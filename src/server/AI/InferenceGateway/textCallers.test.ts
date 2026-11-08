@@ -202,3 +202,31 @@ it('delivers a completed professional answer when optional selected memory persi
  expect(result.reply).toBe('gateway answer'); expect(result.memoryStatus).toBe('not-saved');
  expect(remember).toHaveBeenCalledOnce(); expect(m.gateway).toHaveBeenCalledOnce(); expect(m.legacy).not.toHaveBeenCalled();
 });
+
+describe('fixed policy ingress cannot escape to legacy providers', () => {
+  it.each([false, true])('guest without admission is terminal, streaming=%s', async streaming => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'on');
+    const { withFixedTextChainScope } = await import('../fixedTextChain'); const router = new UniversalAIRouter();
+    const execute = () => streaming ? router.routeStream('public words', [], 'navbharat', 'rules', () => {}, undefined, true) : router.routeDetailed('public words', [], 'navbharat');
+    await expect(withFixedTextChainScope('chat', 'text', () => runWithInferenceScope('free-modules', execute))).rejects.toMatchObject({ reason: 'fixed-chain-ingress-authority-unavailable' });
+    expect(m.strict).not.toHaveBeenCalled(); expect(m.legacy).not.toHaveBeenCalled(); expect(m.gateway).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('authenticated admitted chat uses FreeChain once, streaming=%s', async streaming => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');
+    const { withFixedTextChainScope } = await import('../fixedTextChain'); m.freeChain.mockResolvedValue(response);
+    const router = new UniversalAIRouter(); const ctx = { uid: 'verified', conversationKey: 'opaque', privateTurn: true, healthTurn: true, cacheEligible: false };
+    await withFixedTextChainScope('chat', 'text', () => streaming ? router.routeStream('words', [], 'navbharat', 'rules', () => {}, undefined, true, ctx) : router.routeDetailed('words', [], 'navbharat', undefined, 'rules', false, undefined, ctx));
+    expect(m.freeChain).toHaveBeenCalledOnce(); expect(m.freeChain.mock.calls[0][0].context).toEqual(ctx); expect(m.legacy).not.toHaveBeenCalled();
+  });
+  it.each(['free', 'paid'] as const)('unselected professional %s cannot borrow platform funds or fall through', async tier => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');
+    await expect(runProfessionalChatWithUsage({ id: 'expert', name: 'Expert', systemPrompt: 'Rules' }, 'words', [], 'verified', tier, { fixedTextChainIngress: true })).rejects.toMatchObject({ reason: 'fixed-chain-professional-authority-unavailable' });
+    expect(m.gateway).not.toHaveBeenCalled(); expect(m.legacy).not.toHaveBeenCalled(); expect(m.spend).not.toHaveBeenCalled();
+  });
+  it('selected professional retains health policy, payer and usage accounting', async () => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); m.selected = true;
+    await runProfessionalChatWithUsage({ id: 'expert', name: 'Expert', systemPrompt: 'Rules' }, 'words', [], 'verified', 'free', { freeProductGateway: true });
+    expect(m.gateway.mock.calls[0][1]).toMatchObject({ dataClass: 'health', qualityTier: 'clinical', funding: 'platform-free-fallback' });
+    expect(m.gateway).toHaveBeenCalledOnce(); expect(m.spend).toHaveBeenCalledOnce();
+  });
+});

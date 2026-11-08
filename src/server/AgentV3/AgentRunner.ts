@@ -231,6 +231,14 @@ export interface AgentRunnerOptions {
    */
   projectModule?: () => string | null;
   /**
+   * What the REQUEST still lacks, read at check time — e.g. a game contract's named features not yet in the game's
+   * own code (gameIntent.ts `scopeMatch`). Non-empty ⇒ the done signal does not fire. 🔴 AUTOPSY 61279465, the
+   * fourth return of the class `editingExistingApp` / `projectModule` name: the score measures the PROJECT, and a
+   * freshly seeded game kit is a healthy project. At step 20 the train game scored 100/100 and the user was told
+   * "✅ The app looks complete" before the train could accelerate or brake; 19 steps of real work followed.
+   */
+  requestGaps?: () => readonly string[];
+  /**
    * Admin-only note from inside the loop (autopsy 95598899). Called when the loop declines to
    * override the model — the one decision that otherwise leaves no trace at all, since a turn that
    * was NOT nudged looks identical to a turn where the nudge never applied. Best-effort and never
@@ -1353,6 +1361,7 @@ export class AgentRunner {
                   typeErrors: typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null,
                   editingExistingApp: this.opts.editingExistingApp === true, wroteThisRun: dispatcher.wroteAnything(),
                   projectModule: this.opts.projectModule?.() ?? null,
+                  requestGaps: (() => { try { return this.opts.requestGaps?.() ?? []; } catch { return []; } })(),
                   step: steps, elapsedMs: Date.now() - buildStartMs, at: Date.now(),
                 });
               } catch { /* a measurement must never touch a build */ }
@@ -1770,7 +1779,9 @@ export class AgentRunner {
             const readiness = await dispatcher.assessBuildReadiness();
             // Never "complete and healthy" over a compile that just failed (autopsy 33812996).
             const typeErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;
-            if (appIsDone(readiness) && !(typeErrors !== null && typeErrors > 0)) {
+            let requestGaps: readonly string[] = [];
+            try { requestGaps = this.opts.requestGaps?.() ?? []; } catch { requestGaps = []; }
+            if (appIsDone(readiness) && !(typeErrors !== null && typeErrors > 0) && requestGaps.length === 0) {
               if (!readyMark) readyMark = { step: steps, elapsedMs: Date.now() - buildStartMs, score: readiness.score, at: Date.now() };
               doneText = doneSteer(readiness);
               if (doneText) {

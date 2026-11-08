@@ -544,3 +544,42 @@ describe('safe failure classification', () => {
     expect(upstream.signal.aborted).toBe(true);
   });
 });
+
+describe('CheaperInference exact settled supplier receipt', () => {
+  const cheap = () => new OpenAiCompatProvider(config({ provider: 'CHEAPERINFERENCE', baseURL: 'https://api.cheaperinference.com/v1' }));
+  it('returns the exact documented decimal receipt without rounding', async () => {
+    reply({ ...completion(), billing: { status: 'settled', currency: 'USD', billed_cost_usd: '0.000001' } });
+    expect((await cheap().executeTurn({ prompt: 'test' })).supplierChargeUsd).toBe('0.000001');
+    expect(create).toHaveBeenCalledOnce();
+  });
+  it('retains an evidenced settled charge even when text is malformed', async () => {
+    reply({ ...completion(null), billing: { status: 'settled', currency: 'USD', billed_cost_usd: '0.012345' } });
+    expect(await failure(cheap().executeTurn({ prompt: 'test' }))).toMatchObject({ code: 'EMPTY_RESPONSE', supplierChargeUsd: '0.012345' });
+  });
+  it.each([{ status: 'pending', currency: 'USD', billed_cost_usd: '1' }, { status: 'settled', currency: 'EUR', billed_cost_usd: '1' }, { status: 'settled', currency: 'USD', billed_cost_usd: 0.1 }, { status: 'settled', currency: 'USD', billed_cost_usd: 'secret' }, undefined])('does not infer charges from incomplete billing %#', async billing => {
+    reply({ ...completion(), billing }); expect((await cheap().executeTurn({ prompt: 'test' })).supplierChargeUsd).toBeUndefined();
+  });
+  it('does not reinterpret another provider billing object', async () => {
+    reply({ ...completion(), billing: { status: 'settled', currency: 'USD', billed_cost_usd: '1' } });
+    expect((await new OpenAiCompatProvider(config()).executeTurn({ prompt: 'test' })).supplierChargeUsd).toBeUndefined();
+  });
+});
+
+describe('CheaperInference streamed optional billing evidence', () => {
+ it('preserves a settled USD receipt delivered on the stream', async () => {
+  stream([chunk('answer'), { choices: [], billing: { status: 'settled', currency:'USD', billed_cost_usd:'0.000004' } }]);
+  const result=await new OpenAiCompatProvider(config({ provider:'CHEAPERINFERENCE', baseURL:'https://api.cheaperinference.com/v1' })).executeTurn({prompt:'test',onChunk:vi.fn()});
+  expect(result.supplierChargeUsd).toBe('0.000004');
+ });
+ it('does not invent a receipt for a successful stream', async () => {
+  stream([chunk('answer')]);
+  const result=await new OpenAiCompatProvider(config({ provider:'CHEAPERINFERENCE', baseURL:'https://api.cheaperinference.com/v1' })).executeTurn({prompt:'test',onChunk:vi.fn()});
+  expect(result.supplierChargeUsd).toBeUndefined();
+ });
+});
+
+it('does not settle contradictory streamed supplier receipts', async () => {
+ stream([chunk('answer'), ...['0.001','0.002','0.002'].map(amount => ({ choices: [], billing: { status:'settled',currency:'USD',billed_cost_usd:amount } }))]);
+ const result=await new OpenAiCompatProvider(config({provider:'CHEAPERINFERENCE',baseURL:'https://api.cheaperinference.com/v1'})).executeTurn({prompt:'test',onChunk:vi.fn()});
+ expect(result.supplierChargeUsd).toBeUndefined();
+});

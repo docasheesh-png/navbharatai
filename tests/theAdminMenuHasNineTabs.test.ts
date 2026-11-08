@@ -121,6 +121,11 @@ const FEATURE_HOME: Record<string, string | string[]> = {
   '<BotsLedgerPanel': 'bots',
   // Money · Ads (2026-10-20): the admin's own product ads — form, picture crop, preview and list.
   '<AdsPanel': 'ads',
+  // Money · API Providers (2026-11-03): billing links and live balances.
+  '<ApiProvidersPanel': 'api-providers',
+  // AI Engines (2026-11-04): the enforced provider on/off switches.
+  '<ProviderSwitchesPanel': 'engines',
+  '<GameAssetLiveCheckPanel': 'engines',
   "detail: { view: 'gallery' }": 'review', // PR 3: the gallery review queue, opened from Apps → Review
   // Builds
   'onClick={clearAllReports}': 'reports',

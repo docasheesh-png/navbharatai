@@ -42,12 +42,14 @@ function request(overrides: Partial<RoutingRequest> = {}): RoutingRequest {
     maxPhysicalAttempts: 4, attempts: [], evidenceRef: 'request-ref', ...overrides };
 }
 function candidate(r: RoutingRequest, id: string, paid: boolean, cost = 2_000_000_000): Candidate {
-  const p: ProviderProfile = { id, version: 'profile-1', providerId: 'fixture-provider', modelId: `model-${id}`,
+  const providerId = r.fixedTextChain === 'v1' ? (paid ? 'OPENAI' : 'GLM') : 'fixture-provider';
+  const modelId = r.fixedTextChain === 'v1' ? (paid ? 'gpt-5-nano' : 'glm-4.7-flash') : `model-${id}`;
+  const p: ProviderProfile = { id, version: 'profile-1', providerId, modelId,
     modelRevision: 'revision-1', adapterId: `adapter-${r.capability.kind}`, status: 'approved', serviceClass: 'production',
     product: 'inference-api', surfaces: [r.surface], qualityApprovals: [r.quality], termsApprovals: [r.termsPolicyId],
     capabilities: [supports.find(c => c.kind === r.capability.kind)!], credentialOwner: r.payer,
-    quotaDimensions: [{ scope: { providerId: 'fixture-provider', kind: 'organization', id: 'fixture-org' }, meter: 'requests/day' },
-      { scope: { providerId: 'fixture-provider', kind: 'model', id }, meter: 'tokens/minute' }],
+    quotaDimensions: [{ scope: { providerId, kind: 'organization', id: 'fixture-org' }, meter: 'requests/day' },
+      { scope: { providerId, kind: 'model', id }, meter: 'tokens/minute' }],
     charging: paid ? 'metered' : 'verified-free-no-overage', evidenceRef: `profile-${id}`,
     privacy: { dataClasses: ['public', 'personal', 'confidential', 'health'], training: 'none', humanReview: 'none',
       retentionHours: 0, processingRegions: ['fixture-region'] } };
@@ -883,5 +885,16 @@ describe('explicit monetary evidence basis', () => {
       const usage = vi.mocked(h.ports.ledger.settle).mock.calls[0][1];
       expect(usage).not.toHaveProperty('actualNanoUsd'); expect(usageCommittedNanoUsd(usage)).toBe(123);
     }
+  });
+});
+
+
+describe('fixed-order unresolved paid rejection', () => {
+  it('retains the paid hold and stops after a rejection instead of opening another supplier', async () => {
+    const h = harness({ request: { fixedTextChain: 'v1', maxPhysicalAttempts: 12 }, profiles: [{ id: 'paid-a', paid: true }, { id: 'paid-b', paid: true }] });
+    h.ports.adapter.dispatch = vi.fn(async (intent, claim) => ({ binding: claim.binding, outcome: retry, outputVisible: false, rejectionEvidenceRef: 'http-rejection' }));
+    expect(await h.executor.execute(h.key)).toMatchObject({ kind: 'pending-reconciliation', reason: 'fixed-chain-billing-unresolved' });
+    expect(h.ports.adapter.dispatch).toHaveBeenCalledOnce(); expect(h.ports.ledger.settle).not.toHaveBeenCalled();
+    expect([...h.pending.values()]).toHaveLength(1);
   });
 });

@@ -48,7 +48,11 @@ describe('lease heartbeat lifecycle uses the captured accepted build', () => {
       : () => new Promise(() => {});
     const timer = startBuildLeaseHeartbeat({ store: f.db, workspaceId: 'workspace', token: 'attempt-A', admittedAt: now,
       build: () => f.build, current: () => f.build.ended ? undefined : f.build, active: () => true, release: f.released, lost: f.lost });
+    // One unconfirmed beat is NOT a loss (05012): the lease survives LEASE_STALE_MS, so keep building.
     await vi.advanceTimersByTimeAsync(LEASE_HEARTBEAT_MS + 4_001);
+    expect(f.build.abort.signal.aborted).toBe(false);
+    // Only once the last CONFIRMED renewal is old enough that the lease could lapse does it stop.
+    await vi.advanceTimersByTimeAsync(2 * LEASE_HEARTBEAT_MS);
     expect(f.build.abort.signal.aborted).toBe(true);
     expect(f.build.requiresBodyExit).toBe(true);
     expect(abortCauseOf(f.build.abort.signal)).toBe('authority-unavailable');

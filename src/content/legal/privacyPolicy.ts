@@ -31,7 +31,7 @@
 // ⚠️ NOT LEGAL ADVICE: drafted to be reviewed by a lawyer before being relied on in a dispute.
 
 export const PRIVACY_POLICY_TITLE = 'Privacy Policy';
-export const PRIVACY_POLICY_UPDATED = '21 October 2026';
+export const PRIVACY_POLICY_UPDATED = '30 October 2026';
 
 export const PRIVACY_POLICY = `# Privacy Policy
 
@@ -107,7 +107,7 @@ We do not buy data about you from data brokers.
 
 ### 3.2 Device check for the referral bonus (Android app only)
 
-If you claim one of the free-credit bonuses in our Android app — for signing up, logging in with a verified email, verifying your mobile number, connecting GitHub, or applying a friend's referral code — the app checks, at that moment, that it is running on a genuine Android device. If the check cannot be completed, the signup, login and mobile bonuses are paid under the same rules as on our website, and the referral-code and GitHub bonuses wait until it can.
+Bonuses and referral credit are given **only in our Android app**; the website gives none. If you claim one of them — for installing and signing in, logging in with Gmail, verifying your mobile number, connecting GitHub, or applying a friend's referral code — the app checks, at that moment, that it is running on a genuine Android device. If the check cannot be completed, no bonus is paid until it can. To pay a referrer, we record which account's code you applied and whether you have completed every step; the referrer sees only that progress, never your email, phone number or GitHub account.
 
 **What that involves, precisely:**
 

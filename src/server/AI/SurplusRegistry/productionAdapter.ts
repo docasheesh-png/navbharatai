@@ -1,4 +1,5 @@
 import { surplusUnattemptedEvidence } from './failureEvidence';
+import { tagScopeFailure } from '../../AgentV3/scopeFailureDiagnostic';
 import { createHash } from 'node:crypto';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { getServerDb } from '../../lib/serverDb';
@@ -14,7 +15,7 @@ import type { OpenAiCompletionLike } from '../../AgentV3/providers/OpenAiToolAda
 import type { SurplusTurnPermit } from '../../AgentV3/providers/SurplusTurnRunner';
 import { synthesizeLiveReviews, surplusLiveKey, type LiveProductionReviews, type LiveUsageMapping } from './liveAdmission';
 
-/** @deprecated Review Firestore seed is no longer required for live Surplus; kept for admin/legacy references. */
+/** Existing immutable production evidence; catalog discovery must not populate it. */
 export const SURPLUS_REVIEWS_DOCUMENT = 'live_ai_registry/surplus-builder-reviews';
 export type SurplusUsageMapping = LiveUsageMapping;
 export type SurplusProductionReviews = LiveProductionReviews;
@@ -34,7 +35,76 @@ function envelope(raw: unknown): { wire: WireResponse; body: Record<string, unkn
     objective: supplied.route_objective ?? h['x-si-route-objective'],
   } };
 }
-/** Live admission: Standard key present + AGENTV3_SURPLUS_BUILDER on. No Firestore review seed. */
+/** DNA (05012): quality-first admits OpenAI reasoning models (gpt-5.6-sol). They reject `max_tokens`, so
+ * Surplus renames it to `max_completion_tokens` and names that in X-SI-Adapted-Params. Any adapted
+ * param was treated as a route mismatch → scope ask threw (provider=unknown, 0 tokens) →
+ * mid_build_engine_unavailable → Kimi. A pure output-cap rename keeps the contract (same bound, same
+ * billing); every other adaptation (tools, tool_choice, provider pin, routing…) still fails closed. */
+/* DNA (05016+, z scope): Surplus also discloses reasoning-wire repairs for gpt-5.6 reasoning models —
+ * `reasoning_effort` forced to "none" when tools are present, `include_reasoning`/`reasoning` stripped,
+ * sampling knobs removed, prompt-cache key / stream_options injected (docs: reference/reasoning,
+ * parameter-compatibility). None of these change model, provider, tools, messages or billing basis, yet
+ * each one failed the allowlist → "route or capabilities did not match" (response_validation /
+ * invalid_completion) on every scope ask. Allow them; contract params (model, provider, si_route,
+ * messages, tools, tool_choice) still fail closed. */
+const CONTRACT_PRESERVING_ADAPTATIONS = new Set(['max_tokens', 'max_completion_tokens', 'max_output_tokens',
+  'reasoning_effort', 'reasoning', 'include_reasoning', 'thinking', 'verbosity',
+  'temperature', 'top_p', 'presence_penalty', 'frequency_penalty', 'parallel_tool_calls', 'logprobs', 'top_logprobs', 'logit_bias', 'stop',
+  'prompt_cache_key', 'cache_control', 'stream_options']);
+function headerAdaptedParams(value: unknown): string[] {
+  return typeof value === 'string' && value.trim() ? value.split(',').map(s => s.trim()).filter(Boolean) : [];
+}
+export function adaptedParamsPreserveContract(params: unknown[]): boolean {
+  return params.every(p => typeof p === 'string' && CONTRACT_PRESERVING_ADAPTATIONS.has(p.trim().toLowerCase().split(/[:=>\s.-]/)[0]));
+}
+/** Which identity check failed ('' = accepted). Same contract as before, just named. */
+export function surplusIdentityMismatch(wire: WireResponse, body: Record<string, unknown>, telemetry: Record<string, unknown>): string {
+  if (!wire) return 'no_wire';
+  if (wire.status < 200 || wire.status >= 300) return `http_${wire.status}`;
+  if (body.error) return 'body_error';
+  if (!Array.isArray(body.choices)) return 'no_choices';
+  if (telemetry.conflicts) return 'telemetry_conflict';
+  if (typeof telemetry.truncated !== 'boolean') return 'truncated_flag';
+  if (typeof body.model !== 'string') return 'no_model';
+  if (typeof telemetry.provider !== 'string') return 'no_provider';
+  if (telemetry.served_by !== 'marketplace') return 'served_by';
+  if (telemetry.objective !== undefined && telemetry.objective !== 'price') return 'objective';
+  if (!Array.isArray(telemetry.adapted_params) || !adaptedParamsPreserveContract(telemetry.adapted_params)) return 'adapted_params';
+  if (!adaptedParamsPreserveContract(headerAdaptedParams(wire.headers?.['x-si-adapted-params']))) return 'adapted_params_header';
+  return '';
+}
+/** Strip a vendor prefix ("openai/") and a dated snapshot suffix ("-2026-10-01" / "-20261001"). */
+export function canonicalSurplusModel(model: string): string {
+  return model.trim().toLowerCase().replace(/^[a-z0-9_.-]+\//, '').replace(/-(?:\d{4}-\d{2}-\d{2}|\d{8})$/, '');
+}
+/**
+ * DNA (05015, z Hello): gpt-5.6-sol answered the scope ask in 1.3s but the turn died at
+ * response_validation/invalid_completion. Reasoning-model completions come back as the DATED
+ * snapshot id (or vendor-prefixed), with content as text parts and/or finish_reason null — every
+ * one of which failed the exact-equality checks, so a real paid answer became "engine unavailable".
+ * Normalize ONLY shape: the same canonical model, text parts joined, missing finish_reason = stop
+ * when an answer exists. Different model / provider / adaptations still fail closed.
+ */
+export function normalizeSurplusCompletion(completion: OpenAiCompletionLike, expectedModel?: string): OpenAiCompletionLike {
+  const c = completion as OpenAiCompletionLike & { model?: unknown };
+  if (expectedModel && typeof c.model === 'string' && c.model !== expectedModel
+      && canonicalSurplusModel(c.model) === canonicalSurplusModel(expectedModel)) c.model = expectedModel;
+  for (const choice of c.choices ?? []) {
+    const msg = choice?.message as { content?: unknown; role?: unknown; tool_calls?: unknown[] } | undefined;
+    if (!msg) continue;
+    if (Array.isArray(msg.content)) {
+      msg.content = msg.content.map(part => typeof part === 'string' ? part
+        : part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : '').join('');
+    }
+    if (msg.role === undefined) msg.role = 'assistant';
+    if ((choice.finish_reason === null || choice.finish_reason === undefined)) {
+      if (Array.isArray(msg.tool_calls) && msg.tool_calls.length) choice.finish_reason = 'tool_calls';
+      else if (typeof msg.content === 'string' && msg.content.trim()) choice.finish_reason = 'stop';
+    }
+  }
+  return c;
+}
+/** Configuration permits evaluation, but never substitutes for verified evidence. */
 function assertLive(env: NodeJS.ProcessEnv): string {
   if (parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) !== true) throw new Error('Surplus builder is disabled');
   const key = surplusLiveKey(env);
@@ -68,8 +138,9 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       await refreshSurplusRegistry();
       const snapshot = await new SurplusStore(db).read(surplusRegistryConfig(env).models);
       const now = Date.now();
-      // Live path: synthesize admission from key + observed snapshot. No Firestore review seed.
-      const data = synthesizeLiveReviews(env, snapshot, now);
+      // Read existing evidence; never manufacture verification from observed metadata.
+      const evidence = (await db.doc(SURPLUS_REVIEWS_DOCUMENT).get()).data();
+      const data = synthesizeLiveReviews(env, snapshot, now, evidence);
       if (!data.capabilities.length) throw new Error('Surplus live admission has no observed models yet');
       const state: SurplusReviewedState = { ...data, snapshot };
       states.set(state, structuredClone({ ...data, snapshot }));
@@ -88,6 +159,7 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       const record = permits.get(permit), now = Date.now();
       if (!record || record.startedAt !== null) throw new Error('Unissued or replayed Surplus dispatch');
       assertLive(env);
+      synthesizeLiveReviews(env, record.state.snapshot, now, record.config);
       if (record.review.expiresAt <= now || permit.endpoint !== record.review.endpoint || request.model !== permit.model
           || request.provider !== permit.providerId || object(request.si_route).objective !== 'price') throw new Error('Expired or mismatched Surplus dispatch');
       reviewedEvidence(record.config, record.review, now);
@@ -110,14 +182,16 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       const selection = recheck();
       record.startedAt = now; // An uncertain call cannot be replayed, including a transport failure.
       const db = getServerDb();
-      if (!db || typeof permit.estimatedMicroUsd !== 'string' || !/^[0-9]{1,18}(?:\.[0-9]{1,6})?$/.test(permit.estimatedMicroUsd)) throw new Error('Surplus durable reservation unavailable');
+      if (!db || typeof permit.estimatedMicroUsd !== 'string' || !/^[0-9]{1,18}(?:\.[0-9]{1,6})?$/.test(permit.estimatedMicroUsd)) throw tagScopeFailure(new Error('Surplus durable reservation unavailable'), { stage: 'reservation', reason: 'reservation_failed' });
       const dispatchEnv = { ...env };
-      await reserveSurplusAttempt(db, { buildId: permit.buildId, callId: permit.callId, accountId: record.config.account.accountId,
+      try { await reserveSurplusAttempt(db, { buildId: permit.buildId, callId: permit.callId, accountId: record.config.account.accountId,
         credentialSha256: record.config.account.credentialSha256, model: permit.model, providerId: permit.providerId,
         endpoint: permit.endpoint, policyVersion: permit.policyVersion, priceGeneration: permit.priceGeneration,
         estimatedMicroUsd: selection.estimatedMicroUsd, controlRevision: record.state.snapshot?.controlRevision ?? 0, reviewRevision: record.config.revision, pilot: record.config.pilot, now });
+      } catch (error) { throw tagScopeFailure(error, { stage: 'reservation', reason: 'reservation_failed' }); }
       // Reservation I/O may outlive review validity or observe a credential rotation. Fail closed.
       assertLive(env);
+      synthesizeLiveReviews(env, record.state.snapshot, Date.now(), record.config);
       reviewedEvidence(record.config, record.review, Date.now());
       recheck();
       permit.assertCurrent?.();
@@ -125,20 +199,24 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       // Capture this reviewed credential generation, never a key retained by an older transport.
       return createSurplusBuildTransport(dispatchEnv)(request, signal);
     },
-    identify(raw) {
+    identify(raw, expectedModel?: string) {
       const { wire, body, telemetry } = envelope(raw);
-      if (!wire || wire.status < 200 || wire.status >= 300 || body.error || !Array.isArray(body.choices)
-          || telemetry.conflicts || typeof telemetry.truncated !== 'boolean' || typeof body.model !== 'string' || typeof telemetry.provider !== 'string' || telemetry.served_by !== 'marketplace'
-          || (telemetry.objective !== undefined && telemetry.objective !== 'price')
-          || !Array.isArray(telemetry.adapted_params) || telemetry.adapted_params.length || wire.headers?.['x-si-adapted-params']?.trim()) throw new Error('Surplus response route or capabilities did not match');
-      const completion = structuredClone(body) as unknown as OpenAiCompletionLike;
+      const why = surplusIdentityMismatch(wire, body, telemetry);
+      if (why) {
+        // Enumerated check name only (never upstream text) so the next live fail names its DNA.
+        console.warn(`[SURPLUS] response identity rejected: ${why}`);
+        throw new Error(`Surplus response route or capabilities did not match (${why})`);
+      }
+      const completion = normalizeSurplusCompletion(structuredClone(body) as unknown as OpenAiCompletionLike, expectedModel);
       if (telemetry.truncated === true && completion.choices?.[0]) completion.choices[0].finish_reason = 'length';
-      return { model: body.model, providerId: telemetry.provider, completion };
+      return { model: completion.model as string, providerId: telemetry.provider as string, completion };
     },
     async receipt(raw, permit, result: TurnResult) {
       const record = permits.get(permit);
       if (!record || record.startedAt === null) throw new Error('Unissued Surplus receipt');
       const { wire, body, telemetry } = envelope(raw), usage = object(body.usage), cfg = record.config;
+      const returnedModel = typeof body.model === 'string'
+        ? (canonicalSurplusModel(body.model) === canonicalSurplusModel(permit.model) ? permit.model : body.model) : '';
       const mapping = record.mapping.expiresAt > wire?.receivedAt && record.mapping.expiresAt > Date.now() ? record.mapping : null;
       const tariff = record.tariff;
       const input = count(usage.prompt_tokens), output = count(usage.completion_tokens);
@@ -156,9 +234,9 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       const decision = evaluateSurplusReceipt({ provider: 'surplus', product: 'app-builder', binding,
         disposition: result.truncated ? 'partially_discarded' : result.text || result.toolUses.length ? 'accepted' : 'failed',
         tariff, now: Date.now(), receipt: {
-          ...binding, modelId: typeof body.model === 'string' ? body.model : '',
+          ...binding, modelId: returnedModel,
           providerId: typeof telemetry.provider === 'string' ? telemetry.provider : '',
-          modelVersion: body.model === permit.model ? record.review.modelVersion : '',
+          modelVersion: returnedModel === permit.model ? record.review.modelVersion : '',
           kind: 'validated-surplus-response', receiptId: requestId, requestId,
           identitySource: typeof body.id === 'string' && body.id ? 'provider-response-id' : 'server-dispatch-id',
           currency: 'USD', buyerCostMicro: usage.buyer_cost_micro as number | string, costSource: 'usage.buyer_cost_micro',
@@ -193,14 +271,19 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       let verifiedEmpty = false;
       if (failure.reason === 'empty_completion') {
         try {
-          const response = this.identify(raw), choice = response.completion.choices?.[0];
+          const response = this.identify(raw, permit.model), choice = response.completion.choices?.[0];
           verifiedEmpty = response.model === permit.model && response.providerId === permit.providerId
             && choice?.finish_reason === 'stop' && choice.message?.role === 'assistant'
             && (!('refusal' in choice.message) || choice.message.refusal == null)
             && !choice.message.content?.trim() && !choice.message.tool_calls?.length;
         } catch { /* no route-identity guess */ }
       }
-      return { receipt, canRetry: verifiedEmpty && record.canContinue === true && receipt?.status === 'absorbed' && receipt.actualCostUsd !== null && receipt.officialCeilingUsd !== null };
+      // DNA (z scope, gpt-5.6-sol): a returned-but-unusable completion (invalid_completion) was terminal →
+      // the whole build died on model A. Once its cost is durably recorded, let the session try the next
+      // Surplus coding model (B/C) — Surplus-internal ladder only, never Weak/Kimi/GLM.
+      const recorded = record.canContinue === true && (receipt?.status === 'absorbed' || receipt?.status === 'chargeable');
+      return { receipt, canRetry: (verifiedEmpty && record.canContinue === true && receipt?.status === 'absorbed' && receipt.actualCostUsd !== null && receipt.officialCeilingUsd !== null)
+        || (failure.reason === 'invalid_completion' && recorded) };
     },
   };
 }

@@ -55,24 +55,24 @@ describe('verifyIdentityWithReason', () => {
   const okAuth: VerifierAuth = { async verifyIdToken() { return { uid: 'u1', email: 'a@b.com' }; } };
 
   it("verifies a real token → identity + reason 'ok'", async () => {
-    const r = await verifyIdentityWithReason('Bearer good', async () => okAuth);
+    const r = await verifyIdentityWithReason('Bearer good', async () => okAuth, async () => 0);
     expect(r).toEqual({ identity: { uid: 'u1', email: 'a@b.com' }, reason: 'ok' });
   });
 
   it("no Bearer token → reason 'no-bearer' (never guesses an identity)", async () => {
-    expect((await verifyIdentityWithReason(undefined, async () => okAuth)).reason).toBe('no-bearer');
-    expect((await verifyIdentityWithReason('Basic x', async () => okAuth)).reason).toBe('no-bearer');
+    expect((await verifyIdentityWithReason(undefined, async () => okAuth, async () => 0)).reason).toBe('no-bearer');
+    expect((await verifyIdentityWithReason('Basic x', async () => okAuth, async () => 0)).reason).toBe('no-bearer');
   });
 
   it("admin SDK unavailable → reason 'admin-unavailable'", async () => {
-    const r = await verifyIdentityWithReason('Bearer good', async () => null);
+    const r = await verifyIdentityWithReason('Bearer good', async () => null, async () => 0);
     expect(r).toEqual({ identity: null, reason: 'admin-unavailable' });
   });
 
   it("verifyIdToken keeps throwing → reason 'verify-error' with the detail (the systematic cert/network case)", async () => {
     let calls = 0;
     const throwing: VerifierAuth = { async verifyIdToken() { calls++; throw new Error('Failed to fetch public keys'); } };
-    const r = await verifyIdentityWithReason('Bearer good', async () => throwing);
+    const r = await verifyIdentityWithReason('Bearer good', async () => throwing, async () => 0);
     expect(r.reason).toBe('verify-error');
     expect(r.identity).toBeNull();
     expect(r.detail).toMatch(/public keys/i);
@@ -82,7 +82,7 @@ describe('verifyIdentityWithReason', () => {
   it('retries ONCE and succeeds on the second attempt (a transient cold-start hiccup)', async () => {
     let calls = 0;
     const flaky: VerifierAuth = { async verifyIdToken() { calls++; if (calls === 1) throw new Error('transient'); return { uid: 'u2', email: null }; } };
-    const r = await verifyIdentityWithReason('Bearer good', async () => flaky);
+    const r = await verifyIdentityWithReason('Bearer good', async () => flaky, async () => 0);
     expect(r).toEqual({ identity: { uid: 'u2', email: null }, reason: 'ok' });
     expect(calls).toBe(2);
   });

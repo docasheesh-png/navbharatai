@@ -46,10 +46,10 @@ import {
 import {
   accountCreatedAt, codeWindow, countAppOpen, readAppOpenState, type CodeWindow,
 } from '../lib/referralCodeWindow';
-import { freeProgramPausedNow } from '../lib/freeProgram';
+import { referralLiveNow } from '../lib/referralLive';
 
 /** The referral ladder is live only when its own switch is on AND the free program is not paused (admin 2026-10-22). */
-const rewardsLive = (): boolean => referralRewardsEnabled() && !freeProgramPausedNow();
+const rewardsLive = (): boolean => referralLiveNow(); // split from the free-program pause (admin 2026-10-30)
 
 /** One person's referral record. Absent until they first open the screen or redeem a code. */
 interface ReferralDoc {

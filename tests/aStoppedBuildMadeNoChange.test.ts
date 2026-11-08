@@ -121,7 +121,7 @@ describe('🔴 door 2 — a money statement is made once, after the money is fin
   });
 
   it('🔒 …and emitted only when the waived amount is STILL what the user pays', () => {
-    expect(route).toContain('if (waivedMarkupNotice && effectiveBilledUsd > 0 && effectiveBilledUsd === markupDecision.billedUsd)');
+    expect(route).toContain('if (waivedMarkupNotice && effectiveBilledUsd > 0 && settledSandboxFee.subtotalUsd === markupDecision.billedUsd)');
     // The emit must come AFTER every rule that can change the bill.
     const emitAt = route.indexOf('waivedMarkupNotice && effectiveBilledUsd > 0');
     for (const zeroer of [

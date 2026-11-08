@@ -1,5 +1,5 @@
 import { COMPOSER_BOX_CLASS, COMPOSER_TEXTAREA_CLASS, MobileComposerTools, resizeMobileComposer } from '../chat/ComposerShell';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ServiceRecommendationCard } from './ServiceRecommendationCard';
 import { offerWatchLive } from './earlyPreviewCue';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
@@ -20,6 +20,7 @@ import { AttachMenu } from '../AttachMenu';
 import { SecretRequestCard } from './SecretRequestCard';
 import { HeaderBadges } from './HeaderBadges';
 import { UserActionTray } from './UserActionTray';
+import { NextStepCard, useLiveDomain } from './NextStepCard';
 import { useUserActions } from './useUserActions';
 import { askPrompt, isLiveOnly, type LiveAsks, type UserActionView } from './userActionView';
 import { saveSecret, listSecrets } from '../../lib/secretsApi';
@@ -211,6 +212,36 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // Mode dropup open/closed (admin 2026-07-07: the Build/Plan/Advise switcher moved back to the
   // composer as a dropdown selector — position only, identical function).
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const [adviseIdeasOpen, setAdviseIdeasOpen] = useState(false);
+  const [adviseCount, setAdviseCount] = useState(0);
+  const modeMenuRef = useRef<HTMLDivElement | null>(null);
+  // The shared menu pin is 72px, which is the tab bar, so a tall menu lands on the input and
+  // drags Plan down onto it. Measure the composer and stop the menu at its top edge.
+  useLayoutEffect(() => {
+    if (!modeMenuOpen) return;
+    const place = () => {
+      const menu = modeMenuRef.current;
+      const box = menu?.closest('.nb-composer-box') as HTMLElement | null;
+      if (!menu || !box) return;
+      const top = box.getBoundingClientRect().top;
+      const vv = window.visualViewport;
+      const fromLayoutTop = (vv?.offsetTop ?? 0) + top;
+      const maxPx = Math.max(200, Math.round(top - 12));
+      menu.style.setProperty('--nb-mode-bottom', `${Math.max(0, Math.round(window.innerHeight - fromLayoutTop + 8))}px`);
+      menu.style.setProperty('--nb-mode-max', `${maxPx}px`);
+      // Only take the full gap when the list is actually taller than the room above the input.
+      // Plan stays the footer either way, so it cannot fall onto the box.
+      menu.style.setProperty('--nb-mode-height', menu.scrollHeight > maxPx ? `${maxPx}px` : 'auto');
+    };
+    place();
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', place);
+    window.addEventListener('resize', place);
+    return () => {
+      vv?.removeEventListener('resize', place);
+      window.removeEventListener('resize', place);
+    };
+  }, [modeMenuOpen, adviseIdeasOpen]);
   // Plan/Advise (read-only lanes) run on their OWN request, fully DECOUPLED from the build stream, so
   // they can be sent ANYTIME — even WHILE a build is running (the whole point of the model) — and can
   // never clobber the live build's state. `roleBusy` is their own in-flight flag (independent of the
@@ -3417,6 +3448,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     setAiNoticeUnseen(false);
   }, [aiNoticeKey]);
   const previewDwellMs = usePreviewDwell(showWorkspace && tab === 'preview' && !!state.previewUrl);
+  // Live custom-domain verdict (Firebase Hosting) — feeds both the navigator dot and the NEXT STEP card.
+  const liveDomain = useLiveDomain(state.workspaceId, customDomainsEnabled && !running, `${running}|${publishing}`);
   const navActions = useMemo(() => pendingActions({
     building: running,
     buildFinished: state.done,
@@ -3426,9 +3459,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     // Offered only where the server flag is on AND there is a workspace to attach a domain to —
     // the same two conditions HostingChooser already gates that card on.
     customDomainOffered: customDomainsEnabled && !!state.workspaceId,
+    customDomainConnected: liveDomain === undefined ? undefined : !!liveDomain.domain,
     reportsSentForThisBuild: reportCount,
     appAiNoticeUnseen: aiNoticeUnseen,
-  }), [running, state.done, state.ok, previewDwellMs, publishState?.freshness, customDomainsEnabled, state.workspaceId, reportCount, aiNoticeUnseen]);
+  }), [running, state.done, state.ok, previewDwellMs, publishState?.freshness, customDomainsEnabled, state.workspaceId, reportCount, aiNoticeUnseen, liveDomain]);
 
   // The old single-purpose dot, now derived from the navigator so this screen and the Publish sheet
   // can never disagree. `needsPublishDot`'s verdict is unchanged — it is the same 'changed' case,
@@ -4157,15 +4191,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   }, [workspaceFiles, workspaceFilesFor, running]);
 
   // Plan (todo list) collapse toggle (Task 3) — keeps the chat area readable.
-  /**
-   * Is the plan expanded inside the Build/Plan/Advise menu?
-   *
-   * SEPARATE from `planCollapsed`, deliberately. That one belongs to the strip above the transcript;
-   * this one belongs to the menu. Sharing a single flag would mean opening the plan in one place
-   * silently changed the other, which is the kind of coupling that makes a UI feel haunted.
-   * Defaults CLOSED so the menu opens the size it always has.
-   */
-  const [menuPlanOpen, setMenuPlanOpen] = useState(false);
   const [planCollapsed, setPlanCollapsed] = useState(false);
 
   const agents = Object.values(state.agents).sort((a, b) => b.updatedTs - a.updatedTs);
@@ -4543,10 +4568,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           <HeaderBadges
             badges={[{
               id: 'needs-you',
-              glyph: '❓',
+              glyph: '❗️',
               label: 'What you need to do',
               count: userActions.openCount,
               tone: userActions.actions.some((a) => a.status === 'open' && a.blocking) ? 'urgent' : 'info',
+              attention: true,
               onOpen: () => userActions.setTrayOpen(true),
             }]}
           />
@@ -4667,6 +4693,35 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           )}
         </div>
       </div>
+
+      {/* THE NEXT STEP (admin 2026-10-30): one line, always the single next thing, from live facts. */}
+      {(() => {
+        const open = userActions.actions.filter((a) => a.status === 'open');
+        const top = open.find((a) => a.blocking) ?? open[0];
+        return (
+          <NextStepCard
+            facts={{
+              building: running,
+              buildFinished: state.done,
+              buildOk: state.ok,
+              blockingAsks: open.filter((a) => a.blocking).length,
+              openAsks: open.filter((a) => !a.blocking).length,
+              topAskTitle: top?.title,
+              topAskIsDatabase: top?.cta?.view === 'settings' && top.cta.settingsScreen === 'database',
+              publishFreshness: publishState?.freshness,
+              domain: liveDomain?.domain,
+              domainActive: liveDomain?.active,
+              liveUrl,
+            }}
+            onGo={(target) => {
+              if (target === 'tray') userActions.setTrayOpen(true);
+              else if (target === 'publish') setShowHostingChooser(true);
+              else if (target === 'report') askForReportNote();
+              else if (target === 'database') window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'settings', settingsScreen: 'database' } }));
+            }}
+          />
+        );
+      })()}
 
       <div ref={splitContainerRef} className="flex flex-col sm:flex-row flex-1 min-h-0">
         {/* LEFT: the chat. Full width when the workspace is collapsed. When the
@@ -5359,6 +5414,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       actually charged. It is the time the BUILD held our machine, capped at the build's own
                       duration, never a live preview the user opened — so it is not called one, and no
                       "free alternative" is offered for a choice the user never made. */}
+                  {typeof state.costBreakdown.sandboxFeeInr === 'number' && state.costBreakdown.sandboxFeeInr > 0 && (
+                    <div className="text-muted">
+                      Sandbox service fee (2.5% of subtotal): ₹{state.costBreakdown.sandboxFeeInr.toFixed(2)}
+                    </div>
+                  )}
                   {typeof state.costBreakdown.livePreviewInr === 'number' && state.costBreakdown.livePreviewInr > 0 && (
                     <span>
                       Build machine: {(state.costBreakdown.livePreviewSeconds ?? 0) >= 60
@@ -5711,13 +5771,29 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   <>
                     {/* outside-click catcher */}
                     <div className="fixed inset-0 z-10" onClick={() => setModeMenuOpen(false)} />
-                    <div className="absolute bottom-full left-0 mb-2 z-20 w-60 bg-card border border-line rounded-lg shadow-xl p-1.5 space-y-0.5">
-                      {([['build', 'Build', '🔨'], ['planner', 'Plan', '🧠'], ['advisor', 'Advise', '🔍']] as const).map(([m, label, icon]) => (
+                    <div
+                      ref={modeMenuRef}
+                      data-advise-open={adviseIdeasOpen ? 'true' : 'false'}
+                      className="nb-mode-menu absolute bottom-full left-0 mb-2 z-20 w-60 bg-card border border-line rounded-lg shadow-xl"
+                    >
+                      <div className="flex items-center justify-end px-1.5 pt-1">
+                        <button
+                          type="button"
+                          aria-label="Close"
+                          title="Close"
+                          onClick={() => { setAdviseIdeasOpen(false); setModeMenuOpen(false); }}
+                          className="h-9 w-9 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-raised"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="p-1.5 space-y-0.5">
+                      {([['build', 'Build', '🔨'], ['planner', 'Plan', '🧠']] as const).map(([m, label, icon]) => (
                         <button
                           key={m}
                           type="button"
-                          onClick={() => { setChatMode(m); setModeMenuOpen(false); }}
-                          title={m === 'build' ? 'Build — code, build & chat' : m === 'planner' ? 'Plan — read-only planning; approve steps into the build queue' : 'Advise — read-only analysis (audit / scan / compare)'}
+                          onClick={() => { setChatMode(m); setAdviseIdeasOpen(false); setModeMenuOpen(false); }}
+                          title={m === 'build' ? 'Build — code, build & chat' : 'Plan — read-only planning; approve steps into the build queue'}
                           className={`w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left ${chatMode === m ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink hover:bg-raised'}`}
                         >
                           <span>{icon}</span>{label}
@@ -5737,34 +5813,45 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                               {planComplete ? '\u2713' : `${planDone}/${state.todos.length}`}
                             </span>
                           )}
-                          {m === 'advisor' && roleThreads.advisor.length > 0 && <span className="text-[9px] opacity-70">{Math.ceil(roleThreads.advisor.length / 2)}</span>}
                         </button>
                       ))}
-                      {/* …and the plan itself, expandable right here. Kept INSIDE the menu rather than
-                          opening another panel: the user asked to see it "jab chahe", and a second
-                          surface to dismiss is the opposite of that. Bounded height with its own
-                          scroll so a 20-step plan cannot grow the menu off the screen. */}
-                      {state.todos.length > 0 && (
-                        <div className="mt-1 border-t border-line pt-1">
-                          <button
-                            type="button"
-                            onClick={() => setMenuPlanOpen((v) => !v)}
-                            className="w-full flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wider text-muted hover:text-body hover:bg-raised"
-                            title={menuPlanOpen ? 'Hide the plan' : 'Show this build\u2019s plan'}
-                          >
-                            {menuPlanOpen ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
-                            <span>Plan</span>
-                            <span className="text-faint normal-case font-normal">{planDone}/{state.todos.length}</span>
-                          </button>
-                          {menuPlanOpen && (
-                            <div className="mt-1 max-h-40 overflow-y-auto overscroll-contain px-1">
-                              <TodoList todos={state.todos} hideHeader />
-                            </div>
-                          )}
+                      <button
+                        type="button"
+                        onClick={() => setAdviseIdeasOpen((v) => !v)}
+                        title="Advise — ideas for what to build next"
+                        className={`w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left ${adviseIdeasOpen ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink hover:bg-raised'}`}
+                      >
+                        <span>💡</span>
+                        <span>Advise</span>
+                        {adviseCount > 0 && (
+                          <span className="ml-auto min-w-[15px] h-[15px] px-1 rounded-full bg-amber-500 text-[9px] font-black text-on-accent flex items-center justify-center">{adviseCount}</span>
+                        )}
+                      </button>
+                      </div>
+                      {adviseIdeasOpen && (
+                        <div className="nb-mode-ideas min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-line">
+                          <NextSuggestionsBulb
+                            inline
+                            open
+                            onCount={setAdviseCount}
+                            workspaceId={expectedWorkspaceId()}
+                            ready={!!state.done && !running}
+                            onPick={(text) => { setPrompt(text); setAdviseIdeasOpen(false); setModeMenuOpen(false); setTimeout(() => composerRef.current?.focus(), 0); }}
+                          />
                         </div>
                       )}
                     </div>
                   </>
+                )}
+                {!modeMenuOpen && (
+                  <NextSuggestionsBulb
+                    inline
+                    open={false}
+                    onCount={setAdviseCount}
+                    workspaceId={expectedWorkspaceId()}
+                    ready={!!state.done && !running}
+                    onPick={() => {}}
+                  />
                 )}
                 <button
                   type="button"
@@ -5926,16 +6013,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   (the glowing template button and the Attach-menu option). accept=image/* (no capture) so
                   it opens the photo gallery/library. */}
               <input ref={screenshotInputRef} type="file" accept="image/*" className="hidden" onChange={handleScreenshotPicked} />
-              {/* NEXT-BUILD SUGGESTIONS 💡 — end of the tools row (OLD layout). Only renders when
-                  there is something to suggest; no extra corner chrome. */}
-              <div className="ml-auto shrink-0" aria-label="Suggestions">
-                <NextSuggestionsBulb
-                  workspaceId={expectedWorkspaceId()}
-                  ready={!!state.done && !running}
-                  onPick={(text) => { setPrompt(text); setTimeout(() => composerRef.current?.focus(), 0); }}
-                />
-              </div>
-              {/* Expand stays in the tools row; Send lives on Type's right edge. */}
+              {/* Expand stays in the tools row; Send lives on the card's lower-right corner. */}
                 {!canSteerMidBuild(running, powerLevel, chatMode) && (
                   <button
                     type="button"

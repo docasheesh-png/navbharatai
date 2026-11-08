@@ -72,7 +72,7 @@ const ENGINEERING_RULES = `Rules for production-quality output:
 
 /** Visual design directive — make generated UIs genuinely beautiful, not plain. */
 const DESIGN_RULES = `VISUAL DESIGN (clean, restrained and consistent — like a professionally engineered product, never plain/unstyled):
-- One cohesive palette: neutral surfaces plus ONE accent colour used sparingly for primary actions, links and the active state. Consistent spacing scale, modest radius, subtle borders/shadows, clear hierarchy. Follow the system light/dark preference (prefers-color-scheme) unless the user asks for a specific theme.
+- One cohesive palette: neutral surfaces plus ONE accent colour used sparingly for primary actions, links and the active state. Consistent spacing scale, modest radius, subtle borders/shadows, clear hierarchy. LIGHT theme by default (light surfaces, dark text) — do NOT follow the system dark preference and do not pick a dark look yourself; build dark only when the user's own words ask for it (dark mode / dark theme / night mode), and then via data-theme="dark" on <html>.
 - Use CSS variables for colors/spacing/radius (a small design system) and STYLE EVERY element — no bare browser defaults.
 - No decorative gradients, glow, glassmorphism or emoji in headings/labels unless the user asks for them. Real, specific copy — no hype ("revolutionary", "next-gen") and no invented stats or testimonials.
 - Buttons: padded, rounded, solid accent background with accessible contrast text, hover + active + focus-visible states, pointer cursor. Never ship unstyled <button>.

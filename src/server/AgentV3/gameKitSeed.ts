@@ -193,7 +193,7 @@ export function compactRecipeResult(content: string): string {
  * 3D, and how to add the 3D recipes itself if the game truly needs them — never "this is 2D" as a fact the
  * platform does not have.
  */
-export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts: { flat?: boolean } = {}): string {
+export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts: { flat?: boolean; contract?: string } = {}): string {
   const done = results.filter((r) => r.ok);
   if (done.length === 0) return '';
   const failed = results.filter((r) => !r.ok);
@@ -246,7 +246,9 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
     'What each recipe wrote, and how to use it (its own instructions):',
   ].filter(Boolean).join('\n');
   const sections = done.map((r) => `--- ${r.recipe} ---\n${compactRecipeResult(r.content)}`);
-  return `${head}\n\n${sections.join('\n\n')}`;
+  // Game Engine Ultra Phase 1: the request's scope contract (gameIntent.ts), when the route supplies one.
+  const contract = (opts.contract ?? '').trim();
+  return `${head}\n\n${contract ? `${contract}\n\n` : ''}${sections.join('\n\n')}`;
 }
 
 /** The admin line for GAME_KIT_SEEDED. PURE. */
@@ -274,4 +276,9 @@ export function builderWrittenCount(written: ReadonlyMap<string, string>, kitSee
   let n = 0;
   for (const [p, c] of written) if (kitSeeded.get(p) !== c) n++;
   return n;
+}
+
+/** L3 preparation is allowed only after this new-game seed actually installed its 3D recipe. */
+export function gameKitCanPrepareAssets(results: readonly GameKitSeedResult[]): boolean {
+  return results.some(result => result.recipe === 'generate_game_3d' && result.ok);
 }

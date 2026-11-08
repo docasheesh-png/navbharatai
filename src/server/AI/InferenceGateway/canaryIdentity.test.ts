@@ -4,6 +4,7 @@ vi.mock('../../lib/freeAnswerQuota', () => ({ withFreeAnswerQuota: (_req: unknow
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from '../../../../tests/helpers/routeTestUtils';
 const m = vi.hoisted(() => ({ verify: vi.fn(), detailed: vi.fn(), legacy: vi.fn() }));
+vi.mock('../../lib/sessionRevocation', async original => ({ ...await original<typeof import('../../lib/sessionRevocation')>(), readSessionCutoff: async () => 0 }));
 vi.mock('../../lib/firebaseAdminModule', () => ({ loadFirebaseAdmin: async () => ({ apps: [{}], auth: () => ({ verifyIdToken: m.verify }) }) }));
 vi.mock('../../lib/aiRouter', () => ({ aiRouter: { routeDetailed: m.detailed } }));
 vi.mock('../FreeChain/entryAdmission', () => ({ withFreeChainEntryAdmission: (_req: unknown, _res: unknown, fn: () => unknown) => { m.legacy(); return fn(); } }));
@@ -29,6 +30,6 @@ describe('owner canary trusts the actual Firebase verification boundary', () => 
     expect(res.body).toEqual({ reply: 'answer' });
     expect(principal).toBe(kind === 'owner' ? 'actual-owner' : undefined);
     expect(m.legacy).toHaveBeenCalledTimes(kind === 'owner' ? 0 : 1);
-    expect(m.verify).toHaveBeenCalledTimes(kind === 'missing' ? 0 : 2);
+    expect(m.verify).toHaveBeenCalledTimes(kind === 'missing' ? 0 : kind === 'invalid' ? 2 : 1);
   });
 });

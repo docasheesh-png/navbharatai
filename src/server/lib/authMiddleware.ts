@@ -28,6 +28,8 @@ import { audit } from './audit';
 import { routeParam } from './expressCompat';
 import { grantEmail, identityGrantEmail, type GrantEmail } from '../AgentV3/featureFlag';
 import { isAdminEmail } from './adminEmails';
+import { readSessionCutoff, sessionTokenIsCurrent } from './sessionRevocation';
+import { surplusFallbackDisabledFor } from '../AI/SurplusRegistry/surplusNoFallback';
 
 /**
  * firebase-admin init options. Passes an EXPLICIT projectId when the environment provides one, so the
@@ -104,7 +106,67 @@ export interface IdentityWithReason {
 }
 
 /** Minimal shape of the admin auth we depend on — injectable so this is unit-testable without GCP. */
-export interface VerifierAuth { verifyIdToken(token: string): Promise<{ uid: string; email?: string | null }>; }
+export interface VerifiedSessionToken {
+  uid: string;
+  email?: string | null;
+  email_verified?: boolean;
+  auth_time?: number;
+  phone_number?: string | null;
+  session_auth_time?: number;
+  firebase?: { sign_in_provider?: string };
+}
+export interface VerifierAuth { verifyIdToken(token: string, checkRevoked: true): Promise<VerifiedSessionToken>; }
+
+export type SessionVerification =
+  | { token: VerifiedSessionToken; reason: 'ok' }
+  | { token: null; reason: 'no-bearer' | 'admin-unavailable' | 'verify-error'; detail?: string; invalid?: boolean };
+
+/** A provider outage is NOT proof of sign-out. Only these permanent credential failures are. */
+export function isInvalidSessionError(error: unknown): boolean {
+  return ['auth/id-token-revoked', 'auth/id-token-expired', 'auth/invalid-id-token',
+    'auth/user-disabled', 'auth/user-not-found', 'auth/argument-error'].includes(
+    String((error as { code?: unknown } | null)?.code ?? ''));
+}
+
+/** No cross-request cache: an already-issued token must lose access on the next request. */
+export async function verifySessionWith(
+  authHeader: string | undefined,
+  getAuth: () => Promise<VerifierAuth | null>,
+  readCutoff: (uid: string) => Promise<number> = readSessionCutoff,
+): Promise<SessionVerification> {
+  if (!authHeader?.startsWith('Bearer ') || !authHeader.slice(7)) return { token: null, reason: 'no-bearer' };
+  let auth: VerifierAuth | null;
+  try { auth = await getAuth(); } catch { return { token: null, reason: 'admin-unavailable' }; }
+  if (!auth) return { token: null, reason: 'admin-unavailable' };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const token = await auth.verifyIdToken(authHeader.slice(7), true);
+      const cutoff = await readCutoff(token.uid);
+      if (!sessionTokenIsCurrent(token, cutoff)) return { token: null, reason: 'verify-error', invalid: true };
+      return { token, reason: 'ok' };
+    } catch (err) {
+      const invalid = isInvalidSessionError(err);
+      if (invalid || attempt === 1) return { token: null, reason: 'verify-error', invalid,
+        detail: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  return { token: null, reason: 'verify-error' };
+}
+
+// Rate limiters and route handlers often verify the SAME request several times. Share just that
+// request's in-flight result, never the next request's authority; weak keys do not retain requests.
+const requestSessions = new WeakMap<Request, { header: string | undefined; result: Promise<SessionVerification> }>();
+export function verifyFirebaseSession(req: Request): Promise<SessionVerification> {
+  const header = req.headers.authorization;
+  const cached = requestSessions.get(req);
+  if (cached && cached.header === header) return cached.result;
+  const result = verifySessionWith(header, getAdminAuth);
+  requestSessions.set(req, { header, result });
+  return result;
+}
+
+/** Existing Admin SDK/credentials only; this does not accept a client-supplied target account. */
+export const getAdminAuthForSessions = getAdminAuth;
 
 /**
  * Testable CORE of identity verification with an honest failure reason. Deps (the Authorization header
@@ -114,26 +176,22 @@ export interface VerifierAuth { verifyIdToken(token: string): Promise<{ uid: str
 export async function verifyIdentityWithReason(
   authHeader: string | undefined,
   getAuth: () => Promise<VerifierAuth | null>,
+  readCutoff: (uid: string) => Promise<number> = readSessionCutoff,
 ): Promise<IdentityWithReason> {
-  if (!authHeader?.startsWith('Bearer ')) return { identity: null, reason: 'no-bearer' };
-  const token = authHeader.slice(7);
-  const auth = await getAuth();
-  if (!auth) return { identity: null, reason: 'admin-unavailable' };
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const decoded = await auth.verifyIdToken(token);
-      return { identity: { uid: decoded.uid, email: typeof decoded.email === 'string' ? decoded.email : null }, reason: 'ok' };
-    } catch (err) {
-      if (attempt === 1) return { identity: null, reason: 'verify-error', detail: err instanceof Error ? err.message : String(err) };
-    }
-  }
-  return { identity: null, reason: 'verify-error' };
+  const result = await verifySessionWith(authHeader, getAuth, readCutoff);
+  if (!result.token) return { identity: null, reason: result.reason as Exclude<IdentityReason, 'ok'>,
+    ...(result.detail ? { detail: result.detail } : {}) };
+  const decoded = result.token;
+  return { identity: { uid: decoded.uid, email: typeof decoded.email === 'string' ? decoded.email : null }, reason: 'ok' };
 }
 
 /** Request-level identity + honest reason (build path uses this to log an 'anon' fallback's true cause). */
 export async function verifyFirebaseIdentityDiag(req: Request): Promise<IdentityWithReason> {
   if (process.env.VITEST) return { identity: null, reason: 'no-bearer' };
-  return verifyIdentityWithReason(req.headers.authorization, getAdminAuth as unknown as () => Promise<VerifierAuth | null>);
+  const result = await verifyFirebaseSession(req);
+  if (!result.token) return { identity: null, reason: result.reason as Exclude<IdentityReason, 'ok'>,
+    ...(result.detail ? { detail: result.detail } : {}) };
+  return { identity: { uid: result.token.uid, email: result.token.email ?? null }, reason: 'ok' };
 }
 
 /**
@@ -151,31 +209,14 @@ export async function verifyFirebaseIdentityDiag(req: Request): Promise<Identity
  * mistake "no proof" for "old proof".
  */
 export async function verifyFreshAuth(req: Request): Promise<{ uid: string; authTimeSec: number | null } | null> {
-  const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) return null;
-  try {
-    const auth = await getAdminAuth();
-    if (!auth) return null;
-    const decoded = await auth.verifyIdToken(header.slice(7)) as { uid: string; auth_time?: unknown };
-    const t = typeof decoded.auth_time === 'number' ? decoded.auth_time : Number(decoded.auth_time);
-    return { uid: decoded.uid, authTimeSec: Number.isFinite(t) && t > 0 ? t : null };
-  } catch {
-    return null;
-  }
+  const { token: decoded } = await verifyFirebaseSession(req);
+  if (!decoded) return null;
+  const t = Number(decoded.auth_time);
+  return { uid: decoded.uid, authTimeSec: Number.isFinite(t) && t > 0 ? t : null };
 }
 
 export async function verifyFirebaseToken(req: Request): Promise<string | null> {
-  const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) return null;
-  const token = header.slice(7);
-  try {
-    const auth = await getAdminAuth();
-    if (!auth) return null;
-    const decoded = await auth.verifyIdToken(token);
-    return decoded.uid;
-  } catch {
-    return null;
-  }
+  return (await verifyFirebaseSession(req)).token?.uid ?? null;
 }
 
 /**
@@ -188,17 +229,8 @@ export async function verifyFirebaseToken(req: Request): Promise<string | null> 
  * this and never the body. Best-effort, like the helpers around it: never throws.
  */
 export async function verifiedPhoneNumber(req: Request): Promise<string | null> {
-  const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) return null;
-  try {
-    const auth = await getAdminAuth();
-    if (!auth) return null;
-    const decoded = await auth.verifyIdToken(header.slice(7)) as { phone_number?: string | null };
-    const phone = typeof decoded.phone_number === 'string' ? decoded.phone_number.trim() : '';
-    return phone || null;
-  } catch {
-    return null;
-  }
+  const { token } = await verifyFirebaseSession(req);
+  return typeof token?.phone_number === 'string' ? token.phone_number.trim() || null : null;
 }
 
 /**
@@ -207,19 +239,10 @@ export async function verifiedPhoneNumber(req: Request): Promise<string | null> 
  * an allowlist) so the check can't be spoofed by a client-supplied `email` body field.
  */
 export async function verifyFirebaseIdentity(req: Request): Promise<{ uid: string; email: string | null; emailVerified: boolean } | null> {
-  const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) return null;
-  const token = header.slice(7);
-  try {
-    const auth = await getAdminAuth();
-    if (!auth) return null;
-    const decoded = await auth.verifyIdToken(token);
-    // `emailVerified` travels with the email (Q-624): an email GRANTS nothing unless the provider verified
-    // it — see `grantEmail` in AgentV3/featureFlag.ts. Display uses still read `email` as before.
-    return { uid: decoded.uid, email: typeof decoded.email === 'string' ? decoded.email : null, emailVerified: decoded.email_verified === true };
-  } catch {
-    return null;
-  }
+  const { token: decoded } = await verifyFirebaseSession(req);
+  if (!decoded) return null;
+  return { uid: decoded.uid, email: typeof decoded.email === 'string' ? decoded.email : null,
+    emailVerified: decoded.email_verified === true };
 }
 
 /**
@@ -612,7 +635,8 @@ export function buildRateLimiter() {
         // Prefer the verified email on the ID token; fall back to the Admin SDK account email when the
         // token omitted it (same pattern as free-list / grant checks — never a body/query email).
         const email = identityGrantEmail(identity) ?? await resolveGrantEmail(identity.uid);
-        if (buildRateLimitExempt(email)) {
+        // z@ Surplus debug profile (owner 2026-10-29): DNA testing must not stall on 10 builds/hr.
+        if (buildRateLimitExempt(email) || surplusFallbackDisabledFor(email, identity.uid)) {
           next();
           return;
         }

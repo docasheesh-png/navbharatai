@@ -89,13 +89,13 @@ describe('the number on the bill and the number on the screen are the same numbe
     expect(route).toContain('email, livePreviewCharge.usd, barrenPhases)');
     // NOTE 2026-09-25: the breakdown call gained a trailing `buildDiscount` argument (the admin-set
     // build discount). The live-preview pair it is handed is still the SAME single measurement.
-    expect(route).toContain('usdInrRate(), livePreviewCharge, buildDiscount)');
+    expect(route).toContain('usdInrRate(), livePreviewCharge, buildDiscount, settledSandboxFee)');
   });
 
   it('the watchdog path does the same, so a time-capped build bills and reports identically', () => {
     // Fix 67's lesson: the finalizer used to bill by a different formula than the normal settle.
     expect(route).toContain('watchdogLivePreview = billableSandboxDetail(');
-    expect(route).toContain('usdInrRate(), watchdogLivePreview, watchdogDiscount)');
+    expect(route).toContain('usdInrRate(), watchdogLivePreview, watchdogDiscount, watchdogSandboxFee)');
   });
 
   it('the charge line rides on a SUCCESSFUL build only', () => {

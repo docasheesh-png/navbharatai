@@ -41,7 +41,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('actual Builder route Surplus settlement branch', () => {
-  it.each([['1000', 0.01], ['2000', 0.011]] as const)('charges min(10x actual, official) for %s micro without applying legacy2.5 again', (cost, expected) => {
+  it.each([['1000', 0.01], ['2000', 0.02]] as const)('charges flat 10x actual (no tariff cap) for %s micro without applying legacy2.5 again', (cost, expected) => {
     const ledger = createProviderUsageLedger();
     expect(add(ledger, fixture('one', cost)).status).toBe('chargeable');
     const result = bill(ledger);
@@ -50,11 +50,11 @@ describe('actual Builder route Surplus settlement branch', () => {
     expect(result.absorbedUnbilledUsd).toBe(0);
     expect(result.realCostRemainder).toEqual({ inputTokens: 0, outputTokens: 0 });
   });
-  it('preserves legacy model and VM charges separately under2.5 margin', () => {
+  it('keeps the model margin separate from internal VM expense', () => {
     const legacy = createProviderUsageLedger();
     legacy.add('GLM', { inputTokens: 1_000_000, outputTokens: 0 }, 'glm-5.3');
     const original = bill(legacy, 0.2);
-    expect(original.effectiveBilledUsd).toBeCloseTo(4);
+    expect(original.effectiveBilledUsd).toBeCloseTo(3.5);
     const mixed = createProviderUsageLedger();
     mixed.add('GLM', { inputTokens: 1_000_000, outputTokens: 0 }, 'glm-5.3');
     add(mixed);
@@ -68,9 +68,9 @@ describe('actual Builder route Surplus settlement branch', () => {
     const ledger = createProviderUsageLedger();
     add(ledger, fixture('one', '1000')); add(ledger, fixture('two', '2000')); add(ledger, fixture('one', '1000'));
     expect(ledger.entries()).toHaveLength(2);
-    expect(bill(ledger).effectiveBilledUsd).toBe(0.021);
+    expect(bill(ledger).effectiveBilledUsd).toBe(0.03);
     expect(bill(ledger).realCostUsd).toBe(0.003);
-    expect(surplusBuildCharges([...ledger.entries(), ...ledger.entries()], new Set()).chargeUsd).toBe('0.021');
+    expect(surplusBuildCharges([...ledger.entries(), ...ledger.entries()], new Set()).chargeUsd).toBe('0.03');
   });
   it.each(['discarded', 'partially_discarded', 'failed', 'malformed'] as const)('absorbs entire %s call while retaining supplier expense', disposition => {
     const ledger = createProviderUsageLedger(); const input = fixture(); input.disposition = disposition;
@@ -90,13 +90,16 @@ describe('actual Builder route Surplus settlement branch', () => {
     const ledger = createProviderUsageLedger(); add(ledger, fixture('one'), { phase: 'review' }); add(ledger, fixture('two'), { phase: 'build' });
     expect(bill(ledger, 0, new Set(['review']))).toMatchObject({ effectiveBilledUsd: 0.01, realCostUsd: 0.002, absorbedUnbilledUsd: 0.001 });
   });
-  it.each(['usage', 'cap', 'receipt'] as const)('missing %s halts settlement rather than guessing a zero or tariff', missing => {
+  it.each(['usage', 'cap', 'receipt'] as const)('missing %s is absorbed at ₹0 (no guess, no tariff) and never crashes a finished build', missing => {
     const ledger = createProviderUsageLedger(); const input = fixture();
     if (missing === 'usage') input.receipt!.usage = null;
     if (missing === 'cap') input.tariff = null;
     if (missing === 'receipt') input.receipt = null;
     expect(add(ledger, input).status).toBe('blocked');
-    expect(() => bill(ledger)).toThrow(SurplusAccountingUnavailableError);
+    // z@ live 2026-10-30: this throw used to turn a green, rendered Surplus app into BUILD_EXCEPTION.
+    const decided = bill(ledger);
+    expect(decided.effectiveBilledUsd).toBe(0);
+    expect(decided.absorbedUnbilledUsd).toBe(0);
   });
   it('existing failed-build downstream guard still zeroes a decided Surplus charge', () => {
     const ledger = createProviderUsageLedger(); add(ledger);

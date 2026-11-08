@@ -43,7 +43,8 @@ class Database {
     }
     return attempt(true);
   }
-  store() { return new FreeChainStore(this as any); }
+  // Each handle models a different server process; local quota lanes must not serialize these cross-process races.
+  store() { return new FreeChainStore({ doc: (path: string) => this.doc(path), runTransaction: (run: any) => this.runTransaction(run) } as any); }
   quota() { return [...this.docs.values()].find(d => d.kind === 'quota'); }
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });

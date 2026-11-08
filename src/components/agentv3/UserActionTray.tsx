@@ -16,6 +16,7 @@
 // them: a message they did not choose to send is not a conversation, and it would spend their money.
 
 import { useMemo, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Check, MessageSquare, Ban, ChevronDown, ChevronRight } from 'lucide-react';
 import {
   GROUP_TITLES, closedNote, closedRows, groupedOpen, isLiveOnly, traySummary,
@@ -111,8 +112,9 @@ export function UserActionTray({
     );
   };
 
-  return (
-    <div className="fixed inset-0 z-[200] flex items-end justify-center" role="dialog" aria-modal="true" aria-label="What you need to do">
+  // Portalled to <body> so the Pro bottom tab bar (App z-150) can never paint over it.
+  const tray = (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center nb-modal-safe" role="dialog" aria-modal="true" aria-label="What you need to do">
       <button aria-label="Close" onClick={onClose} className="absolute inset-0 bg-scrim backdrop-blur-sm" />
       <div
         className="relative w-full sm:max-w-md bg-surface border-t sm:border border-line sm:rounded-2xl rounded-t-2xl flex flex-col overflow-hidden"
@@ -166,4 +168,5 @@ export function UserActionTray({
       </div>
     </div>
   );
+  return typeof document === 'undefined' ? tray : createPortal(tray, document.body);
 }

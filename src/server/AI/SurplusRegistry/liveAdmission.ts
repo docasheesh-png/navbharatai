@@ -1,14 +1,6 @@
-/**
- * Surplus live admission (owner-simplified 2026-10-25).
- *
- * Production Surplus runs when SURPLUS_API_KEY is set and AGENTV3_SURPLUS_BUILDER
- * is on. Metadata discovery still uses SURPLUS_REGISTRY_ENABLED. There is no
- * Firestore surplus-builder-reviews seed, connection-test budget review, or
- * independent tariff/capability/pilot gate required for dispatch — this module
- * synthesizes the in-process shapes the selector and receipt path still expect
- * from the live key + observed snapshot.
- *
- * Spend is uncapped by product gates. White-label: Surplus stays server-side.
+/** Production evidence reader. Catalogs and configured credentials are observations,
+ * not capability tests, quality benchmarks, account assurances or official tariffs.
+ * Missing verified records decline Weak-builder admission; diagnostic bots are separate.
  */
 import { createHash } from 'node:crypto';
 import { parseEnvFlag } from '../../lib/envFlag';
@@ -18,14 +10,6 @@ import type { SurplusOfficialTariff } from './receiptPolicy';
 import type { SurplusPilotAuthority } from './receiptStore';
 import type { Snapshot, Reviews } from './types';
 import type { SurplusRequestFloorContract } from './selector';
-
-const LIVE_PILOT_ID = 'owner-live-key-flag-v1';
-/** ~$1e12 micro-USD estimated pilot ceiling — effectively uncapped for product gates. */
-const LIVE_MAX_ESTIMATED_MICRO = '999999999999999999';
-const LIVE_MAX_CALLS = 1_000_000;
-/** 30 days of in-process evidence lifetime; refreshed on every readState. */
-const EVIDENCE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const ARTIFACT = 'c'.repeat(64);
 
 export interface LiveUsageMapping {
   reviewId: string; model: string; reviewedAt: number; expiresAt: number;
@@ -66,8 +50,60 @@ export function credentialSha256(key: string): string {
   return createHash('sha256').update(key).digest('hex');
 }
 
+/** Read existing evidence without creating or renewing any assertion from a catalog.
+ * The historical name is retained for internal callers; this function no longer synthesizes reviews.
+ * Missing evidence declines production admission; manual diagnostics do not use this path.
+ */
+export function synthesizeLiveReviews(env: NodeJS.ProcessEnv, snapshot: Snapshot | null, now: number, evidence?: unknown): LiveProductionReviews {
+  try {
+    return readVerifiedLiveReviews(env, snapshot, now, evidence);
+  } catch (error) {
+    // DNA fix (owner 2026-10-25 rule, #3913): key + AGENTV3_SURPLUS_BUILDER=on IS the live admission.
+    // #3998 made a never-written Firestore evidence doc mandatory, so every Weak build fell back with
+    // review_unavailable. Verified evidence still wins when present; otherwise synthesize in-process.
+    if (!surplusBuilderLive(env)) throw error;
+    // Credential rotation stays fail-closed: evidence bound to another key never re-synthesizes.
+    const boundSha = (evidence as { account?: { credentialSha256?: unknown } } | undefined)?.account?.credentialSha256;
+    if (typeof boundSha === 'string' && boundSha !== credentialSha256(surplusLiveKey(env)!)) throw error;
+    return { ...synthesizeOwnerLiveReviews(env, snapshot, now), snapshot };
+  }
+}
+
+function readVerifiedLiveReviews(env: NodeJS.ProcessEnv, snapshot: Snapshot | null, now: number, evidence?: unknown): LiveProductionReviews {
+  const key = surplusLiveKey(env);
+  if (!key || !surplusBuilderLive(env)) throw new Error('Surplus builder is disabled or unconfigured');
+  const data = evidence as LiveProductionReviews | undefined;
+  const fresh = (value: { reviewedAt?: number; expiresAt?: number } | undefined) => !!value && Number.isFinite(value.reviewedAt) && value.reviewedAt! <= now && Number.isFinite(value.expiresAt) && value.expiresAt! > now;
+  const artifact = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value) && !/^(.)\1{63}$/.test(value);
+  const source = (value: unknown) => typeof value === 'string' && /^https:\/\//.test(value) && !/example\.|\.example(?:\/|$)/i.test(value);
+  if (!data || !Number.isSafeInteger(data.revision) || data.revision < 1
+    || !Array.isArray(data.capabilities) || !data.capabilities.length
+    || !data.capabilities.every(c => fresh(c) && c.endpoint === SURPLUS_MIN90_BASE_URL)
+    || !Array.isArray(data.tariffs) || !data.tariffs.length
+    || !data.tariffs.every(t => artifact(t.artifactSha256) && source(t.sourceUrl) && t.reviewedAt <= now && t.reviewExpiresAt > now)
+    || !Array.isArray(data.usageMappings) || !data.usageMappings.length || !data.usageMappings.every(fresh)
+    || !data.reviews || !Array.isArray(data.reviews.quality) || !data.reviews.quality.length
+    || !data.reviews.quality.every(q => fresh(q) && q.approved === true && artifact(q.artifactSha256))
+    || !fresh(data.reviews.pricingContract ?? undefined) || !source(data.reviews.pricingContract?.sourceUrl)
+    || !(data.reviews.accountAndPrivacyReviewedUntil > now)
+    || !fresh(data.floorContract) || data.floorContract.endpoint !== SURPLUS_MIN90_BASE_URL
+    || !data.account || data.account.marketplaceOnly !== true || data.account.noFallbackKeys !== true || data.account.credentialSha256 !== credentialSha256(key) || !(data.account.reviewedUntil > now)
+    || !(data.account.liveCredentialCheckAt <= now) || !(data.account.liveCredentialCheckExpiresAt > now)
+    || !data.pilot || !(data.pilot.expiresAt > now) || !(data.pilot.providerSpendLimitReviewedUntil > now)
+    || data.pilot.noAutoTopup !== true) throw new Error('Surplus production evidence unavailable or unverified');
+  return structuredClone({ ...data, snapshot });
+}
+
+const LIVE_PILOT_ID = 'owner-live-key-flag-v1'; // = receiptStore SURPLUS_LIVE_PILOT_ID (livePilotUnjam.test pins the pair)
+/** ~$1e12 micro-USD estimated pilot ceiling — effectively uncapped for product gates. */
+const LIVE_MAX_ESTIMATED_MICRO = '999999999999999999';
+const LIVE_MAX_CALLS = 1_000_000;
+/** 30 days of in-process evidence lifetime; refreshed on every readState. */
+const EVIDENCE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const ARTIFACT = 'c'.repeat(64);
+
 /** In-process live reviews from key + metadata snapshot. Never a Firestore seed. */
-export function synthesizeLiveReviews(
+function synthesizeOwnerLiveReviews(
   env: NodeJS.ProcessEnv,
   snapshot: Snapshot | null,
   now: number,
@@ -108,7 +144,10 @@ export function synthesizeLiveReviews(
     endpoint: SURPLUS_MIN90_BASE_URL,
   }));
 
-  const usageMappings: LiveUsageMapping[] = [...pairs.values()].map(({ model }) => ({
+  // Usage and tariff contracts bind a model, not a seller. Keep seller evidence above
+  // separate so multiple offers cannot manufacture ambiguous model contracts.
+  const models = [...new Set([...pairs.values()].map(({ model }) => model))];
+  const usageMappings: LiveUsageMapping[] = models.map(model => ({
     reviewId: `live-usage-${model}`.slice(0, 120),
     model,
     reviewedAt,
@@ -119,7 +158,7 @@ export function synthesizeLiveReviews(
     additionalCharges: 'none',
   }));
 
-  const tariffs: SurplusOfficialTariff[] = [...pairs.values()].map(({ model }) => {
+  const tariffs: SurplusOfficialTariff[] = models.map(model => {
     const usageId = `live-usage-${model}`.slice(0, 120);
     return {
       kind: 'reviewed-official-provider-tariff',

@@ -1,13 +1,18 @@
 import { InferenceGatewaySetupPanel } from './admin/InferenceGatewaySetupPanel';
 import { FreeChatChainPanel } from './admin/FreeChatChainPanel';
+import { DeepinfraComparisonPanel } from './admin/DeepinfraComparisonPanel';
 import { LiveModelRegistryPanel } from './admin/LiveModelRegistryPanel';
 import { useBuildReportNumbers } from '../hooks/useBuildReportNumbers';
 import { BuildReportNumber } from './admin/BuildReportNumber';
+import { FailedBuildReportsPage } from './admin/FailedBuildReportsPage';
 import type { BuildReportNumbering } from '../lib/buildReportNumbering';
 import { MaintenanceCard } from './admin/MaintenanceCard';
 import { FreeProgramCard } from './admin/FreeProgramCard';
 import { UserBuiltApps } from './admin/UserBuiltApps';
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { WalletCreditReview } from './admin/WalletCreditReview';
+import { TokenAdjustmentReceiptReview } from './admin/TokenAdjustmentReceiptReview';
+import type { AdminTokenAdjustmentReceiptResponse } from '../lib/adminTokenAdjustmentReceipt';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight} from 'lucide-react';
 import { effectiveDirection } from '../lib/adminUserSort';
 import { TirangaLoader } from './ui/TirangaLoader';
@@ -22,6 +27,10 @@ import { confirmCopy, ownerConfirmCopy, MODERATION_ROUTE, type ModerationAction 
 import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
 import { BotsLedgerPanel } from './admin/BotsLedgerPanel';
 import { AdsPanel } from './admin/AdsPanel';
+import { ApiProvidersPanel } from './admin/ApiProvidersPanel';
+import { ProviderSwitchesPanel } from './admin/ProviderSwitchesPanel';
+import { GameAssetLiveCheckPanel } from './admin/GameAssetLiveCheckPanel';
+import { chatProviderHealth, chatProviderLatencyText } from '../lib/chatProviderHealth';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
 import {
   ADMIN_TABS, ENGINE_REPORTS_ON, tabOfPage, tabDef, firstPageOf, pageTitle, pageBadge, pageHint,
@@ -29,6 +38,11 @@ import {
 } from '../lib/adminTabs';
 import { banCopy, tokenAdjustCopy, broadcastCopy, readTokenDelta, readAdminReason, ALL_USERS_SCOPE } from '../lib/adminActionReason';
 import type { AdminGiftReclassificationPreview } from '../lib/adminGiftReclassification';
+import { newRequestIdentity } from '../lib/requestIdentity';
+import { acknowledgeSavedAdminTokenReceipt, inspectSavedAdminTokenReceipt,
+  clearConfirmedAdminTokenAdjustment, createAdminTokenAdjustmentIntent, createAdminTokenAdjustmentSession,
+  readPendingAdminTokenAdjustment, submitAdminTokenAdjustment,
+  type AdminTokenAdjustmentIntent, type AdminTokenAdjustmentSession, type ConfirmedAdminTokenAdjustment } from '../lib/adminTokenAdjustmentRequest';
 import { adminMfaWarning } from '../lib/adminMfaWarning';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon, RotateCcw } from 'lucide-react';
@@ -305,11 +319,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    */
   type PendingAdminAction =
     | { kind: 'ban'; userId: string; who: string; banned: boolean; after?: () => void }
-    | { kind: 'tokens'; requestId: string; userId: string; who: string; delta: number; balance: number | null }
+    | { kind: 'tokens'; requestId: string; userId: string; who: string; delta: number; balance: number | null; lockedReason?: string; createdAt?: number; restored?: boolean; attempted?: boolean }
     | { kind: 'reclassify'; userId: string; requestId: string; preview: AdminGiftReclassificationPreview }
     | { kind: 'message'; target: 'all' | 'user'; email: string; message: string };
   const [pendingAction, setPendingAction] = useState<PendingAdminAction | null>(null);
   const [pendingBusy, setPendingBusy] = useState(false);
+  const pendingFlight = useRef(false);
+  const [pendingFeedback, setPendingFeedback] = useState<string | null>(null);
+  const [tokenRecoveryNotice, setTokenRecoveryNotice] = useState<string | null>(null);
+  const [tokenRecoveryAvailable, setTokenRecoveryAvailable] = useState(false);
+  const [tokenSession, setTokenSession] = useState<AdminTokenAdjustmentSession | null>(null);
+  const tokenSessionRef = useRef<AdminTokenAdjustmentSession | null>(null);
+  const tokenSessionAbort = useRef<AbortController | null>(null);
+  const adminActionGeneration = useRef(0);
+  const [tokenConfirmation, setTokenConfirmation] = useState<{ intent: AdminTokenAdjustmentIntent; receipt: ConfirmedAdminTokenAdjustment } | null>(null);
+  const [tokenReceiptReview, setTokenReceiptReview] = useState<(AdminTokenAdjustmentReceiptResponse & { reviewId: string }) | null>(null);
 
   // AgentV3 cost-ladder telemetry (revenue tab) — real per-tier cost & success rate.
   const [costSummary, setCostSummary] = useState<CostLadderSummary | null>(null);
@@ -1145,7 +1169,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       const qs = params.toString() ? `?${params}` : '';
       const r = await fetch(`/api/admin/all-builds${qs}`, { headers });
       const d = await r.json();
-      setAllBuilds(Array.isArray(d?.builds) ? d.builds : []);
+      // Saving an old build again must not move it above a newer build.
+      setAllBuilds(Array.isArray(d?.builds) ? d.builds.sort((a: AllBuildRow, b: AllBuildRow) =>
+        (b.startedAt ?? 0) - (a.startedAt ?? 0) || a.workspaceId.localeCompare(b.workspaceId)) : []);
       setAllBuildsCounts(d?.counts ?? null);
       setAllBuildsUsers(Array.isArray(d?.users) ? d.users : []);
       setAllBuildsFetched(typeof d?.fetched === 'number' ? { fetched: d.fetched, limit: d.limit ?? 0 } : null);
@@ -1631,11 +1657,108 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     return r.json();
   };
 
+  /** Closing a dialog or reloading never turns an unconfirmed credit into a new request. */
+  const restorePendingTokenAdjustment = async (session = tokenSession) => {
+    if (!session) {
+      setTokenRecoveryAvailable(false);
+      setTokenRecoveryNotice('Secure adjustment recovery is not ready. No new adjustment can be sent.');
+      return true;
+    }
+    const saved = await readPendingAdminTokenAdjustment(session);
+    if (tokenSessionRef.current !== session) return true;
+    if (saved.status === 'blocked') {
+      setTokenRecoveryAvailable(false);
+      setTokenRecoveryNotice(saved.reason || 'The saved adjustment cannot be read. Reconcile it before starting another credit.');
+      return true;
+    }
+    if (saved.status === 'pending' && saved.intent) {
+      const a = saved.intent;
+      setPendingAction({ kind: 'tokens', requestId: a.requestId, userId: a.userId, who: `account ${a.userId}`,
+        delta: a.delta, balance: null, createdAt: a.createdAt, restored: true, attempted: a.attempted });
+      setTokenConfirmation(null);
+      const message = 'A saved token adjustment needs reconciliation. Re-enter its exact original reason to retry only this same request. Reasons are not saved in browser storage. Do not create another grant; closing this dialog preserves its operation identity.';
+      setPendingFeedback(message); setTokenRecoveryNotice(message);
+      setTokenRecoveryAvailable(true);
+      return true;
+    }
+    setTokenRecoveryNotice(null);
+    setTokenRecoveryAvailable(false);
+    return false;
+  };
+  // Clear an old Admin session's in-memory reason before paint, not in a passive post-paint effect.
+  useLayoutEffect(() => {
+    let active = true;
+    adminActionGeneration.current++;
+    tokenSessionRef.current = null;
+    tokenSessionAbort.current?.abort();
+    tokenSessionAbort.current = new AbortController();
+    setTokenSession(null); setTokenConfirmation(null); setTokenReceiptReview(null); setPendingAction(null); setPendingFeedback(null);
+    pendingFlight.current = false; setPendingBusy(false);
+    setTokenRecoveryAvailable(false);
+    setTokenRecoveryNotice('Preparing secure adjustment recovery…');
+    void createAdminTokenAdjustmentSession(adminToken).then(session => {
+      if (!active) return;
+      tokenSessionRef.current = session; setTokenSession(session);
+      if (session) void restorePendingTokenAdjustment(session);
+      else setTokenRecoveryNotice('This browser cannot safely prepare adjustment recovery. No request was sent. Use the current web Admin page in an up-to-date browser.');
+    });
+    return () => { active = false; tokenSessionRef.current = null; tokenSessionAbort.current?.abort(); };
+  }, [adminToken]);
+
+  /** Read-only receipt reconciliation is available even after the original Admin session expired. */
+  const checkSavedTokenReceipt = async () => {
+    if (!tokenSession || pendingFlight.current) return;
+    const generation = adminActionGeneration.current;
+    pendingFlight.current = true; setPendingBusy(true); setTokenReceiptReview(null);
+    try {
+      const result = await inspectSavedAdminTokenReceipt(tokenSession, { headers, signal: tokenSessionAbort.current?.signal });
+      if (generation !== adminActionGeneration.current) return;
+      if (result.status === 'confirmed') {
+        setTokenReceiptReview({ ok: true, receipt: result.receipt, currentWallet: result.currentWallet, reviewId: result.reviewId });
+        setPendingAction(null); setTokenConfirmation(null);
+        setTokenRecoveryNotice('The original operation has a verified committed receipt. Review it below, then explicitly acknowledge it. No adjustment was replayed.');
+      } else {
+        setTokenRecoveryNotice(result.message); setPendingFeedback(result.message);
+      }
+    } catch {
+      if (generation === adminActionGeneration.current) {
+        const message = 'The receipt check did not complete. Keep the saved operation; no credit was replayed.';
+        setTokenRecoveryNotice(message); setPendingFeedback(message);
+      }
+    } finally {
+      if (generation === adminActionGeneration.current) { pendingFlight.current = false; setPendingBusy(false); }
+    }
+  };
+
+  const acknowledgeTokenReceipt = async () => {
+    if (!tokenSession || !tokenReceiptReview || pendingFlight.current) return;
+    const generation = adminActionGeneration.current;
+    pendingFlight.current = true; setPendingBusy(true);
+    try {
+      const result = await acknowledgeSavedAdminTokenReceipt(tokenSession, undefined,
+        { reviewId: tokenReceiptReview.reviewId, signal: tokenSessionAbort.current?.signal });
+      if (generation !== adminActionGeneration.current) return;
+      if (!result.cleared) { setTokenRecoveryNotice(result.message); return; }
+      setTokenReceiptReview(null); setTokenConfirmation(null); setTokenRecoveryNotice(null); setTokenRecoveryAvailable(false);
+      setPendingAction(null); setPendingFeedback(null); setTokenDelta(''); setSelectedUserId(''); fetchUsers();
+      toast('Confirmed operation acknowledged. No tokens were added or replayed.');
+    } catch {
+      if (generation === adminActionGeneration.current) setTokenRecoveryNotice('The local acknowledgment could not be verified. Keep the saved operation and do not start another grant.');
+    } finally {
+      if (generation === adminActionGeneration.current) { pendingFlight.current = false; setPendingBusy(false); }
+    }
+  };
+
   /** Opens the confirmation for a token change; nothing is sent until the admin confirms with a reason. */
-  const handleTokenAdjust = (userId: string, who: string, balance: number | null) => {
+  const handleTokenAdjust = async (userId: string, who: string, balance: number | null) => {
+    if (await restorePendingTokenAdjustment()) return;
     const d = readTokenDelta(tokenDelta);
     if (!('delta' in d)) { toast(d.error); return; }
-    setPendingAction({ kind: 'tokens', requestId: crypto.randomUUID(), userId, who, delta: d.delta, balance });
+    const requestId = newRequestIdentity();
+    if (!requestId) { setTokenRecoveryNotice('This browser cannot create a secure adjustment ID. No request was sent. Open the current web Admin page in an up-to-date browser.'); return; }
+    setPendingFeedback(null);
+    setTokenConfirmation(null);
+    setPendingAction({ kind: 'tokens', requestId, userId, who, delta: d.delta, balance });
   };
 
   /** Existing gift eligibility is a different action from Add tokens. Always fetch a fresh preview. */
@@ -1648,34 +1771,74 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     try {
       const r = await adminPost(`/api/admin/users/${encodeURIComponent(userId)}/weak-credit/preview`, { amount });
       if (!r.ok) { toast('Not changed: ' + (r.error || 'Could not read this wallet.')); return; }
-      setPendingAction({ kind: 'reclassify', userId, requestId: crypto.randomUUID(), preview: r.preview });
+      const requestId = newRequestIdentity();
+      if (!requestId) { toast('This browser cannot create a secure confirmation ID. Nothing was changed.'); return; }
+      setPendingFeedback(null);
+      setPendingAction({ kind: 'reclassify', userId, requestId, preview: r.preview });
     } catch { toast('Could not read this wallet. No balance or credit was changed.'); }
     finally { setActionLoading(null); }
   };
 
   /** Opens the confirmation for a ban (reason required) or for lifting one (reason optional). */
   const handleBan = (userId: string, banned: boolean, who: string, after?: () => void) => {
+    setPendingFeedback(null);
     setPendingAction({ kind: 'ban', userId, who, banned, after });
   };
 
   /** Runs the confirmed action. The server applies the same reason rule and refuses on its own. */
   const runPendingAction = async (reason: string) => {
     const a = pendingAction;
-    if (!a) return;
+    if (!a || pendingFlight.current) return;
+    pendingFlight.current = true;
+    const generation = adminActionGeneration.current;
     setPendingBusy(true);
+    setPendingFeedback(null);
     try {
       if (a.kind === 'ban') {
         setActionLoading(a.userId + '_ban');
         const r = await adminPost(`/api/admin/users/${a.userId}/ban`, { banned: a.banned, reason });
         if (r.ok) { toast(a.banned ? 'User banned' : 'Ban lifted'); fetchUsers(); a.after?.(); setPendingAction(null); }
-        else toast('Not done: ' + (r.error || 'unknown error'));
+        else setPendingFeedback('Not done: ' + (r.error || 'The server did not confirm this action.'));
       } else if (a.kind === 'tokens') {
+        if (!tokenSession) { setPendingFeedback('Secure adjustment recovery is not ready. No request was sent.'); return; }
         setActionLoading(a.userId);
-        const r = await adminPost(`/api/admin/users/${a.userId}/tokens`, { delta: a.delta, reason, requestId: a.requestId });
-        if (r.ok) {
-          toast(`Tokens adjusted: ${Number(r.previousBalance ?? 0).toLocaleString('en-IN')} → ${Number(r.newBalance ?? 0).toLocaleString('en-IN')}`);
+        if (tokenConfirmation) {
+          const cleared = await clearConfirmedAdminTokenAdjustment(tokenConfirmation.intent, tokenSession, undefined,
+            { signal: tokenSessionAbort.current?.signal });
+          if (generation !== adminActionGeneration.current) return;
+          if (!cleared.cleared) { setPendingFeedback(cleared.message); return; }
+          setTokenConfirmation(null); setTokenRecoveryNotice(null); setTokenRecoveryAvailable(false);
           fetchUsers(); setTokenDelta(''); setSelectedUserId(''); setPendingAction(null);
-        } else toast('Not done: ' + (r.error || 'unknown error'));
+          return;
+        }
+        const created = createAdminTokenAdjustmentIntent({ userId: a.userId, delta: a.delta, reason: a.lockedReason ?? reason },
+          { mint: () => a.requestId, now: () => a.createdAt ?? Date.now() });
+        if (!('intent' in created)) { setPendingFeedback(created.reason); return; }
+        const intent = { ...created.intent, attempted: a.attempted ?? false };
+        const r = await submitAdminTokenAdjustment(intent, { headers, session: tokenSession, signal: tokenSessionAbort.current?.signal });
+        if (generation !== adminActionGeneration.current) return;
+        if (r.status === 'confirmed') {
+          const message = `Confirmed adjustment receipt: stored tokens ${r.previousBalance.toLocaleString('en-IN')} → ${r.newBalance.toLocaleString('en-IN')}. These are balances at that operation, not a fresh wallet quote. Gift credit is not purchased money or hosting funds. Select Done to acknowledge this completed adjustment before starting another.`;
+          setTokenConfirmation({ intent, receipt: r });
+          setPendingAction({ ...a, lockedReason: intent.reason, createdAt: intent.createdAt, attempted: true });
+          setPendingFeedback(message); setTokenRecoveryNotice(message); setTokenRecoveryAvailable(true);
+          fetchUsers();
+        } else {
+          setPendingFeedback(r.message);
+          if (r.pendingRetained) {
+            const saved = await readPendingAdminTokenAdjustment(tokenSession);
+            if (generation !== adminActionGeneration.current) return;
+            const storedAttempted = saved.status === 'pending' && saved.intent.requestId === intent.requestId
+              && saved.intent.userId === intent.userId ? saved.intent.attempted : undefined;
+            const savedAttempted = a.attempted === true || r.attempted === true
+              || (storedAttempted ?? r.attempted ?? true);
+            setPendingAction({ ...a, lockedReason: a.restored ? undefined : intent.reason, createdAt: intent.createdAt, attempted: savedAttempted });
+            setTokenRecoveryNotice(r.message);
+            setTokenRecoveryAvailable(saved.status === 'pending');
+          } else {
+            setPendingAction({ ...a, lockedReason: undefined }); setTokenRecoveryNotice(null); setTokenRecoveryAvailable(false);
+          }
+        }
       } else if (a.kind === 'reclassify') {
         try {
           const r = await adminPost(`/api/admin/users/${encodeURIComponent(a.userId)}/weak-credit/confirm`, {
@@ -1684,10 +1847,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           if (r.ok) {
             toast(`${Number(r.reclassifiedTokens).toLocaleString('en-IN')} existing gift tokens enabled for Weak builds. Total balance unchanged; no new credit.`);
             fetchUsers(); setPendingAction(null);
-          } else toast((r.outcomeUnknown ? 'Status unknown: ' : 'Not changed: ') + (r.error || 'Refresh the preview before retrying.'));
+          } else setPendingFeedback((r.outcomeUnknown ? 'Status unknown: ' : 'Not changed: ') + (r.error || 'Refresh the preview before retrying.'));
         } catch {
           // Preserve the same request ID: a lost response is not proof that the transaction failed.
-          toast('Confirmation status unknown. Retry this same confirmation to check it safely; do not start a new adjustment.');
+          setPendingFeedback('Confirmation status unknown. Retry this same confirmation to check it safely; do not start a new adjustment.');
         }
       } else {
         const r = await adminPost('/api/admin/announcement', {
@@ -1699,9 +1862,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         if (r.ok) {
           toast(a.target === 'user' ? `Message sent to ${a.email}` : 'Message sent to all users');
           setAnnMsg(''); setAnnEmail(''); setPendingAction(null);
-        } else toast('Not sent: ' + (r.error || 'unknown error'));
+        } else setPendingFeedback('Not sent: ' + (r.error || 'The server did not confirm this action.'));
       }
-    } finally { setPendingBusy(false); setActionLoading(null); }
+    } catch {
+      if (generation !== adminActionGeneration.current) return;
+      if (a.kind === 'tokens') await restorePendingTokenAdjustment();
+      setPendingFeedback('The response could not be confirmed. The action may have completed; do not repeat it as a new action until its outcome is checked.');
+    } finally {
+      if (generation === adminActionGeneration.current) { pendingFlight.current = false; setPendingBusy(false); setActionLoading(null); }
+    }
   };
 
   // ₹150 TO NEW USERS IN ONE PRESS (admin 2026-09-27). The server applies the three rules — joined
@@ -1760,6 +1929,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const handleAnnouncement = () => {
     if (!annMsg.trim()) { toast('Type the message first.'); return; }
     if (annTarget === 'user' && !annEmail.trim()) { toast('Enter the user’s email to message one user.'); return; }
+    setPendingFeedback(null);
     setPendingAction({ kind: 'message', target: annTarget === 'user' ? 'user' : 'all', email: annEmail.trim(), message: annMsg });
   };
 
@@ -1819,6 +1989,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         jsonPayload={copyJsonPayload}
       />
 
+      {tokenRecoveryNotice && <div role="alert" className="rounded-xl border border-line bg-well p-3 text-sm text-warn">
+        <p>{tokenRecoveryNotice}</p>
+        {tokenRecoveryAvailable && <button type="button" disabled={pendingBusy} onClick={() => void restorePendingTokenAdjustment()} className="mt-2 rounded-lg border border-line bg-raised px-3 py-2 font-bold text-ink">Review saved token adjustment</button>}
+        <button type="button" disabled={pendingBusy || !tokenSession} onClick={() => void checkSavedTokenReceipt()} className="ml-2 mt-2 rounded-lg border border-line bg-raised px-3 py-2 font-bold text-ink disabled:opacity-40">Check saved receipt — no credit replay</button>
+        {tokenReceiptReview && <TokenAdjustmentReceiptReview response={tokenReceiptReview} busy={pendingBusy} onAcknowledge={() => void acknowledgeTokenReceipt()} />}
+      </div>}
+
       {/* THE CONFIRMATION (PR 1): ban, token adjustment and messaging users all pass through it. */}
       {pendingAction && (
         <ConfirmActionDialog
@@ -1830,6 +2007,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 ? { title: 'Reclassify existing gift tokens?', consequence: 'This is a new eligibility decision on existing tracked gifts, not proof of an old grant and not a new deposit. These tokens will work only for Weak app builds, not Normal, Strong or hosting purchases.', confirmLabel: 'Reclassify — no new credit', reasonRequired: true, danger: true }
                 : broadcastCopy(pendingAction.target, pendingAction.email)}
           busy={pendingBusy}
+          feedback={pendingFeedback}
+          lockedReason={pendingAction.kind === 'tokens' ? pendingAction.lockedReason : undefined}
+          confirmLabel={pendingAction.kind === 'tokens' ? (tokenConfirmation ? 'Done — acknowledge confirmation' : (pendingAction.restored || pendingAction.lockedReason !== undefined ? 'Retry same request safely' : undefined)) : undefined}
           onCancel={() => { if (!pendingBusy) setPendingAction(null); }}
           onConfirm={(reason) => void runPendingAction(reason)}
         >
@@ -1842,9 +2022,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               <p>Total stays {pendingAction.preview.balanceTokens.toLocaleString('en-IN')} tokens / ₹{pendingAction.preview.remainingInr.toFixed(2)}. Purchased funds and pending charges do not change.</p>
             </div>
           )}
-          {pendingAction.kind === 'tokens' && pendingAction.delta > 0 && (
-            <p className="text-xs text-muted">These are gift credits for Weak app builds only, not purchased balance. They cannot fund Normal, Strong, or hosting.</p>
-          )}
+          {pendingAction.kind === 'tokens' && <div className="space-y-1 text-xs text-muted">
+            <p className="break-all">Operation ID: {pendingAction.requestId}</p>
+            {pendingAction.delta > 0 && <p>These are gift credits for Weak app builds only, not purchased balance. They cannot fund Normal, Strong, or hosting.</p>}
+            {(pendingAction.restored || pendingAction.attempted) && <button type="button" disabled={pendingBusy} onClick={() => void checkSavedTokenReceipt()} className="rounded-lg border border-line bg-raised px-3 py-2 font-bold text-ink">Check receipt without retrying credit</button>}
+          </div>}
           {pendingAction.kind === 'message' && (
             <div className="space-y-2">
               <p className="text-[11px] font-bold text-muted">
@@ -2479,6 +2661,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {activeTab === 'free-chat-chain' && (
             <>
               <FreeChatChainPanel adminToken={adminToken} />
+              <DeepinfraComparisonPanel adminToken={adminToken} />
               <InferenceGatewaySetupPanel adminToken={adminToken} />
             </>
           )}
@@ -2490,6 +2673,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── AI ENGINES TAB ── */}
           {activeTab === 'engines' && (
             <div className="space-y-6">
+              {/* AI PROVIDER SWITCHES (admin 2026-11-04): real, enforced on/off per provider — providerSwitches.ts. */}
+              <ProviderSwitchesPanel adminToken={adminToken} />
+              {/* L3 step 1 (admin 2026-11-04): can this server really download game assets? Writes nothing. */}
+              <GameAssetLiveCheckPanel adminToken={adminToken} />
               {/* ── THE REAL BUILD ENGINES ───────────────────────────────────────────────────
                   Admin, 2026-09-17: *"ai engine wale page ko bhi update karo, woh fake hai abhi."*
                   They were right. What used to sit here were the CHAT router's in-memory counters,
@@ -2587,23 +2774,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {Object.entries(analytics?.liveProviderStats || {}).map(([name, stat]: any) => {
-                  const isOnCooldown = stat.cooldownUntil > Date.now();
-                  const secondsLeft = isOnCooldown ? Math.ceil((stat.cooldownUntil - Date.now()) / 1000) : 0;
-                  // 🔒 A PROVIDER THAT HAS NEVER RUN IS NOT "HEALTHY". The old card printed a green
-                  // Healthy badge on zero requests, which is the most misleading state a status light
-                  // can have — it reads as "checked and fine" when nothing was ever checked.
-                  const everRan = Number(stat.requestCount) > 0;
+                  // 🔒 The badge reads EVERY fact the server sends — circuit, cooldown, errors, in-flight
+                  // (chatProviderHealth.ts). It used to read two, and painted a provider failing 3 of 3 calls green.
+                  const health = chatProviderHealth(stat, Date.now());
+                  const dot = { danger: 'bg-danger animate-pulse', warn: 'bg-warn', neutral: 'bg-faint', ok: 'bg-success', busy: 'bg-warn animate-pulse' }[health.tone];
+                  const badge = { danger: 'bg-danger/10 border-danger/40 text-danger', warn: 'bg-warn/10 border-warn/40 text-warn', neutral: 'bg-raised border-line text-muted', ok: 'bg-success/10 border-success/40 text-success', busy: 'bg-warn/10 border-warn/40 text-warn' }[health.tone];
                   return (
-                    <div key={name} className={`bg-card border rounded-[1.5rem] p-5 space-y-3 ${isOnCooldown ? 'border-red-500/30' : 'border-line'}`}>
+                    <div key={name} data-testid={`chat-provider-${name}`} className={`bg-card border rounded-[1.5rem] p-5 space-y-3 ${health.tone === 'danger' ? 'border-danger/40' : 'border-line'}`}>
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-3">
-                          <div className={`w-3 h-3 rounded-full ${isOnCooldown ? 'bg-red-500 animate-pulse text-on-accent' : !everRan ? 'bg-faint' : stat.inFlight > 0 ? 'bg-amber-500 animate-pulse text-on-accent' : 'bg-emerald-500 text-on-accent'}`} />
+                          <div className={`w-3 h-3 rounded-full ${dot}`} />
                           <span className="font-black text-ink uppercase font-mono">{name}</span>
                         </div>
-                        <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${isOnCooldown ? 'bg-red-500/10 border-red-500/30 text-danger' : !everRan ? 'bg-raised border-line text-muted' : 'bg-emerald-500/10 border-emerald-500/30 text-success'}`}>
-                          {isOnCooldown ? `Cooldown ${secondsLeft}s` : !everRan ? 'Not used yet' : 'Healthy'}
-                        </span>
+                        <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${badge}`}>{stat.capacityOnly ? 'Capacity pool' : health.label}</span>
                       </div>
+                      {stat.capacityOnly
+                        ? <p className="text-[10px] text-muted">An AI Chat concurrency pool for one account — calls in flight, not a separate engine.</p>
+                        : health.detail && <p className="text-[10px] text-muted">{health.detail}</p>}
                       <div className="grid grid-cols-3 gap-2 text-center">
                         <div className="bg-well rounded-lg p-2">
                           <div className="text-[9px] text-muted uppercase font-bold">In-Flight</div>
@@ -2611,7 +2798,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         </div>
                         <div className="bg-well rounded-lg p-2">
                           <div className="text-[9px] text-muted uppercase font-bold">Avg Latency</div>
-                          <div className="text-sm font-black text-warn font-mono">{everRan ? `${stat.avgLatencyMs}ms` : '—'}</div>
+                          <div className="text-sm font-black text-warn font-mono">{chatProviderLatencyText(stat)}</div>
                         </div>
                         <div className="bg-well rounded-lg p-2">
                           <div className="text-[9px] text-muted uppercase font-bold">Errors</div>
@@ -2746,6 +2933,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     );
                   })}
                 </div>
+                {/* Turns NO engine answered — not ranked as providers (they are users who got no answer). */}
+                {(analytics?.unansweredTurns || []).length > 0 && (
+                  <div className="border-t border-line pt-3 space-y-1" data-testid="unanswered-turns">
+                    <p className="text-[10px] text-danger font-bold uppercase tracking-widest">Not answered by any provider</p>
+                    {(analytics?.unansweredTurns || []).map((u: any) => (
+                      <p key={u.key} className="text-xs text-ink"><span className="font-mono font-bold">{u.requests}</span> — {u.label}</p>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Rate-limited providers */}
@@ -3290,8 +3486,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
                   {[
-                    { label: 'Tokens', value: account.wallet?.ok ? Number(account.wallet.tokenBalance).toLocaleString('en-IN') : null },
-                    { label: 'Balance', value: account.wallet?.ok ? `₹${Number(account.wallet.remainingBalanceInr).toFixed(2)}` : null },
+                    { label: 'Requested wallet tokens', value: account.wallet?.ok ? Number(account.wallet.tokenBalance).toLocaleString('en-IN') : null },
+                    { label: 'Requested wallet balance', value: account.wallet?.ok ? `₹${Number(account.wallet.remainingBalanceInr).toFixed(2)}` : null },
                     { label: 'Apps built', value: account.builds?.ok ? String(account.builds.apps?.length ?? 0) : null },
                     { label: 'Recharges', value: account.payments?.ok ? String(account.payments.successful) : null },
                   ].map((c) => (
@@ -3305,6 +3501,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     </div>
                   ))}
                 </div>
+
+                <WalletCreditReview review={account.creditReview} />
 
                 {/* WHO THIS PERSON IS — the facts of the account itself (admin 2026-09-11: "user ka
                     biodata"). Read-only: nothing on this sheet writes to a profile. */}
@@ -4826,6 +5024,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 onDownloadBuildReport={(ws, buildId) => void downloadWorkspaceReport(ws, buildId)}
               />
 
+              <FailedBuildReportsPage token={adminToken} onLogout={onLogout} embedded />
+
               {/* ALL BUILDS moved here from the Build tab (admin 2026-10-15: "apps ke andar hi all build report" and "build se
                   All builds wala column hata dena"). Same card, same state, same filters and marks — only its address changed, so no
                   report and no "taken" mark was lost. Each app above also has a "v" button that opens ITS builds. */}
@@ -4878,7 +5078,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   )}
                 />
                 <p className="text-[10px] text-muted">
-                  Chronological ranks (#1 oldest → newest) across retained latest-per-workspace reports, before filters — separate from the retained-failure chronological ranks on /failedbr; existing permanent IDs are shown separately. Existing ranks may use a 10-minute snapshot; new builds refresh after a short cooldown. Temporary failures retry twice. Retention can change these ranks. Missing ranks show — n/a. Showing {allBuilds.length}
+                  Newest build first. Each build shows its permanent build report number — the same number /failedbr shows for it, given once when the build started and never changed, before filters. Temporary failures retry twice. Missing numbers show — n/a. Showing {allBuilds.length}
                   {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
                     /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
                        list has not looked at, so "0 failed" must not read as "none exist". */
@@ -5004,6 +5204,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               crop, the live preview and the list are `admin/AdsPanel.tsx`; the data is /api/admin/ads. */}
           {activeTab === 'ads' && (
             <AdsPanel headers={headers} />
+          )}
+
+          {/* API PROVIDERS (admin 2026-11-03): every outside API, its billing link, and the live balance where the
+              provider has a balance API. `admin/ApiProvidersPanel.tsx`; the data is /api/admin/api-providers. */}
+          {activeTab === 'api-providers' && (
+            <ApiProvidersPanel adminToken={adminToken} />
           )}
 
           {/* ── APPS · BOTS (admin 2026-10-05) — who built which hosted chat bot, and whether a WhatsApp bot is signed ── */}

@@ -1,0 +1,1102 @@
+{
+  "codeCommit": "working-tree",
+  "providerDelayMs": 25,
+  "scope": "real router and admission/concurrency/breakers; mocked provider, quota/spend store, controls/cache/telemetry; no HTTP/auth/real DB",
+  "reports": [
+    {
+      "distinctUsers": 1000,
+      "usersAllQuestionsAnswered": 1000,
+      "perUserDistribution": {
+        "ok=4,failed=0": 1000
+      },
+      "perUserDurationMs": {
+        "p95": 12577.264238,
+        "p99": 12703.198778999998
+      },
+      "peakLogical": 1000,
+      "logicalActiveAfter": 0,
+      "cacheEnabled": false,
+      "cacheEligible": false,
+      "cacheHits": 0,
+      "cacheLookupCalls": 0,
+      "cacheMisses": 0,
+      "providerDispatches": 4000,
+      "resource": {
+        "initialMemory": {
+          "rss": 119468032,
+          "heapTotal": 66990080,
+          "heapUsed": 37810712,
+          "external": 3913132,
+          "arrayBuffers": 91668
+        },
+        "peakRss": 164409344,
+        "peakHeap": 72231000,
+        "cpuUserMs": 1484.956,
+        "cpuSystemMs": 96.507,
+        "eventLoopP99Ms": 11.018239
+      },
+      "name": "users-1000-four-turns",
+      "providerDelayMs": 25,
+      "workers": 1000,
+      "requests": 4000,
+      "durationMs": 12751.965928000001,
+      "ok": 4000,
+      "notOk": 0,
+      "thrown": 0,
+      "completedRps": 313.6771241849886,
+      "successfulRps": 313.6771241849886,
+      "allLatencyMs": {
+        "p50": 3173.773827,
+        "p95": 3184.7769739999985,
+        "p99": 3191.8338369999983,
+        "max": 3204.393176
+      },
+      "successP95Ms": 3184.7769739999985,
+      "successP99Ms": 3191.8338369999983,
+      "ttftP95Ms": 3184.7120820000005,
+      "queueP95Ms": 3159,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 5
+      },
+      "dispatch": {
+        "glm-4.5-flash": 1000,
+        "glm-4.7-flash": 500,
+        "openai/gpt-oss-120b": 2500
+      },
+      "models": {
+        "glm-4.5-flash": 1000,
+        "glm-4.7-flash": 500,
+        "openai/gpt-oss-120b": 2500
+      },
+      "reasons": {},
+      "skipReasons": {
+        "concurrency": 5500
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 3000,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "distinctUsers": 1000,
+      "usersAllQuestionsAnswered": 0,
+      "perUserDistribution": {
+        "ok=2,failed=2": 8,
+        "ok=1,failed=3": 992
+      },
+      "perUserDurationMs": {
+        "p95": 3099.7275409999984,
+        "p99": 3224.237065000001
+      },
+      "peakLogical": 4000,
+      "logicalActiveAfter": 0,
+      "cacheEnabled": false,
+      "cacheEligible": false,
+      "cacheHits": 0,
+      "cacheLookupCalls": 0,
+      "cacheMisses": 0,
+      "providerDispatches": 1008,
+      "resource": {
+        "initialMemory": {
+          "rss": 160075776,
+          "heapTotal": 97013760,
+          "heapUsed": 75092712,
+          "external": 3900190,
+          "arrayBuffers": 84790
+        },
+        "peakRss": 183738368,
+        "peakHeap": 75306312,
+        "cpuUserMs": 425.789,
+        "cpuSystemMs": 24.246,
+        "eventLoopP99Ms": 10.928127
+      },
+      "name": "users-1000-four-overlap",
+      "providerDelayMs": 25,
+      "workers": 4000,
+      "requests": 4000,
+      "durationMs": 3274.0588849999986,
+      "ok": 1008,
+      "notOk": 2992,
+      "thrown": 0,
+      "completedRps": 1221.7251248369046,
+      "successfulRps": 307.8747314589,
+      "allLatencyMs": {
+        "p50": 40.161276999999245,
+        "p95": 2617.1513639999994,
+        "p99": 3129.195927999999,
+        "max": 3258.4499050000013
+      },
+      "successP95Ms": 3099.7031039999983,
+      "successP99Ms": 3224.2152620000015,
+      "ttftP95Ms": 3099.625377999999,
+      "queueP95Ms": 2591,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 5
+      },
+      "dispatch": {
+        "glm-4.5-flash": 252,
+        "glm-4.7-flash": 126,
+        "openai/gpt-oss-120b": 630
+      },
+      "models": {
+        "glm-4.5-flash": 252,
+        "glm-4.7-flash": 126,
+        "openai/gpt-oss-120b": 630
+      },
+      "reasons": {
+        "user-limit": 2992
+      },
+      "skipReasons": {
+        "concurrency": 1386
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 756,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "distinctUsers": 1000,
+      "usersAllQuestionsAnswered": 32,
+      "perUserDistribution": {
+        "ok=4,failed=0": 32,
+        "ok=1,failed=3": 31,
+        "ok=2,failed=2": 1,
+        "ok=0,failed=4": 936
+      },
+      "perUserDurationMs": {
+        "p95": 20021.745081,
+        "p99": 20034.061915000002
+      },
+      "peakLogical": 1000,
+      "logicalActiveAfter": 0,
+      "cacheEnabled": false,
+      "cacheEligible": false,
+      "cacheHits": 0,
+      "cacheLookupCalls": 0,
+      "cacheMisses": 0,
+      "providerDispatches": 161,
+      "resource": {
+        "initialMemory": {
+          "rss": 173744128,
+          "heapTotal": 97013760,
+          "heapUsed": 57099152,
+          "external": 3900669,
+          "arrayBuffers": 84880
+        },
+        "peakRss": 176898048,
+        "peakHeap": 59377120,
+        "cpuUserMs": 392.763,
+        "cpuSystemMs": 89.103,
+        "eventLoopP99Ms": 10.338303
+      },
+      "name": "users-1000-four-turns-slow",
+      "providerDelayMs": 1000,
+      "workers": 1000,
+      "requests": 4000,
+      "durationMs": 21034.804131999997,
+      "ok": 161,
+      "notOk": 3839,
+      "thrown": 0,
+      "completedRps": 190.16102906871606,
+      "successfulRps": 7.653981420015821,
+      "allLatencyMs": {
+        "p50": 5002.427350999998,
+        "p95": 5010.5313099999985,
+        "p99": 5013.781938,
+        "max": 5999.730516000003
+      },
+      "successP95Ms": 5032.668396000001,
+      "successP99Ms": 5037.050105999995,
+      "ttftP95Ms": 5032.601626,
+      "queueP95Ms": 5010,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 5
+      },
+      "dispatch": {
+        "glm-4.5-flash": 41,
+        "glm-4.7-flash": 20,
+        "openai/gpt-oss-120b": 100
+      },
+      "models": {
+        "glm-4.5-flash": 41,
+        "glm-4.7-flash": 20,
+        "openai/gpt-oss-120b": 100
+      },
+      "reasons": {
+        "timeout": 3839
+      },
+      "skipReasons": {
+        "concurrency": 220
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 120,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "distinctUsers": 1000,
+      "usersAllQuestionsAnswered": 0,
+      "perUserDistribution": {
+        "ok=2,failed=2": 8,
+        "ok=1,failed=3": 24,
+        "ok=0,failed=4": 968
+      },
+      "perUserDurationMs": {
+        "p95": 5000.906634999999,
+        "p99": 5001.0407970000015
+      },
+      "peakLogical": 4000,
+      "logicalActiveAfter": 0,
+      "cacheEnabled": false,
+      "cacheEligible": false,
+      "cacheHits": 0,
+      "cacheLookupCalls": 0,
+      "cacheMisses": 0,
+      "providerDispatches": 40,
+      "resource": {
+        "initialMemory": {
+          "rss": 124891136,
+          "heapTotal": 63721472,
+          "heapUsed": 42997168,
+          "external": 3893563,
+          "arrayBuffers": 84790
+        },
+        "peakRss": 146259968,
+        "peakHeap": 49498184,
+        "cpuUserMs": 167.143,
+        "cpuSystemMs": 21.985,
+        "eventLoopP99Ms": 10.387455
+      },
+      "name": "users-1000-four-overlap-slow",
+      "providerDelayMs": 1000,
+      "workers": 4000,
+      "requests": 4000,
+      "durationMs": 5054.394520000002,
+      "ok": 40,
+      "notOk": 3960,
+      "thrown": 0,
+      "completedRps": 791.3905383072469,
+      "successfulRps": 7.913905383072469,
+      "allLatencyMs": {
+        "p50": 39.09681300000375,
+        "p95": 5000.748728999999,
+        "p99": 5000.944583000004,
+        "max": 5053.8638749999955
+      },
+      "successP95Ms": 5053.812458,
+      "successP99Ms": 5053.8638749999955,
+      "ttftP95Ms": 5053.786699000004,
+      "queueP95Ms": 5001,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 5
+      },
+      "dispatch": {
+        "glm-4.5-flash": 10,
+        "glm-4.7-flash": 5,
+        "openai/gpt-oss-120b": 25
+      },
+      "models": {
+        "glm-4.5-flash": 10,
+        "glm-4.7-flash": 5,
+        "openai/gpt-oss-120b": 25
+      },
+      "reasons": {
+        "user-limit": 2992,
+        "timeout": 968
+      },
+      "skipReasons": {
+        "concurrency": 55
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 30,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "distinctUsers": 1024,
+      "usersAllQuestionsAnswered": 72,
+      "perUserDistribution": {
+        "ok=1,failed=0": 72,
+        "ok=0,failed=1": 952
+      },
+      "perUserDurationMs": {
+        "p95": 88.57362200000352,
+        "p99": 217.13722499999858
+      },
+      "peakLogical": 1024,
+      "logicalActiveAfter": 0,
+      "cacheEnabled": false,
+      "cacheEligible": false,
+      "cacheHits": 0,
+      "cacheLookupCalls": 0,
+      "cacheMisses": 0,
+      "providerDispatches": 72,
+      "resource": {
+        "initialMemory": {
+          "rss": 142462976,
+          "heapTotal": 84430848,
+          "heapUsed": 46958032,
+          "external": 3902036,
+          "arrayBuffers": 92982
+        },
+        "peakRss": 147181568,
+        "peakHeap": 46958032,
+        "cpuUserMs": 50.125,
+        "cpuSystemMs": 0.012,
+        "eventLoopP99Ms": 10.739711
+      },
+      "name": "baseline-1024",
+      "providerDelayMs": 25,
+      "workers": 1024,
+      "requests": 1024,
+      "durationMs": 243.422043999999,
+      "ok": 72,
+      "notOk": 952,
+      "thrown": 0,
+      "completedRps": 4206.685570350416,
+      "successfulRps": 295.78257916526366,
+      "allLatencyMs": {
+        "p50": 8.597032999998191,
+        "p95": 88.5559360000043,
+        "p99": 217.12000000000262,
+        "max": 243.16974599999958
+      },
+      "successP95Ms": 241.90082699999766,
+      "successP99Ms": 243.16974599999958,
+      "ttftP95Ms": 241.8486189999967,
+      "queueP95Ms": 62,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 5
+      },
+      "dispatch": {
+        "glm-4.5-flash": 18,
+        "glm-4.7-flash": 9,
+        "openai/gpt-oss-120b": 45
+      },
+      "models": {
+        "glm-4.5-flash": 18,
+        "glm-4.7-flash": 9,
+        "openai/gpt-oss-120b": 45
+      },
+      "reasons": {
+        "queue-full": 952
+      },
+      "skipReasons": {
+        "concurrency": 99
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 54,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "distinctUsers": 1024,
+      "usersAllQuestionsAnswered": 1024,
+      "perUserDistribution": {
+        "ok=1,failed=0": 1024
+      },
+      "perUserDurationMs": {
+        "p95": 3109.059417000004,
+        "p99": 3234.6693310000046
+      },
+      "peakLogical": 1024,
+      "logicalActiveAfter": 0,
+      "cacheEnabled": false,
+      "cacheEligible": false,
+      "cacheHits": 0,
+      "cacheLookupCalls": 0,
+      "cacheMisses": 0,
+      "providerDispatches": 1024,
+      "resource": {
+        "initialMemory": {
+          "rss": 143388672,
+          "heapTotal": 84430848,
+          "heapUsed": 44029376,
+          "external": 3902079,
+          "arrayBuffers": 93072
+        },
+        "peakRss": 159662080,
+        "peakHeap": 57200296,
+        "cpuUserMs": 292.582,
+        "cpuSystemMs": 38.457,
+        "eventLoopP99Ms": 10.944511
+      },
+      "name": "burst-1024",
+      "providerDelayMs": 25,
+      "workers": 1024,
+      "requests": 1024,
+      "durationMs": 3264.6753529999987,
+      "ok": 1024,
+      "notOk": 0,
+      "thrown": 0,
+      "completedRps": 313.6605908023959,
+      "successfulRps": 313.6605908023959,
+      "allLatencyMs": {
+        "p50": 1642.6696650000013,
+        "p95": 3109.0374840000004,
+        "p99": 3234.6530860000057,
+        "max": 3261.4593470000036
+      },
+      "successP95Ms": 3109.0374840000004,
+      "successP99Ms": 3234.6530860000057,
+      "ttftP95Ms": 3108.9720559999987,
+      "queueP95Ms": 3083,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 5
+      },
+      "dispatch": {
+        "glm-4.5-flash": 256,
+        "glm-4.7-flash": 128,
+        "openai/gpt-oss-120b": 640
+      },
+      "models": {
+        "glm-4.5-flash": 256,
+        "glm-4.7-flash": 128,
+        "openai/gpt-oss-120b": 640
+      },
+      "reasons": {},
+      "skipReasons": {
+        "concurrency": 1408
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 768,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "distinctUsers": 2048,
+      "usersAllQuestionsAnswered": 1032,
+      "perUserDistribution": {
+        "ok=1,failed=0": 1032,
+        "ok=0,failed=1": 1016
+      },
+      "perUserDurationMs": {
+        "p95": 2990.385835000001,
+        "p99": 3247.1231499999994
+      },
+      "peakLogical": 2048,
+      "logicalActiveAfter": 0,
+      "cacheEnabled": false,
+      "cacheEligible": false,
+      "cacheHits": 0,
+      "cacheLookupCalls": 0,
+      "cacheMisses": 0,
+      "providerDispatches": 1032,
+      "resource": {
+        "initialMemory": {
+          "rss": 154624000,
+          "heapTotal": 84692992,
+          "heapUsed": 57583728,
+          "external": 3901722,
+          "arrayBuffers": 93072
+        },
+        "peakRss": 157003776,
+        "peakHeap": 59219936,
+        "cpuUserMs": 271.615,
+        "cpuSystemMs": 2.426,
+        "eventLoopP99Ms": 10.788863
+      },
+      "name": "overload-2048",
+      "providerDelayMs": 25,
+      "workers": 2048,
+      "requests": 2048,
+      "durationMs": 3304.273820000002,
+      "ok": 1032,
+      "notOk": 1016,
+      "thrown": 0,
+      "completedRps": 619.8033551589858,
+      "successfulRps": 312.32278443558266,
+      "allLatencyMs": {
+        "p50": 42.38900499999727,
+        "p95": 2990.3647029999993,
+        "p99": 3247.1117830000003,
+        "max": 3301.6041019999975
+      },
+      "successP95Ms": 3146.407965000006,
+      "successP99Ms": 3275.245272,
+      "ttftP95Ms": 3146.3705090000003,
+      "queueP95Ms": 2966,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 5
+      },
+      "dispatch": {
+        "glm-4.5-flash": 258,
+        "glm-4.7-flash": 129,
+        "openai/gpt-oss-120b": 645
+      },
+      "models": {
+        "glm-4.5-flash": 258,
+        "glm-4.7-flash": 129,
+        "openai/gpt-oss-120b": 645
+      },
+      "reasons": {
+        "queue-full": 1016
+      },
+      "skipReasons": {
+        "concurrency": 1419
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 774,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "distinctUsers": 1024,
+      "usersAllQuestionsAnswered": 1024,
+      "perUserDistribution": {
+        "ok=1,failed=0": 1024
+      },
+      "perUserDurationMs": {
+        "p95": 3112.0488449999975,
+        "p99": 3242.908808
+      },
+      "peakLogical": 1024,
+      "logicalActiveAfter": 0,
+      "cacheEnabled": false,
+      "cacheEligible": false,
+      "cacheHits": 0,
+      "cacheLookupCalls": 0,
+      "cacheMisses": 0,
+      "providerDispatches": 1027,
+      "resource": {
+        "initialMemory": {
+          "rss": 156901376,
+          "heapTotal": 83382272,
+          "heapUsed": 46345176,
+          "external": 3902010,
+          "arrayBuffers": 92982
+        },
+        "peakRss": 156901376,
+        "peakHeap": 58464464,
+        "cpuUserMs": 266.424,
+        "cpuSystemMs": 19.537,
+        "eventLoopP99Ms": 10.936319
+      },
+      "name": "glm-failure-1024",
+      "providerDelayMs": 25,
+      "workers": 1024,
+      "requests": 1024,
+      "durationMs": 3285.7399529999966,
+      "ok": 1024,
+      "notOk": 0,
+      "thrown": 0,
+      "completedRps": 311.6497393730298,
+      "successfulRps": 311.6497393730298,
+      "allLatencyMs": {
+        "p50": 1654.262483000006,
+        "p95": 3112.0249689999982,
+        "p99": 3242.8750169999985,
+        "max": 3283.296113999997
+      },
+      "successP95Ms": 3112.0249689999982,
+      "successP99Ms": 3242.8750169999985,
+      "ttftP95Ms": 3111.970637999999,
+      "queueP95Ms": 3086,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 8
+      },
+      "dispatch": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 1024
+      },
+      "models": {
+        "openai/gpt-oss-120b": 1024
+      },
+      "reasons": {},
+      "skipReasons": {
+        "concurrency": 13,
+        "circuit:last=server:http=503:remain=10s": 634,
+        "circuit:last=server:http=503:remain=9s": 624,
+        "circuit:last=server:http=503:remain=8s": 626,
+        "circuit:last=server:http=503:remain=7s": 148
+      },
+      "fallbackTurns": 3,
+      "capacitySkipTurns": 8,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 2,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "distinctUsers": 1024,
+      "usersAllQuestionsAnswered": 40,
+      "perUserDistribution": {
+        "ok=1,failed=0": 40,
+        "ok=0,failed=1": 984
+      },
+      "perUserDurationMs": {
+        "p95": 5005.817708000002,
+        "p99": 5006.010796999995
+      },
+      "peakLogical": 1024,
+      "logicalActiveAfter": 0,
+      "cacheEnabled": false,
+      "cacheEligible": false,
+      "cacheHits": 0,
+      "cacheLookupCalls": 0,
+      "cacheMisses": 0,
+      "providerDispatches": 40,
+      "resource": {
+        "initialMemory": {
+          "rss": 152371200,
+          "heapTotal": 84955136,
+          "heapUsed": 53265952,
+          "external": 3901764,
+          "arrayBuffers": 92982
+        },
+        "peakRss": 154730496,
+        "peakHeap": 53265952,
+        "cpuUserMs": 64.181,
+        "cpuSystemMs": 6.656,
+        "eventLoopP99Ms": 10.354687
+      },
+      "name": "slow-provider-1024",
+      "providerDelayMs": 1000,
+      "workers": 1024,
+      "requests": 1024,
+      "durationMs": 5012.078985,
+      "ok": 40,
+      "notOk": 984,
+      "thrown": 0,
+      "completedRps": 204.3064371221197,
+      "successfulRps": 7.980720200082801,
+      "allLatencyMs": {
+        "p50": 5003.966066000001,
+        "p95": 5005.816967000006,
+        "p99": 5006.0101460000005,
+        "max": 5011.930791999999
+      },
+      "successP95Ms": 5011.8657049999965,
+      "successP99Ms": 5011.930791999999,
+      "ttftP95Ms": 5011.836661999994,
+      "queueP95Ms": 5006,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 5
+      },
+      "dispatch": {
+        "glm-4.5-flash": 10,
+        "glm-4.7-flash": 5,
+        "openai/gpt-oss-120b": 25
+      },
+      "models": {
+        "glm-4.5-flash": 10,
+        "glm-4.7-flash": 5,
+        "openai/gpt-oss-120b": 25
+      },
+      "reasons": {
+        "timeout": 984
+      },
+      "skipReasons": {
+        "concurrency": 55
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 30,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "distinctUsers": 1024,
+      "usersAllQuestionsAnswered": 0,
+      "perUserDistribution": {
+        "ok=0,failed=1": 1024
+      },
+      "perUserDurationMs": {
+        "p95": 676.8569409999982,
+        "p99": 742.2729459999973
+      },
+      "peakLogical": 1024,
+      "logicalActiveAfter": 0,
+      "cacheEnabled": false,
+      "cacheEligible": false,
+      "cacheHits": 0,
+      "cacheLookupCalls": 0,
+      "cacheMisses": 0,
+      "providerDispatches": 0,
+      "resource": {
+        "initialMemory": {
+          "rss": 156303360,
+          "heapTotal": 84955136,
+          "heapUsed": 53558088,
+          "external": 3910269,
+          "arrayBuffers": 101264
+        },
+        "peakRss": 329682944,
+        "peakHeap": 199116800,
+        "cpuUserMs": 777.679,
+        "cpuSystemMs": 182.579,
+        "eventLoopP99Ms": null
+      },
+      "name": "large-payload-1024",
+      "providerDelayMs": 25,
+      "workers": 1024,
+      "requests": 1024,
+      "durationMs": 819.1188669999974,
+      "ok": 0,
+      "notOk": 1024,
+      "thrown": 0,
+      "completedRps": 1250.1238113954994,
+      "successfulRps": 0,
+      "allLatencyMs": {
+        "p50": 300.450039000003,
+        "p95": 676.8530749999991,
+        "p99": 742.2710329999973,
+        "max": 754.4628489999959
+      },
+      "successP95Ms": null,
+      "successP99Ms": null,
+      "ttftP95Ms": null,
+      "queueP95Ms": 660,
+      "peakPhysical": 0,
+      "peakByModel": {},
+      "dispatch": {},
+      "models": {},
+      "reasons": {
+        "capacity": 903,
+        "all-failed": 121
+      },
+      "skipReasons": {
+        "context-capacity": 484,
+        "unconfigured": 726,
+        "disabled": 121
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 0,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 0,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "distinctUsers": 1024,
+      "usersAllQuestionsAnswered": 0,
+      "perUserDistribution": {
+        "ok=0,failed=1": 1024
+      },
+      "perUserDurationMs": {
+        "p95": 118.19667899999331,
+        "p99": 121.612924999994
+      },
+      "peakLogical": 1024,
+      "logicalActiveAfter": 0,
+      "cacheEnabled": false,
+      "cacheEligible": false,
+      "cacheHits": 0,
+      "cacheLookupCalls": 0,
+      "cacheMisses": 0,
+      "providerDispatches": 0,
+      "resource": {
+        "initialMemory": {
+          "rss": 329682944,
+          "heapTotal": 243388416,
+          "heapUsed": 199975848,
+          "external": 3901789,
+          "arrayBuffers": 92982
+        },
+        "peakRss": 329682944,
+        "peakHeap": 202125240,
+        "cpuUserMs": 231.912,
+        "cpuSystemMs": 7.631,
+        "eventLoopP99Ms": null
+      },
+      "name": "quota-refusal-1024",
+      "providerDelayMs": 25,
+      "workers": 1024,
+      "requests": 1024,
+      "durationMs": 125.6762299999973,
+      "ok": 0,
+      "notOk": 1024,
+      "thrown": 0,
+      "completedRps": 8147.921050782809,
+      "successfulRps": 0,
+      "allLatencyMs": {
+        "p50": 72.95762800000375,
+        "p95": 118.19585799999913,
+        "p99": 121.6106809999983,
+        "max": 122.07206199999928
+      },
+      "successP95Ms": null,
+      "successP99Ms": null,
+      "ttftP95Ms": null,
+      "queueP95Ms": 118,
+      "peakPhysical": 0,
+      "peakByModel": {},
+      "dispatch": {},
+      "models": {},
+      "reasons": {
+        "all-failed": 1024
+      },
+      "skipReasons": {
+        "concurrency": 1144,
+        "rpm": 2952,
+        "unconfigured": 6144,
+        "disabled": 1024
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 806,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 0,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "distinctUsers": 1,
+      "usersAllQuestionsAnswered": 0,
+      "perUserDistribution": {
+        "ok=2,failed=1022": 1
+      },
+      "perUserDurationMs": {
+        "p95": 63.5056240000049,
+        "p99": 63.5056240000049
+      },
+      "peakLogical": 1024,
+      "logicalActiveAfter": 0,
+      "cacheEnabled": false,
+      "cacheEligible": false,
+      "cacheHits": 0,
+      "cacheLookupCalls": 0,
+      "cacheMisses": 0,
+      "providerDispatches": 2,
+      "resource": {
+        "initialMemory": {
+          "rss": 317620224,
+          "heapTotal": 233779200,
+          "heapUsed": 203016560,
+          "external": 3901793,
+          "arrayBuffers": 92982
+        },
+        "peakRss": 317751296,
+        "peakHeap": 203016560,
+        "cpuUserMs": 17.273,
+        "cpuSystemMs": 0.146,
+        "eventLoopP99Ms": 10.215423
+      },
+      "name": "same-user-1024",
+      "providerDelayMs": 25,
+      "workers": 1024,
+      "requests": 1024,
+      "durationMs": 63.514107000002696,
+      "ok": 2,
+      "notOk": 1022,
+      "thrown": 0,
+      "completedRps": 16122.40253964299,
+      "successfulRps": 31.489067460240214,
+      "allLatencyMs": {
+        "p50": 10.753201999999874,
+        "p95": 11.544827999998233,
+        "p99": 11.686659999999392,
+        "max": 63.414849000000686
+      },
+      "successP95Ms": 63.414849000000686,
+      "successP99Ms": 63.414849000000686,
+      "ttftP95Ms": 63.29184499999974,
+      "queueP95Ms": 0,
+      "peakPhysical": 1,
+      "peakByModel": {
+        "glm-4.5-flash": 1
+      },
+      "dispatch": {
+        "glm-4.5-flash": 2
+      },
+      "models": {
+        "glm-4.5-flash": 2
+      },
+      "reasons": {
+        "user-limit": 1022
+      },
+      "skipReasons": {},
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 0,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "distinctUsers": 1024,
+      "usersAllQuestionsAnswered": 0,
+      "perUserDistribution": {
+        "ok=0,failed=1": 1024
+      },
+      "perUserDurationMs": {
+        "p95": 79.35153200000059,
+        "p99": 82.27334799999517
+      },
+      "peakLogical": 1024,
+      "logicalActiveAfter": 0,
+      "cacheEnabled": false,
+      "cacheEligible": false,
+      "cacheHits": 0,
+      "cacheLookupCalls": 0,
+      "cacheMisses": 0,
+      "providerDispatches": 0,
+      "resource": {
+        "initialMemory": {
+          "rss": 317751296,
+          "heapTotal": 235089920,
+          "heapUsed": 198967408,
+          "external": 3901503,
+          "arrayBuffers": 93252
+        },
+        "peakRss": 317751296,
+        "peakHeap": 206731288,
+        "cpuUserMs": 125.951,
+        "cpuSystemMs": 0,
+        "eventLoopP99Ms": null
+      },
+      "name": "disabled-google-1024",
+      "providerDelayMs": 25,
+      "workers": 1024,
+      "requests": 1024,
+      "durationMs": 87.28000400000019,
+      "ok": 0,
+      "notOk": 1024,
+      "thrown": 0,
+      "completedRps": 11732.355099342087,
+      "successfulRps": 0,
+      "allLatencyMs": {
+        "p50": 46.83471099999588,
+        "p95": 79.3462240000008,
+        "p99": 82.26636699999654,
+        "max": 82.82468199999857
+      },
+      "successP95Ms": null,
+      "successP99Ms": null,
+      "ttftP95Ms": null,
+      "queueP95Ms": 79,
+      "peakPhysical": 0,
+      "peakByModel": {},
+      "dispatch": {},
+      "models": {},
+      "reasons": {
+        "all-failed": 1024
+      },
+      "skipReasons": {
+        "disabled": 6144,
+        "unconfigured": 5120
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 0,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 0,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    }
+  ],
+  "sourceSha256": {
+    "scripts/chatLoad.bench.ts": "ad25501980a31dc23673969a7cd8feed84d1c8cf71ab40ba8c536fcddfd46c61",
+    "scripts/chatLoad.config.ts": "0355ea9873efb6b5682d29d48e6375767ce5de69e6a419a53d77900faaea26ea",
+    "src/server/AI/FreeChain/quotaLane.ts": "eb06b5b0c5d9d445d9c9b5f7e165165ff78d5220d7cb766d0aa55494bd816f6b",
+    "src/server/AI/FreeChain/store.ts": "870a5422b5061a973bc18fca79b624292269d6cfbfe66f1e7ca41c0abefab422",
+    "src/server/AI/FreeChain/admissionQueue.ts": "ed3286e2e55cfadf10d350b394e8b177b6e4db740dd0baeee9e8b2f7d68d519d",
+    "src/server/AI/FreeChain/runtime.ts": "d146b3458872a3cc5dec5cbc9372a371965a5580d3782a2856cd4a90655f1d4a"
+  }
+}

@@ -35,10 +35,11 @@
 // PURE: no clock, no environment, no I/O. Every rule here is unit-testable and cannot lie.
 
 import { realProviderCostUsd, type ProviderCostEntry } from './providerRates';
-import { NO_BARREN_PHASES, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_POST_FIX_REVIEW, type BarrenPhases } from './billingPhase';
+import { NO_BARREN_PHASES, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_GAME_REPAIR, PHASE_POST_FIX_REVIEW, type BarrenPhases } from './billingPhase';
 
 /** The token counts of one turn, in the shape the ledger and the rate card both already use. */
 export interface UnbilledTokens {
+  routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt;
   inputTokens: number;
   outputTokens: number;
   /** The cache-hit share of `inputTokens` (already INCLUDED in it, never additional). */
@@ -258,5 +259,6 @@ export function absorbedWorkDetail(
 const PHASE_WORDS: Record<string, string> = {
   [PHASE_POST_BUILD_REVIEW]: 'the post-build review delivered no findings (it ran out of time, or its result could not be read)',
   [PHASE_EXPLORER_REPAIR]: 'a button repair was undone, so the app kept nothing it wrote',
+  [PHASE_GAME_REPAIR]: 'the game repair after the playtest is absorbed by the platform (admin decision pending)',
   [PHASE_POST_FIX_REVIEW]: 'the review after a repair gave no verdict (no time left, or it could not finish)',
 };

@@ -103,7 +103,8 @@ export async function ensureNativeSessionPersisted(): Promise<SessionPersistence
 }
 
 /**
- * FULL client sign-out — clears the session on EVERY layer, so "logout" truly logs out.
+ * CURRENT-DEVICE client sign-out: clears web + native layers on this device only.
+ * The historical name does not mean other devices; global revocation is a separate server action.
  *
  * ROOT-CAUSE FIX (admin 2026-07-18: "app me bhi logout hota hi nahi"): in the Capacitor app the sign-in
  * runs through the NATIVE `@capacitor-firebase/authentication` plugin, which holds its OWN session

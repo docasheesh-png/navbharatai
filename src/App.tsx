@@ -229,7 +229,15 @@ export default function App() {
     } catch { /* ignore */ }
     return 'auto';
   });
-  const [effectiveDeviceMode, setEffectiveDeviceMode] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
+  // CLS 0.211 ON DESKTOP (bench 2026-10-31): this used to start as 'mobile' and flip to 'desktop' in a
+  // post-paint effect, so the 288px side rail popped in after first paint and shoved the whole
+  // workspace sideways. Resolve the real mode on the FIRST render so the rail is there from frame one.
+  const [effectiveDeviceMode, setEffectiveDeviceMode] = useState<'mobile' | 'tablet' | 'desktop'>(() => {
+    if (deviceMode !== 'auto') return deviceMode;
+    if (typeof window === 'undefined') return 'mobile';
+    const width = window.innerWidth;
+    return width < 768 ? 'mobile' : width < 1024 ? 'tablet' : 'desktop';
+  });
   // REPORT A PROBLEM, FROM ANYWHERE (admin 2026-08-21). Shake opens it on a phone; the visible entry
   // in the sidebar opens the same sheet, because an invisible gesture cannot be the only way in (and
   // iOS will not give a page motion access unasked). `reportOpen` lives at the app root so the sheet
@@ -749,6 +757,13 @@ export default function App() {
   // present (a session that began before the split), so this fix can never itself close someone's app.
   const [openTabs, setOpenTabs] = useState<ViewType[]>(() =>
     (restoreV3Tab(readV3TabFlag(), readV3ViewFlag()) ? ['nbi_pro_chat'] : []));
+  // Old persisted tabs can reference the retired diagnostic bot. Keep other tabs/history intact.
+  useEffect(() => {
+    if (String(activeView) === 'mitrify_chat') setActiveView('home');
+    if (openTabs.some(tab => String(tab) === 'mitrify_chat')) {
+      setOpenTabs(tabs => tabs.filter(tab => String(tab) !== 'mitrify_chat'));
+    }
+  }, [activeView, openTabs]);
   // child→parent tab map: which tab opened each option, so ✕-closing Settings/Professionals also closes
   // the options launched from inside it (admin bug 2026-07-11). Populated in toggleTab, pruned in closeTab.
   const [tabOpeners, setTabOpeners] = useState<Partial<Record<ViewType, ViewType>>>({});
@@ -1197,6 +1212,16 @@ export default function App() {
 
 
 
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    let stop: (() => void) | undefined;
+    void import('./lib/startSessionMonitor').then(({ startSessionMonitor }) => {
+      if (!cancelled) stop = startSessionMonitor();
+    });
+    return () => { cancelled = true; stop?.(); };
+  }, [user]);
 
   useEffect(() => {
     // Finalize a social sign-in that used the REDIRECT fallback (popup is primary).
@@ -2173,7 +2198,7 @@ export default function App() {
   // P3.1 — free (NBI) chat engine extracted into useChatEngine (behavior-preserving). Placed here so
   // every dep (state, setters, updatePreview, learnFromMessage, payment hook) is
   // defined above, and the retry/Enter consumers below still resolve handleSend/handleSendForTab.
-  const { handleSendForTab, handleSend, stop: stopChat, unsend: unsendChat } = useChatEngine({
+  const { handleSendForTab, handleSend, queueQuestion, stop: stopChat, unsend: unsendChat } = useChatEngine({
     input, messages, isLoading, sessions, currentSessionId, activeAgent, mode, activeView, activeIntent,
     errorContext, preferredLanguage, user, keys, selectedModel, apnapanProfile,
     hasGeneratedCode, generatedCode, githubToken, files,
@@ -2517,7 +2542,7 @@ export default function App() {
 
 
 
-  // Task 2.7 — memoized: static array, rebuilt only once
+  // Rebuild the registry when the server-authorized private bot capability changes.
   const menuItems = useMemo(() => [
     { id: 'home',         label: 'Home',              icon: Bot },
     { id: 'nbi_chat',     label: COPY.branding.aiChatName,  icon: MessageSquare },
@@ -3555,6 +3580,7 @@ export default function App() {
             />
           )}
 
+
           {(activeView === 'nbi_chat') && (
             <NBIChatPanel
               teachMode={teachMode}
@@ -3565,6 +3591,7 @@ export default function App() {
               input={input}
               setInput={setInput}
               onSend={(files) => handleSendForTab('nbi_chat', undefined, files)}
+              onQueueQuestion={() => queueQuestion()}
               onStop={stopChat}
               onUnsend={unsendChat}
               isLoading={isLoading}

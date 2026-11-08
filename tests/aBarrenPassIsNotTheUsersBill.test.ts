@@ -247,8 +247,11 @@ describe('REVERSION GUARDS — the wiring lives in a 20k-line route no unit test
     // Exactly three phases can go barren: this review; since 2026-09-28 the explorer's repair when it is
     // NOT kept (explorerRepair.ts); and since 2026-10-11 the one review after an applied repair when it
     // gives no verdict (Q-157, postFixReview.ts) — on its OWN phase, so it never hands back this review.
-    // A fourth site would be a new verdict and must come here first.
-    expect(route.match(/barrenPhases\.add\(/g) ?? []).toHaveLength(3);
+    // A fourth site would be a new verdict and must come here first. Since 2026-10-30 the fourth is the game
+    // repair (gameRepair.ts, AGENTV3_GAME_AUTO_REPAIR, default off): ALWAYS barren — the platform absorbs it
+    // until the admin decides who pays.
+    expect(route.match(/barrenPhases\.add\(/g) ?? []).toHaveLength(4);
+    expect(route).toContain('barrenPhases.add(PHASE_GAME_REPAIR)');
     expect(route).toContain('if (!outcome.kept) barrenPhases.add(PHASE_EXPLORER_REPAIR);');
     expect(route).toContain('else if (recheckBudget > 0) barrenPhases.add(PHASE_POST_FIX_REVIEW);');
     // And the two branches it must NOT be in:
@@ -270,7 +273,9 @@ describe('REVERSION GUARDS — the wiring lives in a 20k-line route no unit test
     // New: those three, plus the watchdog failure-ledger remainder. That fourth call
     // reads realCostRemainder for the admin ledger. It does not set the user bill.
     // Fifth: the Surplus-only partition delegates unchanged legacy+VM pricing with the same verdict.
-    expect(route.match(/decideBuildBilledUsd\([\s\S]{0,220}?barrenPhases\)/g) ?? []).toHaveLength(5);
+    // Sixth: the unavailable Router One partition preserves that verdict for all remaining spend.
+    expect(route.match(/decideBuildBilledUsd\([\s\S]{0,220}?barrenPhases\)/g) ?? []).toHaveLength(6);
+    expect(route).toContain('decideBuildBilledUsd(remaining, subtract(sinkTotal), powerLevel, userId, email, sandboxUsd, barrenPhases)');
     expect(route).toContain('decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, vm.usd, barrenPhases)');
     expect(route).toContain('decideBuildBilledUsd(ledger, sink, powerLevelReqEffective, userId ?? undefined, email, sandboxUsd, barrenPhases).realCostRemainder');
   });

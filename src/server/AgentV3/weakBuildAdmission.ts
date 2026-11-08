@@ -1,4 +1,5 @@
 import type { VerifiedFreeProof } from '../AI/LiveRegistry/proof';
+import { readScopeFailure, type ScopeFailureDiagnostic } from './scopeFailureDiagnostic';
 import { WEAK_SCOPE_STRONG, WEAK_SCOPE_UNAVAILABLE, type WeakScopeGuidanceCode } from '../../lib/weakScopeGuidance';
 /** Weak-tier preflight: one bounded classification, before sandbox work. No fallback chain. */
 export type WeakScope = 'simple' | 'complex' | 'strong';
@@ -7,6 +8,7 @@ export interface WeakAdmission {
   scope: WeakScope | null;
   source: 'template' | 'model' | 'unavailable';
   usage?: AdmissionUsage;
+  failure?: Readonly<ScopeFailureDiagnostic>;
 }
 export function weakScopePolicyEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_WEAK_SCOPE_POLICY ?? '').trim().toLowerCase() === 'on';
@@ -34,20 +36,23 @@ export async function admitWeakBuild(
 ): Promise<WeakAdmission> {
   if (opts.template) return { scope: 'simple', source: 'template' };
   // Never truncate an oversized request into a confidently wrong scope. Ask the user to narrow it.
-  if (!prompt.trim() || prompt.length > 32_000) return { scope: null, source: 'unavailable' };
+  if (!prompt.trim() || prompt.length > 32_000) return { scope: null, source: 'unavailable', failure: { stage: 'input', reason: 'invalid_request' } };
   const abort = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
   try {
     const answer = await Promise.race([
       ask(WEAK_SCOPE_INSTRUCTIONS, prompt, abort.signal),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { abort.abort(); reject(new Error('scope-timeout')); }, opts.timeoutMs ?? WEAK_SCOPE_TIMEOUT_MS);
+        timer = setTimeout(() => { timedOut = true; abort.abort(); reject(new Error('scope-timeout')); }, opts.timeoutMs ?? WEAK_SCOPE_TIMEOUT_MS);
       }),
     ]);
     const scope = parseWeakScope(answer.text);
-    return { scope, source: scope ? 'model' : 'unavailable', usage: answer.usage };
-  } catch {
-    return { scope: null, source: 'unavailable' };
+    return { scope, source: scope ? 'model' : 'unavailable', usage: answer.usage,
+      ...(!scope ? { failure: { stage: 'classification', reason: 'invalid_scope' } as const } : {}) };
+  } catch (error) {
+    return { scope: null, source: 'unavailable', failure: timedOut ? { stage: 'deadline', reason: 'scope_timeout' }
+      : readScopeFailure(error) ?? { stage: 'classification', reason: 'classifier_failed' } };
   } finally {
     if (timer) clearTimeout(timer);
     abort.abort();

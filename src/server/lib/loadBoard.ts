@@ -1,3 +1,4 @@
+import type { getChatOutcomeObservation } from '../AI/chatOutcomeObservation';
 // THE LOAD BOARD — every ceiling in the platform, as one number a person can look at.
 // (ROADMAP §12. Admin 2026-09-07: "admin panel ke home page par to load dikhna chahiye — server load,
 // user load, storage load, hosting load… sabhi load likhne hai.")
@@ -152,6 +153,7 @@ export interface LoadReadings {
    * reset on every deploy, so a rate can be a verdict on two attempts.
    */
   providerRequests?: number | null;
+  chatOutcomes?: ReturnType<typeof getChatOutcomeObservation>;
   /** Spend not recovered from users, in INR, over the window. */
   unrecoveredInr?: number | null;
 }
@@ -345,19 +347,20 @@ export function loadBoard(r: LoadReadings | null | undefined): LoadTile[] {
     value: aiPct,
     cap: 100,
     display: aiPct === null ? 'unknown' : `${aiPct}% unanswered`,
-    note: aiLevel === 'unknown'
+    note: (aiLevel === 'unknown'
       ? (tooFewRequests
         ? `Too few requests since this server started (${aiSample}) to mean anything. The count resets on every `
           + 'deploy, so this fills in as normal traffic arrives.'
         : 'Could not read how often requests went unanswered.')
-      : (aiLevel === 'ok'
-        ? 'The AI engines are answering. A request that fell back to a second engine still counts as answered, '
-          + 'because the user got their reply.'
-        : 'Requests are ending with no answer from ANY engine, which is what a user actually feels. At scale the '
-          + 'answer is more API keys in rotation, not more code.')
-        // A percentage without its denominator cannot be weighed (admin Monitor, 2026-09-27: "15%
-        // unanswered" — of how many?). The counters are per instance and reset on every deploy.
-        + ` Measured on this server since it started: ${Math.round(Number(x.providerErrorRate) * Number(aiSample))} of ${aiSample} requests went unanswered.`,
+      : 'Legacy AIRouter sample only: selected gateway and free-chain paths can bypass this counter, '
+        + 'and partial replies were historically counted as answered. This is not all-user reliability or answer accuracy. '
+        + `Measured on this server since it started: ${Math.round(Number(x.providerErrorRate) * Number(aiSample))} of ${aiSample} recorded requests had no answer. `
+        + 'Inspect recent terminal outcomes and provider/admission errors before changing configuration.')
+        + (x.chatOutcomes ? ` Recent universal routing calls (including internal helpers) (approximately ${x.chatOutcomes.windowMinutes} minutes, this server only): `
+          + `${x.chatOutcomes.counts.complete} transport-complete, ${x.chatOutcomes.counts.partial} partial, `
+          + `${x.chatOutcomes.counts.refused} refused, ${x.chatOutcomes.counts.cancelled} cancelled, ${x.chatOutcomes.counts.failed} failed. `
+          + ` Terminal failure signals: ${Object.entries(x.chatOutcomes.failureReasons).map(([reason, count]) => `${reason}=${count}`).join(', ') || 'none observed'}. `
+          + 'Transport completion does not verify correctness, relevance or user satisfaction.' : ''),
   });
 
   // 9 · MONEY — the load that decides whether the rest is worth carrying.

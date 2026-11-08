@@ -68,6 +68,7 @@ export function userDatabaseContext(vaultSecrets: Record<string, string> | null 
     // success. Named per FAMILY so every brand of the same engine gets identical, correct instructions.
     `- ${familyGuidance(spec.family)}`,
     '- Wire any data/auth/storage the app needs to THIS connected database.',
+    spec.id === 'firebase' ? firestorePerAppRulesGuidance() : '',
     'You MUST NOT:',
     '- Provision, scaffold, or spin up a new/different database, an in-memory store, or a local file DB.',
     '- Substitute a different provider, or ask the user to create or configure a database — they already did.',
@@ -109,5 +110,28 @@ export function noDatabaseConnectedContext(): string {
     '  persist until they connect their own database.',
     'If the app does NOT need persistence (a static site, a calculator, a stateless tool), IGNORE this',
     'entirely — do not nag the user about a database they do not need.',
+  ].join('\n');
+}
+
+/**
+ * Owner 2026-10-30: rules differ per app — Pro chat must write THIS app's own Firestore rules when
+ * the app uses Firestore (never one global template), show them in chat to copy, and never
+ * auto-deploy them into the user's Google project. Safe defaults only: no test mode, deny-all last.
+ */
+export function firestorePerAppRulesGuidance(): string {
+  return [
+    '- FIRESTORE SECURITY RULES — PER APP (only when this app actually reads/writes Firestore):',
+    '  - Write a `firestore.rules` file in the project root, tailored to THIS app\'s real collections and',
+    '    fields you just used in the code. Every collection the code touches gets its own `match` block;',
+    '    keep it in sync on every later build that adds/renames a collection.',
+    '  - Safe defaults: `rules_version = \'2\'`; per-user data only for `request.auth.uid == uid` (or an',
+    '    `ownerId`/`userId` field equal to `request.auth.uid` on create/update/delete); public catalogue',
+    '    data read-only to everyone and writable only by signed-in owners/admins; validate required fields',
+    '    and types on create; end with `match /{document=**} { allow read, write: if false; }`.',
+    '  - NEVER `allow read, write: if true`, never `request.time < timestamp.date(...)` (test mode).',
+    '  - In your reply, show the full rules in ONE ```firestore code block (it has a Copy button), then 3 short',
+    '    steps in the user\'s language: 1) Copy  2) Firebase Console → Firestore Database → Rules → replace all → paste',
+    '  3) Publish. Do NOT ask for Google admin access and do NOT claim you deployed them.',
+    '  - If the app does not use Firestore (e.g. only Auth/Hosting), do NOT mention rules at all.',
   ].join('\n');
 }

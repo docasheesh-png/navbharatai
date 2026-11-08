@@ -127,3 +127,20 @@ describe('isolated Surplus helper', () => {
     expect(() => createSurplusChat(env)).toThrow(SurplusError);
   });
 });
+
+describe('disableThinking', () => {
+  it('sends thinking disabled, and only when asked', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => json(ok));
+    const chat = createSurplusChat(env, fetcher);
+    await chat('Hi', { disableThinking: true });
+    await chat('Hi');
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ thinking: { type: 'disabled' } });
+    expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).not.toHaveProperty('thinking');
+  });
+  it('retries once without the flag when the supplier rejects it with 400', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ error: { message: 'unknown field' } }, 400)).mockResolvedValueOnce(json(ok));
+    expect((await createSurplusChat(env, fetcher)('Hi', { disableThinking: true })).text).toBe('Hello!');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).not.toHaveProperty('thinking');
+  });
+});

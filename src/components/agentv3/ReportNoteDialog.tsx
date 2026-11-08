@@ -67,7 +67,7 @@ export const ReportNoteDialog: React.FC<ReportNoteDialogProps> = ({ buildLabel, 
   // bar must not also hold a strip for it. (An earlier draft of this change reasoned the opposite
   // from the un-portalled position; that test caught it.)
   const sheet = (
-    <div className="nb-sheet-overlay-flush nb-sheet-over-nav fixed inset-0 z-[150] flex items-end sm:items-center sm:justify-center">
+    <div className="nb-sheet-overlay-flush nb-sheet-over-nav fixed inset-0 z-[150] flex items-center justify-center nb-modal-safe">
       <div
         className="absolute inset-0 bg-scrim cursor-pointer touch-manipulation"
         onClick={() => { if (!sending) onCancel(); }}

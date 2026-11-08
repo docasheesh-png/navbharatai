@@ -390,7 +390,8 @@ describe('wiring — read from the source, so removing a line turns this red', (
     expect(badgeAt).toBeGreaterThan(stampAt);
     expect(badgeAt - stampAt).toBeLessThan(1500); // the same header row, not somewhere else entirely
     expect(PANEL).toContain('<UserActionTray');
-    expect(PANEL).toContain("glyph: '❓'");
+    expect(PANEL).toContain("glyph: '❗️'");
+    expect(PANEL).toContain('attention: true');
   });
 
   it('🔴 the three cards are OUT of the message stream — that was the whole complaint', () => {

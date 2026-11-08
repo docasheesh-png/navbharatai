@@ -76,7 +76,7 @@ export const HistoryPopup: React.FC<HistoryPopupProps> = ({
     // overlay reserves the bar's real height — and reserves nothing on any screen where the bar is not
     // rendered. The backdrop below is `absolute inset-0`, which resolves against the padding box, so
     // it still covers the whole screen rather than stopping at the reserved strip.
-    <div className="nb-sheet-overlay-flush fixed inset-0 z-[130] flex items-end sm:items-center sm:justify-center">
+    <div className="nb-sheet-overlay-flush fixed inset-0 z-[130] flex items-center justify-center nb-modal-safe">
       <div
         className="absolute inset-0 bg-scrim cursor-pointer touch-manipulation"
         onClick={onClose}

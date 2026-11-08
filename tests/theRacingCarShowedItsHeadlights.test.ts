@@ -350,7 +350,7 @@ describe('1d · the route seeds the kit before the first model call, behind ever
   it('remembers every seeded file as ours, hands the builder the kit, and says so in the report', () => {
     expect(block).toContain('preseededGolden.set(kp, kc);');
     expect(block).toContain('kitSeededFiles.set(kp, kc);');
-    expect(block).toContain('buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt) })}\\n\\n---\\n\\n${buildPrompt}`;');
+    expect(block).toContain('buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt), contract: contractText })}\\n\\n---\\n\\n${buildPrompt}`;');
     expect(block).toContain("code: 'GAME_KIT_SEEDED'");
     expect(block).toContain("code: 'GAME_KIT_NOT_SEEDED'");
     expect(block).toContain('futilityState = armedFutilityState(');
@@ -465,7 +465,10 @@ describe('3b · P-1: the CAMERA half of the +Z rule, in plain three.js', () => {
 
   it('the camera goes opposite the nose, as code any builder can copy — with or without the kit', () => {
     expect(rule).toContain('new THREE.Vector3(0, 0, 1).applyQuaternion(car.quaternion)');
-    expect(rule).toContain('camera.position.copy(car.position).addScaledVector(forward, -6)');
+    // Autopsy 61279465: the distance is the MODEL's, not a fixed 6 m that sits inside a train.
+    expect(rule).toContain('camera.position.copy(car.position).addScaledVector(forward, -back)');
+    expect(rule).toContain('const back = Math.max(6, size.z / 2 + 4), up = Math.max(2.5, size.y * 1.6);');
+    expect(rule).not.toContain('addScaledVector(forward, -6)');
     expect(rule).toContain('camera.lookAt(car.position)');
     expect(rule).toContain('camera = car.position − forward·d + up·h: at −Z LOCAL of a +Z model');
   });
@@ -626,8 +629,11 @@ describe('5 · L-18: press-run → playtest → the explorer\'s repair', () => {
     const calls = [...ROUTE.matchAll(/await runGamePlaytest\((?:startLabelsFromExplore\(exploreRun\.presses\))?\);/g)];
     expect(calls).toHaveLength(2);
     expect(ROUTE).toContain('if (gamePlaytestDone) return;');
-    // The script is started from inside the closure only.
-    expect([...ROUTE.matchAll(/gamePlaytestScript\(/g)]).toHaveLength(1);
+    // The script is started from inside the closure — plus, since Game Engine Ultra Phase 3, the ONE replay of
+    // a repaired game (gameRepair.ts), which runs only after the closure and only when AGENTV3_GAME_AUTO_REPAIR=on.
+    const scripts = [...ROUTE.matchAll(/gamePlaytestScript\(/g)].map((m) => m.index ?? 0);
+    expect(scripts).toHaveLength(2);
+    expect(ROUTE.lastIndexOf('GAME ENGINE ULTRA PHASE 3', scripts[1])).toBeGreaterThan(ROUTE.indexOf('const runGamePlaytest = async'));
     expect(ROUTE.indexOf('gamePlaytestScript(')).toBeGreaterThan(ROUTE.indexOf('const runGamePlaytest = async'));
   });
 

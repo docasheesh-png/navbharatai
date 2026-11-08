@@ -758,3 +758,16 @@ Q-1226
 # argument; they added assertions and a timer tracer that refuses to drain anything). The CLASS it
 # exposed — nothing stops a unit test making a real outbound call — is open as Q-2252.
 Q-2203
+# 2026-11-05 — #4087 merged (autopsy 61279465, first and second passes): resolved at the class, each with its test.
+Q-2330
+Q-2331
+Q-2332
+Q-2333
+Q-2336
+Q-2339
+Q-2340
+Q-2341
+Q-2342
+Q-2345
+Q-2346
+Q-2347

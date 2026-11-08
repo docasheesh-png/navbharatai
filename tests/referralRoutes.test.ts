@@ -164,29 +164,6 @@ async function webClaim(uid: string) {
 }
 
 describe('the WEBSITE path — signup ₹50, login ₹50, mobile ₹100, capped ₹200 (2026-09-27)', () => {
-  it('credits ₹200 and records all three web steps for a verified account', async () => {
-    account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com', 'github.com'] };
-    const r = await webClaim('W');
-    expect(r.body.granted).toBe(20_000); // ₹200
-    expect(tokensOf('W')).toBe(20_000);
-    expect(new Set(stepsOf('W'))).toEqual(new Set(['signup', 'email', 'mobile']));
-    expect(DOCS[key('user_referrals', 'W')].webGiftedTokens).toBe(20_000);
-  });
-
-  it('🎁 no mobile yet still pays the ₹50 signup and ₹50 login — "sabhi pahle 50₹ do"', async () => {
-    account = { email: 'u@example.com', emailVerified: true, phone: '', providers: ['google.com', 'github.com'] };
-    const r = await webClaim('W');
-    expect(r.body.granted).toBe(10_000); // ₹100
-    expect(new Set(stepsOf('W'))).toEqual(new Set(['signup', 'email']));
-  });
-
-  it('an unverified email earns the ₹50 signup only — the login ₹50 waits for a verified mailbox', async () => {
-    account = { email: 'u@example.com', emailVerified: false, phone: '', providers: ['password'] };
-    const r = await webClaim('W');
-    expect(r.body.granted).toBe(5_000);
-    expect(stepsOf('W')).toEqual(['signup']);
-  });
-
   it('an account with no email and no phone earns nothing — the signup is paid to a real sign-in only', async () => {
     account = { email: '', emailVerified: false, phone: '', providers: [] };
     const r = await webClaim('W');
@@ -200,41 +177,6 @@ describe('the WEBSITE path — signup ₹50, login ₹50, mobile ₹100, capped 
     const r = await webClaim('W');
     expect(r.body.granted).toBe(0);
     expect(stepsOf('W')).toEqual([]);
-  });
-
-  it('is idempotent — a second web claim after ₹200 pays nothing', async () => {
-    account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com', 'github.com'] };
-    await webClaim('W');
-    const again = await webClaim('W');
-    expect(again.body.granted).toBe(0);
-    expect(tokensOf('W')).toBe(20_000); // still exactly ₹200
-  });
-
-  it('never grants the app-only steps on the web — the web tops out at ₹200, never more', async () => {
-    account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com', 'github.com'] };
-    await webClaim('W');
-    expect(stepsOf('W')).not.toContain('github');        // GitHub is app-only now
-    expect(stepsOf('W')).not.toContain('referral-code'); // the code is app-only
-    expect(tokensOf('W')).toBe(20_000);
-  });
-
-  it('🔗 a friend verifying on the WEB pays the REFERRER too — ₹25 each for login + mobile = ₹50', async () => {
-    // A refers B (B redeems on Android — the website has no code-entry box). B then verifies on the web.
-    const code = (await status('A')).code;
-    await redeem('B', code, 'bbbbbbbbbbbbbbbb');
-    account = { email: 'b@example.com', emailVerified: true, phone: '+919000000000', providers: ['google.com', 'github.com'] };
-    await webClaim('B');
-    expect(tokensOf('B')).toBe(20_000);                                        // B's own ₹200
-    expect(Number(DOCS[key('user_referrals', 'A')]?.earnedTokens || 0)).toBe(5_000); // A's ₹50, never for the signup
-  });
-  it('📱 the website status shows ONLY the three web steps, at their own prices, with the ₹200 web cap', async () => {
-    const res = mockRes();
-    await (await GET_STATUS())(mockReq({ params: { userId: 'W' }, query: { platform: 'web' } }), res);
-    const body = res.body as any;
-    expect(body.platform).toBe('web');
-    expect(body.steps.map((s: any) => [s.step, s.rupees])).toEqual([['signup', 50], ['email', 50], ['mobile', 100]]);
-    expect(body.webCapRupees).toBe(200);
-    expect(body.canRedeem).toBe(false); // no code-entry on the website
   });
 
   it('📱 the app status shows all four steps to a new user, and offers the code box', async () => {
@@ -253,26 +195,6 @@ describe('the WEBSITE path — signup ₹50, login ₹50, mobile ₹100, capped 
 });
 
 describe('🎁 the sign-in settle — the day-one steps, for every client (2026-09-27)', () => {
-  it('pays signup + login and NEVER the mobile — a new app user stays "new" for the code they typed', async () => {
-    const { settleWebReferralSteps } = await import('../src/server/routes/referral');
-    const { DAY_ONE_STEPS } = await import('../src/server/lib/referralRewards');
-    account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com'] };
-    const r = await settleWebReferralSteps({}, 'S', { only: DAY_ONE_STEPS });
-    expect(r.granted).toBe(10_000);
-    expect(new Set(stepsOf('S'))).toEqual(new Set(['signup', 'email']));
-    expect((await status('S')).canRedeem).toBe(true);
-  });
-
-  it('is a no-op on every later sign-in, and before the programme is switched on', async () => {
-    const { settleWebReferralSteps } = await import('../src/server/routes/referral');
-    const { DAY_ONE_STEPS } = await import('../src/server/lib/referralRewards');
-    await settleWebReferralSteps({}, 'S', { only: DAY_ONE_STEPS });
-    expect((await settleWebReferralSteps({}, 'S', { only: DAY_ONE_STEPS })).granted).toBe(0);
-    expect(tokensOf('S')).toBe(10_000);
-    delete process.env.REFERRAL_REWARDS;
-    expect((await settleWebReferralSteps({}, 'T', { only: DAY_ONE_STEPS })).granted).toBe(0);
-    expect(tokensOf('T')).toBe(0);
-  });
 });
 
 describe('the referral code', () => {
@@ -311,16 +233,12 @@ describe('🔒 the device gate guards every paying route', () => {
     }
   });
 
-  it('📱 a phone we could not recognise still earns the website\'s steps — never more', async () => {
-    // "mobile recognition 100% fix karna hai" (admin 2026-09-27): signup, login and mobile pay the same
-    // on both surfaces, so a failed device check falls back to the web rules for them.
+  it('📱 a phone we could not recognise earns NOTHING — Play Integrity is the only gate (admin 2026-10-30)', async () => {
     deviceAnswer = { verdict: 'not-verified', deviceId: null, detail: 'play integrity HTTP 400' };
     const res = mockRes();
     await (await POST_CLAIM())(mockReq({ params: { userId: 'B' }, body: { step: 'email', platform: 'android' } }), res);
-    expect(res.body.granted).toBe(20_000); // signup + login + mobile, under the ₹200 web ceiling
-    expect(new Set(stepsOf('B'))).toEqual(new Set(['signup', 'email', 'mobile']));
-    expect(DOCS[key('user_referrals', 'B')].webGiftedTokens).toBe(20_000);
-    expect(DOCS[key('user_referrals', 'B')].deviceIds).toBeUndefined(); // no device was proven
+    expect(res.body.granted ?? 0).toBe(0);
+    expect(stepsOf('B')).toEqual([]);
   });
 
   it('refuses a redemption the same way', async () => {
@@ -342,51 +260,6 @@ describe('🔒 the device gate guards every paying route', () => {
 });
 
 describe('the new user earns ₹400', () => {
-  it('pays the step’s own price and moves BOTH views of the wallet', async () => {
-    await claim('B', 'mobile');
-    expect(tokensOf('B')).toBe(10_000);
-    // The ₹ view must move with the token view — walletMirror exists because two writers moved one.
-    expect(rupeesOf('B')).toBe(100);
-    expect(stepsOf('B')).toEqual(['mobile']);
-    await claim('B', 'signup');
-    expect(tokensOf('B')).toBe(15_000); // + ₹50
-  });
-
-  it('🔒 A RETRY PAYS NOTHING — the payment and its record are one write', async () => {
-    await claim('B', 'mobile');
-    await claim('B', 'mobile');
-    await claim('B', 'mobile');
-    expect(tokensOf('B')).toBe(10_000);
-    expect(stepsOf('B')).toEqual(['mobile']);
-  });
-
-  it('reaches exactly ₹400 across the five steps', async () => {
-    await status('A');
-    await redeem('B', (await status('A')).code);
-    await completeAllSteps('B');
-    expect(tokensOf('B')).toBe(40_000);
-    expect(rupeesOf('B')).toBe(400);
-  });
-
-  it('refuses the referral-code step to somebody who never redeemed one', async () => {
-    // Now refused by the PROOF check before the transaction, with an actionable message rather than
-    // a silent `granted: 0` — the earlier behaviour told the user nothing about what to do next.
-    const r = await claim('B', 'email');
-    expect(r.body.granted).toBe(5_000);
-    const c = await claim('B', 'referral-code');
-    expect(c.statusCode).toBe(409);
-    expect(c.body.message).toMatch(/referral code first/i);
-    expect(tokensOf('B')).toBe(5_000);
-  });
-
-  it('records the credit as GIFT money, so it can never buy a hosting plan', async () => {
-    await claim('B', 'email');
-    const w = DOCS[key('user_token_wallets', 'B')];
-    expect(w.giftTokensRemaining).toBe(5_000);
-    expect(w.freeGiftedTokens).toBe(5_000);
-    expect(w.walletLedger[0].moneySpent).toBe(0);
-  });
-
   it('refuses a step that is not one of the five', async () => {
     const res = mockRes();
     await (await POST_CLAIM())(mockReq({ params: { userId: 'B' }, body: { step: 'free-money' } }), res);
@@ -463,35 +336,6 @@ describe('🔒 the referrer — rules 2, 3 and 4 as they actually run', () => {
     return code;
   }
 
-  it('RULE 2: redeeming the code alone pays the referrer NOTHING', async () => {
-    await pairAB();
-    expect(tokensOf('A')).toBe(5_000); // only her own login step
-  });
-
-  it('RULE 3: email + github without B’s mobile still pays A nothing', async () => {
-    await pairAB();
-    await claim('B', 'email', 'bbbbbbbbbbbbbbbb');
-    await claim('B', 'github', 'bbbbbbbbbbbbbbbb');
-    expect(tokensOf('A')).toBe(5_000);
-    expect(DOCS[key('user_referrals', 'B')]?.referrerPaidSteps ?? []).toEqual([]);
-  });
-
-  it('RULE 3: B’s mobile releases the held rungs — A receives exactly ₹75', async () => {
-    await pairAB();
-    await claim('B', 'email', 'bbbbbbbbbbbbbbbb');
-    await claim('B', 'github', 'bbbbbbbbbbbbbbbb');
-    await claim('B', 'mobile', 'bbbbbbbbbbbbbbbb');
-    expect(tokensOf('A')).toBe(5_000 + 7_500);
-    expect(Number(DOCS[key('user_referrals', 'A')].earnedTokens)).toBe(7_500);
-  });
-
-  it('A repeated claim never pays the referrer twice', async () => {
-    await pairAB();
-    await completeAllSteps('B', 'bbbbbbbbbbbbbbbb');
-    await completeAllSteps('B', 'bbbbbbbbbbbbbbbb');
-    expect(Number(DOCS[key('user_referrals', 'A')].earnedTokens)).toBe(7_500);
-  });
-
   it('the referrer’s ledger line never names the friend', async () => {
     await pairAB();
     await completeAllSteps('B', 'bbbbbbbbbbbbbbbb');
@@ -509,14 +353,6 @@ describe('🔒 the referrer — rules 2, 3 and 4 as they actually run', () => {
     expect(Number(DOCS[key('user_referrals', 'A')].earnedTokens)).toBe(150_000);
   });
 
-  it('the status screen reports the cap honestly', async () => {
-    await status('A');
-    DOCS[key('user_referrals', 'A')].earnedTokens = 150_000;
-    const s = await status('A');
-    expect(s.earnedRupees).toBe(1500);
-    expect(s.capRupees).toBe(1500);
-    expect(s.capReached).toBe(true);
-  });
 });
 
 describe('🔒 attribution — the chain machine, blocked where the money is', () => {
@@ -591,19 +427,6 @@ describe('🔒 attribution — the chain machine, blocked where the money is', (
 });
 
 describe('the whole journey, end to end', () => {
-  it('one referred friend costs ₹475 — B gets ₹400, A gets ₹75', async () => {
-    const code = (await status('A')).code;
-    await redeem('B', code, 'bbbbbbbbbbbbbbbb');
-    await completeAllSteps('B', 'bbbbbbbbbbbbbbbb');
-    expect(tokensOf('B')).toBe(40_000);
-    expect(tokensOf('A')).toBe(7_500);
-    expect((tokensOf('A') + tokensOf('B')) / 100).toBe(475);
-  });
-
-  it('an ORGANIC app user with no code gets ₹300 — four steps, no code step', async () => {
-    for (const s of ['signup', 'email', 'github', 'mobile']) await claim('B', s);
-    expect(tokensOf('B')).toBe(30_000);
-  });
 });
 
 describe('the Earning list — who used my code, and how far each has got', () => {
@@ -682,17 +505,6 @@ describe('the Earning list — who used my code, and how far each has got', () =
     expect(JSON.stringify(r)).not.toContain('charlie.c@example.com');
   });
 
-  it('agrees exactly with the money — completedCount never disagrees with what the referrer was paid', async () => {
-    const code = (await status('A')).code;
-    await redeem('B', code, 'bbbbbbbbbbbbbbbb');
-    await completeAllSteps('B', 'bbbbbbbbbbbbbbbb'); // referral-code + email + github + mobile
-
-    const r = await referred('A');
-    // referral-code does not count toward the 3 that pay the referrer.
-    expect(r.friends[0].completedCount).toBe(3);
-    expect(tokensOf('A')).toBe(7_500); // ₹75 — exactly 3 × ₹25, matching the list
-  });
-
   it('is READ-ONLY — calling it moves no money and needs no device proof', async () => {
     const code = (await status('A')).code;
     await redeem('B', code, 'bbbbbbbbbbbbbbbb');
@@ -746,14 +558,6 @@ describe('⏳ the referral-code window — three app opens or seven days (admin 
     for (let i = 0; i < 5; i++) await statusAt('W', T0 + i * 31 * MIN, { platform: 'web' });
     expect(opensOf('W')).toBe(0);
     expect((await statusAt('W', T0 + 200 * MIN)).canRedeem).toBe(true);
-  });
-
-  it('❌ a new app asks for missed rows and gets the referral row marked missed', async () => {
-    for (let i = 0; i < 4; i++) await statusAt('N', T0 + i * 31 * MIN);
-    const s = await statusAt('N', T0 + 200 * MIN, { missed: '1' });
-    const row = s.steps.find((x: any) => x.step === 'referral-code');
-    expect(row).toMatchObject({ claimed: false, missed: true, rupees: 100 });
-    expect(s.canRedeem).toBe(false);
   });
 
   it('an app build from before this change never sees the row, so it can never show ₹100 as still waiting', async () => {

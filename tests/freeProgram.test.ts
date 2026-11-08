@@ -194,15 +194,15 @@ describe('census: every door asks the switch', () => {
     expect(registrations).toHaveLength(1);
     const args = registrations[0].arguments;
     expect(args.slice(1, -1).map(arg => arg.getText(parsed))).toEqual([
-      'buildRateLimiter()', 'enforceNotBanned()', 'enforceFreeProgramPause()', 'surplusBuildInferenceScope',
+      'buildRateLimiter()', 'enforceNotBanned()', 'enforceFreeProgramPause()', 'surplusBuildInferenceScope', 'routerOneAccountingScope',
     ]);
     const handler = args[args.length - 1];
     expect(ts.isCallExpression(handler) && handler.expression.getText(parsed) === 'withBuildRequestCleanup').toBe(true);
     expect(src).not.toContain('AGENTV3_FREE_PROGRAM_PAUSED_REFUSAL');
   });
-  it('the referral ladder is live only while the program is not paused', () => {
+  it('the referral ladder follows its own switch, split from the pause (admin 2026-10-30)', () => {
     const src = read('src/server/routes/referral.ts');
-    expect(src).toContain('referralRewardsEnabled() && !freeProgramPausedNow()');
+    expect(src).toContain('referralLiveNow()');
     expect(src).not.toMatch(/[^!]referralRewardsEnabled\(\)\s*\)/); // no call site bypasses rewardsLive
   });
   it('coupons and admin promo codes are refused while paused — after the purchased-gift-code branch', () => {

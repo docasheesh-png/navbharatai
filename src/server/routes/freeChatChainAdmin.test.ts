@@ -1,3 +1,4 @@
+import { FreeChainConfigurationError, isFreeChainConfigurationErrorResponse } from '../../lib/freeChatChainView';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ view: vi.fn(), metrics: vi.fn(), limiter: vi.fn(), control: vi.fn(), budget: vi.fn(), audit: vi.fn() }));
 vi.mock('../AI/FreeChain/runtime', () => ({ freeChainAdminView: mocks.view, freeChainAdminMetrics: mocks.metrics, controlFreeChain: mocks.control, controlFreeChainBudget: mocks.budget }));
@@ -91,9 +92,17 @@ describe('Free Chat Chain admin API', () => {
 
 describe('audited shared paid-budget endpoint', () => {
   const budget = { capUsd: 0, expectedRevision: 3, reason: 'Stop new paid fallback reservations' };
-  it.each([{}, null, { ...budget, capUsd: 10.01 }, { ...budget, capUsd: '0' }, { ...budget, capUsd: 0.001 }, { ...budget, expectedRevision: undefined }, { ...budget, expectedRevision: -1 }, { ...budget, actorUid: 'spoof' }, { ...budget, reason: 'short' }])('rejects malformed or over-ceiling budget %# without calling storage', async body => {
+  it.each([{}, null, { ...budget, capUsd: 17.01 }, { ...budget, capUsd: '0' }, { ...budget, capUsd: 0.001 }, { ...budget, expectedRevision: undefined }, { ...budget, expectedRevision: -1 }, { ...budget, actorUid: 'spoof' }, { ...budget, reason: 'short' }])('rejects malformed or over-ceiling budget %# without calling storage', async body => {
     const { handler, response } = setup(); await handler('POST', '/budget')({ body }, response);
     expect(response.status).toHaveBeenCalledWith(400); expect(mocks.budget).not.toHaveBeenCalled(); expect(mocks.audit).not.toHaveBeenCalled();
+  });
+  it.each([10.01, 17])('accepts the supported finite boundary %s for audited runtime validation', async capUsd => {
+    const { handler, response } = setup(); const body = { ...budget, capUsd };
+    mocks.budget.mockResolvedValue({ ok: true, capUsd, policyRevision: 4 });
+    await handler('POST', '/budget')({ body }, response);
+    expect(mocks.budget).toHaveBeenCalledExactlyOnceWith(body, 'verified-owner');
+    expect(response.json).toHaveBeenCalledWith({ ok: true, capUsd, policyRevision: 4 });
+    expect(response.status).not.toHaveBeenCalled();
   });
   it('uses verified actor and records only the confirmed policy revision', async () => {
     const { handler, response } = setup(); const result = { ok: true, capUsd: 0, policyRevision: 4 }; mocks.budget.mockResolvedValue(result);
@@ -115,4 +124,14 @@ describe('audited shared paid-budget endpoint', () => {
     expect(JSON.stringify([mocks.budget.mock.calls, mocks.audit.mock.calls])).not.toContain(secret);
     expect(mocks.budget.mock.calls[0][0].reason).toContain('[REDACTED]');
   });
+});
+
+it('configuration errors cross the API as fixed no-store 503 diagnostics without mutation', async () => {
+ const {handler,response}=setup();mocks.view.mockRejectedValue(new FreeChainConfigurationError());
+ await handler('GET','')({},response);
+ expect(response.status).toHaveBeenCalledWith(503);expect(response.setHeader).toHaveBeenCalledWith('Cache-Control','no-store');
+ const wire=JSON.parse(JSON.stringify(response.json.mock.calls[0][0]));
+ expect(isFreeChainConfigurationErrorResponse(wire)).toBe(true);
+ expect(wire).toEqual({code:'FREE_CHAIN_CONFIGURATION_INVALID',fields:['FREE_CHAIN_ORDER']});
+ expect(mocks.control).not.toHaveBeenCalled();expect(mocks.budget).not.toHaveBeenCalled();expect(mocks.metrics).not.toHaveBeenCalled();
 });

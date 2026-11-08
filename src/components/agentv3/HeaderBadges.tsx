@@ -26,9 +26,18 @@ export function HeaderBadges({ badges }: { badges: readonly HeaderBadge[] }) {
           title={badge.label}
           aria-label={`${badge.label} — ${badge.count}`}
           aria-haspopup="dialog"
-          className={`flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${TONE_CLASS[badge.tone]}`}
+          className={badge.attention
+            ? 'nb-needs-you relative flex items-center gap-1 text-[12px] font-bold px-2 py-1 rounded-full border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300'
+            : `flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${TONE_CLASS[badge.tone]}`}
         >
-          <span aria-hidden className="text-[11px] leading-none">{badge.glyph}</span>
+          {badge.attention && (
+            <>
+              <span className="nb-needs-you-spark nb-needs-you-spark-a" aria-hidden>✦</span>
+              <span className="nb-needs-you-spark nb-needs-you-spark-b" aria-hidden>✦</span>
+              <span className="nb-needs-you-spark nb-needs-you-spark-c" aria-hidden>✦</span>
+            </>
+          )}
+          <span aria-hidden className={badge.attention ? 'nb-needs-you-glyph' : 'text-[11px] leading-none'}>{badge.glyph}</span>
           {badgeCountLabel(badge.count)}
         </button>
       ))}

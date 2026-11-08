@@ -971,3 +971,25 @@ describe('automatic slot completion replay', () => {
     finish(); await second; expect((f.docs.get(statePath) as any).occupants).toEqual({});
   });
 });
+
+describe('fixed policy real issuer and transport', () => {
+  it('stamps policy into evidence and dispatches the exact eligible first model', async () => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); const f = fixture(); const second = structuredClone(f.catalog.profiles[0]);
+    second.profile.id = 'glm45-first'; second.profile.modelId = 'glm-4.5-flash'; second.canonicalModelId = 'glm45-canonical'; second.transport.model = 'glm-4.5-flash';
+    const identity = modelSlotIdentity(second.profile)!; second.modelConcurrency = { ...second.modelConcurrency!, ...identity, limit: 2 };
+    f.docs.set(modelSlotPath('policy', identity), second.modelConcurrency); f.docs.set(modelSlotPath('state', identity), emptyModelSlotState(identity));
+    f.catalog.profiles.push(second); f.docs.set(GATEWAY_CATALOG_PATH, f.catalog);
+    network.mockResolvedValue(new Response(JSON.stringify({ model: 'glm-4.5-flash', choices: [{ message: { content: 'First eligible' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2 } })));
+    await expect(run()).resolves.toMatchObject({ model: 'glm-4.5-flash' }); expect(network).toHaveBeenCalledOnce();
+    const attempts = [...f.docs.values()].filter((v: any) => v.kind === 'gateway_attempt') as any[];
+    expect(attempts[0].intent.request).toMatchObject({ fixedTextChain: 'v1', maxPhysicalAttempts: 12, privacy: { dataClass: 'health' }, quality: { tier: 'clinical' } });
+  });
+  it('does not route a formerly approved but unlisted model when selected', async () => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); fixture(false, 'GROQ');
+    await expect(run()).rejects.toThrow(); expect(network).not.toHaveBeenCalled();
+  });
+  it('does not replay or fall back after uncertain dispatch', async () => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); fixture(); network.mockRejectedValue(new Error('connection lost'));
+    await expect(run()).rejects.toThrow(); expect(network).toHaveBeenCalledOnce();
+  });
+});

@@ -1,0 +1,358 @@
+{
+  "_comment": "Game Engine Ultra Phase 4 game benchmark. Every prompt is a REAL prompt already in this repo (autopsy reports, admin reports, classifier fixtures); `source` names the file it was taken from and tests/aGameBenchIsRealPrompts.test.ts checks it is still there. `smoke: true` marks the smoke subset. Run with scripts/agentv3-reliability-bench.ts BENCH_FIXTURE=game — it is a DRY RUN unless BENCH_CONFIRM=yes.",
+  "version": 1,
+  "prompts": [
+    {
+      "id": "create-an-racing-game-for-nokia-c-2-01",
+      "lang": "hinglish",
+      "complexity": "medium",
+      "smoke": true,
+      "prompt": "Create an racing game for Nokia c 2-01",
+      "source": "src/server/AgentV3/deviceTarget.ts"
+    },
+    {
+      "id": "ek-puzzle-game-bnao-candy-wala",
+      "lang": "hinglish",
+      "complexity": "simple",
+      "smoke": true,
+      "prompt": "Ek puzzle game bnao candy wala",
+      "source": "tests/theCandyGameAutopsy.test.ts"
+    },
+    {
+      "id": "make-a-racing-game",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "Make a racing game",
+      "source": "src/server/AgentV3/fastLaneRung.ts"
+    },
+    {
+      "id": "a-3d-coin-collector-game-with-levels-and",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "A 3D coin collector game with levels and hazards",
+      "source": "src/server/AgentV3/nextBuildSuggestions.test.ts"
+    },
+    {
+      "id": "a-roguelike-game-with-waves-of-enemies-a",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": true,
+      "prompt": "A roguelike game with waves of enemies, a score, unlockable levels, sound, and a shop to buy upgrades between runs.",
+      "source": "src/server/lib/RequirementGapAnalyzer.test.ts"
+    },
+    {
+      "id": "a-shooter-game-with-score-sound-effects",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": true,
+      "prompt": "A shooter game with score, sound effects, a pause menu, saved high scores and touch controls for mobile.",
+      "source": "src/server/lib/RequirementGapAnalyzer.test.ts"
+    },
+    {
+      "id": "build-a-3d-car-racing-game-the-key-featu",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "Build a 3D car racing game. The key feature mobile players need is tilt steering.",
+      "source": "tests/aPhoneTheAppCannotRunOnIsNamed.test.ts"
+    },
+    {
+      "id": "build-a-space-invaders-game",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": true,
+      "prompt": "Build a space invaders game",
+      "source": "tests/theRacingCarShowedItsHeadlights.test.ts"
+    },
+    {
+      "id": "create-a-battleship-game",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "Create a battleship game",
+      "source": "tests/theRacingCarShowedItsHeadlights.test.ts"
+    },
+    {
+      "id": "create-a-candy-crush-game",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "Create a candy crush game",
+      "source": "tests/theRacingCarShowedItsHeadlights.test.ts"
+    },
+    {
+      "id": "create-a-flappy-bird-game",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": true,
+      "prompt": "Create a flappy bird game",
+      "source": "tests/theRacingCarShowedItsHeadlights.test.ts"
+    },
+    {
+      "id": "make-a-3d-ninja-platformer-game",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "Make a 3D ninja platformer game",
+      "source": "src/server/lib/RequirementGapAnalyzer.test.ts"
+    },
+    {
+      "id": "make-a-3d-shooter-game-where-you-fight-r",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": true,
+      "prompt": "Make a 3D shooter game where you fight robots in a desert.",
+      "source": "src/server/lib/RequirementGapAnalyzer.test.ts"
+    },
+    {
+      "id": "make-a-3d-snake-game-with-score-3-levels",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "Make a 3D snake game with score, 3 levels, a timer, arrow keys and swipe on mobile, game over screen",
+      "source": "tests/aGameIsBuiltToItsContract.test.ts"
+    },
+    {
+      "id": "make-a-pong-game",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": false,
+      "prompt": "Make a pong game",
+      "source": "tests/theRacingCarShowedItsHeadlights.test.ts"
+    },
+    {
+      "id": "a-3d-memory-card-game",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "a 3D memory card game",
+      "source": "tests/heroObjectSpec.test.ts"
+    },
+    {
+      "id": "a-3d-football-game",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "a 3d football game",
+      "source": "tests/theRacingCarShowedItsHeadlights.test.ts"
+    },
+    {
+      "id": "a-3d-running-game-where-the-player-dodge",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "a 3d running game where the player dodges cars",
+      "source": "tests/theLazyStepsWereNeverOrphans.test.ts"
+    },
+    {
+      "id": "a-4x4-off-road-racing-game-in-the-hills",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "a 4x4 off road racing game in the hills",
+      "source": "tests/heroObjectSpec.test.ts"
+    },
+    {
+      "id": "a-jungle-adventure-game-with-snakes-and",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "a jungle adventure game with snakes and tigers",
+      "source": "tests/theRacingCarShowedItsHeadlights.test.ts"
+    },
+    {
+      "id": "a-match-3-game-with-fruits",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "a match-3 game with fruits",
+      "source": "tests/theRacingCarShowedItsHeadlights.test.ts"
+    },
+    {
+      "id": "a-physics-quiz-game-for-class-10",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": true,
+      "prompt": "a physics quiz game for class 10",
+      "source": "tests/aGameOpensOnTheCheapEngineWhereItCan.test.ts"
+    },
+    {
+      "id": "a-tower-defence-game-with-waves-of-enemi",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": true,
+      "prompt": "a tower defence game with waves of enemies",
+      "source": "src/server/lib/RequirementGapAnalyzer.test.ts"
+    },
+    {
+      "id": "a-village-game-with-cows-and-a-river",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "a village game with cows and a river",
+      "source": "tests/heroObjectSpec.test.ts"
+    },
+    {
+      "id": "build-a-crime-drama-game-where-a-detecti",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "build a crime drama game where a detective finds an explosive",
+      "source": "src/server/lib/promptSafety.test.ts"
+    },
+    {
+      "id": "build-a-memory-game",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": false,
+      "prompt": "build a memory game",
+      "source": "tests/aBareRequestGetsItsTemplate.test.ts"
+    },
+    {
+      "id": "build-a-multiplayer-chess-game",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "build a multiplayer chess game",
+      "source": "tests/aGameOpensOnTheCheapEngineWhereItCan.test.ts"
+    },
+    {
+      "id": "build-a-platformer-game",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": true,
+      "prompt": "build a platformer game",
+      "source": "tests/aGameOpensOnTheCheapEngineWhereItCan.test.ts"
+    },
+    {
+      "id": "build-an-endless-runner-game-for-kids",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "build an endless runner game for kids",
+      "source": "tests/aGameOpensOnTheCheapEngineWhereItCan.test.ts"
+    },
+    {
+      "id": "create-a-ludo-game",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "create a ludo game",
+      "source": "src/server/AgentV3/RequestAnalyser.test.ts"
+    },
+    {
+      "id": "create-a-quiz-game-with-10-questions",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": true,
+      "prompt": "create a quiz game with 10 questions",
+      "source": "tests/theQuestionWasContent.test.ts"
+    },
+    {
+      "id": "ek-3d-racing-game-banao",
+      "lang": "hinglish",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "ek 3d racing game banao",
+      "source": "src/server/lib/realismIntent.test.ts"
+    },
+    {
+      "id": "ek-car-wala-khel-banao",
+      "lang": "hinglish",
+      "complexity": "medium",
+      "smoke": true,
+      "prompt": "ek car wala khel banao",
+      "source": "tests/heroObjectSpec.test.ts"
+    },
+    {
+      "id": "ek-motorcycle-racing-game-banao",
+      "lang": "hinglish",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "ek motorcycle racing game banao",
+      "source": "tests/heroObjectSpec.test.ts"
+    },
+    {
+      "id": "make-a-realistic-3d-bike-racing-game-bil",
+      "lang": "hinglish",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "make a REALISTIC 3d bike racing game, bilkul asli",
+      "source": "tests/heroObjectSpec.test.ts"
+    },
+    {
+      "id": "make-a-chess-game",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "make a chess game",
+      "source": "tests/heroObjectSpec.test.ts"
+    },
+    {
+      "id": "make-a-picture-puzzle-game",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": false,
+      "prompt": "make a picture puzzle game",
+      "source": "tests/aPictureIsNotAnApp.test.ts"
+    },
+    {
+      "id": "make-a-single-file-html-3d-fight-game-wi",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": true,
+      "prompt": "make a single file html 3d fight game with two players, combos, health bars and a stage",
+      "source": "tests/aGamesHealthBarIsNotHealthcare.test.ts"
+    },
+    {
+      "id": "make-a-snake-game-in-html-css-js",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": true,
+      "prompt": "make a snake game in html css js",
+      "source": "tests/theSingleFileGameAutopsy.test.ts"
+    },
+    {
+      "id": "make-a-sudoku-game",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": false,
+      "prompt": "make a sudoku game",
+      "source": "tests/theRacingCarShowedItsHeadlights.test.ts"
+    },
+    {
+      "id": "make-a-tower-defense-game",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "make a tower defense game",
+      "source": "tests/aGameOpensOnTheCheapEngineWhereItCan.test.ts"
+    },
+    {
+      "id": "a-2d-platformer-with-double-jump-and-col",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "A 2D platformer with double jump and collectible coins",
+      "source": "src/server/lib/RequirementGapAnalyzer.test.ts"
+    },
+    {
+      "id": "build-an-endless-runner-for-mobile",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "Build an endless runner for mobile",
+      "source": "src/server/lib/RequirementGapAnalyzer.test.ts"
+    },
+    {
+      "id": "racing-game-with-three-tracks",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "racing game with three tracks",
+      "source": "src/server/lib/RequirementGapAnalyzer.test.ts"
+    }
+  ]
+}

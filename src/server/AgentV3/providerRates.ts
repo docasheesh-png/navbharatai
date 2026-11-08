@@ -1,4 +1,6 @@
+import { routerOneCatalogueEntryCost } from '../AI/RouterOne/catalogueAccounting';
 import { PublicBuildEngineError } from '../lib/buildEngineError';
+import { isRouterOneAccountingProvider, RouterOneAccountingUnavailableError } from '../AI/RouterOne/accounting';
 import { isSurplusReceiptDecision, type SurplusReceiptDecision } from '../AI/SurplusRegistry/receiptPolicy';
 import { isVerifiedFreeProof, type VerifiedFreeProof } from '../AI/LiveRegistry/proof';
 // AgentV3 — REAL provider rate cards + tiered-markup billing (admin model, 2026-07-14).
@@ -236,6 +238,7 @@ export function realRateCard(): Record<string, TokenRate> {
  * 'GEMINI'|'GROK'|'other'); `model` is TurnResult.model (may be undefined for aux calls).
  */
 export function realRateFor(provider: string, model?: string): TokenRate {
+  if (isRouterOneAccountingProvider(provider ?? '')) throw new RouterOneAccountingUnavailableError();
   if ((provider ?? '').toUpperCase() === 'SURPLUS') throw new SurplusAccountingUnavailableError();
   const card = realRateCard();
   const m = (model ?? '').toLowerCase();
@@ -351,6 +354,8 @@ export class SurplusAccountingUnavailableError extends PublicBuildEngineError {
 }
 
 export interface ProviderCostEntry {
+  routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt;
+  routerOneAccountingConflict?: boolean;
   surplusReceipt?: SurplusReceiptDecision;
   surplusAbsorbed?: boolean;
   surplusAccountingConflict?: boolean;
@@ -370,6 +375,7 @@ export function realProviderCostUsd(entries: ProviderCostEntry[], remainder: Bil
   let total = 0;
   let surplusExpenseExact = 0n;
   for (const e of entries) {
+    if (isRouterOneAccountingProvider(e.provider)) { total += routerOneCatalogueEntryCost(e); continue; }
     if (e.provider.toUpperCase() === 'SURPLUS') {
       const receipt = e.surplusReceipt;
       if (e.surplusAccountingConflict || !isSurplusReceiptDecision(receipt)

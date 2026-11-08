@@ -112,3 +112,20 @@ export const NO_FAKE_RESULTS_RULE =
   'real service (keyless where one exists — e.g. open the chosen search engine\'s results page), or, when the ' +
   'feature needs a key or a server the app does not have, show an honest "connect X to turn this on" state and ' +
   'say so in your final message. Sample entries shown for layout are labelled on screen as examples.';
+
+/**
+ * ☀️ LIGHT THEME BY DEFAULT (admin 2026-11-02, verbatim: "jab tak user saf saf na bol de, tab tak light mode me hi game
+ * banne chahiye"). Every app and game came out dark: the design kit followed the PHONE's dark setting (fixed in
+ * designKit.ts — the kit is light whatever the device says), and models also reach for a "premium" dark, neon or night
+ * look on their own. This names the rule for the second half. Shared by every lane, beside the honesty rules, so no
+ * lane can be the one that still builds dark. Dark is not banned: it is the USER's choice, never ours.
+ */
+export const LIGHT_THEME_BY_DEFAULT_RULE =
+  '- ☀️ LIGHT THEME BY DEFAULT (admin rule). Build every app AND every game LIGHT: a light page, light cards and dark ' +
+  'text; a game\'s title, menu, pause and game-over screens light; a 3D scene lit as day ("day", "sunset", "overcast", ' +
+  '"desert" or "forest" lighting). Never choose a dark, black, neon or night look on your own, and never hard-code a dark ' +
+  'page background — the design kit is already light. Build it DARK only when the user\'s OWN words ask for it ("dark ' +
+  'mode", "dark theme", "night mode", "black theme", "dark rang", a night, horror, space or neon setting): then set ' +
+  '`data-theme="dark"` on <html> in index.html so the kit\'s dark palette applies, and use the matching 3D lighting. ' +
+  '"Follow my phone / system theme" → set data-theme from prefers-color-scheme. A light/dark switch the user asked for ' +
+  'starts in light.';

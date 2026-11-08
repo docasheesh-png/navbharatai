@@ -223,7 +223,8 @@ describe('Q-1039 · the wiring — one decision, fed every fact, told the moment
   });
 
   it('🔴 the app-rendered moment is recorded where the green is saved, and announced at once', () => {
-    expect(code).toMatch(/if \(st === 'saved'\) \{\s*inBuildGreenAt = Date\.now\(\);\s*etaAppRenderedAt = inBuildGreenAt;[\s\S]{0,400}emitEtaPhaseNow\(\);/);
+    // Since 5413e6f1 the moment is claimed only when THIS turn changed a file (an untouched app rendering is the old one).
+    expect(code).toMatch(/if \(st === 'saved'\) \{\s*inBuildGreenAt = Date\.now\(\);[\s\S]{0,400}if \(inBuildWroteThisTurn\(inBuildWriteTick\)\) \{\s*etaAppRenderedAt = inBuildGreenAt;[\s\S]{0,400}emitEtaPhaseNow\(\);/);
     // Hoisted beside the final-checks flag, where the heartbeat can see it.
     expect(code.indexOf('let etaAppRenderedAt = 0;')).toBeGreaterThan(code.indexOf('let etaFinalChecks = false;'));
     expect(code.indexOf('let etaAppRenderedAt = 0;')).toBeLessThan(code.indexOf('const diagHeartbeatTimer'));

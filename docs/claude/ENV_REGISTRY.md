@@ -425,6 +425,19 @@ the code (it is actually read somewhere) on 2026-07-11.
   already have — the precise false-positive `appUpdate.ts` names as the way this feature becomes
   hated. From release #2 onward: **upload → wait for Play to say live → then set the number.** The
   first release is the only one where the order does not matter.
+- **Game Engine Ultra kill switches (code-only, NOT set in Cloud Run; default ON, `=off` disables) — 2026-10-30:**
+  `AGENTV3_GAME_SCOPE_CONTRACT` (Phase 1, PR #4036 — game scope contract in the kit handoff + GAME_SCOPE_OK/GAP evidence),
+  `AGENTV3_GAME_PLAYTEST_SEED` (Phase 2 — the playtest seeds `Math.random` with a fixed seed so runs are repeatable).
+  Existing siblings: `AGENTV3_GAME_PLAYTEST`, `AGENTV3_GAME_KIT_SEED`.
+  **Phase 3 — default OFF, `=on` enables (NOT set in Cloud Run; admin decision required before setting):**
+  `AGENTV3_GAME_AUTO_REPAIR` — one verified model repair of a game the playtest measured broken. ⚠️ It SPENDS
+  model calls; as built, the platform absorbs that spend (billing phase `game-repair` is always barren), so the
+  user is never charged. Charging the user for a kept repair needs an explicit admin decision and a separate PR.
+  `AGENTV3_GAME_COMPLETE_GATE` — a game still unplayable (blank / input ignored / start stuck / runtime error /
+  missing kit layer) or missing a feature the user named is reported RED, not shippable. Never flips `ok`, never
+  changes a bill.
+  **Phase 4 — bench-runner env only (local script, never Cloud Run):** `BENCH_FIXTURE` (`reliability` default | `game`)
+  for `scripts/agentv3-reliability-bench.ts`; spends real money only with `BENCH_CONFIRM=yes`.
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),
@@ -1624,6 +1637,16 @@ the code (it is actually read somewhere) on 2026-07-11.
   ✅ **AND THIS REPORT SETTLED THE STREAMING ENTRY'S ONE OPEN QUESTION: Z.ai DOES honour
   `stream_options.include_usage`** — real per-call input/output/cache token counts came back on every
   streamed call. The "0 in / 0 out" risk that entry warns to watch for did not materialise.
+- **🎁 APP-ONLY REFERRAL (admin 2026-10-30) — SUPERSEDES every referral/gift entry below.** Website gift **₹0**
+  (no step earnable on web). Android + Play Integrity only: download/first sign-in ₹5 · referral code ₹10 ·
+  Gmail login ₹10 · GitHub ₹15 · mobile OTP ₹20 (A without code ₹50, B with code ₹60; self ceiling ₹60).
+  Referrer: **₹10 per friend, only after the friend completed ALL steps**; lifetime cap **₹500**
+  (`REFERRER_STEP_TOKENS` default 1000, `REFERRER_LIFETIME_CAP_TOKENS` default 50000 — leave unset).
+  Referral is **split from the Free Program pause**: it follows `REFERRAL_REWARDS=on` only. New key
+  **`REFERRAL_FOLLOWS_FREE_PAUSE`** (NOT set; default OFF): `on` restores pause ⇒ referral off. Gift ₹ is
+  spendable on chat + coding only — hosting traffic (`feature: hosting*`) can no longer use gift; plans,
+  add-ons, remix, APK were already paid-only. The admin one-press ₹150 welcome gift is retired.
+  ⚠️ While the Free Program pause is ON, existing gift-spend rules still make ALL gift unspendable.
 - **🎁 THE FREE-CREDIT STEPS, FINAL PLAN (admin 2026-09-27, verbatim: *"sabhi pahle 50₹ do! (mobile +
   website) · fir refral code ke 100₹ (only mobile') · fir login par 50₹ (dono par) · fir mobile otp
   verification par 100₹ (dono par) · fir github connect (100₹ mobile only) — ab yeh final hai"*). SUPERSEDES
@@ -1881,6 +1904,17 @@ the code (it is actually read somewhere) on 2026-07-11.
   many phones; the IP (the LAST `X-Forwarded-For` entry) is only the backstop. The day is India's. Refusal is
   **403 `guest_limit_reached`** — never 401, which the free-chat client reads as an expired session.
   ⚠️ **The old browser counter (`FREE_DAILY_MESSAGES`) is gone on purpose; do not reintroduce a client-side count.**
+- **💳 FREE CHAT QUOTA + ₹0.10 PAST IT — `UNIFIED_WALLET_ENABLED` (admin 2026-10-30, PRs #4030/#4031).**
+  `UNIFIED_WALLET_ENABLED` (code default **ON** since 2026-10-30 when unset — prod Cloud Run value not yet verified; `off`/`0`/`false` = disabled ⇒
+  quota exhausted = blocked, never charged). Read by `src/server/lib/unifiedWallet/policy.ts` (`unifiedWalletEnabled`).
+  - **Guest (signed-out):** **10 messages/day** (`UNIFIED_WALLET_GUEST_DAILY`, default 10; plus `GUEST_DAILY_MESSAGES` above).
+    After 10 ⇒ sign-in required; guests have no wallet, so never charged.
+  - **Signed-in:** **50/day total = 45 text + 5 text-or-image** (`UNIFIED_WALLET_SIGNED_IN_DAILY`, default 50; 5 free
+    images counted inside the 50). Day = India (IST). `UNIFIED_WALLET_FREE_LIMIT` is legacy (no effect since 2026-10-30).
+  - **Past the free quota:** **₹0.10 (0.1 credit) per text message** from the wallet
+    (`UNIFIED_WALLET_CHAT_MESSAGE_MILLI`, default 100 milli-credit). Per-minute gate `UNIFIED_WALLET_PER_MINUTE` (20) /
+    `UNIFIED_WALLET_GUEST_PER_MINUTE` (6); surfaces `UNIFIED_WALLET_CHARGED_SURFACES` (default all). Full design: `docs/UNIFIED_WALLET.md`.
+  - Independent switch: `UNIFIED_WALLET_MARGIN` (default OFF) — not part of this quota. `AI_WALLET_SPEND` is the separate tools/Doctor flag.
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,
@@ -4475,8 +4509,9 @@ or protect against upgrades/external account traffic.
 
 | Name | Code default / interpretation |
 | --- | --- |
-| `FREE_CHAIN_ENABLED` | OFF. Deployment gate; saved admin controls cannot override OFF. |
-| `CHEAPERINFERENCE` (alias `CheaperInference`) | `off` (default) \| `admin` \| `all`. Simple owner switch for CheaperInference (`https://api.cheaperinference.com/v1`). `off` = never use. `admin` = ONLY verified admin Free Chat replies (via `isAdminEmail` / `AGENTV3_REPORT_ADMINS`); free-chain ladder OFF for those replies so every admin answer comes from CheaperInference. `all` = first eligible paid Free Chat rung for everyone (free providers still first). Unknown values fail closed to `off`. Do not set `all` without owner approval. When `admin` hits a stale OPEN circuit (AUTH=1h / QUOTA=1d from a prior fail), FreeChain force-probes once if remaining >30s and admin diagnostic shows last open reason + upstream HTTP (e.g. `auth:http=401`, `quota_exhausted:http=402`); exclusive admin cheapinf cooldowns cap at 30s. Exclusive admin first-content grace is 60s (beam reasoning); diagnostic includes `waitMs` / `ttftCapMs` / `timeout:first-token:…ms`. |
+| `FREE_CHAIN_ENABLED` | ON when absent (owner default, 2026-11-04). Deployment gate; saved admin controls cannot override OFF. |
+| `CHEAPERINFERENCE` (alias `CheaperInference`) | `off` (default) \| `admin` \| `all`. `admin` = ONLY verified admin Free Chat replies, from Beam with `reasoning_effort=low` and a 2048-token cap (Beam's card allows low\|medium\|high\|xhigh\|max; `none` is not valid and can 400). `all` does not dispatch unless `CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION=on` (Keak terms §6: no shared access to the key without written permission). |
+| `CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION` | OFF. Set `on` only after Keak AI, Inc. has permitted this product to serve the key to end users (terms §6). Without it, `CHEAPERINFERENCE=all` stays closed. Admin-only mode does not need this flag. |
 | `CHEAPERINFERENCE_API_KEY` | Secret, unset. One server-side key (`ci_live_…`). Comma lists rejected. Never put in the frontend. Required for `admin` and `all`. **OWNER:** CheaperInference dashboard login is `aashishcpmt093@gmail.com` (platform.cheaperinference.com). Do not invent another account. |
 | `CHEAPERINFERENCE_MODEL` | `beam` default; allow-list `beam`, `beam-1.0-501b-a23b`, `deepseek-v4.1-flash-1017`. Beam is a reasoning model — exclusive `CHEAPERINFERENCE=admin` uses a 60s first-content grace (paid/all path 30s floor), and reasoning stream deltas pulse the watchdog without delivering text. Admin diagnostic shows `waitMs`, `ttftCapMs`, and `timeout:first-token:…ms`. |
 | `FREE_CHAIN_CHEAPINF_PRICE_IN_PER_MTOK` / `_PRICE_OUT_PER_MTOK` | Indicative Beam defaults 0.006 / 0.022 USD per 1M tokens (owner brief). Env may RAISE, never lower, the reservation floor. Shares the Free Chat $10/day IST paid cap. |
@@ -4490,7 +4525,7 @@ or protect against upgrades/external account traffic.
 | `FREE_CHAIN_BLUESMINDS_API_KEY` / `FREE_CHAIN_REQUESTY_API_KEY` | Secret, unset. Terms/free tier unverified; blocked unless `FREE_CHAIN_<P>_WRITTEN_APPROVAL=on`. |
 | `FREE_CHAIN_<NVIDIA\|MODELSCOPE\|LLM7\|BLUESMINDS\|REQUESTY>_WRITTEN_APPROVAL` | OFF. Set only when the owner holds written commercial permission from that provider. |
 | `FREE_CHAIN_LLM7_FREE_VERIFIED_UNTIL` | Unset. Free-plan attestation for LLM7 (also requires written approval). |
-| `FREE_CHAIN_ROLLOUT_PERCENT` | 0; whole integer 0–100. Used when no saved admin override exists. |
+| `FREE_CHAIN_ROLLOUT_PERCENT` | 100; whole integer 0–100. Used when no saved admin override exists. |
 | `FREE_CHAIN_ALLOW_UIDS` | Empty comma-separated verified UID allowlist. Allowlisted users can be selected even at 0%. Never include secrets. |
 | `FREE_CHAIN_ORDER` | Default includes `cheapinf` first among paid (`glm45,glm47,groq,cloudflare,openrouter,cheapinf,llama8b,…`). Unique known IDs, omitted rungs allowed; no paid rung may precede a free rung. Empty/unset uses default, not an empty chain. |
 | `FREE_CHAIN_SKIP_GEMINI` | ON. Leave on pending current account/privacy/audience/geography review. |
@@ -4671,7 +4706,7 @@ allowances and there is no key-pool rotation. Unknown quota limits are zero unti
 | Name | Code default / bounds |
 | --- | --- |
 | `FREE_CHAIN_MAX_ACTIVE` | 8 active chain turns per process; integer 1–64. Separate from provider/account bulkheads. |
-| `FREE_CHAIN_MAX_QUEUED` | 64 waiting turns per process; integer 0–1000. 0 disables waiting, not active dispatch. |
+| `FREE_CHAIN_MAX_QUEUED` | 1024 waiting turns per process; integer 0–1024; also bounded by a fixed 16 MiB serialized queued-payload budget. 0 disables waiting, not active dispatch. |
 | `FREE_CHAIN_MAX_WAIT_MS` | 5000 ms maximum local wait; integer 100–10000. Expiry returns busy, not an ETA. |
 | `FREE_CHAIN_PER_USER_ACTIVE` | 1 active turn per verified UID per process; integer 1–8. |
 | `FREE_CHAIN_PER_USER_QUEUED` | 1 waiting turn per verified UID per process; integer 0–16. |
@@ -4756,3 +4791,117 @@ providers. Two Weak build reports after the flag flip still showed GLM→Kimi wi
 delivery — admission fail-open suspected; build-report observability follow-up in progress.
 No credential value is recorded here. Live credential validity and the deployed revision have
 not been independently verified. This note is not runtime authority — Admin/server env wins.
+
+- **`Z_TEST_ACCOUNT_FREE`** (`on` default / `off`) — kill switch for the TEMPORARY owner test-account
+  (z@gmail.com) free publish + hosting plan + renewal + domain connect + add-ons + hosting overage + APK
+  charge waivers (`src/server/lib/zTestAccount.ts` → `zTestFreeBilling`). Unset/`on` ⇒ free; `off` ⇒ z is
+  charged like everyone else. (2026-11-02: z's Surplus no-fallback, raw-error debug and Router One pin were
+  retired — z routes like any same-tier user; only this billing waiver remains.) Remove the
+  whole thing later by deleting `zTestAccount.ts` call sites.
+
+### 2026-11-01 owner pricing/routing revision
+
+The earlier sandbox-time billing entry is superseded for Pro builds. Customer
+sandbox service fee is 2.5% of the discounted pre-sandbox subtotal on every band;
+`AGENTV3_BILL_SANDBOX` no longer enables an additional measured-time charge.
+`E2B_USD_PER_HOUR` remains the configured internal expense rate; an unset rate
+cannot turn the placeholder into verified expense. Hosting subscriptions are separate.
+
+Weak uses Surplus → Router One → GLM → its existing tail. `ROUTER_ONE_API_KEY`
+is still required. `ROUTER_ONE_ENABLED` defaults eligible for Weak when unset;
+explicit `off`/`false`/`0`/`no` preserves the emergency disable. `ROUTER_ONE_PIN`
+is retired (2026-11-02): no profile is pinned on any band.
+
+- **`AGENTV3_EXTERNAL_GAME_ASSETS`** (default off) — L3 assets. `on` ⇒ every user; `admin` ⇒ limited
+  rollout to the owner test uid (z@gmail.com) plus verified uids in `AGENTV3_EXTERNAL_GAME_ASSETS_UIDS`
+  (comma list); anything else ⇒ off.
+No environment values or credentials were changed by this code revision.
+Router One's prospective expense multiplier is 2.5; automatic positive settlement
+remains unavailable without trusted final request/account-bound supplier receipts.
+
+## 2026-11-01 — L3 reviewed game assets (not enabled)
+
+- `AGENTV3_EXTERNAL_GAME_ASSETS`: **default OFF**, uses the shared boolean parser (`on` is canonical). No Cloud Run setting
+  changed. Read by `gameAssets/assetPlan.ts`; called inside the successful new-project 3D kit seed.
+  It does not authorize unreviewed catalogue entries, paid providers, or credentialless Sketchfab
+  downloads. Initial catalogue is intentionally empty pending real provenance/browser fixtures.
+- Reuses the existing private `WORKSPACE_ASSETS_BUCKET` fallback resolution for a public-licensed
+  shared content cache under `game-assets-public-cc/v1/`. At most 64 curated hashes, each <=5 MiB.
+  No new bucket/ACL. Project copies stay in the existing owner-aware workspace asset store and erase
+  lifecycle. Shared cache never accepts user uploads or private models.
+- Poly Haven live metadata requests identify NavBharatAI and require a visible source credit when
+  content is surfaced. Runtime renders the reviewed service credit; source/asset licensing is retained
+  separately in the published manifest/ATTRIBUTION.txt. A cached CC0 copy alone does not incur API calls.
+- No rollout to users until actual assets, all six game scenarios, mobile/reload/publish and required
+  local/remote CI checks pass. Turning the flag off restores the existing L1/L2 generation path.
+
+### 2026-11-02 — L3 catalogue continuation (still not enabled)
+
+The initial empty catalogue now has four hash-pinned, asset-licensed models, reviewed in
+`docs/game-engine/l3-reviewed-assets.md`. `AGENTV3_EXTERNAL_GAME_ASSETS` remains default OFF and no
+Cloud Run variable changed. Local artifacts and emulator checks do not authorize broad activation;
+secure live-download and full six-scenario/mobile/publication acceptance remain incomplete.
+
+### 2026-11-03 — Admin → Money → API Providers (balances and billing links)
+
+- **`ADMIN_PROVIDER_LOW_BALANCE_USD`** (optional, default `5`) — a live balance under this many USD is shown LOW on
+  the API Providers page (`src/server/lib/apiProviderDirectory.ts`). CNY balances are compared at a fixed 7.3 CNY/USD
+  as a level hint only. NOT set in Cloud Run.
+- The page reads only key PRESENCE (names, never values) and, with the existing `OPENROUTER_API_KEY`,
+  `DEEPSEEK_API_KEY` / `FREE_CHAIN_DEEPSEEK_API_KEY` and `KIMI_API_KEY` (only when `KIMI_BASE_URL` is unset or on
+  `api.moonshot.ai` / `api.moonshot.cn`), each provider's own balance endpoint. Every other provider is "check
+  manually" with its billing link. No new key is required.
+
+### Ordinary Chat provider order (2026-11-04)
+
+`FREE_CHAIN_ROUTE_REORDER_ENABLED` defaults OFF. Classification still controls
+output caps; only explicit ON permits quality/fast routing to reorder or omit
+rungs. `FREE_CHAIN_ORDER`, sticky spread opt-in, Gateway/Strict Free precedence,
+saved controls and provider OFF switches remain authoritative. See
+[Free Chat runbook](../FREE_CHAT_CHAIN.md) for the full default order and exceptions.
+No live deployment or provider switch is changed by the code default.
+
+### 2026-11-06 — Optional Mitrify transport (privacy blocked; not enabled)
+
+- `AI_PROVIDER`: defaults to `direct`; `mitrify` currently logs the privacy block and retains direct general chat.
+- `MITRIFY_BASE_URL`: optional server-only gateway URL, default documented in `docs/mitrify.md`.
+- `MITRIFY_API_KEY`: server-only secret, no default; never configured by this change.
+- `MITRIFY_MODEL`: single opaque model alias; default lives in `src/server/lib/mitrify.ts`.
+- General chat remains health/clinical. No public-data authority exists for the complete request, so no production traffic reaches the transport. No App Builder or professional routing changes.
+
+### 2026-11-06 — Isolated public-test account selector (not enabled)
+
+- `MITRIFY_CHAT_ACCOUNT_EMAIL`: server-only verified-email selector for `/api/chat/mitrify-public-test`; no default or repository value. Requires `AI_PROVIDER=mitrify`, verified identity, and a server-owned single-use cost-admission adapter. No live adapter exists, so the test fails closed without inference.
+- Ordinary chat is neither paused nor switched by this selector. No credentials, account selector, spending cap or production flags were configured. Rollback is `AI_PROVIDER=direct` or removing the selector. See `docs/mitrify.md` for the exact missing admission contract.
+
+### 2026-11-06 — Canonical Mitrify backend switch and bounded queue
+
+- `AI_BACKEND`: canonical `direct|mitrify` switch, default direct. Explicit values override the legacy `AI_PROVIDER`; the alias is used only when the canonical setting is unset/blank. Invalid selections stay direct. No deployment setting was changed.
+- `MITRIFY_MAX_INFLIGHT`: default 200, valid integers 1–1000. The shared per-process queue also caps waiting calls at 1,000, retained serialized bodies at 64 MiB, and waiting time at 30 seconds. These bounds do not promise fleet-wide concurrency or throughput.
+- General chat remains health/clinical and direct. The isolated public-test route has no live verified cost-admission adapter and remains unavailable without dispatch.
+
+### 2026-11-06 — Separate account-only public-question bot (not activated)
+
+- `MITRIFY_CHAT_ACCOUNT_EMAIL` also selects the only verified account allowed to see or call `/api/chat/mitrify-bot`. No default, client email list or committed account address. Both visibility and send are authorized server-side.
+- `AI_BACKEND=mitrify` plus a configured key permits user-clicked, server-owned public questions only. Direct mode disables sends; removing the account selector hides the entry. No free text, profile/history, files, tools, JSON output or existing-chat routing is added.
+- No environment values or credentials were installed by this change. The bot can spend gateway credits if an operator enables it and the selected user clicks a question; output/retry limits are not a verified INR ceiling. The independent single-use diagnostic still requires its own cost admission. See `docs/mitrify.md`.
+
+### 2026-11-06 — Reviewed free text in the separate account-only bot
+
+- The same account selector and backend switch now also permit one user-reviewed public message (maximum 2000 characters), with explicit per-send confirmation. Sensitive-pattern checks are conservative and incomplete; sender review remains necessary. Profile/history/files are never automatically included. Existing preset clients remain compatible.
+- No new environment values or credential changes. This does not add an INR spending ceiling, enable general chat routing, or relax server-verified account authorization. See `docs/mitrify.md` for the full disclosure and limits.
+
+### 2026-11-07 — Optional verified-user availability for the separate Mitrify bot
+
+- `MITRIFY_BOT_ACCESS`: server-only, defaults to `selected` when unset/blank. `verified` admits all signed-in accounts with a verified, nonempty email; this is not anonymous access. Unknown values fail closed.
+- Selected mode retains `MITRIFY_CHAT_ACCOUNT_EMAIL` as default/rollback. Verified mode ignores that selector only for bot visibility/dispatch. The existing INR diagnostic remains selected-account-only. Backend-off behavior, rate limits, confirmation/privacy checks and main chat stay unchanged.
+- No production switch or credential change. Public activation/live load tests remain pending authorized runtime access and the applicable total-spend safeguards; see `docs/mitrify.md`.
+
+### 2026-11-07 — Controlled Mitrify guest campaign
+
+Server-only `MITRIFY_GUEST_TEST_ENABLED` (off unless exactly `1`),
+`MITRIFY_GUEST_TEST_CAMPAIGN` (no default), and `MITRIFY_GUEST_TEST_TOKEN` (no default,
+secret control token distinct from the gateway credential) gate an isolated
+synthetic guest endpoint. `MITRIFY_GUEST_TEST_TARGET` is an operator-runner origin,
+not an app setting. No values are configured by this change. See docs/mitrify.md
+for expiring shared admission, inclusive spend prerequisite and rollback.

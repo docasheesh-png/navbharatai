@@ -70,34 +70,34 @@ const PHONE = { uid: 'u1', phone_number: '+919800000000', auth_time: NOW - 10, f
 describe('the server exchange', () => {
   it('a fresh phone sign-in gets a custom token for the SAME uid', async () => {
     const a = auth(PHONE);
-    expect(await exchangePhoneIdToken(TOKEN, a, NOW)).toEqual({ ok: true, token: 'custom-token' });
+    expect(await exchangePhoneIdToken(TOKEN, a, NOW, async () => 0)).toEqual({ ok: true, token: 'custom-token' });
     expect(a.minted).toEqual(['u1']);
   });
 
   it('refuses a token that is not a phone sign-in — no other provider can be laundered through it', async () => {
     const a = auth({ ...PHONE, firebase: { sign_in_provider: 'password' } });
-    expect(await exchangePhoneIdToken(TOKEN, a, NOW)).toMatchObject({ ok: false, status: 403, code: 'not-phone' });
+    expect(await exchangePhoneIdToken(TOKEN, a, NOW, async () => 0)).toMatchObject({ ok: false, status: 403, code: 'not-phone' });
     expect(a.minted).toEqual([]);
-    expect(await exchangePhoneIdToken(TOKEN, auth({ ...PHONE, phone_number: undefined }), NOW)).toMatchObject({ code: 'not-phone' });
+    expect(await exchangePhoneIdToken(TOKEN, auth({ ...PHONE, phone_number: undefined }), NOW, async () => 0)).toMatchObject({ code: 'not-phone' });
   });
 
   it('refuses an old sign-in, so a token found later cannot be replayed', async () => {
     const a = auth({ ...PHONE, auth_time: NOW - EXCHANGE_MAX_AGE_S - 1 });
-    expect(await exchangePhoneIdToken(TOKEN, a, NOW)).toMatchObject({ ok: false, status: 401, code: 'stale' });
-    expect(await exchangePhoneIdToken(TOKEN, auth({ ...PHONE, auth_time: undefined }), NOW)).toMatchObject({ code: 'stale' });
+    expect(await exchangePhoneIdToken(TOKEN, a, NOW, async () => 0)).toMatchObject({ ok: false, status: 401, code: 'stale' });
+    expect(await exchangePhoneIdToken(TOKEN, auth({ ...PHONE, auth_time: undefined }), NOW, async () => 0)).toMatchObject({ code: 'stale' });
     expect(a.minted).toEqual([]);
   });
 
   it('refuses an invalid token and a malformed body', async () => {
-    expect(await exchangePhoneIdToken(TOKEN, auth(new Error('bad')), NOW)).toMatchObject({ status: 401, code: 'invalid-token' });
-    expect(await exchangePhoneIdToken(undefined, auth(PHONE), NOW)).toMatchObject({ status: 400 });
-    expect(await exchangePhoneIdToken('short', auth(PHONE), NOW)).toMatchObject({ status: 400 });
+    expect(await exchangePhoneIdToken(TOKEN, auth(new Error('bad')), NOW, async () => 0)).toMatchObject({ status: 401, code: 'invalid-token' });
+    expect(await exchangePhoneIdToken(undefined, auth(PHONE), NOW, async () => 0)).toMatchObject({ status: 400 });
+    expect(await exchangePhoneIdToken('short', auth(PHONE), NOW, async () => 0)).toMatchObject({ status: 400 });
   });
 
   it('a missing IAM permission is an honest 503 with its own code, not a fake success', async () => {
-    expect(await exchangePhoneIdToken(TOKEN, auth(PHONE, new Error('iam.serviceAccounts.signBlob denied')), NOW))
+    expect(await exchangePhoneIdToken(TOKEN, auth(PHONE, new Error('iam.serviceAccounts.signBlob denied')), NOW, async () => 0))
       .toMatchObject({ ok: false, status: 503, code: 'custom-token-unavailable' });
-    expect(await exchangePhoneIdToken(TOKEN, null, NOW)).toMatchObject({ status: 503, code: 'unavailable' });
+    expect(await exchangePhoneIdToken(TOKEN, null, NOW, async () => 0)).toMatchObject({ status: 503, code: 'unavailable' });
   });
 
   it('the route is mounted and rate-limited per address', () => {

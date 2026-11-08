@@ -1,4 +1,5 @@
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
+import { ASSET_MODELS_PATH, localModelSubjects, readyModelFor, localModelLead } from './gameAssets/localModelNote';
 import { randomUUID } from 'node:crypto';
 import { entryShadowNote } from './entryShadow';
 import { bannedInstallRefusal, bannedPackageGuardEnabled, stripBannedDeps, strippedDepsNote } from './reliability/bannedPackages';
@@ -237,6 +238,7 @@ import { analyzeRequirementCoverage, requirementCoverageSummary, currentRequestF
 import { binaryTextWriteRefusal } from './binaryTextWrite';
 import { isKeyboardOnlyGame, touchGameNoteEnabled, touchPlayableNote } from './touchPlayableGame';
 import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type VehicleShapeHalves } from './handWrittenVehicleScan';
+import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, type GroundShapeHalves } from './handWrittenGroundScan';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
@@ -466,6 +468,8 @@ import { withoutPreviewBridge, bridgeShellNote } from './previewBridge';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../lib/generatedDirs';
 import { turnAskedTheUser } from './nudgeToBuild';
 import { withAppEnvFile } from './appEnvFileForCommand';
+import { locatedErrorText } from './runtimeErrorSite';
+import { consoleCleanVerdict } from './renderCheckConsole';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -564,7 +568,7 @@ export interface ActuatorPort {
   getConsoleErrors?(
     workspaceId: string,
     sinceMs: number,
-  ): Promise<{ errors: { t: number; kind: string; text: string }[]; captured?: boolean }>;
+  ): Promise<{ errors: { t: number; kind: string; text: string; stack?: string }[]; captured?: boolean; lastSessionAt?: number }>;
   /** The built static site (dist/) as path→bytes, for a real persistent deploy. */
   downloadDistFiles?(workspaceId: string): Promise<Map<string, Buffer>>;
   /** Hold the idle sweep off a workspace while its build runs — see markBuildActive. */
@@ -945,7 +949,9 @@ export class ToolDispatcher {
     this.onFileWriteRaw?.(path, withoutPreviewBridge(path, content));
     this._unrecorded.delete(path); // recorded here — see `flushUnrecordedWrites`
     this._writtenPaths.add(path); // what THIS agent really wrote — see `writtenPaths`
+    this._lastWriteAt = Date.now(); // a console read older than this says nothing about the current code (Q-2303)
   };
+  private _lastWriteAt: number | undefined;
 
   /**
    * Every path THIS dispatcher wrote — never shared with a child or a parent.
@@ -1076,6 +1082,9 @@ export class ToolDispatcher {
    */
   private _vehicleShapeIndex = new Map<string, VehicleShapeHalves>();
   private _vehicleShapeNoted = false;
+  /** Hand-written flat roads / pinned vehicle y / own trains on hilly terrain (handWrittenGroundScan.ts, 2026-11-02). */
+  private _groundShapeIndex = new Map<string, GroundShapeHalves>();
+  private _groundShapeNoted = false;
   /** Recipe-known packages a hand-written import already had its one install attempt for (see below). */
   private _importInstallTried = new Set<string>();
   /** Q-862: imports whose install stood down because the background install held the lock — retried, and how often. */
@@ -2569,6 +2578,45 @@ export class ToolDispatcher {
   // the sandbox can be reaped.
   private _cpChain: Promise<void> = Promise.resolve();
   private _cpPending: string | null = null;
+
+  /** One object's spec — the object_spec tool answers a whole list with one of these per object (Q-2335). */
+  private async dispatchObjectSpec(wanted: string): Promise<string> {
+    const known = findInCatalog(wanted);
+    const spec = await resolveObjectSpec(wanted, {
+      findInCatalog,
+      cacheGet: memoryCache.get,
+      cacheSet: memoryCache.set,
+      // The FREE router namespace, which by construction never reaches Claude — so this stays
+      // inside the weak-tier rule, and its leader is a zero-cost model. It never throws.
+      ask: async (prompt, system) => {
+        const r = await aiRouter.routeDetailed(prompt, [], 'navbharat', undefined, system);
+        return r.ok ? r.content : null;
+      },
+    });
+    const placement = known ? PLACEMENT[known.category] : undefined;
+    // 🔴 A REVIEWED MODEL L3 ALREADY PREPARED OUTRANKS "HAND-MODEL IT" (autopsy 61279465, localModelNote.ts).
+    let readyModel: string | null = null;
+    try {
+      const src = await this.actuator.readFile(this.workspaceId, ASSET_MODELS_PATH).catch(() => '');
+      readyModel = readyModelFor(wanted, localModelSubjects(typeof src === 'string' ? src : ''));
+    } catch { /* no local models: the spec stands as it is */ }
+    const body = [
+      readyModel ? localModelLead(readyModel) : '',
+      renderSpec(spec, { builder: known?.builder }),
+      placement
+        ? '\n  HOW TO PLACE IT — ' + placement.headline + '\n'
+          + placement.rules.map((r) => '  - ' + r).join('\n')
+        : '',
+      // An object the engine had to invent is worth PROMOTING into the permanent catalogue by
+      // hand, where someone checks its numbers. The tool RESULT is the admin-visible record, so
+      // the note rides it rather than needing plumbing the dispatcher does not have.
+      spec.source === 'provider'
+        ? '\n[OBJECT_SPEC_LEARNED] No catalogue entry for "' + wanted + '" — this spec was '
+          + 'generated by the engine. Worth adding to objectCatalog.ts if it recurs.'
+        : '',
+    ].filter(Boolean).join('\n');
+    return body;
+  }
 
   /** Fire-and-forget: request a checkpoint with the latest message. NEVER blocks the caller. */
   private scheduleCheckpoint(message: string): void {
@@ -4579,6 +4627,15 @@ export class ToolDispatcher {
         for (const p of paths) this._vehicleShapeIndex.set(p, vehicleShapeHalves(p, files[p]));
         const found = vehicleShapeFindings(this._vehicleShapeIndex);
         if (found.length > 0) { vehicle = handWrittenVehicleNote(found); this._vehicleShapeNoted = true; }
+      } catch { /* a note is best-effort */ }
+    }
+    // ⛰️ A hand-written road, rail or driven y that ignores the hills (admin 2026-11-02, build be6aae96) — a
+    // note once per build with the file open; never a build failure.
+    if (!this._groundShapeNoted) {
+      try {
+        for (const p of paths) this._groundShapeIndex.set(p, groundShapeHalves(p, files[p]));
+        const found = groundShapeFindings(this._groundShapeIndex);
+        if (found.length > 0) { vehicle += handWrittenGroundNote(found); this._groundShapeNoted = true; }
       } catch { /* a note is best-effort */ }
     }
     const style = await this.styleWriteNotes(files);
@@ -9560,36 +9617,20 @@ export class ToolDispatcher {
         // the spec-first PROTOCOL, which costs nothing and can never fail a build. That last rung is
         // why this tool is safe to put in front of every hand-modelled object.
         const osRec = (input as Record<string, unknown>) || {};
-        const wanted = typeof osRec.object === 'string' ? osRec.object.trim() : '';
-        if (!wanted) return 'Name the object to look up, for example: object_spec({ object: "auto rickshaw" }).';
-        const known = findInCatalog(wanted);
-        const spec = await resolveObjectSpec(wanted, {
-          findInCatalog,
-          cacheGet: memoryCache.get,
-          cacheSet: memoryCache.set,
-          // The FREE router namespace, which by construction never reaches Claude — so this stays
-          // inside the weak-tier rule, and its leader is a zero-cost model. It never throws.
-          ask: async (prompt, system) => {
-            const r = await aiRouter.routeDetailed(prompt, [], 'navbharat', undefined, system);
-            return r.ok ? r.content : null;
-          },
-        });
-        const placement = known ? PLACEMENT[known.category] : undefined;
-        const body = [
-          renderSpec(spec, { builder: known?.builder }),
-          placement
-            ? '\n  HOW TO PLACE IT — ' + placement.headline + '\n'
-              + placement.rules.map((r) => '  - ' + r).join('\n')
-            : '',
-          // An object the engine had to invent is worth PROMOTING into the permanent catalogue by
-          // hand, where someone checks its numbers. The tool RESULT is the admin-visible record, so
-          // the note rides it rather than needing plumbing the dispatcher does not have.
-          spec.source === 'provider'
-            ? '\n[OBJECT_SPEC_LEARNED] No catalogue entry for "' + wanted + '" — this spec was '
-              + 'generated by the engine. Worth adding to objectCatalog.ts if it recurs.'
-            : '',
-        ].filter(Boolean).join('\n');
-        return body;
+        // ONE CALL FOR EVERY OBJECT (autopsy 61279465, Q-2335): a list is answered in one result, so the model does
+        // not spend a whole turn per object. `object` alone still works.
+        const asked = [
+          ...(Array.isArray(osRec.objects) ? osRec.objects : []),
+          ...(typeof osRec.object === 'string' ? [osRec.object] : []),
+        ].filter((v): v is string => typeof v === 'string' && v.trim() !== '').map((v) => v.trim());
+        const wantedList = [...new Set(asked.map((v) => v.toLowerCase()))].slice(0, 8).map((k) => asked.find((v) => v.toLowerCase() === k)!);
+        if (wantedList.length === 0) return 'Name the objects to look up, all in one call, for example: object_spec({ objects: ["auto rickshaw", "tree"] }).';
+        if (wantedList.length > 1) {
+          const parts: string[] = [];
+          for (const one of wantedList) parts.push(String(await this.dispatchObjectSpec(one)));
+          return parts.join('\n\n');
+        }
+        return this.dispatchObjectSpec(wantedList[0]);
       }
 
       case 'generate_game_3d': {
@@ -11900,9 +11941,10 @@ export class ToolDispatcher {
         }
         const sinceSec = typeof input.since_seconds === 'number' ? input.since_seconds : 120;
         const since = Date.now() - Math.max(1, sinceSec) * 1000;
-        const { errors, captured } = await this.actuator.getConsoleErrors(this.workspaceId, since);
+        const { errors, captured, lastSessionAt } = await this.actuator.getConsoleErrors(this.workspaceId, since);
         if (errors.length > 0) {
-          return `Runtime browser errors (${errors.length}):\n` + errors.slice(0, 30).map((e) => `- [${e.kind}] ${e.text}`).join('\n');
+          // Each line carries where it was thrown (Q-2301): without the file the builder edits the wrong one.
+          return `Runtime browser errors (${errors.length}):\n` + errors.slice(0, 30).map((e) => `- [${e.kind}] ${locatedErrorText(e)}`).join('\n');
         }
         // 🔴 AN UNREAD CONSOLE IS NOT A CLEAN ONE (autopsy 9cca1fd5, 2026-09-17).
         //
@@ -11922,7 +11964,7 @@ export class ToolDispatcher {
           ? 'The browser console could NOT be read for this window — no browser session left a console log. '
             + 'NOTHING about runtime errors was checked, so this is not evidence either way. Open the app '
             + '(screenshot / browser_action) and ask again if you need a real answer.'
-          : 'No runtime browser errors in the window — the console was read and it was clean.';
+          : consoleCleanVerdict({ lastSessionAt, lastWriteAt: this._lastWriteAt, now: Date.now() });
       }
 
       // Level 7: structural codemods (AST-safe cross-file refactoring via ts-morph).

@@ -1,4 +1,6 @@
 import { guardSurplusNarrative, withServiceIdentity } from './surplusNarrativeIdentity';
+import { readScopeFailure, tagScopeFailure, type ScopeFailureDiagnostic } from '../scopeFailureDiagnostic';
+import { tagRawErrorDetail } from '../rawErrorDetail';
 import { PublicBuildEngineError, publicBuildEngineError, type PublicBuildEngineSafeReason } from '../../lib/buildEngineError';
 import { assertAiAvailable, aiMaintenanceStore, AiMaintenanceError } from '../../lib/aiMaintenance';
 import type { RunTurnParams, TurnResult, TurnRunner, TurnUsage } from '../ClaudeClient';
@@ -33,6 +35,8 @@ export interface SurplusTurnRequest extends Record<string, unknown> {
   tools?: OpenAiTool[];
   tool_choice?: 'auto';
   max_tokens: number;
+  /** Thinking off: reasoning models spent the whole budget thinking → empty scope answer. */
+  reasoning_effort?: 'none';
   stream: false;
 }
 /** Internal-only facts. No provider error text or response data crosses this contract. */
@@ -107,12 +111,12 @@ function checkCompletion(completion: OpenAiCompletionLike, permit: SurplusTurnPe
   if (completion?.model === permit.model && Array.isArray(completion?.choices) && completion.choices.length === 0) {
     throw validationError('empty_completion');
   }
-  if (completion?.model !== permit.model || completion?.choices?.length !== 1 ||
-      !choice?.message || choice.message.role !== 'assistant' ||
-      (choice.message.content !== null && typeof choice.message.content !== 'string') ||
-      !['stop', 'length', 'tool_calls', 'content_filter'].includes(choice.finish_reason ?? '')) {
-    throw new Error('Surplus returned an invalid completion');
-  }
+  const bad = completion?.model !== permit.model ? 'model'
+    : completion?.choices?.length !== 1 ? 'choices'
+    : !choice?.message ? 'message' : choice.message.role !== 'assistant' ? 'role'
+    : (choice.message.content !== null && typeof choice.message.content !== 'string') ? 'content'
+    : !['stop', 'length', 'tool_calls', 'content_filter'].includes(choice.finish_reason ?? '') ? 'finish_reason' : '';
+  if (bad) throw new Error(`Surplus returned an invalid completion (${bad})`);
   // A refusal is terminal even when a compatible endpoint reports stop or includes tools.
   if ('refusal' in choice.message && choice.message.refusal != null) throw validationError('content_filter');
   const calls = choice.message.tool_calls;
@@ -150,6 +154,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
   if (!Number.isFinite(configuredMs) || configuredMs <= 0) throw unavailable('misconfigured');
   return {
     async runTurn(params) {
+      let diagnostic: ScopeFailureDiagnostic = { stage: 'authorization', reason: 'authorization_failed' };
       if (params.signal?.aborted) throw publicError(new BuildStoppedError());
       const bound = turnDeadline(configuredMs, params.deadlineAt);
       if (bound.expired) throw publicError(new Error(BUDGET_EXHAUSTED_MESSAGE));
@@ -158,6 +163,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
       let active = true;
       let maintenanceError: AiMaintenanceError | undefined;
       let deadlineError: Error | undefined;
+      let policyRefused = false;
       const offStop = onStop(params.signal, () => controller.abort());
       let rejectMaintenance: (error: Error) => void = () => {};
       const maintenance = new Promise<never>((_, reject) => { rejectMaintenance = reject; });
@@ -229,6 +235,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
             messages: structuredClone(messages),
             ...(tools.length ? { tools: structuredClone(tools), tool_choice: 'auto' as const } : {}),
             max_tokens: permit.maxTokens,
+            reasoning_effort: 'none' as const,
             stream: false,
           };
           await assertAiAvailable();
@@ -248,11 +255,14 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
                 resolution?.retry !== true || resolution.receiptDurablyRecorded !== true || !authority.authorizeFallback) return;
             await assertAiAvailable();
             assertActive();
-            const next = await authority.authorizeFallback(freshParams(), permit, failure);
+            const next = await authority.authorizeFallback(freshParams(), permit, failure).catch(error => {
+              throw tagScopeFailure(error, { stage: 'authorization', reason: 'authorization_failed' });
+            });
             assertActive();
             return next;
           };
           try {
+            diagnostic = { stage: 'dispatch', reason: 'dispatch_failed' };
             raw = await authority.dispatch(request, controller.signal, permit);
           } catch (error) {
             const failure: SurplusTurnFailure = Object.freeze({ stage: 'dispatch', reason: 'dispatch_failed', attempt, hasResponse: false });
@@ -262,6 +272,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
           }
           let result: TurnResult;
           try {
+            diagnostic = { stage: 'response_validation', reason: 'invalid_completion' };
             assertActive();
             const completion = permit.validateResponse(raw);
             checkCompletion(completion, permit, tools);
@@ -279,6 +290,8 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
             });
           } catch (error) {
             const failure: SurplusTurnFailure = Object.freeze({ stage: 'response_validation', reason: failureReason(error), attempt, hasResponse: true });
+            // Accounting can outlive the turn timer; a known refusal must never become availability.
+            if (failure.reason === 'content_filter') policyRefused = true;
             const next = await fallback(await accountFailure(error, failure), failure, error);
             if (next) { permit = next; continue; }
             throw error;
@@ -287,6 +300,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
           result.selectedMaxOutputTokens = permit.maxTokens;
           // A receipt rejection/unknown result is terminal. Do not repeat accounting or inference.
           if (authority.onResponse) {
+            diagnostic = { stage: 'receipt', reason: 'receipt_failed' };
             const receipt = await authority.onResponse(raw, permit, result);
             if (receipt !== undefined) result.usage.surplusReceipt = receipt;
           }
@@ -313,11 +327,13 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
           throw publicError(new AiMaintenanceError(from?.statusUnavailable ? { unavailable: true } : undefined));
         }
         if (deadlineError && error === deadlineError) throw publicError(new Error(BUDGET_REACHED_MESSAGE));
+        // A policy refusal stays terminal across the outer pre-write Weak fallback too.
+        if (policyRefused || failureReason(error) === 'content_filter') throw unavailable('policy_refusal');
         // Never forward an upstream name, stack, cause, body, metadata, or even its error text.
         // Preserve an already-tagged PublicBuildEngineError (timeout / attempts_exhausted); else fold.
-        if (error instanceof PublicBuildEngineError) throw publicError(error);
+        if (error instanceof PublicBuildEngineError) throw tagRawErrorDetail(tagScopeFailure(publicError(error), readScopeFailure(error) ?? diagnostic), error, JSON.stringify(readScopeFailure(error) ?? diagnostic ?? null));
         try { console.warn('[SURPLUS_TURN] folded provider/transport failure to public build-engine boundary'); } catch { /* best-effort */ }
-        throw unavailable('terminal_fold');
+        throw tagRawErrorDetail(tagScopeFailure(unavailable('terminal_fold'), readScopeFailure(error) ?? diagnostic), error, JSON.stringify(readScopeFailure(error) ?? diagnostic ?? null));
       } finally {
         active = false;
         controller.abort();

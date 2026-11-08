@@ -15,7 +15,7 @@
 
 import { MANIFEST_V2_RULES, cleanPurpose, fastLaneDepsChars, fastLaneMaxFiles, fastLaneV2Enabled, fullDepsContext, parseManifestContract, topoWaves, validateManifestContract, type ValidatedContract } from './reliability/fastLaneV2';
 import { dropShadowingEntries } from './entryShadow';
-import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE, LIGHT_THEME_BY_DEFAULT_RULE } from './noEvalRule';
 import { posix } from 'node:path';
 import { contractFilePath, contractImportSpecifier } from './contractLocation';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
@@ -561,6 +561,7 @@ export function fileSystemPrompt(framework: string): string {
     CORS_RULE,
     SEED_PASSWORD_RULE,
     NO_FAKE_FEATURE_RULE,
+    LIGHT_THEME_BY_DEFAULT_RULE,
     ...webPlatformRule(framework),
     ...exportImportConvention(framework),
     ...designContractFor(framework),
@@ -605,7 +606,7 @@ export const DESIGN_KIT_VOCABULARY: string[] = [
   '- A link that acts as a button (`<a class="btn-primary">`) gets the full button shape — no need to restyle it.',
   '- Chat: `.nb-chat` holding `.nb-msg nb-msg-user` / `.nb-msg nb-msg-bot`, with `.nb-composer` at the bottom.',
   '- GAMES: the stage is `.nb-game`; start/pause/game-over screens are `.nb-game-screen` with `h1.nb-game-title` and REAL `<button class="nb-game-btn">` (`nb-game-btn nb-game-btn-secondary` for a second choice) — never a clickable <div>; the score and health sit in `.nb-game-hud` as `.nb-game-stat` and `.nb-game-bar` > `.nb-game-bar-fill` (style="--value: 0.6"); on phones add `.nb-game-pad` > `.nb-game-keys` > `button.nb-game-key`.',
-  '- A light/dark SWITCH sets `data-theme="dark"` / `"light"` (or the class `dark` / `light`) on <html> (`document.documentElement`) — the kit\'s whole palette follows it; with no switch the app follows the device. Any other hook (a class on a wrapper div, `theme-dark`) styles nothing.',
+  '- A light/dark SWITCH sets `data-theme="dark"` / `"light"` (or the class `dark` / `light`) on <html> (`document.documentElement`) — the kit\'s whole palette follows it; with nothing set the app is LIGHT, whatever the device says. Any other hook (a class on a wrapper div, `theme-dark`) styles nothing.',
   "- Your own stylesheet ADDS to the kit (your own classes, your own --accent); do not restyle or remove the kit's classes.",
 ];
 

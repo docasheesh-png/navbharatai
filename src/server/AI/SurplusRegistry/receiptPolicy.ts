@@ -334,8 +334,10 @@ function evaluateReceipt(input: SurplusReceiptPolicyInput): SurplusReceiptDecisi
   if (!bounded(ceiling)) return unavailableCeiling('official_ceiling_exceeds_accounting_bound');
   if (absorptionReason) return { ...result, status: 'absorbed', reason: absorptionReason, officialCeilingUsd: format(ceiling) };
   const markedUp = { coefficient: actual.coefficient * 10n, scale: actual.scale };
-  const charge = compare(markedUp, ceiling) <= 0 ? markedUp : ceiling;
-  return { ...result, status: 'chargeable', reason: compare(markedUp, ceiling) <= 0 ? 'ten_times_verified_actual_cost' : 'capped_at_verified_official_tariff',
+  // Admin 2026-10-30: Surplus charge = verified Surplus cost × 10, flat (no list-tariff cap).
+  // Weak / Normal / Strong billing is untouched — this path prices Surplus receipts only.
+  const charge = markedUp;
+  return { ...result, status: 'chargeable', reason: 'ten_times_verified_actual_cost',
     officialCeilingUsd: format(ceiling), userChargeUsd: format(charge), absorbedCostUsd: differenceFloorZero(actual, charge) };
 }
 

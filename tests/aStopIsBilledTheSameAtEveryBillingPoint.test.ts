@@ -1,3 +1,4 @@
+import { proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../src/server/AgentV3/proSandboxFee';
 /**
  * EVERY BILLING POINT BILLS A STOP BY THE SAME RULES — AND EVERY AI QUOTES THOSE RULES WORD FOR WORD.
  *
@@ -74,7 +75,7 @@ function finalizer(c: { cause: AbortCause | null; ok?: boolean } & Partial<Case>
   new Function(
     'stopBillingSwitches', 'settleStopOrFailure', 'preseededUnchangedCount', 'freeCancellationMessage', 'abortCauseOf',
     'abort', 'writtenFiles', 'billingCtx', 'wdPreviewProven', 'isEditMode', 'decided', 'ok', 'buildDiagRef', 'state',
-    'abortRequestedAtOf', 'stopFellInWindow', 'stylePassWindow',
+    'abortRequestedAtOf', 'stopFellInWindow', 'stylePassWindow', 'proSubtotalNotice',
     `let watchdogBilledUsd = state.watchdogBilledUsd; let watchdogStopNote = state.watchdogStopNote;
      ${wdBlock}
      state.watchdogBilledUsd = watchdogBilledUsd; state.watchdogStopNote = watchdogStopNote;`,
@@ -82,7 +83,7 @@ function finalizer(c: { cause: AbortCause | null; ok?: boolean } & Partial<Case>
     stopBillingSwitches, settleStopOrFailure, preseededUnchangedCount, freeCancellationMessage, abortCauseOf,
     signal(c.cause), files(c.written ?? 9), { preseededGolden: preseeded, appFirstRenderedAt: renderedAt(c) }, c.rendered === true, c.edit === true,
     { realCostUsd: COST, sandboxUsd: 0 }, c.ok ?? true, { record: (e: { code: string }) => recorded.push(e.code) }, state,
-    abortRequestedAtOf, stopFellInWindow, styleWindow(c),
+    abortRequestedAtOf, stopFellInWindow, styleWindow(c), proSubtotalNotice,
   );
   return { billed: state.watchdogBilledUsd, note: state.watchdogStopNote, recorded };
 }
@@ -96,7 +97,7 @@ function settle(c: { cause: AbortCause | null; ok: boolean } & Partial<Case>) {
   new Function(
     'settleStopOrFailure', 'stopBillingSwitches', 'preseededUnchangedCount', 'freeCancellationMessage', 'zeroBillForFailedBuild', 'abortCauseOf',
     'abort', 'writtenFiles', 'preseededGolden', 'appSeenRunningForBill', 'isEditMode', 'decidedRealCostUsd', 'decidedSandboxUsd',
-    'result', 'buildDiag', 'events', 'state', 'abortRequestedAtOf', 'stopFellInWindow', 'appFirstRenderedAt', 'stylePassWindow',
+    'result', 'buildDiag', 'events', 'state', 'abortRequestedAtOf', 'stopFellInWindow', 'appFirstRenderedAt', 'stylePassWindow', 'proSubtotalNotice',
     `let effectiveBilledUsd = state.effectiveBilledUsd; let zeroBillReason = state.zeroBillReason; let waivedMarkupNotice = state.waivedMarkupNotice;
      ${settleBlock}
      state.effectiveBilledUsd = effectiveBilledUsd;`,
@@ -104,7 +105,7 @@ function settle(c: { cause: AbortCause | null; ok: boolean } & Partial<Case>) {
     settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount, freeCancellationMessage, (ok: boolean) => ok === false, abortCauseOf,
     signal(c.cause), files(c.written ?? 9), files(c.preseeded ?? 0), c.rendered === true, c.edit === true, COST, 0,
     { ok: c.ok }, { record: () => {} }, { emit: () => {} }, state,
-    abortRequestedAtOf, stopFellInWindow, renderedAt(c), styleWindow(c),
+    abortRequestedAtOf, stopFellInWindow, renderedAt(c), styleWindow(c), proSubtotalNotice,
   );
   return state.effectiveBilledUsd;
 }
@@ -303,7 +304,7 @@ type WaiverCase = Partial<Case> & {
 type Recorded = { code: string; message: string };
 function compileEnrichment(source: string) {
   const body = `return async function (ports) {
-    const { decideMarkupOnProof, markupNeedsPreview, markupWaiverSettledLine, stopBillingSwitches,
+    const { proSandboxFee, proSandboxFeeFields, proSubtotalNotice, decideMarkupOnProof, markupNeedsPreview, markupWaiverSettledLine, stopBillingSwitches,
       settleStopOrFailure, preseededUnchangedCount, freeCancellationMessage, abortCauseOf, abortRequestedAtOf,
       stopFellInWindow, applyBuildDiscount, buildBillingLabel, renderProvenInLedger, billableSandboxDetail,
       decideBuildBilledUsd, buildDiscountStore, recordBuildTelemetryOnce, buildDiagRef, billingCtx,
@@ -314,6 +315,7 @@ function compileEnrichment(source: string) {
     let watchdogBilledUsd = 0;
     let watchdogLivePreview = { seconds: 0, usd: 0, measuredSeconds: 0 };
     let watchdogDiscount = null;
+    let watchdogSandboxFee = proSandboxFee(0);
     let watchdogStopNote = null;
     ${source}
     ${debitGuard}
@@ -343,7 +345,7 @@ async function watchdogWithWaiver(c: WaiverCase, run = runEnrichment) {
   const decided = { effectiveBilledUsd: c.decided ?? DECIDED, realCostUsd: c.cost ?? COST,
     sandboxUsd: c.sandbox ?? 0, reconciledProviderUsage: usage, absorbedUnbilledUsd: 0 };
   const result = await run({
-    decideMarkupOnProof, markupNeedsPreview: () => c.markupEnabled !== false, markupWaiverSettledLine,
+    proSandboxFee, proSandboxFeeFields, proSubtotalNotice, decideMarkupOnProof, markupNeedsPreview: () => c.markupEnabled !== false, markupWaiverSettledLine,
     stopBillingSwitches, settleStopOrFailure, preseededUnchangedCount, freeCancellationMessage, abortCauseOf,
     abortRequestedAtOf, stopFellInWindow, applyBuildDiscount, buildBillingLabel,
     renderProvenInLedger: () => c.ledgerRendered === true,
@@ -405,19 +407,19 @@ describe('3 — the watchdog waiver describes the final settled bill, not an int
 
   it('saved files retain their positive real-cost floor and the original waiver wording', async () => {
     const result = await watchdogWithWaiver({ written: 9, pct: 50, sandbox: 0.1 });
-    expect(result.billed).toBe(0.5);
+    expect(result.billed).toBeCloseTo(0.41, 10);
     expect(result.discount).toBeNull();
     expect(result.records.find((entry) => entry.code === 'MARKUP_WAIVED_NO_PREVIEW')?.message)
-      .toBe(decideMarkupOnProof({ decidedBilledUsd: 2, realCostUsd: 0.4, sandboxUsd: 0.1, previewProven: false, expectsArtifacts: true }).reason);
+      .toBe(markupWaiverSettledLine(decideMarkupOnProof({ decidedBilledUsd: 2, realCostUsd: 0.4, sandboxUsd: 0, previewProven: false, expectsArtifacts: true }).reason, result.billed, undefined, true));
     expect(result.order.indexOf('MARKUP_WAIVED_NO_PREVIEW')).toBeGreaterThan(result.order.indexOf('billing'));
     expect(result.debits).toEqual([['synthetic-db', 'synthetic-user', {
-      billedInr: 50, buildRef: `synthetic-workspace_${STOP_AT - 10_000}`, feature: 'build', adminCreditEligible: false, description: 'NavBharatAI Pro build (time-capped)',
+      billedInr: 41, buildRef: `synthetic-workspace_${STOP_AT - 10_000}`, feature: 'build', adminCreditEligible: false, description: 'NavBharatAI Pro build (time-capped)',
     }]]);
   });
 
   it.each(['watchdog', 'advisory-cap', 'unknown', null] as const)('%s is not rewritten as user Stop', async (cause) => {
     const result = await watchdogWithWaiver({ cause, written: 0 });
-    expect(result.billed).toBe(COST);
+    expect(result.billed).toBe(proSandboxFee(COST).totalUsd);
     expect(result.records.map((entry) => entry.code)).toEqual(['MARKUP_WAIVED_NO_PREVIEW']);
     expect(result.records[0].message).not.toContain('Superseded');
   });
@@ -425,7 +427,7 @@ describe('3 — the watchdog waiver describes the final settled bill, not an int
   it.each(['AGENTV3_BILL_LATE_STOP_RULES', 'AGENTV3_BILL_CANCELLED'])('%s=off preserves its existing positive bill', async (key) => {
     process.env[key] = 'off';
     const result = await watchdogWithWaiver({ written: 0 });
-    expect(result.billed).toBe(COST);
+    expect(result.billed).toBe(proSandboxFee(COST).totalUsd);
     expect(result.records[0].message).not.toContain('Superseded');
   });
 
@@ -436,7 +438,7 @@ describe('3 — the watchdog waiver describes the final settled bill, not an int
     { name: 'non-artifact turn', expectsArtifacts: false },
   ])('$name: no invented waiver and the normal discount still applies', async (c) => {
     const result = await watchdogWithWaiver({ ...c, cause: null, pct: 25 });
-    expect(result.billed).toBe(1.5);
+    expect(result.billed).toBe(proSandboxFee(1.5).totalUsd);
     expect(result.records.some((entry) => entry.code === 'MARKUP_WAIVED_NO_PREVIEW')).toBe(false);
     expect(result.debits).toHaveLength(1);
   });
@@ -460,14 +462,14 @@ describe('3 — the watchdog waiver describes the final settled bill, not an int
     expect(result.providerTokens).toEqual([{ inputTokens: 100, outputTokens: 20 }]);
     expect(result.cacheTokens).toEqual([12]);
     expect(result.snapshots).toEqual([{
-      userTier: 'paid', charged: true, billedButNotDebited: false, billedUsd: 0.5, billedInr: 50,
-      realCostUsd: 0.4, sandboxCostUsd: 0.1, powerMode: false, powerLevel: 'normal', noClaude: false,
+      userTier: 'paid', charged: true, billedButNotDebited: false, billedUsd: 0.41, billedInr: 41,
+      realCostUsd: 0.4, sandboxCostUsd: 0.1, preSandboxSubtotalUsd: 0.4, sandboxFeeUsd: 0.01, sandboxFeePct: 2.5, powerMode: false, powerLevel: 'normal', noClaude: false,
     }]);
   });
 
   it.each([0, 9])('an absent diagnostic observer does not affect the bill (files=%s)', async (written) => {
     const result = await watchdogWithWaiver({ written, observer: false });
-    expect(result.billed).toBe(written === 0 ? 0 : COST);
+    expect(result.billed).toBe(written === 0 ? 0 : proSandboxFee(COST).totalUsd);
     expect(result.records).toEqual([]);
     expect(result.snapshots).toEqual([]);
     expect(result.debits).toHaveLength(written === 0 ? 0 : 1);
@@ -475,17 +477,17 @@ describe('3 — the watchdog waiver describes the final settled bill, not an int
 
   it.each([0, 9])('a waiver recorder exception occurs AFTER settlement and cannot bypass it (files=%s)', async (written) => {
     const result = await watchdogWithWaiver({ written, throwOnWaiver: true });
-    expect(result.billed).toBe(written === 0 ? 0 : COST);
-    expect(result.snapshots[0].billedUsd).toBe(result.billed);
+    expect(result.billed).toBe(written === 0 ? 0 : proSandboxFee(COST).totalUsd);
+    expect(result.snapshots[0].billedUsd).toBeCloseTo(result.billed, 6);
     expect(result.order.indexOf('MARKUP_WAIVED_NO_PREVIEW')).toBeGreaterThan(result.order.indexOf('billing'));
     expect(result.debits).toHaveLength(written === 0 ? 0 : 1);
   });
 
   it.each([
     { name: 'failed build', ok: false, expected: 0 },
-    { name: 'no user identity', user: false, expected: COST },
-    { name: 'billing disabled', billingActive: false, expected: COST },
-    { name: 'missing idempotency timestamp', startedAt: null, expected: COST },
+    { name: 'no user identity', user: false, expected: proSandboxFee(COST).totalUsd },
+    { name: 'billing disabled', billingActive: false, expected: proSandboxFee(COST).totalUsd },
+    { name: 'missing idempotency timestamp', startedAt: null, expected: proSandboxFee(COST).totalUsd },
   ])('$name: the real debit guard is preserved', async ({ expected, ...c }) => {
     const result = await watchdogWithWaiver({ ...c, cause: null });
     expect(result.billed).toBe(expected);
@@ -495,8 +497,8 @@ describe('3 — the watchdog waiver describes the final settled bill, not an int
   it('both waiver producers use settled values; a newly raw sibling fails this census', () => {
     expect(ROUTE_CODE.match(/code: 'MARKUP_WAIVED_NO_PREVIEW'/g)).toHaveLength(2);
     expect(ROUTE_CODE.match(/message: markupWaiverSettledLine\(/g)).toHaveLength(2);
-    expect(enrichment).toContain('markupWaiverSettledLine(wdMarkup.reason, watchdogBilledUsd)');
-    expect(ROUTE).toContain('markupWaiverSettledLine(markupDecision.reason, effectiveBilledUsd, zeroBillReason)');
+    expect(enrichment).toContain('markupWaiverSettledLine(wdMarkup.reason, watchdogBilledUsd, undefined, true)');
+    expect(ROUTE).toContain('markupWaiverSettledLine(markupDecision.reason, effectiveBilledUsd, zeroBillReason, true)');
   });
 
   it('reverting either the final-value wording or placement fails the same zero-bill regression', async () => {
@@ -507,8 +509,8 @@ describe('3 — the watchdog waiver describes the final settled bill, not an int
     const statement = enrichment.slice(start, end);
     const without = enrichment.slice(0, start) + enrichment.slice(end);
     const beforeStop = without.replace('watchdogBilledUsd = wdMarkup.billedUsd;', `watchdogBilledUsd = wdMarkup.billedUsd;\n${statement}`);
-    const rawReason = enrichment.replace('markupWaiverSettledLine(wdMarkup.reason, watchdogBilledUsd)', 'wdMarkup.reason');
-    const original = beforeStop.replace('markupWaiverSettledLine(wdMarkup.reason, watchdogBilledUsd)', 'wdMarkup.reason');
+    const rawReason = enrichment.replace('markupWaiverSettledLine(wdMarkup.reason, watchdogBilledUsd, undefined, true)', 'wdMarkup.reason');
+    const original = beforeStop.replace('markupWaiverSettledLine(wdMarkup.reason, watchdogBilledUsd, undefined, true)', 'wdMarkup.reason');
     for (const mutant of [beforeStop, rawReason, original]) {
       expect(mutant).not.toBe(enrichment);
       const result = await watchdogWithWaiver({ written: 0 }, compileEnrichment(mutant));

@@ -1,12 +1,13 @@
 import { PUBLIC_BUILD_ENGINE_UNAVAILABLE } from '../../lib/buildEngineError';
 import { describe, expect, it, vi } from 'vitest';
-import { createSurplusBuildTransport, SurplusBuildTransportError, SURPLUS_TRANSPORT_TIMEOUT_MS } from './transport';
+import { createSurplusBuildTransport, SurplusBuildTransportError, SURPLUS_TRANSPORT_TIMEOUT_MS, SURPLUS_TRANSPORT_MAX_ATTEMPTS } from './transport';
 import { BuildStoppedError } from '../../AgentV3/stopSignal';
 const env = () => ({ AGENTV3_SURPLUS_BUILDER: 'true', SURPLUS_API_KEY: 'test-only-not-a-real-key' });
 const request = () => ({ model: 'reviewed-model', provider: 'reviewed-provider', si_route: { objective: 'price' }, messages: [{ role: 'user', content: 'build' }], stream: false, max_tokens: 500 });
 const signal = () => new AbortController().signal;
-function setup(response = new Response('{"choices":[]}', { status: 200 })) {
-  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response);
+// Transport retries transient/empty bodies (SURPLUS_TRANSPORT_MAX_ATTEMPTS); a factory gives each attempt a fresh body.
+function setup(response: Response | (() => Response) = () => new Response('{"choices":[{"message":{"content":"ok"}}]}', { status: 200 })) {
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => (typeof response === 'function' ? response() : response));
   return { fetcher, dispatch: createSurplusBuildTransport(env(), fetcher) };
 }
 describe('dedicated min90 build transport', () => {
@@ -25,7 +26,8 @@ describe('dedicated min90 build transport', () => {
       expect(Object.getOwnPropertyDescriptor(error, 'code')?.enumerable).toBe(false);
       expect(error.cause).toBeUndefined(); expect(error.body).toBeUndefined(); expect(error.headers).toBeUndefined();
       expect(JSON.stringify(error)).not.toMatch(/sk-private|PROMPT_PRIVATE|Surplus|surplusintelligence|buyer_cost|reviewed-model|response|network/);
-      expect(fetcher).toHaveBeenCalledOnce();
+      // Plain network errors are retried (bounded); typed transport errors are final.
+      expect(fetcher).toHaveBeenCalledTimes(upstream instanceof SurplusBuildTransportError ? 1 : SURPLUS_TRANSPORT_MAX_ATTEMPTS);
     }
   });
   it('also sanitizes errors thrown during request encoding before fetch', async () => {
@@ -60,27 +62,27 @@ describe('dedicated min90 build transport', () => {
   });
   it('preserves JSON error bodies and only allowlisted response metadata', async () => {
     const body = { error: { code: 'provider_error' }, usage: { buyer_cost_micro: '1' } };
-    const { dispatch } = setup(new Response(JSON.stringify(body), { status: 200, headers: {
+    const { dispatch } = setup(() => new Response(JSON.stringify(body), { status: 200, headers: {
       'x-si-provider-family': 'reviewed-provider', 'x-si-route-objective': 'price', 'set-cookie': 'never forward', 'x-secret': 'never forward',
     } }));
     expect(await dispatch(request(), signal())).toEqual({ body, status: 200, receivedAt: expect.any(Number), headers: { 'x-si-provider-family': 'reviewed-provider', 'x-si-route-objective': 'price' } });
   });
   it('preserves non-2xx JSON for accounting validation rather than silently retrying', async () => {
-    const { dispatch, fetcher } = setup(new Response('{"error":"quota"}', { status: 429 }));
+    const { dispatch, fetcher } = setup(() => new Response('{"error":"quota"}', { status: 429 }));
     expect(await dispatch(request(), signal())).toMatchObject({ status: 429, body: { error: 'quota' } });
-    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledTimes(SURPLUS_TRANSPORT_MAX_ATTEMPTS);
   });
   it('accepts whitespace keepalives and fragmented JSON', async () => {
-    const body = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(' \n\t {"ok":')); c.enqueue(new TextEncoder().encode('true}')); c.close(); } });
-    const { dispatch } = setup(new Response(body));
+    const body = () => new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(' \n\t {"ok":')); c.enqueue(new TextEncoder().encode('true}')); c.close(); } });
+    const { dispatch } = setup(() => new Response(body()));
     expect((await dispatch(request(), signal())).body).toEqual({ ok: true });
   });
   it('rejects non-JSON safely without exposing raw body or network errors', async () => {
-    const { dispatch } = setup(new Response('SECRET RESPONSE'));
+    const { dispatch } = setup(() => new Response('SECRET RESPONSE'));
     await expect(dispatch(request(), signal())).rejects.toThrow(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
     const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error('SECRET CREDENTIAL'));
     await expect(createSurplusBuildTransport(env(), fetcher)(request(), signal())).rejects.toThrow(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
-    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledTimes(SURPLUS_TRANSPORT_MAX_ATTEMPTS);
   });
   it('bounds declared and streamed response sizes and cancels the reader', async () => {
     const { dispatch } = setup(new Response('{}', { headers: { 'content-length': '4194305' } }));
@@ -110,7 +112,7 @@ describe('dedicated min90 build transport', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
   it('passes a hard transport timeout so hung Surplus HTTP cannot pin the builder forever', async () => {
-    expect(SURPLUS_TRANSPORT_TIMEOUT_MS).toBe(60_000);
+    expect(SURPLUS_TRANSPORT_TIMEOUT_MS).toBe(180_000);
     const { dispatch, fetcher } = setup();
     await dispatch(request(), signal());
     const init = fetcher.mock.calls[0]?.[1] as RequestInit | undefined;

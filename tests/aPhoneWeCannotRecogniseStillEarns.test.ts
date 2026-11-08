@@ -26,21 +26,18 @@ const read = (p: string) => readFileSync(resolve(__dirname, '..', p), 'utf8');
 afterEach(() => { vi.resetModules(); vi.doUnmock('@capacitor/core'); vi.doUnmock('../src/lib/deviceIntegrityNative'); vi.unstubAllGlobals(); });
 
 describe('1 · a phone we cannot recognise still earns what the website earns', () => {
-  it('🔴 the client sends a failed-device claim for a web step under the web rules, instead of dropping it', async () => {
+  it('🔴 a failed device check earns NOTHING now — no web fallback (admin 2026-10-30: app-only, Play Integrity)', async () => {
     vi.doMock('../src/lib/deviceIntegrityNative', () => ({
       collectDeviceCheck: async () => ({ outcome: 'failed', message: 'Missing required properties: nonce' }),
     }));
     const posted: Array<{ url: string; body: any }> = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
       posted.push({ url, body: JSON.parse(init.body) });
-      return { ok: true, json: async () => ({ ok: true, granted: 10_000, rupees: 100 }) };
+      return { ok: true, json: async () => ({ ok: true }) };
     }));
     const { postReferral } = await import('../src/lib/referralClaim');
-    const r = await postReferral('/api/referral/U/claim', { step: 'signup' }, 'android');
-    expect(r.rupees).toBe(100);
-    const claim = posted.find((p) => p.url.endsWith('/claim'))!;
-    expect(claim.body).toEqual({ step: 'signup', platform: 'web' });
-    // Still counted as a failed device check on the admin's tally.
+    await expect(postReferral('/api/referral/U/claim', { step: 'signup' }, 'android')).rejects.toThrow();
+    expect(posted.some((p) => p.url.endsWith('/claim'))).toBe(false);
     expect(posted.some((p) => p.url.endsWith('/claim-failed'))).toBe(true);
   });
 

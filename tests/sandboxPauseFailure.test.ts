@@ -1,94 +1,48 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
-import {
-  shouldMarkPausedAfterFailure,
-  PAUSE_ATTEMPTS_BEFORE_GIVING_UP,
-  sandboxesToReap,
-} from '../src/server/AgentV3/sandboxReaper';
+import { readFileSync } from 'node:fs';
+import { PAUSE_FAILURE_WARNING_THRESHOLD, sandboxesToReap } from '../src/server/AgentV3/sandboxReaper';
 
-/**
- * THE BUG (found 2026-08-24, reading the sweeps against the E2B bill). Both sweeps asked E2B to pause a
- * sandbox and then wrote the durable `pausedAt` flag regardless of the answer. That flag is the orphan
- * reaper's off switch. So a pause that failed against a machine which was still running produced a VM
- * that nothing could ever stop again — invisible to the in-memory sweep (its reference was kept but its
- * activity stamp deleted) and invisible to the reaper (its record said "already paused"). It billed
- * until E2B's own 60-minute lifetime, and the logs recorded a success.
- *
- * That is the shape of the month's unexplained number: an average billed life near an hour, on a service
- * whose idle window is five minutes and whose orphan window is twenty.
- */
-const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
+// Executable provider-failure and async-race coverage lives in sandboxSweepSafety.test.ts.
+// These checks retain the pure eligibility contract and guard both sweep call sites.
+describe('unconfirmed pauses remain eligible rather than being declared finished', () => {
+  const now = 10_000_000;
+  const stale = { workspaceId: 'w', sandboxId: 's', updatedAt: now - 60 * 60_000 };
 
-describe('a pause we could not confirm is a retry, not a success', () => {
-  it('does not retire the record on the first failure — that is the expensive mistake', () => {
-    expect(shouldMarkPausedAfterFailure(1)).toBe(false);
-    expect(shouldMarkPausedAfterFailure(2)).toBe(false);
+  it('a failure count is diagnostic, never evidence that a sandbox stopped', () => {
+    expect(PAUSE_FAILURE_WARNING_THRESHOLD).toBe(3);
+    for (const failures of [1, 2, 3, 100, Number.NaN]) {
+      const unconfirmed = { ...stale, failures };
+      expect(sandboxesToReap([unconfirmed], now)).toHaveLength(1);
+    }
   });
 
-  it('gives up once retrying has stopped being worth it', () => {
-    expect(shouldMarkPausedAfterFailure(PAUSE_ATTEMPTS_BEFORE_GIVING_UP)).toBe(true);
-    expect(shouldMarkPausedAfterFailure(PAUSE_ATTEMPTS_BEFORE_GIVING_UP + 10)).toBe(true);
-  });
-
-  it('an unreadable count keeps trying — it must never resolve to "done"', () => {
-    // Same direction as every other unknown in this file: the cheap side of the trade. Being wrong
-    // costs one API call per sweep; the other way costs an hour of compute nobody is watching.
-    expect(shouldMarkPausedAfterFailure(NaN)).toBe(false);
-    expect(shouldMarkPausedAfterFailure(undefined as unknown as number)).toBe(false);
-  });
-
-  it('the flag really is the reaper\'s off switch — the premise of the whole fix', () => {
-    // If this stopped being true, marking early would be harmless and this test should be deleted
-    // rather than quietly kept. Asserted so whoever changes sandboxesToReap sees the dependency.
-    const now = 10_000_000;
-    const stale = { workspaceId: 'w', sandboxId: 's', updatedAt: now - 60 * 60_000 };
+  it('only a confirmed pause newer than the last use retires a record', () => {
     expect(sandboxesToReap([stale], now)).toHaveLength(1);
     expect(sandboxesToReap([{ ...stale, pausedAt: now - 30 * 60_000 }], now)).toHaveLength(0);
+    expect(sandboxesToReap([{ ...stale, pausedAt: stale.updatedAt - 1 }], now)).toHaveLength(1);
   });
 });
 
-describe('both sweeps are wired to the answer', () => {
-  const src = read('src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts');
+describe('both automatic sweeps use truthful conditional settlement', () => {
+  const src = readFileSync(new URL('../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts', import.meta.url), 'utf8');
+  const idleAt = src.indexOf('private async _sweepIdleSandboxes(');
+  const orphanAt = src.indexOf('private async _sweepOrphanSandboxes(');
+  const idle = src.slice(idleAt, orphanAt);
+  const orphan = src.slice(orphanAt, src.indexOf('private _touchDurable(', orphanAt));
 
-  it('the idle sweep captures the result instead of swallowing it', () => {
-    // The original was `await this.pauseSandbox(...).catch(() => {})` — a void. There is no way to
-    // honour a boolean you never took.
-    expect(src).toContain('const paused = await this.pauseSandbox(sandbox.sandboxId).catch(() => false);');
-    // Since 2026-09-11 the call also names WHICH sweep paused the machine (sandboxLifetime.ts); the
-    // shape this test guards — mark only on a confirmed success — is unchanged.
-    expect(src).toContain("if (paused) await sandboxStore.markPaused(workspaceId, 'idle-sweep').catch(() => {});");
+  it.each([['idle', idle], ['orphan', orphan]])('%s sweep captures pause success and uses conditional settlement', (_name, body) => {
+    expect(body).toMatch(/const paused = await this\.pauseSandbox\(/);
+    expect(body).toContain('if (paused)');
+    expect(body).toContain('sandboxStore.markPausedIfUnchanged(');
+    expect(body).not.toContain('sandboxStore.markPaused(');
+    expect(body).not.toContain('killSandbox(');
   });
 
-  it('the orphan sweep marks only on success or after enough failures', () => {
-    // Old assertion:
-    //   } else if (shouldMarkPausedAfterFailure(this._notePauseFailure(rec.workspaceId))) {
-    // BLD-16: give-up now kills the sandbox (unless it is busy) and only then marks paused.
-    // The counter is still incremented first, and a confirmed pause still clears it.
-    expect(src).toContain('const attempts = this._notePauseFailure(rec.workspaceId);');
-    expect(src).toContain("if (shouldMarkPausedAfterFailure(attempts) && actionAfterPauseFailure(attempts, busy) === 'kill') {");
-    expect(src).toContain('SANDBOX_PAUSE_FAILED_KILLED');
-    expect(src).toContain('this._pauseFailures.delete(rec.workspaceId);');
-  });
-
-  it('no markPaused call remains outside a success or give-up branch', () => {
-    // The regression this guards is a THIRD call site added later that stamps unconditionally, which
-    // would reopen the hole without touching either line asserted above.
-    const calls = src.match(/markPaused\(/g) ?? [];
-    expect(calls).toHaveLength(3); // idle (on success), orphan (on success), orphan (after giving up)
-  });
-
-  it('pauseSandbox lets go of the reference whatever happened', () => {
-    // The dropped reference is what makes the failure path RECOVERABLE: getSandbox then reconnects by
-    // durable id, which auto-resumes. Keeping an unconfirmed handle was the one outcome with no way
-    // back — every later build would return it warm and every command against it would fail.
-    const at = src.indexOf('async pauseSandbox(');
-    const body = src.slice(at, src.indexOf('\n  }', at));
+  it('pause reference cleanup compares the original object, not just the reused sandbox id', () => {
+    const start = src.indexOf('async pauseSandbox(');
+    const body = src.slice(start, src.indexOf('async killSandbox(', start));
     expect(body).toContain('} finally {');
-    const fin = body.slice(body.indexOf('} finally {'));
-    // REPOINTED (same day): the drop now goes through `_dropSandbox`, which also clears the billing
-    // clock and the origin — see sandboxDropState.test.ts. The guarantee asserted here is unchanged
-    // and stronger: the reference is let go whatever happened, and nothing derived from it survives.
-    expect(fin).toContain('this._dropSandbox(wid);');
+    expect(body).toMatch(/this\.sandboxes\.get\(wid\) === sb/);
+    expect(body).toContain('this._dropSandbox(wid)');
   });
 });

@@ -149,7 +149,8 @@ describe('the route wires it the only safe way', () => {
     expect(route.match(/const applyGreenSnapshotRestore =/g)?.length).toBe(1);
     // Four since 2026-09-28: the explorer repair (explorerRepair.ts) is the fourth verifyAfterFix site, same helper.
     // Five since 2026-09-30: the test-suite repair on a green app (autopsy 8e124182), same helper.
-    expect(route.match(/revert: revertToGreenSnapshot,/g)?.length).toBe(5);
+    // Six since 2026-10-30: the game repair (gameRepair.ts, AGENTV3_GAME_AUTO_REPAIR), same helper.
+    expect(route.match(/revert: revertToGreenSnapshot,/g)?.length).toBe(6);
     const def = route.slice(route.indexOf('const revertToGreenSnapshot'), route.indexOf('const revertToGreenSnapshot') + 1200);
     expect(def).toContain('await applyGreenSnapshotRestore(plan)');
     expect(def).toContain('if (!snapshotRestoreComplete(plan, outcome)) throw');

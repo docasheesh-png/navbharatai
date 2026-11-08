@@ -47,7 +47,8 @@ describe('Plan & Advise modes + queue (3-role)', () => {
   it('the composer mode selector really offers Build / Plan / Advise', () => {
     expect(panel).toContain("['build', 'Build', '🔨']");
     expect(panel).toContain("['planner', 'Plan', '🧠']");
-    expect(panel).toContain("['advisor', 'Advise', '🔍']");
+    expect(panel).toContain('Advise — ideas for what to build next');
+    expect(panel).toContain('<span>Advise</span>');
   });
 });
 

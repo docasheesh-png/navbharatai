@@ -1,9 +1,17 @@
+import { getChatOutcomeObservation } from '../AI/chatOutcomeObservation';
 import { adjustAdminBuildTokens, AdminTokenAdjustmentError } from '../lib/adminTokenAdjustment';
+import { adminTokenAdjustmentReceipt } from '../lib/adminTokenAdjustmentReceipt';
+import { freeProgramStore } from '../lib/freeProgram';
+import { walletMergeResolveEnabled } from '../lib/walletResolve';
 import { validRequestId } from '../lib/walletOps';
 import { registerInferenceGatewayAdminRoutes } from './inferenceGatewayAdmin';
 import { registerFreeChatChainRoutes } from './freeChatChainAdmin';
+import { registerDeepinfraComparisonRoutes } from './deepinfraComparison';
 import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
 import { registerSurplusRegistryAdminRoutes } from './surplusRegistryAdmin';
+import { registerApiProvidersAdminRoutes } from './apiProvidersAdmin';
+import { registerProviderSwitchesAdminRoutes } from './providerSwitchesAdmin';
+import { registerGameAssetsAdminRoutes } from './gameAssetsAdmin';
 import { sendAdminOwnerApps } from './adminOwnerApps';
 import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
 import { registerAiMaintenanceRoutes } from './aiMaintenance';
@@ -60,7 +68,7 @@ import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } f
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mergeWallets } from '../lib/accountMerge';
 import { serverStats } from '../lib/serverStats';
-import { getProviderStats, getRouterOutcomeStats } from '../AI/Router/AIRouter';
+import { getProviderStats, getRouterOutcomeStats, visibleProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { metricsTimeline } from '../lib/metricsTimeline';
@@ -113,7 +121,7 @@ import { saveNotification, normalizeTarget } from '../lib/AdminNotificationStore
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore, platformHealthInputs } from '../lib/HealthScore';
-import { summariseUsage, marginInr } from '../lib/usageLedger';
+import { summariseUsage, marginInr, NOT_A_PROVIDER } from '../lib/usageLedger';
 import { platformMarginWindow } from '../lib/platformMargin';
 import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
 import { usdToInr } from '../lib/UsdInrRate';
@@ -178,6 +186,7 @@ import { collectionsNeedingRetention } from '../lib/DataRetentionManager';
  * warning counts only what a human still has to decide.
  */
 const GROWING_COLLECTIONS: readonly string[] = [
+  'session_revocations', // Retained account-session security cutoffs; never silently purged.
   'free_answer_quota', // Shared Free answer admissions; bounded eight-day retention.
   'app_builds', 'build_sessions', 'build_sessions_v2', 'build_history_v2', 'user_build_history', 'user_costs', 'server_logs',
   'agentv3_build_requests',
@@ -210,6 +219,12 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'admin_failed_report_autopsies',
   // Singleton counter for permanent failed-build report numbers (RETAINED_INDEFINITELY).
   'admin_failed_report_numbers',
+  // The build report registry (one row per report, 180 days) and its counter (RETAINED_INDEFINITELY).
+  'build_report_numbers', 'admin_build_report_counter',
+  // The admin's note of which login each outside API account uses (RETAINED_INDEFINITELY; one doc per provider).
+  'admin_api_provider_accounts',
+  // The AI provider on/off switches: one state doc with a bounded change history (RETAINED_INDEFINITELY).
+  'admin_provider_switches',
   'hosting_billing', 'hosting_period_usage',
   // Already on clocks, and absent from this inventory for the same reason the eleven above were.
   'takedown_records', 'safety_flags', 'admin_audit_log', 'build_jobs', 'build_failures',
@@ -440,7 +455,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
   registerLiveModelRegistryRoutes(app, verifyAdminToken);
   registerSurplusRegistryAdminRoutes(app, verifyAdminToken);
+  registerApiProvidersAdminRoutes(app, verifyAdminToken);
+  registerProviderSwitchesAdminRoutes(app, verifyAdminToken);
+  registerGameAssetsAdminRoutes(app, verifyAdminToken);
   registerFreeChatChainRoutes(app, verifyAdminToken);
+  registerDeepinfraComparisonRoutes(app, verifyAdminToken);
   registerInferenceGatewayAdminRoutes(app, verifyAdminToken);
   registerAiMaintenanceRoutes(app, verifyAdminToken);
   registerFreeProgramRoutes(app, verifyAdminToken);
@@ -825,7 +844,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     // ONE reading of this instance's load per response, so the health score and the load panel beside it can
     // never disagree (audit 2026-10-11, F15).
     const load = serverLoad.snapshot();
-    const providerStats = guard(() => getProviderStats());
+    const providerStats = guard(() => visibleProviderStats(getProviderStats()));
 
     // The same composite health inputs the dedicated /health-score endpoint reports, from the same
     // real signals. Kept identical on purpose — two health numbers would be worse than none.
@@ -1864,7 +1883,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // Provider ranking by request count — from the SAME rollup as the burn map (see above).
       // `avgLatencyMs` is null when no latency was recorded, never 0: "unmeasured" and "instant" are
       // different facts, and the old tally printed the legacy rows as "0 ms avg".
+      // Turns NO provider answered are not engines — listed apart, never ranked (NOT_A_PROVIDER, usageLedger.ts).
+      const unansweredTurns = Object.entries(usage.byProvider)
+        .filter(([name]) => name in NOT_A_PROVIDER)
+        .map(([name, r]) => ({ key: name, label: NOT_A_PROVIDER[name], requests: r.requests }))
+        .sort((a, b) => b.requests - a.requests);
       const providerRanking = Object.entries(usage.byProvider)
+        .filter(([name]) => !(name in NOT_A_PROVIDER))
         .map(([name, r]) => ({
           name,
           requests: r.requests,
@@ -1902,7 +1927,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         }));
 
       // Live provider stats from AIRouter
-      const liveProviderStats = getProviderStats();
+      const liveProviderStats = visibleProviderStats(getProviderStats());
 
       return res.json({
         // WHAT THIS ROUTE MEASURES, stated so the screen can say it (admin Monitor capture, 2026-09-14).
@@ -1937,7 +1962,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         hitsSinceBoot: true,
         hitsSinceBootSeconds: Math.round(process.uptime()),
         newUsersToday, activeUsers24h,
-        providerRanking, tokenPurchaseCount, recentPurchases,
+        providerRanking, unansweredTurns, tokenPurchaseCount, recentPurchases,
         liveProviderStats,
         failedLoginAttempts: serverStats.failedLoginIPs.slice(-20),
       });
@@ -2509,6 +2534,26 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
+  // Read-only reconciliation after Admin re-login/expiry. A missing receipt never proves no write.
+  // The existing API version middleware exposes the same handler at /api/v1/admin/… too.
+  app.get('/api/admin/token-adjustments/:requestId/receipt', verifyAdminToken, async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const { requestId } = routeParams(req.params);
+    if (!validRequestId(requestId)) return res.status(400).json({ ok: false, status: 'unknown', error: 'A valid original operation ID is required. No adjustment was sent.' });
+    try {
+      const pause = await freeProgramStore.read();
+      const outcome = await adminTokenAdjustmentReceipt(getDb(), requestId, {
+        paused: pause.paused, pauseStateKnown: !pause.unavailable, mergeResolutionEnabled: walletMergeResolveEnabled(),
+      });
+      audit('ADMIN_TOKEN_ADJUSTMENT_RECEIPT_VIEW', { admin: adminUsername(), requestId, result: outcome.status, ip: req.ip });
+      if (outcome.status === 'unknown') return res.status(404).json({ ok: false, status: 'unknown', error: outcome.reason });
+      return res.json(outcome.response);
+    } catch {
+      audit('ADMIN_TOKEN_ADJUSTMENT_RECEIPT_VIEW', { admin: adminUsername(), requestId, result: 'unavailable', ip: req.ip });
+      return res.status(500).json({ ok: false, status: 'unknown', error: 'The original receipt could not be verified. Do not replace its request ID or add the credit again.' });
+    }
+  });
+
   // ── User token adjustment ─────────────────────────────────────────────────
   app.post('/api/admin/users/:userId/tokens', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
@@ -2524,7 +2569,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const reason = reasonRead.reason;
     try {
       const requestId = req.body?.requestId;
-      if (!validRequestId(requestId)) return res.status(400).json({ error: 'Refresh the admin panel before adjusting tokens.' });
+      if (!validRequestId(requestId)) return res.status(400).json({ ok: false, code: 'ADMIN_CLIENT_UPDATE_REQUIRED',
+        error: 'This app cannot safely identify the adjustment. No tokens were changed by this request. Update the app or open https://navbharatai.com/admin in a current browser; reconcile earlier attempts before creating a new grant.' });
       const outcome = await adjustAdminBuildTokens(db, { userId, delta, reason, requestId }, new Date().toISOString());
       if (outcome === null) {
         audit('ADMIN_TOKEN_ADJUST', { admin: adminUsername(), userId, delta, reason, result: 'user-not-found', ip: req.ip });
@@ -3484,6 +3530,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // with the rate so the board can refuse to grade two requests as a platform verdict.
       if (req > 0) readings.providerErrorRate = (Number(outcomes?.failed) || 0) / req;
       readings.providerRequests = req;
+      readings.chatOutcomes = getChatOutcomeObservation();
     } catch { /* unknown */ }
 
     // Sandbox load — live E2B machines. The SAME reading the Monitor's "Live sandboxes" tile uses, so
@@ -3535,6 +3582,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
     const tiles = loadBoard(readings);
     res.json({
+      routingObservations: readings.chatOutcomes,
       level: worstLevel(tiles),
       tiles,
       // Named so the screen can say WHICH ceilings it could not read, rather than showing a quiet zero.

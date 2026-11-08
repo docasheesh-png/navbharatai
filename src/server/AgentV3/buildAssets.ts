@@ -114,7 +114,9 @@ export async function persistBuildAssets(
     for (const path of save) {
       try {
         const base64 = await source.readBinaryFile(workspaceId, path);
-        const bytes = Math.floor((base64.length * 3) / 4);
+        // Count decoded bytes, including base64 padding: an exact-limit GLB must not be
+        // rejected merely because its encoded string has one or two padding characters.
+        const bytes = Buffer.byteLength(base64, 'base64');
         // A zero-byte "asset" is a broken file, not a picture — never saved as if it were one.
         if (!base64 || bytes === 0 || bytes > MAX_BUILD_ASSET_BYTES) { out.skipped.push(path); continue; }
         assets[path] = `data:${contentTypeFor(path).split(';')[0]};base64,${base64}`;

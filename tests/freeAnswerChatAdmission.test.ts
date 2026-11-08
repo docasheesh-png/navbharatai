@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// These cover the legacy no-wallet free-quota path; the wallet is ON by default since 2026-10-30.
+process.env.UNIFIED_WALLET_ENABLED = 'off';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 const m = vi.hoisted(() => ({ verify: vi.fn(), identity: vi.fn(), legacy: vi.fn(), detailed: vi.fn(), stream: vi.fn(), oldContext: vi.fn(), add: vi.fn(), live: vi.fn(), document: vi.fn(), vision: vi.fn(), reserve: vi.fn(), renew: vi.fn(), settle: vi.fn(), status: vi.fn() }));
 vi.mock('../src/server/lib/authMiddleware', async original => ({ ...await original<typeof import('../src/server/lib/authMiddleware')>(), verifyFirebaseToken: m.verify, verifyFirebaseIdentity: m.identity }));
@@ -50,15 +52,15 @@ describe('real chat ingress enforces shared answer admission without changing pr
     const res = response();
     m.detailed.mockImplementationOnce(async () => { expect(currentInferenceGatewayContext()).toBeUndefined(); return { ok: true, content: 'A useful answer.' }; });
     await route(path)(request({ uid: 'victim', userId: 'victim', tier: 'paid', freeAnswerQuota: false }), res);
-    expect(m.reserve).toHaveBeenCalledWith({ key: 'user:verified-user', limit: 20 }, requestId);
+    expect(m.reserve).toHaveBeenCalledWith({ key: 'user:verified-user', limit: 50 }, requestId, undefined, 240_000);
     expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'answered');
     expect(m.legacy).toHaveBeenCalledOnce(); expect(m.detailed).toHaveBeenCalledOnce();
     expect(res.body).toEqual({ reply: 'A useful answer.' });
   });
-  it('uses five guest answers and trusted address backstop despite forged account metadata and old unlimited knob', async () => {
+  it('uses ten guest answers and trusted address backstop despite forged account metadata and old unlimited knob', async () => {
     m.verify.mockResolvedValue(null); m.identity.mockResolvedValue(null);
     const res = response(); await route()(request({ uid: 'victim', userId: 'victim', tenantId: 'victim' }), res);
-    expect(m.reserve).toHaveBeenCalledWith({ key: 'guest-device:22222222-2222-4222-8222-222222222222', limit: 5, ipKey: 'ip:203.0.113.9' }, requestId);
+    expect(m.reserve).toHaveBeenCalledWith({ key: 'guest-device:22222222-2222-4222-8222-222222222222', limit: 10, ipKey: 'ip:203.0.113.9', guest: true }, requestId, undefined, 240_000);
     expect(res.body.reply).toBe('A useful answer.');
   });
   it.each(['daily-limit', 'busy', 'duplicate', 'attempt-limit'])('stops %s before documents, prompt lookup and inference', async reason => {
@@ -79,7 +81,7 @@ describe('real chat ingress enforces shared answer admission without changing pr
     const consume=vi.spyOn(firestoreGuestUsageStore,'consume').mockResolvedValue({allow:false,reason:'device'});
     const res=response(); await route()(request(),res);
     expect(consume).toHaveBeenCalledOnce(); expect(res.statusCode).toBe(403); expect(res.body.code).toBe('guest_limit_reached');
-    expect(m.reserve.mock.calls[0][0]).toMatchObject({limit:5});
+    expect(m.reserve.mock.calls[0][0]).toMatchObject({limit:10});
     expect(m.settle).toHaveBeenCalledWith(expect.any(Object),'provider-failed');
     expect(m.legacy).not.toHaveBeenCalled(); expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled(); expect(m.add).not.toHaveBeenCalled();
   });

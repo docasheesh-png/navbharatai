@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// These cover the legacy no-wallet free-quota path; the wallet is ON by default since 2026-10-30.
+process.env.UNIFIED_WALLET_ENABLED = 'off';
 import { EventEmitter } from 'node:events';
 const m = vi.hoisted(() => ({ reserve: vi.fn(), renew: vi.fn(), settle: vi.fn(), status: vi.fn(), identify: vi.fn(), limiter: vi.fn() }));
 vi.mock('./freeAnswerQuotaStore', async original => ({ ...await original<typeof import('./freeAnswerQuotaStore')>(), FreeAnswerQuotaStore: class { reserve=m.reserve; renew=m.renew; settle=m.settle; status=m.status; } }));
@@ -13,7 +15,7 @@ afterEach(() => { vi.useRealTimers(); });
 function deferred<T>() { let resolve!: (value: T) => void; const promise=new Promise<T>(r=>{resolve=r;}); return {promise,resolve}; }
 async function flush() { for(let n=0;n<6;n++) await Promise.resolve(); }
 describe('shared Free answer request admission', () => {
- it('uses verified identity and ignores body claimed user', async () => {const {req,res}=fixture(); req.body={userId:'victim'}; await withFreeAnswerQuota(req,res,async()=>markFreeAnswer(req)); expect(m.reserve.mock.calls[0][0]).toMatchObject({key:'user:verified',limit:20}); expect(m.settle.mock.calls[0][1]).toBe('answered');});
+ it('uses verified identity and ignores body claimed user', async () => {const {req,res}=fixture(); req.body={userId:'victim'}; await withFreeAnswerQuota(req,res,async()=>markFreeAnswer(req)); expect(m.reserve.mock.calls[0][0]).toMatchObject({key:'user:verified',limit:50}); expect(m.settle.mock.calls[0][1]).toBe('answered');});
  it('blocks before handler and never retries paid on exhaustion',async()=>{m.reserve.mockResolvedValue({allowed:false,reason:'daily-limit',status:{}}); const {req,res}=fixture(); const run=vi.fn(); await withFreeAnswerQuota(req,res,run); expect(run).not.toHaveBeenCalled(); expect(res.status).toHaveBeenCalledWith(429); expect(res.json.mock.calls[0][0].code).toBe('FREE_ANSWER_DAILY_LIMIT');});
  it('restores a connected failed turn but retains abandoned uncertainty',async()=>{const a=fixture(); await withFreeAnswerQuota(a.req,a.res,async()=>{}); expect(m.settle.mock.calls[0][1]).toBe('provider-failed'); const b=fixture(); await withFreeAnswerQuota(b.req,b.res,async()=>{b.res.emit('close'); expect(freeAnswerSignal(b.req)?.aborted).toBe(true);}); expect(m.settle.mock.calls[1][1]).toBe('uncertain');});
  it('counts a partial answer despite later disconnect',async()=>{const {req,res}=fixture(); await withFreeAnswerQuota(req,res,async()=>{markFreeAnswer(req);res.emit('close');}); expect(m.settle.mock.calls[0][1]).toBe('answered');});
@@ -64,7 +66,7 @@ describe('shared Free answer request admission', () => {
   req.body={uid:'victim',userId:'victim',key:'user:victim'}; req.query={uid:'victim'}; req.headers['x-user-id']='victim';
   const status={limit:20,used:3,reserved:1,remaining:16,inProgress:true,day:'2026-10-23',resetsAt:Date.now()+1000}; m.status.mockResolvedValue(status);
   let work:Promise<unknown>|undefined; handlers[0](req,res,()=>{work=handlers[1](req,res);}); await work;
-  expect(m.status).toHaveBeenCalledWith({key:'user:verified',limit:20});
+  expect(m.status).toHaveBeenCalledWith({key:'user:verified',limit:50});
   expect(res.setHeader).toHaveBeenCalledWith('Cache-Control','no-store'); expect(res.json).toHaveBeenCalledWith(status);
   expect(m.reserve).not.toHaveBeenCalled(); expect(m.settle).not.toHaveBeenCalled();
  });
@@ -73,7 +75,7 @@ describe('shared Free answer request admission', () => {
   registerFreeAnswerQuotaRoutes({get:(path:string,...handlers:any[])=>routes.set(path,handlers)} as never);
   const {req,res}=fixture(); req.body={userId:'victim'}; req.headers={'x-forwarded-for':'203.0.113.77, 203.0.113.9','x-nb-guest':'22222222-2222-4222-8222-222222222222'};
   await routes.get('/api/free-answers/status')![1](req,res);
-  expect(m.status).toHaveBeenCalledWith({key:'guest-device:22222222-2222-4222-8222-222222222222',limit:5,ipKey:'ip:203.0.113.9'});
+  expect(m.status).toHaveBeenCalledWith({key:'guest-device:22222222-2222-4222-8222-222222222222',limit:10,ipKey:'ip:203.0.113.9',guest:true});
  });
 });
 

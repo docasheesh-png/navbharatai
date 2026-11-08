@@ -31,7 +31,7 @@ import { resumeSandboxChoice } from '../../../sandboxResumeChoice';
 import { SandboxRecoveryUnavailableError, isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable } from '../../../SandboxRecoveryError';
 import { sandboxLifecycle } from '../../../previewWake';
 import { countRunningSandboxes, type LiveSandboxCount } from '../../../liveSandboxCount';
-import { reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, shouldMarkPausedAfterFailure, actionAfterPauseFailure } from '../../../sandboxReaper';
+import { reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, PAUSE_FAILURE_WARNING_THRESHOLD } from '../../../sandboxReaper';
 import { sandboxLifetimeMs, heartbeatIntervalMs, shouldExtendLifetime, heartbeatTargets, idleLimitFor } from '../../../sandboxLifetime';
 import { currentSandboxReason } from '../../../sandboxSessionZone';
 import type { SandboxSession } from '../../../sandboxSessions';
@@ -299,49 +299,7 @@ const paintWaitJs = (page: string): string => `
   }
 `;
 
-const SCREENSHOT_SCRIPT = `
-const {chromium}=require('playwright');
-(async()=>{
-  const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
-  const p=await b.newPage();
-  const vw=parseInt(process.argv[3],10)||1280;
-  const vh=parseInt(process.argv[4],10)||720;
-  await p.setViewportSize({width:vw,height:vh});
-  const url=process.argv[2]||'about:blank';
-  await p.goto(url,{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
-${paintWaitJs('p')}
-  const buf=await p.screenshot({type:'png',fullPage:false});
-  require('fs').writeFileSync('${TOOLS_DIR}/last-shot.png', buf);
-  process.stdout.write('OK');
-  await b.close();
-})().catch(e=>{process.stderr.write(String(e));process.exit(1)});
-`.trim();
 
-// Screenshot via the SAME persistent CDP browser the agent drives (Phase 3),
-// so a screenshot taken after a browser_action flow (login, navigation) reflects
-// the real session/cookies/current-page — not a clean fresh browser. If a target
-// URL is given and differs from the current page, navigate there first; otherwise
-// just capture the live page. Exits WITHOUT closing the browser (state persists).
-const SCREENSHOT_CDP_SCRIPT = `
-const {chromium}=require('playwright');
-(async()=>{
-  const target=process.argv[2]||'';
-  const vw=parseInt(process.argv[3],10)||1280;
-  const vh=parseInt(process.argv[4],10)||720;
-  const browser=await chromium.connectOverCDP('http://localhost:${CDP_PORT}');
-  const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:vw,height:vh}});
-  let page=ctx.pages()[0]||await ctx.newPage();
-  await page.setViewportSize({width:vw,height:vh}).catch(()=>{});
-  if(target && page.url()!==target){
-    await page.goto(target,{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
-  }
-${paintWaitJs('page')}
-  const buf=await page.screenshot({type:'png',fullPage:false});
-  require('fs').writeFileSync('${TOOLS_DIR}/last-shot.png', buf);
-  process.stdout.write('OK');
-  process.exit(0);
-})().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
-`.trim();
 
 // Long-lived browser the agent drives across multiple interaction steps.
 // Launched once in the background; exposes a CDP port that action scripts
@@ -418,7 +376,9 @@ function rec(kind,text,stack){ try{ __nbaiFs.appendFileSync(__nbaiLog, JSON.stri
 // \`rec\` only fires ON AN ERROR, so without this the log is absent for a perfectly clean app too and
 // getConsoleErrors reads that absence as \`captured:false\` — "we never looked". Append, never
 // truncate: a second lane must not erase what the first one recorded.
-function recSessionExisted(){ try{ __nbaiFs.appendFileSync(__nbaiLog,''); }catch(e){} }
+// 🕒 IT IS STAMPED (Q-2303). An empty append proved only that SOME session once existed, so a log left by an
+// earlier turn made a window in which no browser looked read as "read and clean". The stamp says WHEN.
+function recSessionExisted(){ try{ __nbaiFs.appendFileSync(__nbaiLog, JSON.stringify({t:Date.now(),kind:'session'})+'\\n'); }catch(e){} }
 `.trim();
 
 /** The four listeners, applied to one page. Shared so the daemon and `browseUrl` can never drift. */
@@ -428,6 +388,57 @@ const attachConsoleJs = (page: string): string => `
   ${page}.on('requestfailed',r=>{ const f=r.failure(); const why=(f&&f.errorText)||'failed'; if(/${CANCELLED_REQUEST_RE.source}/.test(why)) return; rec('requestfailed',r.url()+' — '+why); });
   ${page}.on('response',res=>{ try{ const s=res.status(); if(s>=500) rec('httperror','HTTP '+s+' from '+res.url()); }catch(e){} });
 `;
+
+// 🎧 The fallback lane LISTENS too (Q-2303): it opened the app with no listener, so whatever the page threw while
+// the builder looked at it was lost, and a later console read could only say "clean". Shared recorder.
+export const SCREENSHOT_SCRIPT = `
+const {chromium}=require('playwright');
+${CONSOLE_RECORDER_JS}
+(async()=>{
+  const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
+  const p=await b.newPage();
+${attachConsoleJs('p').trimEnd()}
+  const vw=parseInt(process.argv[3],10)||1280;
+  const vh=parseInt(process.argv[4],10)||720;
+  await p.setViewportSize({width:vw,height:vh});
+  const url=process.argv[2]||'about:blank';
+  await p.goto(url,{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
+${paintWaitJs('p')}
+  if(painted) recSessionExisted();
+  const buf=await p.screenshot({type:'png',fullPage:false});
+  require('fs').writeFileSync('${TOOLS_DIR}/last-shot.png', buf);
+  process.stdout.write('OK');
+  await b.close();
+})().catch(e=>{process.stderr.write(String(e));process.exit(1)});
+`.trim();
+
+// Screenshot via the SAME persistent CDP browser the agent drives (Phase 3),
+// so a screenshot taken after a browser_action flow (login, navigation) reflects
+// the real session/cookies/current-page — not a clean fresh browser. If a target
+// URL is given and differs from the current page, navigate there first; otherwise
+// just capture the live page. Exits WITHOUT closing the browser (state persists).
+export const SCREENSHOT_CDP_SCRIPT = `
+const {chromium}=require('playwright');
+(async()=>{
+  const target=process.argv[2]||'';
+  const vw=parseInt(process.argv[3],10)||1280;
+  const vh=parseInt(process.argv[4],10)||720;
+  const browser=await chromium.connectOverCDP('http://localhost:${CDP_PORT}');
+  const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:vw,height:vh}});
+  let page=ctx.pages()[0]||await ctx.newPage();
+  await page.setViewportSize({width:vw,height:vh}).catch(()=>{});
+  if(target && page.url()!==target){
+    await page.goto(target,{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
+  }
+${paintWaitJs('page')}
+  // The daemon's listeners record this page's errors; this stamps that a browser LOOKED at it now (Q-2303).
+  if(painted){ try{ require('fs').appendFileSync(${JSON.stringify(CONSOLE_LOG)}, JSON.stringify({t:Date.now(),kind:'session'})+'\\n'); }catch(e){} }
+  const buf=await page.screenshot({type:'png',fullPage:false});
+  require('fs').writeFileSync('${TOOLS_DIR}/last-shot.png', buf);
+  process.stdout.write('OK');
+  process.exit(0);
+})().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
+`.trim();
 
 /**
  * The script `browseUrl` runs in the sandbox: open the app in a real browser, wait for it to PAINT,
@@ -513,7 +524,10 @@ ${CONSOLE_RECORDER_JS}
     if(seen.has(page))return; seen.add(page);
 ${attachConsoleJs('page').trimEnd()}
   }
-  setInterval(()=>{ try{ for(const ctx of browser.contexts()){ for(const p of ctx.pages()){ attach(p); } } }catch(e){} }, 1000);
+  // A new page is listened to the moment it opens (Q-2303): the 1-second poll alone missed what a page threw
+  // while it loaded — the errors that break an app. The poll stays as the net for a context it has not seen.
+  const seenCtx=new WeakSet();
+  setInterval(()=>{ try{ for(const ctx of browser.contexts()){ if(!seenCtx.has(ctx)){ seenCtx.add(ctx); ctx.on('page',attach); } for(const p of ctx.pages()){ attach(p); } } }catch(e){} }, 1000);
   setInterval(()=>{}, 1<<30);
 })().catch(e=>{ process.stderr.write(String(e)); process.exit(1); });
 `.trim();
@@ -523,7 +537,7 @@ ${attachConsoleJs('page').trimEnd()}
 // Also emits cursorX/cursorY: the pixel coordinates of the element interacted with
 // (bounding-box center for click/type; sensible defaults for other actions).
 // The frontend uses these to render an animated cursor overlay on the screenshot.
-const BROWSER_ACTION_SCRIPT = `
+export const BROWSER_ACTION_SCRIPT = `
 const {chromium}=require('playwright');
 (async()=>{
   const a=JSON.parse(process.argv[2]||'{}');
@@ -566,6 +580,9 @@ const {chromium}=require('playwright');
   // means a future channel with its own limit cannot resurrect the same bug.
   var meta=JSON.stringify({result:String(result).slice(0,4000),url,cursorX,cursorY});
   try{require('fs').writeFileSync('${TOOLS_DIR}/last-action.json', meta);}catch(_e){}
+  // The daemon's listeners heard whatever this action made the page throw; this stamps that a browser was on
+  // the app now (Q-2303), so a console read after the action counts it as a look.
+  try{require('fs').appendFileSync(${JSON.stringify(CONSOLE_LOG)}, JSON.stringify({t:Date.now(),kind:'session'})+'\\n');}catch(_e){}
   // stdout is KEPT as a fallback: a sandbox that is already warm still holds the OLD script on disk,
   // and the TS side prefers the file only when it can read one. Small now, because of the cap.
   process.stdout.write(meta);
@@ -1214,13 +1231,14 @@ export class E2BActuator implements IEngineerActuator {
   private _creating = new Map<string, Promise<Sandbox>>();
 
   /**
-   * Consecutive pauses we asked for and could not confirm, per workspace.
+   * Consecutive pauses we asked for and could not confirm, per physical sandbox.
    *
    * In memory on purpose. An instance recycle resets it to zero, which restarts the retries — the safe
    * direction, since the expensive mistake is giving up on a machine that is still running. A durable
    * counter would buy nothing but a schema change and a way to persist a wrong verdict.
    */
   private _pauseFailures = new Map<string, number>();
+  private _idleSweepRunning = false;
 
   /**
    * Sandbox OPERATIONS in flight per workspace — a command, an install, a dev-server launch.
@@ -1342,61 +1360,60 @@ export class E2BActuator implements IEngineerActuator {
   }
 
   /** Record a pause we could not confirm and return the new count. */
-  private _notePauseFailure(workspaceId: string): number {
-    const n = (this._pauseFailures.get(workspaceId) ?? 0) + 1;
-    this._pauseFailures.set(workspaceId, n);
+  private _notePauseFailure(sandboxId: string): number {
+    // A new allocation must not inherit another machine's failures. Bound retained diagnostics,
+    // saturate counts, and warn once at the threshold rather than on every two-minute tick.
+    if (!this._pauseFailures.has(sandboxId) && this._pauseFailures.size >= 1000) {
+      this._pauseFailures.delete(this._pauseFailures.keys().next().value!);
+    }
+    const n = Math.min(PAUSE_FAILURE_WARNING_THRESHOLD + 1, (this._pauseFailures.get(sandboxId) ?? 0) + 1);
+    this._pauseFailures.set(sandboxId, n);
+    if (n === PAUSE_FAILURE_WARNING_THRESHOLD) console.warn(`SANDBOX_PAUSE_UNCONFIRMED ${sandboxId}; retained for retry, not deleted`);
     return n;
   }
 
   private async _sweepIdleSandboxes(): Promise<void> {
-    const now = Date.now();
-    for (const [workspaceId, sandbox] of [...this.sandboxes]) {
-      // A build in flight OR an operation still running (see `_opsInFlight`) — never a candidate.
-      if (this._buildInFlight(workspaceId, now) || this._opInFlight(workspaceId)) continue;
-      // The window is per workspace: a machine whose app already lives on a CURRENT saved copy may
-      // sleep sooner (sandboxLifetime.ts). Everything else keeps the ordinary idle limit.
-      const limit = idleLimitFor(this._snapshotCurrent.has(workspaceId));
-      const last = this._lastActivity.get(workspaceId) ?? now;
-      if (now - last > limit) {
-        // LAST CHECK BEFORE A PAUSE THAT CAN BREAK A RUNNING APP. A keep-alive ping from the user's
-        // preview tab may have landed on a DIFFERENT Cloud Run instance, whose stamp lives only in the
-        // durable record. Reading it here costs one document read and only on the rare tick where we
-        // were about to pause anyway — and it is the difference between "nobody is using this" and
-        // "nobody told THIS process about it", which are not the same fact.
+    // A page of slow provider calls can outlast the interval. Never run two cleanup passes together.
+    if (this._idleSweepRunning) return;
+    this._idleSweepRunning = true;
+    try {
+      const now = Date.now();
+      for (const [workspaceId, sandbox] of [...this.sandboxes]) {
+        if (this._buildInFlight(workspaceId, now) || this._opInFlight(workspaceId)) continue;
+        const limit = idleLimitFor(this._snapshotCurrent.has(workspaceId));
+        const last = this._lastActivity.get(workspaceId) ?? now;
+        if (now - last <= limit) continue;
         const durable = await sandboxStore.getRecord(workspaceId).catch(() => null);
         const durableAt = Number(durable?.updatedAt);
-        if (Number.isFinite(durableAt) && durableAt > 0 && now - durableAt <= limit) {
+        if (sandboxResumeEnabled() && (!durable || durable.sandboxId !== sandbox.sandboxId || !Number.isFinite(durableAt) || durableAt <= 0)) continue;
+        if (Number.isFinite(durableAt) && durableAt > 0 && Date.now() - durableAt <= limit) {
           this._lastActivity.set(workspaceId, durableAt);
           continue;
         }
-        // THE ANSWER MATTERS. This used to be `.catch(() => {})` — a pause that failed was recorded
-        // as one that worked, and `markPaused` below then hid a still-running machine from the orphan
-        // reaper (`sandboxesToReap` skips anything already flagged paused). Nothing was left that
-        // could stop it, and nothing reported a fault. See PAUSE_ATTEMPTS_BEFORE_GIVING_UP.
-        // The session ends HERE, before the pause: `pauseSandbox` drops the handle in its `finally`,
-        // and a drop would otherwise close the session as 'dropped' a moment before this line could
-        // say 'idle-sweep'. `endedBy` means "what took the machine out of this instance's hands" —
-        // true even when the pause call itself fails, since the handle is dropped either way; whether
-        // the machine actually stopped is the durable record's `pausedBy`/`pausedAt`, not this.
+        // Work may have started while the durable read was pending.
+        if (this.sandboxes.get(workspaceId) !== sandbox || this._creating.has(workspaceId)
+          || this._buildInFlight(workspaceId, Date.now()) || this._opInFlight(workspaceId)) continue;
+        if (Date.now() - (this._lastActivity.get(workspaceId) ?? Date.now()) <= limit) continue;
+        const activityBeforePause = this._lastActivity.get(workspaceId);
         this._endSession(workspaceId, 'idle-sweep');
         const paused = await this.pauseSandbox(sandbox.sandboxId).catch(() => false);
-        this._lastActivity.delete(workspaceId);
-        this._lastDurableTouch.delete(workspaceId);
-        // Cleared because a PAUSED machine is not being held — the next resume starts a new clock, and
-        // `getSandbox` re-stamps it on BOTH paths (warm and create) so a resumed workspace can never
-        // again go permanently unmeasured. See the note there.
-        this._sandboxStartedAt.delete(workspaceId);
-        this._fileCache.delete(workspaceId); // free the recreate-restore cache for an idle workspace (a resume reconnects + restores from E2B; a fresh build re-populates)
-        // The in-memory bookkeeping goes either way, because `pauseSandbox` has already dropped the
-        // reference and this sweep only ever iterates sandboxes it holds. But the DURABLE flag is the
-        // reaper's off switch, so it is written only for a pause we actually saw succeed. On failure
-        // the record stays live and the orphan reaper — whose window is wider than this one — becomes
-        // the thing that reclaims it, which is exactly the safety net it was built to be.
-        if (paused) await sandboxStore.markPaused(workspaceId, 'idle-sweep').catch(() => {});
-        else this._notePauseFailure(workspaceId);
+        if (!this.sandboxes.has(workspaceId) && !this._creating.has(workspaceId)
+          && this._lastActivity.get(workspaceId) === activityBeforePause
+          && !this._buildInFlight(workspaceId, Date.now()) && !this._opInFlight(workspaceId)) {
+          this._lastActivity.delete(workspaceId);
+          this._lastDurableTouch.delete(workspaceId);
+          this._sandboxStartedAt.delete(workspaceId);
+          this._fileCache.delete(workspaceId);
+        }
+        if (paused) {
+          this._pauseFailures.delete(sandbox.sandboxId);
+          if (durable) await sandboxStore.markPausedIfUnchanged(durable, 'idle-sweep').catch(() => false);
+        } else this._notePauseFailure(sandbox.sandboxId);
       }
+      await this._sweepOrphanSandboxes().catch(() => {});
+    } finally {
+      this._idleSweepRunning = false;
     }
-    await this._sweepOrphanSandboxes().catch(() => {});
   }
 
   /**
@@ -1404,61 +1421,46 @@ export class E2BActuator implements IEngineerActuator {
    *
    * The in-memory sweep only knows about sandboxes in THIS process's map. Cloud Run runs several
    * instances and recycles them, and NavBharatAI redeploys on every merge to main, so the instance
-   * that created a sandbox routinely disappears while the sandbox keeps running and keeps billing —
-   * until E2B's own hour-long lifetime finally expires. Nothing was pausing those.
+   * that created a sandbox can disappear while the sandbox is still running. This durable sweep is
+   * a secondary safety net behind E2B's short pause-on-timeout lifetime.
    *
    * This pass reads the DURABLE record instead, so an orphan is visible whichever instance made it.
    * Sandbox.pause is a static cloud-side call, so this instance can stop a VM it never held.
    *
-   * Safety: the cut-off is held a whole max-length build plus a margin past the last recorded
-   * activity (reapAfterMs), a live build refreshes that record every few minutes, and anything this
-   * instance is actively holding is skipped outright. Every step is best-effort and swallowed — a
+   * Safety: the cut-off allows three missed durable touches plus a margin (reapAfterMs). Re-read the
+   * exact allocation before pausing and skip local builds, operations and held handles. Every step is best-effort and swallowed — a
    * cost sweep must never be able to fail a build.
    */
   private async _sweepOrphanSandboxes(): Promise<void> {
-    // The durable record only exists when warm resume is on — with it off there is nothing to read.
     if (!sandboxResumeEnabled()) return;
     const now = Date.now();
     const records = await sandboxStore.listStale(now - reapAfterMs()).catch(() => []);
-    if (!records.length) return;
     for (const rec of sandboxesToReap(records, now)) {
-      if (this.sandboxes.has(rec.workspaceId)) continue; // in use here — the sweep above owns it
+      const busyHere = () => this.sandboxes.has(rec.workspaceId) || this._creating.has(rec.workspaceId)
+        || this._buildInFlight(rec.workspaceId, Date.now()) || this._opInFlight(rec.workspaceId);
+      if (busyHere()) continue;
+      // Earlier candidates can take seconds to pause. Re-read before acting, and never turn an
+      // unknown read or an allocation/activity change into permission to pause a user's machine.
+      const current = await sandboxStore.getRecord(rec.workspaceId).catch(() => null);
+      if (!current || current.sandboxId !== rec.sandboxId || current.updatedAt !== rec.updatedAt) continue;
+      if (!sandboxesToReap([current], Date.now()).length || busyHere()) continue;
+      const activityBeforePause = this._lastActivity.get(rec.workspaceId);
       const paused = await this.pauseSandbox(rec.sandboxId).catch(() => false);
-      // ⚠️ THIS USED TO STAMP EITHER WAY, and the reason given was only half true. "If it failed the
-      // sandbox is already gone or already paused" covers two of the three failure modes; the third is
-      // a throttled or timed-out API call against a sandbox that is very much alive and billing. For
-      // that one, stamping is the worst possible move: `sandboxesToReap` skips a record flagged paused,
-      // so the single line meant to save money retired the only thing that could still save it.
-      //
-      // Retry instead, and give up only after enough attempts to tell a transient error from a machine
-      // that is genuinely gone. Being wrong now costs one API call per sweep rather than an hour of
-      // compute — and the record is kept regardless, so a returning user still resumes by id.
       if (paused) {
-        this._pauseFailures.delete(rec.workspaceId);
-        await sandboxStore.markPaused(rec.workspaceId, 'orphan-sweep').catch(() => {});
-        this._lastActivity.delete(rec.workspaceId);
-        this._lastDurableTouch.delete(rec.workspaceId);
-        this._sandboxStartedAt.delete(rec.workspaceId);
-        this._fileCache.delete(rec.workspaceId);
-      } else {
-        const attempts = this._notePauseFailure(rec.workspaceId);
-        // Give up only after the same threshold as `shouldMarkPausedAfterFailure`. The FIRST and
-        // SECOND failures stay a retry — the record is left live so the next sweep can still see
-        // the machine. The idle sweep drops its handle in `pauseSandbox`'s finally, so it never
-        // walks the same sandbox up to 3; this orphan pass is the one that reaches the threshold.
-        // Busy (in this process's map, a build flag, or an op in flight) is never killed and is
-        // not marked paused — marking would hide it from the only sweep that can still stop it.
-        // `sandboxesToReap` already dropped anything touched inside the orphan window.
-        const busy = this.sandboxes.has(rec.workspaceId)
-          || this._buildInFlight(rec.workspaceId, Date.now())
-          || this._opInFlight(rec.workspaceId);
-        if (shouldMarkPausedAfterFailure(attempts) && actionAfterPauseFailure(attempts, busy) === 'kill') {
-          try {
-            await this.killSandbox(rec.sandboxId);
-          } catch { /* a cost sweep must never throw */ }
-          console.warn(`SANDBOX_PAUSE_FAILED_KILLED ${rec.sandboxId}`);
-          await sandboxStore.markPaused(rec.workspaceId, 'orphan-sweep').catch(() => {});
+        this._pauseFailures.delete(rec.sandboxId);
+        const settled = await sandboxStore.markPausedIfUnchanged(current, 'orphan-sweep').catch(() => false);
+        // A replacement acquired during the provider await owns its own cache and clocks.
+        if (settled && !this.sandboxes.has(rec.workspaceId) && !this._creating.has(rec.workspaceId)
+          && this._lastActivity.get(rec.workspaceId) === activityBeforePause && !busyHere()) {
+          this._lastActivity.delete(rec.workspaceId);
+          this._lastDurableTouch.delete(rec.workspaceId);
+          this._sandboxStartedAt.delete(rec.workspaceId);
+          this._fileCache.delete(rec.workspaceId);
         }
+      } else {
+        // Failed pause is uncertainty, never proof of deletion or a reason to destroy state.
+        // Keep the durable record live for a later pass; E2B's pause-on-timeout remains the backstop.
+        this._notePauseFailure(rec.sandboxId);
       }
     }
   }
@@ -1479,6 +1481,15 @@ export class E2BActuator implements IEngineerActuator {
     if (!shouldTouchDurable(this._lastDurableTouch.get(workspaceId), now)) return;
     this._lastDurableTouch.set(workspaceId, now);
     void sandboxStore.touch(workspaceId, sandboxId).catch(() => {});
+  }
+
+  /** A cached handle's heartbeat must not overwrite a newer allocation owned elsewhere. */
+  private _touchDurableIfCurrent(workspaceId: string, sandboxId: string): void {
+    if (!sandboxResumeEnabled() || !workspaceId || !sandboxId) return;
+    const now = Date.now();
+    if (!shouldTouchDurable(this._lastDurableTouch.get(workspaceId), now)) return;
+    this._lastDurableTouch.set(workspaceId, now);
+    void sandboxStore.touchIfCurrent(workspaceId, sandboxId).catch(() => false);
   }
 
   /**
@@ -1513,7 +1524,12 @@ export class E2BActuator implements IEngineerActuator {
     }));
     for (const workspaceId of heartbeatTargets(candidates, now)) {
       const sandbox = this.sandboxes.get(workspaceId);
-      if (sandbox) this._extendLifetime(workspaceId, sandbox, true);
+      if (sandbox) {
+        this._extendLifetime(workspaceId, sandbox, true);
+        // A long model/tool call is still a live build. Other instances must see the same liveness
+        // as E2B's timer, even when no file or command has completed during the orphan window.
+        this._touchDurableIfCurrent(workspaceId, sandbox.sandboxId);
+      }
     }
   }
 
@@ -3130,7 +3146,7 @@ ${paintWaitJs('p')}
   async getConsoleErrors(
     workspaceId: string,
     sinceMs: number,
-  ): Promise<{ errors: { t: number; kind: string; text: string; stack?: string }[]; captured: boolean }> {
+  ): Promise<{ errors: { t: number; kind: string; text: string; stack?: string }[]; captured: boolean; lastSessionAt?: number }> {
     const sandbox = await this.getSandbox(workspaceId);
     let raw = '';
     try {
@@ -3141,12 +3157,16 @@ ${paintWaitJs('p')}
       return { errors: [], captured: false };
     }
     const errors: { t: number; kind: string; text: string; stack?: string }[] = [];
+    let lastSessionAt: number | undefined;
     for (const line of raw.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
         const e = JSON.parse(trimmed);
-        if (typeof e.t === 'number' && e.t > sinceMs) {
+        if (typeof e.t !== 'number') continue;
+        // A stamped session marker (Q-2303): a browser looked at the app at `t`. Not an error.
+        if (e.kind === 'session') { if (lastSessionAt === undefined || e.t > lastSessionAt) lastSessionAt = e.t; continue; }
+        if (e.t > sinceMs) {
           errors.push({
             t: e.t,
             kind: String(e.kind || 'console'),
@@ -3158,9 +3178,14 @@ ${paintWaitJs('p')}
         }
       } catch { /* skip malformed line */ }
     }
-    // The log file existed and was read → the console WAS captured (empty errors here = genuinely clean).
+    // 🔴 CAPTURED MEANS A BROWSER LOOKED IN THIS WINDOW (Q-2303, autopsy 8701aaa1 / c71e56de). It used to mean
+    // "the log file exists" — and the file outlives the turn that wrote it (the sandbox resumes, the log is
+    // append-only), so a window in which NO browser opened the app read as "the console was read and it was
+    // clean". The builder believed it three times in one build and declared the game fixed while it threw 1,298
+    // errors. An error in the window is first-hand evidence on its own; otherwise a stamped session must be in it.
+    const captured = errors.length > 0 || (lastSessionAt !== undefined && lastSessionAt > sinceMs);
     // Cap to the most recent 20 to keep the AI prompt bounded.
-    return { errors: errors.slice(-20), captured: true };
+    return { errors: errors.slice(-20), captured, ...(lastSessionAt !== undefined ? { lastSessionAt } : {}) };
   }
 
   /**
@@ -3330,6 +3355,7 @@ ${paintWaitJs('p')}
   }
 
   async pauseSandbox(sandboxId: string): Promise<boolean> {
+    const held = [...this.sandboxes].filter(([, sandbox]) => sandbox.sandboxId === sandboxId);
     try {
       // Static pause works across server instances — operates on the cloud
       // resource directly, even if this instance never held the live object.
@@ -3346,18 +3372,15 @@ ${paintWaitJs('p')}
       // likeliest case) the object is a paused machine that answers nothing; if the sandbox is gone,
       // it is a dead pointer; if it is alive and merely unpausable, `getSandbox` reconnects to it by
       // its durable id, which resumes it and works. Keeping it was the only outcome with no recovery.
-      for (const [wid, sb] of [...this.sandboxes]) {
-        if (sb.sandboxId === sandboxId) this._dropSandbox(wid);
+      for (const [wid, sb] of held) {
+        if (this.sandboxes.get(wid) === sb) this._dropSandbox(wid);
       }
     }
   }
 
   /**
-   * Kill a sandbox by id when pause has been given up on (BLD-16).
-   *
-   * Same shape as `pauseSandbox`: static cloud call, 10s bound, never throws. Called only from the
-   * orphan sweep once `actionAfterPauseFailure` says `'kill'` — not on the first or second failure,
-   * and not for a sandbox this process is still using.
+   * Explicit destructive lifecycle operation. Automatic cost sweeps never call this:
+   * a failed pause does not prove that a machine or its data is safe to delete.
    */
   async killSandbox(sandboxId: string): Promise<boolean> {
     try {

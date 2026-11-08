@@ -77,10 +77,15 @@ describe('Surplus build-scoped authority', () => {
     const { make, adapter } = setup(); const session = await make(); const abort = new AbortController(); abort.abort();
     await expect(session!.runner().runTurn({ ...params, signal: abort.signal })).rejects.toThrow(); expect(adapter.dispatch).not.toHaveBeenCalled();
   });
-  it('poisons later turns after a missing receipt instead of silently charging zero', async () => {
+  it('keeps a validated reply and later turns alive when the receipt is missing (accounting non-fatal)', async () => {
     const { make, adapter } = setup(); adapter.receipt = vi.fn(async () => undefined);
-    const session = await make(); await expect(session!.runner().runTurn(params)).rejects.toThrow('unavailable');
-    await expect(session!.runner().runTurn(params)).rejects.toThrow('unavailable'); expect(adapter.dispatch).toHaveBeenCalledTimes(1);
+    const session = await make(); await expect(session!.runner().runTurn(params)).resolves.toBeDefined();
+    await expect(session!.runner().runTurn(params)).resolves.toBeDefined(); expect(adapter.dispatch).toHaveBeenCalledTimes(2);
+  });
+  it('keeps the build alive when the receipt store throws', async () => {
+    const { make, adapter } = setup(); adapter.receipt = vi.fn(async () => { throw new Error('audit store unavailable'); });
+    const session = await make(); await expect(session!.runner().runTurn(params)).resolves.toBeDefined();
+    await expect(session!.runner().runTurn(params)).resolves.toBeDefined(); expect(adapter.dispatch).toHaveBeenCalledTimes(2);
   });
   it('serializes concurrent model calls while preserving parallel tools within turns', async () => {
     const { make, adapter } = setup(); const session = await make(); let active = 0, peak = 0;

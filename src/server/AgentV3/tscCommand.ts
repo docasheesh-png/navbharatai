@@ -182,5 +182,9 @@ export function recipeInstallCommand(deps: ReadonlyArray<{ name: string; version
   ].filter(Boolean).join(' && ');
   return `_nbw=0; while ${NPM_INSTALL_LOCK_FRESH} && [ $_nbw -lt ${INSTALL_WAIT_SECONDS} ]; do sleep 1; _nbw=$((_nbw+1)); done; `
     + `if ${NPM_INSTALL_LOCK_FRESH}; then echo ${RECIPE_DEPS_BUSY_MARKER}; exit 0; fi; `
-    + `touch ${NPM_INSTALL_LOCK}; ${installs}; _nbs=$?; rm -f ${NPM_INSTALL_LOCK}; exit $_nbs`;
+    // `&& touch node_modules` (autopsy 61279465): \`npm install -D @types/three\` rewrites package.json but adds its
+    // entry under node_modules/@types, so node_modules' own mtime stays older and MANIFEST_CURRENT judged the tree
+    // stale — the write-time typecheck then stood down on 3 writes of a build whose dependencies were installed.
+    // TSC_ENSURE stamps the directory after its install for the same reason; this install now does too.
+    + `touch ${NPM_INSTALL_LOCK}; ${installs} && touch node_modules; _nbs=$?; rm -f ${NPM_INSTALL_LOCK}; exit $_nbs`;
 }

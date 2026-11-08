@@ -1,3 +1,4 @@
+import { proSubtotalNotice } from '../src/server/AgentV3/proSandboxFee';
 /**
  * A STOP IS BILLED BY ONE SET OF RULES, WHENEVER IT LANDS — AND THE PUBLIC WORDS SAY EXACTLY THOSE RULES.
  *
@@ -185,7 +186,7 @@ function settle(s: Scenario) {
   const state = { effectiveBilledUsd: s.billed ?? DECIDED, zeroBillReason: undefined as string | undefined, waivedMarkupNotice: 'x' as string | null };
   // The block assigns three outer `let`s; they are threaded through a small wrapper so the source runs unchanged.
   const fn = new Function(
-    'settleStopOrFailure', 'stopBillingSwitches', 'preseededUnchangedCount', 'freeCancellationMessage', 'zeroBillForFailedBuild', 'abortCauseOf',
+    'proSubtotalNotice', 'settleStopOrFailure', 'stopBillingSwitches', 'preseededUnchangedCount', 'freeCancellationMessage', 'zeroBillForFailedBuild', 'abortCauseOf',
     'abort', 'writtenFiles', 'preseededGolden', 'appSeenRunningForBill', 'isEditMode', 'decidedRealCostUsd', 'decidedSandboxUsd',
     'result', 'buildDiag', 'events', 'state', 'abortRequestedAtOf', 'stopFellInWindow', 'appFirstRenderedAt', 'stylePassWindow',
     `let effectiveBilledUsd = state.effectiveBilledUsd; let zeroBillReason = state.zeroBillReason; let waivedMarkupNotice = state.waivedMarkupNotice;
@@ -193,7 +194,7 @@ function settle(s: Scenario) {
      state.effectiveBilledUsd = effectiveBilledUsd; state.zeroBillReason = zeroBillReason; state.waivedMarkupNotice = waivedMarkupNotice;`,
   );
   fn(
-    settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount, freeCancellationMessage, (ok: boolean) => ok === false, abortCauseOf,
+    proSubtotalNotice, settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount, freeCancellationMessage, (ok: boolean) => ok === false, abortCauseOf,
     ctrl, writtenFiles, preseededGolden, s.rendered === true, s.edit === true, 0.4, 0,
     { ok: s.ok }, { record: (e: { code: string }) => recorded.push(e.code) }, { emit: (e: { text: string }) => emitted.push(e.text) }, state,
     // A rendered row was seen running before the Stop (epoch 1 < the abort's own request time, now); no style pass.

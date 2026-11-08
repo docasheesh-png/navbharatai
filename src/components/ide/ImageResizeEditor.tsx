@@ -131,7 +131,7 @@ export function ImageResizeEditor({ image, initialSize, initialCustom, sizes, on
   );
 
   return createPortal((
-    <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-scrim">
+    <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center bg-scrim nb-modal-safe">
       <div className="nb-sheet w-full sm:max-w-lg flex flex-col overflow-y-auto bg-surface sm:rounded-2xl rounded-t-2xl border border-line">
 
         <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-4 py-3 bg-card border-b border-line">

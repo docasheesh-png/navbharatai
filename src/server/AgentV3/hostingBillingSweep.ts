@@ -65,6 +65,7 @@ import { deploymentStore as deployments } from './DeploymentStore';
 import { FirebaseHostingDeployer } from './Deployment';
 import { takeAppOffline } from './hostedAppLifecycle';
 import { debitWalletRolledUp } from '../lib/walletDebit';
+import { zTestFreeBilling } from '../lib/zTestAccount';
 import { getServerDb } from '../lib/serverDb';
 import { usdInrRate } from '../lib/UsdInrRate';
 
@@ -299,7 +300,8 @@ export async function runHostingBillingSweep(opts?: {
         continue;
       }
 
-      const res = await debitWalletRolledUp(db as never, ownerId, {
+      // 🧪 z@gmail.com test account (lib/zTestAccount.ts): hosting overage is free. Remove later.
+      const res = zTestFreeBilling(null, ownerId) ? { ok: true as const, tokensDebited: 0, tokenBalance: 0 } : await debitWalletRolledUp(db as never, ownerId, {
         feature: 'hosting',
         billedInr: decision.inr,
         rollupRef: hostingLedgerRef(win.day),
@@ -455,7 +457,7 @@ async function reportFrontendTraffic(
       });
       let addInr = 0;
       let gbBilled = Math.max(0, Number(record.frontendGbBilled) || 0);
-      if (fe.charge) {
+      if (fe.charge && !zTestFreeBilling(null, ownerId)) {  // 🧪 z@gmail.com: free (remove later)
         const res = await debitWalletRolledUp(db as never, ownerId, {
           feature: 'hosting',
           billedInr: fe.inr,

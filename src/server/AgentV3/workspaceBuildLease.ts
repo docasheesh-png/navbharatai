@@ -148,18 +148,21 @@ export async function claimWorkspaceBuild(
   return bounded(attempt, { ok: false, reason: 'unavailable', holderHeartbeatAt: 0 });
 }
 
-/** Renew this build's lease. Never overwrites a lease that is no longer ours. */
-export async function renewWorkspaceBuild(
-  store: BuildLeaseStore | null | undefined,
-  opts: { workspaceId: string; token: string; nowMs?: number },
-): Promise<LeaseRenewal> {
-  if (!store || !opts.workspaceId) return 'unknown';
+/**
+ * Why a renewal was not confirmed. DNA (failedbr 628 MP3 Converter, Hello #616, 2026-10-30): the build was
+ * INTERRUPTED with OUTCOME_AUTHORITY_UNAVAILABLE and nothing recorded WHETHER Firestore timed out, threw,
+ * or another owner really held the lease — so an infra blip and a real takeover looked identical.
+ */
+export type LeaseLossReason = 'timeout' | 'store-error' | 'other-owner' | 'missing' | 'stale' | 'no-store';
+export interface LeaseRenewalDetail { renewal: LeaseRenewal; reason?: LeaseLossReason; attempts: number; error?: string }
+
+async function renewOnce(store: BuildLeaseStore, opts: { workspaceId: string; token: string; nowMs?: number }): Promise<Omit<LeaseRenewalDetail, 'attempts'>> {
   const requestStartedAt = Date.now();
   // This exact timestamp is persisted and must also bound the caller's local authority. An ACK's
   // arrival time cannot grant a longer lease than the transaction actually wrote.
   const heartbeatAt = Number.isFinite(opts.nowMs) ? Number(opts.nowMs) : requestStartedAt;
   const deadline = requestStartedAt + LEASE_CALL_TIMEOUT_MS;
-  const attempt = (async (): Promise<LeaseRenewal> => {
+  const attempt = (async (): Promise<Omit<LeaseRenewalDetail, 'attempts'>> => {
     const ref = store.collection(WORKSPACE_BUILD_LEASE_COLLECTION).doc(opts.workspaceId);
     return store.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
@@ -171,10 +174,78 @@ export async function renewWorkspaceBuild(
       // A requested Stop does not prove the shared runtime drained. Keep its exact live token
       // renewed until the captured build has actually exited and releases the lease.
       if (verdict !== 'lost') tx.set(ref, { ...(existing as Record<string, unknown>), heartbeatAt });
-      return verdict;
+      const reason: LeaseLossReason | undefined = verdict !== 'lost' ? undefined
+        : !existing ? 'missing' : existing.token !== opts.token ? 'other-owner' : 'stale';
+      return { renewal: verdict, reason };
     });
   })();
-  return bounded(attempt, 'unknown');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([attempt, new Promise<Omit<LeaseRenewalDetail, 'attempts'>>((resolve) => {
+      timer = setTimeout(() => resolve({ renewal: 'unknown', reason: 'timeout' }), LEASE_CALL_TIMEOUT_MS);
+    })]);
+  } catch (error) {
+    return { renewal: 'unknown', reason: 'store-error', error: error instanceof Error ? error.message.slice(0, 160) : String(error).slice(0, 160) };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/** Transient-store retries inside ONE heartbeat (3 attempts × ≤4 s + jitter stays under the 20 s beat). */
+export const LEASE_RENEW_ATTEMPTS = 3;
+const jitter = (attempt: number) => 250 * attempt + Math.floor(Math.random() * 250);
+
+/**
+ * Renew, retrying ONLY an unconfirmed ('unknown': timeout / thrown store error) result with jitter.
+ * A definite answer ('held' / 'stop-requested' / 'lost') is never retried. Never overwrites a lease
+ * that is no longer ours. Every retry re-stamps `heartbeatAt` at its own start, so a late ACK cannot
+ * grant more authority than the transaction actually wrote.
+ */
+export async function renewWorkspaceBuildDetailed(
+  store: BuildLeaseStore | null | undefined,
+  opts: { workspaceId: string; token: string; nowMs?: number; attempts?: number },
+): Promise<LeaseRenewalDetail> {
+  if (!store || !opts.workspaceId) return { renewal: 'unknown', reason: 'no-store', attempts: 0 };
+  const max = Math.max(1, opts.attempts ?? LEASE_RENEW_ATTEMPTS);
+  let last: Omit<LeaseRenewalDetail, 'attempts'> = { renewal: 'unknown' };
+  for (let i = 1; i <= max; i++) {
+    last = await renewOnce(store, { ...opts, nowMs: i === 1 ? opts.nowMs : Date.now() });
+    if (last.renewal !== 'unknown') return { ...last, attempts: i };
+    if (i < max) await new Promise((resolve) => setTimeout(resolve, jitter(i)));
+  }
+  return { ...last, attempts: max };
+}
+
+/** Renew this build's lease. Never overwrites a lease that is no longer ours. */
+export async function renewWorkspaceBuild(
+  store: BuildLeaseStore | null | undefined,
+  opts: { workspaceId: string; token: string; nowMs?: number; attempts?: number },
+): Promise<LeaseRenewal> {
+  // Single attempt by default (imports and other callers keep their exact timing); the build heartbeat opts into retries.
+  return (await renewWorkspaceBuildDetailed(store, { ...opts, attempts: opts.attempts ?? 1 })).renewal;
+}
+
+/**
+ * Claim, but WAIT (bounded) for a draining previous run to release instead of refusing at once.
+ * DNA (failedbr 629 → 628): a user's Continue arrived while the interrupted run was still draining its
+ * lease and was refused / raced it. A live holder keeps renewing and stays 'busy' → honest 409 after
+ * the wait; a releasing one frees the doc within seconds and Continue proceeds.
+ */
+export async function claimWorkspaceBuildAwaitingRelease(
+  store: BuildLeaseStore | null | undefined,
+  opts: { workspaceId: string; token: string; owner: string; userId?: string | null; nowMs?: number; waitMs?: number; pollMs?: number },
+  claim: typeof claimWorkspaceBuild = claimWorkspaceBuild,
+): Promise<LeaseClaimResult> {
+  const waitUntil = Date.now() + Math.max(0, opts.waitMs ?? 12_000);
+  let nowMs = opts.nowMs;
+  for (;;) {
+    const result = await claim(store, { ...opts, nowMs });
+    // Only a live holder ('busy') is waited for; 'unavailable' stays an immediate honest 503.
+    if (result.ok || result.reason !== 'busy' || Date.now() >= waitUntil || !store) return result;
+    await new Promise((resolve) => setTimeout(resolve, (opts.pollMs ?? 1_500) + Math.floor(Math.random() * 300)));
+    nowMs = Date.now();
+    if (Date.now() >= waitUntil) return claim(store, { ...opts, nowMs });
+  }
 }
 
 /** Release this build's lease — only if it is still ours. Best-effort; a failure just lets it go stale. */

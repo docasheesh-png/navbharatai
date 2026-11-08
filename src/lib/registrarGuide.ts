@@ -18,13 +18,17 @@ export interface RegistrarInfo {
   steps: string;
   /** Lowercase keywords matched against the RDAP registrar name. */
   match: string[];
+  /** Same path in simple Hindi (shown under the English line). */
+  stepsHi?: string;
+  /** Path to the "add DNS record" form, for the records (A/TXT/CNAME) method. */
+  recordsSteps?: string;
 }
 
 export const REGISTRARS: RegistrarInfo[] = [
-  { id: 'godaddy', name: 'GoDaddy', panelUrl: 'https://dcc.godaddy.com/domains', steps: 'My Products → your domain → DNS → Nameservers → Change → "I\'ll use my own nameservers"', match: ['godaddy'] },
-  { id: 'hostinger', name: 'Hostinger', panelUrl: 'https://hpanel.hostinger.com/domains', steps: 'Domains → your domain → DNS / Nameservers → Change nameservers → Custom', match: ['hostinger'] },
-  { id: 'namecheap', name: 'Namecheap', panelUrl: 'https://ap.www.namecheap.com/domains/list/', steps: 'Domain List → Manage → Nameservers → Custom DNS', match: ['namecheap'] },
-  { id: 'bigrock', name: 'BigRock', panelUrl: 'https://manage.bigrock.in/', steps: 'List/Search Orders → your domain → Name Servers → update both', match: ['bigrock'] },
+  { id: 'godaddy', name: 'GoDaddy', panelUrl: 'https://dcc.godaddy.com/domains', steps: 'My Products → your domain → DNS → Nameservers → Change → "I\'ll use my own nameservers"', match: ['godaddy'], stepsHi: 'My Products → अपना domain → DNS → Nameservers → Change → "I\'ll use my own nameservers" → दोनों paste → Save', recordsSteps: 'My Products → your domain → DNS → Add New Record → pick Type → paste Name and Value → Save' },
+  { id: 'hostinger', name: 'Hostinger', panelUrl: 'https://hpanel.hostinger.com/domains', steps: 'Domains → your domain → DNS / Nameservers → Change nameservers → Custom', match: ['hostinger'], stepsHi: 'hPanel → Domains → अपना domain → DNS / Nameservers → Change nameservers → Custom → दोनों paste → Save', recordsSteps: 'hPanel → Domains → your domain → DNS / Nameservers → DNS records → Manage DNS records → pick Type, paste Name + Points to → Add Record' },
+  { id: 'namecheap', name: 'Namecheap', panelUrl: 'https://ap.www.namecheap.com/domains/list/', steps: 'Domain List → Manage → Nameservers → Custom DNS', match: ['namecheap'], stepsHi: 'Domain List → Manage → Nameservers → Custom DNS → दोनों paste → ✓ दबाएँ', recordsSteps: 'Domain List → Manage → Advanced DNS → Add New Record → Type, Host, Value → ✓' },
+  { id: 'bigrock', name: 'BigRock', panelUrl: 'https://manage.bigrock.in/', steps: 'List/Search Orders → your domain → Name Servers → update both', match: ['bigrock'], stepsHi: 'Orders → अपना domain → Name Servers → दोनों बदलें → Update', recordsSteps: 'Orders → your domain → DNS Management → Manage DNS → add the record → Add Record' },
   { id: 'hostgator', name: 'HostGator', panelUrl: 'https://portal.hostgator.com/domains', steps: 'Domains → your domain → Name Servers → Manually set', match: ['hostgator', 'launchpad'] },
   { id: 'bluehost', name: 'Bluehost', panelUrl: 'https://my.bluehost.com/hosting/domains', steps: 'Domains → your domain → Nameservers → Custom', match: ['bluehost', 'fastdomain'] },
   { id: 'squarespace', name: 'Squarespace (old Google Domains)', panelUrl: 'https://account.squarespace.com/domains', steps: 'Domains → your domain → DNS → Use custom nameservers', match: ['squarespace', 'google domains'] },
@@ -33,7 +37,7 @@ export const REGISTRARS: RegistrarInfo[] = [
   { id: 'namedotcom', name: 'Name.com', panelUrl: 'https://www.name.com/account/domain', steps: 'My Domains → your domain → Nameservers → apply changes', match: ['name.com'] },
   { id: 'ionos', name: 'IONOS', panelUrl: 'https://my.ionos.com/domains', steps: 'Domains & SSL → your domain → Nameserver → Use custom name servers', match: ['ionos', '1&1'] },
   { id: 'ovh', name: 'OVH', panelUrl: 'https://www.ovh.com/manager/#/web/domain', steps: 'Domains → your domain → DNS servers → Change the DNS servers', match: ['ovh'] },
-  { id: 'other', name: 'Other / not sure', panelUrl: '', steps: 'Log in where you bought the domain → find your domain → look for "Nameservers" or "DNS servers" → choose custom, paste both, save', match: [] },
+  { id: 'other', name: 'Other / not sure', panelUrl: '', steps: 'Log in where you bought the domain → find your domain → look for "Nameservers" or "DNS servers" → choose custom, paste both, save', match: [], stepsHi: 'जहाँ domain खरीदा वहाँ login करें → domain खोलें → "Nameservers" या "DNS" ढूँढें → Custom चुनें → दोनों paste → Save', recordsSteps: 'Log in where you bought the domain → your domain → DNS / DNS records → Add record → Type, Name, Value → Save' },
 ];
 
 /** Registrar entry by id (null for unknown ids — a select can never produce a crash). */

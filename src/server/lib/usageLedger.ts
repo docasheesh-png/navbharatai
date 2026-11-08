@@ -102,6 +102,20 @@ function toCount(v: unknown): number | 'absent' | 'invalid' {
   return Number.isFinite(n) && n >= 0 ? n : 'invalid';
 }
 
+/**
+ * Usage-ledger buckets that are NOT a provider, with what each one really is (admin 2026-11-04: the AI Engines
+ * ranking listed "unknown" 909 and "NONE" 175 as if they were engines). They are turns NO engine answered:
+ *   · NONE    — Free Chat turned the message away before any provider was called (capacity, queue full,
+ *               timeout, per-user limit — FreeChain/entryAdmission.ts);
+ *   · unknown — no provider was recorded: the routed stream ended before any provider answered, or an old
+ *               row written with the placeholder "auto".
+ * A ranking of engines must never rank them; they are shown on their own, because each is a user who got no answer.
+ */
+export const NOT_A_PROVIDER: Readonly<Record<string, string>> = {
+  NONE: 'Turned away before any provider (Free Chat was busy or the user hit a limit)',
+  unknown: 'No provider answered (the request failed first), or an old record without a provider',
+};
+
 /** A provider name we are willing to group by. Unnamed work is `unknown`, never merged into a real one. */
 function providerKey(v: unknown): string {
   const s = String(v ?? '').trim();

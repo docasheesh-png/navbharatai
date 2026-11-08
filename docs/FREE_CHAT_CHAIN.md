@@ -1,10 +1,10 @@
 # Free Chat Chain: implementation and operator runbook
 
-Status, 2026-10-22: additive implementation for review. The feature defaults OFF,
-rollout defaults to 0%, and Gemini defaults to skipped. No production activation,
-credential creation, provider inference, live multilingual evaluation, purchase,
-or deployment was performed for this change. Offline tests are not evidence that
-an existing account is free, a model is available, or the launch acceptance bar is met.
+Status, 2026-11-04: authenticated ordinary text chat defaults to this chain with
+100% rollout when deployment flags and saved controls are absent. Explicit OFF,
+saved rollout/disabled lists and provider-family switches remain authoritative.
+This code change does not modify live settings, credentials or attestations.
+Offline tests do not prove live provider availability or free-account eligibility.
 
 > **2026-10-23:** the owner's Tier 1 → Tier 2 → Tier 3 module (new providers, paid Tier 3,
 > max attempts, sticky spread, localized busy line, cost estimate) is documented in
@@ -51,9 +51,36 @@ management; the detailed guide could not be independently opened during this run
 The owner must verify the correct key type and actual account quotas in the console
 before configuring this feature. No credential changes were performed.
 
-Default logical order: GLM 4.7 Flash → GLM 4.5 Flash → Groq → existing
-OpenRouter live registry → Cloudflare Workers AI → optional Gemini → separately
-gated DeepSeek. Both GLM rungs share one key, account quota, bulkhead and auth/rate/quota
+Default logical order: GLM 4.5 Flash → GLM 4.7 Flash → Groq GPT-OSS 120B →
+Cloudflare Llama 3.3 70B → verified-free OpenRouter models → CheaperInference →
+DeepInfra Llama 3.1 8B → DeepInfra DeepSeek V4 Flash → GPT-5 Nano → GLM 4.7 FlashX →
+Gemini 2.5 Flash-Lite (paid profile). Gemini stays last in configuration and is
+skipped while its provider-family switch is OFF; Vertex is not a rung. Gemini is
+also withheld until this instance has successfully read switch state at least once.
+The global HTTP/fetch/HTTP2 guard holds both Gemini and Vertex during that startup
+window, including grounding, vision and legacy callers outside FreeChain. A failed
+read also holds both families even if the last snapshot said ON, until a successful
+read recovers; it preserves every last known OFF state; Firestore remains reachable for recovery.
+Switch snapshots apply monotonically by revision, so a delayed older read cannot
+undo a newer OFF write. Cross-instance propagation still uses the existing polling
+interval; this is not proof of live state or cancellation of calls already in flight.
+
+Classification still selects response limits, but does not reorder or remove
+rungs by default. `FREE_CHAIN_ROUTE_REORDER_ENABLED=on` explicitly restores the
+older quality/fast promotion policy; `FREE_CHAIN_STICKY_SPREAD=on` explicitly
+rotates leading free rungs. `FREE_CHAIN_ORDER` remains an operator override.
+Selected Inference Gateway and Strict Free requests retain their own policies;
+this change does not override them. CHEAPERINFERENCE=admin remains the existing
+exclusive verified-admin diagnostic route. Attachments, anonymous callers and
+professional/build surfaces retain their existing routing.
+
+Only eligible rungs run: privacy, dated rate/free-plan evidence, provider OFF,
+shared quotas, circuits, concurrency, OpenRouter registry verification and budget
+reservations still apply. The four-physical-attempt default is unchanged; skipped
+rungs do not spend an attempt, and successful earlier replies stop the chain.
+Paid or privacy-blocked fallbacks are never forced just to visit all eleven entries.
+
+Both GLM rungs share one key, account quota, bulkhead and auth/rate/quota
 cooldowns. Model circuits remain separate so a model-unavailable response from
 4.7 can try 4.5; switching models never creates a fresh account allowance. Unknown GLM
 quota limits default to zero and its local reset defaults to conservative rolling24h. `FREE_CHAIN_ORDER` may
@@ -118,7 +145,7 @@ JSON fields cannot forge it. The runtime reuses that active lease, rather than
 queueing twice, and the handler releases it in `finally`.
 
 The chain has a process-local total-turn queue, separate from each provider/account
-bulkhead. Defaults admit at most 8 active chain turns and 64 waiting turns, with a
+bulkhead. Defaults admit at most 8 active chain turns and 1,024 waiting turns, with a
 5,000 ms maximum wait. Per verified UID, defaults are one active and one queued
 turn in this process. Queue-full, per-user-limit or wait-expiry outcomes return
 the bounded busy response, not an invented queue position or ETA. Aborted work
@@ -325,7 +352,8 @@ not a reassuring zero. Legacy unmarked pricing and wallet charging are unchanged
 
 ## Owner-only setup checklist, no commands executed
 
-1. Leave `FREE_CHAIN_ENABLED` OFF, rollout 0 and Gemini skipped while reviewing.
+1. For a staged review, explicitly set `FREE_CHAIN_ENABLED=off` and rollout 0;
+   absent settings now default ON/100%. Preserve existing provider OFF switches.
 2. Verify each provider's current exact model, account/project tier, active quotas,
    free allocation, privacy/retention settings, license and intended-use terms.
    Record a short-lived review expiry; do not represent it as an automated check.
@@ -456,3 +484,179 @@ budget (`FREE_TIER_PAID_DAILY_CAP_USD`, default $10, shared authority `free_chat
 lists are fixed by an allowlist (`visionModels.ts`, `freeTierPaidCap.ts`). `tests/freeTierPaidLeaks.test.ts`
 fails CI if any Free path names `gemini-*-pro`, Grok or Claude. When the cap is reached the turn falls
 back silently to the busy line in the user's language (Hindi / Hinglish / English).
+
+## DeepInfra candidate comparison (admin)
+
+The Free Chat admin page includes a manual comparison between pinned
+`deepseek-ai/DeepSeek-V4-Flash-0731` and `deepseek-ai/DeepSeek-V4.1-Flash-1017`.
+Opening the panel or refreshing status reads the public catalog, shared budget
+and last saved result; it never starts inference. The existing production model
+defaults and task routing are unchanged. A comparison never promotes a model.
+
+To run: configure the existing `FREE_CHAIN_DEEPINFRA_API_KEY` on the server
+(`DEEPINFRA_TOKEN` or `DEEPINFRA_API_KEY` is also accepted by this diagnostic), ensure its shared Free
+Chat paid budget has enough remaining capacity, review the displayed rates,
+confirm they apply to the account, enter an audit reason and press **Run paid
+comparison once**. Catalog or tariff changes require a fresh review. All requests
+use the official HTTPS origin and pinned models; a client cannot supply prompts,
+credentials, prices or endpoints.
+
+The twelve sequential requests alternate model order over six synthetic tasks:
+Hindi, arithmetic, strict JSON, a forced tool-call envelope, consumed SSE and a
+parsed TypeScript function. No tool is executed and generated code is never run.
+This is a small capability sample, **not an end-to-end app-build benchmark**.
+Reported costs are estimates from reported token usage and reviewed public
+tariffs, not verified invoices. Missing or partial usage is unknown, never zero.
+Compare repeat results and complete real app-build benchmarks before changing
+production routing.
+
+The maximum run reservation is $2 at the reviewed tariffs. Reservations use each
+model's full catalog context and fixed 512-token output limit, rather than an
+unproven character/token estimate. Each physical request must obtain the existing
+shared daily reservation and, when enabled, monthly hold. Unknown costs retain
+conservative booking; retries and duplicate IDs never authorize a second call.
+Only one comparison can run globally at once. A stopped server retains a
+ten-minute lease; refreshing status never resumes a run. The last report is saved
+in the bounded `free_chat_chain/deepinfra_comparison` document with no generated
+text, credentials or customer prompts. GET and POST are admin-only at
+`/api/v1/admin/free-chat-chain/deepinfra-comparison`.
+Its approval body is capped at 4 KB by the shared parser, including versioned URLs.
+
+### Bounded 1,000-request bursts (2026-11-04)
+
+The waiting queue now holds up to 1,024 turns; active turns stay at 8. Both entry
+admission (the whole parsed body) and direct runtime admission (message, history,
+system prompt) charge a shared 16 MiB serialized UTF-8 payload budget while queued.
+This bounds retained payload volume, not total V8 heap; count, deadline and per-user
+limits also remain enforced. Abort, expiry and grant return that payload budget.
+Existing explicit queue overrides still win. No provider quotas or paid limits change.
+
+`npm run test:load:chat` runs an offline real-router experiment, with 1,024 and
+2,048 simultaneous synthetic turns, mocked SDKs/store/cache and 25 ms replies
+(or 1,000 ms in the slow scenario). JSON metrics default to
+`/tmp/navbharatai-chat-burst.json` (`CHAT_LOAD_REPORT` can choose another file).
+Metrics include p95/p99, failures, provider fallback, queue cleanup, CPU, sampled
+RSS/heap peaks and event-loop delay. This is not production capacity evidence.
+
+Cloud Build declares 100 HTTP requests per instance and up to 100 instances;
+those settings and live configuration are unchanged. Local queue capacity does
+not increase those HTTP limits, global provider quotas or database throughput.
+With 8 active calls and 1-second replies, a 1,024-turn burst exceeds the unchanged
+5-second queue deadline and correctly yields busy responses. Provider account
+capacity and shared quota/spend transactions must be measured before claiming
+1,000 simultaneous real inference responses. No paid load test is included.
+
+### Local quota-transaction backpressure
+
+Quota reservation and quota-status reads share a bounded per-database/per-provider
+lane in each process. Different accounts may progress together; overlapping local
+store handles for one account cannot stampede the same quota documents. At most
+32 account lanes and 1,024 total waiting operations are retained; waiters expire
+at 10 seconds and return `local_capacity`. A running SDK transaction retains its
+lane until it actually settles, even if other waiters time out. No quota grants
+are cached or synthesized: every accepted reservation still commits through the
+existing Firestore transaction and current quota/spend protections remain intact.
+This does not serialize independent replicas or prove global database capacity.
+The CI emulator drill exercises 1,024 requests through 32 local store handles,
+checks the unchanged allowance, durable accounting and physical transaction count.
+
+The load harness explicitly disables answer caching in its own config, records
+cache reads/hits/misses and physical mock dispatches, and tests 1,000 users with
+four sequential turns plus a 4,000-overlapping-request stress case. Production
+answer caching is unchanged. Tests that verify controlled refusals are not claims
+that every stress request received an answer.
+
+#### Four overlapping questions and slow replies
+
+Four requests for one user are not four independent free reservations. The HTTP
+route acquires the shared FreeAnswer reservation before local Chat admission;
+`freeAnswerQuotaStore` refuses overlapping live ownership. The local router also
+retains one active and one queued turn per user. Consequently the direct-router
+4,000-request overlap benchmark is deliberately a guardrail test, not proof that
+all four HTTP requests are admitted. Sequential turns preserve conversation order
+and release the reservation between answers. Increasing a local per-user limit
+would neither change that shared contract nor establish more provider capacity.
+
+At eight active turns per process and one-second responses, the ideal service
+rate is only eight replies/second before transaction and network overhead. A
+1,000-request initial burst needs roughly 125 seconds to drain; 4,000 requests
+need roughly 500 seconds. The unchanged five-second admission wait and 90-second
+client/free-answer deadline cannot promise all such replies. More queue memory
+does not change this arithmetic. Increasing active admission also exhausts the
+separate per-provider pools, so extra turns can fail faster. Provider quotas,
+privacy eligibility, token limits and paid budgets remain independent constraints.
+
+A larger successful real workload needs measured account quotas and latency,
+adequate replicas/shared-store capacity, and an agreed response deadline. If the
+work cannot fit that deadline, a durable asynchronous job/result API is a separate
+product contract, requiring per-user ordering, idempotency, cancellation, bounded
+retention and reservation ownership; it must not silently reinterpret current
+synchronous requests or their quota. This change does not introduce that API,
+raise provider limits or alter live scaling. Cache-disabled measurements should
+remain separate from ordinary production cache benefits.
+
+### Local pressure, incomplete output and gateway queue accounting
+
+A `local_capacity` quota decision describes this process's transaction admission,
+not provider health or an account quota window. It must not open the provider's
+circuit for a synthetic minute. The store now returns the observation time as its
+reset marker, and dispatch explicitly excludes this reason from remote cooldown
+handling. Genuine RPM/TPM/day limits and provider cooldowns still apply. This
+removes an avoidable post-pressure blackout without granting additional quota.
+
+A nonempty OpenAI-compatible reply ending with `finishReason=length` is incomplete.
+The router retains delivered text and the existing `reason=stalled` caller contract,
+records `truncated` rather than `served`, and does not cache that answer or dispatch
+a second provider after text commitment. Reported paid usage is still settled;
+unreported usage retains its hold. Complete replies remain cacheable under the
+unchanged eligibility and TTL rules. This is completeness metadata, not a factual
+accuracy judgment. Previously cached entries do not retain finish metadata, so
+this change cannot retrospectively identify them; normal TTL remains unchanged.
+
+InferenceGateway's early ingress lease accounts for the serialized UTF-8 request
+body captured with the verified ingress identity. Its direct invocation path
+accounts for the actual input, including system prompts and attachment payloads.
+Both use the same aggregate 16 MiB waiting-payload budget as FreeChain. Reusing a
+live entry lease does not create another queue entry. The bound remains serialized
+queued input, not total process memory or active-request memory. Oversized queued
+requests fail before prompt assembly/provider work and aggregate reservations are
+released on cancellation or grant.
+
+### Bounded capacity waiting and explicit browser sequencing
+
+When every usable rung is busy and this turn has not attempted any quota
+reservation, FreeChain may wait for a physical slot release and re-scan the
+configured order. The original admission wait budget bounds this too (queue time
+already spent is deducted); at most 32 re-scans and 64 process-local waiters are
+allowed. Provider controls are checked again before dispatch. Cancellation ends
+the wait. A reservation attempt or physical dispatch disables this re-scan path:
+it cannot reserve twice, retry a paid response, ignore quota or mix answers.
+Physical SDK settlement, not watchdog expiry, emits availability. This improves
+short bursts on a small available pool; it does not raise any concurrency limit.
+
+Free Chat's composer has an explicit Queue action while an answer is running.
+It accepts up to three additional text questions of at most 16,000 characters
+each, kept only in browser memory. Each is sent after its predecessor completes,
+with current conversation history; the server independently verifies identity,
+quota, budgets and OFF controls for every turn. Ordinary duplicate Send remains
+blocked. No attachments are queued. The pending sequence expires after 90 seconds
+(or clears on Stop, failure/incomplete response, unmount, or session/account/mode
+change); an expired sequence is not silently resumed. Starting a queued question
+does not erase a new draft. Navigation/context checks run before each dispatch.
+This is browser-local ordering, not a distributed job service: separate tabs,
+devices and raw concurrent API requests still obey shared per-user admission.
+It cannot guarantee all four answers when providers fail, quotas expire or the
+waiting deadline passes. The direct-router overlap stress case remains reported.
+
+### Invalid order status diagnosis
+
+The admin status GET returns HTTP503 with the fixed diagnostic
+`{"code":"FREE_CHAIN_CONFIGURATION_INVALID","fields":["FREE_CHAIN_ORDER"]}`
+when the configured order contains unknown/duplicate rungs or places a paid rung
+before a free rung. This read rejects before store reads; it neither normalizes
+the order nor changes routing, switches, credentials or budgets. Raw configuration
+values are never included. The panel shows a fixed configuration-review message
+and blocks controls, including pending confirmations against an older snapshot.
+Successful snapshots still pass the strict shared validator. Other malformed or
+stale responses remain untrusted; this diagnostic does not prove which field
+caused a historical live page failure without its actual sanitized response.

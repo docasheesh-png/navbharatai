@@ -2392,7 +2392,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'object_spec',
       description:
-        'BEFORE hand-modelling ANY 3D object, call this with its name. Returns the object\u2019s REAL '
+        'BEFORE hand-modelling ANY 3D object, call this ONCE with ALL their names (objects: [...]). Returns the object\u2019s REAL '
         + 'dimensions in metres, the parts it cannot read as itself without, the ONE proportion that '
         + 'carries its silhouette, and HOW that kind of thing is placed in a scene (grounded, '
         + 'instanced, animated, shadowed). It answers for 100 built-in objects instantly and free '
@@ -2413,11 +2413,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           object: {
             type: 'string',
             description:
-              'What to look up, in plain words \u2014 "motorcycle", "auto rickshaw", "bullock cart", '
-              + '"cricket bat", "hand pump". English or Hinglish; one object per call.',
+              'One object to look up, in plain words \u2014 "motorcycle", "auto rickshaw", "bullock cart", '
+              + '"cricket bat", "hand pump". English or Hinglish.',
+          },
+          // 🔴 AUTOPSY 61279465 (Q-2335): this used to ask for a single object per call, and a train game spent SIX model
+          // turns — ~55k input tokens each — asking for train, tree, building, mountain and the track one by one.
+          objects: {
+            type: 'array',
+            items: { type: 'string' },
+            maxItems: 8,
+            description:
+              'EVERY object you are about to build, in ONE call \u2014 e.g. ["train", "railway track", "tree", '
+              + '"building", "mountain"]. Each one costs a whole model turn when asked for separately.',
           },
         },
-        required: ['object'],
       },
     },
     {

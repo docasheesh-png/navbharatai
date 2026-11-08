@@ -189,7 +189,8 @@ describe('the wiring', () => {
     // would show it. The expression moved into ledgerEntryFor; the settle still feeds it the remainder
     // from decideBuildBilledUsd and the same sandbox figure the bill used.
     const route = codeOf(read('src/server/routes/agentv3.ts'));
-    expect(route).toContain('realProviderCostUsd(i.entries, i.remainder) + Math.max(0, i.sandboxUsd || 0)');
+    // Unknown Router One expense is excluded without erasing the other providers' known subtotal.
+    expect(route).toContain('ledgerCostUsd(i.entries) + realProviderCostUsd([], i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0)');
     expect(route).toContain('remainder: realCostRemainderForFailure');
     expect(route).toContain('sandboxUsd: livePreviewCharge.usd');
     expect(route).toContain('entries: providerLedger.entries()');

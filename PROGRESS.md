@@ -1,3 +1,140 @@
+## 2026-11-08 — E2B lifecycle safety audit, first bounded repair
+
+Baseline: 6dca2d474871aeafa615ebc683517f0de1e2c61b. Requested objective: reduce sandbox waste without damaging user-built apps. This is not a measured savings claim, a production rollout, or completion of the broader optimization program.
+
+Fixed: raw-document pagination prevents stale history starving later orphan candidates; automatic pause failures no longer escalate to kill or false paused metadata; sweeps are single-flight; allocation/activity compare-and-set and local rechecks preserve replacement state; busy heartbeats refresh only an existing matching durable allocation. Timeouts, template resources, build logic and user data are unchanged.
+
+Proof: 21 sandbox test files / 282 tests pass with Node 22.23.4, npm 11.18.0 and lockfile dependencies. A real local Firestore emulator passed tied-record pagination and allocation/activity CAS/heartbeat checks. All six existing emulator drill scripts passed. Security/signature/license/SBOM, frontend/server/benchmark typechecks, unused-import/native guards, OAuth/Mitrify/quality checks, build, bundle, boot and server-dependency checks passed locally. Full coverage is not yet a passing result: an initial reconstructed checkout retained one file already deleted on main (corrected locally), and this environment's Node proxy warning makes the existing branding stderr-empty assertion fail. Required PR CI must pass; no gate is bypassed or weakened.
+
+OPEN: cross-instance ownership fencing between the final activity read and provider pause; real provider baseline and per-template cost attribution; existing snapshot expiry/recovery evidence; safe staged rollout and measured savings. The scan cursor is process-local and is not a complete-inventory or 20-minute reclamation guarantee. See docs/E2B_COST_SAFETY_REVIEW.md for root causes, tests, limits, rollout and rollback.
+
+## 2026-11-04 — Follow-up: fix the eight baseline failures and Google startup guard
+
+Owner: find the root cause of all eight failed checks; Gemini and Vertex were
+switched OFF with the Admin → AI Engines buttons. Global HTTP/fetch/HTTP2 now
+holds these two families before the first successful durable switch read; restart,
+first-read failure, later read failure and stale snapshot ordering have regressions.
+No admin switch is turned on by this change.
+
+Four stale assertions covered deliberately retired test-account routing or an
+extracted health helper; tests now enforce the documented 2026-11-02 retirement
+and the actual helper's never-used/failed/successful states. Hosting waivers remain
+independent and tested. The Admin capacity description uses the current AI Chat
+name. Three terrain timeouts came from repeatedly scanning every triangle in the
+native raycast test oracle. The oracle now partitions the same index buffer into
+bounded batches; every probe/assertion remains. A separate equivalence test compares
+native raycasts across transforms, misses, vertex edits, draw ranges and groups.
+Terrain coverage tests: all 21 pass in 16.71s (previous baseline 3 timeouts/156.52s).
+Final local validation passed: 3,213 files, 48,434 tests, 85 skipped; coverage
+statements 75.66%, branches 71.60%, functions 78.28%, lines 77.66%. All CI-equivalent
+checks passed, including the locked emulator drills. No gate/timeout was weakened.
+Code verified at 7747f84d8; this entry records its results. PR/hosted CI follow;
+no live setting or deployment is claimed.
+
+## 2026-11-04 — Ordinary Chat default provider order (local implementation; publication blocked)
+
+Owner requested GLM 4.5 Flash → GLM 4.7 Flash → Groq → Cloudflare → verified-free
+OpenRouter → CheaperInference → DeepInfra 8B → DeepInfra DeepSeek V4 Flash → GPT-5
+Nano → GLM FlashX → paid Gemini Flash-Lite, with Gemini/Vertex remaining OFF.
+The constant already matched; default selection and quality promotion did not.
+Default selection now uses the shared ON policy at context/entry/config and 100%
+rollout when no override exists. Classification retains output sizing, while
+promotion requires explicit route-reorder opt-in. Family OFF is checked before
+quota reservations even if credentials were captured before the switch. Gemini is
+withheld before the first successful switch-state read; monotonically applied
+snapshot revisions prevent delayed reads from undoing newer OFF settings.
+Gateway/Strict Free, saved controls, private/health exclusions, account evidence,
+quotas, budgets, four-attempt limit and exclusive admin diagnostics remain intact.
+See docs/FREE_CHAT_CHAIN.md for scope and exceptions. No live settings changed.
+Validation: 518 targeted tests passed. CI-equivalent typechecks, unused imports,
+native/OAuth guards, security audit, signatures, license/SBOM, build, bundle, boot
+and production-dependency gates passed. Locked emulator: 21 queue/retry, 13 autopsy,
+8 DeepInfra and 78 session-rule assertions passed. Full coverage run completed:
+48,422 passed, 8 failed, 85 skipped (3,206 passing files, 6 failing files).
+The five assertion failures reproduce on untouched main 9dac8a71a (admin engine
+status, admin display naming, Weak Router pinning and two test-account checks).
+All three terrain timeouts also reproduce under coverage on untouched main
+(18 passed, 3 timed out at the unchanged 20-second limit). All eight failures
+therefore reproduce on the baseline. Coverage gate is NOT green. Per the mandatory pre-push gate,
+branch remains local: no push, PR, hosted CI, merge or deployment yet.
+
+## 2026-11-03 — Autopsy of build report #1836 (958aa1ec, second-newest failure)
+
+3D endless car racing game, weak tier, ENGINE_R1 `deepseek-v4.1-flash`, RED in 170 s, never charged; all 162 issues and 18 model calls read.
+
+**Tally:** ✅ self-healed 1 (SPACING_SNAPPED on our own kit) · 🔀 workaround 1 (PROVIDER_FALLBACK with nothing to fall to) · ⏭️ skipped 0 · ❌ shipped broken 3 (provider exhaustion, starter page left showing, outcome unexplained) · 🥵 struggle 1 (80 s of reading the kit, 0 writes).
+
+| Item | Root cause → class | State |
+|---|---|---|
+| "no login, multiplayer, purchases or backend" made multiplayer a REQUIRED feature and the game a LARGE build | `withoutDeclinedSentences` dropped only the clause that began with "no"; `gameIntent` and the scope's heavy-infra check read raw text → *a refusal's list read as requests* | ✅ this PR: a refusal now covers its bare list items (and do-not clauses); both readers use it |
+| OUTCOME_UNEXPLAINED although BUILD_ERROR named the cause | `terminalOutcomeCode` (2026-10-30 fix) knew two terminal sentences, not the provider chain's → *a terminal message the classifier did not share* | ✅ this PR: prefixes exported from `buildOutcomeSummaries`, the chain builds its message from them |
+| SPACING_SNAPPED rewrote `touchControls.ts` and `meta.ts` — our kit — on every game build, and moved the knob 2 px off centre | the kit shipped 10/14/18/26 px → *a heal that fires on our own output* | ✅ this PR: kit on the grid (knob 48 px, centred); census over every recipe file |
+| Fast empty reply labelled OUTPUT_BUDGET_STARVED | label from flags, not from time | 🔲 Q-2308 |
+| Router One alone in the chain; the build ended on its one empty reply, starter page left | weak routing order (RED test on `main` since #4065) | 🔲 Q-2309 (another session's area) |
+| Fast-lane gate and floor budget disagree on whether the engine reasons | two capability sources, ladder rung vs model that ran | 🔲 Q-2310 (class of Q-2306) |
+| DESIGN_CONSISTENCY counts the kit's own colours | linter scope includes platform files | 🔲 Q-2311 |
+| 80 s of exploration, nudge silent | — | 🔲 Q-2312 |
+| DISCOUNT_COST_UNCONFIRMED | an honest billing note (unverified supplier cost excluded from the charge) | ✅ not a defect |
+
+**Lock:** `tests/theDeclinedListStaysDeclined.test.ts` (8, the report's request verbatim). Reversion-proved: refusal covers only its clause (3 fail), game contract on raw text (1), provider exhaustion unnamed (1), kit back off-grid (1).
+## 2026-11-03 — Autopsy of build report #1846 (c71e56de, newest failure): Q-2301 + Q-2303
+
+Admin: *"/failedbr me new to old one by one autopsy karo"*. #1846 ("car age nahi bad rahi hai!!", 3D racing game, weak tier, SURPLUS qwen3-coder, 431 s, RED) is the newest failed report. With #1844 (8701aaa1) and #1845 (7aa2fe7c) it was already autopsied by #4069 (merged): the per-call `ctx` and driveVehicle's lost state were fixed there; Q-2301…Q-2307 were left OPEN. This change resolves two of them from evidence in #1846 itself (all 212 issues and 41 model calls read).
+
+- **Q-2301 — the error reached the builder with no file.** Evidence: the repair prompt carried only "Cannot read properties of undefined (reading 'rotation')"; the builder edited `Bird.ts`, whose rotations were already inside a try/catch. Root: every browser lane records `error.stack`, every reader kept `e.text` (`formatRuntimeErrors` had learned the stack in autopsy 95598899 — only its own lane used it). Class: an error's site captured, then dropped before the model sees it. Fix: `locatedErrorText` (runtimeErrorSite.ts), used by the three render checks that feed the preview repair prompt, the auto-repair reproduce check, the `console_errors` tool and AutoFix; the game playtest keeps `errorStacks` beside its errors and reports through `firstPlayError`; ToolDispatcher's actuator port now types `stack`. Census in `tests/aRuntimeErrorNamesItsFile.test.ts` (the red-team fuzz classifier is the one listed exception). Watch: a repair prompt or GAME_DEFECT_RUNTIME_ERROR line ending in `[at src/…:line:col]`.
+- **Q-2303 — "the console was read and it was clean", three times, while the game threw 1,298 errors.** Evidence: +61 s, +119 s and +328 s; the last read came 32 s after the builder's last edit and after no browser look. Root: `captured` meant "the log file exists", and the log outlives the turn (resumed sandbox, append-only), so a window no browser looked in read as clean. Siblings: the fallback screenshot browser had no listener at all; the daemon attached to a new page only on its next 1-second poll; the empty session marker carried no time. Fix: stamped `{kind:'session'}` markers from every lane (browseUrl when painted, both screenshot lanes, each browser action, daemon launch); `captured` = an error in the window or a stamped look in it; `lastSessionAt` returned; `console_errors` says "BEFORE your last file change … NOT evidence" when the newest look predates the last write (`consoleCleanVerdict`), and that a game in PLAY is measured by the playtest. Also closes a quieter hole: a stale log could let a dead preview earn RUNTIME_VERIFIED.
+- **Proof:** `tests/aRuntimeErrorNamesItsFile.test.ts` (8), `tests/aCleanConsoleReadCoversOnlyWhatItSaw.test.ts` (13, every browser script `node --check`ed). Reversion-proved: helper drops the site (3 fail), one render check back to bare text (2), captured = file exists (1), stale read not called stale (1), fallback screenshot without listeners (1). 189 related test files, 4,110 tests green.
+- **Still OPEN from this report family:** Q-2302 (silencing try/catch accepted), Q-2304 (final text vs RED gate), Q-2307 (TODO tests counted as proof); Q-2305/Q-2306 are the admin's decisions.
+## 2026-11-03 — failedbr: the newest failed build is row 1, at a glance
+
+Admin: *"koi aisa system banao, jisse ek nazar me hi sabse new br pata lag jaye … sabse pahle show hone wali br sabse new ho"*.
+
+- **Root cause:** `list_failed_builds` (and `/api/failedbr/reports`) walked workspaces by document id, so the newest failure could be anywhere among ~640 rows; finding it meant reading them all. Clients holding the pre-1.3.0 tool list could not reach the new sorted tool either.
+- **Fix:** the failed list now reads the build report registry from the HIGHEST permanent number down (`scanRegistry`, one shared walk for this list and `list_build_reports`), keeping `failed` + `stopped` (exactly `settledFailure`). Row 1 of page 1 is the newest failed build, for every client, with no reconnect. `observation.ordering` says `newest-first`; while numbering is pending the old walk serves the page, marked `workspace-history`, so nothing disappears. A v1 cursor is refused with a clear message; a malformed cursor is judged before storage. The numbering job re-sweeps daily, so a report whose history write failed half-way still gets a number within a day. Admin `/failedbr` sorts by the same number. MCP server 1.4.0; tool text and server instructions say newest-first.
+- **Lock:** `tests/buildReportRegistry.test.ts` "the failed list is NEWEST FIRST" (first row = highest failed number, paging without repeats, old cursor refused, expired = gap, daily re-sweep). Reversion-proved: oldest-first (4 fail), no re-sweep (1).
+
+## 2026-11-02 — Built apps and games are LIGHT unless the user asks for dark
+
+Admin: *"jab navbharatai par koi app ya game banaya jata hai, to woh, dark mode banta hai. mai chahta hu, jab tak user saf saf na bol de, tab tak light mode me hi game banne chahiye!!"*
+
+- **Root cause:** the design kit every scaffold ships (`designKit.ts`) followed the DEVICE (`color-scheme: light dark` + `@media (prefers-color-scheme: dark)`). Most phones are set to dark, so the phone, not the user's request, chose the look. The game recipe's stage (`--game-bg: #0b0a1a`) and its overlays were hard-coded dark on top of that.
+- **Class:** a built app's theme chosen by the phone setting or by the model's own taste, not by the user's words.
+- **Fix (DNA level):** the kit is light whatever the device says (`color-scheme: light`); `withThemeSwitch` now REPLACES the device block with the switch blocks, so the unchanged dark palette applies only when the app sets `data-theme="dark"` / class `dark`. The game recipe's dark literals are tokens (`--game-bg/-fg/-glow/-scrim/-glass*/-line/-chip/-track`), light by default and dark under the same switch. `LIGHT_THEME_BY_DEFAULT_RULE` (noEvalRule.ts) rides every lane (architect, fast lane, one-shot, writing sub-agents): light unless the user's own words ask for dark; 3D scenes lit as day.
+- **Siblings fixed:** `kitRestore.ts` (restore and keep-on-rewrite re-added the device block — now only an app's OWN device block is kept); `SettingsScaffoldGenerator` default `system` → `light`; golden `ThemeToggle` started on `auto` (device) → starts light, `auto` is the person's choice and is now really resolved; `ConsentBannerGenerator` dark scoped to the app's switch; `GameShellGenerator` black canvas host and dark WebGL fallback → light tokens; golden game canvas fallbacks; `project/aiEdits.ts` said "Follow the system light/dark preference" → light by default; two prompt lines that said "follows the device".
+- **Lock:** `tests/appsAreLightUnlessTheUserAsks.test.ts` (kit output, game tokens + contrast in both themes, every lane, scaffold defaults, and a CENSUS: every server file mentioning `prefers-color-scheme` is listed with its reason — a new one fails). The real-browser test in `theDarkModeButtonSwitchesTheKit.test.ts` now asserts a DARK device with no switch renders LIGHT. Reversion-proved: kit follows the phone (6 fail), `color-scheme: light dark` (1), restore re-adds device block (1), fast lane drops the rule (1), settings default `system` (1).
+- **What to watch:** the next game and app built on a phone set to dark should open light; a request saying "dark mode" should open dark.
+- **Not changed:** NavBharatAI's own pages (legal, marketing, checkout hand-off, preview loading screen) still follow the device — they are not built apps. 3D presets night/horror/neon remain available when the user asks for them.
+## 2026-11-02 — failedbr: every build report, permanent numbers, filter and sort
+
+Admin: *"usme bas failed build report ati hai, aur numbering bhi stable nahi hai … 1. sabhi build report failedbr me aye. sort/filter option bana do. 2. numbering rocksolid karo"*.
+
+- **Root cause 1 (numbers moved):** the number shown was a RANK — `buildReportNumbering.ts` scanned up to 5,000 documents per read and sorted retained failures by start time. A report expiring off the 180-day clock, or a late arrival, shifted every number after it.
+- **Root cause 2 (no permanent number ever):** the permanent allocator (`reportNumber`, failures only) read `admin_failed_report_numbers/counter`, which nothing ever created, so every report was saved with `counter_uninitialized`. Confirmed live: no row carried `permanentReportId`.
+- **Root cause 3 (failures only):** every reader filtered with `settledFailure()`; there was no list of all reports.
+- **Fix (class, not instance):** `buildReportRegistry.ts` — one row per report in `build_report_numbers` (id `${workspaceId}~${startedAt}`), its number taken once from `admin_build_report_counter/counter` inside the same transaction as the report's FIRST history write, for EVERY outcome (failed / succeeded / stopped / unfinished). Re-saves keep the number and only update the outcome. Readers look the number up (`numberBuildReports`, no scan, no cache); every screen and tool shows the same number. A leased, resumable, oldest-first backfill (`build-report-numbering` job, every 15 min, `exclusive`; one read once done) numbers older reports and then sweeps the ones saved while it ran. Numbers are never reused: expiry and erasure leave gaps.
+- **Plugin:** new MCP tools `list_build_reports` (outcome: all|failed|succeeded|stopped|unfinished, order: newest|oldest, cursor bound to its filter/order) and `get_build_report` (any outcome, with number and digest). No REST twin: nothing in the app would call it, and an uncalled route is dead code (`everyRouteHasACaller`). `list_failed_builds` stays, with permanent numbers. Server version 1.3.0.
+- **Retention/erase:** registry on the report's own 180-day clock (`lastSavedAt`), erased with the workspace (doc-id range); counter RETAINED_INDEFINITELY.
+- **Locks:** `tests/buildReportRegistry.test.ts`, `tests/buildReportNumbering.test.ts` (expiry and late-arrival lock + class source guard), `tests/diagnosticsHistoryWriterIntegrity.test.ts`. Reversion-proved: renumber-on-save (5 fail), allocate-while-backfilling (3), no oldest-first order (4), failures-only numbering (6), rank on read (2).
+- **What to watch after deploy:** the first `[build-report-numbering] numbered N` log line; until then lists say "numbering pending". The legacy `admin_failed_report_numbers` counter is retired (still classified, nothing writes it).
+- **Not built:** an "all reports" view with these filters on the admin `/failedbr` web page — the page still lists failures (now with permanent numbers). The plugin has the full feature.
+
+## 2026-10-30 — Game Engine Ultra Phases 1–3 (PRs #4036 → #4037 → Phase 3, stacked, none merged)
+
+- **Phase 1 (#4036):** `gameIntent.ts` reads a scope contract (genre, view, controls, named features, win/lose) from the request; it rides in the kit handoff (`GAME_CONTRACT`) and is compared with the built code after the playtest (`GAME_SCOPE_OK` / `GAME_SCOPE_GAP`, info). Kill switch `AGENTV3_GAME_SCOPE_CONTRACT=off` (default on).
+- **Phase 2 (#4037):** playtest seeds `Math.random` (`AGENTV3_GAME_PLAYTEST_SEED=off`), names quiz/card/board/puzzle DOM games as not played (no score), and records `GAME_DEFECTS` with structured `GAME_DEFECT_*` codes.
+- **Phase 3:** `gameRepair.ts` — one focused repair on measured defects/scope gap, replayed, kept only if strictly better, else undone (`GAME_REPAIRED` / `GAME_REPAIR_UNREPAIRED` / `GAME_REPAIR_SKIPPED`); platform absorbs the cost (`PHASE_GAME_REPAIR` always barren). Incomplete-delivery gate makes the release gate RED (`GAME_COMPLETE_GATE_BLOCKED`), never flips `ok`, never touches a bill. Both `AGENTV3_GAME_AUTO_REPAIR` and `AGENTV3_GAME_COMPLETE_GATE` default **OFF** — admin decides.
+- **Phase 4:** game benchmark — `BENCH_FIXTURE=game` on the existing reliability bench (`npm run bench:reliability`), corpus `scripts/fixtures/game-bench-prompts.json` = **44 real repo prompts** (14 smoke), each with its source file. Per run adds playtest / GQS / defects / scope / repair / gate (read from GAME_* diagnostics) and a fail class; time and real cost only when the build reported them. DRY RUN unless `BENCH_CONFIRM=yes`. No live run done yet — no rates or costs exist. Finding: "ek car wala khel banao" is not classified as a game ("khel" unrecognised).
+- **Phase 5 (ship package):** Hindi "khel"/"खेल" now classifies as a game (RequirementGapAnalyzer + contract; "car wala khel" → racing). Ship readiness Page lists merge order #4036→#4037→#4038→#4039→#4040, flag defaults and enable steps. Nothing merged; admin names each PR.
+- **Open:** a real quiz/card/board playthrough is not built; who pays for a kept game repair is an admin decision; `AppKnowledgeBase.ts` to be updated when the gate is switched on.
+
+## 2026-10-29 — Batch configure failure diagnostics
+
+The live batch configuration failed before inference, but both server and UI discarded the useful cause. This correction returns only an allowlisted stage/reason, upstream HTTP status/error code, expected field presence/types and a fresh correlation ID to verified admins. Configuration/quote/database/revision failures remain distinct; raw bodies, credentials and arbitrary messages are excluded. UI displays this safe evidence. No parser relaxation, budget policy or dispatch change. Current runner maximum remains32; it does not establish the newly requested1000simultaneous capacity. No paid calls or live Save retries performed during this correction.
+
+## 2026-10-29 — Admin concurrent batch preparation
+
+Added an explicit-action, verified-admin concurrent batch runner alongside the manual diagnostics. Budget, prior supplier spend/attempts, count, concurrency and output settings are operator-editable with revision checks and audit records. Durable wave/item claims prevent duplicate dispatch; abort/resume preserves history and unknown liabilities. Shared daily/monthly controls and independent diagnostic switches remain effective. Supplier receipts and exact synthetic JSON answer checks are recorded without raw prompts/outputs. No automatic provider retry/fallback, no mount dispatch, no paid calls from development. Native pricing is used only for batch reservations; manual bots remain unchanged. Configured Beam exposure uses documented limits and current native price ceilings, not a supplier cash-cap promise. Genuine emulator drills remain unrun because the official download was denied. Focused runner tests: 64 passed; mounted batch UI passed, including late response after stop. Independent review found no remaining must-fix. Final aggregate validation is recorded separately in the handoff.
+
 # NAVBHARATAI PRO v2.0 — UNIFIED MASTER ROADMAP
 ### "The world's best browser-based AI app maker — Claude Code for everyone"
 
@@ -99609,3 +99746,1188 @@ Pro submission now owns a synchronous, session-scoped preflight before attachmen
 Live response display timestamps are projected into a causal conversation clock after the submitted prompt, retained across replay; durable history derives ordering from the store's transcript sequence instead of equal or regressing timestamps. The Code Studio Pro sibling uses the same prompt boundary and retains earlier replies. Regression coverage executes the actual submit closures and mounted production hook with delayed/failed/stale requests, duplicate clicks, confirmation cancellation and result tails; history reversion reproduces reversed messages.
 
 All AI chat composers now share a roomy two-row writing card and wrapping control row, with centered responsive width, multiline inputs and preserved per-surface actions. This supersedes the previous footer-dependent one-line composer layout; branding, non-chat forms and human collaboration chat remain unchanged. Verification status is reported with the change; no live inference or paid build is used for validation.
+
+## 2026-10-27 — Manual DeepInfra candidate comparison
+
+Added an admin-only comparison of the existing pinned V4 Flash release and the catalog-verified V4.1 Flash 1017 release. Six shared synthetic checks cover Hindi, arithmetic, schema output, tool envelopes, consumed SSE and parsed TypeScript. Reports separate unknown usage from zero cost and use reported tokens plus reviewed catalog rates for estimates; they do not assert invoice reconciliation or full app-build quality. The production model defaults, task routing and rollout remain unchanged.
+
+Inference requires explicit reviewed-rate consent, a fixed run identity, a $2 maximum reservation, existing shared daily/monthly budget admission and a persistent global run lease. Duplicate attempts cannot dispatch again; cancellations and uncertain provider usage retain conservative booking. The admin can refresh the last saved report without starting another run. No generated code or tool is executed. The owner's local-CI and explicit-merge rules are recorded in AGENTS.md. Detailed validation and any infrastructure/live-credential blockers are recorded with the PR; no merge or production activation is implied.
+## 2026-10-27 — Six "the browser cannot import that export" reports were ONE gate judging the import graph from one turn's slice
+
+**The six rows.** Q-1378 (`IndianBikeGame`), Q-1380 (`createGame` from `gameLogic.ts`), Q-1384 and Q-1392
+(`combo` from `src/game/core/meta.ts`), Q-1427 (`DEFAULT_TOUCH_BUTTONS`, right after a repair) and Q-1446
+(`BlockWorldGame`). One user-visible failure in all six: the browser could not import a named export from a
+generated module while the build's own gates were green — Q-1392's row even records "despite typecheck and the
+project test suite passing".
+
+**Why the obvious theories were wrong, and how the real one was found.** The detection machinery is NOT missing.
+`ImportExportAnalysis` already flags a type-only export read as a value (`cap.runtime !== 'erased'`), so the
+classic "tsc is happy, the bundler is not" case is covered. `writeTimeImportCheck` fires while the agent still
+holds the file, and a project-wide incremental `tsc` runs on **every** TypeScript write. Each of those was
+checked and cleared before the cause was named.
+
+**ROOT CAUSE, measured.** The MISSING-EXPORT GATE in `routes/agentv3.ts` built its analysis map from
+`Object.fromEntries(writtenFiles)` — THIS turn's writes alone. `analyzeImportExports` skips an import whose
+target is not in the map (`if (!target) continue`) and never examines a target nobody in the map imports. So a
+mismatch whose two halves were authored in DIFFERENT turns was invisible to the one gate whose entire job is
+that class. Measured against the real analyzer, not assumed:
+
+| analysis map | mismatches |
+|---|---|
+| the importer only (`src/game/App.tsx`) | **0** |
+| the target only (`src/game/core/meta.ts`) | **0** |
+| both | **1**, named correctly |
+
+That is the six reports' signature exactly — and it explains Q-1427's "after a repair", because a repair pass
+rewrites one of the two files and leaves the other untouched.
+
+**THE CLASS.** A consistency check must not judge a cross-file contract from the writer's own slice. The route
+itself already says so a few hundred lines below the gate — *"an edit turn's writes are a slice — the player the
+first build wrote is in a file this turn never touched"* — and composes
+`{ ...loadWorkspaceFiles(), ...Object.fromEntries(writtenFiles) }` wherever it needs a whole-project fact. The
+scoping had simply been pushed one stage too early: "regenerate only OUR files" is a **repair** rule, and it had
+been applied to **detection**.
+
+**THE FIX.** The gate loads the workspace once and overlays the fresher captured writes. Detection scope widens;
+**repair scope is unchanged** — only files this build wrote are ever regenerated, so the change adds no new write
+surface. A target this build did not write is now **reported** instead of dropped in silence, as a warning that
+does not flip the turn's verdict (the defect predates the turn).
+
+**Siblings hunted across the whole repo.** The other `analyzeImportExports` callers are correctly scoped and were
+left alone: `ToolDispatcher` passes the workspace snapshot's sources, `WorkspaceHealth` and
+`ImportExportReconcile` take whole file sets, and `writeTimeImportCheck` reads each import target on demand. This
+gate was the only narrow one — reported as measured rather than inflated into a sweep.
+
+**Locked by** `tests/aMissingExportIsNotJudgedFromOneTurnsSlice.test.ts`: three behavioural cases against the real
+analyzer (importer-only, target-only, both) plus a source guard that fails the moment this gate — or a new sibling
+in the same route — is handed `analyzeImportExports(Object.fromEntries(writtenFiles))` again. **Proven by
+reversion:** with the slice restored, two of the six fail.
+
+**Honest limits, stated rather than papered over.**
+- The six builds' sandboxes are gone, so **no individual instance can be re-run**. What is proven is that this
+  hole is present in the code and produces exactly this signature. The rows record that distinction.
+- **OPEN root cause Q-2270:** the gate can now SEE a cross-turn mismatch but still cannot repair one, because
+  `writtenFiles` is its only proof that a file is ours to rewrite. Widening the repair set is a write-surface
+  decision (it could reach a file the user hand-wrote in an earlier session), so it was left for the admin with
+  three options and a recommendation rather than widened silently.
+
+## 2026-10-28 — Surplus model contracts do not multiply with sellers
+
+The live admission synthesizer generated model-scoped usage mappings and tariffs once per
+(model, provider) pair. The production adapter correctly requires exactly one applicable
+contract per model, so multiple sellers made binding fail before reservation or transport.
+The synthesizer now enumerates distinct models for those two contracts only. Capabilities,
+quality evidence, seller offers/rates, tariff values/provenance and strict ambiguity rejection
+remain unchanged. The observer's pair-based quality evidence is intentionally seller-scoped.
+
+Regression proof on unchanged production source: the real buildSession-to-productionAdapter
+path failed both multi-seller orderings (2 failed, 19 passed). With the fix, all 21 Surplus
+registry test files / 573 tests passed. The regression checks cheapest-seller selection,
+reservation before mocked transport, chargeable receipt, unchanged snapshot, and rejection
+of genuinely conflicting mapping/tariff evidence before reservation or transport. No live
+provider call was used. Complete final-source local gates are recorded separately; real
+Firestore drills remain blocked by the environment proxy's CONNECT 403. This entry does not
+claim deployment, live provider attribution, completion of the older cumulative patch, or
+resolution of a specific production incident.
+
+## 2026-10-28 — Scope preflight diagnostic repair (separate from merged binding fix)
+
+Current base is merged main 69f59defd (the distinct-model contract fix remains intact). The post-deployment scope-unavailable canary did not reach coding diagnostics. Its exact historical provider/reservation cause remains unverified. Admin blank details are reproduced: AGENTV3_DISCOUNT_SCOPE_CALL supplied only ok/model/latency/token fields, while persistedAuditEntry derives message from a different fixed key list and Monitor renders only message.
+
+This branch adds safe request correlation and a readable scope-call summary, plus fixed-enum scope-unavailable diagnostics distinguishing invalid request/output, classifier error, the unchanged five-second scope deadline, and observed authorization/reservation/dispatch/response-validation/receipt failures. Native errors remain folded at the public boundary; internal metadata uses WeakMap identity, never upstream text/properties. The 60-second transport and 120-second session ceilings are unchanged. No financial guard, tariff, receipt decision, retry authority, reservation or quarantine state is changed.
+
+The existing private FailedBR MCP read gate exposes list_scope_failures as an allowlisted projection of only this event, paginated by document ID with at most 51 reads per request. Storage errors remain errors; audit retention is best effort and empty pages are not proof of success. No coding-build report is fabricated and existing history/scoring is untouched. Documentation and the app knowledge entry describe the new read tool. Tests cover privacy, access, pagination, abort/error/output distinctions and real buildSession/productionAdapter paths with mocked provider I/O. Focused verification: 164 tests passed; full final-source local workflow evidence will be kept outside the repository. The locked emulator remains unavailable due the previously observed proxy denial; no prohibited retry or paid provider call was made. This entry does not claim release or end-to-end inference success.
+
+### Scope diagnostic verification follow-up
+
+Independent review requested the neutral reservation_failed enum because an uncertain datastore exception cannot prove a reservation was rejected or never committed; corrected without changing guards. The completed preliminary full suite had 47,496 passes, two chat-handler branch-budget failures and 85 suite-declared skips; build/bundle/boot/production-dependency gates passed. Diagnostic formatting and conditional logging were then extracted into explicitly projected, synchronous helpers, preserving the unchanged 537 branch budget. All 172 focused tests, including that guard, passed. Independent review approved the extraction. Final exact-source workflow results remain in external CI evidence; no historical inference success is claimed.
+
+## 2026-10-28 — PR #3982 reconciliation and branding test isolation
+
+Integrated main `a97699747` into the existing comparison head `7647a7c76`, preserving #3980–#3984 without editing their branches or release configuration. No production model routing, consent, body bounds, budget accounting, global lease/tombstones, model-match or unknown-spend protection was changed.
+
+The seven baseline branding failures were reproduced with Node 22.23.4/npm 11.18.0. Root cause: the child runner's `createRequire` found the environment's globally supplied `sharp` through NODE_PATH, so fixtures explicitly modeling an absent image library ran with one installed. The shared subprocess helper now disables Node's global search paths while retaining fixture-local dependencies. Existing assertions are unchanged. A regression injects an ambient image module and proves it is never loaded; removing the isolation makes that regression fail. The sibling census found the affected branding subprocess cases share this helper. The original 30 executable cases plus the new regression pass; real-image cases and full CI-equivalent results are recorded in the final validation evidence, not inferred from this focused run.
+
+Q-2271 remains blocked: the locked Firestore emulator v1.22.0 download from storage.googleapis.com returned HTTP 403 in this environment, and no emulator exists in the normal verified cache locations. No alternate download, fake emulator, hosted Actions, credential access or paid comparison was used. The four current emulator commands cannot be claimed passed on this reconciled tree. Requires access to the official pinned download or an already verified normal cache, then all four drills on the final tree. Other local gates continue independently. No merge or deployment is authorized by this entry.
+
+### 2026-10-28 — Admin provider diagnostic bots: boundary-only local checkpoint
+
+Isolated branch `codex/admin-provider-diagnostics-20261028`, based on fetched main
+`2e83df1bc`. Added shared truthful response/receipt/timing types and strict request
+validation plus reuse of the existing verified-admin middleware. No route mounted,
+provider dispatched, production guard changed, old one-shot record reset or UI shipped.
+Focused validation: `vitest run src/server/lib/providerDiagnosticBoundary.test.ts`:
+22/22 passed on Node 22.23.4 with npm 11.18.0 execution environment. Full CI, mounted
+UI tests and emulator drills are NOT run at this checkpoint. No paid calls or hosted CI.
+Open-PR listing via `gh pr list` returned GraphQL Forbidden; not retried. Known parallel
+pilot-status/admin-panel work remains untouched. Repository `.agents/skills` absent.
+Next: inspect shared durable budget authority and implement reservations/provider adapters
+before mounting the two admin panels. Preserve all existing unknown-liability holds.
+
+### 2026-10-28 — Diagnostic bots: durable accounting local phase
+
+Added `providerDiagnosticStore.ts` and mocked transaction tests. One atomic transaction
+reserves existing shared daily/monthly ledgers and a separate aggregate benchmark
+allowance. Per-test reservation <= ₹1; aggregate <= ₹2,000 inclusive of reviewed prior
+supplier API/sandbox liabilities. Duplicates never gain dispatch permission, unknown
+cost retains holds/global slot, exact receipts settle idempotently, and overruns retain
+the stop. Missing reviewed prior-cost/rate/conversion evidence blocks dispatch; no
+production evidence was fabricated or written. `docs/PROVIDER_DIAGNOSTICS.md` records
+the exact required evidence and remaining composition work. Provider dispatch, routes,
+UI, independent review, full CI and real emulator drills remain unimplemented/unrun.
+No live provider calls, hosted Actions, publication or denied PR-list retry occurred.
+Validation for this phase's final source: 42/42 focused boundary/accounting tests
+passed; server strict typecheck passed; `git diff --check` passed. Executed with
+Node 22.23.4/npm 11.18.0. These are local checks, not full CI or live verification.
+
+### 2026-10-28 — Admin provider diagnostics dispatch/routes checkpoint
+
+On isolated codex/admin-provider-diagnostics-20261028, added providerDiagnosticRunner.ts
+and routes/providerDiagnostics.ts with tests; registered separate admin route prefix.
+Existing provider adapters only, no chain/classifier/fallback/retry. Inline supplier cost
+uses evidenced Surplus micro-USD; missing receipts retain unknown liability. No prompts,
+responses, raw errors or secrets are persisted by diagnostics. Mounted routes enforce
+real admin auth before reads, posts and unknown paths. Mocked complete path: 59/59 pass
+on pinned Node 22.23.4/npm 11.18.0. No paid calls, publication, hosted CI or UI work.
+Production evidence verification composition remains explicitly blocked, as documented;
+no fabricated approval/review data. Parent pilot routes/panels and historical tests untouched.
+Server strict typecheck also passed after route integration; git diff --check passed.
+
+### 2026-10-28 — Two admin diagnostic panels
+
+Added ProviderDiagnosticPanels.tsx and 10 component interaction/render tests; added
+AdminDashboard integration and adminTabs navigation entry. Both bots hidden until an
+explicit authenticated status read; no calls on mount. Plain-text response, supplier
+cost/unknown, wallet distinction, latency, safe stage/reason and expandable timeline.
+Session storage retains UUID only; duplicate lock and same-key GET recovery prevent
+replacement calls after uncertain outcomes. 69 focused tests and frontend strict
+ typecheck pass on pinned runtime. UI tests use repository hook harness, not real DOM;
+real mounted browser navigation remains unrun. No full CI or paid calls. Documented
+smallest evidence-authority integration and why synthetic liveAdmission tariff records
+cannot serve as independently verified prices. Production dispatch remains blocked.
+
+### 2026-10-28 — Shared evidence authority and independent review
+
+Removed production verifier stub. providerDiagnosticEvidence.ts now reads genuine
+server-owned reconciliation/tariff records, reports precise missing fields, binds the
+current deployment/account/endpoint, covers all billed dimensions/model versions and
+rates locked for admitted requests. Aggregate prior floor includes evidenced bounds
+for all outstanding authorized external benchmark spend. No records were fabricated.
+Status dry-runs the same transaction as admission; billing caps come from existing
+paid policy and freeChainConfig. Every transaction retry uses current time and runner
+checks the issued dispatch expiry before network. Existing holds never reset.
+Independent native subagent reviewed auth/accounting/UI and added17 passing evidence
+regressions. Fixed lost-ack uncertainty, settled recovery, overrun/replay cost projection,
+and Surplus failure usage/HTTP status. Official CheaperInference docs verified exact
+settled billing field; shared adapter projects it safely without routing changes.
+Application retry count is explicitly distinguished from unknown provider-internal
+retries. Local focused broad run256 passed; subsequent evidence/navigation run110 passed.
+Real React/Happy DOM21.0.4 mount drill passes, including duplicate POSTs and recovery;
+script is scripts/providerDiagnostics.dom.check.mjs (DOM dependency installed only /tmp).
+Full local CI first coverage run interrupted after two integration failures (navigation
+block format/admin-only provider whitelist); both fixed and final-source coverage restarted.
+Main-job audit/license/SBOM/typechecks/native/OAuth/build/bundle/boot/server-deps passed.
+Informational npm signatures download failed; no retry/bypass. Previously proxy-denied
+emulator download not retried, so real DB/rules/emulator drills remain unrun. No hosted
+Actions, live provider calls, production reads, publication or merge.
+
+Final-source local validation completed: full coverage exit0,3129 test files passed,
+47643 tests passed/85 skipped(47728 total),817.01s. Statements75.38%,branches71.31%,
+functions77.95%,lines77.29%. Final frontend/server typechecks and unused-import gate
+also passed after review fixes; build/bundle/boot/server-dependency checks passed.
+Real React/Happy DOM script passed with manual prompt input, duplicate POST suppression,
+no mount calls, verified visibility/auth denial, remount same-key recovery and hold logic.
+Informational signature verification remains failed(Failed to download). Real emulator
+and database/rules drills remain unrun due earlier official-download proxy denial; no
+retry/bypass. Actual deployed browser and live paid verification were not performed.
+
+Publication preparation: fetched remote main remains2e83df1bcebf455ab22bb771702b70e9861ded7f,
+so no integration changes were necessary. Replaced copied incident identifiers/timing in
+mock fixtures with synthetic values before publication. Product runtime code unchanged;
+affected focused suite and real DOM drill rerun. Draft-only publication explicitly
+authorized; commit uses [skip ci] to avoid hosted Actions. No approval review, merge,
+deployment, paid inference, or denied PR-list retry is authorized/performed here.
+
+## 2026-10-28 — Separate two-call admin diagnostic allowance (locally validated, not deployed)
+
+Owner authorized a NEW ₹100 total for one tiny call per supplier, independent of the old ₹2,000 benchmark. Runtime now uses a separate durable ledger and permanent provider slots, full-context conservative reservations, shared daily/monthly caps, the same verified-admin boundary, and fixed `Reply with exactly: OK` input. Historical benchmark/one-shot records and pending/quarantine holds are untouched. An unknown receipt or overrun still retains the global stop; this may prevent the second call until reconciliation.
+
+Root cause: original diagnostic admission required bespoke review/artifact/account-attestation documents that did not exist. Replacement uses existing server configuration, official read-only catalogs, Surplus undiscounted reference-rate maxima and CheaperInference's current supply-rate ceiling. No review seeding or fabricated historical spend. The pair Surplus request tightens only its own URL to min90; Beam uses documented nested low reasoning and min_discount_percent=0. Fresh existing billing FX gets a 100% planning buffer. These are conservative reservation estimates, NOT guaranteed provider monetary caps or actual INR receipts. Any invoice/FX overrun remains an accounting risk and must not be called a hard cap.
+
+Review fixes: legacy-key replay checked inside transaction for rolling deployments; stale reference prices rejected; zero optional cache rates accepted; pair-specific session recovery plus manual SAME-key admission retry; status and dispatch share the same adapter. No live paid verification, production mutation or publication. Focused mocked suite: 280 passing across 9 files; real React/Happy DOM mounted checks passed; frontend/server/benchmark typechecks and unused-import/local guard passed. Independent targeted review found no remaining must-fix findings after corrections. Final local main-job validation passed with pinned Node 22.23.4/npm 11.18.0: npm ci, audit gate, license gate, SBOM, all three typechecks, unused-code and native guards, OAuth check, full coverage (47,684 passed; 85 skipped; 3,131 files; exit 0), production build, bundle budgets, boot, server production-dependency gate and mounted DOM check. Informational npm signatures failed with “Failed to download”; coverage also emitted environment metadata-lookup HTTP 403 warnings. Real emulator drills remain unrun following prior official download denial; no retry/bypass. Remote main remained d9a77cbec7c6b118f5bdc1b242be2865c5b42c17 before and after validation. Two reservations are NOT atomically prefunded: an unknown first charge retains the active lock because its reservation is an estimate, not a guaranteed supplier cap. No production mutation or live paid verification.
+
+## 2026-10-28 — Diagnostic metadata contract correction (local, not deployed)
+
+Live preflight on merged cd5ffbb31 failed without inference: Surplus modelLimits and CheaperInference malformed_catalog. Root class: requiring optional catalog properties and coupling a single-model test to a bulk catalog; the generic malformed label concealed JSON/envelope/size distinctions. Exact live Cheaper body shape/size is NOT known: direct public API reads from this execution environment were proxy-denied (403) once per supplier, with no retry or bypass.
+
+Surplus parser now reads documented top_provider output limits, rejects malformed containers, honors the smaller conflicting cap, and fills absent/null optional fields ONLY for exact live-listed documented DeepSeek Flash IDs. Explicit incompatibility still blocks admission. CheaperInference uses the official credential-free /public/models/{id} PublicModel response; authenticated supply remains required. A source-linked schema projection includes the complete official required-field list and consumed property types; fixtures are DOCUMENTED contracts, not claimed live captures. Safe admin diagnostics distinguish size, JSON, shape, invalid limits and public-metadata access denial, returning only byte counts and allowlisted field types. No raw body or credentials are exposed. Budget, provider slots, historical holds and paid dispatch remain unchanged.
+
+Focused checks: 298 tests across 10 files passed; independent review found no remaining must-fix issues. Full local CI pending. Actual live catalog verification remains unperformed; parent must verify preflight before paid testing.
+
+## 2026-10-28 — Owner removed diagnostic-only caps (local validation)
+
+Latest explicit instruction removes the separate ₹100 allowance, permanent per-provider one-call slot, and fixed 256-token request limit. Manual diagnostics now use the existing shared daily/monthly spending controls. Old slots, historical records, unresolved liabilities, global in-flight/unknown stops and legacy benchmark accounting are preserved. Prompt and output settings are editable; 256 remains only an editable default. Native documented model limits are enforced when supplied; optional absent text/output fields alone no longer block a priced, context-bounded request. Full-context plus requested-output reservations remain estimates, not guaranteed supplier hard caps. Normal provider routing remains unchanged.
+
+The server no longer replaces the submitted prompt. Browser session recovery retains the exact prompt/output/UUID so reconnect cannot silently change a pending request; these contents are never persisted in server diagnostic logs. Surplus diagnostic calls pass their validated output setting to the adapter while ordinary callers keep the previous default limit. Unsupported Cheaper adapter output is rejected before reservation. Independent review identified these adapter/recovery issues and confirmed their resolution, with no remaining must-fix findings. Focused mocked checks: 343 tests across 11 files passed.
+
+The earlier full CI started before this scope change and observed files during edits, so its coverage result is superseded and must not be treated as final validation. A fresh full run on the completed code follows. No inference, deployment, production mutation or hosted Actions were performed. Latest fetched main remains cd5ffbb31e18712e275f6972f6be39e38daa8ca2.
+
+### Final local validation — diagnostic contracts and manual settings
+
+Pinned Node 22.23.4/npm 11.18.0 fresh run completed: 3,132 test files passed, 47,709 tests passed and 85 skipped; coverage gate passed (statements 75.42%, branches 71.36%, functions 77.98%, lines 77.33%). Install, audit gate, license gate, SBOM, frontend/server/benchmark type checks, unused/native guards, OAuth checks, production build, bundle budget, boot smoke, server production-dependency gate and real React/Happy DOM mounted UI check all passed. Logs/results are at /tmp/diagnostic-manual-ci. Informational npm signature verification failed to download. Real Firestore/emulator drills remain unrun due the earlier official download proxy denial; no bypass or hosted Actions. Environment metadata lookup emitted HTTP403 warnings without failing coverage. Independent review has no remaining must-fix findings.
+
+Current remote main was fetched and remains cd5ffbb31e18712e275f6972f6be39e38daa8ca2. Official documentation/schema fixtures are validated; live catalog response bodies and paid inference remain unverified. The former generic Cheaper malformed_catalog cause cannot be narrowed to size, JSON or envelope without live evidence. This candidate reports those separately. Parent coordinates publication/deployment and subsequent live preflight; no production/provider actions occurred here.
+
+## 2026-10-28 — Independent diagnostic-only OFF switches (PR3995 follow-up)
+
+Owner now requests the feature behind reversible flags, with both OFF on release and no live activation or paid testing. Added independent durable controls under the diagnostic namespace, missing records default OFF, changed only by verified-admin UI actions with revision comparison and atomic safe audit records. Controls never alter ordinary chat/appbuilder routing. OFF status skips provider/config/pricing probes; control or provider errors remain isolated and an enabled provider can still be disabled when its adapter/preflight fails. Status/history/recovery stay readable. No migration, on-load network request, or production seed is introduced.
+
+Admission checks controls before pricing and inside the reservation transaction. Final dispatch claims recheck enabled/revision and pricing expiry transactionally; runner checks expiry again after claim acknowledgement. Disable/re-enable invalidates old unclaimed reservations. Claims already committed may continue after disable, as the UI explicitly explains; no promise of supplier cancellation. Existing holds/history are never cleared or converted to a guessed zero receipt. Stale concurrent enables cannot overwrite a newer disable.
+
+Focused final mocked checks: 360 tests across 11 files passed; real React/Happy DOM checks cover default-OFF controls, explicit revision-checked toggles, independence, no inference on toggle/mount, and recovery. Independent review's disabled-control visibility and expiry-race findings were fixed; no remaining must-fix findings. Full local CI follows on this code. No live toggle, paid call, merge retry, or publication write has occurred in this follow-up yet. Parent owns any reconsideration of previously denied merge.
+
+### Final flag validation — release remains default OFF
+
+Fresh pinned Node22.23.4/npm11.18.0 local CI passed: 3,132 files, 47,726 tests passed, 85 skipped; coverage gate passed (statements75.44%, branches71.37%, functions78%, lines77.34%). Install, audit/license/SBOM, frontend/server/benchmark types, unused/native guards, OAuth, build/bundle, boot, server dependency gate and mounted React/Happy DOM checks all passed. Independent review confirmed no remaining must-fix findings on the final controls/isolation implementation. Source main remains cd5ffbb31. Logs/results: /tmp/diagnostic-flags-ci.
+
+Informational signature verification failed to download; real emulator drills remain unrun after the prior official download denial. No live provider calls or flag activation were performed or are planned under the latest user instruction. Both newly introduced controls default OFF without seeding production documents. This follows the previously denied merge with new user-requested protective controls; no denied merge action was retried or bypassed here. Parent owns PR3995 and merge review.
+
+### 2026-10-29 — Direct manual admin provider tests: final corrective candidate
+
+Resumed the existing isolated diagnostic branch after the owner explicitly authorized one final corrective PR. The two admin bots now send text directly through their configured provider adapters: no mandatory pricing/catalog/supply/FX preflight, separate diagnostic allowance, permanent one-call slot, diagnostic concurrency gate, prompt-byte cap, default output cap or custom diagnostic deadline. Provider/SDK/hosting limits still apply; no monetary hard cap is claimed. Ordinary chat/app-builder routing is unchanged. Independent OFF-by-default switches, verified-admin authorization on all endpoints, secrets privacy, no automatic retry/fallback, safe response diagnostics and truthful reported/unknown supplier cost remain.
+
+Historical holds and records are untouched. New manual records retain exact reported charges or unknown liabilities without settling old reservations. The existing deployed run-key namespace is retained with versioned records so mixed revisions cannot dispatch the same key twice. Independent review found and resolved that migration race, malformed control revisions, explicit legacy API output bounds, and same-key browser recovery preserving old request settings. New UI submissions omit output limits. Completion metadata means the local handler completed, not that supplier billing necessarily stopped.
+
+Root-cause ledger: custom preflight blocked both providers before inference → replaced its two caller paths with direct manual admission and a real-route mocked regression proving zero pricing/catalog calls; unused old pricing modules → removed both modules and their exclusive tests/fixture without weakening the dead-code guard; two source-census ENOENT failures → intended deletions had not yet been staged, so git ls-files still listed absent files. This resume stages the exact reviewed changes before rerunning those checks. The previous full run was 47,689 passed / 2 ENOENT failures / 85 skipped; it is not recorded as green. Final validation is in progress using CI-pinned Node 22.23.4/npm 11.18.0. No live inference, production flags, credentials or records were changed. Official emulator download was previously proxy-denied; no bypass or substitute real drill is claimed.
+
+Validation resume found one additional release blocker from the current registry audit: transitive Firebase dependency re2js 2.8.6 is affected by GHSA-gg6h-894w-4m9c (high, quadratic lookbehind denial of service). The audit states the affected range is >=2.2.0 <2.8.7. Updated only that lock entry to the minimum patched 2.8.7 using npm registry tarball/integrity/engine metadata; no new direct dependency or audit exception. Its Node >=20 engine fits pinned CI/production Node 22. The pre-patch validation was deliberately stopped during coverage, not counted as passing. Both previously failing source-census tests and the dead-code/direct-route checks passed after staging (45 tests).
+
+Final validation (2026-10-29): Node 22.23.4 / npm 11.18.0. All blocking main-job checks passed: clean install, audit gate after the minimal re2js patch, license gate, SBOM, frontend/server/benchmark typechecks, unused-import and native guards, OAuth check, full coverage, production build, bundle check, server boot, production-dependency gate and real React/Happy DOM diagnostic UI check. Full coverage: 3,131 test files passed; 47,691 tests passed, 85 skipped; exit 0 (801.31s). No test/threshold/allowlist was weakened. An initial patched coverage attempt encountered a stale lock belonging to the deliberately terminated pre-patch process; /proc confirmed its owner was defunct before that one lock was removed. The sequential full rerun passed. Informational npm signatures failed with 'Failed to download'; real emulator drills remain unrun due the previously documented official-download proxy denial. Independent staged-diff review found no remaining must-fix issue. Remote main rechecked unchanged at 9e97b447603d51ff2d33e42fa4ea3c4261f5b43c. No paid inference, activation, production write or deployment occurred. The parent owns single-PR publication/merge coordination; no unrelated documentation PR is included.
+## 2026-10-28 — Default-OFF diagnostics release follow-up with ordinary CI
+
+PR3995 is merged at 9e97b447603d51ff2d33e42fa4ea3c4261f5b43c. Both independent diagnostic controls default OFF until a verified admin explicitly enables a provider. Release scope remains the flag-protected feature: no live activation or paid provider test is requested. Status/history/recovery and existing accounting holds remain available; ordinary chat and appbuilder routing are unchanged.
+
+The owner's 18:13 UTC instruction restores ordinary hosted GitHub CI, including honest reporting of failures. Future commits, PRs and merge messages must not suppress CI. The previous instruction to avoid hosted Actions is superseded; workflow security, branch protection and verification gates are unchanged. An allowed CI run is not a passed CI run or permission to misreport a failed check.
+
+This follow-up changes only this release record. The existing .github/workflows/ci.yml runs on pull requests and pushes to main. CLAUDE.md documents the connected Cloud Build push-to-main trigger running cloudbuild.yaml for Cloud Run deployment. The parent will create and merge the follow-up PR through the normal flow; verify the resulting GitHub checks, Cloud Build result and deployed revision independently. A merge alone is not evidence that the site is updated. No workflow edit, manual deployment, runtime change, flag activation or provider call is included here.
+
+Local verification for this documentation-only change: git diff whitespace check and exact unchanged non-PROGRESS repository tree comparison against 9e97b447603d51ff2d33e42fa4ea3c4261f5b43c. Prior runtime-test results are recorded above; this entry does not claim a new full-suite or hosted-CI pass.
+
+### 2026-10-29 — PR 3997 current-main reconciliation
+
+Fetched remote main c43b154e0fe06f28c4900f8377ac4cf161ec423a and confirmed the diagnostic branch remote head remained 0e3aad015669f6be1841f606d8d37c675d6c5cb4. Main had gained only the already-merged PR 3996 documentation entry. Both git merge-tree and the actual feature-branch merge were clean: no unmerged/conflicting files. Preserved that documentation and all diagnostic changes; no runtime source, dependency, workflow or access-control change was needed for reconciliation. Full local gates are rerun on this combined state before pushing the same PR branch. This is preparatory feature-branch integration, not a PR merge or deployment; the existing approval-review rejection remains in force and real-emulator drills remain blocked by official artifact access.
+
+Reconciliation validation completed on Node 22.23.4/npm 11.18.0: 3,131 files passed; 47,691 tests passed / 85 skipped (807.53s), all blocking main-job gates passed, including audit, all typechecks, build/bundle/boot/dependencies and mounted React UI. Mounted checks explicitly passed separate default-OFF controls, revision-checked toggles, disable, admin exclusion, no mount dispatch and duplicate POST suppression. Runtime and lockfile are byte-for-byte unchanged from the independently reviewed 0e3aad015 commit; only PROGRESS documentation was integrated/updated. Informational signatures still failed to download; four real-emulator drills remain unrun, not waived. Remote main and PR head were rechecked unchanged before the normal same-branch push. No PR merge, force push, protection/status change, paid call or deployment was performed.
+
+## 2026-10-29 — local provider accounting/evidence correction (not published)
+
+Branch `codex/provider-accounting-audit-20261029`, base `c5992dee3b9241e2f7ff7076de4aeab33b77887e`. CheaperInference normal-chat settlement uses supplied settled supplier receipts, including charged failures; missing/invalid/conflicting receipts keep conservative liability. Routing and manual diagnostic limits/controls are unchanged. Surplus production no longer manufactures verified capability/quality/tariff/account records from catalog observations: it reads existing evidence, preserves its dates and rechecks credentials/account expiry across reservation I/O. Missing evidence declines admission into existing fallback, not proof of production readiness. The manager's legacy approval endpoint now verifies existing evidence without writing fabricated approval; labels/audit reflect that behavior. Historical records/holds untouched. Synthetic old evidence exists only in explicit unit-test fixture.
+
+Initial focused checks: 359 accounting/queue/rollover tests and 39 Surplus tests passed before independent review refinements. Reviewer identified missing account flags/recheck and false approval UX; both addressed, final validation pending. Full CI running locally with Node22.23.4/npm11.18.0; coverage caught assertions from earlier UI/audit semantics and requires final rerun. Informational signatures download failed; no claim of full green. Real Firestore drills still require previously blocked official emulator download, no denial bypass. No commit/push/PR/deployment/provider dispatch. Browser exclusively owns paid CheaperInference baseline. Scratch-only runner prototype passes six synthetic tests; it has no authenticated transport, durable leases or production readiness. Genuine Surplus official-tariff/capability artifacts are not established by repository metadata; existing customer billing policy remains unchanged.
+
+Backend correction validation completed on staged tree `3d7134488e79305527a3c6167d9c7673b453deb9`: full coverage 47,723 passed / 85 skipped, 3,132 files; all source-dependent main-job gates and mounted diagnostic checks passed. Informational signatures download failed; genuine emulator drills remain unrun due existing official-download restriction.
+
+Latest scoped addition: normal-chat pending feedback uses the existing in-flight state and a polite accessible English status under the repository UI-language policy; answer language resolution is unchanged. Other chat/builder/diagnostic surfaces retain existing indicators. No retries, races or new network calls. Outlier diagnostic totals (16.882s/18.335s) cannot isolate provider latency because successful dispatch-start timing is absent and totals include accounting. Existing normal-chat TTFT includes queue/admission; no claim of all replies below ten seconds. Focused UI/lifecycle checks: 138 passed; separate real-DOM presentation checks: 9 passed. Combined final-tree CI pending. No publication or paid dispatch in this executor.
+
+Final waiting-UI correction: the localized draft failed the existing English-only UI guard, so it was replaced with `Preparing your reply… 🤔` rather than weakening that guard. New unit tests were moved from unsupported root `.test.tsx` placement into supported `src/components/chat`; final focused validation explicitly discovered all five files: 89 tests passed, plus 9 real-DOM presentation checks. Combined final-tree coverage is being rerun; previous combined run had only the now-corrected language guard failure.
+
+Final local validation completed: 47,726 passed / 85 skipped across 3,133 files in full coverage (781.18s). All applicable main-job checks passed across recorded runs, including corrected frontend/unused-import reruns, server/benchmark types, native/OAuth, build/bundle/boot/production dependencies, audit/license/SBOM, mounted diagnostic UI and nine mounted waiting-status checks. Initial wrapper failures remain in raw logs; none were relabeled green. Final functional review found no must-fix; only unused test-import cleanup followed the reviewed implementation. Four genuine emulator drills remain unrun because the enforced network policy excludes the official download host; no alternate-host or permission bypass. Informational npm signatures failed to download. No paid provider request, commit, push, PR or deployment performed by this executor. Source remains local for parent publication coordination. Surplus genuine-evidence availability and upstream slow/format-failing responses remain open production-verification issues, not claims of readiness or fixed provider latency.
+
+## 2026-10-29 — Local admin slow-call timing evidence (not published)
+
+Measured diagnostic latency previously combined admission/control/reservation work and the adapter round trip, preventing reliable attribution of slow calls. Added monotonic runner timing for admission, dispatch start, adapter completion/failure, provider round trip (including parsing), accounting and total. Admin results over 10,000 ms show these intervals and their largest measured stage, explicitly not an upstream root-cause claim. Queue, HTTP-header, separate parsing and first-token measurements remain unavailable for these non-streaming adapters; provider processing/network cannot be separated. Safe evidenced HTTP failure status and retry-after are retained; no retry/cooldown/fallback is introduced. Cancellation is distinguished from timeout. Recovery cannot masquerade as fresh timing, and no prompt/output/header payload is persisted by this instrumentation.
+
+Review identified an expired-admission settlement path that could attribute accounting delay to admission; fixed the interval boundary and added a regression. Existing admin authorization, independent switches, direct provider behavior, historical holds and ordinary chat/builder routing are unchanged. Focused and mounted regression checks cover the threshold, monotonic time despite wall-clock jumps, failure/cancellation, unknown fields, accounting failures, redaction and historical replay. Final checks for this added delta are separate from the previous 47,726-pass baseline; results will be appended after completion. Root cause of the observed live upstream/network delay remains OPEN pending measurements from deployed instrumentation; no speculative retries, racing requests or paid calls performed.
+
+## 2026-10-29 — Slow timing final validation and requested delayed waiting copy (local only)
+
+Full local pipeline session 61142 completed exit 0 on staged tree 9c7d832965b7a2f0475946dc3fd418fe0ac36763: 3,133 files passed, 47,739 tests passed, 85 skipped, zero failures (792.70 seconds). All 13 gates passed: frontend, unused imports, native, server, benchmark, OAuth, coverage, build, bundle, boot, production dependencies, mounted admin diagnostics and mounted waiting status. Node22.23.4/npm11.18.0. Independent review found no remaining must-fix. Four genuine emulator drills remain unrun because the previous official artifact download was denied; no bypass or mock replacement. Dependency audit/license/SBOM checks from the unchanged-dependency baseline remain recorded; informational signature download failed. No commit/push/paid call/deployment.
+
+After that suite completed, user requested a truthful >10-second normal-chat waiting message. Added an actual 10-second pending timer with cleanup and stale-callback guard, keyed to the latest user turn. Message: "Your reply is taking a little longer. Please wait." No inferred server overload, premature failure, retry button or extra request. Success/error/cancel/navigation clear the pending state; streaming updates preserve the same turn timer. This does not claim to reduce latency. Follow-up checks passed: 66 tests across three files, 16 real mounted presentation/lifecycle checks, frontend typecheck. Independent review found no must-fix. Final combined validation is separate from the already completed timing tree and is being run on the updated staged tree.
+
+## 2026-11-01 — Router One supplier-expense billing investigation (not shipped)
+
+Requested policy: verified supplier actual expense times 10 exactly once, separate sandbox/other providers, configured discount last with the existing real-cost floor. Root cause: ENGINE_R1 entered model-first static rate matching, including the Sonnet fallback for unknown DeepSeek models. Local mitigation excludes unverified Router One usage before all legacy build pricing, subtracts it from the sink as well as the attributed ledger, rejects static-rate/actual-cost lookup and preserves other providers in the cost ceiling. Admin diagnostics distinguish unknown supplier expense from measured zero. Surplus is unchanged.
+
+BLOCKED — actual-receipt ingestion and therefore positive 10x Router One charges: the reviewed public OpenAPI completion contract reports tokens but does not expose a documented per-request settlement endpoint or supplier-expense response field. Router One's customer observability documentation describes dashboard walletChargedUsd, chargeSource and planQuotaUnits; totalCost on a plan-covered call is only list-price equivalent and pending means unknown. Need a supported authenticated per-request settlement contract, its account/key/build/request binding and a redacted real response before implementing receipt validation/replay. No public tariff, synthetic receipt, aggregate dashboard total or concurrent wallet balance delta is accepted as actual expense. No paid calls, historic wallet edits or configuration changes performed.
+
+Sources inspected: https://router.one/docs/openapi.json ; https://router.one/docs/chat/createChatCompletion ; https://router.one/llm-observability ; https://router.one/llm-cost-tracking . Local tests cover fail-closed pricing, model-rate leakage, forged receipt-like data, repeated settlement calculation, cache-inclusive input, mixed providers, sandbox, discount/floor and legacy modes. Test execution and publication status must be recorded after validation; this entry does not claim passing checks or deployment.
+
+### Router One billing follow-up — local validation and transport audit
+
+Preserved the documented X-Request-ID header in metadata-only admin audit events for builder and scope calls, without reading response bodies or assuming a completion id is a settlement id. These records remain expenseEvidence=unknown; they are not receipts or authorization for charges. Updated the existing billing call-site/failure-ledger source guards for the additional excluded partition. Final focused run: 10 files, 216 tests passed. Final Node 22.23.4/npm 11.18.0 frontend/server/benchmark typechecks, native guard, security audit, license gate, SBOM, build, bundle gate, boot smoke, production dependency gate, unused-import check and OAuth checks passed. Optional registry-signature verification failed to download.
+
+The full coverage run is NOT green: it found the existing six-versus-eight runTurn census mismatch and unregistered GET /api/agentv3/router-one/catalog + POST /api/agentv3/router-one/catalog/refresh; both reproduce in a separate untouched ddfceb0cb worktree. It also hit a 20-second restore-census timeout under coverage (the unchanged test passes without coverage). The earlier queue-label and failure-ledger source-guard failures from this change were corrected and included in the 216 passing focused tests. The aggregate run began before these final corrections, so it cannot certify the final tree even when complete. Required Firestore drills could not start: the exact pinned 1.22.0 emulator download returned HTTP 403 on both ordinary and escalated attempts; no installed copy was found. No PR, push, hosted CI, merge or deployment has occurred. Local boot is the only runtime verification; no paid provider calls, live billing tests, credentials/configuration changes or historical wallet writes.
+
+Aggregate-run disposition: stopped the obsolete coverage process after its confirmed failures because it started before final corrections and cannot certify this tree. It additionally timed out in tests/aTestThatChecksNothingFails.test.ts's whole-tree census. No aggregate pass count or coverage-threshold pass is claimed; a complete final-tree coverage run remains required after the baseline blockers are resolved. The final code's 216 focused tests and listed non-coverage gates passed. Publication is pending, not attempted or denied by GitHub; the emulator request itself failed with HTTP 403, not an automatic-approval rejection.
+
+### 2026-11-01 recovery — completed aggregate evidence and narrow guard corrections
+
+Completed the unchanged c5d8a0159 aggregate run: 3,171 files, 48,002 passed tests, 8 failed, 85 skipped (1,504.58 seconds). Seven failures reproduced on untouched ddfceb0cb: runTurn census (1), caller census (1), chat-handler budget (2; both trees measure 539 against 537), canary SDK census (2), admin-audit census (1). The eighth was our remaining watchdog source assertion for the changed known-cost expression; updated it while retaining the single-expression/once-write assertions. Corrected the earlier suspicion of added measured headroom branches: the measured count is identical to main, so no budget or unrelated handler refactor is needed.
+
+The transport census now recognizes only an audit observer that wraps canaryFetch(), checks both arms of conditional transports, and rejects unguarded or unknown observers. Negative cases and guard-refusal propagation are tested. Existing SDK count and retry-policy assertions are unchanged; the pre-existing scope constructor still prevents a green census. This is an explicit validation of the new composition, not a baseline waiver.
+
+Emulator recovery diagnosis: CONNECT is denied by the environment proxy; current enforced restricted network policy excludes storage.googleapis.com. The installed official firebase-tools downloader points to that host and its normal cache is empty. No alternate-host bypass was attempted. Need an allowed-host configuration change or the exact verified official cached artifact. CLAUDE.md lines 472 and 727 require green verification before every push; no draft or baseline waiver was found. Publication remains unattempted. Final validation after these narrow corrections is required and recorded separately.
+
+### Router One billing recovery — baseline defects authorized (2026-11-01)
+
+User explicitly authorized fixing the seven reproduced baseline failures. Continued `fix/routerone-receipt-billing` without replacing prior commits; main remained ddfceb0cb and no overlapping open PR was found.
+
+- Removed the scope classifier SDK retry; admitted its guarded constructor to the exact census (five factories), retaining guard and zero-retry assertions for every construction. Reviewed both Router One/Weak delegates in the exact eight-call census and asserted completion-callback propagation.
+- Extracted the existing lazy pin admission/scope selection into a tested helper; chat budget remains 537, never raised.
+- Wired catalog read/refresh into the existing admin registry, with authenticated requests, unconfirmed/error states, disabled refresh until status is read, and administrator/result audit. Catalog prices are explicitly not settlement evidence.
+- Added cancelled/zero-token and separate-request audit coverage. Broader targeted run: 15 files / 188 tests passed. Final-tree aggregate and remaining CI gates are still pending at this checkpoint; no claim of green/full verification.
+- Rechecked official accounting docs. Positive actual-times-10 remains blocked by absent verified settlement transport. `docs/billing/router-one-reconciliation.md` specifies a disabled, trusted-record reconciliation design including identity binding, conflicts, cancellations, retries, absorption, exact arithmetic and idempotency. No importer, wallet changes or production activation.
+- Enforced network policy still excludes the official Firestore download host; no available cached artifact. No forbidden retry or alternate route attempted. Publication remains gated on required checks and emulator access.
+
+### Coverage recovery: deterministic upload-banner fixture (2026-11-01)
+
+Completed aggregate on 7bfcd542c: 3,173 files, 48,031 passed / 1 failed / 85 skipped, 1,644.56 seconds. All seven original failures resolved. The remaining `aStorageMarkerDoesNotWireLocalUpload` failure was a module-initialization fixture calling the scanner's wall-clock-bounded path: forced timeout reproduces empty banner → no-op mutation → one finding instead of zero. Both branch and untouched main isolated runs passed 126/126, confirming load sensitivity. Replaced only banner-fixture construction with a fixed synthetic finding, asserted the actual scanner matches it, and added nonempty/non-no-op mutation assertions. Production scanner budget, security logic and expected outcomes unchanged. A fresh full coverage run is required after this test-only fix; no prior run is represented as final green.
+
+### Coverage recovery: bounded census and deterministic semantic clocks (2026-11-01)
+
+Completed aggregate on 41a1024fd: 3,173 files; 48,030 passed / 2 failed / 85 skipped; 1,733.39 seconds. Upload fixture fix passed. Terminal evidence confirms the entire AST census exceeded the existing 20-second per-test timeout (23 seconds) and a local-login semantic test returned no finding under its 40 ms production budget (84 ms test duration). Isolated census 18/18 and login 107/107 passed. Split the SAME complete census into <=128-file batches with an exact once-only completeness assertion; no sampling or timeout increase. Freeze Date.now only in the two semantic scanner test suites, retaining their explicit injected-clock expiry assertions, all security expectations, and production 40/80 ms budgets. No application behavior changes. Fresh final coverage remains required.
+
+### 2026-11-01 — Router One offline export observations (follow-up to #4057)
+
+Added a pure, disconnected CSV validator with synthetic tests and explicit unverified-export/billingAuthorized:false output. Exact micro-USD parsing, unknown versus zero, schema/quoting limits, file-local duplicate/conflict quarantine and retained cancellation charges are covered. No accepted receipts, production caller, wallet writes, real private fixtures or live imports. Supplied export establishes observed schema only; provider finality/account binding and durable request-to-attempt correlation remain prerequisites. Targeted tests passed on the initial implementation; final-tree verification is recorded separately before publication.
+
+### 2026-11-01 — Offline validator placement correction
+
+The disconnected parser belongs in scripts/lib, not application src. Moved it and its synthetic tests without adding a production caller or modifying deadCodeGuard. The superseded full-coverage run exposed that guard failure and was terminated at 23 minutes (exit143), not reported green. Final-tree verification follows on the corrected tooling placement.
+
+### 2026-11-01 — Router One prospective model multiplier revised to 2.5x
+
+Owner replaced the earlier Router One 10x target with actual model expense times 2.5. There is still no accepted Router One settlement transport or positive live charge path. The offline validator now exposes the immutable prospective ratio 5/2 while preserving unverified-export, billingAuthorized:false and the original unmarked wallet observation. Surplus stays 10x; ordinary providers, sandbox/hosting rates, routing and historical wallets are unchanged. Reconciliation documentation states the separate-subtotal, discount-last and existing floor formula, with a synthetic example. Focused parser/fail-closed/dead-code tests: 52 passed. Aggregate final-tree verification follows; this does not claim activated 2.5x billing.
+
+## 2026-11-01 — owner-confirmed Pro fee and Weak fallback revision (local verification)
+
+Scope: Router One prospective model markup 5/2 (Surplus stays 10); all Pro bands
+replace measured VM customer billing with a 2.5% fee on the discounted AI subtotal;
+Weak becomes admitted Surplus → eligible Router One → GLM → existing tail.
+Profile pin/no-fallback overrides no longer bypass Weak. Shared fallback uses the
+existing bench/dead-rung/stop/usage machinery; plan/heal/complex preserve provider
+order and selected GLM models. Explicit retries can advance past failed tail rungs.
+Missing keys and explicit Router One disable remain respected. Non-Weak routing,
+hosting subscriptions and historical wallets are unchanged.
+
+Billing class fixed: VM expense was mixed into markup, waiver/Stop and discount
+floors while the user authorized a subtotal fee. Normal/watchdog/live paths now
+share proSandboxFee AFTER those rules, with internal rate-priced VM expense kept
+separate. Breakdown and diagnostics name subtotal/fee, and waiver/Stop copy no
+longer denies the separate fee. A zero bill cannot acquire a fee. Existing exact
+source/execution regressions were updated to the authorized policy, not removed.
+43 affected files / 718 tests passed on the current implementation; subsequent
+full gates and final coverage remain pending at this checkpoint.
+
+OPEN: Router One positive actual-cost settlement remains blocked by verified
+supplier finality/identity/request-binding evidence. Offline exports remain
+billingAuthorized:false; routing does not make unknown expense billable. Unknown
+Router One portions are absorbed, an economic limitation explicitly documented.
+No paid calls, account changes, historical debits, CSV identifiers or credentials.
+Local emulator download remains denied by enforced network policy (not retried).
+Deployment verification still requires accessible Cloud Build/Run revision evidence;
+this environment has no configured cloud identity. No live claim at this checkpoint.
+
+Final focused checkpoint: 44 files / 724 tests pass, including the dead-code guard.
+The final review also preserves the active Weak scope policy when a configured
+ladder omits GLM: its GLM fallback model comes from the same registry with only the
+ladder override removed. No configured key or spending-policy flag is fabricated.
+Rollout warning sent to the owner thread: a configured Router One key with no
+explicit disable makes the new Weak fallback reachable by all Weak users. Unknown
+supplier expense is absorbed and is not measurable by the dollar cost ceiling;
+existing admission, stop/deadline, maintenance/canary, bench and retry protections
+remain, but they do not establish a verified supplier expense cap.
+
+## 2026-11-01 15:04 UTC — catalogue-based Router One billing replaces receipt-only target
+
+New explicit owner instruction rejects permanent platform-absorbed Router One
+builds and authorizes official catalogue rate × returned actual usage, then 2.5×,
+truthfully labeled catalogue-calculated rather than settled supplier expense.
+Broad rollout is now BLOCKED until positive catalogue billing and missing-data
+preflight/dispatch handling are tested; no merge/deploy of the silent-zero path.
+
+Completed independent foundation: scripts/lib/routerOneCatalogueMath.ts calculates
+exact decimal rates with integer arithmetic, inclusive cached reads, whole-request
+long-context tiers, immutable normalized snapshot and missing-data states. It is
+offline and billingAuthorized:false, not production settlement. Official docs do
+not define the authenticated catalogue's price field names/units; the old discovery
+engine's numeric-unit heuristic is unsuitable for billing. Need an authentic
+redacted GET /v1/models pricing response or complete provider schema, plus raw
+usage semantics for any non-documented cache fields. No available provider identity
+here, no paid test, no guessed adapter fields. Existing fee/routing milestone is
+preserved in bb76912715b6aeb8fe2d0b1871052da15d576cde, unpublished at this checkpoint.
+
+Validation checkpoint: catalogue foundation plus offline export and dead-code guard
+passed 3 files / 50 tests (catalogue-foundation.log). No verification process remains
+active. Production integration is NOT complete and no branch publication, merge or
+deployment has occurred. Latest owner instruction makes positive catalogue billing
+and safe missing-data admission a release prerequisite; bb769127 must not ship alone.
+
+2026-11-01 public catalogue source correction: independently confirmed explicit
+DeepSeek V4.1 Flash wallet tariffs and units on its official public model page.
+Authenticated GET /v1/models pricing fields are not the only viable adapter source.
+Normal raw-page GET returned HTTP403; current enforced executor allowlist excludes
+router.one. No alternate-route retry was attempted. Need approved source access or
+authentic supplied raw HTML to validate live parsing, followed by production
+snapshot/usage/billing integration. No new runtime edits, paid calls, PR or deploy.
+
+2026-11-01 public JSON-LD reader foundation: added scripts/lib/routerOnePublicTariff.ts
+and synthetic regression tests. Strict Product SKU, USD, explicit per-million units,
+complete unique token components and contiguous whole-request tier validation; inert
+JSON-LD decoding only, no script execution. Unsupported Chat cache-write tariffs are
+excluded. Offline outputs remain billingAuthorized:false. Authentic previously captured
+page fixtures are pending transfer from the parent; no live parser acceptance claimed.
+Verification: 4 files / 65 tests passed; npm run typecheck passed before the final small
+HTML extraction addition (that addition passed targeted Vitest). No process running.
+
+2026-11-01 catalogue integration milestone (unpublished, verification ongoing):
+inline captured public JSON-LD fixtures accepted for exact DeepSeek SKU; Luna rejected
+for unsupported write usage and unverified short alias. Moved parser/math to server;
+added public snapshot source, durable pre-dispatch attempt/key fence, raw usage capture,
+request-ID association, issued evidence ledger attribution and separate 2.5x settlement.
+Scope classifiers and tool runners share guards. Positive cost feeds existing ceilings;
+unknown/uncertain responses preserve output and block more requests on that key.
+Public ranking checks explicit tariffs. No CSV promotion, historic wallet changes,
+paid calls or live network bypass. 14 files / 214 targeted tests and server typecheck
+passed before the last malformed-state hardening. Final gates and coverage pending.
+
+## 2026-11-01 — Router One catalogue accounting: concurrent dispatch and verification follow-up
+
+On `fix/routerone-prospective-2-5x`, replaced the global one-outstanding-request restriction with per-attempt persisted deadlines and unresolved holds. Normal calls sharing a credential remain concurrent under existing pacing/admission. Pending usage blocks new dispatch across workers; expired reserved attempts become durable unresolved holds. A successful completion releases only its own hold. Persist/acknowledge/issue/release sequencing preserves a fence after a lost completion acknowledgement and retains billable evidence after release acknowledgement failure. A failed completion write blocks the current worker immediately; cross-worker protection follows the persisted SDK deadline. No claim of instantaneous global knowledge after a failed database write.
+
+The completed aggregate coverage run on the preceding production tree reported 3,171 passing files, 10 failing files; 48,120 passing tests, 39 failures, 85 skipped (1,820.68s). Corrected the evidenced route extraction harnesses and old billing/wiring assertions without weakening gates; all ten failing files passed in the follow-up. Final-tree targeted verification: 13 files/205 tests, 7 files/158 tests, and 2 files/34 tests passed. Server/frontend/benchmark typechecks, native/audit/license/SBOM, build/bundle/boot, dependency, unused-import and OAuth checks passed. Full aggregate coverage has NOT been rerun on this final tree. Required remote CI remains mandatory before merge. One gate-script invocation used the wrong cwd and failed with missing package.json; rerun from the repo passed, with both logs retained outside Git.
+
+Draft PR creation was denied by automatic approval review, which said explicit publication authorization was absent. It did not execute. Fresh confirmation is pending in the parent conversation; no retry or alternative publication path was attempted. Last published head remains a4346a6bb7a845e5aa9efed170bf42da19ff2e96. These follow-up changes are local. Public tariff live-fetch verification and local emulator drills remain blocked by enforced environment network policy; no bypass. No paid build, wallet mutation, merge or deployment performed. Evidence is preserved under /workspace/routerone-25-verification.
+
+## 2026-11-01 17:03 UTC — terminal aggregate evidence and bounded uncertainty correction
+
+Completed the requested aggregate coverage on 14feb7a580110cc08c29c52c934c990a2fa03176 without interruption: exit 1; 3,177 files passed / 4 failed; 48,159 tests passed / 4 failed / 85 skipped; duration 1,904.56s. Three failures were explicit timeouts in unchanged tests (aPlayerStandsOnTheGround:20s, anAutomaticRestoreReportsOnlyWhatItApplied:20s, noTestLeavesATempDirBehind:60s). They passed in the earlier aggregate run at 19,877ms / 12,713ms / 31,208ms respectively; this is timing-sensitivity evidence, not a waiver or proof of a clean baseline aggregate.
+
+The fourth failure correctly identified new unbounded module-level uncertainKeys state. Replaced it with the repository BoundedCache, hard limit64 credential hashes. Holds are never evicted to enable spending: saturation blocks this worker's Router One dispatch until restart; durable attempt deadlines remain intact. Only uncertain persistence populates this local fence, not normal requests. Added capacity/overflow regression coverage and documentation; the census guard remains unchanged.
+
+Follow-up, unchanged timeouts with supported --maxWorkers=1: all four failed files plus Router One persistence/accounting/positive billing passed, 7files/76tests (44.63s), non-coverage. Server typecheck passed. The aggregate above remains FAILED and full coverage has not been rerun after this small correction. Required remote CI and full-tree green evidence remain outstanding. No publication retry/push, emulator or public-site network retry, paid call, merge or deployment. Publication approval is still pending in the parent conversation. Logs: /workspace/routerone-25-verification/final-14feb7a-coverage.log, final-bounded-targeted.log, final-bounded-typecheck.log.
+
+## 2026-11-01 — L3 external asset engine audit and local foundation (NOT COMPLETE)
+
+Branch `feat/universal-3d-assets`, based on main `504b79298` (billing preserved). Audited
+Game3DGenerator/gameKitSeed/buildAssets/WorkspaceAssetStore/publishing and existing SSRF guard.
+Added local GLB policy, exact subject/license filtering, bounded guarded downloader, cache-first
+acquisition core with mandatory parse/storage acknowledgements, and optional Three.js loader source.
+GLB now participates in the central binary classifier; publishing knows GLB/glTF MIME types.
+The acquisition core and loader are not wired into the game seed; no provider catalogue is deployed.
+
+Provider access BLOCKED — requests to api.polyhaven.com/assets?t=models and api.github.com's official
+KayKit repository tree failed with proxy 403; environment status confirms both hosts absent from its
+enforced restricted allowlist. No alternate-host download retry/bypass. Parent/environment owner
+must authorize needed provider API/download hosts or supply reviewed offline assets/provenance.
+No actual external models downloaded; all current test assets are synthetic. No paid calls.
+
+Dependency install succeeded after moving npm's cache to writable /tmp. Environment Node24.19.0 /
+npm11.9.0 differs from CI22.23.4 / npm11.18.0. Targeted verification checkpoint: 4 files / 45 tests,
+server typecheck and unused-import check passed; subsequent geometry-work bound is under final
+recheck. Full coverage/emulator/CI/browser/mobile/restart/publish verification not completed.
+No commit, push, PR, merge or deployment attempted. Do not claim this as the completed engine.
+Detailed work/evidence/gaps: docs/game-engine/l3-implementation-status.md. Logs: /tmp/navbharat-asset-*.
+
+L3 final local checkpoint: re-ran after geometry-work bounding; 4 files / 45 tests PASS,
+frontend and server typechecks PASS, unused imports/locals PASS, git diff --check PASS.
+No background test processes remain. All full-CI/live-model limitations above still apply.
+Poly Haven's current official API terms were read: commercial use needs no key/payment;
+identifying User-Agent and visible credit when surfacing live API content are required. Preserve
+those service obligations separately from the CC0 asset licence when wiring the provider.
+
+### 2026-11-01 — L3 independent implementation and verification follow-up
+
+- Extended the initial foundation into the guarded 3D kit seed: default-off flag, reviewed provider
+  registry, private content-addressed cache, bounded single-flight download, reviewed glTF resource
+  bundling, sandbox render proof, acknowledged binary/text persistence, generated local loader,
+  attribution, and restore/publish format support. Production catalogue remains empty.
+- Added explicit real Chromium harness and local-only Firestore persistence harness. Chromium rendered
+  and animated the synthetic textured fixture and verified runtime normalization, credit cleanup,
+  missing-file fallback and reload. Firestore saved model+manifest and a fresh process restored
+  identical bytes/provenance. No real provider assets, cloud bucket spill or published game claim.
+- Affected 37 files / 657 tests passed; later 4 asset files / 35 tests passed (overlapping).
+  Full coverage remains running separately; initial interrupted attempt exposed a seed-writer census
+  assertion, which was extended with explicit guard assertions before restarting the full run.
+- CI Node 22.23.4/npm 11.18.0: audit, license, SBOM, frontend/server/benchmark types, unused/native
+  guards, OAuth check, build, bundle, boot and dependency gate passed. Four existing Firestore emulator
+  drills passed on Java 21 and verified Firestore emulator 1.22.0.
+- Required npm signature gate failed HTTP 403 (Sigstore TUF host); not waived. Provider API hosts
+  api.polyhaven.com and api.github.com were already denied. No retries via alternate hosts, security
+  changes, paid inference, production activation, PR or merge. Exact download origins need verified
+  metadata before an environment-access request can name them.
+- Updated docs/game-engine/l3-implementation-status.md with current implementation and limitations.
+  Remaining acceptance includes real licensed catalogue assets, six complete games, mobile and live
+  publication, optimizer/LOD scope and required CI completion. This is not a completed universal engine.
+- Added and passed a production Vite-build browser harness: synthetic GLB and manifest survive the
+  real build byte-for-byte; nested `/published/` base renders/animates after reload without provider
+  URLs. This is local artifact acceptance, not a cloud deployment. Browser checks also passed under
+  CI-matching Node 22.23.4.
+- The single-worker full-coverage attempt was interrupted without a reported test failure because
+  3,186 files were progressing too slowly. Restarted the unchanged complete suite with four workers
+  after confirming four CPUs and a 16 GiB container limit; no test/coverage gate was removed.
+- Final security review found repeated mesh nodes could multiply rendered triangles beyond the
+  geometry-only budget. Policy now sums mesh instances before any browser decoding/rendering;
+  added synthetic under/over-budget cases. The in-progress full run was interrupted for this real
+  source correction; targeted checks and the complete suite are being rerun on the corrected source.
+
+### 2026-11-01 — complete coverage diagnosis and lossless asset compaction
+
+- Local checkpoint 3610b09b3 preserved the default-off pipeline; no push or activation.
+- Full coverage reached terminal: 3,185 files passed, one file failed; 48,200 tests passed, one failed,
+  85 existing skips. The genuine failure was a test fixture in production source. Moved it into
+  tests/fixtures; the dead-code guard remains unchanged. No skip or allowlist was added.
+- Added bounded lossless compact-v1 packing, with reviewed source/output hash pinning, attribution
+  change metadata, and an offline no-overwrite admission CLI. Supports both reviewed GLB and bundled
+  glTF. It does not change triangles, texture pixels or animation tracks.
+- Optimized synthetic fixture saved 65,672 bytes. Real Chromium, actual Vite production artifact and
+  fresh-process emulator restore passed on the derived bytes. Provenance includes both hashes and
+  processing version. This does not establish actual-provider savings or live publication.
+- Investigated existing Three.js simplification: unsupported morph/skin attributes are discarded, so
+  universal automatic LOD remains disabled rather than risking character animation. No new dependency.
+- Required TUF signature gate and provider requests remain blocked; no denied request was retried.
+  Full final verification is pending on the corrected/optimized tree.
+- Corrected/optimized targeted suite: seven files / 49 tests passed, including unchanged dead-code
+  guard, source/output pinning, glTF resource hashes, CLI no-overwrite and optimized manifest/cache reuse.
+- All available CI-equivalent gates passed again on optimized production code. The driver retains
+  the prior signature failure; it intentionally makes no new request to the denied TUF service.
+  All four required emulator drills passed again using the locally verified Firestore jar.
+- Added and passed local private Storage-emulator spill/cache/fresh-process restore. Kept CRC and byte
+  caps intact. Independently reproduced an immediate post-abort keepalive reset in the unmodified SDK
+  + local emulator; the harness waits 10 ms for deliberate abort cleanup, without retrying requests or
+  weakening assertions. Production-cloud same-tick recovery remains unverified.
+- Final full coverage will run on this local checkpoint; no PR/push, merge or feature activation.
+
+- Second complete full run: 3,186 files passed, one failed; 48,206 tests passed, one failed, 85 existing
+  skips. The failure was the new local harness's direct boolean env read. Changed both that reader and
+  L3's opt-in reader to the existing shared parser; no guard exemption or assertion weakening.
+- Removed the provider-backoff truncation and extended bounded per-origin spacing/backoff to binary
+  downloads. Added long numeric/date Retry-After, concurrent cooldown, cancellation and no-second-fetch
+  checks. No denied network request was retried; these provider checks use mocked responses.
+- Targeted guards/assets: ten files / 93 tests passed. Final CI-equivalent gates and complete coverage
+  are being repeated on the corrected tree. Signature access remains blocked.
+- Shared-parser/backoff checkpoint: 93 targeted tests, all available CI-equivalent gates, all four
+  required emulator drills and the local private-storage drill passed. The signature gate remains
+  explicitly failed/blocked from the prior 403 and was not retried. Starting complete coverage on the
+  corrected checkpoint; prior complete failures are retained in the evidence directory.
+
+### 2026-11-01 — terminal full coverage checkpoint
+
+- Code commit 2e97244d61e7520f5d22ab8b629665dfa3ef288b completed full coverage with exit 0.
+  3,188 files passed; 48,211 tests passed, 85 existing skips; duration 956.14 seconds.
+  Statements 75.53%, branches 71.45%, functions 78.15%, lines 77.50%; thresholds passed.
+  Evidence: /workspace/navbharat-asset-verification/coverage-verified-tree.log. Session 97491 ended.
+- No owned verification process remains running. This documentation-only checkpoint follows the
+  verified source; no further implementation change was made after that coverage run.
+- Required signature verification remains failed/blocked by the prior TUF HTTP 403; no retry or
+  bypass. Provider API access to api.polyhaven.com and api.github.com remains denied. Minimal third
+  evidenced host needed for the signature gate is tuf-repo-cdn.sigstore.dev. Download hosts remain
+  unknown until authorized official metadata can be inspected.
+- Zero actual external models admitted/downloaded; production catalogue empty and feature off.
+  Synthetic rendering/animation/artifact/reload/storage evidence does not establish six complete
+  real-asset games, physical mobile performance or live publication. No push, PR, merge or deployment.
+
+### 2026-11-02 — real reviewed asset continuation, feature remains OFF
+
+- Resumed exact remote checkpoint abf2d97; main remains billing merge 504b79298. No rewrite or billing change.
+- Published managed policy contains all four requested domains. API/TUF read-only requests return 200;
+  npm signatures now passes (1,375 signatures / 197 attestations). No security settings changed.
+- Four exact free model licences reviewed and source bytes downloaded: KayKit Knight, sedan and building
+  (CC0), Khronos Fox (model CC0; animation/conversion CC BY 4.0, full credit retained).
+- Added hash-pinned animation-selection-v1: removes unselected clips/data without changing retained skin,
+  geometry or animation samples. Knight shrinks 3,659,532 -> 490,608 bytes; unchanged policy validates it.
+- All four models actually rendered in Chromium; Knight and Fox walking clips moved. Local Vite artifact
+  with four models passed keyboard/button movement, animation, same-origin asset loading, 390x844 layout,
+  reload and fresh-process disk cache restore: 9,578 triangles / 22 draw calls. This is one local fixture.
+- OPEN: direct DNS in production guarded transport fails EAI_AGAIN for raw.githubusercontent.com here.
+  Ordinary permitted HTTPS client obtained the sources; successful artifact harness explicitly uses
+  offline-reviewed input. No guard/proxy bypass. Actual production downloader acceptance is not claimed.
+- OPEN: Poly Haven metadata identifies dl.polyhaven.org; not allowed, not requested. Owner permission
+  needed before download. Other providers, six complete game cases, physical mobile, generated LODs,
+  cloud publication and broad semantic discovery remain incomplete. Feature OFF; no publish/activation.
+- Current final CI-equivalent suite and database drills are being run; prior-run evidence is not reused
+  as a current pass. See docs/game-engine/l3-reviewed-assets.md for exact admission and commands.
+
+### 2026-11-02 — terminal verification for reviewed asset source commit 80c1e4e0c
+
+- Full coverage passed: 3,189 files, 48,216 tests, 85 existing skips; 980.82 s. Thresholds passed:
+  statements 75.54%, branches 71.47%, functions 78.16%, lines 77.51%. No assertions/skips weakened.
+- All CI-equivalent non-coverage gates, all four database drills, synthetic persistence/private-storage
+  drills and real Knight inline project/private-cache/fresh-process restore passed. Node/npm match CI;
+  Java is Debian OpenJDK 21 rather than Temurin 21. No local verification process remains owned/running.
+- Separate controlled human/car/animals fixtures passed actual Vite CLI artifact build, movement,
+  animation where applicable, mobile viewport and reload. Animals mix downloaded Fox with existing
+  procedural dog/cow/horse/tree. They do not complete train/station, bird or ship acceptance.
+- System DNS fails independently for all checked allowed hosts while managed HTTPS succeeds. Kept
+  connection-level SSRF protection intact; production downloader remains unverified, not diagnosed as
+  a production code defect. Poly Haven dl.polyhaven.org remains not allowed/not attempted.
+- Feature stays OFF. No production game publication, activation, deployment or merge. The preceding
+  source commit is the full-suite-tested code; this following change only records evidence.
+
+### 2026-11-02 — seven assets and six local fixtures, source 66d021504
+
+- Added Kenney diesel, Quaternius cruise ship and pinned CC0 Eagle derivative. Seven total reviewed
+  GLBs occupy 3,061,304 bytes. Exact license/source/output hashes retained. Offline Eagle conversion
+  is reproducible but not lossless: four skin influences and adjusted materials are disclosed.
+- Added bounded reviewed GLB/PNG embedding and conservative subject/clause matching; 61 asset tests pass.
+- Six local interactive fixtures pass render/movement/animation where applicable, mobile viewport,
+  Vite build and reload. Railway station and some animals are procedural. Not six generated games,
+  physical devices, a full sandbox restart, or a cloud publication.
+- Non-coverage CI-equivalent gates, signatures (1,375 signatures/197 attestations), four database drills,
+  synthetic persistence/storage and real Eagle spill/private-cache/fresh-process restore pass.
+- Final coverage remains running in original executor; its owner will record terminal result.
+- Owner published dl.polyhaven.org addition, catalog version ends 6ae8177f7f9881a283d07ad40c0e7574.
+  Current executor remains on 6ae80b27205c81a2917a4210d73f511a without CDN allowance. No CDN attempt.
+  Fresh executor needed; recheck actual policy and direct DNS separately. Do not bypass SSRF.
+- Source pushed, main/billing untouched. PR creation remains paused after automatic approval denial;
+  no new permission was granted by environment publication. Feature OFF; no merge/deploy/activation.
+
+### 2026-11-02 — terminal verification for seven-asset source 66d021504
+
+- Full coverage terminal PASS: 3,191 files, 48,227 tests, 85 existing skips, 1,085.11 seconds.
+  Thresholds: statements 75.55%, branches 71.49%, functions 78.17%, lines 77.53%.
+  All owned verification processes are terminal; no pending old-runtime coverage run remains.
+- Parent's fresh executor confirms five allowed hosts, but actual secure downloader returns EAI_AGAIN
+  and zero bytes for both Poly Haven and Fox at the same source/Node version. No bypass. Do not request
+  more domains to solve this DNS failure. Platform direct-DNS/HTTPS support or reviewed transport design
+  is needed. Poly Haven table additionally needs safely validated JPEG support, currently unimplemented.
+- Source checkpoint is verified locally, not by remote PR CI. PR still paused after approval denial;
+  main/billing unchanged, L3 OFF, no merge/deployment/activation. See l3-reviewed-assets.md for exact
+  real-vs-procedural fixture limits, license evidence, formats, cache bytes and remaining acceptance work.
+
+### 2026-11-02 — demand-driven source d580c7fa3 (full coverage pending)
+
+- No startup, bulk or gameplay provider downloads. The existing new-game build hook checks verified
+  cache, exact curated candidates, then bounded official Poly Haven discovery for requested table,
+  chair, bench, rock, tree or plant. Empty curated catalogue is supported; no raw prompt leaves the app.
+- Added first-admission provider-policy checks, source/final SHA-256 provenance, 1k self-contained glTF
+  packaging, visible service credit and six bounded private discovery cache pointers. Model bytes stay
+  private/content-addressed. Actual production guarded network transport is still blocked by EAI_AGAIN.
+- Added bounded baseline/progressive JPEG inspection plus actual decode of every texture, Hindi/Spanish
+  canonical vocabulary, conservative negation and static Three.js LOD (rigs/morphs/instances excluded).
+  Real train switches 1,742->1,388 triangles; ship 858->472. No physical-device performance claim.
+- 90 targeted tests pass. Synthetic demand pipeline passes actual browser admission, durable project
+  acknowledgement, fresh-process cache hit, Vite build/reload and visible credit with no vendor requests
+  during play. Real private Storage emulator verifies discovery pointers/model bytes and zero provider
+  calls on fresh-process reuse. No additional third-party models downloaded in this continuation.
+- Corrected an invalid synthetic PNG and the history-command fixture's missing new helper dependencies;
+  no checks weakened. Incomplete coverage runs were stopped and restarted against corrected source.
+- Non-coverage gates pass at a1f704378; required checks are rerunning for d580c7fa3. One unchanged Phase 2
+  race drill initially returned an unconfirmed-store result; separate unchanged rerun passes 21/21.
+  Initial failure retained, no queue/billing code changed. See docs/game-engine/l3-on-demand.md.
+- Branch checkpoints only. L3 OFF; previously denied PR creation paused, no merge/deploy/activation.
+
+
+### 2026-11-02 — demand-driven final local verification, source d580c7fa3
+
+- Full coverage terminal PASS: 3,195 files, 48,253 tests, 85 existing skips, 1,051.29 seconds.
+  Coverage: statements 75.60%, branches 71.54%, functions 78.21%, lines 77.58%; thresholds passed.
+- Final required local gates and all six emulator/drill groups pass on this source. Signatures:
+  1,375 packages / 197 attestations verified. 90 targeted tests and all recorded browser/cache/runtime
+  checks pass. All owned runs are terminal; prior incomplete runs/failures remain documented.
+- No new model downloads in this continuation. Demand-only Poly Haven discovery covers six canonical
+  static subjects; other providers remain exact curated candidates. JPEG and bounded static LOD added.
+- Production secure downloader remains zero-byte EAI_AGAIN per the parent's fresh-worker verification.
+  No DNS/proxy bypass. Full generated games, physical devices and cloud publication remain unverified.
+- Source checkpoint d580c7fa355086af746de3cd5e5915da3499ed4b; documentation-only commits follow it.
+  L3 OFF. PR creation remains paused after automatic approval-review denial. No merge/deploy/activation.
+  See docs/game-engine/l3-on-demand.md for exact gate evidence, scope, limits and failure disclosure.
+
+
+### 2026-11-02 — PR 4064 live acceptance and conditional merge
+
+- User explicitly authorized draft PR creation, then merge after all local and hosted required CI.
+  PR https://github.com/docasheesh-png/navbharatai/pull/4064 is open. No approval review or check bypass.
+- Production source 05b8b939d: ten bounded canonical Poly Haven subjects; official category mappings;
+  exact object names/components guarded. Six real curated assets securely downloaded/rendered in CI;
+  Eagle now ships privately as a reviewed CC0 derivative instead of a private-repository hotlink.
+- Hosted live acceptance job 125144700590 / run 41404930510 PASS: real side_table_01 discovery,
+  actual guarded transfer/browser admission, persistence, fresh-process cache hit, production artifact
+  reload/service credit; all seven reviewed models and six local scenario fixtures pass.
+- Fixed real failures: 1k packs can share bounded geometry under gltf/8k; only that BIN path class was
+  added, not 8k textures. Browser job pinned to supported Ubuntu 24.04. Assertions/SSRF unchanged.
+- Local required non-coverage gates/drills pass on corrected source; full local and hosted suites
+  remain owned until terminal. Final exact-head validation is recorded in PR #4064's report/checks.
+- L3 OFF. Remaining: deployed-network, physical-device, full generated-game and cloud-publication
+  acceptance. Main merge triggers existing Cloud Build deployment; do not start a duplicate deploy.
+
+
+### 2026-11-02 — final local verification and hosted job allowance
+
+- Source 05b8b939d full local coverage PASS: 3,195 files / 48,263 tests, 85 existing skips;
+  1,236.10s; statements 75.60%, branches 71.54%, functions 78.21%, lines 77.59%. All local gates and
+  database/storage drills pass. Fresh 1,375 signatures / 197 attestations verified.
+- Runtime image build, non-root packaged Eagle hash/size/license and HTTP 200 health pass with no
+  network. Managed verification used CA secret mounts and matching image Node headers; canonical Git
+  file modes were restored after this executor's restrictive umask caused fixture-only EACCES.
+- Extra scheduled Trivy check blocked at database host mirror.gcr.io (Forbidden); no alternate mirror
+  or policy bypass. This is unverified and separate from configured PR CI.
+- Hosted final-head live asset acceptance and database drills pass. Prior run 41403264320's check
+  annotation explicitly says maximum 45m exceeded, while tests were still advancing. Main also had a
+  44m13s successful run and a cancelled 45m run. Raised only overall build-and-test allowance to 60m;
+  every test, coverage threshold and 20s test/hook timeout is unchanged. Require terminal green CI.
+- User conditionally authorizes deployment/activation after readiness. No GCP connector/CLI or cloud
+  identity is configured here; physical devices and production game acceptance are still unavailable.
+  No flag activation or new credentials/security configuration. PR report/checks carry final status.
+
+### 2026-11-02 — Autopsy cf1706d2 / 8701aaa1 / 7aa2fe7c / c71e56de: a driven vehicle always moves
+
+Admin: *"jab bhi koi vehicle game banaya jaye, to vehicle chalni chahiye. 50% vehicles chalti hi nahi hai."*
+Four builds of one 3D racing game (car, train, birds): one stopped by the user, three RED, the car never moved
+(playtest Controls 0, 1,419 runtime errors).
+
+**Root cause (one class, two halves):**
+1. `Game.context` (GameShellGenerator.ts) was a getter that built a NEW object on every access, so anything a
+   game kept on `ctx` in setup() was undefined in update(). driveVehicle(car, undefined) threw "reading
+   'speed'"; after the builder's `|| { speed: 0, heading: 0 }` "fix", driveVehicle(undefined) threw "reading
+   'rotation'". Fixed: ONE context for the game's life, members as live getters.
+2. `driveVehicle` was pure: the car only gained speed if the game wrote the result back into a variable that
+   outlived the frame. Discarded return, a fresh literal every frame, or no state at all each froze the car.
+   Fixed: the kit holds each vehicle's state; the passed state is updated in place and returned; a missing
+   state uses the vehicle's own; a literal re-made with the same values every frame is replaced by the
+   vehicle's own; a state the game sets ONCE (crash stop, respawn) is still obeyed. No vehicle → a clear error
+   naming the fix instead of "reading 'rotation'".
+
+**Prevention upstream:** the kit type contract now carries `MaterialKind`, `PaletteName` (spelled out from
+PALETTES) and `RailTrackOptions` — build cf1706d2 guessed 'plastic' / 'rubber' / 'steel' / 'coal' and
+`createRailTrack({ path })` (11 type errors, ~10 fix-up rounds). Repair hints for VEHICLE_STALLED and
+RUNTIME_ERROR now name the correct pattern and forbid try/catch silencing.
+
+**Locked by** `tests/aDrivenVehicleAlwaysMoves.test.ts`: the real generated kit and shell, driven through
+every way a game keeps its car (kit example, on ctx, discarded return, fresh literal per frame, no state,
+spread copy) — each must move > 25 m in 3 s with Up held. Proven by reversion: old code fails 5 of 10;
+old driveVehicle with the new ctx still fails 4.
+
+**Not finished (queue rows):** Q-2301 stack/file:line for runtime errors · Q-2302 write-time guard against
+silencing catch · Q-2303 a single clean console read taken as proof · Q-2304 final text vs RED gate ·
+Q-2305 post-green unverified writes (admin) · Q-2306 ladder text vs SURPLUS route (admin) · Q-2307 gate
+counts TODO tests as proof. Watch on the next real vehicle build: GAME_DEFECT_VEHICLE_STALLED should not fire.
+
+## 2026-11-03 — Admin → Money → API Providers (admin: "one click par dekh len kon se api provider ka balance low/khatam hai")
+
+- Audit: the AI routing code reads 30+ provider keys. All of them, plus the services the admin listed (E2B, Google Cloud,
+  Brave, Render, Resend, RapidAPI, Cashfree) and the five registered-only free-chain providers, are now ONE directory:
+  `src/server/lib/apiProviderDirectory.ts` (31 rows: key names set, billing link, what to look at).
+- Live balance only where the provider has a documented balance API: OpenRouter (`/api/v1/credits`), DeepSeek
+  (`/user/balance`), Moonshot/Kimi (`/v1/users/me/balance`). Graded OK / LOW / EMPTY. Everything else is
+  "check manually" with its 🔗 billing link — never shown as OK. A refused or unknown-shape answer is "could not check".
+- Route `GET /api/admin/api-providers` (verified admin, rate-limited, no-store); panel `ApiProvidersPanel.tsx`, attention
+  first. Census `tests/everyApiProviderHasABalanceLink.test.ts`: a new `*_API_KEY` in the routing code without a
+  directory row fails CI (reverted → failed). No key value ever leaves the server (test-locked).
+- Not possible from code: live balances for providers with no balance API (Surplus, Router One, GLM, Groq, xAI, E2B, …).
+  If any of them adds one, it becomes one more `BalanceProbe`.
+## 2026-11-03 — Autopsy 8cdb4817 / cb9757a5 / 1c74b3fc (build reports #1817, #1814, #1813 — ENGINE_UNAVAILABLE on SURPLUS)
+
+Ledger (all three: weak tier on SURPLUS qwen3-coder, files on disk, then one call folded to "The build engine is
+temporarily unavailable" and the build ended with the starter page showing):
+- ✅ (already fixed) the build ending on one SURPLUS death with files written — #4050 (merged 2026-10-31 12:21 UTC)
+  continues the same turn on the Weak ladder after writes too. #1813/#1814 started before it; #1817 started 5 min
+  after the merge, inside the deploy window. No ENGINE_UNAVAILABLE report since. Watch: the next SURPLUS death
+  must show SURPLUS_FALLBACK and continue.
+- Q-2320 "your app is built" after a failed loop — class: a success claim gated on "files were written" instead of
+  "the loop succeeded" (sibling of Q-1024 and Q-2314). `etaAppExists(files, loopFailed)` now gates both writers
+  (immediate line + heartbeat tick); class lock in `tests/aFailedLoopBuiltNoApp.test.ts`, reverted → failed.
+- Q-2321 SURPLUS_FALLBACK said "before any user file" after #4050 widened it — `surplusFallbackMessage(reason)`.
+- OPEN: Q-2322 failed-call row names a Claude label on a SURPLUS build · Q-2323 a document request went on to build an app.
+- TODO_ONLY_TURNS (7.7 s) — second evidence for Q-2317 (#4074).
+## 2026-11-03 — Autopsy 5413e6f1 (build report #1823, AI health coach with camera, weak tier)
+
+Ledger: 0 files written, RED gate, "All providers failed".
+- ✅ Q-2313 crawl floor killed a healthy Kimi call 1 s after first byte (bytes ÷ time since request) — class: a
+  rate measured over time the stream was not producing. Fix: `streamIsCrawling` takes `producingMs` from the
+  first byte, after a 5 s window; callers that do not know it keep the old rule. Locked by
+  `tests/aStreamIsJudgedOnWhatItProduced.test.ts` (reverted → failed).
+- ✅ Q-2314 the previous version rendering was told to the user as this turn's app — class: a render claim not
+  tied to this turn's writes. Fix: `inBuildWroteThisTurn` gates the narration and the ETA; restore point and
+  billing proof unchanged. Same test (reverted → failed).
+- OUTCOME_UNEXPLAINED for "All providers failed": already fixed by #4073; this report is second evidence.
+- OPEN: Q-2315 GLM single 429 ends chain · Q-2316 orphan `nb-autostyle.css` · Q-2317 TODO-only first turn ·
+  Q-2318 stale SURPLUS snapshot · Q-2319 "engine slow" note when we abandoned the call.
+Watch on the next weak build: no "crawling after ~15 s" abandonment of a stream that has started producing.
+
+## 2026-11-04 — Admin → AI Engines → AI provider switches (enforced on/off per AI provider)
+
+Admin: "sabhi ai provider (google vertex ai, gemini ai etc) ko on off karne ka switch banao … 100% real and working".
+The old `providerEnabled` switches were removed on 2026-10-11 (audit F16) because nothing read them; this one is its
+own enforced system (`src/server/lib/providerSwitches.ts`), as that audit required:
+- **Layer 1, keys withdrawn:** while a provider is off its AI keys are removed from the server env (restored exactly
+  when on), so every existing "no key" path — ladder rung skipped, Surplus fallback, chat router, features — degrades
+  on its own. Shared infra keys are never withdrawn (Cloudflare DNS token, AWS creds, GOOGLE_API_KEY).
+- **Layer 2, network refused:** `fetch`, `https.request/get` and `http2.connect` refuse the provider's hosts before a
+  socket opens — this catches cached SDK clients, Vertex (no key: server identity) and Nova Sonic (Bedrock, http2).
+  Installed by the FIRST import of server.ts; verified in a CJS esbuild bundle for default/named/require/fetch.
+- **State:** `admin_provider_switches/state`, revision-checked transaction, reason required, last 50 changes kept;
+  every instance re-reads every 10 s; a failed read keeps the last known state (never switches a provider back on).
+  Before the first successful read after boot nothing is off (a boot window of one Firestore read).
+- **Proof:** `tests/anAiProviderSwitchIsEnforced.test.ts` (18 tests, incl. a cached OpenAI and Anthropic SDK client
+  refused after the switch and working again when on); reversion of the guard → 4 tests fail.
+- **Correction:** the API Providers page said Nova Sonic voice was not used — wrong (`src/server/sonic/SonicBridge.ts`
+  uses Bedrock). The Bedrock row now says "Voice chat (Nova Sonic)". My earlier search missed the word "sonic".
+
+## 2026-11-04 — L3 steps 2 + 4 (L3 OFF): 35-model catalogue and genre world dressing
+
+Step 2: 28 CC0 KayKit models (City / Medieval Hexagon / Prototype Bits), admitted with `scripts/gameAssetAdmitGltf.mjs`
+(production bundler/compactor/validator; reproduces building_A exactly); all 35 render through the live guarded
+downloader (`gameAssetReal.check.ts` PASS). Step 4: `worldDressing.ts` — genre scenery + `dressWorld()`; browser proof
+for racing/village/shooting; two layout defects found from screenshots and fixed. Tests: theCatalogueServesEveryGameType,
+aGameGetsAWorldNotOneObject, assetIntegration (seed writes worldDressing only when scenery arrived).
+## 2026-11-04 — L3 step 1: Admin → AI Engines → Game asset download check (L3 OFF)
+
+The L3 asset layer had never downloaded from Cloud Run. New admin check runs the real guarded transports (Poly Haven
+search + reviewed `fox` download + hash + validator) from the live server, writes nothing, never reads the L3 flag.
+`tests/theGameAssetLiveCheckIsReal.test.ts` (9); reverted timing bug → failed. Sandbox: GitHub ✓, Poly Haven ✗ ENOTFOUND
+(container egress). Next: the admin runs it on production; steps 2–4 follow in order (catalogue, acceptance, rollout).
+### 2026-11-04 — Bounded 1,024-turn Chat bursts (validation in progress)
+- User requested 1,000+ simultaneous requests after the isolated load test. Root cause of burst rejections: per-instance 64-waiter limit, distinct from 8 active turns, per-account slots and durable shared quota/spend reservations. Cloud Build already declares HTTP concurrency 100 and max instances 100; no live infrastructure/settings changed.
+- Increased default waiting capacity to 1,024; centralized config default/max at the queue's existing 1,024 ceiling. Active calls, five-second queue deadline, per-user fairness and provider budgets/OFF switches unchanged. Saturated drain avoids useless scans. Explicit overrides remain effective.
+- Added a fixed 16 MiB serialized queued-payload budget at both ingress paths; grant/abort/timeout return bytes. This is a payload bound, not a total-heap claim. Added regression tests for byte accounting, UTF-8, invalid sizes, cleanup and full-body entry accounting; existing 10,000-user overload regression now checks the new bounded default.
+- Added offline `npm run test:load:chat`: real router/queue/breakers, synthetic adapters and mocked durable store. First run: 1,024/1,024 replies at 25 ms simulated provider latency, p95 3.10s/p99 3.23s; same baseline queue allowed 72/1,024. At 1,000 ms latency only 40/1,024 completed before the unchanged deadline. No production capacity claim or paid traffic. Full validation and final evidence follow before publishing.
+
+### 2026-11-04 — 1,024-turn burst validation complete locally
+- Final offline benchmark: nine scenarios, 10,240 turns; 1,024/1,024 healthy replies, p95 3.118s/p99 3.246s with 25ms simulated providers. Baseline queue: 72/1,024; slow (1000ms) providers: 40 replies/984 deadline refusals. Healthy peak RSS 138.0MiB; worst large-payload experiment 315.6MiB. Zero uncaught exceptions, order violations, Google dispatch or retained queue entries. Exact metrics, caveats and source hashes: docs/benchmarks/chat-burst-2026-11-04.{md,json}.
+- All local CI-equivalent gates passed, including full coverage (3,213 files; 48,442 passed/85 skipped), build/boot/dependency gates and emulator drills (21+13+8 checks, 78 session assertions). Node/npm match CI; Java distribution differs (OpenJDK21 vs Temurin21). No live capacity test or infrastructure/provider setting change. Hosted CI still required before merge.
+- Ledger: burst refusal → 64-waiter per-instance cap → count-only admission also risks retained payload growth → both HTTP entry and direct runtime now account queued payload bytes → deterministic 1,024-user drain, 10,000-user overload, byte-budget cleanup and full-body-entry regressions; reproducible real-router synthetic load scenarios.
+
+### 2026-11-04 — Further throughput diagnosis; cache stays unchanged in production
+- User requested all four answers for 1,000 users and cache-disabled tests only. Harness now explicitly sets FREE_CHAIN_CACHE_ENABLED=off, asserts zero cache reads/hits, measures dispatch count, validates a per-request synthetic response ID and reports per-user completion. Production cache configuration/code untouched.
+- Four-turn experiment: realistic 1,000-user sequential scenario produced all 4,000 synthetic replies (25ms adapter latency); the simultaneous 4,000-request scenario hit existing per-user overlap policy. Slow 1-second adapters still exceed the five-second queue deadline. These are unresolved real-capacity constraints, not claimed solved by a larger queue. Actual HTTP also has a shared per-user FreeAnswer reservation; direct-router benchmarks do not bypass or prove that production admission policy.
+- Independent shared-store root cause: a local 1,024-way quota-transaction stampede failed to complete in a bounded emulator run with lock timeouts. Sequential document reads did not fix it; that experiment was not shipped. A serialized per-account lane completed all 1,024 decisions in ~8.67s, granting exactly27 under unchanged30RPM/0.9 safety margin and refusing997. Added bounded per-DB/per-provider local lanes (32 active account lanes,1024 total waiters,10s wait) to quota reservations AND status snapshots, preserving Firestore as cross-replica authority and holding physical ownership until SDK completion. Saturation reports local_capacity separately from store outage.
+- Regression coverage includes multiple store handles sharing the lane, cross-account/database isolation, queue/identity cleanup, timeouts without releasing an active SDK transaction and post-read transaction clocks across simulated separate processes. Added a real 1,024-request quota-lane emulator drill to CI. Full checks must rerun on these changes; prior head05c29080f CI is green but does not validate this follow-up.
+- Screenshot investigation: exact generic error text matches useChatEngine.ts before67550f06d (2026-10-26); absent from current source. Old client assets or historical text are possibilities, not a proven failed-request root cause. Production logs unavailable in this environment; app/platform/version and HTTP/request error evidence requested. No cache or OFF-switch changes made based on a guessed cause.
+
+### 2026-11-04 — Independent closed-answer quality gate
+- User requires teacher-style correctness checks, not a nonempty/mock-response pass. Added16 explicit Hindi/arithmetic/factual/code-tracing/uncertainty cases and a1,000-user/four-turn manifest. Offline evaluator requires all4,000 distinct records, correct identity/source/status and exact independent answer keys; reports failures and users with allfour correct. No provider calls or supplied-code execution.
+- Self-check validates positive/adversarial fixtures, including incorrect/missing/duplicate/timeout/identity/source rejection; fabricated fixtures never count as real model quality. Empty actual-response evaluation intentionally fails with0/4,000 passed and4,000 missing. Actual real-provider quality remains unmeasured; source labels require independent provenance review. CI adds the evaluator self-check. Production caching unchanged.
+- This closed-answer gate covers16 distinct questions repeated250times, not arbitrary teacher answers or universal correctness. Open-ended judging needs task rubrics, independently reviewed labels and calibration before deployment; no self-grading model is used.
+
+### 2026-11-04 — Follow-up validation completed locally
+- All16 CI-equivalent local checks passed on the quota-lane implementation: install/audit/signatures/license/SBOM, frontend/server/benchmark types, imports/native/OAuth, full coverage/build/bundle/boot/dependency gate. Coverage:3,214 files;48,448 passed,85 skipped;876.04s; statements75.67%,branches71.61%,functions78.29%,lines77.67%. Node22.23.4/npm11.18.0.
+- Real emulator drills passed:21 queue/retry,13 autopsy,8 comparison,78 session rules plus the new1,024-request quota-lane drill (27 grants,947 RPM refusals,50 local-capacity refusals; durable27; physical peak1). No paid inference.
+- Final offline load run:13 scenarios passed in59.49s;26,240 logical turns total. Cache lookups/hits/misses zero, production caching unchanged. Four-turn results and resource/latency data are in docs/benchmarks/chat-four-turns-2026-11-04.{md,json}; this verifies transport/guardrails, not live model accuracy or universal capacity. Supplemental load-harness typecheck and offline quality-evaluator self-check passed. New exact-head hosted CI is required before merge; old-head CI is not substituted.
+
+### 2026-11-04 — Autopsy 61279465 (3D train simulator, L3 on for z@gmail.com)
+- **Q-2330 camera inside the train** — root: `CameraRig.chaseFrom` fixed 7 m/2.2 m offset + collision ray hitting the vehicle's own body. Class: the camera did not know the size of what it framed. Fix: size-aware chase from the target's own extent, own-body exclusion, inside/NaN/teleport recovery, front-cab first-person for long vehicles, 'cinematic' view, `setKind`. Car framing unchanged. 37 tests (train 0–6 coaches × 4 headings, collision, accel/turn/reverse/brake 900 frames, respawn, phone portrait/landscape, car/bus/truck/bike/aircraft); 31 fail on the old camera.
+- **Q-2331 GREEN over an unplayed game** — root: the release gate had no playtest input. Class: a check whose answer never reached the verdict. Fix: `RuntimeEvidence.game`, fed on every playtest ending; GREEN needs `passed`; card says "not verified yet".
+- **Q-2332 contract `genre: unknown`** — 'simulator' genre, vehicle, camera, subjects, externalAssets, implied throttle/braking; handed to the builder.
+- **Q-2333 prepared models unused** — object_spec/HERO OBJECTS said "HAND-MODEL" for a subject L3 had a reviewed model for. object_spec now reads assetModels.ts; handoff overrides. Asset provenance verified: all six GLB hashes are reviewed CC0 catalogue entries (train-diesel-a, medieval-tree_single_A, city-building_A, medieval-mountain_A_grass_trees, medieval-hills_A_trees, medieval-building_home_A_red).
+- **Q-2334** playtest now ends itself at its budget with stage + fps (was killed with nothing). Q-2335…Q-2339 open/blocked in `BUILD_REPORT_QUEUE.md`.
+- **Same autopsy, second pass (admin: "puri autopsy kar ke sabhi choti badi problem fix karo").** Added: Q-2336 (claim audit: an unplayed game may not be called "complete and working"), Q-2339 (done readers ask the game contract — the 4th return of the "score measures the project, not the request" class), Q-2310 (fast-lane gate judges the engine that runs), Q-2340 (glass / tile in both material vocabularies), Q-2341 (recipe install stamps node_modules), Q-2342 (LADDER_DEPTH names Surplus), Q-2345 (looking at a filed error is a step), Q-2346 (prompt's hand-written chase camera sized by the model), Q-2347 (playtest catches a camera inside the vehicle for ANY three.js game). Blocked with all four fields: Q-2334, Q-2337, Q-2338, Q-2343, Q-2344. Open: Q-2335 (token cost — candidate: one batched object spec).
+### 2026-11-04 — Follow-up correctness review: three confirmed defects
+- Independently verified that local quota-lane saturation opened the provider circuit until an artificial future reset. Exclude local_capacity from remote circuit opening and return the observation time instead of a synthetic minute. Preserve authoritative quota/cooldown decisions; regression proves the next healthy turn can dispatch while RPM refusals still bench until reset.
+- Verified that nonempty finishReason=length was marked served and cached. Preserve the established stalled/partial contract, mark telemetry truncated, retain paid accounting, prohibit caching/provider hopping after partial text. Complete stop-finished responses remain cached. Existing cache records cannot be retrospectively classified because they lack finish metadata; TTL/cache settings unchanged.
+- Verified missing payloadBytes on both gateway queue paths. Account verified ingress bodies and direct invocation inputs using the shared serialized UTF-8 byte estimator. Regressions exercise oversized and aggregate limits with the real admission queue; separate UTF-8 test includes Hindi history and attachments.
+- Initial targeted runtime/gateway/store regression suite: 286 tests passed. Full checks and emulator drills running; no production claims or game-related changes. Add a cache-OFF 1,024-turn local-pressure recovery scenario to distinguish temporary transaction saturation from an unnecessary provider blackout.
+
+### 2026-11-04 — Six-part follow-up: bounded capacity and browser sequencing
+- Added slot-release notification and bounded pre-reservation waiting: only zero-quota-attempt turns can re-scan; queue wait already spent is deducted,32 re-scans/64 waiters maximum, cancellation/deadline/OFF preserved. No extra provider call or paid/unknown retry. Targeted release/cancel/OFF tests passed; small one-slot and local-pressure load probes both passed (synthetic providers, concurrent local coverage means probe timings are not final measurements).
+- Added explicit Free Chat Queue action: three pending text questions,16k characters each,90-second sequence expiry, FIFO with current history. Stop/account/session/mode changes, failure/incomplete output and unmount clear pending work. No attachments queued; no server reservation until a real turn starts. Ordinary duplicate Send remains blocked. Client lifecycle/queue suite68tests passed, including four ordered mock answers, updated history and preserving an unsent draft. Used React best-practices skill for hook lifecycle and accessible optional UI action review.
+- All four shared queue acquisition sites now account payload bytes. Existing independent closed-answer evaluator remains the quality gate; actual real-provider quality is still unmeasured, not claimed100%. Complete-answer production cache stays enabled as configured.
+- Scope expanded while earlier validation ran; that run is not final evidence for the added scheduler/UI. Freeze final source then rerun all repository gates and emulator checks before publication/merge. Cloud Build retry remains blocked on access/freeze status; no retry or settings change performed.
+
+### 2026-11-04 — Six-part final local evidence
+- Integrated main through25d5b2a14 without modifying external game work. Final full coverage:3,220 files passed;48,501 tests passed/85 skipped;858.82s; statements75.69%,branches71.62%,functions78.30%,lines77.68%. All other applicable local CI gates passed, plus supplemental load-harness types. Initial stale coverage lock and superseded retry are retained as failed/cancelled runs, not passed evidence. Census entry and physical-ownership fixture were corrected without weakening assertions.
+- Real emulator drills:21 queue/retry,13 autopsy,8 comparison,78 session assertions.1,024 quota decisions:27 grants,587 RPM refusals,410 local-capacity refusals; durable27,peak physical1. No real inference/production data.
+- Final cache-OFF load run:16 scenarios/28,416 logical turns passed in68.20s.25ms mock providers:4,000/4,000 complete answers for1,000 sequential four-turn users,p95 3184.0ms/p99 3188.9ms. Raw4,000 simultaneous requests:1,008 complete,2,992 per-user refusals.1s mock providers:160/4,000 sequential complete,3,840 deadline refusals; only32 users got allfour. These hard capacity limits remain; no production capacity or accuracy claim.
+- New constrained-slot probe128/128 complete at physical peak1; local-quota recovery1,016/1,024 after first8 deliberate refusals; truncation probe0complete/1,024 partial,never cached. Actual model accuracy still unmeasured. Raw metrics/source hashes and limitations:docs/benchmarks/chat-six-fixes-2026-11-04.{md,json}.
+- Exact-head hosted CI remains required. Cloud Build retry not performed; access and unknown release-freeze status remain deployment blockers. No live settings, cost ceilings, provider quotas or OFF states changed.
+- **Same autopsy, third pass (admin: "inko bhi fix karo").** Q-2334 + Q-2338 (one root: the sandbox's software renderer drew the 'real' tier at 2.5 fps → kit detects it, lite + 0.5 pixel ratio + no MSAA → 17.6/22.5 fps, playtest played in 30 s), Q-2343 (proofs 3 at once, downloads chained, saves serial: 25.6 s → 17.9 s on the six real models), Q-2335 (object_spec takes every object in one call; ~30% fewer input tokens estimated, not yet measured live), Q-2337 (edit turns refresh untouched kit files; proven on the real workspace's 31 files, strict tsc 0 errors). New 🟡: Q-2348 (provider budget fail-fast vs concurrent builds — admin decision). Q-2344 still the admin's decision.
+
+### 2026-11-05 — The editor's corner button now CLOSES the keyboard (admin report)
+- **The report (verbatim):** *"han, isko hide kar do! aur jab keyboard on ho, tab dikhna chahiye, par size me 1/8 ke as pas ho! iska kaam bas keyboard ko band karna hai! keyboard open to kahi bhi touch karo, keyboard open ho jata hai. band nahi hota, is button se keyboard band ho jaye, bas itna karo!!"*
+- **Root cause (it was never our button).** The 58×36 box in Code Studio's bottom-right corner is Monaco's own `iPadShowKeyboard` overlay widget, registered by the standalone bundle on every iOS device, whose single action is `editor.focus()` — it OPENS the keyboard. Verified in the installed package: `node_modules/monaco-editor/min/vs/editor/editor.main.css` carries `.iPadShowKeyboard{width:58px;…height:36px}` with a base64 keyboard glyph. Nothing in our repo rendered it (the only `<Keyboard` render in `src/` is the Shortcuts popup header, `VirtualKeyboard.tsx:360`).
+- **The class: a control that repeats a gesture the user cannot avoid, standing where the unreachable action belongs.** On a touchscreen a tap anywhere in the code already focuses the editor and raises the keyboard, so the widget's action was free; CLOSING the keyboard had no control at all, because `installKeyboardBehaviour` (nativeShell.ts) removes iOS's accessory bar to stop the app reading as a WebView. Hiding the widget alone would have left the user worse off — the fix is the inverse control in the same corner.
+- **Fix.** `.monaco-editor .iPadShowKeyboard { display: none !important }` in `index.css`, plus a 22×22 chevron chip (inside a 38px tap area) in `Editor.tsx`, gated by the new pure `keyboardDismiss.ts` and blurring through the shared `dismissKeyboardOnMobile`.
+- **The non-obvious half: the signal is FOCUS, not the viewport.** The obvious implementation — `useKeyboardHeight()`, i.e. `window.innerHeight − visualViewport.height` — is structurally blind inside our own app, because `capacitor.config.ts` sets `Keyboard.resize: 'native'` and the WebView itself shrinks with the keyboard, leaving that difference at 0. A height-driven button would have worked in mobile Safari and never appeared in the shipped Android/iOS app. A coarse pointer plus focus inside the editor is true in both, and is the exact inverse of the blur the button performs.
+- **Locked by `tests/theKeyboardCanBeClosed.test.ts`** (13 tests: the decision table, the focus-within bookkeeping, the CSS rule, and source guards that the button is gated on the shared decision, calls the shared blur and never `focus()`). Proven by reversion — restoring `display: block` fails 2 of them. `AppKnowledgeBase.ts` carries the new control.
+### 2026-11-05 — Explicit Free Chat Chain configuration diagnosis
+- Confirmed source defect: config records FREE_CHAIN_ORDER errors but preserves unknown/duplicate IDs; admin status returned that order as successful JSON, and strict frontend validation hid even its configuration-error explanation. The user's exact live failing field remains unproven without the sanitized response and serving revision.
+- Status now rejects invalid order before store reads with a fixed typed diagnostic; route emits sanitized no-store503 with only code and the allowlisted configuration field. Panel renders a local fixed message and retains blocked controls, including after an older valid snapshot. No raw environment value or partial healthy snapshot is returned. Strict successful-snapshot validation and routing/configuration semantics are unchanged; no normalization, settings, budget, credentials or provider activation.
+- Targeted297tests passed initially on environment Node24; final required gates are being rerun with CI Node22.23.4/npm11.18.0. Regressions cover duplicate/unknown/paid-first order, JSON contracts, stale success responses, OFF/uninitialized policy, no reads for malformed order and no writes/inference. No production calls or paid tests.
+
+- Final local validation: all17 CI-equivalent gates passed on Node22.23.4/npm11.18.0; full coverage3,220 files,48,514 passed/85 skipped,851.56s; statements75.69%,branches71.62%,functions78.30%,lines77.68%. Build/bundle/boot/dependency gates passed. Emulator drills21queue/retry+13autopsy+8comparison+78session assertions passed;1,024 quota decisions27grants/997RPM refusals,physical peak1. Local Java is OpenJDK21 rather than CI Temurin21. Artifact uploads/hosted runner execution remain hosted-only; exact-head CI required. Initial npm bootstrap cache-path error resolved using writable /tmp cache; no gate weakened.
+
+## 2026-11-06 — Mitrify transport and explicit general-chat privacy boundary (local work)
+
+Inspection found general chat includes health data, profile, memory and attachments, and is already classified health/clinical. The cache's six public questions do not prove the whole outgoing request public. Added an isolated provider-agnostic transport, server env names, offline HTTP mock checks, an explicit opt-in manual smoke script and documentation. Both general-chat callbacks remain direct even when Mitrify is requested; no privacy classification was downgraded. App Builder and generation logic are untouched.
+
+Production eligibility remains BLOCKED pending trusted full-request public provenance. No credentials configured, no live gateway request, no switch enabled. Verification results will be reported separately; this entry does not claim CI or deployment success.
+
+### 2026-11-06 — Mitrify buffered-stream cancellation correction
+
+Review reproduced cancellation after the first of several already-buffered SSE events: the transport could deliver the remaining events and report success. Added a regression that fails on the original transport, then checked AbortSignal before/after reads, before each event, after the consumer callback and before success. General-chat privacy blocking remains unchanged. Required validation is rerun on this corrected tree before publishing it.
+
+### 2026-11-06 — Account-only no-fallback privacy boundary (not enabled)
+
+- Added an optional server-only verified-email selector at both general-chat endpoints. The selected verified account is refused before either chain, quota admission or private context processing; unrelated accounts keep the existing path. No account value, key or production flag is installed.
+- No request has proven whole-request public provenance, so this is explicitly a privacy pause, not operational Mitrify chat. No prompt rewriting, live calls, spending or App Builder changes. Shared client notices display the privacy refusal without mislabeling it as server load.
+- Added offline account selection/default/no-fallback tests and actual route tests for both endpoints, streaming and non-streaming, forged body claims, plus the user-facing refusal. Full validation pending at this entry.
+
+- Validation found four source-census failures because moving quota wiring into a wrapper hid it from existing guards. Restored inline quota calls at both route registrations; guards were not weakened. All 85 targeted route/quota/notice tests pass. Re-running full checks on the corrected source.
+
+- Corrected source validation: all 3,235 coverage suites pass (48,641 tests passed, 89 skipped), 25 offline Mitrify checks pass, 85 targeted route/quota/notice checks pass. All applicable CI-equivalent type/import/security/license/build/bundle/boot/dependency gates and all five emulator drills pass on Node 22.23.4/npm 11.18.0/Java 21 (Debian locally; Temurin in hosted CI). Missing-key smoke exits 1 as intended. No live inference performed; no production configuration changed.
+
+### 2026-11-06 — Replace draft account pause with isolated public-test preparation
+
+- The pause-only draft must not be merged or enabled. Removed its ordinary-chat refusal and shared frontend notice changes. Both existing chat routes retain their direct path for all users.
+- Added a separate authenticated, empty-body public arithmetic test. Its entire provider payload is server-owned and excludes identity, private context and caller parameters; it has no direct fallback. Unexpected output is never echoed.
+- Production admission is deliberately absent. A real server adapter must verify a gateway-side finite total-cost bound covering retries/failover and durably consume one test authorization bound to the endpoint/model/credential snapshot. No client flag, env boolean or token estimate grants admission. The formerly discussed test cap is not hardcoded as a current user preference.
+- No live test, credential access, production switch or financial-control change occurred. Offline verification pending for this replacement.
+
+### 2026-11-06 — Updated backend naming and concurrency requirements
+
+- Read the latest full user task. Added canonical AI_BACKEND with deterministic precedence over the legacy alias, X-Mitrify-Attempts metadata, and a process-wide bounded FIFO with default 200 active calls. The queue holds permits through retries and stream completion, removes cancelled waiters, bounds count/serialized bytes/wait time, and does not claim fleet throughput.
+- Isolated public-test responses now preserve the provider body/wording and expose only sanitized metadata headers; no fixed-answer rewriting. Ordinary chat remains direct and no pause-only code will be enabled.
+- Stopped the obsolete in-progress validation run when the requirements changed; it is not claimed as passing. Final validation must rerun after these changes. No credential, live-call, production or spending-control action occurred.
+
+- Final coverage identified required census entries for the new operator endpoint and bounded semaphore. Registered its real operator-only caller, strict empty-JSON/default-small-parser contract and numeric/lifecycle state bounds; no guard was disabled. Added explicit JSON content-type refusal and regression checks. The cancelled prior run also left a lock owned by a confirmed defunct process; removed only that stale temporary lock and reran coverage. These incomplete/failed runs are not reported as passing.
+
+- Corrected replacement validation: all 3,235 coverage suites pass (48,642 tests passed, 89 skipped), 43 loopback Mitrify tests pass, and 29 focused ingress tests pass, including rejection of an invalid upstream HTTP 200. All applicable local CI-equivalent security/license/type/import/build/bundle/boot/dependency gates and all five emulator drills pass. Node 22.23.4 and npm 11.18.0 match CI; Java 21 is Debian locally rather than hosted Temurin. Missing-key smoke exits 1 as intended. Artifact uploads and hosted-only infrastructure are verified separately by CI. No live inference, credential configuration, account pause or production setting change occurred.
+
+### 2026-11-06 — Independent-review streaming and deadline corrections
+
+- Review reproduced credential leakage through SSE comments and split text deltas, and a permit retained by a stalled downstream callback after cancellation. Added regressions that fail on b753dad; the identity deadline regression also fails against that exact original source. The PR is draft and that head must not merge.
+- Added bounded per-choice credential-prefix lookahead, omit non-answer SSE comments/control fields, and cancellation-aware waits for downstream consumers, identity and admission. Safe data text remains unchanged; caller-owned delayed writes still must honor AbortSignal. Complete local/hosted validation and independent re-review are required for the corrected head. No live inference or production action occurred.
+
+- Corrected review-fix validation: 49 offline gateway tests pass; all 3,235 full coverage suites pass (48,643 passed, 89 skipped), with all applicable local CI-equivalent gates and all five emulator drills green. Missing-key smoke exits 1 as intended. Earlier failed reproductions are retained as evidence; no failing check was weakened. A new exact-head hosted CI and independent review remain required before merge.
+
+### 2026-11-06 — Extend streaming credential inspection to every forwarded string
+
+- Independent re-review confirmed the previous cancellation/comment/content fixes but reproduced split credentials in refusal/reasoning fields. Added failing reproductions for those fields and metadata against 4016c877; that head must not merge.
+- The bounded rolling inspector now traverses all JSON string values, field names and nested arrays, rather than content alone. A bounded event queue releases earlier safe events once possible matches move on; repeated metadata prefixes cannot retain the entire preceding stream. Added nested-token and incremental metadata regressions. Local gates, fresh exact-head CI and independent review are required again; no live inference or production changes.
+
+- Broader-inspector validation: all 54 loopback gateway tests pass; 3,235 full coverage suites pass (48,643 passed, 89 skipped); all applicable local CI-equivalent checks and all five emulator drills pass. Missing-key smoke exits 1 as intended. New hosted exact-head CI and independent re-review remain required. No live gateway call or production change occurred.
+
+### 2026-11-06 — Remove credential-lookahead stream stalls
+
+- Re-review reproduced a permanent prefix from one-time role metadata: a t-prefixed credential and role assistant caused a normal large stream to remain buffered. Added a failing regression against bc387a7 that requires the first role event before the server sends the remaining 1.5+ MiB answer.
+- Removed answer-event buffering entirely. The inspector keeps only bounded short string prefixes and immediately rejects a substantial credential-prefix marker, including across events. Benign marker collisions fail closed; ordinary short prefix collisions cannot stall streaming. Added single-character fragmentation coverage. Full local/hosted validation and re-review remain required; no production/live-call change occurred.
+
+- Non-buffering correction validation: all 56 loopback gateway tests pass; all 3,235 coverage suites pass (48,643 passed, 89 skipped); all applicable local CI-equivalent gates and five emulator drills pass. Missing-key smoke exits 1 as intended. Published replacement still requires exact-head hosted CI and independent review before merge. No live call or production change occurred.
+
+### 2026-11-06 — Separate account-only Mitrify public-question bot
+
+- PR #4092 merged as 86997144; post-merge CI 42218994732 passed and Cloud Run revision navbharat-ai-prod-05087-vjt serves 100% traffic. No provider activation or live inference was performed.
+- User requested a separate Mitrify-only bot visible to one account. Added server-verified visibility and dispatch using the existing server-only email selector; no account address or credential is committed. Sidebar/navigation/render all require the server capability, and changing accounts discards/cancels the panel.
+- The privacy boundary is an allowlist of three server-owned public questions, not a text classifier. Free text, identity, profile, history, files and caller parameters cannot enter the gateway payload. Each request is stateless, non-streaming, bounded to 256 output tokens, and has no direct fallback. Existing chat and App Builder remain unchanged.
+- Missing selector hides the bot; direct mode or missing key gives the selected account an unavailable state. No production flags or credentials are installed, and no live test is run. The user-operated bot may spend gateway credits if enabled and clicked; it does not claim an INR cap or implement wallet charges. The prior single-use diagnostic admission remains unchanged.
+- Initial verification: 60 loopback transport/bot tests and 67 targeted route/privacy tests pass. Full local CI-equivalent gates, required hosted CI and deployment remain pending before publication/merge claims.
+
+- First full gate exposed four legacy POST-only route harnesses, hardcoded panel colors, and the chip-registry parser/icon uniqueness check. Added GET support to the harnesses without changing their existing assertions, used semantic theme tokens and a distinct chat icon, and let the registry test parse a dynamic memo dependency list. Losing capability now closes the private tab to Home; Stop clears pending UI immediately. All 200 targeted tests across the nine affected suites pass after correction, and build/boot pass. Full corrected-tree coverage remains required; the initial failing run is not counted as passing.
+
+- Corrected runtime validation: all 3,236 coverage suites pass (48,647 passed, 89 skipped), all 60 loopback tests pass, and all five emulator drills pass again. Audit/signatures/licenses/SBOM, unused imports, native guard, server/benchmark types, OAuth/answer checks, build/bundle/boot/dependency gates pass; missing-key smoke exits 1 as intended. The final result matrix caught a frontend type error: the installed Lucide package exports MessagesSquare but this repository's manual declaration omitted it. Added that one type-only export; frontend typecheck and the declaration/registry/privacy tests pass after correction. No runtime code changed after full coverage. Node 22.23.4/npm 11.18.0 match CI; local Java 21 is Debian OpenJDK rather than hosted Temurin. No live gateway or authenticated-browser test occurred. Hosted exact-head CI and deployment remain pending.
+
+### 2026-11-06 — Make restricted bot failures diagnosable on a phone
+
+- User can now see the separate bot but a preset request fails. The UI discarded every server error code, preventing configuration, authorization, network and response-format failures from being distinguished. Added fixed local explanations and bounded HTTP status display; arbitrary error payloads and raw gateway messages never reach the screen. Non-JSON failures retain their HTTP status.
+- This fixes diagnostic visibility, not an unverified live gateway failure. No production credentials/settings or live inference were accessed. Free typing remains a separate unresolved privacy decision: arbitrary text cannot be guaranteed free of sensitive data by a keyword detector. Account authorization and existing chat/App Builder behavior are unchanged. Required validation remains pending.
+
+- Diagnostic validation: all 3,237 coverage suites passed (48,650 tests passed, 89 skipped), all 60 loopback Mitrify tests and all five emulator drills passed. All applicable local security/type/build/bundle/boot/dependency gates passed. Missing-key smoke exited 1 as expected. Node 22.23.4/npm 11.18.0 match CI; Java 21 is Debian OpenJDK rather than hosted Temurin. Required hosted CI and deployment remain pending; no live inference was run.
+
+### 2026-11-06 — Add explicitly reviewed text to the selected-account bot
+
+- User reiterated free typing after the notice that the sender must review sensitive content. Replaced the preset-only UI with a bounded text box and confirmation that resets on edit/send. Only the submitted message is sent, unchanged; no account/profile/history/files are appended. Older installed preset clients remain compatible.
+- Server identity authorization remains mandatory. Exact payload validation, per-send confirmation and conservative recognizable-sensitive-pattern rejection add safeguards; neither documentation nor UI claims complete sensitive-data detection. No raw gateway error is rendered or logged by this change. No live inference or credential/configuration change occurred.
+- Required local/hosted gates must run again. Existing GitHub CI startup failures remain unresolved; reading repository Actions permissions returned integration HTTP 403 and was not bypassed. This restriction prevents policy inspection, not local implementation/testing.
+
+- Reviewed-text validation: all 3,237 final coverage suites passed (48,650 tests passed, 89 skipped), all 63 loopback tests, 36 focused tests and all five emulator drills passed. Other applicable local gates passed. A restarted coverage attempt initially hit a stale lock owned by a defunct prior test process; final coverage used a separate report directory with identical thresholds, and the confirmed stale lock was removed. Missing-key smoke exited 1 as expected. Hosted CI and deployment remain blocked/unverified; no live inference or production change.
+
+### 2026-11-07 — Default-off verified-user availability preparation
+
+- Added explicit selected/verified access modes for the separate bot. Default/blank retains the selected-account behavior; unknown modes fail closed. Verified mode still requires server-verified UID/email and does not change rate limits, content review, direct main chat or the isolated INR diagnostic.
+- Public activation remains a separate operator step requiring authorized runtime access and applicable spending safeguards. No live request, credential change or public activation occurred. Documented valid alternative spend bounds without assuming provider discounts or token estimates prove costs; user-specific financial/access details are not published here.
+- Local tests and required hosted CI must pass before publication/merge. No secret values or actual account addresses were added.
+
+- Verified-user access validation: all 3,237 coverage suites passed (48,650 tests passed, 89 skipped), 67 loopback transport/access checks, 36 focused tests and all five emulator drills passed. All applicable local security/type/build/bundle/boot/dependency gates passed; missing-key smoke exited 1 as expected. Node 22.23.4/npm 11.18.0 match CI; Java 21 is Debian OpenJDK rather than hosted Temurin. Required exact-head hosted CI remains pending. No live gateway request or production activation occurred.
+### 2026-11-07 — Controlled synthetic guest load-test preparation
+
+- Added a separate default-off endpoint without Firebase login, restricted to fixed public arithmetic prompts and 1110 numbered single-use slots across three batches. Shared Firestore transactions bind expiring operator admission to the gateway configuration and inclusive hard-cap confirmation; claims are not refunded. This request ledger is not a monetary cap.
+- Ordinary chat/App Builder and their limiters remain unchanged. Invalid control tokens keep the guest/IP limiter; valid test credentials use the isolated campaign's shared limits. No campaign, credential, production setting or live traffic was created.
+- Added a barrier-start operator runner and loopback/route regressions. Required full validation and hosted CI remain pending. Live execution needs authorized runtime binding, campaign provisioning and permitted destination access; it is not claimed complete.
+
+- Guest-campaign final validation: 3,237 coverage suites passed (48,654 tests passed, 89 skipped), 76 loopback transport/access/runner checks passed, 35 route tests and all five existing emulator drills passed. A separate real Firestore emulator check with two independent clients verified single-dispatch replay protection and revocation. All applicable local security/type/build/bundle/boot/dependency gates passed; missing-key smoke exited 1 as expected.
+- Full coverage initially found the new operator endpoint missing from the external-caller inventory. Added its actual runner as the documented caller; all 18 census checks and the clean full rerun passed. The earlier validation restart also required removal of a lock whose owner was confirmed defunct. Node 22.23.4/npm 11.18.0 match CI; Java 21 is Debian OpenJDK rather than hosted Temurin. Hosted CI has startup failures before jobs execute. No live guest traffic, campaign provisioning, credentials or production activation occurred.
+
+## 2026-11-07 — default-off fixed text-chain policy (partial rollout preparation)
+
+Based on main f52d32a1d (PR #4096 is merged). Added `TEXT_CHAIN_POLICY=legacy|fixed-v1`, default legacy, to order eligible FreeChain and reviewed InferenceGateway text profiles. Legacy limits and behavior remain default. Fixed mode suppresses competing order/admin/sticky/cache selectors, binds policy to gateway evidence and ledger history, stops uncertain paid fallback, and preserves quota/price/quality/privacy gates. Ordinary professional ingress fails closed when its selected gateway/funding authority is absent; shared developer helpers, structured exam generation, Pro and App Builder retain their existing paths.
+
+Mitrify's position is an explicit non-dispatching policy boundary: no complete-payload public provenance or monetary admission bridge exists for ordinary health-classified chat. `MITRIFY_CHAIN_ENABLED` cannot override this. Paid-professional funding integration and universal ingress enrollment remain incomplete; this is not a production-ready universal chain. Details and rollback: `docs/fixed-text-chain.md`.
+
+Validation checkpoint: 49 focused suites / 1,775 tests passed, then 245 issuer/ledger/professional tests passed after the history-bound and structured-exam exclusion changes. All five CI Firestore emulator drills and the two-client guest admission drill passed. Node 22.23.4 / npm 11.18.0 match CI; local OpenJDK 21 is Debian rather than hosted Temurin. Full coverage and remaining CI-equivalent gates are running; final result will be recorded separately. No live inference, secrets/configuration changes, activation, deployment or capacity claim. Workspace still lacks production runtime identity/secret binding and permitted Mitrify/NavBharatAI egress.
+
+## 2026-11-07 — professional ingress contract follow-up after #4097
+
+The user merged #4097 as f1c46c837 before hosted CI could start. Source tree matches tested head 99c23c778 exactly. Main's post-merge Actions run 42352380871 also reports startup_failure with zero jobs; no deployment of this commit was verified. Main-chat Mitrify remains non-dispatchable and fixed mode must not be treated as a complete rollout.
+
+Full local coverage exposed three existing professional conversation contract assertions: the new option changed the literal source order and the default-mode engine argument shape. Follow-up preserves the existing conversationId/platform prefix and adds fixedTextChainIngress only when the server policy is fixed-v1. Existing assertions were not weakened; two new regressions prove default shape and rejection of body-controlled policy. Targeted conversation/route checks: 23 passed. Complete coverage rerun and all applicable gates remain required before merging this follow-up. No production configuration or provider call was made; the separate guest load test is not a prerequisite for main-chain rollout.
+
+### Exact-public-payload Mitrify admission
+
+- Added actual conditional dispatch at the fixed FreeChain Mitrify position. Exact
+  server-reviewed public payload, UID, endpoint/model/credential binding, one-use
+  expiring Firestore claim and evidenced supplier hard per-request ceiling are
+  required. No approvals or production settings are created by this change.
+- Reserve all permitted HTTP attempts in the existing shared daily/monthly budget;
+  retain uncertain/used liability and stop fallback after dispatch failure or
+  partial output. Revalidate shared controls and approval before each attempt.
+- General health/private classification, selected Gateway funding requirements,
+  paid-professional funding boundaries, standalone no-fallback bot, Pro and App
+  Builder remain intact. This is not universal production activation.
+- Added local HTTP regressions and a real two-client Firestore claim race check;
+  CI now executes the admission emulator check alongside existing database drills.
+
+### Separate Mitrify bot response truncation
+
+- Root cause in code: the bot requested 256 output tokens and discarded the
+  provider finish reason; the plain-text UI displayed that cut response as complete.
+- Default output allowance is now 2,048 tokens. Server-only
+  MITRIFY_BOT_MAX_OUTPUT_TOKENS accepts 1–32,768; this application ceiling is not
+  a verified model limit or a monetary authorization. No account cap is changed.
+- Preserve the full returned text and show length/filter/unconfirmed-completion
+  warnings; missing finish reasons and old-server responses cannot imply success.
+  No automatic continuation, additional paid retry, timeout extension or history
+  replay is introduced. Privacy/account gates and main chain/Builder stay intact.
+- Added longer-answer, completion-reason, malformed-response, deadline and UI
+  regressions. Required local checks are recorded in the accompanying PR.
+
+
+### Reviewed Mitrify continuation capability (fail closed)
+
+- Added explicit context review and one-at-a-time continuation controls for length
+  stops only. Old answer text remains intact; appends preserve repetition.
+- Server binds one-use Firestore tickets to account, exact context, gateway,
+  credential, output allowance, instruction and expiry; three rounds, 32 KiB
+  request context, one HTTP attempt and 60 seconds per call are enforced.
+- Production has no verified funding adapter and therefore cannot dispatch a
+  continuation. No environment/browser flag grants funding. No merchant cap,
+  credential, production setting, main chain, guest test or Builder was changed.
+- Offline tests cover races, replay, privacy/account checks, bounds, cancellation,
+  funding denial and revalidation. Required gate results are recorded in the PR.
+
+## 2026-11-07 — More room for long public Mitrify answers
+
+The separate bot still defaulted to 2,048 output tokens after the first truncation
+fix. That application allowance can end a long Hindi answer before the requested
+line count. Raise only the unset/blank default to 8,192; preserve explicit operator
+values (including 2,048), the finite 32,768 configuration ceiling, existing supplier
+errors, deadlines, cancellation, privacy gates and monetary controls. This is an
+application allowance, not evidence that every gateway-selected model supports it
+or a promise of unlimited output. No automatic continuation/replay is added.
+
+Mock regressions preserve all 100 Hindi lines and their exact prompt, assert the
+8,192-token request, and retain length/incomplete status and unavailable continuation
+when funding is unverified. A component test preserves the final line. Existing
+broken-body, timeout/cancellation and gateway error tests remain applicable. Actual
+production override/model capability and live behavior are unverified: no permitted
+runtime identity or new gateway evidence is available. No paid requests or production
+configuration changes were made. Required aggregate validation is pending.
+
+Long-answer validation completed: 3,239 suites / 48,728 tests passed, 89 skipped,
+coverage gate passed; 111 offline transport checks, 12 targeted UI/privacy checks,
+and all six emulator drill groups passed. Security, type, build, bundle, boot and
+production-dependency gates passed. Reverting the default to 2,048 makes the new
+Hindi regression fail; restoring 8,192 passes. Node 22.23.4/npm 11.18.0 match CI;
+Java is Debian OpenJDK 21 versus hosted Temurin 21. Missing-key smoke exits 1 as
+expected. Draft PR creation was denied by automatic approval review for missing
+branch-specific publication approval; GitHub lookup confirmed no PR was created.
+No retry or alternate publication route was used. Live behavior/configuration
+remains unverified; the default does not override an explicit Cloud Run setting.
+## 2026-11-07 — Concise Mitrify message confirmation
+
+The reported long sentence originated only in the separate bot's checkbox label;
+it was not prepended to provider requests or replies. Replace it with “I confirm
+this message contains no sensitive or personal information.” The existing visible
+provider/privacy disclosure, unchecked default, per-edit reset, confirmation gate,
+server exclusions, and continuation review remain unchanged. Sibling search found
+no other production occurrence of the removed sentence. Component regressions
+cover the concise label, retained disclosure/unchecked disabled-send state, and
+unmodified reply rendering; the existing mock transport test asserts the exact
+single user message and reply, with no confirmation text inserted. Required local
+aggregate checks and hosted CI are pending at this checkpoint; no live calls or
+production settings were changed.
+
+Validation completed for the concise-label change: 3,239 suites / 48,729 tests
+passed, 89 skipped, full coverage gate passed; 109 offline transport checks and
+all six emulator drill groups passed (queue 21/21). Type, security, dependency,
+license, build, bundle and boot gates passed. Node 22.23.4/npm 11.18.0 match CI;
+local Java is Debian OpenJDK 21, while CI uses Temurin 21. Missing-key smoke exited
+1 as expected without an inference call. Draft PR creation was rejected by
+automatic approval review for lack of branch-specific publication approval; a
+read-only lookup confirmed no PR was created. No bypass/retry was attempted.
+
+## 2026-11-07 — Resolve #4103 after #4102 merged
+
+Merged main 5f5661d43 into the long-answer branch. The sole conflict was adjacent
+additions in MitrifyChatPanel.test.tsx; retain both the 100-line Hindi rendering
+regression and concise affirmative privacy-confirmation regressions. The concise
+checkbox and 8,192-token default are both preserved, along with both documentation
+entries. Combined targeted tests pass (14); full required validation is running.
+No provider calls or production configuration changes were made.
+
+## 2026-11-07 — Compact ordinary-chat quota details
+
+The shared daily quota banner occupied a separate flex row below AI Chat's title.
+Ordinary AI Chat now renders the same server-derived remaining/limit as a compact
+button between the title and New chat. Details use a non-modal portal overlay,
+with outside-pointer/focus dismissal, toggle, Escape, explicit close, keyboard
+exit and focus restoration. Session/account keys and unmount clean up the overlay.
+Professional and exam screens retain the original badge. Quota accounting, hook,
+reset text, provider routing, auth and paid admission are unchanged. The existing
+status contract is finite counts or null; null remains unavailable (—/—), never
+an invented /50 or unlimited state.
+
+Static regressions cover changing entitlement, zero/exhausted and unavailable
+counts. An offline Chromium test renders the actual panel header and quota control
+with mocked chat/API data at 320, 390, 768 and 1280 pixels: counts, refreshed details,
+repeated taps, keyboard/focus, outside dismissal, session/navigation cleanup and no
+horizontal overflow or lost chat space. First browser run found Tab could leave
+an overlay open toward browser chrome; the boundary now closes and restores focus,
+and the regression passes. Screenshot Library downloads failed for both supplied
+files, including one bounded retry; their original pixels were not viewed locally.
+Local fixture screenshots were viewed and show the compact header and overlay.
+Full required checks are pending. No paid requests or production settings changed.
+
+The first aggregate run found one genuine integration failure: the new dialog
+omitted the shared sheet safe-area/bottom-navigation geometry contract. Adopt
+nb-sheet-overlay and nb-sheet; retain safe top padding when anchoring below the
+counter, and reserve the bottom bar instead of overriding the contract. The 101
+targeted UI/quota/sheet tests pass; browser coverage now includes a short 320px
+viewport with a 59px notch and 90px bottom-nav reservation. No baseline or test
+threshold was weakened. Re-running the full required checks on this correction.
+
+## 2026-11-08 — AI unanswered investigation: professional recovery and truthful observations
+
+- Verified source/reproduction: professional streaming waited the entire 12s commit window even after BOTH physical racer calls had already ended without answer. Existing sequential fallback now starts immediately on both terminal results; Pro/App Builder timing, provider order, admission and spending controls unchanged. Old code failed two new regressions; corrected code passes. Partial commitment never starts another answer.
+- Verified instrumentation blind spot: legacy AIRouter outcome counters omit gateway/strict-free early returns and Universal free-chain dispatch; partial streams can count as legacy success. Kept that historical denominator explicitly labelled as an incomplete legacy sample, removed unsubstantiated key-rotation advice, and added a separate approximately-15-minute process-local Universal-router observation (including helper calls). States: transport-complete, partial, refused, cancelled, failed; fixed allowlisted failure categories and per-surface counts, no prompts/IDs/raw errors retained. This is NOT an all-instance/user-request SLO, correctness assessment or a counter reset.
+- Verified Monitor reporting defect: a failed write is restored to pending, but readable empty storage previously reported available with zero data. Pending unpersisted observations now make the timeline unavailable; mocked failed-write/readable-store and subsequent recovery covered. This does not establish cross-instance telemetry completeness or solve ambiguous-write accounting. Active build logs do not imply a completed-build counter should already increment.
+- Open production cause: the supplied 300/340 screenshot does not reveal terminal error codes, active route/configuration, provider admission/quota state or complete request outcomes. No signed-in production/runtime log evidence was available; no previously denied access was retried. Need authorized sanitized terminal diagnostics for a defined time window/revision before attributing the 88% or measuring 99.9%. No live paid inference, keys, production configuration, privacy or cap changes.
+- Focused validation checkpoint: 9 files / 110 tests passed before final small classification tightening. Full CI-equivalent gates, emulator drills and final-head results are recorded separately. Answer correctness/relevance/completeness still requires reviewed representative outputs; transport completion alone cannot establish it.
+- Validation follow-up: initial full coverage surfaced cache-census and callback-identity expectations; observation state now uses the existing BoundedCache (hard 16 buckets, O(1) recording), and callback tests exercise exact forwarded text/source instead of function identity. Explicit safety codes take precedence over generic HTTP status. No census exceptions or directory exemptions added. Race and timeline negative controls both fail on restored main code and pass on the fix; final focused run: 12 files / 171 tests passed. A clean final full run follows these corrections.
+- Final clean validation on corrected source: 3,241 coverage files passed; 48,755 tests passed / 89 skipped. All six emulator groups, audit/signatures/license/SBOM, frontend/server/benchmark types, imports/native guard, OAuth, answer-quality, Mitrify regressions, build/bundle/boot and dependency gates passed. Missing-key smoke exited 1 as expected without dispatch. Node 22.23.4/npm 11.18.0; Debian OpenJDK 21 differs from hosted Temurin. Metadata lookup 403 warnings occurred in tests but no final failures. Hosted CI and production outcomes remain unverified pending publication/checks.
+## 2026-11-07 — Ordinary AI Chat send position
+
+- Root cause: the shared composer vertically centered the send slot in the textarea row. Ordinary AI Chat now opts into a lower toolbar row with 10px right/bottom padding; normal flex layout reserves the actual Send or Queue/Stop width. Shared defaults and the Enter preference pill remain unchanged. No routing, billing, auth or App Builder changes.
+- Added component/source regressions and a loopback browser layout check covering narrow mobile, keyboard-height viewport, long text, auto-grow, disabled/attachment, Queue/Stop, Enter preference and unchanged shared defaults. Focused tests: 8 files / 116 tests pass. Browser checks pass at 320/390/768/1280px widths; generated short and keyboard-height fixtures inspected.
+- Original screenshot Library downloads failed, including one bounded retry; original pixels were not available locally. Fix is source-grounded and independently checked in browser fixtures, not represented as production screenshot verification. Full repository gates and emulator checks are tracked in the PR validation evidence. No paid inference or production settings changed.
+- Final local validation: 3,240 coverage files passed; 48,739 tests passed / 89 skipped. Audit, signatures, license, SBOM, frontend/server/benchmark types, imports, native guard, OAuth, answer quality, Mitrify regressions, build, bundle, boot and dependency gates passed. Missing-key smoke exited 1 as expected without dispatch. Six real Firestore emulator groups passed. Node 22.23.4 / npm 11.18.0 match CI; local Java 21 is Debian OpenJDK, not Temurin. Coverage emitted metadata-lookup 403 warnings but passed.
+- Negative control: removing the NBI layout opt-in failed the new regression; restored bytes passed all four new cases and the final browser run. Hosted CI and deployment remain separately required; no live claim is made here.
+
+## 2026-11-08 — Reconcile #4106 with merged send-button fix
+
+- GitHub reported #4106 dirty after main advanced to 0b3c95b99 (merged #4105). Local no-commit merge of that main completed automatically, with no unresolved files or manual conflict markers. PROGRESS histories were combined; all incoming Send/Stop positioning changes and all reliability changes are retained. No provider, budget, privacy or production configuration changes. Validating the combined tree before updating the existing PR.
+- Combined-tree validation: 20 focused files / 287 tests passed; full coverage 3,242 files passed, 48,759 tests passed / 89 skipped. All six emulator groups and remaining security/type/build/bundle/boot/dependency gates passed; missing-key smoke refused dispatch as expected. No unexpected exits across 26 checks. Node 22.23.4/npm 11.18.0, Debian OpenJDK 21. No source changes were needed after the automatic merge; hosted CI remains a separate merge gate.
+
+### 2026-11-08 — retire testing bots and revise reviewed Mitrify data policy
+
+- Removed separate Mitrify menu/chat/continuation/public/guest endpoints and exclusive implementation, and Admin AI Engines provider testing bots including their exclusive throughput/batch modules. Preserved shared transport, provider redaction, auth/accounting and all stored records; no database migration/deletion. Retired saved Mitrify view falls back to Home without deleting history.
+- Removed unconditional private/health rejection from legacy main-chain Mitrify. Existing public approvals remain public-only; new exact-data approval format requires classified scope, downstream processor review and actual authority/terms/protection evidence references. No production approval records, keys or settings were created.
+- Main-chain Mitrify now requires confirmed stop finish reason; missing/length completion remains partial and terminal, without hidden fallback. Main requested order already matches fixed-v1; default legacy, Gateway Mitrify adapter and paid Professional funding remain unresolved, not falsely enabled.
+- Local focused routing tests: 73 passed. Full final validation pending. Load testing remains cancelled; no live inference, broad routing activation or production change.
+
+### 2026-11-08 — bot retirement / reviewed-data policy final validation
+
+- Final staged-tree coverage passed: 3,222 files; 48,441 tests passed, 95 skipped. Coverage statements 75.40%, branches 71.33%, functions 77.99%, lines 77.41%. All six real Firestore emulator groups, 60 loopback Mitrify checks, audit/signatures/licenses/SBOM, type/import/native/server/benchmark, OAuth/answer-quality, build/bundle/boot and server dependency gates passed. Missing-key smoke exits 1 as designed; no inference call. Node 22.23.4/npm 11.18.0 match CI; Java is Debian OpenJDK 21, not CI Temurin. Metadata lookup warnings appeared without failing final coverage.
+- Earlier attempts do not count as passes: removal initially left an empty JSX wrapper, an unused icon and an obsolete route test; these were corrected. A transport fixture accidentally gained an extra SSE stop event while retaining the old raw-event expectation; restored its original transport fixture. Coverage was interrupted during final policy/log cleanup, and another run found unstaged deleted files still listed by git ls-files. Staging the intentional deletions fixed the inventory failure; its focused 29 tests and the complete final run passed without weakening assertions.
+- Requested fixed order already exists; Groq/Cloudflare fixed mode require verified-free-no-overage. Default legacy mode remains unchanged. Gateway Mitrify adapter and paid Professional predispatch funding/settlement bridge remain unfinished; no global activation substitutes for them. Existing 250/80 output defaults apply to selected non-reasoning rungs; no runtime values or live accuracy/capacity were verified.
+- No load campaign, paid/live inference, production configuration, credentials or persistent access changed. No stored histories or accounting records deleted. Required hosted CI and deployment remain unverified until PR checks run.

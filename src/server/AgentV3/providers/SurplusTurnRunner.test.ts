@@ -1,4 +1,5 @@
 import { SERVICE_IDENTITY_REPLY, SURPLUS_SERVICE_IDENTITY_INSTRUCTION } from './surplusNarrativeIdentity';
+import { readScopeFailure } from '../scopeFailureDiagnostic';
 import { PUBLIC_BUILD_ENGINE_UNAVAILABLE, PUBLIC_BUILD_ENGINE_TIMEOUT, publicBuildEngineSafeReason } from '../../lib/buildEngineError';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SurplusReceiptDecision } from '../../AI/SurplusRegistry/receiptPolicy';
@@ -31,6 +32,29 @@ function setup(over: Partial<SurplusRunnerAuthority> = {}) {
 afterEach(() => { vi.unstubAllEnvs(); clearReasoningStore(); vi.useRealTimers(); vi.clearAllMocks(); maintenance.check.mockResolvedValue(undefined); maintenance.listeners.clear(); });
 
 describe('Surplus native tool turns', () => {
+  it.each([false, true])('distinguishes unavailable fallback from failed fallback authorization (throws=%s)', async throws => {
+    const { runner, authority } = setup({
+      dispatch: vi.fn(async () => { throw new Error('PRIVATE_DISPATCH'); }),
+      onFailure: async () => ({ retry: true, receiptDurablyRecorded: true }),
+      authorizeFallback: async () => { if (throws) throw new Error('PRIVATE_AUTHORIZATION'); return undefined; },
+    });
+    const error = await runner.runTurn(params()).catch(e => e);
+    expect(readScopeFailure(error)).toEqual(throws ? { stage: 'authorization', reason: 'authorization_failed' }
+      : { stage: 'dispatch', reason: 'dispatch_failed' });
+    expect(authority.dispatch).toHaveBeenCalledTimes(1);
+    expect(error.message).toBe(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
+  });
+  it.each(['authorization', 'response_validation'] as const)('preserves only the safe %s diagnostic across public error folding', async stage => {
+    const secret = new Error('PRIVATE_UPSTREAM_ERROR');
+    const { runner } = setup(stage === 'authorization'
+      ? { authorize: async () => { throw secret; } }
+      : { authorize: async () => permit({ validateResponse: () => { throw secret; } }) });
+    const error = await runner.runTurn(params()).catch(e => e);
+    expect(readScopeFailure(error)).toEqual({ stage, reason: stage === 'authorization' ? 'authorization_failed' : 'invalid_completion' });
+    expect(error.message).toBe(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
+    expect(JSON.stringify(error)).not.toContain('PRIVATE_');
+    expect(error.stack).not.toContain('PRIVATE_');
+  });
   it('authorizes the identity instruction before estimating and sends precisely that prompt', async () => {
     const { runner, authority } = setup();
     const original = params({ system: 'Original task instructions' });

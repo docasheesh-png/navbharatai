@@ -37,6 +37,11 @@ export interface HeaderBadge {
   count: number;
   tone: BadgeTone;
   onOpen: () => void;
+  /**
+   * Glow + pulse + twinkle. Only the needs-you row sets this: a quiet badge was missed on
+   * the dark header. Other rows stay still.
+   */
+  attention?: boolean;
 }
 
 /**

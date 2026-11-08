@@ -278,7 +278,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
       // rather than being covered by it and must NOT hold a strip for a bar nobody can see.
       // ⚠️ `p-0` is gone on purpose: a `p-*` utility beats the overlay class on source order and
       // silently zeroes all four reserves — that exact bug was live in NavAppStore's two sheets.
-      className="nb-sheet-overlay-flush nb-sheet-over-nav fixed inset-0 flex items-end sm:items-center justify-center sm:p-4"
+      className="nb-sheet-overlay-flush nb-sheet-over-nav fixed inset-0 flex items-center justify-center nb-modal-safe"
       style={{ zIndex: SHEET_Z, background: 'rgba(2,6,12,0.72)' }}
       role="dialog"
       aria-modal="true"

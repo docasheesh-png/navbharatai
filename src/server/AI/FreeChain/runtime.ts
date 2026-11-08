@@ -1,15 +1,20 @@
+import { CHAT_SERVER_DEADLINE_MS, CHAT_PROVIDER_ATTEMPT_MS } from '../../../lib/chatDeadline';
+import { FIXED_TEXT_CHAIN, fixedTextChainRank } from '../fixedTextChain';
+import { mitrifyConfig, MitrifyError, runApprovedMitrifyChain } from '../../lib/mitrify';
+import { capacityRevision, notifyCapacityReleased, waitForCapacity } from './capacityWait';
+import { switchedOffProviderFor } from '../../lib/providerSwitches';
 import { chatAvailabilityMessage } from '../../lib/chatAvailabilityMessage';
 import { freeChainAdmissionFailure } from './admissionFailure';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../../lib/chatReplyLanguage';
 import { chatReplyLanguageInstruction } from '../../lib/freeChatReplyLanguage';
 import { publishDeploymentPaidLimit } from './deploymentBudget';
-import { cheaperInferenceAdminStatus, cheaperInferenceMode, cheapinfFirstTokenMs } from '../../lib/cheaperInferencePolicy';
+import { cheaperInferenceAdminStatus, cheaperInferenceMode, cheaperInferenceSharedAccessPermitted, cheapinfFirstTokenMs } from '../../lib/cheaperInferencePolicy';
 import { adminBusyDetail, withAdminBusyDetail } from './adminBusyDetail';
 import { persistFreeChainSample } from './eventSample';
 export { shouldPersistFreeChainEvent } from './eventSample';
 import { sanitizeText } from '../../../lib/observability/sanitize';
 import { isEntryAdmission } from './entryAdmission';
-import { freeChainAdmissionQueue } from './admissionQueue';
+import { admissionPayloadBytes, freeChainAdmissionQueue } from './admissionQueue';
 import { randomUUID } from 'node:crypto';
 import { freeChainConfig, isPaidRung, type FreeChainConfig, type ProviderId, type RungConfig } from './config';
 import { selectedForFreeChain, rolloutBucket, type FreeChainContext } from './rollout';
@@ -20,7 +25,7 @@ import { maximumCostNanoUsd, usdToNanoUsd, type PaidReservation } from './spendC
 import { trimForRung } from './trim';
 import { tryAcquireRungSlot, releaseRungSlot, routeTurn, orderForRoute, effectiveMaxOutput, trimHistory, preparedSystemPrompt, faqCacheable, reserveMonthly, settleMonthly, type TurnRoute } from './masterPlan';
 import { logFreeChain, type FreeChainTelemetry } from './telemetry';
-import { OpenAiCompatProvider, FreeChainProviderError } from './providers/openAiCompatProvider';
+import { OpenAiCompatProvider, FreeChainProviderError, type FreeChainProviderResponse } from './providers/openAiCompatProvider';
 import { FreeRoutingError } from '../LiveRegistry/dispatcher';
 import { runRegistryRung } from './providers/openRouterRegistryRung';
 import { getServerDb, type Firestore } from '../../lib/serverDb';
@@ -34,7 +39,7 @@ import { acquireSlot, releaseSlot, recordProviderLatency } from '../Router/AIRou
 import { runWatchedStream, watchdogLimits } from '../Router/streamWatchdog';
 import type { RoutedCall } from '../UniversalAIRouter';
 import type { AIProviderResponse } from '../Router/ProviderTypes';
-import { readFreeChainBudgetAction, type FreeChainBudgetAction, type FreeChainBudgetResponse, FREE_CHAIN_METRICS_SCAN_LIMIT, FREE_CHAIN_PROVIDER_IDS, type FreeChainAdminMetrics, type FreeChainAdminView, type FreeChainControlAction } from '../../../lib/freeChatChainView';
+import { FreeChainConfigurationError, readFreeChainBudgetAction, type FreeChainBudgetAction, type FreeChainBudgetResponse, FREE_CHAIN_METRICS_SCAN_LIMIT, FREE_CHAIN_PROVIDER_IDS, type FreeChainAdminMetrics, type FreeChainAdminView, type FreeChainControlAction } from '../../../lib/freeChatChainView';
 export interface FreeChainInput { message: string; history: unknown[]; systemPrompt?: string; signal?: AbortSignal; onChunk?: (text: string, source?: 'notice') => void; context: FreeChainContext }
 export type FreeChainResult = RoutedCall & { reason?: 'aborted' | 'no-provider' | 'all-failed' | 'stalled'; freeChain?: FreeChainTelemetry };
 /** Compatibility export: exhausted fallbacks are neutral, not evidence of traffic overload. */
@@ -96,23 +101,28 @@ function verifiedDeepseekReservationRate(rung: RungConfig, cfg: FreeChainConfig)
 }
 function rungReason(rung: RungConfig, cfg: FreeChainConfig, input?: FreeChainInput): string | undefined {
   if (rung.reason) return rung.reason;
+  if (cfg.fixedOrder && fixedTextChainRank({ providerId: names[rung.id], modelId: rung.model, charging: isPaidRung(rung.id) ? 'metered' : 'verified-free-no-overage' }) === undefined) return 'fixed-chain-model-excluded';
   if (['glm47', 'glm45', 'gemini', 'groq', 'cloudflare'].includes(rung.id) && rung.verifiedUntil <= Date.now()) return 'free-plan-review-required';
   if (rung.id === 'deepseek' && !verifiedDeepseekReservationRate(rung, cfg)) return 'rate-card-unverified';
   // cheapinf skips the Kimi ceiling / rate-card gate under the simple CHEAPERINFERENCE mode.
   if (isPaidRung(rung.id) && rung.id !== 'deepseek' && rung.id !== 'cheapinf' && !verifiedPaidReservationRate(rung)) return 'rate-card-unverified';
   if (rung.id === 'cheapinf') {
+    if (cfg.fixedOrder && (!(Date.parse(process.env.FREE_CHAIN_CHEAPINF_RATE_VERIFIED_UNTIL ?? '') > Date.now()) || !verifiedPaidReservationRate(rung))) return 'rate-card-unverified';
     const mode = cheaperInferenceMode();
     if (mode === 'off') return 'disabled';
     if (mode === 'admin' && !input?.context.isAdmin) return 'disabled';
-    // mode=all: eligible for any FreeChain caller (key already checked in config).
+    // mode=all shares the key. Dispatch only after Keak's written permission is recorded.
+    if (mode === 'all' && !cheaperInferenceSharedAccessPermitted()) return 'terms-shared-access';
   }
   if (rung.id === 'openrouter' && !cfg.openRouterModels.length) return 'quality-allowlist-required';
   if (input && rung.id === 'gemini' && (!input.context.cacheEligible || !safeCacheKey({ message: input.message, history: input.history, eligible: true, language: 'public', systemPrompt: '', modelFamily: '' }))) return 'privacy-public-corpus-only';
   if (input && !rung.languages.includes(replyLanguageFor(input))) return 'language';
   if (input && (rung.id === 'gemini' || isPaidRung(rung.id)) && (input.context.privateTurn || input.context.healthTurn)) {
     // Exclusive CHEAPERINFERENCE=admin must answer every admin Free Chat turn, including profile/memory.
-    if (!(rung.id === 'cheapinf' && input.context.isAdmin === true && cheaperInferenceMode() === 'admin')) return 'privacy';
+    if (!(rung.id === 'cheapinf' && !cfg.fixedOrder && input.context.isAdmin === true && cheaperInferenceMode() === 'admin')) return 'privacy';
   }
+  const target = new URL(rung.baseURL);
+  if (switchedOffProviderFor(target.hostname, target.pathname)) return 'disabled';
   return undefined;
 }
 function replyLanguageFor(input: FreeChainInput) {
@@ -130,10 +140,16 @@ function quote(cfg: FreeChainConfig, input: number, output: number, rung?: RungC
   if (rung && rung.id !== 'deepseek') return maximumCostNanoUsd(input, output, usdToNanoUsd(rung.priceIn), usdToNanoUsd(rung.priceOut));
   return maximumCostNanoUsd(input, output, usdToNanoUsd(cfg.deepseekPrices.input), usdToNanoUsd(cfg.deepseekPrices.output));
 }
+/** Missing supplier receipts must not be replaced with a token-price estimate. */
+function reportedChargeNanoUsd(response: unknown): number | null {
+  const amount = (response as { supplierChargeUsd?: unknown } | null)?.supplierChargeUsd;
+  if (typeof amount !== 'string') return null;
+  try { return usdToNanoUsd(amount); } catch { return null; }
+}
 /** This namespace is not installed in AIRouterManager: other consumers of 'free' stay untouched. */
 export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeChainConfig(), refreshConfig?: () => FreeChainConfig) {
   const store = new FreeChainStore(db);
-  async function routeAdmitted(input: FreeChainInput, queueWaitMs: number): Promise<FreeChainResult> {
+  async function routeAdmitted(input: FreeChainInput, queueWaitMs: number, deadlineAt: number): Promise<FreeChainResult> {
     await assertAiAvailable();
     const started = Date.now() - queueWaitMs; const requestId = randomUUID();
     const trace: FreeChainTelemetry = { requestId, queueWaitMs, rung: null, provider: 'NONE', model: 'none', attempts: [], fallbacks: 0, cacheHit: false, costUsdEstimate: null, ttftMs: null, latencyMs: 0, rolloutBucket: rolloutBucket(input.context.uid) };
@@ -144,7 +160,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       await persistFreeChainSample(db, trace, result.ok);
       return { ...result, latencyMs: trace.latencyMs, freeChain: trace };
     };
-    try { await publishDeploymentPaidLimit(db, cfg.paidCapNanoUsd, () => store.observePaidBudgetPolicy(cfg.paidCapNanoUsd)); }
+    try { await publishDeploymentPaidLimit(db, cfg.paidCapNanoUsd, () => store.observePaidBudgetPolicy(cfg.paidCapNanoUsd, Date.now(), false, true)); }
     catch { return done(empty('all-failed', input, adminDetailFor(input, 'paid-budget-publish-failed'))); }
     const explicitLanguage = input.context.replyLanguage ?? resolveChatReplyLanguage(input.message, input.history);
     const language = replyLanguageFor(input);
@@ -152,7 +168,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       : `DEFAULT ONLY when this conversation has no explicit reply-language or script request: ${{ hi: 'Reply in Hindi using Devanagari script.', hinglish: 'Reply in Hinglish using Roman script.', en: 'Reply in English.', other: 'Reply in the same language and script as the user.' }[language]}`;
     // Master plan: stable cacheable prefix (dynamic parts last) and the compact core, both kill-switchable.
     const system = `${preparedSystemPrompt(cfg, input.systemPrompt ?? '')}\n\n${languageInstruction}`;
-    const cacheKey = cfg.cacheEnabled ? safeCacheKey({ message: input.message, history: input.history, eligible: input.context.cacheEligible, language, systemPrompt: system, modelFamily: JSON.stringify(cfg.rungs.map(r => [r.id, r.model])), faq: cfg.features.faqCache && faqCacheable(input.message) }) : null;
+    const cacheKey = !cfg.fixedOrder && cfg.cacheEnabled ? safeCacheKey({ message: input.message, history: input.history, eligible: input.context.cacheEligible, language, systemPrompt: system, modelFamily: JSON.stringify(cfg.rungs.map(r => [r.id, r.model])), faq: cfg.features.faqCache && faqCacheable(input.message) }) : null;
     const history = trimHistory(cfg, input.history);
     if (cacheKey) {
       const hit = await new FreeChainCache(db).get(cacheKey).catch(() => null);
@@ -165,19 +181,67 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     if (routed.route === 'quality' && !['teaching', 'medical'].includes(routed.reason) && cfg.features.throttle) {
       const spend = await store.spendSnapshot(Date.now()).catch(() => null);
       const cap = spend?.capNanoUsd ?? cfg.paidCapNanoUsd;
-      if (spend && cap > 0 && spend.committedNanoUsd * 100 >= cap * cfg.features.throttlePercent) routed = routeTurn(cfg, { message: input.message, history: input.history, teachingMode: input.context.teachingTurn, throttled: true });
+      if (spend && spend.budgetMode !== 'uncapped' && cap > 0 && spend.committedNanoUsd * 100 >= cap * cfg.features.throttlePercent) routed = routeTurn(cfg, { message: input.message, history: input.history, teachingMode: input.context.teachingTurn, throttled: true });
     }
     // CHEAPERINFERENCE=admin: free-chain ladder OFF for verified admins — only cheapinf answers.
-    const exclusiveAdmin = input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
+    const exclusiveAdmin = !cfg.fixedOrder && input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
     const baseOrder = exclusiveAdmin ? (['cheapinf'] as ProviderId[]) : orderForUser(cfg, input.context.uid);
     let route: TurnRoute = exclusiveAdmin ? 'normal' : routed.route;
-    let order = exclusiveAdmin ? baseOrder : orderForRoute(baseOrder, route);
+    let order: Array<ProviderId | 'mitrify'> = cfg.fixedOrder ? [...FIXED_TEXT_CHAIN] : exclusiveAdmin ? baseOrder : orderForRoute(baseOrder, route, cfg.features.routeReorder);
     // A routed order with no usable rung (keys not configured yet, privacy) falls back to the plain order.
-    if (!exclusiveAdmin && order !== baseOrder && !order.some(oid => { const r = cfg.rungs.find(x => x.id === oid); return !!r && !rungReason(r, cfg, input); })) { order = baseOrder; route = 'normal'; }
+    if (!cfg.fixedOrder && !exclusiveAdmin && order !== baseOrder && !order.some(oid => { const r = cfg.rungs.find(x => x.id === oid); return !!r && !rungReason(r, cfg, input); })) { order = baseOrder; route = 'normal'; }
     trace.route = route; trace.routeReason = routed.reason;
+    // Re-scan only pre-reservation capacity refusals. The original queue-wait budget bounds
+    // this wait too; no extra provider attempt, quota charge or unbounded timer is introduced.
+    const capacityDeadline = Date.now() + Math.max(0, cfg.queue.maxWaitMs - queueWaitMs);
+    let capacityRounds = 0, triedQuota = false;
+    for (;;) {
+    const observedCapacity = capacityRevision(); let capacityBusy = false;
     for (const id of order) {
-      if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
-      const baseRung = cfg.rungs.find(r => r.id === id)!;
+      if (input.signal?.aborted || Date.now() >= deadlineAt) return done({ ...empty('aborted'), content: '' });
+      if (id === 'mitrify') {
+        const attempt = { provider: id, model: mitrifyConfig().model, reason: 'pending', entered: false }; trace.attempts.push(attempt);
+        if (trace.attempts.filter(a => a.entered).length >= cfg.maxAttempts) { attempt.reason = 'max-attempts'; break; }
+        // Preserve classification; server review must cover the exact payload and all required data classes.
+        const prepared = trimForRung(input.message, history, system, Number.MAX_SAFE_INTEGER)!;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), Math.max(0, deadlineAt - Date.now()));
+        const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal;
+        let content = '';
+        try {
+          const result = await runApprovedMitrifyChain({ db, uid: input.context.uid, requestId: `${requestId}:mitrify`,
+            privateTurn: input.context.privateTurn, healthTurn: input.context.healthTurn, signal, maxHttpAttempts: Math.min(4, cfg.maxAttempts - trace.attempts.filter(a => a.entered).length),
+            body: { messages: [{ role: 'system', content: prepared.systemPrompt }, { role: 'user', content: prepared.prompt }], max_tokens: cfg.features.replyMaxTokens, stream: true },
+            onChunk: value => { content += value; input.onChunk?.(value); },
+            revalidate: async () => {
+              const control = await readControls(db, cfg);
+              if (!control || control.enabled === false || !cfg.enabled) throw new MitrifyError('MITRIFY_APPROVAL_REVOKED');
+            },
+            reserve: async maximumNanoUsd => {
+              triedQuota = true;
+              const control = await readControls(db, cfg).catch(() => null);
+              if (!control || control.enabled === false || !cfg.enabled) return null;
+              const month = cfg.features.monthlyCap ? await reserveMonthly(db, cfg.features.monthlyCapNanoUsd, maximumNanoUsd) : null;
+              if (cfg.features.monthlyCap && !month) return null;
+              const hold = await store.reservePaid({ uncappedRollout: true, requestId: `${requestId}:mitrify`, uid: input.context.uid, maxCostNanoUsd: maximumNanoUsd, capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
+              if (hold && !hold.mayDispatch) throw new MitrifyError('MITRIFY_ADMISSION_UNCERTAIN');
+              if (!hold) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); return null; }
+              attempt.entered = true;
+              return { releaseUndispatched: async () => { await store.settlePaid(hold, 0); if (month) await settleMonthly(db, month, maximumNanoUsd, 0); } };
+            },
+          });
+          if (result.kind === 'skipped') { attempt.reason = result.reason; continue; }
+          attempt.reason = 'served'; trace.rung = 'mitrify';
+          return done({ content: result.content, provider: 'MITRIFY', model: result.model, ...(result.usage ? { usage: result.usage } : {}), ok: true, latencyMs: 0 });
+        } catch (error) {
+          attempt.reason = error instanceof MitrifyError ? error.code.toLowerCase() : 'mitrify-admission-unavailable';
+          // Unknown liability, cancellation, or committed output never opens a direct fallback.
+          if (content) { trace.rung = 'mitrify'; return done({ content: input.onChunk ? content : `${content}\n\nThe response was interrupted. Please try again.`, provider: 'MITRIFY', model: attempt.model, ok: true, reason: 'stalled', latencyMs: 0 }); }
+          break;
+        } finally { clearTimeout(timer); controller.abort(); }
+      }
+      const baseRung = cfg.rungs.find(r => r.id === id);
+      if (!baseRung) continue;
       const rung: RungConfig = { ...baseRung, maxOutputTokens: effectiveMaxOutput(cfg, id, baseRung.maxOutputTokens, route) };
       const attempt = { provider: id, model: rung.model, reason: 'pending', entered: false }; trace.attempts.push(attempt);
       // Bounded latency: at most cfg.maxAttempts PHYSICAL calls per turn; skipped rungs are free.
@@ -188,13 +252,16 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       const attemptStarted = Date.now();
       const breakerName = `free-chat-chain:${id}`; const capacityName = `free-chat-chain:${accountId(id)}`; const breaker = getBreaker(breakerName);
       // Stale OPEN windows (AUTH=1h / QUOTA=1d) hide the real upstream status behind "circuit".
-      // CHEAPERINFERENCE=admin exclusive path: if remaining > 30s, force one probe so diagnostic
-      // shows auth/402/5xx; short remaining waits report lastOpenReason instead of hammering.
+      // Exclusive cheapinf probes those long windows. It also probes a SHORT window when the last
+      // reason is retryable (empty_response / timeout / network / server / rate_limit): Beam used
+      // to burn the 250-token reply cap on reasoning, open empty_response, and then every later
+      // send skipped the only rung because remain was under 30s. Auth and quota still wait.
       if (breaker.isBlocking()) {
         const snap = breaker.snapshot();
         const remainMs = Math.max(0, snap.openedUntil - Date.now());
         const last = snap.lastOpenReason || 'unknown';
-        if (exclusiveAdmin && id === 'cheapinf' && remainMs > 30_000) {
+        const retryableExclusiveOpen = /^(empty_response|timeout|network|server|rate_limit)(:|$)/.test(last);
+        if (exclusiveAdmin && id === 'cheapinf' && (remainMs > 30_000 || retryableExclusiveOpen)) {
           breaker.allowProbe();
           attempt.reason = `circuit-probe:last=${last}`;
         } else {
@@ -203,13 +270,13 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         }
       }
       // Real per-rung concurrency (GLM-4.5 Flash 2, GLM-4.7 Flash 1): busy → next rung, no wait.
-      if (!tryAcquireRungSlot(cfg, id)) { attempt.reason = 'concurrency'; continue; }
-      if (!acquireSlot(capacityName)) { releaseRungSlot(cfg, id); attempt.reason = 'capacity'; continue; }
+      if (!tryAcquireRungSlot(cfg, id)) { capacityBusy = true; attempt.reason = 'concurrency'; continue; }
+      if (!acquireSlot(capacityName)) { capacityBusy = true; releaseRungSlot(cfg, id); attempt.reason = 'capacity'; continue; }
       let reservation: PaidReservation | null = null;
       let monthHold: { month: string; amount: number } | null = null; let monthSettled = false;
       const controller = new AbortController(); const abort = () => controller.abort(); input.signal?.addEventListener('abort', abort, { once: true });
       if (input.signal?.aborted) abort();
-      let content = ''; let response: AIProviderResponse | undefined; let completeUsage = false; let partial = false;
+      let content = ''; let response: (AIProviderResponse & Pick<FreeChainProviderResponse, 'finishReason'>) | undefined; let completeUsage = false; let partial = false;
       // The watchdog bounds observation, not provider lifetime. Transfer BOTH acquired slots to
       // the original attempt promise, so an uncooperative SDK cannot free capacity by timing out.
       let physical: Promise<void> | undefined;
@@ -217,7 +284,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       const releaseAcquiredSlots = () => {
         if (slotsReleased) return;
         slotsReleased = true;
-        releaseSlot(capacityName); releaseRungSlot(cfg, id);
+        releaseSlot(capacityName); releaseRungSlot(cfg, id); notifyCapacityReleased();
       };
       // Trusted watchdog metadata belongs to this attempt, not to the frozen provider error.
       let watchdogDetail: string | undefined;
@@ -230,6 +297,9 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         if (!control || control.enabled === false) { attempt.reason = 'disabled'; break; }
         if (control.disabledProviders.includes(id)) { attempt.reason = 'disabled'; continue; }
       }
+        const target = new URL(rung.baseURL);
+        if (switchedOffProviderFor(target.hostname, target.pathname)) { attempt.reason = 'disabled'; continue; }
+        triedQuota = true;
         let admission = await store.reserveQuota(quotaInput(rung, cfg, prepared.inputTokens));
         // Owner exclusive: a prior AUTH/402 wrote a 1h/1d Firestore cooldown; clear once so the
         // probe can reach CheaperInference and surface the real HTTP status.
@@ -244,7 +314,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           attempt.reason = admission.reason === 'cooldown' && breaker.snapshot().lastOpenReason
             ? `cooldown:last=${breaker.snapshot().lastOpenReason}`
             : admission.reason;
-          if (typeof admission.resetAt === 'number' && admission.resetAt > Date.now()) {
+          if (admission.reason !== 'local_capacity' && typeof admission.resetAt === 'number' && admission.resetAt > Date.now()) {
             breaker.honorRemoteOpenUntil(admission.resetAt, admission.reason === 'cooldown' ? 'store-cooldown' : admission.reason);
           }
           continue;
@@ -259,13 +329,13 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
             if (!month) { attempt.reason = 'monthly-budget'; continue; }
             monthHold = { month, amount };
           }
-          reservation = await store.reservePaid({ requestId: id === 'deepseek' ? requestId : `${requestId}:${id}`, uid: input.context.uid, maxCostNanoUsd: quote(cfg, 1048576, rung.maxOutputTokens, rung), capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
+          reservation = await store.reservePaid({ uncappedRollout: true, requestId: id === 'deepseek' ? requestId : `${requestId}:${id}`, uid: input.context.uid, maxCostNanoUsd: quote(cfg, 1048576, rung.maxOutputTokens, rung), capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
           if (!reservation?.mayDispatch) { attempt.reason = 'budget'; continue; }
         }
-        if (controller.signal.aborted) { attempt.reason = 'aborted'; break; }
+        if (controller.signal.aborted || Date.now() >= deadlineAt) { attempt.reason = 'aborted'; break; }
         const execute = (chunk: (value: string) => void): Promise<void> => {
           physical = Promise.resolve().then(async () => {
-            if (controller.signal.aborted) throw new FreeChainProviderError('ABORTED');
+            if (controller.signal.aborted || Date.now() >= deadlineAt) throw new FreeChainProviderError('ABORTED');
             attempt.entered = true;
             if (id === 'openrouter') {
               const stickyRef = controlRef(db).collection('sticky').doc(input.context.conversationKey);
@@ -274,8 +344,11 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
               completeUsage = !!response.usage;
               await stickyRef.set({ model: response.model, expiresAt: Date.now() + 86400000, expireAt: new Date(Date.now() + 86400000) });
             } else {
-              const provider = new OpenAiCompatProvider({ provider: names[id] as ConstructorParameters<typeof OpenAiCompatProvider>[0]['provider'], key: rung.key, envName: rung.keyEnv, model: rung.model, baseURL: rung.baseURL, priority: cfg.order.indexOf(id), maxOutputTokens: rung.maxOutputTokens, timeoutMs: 90000, streamUsage: rung.streamUsage,
+              const provider = new OpenAiCompatProvider({ provider: names[id] as ConstructorParameters<typeof OpenAiCompatProvider>[0]['provider'], key: rung.key, envName: rung.keyEnv, model: rung.model, baseURL: rung.baseURL, priority: cfg.order.indexOf(id), maxOutputTokens: rung.maxOutputTokens, timeoutMs: Math.max(1, Math.min(CHAT_PROVIDER_ATTEMPT_MS, deadlineAt - Date.now())), streamUsage: rung.streamUsage,
                 ...(id === 'gemini' || id === 'geminipaid' ? { extraBody: { reasoning_effort: 'none' } } : id === 'gpt5nano' ? { extraBody: { reasoning_effort: 'minimal' } }
+                  // Beam's chat card allows effort low|medium|high|xhigh|max. `low` is the fastest.
+                  // none/minimal are not on that card. 2048 tokens leaves room after thinking.
+                  : id === 'cheapinf' ? { extraBody: { reasoning_effort: 'low' } }
                   // With the reply cap on, GLM thinking would spend the whole budget on hidden tokens.
                   : cfg.features.outputCap && (id === 'glm45' || id === 'glm47' || id === 'glmflashx') ? { extraBody: { thinking: { type: 'disabled' } } } : {}) });
               const result = await provider.executeTurn({ ...prepared, signal: controller.signal, onChunk: chunk }); response = result; completeUsage = result.completeUsage;
@@ -289,12 +362,13 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           return physical;
         };
         // Beam (and other cheapinf models) may stream reasoning before delta.content.
-          // Free-chat default FREE_CHAIN_TTFT_MS=6s was killing exclusive admin as cheapinf:timeout.
+          // The ordinary first-content budget must still preserve the longer exclusive-admin grace.
           const firstTokenMs = id === 'cheapinf'
             ? cheapinfFirstTokenMs(exclusiveAdmin, cfg.ttftMs)
             : cfg.ttftMs;
+          const limits = watchdogLimits(undefined, 'free') ?? { firstTokenMs, idleMs: 30000, hardCapMs: CHAT_PROVIDER_ATTEMPT_MS };
           const watch = await runWatchedStream(execute, chunk => { if (!chunk) return; if (trace.ttftMs === null) trace.ttftMs = Date.now() - started; content += chunk; input.onChunk?.(chunk); },
-            { ...(watchdogLimits(undefined, 'free') ?? { firstTokenMs, idleMs: 30000, hardCapMs: 120000 }), firstTokenMs });
+            { ...limits, firstTokenMs, hardCapMs: Math.max(1, Math.min(limits.hardCapMs, CHAT_PROVIDER_ATTEMPT_MS, deadlineAt - Date.now())) });
           if (watch.verdict !== 'completed') {
             controller.abort();
             partial = watch.delivered;
@@ -308,10 +382,20 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
             throw new FreeChainProviderError(watch.verdict === 'first-token-timeout' || watch.verdict === 'idle-timeout' || watch.verdict === 'hard-cap' ? 'TIMEOUT' : 'NETWORK');
           }
         if (!response || !content.trim()) throw new FreeChainProviderError('EMPTY_RESPONSE');
-        if (reservation && completeUsage && response.usage) await store.settlePaid(reservation, quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung));
-        if (monthHold) { monthSettled = true; await settleMonthly(db, monthHold.month, monthHold.amount, completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) : null); }
+        const actual = id === 'cheapinf' ? reportedChargeNanoUsd(response)
+          : completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) : null;
+        if (reservation && actual !== null) await store.settlePaid(reservation, actual);
+        if (monthHold) { monthSettled = true; await settleMonthly(db, monthHold.month, monthHold.amount, actual); }
         breaker.recordSuccess(); recordProviderLatency(breakerName, Date.now() - attemptStarted, false);
-        attempt.reason = 'served'; trace.rung = id; trace.costUsdEstimate = isPaidRung(id) ? (completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) / 1e9 : null) : 0;
+        trace.rung = id; trace.costUsdEstimate = isPaidRung(id) ? (completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) / 1e9 : null) : 0;
+        // Token exhaustion is a completed transport, not a complete answer. Preserve reported
+        // charges above, never cache it or mix another provider into already committed text.
+        if (response.finishReason === 'length') {
+          attempt.reason = 'truncated';
+          if (!input.onChunk) content += '\n\nThe response was interrupted. Please try again.';
+          return done({ ...response, content, ok: true, reason: 'stalled' });
+        }
+        attempt.reason = 'served';
         if (cacheKey && id !== 'openrouter') await new FreeChainCache(db).put(cacheKey, { content, provider: response.provider, model: response.model }, cfg.cacheTtlS).catch(() => {});
         return done({ ...response, content, ok: true });
       } catch (error) {
@@ -331,8 +415,15 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           breaker.honorRemoteOpenUntil(until, openReason);
           if (accountId(id) !== 'glm' || ['AUTH', 'RATE_LIMIT', 'QUOTA_EXHAUSTED'].includes(safe?.code ?? '')) await store.cooldown(accountId(id), until).catch(() => {}); recordProviderLatency(breakerName, 0, true);
         }
+        // A failed response can still carry a settled supplier receipt. Unknown failures retain holds.
+        const failedCharge = id === 'cheapinf' ? reportedChargeNanoUsd(safe) : null;
+        if (reservation?.mayDispatch && attempt.entered && failedCharge !== null) {
+          await store.settlePaid(reservation, failedCharge);
+          if (monthHold && !monthSettled) { monthSettled = true; await settleMonthly(db, monthHold.month, monthHold.amount, failedCharge); }
+        }
         // Never release an uncertain paid hold, and never mix replies after text commitment.
         if (partial || content) { trace.rung = id; if (!input.onChunk) content += '\n\nThe response was interrupted. Please try again.'; return done({ content, provider: names[id], model: response?.model ?? rung.model, latencyMs: 0, ok: true, reason: 'stalled' }); }
+        if (cfg.fixedOrder && reservation?.mayDispatch && attempt.entered && failedCharge === null) break;
         if (safe?.code === 'SAFETY_REFUSAL' || safe?.code === 'INVALID_REQUEST' || safe?.code === 'POLICY_BLOCKED' || safe?.code === 'ABORTED' || input.signal?.aborted) break;
       } finally {
         controller.abort(); input.signal?.removeEventListener('abort', abort);
@@ -344,6 +435,13 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         if (monthHold && !monthSettled) await settleMonthly(db, monthHold.month, monthHold.amount, attempt.entered ? null : 0);
       }
     }
+    if (!triedQuota && capacityBusy && ++capacityRounds <= 32) {
+      const released = await waitForCapacity(observedCapacity, capacityDeadline, input.signal);
+      if (input.signal?.aborted || Date.now() >= deadlineAt) return done({ ...empty('aborted'), content: '' });
+      if (released) continue;
+    }
+    break;
+    }
     const lastTtft = [...trace.attempts].reverse().find(a => a.provider === 'cheapinf' && /timeout:/.test(a.reason));
     const ttftCapMs = lastTtft ? Number((/timeout:(?:first-token|idle|hard-cap|stream):(\d+)ms/.exec(lastTtft.reason) ?? [])[1]) : undefined;
     const result = empty('all-failed', input, adminDetailFor(input, 'all-failed', trace.attempts, {
@@ -351,13 +449,13 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       ttftCapMs: Number.isFinite(ttftCapMs) ? ttftCapMs : undefined,
     })); input.onChunk?.(result.content, 'notice'); return done(result);
   }
-  return { async route(input: FreeChainInput): Promise<FreeChainResult> {
+  async function routeWithinDeadline(input: FreeChainInput, deadlineAt: number): Promise<FreeChainResult> {
     const entry = input.context.entryAdmission;
     if (isEntryAdmission(entry, input.context.uid)) input = { ...input, signal: input.signal ? AbortSignal.any([input.signal, entry.signal]) : entry.signal };
     if (input.signal?.aborted) return { ...empty('aborted'), content: '' };
     const admission = isEntryAdmission(entry, input.context.uid)
       ? { admitted: true as const, waitedMs: entry!.waitedMs, release: () => {} }
-      : await freeChainAdmissionQueue.acquire({ uid: input.context.uid, signal: input.signal, ...cfg.queue });
+      : await freeChainAdmissionQueue.acquire({ uid: input.context.uid, signal: input.signal, payloadBytes: admissionPayloadBytes({ message: input.message, history: input.history, systemPrompt: input.systemPrompt }), ...cfg.queue });
     if (!admission.admitted) {
       const admReason = admission.reason === 'aborted' ? 'aborted' : 'no-provider';
       const notice = freeChainAdmissionFailure(admission.reason, { message: input.message, history: input.history, replyLanguage: input.context.replyLanguage }).body.reply;
@@ -373,7 +471,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       const current = refreshConfig?.() ?? cfg;
       // #3933 bug: maybeFreeChain admits CHEAPERINFERENCE=admin when FREE_CHAIN_ENABLED is off,
       // but this gate still returned the busy notice before cheapinf could run.
-      const exclusiveAdmin = input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
+      const exclusiveAdmin = !cfg.fixedOrder && input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
       if (strictFreeRequired() || (!exclusiveAdmin && (!current.enabled || current.errors.length))) {
         const early = strictFreeRequired() ? 'strict-free-required'
           : !current.enabled ? 'free-chain-disabled'
@@ -381,8 +479,16 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         const result = empty('all-failed', input, adminDetailFor(input, early));
         input.onChunk?.(result.content, 'notice'); return result;
       }
-      return await routeAdmitted(input, admission.waitedMs);
+      return await routeAdmitted(input, admission.waitedMs, deadlineAt);
     } finally { admission.release(); }
+  }
+  return { async route(input: FreeChainInput): Promise<FreeChainResult> {
+    const deadlineAt = Date.now() + CHAT_SERVER_DEADLINE_MS;
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), CHAT_SERVER_DEADLINE_MS);
+    const signal = input.signal ? AbortSignal.any([input.signal, deadline.signal]) : deadline.signal;
+    try { return await routeWithinDeadline({ ...input, signal }, deadlineAt); }
+    finally { clearTimeout(timer); }
   } };
 }
 
@@ -407,9 +513,9 @@ export async function maybeFreeChain(input: FreeChainInput): Promise<FreeChainRe
   if (cfg.errors.length && (cfg.enabled || held)) { warnOnce(`Invalid configuration: ${cfg.errors.join(', ')}`); return unavailable(`config-errors:${cfg.errors.slice(0, 3).join(',')}`); }
   // CHEAPERINFERENCE=admin + verified admin: exclusive cheapinf path (free ladder off for this reply).
   // Works even when FREE_CHAIN_ENABLED is off, so the owner can test with only CHEAPERINFERENCE=admin.
-  const exclusiveAdmin = input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
+  const exclusiveAdmin = !cfg.fixedOrder && input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
   // OFF restores legacy for new requests (no db touch), never for a turn already admitted — unless exclusive admin.
-  if (!cfg.enabled && !exclusiveAdmin) return held ? unavailable('free-chain-disabled') : null;
+  if (!cfg.enabled && !exclusiveAdmin) return held || cfg.fixedOrder ? unavailable('free-chain-disabled') : null;
   const db = getServerDb(); if (!db) return unavailable('firestore-unavailable');
   if (exclusiveAdmin) {
     const cheap = cfg.rungs.find(r => r.id === 'cheapinf');
@@ -424,7 +530,7 @@ export async function maybeFreeChain(input: FreeChainInput): Promise<FreeChainRe
     return buildFreeChainRouter(db, cfg, freeChainConfig).route(input);
   }
   const control = await readControlsForSelection(db, cfg).catch(() => null); if (!control) return unavailable('controls-unavailable');
-  if (!selectedForFreeChain(cfg, control, input.context.uid)) return held ? unavailable('not-selected-for-rollout') : null;
+  if (!selectedForFreeChain(cfg, control, input.context.uid)) return held || cfg.fixedOrder ? unavailable('not-selected-for-rollout') : null;
   return buildFreeChainRouter(db, cfg, freeChainConfig).route(input);
 }
 export async function controlFreeChain(action: FreeChainControlAction, actor: string): Promise<void> {
@@ -435,16 +541,18 @@ export async function controlFreeChain(action: FreeChainControlAction, actor: st
 export async function controlFreeChainBudget(value: FreeChainBudgetAction, actor: string): Promise<FreeChainBudgetResponse> {
   const action = readFreeChainBudgetAction(value);
   const cfg = freeChainConfig();
-  if (!action || Math.round(action.capUsd * 100) * 10_000_000 > cfg.paidCapNanoUsd) throw new Error('FREE_CHAIN_BUDGET_INVALID_INPUT');
+  if (!action || (action.budgetMode !== 'uncapped' && Math.round(action.capUsd * 100) * 10_000_000 > cfg.paidCapNanoUsd)) throw new Error('FREE_CHAIN_BUDGET_INVALID_INPUT');
   if (cfg.errors.includes('FREE_CHAIN_PAID_DAILY_CAP_USD')) throw new Error('FREE_CHAIN_BUDGET_UNAVAILABLE');
   const db = getServerDb(); if (!db) throw new Error('FREE_CHAIN_STORE_UNAVAILABLE');
-  const result = await new FreeChainStore(db).setPaidBudgetPolicy({ capNanoUsd: Math.round(action.capUsd * 100) * 10_000_000,
+  const result = await new FreeChainStore(db).setPaidBudgetPolicy({ ...(action.budgetMode ? { budgetMode: action.budgetMode } : {}), capNanoUsd: Math.round(action.capUsd * 100) * 10_000_000,
     expectedRevision: action.expectedRevision, actorUid: actor, reason: sanitizeText(action.reason, 500).slice(0, 500) });
   if (!result.ok) throw new Error(result.reason === 'conflict' ? 'FREE_CHAIN_BUDGET_CONFLICT' : result.reason === 'invalid_input' ? 'FREE_CHAIN_BUDGET_INVALID_INPUT' : 'FREE_CHAIN_BUDGET_UNAVAILABLE');
-  return { ok: true, capUsd: result.policy.capNanoUsd / 1e9, policyRevision: result.policy.revision };
+  return { ok: true, ...(result.policy.budgetMode ? { budgetMode: result.policy.budgetMode } : {}), capUsd: result.policy.capNanoUsd / 1e9, policyRevision: result.policy.revision };
 }
 export async function freeChainAdminView(): Promise<FreeChainAdminView> {
-  const cfg = freeChainConfig(); const db = getServerDb(); if (!db) throw new Error('FREE_CHAIN_STORE_UNAVAILABLE');
+  const cfg = freeChainConfig();
+  if (cfg.errors.includes('FREE_CHAIN_ORDER')) throw new FreeChainConfigurationError();
+  const db = getServerDb(); if (!db) throw new Error('FREE_CHAIN_STORE_UNAVAILABLE');
   const control = await readControls(db, cfg); const store = new FreeChainStore(db);
   const spend = await store.spendSnapshot(Date.now());
   // Request-local reuse only: both Flash models share one account/reset scope.
@@ -459,7 +567,7 @@ export async function freeChainAdminView(): Promise<FreeChainAdminView> {
       usage: usage.available ? { ...usage.usage } : undefined, nextResetAt: usage.dailyResetAt, limits: { rpm: rung.rpm, rpd: rung.rpd, tpm: rung.tpm, tpd: rung.tpd, ...(rung.id === 'cloudflare' ? { neuronsPerDay: 10000 } : {}) }, circuit: getBreaker(`free-chat-chain:${rung.id}`).snapshot() };
   }));
   return { order: cfg.order, enabled: cfg.enabled, runtimeEnabled: control.enabled, rolloutPercent: control.rolloutPercent, allowListConfigured: cfg.allowUids.length > 0, providers,
-    paid: { policyState: spend.available ? 'initialized' : 'uninitialized', configuredCapUsd: cfg.errors.includes('FREE_CHAIN_PAID_DAILY_CAP_USD') ? null : cfg.paidCapNanoUsd / 1e9, capUsd: spend.capNanoUsd === null ? null : spend.capNanoUsd / 1e9, policyRevision: spend.policyRevision, reservedUsd: spend.available ? spend.heldNanoUsd / 1e9 : null, reportedUsd: spend.available ? spend.spentNanoUsd / 1e9 : null },
+    paid: { budgetMode: spend.budgetMode ?? 'capped', policyState: spend.available ? 'initialized' : 'uninitialized', configuredCapUsd: cfg.errors.includes('FREE_CHAIN_PAID_DAILY_CAP_USD') ? null : cfg.paidCapNanoUsd / 1e9, capUsd: spend.capNanoUsd === null ? null : spend.capNanoUsd / 1e9, policyRevision: spend.policyRevision, reservedUsd: spend.available ? spend.heldNanoUsd / 1e9 : null, reportedUsd: spend.available ? spend.spentNanoUsd / 1e9 : null },
 
     limitations: [
       (() => { const s = cheaperInferenceAdminStatus(); return `CheaperInference (${s.defaultModel} @ ${s.baseUrl}): mode=${s.mode}, key=${s.apiKeyConfigured ? 'configured' : 'missing'} (off|admin|all). Default off; admin = exclusive for verified admins; all = first paid rung for everyone.`.slice(0, 500); })(),

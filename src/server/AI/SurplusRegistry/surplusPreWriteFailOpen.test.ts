@@ -8,13 +8,12 @@ vi.mock('./surplusAdmitCircuit', () => ({
   recordSurplusMidBuildDeath: (...a: unknown[]) => circuitMocks.death(...a),
   recordSurplusAdmitProbeSuccess: (...a: unknown[]) => circuitMocks.success(...a),
 }));
-import { PublicBuildEngineError, PUBLIC_BUILD_ENGINE_UNAVAILABLE, PUBLIC_BUILD_ENGINE_TIMEOUT } from '../../lib/buildEngineError';
+import { PublicBuildEngineError, PUBLIC_BUILD_ENGINE_UNAVAILABLE, PUBLIC_BUILD_ENGINE_TIMEOUT, publicBuildEngineError } from '../../lib/buildEngineError';
 import { SurplusBuildTransportError } from './transport';
 import {
   shouldFailOpenSurplusPreWrite,
   surplusPreWriteFailOpenReason,
   isSurplusPublicBuildEngineFailure,
-  isPublicBuildEngineUnavailableText,
   tryConsumeSurplusPreWriteFailOpen,
   wrapSurplusRunnerPreWriteFailOpen,
   isSurplusPreWriteFailOpenReason,
@@ -61,10 +60,20 @@ describe('shouldFailOpenSurplusPreWrite', () => {
     })).toBe(true);
   });
 
-  it('does NOT fail-open once any user file exists (partial Surplus work)', () => {
+  it('fail-opens after user files exist ONLY for the same-turn wrapper (bench 2026-10-31)', () => {
     expect(shouldFailOpenSurplusPreWrite({
       userFilesWritten: 1,
       error: new PublicBuildEngineError(),
+    })).toBe(false);
+    expect(shouldFailOpenSurplusPreWrite({
+      userFilesWritten: 1,
+      error: new PublicBuildEngineError(),
+      allowAfterWrite: true,
+    })).toBe(true);
+    expect(shouldFailOpenSurplusPreWrite({
+      userFilesWritten: NaN,
+      error: new PublicBuildEngineError(),
+      allowAfterWrite: true,
     })).toBe(false);
   });
 
@@ -154,16 +163,19 @@ describe('wrapSurplusRunnerPreWriteFailOpen', () => {
     expect(circuitMocks.death).not.toHaveBeenCalled();
   });
 
-  it('rethrows when user files already exist — no Weak restart after partial write', async () => {
+  it('continues the SAME turn on Weak after a partial write (no restart, reason mid_build_after_write)', async () => {
     const surplusRun = vi.fn(async () => { throw new PublicBuildEngineError(); });
     const weakRun = vi.fn(async () => emptyTurn());
+    const onFailOpen = vi.fn();
     const wrapped = wrapSurplusRunnerPreWriteFailOpen(
       { runTurn: surplusRun } as TurnRunner,
       () => ({ runTurn: weakRun } as TurnRunner),
-      { state: { dropped: false }, userFilesWritten: () => 3 },
+      { state: { dropped: false }, userFilesWritten: () => 3, onFailOpen },
     );
-    await expect(wrapped.runTurn(params())).rejects.toThrow(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
-    expect(weakRun).not.toHaveBeenCalled();
+    const p = params();
+    await wrapped.runTurn(p);
+    expect(weakRun).toHaveBeenCalledWith(p);
+    expect(onFailOpen).toHaveBeenCalledWith('mid_build_after_write');
   });
 
   it('routes subsequent turns straight to Weak after one fail-open (shared state)', async () => {
@@ -209,57 +221,50 @@ describe('wrapSurplusRunnerPreWriteFailOpen', () => {
 });
 
 
-describe('isPublicBuildEngineUnavailableText (AgentRunner soft-scrub)', () => {
-  it('matches UNAVAILABLE, TIMEOUT, and Error: prefixed soft summaries', () => {
-    expect(isPublicBuildEngineUnavailableText(PUBLIC_BUILD_ENGINE_UNAVAILABLE)).toBe(true);
-    expect(isPublicBuildEngineUnavailableText(PUBLIC_BUILD_ENGINE_TIMEOUT)).toBe(true);
-    expect(isPublicBuildEngineUnavailableText(`Error: ${PUBLIC_BUILD_ENGINE_UNAVAILABLE}`)).toBe(true);
-    expect(isPublicBuildEngineUnavailableText('Stopped — the build was asked to stop')).toBe(false);
-  });
-});
-
-describe('tryConsumeSurplusPreWriteFailOpen (non-throw scrub path)', () => {
-  it('night A/B: soft summary string with Files=0 consumes mid_build_engine_unavailable once', () => {
+describe('tryConsumeSurplusPreWriteFailOpen (captured scope exception)', () => {
+  it('consumes an actual public exception exactly once', () => {
     const onFailOpen = vi.fn();
     const hooks = { state: { dropped: false }, userFilesWritten: () => 0, onFailOpen };
-    const reason = tryConsumeSurplusPreWriteFailOpen(
-      hooks,
-      `Error: ${PUBLIC_BUILD_ENGINE_UNAVAILABLE}`,
-    );
-    expect(reason).toBe('mid_build_engine_unavailable');
+    expect(tryConsumeSurplusPreWriteFailOpen(hooks, new PublicBuildEngineError())).toBe('mid_build_engine_unavailable');
     expect(hooks.state.dropped).toBe(true);
     expect(onFailOpen).toHaveBeenCalledExactlyOnceWith('mid_build_engine_unavailable');
-    expect(tryConsumeSurplusPreWriteFailOpen(hooks, `Error: ${PUBLIC_BUILD_ENGINE_UNAVAILABLE}`)).toBeNull();
+    expect(tryConsumeSurplusPreWriteFailOpen(hooks, new PublicBuildEngineError())).toBeNull();
+    expect(circuitMocks.death).toHaveBeenCalledOnce();
   });
 
-  it('does not consume when model-authored files already exist', () => {
-    const onFailOpen = vi.fn();
-    const hooks = { state: { dropped: false }, userFilesWritten: () => 2, onFailOpen };
+  it.each([
+    `Error: ${PUBLIC_BUILD_ENGINE_UNAVAILABLE}`,
+    PUBLIC_BUILD_ENGINE_UNAVAILABLE,
+    new Error(`Stopped: ${PUBLIC_BUILD_ENGINE_UNAVAILABLE}`),
+    new Error(`A provider quoted: ${PUBLIC_BUILD_ENGINE_TIMEOUT}`),
+    { code: 'DISCOUNT_BUILD_UNAVAILABLE' },
+    publicBuildEngineError('policy_refusal'),
+  ])('does not turn summaries, untrusted codes or terminal refusal into retry authority', error => {
+    const hooks = { state: { dropped: false }, userFilesWritten: () => 0, onFailOpen: vi.fn() };
+    expect(tryConsumeSurplusPreWriteFailOpen(hooks, error)).toBeNull();
+    expect(hooks.state.dropped).toBe(false);
+    expect(hooks.onFailOpen).not.toHaveBeenCalled();
+    expect(circuitMocks.death).not.toHaveBeenCalled();
+  });
+
+  it.each([1, -1, NaN, Infinity])('requires verified zero model-authored files, not %s', files => {
+    const hooks = { state: { dropped: false }, userFilesWritten: () => files };
     expect(tryConsumeSurplusPreWriteFailOpen(hooks, new PublicBuildEngineError())).toBeNull();
     expect(hooks.state.dropped).toBe(false);
-    expect(onFailOpen).not.toHaveBeenCalled();
   });
 
-  it('duck-types DISCOUNT_BUILD_UNAVAILABLE when instanceof misses', () => {
-    const onFailOpen = vi.fn();
-    const hooks = { state: { dropped: false }, userFilesWritten: () => 0, onFailOpen };
-    const duck = Object.assign(new Error(PUBLIC_BUILD_ENGINE_UNAVAILABLE), { code: 'DISCOUNT_BUILD_UNAVAILABLE' });
-    expect(isSurplusPublicBuildEngineFailure(duck)).toBe(true);
-    expect(tryConsumeSurplusPreWriteFailOpen(hooks, duck)).toBe('mid_build_engine_unavailable');
+  it('does not assume zero files when the counter cannot be read', () => {
+    const hooks = { state: { dropped: false }, userFilesWritten: () => { throw new Error('counter unavailable'); } };
+    expect(tryConsumeSurplusPreWriteFailOpen(hooks, new PublicBuildEngineError())).toBeNull();
+    expect(circuitMocks.death).not.toHaveBeenCalled();
   });
-});
 
-describe('wrapSurplusRunnerPreWriteFailOpen after soft consume', () => {
-  it('routes subsequent turns to Weak once scrub path already dropped Surplus', async () => {
+  it('routes subsequent turns to Weak after the captured scope exception was consumed', async () => {
     const surplusRun = vi.fn(async () => emptyTurn());
     const weakRun = vi.fn(async () => emptyTurn());
     const hooks = { state: { dropped: false }, userFilesWritten: () => 0 };
-    tryConsumeSurplusPreWriteFailOpen(hooks, `Error: ${PUBLIC_BUILD_ENGINE_UNAVAILABLE}`);
-    const wrapped = wrapSurplusRunnerPreWriteFailOpen(
-      { runTurn: surplusRun } as TurnRunner,
-      () => ({ runTurn: weakRun } as TurnRunner),
-      hooks,
-    );
+    tryConsumeSurplusPreWriteFailOpen(hooks, new PublicBuildEngineError());
+    const wrapped = wrapSurplusRunnerPreWriteFailOpen({ runTurn: surplusRun }, () => ({ runTurn: weakRun }), hooks);
     await wrapped.runTurn(params());
     expect(surplusRun).not.toHaveBeenCalled();
     expect(weakRun).toHaveBeenCalledOnce();

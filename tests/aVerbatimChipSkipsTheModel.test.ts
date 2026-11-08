@@ -197,7 +197,7 @@ describe('Q-963 — a verbatim chip does not run a model', () => {
   it('the chat handler keeps the existing settle adapter, result, gating, and reviewer wiring', () => {
     const route = readFileSync(resolve(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
     const settle = sourceBetween(route, 'const verbatimTemplate = await settleVerbatimTemplate({', '// FREE-TIER: never escalate');
-    expect(settle).toContain('skip: verbatimTemplateSkipsModel({ preseeded: goldenPreseeded, tier: goldenPreseededTier, prompt })');
+    expect(settle).toContain('skip: verbatimTemplateSkipsModel({ preseeded: goldenPreseeded, tier: goldenPreseededTier, prompt, surplusAdmitted: surplusAdmissionDiag?.code === \'SURPLUS_ADMITTED\' })');
     expect(settle).toContain("startPreview: () => startTemplatePreview(templateInstantPreviewEnabled(), () => dispatcher.dispatch({ id: 'template-verify-preview', name: 'update_preview', input: { port: 5173 } }, 'architect', { signal: abort.signal }).then(() => undefined))");
     expect(settle).toContain('result = templateRunResult(result, verbatimTemplate);');
     expect(settle).toContain('fastLaneGated = templateCountsAsGated(fastLaneGated, verbatimTemplate.deliver);');
@@ -284,5 +284,14 @@ describe('Q-963 — a verbatim chip does not run a model', () => {
     const oldSummary = "Your app is NavBharatAI\\'s tested template for this request. It is already on the preview — nothing else was generated.";
     const reverted = await observe(compile(producer.replace(literal, oldSummary)));
     expect(() => expectPreparedSettlement(reverted.settled, reverted.observed)).toThrow();
+  });
+});
+
+describe('Surplus admitted never short-circuits to the template', () => {
+  it('runs the model loop when Surplus is admitted', () => {
+    const prompt = 'Hello';
+    const plain = verbatimTemplateSkipsModel({ preseeded: true, tier: 'simple', prompt, env: {} });
+    expect(verbatimTemplateSkipsModel({ preseeded: true, tier: 'simple', prompt, surplusAdmitted: true, env: {} })).toBe(false);
+    expect(typeof plain).toBe('boolean');
   });
 });

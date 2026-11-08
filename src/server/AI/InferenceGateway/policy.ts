@@ -1,3 +1,4 @@
+import { FIXED_TEXT_CHAIN_MAX_ATTEMPTS, fixedTextChainRank, fixedTextChainScope } from '../fixedTextChain';
 /**
  * Pure planner: returns one proposed physical attempt, never a dispatch permit.
  * No network, env lookup, billing write, credential resolution or caller integration.
@@ -39,7 +40,8 @@ function requestRejection(r: RoutingRequest, now: number): PlanningResult | unde
     || !isPositiveCount(r.firstOutputTimeoutMs) || !isPositiveCount(r.attemptTimeoutMs)
     || r.firstOutputTimeoutMs > r.attemptTimeoutMs || !r.cancellation || !isIdentifier(r.cancellation.id)
     || typeof r.cancellation.cancelled !== 'boolean' || typeof r.outputVisible !== 'boolean'
-    || !Number.isInteger(r.maxPhysicalAttempts) || r.maxPhysicalAttempts < 1 || r.maxPhysicalAttempts > 4
+    || !Number.isInteger(r.maxPhysicalAttempts) || r.maxPhysicalAttempts < 1 || r.maxPhysicalAttempts > (r.fixedTextChain === 'v1' ? FIXED_TEXT_CHAIN_MAX_ATTEMPTS : 4)
+    || (r.fixedTextChain !== undefined && (r.fixedTextChain !== 'v1' || !fixedTextChainScope(r.surface, r.capability.kind)))
     || !Array.isArray(r.attempts)) return blocked('malformed');
   if (!validPayer(r.payer) || (r.payer.kind === 'tenant' && (r.payer.tenantId !== r.tenantId
     || !['developer-api', 'published-app'].includes(r.surface)))) return blocked('payer');
@@ -79,6 +81,7 @@ function evaluate(c: Candidate, input: PlanningInput, requestBinding: string): E
   const { request: r, nowMs: now, authority, budget } = input;
   const { profile: p, quota: q, availability: a, price } = c;
   if (!p || !q || !a) return 'malformed';
+  if (r.fixedTextChain === 'v1' && (fixedTextChainRank(p) === undefined || r.attempts.some(attempt => attempt.profileId === p.id))) return 'fixed-chain';
   if (!hasCurrentEvidence(authority, p.evidenceRef, 'profile', withoutEvidence(p), now)) return 'evidence';
   const profileReason = profileRejection(p, r);
   if (profileReason) return profileReason;
@@ -152,6 +155,10 @@ export function planInference(input: PlanningInput): PlanningResult {
       } catch { rejected.push({ profileId: c?.profile?.id ?? 'invalid-profile', reason: 'malformed' }); }
     }
     eligible.sort((a, b) => {
+      if (r.fixedTextChain === 'v1') {
+        const order = fixedTextChainRank(a.candidate.profile)! - fixedTextChainRank(b.candidate.profile)!;
+        if (order) return order;
+      }
       const paid = Number(!!a.paidHold) - Number(!!b.paidHold);
       if (paid) return paid;
       if (a.paidHold && b.paidHold) {

@@ -1,3 +1,5 @@
+import { readSessionCutoff, sessionTokenIsCurrent } from './sessionRevocation';
+
 // ANDROID INSTANT VERIFICATION → A REAL SIGN-IN (admin 2026-09-30: "sabhi problem fix? … No - continue").
 //
 // 🔴 THE PROBLEM. Android can confirm a phone number WITHOUT sending an SMS ("instant verification").
@@ -19,13 +21,13 @@
 // Google, exactly as before this existed, and the admin's OTP card shows the code.
 
 export interface ExchangeAuth {
-  verifyIdToken(token: string): Promise<{
+  verifyIdToken(token: string, checkRevoked: true): Promise<{
     uid: string;
     phone_number?: string;
     auth_time?: number;
     firebase?: { sign_in_provider?: string };
   }>;
-  createCustomToken(uid: string): Promise<string>;
+  createCustomToken(uid: string, claims: { session_auth_time: number }): Promise<string>;
 }
 
 export type ExchangeResult =
@@ -40,6 +42,7 @@ export async function exchangePhoneIdToken(
   idToken: unknown,
   auth: ExchangeAuth | null,
   nowS: number,
+  readCutoff: (uid: string) => Promise<number> = readSessionCutoff,
 ): Promise<ExchangeResult> {
   if (typeof idToken !== 'string' || idToken.length < 20 || idToken.length > 8192) {
     return { ok: false, status: 400, code: 'bad-request', message: 'Sign-in could not be completed.' };
@@ -49,9 +52,16 @@ export async function exchangePhoneIdToken(
   }
   let decoded: Awaited<ReturnType<ExchangeAuth['verifyIdToken']>>;
   try {
-    decoded = await auth.verifyIdToken(idToken);
+    decoded = await auth.verifyIdToken(idToken, true);
   } catch {
     return { ok: false, status: 401, code: 'invalid-token', message: 'Sign-in could not be completed.' };
+  }
+  try {
+    if (!sessionTokenIsCurrent(decoded, await readCutoff(decoded.uid))) {
+      return { ok: false, status: 401, code: 'invalid-token', message: 'Sign-in could not be completed.' };
+    }
+  } catch {
+    return { ok: false, status: 503, code: 'unavailable', message: 'Sign-in is not available right now.' };
   }
   if (decoded.firebase?.sign_in_provider !== 'phone' || !decoded.phone_number) {
     return { ok: false, status: 403, code: 'not-phone', message: 'Sign-in could not be completed.' };
@@ -61,7 +71,7 @@ export async function exchangePhoneIdToken(
     return { ok: false, status: 401, code: 'stale', message: 'That sign-in took too long. Please try again.' };
   }
   try {
-    return { ok: true, token: await auth.createCustomToken(decoded.uid) };
+    return { ok: true, token: await auth.createCustomToken(decoded.uid, { session_auth_time: authTime }) };
   } catch (err) {
     // Admin-only: the server log. Most often the missing IAM role named above.
     try {

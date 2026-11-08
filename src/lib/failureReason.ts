@@ -118,6 +118,8 @@ export const OUTCOME_REASONS: Readonly<Record<string, FailureReason>> = {
    */
   OUTCOME_EMPTY_BUILD: { key: 'empty-build', label: 'No files were produced' },
   OUTCOME_SANDBOX_UNAVAILABLE: { key: 'sandbox-unavailable', label: 'Build sandbox unavailable (infra, not the app)' },
+  OUTCOME_ENGINE_UNAVAILABLE: { key: 'engine-unavailable', label: 'Build engine unavailable mid-build (infra, not the app)' },
+  OUTCOME_ENGINE_TIMEOUT: { key: 'engine-timeout', label: 'Build engine step timed out (infra, not the app)' },
   /**
    * 🔴 THE SEVEN ABORTS THAT RECORDED NOTHING (admin's failure table, 2026-09-18 — "Other" was the top
    * reason for the biggest row, 45 of 106). Nine causes abort a build; only the two deadline causes

@@ -16,7 +16,7 @@
 // INJECTED, so the parsing/classification/prompt logic is fully unit-testable without a sandbox.
 
 import { ensureReactValueImport } from './EndgameRepair';
-import { NO_FAKE_FEATURE_RULE, NO_FAKED_RESULT_RULE, NO_FAKE_RESULTS_RULE } from './noEvalRule';
+import { NO_FAKE_FEATURE_RULE, NO_FAKED_RESULT_RULE, NO_FAKE_RESULTS_RULE, LIGHT_THEME_BY_DEFAULT_RULE } from './noEvalRule';
 import type { StartTier } from './RequestAnalyser';
 // ONE timeout helper for the whole build pipeline. This module used to carry its own private copy,
 // and that duplication is the direct reason the July zombie-write fix landed in `SimpleBuilder` and
@@ -229,6 +229,7 @@ export function oneShotSystemPrompt(framework: string): string {
     NO_FAKE_FEATURE_RULE,
     NO_FAKED_RESULT_RULE,
     NO_FAKE_RESULTS_RULE,
+    LIGHT_THEME_BY_DEFAULT_RULE,
   ].join('\n');
 }
 

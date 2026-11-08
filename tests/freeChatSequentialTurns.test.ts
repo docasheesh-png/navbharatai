@@ -128,7 +128,7 @@ describe('registered Free Chat routes with real user quota, admission queue and 
       const res = new ResponseFixture();
       await send(request(n, n === 2 ? { message: 'Why?', history: [{ sender: 'user', text: 'Tell me about triangles.' }, { sender: 'ai', text: 'A synthetic useful answer.' }] } : {}), res);
       expect(res.statusCode).toBe(200); expect(res.body.reply).toBe('A synthetic useful answer.');
-      expect(await status()).toMatchObject({ used: n, reserved: 0, remaining: 20 - n, inProgress: false });
+      expect(await status()).toMatchObject({ used: n, reserved: 0, remaining: 50 - n, inProgress: false });
     }
     expect(m.execute).toHaveBeenCalledTimes(2);
     expect(m.execute.mock.calls.map(call => call[1].provider)).toEqual(['GROQ', 'GROQ']);
@@ -149,7 +149,7 @@ describe('registered Free Chat routes with real user quota, admission queue and 
       expect(input.systemPrompt).toContain('Hindi using Devanagari script, not Romanized Hindi or Hinglish');
       expect(input.systemPrompt).not.toContain('Reply in Hinglish using Roman script.');
     }
-    expect(await status()).toMatchObject({ used: 3, reserved: 0, remaining: 17, inProgress: false });
+    expect(await status()).toMatchObject({ used: 3, reserved: 0, remaining: 47, inProgress: false });
   });
   it('keeps the real streaming sibling available after its first completed reply', async () => {
     for (let n = 1; n <= 2; n++) {
@@ -159,15 +159,15 @@ describe('registered Free Chat routes with real user quota, admission queue and 
       expect(res.chunks.join('')).not.toContain('CHAT_ROUTE_UNAVAILABLE');
     }
     expect(m.execute).toHaveBeenCalledTimes(2);
-    expect(await status()).toMatchObject({ used: 2, reserved: 0, remaining: 18, inProgress: false });
+    expect(await status()).toMatchObject({ used: 2, reserved: 0, remaining: 48, inProgress: false });
   });
   it('does not consume an answer on no-output terminal failure, and a new request can succeed', async () => {
     m.execute.mockRejectedValueOnce(new FreeChainProviderError('INVALID_REQUEST'));
     const failed = new ResponseFixture(); await route()(request(1), failed);
     expect(failed.statusCode).toBe(503); expect(failed.body.code).toBe('CHAT_ROUTE_UNAVAILABLE');
-    expect(await status()).toMatchObject({ used: 0, remaining: 20, inProgress: false });
+    expect(await status()).toMatchObject({ used: 0, remaining: 50, inProgress: false });
     const retried = new ResponseFixture(); await route()(request(2, { message: 'Why?' }), retried);
-    expect(retried.statusCode).toBe(200); expect(await status()).toMatchObject({ used: 1, remaining: 19, inProgress: false });
+    expect(retried.statusCode).toBe(200); expect(await status()).toMatchObject({ used: 1, remaining: 49, inProgress: false });
   });
   it('falls back after the first provider fails and keeps serving on the next user turn', async () => {
     m.execute.mockRejectedValueOnce(new FreeChainProviderError('RATE_LIMIT'));
@@ -175,7 +175,7 @@ describe('registered Free Chat routes with real user quota, admission queue and 
     const second = new ResponseFixture(); await route()(request(2), second);
     expect(first.statusCode).toBe(200); expect(second.statusCode).toBe(200);
     expect(m.execute.mock.calls.map(call => call[1].provider)).toEqual(['GROQ', 'CLOUDFLARE', 'CLOUDFLARE']);
-    expect(await status()).toMatchObject({ used: 2, remaining: 18, inProgress: false });
+    expect(await status()).toMatchObject({ used: 2, remaining: 48, inProgress: false });
   });
   it('rejects concurrent same-account work while allowing another account, then releases the first account', async () => {
     let release!: () => void;
@@ -188,7 +188,7 @@ describe('registered Free Chat routes with real user quota, admission queue and 
     expect(other.statusCode).toBe(200);
     release(); await pending;
     const next = new ResponseFixture(); await route()(request(3), next);
-    expect(next.statusCode).toBe(200); expect(await status()).toMatchObject({ used: 2, remaining: 18, inProgress: false });
+    expect(next.statusCode).toBe(200); expect(await status()).toMatchObject({ used: 2, remaining: 48, inProgress: false });
   });
   it('releases a disconnected no-output request after upstream abort and admits the next turn', async () => {
     m.execute.mockImplementationOnce((input: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
@@ -196,8 +196,8 @@ describe('registered Free Chat routes with real user quota, admission queue and 
     }));
     const first = new ResponseFixture(); const pending = route()(request(1), first);
     await vi.waitFor(() => expect(m.execute).toHaveBeenCalledOnce()); first.disconnect(); await pending;
-    expect(await status()).toMatchObject({ used: 1, remaining: 19, inProgress: false });
+    expect(await status()).toMatchObject({ used: 1, remaining: 49, inProgress: false });
     const next = new ResponseFixture(); await route()(request(2), next);
-    expect(next.statusCode).toBe(200); expect(await status()).toMatchObject({ used: 2, remaining: 18, inProgress: false });
+    expect(next.statusCode).toBe(200); expect(await status()).toMatchObject({ used: 2, remaining: 48, inProgress: false });
   });
 });

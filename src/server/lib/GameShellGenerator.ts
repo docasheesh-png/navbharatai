@@ -44,6 +44,7 @@ import { startMeta, mountMetaToasts, combo } from './core/meta';
 import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
+import { groundScene } from './three/surfaces';
 import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle } from './three/objects';
 import { CharacterController } from './play/character';
@@ -297,18 +298,33 @@ export class Game {
     );
   }
 
+  /**
+   * ONE context for the game's whole life — the SAME object in setup() and in every update().
+   *
+   * 🔴 WHY (autopsy 8701aaa1 / 7aa2fe7c / c71e56de, 2026-11-02, admin: "50% vehicles chalti hi nahi hai").
+   * This used to be a getter that built a NEW object on every access, so a game that kept its car on the
+   * context — "ctx.car = car" or "(ctx as any).vehicleState = drive" in setup(), the most natural thing
+   * a builder writes — read undefined in update(). driveVehicle(undefined, …) then threw every frame
+   * ("Cannot read properties of undefined (reading 'rotation')" / "(reading 'speed')", 1,419 errors in
+   * one playtest) and the car never moved. Whatever a game stores here now survives, and the members are
+   * live getters, so nothing on it can go stale either.
+   */
+  private ctxObject: GameContext | null = null;
   get context(): GameContext {
-    return {
-      scene: this.scene,
-      camera: this.rig.camera,
-      renderer: this.renderer,
-      player: this.player,
-      particles: this.particles,
-      feel: this.feel,
-      input: this.input,
-      lights: this.lights,
+    if (this.ctxObject) return this.ctxObject;
+    const game = this;
+    this.ctxObject = {
+      get scene() { return game.scene; },
+      get camera() { return game.rig.camera; },
+      get renderer() { return game.renderer; },
+      get player() { return game.player; },
+      get particles() { return game.particles; },
+      get feel() { return game.feel; },
+      get input() { return game.input; },
+      get lights() { return game.lights; },
       follow: (object) => { this.followTarget = object; this.followChosen = true; this.syncTouchLayout(); },
     };
+    return this.ctxObject;
   }
 
   /** Run the game's own code, listening for the vehicles it drives and the buttons it reads. */
@@ -412,6 +428,9 @@ export class Game {
       }
       // The shell listens while the game runs, so a vehicle it drives is known without being declared.
       this.asGame(() => this.options.update?.(this.context, delta));
+      // 🔒 NOTHING SINKS: every top-level object (car, NPC, animal, prop, train) is kept on the terrain
+      // after the game moved it — the kit enforces it, so no generated game can forget it (2026-11-02).
+      groundScene(this.scene);
       this.syncTouchLayout();   // back to the joystick if the car has left the scene
       this.particles.update(delta);
     }
@@ -538,7 +557,7 @@ export function GameCanvas({ options, onReady, className = '', fullscreen = true
 
   if (failed) {
     return (
-      <div style={{ ...fill, display: 'grid', placeItems: 'center', background: '#111', color: '#eee', padding: 24, textAlign: 'center' }}>
+      <div style={{ ...fill, display: 'grid', placeItems: 'center', background: 'var(--bg, #f6f7fb)', color: 'var(--fg, #17171c)', padding: 24, textAlign: 'center' }}>
         <div>
           <p style={{ fontWeight: 600, marginBottom: 8 }}>This game needs 3D graphics (WebGL).</p>
           <p style={{ opacity: 0.7, fontSize: 14 }}>{failed}</p>
@@ -548,7 +567,7 @@ export function GameCanvas({ options, onReady, className = '', fullscreen = true
   }
 
   return (
-    <div className={className} style={{ ...fill, overflow: 'hidden', background: '#000' }}>
+    <div className={className} style={{ ...fill, overflow: 'hidden', background: 'var(--game-bg, #eef1ff)' }}>
       <div ref={hostRef} style={{ width: '100%', height: '100%' }} />
       {game ? <Hud game={game} /> : null}
     </div>
@@ -767,11 +786,11 @@ const CSS = [
   '.nbg-tc-look{position:absolute;right:0;top:0;width:50%;height:100%;pointer-events:auto}',
   '.nbg-tc-base{position:absolute;width:' + STICK_RADIUS * 2 + 'px;height:' + STICK_RADIUS * 2 + 'px;margin:-' + STICK_RADIUS + 'px 0 0 -' + STICK_RADIUS + 'px;border-radius:50%;background:rgba(255,255,255,0.12);border:2px solid rgba(255,255,255,0.35);opacity:0.55;transition:opacity 120ms}',
   '.nbg-tc-base.live{opacity:1}',
-  '.nbg-tc-knob{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;background:rgba(255,255,255,0.55)}',
-  '.nbg-tc-buttons{position:absolute;right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(2,64px);gap:14px;pointer-events:none}',
+  '.nbg-tc-knob{position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px 0 0 -24px;border-radius:50%;background:rgba(255,255,255,0.55)}',
+  '.nbg-tc-buttons{position:absolute;right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(2,64px);gap:16px;pointer-events:none}',
   '.nbg-tc-btn{pointer-events:auto;width:64px;height:64px;border-radius:50%;border:2px solid rgba(255,255,255,0.5);background:rgba(0,0,0,0.35);color:#fff;font:600 13px/1 system-ui,sans-serif;display:grid;place-items:center;padding:0}',
   '.nbg-tc-btn.down{background:rgba(255,255,255,0.45);color:#111}',
-  '.nbg-tc-hint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:10px 16px;border-radius:10px;background:rgba(0,0,0,0.6);color:#fff;font:500 14px/1.3 system-ui,sans-serif;text-align:center;pointer-events:none;display:none}',
+  '.nbg-tc-hint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:8px 16px;border-radius:10px;background:rgba(0,0,0,0.6);color:#fff;font:500 14px/1.3 system-ui,sans-serif;text-align:center;pointer-events:none;display:none}',
   '@media (orientation: portrait){.nbg-tc.hinting .nbg-tc-hint{display:block}}',
   // The 'drive' layout: two pads in the bottom corners, bigger than the action buttons (a thumb rests
   // on them for the whole race), and the move/look/action set hidden while it is up.

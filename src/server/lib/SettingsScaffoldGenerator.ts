@@ -22,7 +22,9 @@ export interface Settings {
   compactMode: boolean;
 }
 
-const DEFAULTS: Settings = { theme: 'system', emailNotifications: true, compactMode: false };
+// Light until the person chooses otherwise (admin 2026-11-02: light unless the user asks for dark). 'system' would
+// follow the phone, and most phones are set to dark — the defect this default closes.
+const DEFAULTS: Settings = { theme: 'light', emailNotifications: true, compactMode: false };
 const STORAGE_KEY = 'app.settings';
 
 interface SettingsContextValue {

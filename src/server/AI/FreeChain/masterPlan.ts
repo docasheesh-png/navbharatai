@@ -1,6 +1,7 @@
+import { readData, readPaidPolicy, FREE_CHAIN_COLLECTION } from './paidLedger';
 /**
  * NavBharatAI Chat — Final Master Plan (owner, 2026-10-24). Pure helpers + two tiny stores used by
- * runtime.ts. Every feature here is default ON with an env kill switch (see FreeChainFeatures).
+ * runtime.ts. Provider reordering is opt-in; other features retain their kill switches.
  * Never logs prompts, keys or user text.
  */
 import { FREE_CHAT_LANGUAGE_RULE } from '../../lib/freeChatReplyLanguage';
@@ -62,11 +63,13 @@ function estimateTokensRough(text: string): number { return Math.ceil(Buffer.byt
 /** The quality model is the DeepInfra DeepSeek-V4-Flash rung (then the paid backups). */
 export const QUALITY_RUNG: ProviderId = 'dsv4flash';
 /**
- * Re-orders the per-user order for a route. Quality puts DeepSeek first and skips free + 8B; fast
+ * With explicit reorder opt-in, re-orders the per-user order for a route. Quality puts DeepSeek first and skips free + 8B; fast
  * drops the DeepSeek rungs. The caller falls back to the plain order when no rung in the routed order
  * is usable (e.g. keys not yet in Cloud Run), so routing can never turn a reply into an error.
  */
-export function orderForRoute(order: ProviderId[], route: TurnRoute): ProviderId[] {
+export function orderForRoute(order: ProviderId[], route: TurnRoute, reorder = false): ProviderId[] {
+  // Classification still controls output size; provider promotion requires explicit opt-in.
+  if (!reorder) return order;
   if (route === 'quality') {
     if (!order.includes(QUALITY_RUNG)) return order;
     return [QUALITY_RUNG, ...order.filter(id => isPaidRung(id) && id !== QUALITY_RUNG && id !== 'llama8b')];
@@ -74,8 +77,10 @@ export function orderForRoute(order: ProviderId[], route: TurnRoute): ProviderId
   if (route === 'fast') return order.filter(id => id !== QUALITY_RUNG && id !== 'deepseek');
   return order;
 }
-/** Reasoning models spend hidden tokens; a 250-token cap would empty them, so they keep their own cap. */
-const REASONING_RUNGS: ReadonlySet<ProviderId> = new Set<ProviderId>(['groq', 'gpt5nano', 'openrouter']);
+/** Reasoning models spend hidden tokens; a 250-token cap would empty them, so they keep their own cap.
+ * cheapinf (Beam) is one of those: the 250 reply cap spent the whole budget on reasoning and
+ * Free Chat recorded EMPTY_RESPONSE, then the only admin rung sat in circuit for 30s. */
+const REASONING_RUNGS: ReadonlySet<ProviderId> = new Set<ProviderId>(['groq', 'gpt5nano', 'openrouter', 'cheapinf']);
 export function effectiveMaxOutput(cfg: FreeChainConfig, id: ProviderId, rungMax: number, route: TurnRoute): number {
   if (!cfg.features.outputCap || REASONING_RUNGS.has(id)) return rungMax;
   return Math.min(rungMax, route === 'fast' ? cfg.features.fastMaxTokens : cfg.features.replyMaxTokens);
@@ -162,9 +167,11 @@ export async function reserveMonthly(db: Firestore, capNanoUsd: number, amount: 
   try {
     const ref = monthRef(db, month);
     return await db.runTransaction(async tx => {
+      const policy = readPaidPolicy(readData(await tx.get(db.doc(`${FREE_CHAIN_COLLECTION}/paid_budget_policy`))));
       const d = (await tx.get(ref)).data() ?? {};
-      const held = Number.isSafeInteger(d.heldNanoUsd) ? d.heldNanoUsd : 0; const spent = Number.isSafeInteger(d.spentNanoUsd) ? d.spentNanoUsd : 0;
-      if (held + spent + amount > capNanoUsd) return null;
+      const held = d.heldNanoUsd ?? 0; const spent = d.spentNanoUsd ?? 0;
+      if (!Number.isSafeInteger(held) || !Number.isSafeInteger(spent)) return null;
+      if (!Number.isSafeInteger(amount) || amount <= 0 || held < 0 || spent < 0 || !Number.isSafeInteger(held + spent + amount) || (policy?.budgetMode !== 'uncapped' && held + spent + amount > capNanoUsd)) return null;
       tx.set(ref, { heldNanoUsd: held + amount, spentNanoUsd: spent, updatedAt: now }, { merge: true });
       return month;
     });

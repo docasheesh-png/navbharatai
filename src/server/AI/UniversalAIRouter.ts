@@ -1,3 +1,6 @@
+import { observeChatOutcome } from './chatOutcomeObservation';
+import { fixedTextChainSelected } from './fixedTextChain';
+import { InferenceGatewayTerminalError } from './InferenceGateway/dispatchBoundary';
 import { currentFreeAnswerSignal } from '../lib/freeAnswerQuotaContext';
 import type { FreeChainContext } from './FreeChain/rollout';
 import type { FreeChainTelemetry } from './FreeChain/telemetry';
@@ -78,11 +81,31 @@ export class UniversalAIRouter {
     freeChainContext?: FreeChainContext,
   ): Promise<RoutedCall> {
     const quotaSignal = currentFreeAnswerSignal();
+    const observedSignal = signal && quotaSignal ? AbortSignal.any([signal, quotaSignal]) : signal ?? quotaSignal;
+    return observeChatOutcome(tier, observedSignal, () =>
+      this.routeDetailedInner(message, history, tier, _traceContext, systemPrompt, allowFreeChatHedge, signal, freeChainContext));
+  }
+
+  private async routeDetailedInner(
+    message: string,
+    history: any[] = [],
+    tier: 'navbharat' | 'free' | 'sda' | 'doctor' | 'professional' = 'navbharat',
+    _traceContext?: TraceContext,
+    systemPrompt?: string,
+    allowFreeChatHedge = false,
+    signal?: AbortSignal,
+    freeChainContext?: FreeChainContext,
+  ): Promise<RoutedCall> {
+    const quotaSignal = currentFreeAnswerSignal();
     signal = signal && quotaSignal ? AbortSignal.any([signal, quotaSignal]) : signal ?? quotaSignal;
-    if (!isGatewayRouteSelected() && tier === 'navbharat' && freeChainContext) {
+    if (!isGatewayRouteSelected() && (tier === 'navbharat' || (fixedTextChainSelected() && tier === 'free')) && freeChainContext) {
       const { maybeFreeChain } = await import('./FreeChain/runtime');
       const chain = await maybeFreeChain({ message, history, systemPrompt, signal, context: freeChainContext });
       if (chain) return chain;
+    }
+    if (fixedTextChainSelected() && !isGatewayRouteSelected()) {
+      signal?.throwIfAborted();
+      throw new InferenceGatewayTerminalError('fixed-chain-ingress-authority-unavailable');
     }
     const ns = this.namespaceFor(tier);
     const fullPrompt = this.buildPrompt(message, history);
@@ -149,10 +172,34 @@ export class UniversalAIRouter {
     allowFreeChatHedge = false,
     freeChainContext?: FreeChainContext,
   ): Promise<StreamOutcome> {
-    if (!isGatewayRouteSelected() && tier === 'navbharat' && freeChainContext) {
+    let visible = false;
+    const quotaSignal = currentFreeAnswerSignal();
+    const observedSignal = signal && quotaSignal ? AbortSignal.any([signal, quotaSignal]) : signal ?? quotaSignal;
+    return observeChatOutcome(tier, observedSignal, () =>
+      this.routeStreamInner(message, history, tier, systemPrompt, (text, ...source) => {
+        if (source[0] !== 'notice' && text.trim()) visible = true;
+        onChunk(text, ...source);
+      }, signal, allowFreeChatHedge, freeChainContext), () => visible);
+  }
+
+  private async routeStreamInner(
+    message: string,
+    history: any[],
+    tier: string,
+    systemPrompt: string | undefined,
+    onChunk: (text: string, source?: 'notice') => void,
+    signal?: AbortSignal,
+    allowFreeChatHedge = false,
+    freeChainContext?: FreeChainContext,
+  ): Promise<StreamOutcome> {
+    if (!isGatewayRouteSelected() && (tier === 'navbharat' || (fixedTextChainSelected() && tier === 'free')) && freeChainContext) {
       const { maybeFreeChain } = await import('./FreeChain/runtime');
       const chain = await maybeFreeChain({ message, history, systemPrompt, signal, onChunk, context: freeChainContext });
       if (chain) return chain;
+    }
+    if (fixedTextChainSelected() && !isGatewayRouteSelected()) {
+      signal?.throwIfAborted();
+      throw new InferenceGatewayTerminalError('fixed-chain-ingress-authority-unavailable');
     }
     if (!isGatewayRouteSelected() && strictFreeRequired() && allowFreeChatHedge) {
       const result = await strictFreeChat({ prompt: this.buildPrompt(message, history), systemPrompt, onChunk, signal });

@@ -7,11 +7,12 @@
 // there is no failure path that can strand a unit. Best-effort: a full/busy text quota never blocks an image.
 import { randomUUID } from 'node:crypto';
 import { FreeAnswerQuotaStore } from '../freeAnswerQuotaStore';
-import { signedInDailyLimit, truthy } from './policy';
+import { signedInDailyLimit } from './policy';
 
 type Env = Record<string, string | undefined>;
 export function imageCountsAgainstText(env: Env = process.env): boolean {
-  return truthy(env.UNIFIED_WALLET_IMAGE_COUNTS_TEXT);
+  // Default ON (owner 2026-10-30: 50 texts include 5 free images). `off` disables.
+  return (env.UNIFIED_WALLET_IMAGE_COUNTS_TEXT ?? '').trim().toLowerCase() !== 'off' && env.UNIFIED_WALLET_IMAGE_COUNTS_TEXT !== '0' && env.UNIFIED_WALLET_IMAGE_COUNTS_TEXT !== 'false';
 }
 
 /** Call once, after the image was delivered. Returns whether a text unit was used. Never throws. */

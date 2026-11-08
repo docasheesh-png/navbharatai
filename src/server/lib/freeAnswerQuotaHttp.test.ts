@@ -1,4 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
+// These cover the legacy no-wallet free-quota path; the wallet is ON by default since 2026-10-30.
+process.env.UNIFIED_WALLET_ENABLED = 'off';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import express, { type Request, type Response } from 'express';
@@ -107,10 +109,10 @@ it('publishes JSON completion only after durable settlement, then admits four im
       expect((await question(otherServer.port, message)).status).toBe(200);
     }
     expect(firstServer.dispatched() + otherServer.dispatched()).toBe(4);
-    expect(await new FreeAnswerQuotaStore(db as never).status({ key: 'guest-device:synthetic-settlement-http-guest', limit: 5, ipKey: 'ip:127.0.0.1' }))
-      .toMatchObject({ used: 4, reserved: 0, remaining: 1, inProgress: false });
-    expect((await question(otherServer.port, 'Name a seven-sided polygon.')).status).toBe(200);
-    expect((await question(otherServer.port, 'This exceeds five guest credits.')).body.code).toBe('FREE_ANSWER_DAILY_LIMIT');
+    expect(await new FreeAnswerQuotaStore(db as never).status({ key: 'guest-device:synthetic-settlement-http-guest', limit: 10, ipKey: 'ip:127.0.0.1', guest: true }))
+      .toMatchObject({ used: 4, reserved: 0, remaining: 6, inProgress: false });
+    for (let index = 0; index < 6; index++) expect((await question(otherServer.port, `Name polygon number ${index}.`)).status).toBe(200);
+    expect((await question(otherServer.port, 'This exceeds ten guest credits.')).body.code).toBe('FREE_ANSWER_DAILY_LIMIT');
   } finally {
     release.resolve();
     await first;
@@ -118,12 +120,12 @@ it('publishes JSON completion only after durable settlement, then admits four im
 });
 
 
-it('retains the signed-in20 daily limit with immediate sequential responses', async () => {
+it('retains the signed-in 50 daily limit with immediate sequential responses', async () => {
   setServerDb(database() as never);
   const server = await listen(undefined, 'synthetic-signed-in-settlement-user');
-  for (let index = 0; index < 20; index++) expect((await question(server.port, `Explain synthetic topic ${index}.`)).status).toBe(200);
-  expect((await question(server.port, 'The twenty-first question.')).body.code).toBe('FREE_ANSWER_DAILY_LIMIT');
-  expect(server.dispatched()).toBe(20);
+  for (let index = 0; index < 50; index++) expect((await question(server.port, `Explain synthetic topic ${index}.`)).status).toBe(200);
+  expect((await question(server.port, 'The fifty-first question.')).body.code).toBe('FREE_ANSWER_DAILY_LIMIT');
+  expect(server.dispatched()).toBe(50);
 });
 it('waits for a known no-answer refund before publishing failure and admits the immediate next turn', async () => {
   const db = database(); setServerDb(db as never);
@@ -144,7 +146,7 @@ it('waits for a known no-answer refund before publishing failure and admits the 
     expect((await failed).status).toBe(503);
     expect((await question(server.port, 'success')).status).toBe(200);
     expect(settle.mock.calls.map(call => call[1])).toEqual(['provider-failed', 'answered']);
-    expect(await new FreeAnswerQuotaStore(db as never).status({ key: 'guest-device:synthetic-settlement-http-guest', limit: 5 }))
+    expect(await new FreeAnswerQuotaStore(db as never).status({ key: 'guest-device:synthetic-settlement-http-guest', limit: 10 }))
       .toMatchObject({ used: 1, reserved: 0, inProgress: false });
   } finally { release.resolve(); await failed; }
 });
@@ -159,8 +161,8 @@ it.each(['false', 'reject'] as const)('fails honestly on %s settlement without r
   expect(Number(result.headers['content-length'])).toBe(Buffer.byteLength(JSON.stringify(result.body)));
   expect((await question(server.port, 'next')).body.code).toBe('FREE_ANSWER_BUSY');
   expect(server.dispatched()).toBe(1); expect(settle).toHaveBeenCalledOnce();
-  expect(await new FreeAnswerQuotaStore(db as never).status({ key: 'guest-device:synthetic-settlement-http-guest', limit: 5 }))
-    .toMatchObject({ used: 0, reserved: 1, remaining: 4, inProgress: true });
+  expect(await new FreeAnswerQuotaStore(db as never).status({ key: 'guest-device:synthetic-settlement-http-guest', limit: 10 }))
+    .toMatchObject({ used: 0, reserved: 1, remaining: 9, inProgress: true });
 });
 it('publishes a compressed JSON body intact after successful durable completion', async () => {
   setServerDb(database() as never);
@@ -191,8 +193,8 @@ it.each([false, true])('keeps cancellation accounting and does not settle before
     await closed.promise; expect(signal?.aborted).toBe(true); expect(settle).not.toHaveBeenCalled();
     release.resolve(); await settled.promise;
     expect(settle).toHaveBeenCalledOnce(); expect(settle.mock.calls[0][1]).toBe(partial ? 'answered' : 'uncertain');
-    expect(await new FreeAnswerQuotaStore(db as never).status({ key: 'guest-device:synthetic-settlement-http-guest', limit: 5 }))
-      .toMatchObject({ used: 1, reserved: 0, remaining: 4, inProgress: false });
+    expect(await new FreeAnswerQuotaStore(db as never).status({ key: 'guest-device:synthetic-settlement-http-guest', limit: 10 }))
+      .toMatchObject({ used: 1, reserved: 0, remaining: 9, inProgress: false });
   } finally { request.destroy(); release.resolve(); }
 });
 
@@ -221,7 +223,7 @@ it.each(['hi', 'ta'].flatMap(replyLanguage => ['false', 'reject'].map(failure =>
     expect(JSON.stringify(result.body)).not.toMatch(/API|provider|budget|diagnostic|stay staged|traffic|busy/i);
     expect(settle).toHaveBeenCalledOnce(); expect(settle.mock.calls[0][1]).toBe('answered');
     expect(server.dispatched()).toBe(1);
-    expect(await new FreeAnswerQuotaStore(db as never).status({ key: 'guest-device:synthetic-settlement-http-guest', limit: 5 }))
+    expect(await new FreeAnswerQuotaStore(db as never).status({ key: 'guest-device:synthetic-settlement-http-guest', limit: 10 }))
       .toMatchObject({ used: 0, reserved: 1, inProgress: true });
   },
 );

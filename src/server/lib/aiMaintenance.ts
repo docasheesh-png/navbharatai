@@ -7,7 +7,7 @@ export const MAINTENANCE_DOCUMENT = 'ai_maintenance';
 export const MAINTENANCE_FAILURE_WINDOW_MS = 120_000;
 export const MAINTENANCE_FAILURE_THRESHOLD = 3;
 /** Recent known-off window: prefer fail-open over latching a fake maintenance pause. */
-export const MAINTENANCE_FAIL_OPEN_MS = 45_000;
+export const MAINTENANCE_FAIL_OPEN_MS = 10 * 60_000;
 export interface MaintenanceState {
   enabled: boolean;
   unavailable?: boolean;
@@ -57,6 +57,8 @@ function firestoreBackend(): MaintenanceBackend {
 export class AiMaintenanceStore {
   private value: MaintenanceState | null = null;
   private readAt = 0;
+  /** When storage last CONFIRMED a state. Independent of readAt, which a watch error zeroes to force a refresh. */
+  private confirmedAt = 0;
   private generation = 0;
   private pending: Promise<MaintenanceState> | null = null;
   private stopWatch?: () => void;
@@ -64,6 +66,7 @@ export class AiMaintenanceStore {
   constructor(private backend: () => MaintenanceBackend = firestoreBackend, private now: () => number = Date.now) {}
   private accept(state: MaintenanceState): MaintenanceState {
     this.value = state; this.readAt = this.now();
+    if (!state.unavailable) this.confirmedAt = this.readAt;
     for (const fn of this.listeners) fn(state);
     return state;
   }
@@ -80,7 +83,7 @@ export class AiMaintenanceStore {
       try {
         const data = await Promise.race([
           this.backend().read(),
-          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Maintenance setting unavailable')), 1_500); }),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Maintenance setting unavailable')), 3_000); }),
         ]);
         // An old read finishing after an admin write must never turn maintenance back off.
         if (generation !== this.generation && this.value) return this.value;
@@ -89,7 +92,7 @@ export class AiMaintenanceStore {
         // Unreadable flag: never claim the admin paused AI. User copy is temporary high-demand (not technical).
         // Fail-open only when a recent successful read said enabled===false (no deliberate pause).
         const last = this.value;
-        const age = last ? this.now() - this.readAt : Number.POSITIVE_INFINITY;
+        const age = last ? this.now() - this.confirmedAt : Number.POSITIVE_INFINITY;
         if (last && last.enabled === false && !last.unavailable && age <= MAINTENANCE_FAIL_OPEN_MS) {
           return { ...last, unavailable: true };
         }

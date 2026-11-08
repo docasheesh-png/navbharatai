@@ -56,13 +56,17 @@ export interface SurplusChatOptions {
   model?: string;
   maxTokens?: number;
   signal?: AbortSignal;
+  /** Ask the model to answer directly (no reasoning phase). A 400 rejection of the flag retries once without it. */
+  disableThinking?: boolean;
 }
 
 /** Server-only, lazy factory. Importing this module does not read secrets or make requests. */
 export function createSurplusChat(
   env: NodeJS.ProcessEnv = process.env,
   transport: typeof fetch = globalThis.fetch,
+  limits: { maxOutputTokens: number; providerDefaults?: boolean } = { maxOutputTokens: 8192 },
 ) {
+  if (!Number.isSafeInteger(limits.maxOutputTokens) || limits.maxOutputTokens < 1) throw new SurplusError('configuration');
   if (typeof window !== 'undefined') throw new SurplusError('configuration');
   const apiKey = env.SURPLUS_API_KEY?.trim();
   const baseURL = (env.SURPLUS_BASE_URL?.trim() || SURPLUS_BASE_URL).replace(/\/$/, '');
@@ -77,7 +81,7 @@ export function createSurplusChat(
     baseURL,
     organization: null,
     project: null,
-    timeout: SURPLUS_TIMEOUT_MS,
+    ...(limits.providerDefaults ? {} : { timeout: SURPLUS_TIMEOUT_MS }),
     maxRetries: 0, // Avoid hidden extra inference charges, including after an uncertain timeout.
     logLevel: 'off', // Override OPENAI_LOG; never emit requests or raw error bodies.
     fetch: (input, init) => {
@@ -101,19 +105,27 @@ export function createSurplusChat(
     let requestBytes: number;
     try { requestBytes = Buffer.byteLength(JSON.stringify(requestMessages), 'utf8'); }
     catch { throw new SurplusError('invalid_request'); }
-    if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 8192 ||
+    if (!Number.isInteger(maxTokens) || maxTokens < 1 || (!limits.providerDefaults && maxTokens > limits.maxOutputTokens) ||
         !Array.isArray(requestMessages) || requestMessages.length < 1 || requestMessages.length > 128 ||
         (typeof input === 'string' && !input.trim()) ||
-        requestBytes > 65_536) {
+        (!limits.providerDefaults && requestBytes > 65_536)) {
       throw new SurplusError('invalid_request');
     }
     try {
-      const response = await client.chat.completions.create({
+      const request = (noThinking: boolean) => client.chat.completions.create({
         model: options.model?.trim() || defaultModel,
         messages: requestMessages,
-        max_tokens: maxTokens,
+        ...(limits.providerDefaults && options.maxTokens === undefined ? {} : { max_tokens: maxTokens }),
+        ...(noThinking ? { thinking: { type: 'disabled' } } : {}),
         stream: false,
-      }, { signal: options.signal });
+      } as Parameters<typeof client.chat.completions.create>[0] & { stream: false }, { signal: options.signal });
+      let response;
+      try { response = await request(options.disableThinking === true); }
+      catch (error) {
+        // A 400 is a rejected request (never billed): the supplier does not know the flag.
+        if (options.disableThinking !== true || !(error instanceof OpenAI.APIError) || error.status !== 400) throw error;
+        response = await request(false);
+      }
       // Surplus can report long-running failures inside HTTP 200 bodies. HTTP success is
       // NOT inference success. Never retry these, or infer that a failed turn was unbilled.
       const usage = safeUsage(response?.usage);

@@ -1,8 +1,10 @@
-import { PublicBuildEngineError } from '../../lib/buildEngineError';
+import { PublicBuildEngineError, publicBuildEngineError, publicBuildEngineSafeReason } from '../../lib/buildEngineError';
+import { AiMaintenanceError } from '../../lib/aiMaintenance';
+import { BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../../AgentV3/turnDeadline';
 import { randomUUID } from 'node:crypto';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { SURPLUS_MIN90_BASE_URL } from '../../lib/surplusClient';
-import { raceStop, throwIfStopped } from '../../AgentV3/stopSignal';
+import { BuildStoppedError, raceStop, throwIfStopped } from '../../AgentV3/stopSignal';
 import type { RunTurnParams, TurnResult, TurnUsage } from '../../AgentV3/ClaudeClient';
 import { makeSurplusTurnRunner, type SurplusTurnPermit, type SurplusTurnFailure } from '../../AgentV3/providers/SurplusTurnRunner';
 import type { OpenAiCompletionLike } from '../../AgentV3/providers/OpenAiToolAdapter';
@@ -53,7 +55,7 @@ export interface SurplusReviewedAdapter {
   routing(review: SurplusCapabilityReview): Readonly<Record<string, unknown>>;
   bind?(permit: SurplusTurnPermit, state: SurplusReviewedState, review: SurplusCapabilityReview): void;
   dispatch(request: Record<string, unknown>, signal: AbortSignal, permit: SurplusTurnPermit): Promise<unknown>;
-  identify(raw: unknown): { model: string; providerId: string; completion: OpenAiCompletionLike };
+  identify(raw: unknown, expectedModel?: string): { model: string; providerId: string; completion: OpenAiCompletionLike };
   receipt(raw: unknown, permit: SurplusTurnPermit, result: TurnResult): Promise<TurnUsage['surplusReceipt']>;
   failure?(raw: unknown, permit: SurplusTurnPermit, result: TurnResult, failure: SurplusTurnFailure): Promise<{ receipt?: TurnUsage['surplusReceipt']; canRetry: boolean }>;
 }
@@ -78,6 +80,12 @@ function capability(state: SurplusReviewedState, selection: { model: string; pro
       || workload.input + workload.output > r.contextTokens || workload.output > r.maxOutputTokens) return fail('reviewed_capability_or_exact_route_contract_missing');
   return r;
 }
+/** OpenAI-style reasoning ids (gpt-5.x, o-series, *-sol/-terra, *thinking/*reason*). Flash/mini/instruct stay plain. */
+export function isSurplusReasoningModel(model: string): boolean {
+  const m = model.toLowerCase();
+  if (/flash|instruct|chat|non-?reason|turbo/.test(m)) return false;
+  return /(^|\/)(gpt-5|o[1-9])|-(sol|terra)\b|think|reason|\br1\b/.test(m);
+}
 /** Default OFF is a strict no-I/O path. ON with SURPLUS_API_KEY uses live key+flag admission (no Firestore review seed). */
 export async function createSurplusBuildSession(options: {
   buildId: string; tier: string; initialWorkload?: Workload; enabled?: boolean; adapter?: SurplusReviewedAdapter; now?: () => number;
@@ -95,10 +103,21 @@ export async function createSurplusBuildSession(options: {
       try { capability(state, offer, at, workload); return true; } catch { return false; }
     }) } : null;
   }
-  const initial = planSurplusDispatchCandidate(eligibleSnapshot(initialState, initialWorkload, now()), initialState.reviews, initialWorkload, now(), initialState.floorContract);
+  // Scope/first call: prefer a flash / non-reasoning Surplus model (reasoning models burned the budget
+  // thinking → empty/invalid scope answers). Reasoning models stay eligible as the Surplus-internal B/C.
+  const reasoningModels = new Set((initialState.snapshot?.offers ?? []).map(o => o.model).filter(isSurplusReasoningModel));
+  const plainFirst = planSurplusDispatchCandidate(eligibleSnapshot(initialState, initialWorkload, now(), undefined, reasoningModels), initialState.reviews, initialWorkload, now(), initialState.floorContract);
+  const initial = plainFirst.status === 'estimated_candidate' && plainFirst.selection ? plainFirst
+    : planSurplusDispatchCandidate(eligibleSnapshot(initialState, initialWorkload, now()), initialState.reviews, initialWorkload, now(), initialState.floorContract);
   if (initial.status !== 'estimated_candidate' || !initial.selection) return fail(initial.reason);
   let model = initial.selection.model;
-  let poisoned = false;
+  // DNA (failedbr 627/630, 2026-10-30): a mid-build turn that failed (budget/deadline abort, transport,
+  // empty) or whose failure receipt could not be settled used to poison the session, so EVERY later turn died
+  // with previous_call_accounting_unavailable (503 DISCOUNT_BUILD_UNAVAILABLE → "engine unavailable").
+  // Billing never blocks inference: the failed turn's cost is absorbed, its model is benched for this
+  // session, and the next turn moves to another Surplus-internal model (AI2/AI3) — never Weak.
+  const benchedModels = new Set<string>();
+  let terminalPolicyFailure: PublicBuildEngineError | undefined;
   // Serialize inference across ALL runners of this build. Parallel tool execution is unchanged.
   // A queued call may be cancelled before spending; only durably resolved safe failures can get a new attempt.
   let queue: Promise<void> = Promise.resolve();
@@ -120,12 +139,28 @@ export async function createSurplusBuildSession(options: {
       const failedModels = new WeakMap<object, Set<string>>();
       const authorizedFallbacks = new WeakSet<object>();
       async function authorize(params: RunTurnParams, previous?: SurplusTurnPermit) {
-          if (poisoned) return fail('previous_call_accounting_unavailable');
+          if (terminalPolicyFailure) throw terminalPolicyFailure;
           const workload = estimate(params), state = await adapter.readState(), at = now();
           // A winning model stays sticky. Only a durably resolved safe failed turn may change it.
           const excluded = previous ? new Set([...(failedModels.get(previous) ?? []), previous.model]) : new Set<string>();
-          const snapshot = eligibleSnapshot(state, workload, at, previous ? undefined : model, excluded);
-          const plan = planSurplusDispatchCandidate(snapshot, state.reviews, workload, at, state.floorContract);
+          for (const m of benchedModels) excluded.add(m);
+          let snapshot = eligibleSnapshot(state, workload, at, previous ? undefined : model, excluded);
+          let plan = planSurplusDispatchCandidate(snapshot, state.reviews, workload, at, state.floorContract);
+          if ((plan.status !== 'estimated_candidate' || !plan.selection) && benchedModels.size > 0 && !previous) {
+            // Every alternative is benched: un-bench once and retry on Surplus rather than refusing the build.
+            for (const m of benchedModels) excluded.delete(m);
+            benchedModels.clear();
+            snapshot = eligibleSnapshot(state, workload, at, undefined, excluded);
+            plan = planSurplusDispatchCandidate(snapshot, state.reviews, workload, at, state.floorContract);
+          }
+          // DNA (z@ live 2026-10-29): the sticky model is the small flash scope model; a full build turn
+          // (system+tools) can exceed its reviewed context/output, which filtered the ONLY allowed offer
+          // and threw DISCOUNT_BUILD_UNAVAILABLE. Stickiness is a preference: move to another eligible
+          // Surplus model (Surplus AI2/AI3) instead of refusing the build.
+          if (!previous && (plan.status !== 'estimated_candidate' || !plan.selection)) {
+            snapshot = eligibleSnapshot(state, workload, at, undefined, excluded);
+            plan = planSurplusDispatchCandidate(snapshot, state.reviews, workload, at, state.floorContract);
+          }
           if (plan.status !== 'estimated_candidate' || !plan.selection) return fail(plan.reason);
           const selectedModel = plan.selection.model;
           const review = capability(state, plan.selection, at, workload);
@@ -137,13 +172,13 @@ export async function createSurplusBuildSession(options: {
             priceGeneration: plan.snapshotVersion!, estimatedMicroUsd: plan.selection.estimatedMicroUsd, policyVersion: SURPLUS_BUILD_POLICY, maxTokens: params.maxTokens ?? 8192,
             requestRouting: Object.freeze({ ...requestRouting }),
             assertCurrent() {
-              if (poisoned) return fail('previous_call_accounting_unavailable');
+              if (terminalPolicyFailure) throw terminalPolicyFailure;
               const checked = planSurplusDispatchCandidate(frozenState.snapshot, frozenState.reviews, workload, now(), frozenState.floorContract);
               if (checked.status !== 'estimated_candidate' || !checked.selection) return fail(checked.reason);
               capability(frozenState, { model: selectedModel, providerId: review.providerId, offerId: plan.selection!.offerId }, now(), workload);
             },
             validateResponse(raw: unknown) {
-              const identity = adapter.identify(raw);
+              const identity = adapter.identify(raw, selectedModel);
               if (identity.model !== selectedModel || identity.providerId !== review.providerId) return fail('returned_route_identity_mismatch');
               return identity.completion;
             },
@@ -153,16 +188,18 @@ export async function createSurplusBuildSession(options: {
           failedModels.set(permit, excluded);
           return permit;
       }
+      const stayAlive = surplusStayAlivePolicy();
       const native = makeSurplusTurnRunner({
         authorize,
+        timeoutMs: stayAlive.turnMs,
         async authorizeFallback(params, previous) {
-          if (!authorizedFallbacks.delete(previous) || poisoned) return undefined;
+          if (!authorizedFallbacks.delete(previous)) return undefined;
           return authorize(params, previous);
         },
         async dispatch(request, signal, permit) {
           await acquire(permit, signal);
           const grant = issued.get(permit);
-          if (poisoned || !grant || grant.used || grant.review.expiresAt <= now()) { release(permit); return fail('expired_or_replayed_dispatch'); }
+          if (!grant || grant.used || grant.review.expiresAt <= now()) { release(permit); return fail('expired_or_replayed_dispatch'); }
           const rechecked = planSurplusDispatchCandidate(grant.state.snapshot, grant.state.reviews, grant.workload, now(), grant.state.floorContract);
           if (rechecked.status !== 'estimated_candidate' || !rechecked.selection) { release(permit); return fail(rechecked.reason); }
           try {
@@ -173,19 +210,30 @@ export async function createSurplusBuildSession(options: {
           catch (error) { release(permit); throw error; }
         },
         async onResponse(raw, permit, result) {
+          // DNA (z@ live 2026-10-30): a validated, identity-checked Surplus reply whose receipt could not be
+          // settled (blocked/duplicate/conflict, or the audit store threw) used to poison the whole session:
+          // that turn died with response_accounting_unavailable and every later turn with
+          // previous_call_accounting_unavailable — killing a build that Surplus was answering fine.
+          // Accounting is now non-fatal: the reply is kept, the cost is absorbed (user charge 0), and the
+          // reason is logged for reconciliation. Billing never blocks inference.
           let receipt: TurnUsage['surplusReceipt'];
           try { receipt = await adapter.receipt(raw, permit, result); }
-          catch (error) { poisoned = true; release(permit); throw error; }
-          if (!isSurplusReceiptDecision(receipt) || !['chargeable', 'absorbed'].includes(receipt.status)) {
-            poisoned = true;
-            result.usage.surplusReceipt = receipt;
-            callbacks.onTurnComplete?.(result, 'SURPLUS');
+          catch (error) {
+            console.warn(`[SURPLUS] receipt unavailable (non-fatal, absorbed): ${error instanceof Error ? error.message.slice(0, 120) : 'unknown'}`);
             release(permit);
-            return fail('response_accounting_unavailable');
+            return undefined;
+          }
+          if (!isSurplusReceiptDecision(receipt) || !['chargeable', 'absorbed'].includes(receipt.status)) {
+            const why = isSurplusReceiptDecision(receipt) ? `${receipt.status}:${receipt.reason}` : 'invalid_decision';
+            console.warn(`[SURPLUS] receipt not settled (non-fatal, absorbed): ${why}`);
+            release(permit);
+            return isSurplusReceiptDecision(receipt) ? receipt : undefined;
           }
           return receipt;
         },
         async onFailure(raw, permit, _error, failure) {
+          // Refusal cannot be downgraded into generic poisoned-session availability on a later turn.
+          if (failure?.reason === 'content_filter') terminalPolicyFailure = publicBuildEngineError('policy_refusal');
           const result: TurnResult = { text: '', toolUses: [], rawContent: [], stopReason: null, model: permit.model,
             usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, measured: false } };
           try {
@@ -203,9 +251,18 @@ export async function createSurplusBuildSession(options: {
               result.usage.surplusReceipt = await adapter.receipt(raw, permit, result);
               callbacks.onTurnComplete?.(result, 'SURPLUS');
             }
-            poisoned = true;
-          } catch (error) { poisoned = true; throw error; }
+          } catch (error) {
+            // Unsettled failure accounting is absorbed (user charge 0) and logged; it never poisons the session.
+            console.warn(`[SURPLUS] failure receipt unavailable (non-fatal, absorbed): ${error instanceof Error ? error.message.slice(0, 120) : 'unknown'}`);
+          }
           finally { release(permit); }
+          if (!terminalPolicyFailure) {
+            benchedModels.add(permit.model);
+            if (model === permit.model) {
+              const alt = (initialState.snapshot?.offers ?? []).map(o => o.model).find(m => !benchedModels.has(m) && !(options.tier === 'weak' && /claude|sonnet|opus/i.test(m)));
+              if (alt) model = alt;
+            }
+          }
         },
         onProviderUsed: permit => { model = permit.model; try { callbacks.onProviderUsed?.(permit); } catch { /* observation cannot hold the inference queue */ } },
         onTurnComplete(result, used) {
@@ -222,19 +279,69 @@ export async function createSurplusBuildSession(options: {
         let releaseTurn!: () => void;
         const slot = new Promise<void>(resolve => { releaseTurn = resolve; });
         turnQueue = previous.then(() => slot);
-        const deadlineAt = Math.min(params.deadlineAt ?? Infinity, Date.now() + 120_000);
-        let timer: ReturnType<typeof setTimeout> | undefined;
         try {
-          await raceStop(Promise.race([previous, new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new SurplusBuildUnavailableError('review_unavailable')), Math.max(0, deadlineAt - Date.now()));
-          })]), params.signal);
+          // Waiting behind another turn of the SAME build is not a Surplus failure: never time it out
+          // into "engine unavailable" — the previous turn is itself bounded by its own deadline.
+          await raceStop(previous, params.signal);
           throwIfStopped(params.signal);
-          return await native.runTurn({ ...params, deadlineAt });
+          // DNA (failedbr A–C 2026-10-31, owner: "Surplus marna nahi chahiye"): a single transient
+          // turn failure (timeout / transport / empty / unsettled) used to end the whole game build with
+          // ENGINE_UNAVAILABLE after files were half-written. Keep the SAME Surplus session alive:
+          // retry the turn with backoff and a fresh per-turn deadline (other Surplus models after a
+          // benched one), so one Surplus run finishes the whole game. Only Stop, maintenance, policy
+          // refusal, the build's own budget/deadline, or exhausting the retry budget end it.
+          const policy = stayAlive;
+          let lastError: unknown;
+          for (let attempt = 0; attempt <= policy.retries; attempt++) {
+            throwIfStopped(params.signal);
+            const now0 = Date.now();
+            const outer = params.deadlineAt ?? Infinity;
+            if (attempt > 0 && outer - now0 < policy.minTurnMs) break;
+            const deadlineAt = Math.min(outer, now0 + policy.turnMs);
+            try {
+              return await native.runTurn({ ...params, deadlineAt });
+            } catch (error) {
+              lastError = error;
+              if (!isSurplusTurnRetryable(error) || params.signal?.aborted || terminalPolicyFailure) throw error;
+              if (attempt >= policy.retries) break;
+              const wait = policy.backoffMs[Math.min(attempt, policy.backoffMs.length - 1)];
+              try { console.warn(`[SURPLUS] stay-alive: turn retry ${attempt + 1}/${policy.retries} in ${wait}ms`); } catch { /* best-effort */ }
+              await raceStop(new Promise<void>(resolve => setTimeout(resolve, wait)), params.signal);
+            }
+          }
+          throw lastError;
         } finally {
-          if (timer !== undefined) clearTimeout(timer);
           releaseTurn();
         }
       } };
     },
   });
+}
+
+/** Owner 2026-10-31: one Surplus run finishes the whole build. Env-tunable, safe defaults. */
+export function surplusStayAlivePolicy(env: NodeJS.ProcessEnv = process.env) {
+  const num = (v: string | undefined, d: number, lo: number, hi: number) => {
+    const n = Number(v); return Number.isFinite(n) && v?.trim() ? Math.min(hi, Math.max(lo, Math.floor(n))) : d;
+  };
+  // Unit suites pin single-turn failure semantics; they opt in via SURPLUS_TURN_RETRIES explicitly.
+  const off = /^(0|off|false|no)$/i.test(env.SURPLUS_STAY_ALIVE?.trim() ?? '') ||
+    (Boolean(env.VITEST) && !env.SURPLUS_TURN_RETRIES?.trim());
+  return Object.freeze({
+    retries: off ? 0 : num(env.SURPLUS_TURN_RETRIES, 5, 0, 10),
+    turnMs: num(env.SURPLUS_TURN_TIMEOUT_MS, env.VITEST && !env.SURPLUS_TURN_RETRIES?.trim() ? 120_000 : 240_000, 30_000, 600_000),
+    minTurnMs: 20_000,
+    backoffMs: [2_000, 5_000, 10_000, 20_000, 30_000],
+  });
+}
+
+/** Transient Surplus deaths only. Stop / maintenance / policy / build budget are terminal. */
+export function isSurplusTurnRetryable(error: unknown): boolean {
+  try {
+    if (!error || typeof error !== 'object') return false;
+    if (error instanceof BuildStoppedError || error instanceof AiMaintenanceError) return false;
+    const msg = String((error as Error).message ?? '');
+    if (msg === BUDGET_REACHED_MESSAGE || msg === BUDGET_EXHAUSTED_MESSAGE) return false;
+    if (error instanceof PublicBuildEngineError) return publicBuildEngineSafeReason(error) !== 'policy_refusal';
+    return error instanceof SurplusBuildUnavailableError;
+  } catch { return false; }
 }

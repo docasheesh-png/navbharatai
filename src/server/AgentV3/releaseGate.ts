@@ -70,6 +70,19 @@ export interface RuntimeEvidence {
    * an omitted value keeps the original wording.
    */
   previewUrlPublished?: boolean;
+  /** Game Engine Ultra Phase 3 (gameRepair.ts, AGENTV3_GAME_COMPLETE_GATE=on): why a played game is not shippable. */
+  gameIncomplete?: string | null;
+  /**
+   * 🎮 Was this canvas GAME actually played in a real browser (gamePlaytest.ts)? Set only for a project the
+   * playtest applies to; omitted for every other app, which keeps every verdict as it was.
+   *
+   * 🔴 WHY (autopsy 61279465, 2026-11-04 — the 3D train simulator). The playtest timed out after 80 s, so
+   * nothing showed the game could be driven — and the gate still said GREEN, *"Shippable — pressing its
+   * controls in a real browser held up"*, because the ONE control pressed was "Start Simulation". A start
+   * button is not gameplay. For a game the playtest IS the user journey: GREEN now needs it to have
+   * PASSED; not run or failed, the verdict stays below green and says so.
+   */
+  game?: CheckOutcome;
   /**
    * The dev server would not stay up. Infrastructure, not a judgement of the app.
    * Only changes the wording of an unproven preview (`not-run`). Never a verdict
@@ -236,7 +249,7 @@ export interface GateVerdict {
 // ⚠️ Every field added to RuntimeEvidence that is NOT a runtime CHECK must be excluded here, or it
 // silently becomes a row the gate tries to label and grade. tsc catches the omission, which is
 // how `stoppedByUser` was caught the moment it was added.
-export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'previewServerDown' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'awaitingShell' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy' | 'journeyReloaded'>;
+export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'previewServerDown' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'awaitingShell' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy' | 'journeyReloaded' | 'gameIncomplete' | 'game'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<CheckKey, string> = {
@@ -416,8 +429,14 @@ export function releaseGate(
   // derivation result does not establish that the app has no stored state.
   const pressedOk = ev.explore === 'passed' && (ev.explorePresses ?? 0) > 0;
   if (pressedOk) proven.push(`pressing ${ev.explorePresses} of its controls in a real browser broke nothing`);
+  // The game's own verdict (see `game`). Only a game the playtest applies to carries one.
+  const isPlayedGame = ev.game === 'passed' || ev.game === 'failed' || ev.game === 'not-run';
+  if (ev.game === 'passed') proven.push('the game was PLAYED in a real browser — its controls, movement and camera answered');
+  else if (ev.game === 'failed') softFailures.push('playing the game in a real browser found problems');
+  else if (ev.game === 'not-run') unproven.push('the game was never played in a real browser, so its controls, movement and camera are NOT VERIFIED');
 
   if (f.blockers > 0) failures.push(`${f.blockers} build-breaking blocker(s)${namedFindings(f.blockers, f.blockerLabels)}`);
+  if (ev.gameIncomplete) failures.push(`the game is not complete: ${ev.gameIncomplete}`);
   if (f.highSeverity > 0) failures.push(`${f.highSeverity} high-severity security/privacy finding(s)`);
 
   // RED — something we looked at is actually broken.
@@ -457,7 +476,8 @@ export function releaseGate(
   // GREEN needs the app to have run AND a journey to have held up. Rendering is necessary and not
   // sufficient: an app that paints beautifully and saves nothing renders exactly as well as one that
   // works, which is why "it rendered" alone lands at yellow.
-  const journeyProven = ev.journeys === 'passed' || (noDataJourney && pressedOk);
+  // A game's journey is being PLAYED: pressing a start button is not gameplay (autopsy 61279465).
+  const journeyProven = isPlayedGame ? ev.game === 'passed' : (ev.journeys === 'passed' || (noDataJourney && pressedOk));
   // Measured-in-a-browser quality costs green, but never more than that (see QualitySignals).
   const qualityCaveats: string[] = [];
   if (q.a11yIssues > 0) qualityCaveats.push(`${q.a11yIssues} accessibility problem(s) real users would hit`);
@@ -467,7 +487,9 @@ export function releaseGate(
       && ev.preview === 'passed') {
     return {
       state: 'green',
-      headline: ev.journeys === 'passed'
+      headline: isPlayedGame
+        ? 'Shippable — it runs, and the game was played in a real browser: its controls, movement and camera answered.'
+        : ev.journeys === 'passed'
         ? 'Shippable — it runs, and a real user journey held up end to end.'
         : 'Shippable — it runs, and pressing its controls in a real browser held up.',
       proven, unproven, failures,
@@ -490,6 +512,15 @@ export function releaseGate(
     : pressedOk
       ? `It runs and renders, and pressing its controls in a real browser broke nothing — but no save-and-reload journey was proven, so whether it keeps what a user enters is untested${caveat ? ` (also: ${caveat})` : ''}.`
       : `It runs and renders — but no user journey was proven, so whether it actually SAVES anything is untested${caveat ? ` (also: ${caveat})` : ''}.`;
+  if (isPlayedGame && ev.game !== 'passed') {
+    return {
+      state: 'yellow',
+      headline: ev.game === 'failed'
+        ? `It builds and renders, but the game is NOT VERIFIED as playable: ${caveat}.`
+        : `It builds and renders — but the game was never played in a browser, so whether it is playable is NOT VERIFIED${caveat ? ` (also: ${caveat})` : ''}.`,
+      proven, unproven, failures,
+    };
+  }
   return {
     state: 'yellow',
     headline: journeyProven

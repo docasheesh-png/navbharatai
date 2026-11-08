@@ -133,7 +133,7 @@ export function ModePickerSheet({
     // bar stays on top and tappable, the card ends above it, and the footer's own rule
     // (lib/footerSheets.ts) closes this sheet when another item is tapped. The overlay reserves the
     // device inset itself, so the card no longer adds it a second time.
-    <div className="nb-sheet-overlay-flush fixed inset-0 z-[130] flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Choose AI mode">
+    <div className="nb-sheet-overlay-flush fixed inset-0 z-[130] flex items-center justify-center nb-modal-safe" role="dialog" aria-modal="true" aria-label="Choose AI mode">
       <button aria-label="Close" onClick={onClose} className="absolute inset-0 bg-scrim backdrop-blur-sm" />
       <div
         className="relative w-full sm:max-w-md bg-surface border-t sm:border border-line sm:rounded-2xl rounded-t-2xl flex flex-col overflow-hidden"

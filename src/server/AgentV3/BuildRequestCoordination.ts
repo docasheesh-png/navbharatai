@@ -1,5 +1,5 @@
 import type { Request, Response, RequestHandler } from 'express';
-import { renewWorkspaceBuild, LEASE_HEARTBEAT_MS, type BuildLeaseStore } from './workspaceBuildLease';
+import { renewWorkspaceBuildDetailed, LEASE_HEARTBEAT_MS, LEASE_STALE_MS, type BuildLeaseStore } from './workspaceBuildLease';
 import type { RunningBuild } from './runningBuildRegistry';
 import { abortBuild } from './buildAbortCause';
 import { hasBuildBodyExitHold } from './stoppingBuild';
@@ -305,6 +305,10 @@ export function startBuildLeaseHeartbeat(opts: {
   build: () => RunningBuild | null; current: () => RunningBuild | undefined; active: () => boolean;
   release: () => Promise<void>; lost: () => void;
 }): ReturnType<typeof setInterval> {
+  // DNA (05012 OUTCOME_AUTHORITY_UNAVAILABLE): one slow/failed Firestore renewal aborted a healthy build,
+  // though the lease survives LEASE_STALE_MS (four beats) and no other worker may claim it before then.
+  // Abort only once the last CONFIRMED renewal is old enough that the lease could lapse before the next beat.
+  let lastConfirmedAt = opts.admittedAt;
   const timer = setInterval(() => {
     void (async () => {
       const build = opts.build();
@@ -318,8 +322,19 @@ export function startBuildLeaseHeartbeat(opts: {
         await opts.release(); return;
       }
       const heartbeatAt = Date.now();
-      const renewal = await renewWorkspaceBuild(opts.store, { workspaceId: opts.workspaceId, token: opts.token, nowMs: heartbeatAt });
-      if (renewal === 'unknown' && build && !build.exited) {
+      // Transient store errors/timeouts are retried with jitter inside this beat; the loss reason is logged.
+      // Abort margin: two beats before the lease could lapse, so the NEXT beat (after a recovered store)
+      // still finds our own live lease and keeps a successor out while the aborted body drains. Once at
+      // risk, a single bounded attempt — retries must never push the decision past the lease's life.
+      const atRiskBeforeCall = heartbeatAt - lastConfirmedAt >= LEASE_STALE_MS - 2 * LEASE_HEARTBEAT_MS;
+      const detail = await renewWorkspaceBuildDetailed(opts.store, { workspaceId: opts.workspaceId, token: opts.token, nowMs: heartbeatAt, attempts: atRiskBeforeCall ? 1 : undefined });
+      const renewal = detail.renewal;
+      if (renewal !== 'unknown') lastConfirmedAt = heartbeatAt;
+      if (renewal === 'unknown' || renewal === 'lost') {
+        console.warn(`[BUILD_LEASE] renewal ${renewal} workspace=${opts.workspaceId} reason=${detail.reason ?? 'unknown'} attempts=${detail.attempts} unconfirmedForMs=${Date.now() - lastConfirmedAt}${detail.error ? ` error=${detail.error}` : ''}`);
+      }
+      const authorityAtRisk = Date.now() - lastConfirmedAt >= LEASE_STALE_MS - 2 * LEASE_HEARTBEAT_MS;
+      if (renewal === 'unknown' && build && !build.exited && authorityAtRisk) {
         // An unavailable store is not permission to keep building until another worker takes over.
         // Abort cooperatively, but retain the local/body hold and keep trying to renew: an abort
         // signal does not prove an already-dispatched sandbox command has actually stopped.

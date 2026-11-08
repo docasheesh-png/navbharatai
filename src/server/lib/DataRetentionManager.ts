@@ -578,6 +578,10 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
    * permanent file on the people those ids name. `ts: Date.parse(…)` is a plain number ⇒ `epochMs`.
    */
   { collection: 'admin_audit_log', ttlDays: 180, timestampField: 'ts', timestampKind: 'epochMs' },
+  // One row per build report: its permanent number (buildReportRegistry.ts). On the SAME 180-day clock as
+  // the report it numbers (its history entry, `savedAt`), read from `lastSavedAt`, which every save of that
+  // report refreshes. The number is never reissued after expiry: the counter only moves forward.
+  { collection: 'build_report_numbers', ttlDays: 180, timestampField: 'lastSavedAt', timestampKind: 'epochMs' },
   /**
    * Flagged messages — the same 180-day story as the removal records above, and for the same reason:
    * an abuse record must outlive the account (see the exclusion note in USER_SCOPED_COLLECTIONS) and
@@ -832,6 +836,7 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
  * a warning nobody can ever clear is a warning nobody reads.
  */
 export const RETAINED_INDEFINITELY: readonly { collection: string; reason: string }[] = [
+  { collection: 'session_revocations', reason: 'Minimal security tombstone: UID-keyed monotonic sign-in cutoff and bounded rate counter only, no tokens or contact details. Removing it can reauthorize revoked custom-token origins or direct-database sessions, including after partial account deletion. Retain until credential expiry/erasure can be proven safely; never purge merely by elapsed time.' },
   { collection: 'surplus_build_receipts', reason: 'server-only supplier expense and uncertain-dispatch audit evidence for explicitly authorized capped pilots. Contains opaque build/account/call identities, normalized usage and exact money, never prompts, source code, raw responses or credentials. Deleting pending or final evidence can erase liability or permit replay; no clock-based deletion is authorized. Bounded by each pilot maxCalls.' },
   { collection: 'surplus_connection_tests', reason: 'server-only fixed one-shot synthetic connection-test attempt and unknown-liability fence. Retained across credential/review rotation so deletion cannot re-arm the owner-authorized test. Stores only safe status, timing, credential digest and exact reported money; no prompt content, provider output, keys or raw account/balance responses. No automatic deletion or reset; independent reconciliation authorization required.' },
   { collection: 'surplus_pilot_admissions', reason: 'server-only durable pilot spend/attempt authority and pending-liability fence. Deleting an admission re-arms the pilot budget; retain until an independently authorized financial reconciliation/archive. No prompts, user content or credential secrets; keys use one-way credential generation digest.' },
@@ -846,6 +851,9 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
   // doc is replaced in place, but every settled build also writes `{workspace}/history/{startedAt}`, and
   // that subcollection grew for ever. It is on SUBCOLLECTION_RETENTION_POLICIES (180 days) now.
   { collection: 'workspace_diagnostics_v3', reason: "the latest report per workspace, replaced in place. Its `history` subcollection is on a 180-day clock (SUBCOLLECTION_RETENTION_POLICIES)" },
+  { collection: 'admin_provider_switches', reason: 'the AI provider on/off switches (Admin → AI Engines): ONE state doc with the last 50 changes; deleting it would silently switch every provider back on' },
+  { collection: 'admin_api_provider_accounts', reason: 'the admin’s note of which login each outside API account uses (Admin → Money → API Providers). At most one doc per provider, replaced in place; the admin clears it' },
+  { collection: 'admin_build_report_counter', reason: 'singleton counter for permanent build report numbers (every outcome). Replaced in place; deleting it would let numbers be issued twice and break every reference to a report by number' },
   { collection: 'admin_failed_report_numbers', reason: 'singleton counter for permanent failed-build report numbers (max+1 on retain). Replaced in place; deleting it would allow number reuse and break agent references' },
   { collection: 'project_plans_v3', reason: "the plan the user's app is being built against" },
   { collection: 'app_engineering_memory_v1', reason: "the app's requirement ledger, open issues and change log — bounded per app, erased with the workspace" },

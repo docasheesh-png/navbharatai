@@ -15,14 +15,14 @@ import {
 } from '../sandbox/AppMakerLab/generator/templates/ViteReactProviderContents';
 
 /**
- * Shared theme toggle every golden app can use: cycles auto → light → dark, persists the choice, and
- * overrides the index.css variables via a data-theme attribute (the base css only follows the system
- * preference). Shipped as its own file so App.tsx stays focused on the app itself.
+ * Shared theme toggle every golden app can use: starts LIGHT, cycles light → dark → auto, persists the choice, and
+ * sets data-theme on <html>. ☀️ 2026-11-02 (admin: light unless the user asks for dark): it used to START on "auto",
+ * which followed the phone — and most phones are dark. The base css is light whatever the device says now, so "auto"
+ * is a real choice the person makes, resolved here from prefers-color-scheme. Its own file keeps App.tsx focused.
  */
 export const themeTsx = `import { useEffect, useState } from 'react';
 
-// Explicit light/dark variable overrides — the base index.css follows the SYSTEM preference; setting
-// data-theme on <html> pins the app to one side regardless of the device setting.
+// Explicit light/dark variable overrides — the base index.css is light; data-theme on <html> picks the side.
 const OVERRIDES = [
   "[data-theme='light']{--bg:#f6f7fb;--fg:#17171c;--muted:#6b7280;--accent:#4f46e5;--accent-hover:#4338ca;--accent-soft:#eef0ff;--accent-ink:#4338ca;--accent-strong:#4f46e5;--accent-deep:#4338ca;--danger-ink:#b91c1c;--success-ink:#166534;--card:#ffffff;--border:#e5e7eb;color-scheme:light;}",
   "[data-theme='dark']{--bg:#0d0d12;--fg:#ececf1;--muted:#9ca3af;--accent:#7c74ff;--accent-hover:#948dff;--accent-soft:#1c1b2e;--accent-ink:#c4c0ff;--accent-strong:#5b52e0;--accent-deep:#4a3fd6;--danger-ink:#fca5a5;--success-ink:#86efac;--card:#17171f;--border:#2a2a35;color-scheme:dark;}",
@@ -36,15 +36,20 @@ export function ThemeToggle() {
   const [mode, setMode] = useState<Mode>(() => {
     try {
       const saved = localStorage.getItem('theme');
-      return saved === 'light' || saved === 'dark' ? saved : 'auto';
-    } catch { return 'auto'; }
+      return saved === 'light' || saved === 'dark' || saved === 'auto' ? saved : 'light';
+    } catch { return 'light'; }
   });
   useEffect(() => {
-    if (mode === 'auto') document.documentElement.removeAttribute('data-theme');
-    else document.documentElement.setAttribute('data-theme', mode);
+    const mq = typeof matchMedia !== 'undefined' ? matchMedia('(prefers-color-scheme: dark)') : null;
+    // "Auto" is the person's own choice to follow the device; nothing else consults it.
+    const apply = () => document.documentElement.setAttribute('data-theme', mode === 'dark' || (mode === 'auto' && !!mq?.matches) ? 'dark' : 'light');
+    apply();
     try { localStorage.setItem('theme', mode); } catch { /* storage blocked — the choice lasts this visit */ }
+    if (mode !== 'auto' || !mq) return;
+    mq.addEventListener?.('change', apply);
+    return () => mq.removeEventListener?.('change', apply);
   }, [mode]);
-  const next: Record<Mode, Mode> = { auto: 'light', light: 'dark', dark: 'auto' };
+  const next: Record<Mode, Mode> = { light: 'dark', dark: 'auto', auto: 'light' };
   // The icon AND the word: "Auto" alone did not read as a light/dark switch, and a builder replaced it
   // with a hand-rolled one that styled nothing (autopsy 8257ca59).
   const icon = mode === 'light' ? '☀️ Light' : mode === 'dark' ? '🌙 Dark' : '🌓 Auto';

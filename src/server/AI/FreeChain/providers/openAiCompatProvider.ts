@@ -11,6 +11,9 @@ export type AdapterConfig = {
   maxOutputTokens: number;
   timeoutMs: number;
   streamUsage: boolean;
+  /** Admin manual diagnostics may defer output and timeout defaults to provider/SDK. */
+  providerDefaults?: boolean;
+  requestedOutputTokens?: number;
   /** The variable's name, never its value. Used only for safe operator diagnostics. */
   envName?: string;
   extraBody?: Readonly<Record<string, unknown>>;
@@ -23,6 +26,8 @@ export type FreeChainErrorCode =
 export type FreeChainFinishReason = 'stop' | 'length' | 'content_filter' | 'tool_calls' | 'function_call';
 
 export interface FreeChainProviderResponse extends AIProviderResponse {
+  /** Exact settled charge from CheaperInference billing, never an estimated token quote. */
+  supplierChargeUsd?: string;
   /** Only true when BOTH token counts were actually reported, never inferred from the text. */
   completeUsage: boolean;
   cachedInputTokens?: number;
@@ -39,6 +44,7 @@ export interface FreeChainTurnInput {
 }
 
 type SafeErrorDetails = {
+  supplierChargeUsd?: string;
   status?: number;
   rateLimitHeaders?: Record<string, string>;
   retryAfterMs?: number;
@@ -47,6 +53,7 @@ type SafeErrorDetails = {
 
 /** Never retains the original SDK error, response, request, headers, cause or credential. */
 export class FreeChainProviderError extends Error {
+  readonly supplierChargeUsd?: string;
   readonly code: FreeChainErrorCode;
   readonly status?: number;
   readonly retryAfterMs?: number;
@@ -59,6 +66,7 @@ export class FreeChainProviderError extends Error {
     super(`Free chat provider request failed (${safeCode}).`);
     this.name = safeCode === 'ABORTED' ? 'AbortError' : 'FreeChainProviderError';
     this.code = safeCode;
+    this.supplierChargeUsd = exactSupplierCharge(details.supplierChargeUsd);
     this.status = typeof details.status === 'number' && Number.isInteger(details.status) && details.status >= 400 && details.status <= 599 ? details.status : undefined;
     this.retryAfterMs = typeof details.retryAfterMs === 'number' && Number.isFinite(details.retryAfterMs) && details.retryAfterMs >= 0 ? Math.min(MAX_RETRY_AFTER_MS, Math.ceil(details.retryAfterMs)) : undefined;
     this.rateLimitHeaders = Object.freeze(safeRateLimitHeaders(details.rateLimitHeaders));
@@ -109,6 +117,11 @@ const DURATION = /^(?:\d+(?:\.\d+)?(?:ms|s|m|h|d))+$/;
 const MAX_RETRY_AFTER_MS = 31 * 24 * 60 * 60 * 1000;
 
 type UnknownRecord = Record<string, unknown>;
+/** Official docs /docs#usage-and-response-privacy: billing.billed_cost_usd is the
+ * customer's settled charge to CheaperInference, not its private serving-provider cost. */
+function exactSupplierCharge(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length <= 40 && /^(?:0|[1-9]\d*)(?:\.\d{1,9})?$/.test(value) ? value : undefined;
+}
 function record(value: unknown): UnknownRecord | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : undefined;
 }
@@ -215,7 +228,7 @@ function sanitizeError(error: unknown, signal: AbortSignal | undefined, credenti
 }
 
 /** Only text-generation tuning is accepted. Extra body fields cannot change spend or credentials. */
-function validatedExtraBody(extra: AdapterConfig['extraBody']): Record<string, unknown> {
+function validatedExtraBody(extra: AdapterConfig['extraBody'], provider: AdapterConfig['provider']): Record<string, unknown> {
   if (extra === undefined) return {};
   const input = record(extra);
   if (!input) throw new FreeChainProviderError('CONFIGURATION');
@@ -225,9 +238,13 @@ function validatedExtraBody(extra: AdapterConfig['extraBody']): Record<string, u
       && typeof value === 'number' && Number.isFinite(value)
       && (name === 'temperature' ? value >= 0 && value <= 2 : name === 'top_p' ? value >= 0 && value <= 1 : value >= -2 && value <= 2)) {
       result[name] = value;
+    } else if (name === 'min_discount_percent' && provider === 'CHEAPERINFERENCE' && typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 99.99) {
+      result.min_discount_percent = value;
+    } else if (name === 'reasoning' && provider === 'CHEAPERINFERENCE' && (record(value)?.effort === 'low' || record(value)?.effort === 'none') && Object.keys(record(value)!).length === 1) {
+      result.reasoning = { effort: record(value)!.effort };
     } else if (name === 'seed' && typeof value === 'number' && Number.isSafeInteger(value)) {
       result.seed = value;
-    } else if (name === 'reasoning_effort' && (value === 'none' || value === 'minimal')) {
+    } else if (name === 'reasoning_effort' && (value === 'none' || value === 'minimal' || value === 'low')) {
       result.reasoning_effort = value;
     } else if (name === 'thinking' && record(value)?.type === 'disabled' && Object.keys(record(value)!).length === 1) {
       result.thinking = { type: 'disabled' };
@@ -263,7 +280,7 @@ export class OpenAiCompatProvider implements AIProvider {
       || (config.envName !== undefined && !/^[A-Z][A-Z0-9_]{0,79}$/.test(config.envName))) {
       throw new FreeChainProviderError('CONFIGURATION');
     }
-    const extraBody = validatedExtraBody(config.extraBody);
+    const extraBody = validatedExtraBody(config.extraBody, config.provider);
     this.name = config.provider;
     this.priority = config.priority;
     this.pinnedModel = config.model;
@@ -272,7 +289,8 @@ export class OpenAiCompatProvider implements AIProvider {
     this.#config = Object.freeze({
       provider: config.provider, model: config.model, baseURL: config.baseURL.replace(/\/$/, ''),
       priority: config.priority, maxOutputTokens: config.maxOutputTokens, timeoutMs: config.timeoutMs,
-      streamUsage: config.streamUsage, envName: config.envName ?? DEFAULT_ENV[config.provider],
+      requestedOutputTokens: Number.isSafeInteger(config.requestedOutputTokens) && config.requestedOutputTokens! > 0 ? config.requestedOutputTokens : undefined,
+      streamUsage: config.streamUsage, providerDefaults: config.providerDefaults === true, envName: config.envName ?? DEFAULT_ENV[config.provider],
       extraBody: Object.freeze(extraBody),
     });
     Object.freeze(this);
@@ -286,7 +304,7 @@ export class OpenAiCompatProvider implements AIProvider {
 
   #getClient(): OpenAI {
     return this.#client ??= new OpenAI({
-      apiKey: this.#key, baseURL: this.#config.baseURL, timeout: this.#config.timeoutMs,
+      apiKey: this.#key, baseURL: this.#config.baseURL, ...(this.#config.providerDefaults ? {} : { timeout: this.#config.timeoutMs }),
       organization: null, project: null, adminAPIKey: null, webhookSecret: null,
       maxRetries: 0, logLevel: 'off', fetchOptions: { redirect: 'error' },
       // The SDK inherits OPENAI_CUSTOM_HEADERS even for non-OpenAI base URLs. Never forward
@@ -317,6 +335,8 @@ export class OpenAiCompatProvider implements AIProvider {
 
   async executeTurn({ prompt, systemPrompt, signal, onChunk }: FreeChainTurnInput): Promise<FreeChainProviderResponse> {
     const started = Date.now();
+    let supplierChargeUsd: string | undefined;
+    let conflictingCharge = false;
     try {
       if (signal?.aborted) throw new FreeChainProviderError('ABORTED');
       if (typeof prompt !== 'string' || !prompt.trim() || (systemPrompt !== undefined && typeof systemPrompt !== 'string')
@@ -328,9 +348,9 @@ export class OpenAiCompatProvider implements AIProvider {
         ...this.#config.extraBody,
         ...(['DEEPSEEK', 'GLM'].includes(this.name) ? { thinking: { type: 'disabled' } } : {}),
         model: this.#config.model, messages,
-        ...(this.name === 'GROQ' || this.name === 'OPENAI' ? { max_completion_tokens: this.#config.maxOutputTokens } : { max_tokens: this.#config.maxOutputTokens }),
+        ...(this.#config.providerDefaults ? (this.#config.requestedOutputTokens === undefined ? {} : { max_tokens: this.#config.requestedOutputTokens }) : this.name === 'GROQ' || this.name === 'OPENAI' ? { max_completion_tokens: this.#config.maxOutputTokens } : { max_tokens: this.#config.maxOutputTokens }),
       };
-      const options = { signal, maxRetries: 0, timeout: this.#config.timeoutMs };
+      const options = { signal, maxRetries: 0, ...(this.#config.providerDefaults ? {} : { timeout: this.#config.timeoutMs }) };
       let content = '';
       let usage: ProviderUsage | undefined;
       let cachedInputTokens: number | undefined;
@@ -359,6 +379,14 @@ export class OpenAiCompatProvider implements AIProvider {
         try {
           for await (const chunk of stream) {
             if (signal?.aborted) throw new FreeChainProviderError('ABORTED');
+            if (this.name === 'CHEAPERINFERENCE') {
+              const billing = record(record(chunk)?.billing);
+              if (billing?.status === 'settled' && billing.currency === 'USD') {
+                const charge = exactSupplierCharge(billing.billed_cost_usd);
+                if (supplierChargeUsd !== undefined && charge !== undefined && charge !== supplierChargeUsd) conflictingCharge = true;
+                supplierChargeUsd = conflictingCharge ? undefined : charge ?? supplierChargeUsd;
+              }
+            }
             const extension = record(record(chunk)?.x_groq);
             if (extension?.error) throw extensionError(extension.error);
             const measured = rememberUsage(chunk.usage);
@@ -400,6 +428,10 @@ export class OpenAiCompatProvider implements AIProvider {
         assertLegacyInferenceAllowed('direct-text-provider');
         const { data: completion, response } = await this.#getClient().chat.completions.create({ ...body, stream: false }, options).withResponse();
         headers = safeRateLimitHeaders(response.headers);
+        if (this.name === 'CHEAPERINFERENCE') {
+          const billing = record(record(completion)?.billing);
+          if (billing?.status === 'settled' && billing.currency === 'USD') supplierChargeUsd = exactSupplierCharge(billing.billed_cost_usd);
+        }
         const extension = record(record(completion)?.x_groq);
         if (extension?.error) throw extensionError(extension.error);
         rememberUsage(completion.usage);
@@ -413,10 +445,13 @@ export class OpenAiCompatProvider implements AIProvider {
       if (!content.trim()) throw new FreeChainProviderError('EMPTY_RESPONSE');
       return {
         content, latencyMs: Date.now() - started, provider: this.name, model: this.pinnedModel,
+        ...(supplierChargeUsd === undefined ? {} : { supplierChargeUsd }),
         usage, completeUsage, cachedInputTokens, rateLimitHeaders: headers, finishReason: reason,
       };
     } catch (error) {
-      throw sanitizeError(error, signal, this.#config.envName, this.name);
+      const safe = sanitizeError(error, signal, this.#config.envName, this.name);
+      if (supplierChargeUsd !== undefined) throw new FreeChainProviderError(safe.code, { status: safe.status, rateLimitHeaders: safe.rateLimitHeaders, retryAfterMs: safe.retryAfterMs, credentialEnv: safe.credentialEnv, supplierChargeUsd });
+      throw safe;
     }
   }
 }

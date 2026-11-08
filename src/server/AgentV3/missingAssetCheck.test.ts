@@ -162,7 +162,10 @@ describe('the big-asset spill-over (locked)', () => {
     // Workspace assets are the user's unpublished files. bucketPublish refuses this same fallback
     // because a published app must be public — the difference is access, not size.
     expect(store).toContain("from '../lib/workspaceAssetStorage'");
-    expect((store.match(/workspaceAssetBucketName\(\)/g) || []).length).toBe(2); // spill and read
+    expect((store.match(/workspaceAssetBucketName\(\)/g) || []).length).toBe(3); // spill, bulk restore, and bounded L3 acknowledgement read
+    expect(store).toContain('readWorkspaceAssetBytes');
+    expect(store).toContain("createReadStream({ validation: 'crc32c' })");
+    expect(store).toContain("if (size > maxBytes) throw new Error('Workspace model exceeds budget')");
     expect(storagePolicy).toContain('WORKSPACE_ASSETS_BUCKET');
     expect(storagePolicy).toContain('NAV_STORE_BUCKET');
     expect(storagePolicy).not.toContain('PUBLISHED_APPS_BUCKET');

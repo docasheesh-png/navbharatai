@@ -291,6 +291,23 @@ html.nb-native-shell .nb-selectable {
   user-select: text;
 }
 
+/* MONACO'S OWN iOS "SHOW KEYBOARD" WIDGET IS HIDDEN (admin 2026-11-05).
+
+   Monaco's standalone bundle registers `iPadShowKeyboard`, which paints a 58×36 box in the editor's
+   bottom-right corner on every iOS device. Its only action is `editor.focus()` — it OPENS the
+   keyboard. On a touchscreen a tap anywhere in the code already does that, so the widget duplicates
+   a gesture the user cannot avoid while occupying the corner, and the admin reported it as exactly
+   that. Our own control (`Editor.tsx`, decided by `keyboardDismiss.ts`) takes that corner and does
+   the inverse — it CLOSES the keyboard, which nothing else in the app could do once
+   `installKeyboardBehaviour` removed iOS's accessory bar.
+
+   ⚠️ Keep this rule alongside the replacement, never alone: hiding the widget without a way to
+   dismiss the keyboard leaves the user worse off than Monaco's default. Locked by
+   `tests/theKeyboardCanBeClosed.test.ts`. */
+.monaco-editor .iPadShowKeyboard {
+  display: none !important;
+}
+
 
 @layer base {
   /* ── DNA-level theme palette (admin 2026-07-14) ──────────────────────────────────────────────
@@ -738,6 +755,47 @@ html.nb-native-shell .nb-selectable {
   50% { opacity: 0; }
 }
 
+/* Needs-you header badge. The old ❓ sat in muted text and was missed on the dark Pro header.
+   This mark stays bright even if motion is reduced; the pulse and stars are the extra pull. */
+@keyframes nb-needs-you-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(255, 49, 49, 0.45), 0 0 8px 1px rgba(255, 214, 10, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(255, 49, 49, 0), 0 0 14px 2px rgba(255, 230, 90, 0.85);
+  }
+}
+@keyframes nb-needs-you-twinkle {
+  0%, 100% { opacity: 0.15; transform: scale(0.4); }
+  40% { opacity: 1; transform: scale(1.2); }
+  70% { opacity: 0.25; transform: scale(0.55); }
+}
+.nb-needs-you {
+  color: #fff;
+  background: linear-gradient(180deg, #ff5a5a 0%, #d10000 100%);
+  border-color: #ffe14a;
+  animation: nb-needs-you-pulse 1.05s ease-in-out infinite;
+  /* No z-index and no scale. A z-index here sits above the composer, so this chip
+     painted on top of the Build / Advise menu. It belongs in the sub-header only. */
+}
+.nb-needs-you-glyph {
+  font-size: 15px;
+  line-height: 1;
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+}
+.nb-needs-you-spark {
+  position: absolute;
+  color: #ffe566;
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+  text-shadow: 0 0 6px #fff6b0;
+  animation: nb-needs-you-twinkle 1.35s ease-in-out infinite;
+}
+.nb-needs-you-spark-a { top: -8px; right: -3px; }
+.nb-needs-you-spark-b { bottom: -7px; left: -4px; animation-delay: 0.45s; }
+.nb-needs-you-spark-c { top: -7px; left: 10px; animation-delay: 0.85s; }
+
 /* Dedicated, unbreakable status spinner. A live "working…" ring conveys that the build is
    alive; if it freezes it reads as a hung app. `!important` + class specificity make it win
    over the global reduced-motion reset below (which !important-zeroes every animation), and it
@@ -912,4 +970,21 @@ html.nb-native-shell .nb-selectable {
 @media (pointer: coarse) and (prefers-reduced-motion: reduce) {
   button, a, [role="button"], [role="tab"] { transition: none; }
   button:active, a:active, [role="button"]:active, [role="tab"]:active { transform: none; }
+}
+
+/* Centered, never-cropped modal frame (owner 2026-10-30: sheets were hiding under the
+   Pro bottom tab bar / Safari chrome). Overlay pads by safe-area + header/footer room,
+   and the dialog box can never exceed the padded height, so it sits in the visual middle. */
+.nb-modal-safe {
+  padding-top: calc(var(--nb-safe-top, 0px) + 16px);
+  padding-bottom: calc(var(--nb-safe-bottom, 0px) + 80px);
+  padding-left: calc(var(--nb-safe-left, 0px) + 12px);
+  padding-right: calc(var(--nb-safe-right, 0px) + 12px);
+}
+@media (min-width: 640px) {
+  .nb-modal-safe { padding-bottom: calc(var(--nb-safe-bottom, 0px) + 16px); }
+}
+.nb-modal-safe > :not([aria-label="Close"]):not(.absolute) {
+  max-height: 100% !important;
+  border-radius: 1rem;
 }

@@ -136,7 +136,10 @@ function parsedKit(): ParsedKit {
   const kit: ParsedKit = { rules: [], media: [], keyframes: new Map(), light: new Map(), dark: new Map() };
   for (const b of parseCssBlocks(DESIGN_KIT_CSS)) {
     if (isThemeSwitchPrelude(b.prelude)) {
-      continue; // generated from the same palette as the media block below — see `themeSwitchCss`
+      // ☀️ The kit's dark palette lives ONLY behind the dark switch (2026-11-02: light unless the app chooses
+      // dark), so it is read from there. The light switch only repeats `:root` values.
+      if (norm(b.prelude) === norm(KIT_DARK_SWITCH)) for (const [k, v] of tokenDecls(b.body)) kit.dark.set(k, v);
+      continue;
     } else if (b.prelude === ':root') {
       for (const [k, v] of tokenDecls(b.body)) kit.light.set(k, v);
     } else if (/^@keyframes\s+/.test(b.prelude)) {
@@ -242,8 +245,8 @@ export function kitRestorePatch(files: Record<string, string>, env: NodeJS.Proce
   const tokenCss: string[] = [];
   if (tokenList.length > 0) {
     tokenCss.push(`:root {\n${tokenList.map((t) => `  ${t}: ${kit.light.get(t)};`).join('\n')}\n}`);
-    const dark = tokenList.filter((t) => kit.dark.has(t));
-    if (dark.length > 0) tokenCss.push(`@media (prefers-color-scheme: dark) {\n  :root {\n${dark.map((t) => `    ${t}: ${kit.dark.get(t)};`).join('\n')}\n  }\n}`);
+    // ☀️ No `prefers-color-scheme` block from the kit (2026-11-02): it would make the restored tokens follow the
+    // phone into dark mode, which is the defect. The dark values travel only behind the switch, below.
     tokenCss.push(...themeSwitchCss(tokenList, (t) => kit.light.get(t), (t) => kit.dark.get(t), appCss));
   }
 
@@ -355,11 +358,13 @@ export function keepKitOnRewrite(path: string, before: string, after: string, en
   const beforeLight = new Map<string, string>();
   const beforeDark = new Map<string, string>();
   let beforeHadSwitch = false;
+  let beforeFollowedDevice = false;
   for (const b of beforeBlocks) {
     if (isThemeSwitchPrelude(b.prelude)) beforeHadSwitch = true;
     if (/^@keyframes\s+/.test(b.prelude)) beforeKeyframes.set(b.prelude.replace(/^@keyframes\s+/, '').trim(), `${b.prelude} {${b.body}}`);
     else if (b.prelude === ':root') for (const [k, v] of tokenDecls(b.body)) beforeLight.set(k, v);
     else if (/^@media\b/.test(b.prelude) && /prefers-color-scheme:\s*dark/.test(b.prelude)) {
+      beforeFollowedDevice = true;
       for (const r of parseCssBlocks(b.body)) if (r.prelude === ':root') for (const [k, v] of tokenDecls(r.body)) beforeDark.set(k, v);
     }
   }
@@ -388,7 +393,9 @@ export function keepKitOnRewrite(path: string, before: string, after: string, en
   const tokenCss: string[] = [];
   if (tokenList.length > 0) {
     tokenCss.push(`:root {\n${tokenList.map((t) => `  ${t}: ${lightOf(t)};`).join('\n')}\n}`);
-    const dark = tokenList.filter((t) => darkOf(t) !== undefined);
+    // A device-following block is kept only when the APP's own old stylesheet had one (its own choice, e.g. the
+    // user asked to follow the phone). The kit never adds one: light unless the app chooses dark (2026-11-02).
+    const dark = beforeFollowedDevice ? tokenList.filter((t) => darkOf(t) !== undefined) : [];
     if (dark.length > 0) tokenCss.push(`@media (prefers-color-scheme: dark) {\n  :root {\n${dark.map((t) => `    ${t}: ${darkOf(t)};`).join('\n')}\n  }\n}`);
   }
   // 🌗 THE SWITCH TRAVELS WITH THE PALETTE (db07e0af). The old file's theme-switch blocks are not component rules,

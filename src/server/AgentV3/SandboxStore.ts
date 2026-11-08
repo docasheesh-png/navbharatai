@@ -87,6 +87,9 @@ export type SandboxRecoveryIdentity =
 
 export class SandboxStore {
   private db: admin.firestore.Firestore | null = null;
+  // Advance over raw documents, including already-paused records. Starting at the same oldest
+  // 50 rows forever let historical pauses hide every newer orphan from the cost sweep.
+  private staleCursor: admin.firestore.QueryDocumentSnapshot | null = null;
 
   /** An explicit provider lets non-production callers exercise the same read decisions. */
   constructor(private readonly dbProvider?: () => admin.firestore.Firestore | null) {}
@@ -413,6 +416,21 @@ export class SandboxStore {
     } catch { /* best-effort — never block a build */ }
   }
 
+  /** A heartbeat may refresh an existing allocation, never resurrect or replace its identity. */
+  async touchIfCurrent(workspaceId: string, sandboxId: string): Promise<boolean> {
+    const db = this.getDb();
+    if (!db || !workspaceId || !sandboxId) return false;
+    try {
+      const ref = db.collection('agentv3_sandboxes').doc(workspaceId);
+      return await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists || snap.data()?.sandboxId !== sandboxId) return false;
+        tx.update(ref, { updatedAt: Date.now() });
+        return true;
+      });
+    } catch { return false; }
+  }
+
   /**
    * The sandboxes whose last activity predates `cutoffMs` — candidates for the orphan reaper.
    *
@@ -425,12 +443,20 @@ export class SandboxStore {
     const db = this.getDb();
     if (!db || !Number.isFinite(cutoffMs)) return [];
     try {
-      const snap = await db.collection('agentv3_sandboxes')
+      const pageSize = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 50;
+      let query = db.collection('agentv3_sandboxes')
         .where('updatedAt', '<', cutoffMs)
-        .orderBy('updatedAt', 'asc')
-        .limit(Math.max(1, Math.min(500, limit)))
-        .get();
-      return snap.docs.map((d) => d.data() as SandboxRecord).filter((r) => r && r.sandboxId);
+        .orderBy('updatedAt', 'desc')
+        .limit(pageSize);
+      if (this.staleCursor) query = query.startAfter(this.staleCursor);
+      const snap = await query.get();
+      // Snapshot cursors preserve both timestamp and document-id ordering, including ties. Start
+      // with recent stale records after a restart; wrap only at exhaustion. A failed read keeps
+      // progress unchanged. This remains one bounded page per sweep, never a collection scan.
+      this.staleCursor = snap.docs.length === pageSize ? snap.docs[snap.docs.length - 1]! : null;
+      return snap.docs.map((d) => ({ record: d.data() as SandboxRecord, id: d.id }))
+        .filter(({ record, id }) => record && record.sandboxId && record.workspaceId === id)
+        .map(({ record }) => record);
     } catch {
       return []; // a missing index or a Firestore blip must never break the sweep
     }
@@ -453,6 +479,23 @@ export class SandboxStore {
       await db.collection('agentv3_sandboxes').doc(workspaceId)
         .update({ pausedAt: Date.now(), ...(by ? { pausedBy: by } : {}) });
     } catch { /* best-effort — a missing record has nothing to mark */ }
+  }
+
+  /** A sweep may settle only the exact allocation and activity it observed before pausing. */
+  async markPausedIfUnchanged(record: SandboxRecord, by: PauseCause): Promise<boolean> {
+    const db = this.getDb();
+    if (!db || !record?.workspaceId || !record.sandboxId || !Number.isFinite(record.updatedAt) || record.updatedAt <= 0) return false;
+    try {
+      const ref = db.collection('agentv3_sandboxes').doc(record.workspaceId);
+      return await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists) return false;
+        const current = snap.data();
+        if (current?.sandboxId !== record.sandboxId || current.updatedAt !== record.updatedAt) return false;
+        tx.update(ref, { pausedAt: Date.now(), pausedBy: by });
+        return true;
+      });
+    } catch { return false; }
   }
 
   /**

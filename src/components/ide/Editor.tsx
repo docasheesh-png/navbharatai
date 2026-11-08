@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MonacoEditor, { loader } from '@monaco-editor/react';
 import { cn } from '../../lib/utils';
-import { X, Bug, Save, FileCode, Check, ChevronRight, RotateCcw, Search, Globe, Paintbrush, Braces, FileText, Image, FolderOpen } from 'lucide-react';
+import { X, Bug, Save, FileCode, Check, ChevronRight, ChevronDown, RotateCcw, Search, Globe, Paintbrush, Braces, FileText, Image, FolderOpen } from 'lucide-react';
 import type { FC, SVGProps } from 'react';
 
 type IconComponent = FC<SVGProps<SVGSVGElement> & { className?: string }>;
@@ -23,6 +23,8 @@ import {
   type EditorThemeId,
 } from './monacoThemes';
 import { decideEditorEngine } from './editorEngine';
+import { shouldShowKeyboardDismiss, stillFocusedAfterFocusOut } from './keyboardDismiss';
+import { dismissKeyboardOnMobile, softKeyboardWouldOpen } from '../../lib/dismissKeyboard';
 
 // Load Monaco from our OWN origin, not a CDN. `scripts/copyMonaco.mjs` copies the installed
 // monaco-editor `min/vs` into `public/monaco/vs` at build time, so `/monaco/vs` is served as a
@@ -151,6 +153,30 @@ export const Editor: React.FC<EditorProps> = React.memo(({
     setJustSaved(true);
     savedTimerRef.current = setTimeout(() => setJustSaved(false), 1800);
   };
+  // ── HIDE-KEYBOARD BUTTON ────────────────────────────────────────────────────────────────────
+  // Replaces Monaco's hidden `.iPadShowKeyboard` widget with its inverse. The full reasoning —
+  // why the signal is focus and not the visual viewport — is in `keyboardDismiss.ts`.
+  const editorAreaRef = useRef<HTMLDivElement>(null);
+  const [editorFocused, setEditorFocused] = useState(false);
+  // The pointer type cannot change during a session, so it is read once rather than every render.
+  const [coarsePointer] = useState(softKeyboardWouldOpen);
+  const showHideKeyboard = shouldShowKeyboardDismiss({ coarsePointer, editorFocused });
+
+  /**
+   * Close the on-screen keyboard. Blurring the focused node is what dismisses it, and the shared
+   * `dismissKeyboardOnMobile` is the one place in the app that does so (it is also a no-op on a
+   * mouse pointer, so this can never steal focus on a desktop).
+   */
+  const hideKeyboard = () => {
+    const active = typeof document === 'undefined' ? null : (document.activeElement as HTMLElement | null);
+    const inside = !!(active && editorAreaRef.current?.contains(active));
+    // Monaco keeps its caret in a hidden textarea; the lite editor IS a textarea. Either way the
+    // node holding focus is the one to blur, and the query is the fallback when focus has already
+    // moved elsewhere (so a stray tap cannot leave the keyboard up with nothing to close it).
+    dismissKeyboardOnMobile(inside ? active : (editorAreaRef.current?.querySelector('textarea') as HTMLElement | null));
+    setEditorFocused(false);
+  };
+
   const changeTheme = (id: EditorThemeId) => { setThemeState(id); saveTheme(id); };
 
   useEffect(() => {
@@ -423,7 +449,12 @@ export const Editor: React.FC<EditorProps> = React.memo(({
           content height by the default `min-height:auto`. Without it, on a small screen the editor
           area is pushed to full content height and the mobile textarea / Monaco can't scroll within
           the visible pane. Locked by Editor.scroll.test.tsx. */}
-      {!isBinaryFile && <div className="flex-1 min-h-0 overflow-hidden relative">
+      {!isBinaryFile && <div
+        ref={editorAreaRef}
+        onFocus={() => setEditorFocused(true)}
+        onBlur={(e) => { if (!stillFocusedAfterFocusOut(e.currentTarget, e.relatedTarget)) setEditorFocused(false); }}
+        className="flex-1 min-h-0 overflow-hidden relative"
+      >
         {useTextarea ? (
           <textarea
             value={content}
@@ -484,6 +515,28 @@ export const Editor: React.FC<EditorProps> = React.memo(({
             ...editorOptions,
           }}
         />
+        )}
+
+        {/* The corner Monaco used to own — same place, opposite job, and deliberately TINY: the
+            widget it replaces was 58×36, this chip is 22×22 inside a 38px tap area, because it is
+            an escape hatch and not a tool. It appears only while the editor holds focus (i.e. only
+            while the keyboard is up), so it is never a control that does nothing. */}
+        {showHideKeyboard && (
+          <button
+            type="button"
+            // The default pointerdown would move focus before our click runs; preventing it keeps
+            // the caret where the user left it, so the blur below is what closes the keyboard and
+            // the next tap resumes typing at the same spot.
+            onPointerDown={(e) => e.preventDefault()}
+            onClick={hideKeyboard}
+            aria-label="Hide keyboard"
+            title="Hide keyboard"
+            className="absolute bottom-1.5 right-1.5 z-20 p-2 flex items-center justify-center bg-transparent"
+          >
+            <span className="w-[22px] h-[22px] rounded-md border border-line bg-raised shadow-md flex items-center justify-center">
+              <ChevronDown className="w-3 h-3 text-muted" />
+            </span>
+          </button>
         )}
       </div>}
 

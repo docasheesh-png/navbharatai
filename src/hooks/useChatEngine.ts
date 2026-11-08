@@ -1,4 +1,6 @@
+import { CHAT_CLIENT_DEADLINE_MS } from '../lib/chatDeadline';
 import { chatReplyLanguageFromPicker, resolveChatReplyLanguage } from '../lib/chatReplyLanguage';
+import { scrubVendorBrands } from '../shared/brandScrub';
 import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../lib/freeAnswerStatus';
 // useChatEngine — the free (NBI) chat engine, lifted out of the App.tsx God component (P3.1, behavior-
 // preserving). Owns the send pipeline: handleSendForTab (the core turn handler — intent routing, GitHub
@@ -9,7 +11,8 @@ import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../lib/freeAnsw
 // destructures the SAME handleSendForTab/handleSend identifiers back, so every call site is unchanged.
 
 import axios from 'axios';
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
+import { PendingChatQuestions } from '../lib/pendingChatQuestions';
 import type { Dispatch, SetStateAction } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import type { Message, ErrorContext, ViewType, FileSystem } from '../types';
@@ -26,6 +29,7 @@ import { loadVials, saveVial } from '../lib/vialMemory';
 import { chatBuildMeta } from '../lib/chatBuildMeta';
 import { platformHeader } from '../lib/platformHeader';
 import { consumeChatResponseStream, ChatStreamTerminalError, gatewayChatFailure } from '../lib/chatResponseStream';
+import { chatFailureNotice, browserOffline, USER_FACING_CHAT_CODES } from '../lib/chatFailureNotice';
 export interface ChatEngineDeps {
   // values read
   input: string;
@@ -75,6 +79,9 @@ interface ChatTurnScope {
   stopped: boolean;
   finished: boolean;
   streamingMessageId: string | null;
+  succeeded?: boolean;
+  incomplete?: boolean;
+  scope?: string;
 }
 
 export function useChatEngine(deps: ChatEngineDeps) {
@@ -91,6 +98,16 @@ export function useChatEngine(deps: ChatEngineDeps) {
   // Every asynchronous continuation belongs to its own turn. Stop may allow a successor before the
   // old transport settles; the old turn must never reset its state, append a notice or replace its controller.
   const activeTurnRef = useRef<ChatTurnScope | null>(null);
+  const pendingQuestions = useRef(new PendingChatQuestions());
+  const latest = useRef(deps); latest.current = deps;
+  const mounted = useRef(true);
+  const sendLatest = useRef<(text:string)=>Promise<void>>(async()=>{});
+  const queueScope = (state: ChatEngineDeps) => JSON.stringify([state.user?.uid ?? 'guest', state.currentSessionId, state.mode, state.activeAgent, state.activeView]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current=false;pendingQuestions.current.clear();const turn=activeTurnRef.current;if(turn){turn.stopped=true;turn.controller?.abort();} };
+  }, []);
+
   const ownsTurn = (turn: ChatTurnScope) => activeTurnRef.current === turn;
   const assertActiveTurn = (turn: ChatTurnScope) => {
     if (!ownsTurn(turn) || turn.stopped) throw new DOMException('Stopped', 'AbortError');
@@ -121,7 +138,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
     const controller = new AbortController();
     assertActiveTurn(turn);
     turn.controller = controller;
-    const timeoutId = setTimeout(() => controller.abort(), 95000);
+    const timeoutId = setTimeout(() => controller.abort(), CHAT_CLIENT_DEADLINE_MS);
 
     try {
       const headers = { ...(await authHeader()) };
@@ -164,6 +181,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
       if (controller.signal.aborted) throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The reply was stopped.', partial: false });
       const terminal = gatewayChatFailure(response.data);
       if (terminal) throw new ChatStreamTerminalError(terminal);
+      if (response.data.stalled === true) turn.incomplete = true;
       return response.data.reply;
     } catch (error: any) {
       clearTimeout(timeoutId);
@@ -175,7 +193,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
       if (terminal) throw new ChatStreamTerminalError(terminal);
       if (axios.isCancel(error) || !error.response || error.response.status >= 500) {
         // An aborted request may already have generated/billed. Never create a second logical request.
-        throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The AI service could not confirm the reply. Please retry when the service is available.', partial: false });
+        throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: chatFailureNotice({}).text, partial: false });
       }
       
       let errMsg = "AI request failed.";
@@ -187,13 +205,18 @@ export function useChatEngine(deps: ChatEngineDeps) {
         throw Object.assign(new Error(notice), { guestLimit: true });
       }
 
+      const axCode = error.response?.data?.code; const axStatus = error.response?.status;
+      if ((typeof axCode === 'string' && USER_FACING_CHAT_CODES[axCode]) || axStatus === 402 || axStatus === 429) {
+        const notice = chatFailureNotice({ status: axStatus, code: axCode, serverText: error.response?.data?.reply ?? error.response?.data?.error });
+        throw new ChatStreamTerminalError({ code: typeof axCode === 'string' ? axCode : notice.reason, message: notice.text, partial: false });
+      }
       if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') errMsg = "Network connection failed. Please check your internet or the backend availability.";
       else if (error.response?.status === 401) errMsg = "API key invalid or expired. Go to Settings → Secrets & API Keys to update your key.";
       else if (error.response?.status === 500) errMsg = "Backend runtime failure detected.";
       else if (error.response?.status === 403) errMsg = "AI permission/authentication failure detected.";
       else if (error.message.includes('failed to fetch')) errMsg = "Frontend could not reach backend service.";
-      else if (error.message.includes('timeout')) errMsg = "Vertex AI inference timeout.";
-      else errMsg = error.response?.data?.error || error.message || "Application runtime error detected.";
+      else if (error.message.includes('timeout')) errMsg = "NavBharatAI is busy right now. Please try again.";
+      else errMsg = scrubVendorBrands(String(error.response?.data?.error || error.message || "Application runtime error detected."));
 
       // A 402 used to open the ₹100 Vishwakarma entry-pass modal. That pass is deleted, and no server
       // route ever sent the `requirePass` flag this also watched for, so the honest response to a 402
@@ -240,12 +263,12 @@ export function useChatEngine(deps: ChatEngineDeps) {
     };
   };
 
-  const handleSendForTab = async (tabId: ViewType, overrideMessage?: string, files: File[] = []) => {
+  const handleSendForTab = async (tabId: ViewType, overrideMessage?: string, files: File[] = [], queued = false) => {
       // ... (existing logic, maybe add files to messages)
     const isNbi = tabId === 'nbi_chat';
     const answerRequestId = newFreeAnswerRequestId();
     const currentInput = input;
-    const currentMessages = messages;
+    const currentMessages = queued ? latest.current.messages : messages;
     const activeSession = sessions.find(s => s.id === currentSessionId);
     const restoredMessages = asMessageArray(activeSession?.restoredMessages);
     const memorySummary = activeSession?.memorySummary || '';
@@ -255,14 +278,14 @@ export function useChatEngine(deps: ChatEngineDeps) {
     const setMessagesForTab: typeof setMessages = value => {
       if (current()) setMessages(prev => current() ? (typeof value === 'function' ? value(prev) : value) : prev);
     };
-    const setInputForTab = setInput;
+    const setInputForTab: typeof setInput = queued ? () => {} : setInput;
     const setIsLoadingForTab: typeof setIsLoading = value => { if (current()) setIsLoading(value); };
     const setIntentForTab = setActiveIntent;
     const currentAgent = activeAgent;
     const currentMode = mode;
 
     const msgInput = typeof overrideMessage === 'string' ? overrideMessage : '';
-    if (!msgInput && !input.trim() && !errorContext?.lastInput && files.length === 0 || isLoading
+    if (!msgInput && !input.trim() && !errorContext?.lastInput && files.length === 0 || (!queued && (isLoading || pendingQuestions.current.size>0))
       || (activeTurnRef.current && !activeTurnRef.current.finished && !activeTurnRef.current.stopped)) return;
 
     const messageToSend = msgInput || currentInput.trim() || errorContext?.lastInput || '';
@@ -294,7 +317,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
       }
     }
 
-    turn = { controller: null, stopped: false, finished: false, streamingMessageId: null };
+    turn = { controller: null, stopped: false, finished: false, streamingMessageId: null, scope: queueScope(latest.current) };
     activeTurnRef.current = turn;
     // Lock before attachment preparation yields, not only after the first await.
     setIsLoadingForTab(true);
@@ -495,12 +518,12 @@ export function useChatEngine(deps: ChatEngineDeps) {
             vials: loadVials(),
             stream: true,
           }),
-          // The user can Stop this turn OR it self-cancels after 90s — whichever fires first.
-          signal: AbortSignal.any([userAbort.signal, AbortSignal.timeout(90000)]),
+          // Stop is immediate; the client deadline leaves the server time to finish safe fallbacks.
+          signal: AbortSignal.any([userAbort.signal, AbortSignal.timeout(CHAT_CLIENT_DEADLINE_MS)]),
         }); } catch (error) {
           if (userAbort.signal.aborted) throw error;
           // No response is not proof of non-dispatch. Do not issue a new logical request.
-          throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The connection ended before the reply was confirmed. Please retry when the service is available.', partial: false });
+          throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: chatFailureNotice({ offline: browserOffline(), networkError: true }).text, partial: false });
         }
 
         assertActiveTurn(turn!);
@@ -515,9 +538,15 @@ export function useChatEngine(deps: ChatEngineDeps) {
           }
           const errData = await response.json().catch(() => ({}));
           assertActiveTurn(turn!);
+          const errCode = (errData as any)?.code;
+          if (typeof errCode === 'string' && USER_FACING_CHAT_CODES[errCode]) {
+            const notice = chatFailureNotice({ status: response.status, code: errCode, serverText: (errData as any).reply ?? (errData as any).error });
+            throw new ChatStreamTerminalError({ code: errCode, message: notice.text, partial: false });
+          }
+          if (response.status === 402) throw new ChatStreamTerminalError({ code: 'INSUFFICIENT_BALANCE', message: chatFailureNotice({ status: 402 }).text, partial: false });
           const terminal = gatewayChatFailure(errData);
           if (terminal) throw new ChatStreamTerminalError(terminal);
-          if (response.status >= 500) throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The AI service could not confirm the reply. Please retry when the service is available.', partial: false });
+          if (response.status >= 500) throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: chatFailureNotice({}).text, partial: false });
           if (response.status === 401) {
             setUser(null);
             setShowAuth(true);
@@ -608,7 +637,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
         } catch (frontendErr: any) {
           assertActiveTurn(turn);
           if (frontendErr instanceof ChatStreamTerminalError || frontendErr?.guestLimit === true) throw frontendErr;
-          console.warn('Frontend Gemini failed, trying backend fallback...', frontendErr.message);
+          console.warn('Frontend path failed, trying backend fallback...', frontendErr.message);
           data = await callWithRetry();
         }
       } else {
@@ -626,7 +655,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
           text: data.reply || 'No response received.',
           sender: 'ai',
           timestamp: new Date(),
-          modelUsed: data.model
+          modelUsed: 'navBharatAI'
         };
         replyMsgId = aiMessage.id;
         setMessagesForTab((prev) => {
@@ -637,10 +666,10 @@ export function useChatEngine(deps: ChatEngineDeps) {
         // Update modelUsed on the streaming message
         const sid = streamingMsgId;
         if (data.model && data.model !== 'streaming' && sid) {
-          setMessagesForTab(prev => prev.map(m => m.id === sid ? { ...m, modelUsed: data.model } : m));
+          setMessagesForTab(prev => prev.map(m => m.id === sid ? { ...m, modelUsed: 'navBharatAI' } : m));
         }
       }
-      addLog(`AI Response received via ${data.model || 'streaming'}`, 'success');
+      addLog('AI Response received via NavBharatAI', 'success');
 
       // Sync CSS/HTML/JS if build mode
       if (currentMode === 'build' && data.reply) {
@@ -690,6 +719,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
          }
       }
 
+      turn.succeeded = !data?.stalled && !turn.incomplete;
     } catch (error: any) {
       if (!ownsTurn(turn)) return;
       // The user pressed Stop — this is NOT an error. Keep whatever streamed so far (marked stopped) and
@@ -702,8 +732,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
       if (error instanceof ChatStreamTerminalError) {
         // The server's honest unavailable/interrupted notice already lives in the stream bubble.
         // Streaming has started, so callWithRetry cannot issue another provider request.
-        if (!error.displayed) setMessagesForTab(prev => [...prev, { id: `terminal-${answerRequestId}`, text: error.message, sender: 'ai', timestamp: new Date() }]);
-        setErrorContext({ type: classifyError(error), message: error.message, lastInput: messageToSend });
+        if (!error.displayed) setMessagesForTab(prev => [...prev, { id: `terminal-${answerRequestId}`, text: scrubVendorBrands(error.message), sender: 'ai', timestamp: new Date() }]);
+        setErrorContext({ type: classifyError(error), message: scrubVendorBrands(error.message), lastInput: messageToSend });
         addLog(`AI Error: ${error.message}`, 'error');
         return; // finally clears loading; do not append a misleading second answer.
       }
@@ -713,7 +743,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
       const errType = classifyError(error);
       setErrorContext({
         type: errType,
-        message: error.message || 'Connection failed',
+        message: scrubVendorBrands(error.message || 'Connection failed'),
         lastInput: messageToSend
       });
 
@@ -723,7 +753,11 @@ export function useChatEngine(deps: ChatEngineDeps) {
       
       const errorMessage: Message = {
         id: `reply-${answerRequestId}`,
-        text: "NavBharatAI is temporarily unable to respond. Please try again shortly.",
+        text: chatFailureNotice({
+          status: error?.response?.status ?? (error?.message?.includes('Session expired') ? 401 : error?.message?.includes('Too many requests') ? 429 : undefined),
+          offline: browserOffline(),
+          networkError: errType === 'NETWORK',
+        }).text,
         sender: 'ai',
         timestamp: new Date(),
       };
@@ -733,7 +767,25 @@ export function useChatEngine(deps: ChatEngineDeps) {
       notifyFreeAnswerChanged();
       turn.finished = true;
       turn.controller = null;
+      if (ownsTurn(turn)) {
+        if (!turn.succeeded || turn.stopped) pendingQuestions.current.clear();
+        else setTimeout(() => {
+          if (!mounted.current || !ownsTurn(turn!) || latest.current.activeView !== 'nbi_chat' || turn?.scope!==queueScope(latest.current)) {pendingQuestions.current.clear();return;}
+          const next=pendingQuestions.current.take(queueScope(latest.current));
+          if(next)void sendLatest.current(next).catch(()=>pendingQuestions.current.clear());
+        },0);
+      }
     }
+  };
+  sendLatest.current = text => handleSendForTab('nbi_chat',text,[],true);
+  // Explicit composer action; ordinary duplicate Send remains guarded as before.
+  const queueQuestion = (text = latest.current.input): boolean => {
+    const turn=activeTurnRef.current;
+    if(!mounted.current || !turn || turn.finished || turn.stopped || latest.current.activeView!=='nbi_chat' || turn.scope!==queueScope(latest.current))return false;
+    const accepted=pendingQuestions.current.enqueue(queueScope(latest.current),text);
+    if(accepted){latest.current.setInput('');latest.current.addToast(`Question queued (${pendingQuestions.current.size}/3). It expires after 90 seconds.`, 'info');}
+    else latest.current.addToast('You can queue up to three short text questions.', 'info');
+    return accepted;
   };
 
   const handleSend = async (overrideMessage?: string) => {
@@ -744,6 +796,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
   // STOP — cancel the reply that is streaming right now (admin 2026-08-13). Marks it a deliberate stop so
   // the partial reply is kept (not replaced by an error), aborts the fetch, and clears the busy state.
   const stop = () => {
+    pendingQuestions.current.clear();
     const turn = activeTurnRef.current;
     if (!turn || turn.finished) return;
     turn.stopped = true;
@@ -813,5 +866,5 @@ export function useChatEngine(deps: ChatEngineDeps) {
         ? downscaleImage(file)
         : readFileRaw(file)
     ));
-  return { handleSendForTab, handleSend, stop, unsend };
+  return { handleSendForTab, handleSend, queueQuestion, stop, unsend };
 }

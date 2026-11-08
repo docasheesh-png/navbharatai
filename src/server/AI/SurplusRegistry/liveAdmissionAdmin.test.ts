@@ -33,7 +33,7 @@ function mockDocs(docs: Map<string, unknown>) {
 }
 
 describe('admin manager live admission overlay', () => {
-  it('shows coding quality reviewed via live synthesis when key + builder flag are on', async () => {
+  it('keeps quality unknown when only key, flag and observations exist', async () => {
     vi.stubEnv('SURPLUS_REGISTRY_ENABLED', 'true');
     vi.stubEnv('SURPLUS_REGISTRY_MODELS', 'model-a');
     vi.stubEnv('AGENTV3_SURPLUS_BUILDER', 'true');
@@ -52,13 +52,13 @@ describe('admin manager live admission overlay', () => {
     ]);
     mockDocs(docs);
     const view = await readSurplusObservations();
-    expect(view.liveBuilderAdmission).toBe(true);
-    expect(view.qualitySource).toBe('live_synthesis');
+    expect(view.liveBuilderAdmission).toBe(false);
+    expect(view.qualitySource).toBe('none');
     expect(view.canDispatch).toBe(false);
-    expect(view.models[0]).toMatchObject({ modelId: 'model-a', qualityReviewStatus: 'reviewed' });
-    expect(view.models[0].blockedReasons).not.toContain('coding_quality_unreviewed');
-    expect(view.models[0].blockedReasons).not.toContain('request_time_floor_contract_not_reviewed');
-    expect(view.limitations.some(l => /Live builder admission is ACTIVE/i.test(l))).toBe(true);
+    expect(view.models[0]).toMatchObject({ modelId: 'model-a', qualityReviewStatus: 'unreviewed' });
+    expect(view.models[0].blockedReasons).toContain('coding_quality_unreviewed');
+    expect(view.models[0].blockedReasons).toContain('request_time_floor_contract_not_reviewed');
+    expect(view.limitations.some(l => /Live builder admission is ACTIVE/i.test(l))).toBe(false);
   });
 
   it('stays unreviewed from empty Firestore when live builder is off', async () => {
@@ -101,21 +101,9 @@ describe('approveObservedSurplusModels', () => {
       }],
     ]);
     mockDocs(docs);
-    const result = await approveObservedSurplusModels({
-      reason: 'Owner approved observed Surplus coding offers for Weak builds',
-      confirm: APPROVE_OBSERVED_CONFIRM,
-    });
-    expect(result.approvedModels).toEqual(['model-a']);
-    expect(result.offerPairs).toBe(1);
-    expect(result.qualitySource).toBe('firestore');
-    const saved = docs.get(SURPLUS_REVIEWS_DOC) as { reviews: { quality: unknown[] }; floorContract: { kind: string }; approvalSource: string };
-    expect(saved.approvalSource).toBe('admin-approve-observed');
-    expect(saved.floorContract.kind).toBe('observation-only-provider-request-time-floor');
-    expect(saved.reviews.quality).toHaveLength(1);
-    const view = await readSurplusObservations();
-    expect(view.qualitySource).toBe('firestore');
-    expect(view.models[0].qualityReviewStatus).toBe('reviewed');
-    expect(view.models[0].blockedReasons).not.toContain('coding_quality_unreviewed');
+    await expect(approveObservedSurplusModels({ reason: 'Owner approved observed Surplus coding offers for Weak builds', confirm: APPROVE_OBSERVED_CONFIRM })).rejects.toThrow();
+    expect(docs.has(SURPLUS_REVIEWS_DOC)).toBe(false); // no invented approval or overwrite
+
   });
 
   it('rejects wrong confirm token and short reason before writes', async () => {

@@ -36,10 +36,13 @@
 //
 // PURE. The runner is a STRING built here and executed by the caller in the sandbox.
 
+import { missingLayerFiles } from '../lib/gameRecipeLayers';
+import { scopeMatch, type GameScopeContract } from './gameIntent';
 import { browserScriptRunLine, parseScriptDiagnostic, playwrightImport } from './sandboxBrowserScript';
 import { newPageOptionsExpr } from './signInExplore';
 import { CONSOLE_NOISE, NEVER_PRESS } from './clickExplorer';
 import { GAME_SIGNAL } from './touchPlayableGame';
+import { locatedErrorText } from './runtimeErrorSite';
 
 export const PLAYTEST_RESULT_MARKER = 'NBAI_PLAYTEST:';
 export const PLAYTEST_BUDGET_MS = 60_000;
@@ -102,7 +105,10 @@ export function replayFromCode(files: Record<string, string>): GameCodeFacts {
     if (/\bstartMeta\s*\(/.test(content) || /localStorage\.setItem\([^)]*(best|high|score|level|progress)/i.test(content)) progress = true;
     if (/\b(play again|restart|try again|retry|replay)\b/i.test(content) || /\.restart\s*\(/.test(content)) restart = true;
   }
-  return isDrivingGame(files) ? { progress, restart, driving: true } : { progress, restart };
+  if (!isDrivingGame(files)) return { progress, restart };
+  const cockpit = Object.entries(files || {}).some(([p, c]) => typeof c === 'string' && CODE_FILE.test(p) && !/(^|\/)node_modules\//.test(p)
+    && !/(^|\/)src\/game\/three\/camera\.ts$/.test(p) && /\b(first-person|cockpit|cab ?view|driver view)\b/i.test(c));
+  return cockpit ? { progress, restart, driving: true, cockpit: true } : { progress, restart, driving: true };
 }
 
 /**
@@ -197,6 +203,8 @@ export interface GameCodeFacts {
   restart: boolean;
   /** Present (true) only for a driving game — see `isDrivingGame`. */
   driving?: boolean;
+  /** The game offers a cockpit / first-person view, where a camera inside the vehicle is the design. */
+  cockpit?: boolean;
 }
 
 /** The in-sandbox shell command. PURE. */
@@ -208,11 +216,17 @@ NBAI_EOF
 ${browserScriptRunLine({ toolsDir: TOOLS_DIR, scriptPath: '/tmp/nbai-playtest.mjs', marker: PLAYTEST_RESULT_MARKER })}`;
 }
 
-export function gamePlaytestConfig(previewUrl: string, storageState: string | null = null, startLabels: readonly string[] = []): Record<string, unknown> {
+export function gamePlaytestConfig(previewUrl: string, storageState: string | null = null, startLabels: readonly string[] = [], env: NodeJS.ProcessEnv = process.env): Record<string, unknown> {
   return {
     base: String(previewUrl ?? '').trim(),
+    // Game Engine Ultra Phase 2: a fixed Math.random seed so two playtests of the same game see the same
+    // spawns and layouts. null when AGENTV3_GAME_PLAYTEST_SEED=off.
+    seed: playtestSeed(env),
     marker: PLAYTEST_RESULT_MARKER,
     loadMs: LOAD_MS,
+    // The script's OWN deadline (autopsy 61279465): it reports what it measured, and where it got to,
+    // before the route's outer timeout (budget + 20 s) kills it with nothing to show.
+    budgetMs: PLAYTEST_BUDGET_MS,
     // The "same picture" floor, so the script can tell when the accelerator probe saw nothing move (Q-865).
     stillBelow: STILL_BELOW,
     // How many one-second looks the second accelerator hold may take (Q-869: a 9 s countdown is a working game).
@@ -243,6 +257,13 @@ export function gamePlaytestModule(cfg: Record<string, unknown>, importLine: str
 const cfg = ${JSON.stringify(cfg)};
 const say = (o) => console.log(cfg.marker + JSON.stringify(o));
 const noise = new RegExp(cfg.noise, cfg.noiseFlags);
+
+// Deterministic randomness (Game Engine Ultra Phase 2): Math.random becomes a seeded mulberry32, so the
+// same game is played against the same spawns every run. crypto.getRandomValues is left alone.
+const seedRandom = (seed) => {
+  let a = seed >>> 0;
+  Math.random = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+};
 
 // Frames are counted by DISTINCT timestamps, so a game with three requestAnimationFrame loops is not
 // counted three times; a gap over 100ms is a long frame (a visible hitch).
@@ -289,6 +310,30 @@ const sceneHook = () => {
     walk(sc, 0, false);
     const c = cam.matrixWorld.elements;
     return { t: performance.now(), cam: [c[12], c[14]], camDir: [-c[8], -c[10]], objs };
+  };
+  // IS THE CAMERA INSIDE THE VEHICLE IT FOLLOWS (autopsy 61279465: a chase camera sat inside a 20 m train)?
+  // Tested per mesh in that mesh's OWN space, with the game's own three.js objects, so a rotated train is not
+  // mistaken for its world-aligned box. Returns the enclosing mesh's size in metres, or null.
+  window.__nbCamInside = (id) => {
+    const sc = seen.scene, cam = seen.camera;
+    if (!sc || !cam || !id || typeof sc.getObjectByProperty !== 'function') return null;
+    const v = sc.getObjectByProperty('uuid', id);
+    if (!v) return null;
+    for (let p = cam; p; p = p.parent) if (p === v) return null; // a camera mounted ON the vehicle is a cockpit view
+    const eye = cam.getWorldPosition(cam.position.clone());
+    let found = null;
+    v.traverse((o) => {
+      if (found || !o.isMesh || o.isInstancedMesh || !o.visible || !o.geometry) return;
+      if (!o.geometry.boundingBox && o.geometry.computeBoundingBox) o.geometry.computeBoundingBox();
+      const b = o.geometry.boundingBox;
+      if (!b || !o.matrixWorld) return;
+      const local = eye.clone().applyMatrix4(o.matrixWorld.clone().invert());
+      if (b.containsPoint(local)) {
+        const s = o.getWorldScale(o.position.clone());
+        found = [(b.max.x - b.min.x) * s.x, (b.max.y - b.min.y) * s.y, (b.max.z - b.min.z) * s.z].map((n) => Math.round(n * 10) / 10);
+      }
+    });
+    return found;
   };
 };
 
@@ -568,9 +613,12 @@ async function startUntilSurface(page, already) {
 }
 
 const errors = [];
+// The stack beside each error (Q-2301): the server reads the app's own frame out of it, so the repair is told
+// WHERE the throw is. '' when there is none (a console line carries no stack).
+const errorStacks = [];
 function watch(page) {
-  page.on('pageerror', (e) => errors.push(String(e && e.message || e).slice(0, 160)));
-  page.on('console', (m) => { if (m.type() === 'error' && !noise.test(m.text())) errors.push(m.text().slice(0, 160)); });
+  page.on('pageerror', (e) => { errors.push(String(e && e.message || e).slice(0, 160)); errorStacks.push(String(e && e.stack || '').slice(0, 1200)); });
+  page.on('console', (m) => { if (m.type() === 'error' && !noise.test(m.text())) { errors.push(m.text().slice(0, 160)); errorStacks.push(''); } });
 }
 
 async function hold(page, keys, ms) {
@@ -620,16 +668,28 @@ function framesBetween(before, after, ms) {
 }
 
 const browser = await chromium.launch();
-const out = { ok: true };
+const out = { ok: true, stage: 'loading the game' };
+// THE SCRIPT ENDS ITSELF IN TIME (autopsy 61279465: a heavy 3D train scene ran past the route's 80 s
+// timeout, which killed the browser and left only "timed out" — no stage, no frame rate, nothing to fix).
+// At its own budget it says which stage it reached and how fast the page was drawing, then exits.
+const watchdog = setTimeout(async () => {
+  let fps = null;
+  try { fps = out.fps ?? null; } catch (e) { /* nothing measured yet */ }
+  say({ ok: false, partial: true, stage: out.stage, fps, started: out.started ?? null,
+    error: 'the playtest ran out of time while ' + out.stage + (fps != null ? ' (the page drew ' + fps + ' frames per second)' : '') });
+  process.exit(0);
+}, Math.max(10000, Number(cfg.budgetMs) || 60000));
 try {
   // ── DESKTOP: keyboard + mouse ─────────────────────────────────────────────────────────────────────
   const ctx = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 1280, height: 720 } });
   await ctx.addInitScript(frameCounter);
   await ctx.addInitScript(sceneHook);
+  if (cfg.seed != null) await ctx.addInitScript(seedRandom, cfg.seed);
   const page = await ctx.newPage();
   watch(page);
   await page.goto(cfg.base, { waitUntil: 'load', timeout: cfg.loadMs });
   await page.waitForTimeout(1500);
+  out.stage = 'starting the game';
   out.started = await pressStart(page);
   let box = await surface(page);
   if (!box) {
@@ -658,6 +718,7 @@ try {
   out.fps = Math.round(((f1.frames - f0.frames) * 1000) / Math.max(1, f1.t - f0.t));
   out.longFrames = f1.long - f0.long;
 
+  out.stage = 'driving it with the keyboard';
   const moves = [];
   let prev = b;
   const step = async (label, act) => {
@@ -695,6 +756,10 @@ try {
     const gasMoves = sceneMoves(sg0, sg1);
     const car = pickVehicle(idleMoves, gasMoves);
     vehicleId = car;
+    if (car) {
+      const inside = await page.evaluate((id) => (window.__nbCamInside ? window.__nbCamInside(id) : null), car).catch(() => null);
+      if (inside) out.cameraInside = inside;
+    }
     if (car && sg0 && sg1) {
       // Q-869: where the camera is, relative to where the vehicle is going — read from the scene, not from pixels.
       const m = gasMoves.get(car);
@@ -816,6 +881,7 @@ try {
   await ctx.close();
 
   // ── PHONE: touch only ─────────────────────────────────────────────────────────────────────────────
+  out.stage = 'playing it with touch controls on a phone';
   const m = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const mp = await m.newPage();
   watch(mp);
@@ -860,11 +926,13 @@ try {
   }
   await m.close();
   out.errors = errors.slice(0, 5);
+  out.errorStacks = errorStacks.slice(0, 5);
   out.errorCount = errors.length;
   say(out);
 } catch (e) {
   if (e !== null) say({ ok: false, error: String(e && e.message || e).slice(0, 200) });
 } finally {
+  clearTimeout(watchdog);
   await browser.close();
 }
 `;
@@ -1004,6 +1072,11 @@ export function probeStarvedNote(r: SceneRead | null | undefined, min = PROBE_MI
 export interface PlaytestRun {
   ok: boolean;
   error?: string;
+  /** The size (m) of the vehicle mesh the chase camera sat INSIDE while driving (autopsy 61279465), when it did. */
+  cameraInside?: number[];
+  /** The script hit its own deadline (autopsy 61279465): `stage` says how far it got, `fps` how fast the page drew. */
+  partial?: boolean;
+  stage?: string;
   diagnostic?: string | null;
   started?: string | null;
   spread?: number;
@@ -1034,6 +1107,8 @@ export interface PlaytestRun {
   /** Read from a three.js game's own scene (Q-869): see SceneRead. */
   scene?: SceneRead;
   errors?: string[];
+  /** The stack captured with each of `errors`, same order ('' when none). Absent from an older script's output. */
+  errorStacks?: string[];
   errorCount?: number;
 }
 
@@ -1087,6 +1162,8 @@ export interface PlaytestScore {
   cameraFacesVehicle?: boolean;
   /** A driving game seen from a forward camera whose view panned LEFT when LEFT was held (Q-861). */
   steeringMirrored?: boolean;
+  /** The chase camera sat INSIDE the vehicle's own geometry (autopsy 61279465). */
+  cameraInsideVehicle?: boolean;
 }
 
 /**
@@ -1157,6 +1234,7 @@ export function flowStarvedNote(f: FlowRead | null | undefined): string | null {
   return `the page drew only ${frames} frame(s) to measure, fewer than the ${FLOW_MIN_FRAMES} this reading needs`;
 }
 export const CAMERA_FACES_VEHICLE_FIX = 'Driving forward moves the road UP the screen — the camera sits in front of the vehicle looking back at it, so the player sees its headlights and LEFT looks like RIGHT. Put the camera BEHIND the vehicle (offset along its backward direction, looking along its heading); in the kit, ctx.follow(car) does this.';
+export const CAMERA_INSIDE_VEHICLE_FIX = 'The camera sits INSIDE the vehicle it follows — the player sees the inside of its body instead of the vehicle and the way ahead. Place the camera behind and above the vehicle by its real size (a 20 m train needs far more than a car\'s 6 m); in the kit, CameraRig({ kind: \'chase\' }) with rig.follow(vehicle, dt) sizes itself to the model.';
 export const STEERING_MIRRORED_FIX = 'Holding LEFT turned the view to the RIGHT — the steering is mirrored. LEFT must turn the vehicle to the driver\'s left and RIGHT to the right; in the kit, driveVehicle already does this.';
 
 /**
@@ -1262,7 +1340,9 @@ export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): Playtest
   const cameraFacesVehicle = scene.faces ?? road === -1;
   const forwardCamera = scene.faces === false || (scene.faces === null && road === 1);
   const steeringMirrored = scene.mirrored ?? (forwardCamera && firmFlow(run.steerFlow) === -1);
-  const backwards = cameraFacesVehicle || steeringMirrored;
+  // A chase camera inside the vehicle's own body shows the player the inside of the train (autopsy 61279465).
+  const cameraInsideVehicle = replay.driving === true && replay.cockpit !== true && Array.isArray(run.cameraInside) && run.cameraInside.length === 3;
+  const backwards = cameraFacesVehicle || steeringMirrored || cameraInsideVehicle;
   // A driving game whose accelerator moves nothing cannot score as controllable, whatever else answered — nor one
   // whose controls read backwards to the player.
   const responds = Math.min(stalledVehicle || backwards ? 40 : 100,
@@ -1293,6 +1373,7 @@ export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): Playtest
     ...(stalledVehicle ? { stalledVehicle: true } : {}),
     ...(cameraFacesVehicle ? { cameraFacesVehicle: true } : {}),
     ...(steeringMirrored ? { steeringMirrored: true } : {}),
+    ...(cameraInsideVehicle ? { cameraInsideVehicle: true } : {}),
   };
 }
 
@@ -1383,9 +1464,9 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
   const played = score.respondedTo.length ? `it responded to ${score.respondedTo.join(', ')}` : 'it did not respond to the arrows/WASD, Space or a drag';
   const fpsNote = typeof run.fps === 'number' ? `; ${run.fps} fps in the build sandbox's software renderer (a phone's GPU is faster)` : '';
   const pictureNote = typeof run.brightness === 'number' ? `; picture brightness ${run.brightness}/255, contrast ${run.spread ?? 0}` : '';
-  const errNote = run.errorCount ? `; ${run.errorCount} error(s) while playing: ${(run.errors ?? [])[0] ?? ''}` : '';
+  const errNote = run.errorCount ? `; ${run.errorCount} error(s) while playing: ${firstPlayError(run)}` : '';
   const anyZero = (Object.keys(score.dimensions) as Dimension[]).some((d) => score.dimensions[d] === 0 && d !== 'replay');
-  const ok = score.overall >= PLAYABLE_SCORE && !anyZero && !score.stalledVehicle && !score.cameraFacesVehicle && !score.steeringMirrored;
+  const ok = score.overall >= PLAYABLE_SCORE && !anyZero && !score.stalledVehicle && !score.cameraFacesVehicle && !score.steeringMirrored && !score.cameraInsideVehicle;
   /**
    * 🔴 A PROBE THAT COULD NOT LOOK DOES NOT READ AS A PASS (Q-1038) — `playtestNotRunVerdict`'s own
    * principle, one level down. When the page was starved of frames the steering verdict is null, and a
@@ -1448,6 +1529,7 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
   const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.${starvedNote}`;
   if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: head };
   const fix = score.stalledVehicle ? STALLED_VEHICLE_FIX
+    : score.cameraInsideVehicle ? `${CAMERA_INSIDE_VEHICLE_FIX} (measured: inside a ${(run.cameraInside ?? []).join(' × ')} m part of it)`
     : score.cameraFacesVehicle ? CAMERA_FACES_VEHICLE_FIX
       : score.steeringMirrored ? STEERING_MIRRORED_FIX
         : DIMENSION_FIX[score.weakest];
@@ -1460,4 +1542,107 @@ export function playtestOutcome(code: string | null | undefined): 'passed' | 'fa
   if (c === 'GAME_PLAYTEST_OK') return 'passed';
   if (c === 'GAME_PLAYTEST_ISSUES') return 'failed';
   return 'not-run';
+}
+
+// 🎯 GAME ENGINE ULTRA PHASE 1 — SCOPE MATCH AS EVIDENCE (gameIntent.ts). The playtest answers "can it be
+// played?"; this answers "is it the game that was asked for?" from the code the builder wrote, against the
+// features the request NAMED. Never a gate and never a charge: an info line for the admin timeline.
+export interface GameScopeVerdict { code: 'GAME_SCOPE_OK' | 'GAME_SCOPE_GAP'; severity: 'info'; message: string; autoResolved: true }
+export function gameScopeVerdict(contract: GameScopeContract, files: Record<string, string>): GameScopeVerdict | null {
+  if (!contract || contract.requiredFeatures.length === 0) return null;
+  const m = scopeMatch(contract, files);
+  if (m.missing.length === 0) {
+    return { code: 'GAME_SCOPE_OK', severity: 'info', autoResolved: true, message: `Every feature the request named is in the game's code: ${m.present.join(', ')}.` };
+  }
+  return { code: 'GAME_SCOPE_GAP', severity: 'info', autoResolved: true, message: `The request named ${m.missing.join(', ')}, and the game's own code shows no sign of ${m.missing.length === 1 ? 'it' : 'them'} (found: ${m.present.join(', ') || 'none of the named features'}). Read from code, not played — evidence only.` };
+}
+
+// ─── GAME ENGINE ULTRA PHASE 2 — SEED, NON-CANVAS GAMES, STRUCTURED DEFECTS ─────────────────────────────
+
+/** The fixed seed the playtest gives Math.random. `AGENTV3_GAME_PLAYTEST_SEED=off` → null (the game's own randomness). */
+export const PLAYTEST_SEED = 20261030;
+export function playtestSeed(env: NodeJS.ProcessEnv = process.env): number | null {
+  return String(env.AGENTV3_GAME_PLAYTEST_SEED ?? '').trim().toLowerCase() === 'off' ? null : PLAYTEST_SEED;
+}
+
+/**
+ * A game drawn in the PAGE, not on a canvas (quiz, card, board, word/number puzzle). The canvas playtest
+ * reads pixels of a game surface; it cannot score these, so it must say so rather than stay silent or fake a
+ * score. Read from the contract's genre (gameIntent.ts) and from the code. null = not a DOM game. PURE.
+ */
+export type DomGameKind = 'quiz' | 'card' | 'board' | 'puzzle';
+const DOM_GAME_CODE: ReadonlyArray<[DomGameKind, RegExp]> = [
+  ['quiz', /\b(questions?\s*[:=]|correctAnswer|currentQuestion|quizState)/],
+  ['board', /\b(board\s*[:=]\s*\[|checkWinner|isCheckmate|currentPlayer)/],
+  ['card', /\b(deck\s*[:=]|shuffleDeck|drawCard|dealCards?)/],
+  ['puzzle', /\b(grid\s*[:=]\s*\[|isSolved|checkSolution)/],
+];
+export function domGameKind(files: Record<string, string>, contract?: GameScopeContract | null): DomGameKind | null {
+  if (isCanvasGameProject(files)) return null;
+  const g = contract?.genre;
+  if (g === 'quiz' || g === 'card' || g === 'board' || g === 'puzzle') return g;
+  for (const [path, content] of Object.entries(files || {})) {
+    if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof content !== 'string') continue;
+    if (/(^|\/)src\/(?:game\/(?:core|fx)|audio)\//.test(path)) continue;
+    for (const [kind, re] of DOM_GAME_CODE) if (re.test(content)) return kind;
+  }
+  return null;
+}
+
+/** The honest line for a DOM game the canvas playtest does not play: no score, never a pass. PURE. */
+export function domGameNotPlayedVerdict(kind: DomGameKind): PlaytestVerdict {
+  return {
+    code: 'GAME_PLAYTEST_NOT_RUN', severity: 'info', autoResolved: true, score: null,
+    message: `This ${kind} game is drawn in the page, not on a game canvas, so the canvas playtest did not play it and gave no Game Quality Score. Its buttons are pressed by the click explorer; a ${kind}-specific playthrough is not built yet.`,
+  };
+}
+
+/**
+ * STRUCTURED DEFECT CODES for Phase 3 (repair) to consume — each from a measurement this file already makes
+ * or from an autopsy pattern, never a guess. Evidence only: recorded as one GAME_DEFECTS info line.
+ */
+export type GameDefectCode =
+  | 'GAME_DEFECT_START_STUCK'     // build 46e2d74b / Q-1203: no surface after pressing start
+  | 'GAME_DEFECT_BLANK'           // runs = 0: blank or a single colour (Q-913)
+  | 'GAME_DEFECT_INPUT_IGNORED'   // runs > 0, responds = 0
+  | 'GAME_DEFECT_NO_TOUCH'        // mobile = 0
+  | 'GAME_DEFECT_RUNTIME_ERROR'   // uncaught errors while played
+  | 'GAME_DEFECT_CAMERA_WRONG'    // Q-861: camera faces the vehicle / steering mirrored
+  | 'GAME_DEFECT_VEHICLE_STALLED' // build 46e2d74b: the car never moves
+  | 'GAME_DEFECT_MISSING_LAYER';  // autopsy 6a55d939: imports a kit layer that is not on disk
+export interface GameDefect { code: GameDefectCode; evidence: string }
+
+export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | null, missingLayerPaths: readonly string[] = []): GameDefect[] {
+  const out: GameDefect[] = [];
+  if (run && !run.ok && run.started && /no game surface/i.test(run.error ?? '')) out.push({ code: 'GAME_DEFECT_START_STUCK', evidence: `pressed "${run.started}", no game surface appeared` });
+  if (score) {
+    const d = score.dimensions;
+    if (d.runs === 0) out.push({ code: 'GAME_DEFECT_BLANK', evidence: 'game surface blank or a single colour' });
+    else if (d.responds === 0) out.push({ code: 'GAME_DEFECT_INPUT_IGNORED', evidence: 'picture did not change more with controls than without' });
+    if (d.mobile === 0) out.push({ code: 'GAME_DEFECT_NO_TOUCH', evidence: 'phone drag/tap changed nothing and no on-screen controls' });
+    if (score.cameraFacesVehicle || score.steeringMirrored || score.cameraInsideVehicle) out.push({ code: 'GAME_DEFECT_CAMERA_WRONG', evidence: score.cameraInsideVehicle ? 'the camera sat inside the vehicle\'s own geometry while driving' : score.cameraFacesVehicle ? 'road moved up the screen while driving' : 'view panned left when LEFT was held' });
+    if (score.stalledVehicle) out.push({ code: 'GAME_DEFECT_VEHICLE_STALLED', evidence: 'picture still at idle and with the accelerator held' });
+  }
+  const errs = run ? (run.errorCount ?? run.errors?.length ?? 0) : 0;
+  // The site is appended AFTER the message's own cap, so a long message can never cut the file off (Q-2301).
+  if (run && errs > 0) out.push({ code: 'GAME_DEFECT_RUNTIME_ERROR', evidence: run.errors?.[0] ? firstPlayError(run) : `${errs} error(s)` });
+  if (missingLayerPaths.length > 0) out.push({ code: 'GAME_DEFECT_MISSING_LAYER', evidence: `imports kit files not on disk: ${missingLayerPaths.slice(0, 5).join(', ')}` });
+  return out;
+}
+
+/** The admin line for GAME_DEFECTS ('' when none). PURE. */
+export function gameDefectsMessage(defects: readonly GameDefect[]): string {
+  if (defects.length === 0) return '';
+  return `Game defects measured (evidence, not a gate): ${defects.map((d) => `${d.code} — ${d.evidence}`).join('; ')}.`;
+}
+
+/** The kit layer files the project imports but does not have (gameRecipeLayers.ts). PURE. */
+export function missingKitLayerPaths(files: Record<string, string>): string[] {
+  try { return [...missingLayerFiles(files, new Set(Object.keys(files || {}))).keys()]; } catch { return []; }
+}
+
+/** The first error a playthrough hit, with where it was thrown when its stack names an app file (Q-2301). */
+export function firstPlayError(run: { errors?: string[]; errorStacks?: string[] }): string {
+  const text = String(run.errors?.[0] ?? '').slice(0, 160);
+  return text ? locatedErrorText({ text, stack: run.errorStacks?.[0] }) : '';
 }

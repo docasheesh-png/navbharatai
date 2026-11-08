@@ -799,3 +799,23 @@ describe('atomic exact-model slot ledger', () => {
     expect(Object.keys(occupants(f.state))).toHaveLength(1);
   });
 });
+
+describe('fixed-policy ledger history bounds', () => {
+  it.each([5, 12])('can release an undispatched held reservation after %i recorded attempts', async count => {
+    const f = fixture(undefined, 'fixed-history', 0, NOW, 'fixed-principal', 1);
+    f.updateRequest({ fixedTextChain: 'v1', maxPhysicalAttempts: 12 });
+    const h = await f.reserve(); const path = gatewayLedgerPath('logical', f.key.logicalRequestId);
+    const logical = f.state.docs.get(path) as Record<string, unknown>;
+    expect(logical.fixedTextChain).toBe('v1');
+    f.state.seed(path, { ...logical, attempts: Array.from({ length: count }, (_, i) => ({ physicalAttemptId: `past-${i}`, profileId: `profile-${i}`, outcome: 'definite-failure', failureClass: 'retryable-provider-failure', outputVisible: false })) });
+    await f.ledger.releaseUndispatched(h.reservation, 'cancelled-before-send');
+    expect(f.state.docs.get(path)).toMatchObject({ activeAttemptId: null, heldNanoUsd: 0 });
+  });
+  it('does not expand the legacy history bound or accept an unrecognized policy marker', async () => {
+    for (const marker of [undefined, 'forged']) {
+      const f = fixture(); const h = await f.reserve(); const path = gatewayLedgerPath('logical', f.key.logicalRequestId);
+      f.state.seed(path, { ...(f.state.docs.get(path) as object), ...(marker ? { fixedTextChain: marker } : {}), attempts: Array.from({ length: 5 }, (_, i) => ({ physicalAttemptId: `past-${i}`, profileId: 'profile', outcome: 'definite-failure', failureClass: 'retryable-provider-failure', outputVisible: false })) });
+      await expect(f.ledger.releaseUndispatched(h.reservation, 'cancelled')).rejects.toThrow();
+    }
+  });
+});

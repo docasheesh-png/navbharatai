@@ -1,7 +1,8 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import 'dotenv/config';
-import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
+import { AIProvider, AIProviderResponse, type ProviderUsage } from '../ProviderTypes';
+import { vertexStreamFinished, vertexStreamUsage } from '../streamUsage';
 import { vertexGenAI, vertexProjectId, vertexLocation } from '../../../lib/vertexGenAI';
 
 /** How long one Vertex answer may take before the request is aborted (was a race that left it running). */
@@ -57,7 +58,7 @@ export class VertexProvider implements AIProvider {
                     latencyMs: Date.now() - startTime,
                     provider: 'VERTEX',
                     model: modelName,
-                    usage: readProviderUsage(result.usageMetadata),
+                    usage: vertexStreamUsage(result.usageMetadata),
                 };
             } catch (error: any) {
                 signal?.throwIfAborted();
@@ -89,7 +90,7 @@ export class VertexProvider implements AIProvider {
      * still be charged usage"), so what it buys is the connection closed and the turn ended at once — not
      * a refund of what Google already generated. See `lib/vertexGenAI.ts`.
      */
-    async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, modelName?: string, signal?: AbortSignal): Promise<string> {
+    async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, modelName?: string, signal?: AbortSignal, onUsage?: (usage: ProviderUsage) => void): Promise<string> {
     assertLegacyInferenceAllowed('direct-text-provider');
         const ai = vertexGenAI();
         if (!ai) throw new Error('Vertex AI not configured');
@@ -98,11 +99,16 @@ export class VertexProvider implements AIProvider {
         if (signal) request.config.abortSignal = signal;
         const stream = await ai.models.generateContentStream(request);
         let full = '';
+        let usage: ProviderUsage | undefined;
+        let finished = false;
         for await (const chunk of stream) {
             if (signal?.aborted) break;
+            if (chunk.candidates?.length) finished = chunk.candidates.every(candidate => vertexStreamFinished(candidate.finishReason));
+            usage = vertexStreamUsage(chunk.usageMetadata);
             const text = chunk.text || '';
             if (text) { full += text; onChunk(text); }
         }
+        if (!signal?.aborted && finished && usage) onUsage?.(usage);
         return full;
     }
 

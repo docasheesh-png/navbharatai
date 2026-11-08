@@ -216,7 +216,8 @@ export function previewBridgeSource(source: 'in-browser' | 'live'): string {
     } catch (e) { /* ignore */ }
     return false;
   }
-  // 🌗 THE PANEL'S OWN SWITCH MUST SWITCH TOO (autopsy db07e0af). The design kit follows the device AND obeys a
+  // 🌗 THE PANEL'S OWN SWITCH MUST SWITCH TOO (autopsy db07e0af). The design kit is light unless the app sets (since
+  // 2026-11-02 it no longer follows the device); an app's OWN stylesheet may still follow it and obey a
   // \`dark\` / \`light\` class on <html>. Reporting only "has the dark class" told a phone set to dark that a dark app
   // was light, and turning dark OFF only removed a class the media query did not need — the panel's toggle was
   // the same dead switch the autopsy found in the app. Now the page's real look is reported, and "light" sets

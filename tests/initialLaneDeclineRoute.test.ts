@@ -1,3 +1,4 @@
+import { proSandboxFee, proSandboxFeeFields } from '../src/server/AgentV3/proSandboxFee';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -25,6 +26,7 @@ import { BuildDiagnostics, buildWasStopped, stoppedByUser, outcomeCodeOf, isAppF
 import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict } from '../src/server/AgentV3/buildAbortCause';
 import { buildFindingSuggestions } from '../src/server/AgentV3/buildFindingSuggestions';
 import { buildExceptionDetails } from '../src/server/AgentV3/BuildRequestCoordination';
+import { terminalOutcomeCode, terminalOutcomeRecord } from '../src/server/AgentV3/buildOutcomeSummaries';
 import { SandboxRecoveryUnavailableError } from '../src/server/AgentV3/SandboxRecoveryError';
 import { zeroBillReasonFor } from '../src/server/AgentV3/zeroBillReason';
 import { buildBillingLabel } from '../src/server/AgentV3/buildBillingLabel';
@@ -84,10 +86,11 @@ const integrity = text(integrityAdmission).replace(
 );
 const finishingCall = statementContainingCall('applyFinishingPasses');
 const finishingAdmission = ts.isIfStatement(finishingCall.parent) ? finishingCall.parent : finishingCall;
-const finalOutcome = one(nodes.filter(ts.isIfStatement).filter((n) => text(n.expression) === 'result && result.ok === false' && text(n).includes('OUTCOME_UNEXPLAINED')), 'normal-settle no-outcome branch');
+const finalOutcome = one(nodes.filter(ts.isIfStatement).filter((n) => text(n.expression) === 'result && result.ok === false' && text(n).includes('terminalOutcomeRecord(')), 'normal-settle no-outcome branch');
 const zeroBill = one(nodes.filter(ts.isIfStatement).filter((n) => text(n.expression) === 'expectsArtifacts && builderWroteCount() === 0' && text(n).includes('zeroBillReasonFor(')), 'zero-artifact billing and upsell');
 const finish = statementContainingCall('buildDiag.finish', (n) => text(n).includes('result.ok, result.summary'));
 const billing = statementContainingCall('buildDiag.setBilling');
+const sandboxFeeAssignment = one(nodes.filter(ts.isExpressionStatement).filter(n => text(n.expression) === 'effectiveBilledUsd = settledSandboxFee.totalUsd'), 'settled sandbox fee assignment');
 const providerTokens = statementContainingCall('buildDiag.setProviderTokens');
 const resultEvent = statementContainingCall('emit', (n) => text(n).includes("type: 'result', ...result"));
 const pureFunctions = ['shouldRetryEmptyBuild', 'sessionCostCapUsd'].map((name) => text(one(nodes.filter(ts.isFunctionDeclaration).filter((n) => n.name?.text === name), name)).replace(/^export /, '')).join('\n');
@@ -131,6 +134,8 @@ function program(mutation?: Mutation): string {
     ${outcomeCode}
     let effectiveBilledUsd = result.billedUsd; let zeroBillReason;
     ${text(zeroBill)}
+    ${text(variable('settledSandboxFee'))}
+    ${text(sandboxFeeAssignment)}
     const reconciledProviderUsage = { synthetic: { ...osUsage } };
     ${text(providerTokens)}
     const settledBilledInr = Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100;
@@ -244,11 +249,12 @@ async function runCaller(options: { files: Record<string, string>; replies?: str
     findAmbientShimCollisions, stripCollidingAmbientShims, ambientShimNote, withE2eExcluded, e2eExcludeNote,
     noteFinishingWrite: (path: string) => finishingPaths.add(path), userId: null,
     recheckAfterFinishingWrites, postGreenRecheckEnabled, inBuildGreenAt: options.existingPreview ? 1 : 0,
+    terminalOutcomeCode, terminalOutcomeRecord,
     buildWasStopped, stoppedByUser, outcomeCodeOf, abortCauseOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured,
     buildStarvedItsOutputBudget, providerDegradedMessage,
     // These presentation-only fakes are reached by NON-decline controls, never used to decide admission.
     answerOnlyNow: () => false, assessBuildInput: () => ({ buildable: true }), freeTierUpsellMessage: () => 'SYNTHETIC_UPSELL',
-    interruptedBeforeAnyVerdict, zeroBillReasonFor, buildBillingLabel, chargeRecordFields,
+    interruptedBeforeAnyVerdict, zeroBillReasonFor, buildBillingLabel, chargeRecordFields, proSandboxFee, proSandboxFeeFields,
     usdInrRate: () => 80, email: undefined, isAgentV3FreeUser: () => false, billingActive: true,
     walletDebit: null, decidedRealCostUsd: 1, decidedSandboxUsd: 0, onlyOpus: false, noClaudeBuild: false,
     leakedClaudeProvider: null, projectContinue: {}, buildId: 'synthetic-build', promptHash: 'synthetic-prompt',
@@ -270,7 +276,7 @@ async function runCrash(priorOutcome?: string, err: Error = new Error('Synthetic
     const finalize = vi.spyOn(buildDiagRef, 'finish');
     const env = {
       err, buildExceptionDetails,
-      buildDiagRef, outcomeCodeOf, userFacingReport, initialTerminalDecline: true,
+      buildDiagRef, outcomeCodeOf, userFacingReport, initialTerminalDecline: true, terminalOutcomeCode, terminalOutcomeRecord,
       lastDiagnostics: new Map(), buildKey: 'synthetic-crash', workspaceId: 'synthetic-workspace', userId: null,
       saveDiagnostics: vi.fn(async () => {}), saveDiagnosticsHistory: vi.fn(async () => {}), saveLatestForUser: vi.fn(async () => {}),
     };

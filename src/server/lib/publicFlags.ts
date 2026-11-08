@@ -5,6 +5,7 @@
  */
 import { envFlag } from './envFlag';
 import { freeProgramPausedNow } from './freeProgram';
+import { referralLiveNow } from './referralLive';
 
 export interface PublicFlags {
   walletV2Ui: boolean;
@@ -12,6 +13,8 @@ export interface PublicFlags {
   byoLifecycle: boolean;
   /** The free program is paused: the browser hides every reward / referral / free-token surface. */
   freeProgramPaused: boolean;
+  /** The app-only referral ladder is live (own switch, split from the pause — admin 2026-10-30). */
+  referralLive: boolean;
 }
 
 export function publicFlags(): PublicFlags {
@@ -20,5 +23,6 @@ export function publicFlags(): PublicFlags {
     planModelPro: envFlag('PLAN_MODEL_PRO'),
     byoLifecycle: envFlag('BYO_LIFECYCLE_V1'),
     freeProgramPaused: freeProgramPausedNow(),
+    referralLive: referralLiveNow(),
   };
 }

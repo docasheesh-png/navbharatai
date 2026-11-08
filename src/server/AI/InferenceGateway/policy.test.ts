@@ -90,7 +90,7 @@ function context(r = request(), candidates = [candidate(r)], b: BudgetAuthorizat
   return { input, records, seal };
 }
 function plan(result: PlanningResult): SelectionPlan {
-  expect(result.kind).toBe('plan');
+  expect(result.kind, JSON.stringify(result)).toBe('plan');
   if (result.kind !== 'plan') throw new Error(JSON.stringify(result));
   return result;
 }
@@ -515,5 +515,55 @@ describe('terminal safety and contradictory accounting regressions', () => {
     } }]);
     if (condition === 'stale') c.records.set('price-free-a', { ...c.records.get('price-free-a')!, expiresAtMs: NOW });
     rejected(planInference(c.input), 'price');
+  });
+});
+
+describe('fixed text chain uses approved candidates in owner order', () => {
+  const models = [
+    ['GLM', 'glm-4.5-flash'], ['GLM', 'glm-4.7-flash'], ['GROQ', 'openai/gpt-oss-120b'],
+    ['CLOUDFLARE', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'], ['OPENROUTER', 'unknown-but-reviewed-free'],
+    ['CHEAPERINFERENCE', 'beam'], ['DEEPINFRA', 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'],
+    ['DEEPINFRA', 'deepseek-ai/DeepSeek-V4-Flash-0731'], ['OPENAI', 'gpt-5-nano'], ['GLM', 'glm-4.7-flashx'], ['GEMINI', 'gemini-2.5-flash-lite'],
+  ];
+  function fixed(overrides: Partial<RoutingRequest> = {}) { return request({ fixedTextChain: 'v1', maxPhysicalAttempts: 12, ...overrides }); }
+  function choices(r: RoutingRequest) { return models.map(([providerId, modelId], i) => candidate(r, `rung-${i}`, i >= 5, { providerId, modelId, quotaDimensions: [{ scope: { providerId, kind: 'organization', id: 'shared-org' }, meter: 'requests/day' }] })); }
+  it.each(['chat', 'professional', 'doctor', 'sda'] as const)('orders eligible %s profiles without cheaper-price or latency reordering', surface => {
+    const r = fixed({ surface }); const cs = choices(r); const b = { ...budget(r), allowedProfileIds: cs.map(c => c.profile.id) };
+    for (let i = 0; i < cs.length; i++) expect(plan(planInference(context(r, cs.slice(i).reverse(), b).input)).profileId).toBe(`rung-${i}`);
+  });
+  it('does not replay a failed profile or exclude the next model solely for sharing its provider', () => {
+    const r = fixed({ attempts: [{ physicalAttemptId: 'prior', profileId: 'rung-0', outcome: 'definite-failure', failureClass: 'retryable-provider-failure', outputVisible: false }] });
+    expect(plan(planInference(context(r, choices(r)).input)).profileId).toBe('rung-1');
+  });
+  it('cannot promote an unreviewed/free-looking provider or classify Mitrify as free', () => {
+    const r = fixed();
+    rejected(planInference(context(r, [candidate(r, 'other'), candidate(r, 'mitrify', false, { providerId: 'MITRIFY' })]).input), 'fixed-chain');
+    const health = fixed({ privacy: { ...r.privacy, dataClass: 'health' } });
+    rejected(planInference(context(health, [candidate(health, 'mitrify', true, { providerId: 'MITRIFY' })]).input), 'fixed-chain');
+  });
+  it('retains quality/privacy/evidence gates and paid budget exhaustion', () => {
+    const r = fixed(); const cs = choices(r);
+    rejected(planInference(context(r, [{ ...cs[0], profile: { ...cs[0].profile, qualityApprovals: [] } }]).input), 'quality');
+    rejected(planInference(context(r, [{ ...cs[0], profile: { ...cs[0].profile, privacy: { ...cs[0].profile.privacy, dataClasses: [] } } }]).input), 'privacy');
+    const c = context(r, [cs[0]]); c.records.delete(cs[0].profile.evidenceRef); rejected(planInference(c.input), 'evidence');
+    expect(planInference(context(r, cs.slice(5), { ...budget(r), allowedProfileIds: cs.map(c => c.profile.id), remainingPeriodNanoUsd: 0 }).input).kind).toBe('blocked');
+  });
+  it.each(['builder', 'pro'] as const)('does not enroll excluded %s by attaching a policy marker', surface => {
+    const r = fixed({ surface: surface as RoutingRequest['surface'] });
+    expect(planInference(context(r).input).kind).toBe('blocked');
+  });
+  it.each(requests.filter(c => c.kind !== 'text'))('does not coerce $kind into text', capability => {
+    const r = fixed({ capability }); expect(planInference(context(r).input).kind).toBe('blocked');
+  });
+  it.each([
+    { cancellation: { id: 'cancel', cancelled: true } }, { outputVisible: true },
+    { attempts: [{ physicalAttemptId: 'prior', profileId: 'rung-0', outcome: 'uncertain' as const, outputVisible: false }] },
+    { attempts: [{ physicalAttemptId: 'prior', profileId: 'rung-0', outcome: 'completed' as const, outputVisible: false }] },
+    { attempts: [{ physicalAttemptId: 'prior', profileId: 'rung-0', outcome: 'definite-failure' as const, failureClass: 'safety-refusal' as const, outputVisible: false }] },
+  ])('does not continue after terminal state %j', state => {
+    const r = fixed(state); expect(planInference(context(r, choices(r)).input).kind).toBe('blocked');
+  });
+  it('binds policy selection to request evidence', () => {
+    const c = context(); c.input.request = { ...c.input.request, fixedTextChain: 'v1' }; expect(planInference(c.input)).toMatchObject({ kind: 'blocked', reason: 'evidence' });
   });
 });

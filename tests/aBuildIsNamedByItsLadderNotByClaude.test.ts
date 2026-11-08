@@ -137,8 +137,8 @@ describe('§1 · the chain says what it plans to call — on the real 303e8a6f i
   });
 
   it('a heal and a complex build plan the rung they really open on', () => {
-    expect(buildTurnRunner({ tier: 'weak', noClaude: true, heal: true }).plannedModel).toBe('kimi-k2.7-code');
-    expect(buildTurnRunner({ tier: 'weak', noClaude: true, complex: true }).plannedModel).toBe('kimi-k2.7-code');
+    expect(buildTurnRunner({ tier: 'weak', noClaude: true, heal: true }).plannedModel).toBe('glm-5.3');
+    expect(buildTurnRunner({ tier: 'weak', noClaude: true, complex: true }).plannedModel).toBe('glm-5.3');
   });
 
   it('🔒 a Weak build never plans a Sonnet or Opus model, whatever the options', () => {
@@ -477,7 +477,7 @@ describe('§6 · class census over the route and AgentRunner', () => {
       if (!prop) { clients.push(`NO CLIENT @${lineOf(route, n)}`); return; }
       clients.push(ts.isShorthandPropertyAssignment(prop) ? 'client' : ts.isPropertyAssignment(prop) ? prop.initializer.getText(route).replace(/\s+/g, ' ') : 'OTHER');
     });
-    expect(clients.length).toBe(18);
+    expect(clients.length).toBe(19); // +1 2026-10-30: the game repair (gameRepair.ts), on buildTurnRunner(healRunnerOpts())
     for (const c of clients) expect(c).toMatch(/^(?:buildTurnRunner\(|client$|planGrok \?\? client$)/);
     // …and every sub-agent runs on the main client (SubAgent.ts uses deps.client).
     expect(codeOnlyText(read('src/server/routes/agentv3.ts'))).toContain('client, actuator, workspaceId, state, events, model: requestModel, onlyOpus,');

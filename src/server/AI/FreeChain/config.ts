@@ -1,5 +1,7 @@
+import { CHAT_FIRST_CONTENT_MS } from '../../../lib/chatDeadline';
+import { fixedTextChainEnabled, FIXED_TEXT_CHAIN, FIXED_TEXT_CHAIN_MAX_ATTEMPTS } from '../fixedTextChain';
 import { parseEnvFlag } from '../../lib/envFlag';
-import { cheaperInferenceMode, cheaperInferenceApiKeyConfigured } from '../../lib/cheaperInferencePolicy';
+import { cheaperInferenceMode, cheaperInferenceApiKeyConfigured, cheaperInferenceSharedAccessPermitted } from '../../lib/cheaperInferencePolicy';
 import { usdToNanoUsd, DEFAULT_PAID_CAP_NANO_USD, OWNER_PAID_DAILY_CEILING_NANO_USD, NANO_USD } from './spendCap';
 import { dailyWindow } from './quota';
 import { DEFAULT_ADMISSION_QUEUE_LIMITS } from './admissionQueue';
@@ -39,6 +41,11 @@ export const TERMS_UNVERIFIED_IDS = ['bluesminds', 'requesty'] as const;
  * Free-tier Gemini is no longer in the default order (privacy); Nemotron Nano was removed.
  */
 export const DEFAULT_ORDER = ['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid'] as const;
+/** Default chat routing; explicit OFF remains authoritative at every ingress. */
+export function freeChainEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const value = env.FREE_CHAIN_ENABLED;
+  return value === undefined || value === '' || parseEnvFlag(value) === true;
+}
 export function isPaidRung(id: string): boolean { return (PAID_PROVIDER_IDS as readonly string[]).includes(id); }
 export type ProviderId = typeof PROVIDER_IDS[number];
 export type ReplyLanguage = 'hi' | 'hinglish' | 'en' | 'other';
@@ -58,8 +65,9 @@ export interface FreeChainConfig {
   queue: { maxActive: number; maxQueued: number; maxWaitMs: number; perUserActive: number; perUserQueued: number };
   deepseekPrices: { input: number; output: number; cached: number };
   openRouterModels: string[]; rungs: RungConfig[]; errors: string[];
-  /** Max PHYSICAL provider attempts per turn (owner spec: 3-4). Skipped rungs do not count. */
+  /** Visit the eligible chain before giving up. Skipped rungs do not count as physical attempts. */
   maxAttempts: number;
+  fixedOrder?: boolean;
   /** Spread users across equal-cost free Tier-1 rungs by a stable uid hash (continuity + load spread). */
   stickySpread: boolean;
   /** Per-rung in-flight call limits (0 = no limit). Owner: GLM-4.5 Flash 2, GLM-4.7 Flash 1. */
@@ -67,11 +75,12 @@ export interface FreeChainConfig {
   features: FreeChainFeatures;
 }
 /**
- * Master-plan features. Default ON (owner 2026-10-24); each has an env kill switch (`=off`).
+ * Master-plan features default ON, except routeReorder (owner fixed order, 2026-11-04).
+ * Each has an explicit environment override.
  * A rung without its key is skipped by rungReason, so ON features never break production.
  */
 export interface FreeChainFeatures {
-  concurrency: boolean; router: boolean; stablePrefix: boolean; compactPrompt: boolean;
+  concurrency: boolean; router: boolean; routeReorder: boolean; stablePrefix: boolean; compactPrompt: boolean;
   outputCap: boolean; replyMaxTokens: number; fastMaxTokens: number; historyTrim: boolean; historyTurns: number;
   faqCache: boolean; monthlyCap: boolean; monthlyCapNanoUsd: number; throttle: boolean; throttlePercent: number;
 }
@@ -138,7 +147,8 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
     if (env[name] === undefined || env[name] === '') return fallback;
     const value = parseEnvFlag(env[name]); if (value === null) { errors.push(name); return fallback; } return value;
   }
-  const rawOrder = list(env.FREE_CHAIN_ORDER); const order: string[] = rawOrder.length ? rawOrder : [...DEFAULT_ORDER];
+  const fixedOrder = fixedTextChainEnabled(env);
+  const rawOrder = list(env.FREE_CHAIN_ORDER); const order: string[] = fixedOrder ? FIXED_TEXT_CHAIN.filter(id => id !== 'mitrify') : rawOrder.length ? rawOrder : [...DEFAULT_ORDER];
   if (order.some(p => !PROVIDER_IDS.includes(p as ProviderId)) || new Set(order).size !== order.length) errors.push('FREE_CHAIN_ORDER');
   // The paid rung can be disabled, never promoted above a free rung by configuration.
   // No paid rung may ever sit above a free rung, whatever the order says.
@@ -179,12 +189,13 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
     if (id === 'gemini' && (skipGemini || !privacyApproved)) reason = 'privacy';
     if (blocked && !writtenApproval) reason = 'terms-non-production';
     if (unverified && !writtenApproval) reason = 'terms-unverified';
-    // CheaperInference: one mode CHEAPERINFERENCE=off|admin|all. Config marks the rung usable when
-    // mode is admin|all and a key is set; runtime still restricts admin-mode to verified admins only
-    // (exclusive path) and mode=all to the shared paid ladder. mode=off ⇒ disabled.
+    // CheaperInference: admin = this owner's verified admin replies only.
+    // mode=all would share the key with every Free Chat user. Keak terms §6 forbid that
+    // unless CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION=on. mode=off ⇒ disabled.
     if (id === 'cheapinf') {
       const mode = cheaperInferenceMode(env);
       if (mode === 'off' || !cheaperInferenceApiKeyConfigured(env)) reason = 'disabled';
+      else if (mode === 'all' && !cheaperInferenceSharedAccessPermitted(env)) reason = 'terms-shared-access';
     }
     const paidPrice = PAID_PRICES[id];
     const priceIn = paidPrice ? num(`FREE_CHAIN_${prefix}_PRICE_IN_PER_MTOK`, paidPrice[0], paidPrice[0], 1000, false) : 0;
@@ -198,24 +209,24 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
     return { id, model: allowed ? model : '', key: validKey ? rawKey : '', keyEnv, baseURL, configured: validKey, reason,
       languages: (langs.length ? langs : ['hi', 'hinglish', 'en', 'other']) as ReplyLanguage[],
       maxInputTokens: num(`FREE_CHAIN_${prefix}_MAX_INPUT_TOKENS`, id === 'groq' ? 6000 : 16000, 256, 100000),
-      maxOutputTokens: num(`FREE_CHAIN_${prefix}_MAX_OUTPUT_TOKENS`, 1024, 64, 8192),
+      maxOutputTokens: num(`FREE_CHAIN_${prefix}_MAX_OUTPUT_TOKENS`, id === 'cheapinf' ? 2048 : 1024, 64, 8192),
       rpm: num(`FREE_CHAIN_${prefix}_RPM`, limits[0], 0, 100000), rpd: num(`FREE_CHAIN_${prefix}_RPD`, limits[1], 0, 10000000),
       tpm: num(`FREE_CHAIN_${prefix}_TPM`, limits[2], 0, 100000000), tpd: num(`FREE_CHAIN_${prefix}_TPD`, limits[3], 0, 1000000000),
       // IANA zone handles Pacific daylight saving; Groq defaults conservatively rolling, not guessed midnight.
       timeZone,
       verifiedUntil: Number.isFinite(verifiedUntil) ? verifiedUntil : 0, streamUsage: id === 'gemini' || isPaidRung(id), priceIn, priceOut };
   });
-  const config: FreeChainConfig = { enabled: flag('FREE_CHAIN_ENABLED'), rolloutPercent: num('FREE_CHAIN_ROLLOUT_PERCENT', 0, 0, 100),
+  const config: FreeChainConfig = { enabled: flag('FREE_CHAIN_ENABLED', true) && freeChainEnabled(env), rolloutPercent: num('FREE_CHAIN_ROLLOUT_PERCENT', 100, 0, 100),
     allowUids: list(env.FREE_CHAIN_ALLOW_UIDS), order: order as ProviderId[], skipGemini, privacyApproved,
-    ttftMs: num('FREE_CHAIN_TTFT_MS', 6000, 1000, 90000), cacheEnabled: flag('FREE_CHAIN_CACHE_ENABLED', true), cacheTtlS: num('FREE_CHAIN_CACHE_TTL_S', 86400, 60, 86400),
+    ttftMs: num('FREE_CHAIN_TTFT_MS', CHAT_FIRST_CONTENT_MS, 1000, 90000), cacheEnabled: !fixedOrder && flag('FREE_CHAIN_CACHE_ENABLED', true), cacheTtlS: num('FREE_CHAIN_CACHE_TTL_S', 86400, 60, 86400),
     paidCapNanoUsd: money('FREE_CHAIN_PAID_DAILY_CAP_USD', DEFAULT_PAID_CAP_NANO_USD / NANO_USD, 0, OWNER_PAID_DAILY_CEILING_NANO_USD / NANO_USD),
-    queue: { maxActive: num('FREE_CHAIN_MAX_ACTIVE', 8, 1, 64), maxQueued: num('FREE_CHAIN_MAX_QUEUED', 64, 0, 1000), maxWaitMs: num('FREE_CHAIN_MAX_WAIT_MS', DEFAULT_ADMISSION_QUEUE_LIMITS.maxWaitMs, 100, 10000), perUserActive: num('FREE_CHAIN_PER_USER_ACTIVE', 1, 1, 8), perUserQueued: num('FREE_CHAIN_PER_USER_QUEUED', 1, 0, 16) },
+    queue: { maxActive: num('FREE_CHAIN_MAX_ACTIVE', 8, 1, 64), maxQueued: num('FREE_CHAIN_MAX_QUEUED', DEFAULT_ADMISSION_QUEUE_LIMITS.maxQueued, 0, 1024), maxWaitMs: num('FREE_CHAIN_MAX_WAIT_MS', DEFAULT_ADMISSION_QUEUE_LIMITS.maxWaitMs, 100, 10000), perUserActive: num('FREE_CHAIN_PER_USER_ACTIVE', 1, 1, 8), perUserQueued: num('FREE_CHAIN_PER_USER_QUEUED', 1, 0, 16) },
     paidPerUserDaily: num('FREE_CHAIN_PAID_PER_USER_DAILY', 20, 0, 1000), safetyMargin: num('FREE_CHAIN_QUOTA_MARGIN', .9, .1, .95, false),
     deepseekPrices: { input: num('FREE_CHAIN_DEEPSEEK_PRICE_IN_PER_MTOK', .30, .30, 1000, false), output: num('FREE_CHAIN_DEEPSEEK_PRICE_OUT_PER_MTOK', 1.20, 1.20, 1000, false), cached: num('FREE_CHAIN_DEEPSEEK_PRICE_CACHED_IN_PER_MTOK', .006, .006, 1000, false) },
     openRouterModels: list(env.FREE_CHAIN_OPENROUTER_MODELS), rungs, errors,
-    maxAttempts: num('FREE_CHAIN_MAX_ATTEMPTS', 4, 1, 6), stickySpread: flag('FREE_CHAIN_STICKY_SPREAD'),
+    fixedOrder, maxAttempts: num('FREE_CHAIN_MAX_ATTEMPTS', fixedOrder ? FIXED_TEXT_CHAIN_MAX_ATTEMPTS : order.length, 1, fixedOrder ? FIXED_TEXT_CHAIN_MAX_ATTEMPTS : PROVIDER_IDS.length), stickySpread: !fixedOrder && flag('FREE_CHAIN_STICKY_SPREAD'),
     concurrency: { glm45: num('FREE_CHAIN_GLM45_MAX_CONCURRENT', 2, 0, 64), glm47: num('FREE_CHAIN_GLM47_MAX_CONCURRENT', 1, 0, 64) },
-    features: { concurrency: flag('FREE_CHAIN_CONCURRENCY_ENABLED', true), router: flag('FREE_CHAIN_ROUTER_ENABLED', true),
+    features: { concurrency: flag('FREE_CHAIN_CONCURRENCY_ENABLED', true), router: flag('FREE_CHAIN_ROUTER_ENABLED', true), routeReorder: !fixedOrder && flag('FREE_CHAIN_ROUTE_REORDER_ENABLED'),
       stablePrefix: flag('FREE_CHAIN_STABLE_PREFIX_ENABLED', true), compactPrompt: flag('FREE_CHAIN_COMPACT_PROMPT_ENABLED', true),
       outputCap: flag('FREE_CHAIN_OUTPUT_CAP_ENABLED', true), replyMaxTokens: num('FREE_CHAIN_REPLY_MAX_TOKENS', 250, 64, 4096), fastMaxTokens: num('FREE_CHAIN_FAST_MAX_TOKENS', 80, 32, 1024),
       historyTrim: flag('FREE_CHAIN_HISTORY_TRIM_ENABLED', true), historyTurns: num('FREE_CHAIN_HISTORY_TURNS', 6, 0, 50),

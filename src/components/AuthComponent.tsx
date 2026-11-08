@@ -227,7 +227,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       setPlatform(platform);
       // FREE PROGRAM PAUSED (admin 2026-10-22): no referral box, and it is NOT marked as offered — it must still
       // appear, once, if the program resumes. An unknown state counts as paused (fetchPublicFlags' default).
-      if ((await fetchPublicFlags()).freeProgramPaused) return;
+      if (!(await fetchPublicFlags()).referralLive) return; // split from the pause (admin 2026-10-30)
       if (!alive) return;
       const show = shouldOfferReferralBox({
         platform,

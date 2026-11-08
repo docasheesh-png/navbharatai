@@ -103,7 +103,7 @@ describe('admin-only discounted paid registry', () => {
 
 
 describe('admin approve-observed coding unlock', () => {
-  it('records durable approval with confirm token and never claims canDispatch', async () => {
+  it('verifies existing evidence with confirm token and never claims canDispatch', async () => {
     const { call, response } = setup();
     mocks.approve.mockResolvedValue({ approvedModels: ['glm-5.3'], offerPairs: 1, qualitySource: 'firestore', expiresAt: 9 });
     await call('POST', '/approve-observed', { confirm: 'approve-observed-coding', reason: 'Owner approved observed Surplus coding offers' });
@@ -112,7 +112,7 @@ describe('admin approve-observed coding unlock', () => {
       confirm: 'approve-observed-coding',
     });
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({ ok: true, canDispatch: false, approvedModels: ['glm-5.3'] }));
-    expect(mocks.audit).toHaveBeenCalledWith('ADMIN_SURPLUS_APPROVE_OBSERVED', expect.objectContaining({ admin: 'verified-owner', result: 'ok' }));
+    expect(mocks.audit).toHaveBeenCalledWith('ADMIN_SURPLUS_VERIFY_EVIDENCE', expect.objectContaining({ admin: 'verified-owner', result: 'ok' }));
   });
   it.each([
     { confirm: 'wrong', reason: 'Owner approved observed Surplus coding offers' },
@@ -132,7 +132,7 @@ describe('admin approve-observed coding unlock', () => {
     mocks.approve.mockRejectedValue(new Error('STALE_SNAPSHOT'));
     await call('POST', '/approve-observed', { confirm: 'approve-observed-coding', reason: 'Owner approved observed Surplus coding offers' });
     expect(response.status).toHaveBeenCalledWith(409);
-    expect(mocks.audit).toHaveBeenCalledWith('ADMIN_SURPLUS_APPROVE_OBSERVED_FAILED', expect.objectContaining({ result: 'stale' }));
+    expect(mocks.audit).toHaveBeenCalledWith('ADMIN_SURPLUS_VERIFY_EVIDENCE_FAILED', expect.objectContaining({ result: 'stale' }));
   });
 });
 

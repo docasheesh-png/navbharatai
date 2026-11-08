@@ -78,7 +78,7 @@ describe('🔒 the allowlist stays a deliberate, enumerated list', () => {
     expect(ALLOWED_PASSES.has('design-consistency-heal')).toBe(true);
     expect(ALLOWED_PASSES.has('design-heal-revert')).toBe(true);
     expect([...ALLOWED_PASSES].sort()).toEqual([
-      'design-consistency-heal', 'design-heal-revert', 'explorer-repair', 'feature-presence-heal',
+      'design-consistency-heal', 'design-heal-revert', 'explorer-repair', 'feature-presence-heal', 'game-repair',
       'green-guard-restore', 'reviewer-functional-repair', 'runtime-error-autofix', 'sandbox-file-restore',
       'vaccine-repair',
     ]);

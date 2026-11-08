@@ -147,7 +147,7 @@ export function ImageOptionSelect({ label, heading, options, value, onChange, di
 
       {open && typeof document !== 'undefined' && createPortal((
         <div
-          className="nb-sheet-overlay-flush fixed inset-0 z-50 flex items-end justify-center bg-scrim"
+          className="nb-sheet-overlay-flush fixed inset-0 z-50 flex items-center justify-center bg-scrim nb-modal-safe"
           onClick={() => { setOpen(false); triggerRef.current?.focus(); }}
         >
           <div

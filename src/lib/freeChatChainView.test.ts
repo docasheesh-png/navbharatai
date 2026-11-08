@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { freeChainMetricsFixture, freeChainViewFixture } from '../../tests/freeChatChainFixtures';
 import { adminAuditRow, isAdminAuditEvent } from './adminAuditEvents';
-import { readFreeChainBudgetAction, isFreeChainBudgetResponse, freeChainBudgetFingerprint, freeChainControls, freeChainControlFingerprint, freeChainPercent, freeChainUsd, freeChainTimestamp, isFreeChainAdminMetrics, isFreeChainAdminView, readFreeChainControlAction, validFreeChainReason } from './freeChatChainView';
+import { freeChainConfigurationErrorResponse, isFreeChainConfigurationErrorResponse, readFreeChainBudgetAction, isFreeChainBudgetResponse, freeChainBudgetFingerprint, freeChainControls, freeChainControlFingerprint, freeChainPercent, freeChainUsd, freeChainTimestamp, isFreeChainAdminMetrics, isFreeChainAdminView, readFreeChainControlAction, validFreeChainReason } from './freeChatChainView';
 
 const expectedControls = { enabled: true, rolloutPercent: 0, disabledProviders: [] };
 const action = { enabled: false, reason: 'Investigating provider errors', expectedControls };
@@ -73,20 +73,20 @@ describe('separate on-demand history schema', () => {
 
 describe('durable paid budget action and response schema', () => {
   const budget = { capUsd: 0, expectedRevision: 7, reason: 'Emergency paid fallback stop' };
-  it.each([0, 0.01, 0.29, 2.5, 10])('accepts deliberate bounded USD edits %s', capUsd => {
+  it.each([0, 0.01, 0.29, 2.5, 10, 17])('accepts deliberate bounded USD edits %s', capUsd => {
     expect(readFreeChainBudgetAction({ ...budget, capUsd })).toEqual({ ...budget, capUsd });
   });
-  it.each([null, {}, { capUsd: 10.01 }, { capUsd: -1 }, { capUsd: Infinity }, { capUsd: NaN }, { capUsd: '2' }, { capUsd: 0.001 }, { expectedRevision: undefined }, { expectedRevision: -1 }, { expectedRevision: 0.5 }, { expectedRevision: Number.MAX_SAFE_INTEGER + 1 }, { actorUid: 'spoof' }, { enabled: true }, { reason: 'short' }, { reason: 'x'.repeat(501) }])('rejects malformed budget edit %#', over => {
+  it.each([null, {}, { capUsd: 17.01 }, { capUsd: -1 }, { capUsd: Infinity }, { capUsd: NaN }, { capUsd: '2' }, { capUsd: 0.001 }, { expectedRevision: undefined }, { expectedRevision: -1 }, { expectedRevision: 0.5 }, { expectedRevision: Number.MAX_SAFE_INTEGER + 1 }, { actorUid: 'spoof' }, { enabled: true }, { reason: 'short' }, { reason: 'x'.repeat(501) }])('rejects malformed budget edit %#', over => {
     expect(readFreeChainBudgetAction(over === null ? null : Object.keys(over).length ? { ...budget, ...over } : {})).toBeNull();
   });
   it('validates the confirmed policy revision and amount instead of trusting ok alone', () => {
     expect(isFreeChainBudgetResponse({ ok: true, capUsd: 0, policyRevision: 8 })).toBe(true);
-    for (const body of [{ ok: true }, { ok: true, capUsd: 11, policyRevision: 8 }, { ok: true, capUsd: 0, policyRevision: 0 }]) expect(isFreeChainBudgetResponse(body)).toBe(false);
+    for (const body of [{ ok: true }, { ok: true, capUsd: 18, policyRevision: 8 }, { ok: true, capUsd: 0, policyRevision: 0 }]) expect(isFreeChainBudgetResponse(body)).toBe(false);
   });
   it('validates shared and configured caps and revisions, keeping unknowns nullable', () => {
     const view = freeChainViewFixture();
     expect(isFreeChainAdminView({ ...view, paid: { ...view.paid, policyState: 'uninitialized', capUsd: null, configuredCapUsd: null, policyRevision: null } })).toBe(true);
-    for (const bad of [{ capUsd: 11 }, { configuredCapUsd: 11 }, { policyRevision: -1 }, { policyRevision: 1.1 }, { policyRevision: undefined }, { policyState: undefined }, { policyState: 'uninitialized' }]) expect(isFreeChainAdminView({ ...view, paid: { ...view.paid, ...bad } })).toBe(false);
+    for (const bad of [{ capUsd: 18 }, { configuredCapUsd: 18 }, { policyRevision: -1 }, { policyRevision: 1.1 }, { policyRevision: undefined }, { policyState: undefined }, { policyState: 'uninitialized' }]) expect(isFreeChainAdminView({ ...view, paid: { ...view.paid, ...bad } })).toBe(false);
     expect(freeChainBudgetFingerprint(view)).not.toBe(freeChainBudgetFingerprint({ ...view, paid: { ...view.paid, policyRevision: 2 } }));
     expect(freeChainBudgetFingerprint(view)).not.toBe(freeChainBudgetFingerprint({ ...view, paid: { ...view.paid, configuredCapUsd: 0 } }));
   });
@@ -97,3 +97,23 @@ describe('durable paid budget action and response schema', () => {
     }
   });
 });
+
+describe('separate sanitized configuration diagnosis', () => {
+ it('accepts only the fixed error contract, never as a healthy snapshot', () => {
+  const error=JSON.parse(JSON.stringify(freeChainConfigurationErrorResponse()));
+  expect(isFreeChainConfigurationErrorResponse(error)).toBe(true);expect(isFreeChainAdminView(error)).toBe(false);
+  for(const bad of [null,{}, {...error,fields:['private-env-value']},{...error,fields:[]},{...error,fields:['FREE_CHAIN_ORDER','FREE_CHAIN_ORDER']},{...error,secret:'hidden'},{...error,code:'other'}]) expect(isFreeChainConfigurationErrorResponse(bad)).toBe(false);
+ });
+ it.each(['runtimeEnabled','allowListConfigured','paid','providers'])('still rejects stale success snapshots missing %s', key => {
+  const wire=JSON.parse(JSON.stringify(freeChainViewFixture()));delete wire[key];expect(isFreeChainAdminView(wire)).toBe(false);
+ });
+});
+
+ it('accepts $17 admin status and serializable uncapped mode but rejects unknown modes', () => {
+   const view = freeChainViewFixture();
+   view.paid.capUsd = 17; view.paid.configuredCapUsd = 17;
+   expect(isFreeChainAdminView(view)).toBe(true);
+   view.paid.budgetMode = 'uncapped';
+   expect(isFreeChainAdminView(JSON.parse(JSON.stringify(view)))).toBe(true);
+   expect(isFreeChainAdminView({ ...view, paid: { ...view.paid, budgetMode: 'infinity' } })).toBe(false);
+ });

@@ -51,6 +51,7 @@ import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfter
 import { contractEnumAsConstEnabled, stringEnumsAsConstObjects, contractEnumHeaderLine, contractEnumsSentence } from './contractEnums';
 import { contractRenameHeaderLine, type ContractRename } from './contractRenames';
 import { readWriteOutcomes, type WriteOutcome } from './writeOutcomes';
+import { binaryTextGenerationProblem } from './binaryTextWrite';
 
 
 /**
@@ -505,6 +506,9 @@ export function manifestSystemPrompt(framework: string, scaffoldPaths?: readonly
     '',
     'RULES:',
     '- List EVERY source file the app needs (entry, components, styles, hooks, utils, config it must edit).',
+    '- This lane writes TEXT only. Do not ask it to synthesize JPG/PNG/MP4/fonts or other binary bytes.',
+    '  Use text SVG for original icons, or an already available, real asset/URL. If the app needs NEW binary',
+    '  files, list them honestly: that plan must go to the tool-capable builder to obtain real bytes.',
     `- Edit/replace the scaffolded entry files (${entryFilesHint(framework)}) — do not nest a subfolder.`,
     '- Keep it minimal but COMPLETE — no file the app references should be missing.',
     // SIZE DISCIPLINE (admin 2026-08-02): "minimal" alone is an adjective a weak model reads as optional —
@@ -2234,6 +2238,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         v2Contract = validateManifestContract(manifest.map((m) => m.path), raw);
         if (v2Contract.dropped.length) deps.log?.(`Ignoring ${v2Contract.dropped.length} planned import(s) of files not in the plan: ${v2Contract.dropped.slice(0, 6).join('; ')}.`);
       }
+      // BR1952: a text-only per-file lane cannot obtain binary assets. The writer already
+      // refuses these, but discovering that AFTER generating JPEG bytes burned the whole lane.
+      // Do not silently drop/rename the assets: keep the COMPLETE plan for the tool-capable builder.
+      // Test the plan before folding, so an asset cannot be hidden in another file's purpose.
+      const binaryProblem = binaryTextGenerationProblem(manifest);
+      if (binaryProblem) {
+        plannedFiles = manifest.length;
+        plannedPaths = manifest.map((f) => f.path);
+        throw new Error(binaryProblem);
+      }
       const foldedPlan = foldPlanToBudget(manifest, fileBudgetForPrompt(request));
       if (foldedPlan.folded.length) {
         deps.log?.(foldedPlan.note ?? '');
@@ -2379,6 +2393,13 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           }
           contractFile = { path: contractPath, content: mod.source };
           generatedSoFar.push(contractFile); // salvageable on a timeout, like any finished file
+          // A consumer is told ALREADY WRITTEN. Establish that prerequisite before spending on
+          // consumers, not eight minutes later at salvage (BR1952's unavailable workspace).
+          // The normal final write skips this confirmed identical copy through alreadyThere.
+          const contractSave = await writeAndLearn([contractFile]);
+          if (contractSave.failed.length > 0) {
+            throw new Error('simple-build fast lane stopped early — the shared contract could not be saved to the workspace; consumers were not generated');
+          }
           deps.log?.(`📐 Wrote the shared contract as ${contractPath} — ${mod.symbols.length} shared symbol(s) every file imports from one place.`);
         }
       }
@@ -2470,7 +2491,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           const match = blocks.find((b) => b.path === spec.path) ?? blocks[0];
           if (!match) return null;
           filesDone += 1; // synchronous — safe even with concurrent genOne calls in flight
-          deps.log?.(`✓ ${spec.path} (${filesDone}/${manifest.length})`);
+          deps.log?.(`🧩 Generated ${spec.path} (${filesDone}/${manifest.length}) — not saved yet.`);
           const file = { path: spec.path, content: ensureReactValueImport(spec.path, match.content) };
           const decidedBefore = handOffDecision !== null;
           generatedSoFar.push(file); // mirror outside the closure so a timeout can salvage finished work

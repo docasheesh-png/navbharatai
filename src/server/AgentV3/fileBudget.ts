@@ -82,6 +82,10 @@ export function overBudgetNote(plannedFiles: number, budget: FileBudget): string
   );
 }
 
+// A module can co-locate another module's code. Independently parsed resources cannot:
+// package.json inside tailwind.config.js is NOT a package manifest (BR1952).
+const COLOCATABLE_MODULE = /\.[cm]?[jt]sx?$/i;
+const CONFIG_MODULE = /(?:^|\/)(?:[^/]*\.config\.[^/]+|[.][^/]+rc(?:\.[^/]+)?)$/i;
 const PROTECTED_PLAN_FILE = /^(src\/App\.tsx|src\/main\.tsx|src\/main\.jsx|src\/index\.css|index\.html)$/;
 
 export interface FoldedPlan<T> {
@@ -93,8 +97,9 @@ export interface FoldedPlan<T> {
 
 /**
  * A plan over the ceiling is not dropped and not built as N extra model calls. Entry files stay.
- * Every extra path is named inside the last kept file's purpose, so that one call writes them
- * in place. Nothing the plan asked for is discarded. Pure.
+ * Only co-locatable source modules are named inside the last kept module's purpose. Config,
+ * documents, styles, data and binary assets retain their own paths even if the ceiling cannot
+ * be met: warn rather than move independently parsed resources into an unrelated file. Pure.
  */
 export function foldPlanToBudget<T extends { path: string; purpose: string }>(
   files: readonly T[],
@@ -106,7 +111,7 @@ export function foldPlanToBudget<T extends { path: string; purpose: string }>(
   }
   const protectedIdx: number[] = [];
   const rest: number[] = [];
-  list.forEach((f, i) => (PROTECTED_PLAN_FILE.test(f.path) ? protectedIdx : rest).push(i));
+  list.forEach((f, i) => (PROTECTED_PLAN_FILE.test(f.path) || !COLOCATABLE_MODULE.test(f.path) || CONFIG_MODULE.test(f.path) ? protectedIdx : rest).push(i));
   const room = budget.maxFiles - protectedIdx.length;
   if (room <= 0) {
     return { files: list, folded: [], note: overBudgetNote(list.length, budget) };

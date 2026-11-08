@@ -13912,7 +13912,7 @@ async function noteBuildOutcome(
     // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
     // blank gap during a long/slow step. Best-effort; cleared in `finally`.
     const diagHeartbeatTimer: ReturnType<typeof setInterval> = setInterval(() => {
-      if (rb.ended) return;
+      if (rb.ended || abort.signal.aborted) return;
       try { buildDiagRef?.heartbeat(); } catch { /* diagnostics are best-effort */ }
       // ⏸️ WAITING FOR THE USER IS NOT BUILDING (autopsy 1219c639). Through a ten-minute key popup this
       // line said "Still building… 4 min in · ~3 min to go", and the futility breaker below counted every
@@ -13969,7 +13969,7 @@ async function noteBuildOutcome(
       // Live ETA: every 2nd tick (~2 min) show elapsed + a REVISED remaining time, adapting as the
       // build runs. Honest when it overruns the estimate (no fake "almost done"). Best-effort.
       etaTick += 1;
-      if (etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0) {
+      if (!abort.signal.aborted && etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0) {
         try {
           const now = Date.now();
           const elapsedMs = now - etaStartMs;
@@ -18920,7 +18920,10 @@ async function noteBuildOutcome(
       peakMemoryAtStart = sandboxSessionOf(actuator, workspaceId)
         ? withTimeout(actuator.runCommand(workspaceId, PEAK_MEMORY_PROBE), 5_000, 'peak-memory').then((r) => peakProbeOutcome(r).peak, () => null)
         : Promise.resolve(null);
-      const fastLaneWouldRun = !goldenPreseeded && pastedSeed.size === 0 && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn;
+      // BR1952: a text-only lane cannot repair failed sandbox setup. The tool-capable
+      // builder remains eligible to recover it (as it did in BR1951); no build-wide abort.
+      const fastLaneWouldRun = !sandboxUnavailable && !goldenPreseeded && pastedSeed.size === 0 && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn;
+      if (sandboxUnavailable) buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_SANDBOX', message: 'Workspace setup failed: text-only fast lanes cannot run against an unavailable workspace. The tool-capable builder can check for recovery; text generation cannot make this workspace writable.', autoResolved: true });
       const fastLaneRung = fastLaneWouldRun
         ? (() => {
           try {
@@ -27170,7 +27173,10 @@ async function noteBuildOutcome(
           // the signal is the one source that cannot be wrong — see `interruptedBeforeAnyVerdict`.
           // Kept SEPARATE from `stopped` so the record below can say which it was: "you stopped it" and
           // "our server interrupted it" are different sentences to an admin.
-          const interrupted = !stopped && abort.signal.aborted && interruptedBeforeAnyVerdict(abortCauseOf(abort.signal));
+          // BR1952: an unrecovered workspace is not an engine-capability verdict, even when
+          // the terminal signal is futility rather than a provider outage. This flag was rechecked
+          // against real commands/render evidence above; an initial failure that recovered is allowed.
+          const interrupted = !stopped && (sandboxUnavailable || (abort.signal.aborted && interruptedBeforeAnyVerdict(abortCauseOf(abort.signal))));
           const refused = !stopped && modelAnswer.declined;
           const degraded = !stopped && !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
           // (d) OUR OWN CONFIGURATION (build report 58fe8254, 2026-09-15). A rung that rejects every
@@ -27211,7 +27217,7 @@ async function noteBuildOutcome(
               message: stopped
                 ? 'Did not ask this user to add credits: the build was STOPPED. A stopped build does not establish a capability limit; it is not evidence that adding credits would help.'
                 : interrupted
-                ? `Did not ask this user to add credits: our own platform interrupted this build (${abortCauseOf(abort.signal)}) before any engine could be judged. A deploy, a lock takeover or a cleanup is not a capability limit, and a fuller wallet would have changed nothing.`
+                ? `Did not ask this user to add credits: our workspace or platform prevented this build from establishing an engine capability limit (sandbox unavailable: ${sandboxUnavailable}; abort: ${abortCauseOf(abort.signal)}). A fuller wallet is not a fix for unavailable build infrastructure.`
                 : refused
                 ? 'Did not ask this user to add credits: the engine DECLINED this request and wrote no files — a refusal, or an honest "this cannot be done here" (autopsy 707f8e56: an MP4 video asked of a web-app builder, declined with an HTML5-animation offer). `modelAnswer.declined` does not tell those apart, so neither is called a policy refusal. Either way it is an answer, not a shortfall a stronger engine would fix — no upsell.'
                 : starved

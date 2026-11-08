@@ -236,7 +236,8 @@ describe('runSimpleBuild — the contract file is written FIRST and every file i
         const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
         return `<<<FILE ${path}>>>\nimport { GameStatus } from '${path.includes('components/') ? '../types' : './types'}';\nexport default function X(){return GameStatus.MENU}\n<<<ENDFILE>>>`;
       },
-      writeFiles: async (f: OneShotFile[]) => { written.push(...f); },
+      // Match the real writer: confirmed receipts let the lane avoid rewriting the early contract.
+      writeFiles: async (f: OneShotFile[]) => { written.push(...f); return f.map(file => ({path: file.path, ok: true})); },
       repair: async (...args: unknown[]) => { repairArgs.push(args); return []; },
       ...over,
     };

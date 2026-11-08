@@ -1,3 +1,4 @@
+import { binaryTextGenerationProblem, BINARY_TEXT_GENERATION_PREFIX } from './binaryTextWrite';
 // AgentV3 — OneShot fast lane (additive; the agentic loop is untouched).
 //
 // A simple app (todo, landing, form, small CRUD) does NOT need the full multi-agent ReAct loop
@@ -103,6 +104,7 @@ export function oneShotStillViable(sb: { plannedFiles?: number; reason?: string 
   // The full agentic builder remains the safety net in every case, so declining only ever costs a lane
   // we had measured to be a bad bet.
   if (typeof sb?.reason === 'string' && sb.reason.includes('timed out')) return false;
+  if (sb?.reason?.startsWith(BINARY_TEXT_GENERATION_PREFIX)) return false;
   const planned = sb?.plannedFiles;
   if (typeof planned !== 'number' || !Number.isFinite(planned) || planned <= 0) return true; // never measured
   // ONE file is exactly the case this lane owns. TWO or more is an app a single call truncates.
@@ -121,6 +123,7 @@ export function oneShotSkipReason(sb: { plannedFiles?: number; reason?: string }
       + 'so a single, larger call to the same engine was a worse bet, not an untried one — going straight '
       + 'to the full builder instead of spending another generation call and another two minutes proving it.';
   }
+  if (sb?.reason?.startsWith(BINARY_TEXT_GENERATION_PREFIX)) return 'Skipped the one-shot fast lane: the plan requires binary assets, which need real file tools rather than another text-only call.';
   return `Skipped the one-shot fast lane: the file plan had already found ${sb?.plannedFiles} files, and that `
     + 'lane only fits a single-file app — going straight to the full builder instead of spending a generation '
     + 'call proving it.';
@@ -343,6 +346,8 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
       // rewrites them is dropped, as the fast lane's plan drops them (scaffoldBoilerplate.ts, autopsy 70e030bb).
       const provided = new Set(deps.scaffoldPaths.length ? planProvidedFiles(deps.scaffoldPaths) : []);
       const rawFiles = parseFileBlocks(text);
+      const binaryProblem = binaryTextGenerationProblem(rawFiles);
+      if (binaryProblem) throw new Error(binaryProblem);
       const initialDecline = readInitialLaneDecline(text, rawFiles.length);
       if (initialDecline) throw new InitialLaneDeclinedError(initialDecline);
       const parsed = rawFiles

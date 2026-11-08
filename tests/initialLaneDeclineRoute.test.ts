@@ -219,7 +219,7 @@ async function runCaller(options: { files: Record<string, string>; replies?: str
   const fullRunner = vi.fn(async () => ({ ok: false, summary: 'Synthetic runner retained the fallback category.', steps: 0, usage: accumulatedUsage, billedUsd: billedAmountUsd(accumulatedUsage, 'off') }));
   const env = {
     prompt: 'Build a synthetic note display.', workspaceId: 'synthetic-workspace', framework: 'vite-react',
-    accumulatedUsage, abort, buildDiag, writtenFiles, finishingPaths,
+    accumulatedUsage, abort, buildDiag, writtenFiles, finishingPaths, sandboxUnavailable: false,
     laneFence: fence, runSimpleBuild: runSimple, runOneShot: runOne,
     fastGenerate: generate, fastPreview: preview, fastVerify: verify, fastRepair: repair,
     fastWrite: rawWrite, fastLog: (msg: string) => events.push({ type: 'narration', text: msg }),

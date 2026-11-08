@@ -57,7 +57,7 @@ describe('🔒 WIRING — the upsell asks its question of the complete source', 
 
   it('`interrupted` is read from the abort cause, and only when a user stop did not already explain it', () => {
     expect(route).toContain(
-      'const interrupted = !stopped && abort.signal.aborted && interruptedBeforeAnyVerdict(abortCauseOf(abort.signal));',
+      'const interrupted = !stopped && (sandboxUnavailable || (abort.signal.aborted && interruptedBeforeAnyVerdict(abortCauseOf(abort.signal))));',
     );
   });
 
@@ -67,7 +67,7 @@ describe('🔒 WIRING — the upsell asks its question of the complete source', 
 
   it('…and the suppression is recorded, in its own words', () => {
     expect(route).toContain('if (refused || degraded || misconfigured || starved || stopped || interrupted) {');
-    expect(route).toMatch(/: interrupted\s*\?\s*`Did not ask this user to add credits: our own platform interrupted this build/);
+    expect(route).toMatch(/: interrupted\s*\?\s*`Did not ask this user to add credits: our workspace or platform prevented this build/);
   });
 
   it('the predicate is exhaustive over every abort cause, so a new cause must be placed deliberately', () => {

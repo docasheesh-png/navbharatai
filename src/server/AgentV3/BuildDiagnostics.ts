@@ -251,6 +251,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // …and not starting it for a GAME, which only the full builder's game recipes can build (autopsy 0bb437b4).
   'FAST_LANE_SKIPPED_GAME',
   'FAST_LANE_SKIPPED_IMAGE_APP',
+  'FAST_LANE_SKIPPED_SANDBOX', // BR1952: unavailable infrastructure, never an app defect or repair offer
   // …and the lane HANDING OFF because its chain fell to such a rung mid-lane (autopsy Study-Racer).
   'FAST_LANE_FELL_TO_REASONING_RUNG',
   'FAST_LANE_STAYED_ON_REASONING_RUNG', // Q-926: the lane's stay on a reasoning rung, measured — a fact about OUR routing

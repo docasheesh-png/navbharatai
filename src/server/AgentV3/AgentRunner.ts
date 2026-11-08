@@ -630,7 +630,8 @@ export class AgentRunner {
     const budgetStagesSent = new Set<BudgetStage>();
     // Total tool calls across the whole run — a build that never called a tool built nothing.
     let totalToolUses = 0;
-    // …and of those, the ones that could have PRODUCED something. A build that only ever read a file
+    // …and of those, completed effect-capable tools (or observed partial effects before an error).
+    // An attempted/refused writer is not saved work. A build that only ever read a file
     // has not built anything, however many reads it made — see `toolUseCouldProduceWork`.
     let producingToolUses = 0;
     // Turns whose only tool calls were update_todo (todoOnlyTurn.ts, autopsy 9c612cdb): every one is reported
@@ -960,7 +961,7 @@ export class AgentRunner {
         // watchdog's own message — *your files so far are saved, send another message and I'll continue
         // from here* — was unreachable. The user was blamed AND not told the work had survived.
         // `abortSummary` now carries that recovery line for every cause where it is TRUE, which is what
-        // `totalToolUses > 0` decides: claiming saved work when none was written would be the same
+        // acknowledged effects or existing files decide: claiming saved work when none was written would be the same
         // dishonesty pointing the other way.
         if (this.opts.signal?.aborted) return endAborted();
 
@@ -1527,7 +1528,6 @@ export class AgentRunner {
           return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}), ...(!ok && modelAnswer ? { modelAnswer } : {}) };
         }
         totalToolUses += turn.toolUses.length;
-        producingToolUses += turn.toolUses.filter(toolUseCouldProduceWork).length;
         // 📋 A TURN SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-987: five of 22 turns, 20 s of model time).
         // Measured here, while `llmStartedAt` still times only the model call; handed back below, once.
         const todoOnlyTurn = isTodoOnlyTurn(turn.toolUses.map((tu) => tu.name), tools.map((t) => t.name));
@@ -1625,7 +1625,13 @@ export class AgentRunner {
           };
           const before = changes();
           const result = await dispatchWithBudget(tu);
-          if (loopGuardOn) noteToolEffect(repeatProbe, tu, result, before, changes());
+          const after = changes();
+          // BR1952: requesting bash/write is not evidence of saved work. Failed/refused/queued
+          // tools count only if the real dispatcher observed a partial change before the error.
+          // A known zero-change command is not a file either. Legacy dispatchers without an
+          // observer retain successful opaque-effect semantics; earlier work stays kept.
+          if (toolUseCouldProduceWork(tu) && (before !== null && after !== null ? after > before : result.is_error === false)) producingToolUses += 1;
+          if (loopGuardOn) noteToolEffect(repeatProbe, tu, result, before, after);
           return result;
         };
         const serialIdx: number[] = [];

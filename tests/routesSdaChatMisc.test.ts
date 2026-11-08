@@ -1,4 +1,4 @@
-vi.mock('../src/server/lib/freeAnswerQuota', () => ({ withFreeAnswerQuota: (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(), assertFreeAnswerActive: () => {}, markFreeAnswer: () => {}, freeAnswerSignal: () => undefined }));
+vi.mock('../src/server/lib/freeAnswerQuota', () => ({ withFreeAnswerQuota: (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(), assertFreeAnswerActive: () => {}, markFreeAnswer: () => {}, markFreeAnswerProviderFailure: () => {}, freeAnswerSignal: () => undefined }));
 /**
  * Route handler validation tests — SDA, Chat, Zip, and Anthropic routes.
  *

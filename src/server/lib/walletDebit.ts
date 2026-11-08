@@ -250,6 +250,8 @@ export function isPaidOnlyFeature(feature: unknown): boolean {
 }
 
 export interface WalletRollupTx {
+  /** Trusted server-issued AI dispatch identities, atomically deduplicated across days/restarts. */
+  operationIds?: readonly string[];
   /** Which feature this bucket belongs to — see WalletDebitTx.feature. */
   feature?: WalletFeature;
   /** How far below zero this wallet may go, in ₹. Defaults to the built-in floor — see below. */
@@ -668,11 +670,22 @@ export async function debitWalletRolledUp(
   try {
     const ownerId = await walletOwnerId(db, userId);
     const walletRef = doc(db, 'user_token_wallets', ownerId);
+    const ids = tx.operationIds;
+    if (ids && (!Array.isArray(ids) || ids.length === 0 || ids.length > 64 || new Set(ids).size !== ids.length
+      || ids.some(id => typeof id !== 'string' || !id || id.length > 256))) throw new Error('Invalid AI debit identity');
+    const opRefs = (ids ?? []).map(id => doc(db, WALLET_OPS, walletOpId(userId, 'ai-turn', id)));
     const debited = await runTransaction(db, async (t: any) => {
       const snap = await t.get(walletRef);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
+      const operations = await Promise.all(opRefs.map(ref => t.get(ref)));
+      const settled = operations.filter(op => op.exists()).length;
+      if (settled === opRefs.length && settled > 0) return { applied: false, tokensDebited: 0, wallet: current };
+      if (settled > 0) throw new Error('AI charge overlaps an already settled operation');
       const result = computeRolledUpDebit(current, { ...tx, floorInr: tx.floorInr ?? overdraftFloorInr() }, new Date().toISOString());
-      if (result.applied) t.set(walletRef, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? snap.data() : null, result.wallet, 'wallet-debit'));
+      if (result.applied) {
+        t.set(walletRef, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? snap.data() : null, result.wallet, 'wallet-debit'));
+        for (const [index, ref] of opRefs.entries()) t.set(ref, { kind: 'ai-turn', ownerId, ref: ids![index], billedInr: tx.billedInr, rollupRef: tx.rollupRef });
+      }
       return result;
     });
     if (debited.applied) recordFeatureSpend(tx, userId);

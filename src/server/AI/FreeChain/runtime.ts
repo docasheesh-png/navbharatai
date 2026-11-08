@@ -1,3 +1,4 @@
+import { chatAttemptLimits, watchChatAttempt } from './attemptBudget';
 import { CHAT_SERVER_DEADLINE_MS, CHAT_PROVIDER_ATTEMPT_MS } from '../../../lib/chatDeadline';
 import { FIXED_TEXT_CHAIN, fixedTextChainRank } from '../fixedTextChain';
 import { mitrifyConfig, MitrifyError, runApprovedMitrifyChain } from '../../lib/mitrify';
@@ -37,7 +38,7 @@ import { CHAT_INPUT_WEIGHT } from '../freeTierCostCeiling';
 import { realRateFor } from '../../AgentV3/providerRates';
 import { getBreaker } from '../Router/CircuitBreaker';
 import { acquireSlot, releaseSlot, recordProviderLatency } from '../Router/AIRouter';
-import { runWatchedStream, watchdogLimits } from '../Router/streamWatchdog';
+import { watchdogLimits } from '../Router/streamWatchdog';
 import type { RoutedCall } from '../UniversalAIRouter';
 import type { AIProviderResponse } from '../Router/ProviderTypes';
 import { FreeChainConfigurationError, readFreeChainBudgetAction, type FreeChainBudgetAction, type FreeChainBudgetResponse, FREE_CHAIN_METRICS_SCAN_LIMIT, FREE_CHAIN_PROVIDER_IDS, type FreeChainAdminMetrics, type FreeChainAdminView, type FreeChainControlAction } from '../../../lib/freeChatChainView';
@@ -213,23 +214,34 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     let capacityRounds = 0, triedQuota = false;
     for (;;) {
     const observedCapacity = capacityRevision(); let capacityBusy = false;
-    for (const id of order) {
+    for (const [position, id] of order.entries()) {
       if (input.signal?.aborted || Date.now() >= deadlineAt) return done({ ...empty('aborted'), content: '' });
       if (id === 'mitrify') {
-        const attempt = { provider: id, model: mitrifyConfig().model, reason: 'pending', entered: false }; trace.attempts.push(attempt);
+        // A malformed optional supplier must not take down the later healthy rungs.
+        let model: string;
+        try { model = mitrifyConfig().model; } catch {
+          trace.attempts.push({ provider: id, model: 'unconfigured', reason: 'mitrify-configuration', entered: false });
+          continue;
+        }
+        const attempt = { provider: id, model, reason: 'pending', entered: false }; trace.attempts.push(attempt);
         if (!paidBudgetReady) { attempt.reason = 'paid-budget-unavailable'; continue; }
         if (trace.attempts.filter(a => a.entered).length >= cfg.maxAttempts) { attempt.reason = 'max-attempts'; break; }
         // Preserve classification; server review must cover the exact payload and all required data classes.
         const prepared = trimForRung(input.message, history, system, Number.MAX_SAFE_INTEGER)!;
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), Math.max(0, deadlineAt - Date.now()));
+        const mitrifyLimits = chatAttemptLimits({ firstTokenMs: cfg.ttftMs, idleMs: 30000, hardCapMs: CHAT_PROVIDER_ATTEMPT_MS }, deadlineAt, order.length - position);
+        let timer = setTimeout(() => controller.abort(), mitrifyLimits.firstTokenMs);
         const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal;
         let content = '';
         try {
           const result = await runApprovedMitrifyChain({ db, uid: input.context.uid, requestId: `${requestId}:mitrify`,
-            privateTurn: input.context.privateTurn, healthTurn: input.context.healthTurn, signal, maxHttpAttempts: Math.min(4, cfg.maxAttempts - trace.attempts.filter(a => a.entered).length),
+            privateTurn: input.context.privateTurn, healthTurn: input.context.healthTurn, signal, maxHttpAttempts: 1,
             body: { messages: [{ role: 'system', content: prepared.systemPrompt }, { role: 'user', content: prepared.prompt }], max_tokens: cfg.features.replyMaxTokens, stream: true },
-            onChunk: value => { content += value; input.onChunk?.(value); },
+            onChunk: value => {
+              if (signal.aborted) return;
+              if (value) { clearTimeout(timer); timer = setTimeout(() => controller.abort(), Math.min(30000, Math.max(1, deadlineAt - Date.now()))); }
+              content += value; input.onChunk?.(value);
+            },
             revalidate: async () => {
               const control = await readControls(db, cfg);
               if (!control || control.enabled === false || !cfg.enabled) throw new MitrifyError('MITRIFY_APPROVAL_REVOKED');
@@ -253,6 +265,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         } catch (error) {
           attempt.reason = error instanceof MitrifyError ? error.code.toLowerCase() : 'mitrify-admission-unavailable';
           // Unknown liability, cancellation, or committed output never opens a direct fallback.
+          if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
           if (content) { trace.rung = 'mitrify'; return done({ content: input.onChunk ? content : `${content}\n\nThe response was interrupted. Please try again.`, provider: 'MITRIFY', model: attempt.model, ok: true, reason: 'stalled', latencyMs: 0 }); }
           break;
         } finally { clearTimeout(timer); controller.abort(); }
@@ -384,9 +397,10 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           const firstTokenMs = id === 'cheapinf'
             ? cheapinfFirstTokenMs(exclusiveAdmin, cfg.ttftMs)
             : cfg.ttftMs;
-          const limits = watchdogLimits(undefined, 'free') ?? { firstTokenMs, idleMs: 30000, hardCapMs: CHAT_PROVIDER_ATTEMPT_MS };
-          const watch = await runWatchedStream(execute, chunk => { if (!chunk) return; if (trace.ttftMs === null) trace.ttftMs = Date.now() - started; content += chunk; input.onChunk?.(chunk); },
-            { ...limits, firstTokenMs, hardCapMs: Math.max(1, Math.min(limits.hardCapMs, CHAT_PROVIDER_ATTEMPT_MS, deadlineAt - Date.now())) });
+          const configuredLimits = { ...(watchdogLimits(undefined, 'free') ?? { firstTokenMs, idleMs: 30000, hardCapMs: CHAT_PROVIDER_ATTEMPT_MS }), firstTokenMs };
+          const boundedLimits = { ...configuredLimits, hardCapMs: Math.max(1, Math.min(configuredLimits.hardCapMs, CHAT_PROVIDER_ATTEMPT_MS, deadlineAt - Date.now())) };
+          const limits = cfg.fixedOrder ? chatAttemptLimits(boundedLimits, deadlineAt, order.length - position) : boundedLimits;
+          const watch = await watchChatAttempt(execute, chunk => { if (!chunk) return; if (trace.ttftMs === null) trace.ttftMs = Date.now() - started; content += chunk; input.onChunk?.(chunk); }, limits, controller.signal);
           if (watch.verdict !== 'completed') {
             controller.abort();
             partial = watch.delivered;
@@ -422,7 +436,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           ? `${safe.code.toLowerCase()}${typeof safe.status === 'number' ? `:http=${safe.status}` : ''}${watchdogDetail ? `:${watchdogDetail}` : ''}`
           : 'unavailable';
         if (safe?.code === 'AUTH') warnOnce(`${rung.keyEnv}: authentication failed`);
-        if (!['INVALID_REQUEST', 'SAFETY_REFUSAL', 'ABORTED'].includes(safe?.code ?? '')) {
+        if (!input.signal?.aborted && !['INVALID_REQUEST', 'SAFETY_REFUSAL', 'ABORTED'].includes(safe?.code ?? '')) {
           // Ordinary rungs keep AUTH=1h / QUOTA=1d. Owner exclusive cheapinf caps at 30s so a bad
           // key or empty wallet can be fixed and retried.
           const openReason = attempt.reason; // already auth:http=401 / quota_exhausted:http=402 …
@@ -439,6 +453,8 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           await store.settlePaid(reservation, failedCharge);
           if (monthHold && !monthSettled) { monthSettled = true; await settleMonthly(db, monthHold.month, monthHold.amount, failedCharge); }
         }
+        // Cancellation is final, not an outage notice, breaker failure or a fallback.
+        if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
         // Never release an uncertain paid hold, and never mix replies after text commitment.
         if (partial || content) { trace.rung = id; if (!input.onChunk) content += '\n\nThe response was interrupted. Please try again.'; return done({ content, provider: names[id], model: response?.model ?? rung.model, latencyMs: 0, ok: true, reason: 'stalled' }); }
         if (cfg.fixedOrder && reservation?.mayDispatch && attempt.entered && failedCharge === null) break;
@@ -460,6 +476,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     }
     break;
     }
+    if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
     const lastTtft = [...trace.attempts].reverse().find(a => a.provider === 'cheapinf' && /timeout:/.test(a.reason));
     const ttftCapMs = lastTtft ? Number((/timeout:(?:first-token|idle|hard-cap|stream):(\d+)ms/.exec(lastTtft.reason) ?? [])[1]) : undefined;
     const result = empty('all-failed', input, adminDetailFor(input, 'all-failed', trace.attempts, {

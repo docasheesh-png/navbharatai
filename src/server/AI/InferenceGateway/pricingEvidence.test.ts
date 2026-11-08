@@ -5,14 +5,16 @@ import type { DispatchBinding } from './executor';
 import { realRateFor } from '../../AgentV3/providerRates';
 import { maximumCostNanoUsd, usdToNanoUsd } from '../FreeChain/spendCap';
 import { executeGatewayText, gatewayTextCredentialBinding, gatewayTextPayloadDigest, type GatewayTextInput, type GatewayTextProvider, type GatewayTextTransportConfig } from './textTransport';
-import { createGatewayFreePricingProof, isGatewayFreePricingProof } from './pricingEvidence';
+import { createGatewayMeteredPricingProof, readGatewayMeteredPricingProof, createGatewayFreePricingProof, isGatewayFreePricingProof } from './pricingEvidence';
 import { chatTurnCost, sumChatTurnCosts } from '../../lib/chatSpend';
 import { foldAssistantTurn } from '../../lib/assistantSpendRollup';
-const mocks = vi.hoisted(() => ({ response: undefined as unknown, record: vi.fn(), spend: vi.fn() }));
+const mocks = vi.hoisted(() => ({ response: undefined as unknown, record: vi.fn(), spend: vi.fn(), debit: vi.fn() }));
 vi.mock('../AIRouterManager', () => ({ AIRouterManager: { getRouter: () => ({ routeRaced: async () => ({ response: mocks.response, telemetry: { success: true } }) }) } }));
 vi.mock('./runtime', () => ({ isGatewayRouteSelected: () => true, isGatewayTerminalError: () => false }));
 vi.mock('../../lib/AssistantSpendStore', () => ({ assistantSpendStore: { record: mocks.record } }));
 vi.mock('../../lib/aiSpendZone', () => ({ recordAiSpend: mocks.spend }));
+vi.mock('../../lib/walletDebit', () => ({ debitWalletRolledUp: mocks.debit }));
+import { chargeForAiTurn, chargeForAiTurns } from '../../lib/aiTurnCharge';
 import { callProfessionalAIWithUsage } from '../../lib/professionalRouting';
 const SECRET = 'fake-test-secret-never-retain';
 const ENV = 'GATEWAY_TEST_CREDENTIAL';
@@ -118,5 +120,44 @@ describe('authenticated gateway professional cost reporting', () => {
  it('preserves existing legacy paid and free tariffs', () => {
   expect(chatTurnCost({ provider: 'ANTHROPIC', model: 'claude-sonnet-4-6', inputTokens: 100, outputTokens: 20 }, 85).realUsd).toBeGreaterThan(0);
   expect(chatTurnCost({ provider: 'GLM', model: 'glm-4.7-flash', inputTokens: 100, outputTokens: 20 }, 85)).toMatchObject({ measured: true, realUsd: 0 });
+ });
+});
+
+async function pricedGatewayTurn(streaming = false, cache: number | null = 0) {
+ const original = fixture('DEEPSEEK', true);
+ const input = bind({ ...original, request: { ...original.request, capability: { ...original.request.capability, streaming } }, transport: { ...original.transport, rateCard: { ...original.transport.rateCard!, billingBasis: 'exact-token-tariff' } },
+   ...(streaming ? { onChunk: vi.fn() } : {}) });
+ const packet = { model: input.transport.model, choices: [{ index: 0, message: { content: 'Priced answer' }, delta: { content: 'Priced answer' }, finish_reason: 'stop' }],
+  usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, ...(cache === null ? {} : { prompt_tokens_details: { cached_tokens: cache } }) } };
+ vi.mocked(fetch).mockResolvedValue(new Response(streaming ? `data: ${JSON.stringify(packet)}\n\ndata: [DONE]\n\n` : JSON.stringify(packet), { headers: { 'content-type': streaming ? 'text/event-stream' : 'application/json' } }));
+ const response = await executeGatewayText(input); const proof = createGatewayMeteredPricingProof(response, input.claim);
+ return { input, response, proof, usage: { provider: response.provider, model: response.model, ...response.usage,
+  inferenceGateway: { version: 1 as const, logicalRequestId: input.request.logicalRequestId, accounting: 'separate-ledger' as const }, gatewayPricingProof: proof } };
+}
+describe('measured exact-tariff commercial Gateway charging', () => {
+ it.each([false,true])('prices authenticated buffered/streamed tokens using the existing reviewed tariff and markup (stream=%s)', async streaming => {
+  const f = await pricedGatewayTurn(streaming, 10); expect(f.proof).toBeDefined();
+  const rate = f.input.transport.rateCard!;
+  const expected = (maximumCostNanoUsd(90,20,rate.inputNanoUsdPerMillion,rate.outputNanoUsdPerMillion) + maximumCostNanoUsd(10,0,rate.cachedInputNanoUsdPerMillion!,0)) / 1e9;
+  expect(chatTurnCost(f.usage,85)).toMatchObject({ measured: true, costBasis: 'metered-gateway', realUsd: expected });
+  expect(chatTurnCost({...f.usage,gatewayPricingProof:{...f.proof!}},85).measured).toBe(false);
+  expect(chatTurnCost({...f.usage,inputTokens:101},85).measured).toBe(false);
+  expect(createGatewayMeteredPricingProof({...f.response}, f.input.claim)).toBeUndefined();
+ });
+ it('does not guess a cache discount or certify a ceiling as an exact tariff', async () => {
+  const f = await pricedGatewayTurn(false,null); expect(f.proof).toBeUndefined();
+  expect(chatTurnCost(f.usage,85)).toMatchObject({ measured:false,costBasis:'unpriced-gateway' });
+ });
+ it('binds money to the verified principal and deduplicates repeated turns before one markup/debit', async () => {
+  const f = await pricedGatewayTurn(); mocks.debit.mockResolvedValue({ok:true,tokensDebited:1});
+  await chargeForAiTurns({}, {userId:'principal-1',billableFraction:0.5}, [f.usage,f.usage],85,Date.now(),{AI_WALLET_SPEND:'on'});
+  expect(mocks.debit).toHaveBeenCalledOnce(); expect(mocks.debit.mock.calls[0][2].operationIds).toHaveLength(1);
+  expect(mocks.debit.mock.calls[0][2].billedInr).toBe(chatTurnCost(f.usage,85).billedInr * 0.5);
+  mocks.debit.mockClear();
+  expect(await chargeForAiTurn({}, {userId:'other-user'},f.usage,85,Date.now(),{AI_WALLET_SPEND:'on'})).toMatchObject({charge:false,debited:false});
+  expect(mocks.debit).not.toHaveBeenCalled();
+  for (const ctx of [{userId:'principal-1',hasActivePass:true},{userId:'principal-1',isFreeListed:true},{userId:'principal-1',billableFraction:0}])
+   expect(await chargeForAiTurn({},ctx,f.usage,85,Date.now(),{AI_WALLET_SPEND:'on'})).toMatchObject({charge:false,debited:false});
+  expect(mocks.debit).not.toHaveBeenCalled();
  });
 });

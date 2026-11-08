@@ -74,8 +74,10 @@ function budgetEligible(b: BudgetAuthorization | undefined, r: RoutingRequest, p
     && isIdentifier(b.periodId) && isCount(b.periodStartsAtMs) && isCount(b.periodEndsAtMs)
     && b.periodStartsAtMs <= now && now < b.periodEndsAtMs
     && [b.maxAttemptNanoUsd, b.remainingLogicalRequestNanoUsd, b.remainingPeriodNanoUsd, b.periodLimitNanoUsd].every(isCount)
+    && (b.budgetMode === undefined || b.budgetMode === 'capped' || b.budgetMode === 'uncapped')
     && b.remainingPeriodNanoUsd <= b.periodLimitNanoUsd
-    && ceiling <= Math.min(b.maxAttemptNanoUsd, b.remainingLogicalRequestNanoUsd, b.remainingPeriodNanoUsd);
+    && ceiling <= Math.min(b.maxAttemptNanoUsd, b.remainingLogicalRequestNanoUsd)
+    && (b.budgetMode === 'uncapped' || ceiling <= b.remainingPeriodNanoUsd);
 }
 function evaluate(c: Candidate, input: PlanningInput, requestBinding: string): EvaluatedCandidate | RejectionReason {
   const { request: r, nowMs: now, authority, budget } = input;

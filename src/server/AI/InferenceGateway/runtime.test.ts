@@ -1,3 +1,6 @@
+vi.mock('../../lib/ApiKeyStore', () => ({ apiKeyStore: { findByHash: mocks.apiKey } }));
+import { mitrifyChainBinding } from '../../lib/mitrify';
+import { gatewayMitrifyBody } from './mitrifyTransport';
 import { modelSlotIdentity, modelSlotPath, emptyModelSlotState } from './modelConcurrency';
 /** Offline vertical tests: real issuer, planner, ledger and transport; only Firebase/token/network edges are simulated. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -5,7 +8,7 @@ import type { Request } from 'express';
 import { mockReq, mockRes } from '../../../../tests/helpers/routeTestUtils';
 import { guestDailyQuota } from '../../lib/guestDailyQuota';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
-const mocks = vi.hoisted(() => ({ db: null as unknown, verify: vi.fn(), maintenance: vi.fn() }));
+const mocks = vi.hoisted(() => ({ db: null as unknown, verify: vi.fn(), maintenance: vi.fn(), apiKey: vi.fn() }));
 vi.mock('../../lib/serverDb', () => ({ getServerDb: () => mocks.db }));
 vi.mock('../../lib/authMiddleware', () => ({ verifyFirebaseToken: mocks.verify }));
 vi.mock('../../lib/aiMaintenance', () => ({ assertAiAvailable: mocks.maintenance }));
@@ -16,7 +19,7 @@ vi.mock('google-auth-library', () => ({ GoogleAuth: class {
   async getProjectId() { return 'my-project'; }
 } }));
 import { assertGatewayAccountAccess, currentInferenceGatewayContext, inferenceGatewayEnabled, isGatewayRouteSelected, isGatewayTerminalError,
-  maybeGatewayText, maybeGatewayEmbedding, maybeGatewayGrounding, maybeGatewayVision, maintainGatewayQuotaWindows, runWithAuthenticatedInferenceGatewayRequest, runWithInferenceGatewayContext } from './runtime';
+  runWithApiKeyInferenceGatewayRequest, maybeGatewayText, maybeGatewayEmbedding, maybeGatewayGrounding, maybeGatewayVision, maintainGatewayQuotaWindows, runWithAuthenticatedInferenceGatewayRequest, runWithInferenceGatewayContext } from './runtime';
 import type { InferenceGatewayContext } from './context';
 import { GATEWAY_CATALOG_PATH, GatewayAuthorityStore, type GatewayCatalog } from './authorityStore';
 import { gatewayAccountFencePath, gatewayAccountCooldownPath, gatewayCredentialHealthPath } from './accountMigration';
@@ -40,6 +43,7 @@ function database() {
       const tx = { async get(ref: { path: string }) { if (pending.size) throw new Error('Read after write'); onRead?.(ref.path);
         return { exists: docs.has(ref.path), data: () => copy(docs.get(ref.path)) }; },
       set(ref: { path: string }, value: unknown) { pending.set(ref.path, copy(value)); },
+      update(ref: { path: string }, value: object) { if (!docs.has(ref.path)) throw new Error('Missing update target'); pending.set(ref.path, { ...(pending.get(ref.path) as object ?? docs.get(ref.path) as object), ...copy(value) }); },
       create(ref: { path: string }, value: unknown) { if (docs.has(ref.path) || pending.has(ref.path)) throw new Error('Already exists'); pending.set(ref.path, copy(value)); } };
       const result = await fn(tx as unknown as Transaction); for (const [key, value] of pending) docs.set(key, value); onCommitted?.(pending); return result;
     });
@@ -52,9 +56,9 @@ function context(overrides: Partial<InferenceGatewayContext> = {}): InferenceGat
     qualityTier: 'clinical', dataClass: 'health', funding: 'platform-free-fallback', mode: 'free-first-authorized-paid',
     deadlineAtMs: Date.now() + 90_000, ...overrides };
 }
-function fixture(paid = false, freeProvider: 'GLM' | 'GROQ' = 'GLM', quotaWindowMs = 61000) {
-  const state = database(); const now = Date.now(); const provider = paid ? 'DEEPSEEK' : freeProvider; const legacyProvider = paid ? 'deepseek' : freeProvider.toLowerCase();
-  const model = paid ? 'deepseek-flash' : freeProvider === 'GROQ' ? 'reviewed-groq-model' : 'glm-4.7-flash';
+function fixture(paid = false, freeProvider: 'GLM' | 'GROQ' = 'GLM', quotaWindowMs = 61000, paidProvider: 'DEEPSEEK' | 'OPENAI' | 'MITRIFY' = 'DEEPSEEK') {
+  const state = database(); const now = Date.now(); const provider = paid ? paidProvider : freeProvider; const legacyProvider = provider.toLowerCase();
+  const model = paid ? paidProvider === 'OPENAI' ? 'gpt-5-nano' : paidProvider === 'MITRIFY' ? 'mitrify/auto-cheap' : 'deepseek-flash' : freeProvider === 'GROQ' ? 'reviewed-groq-model' : 'glm-4.7-flash';
   const payer = { kind: 'platform' as const, ownerId: 'reviewed-owner' };
   const quality = { tier: 'clinical' as const, gateId: 'synthetic-clinical-gate', gateVersion: 'v1' };
   const privacy = { dataClass: 'health' as const, policyId: 'synthetic-private-policy', allowedProcessingRegions: ['reviewed-region'], maxRetentionHours: 0, allowTraining: false, allowHumanReview: false };
@@ -64,15 +68,15 @@ function fixture(paid = false, freeProvider: 'GLM' | 'GROQ' = 'GLM', quotaWindow
       maxInputTokens: 4096, maxOutputTokens: 512, maxQueueWaitMs: 5000, firstOutputTimeoutMs: 5000, attemptTimeoutMs: 60_000, logicalLimitNanoUsd: 10_000_000 } },
     profiles: [{ accountCredentialBinding: gatewayTextCredentialBinding('synthetic-secret-never-live'),
       ...(paid ? {} : { freeBillingSafety: { kind: 'intrinsic-zero' as const, evidenceRef: 'reviewed-zero-price', reviewedAtMs: now - 100, expiresAtMs: now + 60_000 } }), canonicalModelId: paid ? 'deepseek-flash-canonical' : freeProvider === 'GROQ' ? 'reviewed-groq-canonical' : 'glm-flash-canonical', profile: { id: 'profile-one', version: 'v1', providerId: provider, modelId: model, modelRevision: 'reviewed-model-v1',
-      adapterId: 'gateway-openai-text-v1', status: 'approved', serviceClass: 'production', product: 'inference-api', surfaces: ['chat'],
+      adapterId: provider === 'MITRIFY' ? 'gateway-mitrify-text-v1' : 'gateway-openai-text-v1', status: 'approved', serviceClass: 'production', product: 'inference-api', surfaces: ['chat'],
       qualityApprovals: [quality], termsApprovals: ['reviewed-terms-v1'], capabilities: [{ kind: 'text', maxInputTokens: 4096, maxOutputTokens: 512, maxContextTokens: 4608, streaming: true, systemPrompt: true }],
       privacy: { dataClasses: ['health'], training: 'none', humanReview: 'none', retentionHours: 0, processingRegions: ['reviewed-region'] }, credentialOwner: payer,
       quotaDimensions: [{ scope: { providerId: provider, kind: 'account', id: 'reviewed-account-one' }, meter: 'requests/day' },
         { scope: { providerId: provider, kind: 'account', id: 'reviewed-account-one' }, meter: 'tokens/minute' }],
       charging: paid ? 'metered' : 'verified-free-no-overage', evidenceRef: 'catalog-reviewed-profile' },
-      transport: { provider, baseURL: paid ? 'https://api.deepseek.com/v1' : freeProvider === 'GROQ' ? 'https://api.groq.com/openai/v1' : 'https://api.z.ai/api/paas/v4', model,
+      transport: { provider, baseURL: paid ? paidProvider === 'OPENAI' ? 'https://api.openai.com/v1' : paidProvider === 'MITRIFY' ? 'https://mitrify.com/v1' : 'https://api.deepseek.com/v1' : freeProvider === 'GROQ' ? 'https://api.groq.com/openai/v1' : 'https://api.z.ai/api/paas/v4', model,
         maxOutputTokens: 512, timeoutMs: 60_000, streamUsage: true, credentialEnv: 'INFERENCE_GATEWAY_TEST_CREDENTIAL', credentialBinding: gatewayTextCredentialBinding('synthetic-secret-never-live'),
-        ...(paid ? { rateCard: { version: 'reviewed-rate-v1', inputNanoUsdPerMillion: 300_000_000, outputNanoUsdPerMillion: 1_200_000_000,
+        ...(paid ? { rateCard: provider === 'MITRIFY' ? { version: 'reviewed-inclusive-ceiling-v1', inputNanoUsdPerMillion: 0, outputNanoUsdPerMillion: 0, supplierPerHttpRequestCeilingNanoUsd: 1000000, verifiedAtMs: now - 100, expiresAtMs: now + 60000 } : { version: 'reviewed-rate-v1', inputNanoUsdPerMillion: 300_000_000, outputNanoUsdPerMillion: 1_200_000_000,
           cachedInputNanoUsdPerMillion: 6_000_000, verifiedAtMs: now - 100, expiresAtMs: now + 60_000 } } : {}) },
       availability: { coolingUntilMs: 0, predictedQueueMs: 0, predictedFirstOutputMs: 10, predictedCompletionMs: 100 }, legacyProvider, migrationId: 'reviewed-migration-v1',
       review: { account: 'account-review', terms: 'terms-review', quality: 'quality-review', privacy: 'privacy-review', capability: 'capability-review', pricing: 'pricing-review' },
@@ -992,4 +996,171 @@ describe('fixed policy real issuer and transport', () => {
     vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); fixture(); network.mockRejectedValue(new Error('connection lost'));
     await expect(run()).rejects.toThrow(); expect(network).toHaveBeenCalledOnce();
   });
+});
+
+function professionalSupplierFixture() {
+  const f = fixture(true, 'GLM', 61000, 'OPENAI');
+  f.catalog.professionalScope = { id: 'professional-supplier-pool', ownerId: f.catalog.platformScope.ownerId };
+  f.catalog.policies['professional:teacher_ai'] = { ...f.catalog.policies['chat:text'], surface: 'professional', funding: 'existing-professional' };
+  f.catalog.profiles[0].profile.surfaces = ['professional'];
+  f.docs.set('professional_inference/paid_budget_policy', structuredClone(f.docs.get('free_chat_chain/paid_budget_policy')));
+  network.mockResolvedValue(new Response(JSON.stringify({ model: 'gpt-5-nano', choices: [{ message: { content: 'Professional answer' }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 20 } }), { headers: { 'content-type': 'application/json' } }));
+  return f;
+}
+const professionalContext = () => context({ surface: 'professional', policyKey: 'professional:teacher_ai', funding: 'existing-professional' });
+describe('separate atomic professional supplier funding', () => {
+  it('honors the reviewed professional budget without inherited free-pool dollar or user-attempt caps', async () => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); const f = professionalSupplierFixture();
+    vi.stubEnv('FREE_CHAIN_PAID_DAILY_CAP_USD', 'invalid-free-pool-config');
+    network.mockImplementation(async () => new Response(JSON.stringify({ model: 'gpt-5-nano', choices: [{ message: { content: 'Professional answer' }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 20 } }), { headers: { 'content-type': 'application/json' } }));
+    f.docs.set('professional_inference/paid_budget_policy', { ...(f.docs.get('professional_inference/paid_budget_policy') as object), capNanoUsd: 100_000_000_000 });
+    f.catalog.policies['professional:teacher_ai'].logicalLimitNanoUsd = 20_000_000_000;
+    expect(await run(professionalContext())).toMatchObject({ ok: true });
+    const counterPath = [...f.docs.keys()].find(path => path.startsWith('professional_inference/paid_user_'))!;
+    f.docs.set(counterPath, { ...(f.docs.get(counterPath) as object), requests: 20 });
+    expect(await run(professionalContext())).toMatchObject({ ok: true });
+    expect(f.docs.get(counterPath)).toMatchObject({ requests: 21 });
+    expect(network).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses the professional pool with real issuer/planner/ledger/transport, never the free-chat pool', async () => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); const f = professionalSupplierFixture();
+    const freeBefore = structuredClone(f.docs.get('free_chat_chain/paid_budget_policy'));
+    expect(await run(professionalContext())).toMatchObject({ ok: true, provider: 'OPENAI', model: 'gpt-5-nano' });
+    const day = civilDayWindow(Date.now(), 'Asia/Kolkata');
+    expect(f.docs.get(`professional_inference/paid_day_${day.key}`)).toMatchObject({ pending: 1, spentNanoUsd: 0, heldNanoUsd: expect.any(Number) });
+    expect((f.docs.get(`professional_inference/paid_day_${day.key}`) as any).heldNanoUsd).toBeGreaterThan(0);
+    expect(f.docs.has(`free_chat_chain/paid_day_${day.key}`)).toBe(false);
+    expect(f.docs.get('free_chat_chain/paid_budget_policy')).toEqual(freeBefore);
+    expect([...f.docs.keys()].filter(path => path.startsWith('professional_inference/paid_user_'))).toHaveLength(1);
+  });
+  it.each(['missing', 'zero', 'same-scope'] as const)('cannot borrow the free-chat pool when professional authority is %s', async kind => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); const f = professionalSupplierFixture();
+    if (kind === 'missing') f.docs.delete('professional_inference/paid_budget_policy');
+    if (kind === 'zero') f.docs.set('professional_inference/paid_budget_policy', { ...(f.docs.get('professional_inference/paid_budget_policy') as object), capNanoUsd: 0 });
+    if (kind === 'same-scope') f.catalog.professionalScope = { ...f.catalog.platformScope };
+    await expect(run(professionalContext())).rejects.toMatchObject({ code: 'INFERENCE_GATEWAY_TERMINAL' });
+    expect(network).not.toHaveBeenCalled(); expect([...f.docs.keys()].filter(p => /paid_day_/.test(p))).toHaveLength(0);
+  });
+});
+function mitrifyFixture(approve = true, streaming = false) {
+  vi.stubEnv('MITRIFY_CHAIN_ENABLED', '1'); vi.stubEnv('MITRIFY_API_KEY', 'synthetic-secret-never-live');
+  const f = fixture(true, 'GLM', 61000, 'MITRIFY'); const now = Date.now();
+  const body = gatewayMitrifyBody({ prompt: 'Hello', systemPrompt: 'Keep the complete instructions.', streaming }, 512);
+  const binding = mitrifyChainBinding('verified-user', body);
+  if (approve) f.docs.set(`mitrify_chain_approvals/${binding.id}`, { kind: 'mitrify-exact-data-approval-v2', uid: 'verified-user', state: 'approved', payloadDigest: binding.payloadDigest, gateway: binding.gateway,
+    dataReview: { entirePayloadReviewed: true, approvedDataClasses: ['private', 'health'], gatewayAndAllDownstreamProcessorsReviewed: true, reviewRef: 'synthetic-review', disclosureAuthorityRef: 'synthetic-disclosure', processorTermsRef: 'synthetic-terms', protectionsRef: 'synthetic-protections' },
+    supplierContract: { currency: 'USD', hardCeilingEnforced: true, includesInternalRetriesFailoversAndFees: true, evidenceRef: 'synthetic-test-contract-not-real-pricing', perHttpRequestCeilingNanoUsd: 1000000 }, reviewedAtMs: now - 100, expiresAtMs: now + 60000 });
+  network.mockResolvedValue(new Response(JSON.stringify({ model: 'mitrify/auto-cheap', choices: [{ index: 0, message: { content: 'Reviewed Mitrify answer' }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 20 } }), { headers: { 'content-type': 'application/json' } }));
+  return { ...f, approvalPath: `mitrify_chain_approvals/${binding.id}` };
+}
+describe('Mitrify vertical integration, no separate legacy spend reservation', () => {
+  it('claims exact private/health approval once and settles the ONE gateway hold at the reviewed ceiling', async () => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); const f = mitrifyFixture();
+    expect(await run()).toMatchObject({ ok: true, provider: 'MITRIFY', model: 'mitrify/auto-cheap', content: 'Reviewed Mitrify answer' });
+    expect(network).toHaveBeenCalledOnce(); expect(f.docs.get(f.approvalPath)).toMatchObject({ state: 'claimed', attemptsStarted: 1, maxHttpAttempts: 1 });
+    const day = civilDayWindow(Date.now(), 'Asia/Kolkata');
+    expect(f.docs.get(`free_chat_chain/paid_day_${day.key}`)).toMatchObject({ heldNanoUsd: 0, pending: 0, spentNanoUsd: 1000000, requests: 1 });
+    expect([...f.docs.values()].filter((v: any) => v.kind === 'gateway_attempt')).toHaveLength(1);
+    // The approval is one-use even though the initial request completed successfully.
+    network.mockClear(); await expect(run()).rejects.toMatchObject({ code: 'INFERENCE_GATEWAY_TERMINAL' }); expect(network).not.toHaveBeenCalled();
+  });
+  it.each(['missing', 'wrong-payload', 'wrong-credential', 'health-not-reviewed', 'ceiling-unreviewed'] as const)('does not reserve or send an unapproved %s turn', async kind => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); const f = mitrifyFixture(kind !== 'missing');
+    if (kind !== 'missing') {
+      const approval = f.docs.get(f.approvalPath) as any;
+      if (kind === 'wrong-payload') approval.payloadDigest = 'changed';
+      if (kind === 'wrong-credential') approval.gateway.credentialBinding = 'wrong-binding';
+      if (kind === 'health-not-reviewed') approval.dataReview.approvedDataClasses = ['private'];
+      if (kind === 'ceiling-unreviewed') approval.supplierContract.hardCeilingEnforced = false;
+    }
+    await expect(run()).rejects.toMatchObject({ code: 'INFERENCE_GATEWAY_TERMINAL' }); expect(network).not.toHaveBeenCalled();
+    expect([...f.docs.keys()].filter(path => path.includes('paid_day_'))).toHaveLength(0);
+  });
+});
+
+describe('fixed guest Repo Analyst has scoped one-use admission', () => {
+  const principalId = 'nb-free-guest:11111111-1111-4111-8111-111111111111';
+  async function guestAdmission(surface: 'chat' | 'repo-analyst') {
+    mocks.verify.mockResolvedValue(null);
+    const request = mockReq({ body: { message: 'explain the repository' }, headers: { 'x-nb-guest': '11111111-1111-4111-8111-111111111111', 'x-forwarded-for': '203.0.113.9' } });
+    const res = mockRes(); const next = vi.fn(); await guestDailyQuota(surface, { identify: async () => null, store: { consume: async () => ({ allow: true, remaining: 9, durablePrincipalId: principalId }) } })(request, res, next);
+    expect(next).toHaveBeenCalledOnce(); return { request, res };
+  }
+  function repoContext(overrides: Partial<InferenceGatewayContext> = {}) {
+    return context({ principalId, tenantId: principalId, surface: 'professional', policyKey: 'mode:repo-analyst:chat', ...overrides });
+  }
+  async function execute(request: Request, overrides: Partial<InferenceGatewayContext> = {}) {
+    return runWithAuthenticatedInferenceGatewayRequest(request, (_uid, guest) => runWithInferenceGatewayContext(repoContext({ deadlineAtMs: Math.min(Date.now() + 90000, guest?.expiresAtMs ?? Date.now() + 90000), ...overrides }), () => maybeGatewayText({ prompt: 'Hello', systemPrompt: 'Keep the complete instructions.' })));
+  }
+  function setup() { vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'off'); const f = fixture(); f.catalog.policies['mode:repo-analyst:chat'] = { ...f.catalog.policies['chat:text'], surface: 'professional' }; f.catalog.profiles[0].profile.surfaces = ['professional']; return f; }
+  it('runs an admitted guest even when old cohorts exclude everyone, without account ownership', async () => {
+    setup(); const { request } = await guestAdmission('repo-analyst');
+    expect(await execute(request)).toMatchObject({ ok: true, model: 'glm-4.7-flash' }); expect(network).toHaveBeenCalledOnce();
+    await expect(execute(request)).rejects.toMatchObject({ reason: 'context-unverified' });
+  });
+  it.each(['chat-receipt', 'another-specialist', 'professional-payer', 'expired'] as const)('does not let %s escape the guest boundary', async kind => {
+    setup(); const { request, res } = await guestAdmission(kind === 'chat-receipt' ? 'chat' : 'repo-analyst');
+    const overrides = kind === 'another-specialist' ? { policyKey: 'professional:teacher_ai' } : kind === 'professional-payer' ? { funding: 'existing-professional' as const } : {};
+    if (kind === 'expired') res.emit('close');
+    await expect(execute(request, overrides)).rejects.toMatchObject({ reason: 'context-unverified' }); expect(network).not.toHaveBeenCalled();
+  });
+});
+
+describe('Mitrify stream commits and cancellation', () => {
+  const packet = (content: string, finish_reason: string | null = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content }, finish_reason }] })}\n\n`;
+  it('does not switch, replay, or label a partial stream complete', async () => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); const f = mitrifyFixture(true, true); const chunks: string[] = [];
+    network.mockResolvedValue(new Response(packet('Only this prefix'), { headers: { 'content-type': 'text/event-stream' } }));
+    const result = await runWithAuthenticatedInferenceGatewayRequest(req, () => runWithInferenceGatewayContext(context(), () => maybeGatewayText({ prompt: 'Hello', systemPrompt: 'Keep the complete instructions.', onChunk: text => { chunks.push(text); } })));
+    expect(result).toMatchObject({ reason: 'stalled', content: 'Only this prefix' }); expect(chunks).toEqual(['Only this prefix']); expect(network).toHaveBeenCalledOnce();
+    const day = civilDayWindow(Date.now(), 'Asia/Kolkata'); expect(f.docs.get(`free_chat_chain/paid_day_${day.key}`)).toMatchObject({ pending: 1, heldNanoUsd: 1000000, spentNanoUsd: 0 });
+  });
+  it('abort after dispatch suppresses late output and retains supplier liability', async () => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); const f = mitrifyFixture(true, true); const c = new AbortController(); const chunks: string[] = [];
+    let wire: ReadableStreamDefaultController<Uint8Array> | undefined;
+    network.mockResolvedValue(new Response(new ReadableStream({ start(controller) { wire = controller; } }), { headers: { 'content-type': 'text/event-stream' } }));
+    const pending = runWithAuthenticatedInferenceGatewayRequest(req, () => runWithInferenceGatewayContext(context({ signal: c.signal }), () => maybeGatewayText({ prompt: 'Hello', systemPrompt: 'Keep the complete instructions.', onChunk: text => { chunks.push(text); } })));
+    await vi.waitFor(() => expect(network).toHaveBeenCalledOnce()); c.abort(); await expect(pending).rejects.toMatchObject({ code: 'INFERENCE_GATEWAY_TERMINAL' });
+    try { wire?.enqueue(new TextEncoder().encode(packet('Late output'))); wire?.close(); } catch { /* Reader cancellation can close the source. */ }
+    await new Promise(resolve => setTimeout(resolve, 0)); expect(chunks).toEqual([]); expect(network).toHaveBeenCalledOnce();
+    const day = civilDayWindow(Date.now(), 'Asia/Kolkata'); expect(f.docs.get(`free_chat_chain/paid_day_${day.key}`)).toMatchObject({ pending: 1, heldNanoUsd: 1000000, spentNanoUsd: 0 });
+  });
+});
+
+describe('developer API key authenticated chain boundary', () => {
+  const apiReq = mockReq({ headers: { 'x-api-key': 'nbai_offline_fixture' }, body: { uid: 'forged-user' } });
+  const enter = () => runWithApiKeyInferenceGatewayRequest(apiReq, { uid: 'verified-user', keyId: 'reviewed-key', scopes: ['ai:chat'] }, uid => runWithInferenceGatewayContext(context({ principalId: uid!, tenantId: uid!, surface: 'developer-api', policyKey: 'developer-api:text', funding: 'existing-professional' }), () => maybeGatewayText({ prompt: 'Hello', systemPrompt: 'Keep the complete instructions.' })));
+  function setup() { vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'off'); const f = professionalSupplierFixture(); f.catalog.policies['developer-api:text'] = { ...f.catalog.policies['professional:teacher_ai'], surface: 'developer-api' }; f.catalog.profiles[0].profile.surfaces = ['developer-api']; return f; }
+  it('uses the real issuer/ledger/transport and separate supplier budget, not Firebase/body UID', async () => {
+    const f = setup(); mocks.verify.mockResolvedValue(null); mocks.apiKey.mockResolvedValue({ userId: 'verified-user', keyId: 'reviewed-key', scopes: ['ai:chat'] });
+    expect(await enter()).toMatchObject({ ok: true, model: 'gpt-5-nano' }); expect(mocks.verify).not.toHaveBeenCalled(); expect(network).toHaveBeenCalledOnce();
+    expect([...f.docs.keys()].some(p => p.startsWith('professional_inference/paid_day_'))).toBe(true);
+    expect([...f.docs.keys()].some(p => p.startsWith('free_chat_chain/paid_day_'))).toBe(false);
+  });
+  it.each(['revoked', 'wrong-user', 'wrong-key', 'wrong-scope'] as const)('does not dispatch using %s API identity', async kind => {
+    setup(); mocks.apiKey.mockResolvedValue(kind === 'revoked' ? null : { userId: kind === 'wrong-user' ? 'forged-user' : 'verified-user', keyId: kind === 'wrong-key' ? 'other-key' : 'reviewed-key', scopes: kind === 'wrong-scope' ? ['read:profile'] : ['ai:chat'] });
+    await expect(enter()).rejects.toMatchObject({ reason: 'context-unverified' }); expect(network).not.toHaveBeenCalled();
+  });
+});
+
+describe('uncapped authority issuer through real dispatch', () => {
+ it('preserves explicitly uncapped professional authority even with a zero nominal day cap', async () => {
+  vi.stubEnv('TEXT_CHAIN_POLICY','fixed-v1'); const f=professionalSupplierFixture();
+  f.docs.set('professional_inference/paid_budget_policy',{...(f.docs.get('professional_inference/paid_budget_policy') as object),capNanoUsd:0,budgetMode:'uncapped'});
+  expect(await run(professionalContext())).toMatchObject({ok:true}); expect(network).toHaveBeenCalledOnce();
+ });
+});
+
+describe('professional exact-tariff proof survives real Gateway runtime',()=>{
+ it('uses approved catalog rates and authentic complete token usage, not the supplier hold',async()=>{
+  vi.stubEnv('TEXT_CHAIN_POLICY','fixed-v1');const f=professionalSupplierFixture();
+  f.catalog.profiles[0].transport.rateCard={...f.catalog.profiles[0].transport.rateCard!,billingBasis:'exact-token-tariff'};
+  network.mockResolvedValue(new Response(JSON.stringify({model:'gpt-5-nano',choices:[{message:{content:'Answer'},finish_reason:'stop'}],usage:{prompt_tokens:100,completion_tokens:20,total_tokens:120,prompt_tokens_details:{cached_tokens:0}}}),{headers:{'content-type':'application/json'}}));
+  const response=await run(professionalContext());expect(response).toMatchObject({ok:true,gatewayPricingProof:{kind:'gateway-metered-tariff'}});
+  const {chatTurnCost}=await import('../../lib/chatSpend');
+  const approved=f.catalog.profiles[0].transport.rateCard!;
+  const expected=(100*approved.inputNanoUsdPerMillion+20*approved.outputNanoUsdPerMillion)/1e15;
+  expect(chatTurnCost({...response,...response.usage},85)).toMatchObject({measured:true,costBasis:'metered-gateway',realUsd:expected});
+ });
 });

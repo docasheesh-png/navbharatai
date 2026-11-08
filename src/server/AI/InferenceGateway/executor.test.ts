@@ -128,7 +128,7 @@ function harness(options: { request?: Partial<RoutingRequest>; profiles?: { id: 
         events.push('reserve');
         const id = `${intent.binding.key.logicalRequestId}:${intent.binding.physicalAttemptId}`;
         const pool = scopeKey(intent);
-        const available = state.budget.get(pool) ?? PLATFORM_FREE_DAILY_LIMIT_NANO_USD;
+        const available = state.budget.get(pool) ?? 10_000_000_000;
         const cost = intent.binding.budget?.amountNanoUsd ?? 0;
         if (state.quarantined.has(intent.binding.providerId) || state.active.has(intent.binding.key.logicalRequestId) || held.has(id) || available < cost
           || intent.binding.quota.some(q => (state.quota.get(q.ledgerKey) ?? 100) < q.amount)) return { kind: 'denied' as const };
@@ -840,6 +840,12 @@ describe('bounded physical attempts and shared mock-ledger contracts', () => {
     h.snapshot = { ...h.snapshot, budget: { ...h.snapshot.budget!, ...(flaw === 'cap'
       ? { periodLimitNanoUsd: PLATFORM_FREE_DAILY_LIMIT_NANO_USD + 1 } : { periodEndsAtMs: DAY * 2 }) } }; h.seal();
     expect((await h.executor.execute(h.key)).kind).toBe('stopped'); expect(h.ports.ledger.reserve).not.toHaveBeenCalled();
+  });
+  it('uses the approved professional budget, not the free-chat ceiling', async () => {
+    const h = harness({ request: { surface: 'professional', budgetScopeId: 'professional-funded' },
+      scopes: [{ id: 'professional-funded', kind: 'existing-professional' }], profiles: [{ id: 'paid-professional', paid: true }] });
+    h.snapshot = { ...h.snapshot, budget: { ...h.snapshot.budget!, periodLimitNanoUsd: 100_000_000_000 } }; h.seal();
+    expect((await h.executor.execute(h.key)).kind).toBe('completed');
   });
   it('keeps the existing funded-builder budget separate from the new platform-free pool', async () => {
     const h = harness({ request: { surface: 'builder', budgetScopeId: 'builder-funded' },

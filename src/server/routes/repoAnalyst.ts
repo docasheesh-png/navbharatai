@@ -1,3 +1,4 @@
+import { fixedTextChainEnabled } from '../AI/fixedTextChain';
 import { withFreeAnswerQuota, markFreeAnswer, markFreeAnswerProviderFailure, freeAnswerSignal, assertFreeAnswerActive } from '../lib/freeAnswerQuota';
 import { freeModuleInferenceScope } from '../AI/inferencePolicy';
 import type { Express, Request, Response } from 'express';
@@ -14,18 +15,18 @@ import { onClientGone } from '../lib/clientDisconnect';
 /** This route is a Free Mode, not the developer API or the Pro app builder. */
 async function withRepoAnalystGateway<T>(req: Request, res: Response, operation: 'chat' | 'generate', run: (signal?: AbortSignal) => Promise<T>): Promise<T> {
   const quotaSignal = freeAnswerSignal(req);
-  if (!inferenceGatewayEnabled('professional')) return run(quotaSignal);
+  if (!fixedTextChainEnabled() && !inferenceGatewayEnabled('professional')) return run(quotaSignal);
   const deadlineAtMs = Date.now() + 90_000;
   const controller = new AbortController();
   onClientGone(res, () => controller.abort());
   const signal = quotaSignal ? AbortSignal.any([controller.signal, quotaSignal]) : controller.signal;
   const timer = setTimeout(() => controller.abort(), Math.max(0, deadlineAtMs - Date.now()));
   try {
-    return await runWithAuthenticatedInferenceGatewayRequest(req, uid => runWithInferenceGatewayContext({
-      principalId: uid ?? 'unauthenticated', tenantId: uid ?? 'unauthenticated', surface: 'professional',
+    return await runWithAuthenticatedInferenceGatewayRequest(req, (uid, guest) => runWithInferenceGatewayContext({
+      principalId: uid ?? guest?.principalId ?? 'unauthenticated', tenantId: uid ?? guest?.principalId ?? 'unauthenticated', surface: 'professional',
       policyKey: `mode:repo-analyst:${operation}`, qualityTier: 'professional', dataClass: 'confidential',
       funding: 'platform-free-fallback', mode: strictFreeRequired() ? 'strict-free' : 'free-first-authorized-paid',
-      deadlineAtMs, signal,
+      deadlineAtMs: guest ? Math.min(deadlineAtMs, guest.expiresAtMs) : deadlineAtMs, signal,
     }, () => isGatewayRouteSelected() ? runWithInferenceGatewayEntryAdmission(() => run(signal)) : run(quotaSignal)));
   } finally { clearTimeout(timer); }
 }

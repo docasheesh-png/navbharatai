@@ -104,6 +104,20 @@ function exportedCallableOrClass(source: string, name: string): string | null {
       const signatures = functions.some((n) => !n.body) ? functions.filter((n) => !n.body) : functions;
       return signatures.map(quote).join('\n');
     }
+    // BR1955: a string-typed action parameter is unusable without its actual default vocabulary.
+    // Quote only the selected exported const, with a literal initializer; never evaluate source.
+    for (const statement of sf.statements) {
+      if (!ts.isVariableStatement(statement) || !exported(statement)
+        || !(statement.declarationList.flags & ts.NodeFlags.Const)) continue;
+      const declaration = statement.declarationList.declarations.find((d) => ts.isIdentifier(d.name) && d.name.text === name);
+      const literal = (node: ts.Expression): boolean => ts.isStringLiteral(node) || ts.isNumericLiteral(node)
+        || node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword
+        || node.kind === ts.SyntaxKind.NullKeyword
+        || (ts.isArrayLiteralExpression(node) && node.elements.every((e) => ts.isExpression(e) && literal(e)))
+        || (ts.isObjectLiteralExpression(node) && node.properties.every((e) => ts.isPropertyAssignment(e)
+          && !ts.isComputedPropertyName(e.name) && literal(e.initializer)));
+      if (declaration?.initializer && literal(declaration.initializer)) return 'export const ' + ts.createPrinter({ removeComments: true }).printNode(ts.EmitHint.Unspecified, declaration, sf) + ';';
+    }
     const cls = sf.statements.find((n): n is ts.ClassDeclaration => ts.isClassDeclaration(n)
       && n.name?.text === name && exported(n));
     if (!cls) return null;
@@ -182,7 +196,7 @@ const CONTRACT: readonly ContractEntry[] = [
   // (RailTrackOptions above: the same build passed { path } to createRailTrack.)
   { file: 'src/game/three/materials.ts', names: ['MaterialKind', 'PaletteName', 'sharedMaterial', 'paletteColor'] },
   // BR1954: Input.bind, EventBus.off, CameraRig.object and wrong factories/signatures were guessed.
-  { file: 'src/game/core/input.ts', names: ['ActionMap', 'Input'] },
+  { file: 'src/game/core/input.ts', names: ['ActionMap', 'DEFAULT_ACTIONS', 'Input'] },
   { file: 'src/game/core/events.ts', names: ['EventBus'] },
   { file: 'src/game/three/camera.ts', names: ['CameraRigOptions', 'CameraRig'] },
   { file: 'src/game/three/humanoid.ts', names: ['HumanoidOptions', 'Humanoid', 'createHumanoid'] },

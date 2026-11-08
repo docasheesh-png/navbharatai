@@ -34,7 +34,7 @@ describe('the bar for "you may stop" is higher than the bar for "nothing is bloc
 
   it('a healthy, unblocked app IS done', () => {
     expect(appIsDone(report())).toBe(true);
-    expect(doneSteer(report())).toContain('complete and healthy');
+    expect(doneSteer(report())).toContain('automatic source/build check is clear');
   });
 
   it.each([
@@ -57,7 +57,7 @@ describe('the steer states its evidence and lets the model disagree', () => {
 
   it('names the measure rather than issuing a bare order', () => {
     expect(text).toContain('92/100');
-    expect(text).toContain('no blockers');
+    expect(text).toContain('no static blockers');
   });
 
   it('tells the model to override it when something requested is genuinely missing', () => {

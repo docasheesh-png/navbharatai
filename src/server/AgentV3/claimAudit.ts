@@ -433,6 +433,11 @@ const DESIGN_CLAIMED = new RegExp([
 
 const GAME_NAMED = /\b(game|simulator|simulation|playable|gameplay)\b/i;
 const GAME_WORKS_CLAIMED = /\b(complete and working|working (properly|perfectly|well|great|correctly)|works (properly|perfectly|well|great|correctly)|is (fully )?playable|fully playable|ready to play|fully functional|is working)\b/i;
+// BR1955's exact summary said all requested features / Milestone 1 Complete, not 'fully playable'.
+// Only an affirmative delivery claim on a line naming the game; plans/negations are not verdicts.
+const GAME_DELIVERED_CLAIM = /(?:\b(?:built|created|implemented|delivered)\b[^.!?\n]{0,160}\ball (?:the )?requested features\b|\bmilestone\s+\d+\s+complete\b)/i;
+const GAME_DELIVERY_NOT_ASSERTED = /\b(?:not|never|cannot|can't|isn't|is not|wasn't|doesn't|does not|will|would|could|should|plan(?:ning)?|when|if|until|before|once)\b/i;
+
 
 export function auditSummaryClaims(summary: string, facts: MeasuredFacts): ClaimContradiction[] {
   const text = String(summary ?? '');
@@ -524,7 +529,8 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
   // A GAME CALLED WORKING THAT NOBODY PLAYED (autopsy 61279465). Narrow: the same line must name the game and
   // claim it works or is playable — "the game has a start screen" is a description, not a verdict.
   if (facts.gamePlayed && facts.gamePlayed !== 'passed') {
-    const line = text.split(/\n+/).find((l) => GAME_NAMED.test(l) && GAME_WORKS_CLAIMED.test(l));
+    const line = text.split(/\n+/).find((l) => GAME_NAMED.test(l) && (GAME_WORKS_CLAIMED.test(l)
+      || (GAME_DELIVERED_CLAIM.test(l.replace(/[*_`]/g, '')) && !GAME_DELIVERY_NOT_ASSERTED.test(l))));
     if (line) {
       out.push({
         kind: 'game-claimed-playable',

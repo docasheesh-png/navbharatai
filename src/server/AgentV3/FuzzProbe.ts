@@ -279,7 +279,9 @@ export function redTeamRunNote(r: { casesRun: number; crashes: number; ms: numbe
   const s = Math.round(r.ms / 1000);
   return {
     phase: 'readiness', severity: 'info', code: 'REDTEAM_RAN', autoResolved: true,
-    message: `Red-team pass: ${r.casesRun} hostile input case(s) in ${s}s (budget ${Math.round(r.budgetMs / 1000)}s), `
+    message: r.casesRun === 0
+      ? 'Red-team check: no hostile-input cases ran; no hostile-input safety verdict was established.'
+      : `Red-team pass: ${r.casesRun} hostile input case(s) in ${s}s (budget ${Math.round(r.budgetMs / 1000)}s), `
       + `${r.crashes === 0 ? 'no crash' : `${r.crashes} crash(es)`}.`,
   };
 }

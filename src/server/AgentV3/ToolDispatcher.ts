@@ -950,6 +950,12 @@ export class ToolDispatcher {
     this._unrecorded.delete(path); // recorded here — see `flushUnrecordedWrites`
     this._writtenPaths.add(path); // what THIS agent really wrote — see `writtenPaths`
     this._lastWriteAt = Date.now(); // a console read older than this says nothing about the current code (Q-2303)
+    // BR1951: the first TS file can precede its config. A successful write through ANY
+    // door (batch/edit/recipe/shell sync included) supersedes the cached negative read.
+    if (path.replace(/^\.\//, '') === 'tsconfig.json') {
+      this._tsProject = 'yes';
+      this._writeTypecheckStats.projectVerdict = 'yes';
+    }
   };
   private _lastWriteAt: number | undefined;
 
@@ -3634,8 +3640,9 @@ export class ToolDispatcher {
       try { existing = await this.actuator.readFile(this.workspaceId, path); }
       catch (err) {
         if (!isNotFoundError(err)) {
-          lines.push(`skipped existing ${path}`);
-          continue;
+          // BR1951: an unreadable sandbox is not an existing file. Preserve it and return
+          // an error, so the caller cannot advertise an installed zero-file kit.
+          throw new Error(`Recipe could not inspect ${path}; no overwrite attempted: ${err instanceof Error ? err.message : String(err)}`);
         }
         missing = true;
         existing = null;
@@ -3875,6 +3882,8 @@ export class ToolDispatcher {
       // A FAILED READ IS NOT A VERDICT. It stays 'unknown' and is retried on the next TypeScript write,
       // so one sandbox hiccup cannot switch the compiler off for a sixteen-minute build — which is what
       // bb688add's report shows, and why its eleven TS2339 errors were only met five minutes later.
+      // A sibling writer may have acknowledged the config through the shared build facts.
+      if (s.projectVerdict === 'yes') this._tsProject = 'yes';
       if (shouldProbeTsconfig(this._tsProject, this._tsProbeAttempts)) {
         this._tsProbeAttempts += 1;
         try { await this.actuator.readFile(this.workspaceId, 'tsconfig.json'); this._tsProject = 'yes'; }
@@ -6555,7 +6564,7 @@ export class ToolDispatcher {
         // actually start/build? Reads package.json; never throws, never breaks
         // evaluate. "Preview is EARNED" — a build that compiles can still not run.
         // (package.json was read once, above, for the outside-the-app decision — `pkgForRun`.)
-        const runnability = analyzeRunnability(mem.graph(), pkgForRun);
+        const runnability = analyzeRunnability(mem.graph(), pkgForRun, this._starterExpected);
         // Best-effort SEO/metadata pass (Section I #19): reads the HTML entry and
         // checks the discoverability essentials. Never throws, never breaks evaluate.
         let indexHtml: string | null = null;

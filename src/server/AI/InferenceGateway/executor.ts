@@ -1,3 +1,4 @@
+import { OWNER_PAID_DAILY_CEILING_NANO_USD } from '../FreeChain/spendCap';
 /**
  * Trusted orchestration used by the default-off server gateway composition.
  * Matching JSON never authenticates evidence, receipts or usage. All ports must
@@ -10,7 +11,8 @@ import { evidenceBinding, withoutEvidence } from './profiles';
 import type { AttemptRecord, BudgetAuthorization, Candidate, EvidenceAuthority, Payer,
   PlanningResult, RoutingRequest, SelectionPlan } from './types';
 
-export const PLATFORM_FREE_DAILY_LIMIT_NANO_USD = 10_000_000_000;
+// Reuse the owner's existing FreeChain ceiling; never invent a narrower USD10 policy.
+export const PLATFORM_FREE_DAILY_LIMIT_NANO_USD = OWNER_PAID_DAILY_CEILING_NANO_USD;
 const DAY_MS = 86_400_000;
 
 /** A locator, NOT authentication. readTrusted must authorize it against server identity. */
@@ -362,7 +364,7 @@ export function createInferenceExecutor(ports: ExecutionPorts) {
       : r.payer.kind !== 'platform') || (scope.kind === 'funded-builder' && r.surface !== 'builder');
     const b = snapshot.budget;
     if (incompatible || (r.surface === 'chat' && r.maxQueueWaitMs > 5000)
-      || ((scope.kind === 'platform-free-fallback' || scope.kind === 'existing-professional') && b && (b.periodLimitNanoUsd > PLATFORM_FREE_DAILY_LIMIT_NANO_USD
+      || ((scope.kind === 'platform-free-fallback' || scope.kind === 'existing-professional') && b && ((scope.kind === 'platform-free-fallback' && b.periodLimitNanoUsd > PLATFORM_FREE_DAILY_LIMIT_NANO_USD)
         || b.periodEndsAtMs - b.periodStartsAtMs !== DAY_MS))) return { kind: 'blocked', reason: 'budget', rejected: [] };
     return planInference({ ...snapshot, authority: ports.evidence, nowMs: ports.clock.now() });
   }

@@ -27,13 +27,13 @@ export function readSpendDay(raw: unknown, window: DayWindow): SpendDay {
     spentNanoUsd: d.spentNanoUsd, requests: d.requests, pending: d.pending,
     ...(d.conservativePending === undefined ? {} : { conservativePending: d.conservativePending }), alertedPercent: d.alertedPercent };
 }
-export function readPaidPolicy(raw: unknown): PaidBudgetPolicy | null {
+export function readPaidPolicy(raw: unknown, collection: 'free_chat_chain' | 'professional_inference' = FREE_CHAIN_COLLECTION): PaidBudgetPolicy | null {
   if (raw === undefined) return null;
   const p = raw as PaidBudgetPolicy & Raw;
   if (!p || p.kind !== 'paid_budget_policy' || p.version !== 1 || !nonnegativeInteger(p.revision) || p.revision < 1
     || (p.uncappedRolloutVersion !== undefined && p.uncappedRolloutVersion !== 1)
     || (p.budgetMode !== undefined && p.budgetMode !== 'capped' && p.budgetMode !== 'uncapped')
-    || !validPaidCapNanoUsd(p.capNanoUsd) || !nonnegativeInteger(p.updatedAt)
+    || !(collection === 'professional_inference' ? nonnegativeInteger(p.capNanoUsd) : validPaidCapNanoUsd(p.capNanoUsd)) || !nonnegativeInteger(p.updatedAt)
     || (p.source !== 'deployment' && p.source !== 'admin' && p.source !== 'safety') || 'expiresAt' in p || 'expireAt' in p) {
     throw new FreeChainDataError('Malformed paid budget policy');
   }

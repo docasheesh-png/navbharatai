@@ -91,8 +91,14 @@ Reservations and conservative ceiling bookings are not reported as supplier invo
   by the funding split. Unknown paid liabilities retain their original holds.
 - No default budget, migration, deployed flag, secret or production record was written.
 
-The existing Gateway planner still enforces its finite USD10/day ceiling and per-user
-paid-attempt guard; a configured policy is not permission to exceed those limits.
+The pre-existing Gateway USD10 planner bound was stale against the owner's existing
+FreeChain USD17 ceiling; the planner now reuses that existing ceiling and still
+requires the actual approved budget (no new allowance). The free per-user guard is
+pre-existing. Those free-pool restrictions are not
+borrowed for paid professionals: that pool follows its explicitly approved finite
+`capNanoUsd` and request limit, with no invented dollar or per-user-attempt default.
+The pre-existing free-pool bounds/uncapped-rollout compatibility still need checking
+against the actual deployed free policy before fixed-v1 activation.
 A timeout/ambiguous paid failure is **not proof of zero cost**: it remains pending
 reconciliation and may terminate the request. Only supported authenticated rejection
 proof permits a paid retry. Do not loosen that fence merely to demonstrate all rungs.
@@ -117,8 +123,7 @@ Secrets belong in the existing server secret configuration, never chat or this d
    `mode:repo-analyst:chat|generate`, `developer-api:text`, and
    `developer-api:professional:<id>`, plus actually-used auxiliary keys. Do not invent
    RPM/TPM, free-plan status, health-data consent or capacity from model names.
-3. For the paid supplier pool only, choose/approve the finite daily cap D (0 < D <=
-   USD10), distinct professional scope ID/supplier owner, and per-request limit within
+3. For the paid supplier pool only, confirm the approved finite positive daily `capNanoUsd` (no invented USD10/17 cap), distinct professional scope ID/supplier owner, and per-request limit within
    that authority. `paid_budget_policy` uses the existing schema: kind
    `paid_budget_policy`, version 1, positive revision, integer `capNanoUsd`, timestamp
    `updatedAt`, source `admin`. No initial day balance needs to be fabricated. Confirm
@@ -226,3 +231,23 @@ Public references checked 2026-11-08 (IST):
 - https://developers.cloudflare.com/workers-ai/models/llama-3.3-70b-instruct-fp8-fast/
 - https://ai.google.dev/gemini-api/docs/pricing
 - https://ai.google.dev/gemini-api/docs/deprecations
+
+## Policy provenance (review clarification)
+
+Pre-existing in base `dda0eda73`: Gateway catalog/profile quality/privacy/terms,
+credential/account/quota reviews, free/no-overage evidence, strict-free safety,
+Mitrify v2 exact-payload/data/downstream-processor/supplier-ceiling approval, and
+CheaperInference written shared-serving permission. This PR does not invent or
+relax those approvals.
+
+Added integration configuration: `gateway_catalog.professionalScope` plus
+`professional_inference/paid_budget_policy` binds paid supplier funds without
+borrowing free-chat money; no default funds or new fixed USD ceiling are created.
+Mitrify's adapter ceiling and Beam's maker-list/discount rate-card fields are
+transport reservation bounds sourced from existing supplier contracts/catalogs,
+not new consent policies or guessed supplier prices.
+
+Live connector review: both `get_service` and `get_service_log` were attempted
+through the READY connector for the named production project/region/service. Both
+returned "GCP credentials are not available". READY describes tool availability,
+not successful GCP authorization; no service/env values or logs were obtained.

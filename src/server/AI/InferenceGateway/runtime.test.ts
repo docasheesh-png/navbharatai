@@ -1009,6 +1009,20 @@ function professionalSupplierFixture() {
 }
 const professionalContext = () => context({ surface: 'professional', policyKey: 'professional:teacher_ai', funding: 'existing-professional' });
 describe('separate atomic professional supplier funding', () => {
+  it('honors the reviewed professional budget without inherited free-pool dollar or user-attempt caps', async () => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); const f = professionalSupplierFixture();
+    vi.stubEnv('FREE_CHAIN_PAID_DAILY_CAP_USD', 'invalid-free-pool-config');
+    network.mockImplementation(async () => new Response(JSON.stringify({ model: 'gpt-5-nano', choices: [{ message: { content: 'Professional answer' }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 20 } }), { headers: { 'content-type': 'application/json' } }));
+    f.docs.set('professional_inference/paid_budget_policy', { ...(f.docs.get('professional_inference/paid_budget_policy') as object), capNanoUsd: 100_000_000_000 });
+    f.catalog.policies['professional:teacher_ai'].logicalLimitNanoUsd = 20_000_000_000;
+    expect(await run(professionalContext())).toMatchObject({ ok: true });
+    const counterPath = [...f.docs.keys()].find(path => path.startsWith('professional_inference/paid_user_'))!;
+    f.docs.set(counterPath, { ...(f.docs.get(counterPath) as object), requests: 20 });
+    expect(await run(professionalContext())).toMatchObject({ ok: true });
+    expect(f.docs.get(counterPath)).toMatchObject({ requests: 21 });
+    expect(network).toHaveBeenCalledTimes(2);
+  });
+
   it('uses the professional pool with real issuer/planner/ledger/transport, never the free-chat pool', async () => {
     vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); const f = professionalSupplierFixture();
     const freeBefore = structuredClone(f.docs.get('free_chat_chain/paid_budget_policy'));

@@ -254,7 +254,7 @@ export class GatewayAuthorityStore {
         && nonnegativeInteger(p.maxQueueWaitMs) && p.maxQueueWaitMs <= 5000
         && positive(p.firstOutputTimeoutMs) && positive(p.attemptTimeoutMs) && p.firstOutputTimeoutMs <= p.attemptTimeoutMs
         && p.attemptTimeoutMs <= 120_000 && nonnegativeInteger(p.logicalLimitNanoUsd)
-        && p.logicalLimitNanoUsd <= OWNER_PAID_DAILY_CEILING_NANO_USD);
+        && (this.context.funding === 'existing-professional' || p.logicalLimitNanoUsd <= OWNER_PAID_DAILY_CEILING_NANO_USD));
       const capability = requestedCapability(p, this.payload);
       const fixedOrder = fixedTextChainScopeAllowed() && fixedTextChainEnabled() && fixedTextChainScope(this.context.surface, capability.kind);
       const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE);
@@ -263,7 +263,7 @@ export class GatewayAuthorityStore {
         this.get(tx, gatewayLedgerPath('authority', this.key.logicalRequestId)),
       ]);
       requireValue(existingAuthority === undefined);
-      const paid = readPaidPolicy(paidRaw); const day = readSpendDay(dayRaw, window);
+      const paid = readPaidPolicy(paidRaw, this.fundingCollection); const day = readSpendDay(dayRaw, window);
       const r: RoutingRequest = { ...this.key, nextPhysicalAttemptId: randomUUID(), policyRevision: c.revision,
         termsPolicyId: p.termsPolicyId, budgetScopeId: supplierScope.id, surface: this.context.surface,
         quality: p.quality, privacy: p.privacy, payer: { kind: 'platform', ownerId: supplierScope.ownerId },
@@ -489,7 +489,7 @@ export class GatewayAuthorityStore {
       }
       const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE);
       const [paidRaw, dayRaw] = await Promise.all([this.get(tx, `${this.fundingCollection}/paid_budget_policy`), this.get(tx, `${this.fundingCollection}/paid_day_${window.key}`)]);
-      const paid = readPaidPolicy(paidRaw); const day = readSpendDay(dayRaw, window);
+      const paid = readPaidPolicy(paidRaw, this.fundingCollection); const day = readSpendDay(dayRaw, window);
       let budget: BudgetAuthorization | undefined;
       if (request.mode !== 'strict-free' && authority.snapshot.budget && paid && paid.updatedAt <= now && paid.capNanoUsd > 0) {
         const previousBudget = authority.snapshot.budget;
@@ -576,7 +576,7 @@ export class GatewayAuthorityStore {
         }
         if (claim.binding.budget) {
           const [policyRaw, dayRaw] = await Promise.all([this.get(tx, `${this.fundingCollection}/paid_budget_policy`), this.get(tx, `${this.fundingCollection}/paid_day_${claim.binding.budget.periodId}`)]);
-          const policy = readPaidPolicy(policyRaw); const budget = claim.binding.budget;
+          const policy = readPaidPolicy(policyRaw, this.fundingCollection); const budget = claim.binding.budget;
           expiries.push(authority.snapshot.budget!.periodEndsAtMs, Number(object(attempt.window).resetAt));
           finalChecks.push(now => {
             const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE); const day = readSpendDay(dayRaw, window);
@@ -638,7 +638,7 @@ export class GatewayAuthorityStore {
       requireValue(['claimed', 'pending'].includes(String(attempt.phase)) && same(attempt.claim, claim)
         && nonnegativeInteger(attempt.dispatchAuthorizedAtMs) && nonnegativeInteger(proof.receivedAtMs)
         && proof.receivedAtMs >= (attempt.dispatchAuthorizedAtMs as number) && proof.receivedAtMs <= Date.now());
-      const paidPolicy = readPaidPolicy(await this.get(tx, `${this.fundingCollection}/paid_budget_policy`));
+      const paidPolicy = readPaidPolicy(await this.get(tx, `${this.fundingCollection}/paid_budget_policy`), this.fundingCollection);
       const held = attempt.heldQuota;
       requireValue(Array.isArray(held) && held.length > 0 && held.length <= 32);
       const states = await Promise.all((held as Record<string, unknown>[]).map(async hold => {

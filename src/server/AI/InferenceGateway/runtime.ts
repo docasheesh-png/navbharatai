@@ -251,9 +251,9 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
     const db = getServerDb();
     if (!db) throw new InferenceGatewayTerminalError('authority-store-unavailable');
     const deployment = freeChainConfig();
-    if (deployment.errors.includes('FREE_CHAIN_PAID_DAILY_CAP_USD')) throw new InferenceGatewayTerminalError('invalid-paid-cap');
+    if (context.funding === 'platform-free-fallback' && deployment.errors.includes('FREE_CHAIN_PAID_DAILY_CAP_USD')) throw new InferenceGatewayTerminalError('invalid-paid-cap');
     const fundingCollection = supplierFundingCollection(context.funding);
-    const paidPolicyObserved = !!await boundedControl(async () => readPaidPolicy(readData(await db.doc(`${fundingCollection}/paid_budget_policy`).get())), context.deadlineAtMs, signal);
+    const paidPolicyObserved = !!await boundedControl(async () => readPaidPolicy(readData(await db.doc(`${fundingCollection}/paid_budget_policy`).get()), fundingCollection), context.deadlineAtMs, signal);
     if (paidPolicyObserved && context.funding === 'platform-free-fallback') {
       const legacyStore = new FreeChainStore(db);
       await boundedControl(() => publishDeploymentPaidLimit(db, deployment.paidCapNanoUsd,

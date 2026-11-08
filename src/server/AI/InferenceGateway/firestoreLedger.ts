@@ -203,8 +203,8 @@ export class FirestoreInferenceLedger implements LedgerPort {
     demand(db && typeof db.runTransaction === 'function' && typeof db.doc === 'function');
     demand(options && [options.principal.principalId, options.principal.tenantId, options.platformScope.id,
       options.platformScope.ownerId].every(isIdentifier) && typeof options.now === 'function' && typeof options.adminEmails === 'function');
-    demand(nonnegativeInteger(options.perUserDailyLimit ?? DEFAULT_PAID_PER_USER_DAILY_LIMIT)
-      && (options.perUserDailyLimit ?? DEFAULT_PAID_PER_USER_DAILY_LIMIT) <= DEFAULT_PAID_PER_USER_DAILY_LIMIT);
+    demand(options.perUserDailyLimit === undefined || (nonnegativeInteger(options.perUserDailyLimit)
+      && (options.fundingBoundary === 'existing-professional' || options.perUserDailyLimit <= DEFAULT_PAID_PER_USER_DAILY_LIMIT)));
     this.options = { ...options, principal: { ...options.principal }, platformScope: { ...options.platformScope } };
   }
   private get fundingBoundary(): ImplementedSupplierFunding { return this.options.fundingBoundary ?? 'platform-free-fallback'; }
@@ -292,7 +292,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
       && authority.snapshot.request.logicalRequestId === key.logicalRequestId
       && authority.snapshot.request.principalId === key.principalId && authority.snapshot.request.tenantId === key.tenantId
       && authority.snapshot.request.payloadDigest === key.payloadDigest
-      && nonnegativeInteger(authority.logicalLimitNanoUsd) && authority.logicalLimitNanoUsd <= OWNER_PAID_DAILY_CEILING_NANO_USD
+      && nonnegativeInteger(authority.logicalLimitNanoUsd) && (this.fundingBoundary === 'existing-professional' || authority.logicalLimitNanoUsd <= OWNER_PAID_DAILY_CEILING_NANO_USD)
       && nonnegativeInteger(authority.paidPolicyRevision));
     demand(Array.isArray(authority.snapshot.candidates) && authority.snapshot.candidates.length <= 32);
     if (this.options.requireConfigurationBinding || authority.configurationBinding !== undefined) {
@@ -346,7 +346,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
       return { policy, state: this.quotaState(s, policy.ledgerKey, policy.migrationId), period: this.quotaPeriod(p, policy.ledgerKey, policy.window) };
     }));
     return { authority, evidence, logical: this.logical(l, authority), ...(attempt === undefined ? {} : { attempt: this.parseAttempt(attempt) }),
-      ...(modelSlot ? { modelSlot } : {}), quotas, policy: readPaidPolicy(policyRaw), day: readSpendDay(dayRaw, window),
+      ...(modelSlot ? { modelSlot } : {}), quotas, policy: readPaidPolicy(policyRaw, this.fundingCollection), day: readSpendDay(dayRaw, window),
       paidUserCount: readPaidUser(userRaw, window.key, hash(key.principalId)), window };
   }
   private eligible(current: CurrentAuthority, supplied: AdmissionIntent, claiming: boolean, now: number): AdmissionIntent {
@@ -389,12 +389,12 @@ export class FirestoreInferenceLedger implements LedgerPort {
       demand(committed <= q.policy.limit && expected.amount <= q.policy.limit - committed);
     }
     if (amount) {
-      const userLimit = this.options.perUserDailyLimit ?? DEFAULT_PAID_PER_USER_DAILY_LIMIT;
-      demand(claiming ? current.paidUserCount >= 1 && current.paidUserCount <= userLimit : current.paidUserCount < userLimit);
+      const userLimit = this.options.perUserDailyLimit ?? (this.fundingBoundary === 'platform-free-fallback' ? DEFAULT_PAID_PER_USER_DAILY_LIMIT : undefined);
+      demand(claiming ? current.paidUserCount >= 1 && (userLimit === undefined || current.paidUserCount <= userLimit) : userLimit === undefined || current.paidUserCount < userLimit);
       const b = authority.snapshot.budget;
       demand(policy && policy.revision === authority.paidPolicyRevision && policy.updatedAt <= now && policy.capNanoUsd > 0 && b
         && b.periodId === window.key && b.periodStartsAtMs === window.startAt && b.periodEndsAtMs === window.resetAt
-        && b.periodLimitNanoUsd <= policy.capNanoUsd && b.periodLimitNanoUsd <= OWNER_PAID_DAILY_CEILING_NANO_USD
+        && b.periodLimitNanoUsd <= policy.capNanoUsd && (this.fundingBoundary === 'existing-professional' || b.periodLimitNanoUsd <= OWNER_PAID_DAILY_CEILING_NANO_USD)
         && b.remainingLogicalRequestNanoUsd <= authority.logicalLimitNanoUsd);
       const committed = checkedAdd(subtract(day.heldNanoUsd, own), day.spentNanoUsd);
       const allowedPeriod = Math.min(policy.capNanoUsd, b.periodLimitNanoUsd);
@@ -506,7 +506,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
         releasedSlot = { ...state, occupants };
       }
       const nextLogical = { ...logical, activeAttemptId: null, heldNanoUsd: subtract(logical.heldNanoUsd, attempt.heldNanoUsd) };
-      const policy = readPaidPolicy(policyRaw);
+      const policy = readPaidPolicy(policyRaw, this.fundingCollection);
       let day: SpendDay | undefined;
       if (attempt.heldNanoUsd) { demand(dayRaw !== undefined); const d = readSpendDay(dayRaw, attempt.window);
         day = { ...d, heldNanoUsd: subtract(d.heldNanoUsd, attempt.heldNanoUsd), pending: subtract(d.pending, 1) }; }
@@ -669,7 +669,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
         return { state: { ...state, held: replaceConservative ? state.held : subtract(state.held, q.amount), quarantined: state.quarantined || quarantine },
           period: { ...period, spent: checkedAdd(subtract(period.spent, previousQuota.get(q.ledgerKey) ?? 0), actual.get(q.ledgerKey)!) } };
       });
-      const policy = readPaidPolicy(policyRaw); const now = this.now(); demand(now >= attempt.createdAtMs);
+      const policy = readPaidPolicy(policyRaw, this.fundingCollection); const now = this.now(); demand(now >= attempt.createdAtMs);
       let day: SpendDay | undefined;
       if (attempt.heldNanoUsd || charge.amount || replaceConservative) {
         if (attempt.heldNanoUsd) demand(dayRaw !== undefined);

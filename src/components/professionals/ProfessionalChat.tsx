@@ -546,7 +546,7 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
               <>
                 <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-indigo-500/15 text-accent-text flex items-center justify-center"><LogIn className="w-6 h-6" /></div>
                 <h3 className="font-bold text-ink mb-1">Sign in to continue</h3>
-                <p className="text-sm text-muted mb-4">Professionals need a free account. Signed-in answers use the one shared daily allowance, together with Free chat.</p>
+                <p className="text-sm text-muted mb-4">Professionals need a free account. Signed-in answers use the one shared daily allowance with AI chat.</p>
                 {/* A card that says "sign in" must be able to open sign-in (admin 2026-09-23 — until the
                     daily allowance was counted, a guest never reached this card at all). It rides the
                     existing `signIn` navigate event, the one App listens to for opening the sign-in

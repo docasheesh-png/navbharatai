@@ -43,6 +43,44 @@ beforeEach(() => {
 });
 afterEach(() => { __resetProviderSwitchesForTests(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 describe('free chat chain central dispatch', () => {
+ it('keeps independently reviewed free chat available when paid budget publication fails', async () => {
+   m.observeBudget.mockRejectedValue(new Error('synthetic paid-policy outage'));
+   const freshDb = {} as typeof db;
+   const result = await buildFreeChainRouter(freshDb, config()).route(input());
+   expect(result).toMatchObject({ ok: true, provider: 'GROQ' });
+   expect(m.paid).not.toHaveBeenCalled(); expect(m.execute).toHaveBeenCalledOnce();
+ });
+ it('never dispatches paid fallback after failed paid-policy publication', async () => {
+   m.observeBudget.mockRejectedValue(new Error('synthetic paid-policy outage'));
+   m.execute.mockRejectedValue(new FreeChainProviderError('MODEL_UNAVAILABLE'));
+   const result = await buildFreeChainRouter({} as typeof db, config('groq,deepseek')).route(input());
+   expect(result.ok).toBe(false); expect(m.execute).toHaveBeenCalledOnce();
+   expect(m.paid).not.toHaveBeenCalled();
+   expect(result.freeChain?.attempts).toEqual(expect.arrayContaining([expect.objectContaining({ provider: 'deepseek', reason: 'paid-budget-unavailable', entered: false })]));
+ });
+
+ it('retries transient paid authority failure on a later request without disabling free chat', async () => {
+   vi.useFakeTimers();
+   m.observeBudget.mockRejectedValueOnce(new Error('synthetic paid-policy outage'));
+   const router = buildFreeChainRouter({} as typeof db, config('groq'));
+   expect(await router.route(input())).toMatchObject({ ok: true, provider: 'GROQ' });
+   await vi.advanceTimersByTimeAsync(1001);
+   expect(await router.route(input())).toMatchObject({ ok: true, provider: 'GROQ' });
+   expect(m.observeBudget).toHaveBeenCalledTimes(2); expect(m.paid).not.toHaveBeenCalled();
+ });
+
+ it('blocks Mitrify and every fixed-chain paid rung when paid authority publication fails', async () => {
+   m.observeBudget.mockRejectedValue(new Error('synthetic paid-policy outage'));
+   m.execute.mockRejectedValue(new FreeChainProviderError('MODEL_UNAVAILABLE'));
+   const cfg = config(); cfg.fixedOrder = true; cfg.maxAttempts = 12;
+   const result = await buildFreeChainRouter({} as typeof db, cfg).route(input());
+   expect(result.ok).toBe(false); expect(m.paid).not.toHaveBeenCalled();
+   for (const provider of ['mitrify', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']) {
+     expect(result.freeChain?.attempts.find(a => a.provider === provider)).toMatchObject({ reason: 'paid-budget-unavailable', entered: false });
+   }
+   expect(m.execute.mock.calls.every(call => ['glm-4.5-flash', 'glm-4.7-flash', 'openai/gpt-oss-120b', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'].includes(call[1].model))).toBe(true);
+ });
+
  it.each(['hello', 'solve 2 + 2', 'exam notes', 'fever symptoms'])('keeps GLM first for default routing: %s', async message => {
    const cfg = config(DEFAULT_ORDER.join(','));
    const result = await buildFreeChainRouter(db, cfg).route({ ...input(), message });

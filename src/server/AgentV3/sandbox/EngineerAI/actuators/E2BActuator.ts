@@ -1391,7 +1391,9 @@ export class E2BActuator implements IEngineerActuator {
           continue;
         }
         // Work may have started while the durable read was pending.
-        if (this.sandboxes.get(workspaceId) !== sandbox || this._buildInFlight(workspaceId, Date.now()) || this._opInFlight(workspaceId)) continue;
+        if (this.sandboxes.get(workspaceId) !== sandbox || this._creating.has(workspaceId)
+          || this._buildInFlight(workspaceId, Date.now()) || this._opInFlight(workspaceId)) continue;
+        if (Date.now() - (this._lastActivity.get(workspaceId) ?? Date.now()) <= limit) continue;
         const activityBeforePause = this._lastActivity.get(workspaceId);
         this._endSession(workspaceId, 'idle-sweep');
         const paused = await this.pauseSandbox(sandbox.sandboxId).catch(() => false);
@@ -1434,7 +1436,7 @@ export class E2BActuator implements IEngineerActuator {
     const now = Date.now();
     const records = await sandboxStore.listStale(now - reapAfterMs()).catch(() => []);
     for (const rec of sandboxesToReap(records, now)) {
-      const busyHere = () => this.sandboxes.has(rec.workspaceId)
+      const busyHere = () => this.sandboxes.has(rec.workspaceId) || this._creating.has(rec.workspaceId)
         || this._buildInFlight(rec.workspaceId, Date.now()) || this._opInFlight(rec.workspaceId);
       if (busyHere()) continue;
       // Earlier candidates can take seconds to pause. Re-read before acting, and never turn an

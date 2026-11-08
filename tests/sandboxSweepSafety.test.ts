@@ -14,6 +14,7 @@ interface Internals {
   _sweepIdleSandboxes(): Promise<void>;
   _sweepOrphanSandboxes(): Promise<void>;
   sandboxes: Map<string, Sandbox>;
+  _creating: Map<string, Promise<Sandbox>>;
   _activeBuilds: Map<string, number>;
   _opsInFlight: Map<string, number>;
   _lastActivity: Map<string, number>;
@@ -77,6 +78,61 @@ describe('sandbox sweeps preserve active work without provider traffic', () => {
     await sweep;
     expect(f.pause).not.toHaveBeenCalled();
     expect(f.settle).not.toHaveBeenCalled();
+  });
+
+  it('does not pause an idle handle when preview activity arrives during its durable read', async () => {
+    const f = fixture();
+    f.list.mockResolvedValue([]);
+    f.internal.sandboxes.set(WS, handle());
+    f.internal._lastActivity.set(WS, stale.updatedAt);
+    const read = deferred<SandboxRecord | null>();
+    const entered = deferred<void>();
+    f.current.mockImplementationOnce(() => { entered.resolve(); return read.promise; });
+    const sweep = f.internal._sweepIdleSandboxes();
+    await entered.promise;
+    f.internal._lastActivity.set(WS, NOW);
+    read.resolve({ ...stale });
+    await sweep;
+    expect(f.pause).not.toHaveBeenCalled();
+    expect(f.settle).not.toHaveBeenCalled();
+    expect(f.internal._lastActivity.get(WS)).toBe(NOW);
+  });
+
+  it.each(['idle', 'orphan'] as const)('does not pause during an already pending creation in the %s pass', async (pass) => {
+    const f = fixture();
+    if (pass === 'idle') {
+      f.list.mockResolvedValue([]);
+      f.internal.sandboxes.set(WS, handle());
+      f.internal._lastActivity.set(WS, stale.updatedAt);
+    }
+    const creation = deferred<Sandbox>();
+    f.internal._creating.set(WS, creation.promise);
+    if (pass === 'idle') await f.internal._sweepIdleSandboxes();
+    else await f.internal._sweepOrphanSandboxes();
+    expect(f.pause).not.toHaveBeenCalled();
+    expect(f.settle).not.toHaveBeenCalled();
+    expect(f.internal._creating.get(WS)).toBe(creation.promise);
+  });
+
+  it.each(['idle', 'orphan'] as const)('rechecks creation starting during the durable read in the %s pass', async (pass) => {
+    const f = fixture();
+    if (pass === 'idle') {
+      f.list.mockResolvedValue([]);
+      f.internal.sandboxes.set(WS, handle());
+      f.internal._lastActivity.set(WS, stale.updatedAt);
+    }
+    const read = deferred<SandboxRecord | null>();
+    const entered = deferred<void>();
+    f.current.mockImplementationOnce(() => { entered.resolve(); return read.promise; });
+    const sweep = pass === 'idle' ? f.internal._sweepIdleSandboxes() : f.internal._sweepOrphanSandboxes();
+    await entered.promise;
+    const creation = deferred<Sandbox>();
+    f.internal._creating.set(WS, creation.promise);
+    read.resolve({ ...stale });
+    await sweep;
+    expect(f.pause).not.toHaveBeenCalled();
+    expect(f.settle).not.toHaveBeenCalled();
+    expect(f.internal._creating.get(WS)).toBe(creation.promise);
   });
 
   it.each(['replacement', 'fresh', 'missing', 'unavailable'] as const)('does not pause a %s durable candidate', async (kind) => {

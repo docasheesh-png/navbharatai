@@ -23,7 +23,6 @@ import { directDoseReply, sanitizeVials, parseVialTeaching, vialRememberedMessag
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { clientPlatform } from '../AppContext/iosPurchaseGuard';
 import { buildDocumentContext } from '../lib/attachmentText';
-import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { groundingStatusFor, firstTokenLog } from '../lib/chatGrounding';
@@ -983,7 +982,11 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         // Never leak the raw inference error (may name a provider/model) to the client.
         if (strictFreeRequired()) return res.status(503).json({ code: 'STRICT_FREE_UNAVAILABLE', reply: 'No verified free model is currently available. Please try again later.', error: 'No paid fallback was used.' });
         if (isGatewayTerminalError(e)) return res.status(503).json({ code: 'INFERENCE_GATEWAY_UNAVAILABLE', reply: 'The AI service is temporarily unavailable. Please try again later.' });
-        res.status(500).json({ reply: 'Backend AI inference failed', error: toSafeClientMessage(e, 'Backend AI inference failed') });
+        // An unlabeled 500 is shown to signed-in users as "High server load", which hides a
+        // provider failure the chain can still fail over, and a finished all-failed result.
+        // Keep the recognized unavailable code so the client shows the honest notice.
+        const failure = unavailableChatReply(chatAvailabilityMessage('temporary', { message, history: req.body?.history, replyLanguage }));
+        res.status(503).json(failure);
       }
     }
   };

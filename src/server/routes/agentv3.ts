@@ -16106,7 +16106,11 @@ async function noteBuildOutcome(
       // is handed the OBJECT and builds its line when it serializes — never from a number read mid-build.
       const todoOnlyTally = { turns: 0, latencyMs: 0, firstInRun: 0 };
       buildDiag.setTodoOnlyTally(todoOnlyTally);
+      // A real later team message makes this a customised request; never let the initial chip overrule it.
+      const requestActionIssue = (proposal: string, input?: Record<string, unknown>) => intent === 'new_build' && !isEditMode && !rb.lastSteerAt
+        ? goldenQuestionReviewIssue(originalPrompt, proposal, input) : null;
       const subAgentDeps: SubAgentDeps = {
+        requestActionIssue,
         sandboxAdmissionBudget,
         replyVoice: () => rb.replyVoice ?? voiceOf(originalPrompt),
         ignoreRules: () => ignoreRulesForBuild,
@@ -17545,7 +17549,7 @@ async function noteBuildOutcome(
         // are built. The done signal must not tell a module turn it may stop (autopsy 50378049).
         projectModule: () => projectModuleRef?.name ?? null,
         // A game is not "complete" while a feature its contract names is missing from its own code (autopsy 61279465).
-        requestActionIssue: (proposal: string) => intent === 'new_build' && !isEditMode ? goldenQuestionReviewIssue(prompt, proposal) : null,
+        requestActionIssue,
         requestGaps: () => {
           const c = requestContractRef.contract;
           if (!c || c.requiredFeatures.length === 0) return [];

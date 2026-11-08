@@ -37,6 +37,7 @@ import type { AgentRole, ToolName } from './types';
 export interface SubAgentDeps {
   replyVoice?: AgentRunnerOptions['replyVoice'];
   sandboxAdmissionBudget?: AgentRunnerOptions['sandboxAdmissionBudget'];
+  requestActionIssue?: AgentRunnerOptions['requestActionIssue'];
   client: TurnRunner;
   actuator: ActuatorPort;
   workspaceId: string;
@@ -367,6 +368,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     const runner = new AgentRunner({
       replyVoice: deps.replyVoice,
       sandboxAdmissionBudget: deps.sandboxAdmissionBudget,
+      requestActionIssue: deps.requestActionIssue,
       client: deps.client,
       dispatcher: childDispatcher,
       state: deps.state,

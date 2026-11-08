@@ -128,3 +128,7 @@ PR **#4124**. Latest main `e4bc40b197867ff5d71f7692083174029e4cd38a` (parent-ver
 ## Proactive priority
 
 The highest-value missing system is an **admission/capability contract before expensive generation**: usable workspace, tool-capable binary acquisition, real saved prerequisites and terminal state must constrain what lanes can run. F1/F3/F8 implement that prevention at existing shared doors, not another model reminder. Next, preserve an authorized read-only artifact/tool-input/steering-arrival trace with reports so real backend/language/recovery behavior can be tested locally instead of guessed. Admission lifecycle/quota changes must preserve active/paused user work and stay separate from concurrent #4122's observation-only scope. No retention policy, provider quota or deployment is changed by this audit.
+
+## Confirmed merge carry-forward — 9 November2026 (IST), BR1953 audit
+
+Parent independently confirmed #4124 merged exact `fbab167a549041cf4822fa3095c04996a5cd32a4` via squash `8d897a9fa8123533f837b8aba43af7c04f8ad96f`. The25 historical fixed rows and5 review safeguards are therefore merged, not still branch-only. D43/Q-2377 remains the prior #4123 fix;22 report blockers remain (including shared Q-1122), not repaired by that merge. BR1953's fresh-main queue cleanup closes only those30 fixed rows plus same-class Q-2176, with31 IDs appended to CLOSED; old blocked rows and #4122 ownership remain. No historical build replay or server autopsy persistence is implied.

@@ -329,12 +329,24 @@ const KEEP_THE_SWITCH = `KEEP the template's own working controls — above all 
 export const EXAM_REVIEW_CONTRACT = '[QUESTION REVIEW CONTRACT] Review of every question means showing the chosen answer, correct answer and correct/wrong/skipped outcome; mark-for-review is an in-paper bookmark. Neither requests star ratings, testimonials or a separate feedback/reviews store. Add those only when the user explicitly asks. Preserve the section-wise negative-marked scores, whole-paper deadline and browser attempt history.';
 
 /** A narrow original-request contract, not a universal ban on ratings or a semantic-completeness judge. */
-export function goldenQuestionReviewIssue(originalPrompt: string, proposal: string): string | null {
+export function goldenQuestionReviewIssue(originalPrompt: string, proposal: string, input?: Record<string, unknown>): string | null {
   // Exact/bare exam chips only. A custom addition, an edit or any other app keeps its own scope.
   if (goldenScaffoldForPrompt(originalPrompt)?.id !== 'exam-prep') return null;
-  const affirmative = proposal.replace(/\b(?:do not|don't|never|not|without)\s+(?:add(?:ing)?|implement(?:ing)?|includ(?:e|ing))?\s*(?:reviews?\s*[/&]\s*)?(?:star[- ]?)?ratings?\b/gi, '');
-  const ratingAddition = /\b(?:add|implement|load|save|persist|include|build)\b[^.;\n]{0,120}\bratings?\b|\brating\s*[?:=]|\b(?:setRating|StarRating)\b/i.test(affirmative);
-  return ratingAddition ? 'Not run — this change adds unrequested ratings. ' + EXAM_REVIEW_CONTRACT : null;
+  const contradicts = (text: string): boolean => {
+    const affirmative = text.replace(/\b(?:do not|don't|never|not|without)\s+(?:add(?:ing)?|implement(?:ing)?|includ(?:e|ing))?\s*(?:(?:a|an|any|new|the|separate)\s+)*(?:reviews?(?:\s*[/&]\s*|\s+(?:and|or)\s+))?(?:star[- ]?)?ratings?\b/gi, '');
+    return /\b(?:add|implement|load|save|persist|include|build)\b[^.;\n]{0,120}\bratings?\b|\brating\s*[?:=]|\b(?:setRating|StarRating)\b/i.test(affirmative);
+  };
+  // Inspect the proposed values without serializing/copying an entire large tool payload. Search
+  // text is NOT new code: removing an old rating field must remain possible.
+  const seen = new Set<object>();
+  const introduced = (value: unknown): boolean => {
+    if (typeof value === 'string') return contradicts(value);
+    if (!value || typeof value !== 'object' || seen.has(value)) return false;
+    seen.add(value);
+    return Object.entries(value).some(([key, child]) => !['old_string', 'oldString', 'old_content'].includes(key) && introduced(child));
+  };
+  return contradicts(proposal) || introduced(input)
+    ? 'Not run — this change adds unrequested ratings. ' + EXAM_REVIEW_CONTRACT : null;
 }
 
 export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string, extension?: string | null): string {

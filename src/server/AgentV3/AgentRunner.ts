@@ -245,7 +245,7 @@ export interface AgentRunnerOptions {
    */
   requestGaps?: () => readonly string[];
   /** Original-user scope binding for proposed mutations; reads and cancellation retain their own semantics. */
-  requestActionIssue?: (proposal: string) => string | null;
+  requestActionIssue?: (proposal: string, input?: Record<string, unknown>) => string | null;
   /**
    * Admin-only note from inside the loop (autopsy 95598899). Called when the loop declines to
    * override the model — the one decision that otherwise leaves no trace at all, since a turn that
@@ -1611,7 +1611,7 @@ export class AgentRunner {
             return { ...r, content: `${toolAliasNote(tu.name, aliasTo)}${r.content}` };
           }
           if (this.opts.requestActionIssue && toolUseCouldProduceWork(tu)) {
-            const issue = this.opts.requestActionIssue(`${turn.text ?? ''}\n${JSON.stringify(tu.input ?? {})}`);
+            const issue = this.opts.requestActionIssue(turn.text ?? '', tu.input);
             if (issue) {
               try { this.opts.onNote?.({ code: 'REQUEST_SCOPE_REFUSED', message: issue }); } catch { /* observation only */ }
               events.emit({ type: 'narration', agent: agentRole, text: issue, ts: Date.now() });

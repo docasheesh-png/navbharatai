@@ -56,5 +56,5 @@ export function goldenComponentHarness(source: string) {
     if (!match) throw new Error('No button: ' + label);
     return match;
   };
-  return { flush, nodes, text: () => text(tree), button, click: (label: string) => { button(label).props.onClick(); flush(); }, dispose: () => cleanups.forEach(f => f?.()) };
+  return { flush, nodes, textOf: text, text: () => text(tree), button, click: (label: string) => { button(label).props.onClick(); flush(); }, dispose: () => cleanups.forEach(f => f?.()) };
 }

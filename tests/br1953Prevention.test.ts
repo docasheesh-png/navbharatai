@@ -6,6 +6,7 @@ import { GOLDEN_SCAFFOLDS, goldenScaffoldForPrompt, goldenBuildPrompt, goldenQue
 import { verbatimTemplateSkipsModel } from '../src/server/AgentV3/templateVerify';
 import { STARTER_TEMPLATES } from '../src/components/agentv3/starterTemplates';
 import { goldenComponentHarness } from './helpers/goldenComponentHarness';
+import { makeSubAgentSpawn } from '../src/server/AgentV3/SubAgent';
 import { AgentRunner } from '../src/server/AgentV3/AgentRunner';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
@@ -35,6 +36,21 @@ describe('BR1953 shipped exam source: one scoring rule and an actual whole-paper
     expect(attempts()[0]).toMatchObject({ score: 0.75, correct: 1, wrong: 1, skipped: 10 });
     expect(a.text()).toContain('Answer: Article 17 · you chose Article 14');
     expect(a.nodes().filter(n => n.props.className === 'badge' && n.props.children === 'Skipped')).toHaveLength(10);
+  });
+  it.each([true, false])('all twelve questions expose four options and score a complete %s-correct paper consistently', correct => {
+    const a = open(); a.click('Start test');
+    const answers = [1,2,2,1,1,0,1,2,1,1,2,1];
+    for (let i=0;i<answers.length;i++) {
+      a.click('Go to question ' + (i+1));
+      const options=a.nodes().filter(n=>n.type==='button' && /^[A-D]\. /.test(a.textOf(n)));
+      expect(options).toHaveLength(4);
+      options[correct ? answers[i] : (answers[i]+1)%4].props.onClick(); a.flush();
+    }
+    a.click('Submit paper'); expect(attempts()[0]).toMatchObject({score:correct?12:-3,correct:correct?12:0,wrong:correct?0:12,skipped:0});
+    expect(a.text()).toContain('General Knowledge'+(correct?4:-1)+' / 4');
+    expect(a.text()).toContain('English'+(correct?2:-0.5)+' / 2');
+    a.click('Back to start'); const saved=attempts(); a.dispose(); app=undefined;
+    const reload=open(saved); expect(reload.text()).toContain('Past attempts'); expect(attempts()).toEqual(saved);
   });
   it('an all-skipped paper has zero, not negative marks', () => {
     const a = open(); a.click('Start test'); a.click('Submit paper');
@@ -94,8 +110,13 @@ describe('BR1953 review-domain contract, including the admitted Surplus path', (
   it.each([INTENT, 'I will add reviews/ratings functionality.', 'interface Review { rating: number; }', 'setRating(5)'])('refuses the evidenced competing rating product: %s', proposal => {
     expect(goldenQuestionReviewIssue(PROMPT, proposal)).toContain('Not run');
   });
-  it.each(['Fix section-wise negative marking.', 'Show the chosen and correct answer for every question.', 'Do not add ratings; fix section scores.', 'Never implement star ratings. Keep answer review.'])('retains legitimate requested work: %s', proposal => {
+  it.each(['Fix section-wise negative marking.', 'Show the chosen and correct answer for every question.', 'Do not add ratings; fix section scores.', 'Never implement star ratings. Keep answer review.', 'Do not add a rating system; fix scores.', 'Do not add reviews and ratings; retain question review.'])('retains legitimate requested work: %s', proposal => {
     expect(goldenQuestionReviewIssue(PROMPT, proposal)).toBeNull();
+  });
+  it('new code is checked, while removing old rating code and opaque non-exam payloads stay safe', () => {
+    expect(goldenQuestionReviewIssue(PROMPT, 'Repair question review.', {new_string:'interface Review { rating: number; }'})).toContain('Not run');
+    expect(goldenQuestionReviewIssue(PROMPT, 'Remove unrequested feedback.', {old_string:'interface Review { rating: number; }',new_string:''})).toBeNull();
+    expect(goldenQuestionReviewIssue('Build an invoice app.', 'Add ratings.', { get content() { throw Error('must not inspect'); } })).toBeNull();
   });
   it('explicit user extensions and non-exam review apps keep their own authority', () => {
     expect(goldenQuestionReviewIssue(PROMPT + ' Add question star ratings.', INTENT)).toBeNull();
@@ -104,7 +125,7 @@ describe('BR1953 review-domain contract, including the admitted Surplus path', (
   });
 });
 
-function runFixture(options: { stopAfterReady?: boolean; proposal?: string; guard?: boolean; earlyStop?: boolean; failAfterReady?: boolean }) {
+function runFixture(options: { stopAfterReady?: boolean; proposal?: string; guard?: boolean; earlyStop?: boolean; failAfterReady?: boolean; toolInput?: Record<string, unknown>; scopePrompt?: string }) {
   const ac = new AbortController(); const events = new AgentEventStream(); const notes: string[] = []; const dispatched: string[] = []; let calls = 0;
   const client: MessagesCreateClient = { messages: { create: async () => {
     calls++;
@@ -112,18 +133,37 @@ function runFixture(options: { stopAfterReady?: boolean; proposal?: string; guar
     if (options.stopAfterReady && calls === 21) { ac.abort(); throw Error('cancelled'); }
     if (options.failAfterReady && calls === 21) throw Error('synthetic fatal');
     if (options.proposal && calls > 1) return { content: [{type:'text',text:'Stopped without making that change.'}], stop_reason:'end_turn', usage:{input_tokens:1,output_tokens:1} } as never;
-    return { content: [{type:'text',text:options.proposal ?? 'Checking the requested paper.'}, {type:'tool_use',id:'t'+calls,name:'edit_file',input:{path:'src/App.tsx',old_string:'x',new_string:'y'}}], stop_reason:'tool_use', usage:{input_tokens:1,output_tokens:1} } as never;
+    return { content: [{type:'text',text:options.proposal ?? 'Checking the requested paper.'}, {type:'tool_use',id:'t'+calls,name:'edit_file',input:options.toolInput ?? {path:'src/App.tsx',old_string:'x',new_string:'y'}}], stop_reason:'tool_use', usage:{input_tokens:1,output_tokens:1} } as never;
   } } };
   const dispatcher = { dispatch: async (tu: {id:string;name:string}) => { dispatched.push(tu.name); return {tool_use_id:tu.id,content:'ok',is_error:false}; }, changeCount:()=>dispatched.length, wroteAnything:()=>true,
     assessBuildReadiness:async()=>({score:100,ready:true,blockers:[],warnings:[],tier:'production'}), lastTypecheckErrorCount:()=>0, undefinedClassesNow:async()=>[] };
   const runner = new AgentRunner({client:new ClaudeClient(client), dispatcher:dispatcher as never, events,state:new WorkspaceState(events),model:'m',system:'s',tools:defaultToolCatalog(),signal:ac.signal,maxSteps:22,
-    requestActionIssue: options.guard ? p=>goldenQuestionReviewIssue(PROMPT,p) : undefined,onNote:n=>notes.push(n.code)});
+    requestActionIssue: options.guard ? (p,input)=>goldenQuestionReviewIssue(options.scopePrompt ?? PROMPT,p,input) : undefined,onNote:n=>notes.push(n.code)});
   return { result:runner.run(PROMPT), dispatched, notes };
 }
 
 describe('production AgentRunner boundaries: refusal and readiness attribution survive cancellation', () => {
   it('refuses the actual contradictory edit before dispatch, not just a prompt suggestion', async () => {
     const f = runFixture({proposal:INTENT,guard:true}); await f.result; expect(f.dispatched).toEqual([]); expect(f.notes).toContain('REQUEST_SCOPE_REFUSED');
+  });
+  it('a real writer specialist inherits the original-user guard before any actuator write', async () => {
+    let calls=0; const events=new AgentEventStream(); const writeFile=vi.fn(async()=>{});
+    const client: MessagesCreateClient={messages:{create:async()=> (++calls===1 ? {
+      content:[{type:'text',text:INTENT},{type:'tool_use',id:'child-write',name:'write_file',input:{path:'src/ratings.ts',content:'export const rating = 5;'}}],stop_reason:'tool_use',usage:{input_tokens:1,output_tokens:1},
+    } : {content:[{type:'text',text:'No rating change was made.'}],stop_reason:'end_turn',usage:{input_tokens:1,output_tokens:1}}) as never}};
+    const spawn=makeSubAgentSpawn({client:new ClaudeClient(client),workspaceId:'br1953-scope-child',events,state:new WorkspaceState(events),model:'m',maxSteps:2,
+      actuator:{readFile:async()=>{throw Error('ENOENT');},writeFile,listFiles:async()=>[],runCommand:async()=>({exitCode:0,stdout:'',stderr:''})},
+      requestActionIssue:(p,input)=>goldenQuestionReviewIssue(PROMPT,p,input)});
+    await spawn('frontend','Implement the original mock-test request.'); expect(writeFile).not.toHaveBeenCalled();
+  });
+  it('the real mutation boundary permits removal of an unwanted old rating field', async () => {
+    const f=runFixture({proposal:'Remove the unwanted feedback field.',guard:true,toolInput:{path:'src/App.tsx',old_string:'rating: number;',new_string:''}});
+    await f.result; expect(f.dispatched).toEqual(['edit_file']);
+  });
+  it('an unrelated app does not serialize/copy or inspect a large opaque tool body for this scope check', async () => {
+    const input={path:'src/App.tsx',get content():string {throw Error('unnecessary payload traversal');}};
+    const f=runFixture({proposal:'Update the invoice.',guard:true,scopePrompt:'Build an invoice app.',toolInput:input});
+    await f.result; expect(f.dispatched).toEqual(['edit_file']);
   });
   it('legitimate score edits remain dispatchable', async () => {
     const f = runFixture({proposal:'Fix section-wise negative marking.',guard:true}); await f.result; expect(f.dispatched).toEqual(['edit_file']);
@@ -142,9 +182,29 @@ describe('production AgentRunner boundaries: refusal and readiness attribution s
       ts.forEachChild(n,visit);
     }
     visit(ast); expect(count).toBeGreaterThanOrEqual(10);
+    let declaration:ts.VariableDeclaration|undefined;
+    function mark(n:ts.Node) { if(ts.isVariableDeclaration(n) && n.name.getText(ast)==='readyMark') declaration=n; ts.forEachChild(n,mark); }
+    mark(ast); expect(declaration).toBeDefined();
+    for(let parent=declaration!.parent;parent;parent=parent.parent) expect(ts.isForStatement(parent)).toBe(false);
+  });
+  it.each([
+    ['new_build', false, undefined, true], ['new_build', false, 123, false], ['new_build', true, undefined, false], ['edit', false, undefined, false],
+  ])('original-chip guard respects real later user authority: %s %s %s', (intent, isEditMode, lastSteerAt, refused) => {
+    const route=readFileSync('src/server/routes/agentv3.ts','utf8');
+    const ast=ts.createSourceFile('route.ts',route,ts.ScriptTarget.Latest,true); let expression='';
+    function visit(n: ts.Node) { if(ts.isVariableDeclaration(n) && n.name.getText(ast)==='requestActionIssue') expression=n.initializer!.getText(ast); ts.forEachChild(n,visit); }
+    visit(ast); expect(expression).not.toBe('');
+    const js=ts.transpileModule('const f = '+expression+'; exports.f=f;', {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+    const out: {f?:(p:string)=>string|null}={};
+    new Function('exports','intent','isEditMode','rb','originalPrompt','goldenQuestionReviewIssue',js)(out,intent,isEditMode,{lastSteerAt},PROMPT,goldenQuestionReviewIssue);
+    expect(Boolean(out.f!(INTENT))).toBe(refused);
   });
   it('production route binds the ORIGINAL new-build request, not a generated replacement or chat turn', () => {
     const route=readFileSync('src/server/routes/agentv3.ts','utf8');
-    expect(route).toContain("requestActionIssue: (proposal: string) => intent === 'new_build' && !isEditMode ? goldenQuestionReviewIssue(prompt, proposal) : null");
+    expect(route).toContain("const requestActionIssue = (proposal: string, input?: Record<string, unknown>) => intent === 'new_build' && !isEditMode && !rb.lastSteerAt");
+    expect(route).toContain('goldenQuestionReviewIssue(originalPrompt, proposal, input) : null');
+    expect(route.match(/^        requestActionIssue,$/gm)).toHaveLength(2);
+    const child = readFileSync('src/server/AgentV3/SubAgent.ts', 'utf8');
+    expect(child).toContain('requestActionIssue: deps.requestActionIssue');
   });
 });

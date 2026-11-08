@@ -1,3 +1,4 @@
+import { getChatOutcomeObservation, resetChatOutcomeObservationForTests } from '../src/server/AI/chatOutcomeObservation';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ chat: vi.fn(), route: vi.fn(), stream: vi.fn(), getRouter: vi.fn() }));
 vi.mock('../src/server/AI/LiveRegistry/runtime', () => ({ strictFreeChat: mocks.chat }));
@@ -6,7 +7,7 @@ import { UniversalAIRouter } from '../src/server/AI/UniversalAIRouter';
 import { runWithInferenceScope } from '../src/server/AI/inferencePolicy';
 const old = process.env.STRICT_FREE_MODULES_ENABLED;
 beforeEach(() => {
-  vi.clearAllMocks(); process.env.STRICT_FREE_MODULES_ENABLED = 'true';
+  resetChatOutcomeObservationForTests(); vi.clearAllMocks(); process.env.STRICT_FREE_MODULES_ENABLED = 'true';
   mocks.getRouter.mockReturnValue({ route: mocks.route, routeStream: mocks.stream });
   mocks.route.mockResolvedValue({ response: { content: 'sequential', provider: 'OPENROUTER', model: 'free', latencyMs: 1 }, telemetry: { success: true } });
   mocks.stream.mockResolvedValue({ ok: true });
@@ -16,6 +17,7 @@ afterEach(() => { if (old === undefined) delete process.env.STRICT_FREE_MODULES_
 describe('only ordinary chat explicitly opts into two-model hedging', () => {
   it('explicit nonstream chat opt-in avoids constructing legacy clients', async () => {
     const result = await runWithInferenceScope('free-modules', () => new UniversalAIRouter().routeDetailed('hello', [], 'navbharat', undefined, 'system', true));
+    expect(getChatOutcomeObservation().counts.complete).toBe(1);
     expect(result.content).toBe('chat'); expect(mocks.chat).toHaveBeenCalledOnce(); expect(mocks.getRouter).not.toHaveBeenCalled();
   });
   it('helpers default to the sequential router even with the module flag on', async () => {
@@ -24,8 +26,11 @@ describe('only ordinary chat explicitly opts into two-model hedging', () => {
   });
   it('only explicit streaming chat opt-in forwards chunks and cancellation to hedge', async () => {
     const onChunk = vi.fn(); const signal = new AbortController().signal;
+    mocks.chat.mockImplementationOnce(async ({ onChunk }) => { onChunk('Real reply'); return { content: 'Real reply', provider: 'OPENROUTER', model: 'free', latencyMs: 1 }; });
     await runWithInferenceScope('free-modules', () => new UniversalAIRouter().routeStream('hello', [], 'navbharat', 'system', onChunk, signal, true));
-    expect(mocks.chat).toHaveBeenCalledWith(expect.objectContaining({ systemPrompt: 'system', onChunk, signal }));
+    expect(mocks.chat).toHaveBeenCalledWith(expect.objectContaining({ systemPrompt: 'system', onChunk: expect.any(Function), signal }));
+    expect(onChunk).toHaveBeenCalledWith('Real reply');
+    expect(getChatOutcomeObservation().counts.complete).toBe(1);
     expect(mocks.getRouter).not.toHaveBeenCalled();
   });
   it('flag-off and paid builder never activate the free hedge', async () => {

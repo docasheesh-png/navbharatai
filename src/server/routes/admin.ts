@@ -1,3 +1,4 @@
+import { getChatOutcomeObservation } from '../AI/chatOutcomeObservation';
 import { adjustAdminBuildTokens, AdminTokenAdjustmentError } from '../lib/adminTokenAdjustment';
 import { adminTokenAdjustmentReceipt } from '../lib/adminTokenAdjustmentReceipt';
 import { freeProgramStore } from '../lib/freeProgram';
@@ -3531,6 +3532,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // with the rate so the board can refuse to grade two requests as a platform verdict.
       if (req > 0) readings.providerErrorRate = (Number(outcomes?.failed) || 0) / req;
       readings.providerRequests = req;
+      readings.chatOutcomes = getChatOutcomeObservation();
     } catch { /* unknown */ }
 
     // Sandbox load — live E2B machines. The SAME reading the Monitor's "Live sandboxes" tile uses, so
@@ -3582,6 +3584,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
     const tiles = loadBoard(readings);
     res.json({
+      routingObservations: readings.chatOutcomes,
       level: worstLevel(tiles),
       tiles,
       // Named so the screen can say WHICH ceilings it could not read, rather than showing a quiet zero.

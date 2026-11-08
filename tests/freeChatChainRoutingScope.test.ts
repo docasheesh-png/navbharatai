@@ -46,8 +46,10 @@ describe('Free Chat Chain scope is ordinary chat plus explicit server context', 
   it('legacy streaming callers without server context preserve the signal and original router', async () => {
     const signal = new AbortController().signal; const onChunk = vi.fn();
     expect(await new UniversalAIRouter().routeStream('hello', history, 'navbharat', 'system', onChunk, signal)).toMatchObject({ content: 'legacy stream', ok: true });
+    mocks.stream.mock.calls[0][2]('delivered', 'notice');
+    expect(onChunk).toHaveBeenCalledExactlyOnceWith('delivered', 'notice');
     expect(mocks.chain).not.toHaveBeenCalled();
-    expect(mocks.stream).toHaveBeenCalledWith('User: earlier question\nAssistant: earlier answer\nUser: hello', 'system', onChunk, signal);
+    expect(mocks.stream).toHaveBeenCalledWith('User: earlier question\nAssistant: earlier answer\nUser: hello', 'system', expect.any(Function), signal);
   });
 
   it('ordinary nonstream chat forwards complete server-owned context and real result telemetry', async () => {
@@ -63,7 +65,7 @@ describe('Free Chat Chain scope is ordinary chat plus explicit server context', 
     const signal = new AbortController().signal; const onChunk = vi.fn();
     mocks.chain.mockImplementation(async input => { input.onChunk('chain answer'); return chainReply; });
     const result = await new UniversalAIRouter().routeStream('hello', history, 'navbharat', 'system', onChunk, signal, false, context);
-    expect(mocks.chain).toHaveBeenCalledExactlyOnceWith({ message: 'hello', history, systemPrompt: 'system', signal, onChunk, context });
+    expect(mocks.chain).toHaveBeenCalledExactlyOnceWith({ message: 'hello', history, systemPrompt: 'system', signal, onChunk: expect.any(Function), context });
     expect(result).toBe(chainReply);
     expect(onChunk.mock.calls).toEqual([['chain answer']]);
     expect(mocks.getRouter).not.toHaveBeenCalled();

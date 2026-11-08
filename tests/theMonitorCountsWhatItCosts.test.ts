@@ -28,7 +28,7 @@ function fakeDb() {
   const db = {
     collection: () => ({
       doc: () => ({ set: async (u: Record<string, unknown>) => { writes.push(u); } }),
-      where: () => ({ limit: () => ({ get: async () => ({ empty: true, docs: [] }) }) }),
+      where: () => ({ limit: () => ({ get: async () => ({ empty: true, size: 0, docs: [] }) }), orderBy: () => ({ limit: () => ({ get: async () => ({ empty: true, size: 0, docs: [] }) }) }) }),
     }),
   };
   return { db, writes };
@@ -48,6 +48,21 @@ describe('1 · a build and its cost reach the Monitor in the same write', () => 
     restore = () => { t.getDb = original; };
   });
   afterEach(() => restore());
+
+  it('reports unavailable when writes fail even though the collection is readable', async () => {
+    const { db } = fakeDb();
+    const collection = db.collection;
+    t.getDb = () => ({ collection: () => ({ ...collection(), doc: () => ({ set: async () => { throw new Error('Synthetic write denied'); } }) }) });
+    metricsTimeline.recordBuild({ ok: true, previewAllowed: true, ms: 1000 });
+    const series = await metricsTimeline.series();
+    expect(series.available).toBe(false);
+    expect(series.points).toEqual([]);
+    expect(t.pending.size).toBeGreaterThan(0);
+    t.getDb = () => db;
+    await t.flush();
+    expect(t.pending.size).toBe(0);
+    expect((await metricsTimeline.series()).available).toBe(true);
+  });
 
   it("🔴 the capture: the build's model call no longer flushes ahead of the build it belongs to", async () => {
     // Exactly what recordPlatformBuild does, synchronously: calls first, build last.
@@ -151,6 +166,6 @@ describe('3 · AI load counts the streamed chat turn and shows its sample', () =
   it('the tile says how many requests its percentage stands on', () => {
     const tile = loadBoard({ providerErrorRate: 0.15, providerRequests: 20 } as any).find((x) => x.id === 'ai')!;
     expect(tile.display).toBe('15% unanswered');
-    expect(tile.note).toContain('3 of 20 requests went unanswered');
+    expect(tile.note).toContain('3 of 20 recorded requests had no answer');
   });
 });

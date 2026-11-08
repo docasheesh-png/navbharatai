@@ -1,3 +1,4 @@
+import { observeChatOutcome } from './chatOutcomeObservation';
 import { fixedTextChainSelected } from './fixedTextChain';
 import { InferenceGatewayTerminalError } from './InferenceGateway/dispatchBoundary';
 import { currentFreeAnswerSignal } from '../lib/freeAnswerQuotaContext';
@@ -80,6 +81,22 @@ export class UniversalAIRouter {
     freeChainContext?: FreeChainContext,
   ): Promise<RoutedCall> {
     const quotaSignal = currentFreeAnswerSignal();
+    const observedSignal = signal && quotaSignal ? AbortSignal.any([signal, quotaSignal]) : signal ?? quotaSignal;
+    return observeChatOutcome(tier, observedSignal, () =>
+      this.routeDetailedInner(message, history, tier, _traceContext, systemPrompt, allowFreeChatHedge, signal, freeChainContext));
+  }
+
+  private async routeDetailedInner(
+    message: string,
+    history: any[] = [],
+    tier: 'navbharat' | 'free' | 'sda' | 'doctor' | 'professional' = 'navbharat',
+    _traceContext?: TraceContext,
+    systemPrompt?: string,
+    allowFreeChatHedge = false,
+    signal?: AbortSignal,
+    freeChainContext?: FreeChainContext,
+  ): Promise<RoutedCall> {
+    const quotaSignal = currentFreeAnswerSignal();
     signal = signal && quotaSignal ? AbortSignal.any([signal, quotaSignal]) : signal ?? quotaSignal;
     if (!isGatewayRouteSelected() && (tier === 'navbharat' || (fixedTextChainSelected() && tier === 'free')) && freeChainContext) {
       const { maybeFreeChain } = await import('./FreeChain/runtime');
@@ -146,6 +163,26 @@ export class UniversalAIRouter {
   }
 
   async routeStream(
+    message: string,
+    history: any[],
+    tier: string,
+    systemPrompt: string | undefined,
+    onChunk: (text: string, source?: 'notice') => void,
+    signal?: AbortSignal,
+    allowFreeChatHedge = false,
+    freeChainContext?: FreeChainContext,
+  ): Promise<StreamOutcome> {
+    let visible = false;
+    const quotaSignal = currentFreeAnswerSignal();
+    const observedSignal = signal && quotaSignal ? AbortSignal.any([signal, quotaSignal]) : signal ?? quotaSignal;
+    return observeChatOutcome(tier, observedSignal, () =>
+      this.routeStreamInner(message, history, tier, systemPrompt, (text, ...source) => {
+        if (source[0] !== 'notice' && text.trim()) visible = true;
+        onChunk(text, ...source);
+      }, signal, allowFreeChatHedge, freeChainContext), () => visible);
+  }
+
+  private async routeStreamInner(
     message: string,
     history: any[],
     tier: string,

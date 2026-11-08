@@ -1,0 +1,270 @@
+{
+  "mode": "offline-scheduler-rehearsal",
+  "liveRequests": 0,
+  "planned": 10110,
+  "attempted": 10110,
+  "notAttempted": 0,
+  "automaticReplays": 0,
+  "usersAllFourCorrect": 1000,
+  "accuracyScope": "Deterministic closed-answer fixtures only; no production accuracy or capacity measured.",
+  "budget": {
+    "authorizedINR": 1000,
+    "runtimeEnforcementVerified": false,
+    "measuredSpend": null
+  },
+  "batches": [
+    {
+      "stage": 0,
+      "requested": 10,
+      "clientPeakPending": 10,
+      "launchSpreadMs": 1.0288520000000005,
+      "outcomes": {
+        "complete": 10,
+        "partial": 0,
+        "refused": 0,
+        "cancelled": 0,
+        "failed": 0
+      },
+      "http429": 0,
+      "http503": 0,
+      "latencyMs": {
+        "p50": 12.870790999999997,
+        "p95": 13.308683000000002,
+        "p99": 13.308683000000002
+      },
+      "ttftMs": {
+        "p50": 12.471349000000004,
+        "p95": 13.130012999999991,
+        "p99": 13.130012999999991
+      },
+      "correct": 10,
+      "admittedConcurrency": null,
+      "providerConcurrency": null,
+      "actualProviderRequests": null,
+      "cacheEvidence": "unmeasured",
+      "costs": null
+    },
+    {
+      "stage": 1,
+      "requested": 100,
+      "clientPeakPending": 100,
+      "launchSpreadMs": 1.1361550000000022,
+      "outcomes": {
+        "complete": 100,
+        "partial": 0,
+        "refused": 0,
+        "cancelled": 0,
+        "failed": 0
+      },
+      "http429": 0,
+      "http503": 0,
+      "latencyMs": {
+        "p50": 2.025505999999993,
+        "p95": 2.6503799999999984,
+        "p99": 2.69882299999999
+      },
+      "ttftMs": {
+        "p50": 2.0065179999999856,
+        "p95": 2.6323520000000116,
+        "p99": 2.6793229999999966
+      },
+      "correct": 100,
+      "admittedConcurrency": null,
+      "providerConcurrency": null,
+      "actualProviderRequests": null,
+      "cacheEvidence": "unmeasured",
+      "costs": null
+    },
+    {
+      "stage": 2,
+      "requested": 1000,
+      "clientPeakPending": 1000,
+      "launchSpreadMs": 10.884723999999977,
+      "outcomes": {
+        "complete": 1000,
+        "partial": 0,
+        "refused": 0,
+        "cancelled": 0,
+        "failed": 0
+      },
+      "http429": 0,
+      "http503": 0,
+      "latencyMs": {
+        "p50": 38.57215500000001,
+        "p95": 46.603284,
+        "p99": 47.005641999999995
+      },
+      "ttftMs": {
+        "p50": 38.553257,
+        "p95": 46.586197999999996,
+        "p99": 46.98729399999999
+      },
+      "correct": 1000,
+      "admittedConcurrency": null,
+      "providerConcurrency": null,
+      "actualProviderRequests": null,
+      "cacheEvidence": "unmeasured",
+      "costs": null
+    },
+    {
+      "stage": 3,
+      "requested": 5000,
+      "clientPeakPending": 5000,
+      "launchSpreadMs": 61.551882000000006,
+      "outcomes": {
+        "complete": 5000,
+        "partial": 0,
+        "refused": 0,
+        "cancelled": 0,
+        "failed": 0
+      },
+      "http429": 0,
+      "http503": 0,
+      "latencyMs": {
+        "p50": 111.148774,
+        "p95": 151.62305,
+        "p99": 154.824611
+      },
+      "ttftMs": {
+        "p50": 111.13554400000004,
+        "p95": 151.60319,
+        "p99": 154.802728
+      },
+      "correct": 5000,
+      "admittedConcurrency": null,
+      "providerConcurrency": null,
+      "actualProviderRequests": null,
+      "cacheEvidence": "unmeasured",
+      "costs": null
+    },
+    {
+      "stage": 4,
+      "requested": 1000,
+      "clientPeakPending": 1000,
+      "launchSpreadMs": 3.833684999999946,
+      "outcomes": {
+        "complete": 1000,
+        "partial": 0,
+        "refused": 0,
+        "cancelled": 0,
+        "failed": 0
+      },
+      "http429": 0,
+      "http503": 0,
+      "latencyMs": {
+        "p50": 12.427612999999951,
+        "p95": 18.07805000000002,
+        "p99": 18.63461000000001
+      },
+      "ttftMs": {
+        "p50": 12.415525000000002,
+        "p95": 18.065612000000044,
+        "p99": 18.62084900000002
+      },
+      "correct": 1000,
+      "admittedConcurrency": null,
+      "providerConcurrency": null,
+      "actualProviderRequests": null,
+      "cacheEvidence": "unmeasured",
+      "costs": null
+    },
+    {
+      "stage": 5,
+      "requested": 1000,
+      "clientPeakPending": 1000,
+      "launchSpreadMs": 22.354612999999972,
+      "outcomes": {
+        "complete": 1000,
+        "partial": 0,
+        "refused": 0,
+        "cancelled": 0,
+        "failed": 0
+      },
+      "http429": 0,
+      "http503": 0,
+      "latencyMs": {
+        "p50": 25.878180000000043,
+        "p95": 31.449847999999974,
+        "p99": 31.883993000000032
+      },
+      "ttftMs": {
+        "p50": 25.865950999999995,
+        "p95": 31.43756000000002,
+        "p99": 31.870182
+      },
+      "correct": 1000,
+      "admittedConcurrency": null,
+      "providerConcurrency": null,
+      "actualProviderRequests": null,
+      "cacheEvidence": "unmeasured",
+      "costs": null
+    },
+    {
+      "stage": 6,
+      "requested": 1000,
+      "clientPeakPending": 1000,
+      "launchSpreadMs": 7.904747999999984,
+      "outcomes": {
+        "complete": 1000,
+        "partial": 0,
+        "refused": 0,
+        "cancelled": 0,
+        "failed": 0
+      },
+      "http429": 0,
+      "http503": 0,
+      "latencyMs": {
+        "p50": 20.80081800000005,
+        "p95": 25.094697999999994,
+        "p99": 25.387940000000015
+      },
+      "ttftMs": {
+        "p50": 20.784553999999957,
+        "p95": 25.081106999999975,
+        "p99": 25.37561199999999
+      },
+      "correct": 1000,
+      "admittedConcurrency": null,
+      "providerConcurrency": null,
+      "actualProviderRequests": null,
+      "cacheEvidence": "unmeasured",
+      "costs": null
+    },
+    {
+      "stage": 7,
+      "requested": 1000,
+      "clientPeakPending": 1000,
+      "launchSpreadMs": 11.878750999999966,
+      "outcomes": {
+        "complete": 1000,
+        "partial": 0,
+        "refused": 0,
+        "cancelled": 0,
+        "failed": 0
+      },
+      "http429": 0,
+      "http503": 0,
+      "latencyMs": {
+        "p50": 23.52900999999997,
+        "p95": 25.577992999999992,
+        "p99": 25.770212000000015
+      },
+      "ttftMs": {
+        "p50": 23.518343999999956,
+        "p95": 25.563280000000077,
+        "p99": 25.757873000000018
+      },
+      "correct": 1000,
+      "admittedConcurrency": null,
+      "providerConcurrency": null,
+      "actualProviderRequests": null,
+      "cacheEvidence": "unmeasured",
+      "costs": null
+    }
+  ],
+  "sourceRevision": "bf8056b48627361eaa41ec0e03e3323cc59275bb",
+  "manifestSha256": "650d22e929f5ea297551a7dc7c695b85260ac0a04fd7eccece6edde40a94945d",
+  "recordCount": 10110,
+  "nodeVersion": "v22.23.4",
+  "environment": "Single local Node process; injected deterministic answers, no HTTP or server routing"
+}

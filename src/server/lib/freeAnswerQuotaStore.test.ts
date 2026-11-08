@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Firestore } from 'firebase-admin/firestore';
-import { FreeAnswerQuotaStore, FREE_ANSWER_LEASE_MS } from './freeAnswerQuotaStore';
+import { FreeAnswerQuotaStore, FREE_ANSWER_LEASE_MS, FREE_ANSWER_REQUEST_MS, FREE_ANSWER_CHAT_REQUEST_MS } from './freeAnswerQuotaStore';
 
 const at = Date.parse('2026-10-23T10:00:00Z');
 const uid = { key: 'uid:verified-user', limit: 20 as const };
@@ -86,9 +86,40 @@ describe('durable shared Free answer quota', () => {
   it('renews only the live owner and never beyond the request deadline', async () => {
     const { store } = fixture(); const r = await held(store);
     expect(await store.renew({ ...r, owner: 'forged' }, at + 1)).toBe(false);
-    for (let t = 20_000; t < 90_000; t += 20_000) expect(await store.renew(r, at + t)).toBe(true);
-    expect(await store.renew(r, at + 90_000)).toBe(false);
-    expect(await store.settle(r, 'provider-failed', at + 90_000)).toBe(false);
+    for (let t = 20_000; t < FREE_ANSWER_REQUEST_MS; t += 20_000) expect(await store.renew(r, at + t)).toBe(true);
+    expect(await store.renew(r, at + FREE_ANSWER_REQUEST_MS)).toBe(false);
+    expect(await store.settle(r, 'provider-failed', at + FREE_ANSWER_REQUEST_MS)).toBe(false);
+  });
+  it('extends only an explicitly requested ordinary-chat reservation through the full fallback budget', async () => {
+    const f = fixture(); const decision = await f.store.reserve(uid, id(1), at, FREE_ANSWER_CHAT_REQUEST_MS);
+    expect(decision.allowed).toBe(true); if (!decision.allowed) return;
+    const r = decision.reservation;
+    expect(r.deadlineAt).toBe(at + 240_000);
+    for (let t = 20_000; t < FREE_ANSWER_CHAT_REQUEST_MS; t += 20_000) expect(await f.store.renew(r, at + t)).toBe(true);
+    expect(await f.store.renew(r, at + FREE_ANSWER_CHAT_REQUEST_MS)).toBe(false);
+    expect(await f.store.settle(r, 'provider-failed', at + FREE_ANSWER_CHAT_REQUEST_MS)).toBe(false);
+    const other = fixture(); expect((await held(other.store)).deadlineAt).toBe(at + 90_000);
+    await expect(other.store.reserve(uid, id(2), at, 999_999)).rejects.toThrow();
+  });
+  it('reads and settles pre-deployment ninety-second reservations without extending or resetting them', async () => {
+    const f = fixture(); const decision = await f.store.reserve(uid, id(1), at, FREE_ANSWER_CHAT_REQUEST_MS);
+    expect(decision.allowed).toBe(true); if (!decision.allowed) return;
+    const reservation = decision.reservation;
+    const old = { ...reservation, deadlineAt: at + 90_000 };
+    for (const [key, doc] of f.docs) {
+      if (doc.active?.id === old.id) f.docs.set(key, { ...doc, active: { ...doc.active, deadlineAt: old.deadlineAt } });
+      if (doc.id === old.id) f.docs.set(key, { ...doc, deadlineAt: old.deadlineAt });
+    }
+    for (const elapsed of [20_000, 40_000, 60_000, 80_000]) expect(await f.store.renew(old, at + elapsed)).toBe(true);
+    expect(await f.store.settle(old, 'answered', at + 85_000)).toBe(true);
+    expect(await f.store.reserve(uid, id(1), at + 86_000)).toMatchObject({ allowed: false, reason: 'duplicate' });
+    expect(await f.store.status(uid, at + 86_000)).toMatchObject({ used: 1, reserved: 0 });
+    expect(old.deadlineAt).toBe(at + 90_000);
+  });
+  it('rejects a malformed extended reservation rather than treating arbitrary duration as authorized', async () => {
+    const f = fixture(); const reservation = await held(f.store);
+    for (const [key, doc] of f.docs) if (doc.active) f.docs.set(key, { ...doc, active: { ...reservation, deadlineAt: at + FREE_ANSWER_REQUEST_MS + 1 } });
+    await expect(f.store.status(uid, at + 1)).rejects.toThrow('Invalid Free answer quota state');
   });
   it('resets at midnight IST without removing a previous-day active lock or cross-day idempotency', async () => {
     const { store } = fixture(); const midnight = Date.parse('2026-10-23T18:30:00Z');

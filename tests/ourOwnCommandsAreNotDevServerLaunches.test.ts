@@ -21,6 +21,7 @@ const NOT_LAUNCHES: Record<string, () => string> = {
   TSC_ENSURE: () => T.TSC_ENSURE,
   PRIME_NODE_MODULES: () => T.PRIME_NODE_MODULES,
   robustTscCommand: () => T.robustTscCommand(),
+  sharedBareTypecheckCommand: () => T.sharedBareTypecheckCommand('./node_modules/.bin/tsc --noEmit', 'vite-react-census'),
   recipeInstallCommand: () => T.recipeInstallCommand([{ name: 'vite', version: '^5', dev: true }]),
   writeTypecheckCommand: () => W.writeTypecheckCommand(),
   writeTypecheckWarmupCommand: () => W.writeTypecheckWarmupCommand(),

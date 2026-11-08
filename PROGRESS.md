@@ -100944,3 +100944,7 @@ Ten class changes: unknown recipe reads return an error rather than zero-file ki
 Regression: `tests/br1951Autopsy.test.ts` plus neighboring recipe/JSX/claim/red-team/readiness suites; separate baseline worktree reversion proof (new dependency helper retained only as no-op API to test old recovery semantics). Full CI-equivalent local gates required before push; outcomes recorded in PR handoff. No new env flags, routing/billing change, paid call, production replay, deployment, merge or external autopsy persistence. Live connector has no autopsy write operation, and its failure-only autopsy endpoint not finding this successful BR is not a missing report.
 
 Parent owns merge. BR1952 is the exact next report only AFTER this PR's merged state is confirmed; blocked actions remain in the queue after merge.
+### 2026-11-08 — professional 10-a-day cap retired; shared 50 remains
+
+- The "X/10 free today" badge was a real second admission counter (`professionalUsageStore` + `professionalFreeDailyLimit`), not a label. Signed-in Teacher, Doctor, Lawyer and the other professionals now use the shared free-answer ceiling (50/day, one pool with Free chat). Guest public chat stays 10. Pass holders and the free-list stay unlimited. Exam mode still prices its first 5 questions separately.
+- A failed Doctor answer marks the shared reservation as a provider failure so it can be refunded. One successful logical answer still settles one credit.

@@ -19,7 +19,8 @@ import { isAuditReplyClean } from '../lib/clinical/auditGate';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { anthropicTotalInput } from '../lib/anthropicUsage';
 import { verifyFirebaseIdentity, rateLimiter } from '../lib/authMiddleware';
-import { gateProfessionalTurn, burnFreeMessage, type ProfessionalTier } from '../professionals/passGate';
+import { gateProfessionalTurn, type ProfessionalTier } from '../professionals/passGate';
+import { withFreeAnswerQuota, markFreeAnswer, markFreeAnswerProviderFailure } from '../lib/freeAnswerQuota';
 import { identityGrantEmail } from '../AgentV3/featureFlag';
 import { chargeForAiTurn } from '../lib/aiTurnCharge';
 import type { ChatTurnUsage } from '../lib/chatSpend';
@@ -159,6 +160,10 @@ export function registerSdaRoutes(app: Express): void {
         }
       }
 
+      // Model turns join the shared free-answer ceiling. Early dose and image replies returned above
+      // and do not take a credit. Pass and free-list stay outside this reservation.
+      const produceAnswer = async () => {
+        try {
       // ── Session / clinical-store resolution ──────────────────────────────────
       // The case id the client sent (one per patient), scoped to the verified account — see sdaStoreKey.
       // Scoped to the VERIFIED account — never to an id taken from the body (see sdaStoreKey).
@@ -712,6 +717,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         // Admin-facing detail stays in the log; the doctor gets an honest, on-brand busy message
         // (never internal provider/key detail — the client now shows this text directly).
         console.error('[SDA] All AI providers failed — returning 503');
+        if (sdaGate.tier === 'free') markFreeAnswerProviderFailure(req);
         return res.status(503).json({ error: sdaTier === 'free' ? freeBusyMessage(message) : 'Doctor AI is busy right now — please try again in a moment.' });
       }
 
@@ -781,16 +787,16 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       if (suggestPDF) clinicalEntry.stage = 'complete';
       clinicalEntry.updatedAt = Date.now();
 
-      // A genuinely-answered FREE-tier turn burns one of today's free messages (shared across all
-      // professionals + Doctor AI). Never on a paywall block or an error. Best-effort.
-      if (sdaGate.countsAgainstFree) burnFreeMessage(sdaGate.uid);
+      // One shared free-answer credit, the same pool as Free chat and every other professional.
+      // Deterministic dose and image-guidance replies returned above and do not reach this mark.
+      if (sdaGate.tier === 'free') markFreeAnswer(req);
       // ONE WALLET: Doctor AI draws on the same balance as every other assistant and every build.
       // After the answer, never awaited into the response, inert while AI_WALLET_SPEND is off.
       void chargeForAiTurn(
         getServerDb() as any,
         {
           userId: sdaGate.uid, isFreeListed: sdaGate.isFreeListed, hasActivePass: sdaGate.hasActivePass, feature: 'doctor',
-          // Doctor AI shares the professionals' 10 free messages (admin 2026-09-23) — a free one is free.
+          // A shared-quota turn is free here. Pass and free-list keep their own fraction.
           billableFraction: sdaGate.billableFraction,
         },
         sdaSpend,
@@ -803,6 +809,17 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // The CLIENT's case id goes back, never the internal account-scoped key.
       return res.json({ reply: finalReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF, sessionId: typeof sessionId === 'string' ? sessionId : null, reportResendNeeded });
 
+        } catch (err: any) {
+          if (sdaGate.tier === 'free') markFreeAnswerProviderFailure(req);
+          console.error('[SDA] Error:', err);
+          if (!res.headersSent && !res.writableEnded) res.status(500).json({ error: 'Doctor AI hit an unexpected error. Please try again in a moment.' });
+        }
+      };
+      if (sdaGate.tier === 'free') {
+        await withFreeAnswerQuota(req, res, produceAnswer, { uid: sdaIdentity?.uid || null, surface: 'professionals' });
+      } else {
+        await produceAnswer();
+      }
     } catch (err: any) {
       // Full detail to the server log (admin diagnostics); a safe, on-brand message to the doctor —
       // the client now shows this `error` text directly, so it must never leak internals.

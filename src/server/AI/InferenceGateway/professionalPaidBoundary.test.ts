@@ -74,7 +74,13 @@ describe('server professional entitlements precede Free inference policy', () =>
     });
     const res = await invoke(operation, { message: 'hello', subject: 'Physics', count: 1, tier: 'paid', hasActivePass: true });
     expect(res.statusCode).toBe(200); expect(m.pass).toHaveBeenCalledOnce(); expect(m.verify).toHaveBeenCalledOnce(); expect(m.engine).toHaveBeenCalledOnce();
-    expect(operation === 'chat' ? m.used : m.examUsed).toHaveBeenCalledOnce();
+    if (operation === 'chat') {
+      // The separate professional message counter is retired. Chat uses the shared ceiling.
+      expect(m.used).not.toHaveBeenCalled();
+      expect(m.increment).not.toHaveBeenCalled();
+    } else {
+      expect(m.examUsed).toHaveBeenCalledOnce();
+    }
   });
   it('paid vision is not rejected by the Free flag before its original describe call', async () => {
     m.pass.mockResolvedValueOnce({ active: true });

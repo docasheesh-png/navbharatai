@@ -325,6 +325,18 @@ export function chipPromptForBuild(prompt: string): string {
 /** Autopsy 8257ca59 — said to every builder of a simple template, verify or customise. */
 const KEEP_THE_SWITCH = `KEEP the template's own working controls — above all its light/dark switch (ThemeToggle in src/theme.tsx, which cycles Auto → Light → Dark through the data-theme attribute the styles use); improve one in place if you must, never replace it with a hand-rolled copy.`;
 
+/** BR1953: question-answer review is not a new social-feedback product. Keep explicit additions authoritative. */
+export const EXAM_REVIEW_CONTRACT = '[QUESTION REVIEW CONTRACT] Review of every question means showing the chosen answer, correct answer and correct/wrong/skipped outcome; mark-for-review is an in-paper bookmark. Neither requests star ratings, testimonials or a separate feedback/reviews store. Add those only when the user explicitly asks. Preserve the section-wise negative-marked scores, whole-paper deadline and browser attempt history.';
+
+/** A narrow original-request contract, not a universal ban on ratings or a semantic-completeness judge. */
+export function goldenQuestionReviewIssue(originalPrompt: string, proposal: string): string | null {
+  // Exact/bare exam chips only. A custom addition, an edit or any other app keeps its own scope.
+  if (goldenScaffoldForPrompt(originalPrompt)?.id !== 'exam-prep') return null;
+  const affirmative = proposal.replace(/\b(?:do not|don't|never|not|without)\s+(?:add(?:ing)?|implement(?:ing)?|includ(?:e|ing))?\s*(?:reviews?\s*[/&]\s*)?(?:star[- ]?)?ratings?\b/gi, '');
+  const ratingAddition = /\b(?:add|implement|load|save|persist|include|build)\b[^.;\n]{0,120}\bratings?\b|\brating\s*[?:=]|\b(?:setRating|StarRating)\b/i.test(affirmative);
+  return ratingAddition ? 'Not run — this change adds unrequested ratings. ' + EXAM_REVIEW_CONTRACT : null;
+}
+
 export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string, extension?: string | null): string {
   const added = String(extension ?? '').trim();
   // The user's own words on top of a chip (chipExtensionFor, autopsy ca99778e) — said FIRST and as the priority.
@@ -336,7 +348,7 @@ export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string, e
       + `${KEEP_THE_SWITCH}\n\n`
     : '';
   if (customise && golden.tier !== 'pro') {
-    const note = golden.finishNote ? `\n\n${golden.finishNote}` : '';
+    const note = (golden.finishNote ? `\n\n${golden.finishNote}` : '') + (golden.id === 'exam-prep' ? `\n\n${EXAM_REVIEW_CONTRACT}` : '');
     return `${customise.trimEnd()}${note}\n\n---\n\n${buildPrompt}`;
   }
   const head = customise + (golden.tier === 'pro'
@@ -352,6 +364,6 @@ export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string, e
       // Autopsy 8257ca59: a polish step replaced the template's working light/dark switch with a
       // hand-rolled one that set a class no stylesheet styles, and a repair pass had to put it back.
       KEEP_THE_SWITCH);
-  const note = golden.finishNote ? `\n\n${golden.finishNote}` : '';
+  const note = (golden.finishNote ? `\n\n${golden.finishNote}` : '') + (golden.id === 'exam-prep' ? `\n\n${EXAM_REVIEW_CONTRACT}` : '');
   return `${head}${note}\n\n---\n\n${buildPrompt}`;
 }

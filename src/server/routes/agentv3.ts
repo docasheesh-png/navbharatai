@@ -70,7 +70,7 @@ import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContrac
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { isInertCommand } from '../AgentV3/inertCommand';
-import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp, seedableScaffoldFor, chipExtensionTextOf, templateOnlyBuild } from '../AgentV3/goldenScaffolds/registry';
+import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp, seedableScaffoldFor, chipExtensionTextOf, templateOnlyBuild, goldenQuestionReviewIssue } from '../AgentV3/goldenScaffolds/registry';
 import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
@@ -17545,6 +17545,7 @@ async function noteBuildOutcome(
         // are built. The done signal must not tell a module turn it may stop (autopsy 50378049).
         projectModule: () => projectModuleRef?.name ?? null,
         // A game is not "complete" while a feature its contract names is missing from its own code (autopsy 61279465).
+        requestActionIssue: (proposal: string) => intent === 'new_build' && !isEditMode ? goldenQuestionReviewIssue(prompt, proposal) : null,
         requestGaps: () => {
           const c = requestContractRef.contract;
           if (!c || c.requiredFeatures.length === 0) return [];

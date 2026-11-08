@@ -2391,12 +2391,20 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             // a second, drifting version of it in an isolated call is the defect this section removes.
             manifest.splice(planned, 1);
           }
+          if (lapsed) return []; // an abandoned lane cannot acquire a new write
           contractFile = { path: contractPath, content: mod.source };
           generatedSoFar.push(contractFile); // salvageable on a timeout, like any finished file
           // A consumer is told ALREADY WRITTEN. Establish that prerequisite before spending on
           // consumers, not eight minutes later at salvage (BR1952's unavailable workspace).
           // The normal final write skips this confirmed identical copy through alreadyThere.
-          const contractSave = await writeAndLearn([contractFile]);
+          throwIfStopped(deps.signal);
+          const savingContract = writeAndLearn([contractFile]);
+          // Join the existing early-save settlement fence: timeout salvage must not race
+          // a prerequisite write that was already in flight when lane ownership lapsed.
+          handOffSaves.push(savingContract.then(() => undefined, () => undefined));
+          const contractSave = await savingContract;
+          if (lapsed) return []; // no late Wrote announcement or consumer generation
+          throwIfStopped(deps.signal);
           if (contractSave.failed.length > 0) {
             throw new Error('simple-build fast lane stopped early — the shared contract could not be saved to the workspace; consumers were not generated');
           }

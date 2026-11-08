@@ -91,6 +91,29 @@ describe('the shared contract is a real saved prerequisite, not an announcement 
     expect((await runSimpleBuild(h.deps)).ok).toBe(true);
     expect(h.saved.filter(f=>f.path==='src/types.ts')).toHaveLength(1);
   });
+  it('a pending contract save settles before timeout handoff; no duplicate salvage or late consumers', async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    let writes = 0;
+    const h = lane({ complex: true, overallTimeoutMs: 1_000, writeFiles: async files => {
+      writes++;
+      if (writes === 1) await blocked;
+      return files.map(f => ({path: f.path, ok: true}));
+    }});
+    let ended = false;
+    const pending = runSimpleBuild(h.deps).then(r => {ended = true; return r;});
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect(writes).toBe(1);
+    expect(ended).toBe(false);
+    release();
+    const result = await pending;
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/timed out/);
+    expect(writes).toBe(1);
+    expect(h.calls.filter(s => s.includes('write THIS file'))).toHaveLength(0);
+    expect(h.logs.some(s => s.includes('Wrote the shared contract'))).toBe(false);
+  });
   it('a refused contract starts no per-file consumer calls and never says Wrote', async () => {
     const h = lane({writeFiles: async files => files.map(f=>({path:f.path,ok:false,error:'sandbox capacity unavailable'}))});
     const r = await runSimpleBuild(h.deps);
@@ -193,7 +216,7 @@ describe('binary-text generation siblings cannot reopen the same impossible work
   });
   it('neither complete nor truncated binary blocks buy a continuation',async()=>{
     for(const text of ['<<<FILE src/assets/thumbnails/thumb4.jpg>>>\nJFIF partial', '<<<FILE public/logo.png>>>\nPNG bytes\n<<<ENDFILE>>>']){
-      const generate=vi.fn();
+      const generate=vi.fn(async()=>({text:'remaining bytes\n<<<ENDFILE>>>',stopReason:'end_turn'}));
       await expect(continueFastLaneGeneration({text,stopReason:'max_tokens'},{generate})).rejects.toThrow(/binary/);
       expect(generate).not.toHaveBeenCalled();
     }
@@ -250,7 +273,7 @@ describe('whole-server class census: a new sibling needs the same boundary and a
     expect(observed.indexOf('producingToolUses +=')).toBeGreaterThan(observed.indexOf('await dispatchWithBudget'));
     const simple=readFileSync('src/server/AgentV3/SimpleBuilder.ts','utf8');
     expect(simple).not.toContain('`✓ ${spec.path}');
-    expect(simple.indexOf('const contractSave = await writeAndLearn')).toBeGreaterThan(-1);
-    expect(simple.indexOf('const contractSave = await writeAndLearn')).toBeLessThan(simple.indexOf('deps.log?.(`📐 Wrote the shared contract'));
+    expect(simple.indexOf('const contractSave = await savingContract')).toBeGreaterThan(-1);
+    expect(simple.indexOf('const contractSave = await savingContract')).toBeLessThan(simple.indexOf('deps.log?.(`📐 Wrote the shared contract'));
   });
 });

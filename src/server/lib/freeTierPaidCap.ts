@@ -106,11 +106,11 @@ export async function reserveFreeTierPaid(input: { surface: FreeTierPaidSurface;
   const cap = freeTierPaidCapNanoUsd();
   const quote = quoteFreeTierPaidNanoUsd(input.model, input.inputTokens, input.outputTokens);
   const authority = store();
-  if (!authority || cap <= 0 || quote === null || quote > cap) {
+  if (!authority || quote === null) {
     console.warn(`[FREE_PAID_CAP] refused ${input.model} on ${input.surface} (cap/price/store unavailable)`);
     return null;
   }
-  const reservation = await authority.reservePaid({ requestId: `free-tier:${input.surface}:${randomUUID()}`,
+  const reservation = await authority.reservePaid({ uncappedRollout: true, requestId: `free-tier:${input.surface}:${randomUUID()}`,
     uid: `free-tier-shared:${input.surface}`, maxCostNanoUsd: quote, capNanoUsd: cap, perUserLimit: Number.MAX_SAFE_INTEGER })
     .catch(() => null);
   if (!reservation || !reservation.mayDispatch) {

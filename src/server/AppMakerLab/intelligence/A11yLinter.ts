@@ -127,9 +127,13 @@ export function controlLabelVerdict(t: ScannedTag): 'not-a-control' | 'labelled'
  * Only a LITERAL placeholder is used (`placeholder={t('x')}` is left alone — its text is not known here),
  * only an HTML element (never a component), and only a control this linter calls unlabelled. PURE.
  */
-export function labelFieldsFromPlaceholder(code: string): { code: string; repaired: number } {
+export function labelFieldsFromPlaceholder(code: string, existingCode = ''): { code: string; repaired: number } {
   const edits: Array<{ at: number; insert: string }> = [];
+  // Identical old/new tags cannot safely be assigned ownership by position. Preserve every
+  // tag already present, including reordered/duplicated tags, rather than relabel an old control.
+  const unchanged = new Set(scanMarkup(existingCode).map(t => t.tag));
   for (const t of scanMarkup(code)) {
+    if (unchanged.has(t.tag)) continue;
     if (controlLabelVerdict(t) !== 'unlabelled') continue;
     const ph = /\splaceholder\s*=\s*("([^"{}]+)"|'([^'{}]+)')/.exec(t.tag);
     if (!ph) continue;
@@ -145,6 +149,16 @@ export function labelFieldsFromPlaceholder(code: string): { code: string; repair
   let out = code;
   for (const e of edits.sort((a, b) => b.at - a.at)) out = out.slice(0, e.at) + e.insert + out.slice(e.at);
   return { code: out, repaired: edits.length };
+}
+
+/** BR1956: admit a newly authored literal-placeholder field already labelled, before a model heal.
+ * Existing unchanged fields, tests, components and dynamic labels are not rewritten. The SAME
+ * established LABEL_REPAIR switch and parser own both this admission and the end-pass backstop. */
+export function labelAuthoredFields(path: string, existing: string | null, content: string, env: NodeJS.ProcessEnv = process.env): { code: string; repaired: number; note: string } {
+  if (existing === null || env.AGENTV3_LABEL_REPAIR === 'off' || !/\.(?:tsx|jsx|html?)$/i.test(path)
+    || /(?:^|\/)(?:node_modules|dist|tests?|__tests__|__mocks__)\/|\.(?:test|spec)\./i.test(path)) return {code:content,repaired:0,note:''};
+  const result = labelFieldsFromPlaceholder(content, existing);
+  return {...result, note: result.repaired > 0 ? `\n[platform] ${result.repaired} newly authored field(s) received an accessible name from their own literal placeholder before saving; no label text was invented.` : ''};
 }
 
 /**

@@ -1,3 +1,4 @@
+import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { manifestArchitectureProblem } from './manifestArchitecture';
 import { STEERING_YIELD_REASON, isSteeringYield } from './steeringHandoff';
 // AgentV3 — Simple Builder: "plan the files, then build each file in its OWN focused call".
@@ -2054,7 +2055,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   const inWorkspace = new Map<string, { content: string; confirmed: boolean }>();
   const writeAndLearn = async (files: OneShotFile[]): Promise<{ landed: OneShotFile[]; failed: string[] }> => {
     // A copy, so what is written and what is recorded are the same text even if a caller's object changes later.
-    const batch = files.map((f) => ({ path: f.path, content: f.content }));
+    const batch = await Promise.all(files.map(async (f) => {
+      const existing = inWorkspace.get(f.path)?.content ?? (deps.scaffoldPaths.includes(f.path)
+        ? deps.readExisting ? await deps.readExisting(f.path).catch(() => null) : null : '');
+      const labels = labelAuthoredFields(f.path, existing, f.content);
+      if (labels.repaired) deps.log?.(labels.note.trim());
+      return {path:f.path,content:labels.code};
+    }));
+    if (deps.yieldRequested?.()) throw new Error(STEERING_YIELD_REASON);
     const read = readWriteOutcomes(batch, await deps.writeFiles(batch));
     for (const f of read.landed) inWorkspace.set(f.path, { content: f.content, confirmed: read.known });
     return { landed: read.landed, failed: read.failed.map((x) => x.path) };
@@ -2062,7 +2070,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   /** Already in the workspace, CONFIRMED, with exactly this content — writing it again would change nothing. */
   const alreadyThere = (f: OneShotFile): boolean => {
     const held = inWorkspace.get(f.path);
-    return !!held && held.confirmed && held.content === f.content;
+    return !!held && held.confirmed && held.content === labelAuthoredFields(f.path, held.content, f.content).code;
   };
   /** The files the workspace holds, each in the version it holds; a file it never took is left out. */
   const asInWorkspace = (files: OneShotFile[]): OneShotFile[] => files.flatMap((f) => {

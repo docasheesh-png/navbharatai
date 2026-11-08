@@ -572,13 +572,18 @@ export class AIRouter {
       const s2 = runStream(p2, 1);
       // Preserve the existing 12-second commit budget and rest-of-ladder fallback policy.
       const commitTimeout = new Promise<void>(res => { commitTimer = setTimeout(res, 12000); });
-      await Promise.race([commitPromise, commitTimeout]);
+      // Professional chat need not spend 12 seconds waiting for racers that have BOTH
+      // already settled without output. Keep Pro/build timing unchanged. Waiting for both
+      // physical promises also avoids starting an extra fallback beside an unfinished call.
+      const commitWaiters = [commitPromise, commitTimeout];
+      if (this.universe === 'professional') commitWaiters.push(Promise.all([s1, s2]).then(() => {}));
+      await Promise.race(commitWaiters);
       if (commitTimer) clearTimeout(commitTimer);
       if (signal?.aborted) return { ok: false, reason: 'aborted' };
 
       if (!committed) {
         active = false; // Late racers must not interleave with the sequential fallback.
-        console.warn('[RACE_STREAM] No commit in 12s — trying sequential fallbacks');
+        console.warn('[RACE_STREAM] No committed output — trying sequential fallbacks');
         return await this.streamSequential(rest, prompt, systemPrompt, onChunk, signal);
       }
 

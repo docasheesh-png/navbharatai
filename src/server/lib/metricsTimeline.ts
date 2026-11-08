@@ -521,6 +521,9 @@ class MetricsTimeline {
     };
 
     await this.flush().catch(() => {});
+    // Read access alone does not establish a complete feed. Failed writes are restored
+    // to pending; do not paint their absent rows as a true zero/healthy timeline.
+    if (this.pending.size > 0) return emptyResult(false);
     const db = this.getDb();
     if (!db) return emptyResult(false);
     try {

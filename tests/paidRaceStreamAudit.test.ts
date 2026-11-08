@@ -123,15 +123,13 @@ describe('paid race: visible-output commitment and honest terminal outcomes', ()
     expect(outcome.reason).toBeUndefined(); expect(vi.getTimerCount()).toBe(0);
   });
 
-  it.each(['on', 'off'])('empty completions use the same rest fallback after the unchanged 12s budget (%s)', async watchdog => {
+  it.each(['on', 'off'])('professional empty completions immediately use the existing rest fallback (%s)', async watchdog => {
     vi.stubEnv('CHAT_STREAM_WATCHDOG', watchdog);
     const { router, firstCall, secondCall } = configure(async () => 'metadata only', async (_p, _s, chunk) => { chunk(''); chunk(' \n'); return 'metadata'; });
     const fallback = vi.fn<Stream>(async (_p, _s, chunk) => { chunk('Fallback answer.'); return 'Fallback answer.'; });
     router.registerProvider({ name: 'ANTHROPIC', priority: 3, execute: vi.fn(), healthCheck: async () => true, executeStream: fallback });
     const chunks: string[] = [];
     const pending = router.routeStream('Synthetic test', undefined, c => chunks.push(c));
-    await vi.advanceTimersByTimeAsync(11_999);
-    expect(fallback).not.toHaveBeenCalled(); expect(chunks).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
     expect(await pending).toMatchObject({ ok: true, provider: 'ANTHROPIC', raced: false });
     expect(chunks).toEqual(['Fallback answer.']);

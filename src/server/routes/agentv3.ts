@@ -1,5 +1,6 @@
 import { completedAppReviewEligible } from '../AgentV3/optionalBugHunt';
-import { compilerNeedsPackageSetup, PACKAGE_SETUP_REQUIRED } from '../AgentV3/compilerSetupBoundary';
+import { readSummaryManifest } from '../AgentV3/ProjectSummary';
+import { compilerNeedsPackageSetup, compilerRepairProven, PACKAGE_SETUP_REQUIRED } from '../AgentV3/compilerSetupBoundary';
 import { prepareGameSeedWorkspace } from '../AgentV3/gameSeedWorkspace';
 import { withReplyLanguage, replyVoiceForRequest } from '../AgentV3/replyLanguageBinding';
 import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
@@ -20485,13 +20486,13 @@ async function noteBuildOutcome(
             console.log(`[AGENTV3] agentic tsc-gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
           }
           check = await runTsc();
-          if (check.ok) {
+          if (compilerRepairProven(check)) {
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Type errors fixed — the finished build now compiles cleanly.', ts: Date.now() });
           } else {
             // Type errors remain after one repair — record the honest end-state (do NOT flip result.ok;
             // the app is built and will be durably saved — ship-with-warning, like PREVIEW_FAILED).
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'OUTCOME_TYPECHECK_FAILED', message: 'Type errors remained after the agentic build and one repair pass.', autoResolved: false });
-            events.emit({ type: 'narration', agent: 'architect', text: '⚠️ Some TypeScript errors remain after one fix pass. Your files are saved — send a follow-up and I\'ll finish fixing them.', ts: Date.now() });
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'OUTCOME_TYPECHECK_FAILED', message: 'Type errors were not verified as resolved after the agentic build and one repair pass.', autoResolved: false });
+            events.emit({ type: 'narration', agent: 'architect', text: '⚠️ The TypeScript errors could not be verified as fixed. Your files are saved; further checking is needed.', ts: Date.now() });
           }
         }
         if (check.verified) gateEvidence.typecheck = check.ok ? 'passed' : 'failed';
@@ -25520,7 +25521,7 @@ async function noteBuildOutcome(
           // files this turn authored, by the reviewer's own rule (`reviewChangedPaths`); a fresh build's
           // headline names no count, so it keeps reading the whole map.
           const summaryPaths = isEditMode ? reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden) : [...writtenFiles.keys()];
-          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: summaryPaths.length, editMode: isEditMode, changedPaths: summaryPaths, platformAdded: isEditMode ? writtenFiles.size - summaryPaths.length : 0, awaitingShell: awaitsShellNow(), packageJson: writtenFiles.get('package.json') ?? projectFilesAtTurnStart?.['package.json'] ?? null, runProven: runProof().proven });
+          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: summaryPaths.length, editMode: isEditMode, changedPaths: summaryPaths, platformAdded: isEditMode ? writtenFiles.size - summaryPaths.length : 0, awaitingShell: awaitsShellNow(), packageJson: await readSummaryManifest({ stopped: () => abort.signal.aborted, read: () => withTimeout(actuator.readFile(workspaceId, 'package.json'), 5_000, 'summary-manifest') }), runProven: runProof().proven });
           if (summaryText) events.emit({ type: 'narration', agent: 'architect', text: summaryText, ts: Date.now() });
         } catch { /* summary is best-effort — never affects the build */ }
       }

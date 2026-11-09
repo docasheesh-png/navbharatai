@@ -1,3 +1,4 @@
+import { gameDimensionConflict } from '../AgentV3/gameDimension';
 import { requiresSingleHtml } from '../../lib/singleHtmlConstraint';
 
 // MEGA-APP ROADMAP — Phase 2 of the mega-app system (admin 2026-08-14, the "PUBG / WhatsApp / Claude
@@ -337,6 +338,10 @@ export function roadmapGuardrail(
     && !requiresSingleHtml(architecture.originalRequest)
     && parsed.steps.some((step) => requiresSingleHtml(step.buildPrompt))) {
     return { roadmap: null, rejected: [`roadmap architecture conflicts with selected ${architecture.framework}: single HTML is a planner choice, not a user constraint`] };
+  }
+
+  if (architecture && parsed.steps.some(step => gameDimensionConflict(architecture.originalRequest, step.buildPrompt))) {
+    return { roadmap: null, rejected: ['roadmap dimension conflicts with an explicit user constraint; keep the user constraint rather than seed a contradictory game'] };
   }
 
   const seen = new Set<string>();

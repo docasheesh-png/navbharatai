@@ -1,10 +1,15 @@
+import { readyOverrunNote } from '../src/server/AgentV3/doneSignal';
+import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
 import { describe, expect, it, vi } from 'vitest';
+import { splitSeedOrphans, seedOrphanObservation } from '../src/server/AgentV3/seedOrphanOwnership';
+import { roadmapGuardrail } from '../src/server/lib/megaRoadmap';
+import { readSummaryManifest } from '../src/server/AgentV3/ProjectSummary';
 import { readFileSync } from 'node:fs';
 import { createSandboxAdmissionBudget, sandboxAdmissionActuator } from '../src/server/AgentV3/sandboxAdmissionBudget';
 import { sandboxWasUnavailable } from '../src/server/AgentV3/sandboxAvailability';
 import type { IEngineerActuator } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { prepareGameSeedWorkspace } from '../src/server/AgentV3/gameSeedWorkspace';
-import { compilerNeedsPackageSetup } from '../src/server/AgentV3/compilerSetupBoundary';
+import { compilerNeedsPackageSetup, compilerRepairProven } from '../src/server/AgentV3/compilerSetupBoundary';
 import { runEndgameRepair } from '../src/server/AgentV3/EndgameRepair';
 import { runSimpleBuild } from '../src/server/AgentV3/SimpleBuilder';
 import { gameKitPlan, gameTurnRequest, gamePlannerCapability, gameTurnHandoff } from '../src/server/AgentV3/gameKitSeed';
@@ -156,8 +161,8 @@ describe('BR1958 F5/F6: typed declarations and platform seed ownership are not u
   it('the readiness owner samples the shared exact kit map, separates platform preparation, and keeps true old-user observations', () => {
     expect(route()).toContain('dispatcher.setPlatformSeedFiles(() => kitSeededFiles.keys())');
     const s = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
-    expect(s).toContain('authoredPathSet(this.platformSeedFiles())'); expect(s).toContain("not the user's existing code");
-    expect(s).toContain('!orphanedHere.includes(o) && !seedPaths.has(o.file)');
+    expect(s).toContain('splitSeedOrphans(split.preExisting.filter((o) => !orphanedHere.includes(o)), this.platformSeedFiles?.() ?? [])');
+    expect(s).toContain('seedOrphanObservation(seedOwnership.platform.map((o) => o.label))');
     expect(s).toContain('preExistingCodeObservation(');
   });
 });
@@ -189,6 +194,68 @@ describe('BR1958 F7/F8/F9: generated files and source inventory are not a runnab
     expect(ask).toHaveBeenCalledTimes(1); expect(r.runReview).toBe(true);
     expect(route().match(/completedAppReviewEligible\(\{/g)).toHaveLength(2);
     expect(route()).toContain('runProven: runProof().proven, stopped: abort.signal.aborted');
-    expect(route()).toContain("packageJson: writtenFiles.get('package.json')");
+    expect(route()).toContain('packageJson: await readSummaryManifest(');
+  });
+});
+
+describe('BR1958 review safeguards: explicit dimensions, actual script reads and independent seed ownership', () => {
+  it.each([['Build a 3D game', 'Build a 2D game with a working city map'], ['Build a 2D game', 'Build a 3D game with vehicle controls']])('a known contradictory planner dimension never overrides user constraint: %s', (request, brief) => {
+    const parsed = { achievableSummary: 'Game', note: null, steps: [1,2,3].map(n => ({ title: 'Step '+n, goal: 'Real playable goal', buildPrompt: brief, needsInfra: null })) };
+    expect(roadmapGuardrail(parsed, null, { framework: 'vite-react', originalRequest: request }).roadmap).toBeNull();
+  });
+  it('GTA/driving without an explicit dimension may legitimately choose a 2D milestone', () => {
+    const p = { achievableSummary: 'Game', note: null, steps: [1,2,3].map(n => ({ title: 'Step '+n, goal: 'Real playable goal', buildPrompt: 'Build a 2D game with a working city map', needsInfra: null })) };
+    expect(roadmapGuardrail(p, null, { framework: 'vite-react', originalRequest: 'Gta 5 full copy game banao' }).roadmap).not.toBeNull();
+  });
+  it('ownership follows exact normalized acknowledgments, not src/game naming, and keeps pre-existing/user findings visible', () => {
+    const a = { file: './src/game/GameCanvas.tsx', label: 'GameCanvas' }, b = { file: 'src/game/UserGame.tsx', label: 'UserGame' };
+    const split = splitSeedOrphans([a,b], ['src/game/GameCanvas.tsx']);
+    expect(split.platform).toEqual([a]); expect(split.preExisting).toEqual([b]);
+    expect(seedOrphanObservation(split.platform.map(x => x.label))).toContain("not the user's existing code");
+    expect(splitSeedOrphans([a,b], []).preExisting).toEqual([a,b]);
+  });
+  it('the current manifest owner refuses Stop and failed reads, not an old stored manifest', async () => {
+    const read = vi.fn(async () => manifest); expect(await readSummaryManifest({ stopped: () => true, read })).toBeNull(); expect(read).not.toHaveBeenCalled();
+    expect(await readSummaryManifest({ stopped: () => false, read })).toBe(manifest); read.mockRejectedValue(Error('unavailable'));
+    expect(await readSummaryManifest({ stopped: () => false, read })).toBeNull();
+  });
+  it('post-repair compiler success requires the verified bit, not fail-open ok alone', () => {
+    expect(route()).toContain('if (compilerRepairProven(check))');
+    expect(compilerRepairProven({ ok: true, verified: false })).toBe(false);
+    expect(compilerRepairProven({ ok: false, verified: true })).toBe(false);
+    expect(compilerRepairProven({ ok: true, verified: true })).toBe(true);
+    expect(route()).toContain('Type errors were not verified as resolved after the agentic build and one repair pass.');
+  });
+});
+
+describe('BR1958 F11: an admission call outside the timer is not a zero-duration call', () => {
+  it('actual BR1958-shaped backfill preserves measured 2751ms and refuses the impossible split', () => {
+    let t = 1000; const d = new BuildDiagnostics({ now: () => t }); t += 4;
+    d.recordLlmCall({ model: 'fixture', promptPreview: 'Build scope admission classification', latencyMs: 2751, ok: true });
+    const report = d.report(); const note = report.issues.find(x => x.code === 'TIME_TO_FIRST_CALL')!.message;
+    expect(note).toContain('2.8s latency'); expect(note).toContain('cannot be separated');
+    expect(note).not.toContain('first call itself then took 0s'); expect(note).not.toContain('0s of preparation');
+    expect(report.llmCalls?.[0].latencyMs).toBe(2751);
+  });
+  it('a compatible real timing window retains the normal measured split', () => {
+    let t = 1000; const d = new BuildDiagnostics({ now: () => t }); t += 8000;
+    d.recordLlmCall({ model: 'fixture', latencyMs: 2000, ok: true });
+    expect(d.report().issues.find(x => x.code === 'TIME_TO_FIRST_CALL')!.message).toContain('6s of preparation');
+    expect(d.report().issues.find(x => x.code === 'TIME_TO_FIRST_CALL')!.message).toContain('then took 2s');
+  });
+});
+
+describe('BR1958 review: a known package name does not bless an invented public subpath', () => {
+  it.each(['react/missing', 'three/not-a-real-api', 'vitest/imaginary', 'react/jsx-runtime-typo'])('keeps normal source repair for %s', name => {
+    expect(compilerNeedsPackageSetup(`src/App.tsx(1,1): error TS2307: Cannot find module '${name}' or its corresponding type declarations.`)).toBe(false);
+  });
+});
+
+describe('BR1958 F12: structural readiness92 is not runtime proof', () => {
+  it.each([0, 2000])('retains same-origin overrun measurement without declaring the app built (%sms)', extra => {
+    const note = readyOverrunNote({ step: 3, score: 92, elapsedMs: 1000, at: 10000 }, 3, 1000 + extra, { endAt: 10000 + extra });
+    expect(note).toContain('Structural readiness'); expect(note).toContain('not proof the app ran');
+    expect(note).toContain('(92/100)'); expect(note).not.toContain('The app was judged finished');
+    expect(note).toContain(extra ? 'over 2s' : 'build ended there');
   });
 });

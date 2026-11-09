@@ -1,3 +1,4 @@
+import { splitSeedOrphans, seedOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
 import { ASSET_MODELS_PATH, localModelSubjects, readyModelFor, localModelLead } from './gameAssets/localModelNote';
@@ -7030,11 +7031,9 @@ export class ToolDispatcher {
             // An untouched file this build ORPHANED by removing its last import elsewhere is this build's doing
             // (autopsy 8257ca59) — said as such, at warning weight, never as "your existing code".
             const orphanedHere = split.preExisting.filter((o) => this._droppedImportStems.has(importStem(o.file)));
-            const seedPaths = this.platformSeedFiles ? authoredPathSet(this.platformSeedFiles()) : new Set<string>();
-            const platformPrepared = split.preExisting.filter((o) => !orphanedHere.includes(o) && seedPaths.has(o.file));
-            const reallyOld = split.preExisting.filter((o) => !orphanedHere.includes(o) && !seedPaths.has(o.file));
-            if (platformPrepared.length > 0) extra.push({ severity: 'observation', label:
-              `[platform preparation from this build — not the user's existing code] ${platformPrepared.length} game component(s) were seeded but not imported: ${platformPrepared.map((o) => o.label).join(', ')}. Seed preparation is not delivered gameplay.` });
+            const seedOwnership = splitSeedOrphans(split.preExisting.filter((o) => !orphanedHere.includes(o)), this.platformSeedFiles?.() ?? []);
+            const reallyOld = seedOwnership.preExisting;
+            if (seedOwnership.platform.length > 0) extra.push({ severity: 'observation', label: seedOrphanObservation(seedOwnership.platform.map((o) => o.label)) });
             if (orphanedHere.length > 0) extra.push({ severity: 'medium', label: droppedImportOrphanLabel(orphanedHere.map((o) => o.label)) });
             if (reallyOld.length > 0) {
               extra.push({

@@ -1600,15 +1600,19 @@ export class BuildDiagnostics {
     const elapsedMs = Math.max(0, this.now() - this.startedAt);
     // Clamped to the elapsed time: a provider-reported latency longer than the whole build so far is
     // not a measurement we can subtract, and a negative prep time would be worse than the old bug.
-    const lat = typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs >= 0
-      ? Math.min(latencyMs, elapsedMs)
-      : undefined;
+    // BR1958: pre-build admission calls are backfilled after this timer starts. Clamping their
+    // measured 2751ms into a 4ms window falsely reported a zero-second model call.
+    const windowMismatch = typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs > elapsedMs;
+    const lat = typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs >= 0 && !windowMismatch
+      ? latencyMs : undefined;
     // ⚠️ PREPARATION IS SUBTRACTED FROM THE CALLER'S WAIT, NEVER FROM THE ANSWERER'S TIME. Using `answerMs`
     // here would turn GLM's abandoned 15 s into "26s of preparation" — blaming setup for a provider crawl,
     // the misattribution autopsies dukaan and a38c6fef already paid for once.
     const seconds = Math.round((lat === undefined ? elapsedMs : elapsedMs - lat) / 1000);
     const callTime = lat === undefined ? null : BuildDiagnostics.firstCallTime(lat, answerMs, fallbackMs);
-    const message = lat === undefined
+    const message = windowMismatch
+      ? `The first recorded call reports ${Math.round(latencyMs! / 100) / 10}s latency, longer than the ${Math.round(elapsedMs / 100) / 10}s build timing window. Preparation and call timing cannot be separated from these timestamps; no zero-duration call or setup attribution is established.`
+      : lat === undefined
       // NEVER INVENT THE SPLIT. Without a latency we cannot separate the two, so we say the number is
       // an upper bound rather than repeating the old confident, wrong attribution.
       ? `${seconds}s passed before the build's first model call was recorded — this includes the call's own duration, which was not measured, so treat it as an upper bound on setup.`
@@ -1638,7 +1642,7 @@ export class BuildDiagnostics {
     // returned at 120s. Attributing 93s to "abandoned lanes" there would have replaced an accurate
     // sentence with a misleading one, i.e. exactly the failure this fix exists to prevent, committed by
     // the fix itself. Below the 60s line the ordinary wording is accurate and stays.
-    const abandoned = seconds >= 60 ? BuildDiagnostics.abandonedLaneWindow(this.issues, this.startedAt) : null;
+    const abandoned = !windowMismatch && seconds >= 60 ? BuildDiagnostics.abandonedLaneWindow(this.issues, this.startedAt) : null;
     const attributed = abandoned
       ? `${seconds}s passed before the build's first model call was recorded, and MOST OF IT WAS NOT SETUP: `
         + `${abandoned.seconds}s went to ${abandoned.lanes} fast build lane(s) that were started and then abandoned at their `

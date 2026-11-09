@@ -26,7 +26,7 @@ describe('Q-976 · the overrun is measured on one clock', () => {
   const T = 1_791_809_453_500;
   const mark = { step: 18, elapsedMs: 222_700, score: 86, at: T };
   it('🔴 with the absolute instant: ~11 s after the judgement, not 56', () => {
-    expect(readyOverrunNote(mark, 19, 278_700, { endAt: T + 11_000 })).toBe('The app was judged finished at step 18 (86/100); the build then ran 1 more step(s) over 11s before it ended.');
+    expect(readyOverrunNote(mark, 19, 278_700, { endAt: T + 11_000 })).toBe('Structural readiness was judged finished at step 18 (86/100); the build then ran 1 more step(s) over 11s before it ended. This is not proof the app ran.');
   });
   it('the old arithmetic is what produced the 56 s', () => {
     const { at: _ignored, ...noInstant } = mark;

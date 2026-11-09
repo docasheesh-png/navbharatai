@@ -240,3 +240,9 @@ export function summarizeProject(graph: ProjectGraph, request: string, opts?: { 
 export function projectSummaryNote(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean; changedFiles?: number; editMode?: boolean }): string {
   return summarizeProject(graph, request, opts);
 }
+
+/** Current source read only, with Stop ownership. A stored graph/start-of-turn manifest is not current scripts. */
+export async function readSummaryManifest(io: { stopped: () => boolean; read: () => Promise<string> }): Promise<string | null> {
+  if (io.stopped()) return null;
+  try { return await io.read(); } catch { return null; }
+}

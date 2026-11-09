@@ -67,7 +67,7 @@ export interface ProviderTelemetry {
 }
 
 export interface AIProvider {
-  name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI' | 'OPENROUTER' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'NVIDIA' | 'MODELSCOPE' | 'LLM7' | 'BLUESMINDS' | 'REQUESTY' | 'DEEPINFRA' | 'CHEAPERINFERENCE';
+  name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI' | 'OPENROUTER' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'NVIDIA' | 'MODELSCOPE' | 'LLM7' | 'BLUESMINDS' | 'REQUESTY' | 'DEEPINFRA' | 'CHEAPERINFERENCE' | 'MITRIFY';
   priority: number;
   /**
    * When true, this provider is a LAST-RESORT fallback: in a raced router

@@ -138,7 +138,7 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
   splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome,
 } from './writeTimeTypecheck';
-import { scanAuthenticity, authenticitySummary, fakeResultWriteNote } from './AuthenticityAnalysis';
+import { scanAuthenticity, authenticitySummary, authenticityConfidenceCount, fakeResultWriteNote } from './AuthenticityAnalysis';
 import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
 import { browserAiKeyWriteNote } from './browserAiKeyScan';
 import { uploadStorageWriteNote } from './browserFileStore';
@@ -7073,7 +7073,7 @@ export class ToolDispatcher {
             layering: archReport.layeringViolations.length,
           },
           security: tally(findings),
-          authenticity: issues.length,
+          authenticity: authenticityConfidenceCount(issues), // one per file for empty-handler, as before BR1959
           dependencies: {
             missing: depIssues.filter((d) => d.kind === 'missing').length,
             unused: depIssues.filter((d) => d.kind === 'unused').length,

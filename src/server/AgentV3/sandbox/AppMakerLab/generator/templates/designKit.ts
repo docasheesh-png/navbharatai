@@ -486,10 +486,13 @@ small, .muted, .text-muted { color: var(--muted); }
 .nb-header { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 16px; background: color-mix(in srgb, var(--card) 90%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
 .nb-brand { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 1.2rem; font-weight: 800; letter-spacing: -0.01em; color: var(--fg); text-decoration: none; }
 .nb-brand:hover { text-decoration: none; }
-.nb-header-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+/* A header action row may hold a whole nav of chips (autopsy BR1959: ten nav chips made this row 1364px wide
+   on a 390px phone, because an inline-flex box takes its content's full width). It may shrink and wrap;
+   the chip row inside it scrolls sideways within the screen instead of widening the page. */
+.nb-header-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; min-width: 0; max-width: 100%; }
 .nb-search { flex: 1 1 220px; min-width: 0; border-radius: 999px; padding-left: 16px; background: color-mix(in srgb, var(--fg) 5%, var(--card)); }
 /* Horizontal category chips — they scroll sideways on a phone instead of wrapping into a wall. */
-.nb-chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0; scrollbar-width: none; }
+.nb-chips { display: flex; gap: 8px; overflow-x: auto; min-width: 0; max-width: 100%; padding: 4px 0; scrollbar-width: none; }
 .nb-chips::-webkit-scrollbar { display: none; }
 .nb-chip { flex: none; min-height: 36px; padding: 4px 16px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--fg); font-weight: 600; white-space: nowrap; }
 .nb-chip:hover { background: var(--accent-soft); color: var(--accent-ink); }

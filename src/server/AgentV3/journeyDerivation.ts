@@ -1265,10 +1265,16 @@ export function routeFromRouter(page: string, files: Record<string, string>): st
     for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:React\s*\.\s*)?lazy\s*\(\s*\(\s*\)\s*=>\s*import\s*\(\s*["']([^"']+)["']\s*\)/g)) bind(m[1], m[2]);
     // JSX routes first, with their parents joined (routerPaths.ts): a nested `<Route path="new">` serves
     // `/new`, and dropping it sent the journey to `/`, where the form is not (autopsy a106df77).
+    // 🔴 THE PAGE INSIDE A GUARD IS STILL THE ROUTE'S PAGE (autopsy BR1959, 2026-11-09). A school app wrapped
+    // every route's element in its guard — `element={<ProtectedRoute allowedRoles={['admin']}><ClassForm …/>
+    // </ProtectedRoute>}` — and this read only an element that IS the page, so `/classes/new` named no file
+    // and the form's journey fell back to `/`, where it is not. Opening tags that only WRAP (no `<`/`>` or arrow
+    // in their attributes, not self-closing, nothing rendered before the page) may now stand between `{` and the page.
+    const WRAPPERS = String.raw`(?:<\s*[A-Za-z][\w.]*(?:\s[^<>]*[^<>/\s=])?\s*>\s*)*`;
     for (const r of declaredRoutes(src)) {
       for (const name of bindings) {
         const n = name.replace(/\$/g, '\\$');
-        if (new RegExp(String.raw`(?:element\s*=\s*\{\s*<\s*${n}\b|Component\s*=\s*\{\s*${n}\b)`).test(r.tag)) return r.path;
+        if (new RegExp(String.raw`(?:element\s*=\s*\{\s*${WRAPPERS}<\s*${n}\b|Component\s*=\s*\{\s*${n}\b)`).test(r.tag)) return r.path;
       }
     }
     for (const name of bindings) {

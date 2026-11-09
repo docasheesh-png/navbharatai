@@ -632,7 +632,8 @@ import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } f
 import { userStorageContext } from '../AgentV3/userStorageContext';
 import { userAuthContext } from '../AgentV3/userAuthContext';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
-import { findMissingDependencies, phantomAliasDependencies, removeDependenciesFromPackageJson } from '../AgentV3/DependencyReconciler';
+import { phantomAliasDependencies, removeDependenciesFromPackageJson } from '../AgentV3/DependencyReconciler';
+import { fastLaneDependencyPlan, fastLaneDependencyInstallCommand, fastLaneDependencyNote } from '../AgentV3/fastLaneDependencies';
 import { foundationFilesStillAbsent, ensureViteReactFoundation, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
@@ -19205,6 +19206,50 @@ async function noteBuildOutcome(
         // Kept for the route's OWN in-lane writes (the deterministic mispath auto-fix inside fastVerify,
         // and the one-shot's post-success repair). Both run while their lane still owns the workspace.
         const fastWrite = (files: { path: string; content: string }[]): Promise<WriteOutcome[]> => fastWriteRaw(files);
+        // 📦 THE FAST LANE'S DEPENDENCY RECONCILE, ONE CLOSURE FOR BOTH STAGES (autopsy BR1959; the plan and
+        // its reasons live in fastLaneDependencies.ts). Verify runs it before `tsc` — a package the code
+        // imports and nobody declared is not a compile error a repair round can fix — and preview runs it
+        // before the dev server. Idempotent: once declared and installed, the plan is empty. Best-effort —
+        // a failure here leaves the compile check to report exactly what it always reported.
+        const fastReconcileDependencies = async (stage: 'verify' | 'preview'): Promise<void> => {
+          try {
+            const written = Object.fromEntries(writtenFiles);
+            const disk = typeof written['package.json'] === 'string' ? null : await actuator.readFile(workspaceId, 'package.json').catch(() => null);
+            const plan = fastLaneDependencyPlan(written, disk);
+            // ONE writer site for the lane's package.json copy (census in agentv3.test.ts): the pinned manifest
+            // that landed, then — after an install — the bytes npm left on disk, so the lane's copy equals the disk.
+            // Only when the lane OWNS the manifest (it wrote package.json): a scaffold manifest read from disk is
+            // updated on disk only, and never becomes a file this build is credited with writing (side-effect review).
+            let laneManifest: string | null = null;
+            let pinnedWritten = plan.packageJson === null;
+            if (plan.packageJson !== null) {
+              const pkgWrite = [{ path: 'package.json', content: plan.packageJson }];
+              if (readWriteOutcomes(pkgWrite, await fastWrite(pkgWrite)).landed.length > 0) {
+                laneManifest = plan.packageJson;
+                pinnedWritten = true;
+              }
+            }
+            const command = fastLaneDependencyInstallCommand(plan, pinnedWritten);
+            let res: { is_error?: boolean } | null = null;
+            if (command) {
+              const names = [...plan.pinned.map((p) => p.package), ...plan.unpinned];
+              fastLog(`📦 Installing ${names.length} package(s) the code imports but package.json omitted: ${names.join(', ')}`);
+              res = await dispatcher.dispatch({ id: `fast-deps-${stage}`, name: 'bash', input: { command } }, 'frontend');
+              // `npm install <name>` records the name in package.json on disk; keep the lane's copy equal to it.
+              if (laneManifest !== null || writtenFiles.has('package.json')) {
+                const after = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
+                if (typeof after === 'string' && after.trim()) laneManifest = after;
+              }
+            }
+            if (plan.manifest === 'written' && laneManifest !== null) writtenFiles.set('package.json', laneManifest);
+            if (!command || !res) return;
+            buildDiag.record({
+              phase: 'build', severity: res.is_error ? 'warning' : 'info', code: 'FASTLANE_DEPS_RECONCILED', autoResolved: !res.is_error,
+              message: fastLaneDependencyNote(plan, stage, !res.is_error),
+              detail: `manifest=${plan.manifest} · stage=${stage}`,
+            });
+          } catch { /* best-effort — the compile check / dev server below report what is still missing */ }
+        };
         const fastPreview = async (): Promise<void> => {
           // FOUNDATION GUARANTEE (deep-test Level-1, build 7c56b35a): the file-list planner can OMIT the
           // foundational files a vite-react app needs to install & boot — most damagingly `package.json`.
@@ -19277,17 +19322,9 @@ async function noteBuildOutcome(
           // dev server's port is up but the app can't load. Scan the generated files for imported-but-
           // undeclared packages and install exactly those BEFORE starting the dev server. Bounded + safe:
           // each name is shell-quote-validated, capped, and this only ADDS missing deps (never removes).
-          try {
-            const missing = findMissingDependencies(Object.fromEntries(writtenFiles))
-              .filter((p) => /^(?:@[\w.-]+\/)?[\w.-]+$/.test(p)) // shell-safe package names only
-              .slice(0, 20);
-            if (missing.length > 0) {
-              fastLog(`📦 Installing ${missing.length} missing dependenc${missing.length === 1 ? 'y' : 'ies'} the code imports but package.json omitted: ${missing.join(', ')}`);
-              // `|| … --legacy-peer-deps` retries only if the strict install hits an ERESOLVE peer
-              // conflict (EventHive autopsy) — the automated install is then as forgiving as the agent's.
-              await dispatcher.dispatch({ id: 'fast-reconcile', name: 'bash', input: { command: `npm install --no-audit --no-fund ${missing.join(' ')} || npm install --no-audit --no-fund --legacy-peer-deps ${missing.join(' ')}` } }, 'frontend');
-            }
-          } catch { /* reconcile is best-effort — a failure just falls back to the plain install above */ }
+          // The manifest is the one the lane wrote, else the one ON DISK (autopsy BR1959: read from the lane's
+          // writes alone, a lane that never wrote package.json counted `react` itself as undeclared).
+          await fastReconcileDependencies('preview');
           await dispatcher.dispatch({ id: 'fast-dev', name: 'bash', input: { command: 'npm run dev' } }, 'frontend');
           await dispatcher.dispatch({ id: 'fast-preview', name: 'update_preview', input: { port: oneShotDevPort(framework) } }, 'frontend');
         };
@@ -19378,6 +19415,9 @@ async function noteBuildOutcome(
             // Fix 38b — zero diagnostics alone is not verification. The marker records executable
             // exit zero, not compiler identity; require both canonical output evidence and the marker.
             // A missing marker remains unverified even when no diagnostic was printed.
+            // 📦 Declared-and-installed BEFORE the compile check (autopsy BR1959): TS2307 for a package nobody
+            // declared is not a code error, and a repair round cannot install a package.
+            await fastReconcileDependencies('verify');
             const r = await actuator.runCommand(workspaceId, `${TSC_ENSURE}; if ${TSC_BIN} --noEmit > /tmp/nb_tsc.log 2>&1; then echo __TSC_CLEAN__; fi; tail -200 /tmp/nb_tsc.log 2>/dev/null || true`);
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
             // Preserve the torn-install short circuit. Other unverified outputs must still reach

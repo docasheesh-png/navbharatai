@@ -12,7 +12,7 @@ Historical Stop is respected. No stopped-app resume, production replay, paid mod
 
 ## Honest accounting / missing systems
 
-**31rows =22prevention/safeguard rows awaiting parent review+merge (5report-derived,8inspection including1new browser finding,9review-only),4already-fixed/guarded,5blocked. Seven bounded classes, NOT31historical failures.** The source-based math/input/Select findings are current-template inspection, not proof the historical partial app calculated incorrectly: its seed failed before delivery. No app had been judged finished.
+**32rows =23prevention/safeguard rows awaiting parent review+merge (5report-derived,8inspection including1new browser finding,10review-only),4already-fixed/guarded,5blocked. Seven bounded classes, NOT32historical failures.** The source-based math/input/Select findings are current-template inspection, not proof the historical partial app calculated incorrectly: its seed failed before delivery. No app had been judged finished.
 
 Five historical buckets: **self-healed0; workaround2; skipped0; still-broken/result-imperfect6; struggle2**. These10distinct report items concern claims, accounting/census, capacity and alternative generation; they are not10broken apps. Cancellations and appropriately deferred tests are NOT classified as skipped defects. Uncertain draft attribution/store reconciliation is recorded separately, not inflated into proven failures.
 
@@ -343,3 +343,8 @@ Before any source edit the owned obsolete-head coverage process tree was stopped
 
 ## Queue format validation correction (not an extra historical failure)
 Full coverage on badfe7844 found the existing mandatory queue ratchet red: new blocked rows lacked four explicit **bold-labelled** fields even where prose contained the reason. The owned known-red validator was stopped before any edit (actualpipeline1, archived attempt-badfe7844). All5new blocker rows now carry **What / Why / Needs / Tried**, using measured evidence already documented. The invariant remains0missing fields and no test/threshold was weakened. Current exact-head CI must be rerun completely; this correction is not another historical1957problem.
+
+
+## R10 / Q-2563 — FIXED IN BRANCH, additive seed-ownership gate safeguard
+Completed full coverage2164a69ff honestly failed2tests: current chip forms were missing from append-only history, and the old seed-source regex expected the previous unguarded expression. Exactly49161passed/2failed/95existing skips across3240files, not green; no build/emulator gate ran. Full logs archived attempt-2164a69ff.
+Run the official history generator: exactly3new normalized hashes for Panchang, Kundali and sharedUI; full-table comparison proves every old hash retained. Existing legacy/current/user-edit history controls remain; a new three-form fixture and missing-current-history mutation lock this seam. The old seed-door assertion is STRENGTHENED to require non-null inventory plus the old empty-or-untouched-starter rule at BOTH doors, retaining all17original tests. No assertion deletion or threshold relaxation. These are gate-discovered rollout/ownership safeguards, not additional historical1957failures; revised exacthead reruns all gates.

@@ -8,6 +8,8 @@ import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../src/server/
 import { panchangAppTsx, kundaliAppTsx } from '../src/server/AgentV3/goldenScaffolds/indiaPanchang';
 import { restateDesignAfterRepair } from '../src/server/AgentV3/designAfterRepair';
 import { modelDesignLine } from '../src/server/AgentV3/writeTimeQualityCheck';
+import { PLATFORM_SEED_HISTORY } from '../src/server/AgentV3/platformSeedHistory';
+import { isKnownSeedVersion } from '../src/server/AgentV3/seedVersions';
 import { proUiTsx } from '../src/server/AgentV3/goldenScaffolds/proShell';
 import { goldenComponentHarness } from './helpers/goldenComponentHarness';
 import { AgentRunner } from '../src/server/AgentV3/AgentRunner';
@@ -189,5 +191,18 @@ describe('BR1957 F4 post-repair/tool applicability siblings',()=>{
     expect(record).toHaveBeenCalledOnce();expect(after.designObserved).toBe(!startedWithUI);
     expect(record.mock.calls[0][0].message.includes('not scored')).toBe(startedWithUI);
     expect(modelDesignLine(lintBuiltApp(logic))).toContain('not scored');
+  });
+});
+
+
+describe('BR1957 additive seed authorship safeguard',()=>{
+  it('recognizes all corrected forms, retains all three actual predecessor forms and rejects user edits',()=>{
+    for(const source of [panchangAppTsx,kundaliAppTsx]){
+      expect(isKnownSeedVersion('src/App.tsx',source,'any')).toBe(true);
+      expect(isKnownSeedVersion('src/App.tsx',source+'\n// user-authored edit','any')).toBe(false);
+    }
+    expect(isKnownSeedVersion('src/lib/ui.tsx',proUiTsx,'any')).toBe(true);
+    for(const hash of ['607d62029ed7165e9bc94e12','f8d4b6890e9ded8fdb982de6'])expect(PLATFORM_SEED_HISTORY.golden['src/App.tsx']).toContain(hash);
+    expect(PLATFORM_SEED_HISTORY.golden['src/lib/ui.tsx']).toContain('3bb652a142ed73dd4e4d6cfa');
   });
 });

@@ -1,5 +1,6 @@
 import { InferenceGatewaySetupPanel } from './admin/InferenceGatewaySetupPanel';
 import { FreeChatChainPanel } from './admin/FreeChatChainPanel';
+import { TestChatBotPanel } from './admin/TestChatBotPanel';
 import { DeepinfraComparisonPanel } from './admin/DeepinfraComparisonPanel';
 import { LiveModelRegistryPanel } from './admin/LiveModelRegistryPanel';
 import { useBuildReportNumbers } from '../hooks/useBuildReportNumbers';
@@ -2669,6 +2670,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
           {activeTab === 'livemodels' && (
             <LiveModelRegistryPanel adminToken={adminToken} />
+          )}
+
+          {activeTab === 'test-chat-bot' && (
+            <TestChatBotPanel adminToken={adminToken} />
           )}
 
           {/* ── AI ENGINES TAB ── */}

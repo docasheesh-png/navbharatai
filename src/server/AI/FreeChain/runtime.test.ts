@@ -75,7 +75,7 @@ describe('free chat chain central dispatch', () => {
    const cfg = config(); cfg.fixedOrder = true; cfg.maxAttempts = 12;
    const result = await buildFreeChainRouter({} as typeof db, cfg).route(input());
    expect(result.ok).toBe(false); expect(m.paid).not.toHaveBeenCalled();
-   for (const provider of ['mitrify', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']) {
+   for (const provider of ['mitrify', 'qubax', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']) {
      expect(result.freeChain?.attempts.find(a => a.provider === provider)).toMatchObject({ reason: 'paid-budget-unavailable', entered: false });
    }
    expect(m.execute.mock.calls.every(call => ['glm-4.5-flash', 'glm-4.7-flash', 'openai/gpt-oss-120b', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'].includes(call[1].model))).toBe(true);
@@ -893,7 +893,7 @@ describe('fixed chain recovery and cancellation', () => {
    const result = await buildFreeChainRouter(db, cfg).route(input());
    expect(result.ok).toBe(false);
    expect(result.freeChain?.attempts.map(attempt => attempt.provider)).toEqual([
-     'glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'mitrify', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid',
+     'glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'mitrify', 'qubax', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid',
    ]);
    expect(result.freeChain?.attempts.find(a => a.provider === 'mitrify')).toMatchObject({ entered: false, reason: 'mitrify-configuration' });
    expect(m.execute).not.toHaveBeenCalled();

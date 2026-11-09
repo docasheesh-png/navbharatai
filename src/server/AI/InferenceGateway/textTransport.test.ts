@@ -11,7 +11,7 @@ import { executeGatewayText, gatewayTextCredentialBinding, gatewayTextPayloadDig
 
 const SECRET = 'fake-test-secret-never-retain';
 const ENV = 'GATEWAY_TEST_CREDENTIAL';
-const ENDPOINTS: Record<Exclude<GatewayTextProvider, 'OPENAI' | 'DEEPINFRA' | 'CHEAPERINFERENCE' | 'MITRIFY'>, string> = {
+const ENDPOINTS: Record<Exclude<GatewayTextProvider, 'OPENAI' | 'DEEPINFRA' | 'CHEAPERINFERENCE' | 'MITRIFY' | 'QUBAX'>, string> = {
   GLM: 'https://api.z.ai/api/paas/v4', GEMINI: 'https://generativelanguage.googleapis.com/v1beta/openai',
   GROQ: 'https://api.groq.com/openai/v1', DEEPSEEK: 'https://api.deepseek.com/v1',
   CLOUDFLARE: 'https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/v1',

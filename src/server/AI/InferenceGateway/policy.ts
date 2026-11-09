@@ -83,6 +83,7 @@ function evaluate(c: Candidate, input: PlanningInput, requestBinding: string): E
   const { request: r, nowMs: now, authority, budget } = input;
   const { profile: p, quota: q, availability: a, price } = c;
   if (!p || !q || !a) return 'malformed';
+  if (p.providerId === 'QUBAX' && (r.surface !== 'chat' || r.fixedTextChain !== 'v1')) return 'fixed-chain';
   if (r.fixedTextChain === 'v1' && (fixedTextChainRank(p) === undefined || r.attempts.some(attempt => attempt.profileId === p.id))) return 'fixed-chain';
   if (!hasCurrentEvidence(authority, p.evidenceRef, 'profile', withoutEvidence(p), now)) return 'evidence';
   const profileReason = profileRejection(p, r);

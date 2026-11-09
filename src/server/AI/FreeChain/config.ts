@@ -148,7 +148,7 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
     const value = parseEnvFlag(env[name]); if (value === null) { errors.push(name); return fallback; } return value;
   }
   const fixedOrder = fixedTextChainEnabled(env);
-  const rawOrder = list(env.FREE_CHAIN_ORDER); const order: string[] = fixedOrder ? FIXED_TEXT_CHAIN.filter(id => id !== 'mitrify') : rawOrder.length ? rawOrder : [...DEFAULT_ORDER];
+  const rawOrder = list(env.FREE_CHAIN_ORDER); const order: string[] = fixedOrder ? FIXED_TEXT_CHAIN.filter(id => id !== 'mitrify' && id !== 'qubax') : rawOrder.length ? rawOrder : [...DEFAULT_ORDER];
   if (order.some(p => !PROVIDER_IDS.includes(p as ProviderId)) || new Set(order).size !== order.length) errors.push('FREE_CHAIN_ORDER');
   // The paid rung can be disabled, never promoted above a free rung by configuration.
   // No paid rung may ever sit above a free rung, whatever the order says.

@@ -23,7 +23,7 @@ export interface AIProviderResponse {
   // `AIProvider.name` (what a REGISTERED provider is called). They are not the same declaration, and
   // adding a provider to only one compiles fine on the FRONTEND tsconfig and fails on the server's.
   // Adding OPENAI here was missed on the first pass and `npm run typecheck:server` is what caught it.
-  provider: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI' | 'OPENROUTER' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'NVIDIA' | 'MODELSCOPE' | 'LLM7' | 'BLUESMINDS' | 'REQUESTY' | 'DEEPINFRA' | 'CHEAPERINFERENCE' | 'MITRIFY';
+  provider: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI' | 'OPENROUTER' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'NVIDIA' | 'MODELSCOPE' | 'LLM7' | 'BLUESMINDS' | 'REQUESTY' | 'DEEPINFRA' | 'CHEAPERINFERENCE' | 'MITRIFY' | 'QUBAX';
   model: string;
   /** What this call really cost in tokens, as reported by the provider. Absent = unreported. */
   usage?: ProviderUsage;

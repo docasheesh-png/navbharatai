@@ -54,6 +54,10 @@ export const securityHeadersConfig: HelmetOptions = {
       scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com", "https://www.gstatic.com", "https://www.google.com", "https://esm.sh", "https://esm.run", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://unpkg.com", "https://cdn.tailwindcss.com", "https://sdk.cashfree.com"],
       styleSrc:   ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc:     ["'self'", "data:", "blob:", "https:"],
+      // Voice AI plays a same-document blob: WAV. media-src is not inherited from img-src;
+      // without this directive it falls back to default-src 'self', and iPhone Safari then
+      // shows Error on the audio control even though the WAV bytes were delivered and charged.
+      mediaSrc:   ["'self'", "blob:"],
       connectSrc: ["'self'", "https:", "wss:"],
       fontSrc:    ["'self'", "data:", "https:"],
       frameSrc:   ["'self'", "https:"],

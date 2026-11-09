@@ -1,8 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FIXED_TEXT_CHAIN, fixedTextChainEnabled, fixedTextChainRank, fixedTextChainScope, fixedTextChainSelected, withFixedTextChainScope } from './fixedTextChain';
+import { FIXED_TEXT_CHAIN, FIXED_TEXT_CHAIN_MAX_ATTEMPTS, FIXED_CHAT_SUPPLIER_HTTP_ATTEMPT_CEILINGS, SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS, fixedTextChainEnabled, fixedTextChainRank, fixedTextChainScope, fixedTextChainSelected, withFixedTextChainScope } from './fixedTextChain';
+import { CHAT_SERVER_DEADLINE_MS } from '../../lib/chatDeadline';
 import { mitrifyChainStatus } from '../lib/mitrify';
 afterEach(() => vi.unstubAllEnvs());
 describe('server-owned fixed text policy', () => {
+  it('separates requested supplier ceilings from current single-use dispatch authority', () => {
+    expect(FIXED_CHAT_SUPPLIER_HTTP_ATTEMPT_CEILINGS).toEqual({ MITRIFY: 3, QUBAX: 3 });
+    expect(Object.isFrozen(FIXED_CHAT_SUPPLIER_HTTP_ATTEMPT_CEILINGS)).toBe(true);
+    expect(SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS).toBe(1);
+    expect(FIXED_TEXT_CHAIN_MAX_ATTEMPTS).toBe(12);
+    expect(CHAT_SERVER_DEADLINE_MS).toBe(240_000);
+  });
   it('defaults off and rejects misspelled selection', () => {
     expect(fixedTextChainEnabled({})).toBe(false);
     expect(fixedTextChainEnabled({ TEXT_CHAIN_POLICY: 'legacy' })).toBe(false);

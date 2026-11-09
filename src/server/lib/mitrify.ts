@@ -184,7 +184,8 @@ export async function runApprovedMitrifyChain(options: {
     return { kind: 'response', content, model: cfg.model, ...(usage ? { usage } : {}) };
   } catch (error) {
     // Once an HTTP attempt may have begun, liability and failure are terminal to the chain.
-    throw new MitrifyError(error instanceof MitrifyError ? error.code : signal.aborted ? 'MITRIFY_CANCELLED' : 'MITRIFY_ADMISSION_FAILED', error instanceof MitrifyError ? error.status : 0, !!content);
+    throw new MitrifyError(error instanceof MitrifyError ? error.code : signal.aborted ? 'MITRIFY_CANCELLED' : 'MITRIFY_ADMISSION_FAILED',
+      error instanceof MitrifyError ? error.status : 0, !!content || (error instanceof MitrifyError && error.partial), entered);
   } finally {
     clearTimeout(timer); controller.abort();
     await releaseUnused();
@@ -274,14 +275,17 @@ export class MitrifyError extends Error {
   readonly status: number;
   readonly code: string;
   readonly partial: boolean;
-  constructor(code: string, status = 0, partial = false) {
+  /** Only the reviewed wrapper knows this boundary. Low-level errors remain unknown.
+   * Neither undefined nor false is a billing receipt or permission to retry. */
+  readonly dispatched: boolean | undefined;
+  constructor(code: string, status = 0, partial = false, dispatched?: boolean) {
     const messages: Record<string, string> = {
       MITRIFY_QUEUE_FULL: 'Mitrify capacity is full; no new request was dispatched.',
       MITRIFY_QUEUE_TIMEOUT: 'The request timed out waiting for Mitrify capacity; it was not dispatched.',
     };
     super(messages[code] || (code === 'MITRIFY_CONFIGURATION' ? 'Mitrify configuration error: check server credentials and URL.'
       : partial ? 'The AI reply was interrupted and is incomplete.' : 'Mitrify request failed; see status and error code in server metadata.'));
-    this.name = 'MitrifyError'; this.code = code; this.status = status; this.partial = partial;
+    this.name = 'MitrifyError'; this.code = code; this.status = status; this.partial = partial; this.dispatched = dispatched;
   }
 }
 

@@ -1224,12 +1224,18 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
             .then(({ claimJobRun }) => import('./src/server/lib/serverDb').then(({ getServerDb }) => {
               // Resolved per CALL, not at wiring time: the db may not be set yet at boot, and a null
               // store means the job runs — never that it is silently cancelled.
-              scheduler.setClaim((jobId) => ['live-model-registry', 'live-image-model-registry', 'surplus-metadata-registry'].includes(jobId) ? Promise.resolve(true) : claimJobRun(getServerDb() as any, { jobId }));
+              scheduler.setClaim((jobId) => ['live-model-registry', 'live-image-model-registry', 'surplus-metadata-registry', 'qubax-public-price-feed'].includes(jobId) ? Promise.resolve(true) : claimJobRun(getServerDb() as any, { jobId }));
             }))
             .catch(() => { /* no claim wired ⇒ every job runs, exactly as before */ })
             // Either way the boot run happens — a claim that could not be wired must delay the purge,
             // never cancel it.
             .finally(() => { bootRun?.(); });
+          // Public GET-only prices, opt-in and isolated from dispatch approvals. Uses its own short,
+          // fail-closed fence instead of the generic fail-open ten-minute lease above.
+          try {
+            const prices = await import('./src/server/lib/qubaxPriceFeedRuntime');
+            prices.registerQubaxPriceFeed(scheduler);
+          } catch { console.warn('[QUBAX_PRICE_FEED] Public observations unavailable; dispatch authority is unchanged.'); }
           // Optional public metadata only. Its own durable fenced lease fails closed; no inference or key required.
           try {
             const surplus = await import('./src/server/AI/SurplusRegistry/runtime');

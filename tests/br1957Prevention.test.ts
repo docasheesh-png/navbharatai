@@ -99,6 +99,16 @@ describe('BR1957 F3 selection is not delivery, in both planner diagnostics',()=>
   });
 });
 
+describe('BR1957 unresolved-seed diagnostic siblings',()=>{
+  it('unknown inventory and a thrown seed failure never claim resolution or a generated replacement',()=>{
+    const route=fs.readFileSync('src/server/routes/agentv3.ts','utf8');
+    const seed=route.slice(route.indexOf('// ── GAME KIT SEED')-15000,route.indexOf('// ── GAME KIT SEED'));
+    expect(seed).toContain("code: 'GOLDEN_SCAFFOLD_SKIPPED', autoResolved: existingSrc !== null");
+    expect(seed).toContain("code: 'GOLDEN_SCAFFOLD_SKIPPED', autoResolved: false");
+    expect(seed).toContain('no replacement app is established');expect(seed).not.toContain('so the app is built from scratch');
+  });
+});
+
 describe('BR1957 F4 advisory scope must not award a perfect page to four hooks/types',()=>{
   it('emits no perfect design/WCAG claim for logic-only sources, including TSX type parameters',()=>{
     const r=lintBuiltApp({'src/types.ts':'export interface City {name:string}', 'src/hooks/useTheme.ts':'const theme="light"','src/hooks/useCityStorage.tsx':'const city=useState<City>(null)', 'src/hooks/useCalculation.ts':'export const answer=42'})!;

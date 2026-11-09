@@ -16,7 +16,7 @@ References checked 2026-11-09:
 
 The UI is usable for composing a message when Qubax is unconfigured. Sending remains disabled until the server has QUBAX_ENABLED=1 and a credential. A configured status is **not** a successful connection check or permission to infer. No network call is made by opening/refreshing the page.
 
-The adapter still requires a current independently reviewed catalog, exact-payload disclosure approval, reviewed downstream processors, a supplier-enforced monetary ceiling covering its internal retries/failovers/fees, and the existing shared daily/monthly budget. No approval, supplier contract or credential is manufactured by this page. The checkbox confirms the intended destination for this submission; it does not mint disclosure or spend authority. If any prerequisite is missing the request fails closed and the UI says so.
+When `QUBAX_ENABLED=1`, `QUBAX_API_KEY`, `QUBAX_MODEL` and `QUBAX_MAX_USD_PER_REQUEST` are set, the server uses that owner switch. It reserves at most that per-request ceiling on the existing shared budget and makes one Qubax call. It does not read a per-message approval document. Without those values the older catalog and exact-payload approval path remains fail-closed. The checkbox confirms the destination; it does not raise the cap. Guest and signed-in daily answer quotas are unchanged.
 
 The adapter's exact review UID is `admin-test-chat:` followed by the SHA-256 of the server-derived admin username. The wire body before the adapter selects its reviewed model is:
 

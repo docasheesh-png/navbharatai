@@ -14,6 +14,24 @@ export function qubaxConfig(env: Env = process.env) {
   // One verified gateway origin. Never take a host, URL or credential from request JSON.
   return { enabled: env.QUBAX_ENABLED === '1', baseURL: 'https://api.qubax.ai/v1', apiKey: env.QUBAX_API_KEY?.trim() || '', maxInflight };
 }
+/** Owner switch. Replaces a per-payload Firestore approval. Absent or invalid values do not authorize a call.
+ * The numeric cap is the maximum reserved for one HTTP request and cannot exceed one US dollar. */
+export function qubaxOwnerDispatch(env: Env = process.env): { modelId: string; ceilingNanoUsd: number } | null {
+  if (env.QUBAX_ENABLED !== '1' || !env.QUBAX_API_KEY?.trim()) return null;
+  const modelId = env.QUBAX_MODEL?.trim() ?? '';
+  const raw = env.QUBAX_MAX_USD_PER_REQUEST?.trim() ?? '';
+  if (!modelId || modelId.length > 200 || /[\s,]/.test(modelId) || !/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(raw)) return null;
+  const usd = Number(raw);
+  const ceilingNanoUsd = Math.round(usd * 1_000_000_000);
+  if (!(usd >= 0.000001) || usd > 1 || !Number.isSafeInteger(ceilingNanoUsd) || ceilingNanoUsd <= 0) return null;
+  return { modelId, ceilingNanoUsd };
+}
+function ownerSelection(owner: { modelId: string; ceilingNanoUsd: number }, now: number): QubaxSelection {
+  return Object.freeze({ modelId: owner.modelId, modelRevision: 'owner-enabled', sku: 'owner-enabled',
+    maximumNanoUsd: owner.ceilingNanoUsd, qubaxCostNanoUsd: owner.ceilingNanoUsd, officialCostNanoUsd: owner.ceilingNanoUsd,
+    discountBps: 0, evidenceBinding: hash(`qubax-owner-v1\0${owner.modelId}\0${owner.ceilingNanoUsd}`),
+    expiresAtMs: now + 60_000, reviewRef: 'owner-env' });
+}
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 export function qubaxWorkload(body: Record<string, unknown>): QubaxWorkload {
   const wire = JSON.stringify(body.messages);
@@ -104,14 +122,19 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
   try {
     signal.throwIfAborted();
     const workload = qubaxWorkload(body);
-    const selection = await bounded(getQubaxSelection(options.db, workload));
+    // Gateway callers pin a catalog claim. Public chat and the admin test bot do not:
+    // the owner env then authorizes one model and one hard ceiling, with no per-message approval document.
+    const owner = expected ? null : qubaxOwnerDispatch(env);
+    const selection = owner ? ownerSelection(owner, Date.now()) : await bounded(getQubaxSelection(options.db, workload));
     if (!selection) return { kind: 'skipped', reason: 'qubax-price-or-quality-unverified' };
     if (expected && (selection.modelId !== expected.modelId || selection.modelRevision !== expected.modelRevision
       || selection.maximumNanoUsd !== expected.maximumNanoUsd)) return { kind: 'skipped', reason: 'qubax-selection-claim-mismatch' };
     const binding = qubaxChatBinding(options.uid, body, selection, env);
-    const approvalRef = options.db.doc(`qubax_chat_approvals/${binding.id}`);
     const digest = (a: any) => hash(JSON.stringify([a.kind, a.uid, a.payloadDigest, a.gateway, a.dataReview, a.supplierContract, a.reviewedAtMs, a.expiresAtMs]));
-    const approval = await bounded(options.db.runTransaction(async tx => {
+    const approval = owner
+      ? { ceiling: owner.ceilingNanoUsd, digest: 'owner-env', expiresAtMs: selection.expiresAtMs }
+      : await bounded(options.db.runTransaction(async tx => {
+      const approvalRef = options.db.doc(`qubax_chat_approvals/${binding.id}`);
       const a = (await tx.get(approvalRef)).data();
       const ceiling = qubaxReviewedApprovalCeiling(a, { uid: options.uid, binding, selection, privateTurn, healthTurn, now: Date.now() });
       if (!a || ceiling === undefined) return null;
@@ -124,16 +147,23 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     signal.throwIfAborted(); await bounded(options.reserve(approval.ceiling).then(async receipt => { hold = receipt; if (signal.aborted) await releaseUnused(); return receipt; })); signal.throwIfAborted();
     if (!hold) return { kind: 'skipped', reason: 'qubax-budget' };
     await bounded(Promise.resolve().then(() => options.revalidate?.())); signal.throwIfAborted();
+    if (owner) {
+      const again = qubaxOwnerDispatch(env);
+      if (!again || again.modelId !== owner.modelId || again.ceilingNanoUsd !== owner.ceilingNanoUsd
+        || !qubaxConfig(env).enabled || qubaxConfig(env).apiKey !== cfg.apiKey) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
+    } else {
     // Re-read the catalog at dispatch: a cached discovery result cannot authorize stale/revoked evidence.
     const currentSelection = await bounded(getQubaxSelection(options.db, workload, Date.now(), true));
     if (!currentSelection || JSON.stringify(currentSelection) !== JSON.stringify(selection)
       || !qubaxConfig(env).enabled || qubaxChatBinding(options.uid, body, selection, env).id !== binding.id) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
     await bounded(options.db.runTransaction(async tx => {
+      const approvalRef = options.db.doc(`qubax_chat_approvals/${binding.id}`);
       const a = (await tx.get(approvalRef)).data();
       if (!a || a.state !== 'claimed' || a.requestId !== options.requestId || a.attemptsStarted !== 0
         || digest(a) !== approval.digest || a.expiresAtMs <= Date.now()) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
       signal.throwIfAborted(); tx.update(approvalRef, { attemptsStarted: 1 });
     }));
+    }
     signal.throwIfAborted();
     if (Date.now() >= selection.expiresAtMs || !qubaxConfig(env).enabled || qubaxConfig(env).apiKey !== cfg.apiKey) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
     options.beforeHttpDispatch?.(); signal.throwIfAborted();

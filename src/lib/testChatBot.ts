@@ -20,7 +20,7 @@ export interface TestChatProviderStatus {
   enabled: boolean;
   model: string | null;
 }
-export interface TestChatStatus { providers: TestChatProviderStatus[]; approvalRequired: true; noFallback: true }
+export interface TestChatStatus { providers: TestChatProviderStatus[]; approvalRequired: boolean; noFallback: true }
 export interface TestChatReply {
   requestId: string;
   provider: TestChatProviderId;
@@ -53,7 +53,7 @@ export function readTestChatAction(value: unknown): TestChatAction | null {
   return { provider: value.provider as TestChatProviderId, requestId: value.requestId, messages, confirmGatewayDisclosure: true };
 }
 export function isTestChatStatus(v: unknown): v is TestChatStatus {
-  return record(v) && v.approvalRequired === true && v.noFallback === true && Array.isArray(v.providers)
+  return record(v) && typeof v.approvalRequired === 'boolean' && v.noFallback === true && Array.isArray(v.providers)
     && v.providers.length === TEST_CHAT_PROVIDER_IDS.length
     && v.providers.every((p, i) => record(p) && p.id === TEST_CHAT_PROVIDER_IDS[i] && typeof p.label === 'string'
       && typeof p.configured === 'boolean' && typeof p.enabled === 'boolean' && (p.model === null || safeText(p.model, 200)));

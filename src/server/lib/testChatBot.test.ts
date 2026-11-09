@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const fake = vi.hoisted(() => ({ run: vi.fn(), config: vi.fn(), db: vi.fn(), maintenance: vi.fn(), policy: vi.fn(),
   budgetConfig: vi.fn(), reserve: vi.fn(), settle: vi.fn(), month: vi.fn(), settleMonth: vi.fn() }));
-vi.mock('./qubax', () => ({ runApprovedQubaxChat: fake.run, qubaxConfig: fake.config,
+vi.mock('./qubax', () => ({ runApprovedQubaxChat: fake.run, qubaxConfig: fake.config, qubaxOwnerDispatch: () => null,
   QubaxError: class extends Error { constructor(readonly code: string) { super(code); } } }));
 vi.mock('./serverDb', () => ({ getServerDb: fake.db }));
 vi.mock('./aiMaintenance', () => ({ assertAiAvailable: fake.maintenance }));

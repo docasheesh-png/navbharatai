@@ -4924,3 +4924,16 @@ Separate from real-time voice conversations. Server-only configuration; never ex
 | `SARVAM_TTS_COST_TAX_PERCENT` | Explicit effective supplier tax percentage, including 0 if applicable | required |
 
 Retail quote is 2 × configured tax-inclusive supplier cost, expressed to six decimal places. A temporary hold rounds up to one paise only for reversible authorization; settlement releases that hold and debits the exact quoted fee with the shared fractional-token carry. This is not a tax invoice and does not establish the user's applicable output GST. Review the configured rate against the supplier account before enabling. Provider invoices remain authoritative; no actual savings or measured cost claim is made. Provider master switch and maintenance remain effective. The paid-voice dispatch scope is entered only after the wallet hold; other free-module policy is unchanged. No deployment/secret/paid account setup is performed merely by adding this code.
+
+### Qubax owner enable (2026-11-09)
+
+Public chat fallback and the admin Test Chat Bot call Qubax when these are all set. A per-message Firestore approval is not required on that path. Gateway catalog claims still use their own exact approval.
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `QUBAX_ENABLED` | `1` turns the owner switch on | disabled |
+| `QUBAX_API_KEY` | Server-only Qubax credential. Never a client value. | missing |
+| `QUBAX_MODEL` | Exact model id sent to `https://api.qubax.ai/v1/chat/completions` | missing; no call |
+| `QUBAX_MAX_USD_PER_REQUEST` | Hard USD ceiling reserved before one HTTP call. Must be from `0.000001` to `1`. | missing; no call |
+
+Guest 10/day and signed-in shared 50/day stay on the free-answer quota. The shared paid daily and monthly budgets still have to admit the ceiling. No secret is stored in this file.

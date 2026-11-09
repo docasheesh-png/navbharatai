@@ -5,6 +5,7 @@ import { readData, readPaidPolicy, FREE_CHAIN_COLLECTION } from './paidLedger';
  * Never logs prompts, keys or user text.
  */
 import { FREE_CHAT_LANGUAGE_RULE } from '../../lib/freeChatReplyLanguage';
+import { resolveChatReplyLanguage } from '../../../lib/chatReplyLanguage';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../../lib/prompts';
 import { freeChatModeGuide } from '../../lib/freeChatModeGuide';
 import { FREE_ANSWER_ALL_RULES } from '../../lib/freeChatReplies';
@@ -87,10 +88,33 @@ export function effectiveMaxOutput(cfg: FreeChainConfig, id: ProviderId, rungMax
 }
 
 // ── 3. History trimming ─────────────────────────────────────────────────────────────────────────
+function isUserTurn(row: unknown): boolean {
+  if (!row || typeof row !== 'object') return false;
+  const turn = row as { sender?: unknown; role?: unknown };
+  return turn.sender === 'user' || turn.role === 'user';
+}
+function turnText(row: unknown): string {
+  if (!row || typeof row !== 'object') return '';
+  const turn = row as { text?: unknown; content?: unknown };
+  return typeof turn.text === 'string' ? turn.text : typeof turn.content === 'string' ? turn.content : '';
+}
+/** Opening user facts stay inside the same turn budget. A flat tail cut dropped a name or place
+ * stated before the recent window, including on the provider that answers after a fallback.
+ * An explicit reply-language command is not a fact: it is already carried as the system instruction,
+ * and the six-turn window must still be able to drop that source turn. */
 export function trimHistory(cfg: FreeChainConfig, history: unknown[]): unknown[] {
   if (!cfg.features.historyTrim || !Array.isArray(history)) return history;
   const turns = cfg.features.historyTurns;
-  return turns <= 0 ? [] : history.slice(-turns);
+  if (turns <= 0) return [];
+  if (history.length <= turns) return history;
+  const early: unknown[] = [];
+  for (const row of history) {
+    if (!isUserTurn(row) || resolveChatReplyLanguage(turnText(row))) continue;
+    early.push(row);
+    if (early.length >= Math.min(2, Math.max(0, turns - 1))) break;
+  }
+  const recent = history.slice(-Math.max(1, turns - early.length));
+  return [...early.filter(row => !recent.includes(row)), ...recent];
 }
 
 // ── 4. Stable prefix (prompt caching) + compact prompt ──────────────────────────────────────────
@@ -107,7 +131,10 @@ export function compactCore(answerAll: boolean): string {
   return `You are NavBharatAI — India's own friendly AI companion (by NavBharat team).
 ${FREE_CHAT_LANGUAGE_RULE}
 
-STYLE: warm, respectful, culturally aware Indian friend; crisp and accurate; match the user's mood. Use जी/ज़रूर naturally and sparingly. Never repeat the same opener. Never mention memory or profile.
+STYLE: warm, respectful, culturally aware; crisp and accurate; match the user's mood. Use जी/ज़रूर only inside a Hindi or Hinglish reply, and sparingly. Never repeat the same opener. Never mention memory or profile.
+CURRENT ANSWER: The latest user message is the only question. Earlier turns are context. Answer it completely before any aside. A greeting plus a question still gets the answer. A greeting alone gets that greeting in the user's script, then a short offer to help, not a biography.
+LANGUAGE MATCH: Devanagari Hindi stays Devanagari. Roman Hinglish stays Roman Hinglish. English stays English. Do not switch the user into Hindi. Greeting examples are styles, not a script change.
+IDENTITY: You are NavBharatAI. When asked who made you, say only that Dr Asheesh and his team created you and that Dr Asheesh is based in Budaun, Uttar Pradesh, India. Do not invent age, schooling, family, jobs, dates, partners, or a model-vendor biography.
 GREETINGS: if the user greets, reply once with the SAME greeting style (राम-राम → राम-राम!, नमस्ते → नमस्ते!, Salam → वअलैकुम अस्सलाम!, Sat Sri Akal → सत श्री अकाल जी!, Hi → Hi!). A direct question gets NO greeting — just the answer.
 ${answerAll ? FREE_ANSWER_ALL_RULES : `APP REQUESTS: you do not build apps here. For an app/website request, warmly recommend **NavBharatAI Pro** first (describe the app in any language; it plans, builds, previews and ships it), then add brief tips. Never recommend rival app builders or "hire a developer".`}
 

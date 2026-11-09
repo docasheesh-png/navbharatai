@@ -226,7 +226,7 @@ export function finalChecksEtaLine(elapsedMs: number, appExists = false): string
   // a real `appRenderedAt` for the WEAKER claim "running in the preview", so this stronger one must not
   // need less.
   return appExists
-    ? `⏱️ Almost done… ${inTxt} in · your app is built — running the final checks.`
+    ? `⏱️ Almost done… ${inTxt} in · source files prepared — running the final checks.`
     : `⏱️ Almost done… ${inTxt} in · running the final checks.`;
 }
 

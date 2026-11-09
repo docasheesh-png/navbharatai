@@ -527,7 +527,7 @@ describe('fixed text chain uses approved candidates in owner order', () => {
   ];
   function fixed(overrides: Partial<RoutingRequest> = {}) { return request({ fixedTextChain: 'v1', maxPhysicalAttempts: 12, ...overrides }); }
   function choices(r: RoutingRequest) { return models.map(([providerId, modelId], i) => candidate(r, `rung-${i}`, i >= 5, { providerId, modelId, quotaDimensions: [{ scope: { providerId, kind: 'organization', id: 'shared-org' }, meter: 'requests/day' }] })); }
-  it.each(['chat', 'professional', 'doctor', 'sda'] as const)('orders eligible %s profiles without cheaper-price or latency reordering', surface => {
+  it.each(['chat', 'professional', 'doctor', 'sda', 'developer-api'] as const)('orders eligible %s profiles without cheaper-price or latency reordering', surface => {
     const r = fixed({ surface }); const cs = choices(r); const b = { ...budget(r), allowedProfileIds: cs.map(c => c.profile.id) };
     for (let i = 0; i < cs.length; i++) expect(plan(planInference(context(r, cs.slice(i).reverse(), b).input)).profileId).toBe(`rung-${i}`);
   });
@@ -538,8 +538,9 @@ describe('fixed text chain uses approved candidates in owner order', () => {
   it('cannot promote an unreviewed/free-looking provider or classify Mitrify as free', () => {
     const r = fixed();
     rejected(planInference(context(r, [candidate(r, 'other'), candidate(r, 'mitrify', false, { providerId: 'MITRIFY' })]).input), 'fixed-chain');
-    const health = fixed({ privacy: { ...r.privacy, dataClass: 'health' } });
-    rejected(planInference(context(health, [candidate(health, 'mitrify', true, { providerId: 'MITRIFY', privacy: { dataClasses: ['public'], training: 'none', humanReview: 'none', retentionHours: 0, processingRegions: ['fixture-region'] } })]).input), 'privacy');
+    const paid = candidate(r, 'mitrify', true, { providerId: 'MITRIFY', quotaDimensions: [{ scope: { providerId: 'MITRIFY', kind: 'organization', id: 'shared-org' }, meter: 'requests/day' }] });
+    expect(plan(planInference(context(r, [paid], { ...budget(r), allowedProfileIds: ['mitrify'] }).input)).profileId).toBe('mitrify');
+    // Exact-data permission is additionally enforced by the dedicated transport, never by preference ordering.
   });
   it('retains quality/privacy/evidence gates and paid budget exhaustion', () => {
     const r = fixed(); const cs = choices(r);

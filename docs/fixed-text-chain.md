@@ -7,7 +7,7 @@ rollout**. Do not enable it until the admission/funding prerequisites below are 
 Rollback is `TEXT_CHAIN_POLICY=legacy`; existing provider rollout controls remain.
 
 Order among eligible candidates: GLM-4.5 Flash, GLM-4.7 Flash, Groq GPT-OSS 120B,
-Cloudflare Llama 3.3 70B, reviewed free OpenRouter, the reviewed Mitrify position,
+Cloudflare Llama 3.3 70B, reviewed free OpenRouter, the reserved Mitrify position,
 CheaperInference Beam, DeepInfra Llama 3.1 8B Turbo, DeepInfra DeepSeek V4 Flash,
 GPT-5 Nano, GLM-4.7 FlashX, Gemini 2.5 Flash-Lite paid. A skipped candidate is not a
 physical attempt. Success stops the chain. No provider is made available or free
@@ -44,9 +44,8 @@ reservation-rate checks. No credential, allowance or price is configured here.
   conservative liabilities until authoritative reconciliation; they are not
   represented as actual invoices or refunded on ambiguous failures. Only a
   provably undispatched hold is released. Duplicate claims cannot dispatch.
-  This legacy adapter does not enroll or fund selected Gateway routes. The
-  separate Gateway transport described below uses its existing durable claim and
-  shared daily funding authority. Paid Professional funding remains unavailable.
+  Selected InferenceGateway and paid-professional funding bridges are still
+  unavailable; this adapter does not enroll or fund those routes.
   Standalone Mitrify bot/diagnostic interfaces have been removed.
   Model policy continues to come from `MITRIFY_MODEL` in the Mitrify module.
 - Existing authenticated FreeChain enrollment and selected guest Gateway
@@ -66,39 +65,3 @@ Consequently this change does not establish “100% all chats use the same chain
 A rollout needs reviewed ingress coverage, paid-professional funding integration,
 and real reviewed Mitrify data-processing/merchant-ceiling evidence. No live model calls, public load test,
 production environment changes or deployment verification are included.
-
-## Reviewed Gateway Mitrify transport
-
-The Gateway can now dispatch an independently reviewed `MITRIFY` text profile
-through `gateway-mitrify-text-v1` at rank 5 (between OpenRouter and Beam). This does
-not create a catalog entry, account review, credential, budget or rollout flag.
-`MITRIFY_CHAIN_ENABLED=1` and the existing Gateway rollout are both required.
-The model and endpoint must match `MITRIFY_MODEL` and `MITRIFY_BASE_URL`; credentials
-come only from `MITRIFY_API_KEY`. No upstream model list, provider selection or
-upstream price interpretation is added.
-
-The operator-owned catalog transport has `provider: MITRIFY`, the configured
-`baseURL` and `model`, `credentialEnv: MITRIFY_API_KEY`, its reviewed credential
-binding, `maxOutputTokens`, `timeoutMs` and a `rateCard`. The rate card must contain
-an unexpired (at most 24-hour) review with `version`, `verifiedAtMs`, `expiresAtMs`,
-`perHttpRequestCeilingNanoUsd`, `hardCeilingEnforced: true`,
-`includesInternalRetriesFailoversAndFees: true`, `evidenceRef`,
-`gatewayAndAllDownstreamProcessorsReviewed: true`, `processorPolicyReviewRef` and
-`disclosureAuthorityRef`. These must refer to real independently reviewed evidence,
-not values synthesized from this document. Existing account, quota, quality,
-privacy and payer reviews still apply. A public-only profile cannot serve health
-or private requests. The administrative setup form does not yet publish this
-transport; this change provides no alternate unreviewed catalog writer.
-
-One durable claim permits one HTTP request. Inner retries are disabled because a
-received error does not prove all upstream attempts were free. The full reviewed
-all-in supplier ceiling is reserved in the existing Gateway daily pool; reported
-tokens remain telemetry and never refund that hold or become an actual invoice.
-An unknown final charge remains held for authoritative reconciliation. Streamed
-text is forwarded in order, requires usage reporting and is never replayed after
-output. Missing terminal proof or a length-limited reply is not a complete answer.
-
-This does not implement the paid Professional wallet/funding bridge, additional
-paid-provider Gateway transports, or Gateway monthly-cap accounting. Those must
-be completed and reviewed before claiming universal activation or changing
-production policy. No production configuration or live inference is changed.

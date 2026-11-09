@@ -235,5 +235,6 @@ export function readinessVerdict(r: ReadinessReport): string {
   const head = r.ready
     ? `Deployment readiness: READY — score ${r.score}/100.`
     : `Deployment readiness: NOT READY — score ${r.score}/100. Must fix: ${r.blockers.join('; ')}.`;
-  return r.warnings.length ? `${head} Warnings: ${r.warnings.join('; ')}.` : head;
+  const scope = ' This is a technical readiness score; it does not establish gameplay or user-journey success.';
+  return (r.warnings.length ? `${head} Warnings: ${r.warnings.join('; ')}.` : head) + scope;
 }

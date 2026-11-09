@@ -16,6 +16,7 @@ vi.mock('./telemetry', () => ({ logFreeChain: vi.fn() }));
 import { buildFreeChainRouter, maybeFreeChain, freeChainAdminView, freeChainAdminMetrics, controlFreeChainBudget, durationMs, shouldPersistFreeChainEvent, type FreeChainInput } from './runtime';
 import { FreeRoutingError } from '../LiveRegistry/dispatcher';
 import { DEFAULT_ORDER, freeChainConfig } from './config';
+import { CHAT_SERVER_DEADLINE_MS } from '../../../lib/chatDeadline';
 import { applySwitchedOff, __resetProviderSwitchesForTests } from '../../lib/providerSwitches';
 import { getBreaker, resetAllBreakers } from '../Router/CircuitBreaker';
 import { FreeChainProviderError } from './providers/openAiCompatProvider';
@@ -68,7 +69,6 @@ describe('free chat chain central dispatch', () => {
    expect(await router.route(input())).toMatchObject({ ok: true, provider: 'GROQ' });
    expect(m.observeBudget).toHaveBeenCalledTimes(2); expect(m.paid).not.toHaveBeenCalled();
  });
-
  it('blocks Mitrify and every fixed-chain paid rung when paid authority publication fails', async () => {
    m.observeBudget.mockRejectedValue(new Error('synthetic paid-policy outage'));
    m.execute.mockRejectedValue(new FreeChainProviderError('MODEL_UNAVAILABLE'));
@@ -860,3 +860,50 @@ it.each(['released','cancelled','disabled'] as const)('waits only for pre-reserv
    expect(m.execute).not.toHaveBeenCalled();expect(m.setBudget).not.toHaveBeenCalled();expect(m.observeBudget).not.toHaveBeenCalled();
   });
  });
+
+
+describe('fixed chain recovery and cancellation', () => {
+ it.each([false, true])('cancellation is not an outage or provider failure (committed=%s)', async committed => {
+   const controller = new AbortController(); const chunks: string[] = [];
+   m.execute.mockImplementationOnce(async arg => {
+     if (committed) arg.onChunk('partial');
+     controller.abort();
+     await new Promise(() => {}); // SDK ignores cancellation
+   });
+   const result = await buildFreeChainRouter(db, config()).route({ ...input(), signal: controller.signal, onChunk: s => chunks.push(s) });
+   expect(result).toMatchObject({ ok: false, reason: 'aborted', content: '' });
+   expect(m.execute).toHaveBeenCalledOnce(); expect(m.cooldown).not.toHaveBeenCalled();
+   expect(chunks).toEqual(committed ? ['partial'] : []);
+ });
+ it('a silent first fixed rung cannot consume the next rung or interleave late chunks', async () => {
+   vi.useFakeTimers(); const cfg = config(); cfg.fixedOrder = true; cfg.maxAttempts = 12;
+   cfg.ttftMs = 90000; let lateChunk!: (value: string) => void; const chunks: string[] = [];
+   m.execute.mockImplementationOnce(async arg => { lateChunk = arg.onChunk; await new Promise(() => {}); }).mockImplementation(successful('second'));
+   const pending = buildFreeChainRouter(db, cfg).route({ ...input(), onChunk: s => chunks.push(s) });
+   // Shared server deadline / twelve remaining positions; watchdog samples each second.
+   await vi.advanceTimersByTimeAsync(Math.floor(CHAT_SERVER_DEADLINE_MS / 12) + 1000);
+   expect(await pending).toMatchObject({ ok: true, model: 'glm-4.7-flash', content: 'second' });
+   lateChunk('stale'); expect(chunks).toEqual(['second']);
+   expect(m.execute).toHaveBeenCalledTimes(2);
+ });
+ it('malformed optional Mitrify config cannot throw away the later paid fallback positions', async () => {
+   vi.stubEnv('MITRIFY_MAX_INFLIGHT', 'invalid');
+   const cfg = config(); cfg.fixedOrder = true; cfg.maxAttempts = 12;
+   cfg.rungs.forEach(rung => { rung.reason = 'unconfigured'; });
+   const result = await buildFreeChainRouter(db, cfg).route(input());
+   expect(result.ok).toBe(false);
+   expect(result.freeChain?.attempts.map(attempt => attempt.provider)).toEqual([
+     'glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'mitrify', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid',
+   ]);
+   expect(result.freeChain?.attempts.find(a => a.provider === 'mitrify')).toMatchObject({ entered: false, reason: 'mitrify-configuration' });
+   expect(m.execute).not.toHaveBeenCalled();
+ });
+ it('reaches the next turn after all-fail without inventing a successful answer', async () => {
+   vi.useFakeTimers();
+   m.execute.mockRejectedValueOnce(new FreeChainProviderError('SERVER'));
+   const router = buildFreeChainRouter(db, config('groq'));
+   expect(await router.route(input())).toMatchObject({ ok: false, reason: 'all-failed' });
+   await vi.advanceTimersByTimeAsync(10001); m.execute.mockImplementation(successful('recovered'));
+   expect(await router.route(input())).toMatchObject({ ok: true, content: 'recovered' });
+ });
+});

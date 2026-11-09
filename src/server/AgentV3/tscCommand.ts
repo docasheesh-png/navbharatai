@@ -188,3 +188,13 @@ export function recipeInstallCommand(deps: ReadonlyArray<{ name: string; version
     // TSC_ENSURE stamps the directory after its install for the same reason; this install now does too.
     + `touch ${NPM_INSTALL_LOCK}; ${installs} && touch node_modules; _nbs=$?; rm -f ${NPM_INSTALL_LOCK}; exit $_nbs`;
 }
+
+/** BR1955: bare manual probes must not throw away the write-time compiler's incremental data.
+ * The real compiler still runs and validates every input; this is NOT a cached-success bypass.
+ * Explicit CLI configs, output/watch modes, shell composition and CLI cache choices are unchanged.
+ */
+export function sharedBareTypecheckCommand(command: string, buildInfoId: string): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(buildInfoId)
+    || !/^\s*(?:(?:\.\/)?node_modules\/\.bin\/tsc|npx\s+tsc)\s+--noEmit\s*$/.test(command)) return command;
+  return command.trim() + ` --incremental --tsBuildInfoFile /tmp/agentv3-${buildInfoId}.tsbuildinfo`;
+}

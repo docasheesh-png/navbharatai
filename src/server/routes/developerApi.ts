@@ -1,3 +1,5 @@
+import { fixedTextChainEnabled } from '../AI/fixedTextChain';
+import { withConversationalGateway } from '../AI/InferenceGateway/conversationalIngress';
 // THE NAVBHARATAI API, v1 — the three doors a key opens beyond `/me`.
 //
 // Every decision behind these routes is written down in `lib/developerApi.ts` (why the shape is
@@ -299,7 +301,7 @@ export function registerDeveloperApiRoutes(app: Express): void {
           { scope: 'ai:professionals' }));
         return;
       }
-      await answerAsExpert(res, auth, now, expertId, request.system, request.messages, streamChoiceOf(req.body));
+      await answerAsExpert(req, res, auth, now, expertId, request.system, request.messages, streamChoiceOf(req.body), true);
       return;
     }
 
@@ -308,7 +310,10 @@ export function registerDeveloperApiRoutes(app: Express): void {
     if (!gate) return;
 
     const system = request.system ? `${DEVELOPER_API_SYSTEM_PROMPT}\n\n${request.system}` : DEVELOPER_API_SYSTEM_PROMPT;
-    const run = await collectAiSpend(() => callProfessionalAIWithUsage(system, foldMessagesToPrompt(request.messages), 'free'));
+    const generate = () => callProfessionalAIWithUsage(system, foldMessagesToPrompt(request.messages), 'free');
+    const run = await collectAiSpend(() => fixedTextChainEnabled()
+      ? withConversationalGateway(req, res, { verifiedUid: auth.userId, verifiedApiKeyId: auth.keyId, requiredApiScopes: ['ai:chat'], surface: 'developer-api', policyKey: 'developer-api:text', funding: 'existing-professional', qualityTier: 'clinical', dataClass: 'health' }, generate)
+      : generate());
     if (!run.ok) {
       // Every provider failed. The developer gets branded wording; the reason stays on our side.
       console.error(`[DEVAPI] key ${auth.keyId}: the assistant chain failed:`, run.error);
@@ -374,7 +379,7 @@ export function registerDeveloperApiRoutes(app: Express): void {
       res.status(400).json(apiError('invalid_request', chatRequestHelp(request.reason)));
       return;
     }
-    await answerAsExpert(res, auth, now, routeParam(req.params.id), request.system, request.messages, streamChoiceOf(req.body));
+    await answerAsExpert(req, res, auth, now, routeParam(req.params.id), request.system, request.messages, streamChoiceOf(req.body));
   });
 
   // ── any valid key: what can I address? ──────────────────────────────────────────────────────
@@ -438,6 +443,7 @@ function chatRequestHelp(reason: 'no-messages' | 'bad-message' | 'too-many' | 't
  * does not get to rename the engine (White-Label Law, same as the plain chat door).
  */
 async function answerAsExpert(
+  req: Request,
   res: Response,
   auth: { userId: string; keyId: string; dailyCapInr?: number },
   now: number,
@@ -445,6 +451,7 @@ async function answerAsExpert(
   developerSystem: string,
   messages: readonly ChatMessage[],
   stream: StreamChoice,
+  chatModelAlias = false,
 ): Promise<void> {
   const config = getProfessional(id);
   if (!config) {
@@ -467,7 +474,10 @@ async function answerAsExpert(
     ? `${last}\n\n[The program asking on the user's behalf adds: ${developerSystem}]`
     : last;
 
-  const run = await collectAiSpend(() => runProfessionalChatWithUsage(config, question, history, auth.userId, 'free'));
+  const generate = () => runProfessionalChatWithUsage(config, question, history, auth.userId, 'free');
+  const run = await collectAiSpend(() => fixedTextChainEnabled()
+    ? withConversationalGateway(req, res, { verifiedUid: auth.userId, verifiedApiKeyId: auth.keyId, requiredApiScopes: chatModelAlias ? ['ai:chat', 'ai:professionals'] : ['ai:professionals'], surface: 'developer-api', policyKey: `developer-api:professional:${config.id}`, funding: 'existing-professional', qualityTier: 'clinical', dataClass: 'health' }, generate)
+    : generate());
   if (!run.ok) {
     console.error(`[DEVAPI] key ${auth.keyId}: expert ${id} failed:`, run.error);
     res.status(503).json(apiError('engine_unavailable', 'NavBharatAI could not answer right now. Please try again in a moment.'));

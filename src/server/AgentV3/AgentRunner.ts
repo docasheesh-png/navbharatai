@@ -1,3 +1,6 @@
+import { bindReplyLanguage } from './replyLanguageBinding';
+import type { PlatformVoice } from './platformVoice';
+import { createSandboxAdmissionBudget, SANDBOX_ADMISSION_BLOCKED, type SandboxAdmissionBudget } from './sandboxAdmissionBudget';
 import { NOT_READY_HEADLINE, NOT_READY_HEADLINE_CONTINUE } from './notReadyHeadline';
 import { resumeTruncatedEnabled } from './reliability/resumeWrite';
 import { compactForBudget, recentlyTouchedPaths, tokenCompactEnabled, withWorkingSet, workingSetBlock, workingSetConfig, workingSetEnabled } from './reliability/contextBudget';
@@ -66,6 +69,9 @@ import { runAsModelToolCall } from './modelToolWrites';
  * model as is_error results — never a fake "done".
  */
 export interface AgentRunnerOptions {
+  replyVoice?: () => PlatformVoice;
+  /** Shared across the build's primary/retry/heal runners; no repeated spending on proven admission exhaustion. */
+  sandboxAdmissionBudget?: SandboxAdmissionBudget;
   client: TurnRunner;
   /**
    * P4b (fix/build-reliability, AGENTV3_QUALITY_ESCALATE) — called when the quality monitor sees the
@@ -238,6 +244,8 @@ export interface AgentRunnerOptions {
    * "✅ The app looks complete" before the train could accelerate or brake; 19 steps of real work followed.
    */
   requestGaps?: () => readonly string[];
+  /** Original-user scope binding for proposed mutations; reads and cancellation retain their own semantics. */
+  requestActionIssue?: (proposal: string, input?: Record<string, unknown>) => string | null;
   /**
    * Admin-only note from inside the loop (autopsy 95598899). Called when the loop declines to
    * override the model — the one decision that otherwise leaves no trace at all, since a turn that
@@ -590,6 +598,8 @@ export class AgentRunner {
     const agentRole: AgentRole = this.opts.agentRole ?? 'architect';
     const toolConcurrency = Math.max(1, this.opts.toolConcurrency ?? 4);
     const expectsArtifacts = this.opts.expectsArtifacts === true;
+    // A read-only specialist still uses the parent workspace: an explicit shared budget binds every role.
+    const admission = this.opts.sandboxAdmissionBudget ?? (expectsArtifacts ? createSandboxAdmissionBudget() : null);
     const readinessGate = this.opts.readinessGate === true;
     const lintGate = this.opts.lintGate === true;
     // P-PIPE — build-end dependency-health advisory (OSV/CVE + strong-copyleft). Default-OFF admin flag
@@ -630,7 +640,8 @@ export class AgentRunner {
     const budgetStagesSent = new Set<BudgetStage>();
     // Total tool calls across the whole run — a build that never called a tool built nothing.
     let totalToolUses = 0;
-    // …and of those, the ones that could have PRODUCED something. A build that only ever read a file
+    // …and of those, completed effect-capable tools (or observed partial effects before an error).
+    // An attempted/refused writer is not saved work. A build that only ever read a file
     // has not built anything, however many reads it made — see `toolUseCouldProduceWork`.
     let producingToolUses = 0;
     // Turns whose only tool calls were update_todo (todoOnlyTurn.ts, autopsy 9c612cdb): every one is reported
@@ -923,6 +934,8 @@ export class AgentRunner {
     let noOpTurnsAfterFinal = 0;
     const loopGuardOn = loopGuardEnabled();
     const loopThreshold = loopGuardThreshold();
+    // The first readiness measurement belongs to the BUILD, not a resume-loop iteration or exit kind.
+    let readyMark: ReadyMark | null = null;
     try {
       // eslint-disable-next-line no-labels
       stepResumeLoop: for (;;) {
@@ -930,7 +943,6 @@ export class AgentRunner {
       // its answer nobody read. `readyMark` is the MEASUREMENT (when was this app first finished?) and
       // is recorded whether or not the model acts on the steer.
       const doneCfg = doneSignalConfig();
-      let readyMark: ReadyMark | null = null;
       let doneSignalled = false;
       /** A due done-check skipped because its step failed — the next clean step runs it (autopsy 6ae30b33). */
       let doneMissedAt: number | undefined;
@@ -944,9 +956,15 @@ export class AgentRunner {
         });
         await persist('stopped');
         events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
-        return { ok: false, summary, steps, usage, billedUsd: billed() };
+        return { ok: false, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
       };
       while (steps < stepCap) {
+        if (admission?.exhausted && !this.opts.signal?.aborted) {
+          try { this.opts.onNote?.({ code: 'SANDBOX_ADMISSION_EXHAUSTED', message: SANDBOX_ADMISSION_BLOCKED }); } catch { /* observation only */ }
+          await persist('error');
+          events.emit({ type: 'done', ok: false, summary: SANDBOX_ADMISSION_BLOCKED, ts: Date.now() });
+          return { ok: false, summary: SANDBOX_ADMISSION_BLOCKED, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
+        }
         steps++;
 
         // The build was aborted — end between turns, and say WHY it really stopped.
@@ -960,7 +978,7 @@ export class AgentRunner {
         // watchdog's own message — *your files so far are saved, send another message and I'll continue
         // from here* — was unreachable. The user was blamed AND not told the work had survived.
         // `abortSummary` now carries that recovery line for every cause where it is TRUE, which is what
-        // `totalToolUses > 0` decides: claiming saved work when none was written would be the same
+        // acknowledged effects or existing files decide: claiming saved work when none was written would be the same
         // dishonesty pointing the other way.
         if (this.opts.signal?.aborted) return endAborted();
 
@@ -974,7 +992,7 @@ export class AgentRunner {
           const summary = timedOutSummary(minutes, ending);
           await persist(builtSomething ? 'complete' : 'stopped');
           events.emit({ type: 'done', ok: builtSomething, summary, ts: Date.now() });
-          return { ok: builtSomething, summary, steps, usage, billedUsd: billed(), timedOut: true };
+          return { ok: builtSomething, summary, steps, usage, billedUsd: billed(), timedOut: true, ...(readyMark ? { readyAt: readyMark } : {}) };
         }
 
         // OUR STYLE PASS HAS A CAP OF ITS OWN (stylePassCap.ts, r6–r10 autopsy). It only ever starts on a build
@@ -1015,7 +1033,7 @@ export class AgentRunner {
         //
         // The size is still reported exactly — it is summed rather than measured off a string that
         // no longer needs to exist.
-        const systemText = system ?? '';
+        const systemText = this.opts.replyVoice ? bindReplyLanguage(system, this.opts.replyVoice()) : system ?? '';
         const promptChars = systemText.length + SEPARATOR.length + lastMsgText.length;
         const promptPreview = `${systemText.slice(0, PROMPT_PREVIEW_HEAD)}${SEPARATOR}${lastMsgText.slice(0, PROMPT_PREVIEW_HEAD)}`;
         const llmStartedAt = Date.now();
@@ -1035,7 +1053,7 @@ export class AgentRunner {
             ? messages
             : tokenCompactEnabled()
               // P3a (AGENTV3_TOKEN_COMPACT) — verbatim until ~50% of the window, then gentle, then tight.
-              ? compactForBudget(messages, (system ?? '').length, compactTranscriptForModel).messages
+              ? compactForBudget(messages, systemText.length, compactTranscriptForModel).messages
               : compactTranscriptForModel(messages, { keepRecentMessages: modelKeepRecent, maxOldToolResultChars: modelMaxOldToolResultChars });
           // P3b (AGENTV3_WORKING_SET) — the fresh on-disk content of recently touched files, appended last.
           if (workingSetEnabled() && typeof dispatcher.readForWorkingSet === 'function') {
@@ -1058,7 +1076,7 @@ export class AgentRunner {
             : undefined;
           const turnCall = client.runTurn({
             model,
-            system,
+            system: systemText,
             messages: modelMessages,
             tools: toolsThisTurn(tools, todoWithdrawal),
             maxTokens: maxTokensPerTurn,
@@ -1527,7 +1545,6 @@ export class AgentRunner {
           return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}), ...(!ok && modelAnswer ? { modelAnswer } : {}) };
         }
         totalToolUses += turn.toolUses.length;
-        producingToolUses += turn.toolUses.filter(toolUseCouldProduceWork).length;
         // 📋 A TURN SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-987: five of 22 turns, 20 s of model time).
         // Measured here, while `llmStartedAt` still times only the model call; handed back below, once.
         const todoOnlyTurn = isTodoOnlyTurn(turn.toolUses.map((tu) => tu.name), tools.map((t) => t.name));
@@ -1593,6 +1610,14 @@ export class AgentRunner {
             const r = await dispatchWithBudget({ ...tu, name: aliasTo });
             return { ...r, content: `${toolAliasNote(tu.name, aliasTo)}${r.content}` };
           }
+          if (this.opts.requestActionIssue && toolUseCouldProduceWork(tu)) {
+            const issue = this.opts.requestActionIssue(turn.text ?? '', tu.input);
+            if (issue) {
+              try { this.opts.onNote?.({ code: 'REQUEST_SCOPE_REFUSED', message: issue }); } catch { /* observation only */ }
+              events.emit({ type: 'narration', agent: agentRole, text: issue, ts: Date.now() });
+              return { tool_use_id: tu.id, content: issue, is_error: true };
+            }
+          }
           // 🔑 A TOOL CALL THE MODEL ASKED FOR IS MARKED AS ONE (modelToolWrites.ts, autopsy 9c612cdb). Every write
           // it makes is then the model's by evidence, so a platform step that named no pass can no longer be
           // reported as "the build loop". A repair the platform started is marked as that, not as the build.
@@ -1624,8 +1649,14 @@ export class AgentRunner {
             try { return dispatcher.changeCount(); } catch { return null; }
           };
           const before = changes();
-          const result = await dispatchWithBudget(tu);
-          if (loopGuardOn) noteToolEffect(repeatProbe, tu, result, before, changes());
+          const result = await (admission ? admission.dispatch(tu, () => dispatchWithBudget(tu)) : dispatchWithBudget(tu));
+          const after = changes();
+          // BR1952: requesting bash/write is not evidence of saved work. Failed/refused/queued
+          // tools count only if the real dispatcher observed a partial change before the error.
+          // A known zero-change command is not a file either. Legacy dispatchers without an
+          // observer retain successful opaque-effect semantics; earlier work stays kept.
+          if (toolUseCouldProduceWork(tu) && (before !== null && after !== null ? after > before : result.is_error === false)) producingToolUses += 1;
+          if (loopGuardOn) noteToolEffect(repeatProbe, tu, result, before, after);
           return result;
         };
         const serialIdx: number[] = [];
@@ -1745,7 +1776,7 @@ export class AgentRunner {
             const summary = 'Stopped this run: after being told twice to stop, the model kept sending steps that do '
               + `nothing (${noOpTurnsAfterFinal} more turns of empty, refused or proven unchanged calls). Nothing further would have changed.`;
             events.emit({ type: 'narration', agent: agentRole, text: `⚠️ ${summary}`, ts: Date.now() });
-            return { ok: false, summary, steps, usage, billedUsd: billed() };
+            return { ok: false, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
           }
         }
         // TIME BUDGET — the one thing the model was never told (see `budgetStagesSent` above). Rides the
@@ -1796,7 +1827,7 @@ export class AgentRunner {
                   }
                 } catch { /* the style read is advisory — the done steer stands without it */ }
                 if (styleNote) doneText = `${doneText}\n\n${styleNote}`;
-                else events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: '✅ The app looks complete — wrapping up.' });
+                else events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: '✅ Source/build checks are clear — final runtime checks are next.' });
               }
             }
           }
@@ -2040,7 +2071,7 @@ export class AgentRunner {
       const message = err instanceof Error ? err.message : String(err);
       await persist('error');
       events.emit({ type: 'error', message, ts: Date.now() });
-      return { ok: false, summary: `Error: ${message}`, steps, usage, billedUsd: billed() };
+      return { ok: false, summary: `Error: ${message}`, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
     }
   }
 }

@@ -436,6 +436,7 @@ export class GatewayAdminSetup {
       const catalog: GatewayCatalog = { kind: 'gateway_catalog', version: 1, enabled: true, revision: v.operationId,
         issuedAtMs: now, expiresAtMs: Math.max(...profiles.map(p => p.expiresAtMs)),
         platformScope: c?.platformScope ?? { id: 'platform-free-fallback', ownerId: v.platformOwnerId },
+        ...(c?.professionalScope ? { professionalScope: c.professionalScope } : {}),
         policies: { ...(c?.policies ?? {}), ...proposedPolicies }, profiles };
       requireValue(catalog.expiresAtMs > now, 'conflict');
       const finalNow = this.options.now(); readGatewaySetupSubmission(v, finalNow);

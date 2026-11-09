@@ -168,8 +168,8 @@ describe('a planner or a repair is asked for an answer', () => {
 
   it('both text-runner factories are wrapped, so the roadmap, blueprint, Project Mode and repair calls inherit it', () => {
     const route = read('src/server/routes/agentv3.ts');
-    expect(route).toContain('const makeFastTextRunner = (onUsed?: (used: string) => void, heal = false, manualUsage = false): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({');
-    expect(route).toContain('const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({');
+    expect(route).toContain('const makeFastTextRunner = (onUsed?: (used: string) => void, heal = false, manualUsage = false): TurnRunner => withReplyLanguage(withAnswerNotDeliberation(withStopSignal(buildTurnRunner({');
+    expect(route).toContain('const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => withReplyLanguage(withAnswerNotDeliberation(withStopSignal(buildTurnRunner({');
   });
 });
 

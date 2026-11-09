@@ -77,6 +77,8 @@ export interface LaneWriteFence {
    * or not it knows it was abandoned. Idempotent.
    */
   handoff(): void;
+  /** Revoke new starts, then wait for already-accepted writes before a successor may run. */
+  handoffAndDrain(): Promise<void>;
   /** The lane that currently owns the workspace, or `null` once it has been handed off. */
   readonly holder: string | null;
 }
@@ -95,6 +97,7 @@ export function createLaneWriteFence(
 ): LaneWriteFence {
   interface Lease { readonly lane: string; live: boolean; }
   let current: Lease | null = null;
+  const pending = new Set<Promise<WriteOutcome[] | void>>();
 
   const revoke = (): void => {
     if (current) current.live = false;
@@ -118,11 +121,17 @@ export function createLaneWriteFence(
           throw new LaneAbandonedError(lane, paths);
         }
         // The outcome is passed through untouched: the fence decides WHO may write, never what happened.
-        return write(files);
+        const task = write(files);
+        pending.add(task);
+        try { return await task; } finally { pending.delete(task); }
       };
     },
     handoff(): void {
       revoke();
+    },
+    async handoffAndDrain(): Promise<void> {
+      revoke();
+      await Promise.allSettled([...pending]);
     },
     get holder(): string | null {
       return current?.lane ?? null;

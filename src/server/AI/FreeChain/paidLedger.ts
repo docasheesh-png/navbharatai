@@ -27,13 +27,13 @@ export function readSpendDay(raw: unknown, window: DayWindow): SpendDay {
     spentNanoUsd: d.spentNanoUsd, requests: d.requests, pending: d.pending,
     ...(d.conservativePending === undefined ? {} : { conservativePending: d.conservativePending }), alertedPercent: d.alertedPercent };
 }
-export function readPaidPolicy(raw: unknown): PaidBudgetPolicy | null {
+export function readPaidPolicy(raw: unknown, collection: 'free_chat_chain' | 'professional_inference' = FREE_CHAIN_COLLECTION): PaidBudgetPolicy | null {
   if (raw === undefined) return null;
   const p = raw as PaidBudgetPolicy & Raw;
   if (!p || p.kind !== 'paid_budget_policy' || p.version !== 1 || !nonnegativeInteger(p.revision) || p.revision < 1
     || (p.uncappedRolloutVersion !== undefined && p.uncappedRolloutVersion !== 1)
     || (p.budgetMode !== undefined && p.budgetMode !== 'capped' && p.budgetMode !== 'uncapped')
-    || !validPaidCapNanoUsd(p.capNanoUsd) || !nonnegativeInteger(p.updatedAt)
+    || !(collection === 'professional_inference' ? nonnegativeInteger(p.capNanoUsd) : validPaidCapNanoUsd(p.capNanoUsd)) || !nonnegativeInteger(p.updatedAt)
     || (p.source !== 'deployment' && p.source !== 'admin' && p.source !== 'safety') || 'expiresAt' in p || 'expireAt' in p) {
     throw new FreeChainDataError('Malformed paid budget policy');
   }
@@ -41,21 +41,22 @@ export function readPaidPolicy(raw: unknown): PaidBudgetPolicy | null {
   return { ...(p.uncappedRolloutVersion ? { uncappedRolloutVersion: p.uncappedRolloutVersion } : {}), ...(p.budgetMode ? { budgetMode: p.budgetMode } : {}), kind: p.kind, version: p.version, revision: p.revision, capNanoUsd: p.capNanoUsd, updatedAt: p.updatedAt, source: p.source };
 }
 /** Same atomic administrator notifications and retention rules as the original store writer. */
-export function writeSpendDay(tx: Transaction, db: Pick<Firestore, 'doc'>, day: SpendDay, capNanoUsd: number, now: number, adminEmails: () => string[], budgetMode?: 'capped' | 'uncapped'): void {
+export function writeSpendDay(tx: Transaction, db: Pick<Firestore, 'doc'>, day: SpendDay, capNanoUsd: number, now: number, adminEmails: () => string[], budgetMode?: 'capped' | 'uncapped', collection: 'free_chat_chain' | 'professional_inference' = FREE_CHAIN_COLLECTION): void {
   const reached = budgetMode === 'uncapped' ? [] : spendThresholds(day, capNanoUsd);
   const alertedPercent = [...day.alertedPercent, ...reached];
   const committed = checkedAdd(day.heldNanoUsd, day.spentNanoUsd);
   const recipients = [...new Set(adminEmails().map(email => email.trim().toLowerCase()).filter(Boolean))].slice(0, 50);
   for (const threshold of reached) for (const email of recipients) {
-    const id = `free-chat-spend_${day.key}_${threshold}_${hash(email)}`;
+    const id = `${collection === 'free_chat_chain' ? 'free-chat' : 'professional-inference'}-spend_${day.key}_${threshold}_${hash(email)}`;
     tx.set(db.doc(`admin_notifications/${id}`), {
-      id, message: `FREE chat paid-fallback budget reached ${threshold}% for ${day.key} (Asia/Kolkata): `
+      id, message: `${collection === 'professional_inference' ? 'Professional supplier' : 'FREE chat paid-fallback'} budget reached ${threshold}% for ${day.key} (Asia/Kolkata): `
         + `$${(committed / NANO_USD).toFixed(4)} committed of $${(capNanoUsd / NANO_USD).toFixed(2)}. `
-        + 'Committed includes maximum-cost holds with unknown usage. Open Admin → FREE Chat Chain.',
-      target: { type: 'user', email }, createdAt: now, createdBy: 'free-chat-chain',
+        + 'Committed includes maximum-cost holds with unknown usage. '
+        + (collection === 'free_chat_chain' ? 'Open Admin → FREE Chat Chain.' : 'Review the professional_inference supplier ledger.'),
+      target: { type: 'user', email }, createdAt: now, createdBy: collection === 'free_chat_chain' ? 'free-chat-chain' : 'professional-inference',
     });
   }
-  tx.set(db.doc(`${FREE_CHAIN_COLLECTION}/paid_day_${day.key}`), { ...day, alertedPercent, kind: 'paid_day', version: 1,
+  tx.set(db.doc(`${collection}/paid_day_${day.key}`), { ...day, alertedPercent, kind: 'paid_day', version: 1,
     capNanoUsd, updatedAt: now,
     // Pending holds and conservative reconciliations never expire their original accounting day.
     ...(day.pending === 0 && (day.conservativePending ?? 0) === 0 ? { expiresAt: new Date(Math.max(now, day.resetAt) + 90 * DAY_MS) } : {}),
@@ -63,8 +64,8 @@ export function writeSpendDay(tx: Transaction, db: Pick<Firestore, 'doc'>, day: 
 }
 
 /** Existing UID-wide daily guard, shared across legacy and gateway paid attempts. */
-export function paidUserDocumentPath(day: string, uidHash: string): string {
-  return `${FREE_CHAIN_COLLECTION}/paid_user_${day}_${uidHash}`;
+export function paidUserDocumentPath(day: string, uidHash: string, collection: 'free_chat_chain' | 'professional_inference' = FREE_CHAIN_COLLECTION): string {
+  return `${collection}/paid_user_${day}_${uidHash}`;
 }
 export function readPaidUser(value: unknown, day: string, uidHash: string): number {
   const user = value as Raw | undefined;
@@ -72,8 +73,8 @@ export function readPaidUser(value: unknown, day: string, uidHash: string): numb
     || user.uidHash !== uidHash || !nonnegativeInteger(user.requests))) throw new FreeChainDataError('Malformed per-user count');
   return (user?.requests as number | undefined) ?? 0;
 }
-export function writePaidUser(tx: Transaction, db: Pick<Firestore, 'doc'>, window: DayWindow, uidHash: string, requests: number): void {
+export function writePaidUser(tx: Transaction, db: Pick<Firestore, 'doc'>, window: DayWindow, uidHash: string, requests: number, collection: 'free_chat_chain' | 'professional_inference' = FREE_CHAIN_COLLECTION): void {
   if (!nonnegativeInteger(requests)) throw new FreeChainDataError('Invalid per-user count');
-  tx.set(db.doc(paidUserDocumentPath(window.key, uidHash)), { kind: 'paid_user', day: window.key, uidHash, requests,
+  tx.set(db.doc(paidUserDocumentPath(window.key, uidHash, collection)), { kind: 'paid_user', day: window.key, uidHash, requests,
     expiresAt: new Date(window.resetAt + 90 * DAY_MS) });
 }

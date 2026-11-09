@@ -1,4 +1,7 @@
-import { gatewayMitrifyCeiling, type GatewayMitrifyConfig } from '../../lib/mitrify';
+import { mitrifyChainBinding, mitrifyChainEnabled, mitrifyConfig, mitrifyReviewedApprovalCeiling } from '../../lib/mitrify';
+import { gatewayMitrifyBody } from './mitrifyTransport';
+import { readGatewayMitrifyCompletion, readGatewayMitrifyConservativeUsage } from './mitrifyTransport';
+import { supplierFundingCollection, supplierFundingSurface, type ImplementedSupplierFunding } from './supplierFunding';
 import { fixedTextChainEnabled, fixedTextChainScopeAllowed, fixedTextChainScope, FIXED_TEXT_CHAIN_MAX_ATTEMPTS } from '../fixedTextChain';
 import { modelSlotIdentity, modelSlotPath, modelSlotBinding, readModelSlotPolicy, readModelSlotState, readHeldModelSlot, type GatewayModelSlotPolicy } from './modelConcurrency';
 /**
@@ -20,7 +23,7 @@ import { gatewayAccountCooldownPath, gatewayCredentialHealthPath, gatewayAccount
 import { GatewayQuotaRollover, gatewayQuotaRulePath, gatewayQuotaWindow, reviewedGatewayQuotaRule, type GatewayRolloverPolicy } from './quotaRollover';
 import { isIdentifier } from './capabilities';
 import type { BudgetAuthorization, Candidate, EvidenceKind, EvidenceRecord, PrivacyRequirement, ProviderProfile, QualityRequirement, RoutingRequest, Surface, CapabilityRequest } from './types';
-import { gatewayTextCredentialBinding, readGatewayTextHealth, readGatewayTextCostAnomaly, readGatewayTextRejection, readGatewayTextUsage, readGatewayTextCompletion, readGatewayTextConservativeUsage, type GatewayTextTransportConfig, type GatewayTextResponse } from './textTransport';
+import { gatewayCredentialEnvAllowed, gatewayTextCredentialBinding, readGatewayTextHealth, readGatewayTextCostAnomaly, readGatewayTextRejection, readGatewayTextUsage, readGatewayTextCompletion, readGatewayTextConservativeUsage, type GatewayTextTransportConfig, type GatewayTextResponse } from './textTransport';
 import { readGatewayOpenRouterHealth, readGatewayOpenRouterCostAnomaly, readGatewayOpenRouterRejection, readGatewayOpenRouterUsage, type GatewayOpenRouterConfig } from './openRouterTransport';
 import { gatewayEmbeddingCredentialBinding, readGatewayEmbeddingHealth, readGatewayEmbeddingUsage, readGatewayEmbeddingCostAnomaly, type GatewayEmbeddingConfig } from './embeddingTransport';
 import { readGatewayGroundingHealth, readGatewayGroundingUsage, type GatewayGroundingConfig } from './groundingTransport';
@@ -28,14 +31,14 @@ import { readGatewayVisionHealth, readGatewayVisionUsage, readGatewayVisionCompl
 import type { GatewayInvocationPayload, GatewayOperationPolicy } from './capabilityInvocation';
 export type GatewayRuntimeTransport = (GatewayTextTransportConfig & { readonly kind?: 'text' })
   | (GatewayOpenRouterConfig & { readonly kind?: 'text'; readonly rateCard?: never })
-  | GatewayMitrifyConfig | GatewayEmbeddingConfig | GatewayGroundingConfig | GatewayVisionTransportConfig;
+  | GatewayEmbeddingConfig | GatewayGroundingConfig | GatewayVisionTransportConfig;
 
 export const GATEWAY_CATALOG_PATH = 'free_chat_chain/gateway_catalog';
 type GatewayPayload = GatewayInvocationPayload;
 export interface GatewaySurfacePolicy {
   /** Absent is text-only. Every auxiliary operation needs a separately reviewed server key. */
   operation?: GatewayOperationPolicy;
-  surface: Surface; funding: 'platform-free-fallback'; termsPolicyId: string;
+  surface: Surface; funding: ImplementedSupplierFunding; termsPolicyId: string;
   quality: QualityRequirement; privacy: PrivacyRequirement;
   /** Full admitted model context bounds, not a character/token guess. */
   maxInputTokens: number; maxOutputTokens: number; maxQueueWaitMs: number;
@@ -57,6 +60,7 @@ export interface GatewayCatalog {
   kind: 'gateway_catalog'; version: 1; enabled: true; revision: string;
   issuedAtMs: number; expiresAtMs: number;
   platformScope: { id: string; ownerId: string };
+  professionalScope?: { id: string; ownerId: string };
   policies: Record<string, GatewaySurfacePolicy>;
   profiles: GatewayCatalogEntry[];
 }
@@ -83,7 +87,7 @@ function usageAmount(meter: string, input: number, output: number): number {
 }
 function transportCredentialBinding(t: GatewayRuntimeTransport): string {
   if (t.kind === 'embedding') return gatewayEmbeddingCredentialBinding({ project: t.project, credentialPrincipal: t.credentialPrincipal });
-  requireValue((t.provider === 'MITRIFY' ? t.credentialEnv === 'MITRIFY_API_KEY' : /^INFERENCE_GATEWAY_[A-Z0-9_]+$/.test(t.credentialEnv)) && !!process.env[t.credentialEnv]);
+  requireValue(gatewayCredentialEnvAllowed(t) && !!process.env[t.credentialEnv]);
   const binding = gatewayTextCredentialBinding(process.env[t.credentialEnv]!);
   requireValue(t.credentialBinding === binding); return binding;
 }
@@ -129,7 +133,6 @@ function requestedCapability(p: GatewaySurfacePolicy, payload: GatewayPayload): 
   throw new Error('Unsupported reviewed operation');
 }
 function maximumFor(t: GatewayRuntimeTransport, p: GatewaySurfacePolicy, payload: GatewayPayload): number {
-  if (t.provider === 'MITRIFY') return gatewayMitrifyCeiling(t);
   const rate = t.rateCard; requireValue(rate && current(rate.verifiedAtMs, rate.expiresAtMs, Date.now()) && isIdentifier(rate.version));
   if (t.kind === 'embedding') {
     requireValue(payload.kind === 'embedding' && positive(t.rateCard.maxNanoUsdPerCharacter) && t.rateCard.maxNanoUsdPerCharacter >= 25);
@@ -140,6 +143,7 @@ function maximumFor(t: GatewayRuntimeTransport, p: GatewaySurfacePolicy, payload
     return t.rateCard.requestNanoUsd;
   }
   requireValue(t.rateCard);
+  if (t.provider === 'MITRIFY') { requireValue(positive(t.rateCard.supplierPerHttpRequestCeilingNanoUsd)); return t.rateCard.supplierPerHttpRequestCeilingNanoUsd; }
   return maximumCostNanoUsd(t.kind === 'vision-pdf' && t.provider === 'GEMINI' ? 1048576 : p.maxInputTokens, p.maxOutputTokens, t.rateCard.inputNanoUsdPerMillion, t.rateCard.outputNanoUsdPerMillion);
 }
 function operationUsage(meter: string, capability: CapabilityRequest, transport: GatewayRuntimeTransport): number {
@@ -219,6 +223,7 @@ export class GatewayAuthorityStore {
   constructor(private readonly db: Db, private readonly context: InferenceGatewayContext, private readonly key: ExecutionKey,
     private readonly payload: GatewayPayload, private readonly strictFree: boolean, private readonly signal?: AbortSignal,
     private readonly queueWaitConsumedMs = 0, private readonly paidAuthorityObserved = true) {}
+  private get fundingCollection() { return supplierFundingCollection(this.context.funding); }
   private checkLive(): void { requireValue(!this.signal?.aborted && Date.now() < this.context.deadlineAtMs); }
   private async get(tx: Transaction, path: string): Promise<unknown> { return readData(await tx.get(this.db.doc(path))); }
   async issue(): Promise<{ platformScope: GatewayCatalog['platformScope']; scope: SpendScope; cancellationId: string; createdAtMs: number }> {
@@ -228,6 +233,10 @@ export class GatewayAuthorityStore {
       const now = Date.now();
       const c = catalogAt(await this.get(tx, GATEWAY_CATALOG_PATH), now);
       const p = c.policies[this.context.policyKey];
+      requireValue(supplierFundingSurface(this.context.funding, this.context.surface));
+      const supplierScope = this.context.funding === 'existing-professional' ? c.professionalScope : c.platformScope;
+      requireValue(supplierScope && isIdentifier(supplierScope.id) && isIdentifier(supplierScope.ownerId)
+        && (this.context.funding !== 'existing-professional' || supplierScope.id !== c.platformScope.id));
       const excluded = this.context.excludedModelIds ?? [];
       requireValue(Array.isArray(excluded) && excluded.length <= 8 && excluded.every(isIdentifier));
       const excludedCanonical = new Set<string>();
@@ -245,23 +254,25 @@ export class GatewayAuthorityStore {
         && nonnegativeInteger(p.maxQueueWaitMs) && p.maxQueueWaitMs <= 5000
         && positive(p.firstOutputTimeoutMs) && positive(p.attemptTimeoutMs) && p.firstOutputTimeoutMs <= p.attemptTimeoutMs
         && p.attemptTimeoutMs <= 120_000 && nonnegativeInteger(p.logicalLimitNanoUsd)
-        && p.logicalLimitNanoUsd <= OWNER_PAID_DAILY_CEILING_NANO_USD);
+        && (this.context.funding === 'existing-professional' || p.logicalLimitNanoUsd <= OWNER_PAID_DAILY_CEILING_NANO_USD));
       const capability = requestedCapability(p, this.payload);
       const fixedOrder = fixedTextChainScopeAllowed() && fixedTextChainEnabled() && fixedTextChainScope(this.context.surface, capability.kind);
       const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE);
       const [paidRaw, dayRaw, existingAuthority] = await Promise.all([
-        this.get(tx, 'free_chat_chain/paid_budget_policy'), this.get(tx, `free_chat_chain/paid_day_${window.key}`),
+        this.get(tx, `${this.fundingCollection}/paid_budget_policy`), this.get(tx, `${this.fundingCollection}/paid_day_${window.key}`),
         this.get(tx, gatewayLedgerPath('authority', this.key.logicalRequestId)),
       ]);
       requireValue(existingAuthority === undefined);
-      const paid = readPaidPolicy(paidRaw); const day = readSpendDay(dayRaw, window);
+      const paid = readPaidPolicy(paidRaw, this.fundingCollection); const day = readSpendDay(dayRaw, window);
       const r: RoutingRequest = { ...this.key, nextPhysicalAttemptId: randomUUID(), policyRevision: c.revision,
-        termsPolicyId: p.termsPolicyId, budgetScopeId: c.platformScope.id, surface: this.context.surface,
-        quality: p.quality, privacy: p.privacy, payer: { kind: 'platform', ownerId: c.platformScope.ownerId },
+        termsPolicyId: p.termsPolicyId, budgetScopeId: supplierScope.id, surface: this.context.surface,
+        quality: p.quality, privacy: p.privacy, payer: { kind: 'platform', ownerId: supplierScope.ownerId },
         capability,
         mode: this.strictFree ? 'strict-free' : 'free-first-authorized-paid', createdAtMs: now - this.queueWaitConsumedMs,
         deadlineAtMs: Math.min(this.context.deadlineAtMs, now + p.attemptTimeoutMs), maxQueueWaitMs: p.maxQueueWaitMs,
-        queueEnteredAtMs: now, queueWaitConsumedMs: this.queueWaitConsumedMs, firstOutputTimeoutMs: p.firstOutputTimeoutMs,
+        queueEnteredAtMs: now, queueWaitConsumedMs: this.queueWaitConsumedMs,
+        // Reserve control-plane headroom rather than letting the first rung consume the chain deadline.
+        firstOutputTimeoutMs: fixedOrder ? Math.min(p.firstOutputTimeoutMs, Math.max(1, Math.floor((Math.min(this.context.deadlineAtMs, now + p.attemptTimeoutMs) - now) * 0.8 / FIXED_TEXT_CHAIN_MAX_ATTEMPTS))) : p.firstOutputTimeoutMs,
         attemptTimeoutMs: p.attemptTimeoutMs, cancellation: { id: randomUUID(), cancelled: false }, outputVisible: false,
         ...(fixedOrder ? { fixedTextChain: 'v1' as const } : {}),
         maxPhysicalAttempts: fixedOrder ? FIXED_TEXT_CHAIN_MAX_ATTEMPTS : 4, attempts: [], evidenceRef: randomUUID() };
@@ -283,7 +294,7 @@ export class GatewayAuthorityStore {
             && current(entry.reviewedAtMs, entry.expiresAtMs, now) && entry.expiresAtMs - entry.reviewedAtMs <= 86_400_000
             && entry.review && ['account', 'terms', 'quality', 'privacy', 'capability', 'pricing'].every(k => isIdentifier(entry.review[k as keyof typeof entry.review]))
             && (entry.transport.kind ?? 'text') === capability.kind
-            && entry.legacyProvider === ({ GLM: 'glm', GEMINI: 'gemini', GROQ: 'groq', CLOUDFLARE: 'cloudflare', DEEPSEEK: 'deepseek', OPENROUTER: 'openrouter', VERTEX: 'vertex', BRAVE: 'brave', MITRIFY: 'mitrify' } as const)[entry.transport.provider]
+            && entry.legacyProvider === ({ GLM: 'glm', GEMINI: 'gemini', GROQ: 'groq', CLOUDFLARE: 'cloudflare', DEEPSEEK: 'deepseek', OPENROUTER: 'openrouter', VERTEX: 'vertex', BRAVE: 'brave', OPENAI: 'openai', DEEPINFRA: 'deepinfra', CHEAPERINFERENCE: 'cheapinf', MITRIFY: 'mitrify' } as const)[entry.transport.provider]
             && entry.profile.adapterId === (entry.transport.kind === 'embedding' ? 'gateway-vertex-embedding-v1'
               : entry.transport.kind === 'grounding-search' ? 'gateway-brave-search-v1' : entry.transport.kind === 'vision-pdf' ? 'gateway-vision-v1'
               : entry.transport.provider === 'OPENROUTER' ? 'gateway-openrouter-text-v1' : entry.transport.provider === 'MITRIFY' ? 'gateway-mitrify-text-v1' : 'gateway-openai-text-v1') && entry.profile.modelId === entry.transport.model
@@ -295,7 +306,15 @@ export class GatewayAuthorityStore {
               && current(entry.freeBillingSafety.reviewedAtMs, entry.freeBillingSafety.expiresAtMs, now)
               && entry.freeBillingSafety.expiresAtMs - entry.freeBillingSafety.reviewedAtMs <= 86_400_000))
             && Array.isArray(entry.profile.quotaDimensions) && entry.profile.quotaDimensions.length > 0 && entry.profile.quotaDimensions.length <= 32);
-          if (entry.transport.provider === 'MITRIFY') { requireValue(entry.profile.charging === 'metered'); gatewayMitrifyCeiling(entry.transport, now); }
+          if (entry.transport.provider === 'MITRIFY') {
+            requireValue(mitrifyChainEnabled() && this.payload.kind === 'text');
+            const cfg = mitrifyConfig(); requireValue(!!cfg.apiKey && entry.transport.baseURL === cfg.baseURL && entry.transport.model === cfg.model);
+            const binding = mitrifyChainBinding(r.principalId, gatewayMitrifyBody(this.payload as Extract<GatewayPayload, { kind: 'text' }>, p.maxOutputTokens));
+            const ceiling = mitrifyReviewedApprovalCeiling(await this.get(tx, `mitrify_chain_approvals/${binding.id}`), {
+              uid: r.principalId, binding, privateTurn: r.privacy.dataClass !== 'public', healthTurn: r.privacy.dataClass === 'health', now,
+            });
+            requireValue(ceiling !== undefined && ceiling <= entry.transport.rateCard!.supplierPerHttpRequestCeilingNanoUsd!);
+          }
           const fencePath = gatewayAccountFencePath(entry.legacyProvider, gatewayAccountScopeIds(entry.profile.quotaDimensions));
           const fenceRaw = await this.get(tx, fencePath); const fence = validFence(fenceRaw, entry, now);
           const slotIdentity = modelSlotIdentity(entry.profile);
@@ -356,18 +375,19 @@ export class GatewayAuthorityStore {
       requireValue(candidates.length > 0);
       let budget: BudgetAuthorization | undefined;
       const paidIds = candidates.filter(c => c.profile.charging === 'metered').map(c => c.profile.id);
-      if (this.paidAuthorityObserved && !this.strictFree && paidIds.length && paid && paid.updatedAt <= now && paid.capNanoUsd > 0) {
+      if (this.paidAuthorityObserved && !this.strictFree && paidIds.length && paid && paid.updatedAt <= now && (paid.budgetMode === 'uncapped' || paid.capNanoUsd > 0)) {
         budget = { id: randomUUID(), principalId: r.principalId, tenantId: r.tenantId, logicalRequestId: r.logicalRequestId,
           payer: r.payer, surface: r.surface, allowedProfileIds: paidIds, budgetScopeId: r.budgetScopeId,
           periodId: window.key, periodStartsAtMs: window.startAt, periodEndsAtMs: window.resetAt,
           maxAttemptNanoUsd: p.logicalLimitNanoUsd, remainingLogicalRequestNanoUsd: p.logicalLimitNanoUsd,
+          budgetMode: paid.budgetMode ?? 'capped',
           remainingPeriodNanoUsd: Math.max(0, paid.capNanoUsd - day.heldNanoUsd - day.spentNanoUsd), periodLimitNanoUsd: paid.capNanoUsd,
           evidenceRef: randomUUID() };
         issueEvidence('budget', budget, window.resetAt);
       }
       const authority: GatewayAuthorityDocument = { kind: 'gateway_authority', version: 1, key: this.key,
         snapshot: { revision: randomUUID(), request: r, candidates, ...(budget ? { budget } : {}) },
-        scope: { id: c.platformScope.id, kind: 'platform-free-fallback' }, logicalLimitNanoUsd: p.logicalLimitNanoUsd,
+        scope: { id: supplierScope.id, kind: this.context.funding as ImplementedSupplierFunding }, logicalLimitNanoUsd: p.logicalLimitNanoUsd,
         paidPolicyRevision: paid?.revision ?? 0, configurationBinding: evidenceBinding(c),
         modelSlots, sourceBindings: [...new Map(sourceBindings.map(source => [source.path, source])).values()] };
       requireValue(authority.sourceBindings!.length <= 32);
@@ -378,7 +398,7 @@ export class GatewayAuthorityStore {
     });
     this.authority = copy(issued.authority); this.catalog = copy(issued.c);
     this.entries = issued.entries; this.records = issued.records;
-    return { platformScope: this.catalog.platformScope, scope: this.authority.scope,
+    return { platformScope: (this.context.funding === 'existing-professional' ? this.catalog.professionalScope! : this.catalog.platformScope), scope: this.authority.scope,
       cancellationId: this.authority.snapshot.request.cancellation.id, createdAtMs: this.authority.snapshot.request.createdAtMs };
   }
   transportFor(profileId: string): GatewayRuntimeTransport {
@@ -469,14 +489,15 @@ export class GatewayAuthorityStore {
         candidates.push(candidate);
       }
       const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE);
-      const [paidRaw, dayRaw] = await Promise.all([this.get(tx, 'free_chat_chain/paid_budget_policy'), this.get(tx, `free_chat_chain/paid_day_${window.key}`)]);
-      const paid = readPaidPolicy(paidRaw); const day = readSpendDay(dayRaw, window);
+      const [paidRaw, dayRaw] = await Promise.all([this.get(tx, `${this.fundingCollection}/paid_budget_policy`), this.get(tx, `${this.fundingCollection}/paid_day_${window.key}`)]);
+      const paid = readPaidPolicy(paidRaw, this.fundingCollection); const day = readSpendDay(dayRaw, window);
       let budget: BudgetAuthorization | undefined;
-      if (request.mode !== 'strict-free' && authority.snapshot.budget && paid && paid.updatedAt <= now && paid.capNanoUsd > 0) {
+      if (request.mode !== 'strict-free' && authority.snapshot.budget && paid && paid.updatedAt <= now && (paid.budgetMode === 'uncapped' || paid.capNanoUsd > 0)) {
         const previousBudget = authority.snapshot.budget;
         budget = { ...previousBudget, id: advancing ? randomUUID() : previousBudget.id,
           allowedProfileIds: candidates.filter(c => c.profile.charging === 'metered').map(c => c.profile.id),
           periodId: window.key, periodStartsAtMs: window.startAt, periodEndsAtMs: window.resetAt,
+          budgetMode: paid.budgetMode ?? 'capped',
           remainingPeriodNanoUsd: Math.max(0, paid.capNanoUsd - day.heldNanoUsd - day.spentNanoUsd), periodLimitNanoUsd: paid.capNanoUsd,
           remainingLogicalRequestNanoUsd: Math.max(0, authority.logicalLimitNanoUsd - Number(logical?.heldNanoUsd ?? 0) - Number(logical?.spentNanoUsd ?? 0)), evidenceRef: randomUUID() };
         if (budget.allowedProfileIds.length) issue('budget', budget, window.resetAt); else budget = undefined;
@@ -556,14 +577,15 @@ export class GatewayAuthorityStore {
           finalChecks.push(now => current(policy.window.startsAtMs, policy.window.endsAtMs, now));
         }
         if (claim.binding.budget) {
-          const [policyRaw, dayRaw] = await Promise.all([this.get(tx, 'free_chat_chain/paid_budget_policy'), this.get(tx, `free_chat_chain/paid_day_${claim.binding.budget.periodId}`)]);
-          const policy = readPaidPolicy(policyRaw); const budget = claim.binding.budget;
+          const [policyRaw, dayRaw] = await Promise.all([this.get(tx, `${this.fundingCollection}/paid_budget_policy`), this.get(tx, `${this.fundingCollection}/paid_day_${claim.binding.budget.periodId}`)]);
+          const policy = readPaidPolicy(policyRaw, this.fundingCollection); const budget = claim.binding.budget;
           expiries.push(authority.snapshot.budget!.periodEndsAtMs, Number(object(attempt.window).resetAt));
           finalChecks.push(now => {
             const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE); const day = readSpendDay(dayRaw, window);
-            return !!policy && policy.revision === authority.paidPolicyRevision && policy.capNanoUsd > 0 && policy.updatedAt <= now
+            return !!policy && policy.revision === authority.paidPolicyRevision && (policy.budgetMode === 'uncapped' || policy.capNanoUsd > 0) && policy.updatedAt <= now
+              && (authority.snapshot.budget!.budgetMode ?? 'capped') === (policy.budgetMode ?? 'capped')
               && window.key === budget.periodId && same(attempt.window, window) && day.pending > 0
-              && day.heldNanoUsd >= budget.amountNanoUsd && day.heldNanoUsd + day.spentNanoUsd <= policy.capNanoUsd;
+              && day.heldNanoUsd >= budget.amountNanoUsd && (policy.budgetMode === 'uncapped' || day.heldNanoUsd + day.spentNanoUsd <= policy.capNanoUsd);
           });
         }
         // No time-sensitive decision uses a pre-read timestamp. Reads can span quota resets,
@@ -619,7 +641,7 @@ export class GatewayAuthorityStore {
       requireValue(['claimed', 'pending'].includes(String(attempt.phase)) && same(attempt.claim, claim)
         && nonnegativeInteger(attempt.dispatchAuthorizedAtMs) && nonnegativeInteger(proof.receivedAtMs)
         && proof.receivedAtMs >= (attempt.dispatchAuthorizedAtMs as number) && proof.receivedAtMs <= Date.now());
-      const paidPolicy = readPaidPolicy(await this.get(tx, 'free_chat_chain/paid_budget_policy'));
+      const paidPolicy = readPaidPolicy(await this.get(tx, `${this.fundingCollection}/paid_budget_policy`), this.fundingCollection);
       const held = attempt.heldQuota;
       requireValue(Array.isArray(held) && held.length > 0 && held.length <= 32);
       const states = await Promise.all((held as Record<string, unknown>[]).map(async hold => {
@@ -637,7 +659,7 @@ export class GatewayAuthorityStore {
         // including a purported-free request that had no monetary reservation.
         // Stop the shared pool, not just one alias.
         // No invoice amount is invented and every original hold remains committed.
-        tx.set(this.db.doc('free_chat_chain/paid_budget_policy'), { kind: 'paid_budget_policy', version: 1,
+        tx.set(this.db.doc(`${this.fundingCollection}/paid_budget_policy`), { kind: 'paid_budget_policy', version: 1,
           revision, capNanoUsd: 0, updatedAt: Date.now(), source: 'safety' });
       }
       for (const state of states) tx.set(this.db.doc(gatewayLedgerPath('quota-state', state.ledgerKey as string)), { ...state, quarantined: true });
@@ -682,7 +704,7 @@ export class GatewayAuthorityStore {
   async releaseTrustedModelSlot(value: unknown, claim: DispatchClaim): Promise<void> {
     const entry = this.entries.get(claim.binding.profileId); requireValue(entry && same(claim.binding.key, this.key));
     const identity = modelSlotIdentity(entry.profile); if (!identity) return;
-    const terminal = readGatewayTextCompletion(value, claim) ?? readGatewayVisionCompletion(value, claim);
+    const terminal = readGatewayMitrifyCompletion(value, claim) ?? readGatewayTextCompletion(value, claim) ?? readGatewayVisionCompletion(value, claim);
     const rejection = readGatewayTextRejection(value, claim) ?? readGatewayVisionRejection(value, claim);
     const proof = terminal ?? rejection; if (!proof) return;
     const kind = terminal ? 'provider-terminal' : 'no-generation-rejection';
@@ -705,7 +727,7 @@ export class GatewayAuthorityStore {
   }
   async recordTrustedUsage(result: unknown, claim: DispatchClaim): Promise<string | undefined> {
     const measured = readGatewayTextUsage(result, claim) ?? readGatewayOpenRouterUsage(result, claim)
-      ?? readGatewayTextConservativeUsage(result, claim) ?? readGatewayEmbeddingUsage(result, claim)
+      ?? readGatewayMitrifyConservativeUsage(result, claim) ?? readGatewayTextConservativeUsage(result, claim) ?? readGatewayEmbeddingUsage(result, claim)
       ?? readGatewayGroundingUsage(result, claim) ?? readGatewayVisionUsage(result, claim) ?? readGatewayVisionConservativeUsage(result, claim); if (!measured) return undefined;
     const entry = this.entries.get(claim.binding.profileId); requireValue(entry);
     const reference = randomUUID();

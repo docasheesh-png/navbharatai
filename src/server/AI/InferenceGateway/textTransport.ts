@@ -1,3 +1,6 @@
+import { executeGatewayMitrify } from './mitrifyTransport';
+import { mitrifyConfig } from '../../lib/mitrify';
+import { cheaperInferenceMode, cheaperInferenceSharedAccessPermitted } from '../../lib/cheaperInferencePolicy';
 /**
  * Server-only, single-dispatch text transport. This is NOT a public router or an
  * admission authority. Its caller must authenticate the exact durable claim and
@@ -21,9 +24,15 @@ export function gatewayTextCredentialBinding(credential: string): string {
   return createHash('sha256').update('navbharatai-inference-gateway-text-credential-v1\0').update(credential).digest('hex');
 }
 
-export type GatewayTextProvider = 'GLM' | 'GEMINI' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK';
+export type GatewayTextProvider = 'GLM' | 'GEMINI' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'OPENAI' | 'DEEPINFRA' | 'CHEAPERINFERENCE' | 'MITRIFY';
 export interface GatewayTextRateCard {
   readonly version: string;
+  /** Only a reviewed exact all-token tariff, never a reservation ceiling or variable supplier discount. */
+  readonly billingBasis?: 'exact-token-tariff';
+  readonly supplierPerHttpRequestCeilingNanoUsd?: number;
+  readonly supplierListInputNanoUsdPerMillion?: number;
+  readonly supplierListOutputNanoUsdPerMillion?: number;
+  readonly minimumDiscountBasisPoints?: number;
   readonly inputNanoUsdPerMillion: number;
   readonly outputNanoUsdPerMillion: number;
   /** Optional reviewed cache reservation bound; never an exact invoice-settlement rate. */
@@ -43,6 +52,15 @@ export interface GatewayTextTransportConfig {
   /** Non-secret generation binding reviewed with the actual account, not a quota identity. */
   readonly credentialBinding: string;
   readonly rateCard?: GatewayTextRateCard;
+}
+/** Reuse existing official server configuration; no secret alias is required. */
+export function gatewayCredentialEnvAllowed(transport: { provider: string; credentialEnv: string }): boolean {
+  if (/^INFERENCE_GATEWAY_[A-Z0-9_]+$/.test(transport.credentialEnv)) return true;
+  const official: Record<string, readonly string[]> = { MITRIFY: ['MITRIFY_API_KEY'], CHEAPERINFERENCE: ['CHEAPERINFERENCE_API_KEY'],
+    GLM: ['FREE_CHAIN_GLM_API_KEY', 'FREE_CHAIN_GLMX_API_KEY'], GROQ: ['FREE_CHAIN_GROQ_API_KEY'],
+    CLOUDFLARE: ['FREE_CHAIN_CF_API_TOKEN'], DEEPINFRA: ['FREE_CHAIN_DEEPINFRA_API_KEY'], OPENAI: ['FREE_CHAIN_OPENAI_API_KEY'],
+    GEMINI: ['FREE_CHAIN_GEMINIPAID_API_KEY'], OPENROUTER: ['OPENROUTER_API_KEY'] };
+  return official[transport.provider]?.includes(transport.credentialEnv) === true;
 }
 export interface GatewayTextPayload {
   readonly prompt: string;
@@ -90,6 +108,16 @@ export interface GatewayTextUsage {
   readonly actualNanoUsd: number;
   readonly rateCardVersion?: string;
 }
+export interface GatewayTextTariffUsage {
+  readonly principalId: string; readonly logicalRequestId: string; readonly physicalAttemptId: string;
+  readonly tariffNanoUsd: number; readonly rateCardVersion: string;
+}
+const tariffUsage = new WeakMap<object, { claim: string; usage: GatewayTextTariffUsage }>();
+export function readGatewayTextTariffUsage(result: unknown, claim: DispatchClaim): GatewayTextTariffUsage | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const value = tariffUsage.get(result);
+  return value?.claim === evidenceBinding(claim) ? value.usage : undefined;
+}
 /** Complete authenticated usage priced at reviewed maximums, NOT actual billed money. */
 export interface GatewayTextConservativeUsage extends Omit<GatewayTextUsage, 'actualNanoUsd' | 'rateCardVersion'> {
   readonly chargeBasis: 'conservative-ceiling';
@@ -120,10 +148,14 @@ const ENDPOINTS: Record<GatewayTextProvider, RegExp> = {
   GEMINI: /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/openai\/?$/,
   GROQ: /^https:\/\/api\.groq\.com\/openai\/v1\/?$/,
   CLOUDFLARE: /^https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/[a-fA-F0-9]{32}\/ai\/v1\/?$/,
+  OPENAI: /^https:\/\/api\.openai\.com\/v1\/?$/,
+  DEEPINFRA: /^https:\/\/api\.deepinfra\.com\/v1\/openai\/?$/,
+  CHEAPERINFERENCE: /^https:\/\/api\.cheaperinference\.com\/v1\/?$/,
+  MITRIFY: /^https:\/\//,
   DEEPSEEK: /^https:\/\/api\.deepseek\.com\/v1\/?$/,
 };
 const CONFIG_KEYS = ['provider', 'baseURL', 'model', 'maxOutputTokens', 'timeoutMs', 'streamUsage', 'credentialEnv', 'credentialBinding', 'rateCard'];
-const RATE_KEYS = ['version', 'inputNanoUsdPerMillion', 'outputNanoUsdPerMillion', 'cachedInputNanoUsdPerMillion', 'verifiedAtMs', 'expiresAtMs'];
+const RATE_KEYS = ['billingBasis', 'version', 'inputNanoUsdPerMillion', 'outputNanoUsdPerMillion', 'cachedInputNanoUsdPerMillion', 'supplierPerHttpRequestCeilingNanoUsd', 'supplierListInputNanoUsdPerMillion', 'supplierListOutputNanoUsdPerMillion', 'minimumDiscountBasisPoints', 'verifiedAtMs', 'expiresAtMs'];
 const SAFETY_REASONS = new Set(['content_filter', 'safety', 'blocklist', 'prohibited_content', 'spii', 'recitation', 'sensitive']);
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 const MAX_FRAME_BYTES = 2 * 1024 * 1024;
@@ -202,12 +234,44 @@ export function readGatewayTextRejection(error: unknown, claim: DispatchClaim): 
 function validRates(transport: GatewayTextTransportConfig, profile: ProviderProfile, now: number): boolean {
   const rate = transport.rateCard;
   if (profile.charging === 'verified-free-no-overage') return rate === undefined;
-  if (profile.charging !== 'metered' || transport.provider !== 'DEEPSEEK' || transport.model !== 'deepseek-flash'
-    || !rate || Object.keys(rate).some(key => !RATE_KEYS.includes(key)) || !isIdentifier(rate.version)
-    || !isCount(rate.verifiedAtMs) || !isCount(rate.expiresAtMs) || rate.verifiedAtMs > now || rate.expiresAtMs <= now
-    || !isPositiveCount(rate.inputNanoUsdPerMillion) || !isPositiveCount(rate.outputNanoUsdPerMillion)) return false;
+  if (profile.charging !== 'metered'
+    || !rate || (rate.billingBasis !== undefined && rate.billingBasis !== 'exact-token-tariff') || Object.keys(rate).some(key => !RATE_KEYS.includes(key)) || !isIdentifier(rate.version)
+    || !isCount(rate.verifiedAtMs) || !isCount(rate.expiresAtMs) || rate.verifiedAtMs > now || rate.expiresAtMs <= now) return false;
   try {
-    const minimum = realRateFor('DEEPSEEK', transport.model);
+    if ((transport.provider === 'MITRIFY' || transport.provider === 'CHEAPERINFERENCE') && rate.billingBasis !== undefined) return false;
+    if (transport.provider === 'MITRIFY') {
+      const cfg = mitrifyConfig();
+      return transport.baseURL === cfg.baseURL && transport.model === cfg.model
+        && typeof rate.supplierPerHttpRequestCeilingNanoUsd === 'number' && isPositiveCount(rate.supplierPerHttpRequestCeilingNanoUsd)
+        && rate.minimumDiscountBasisPoints === undefined && rate.supplierListInputNanoUsdPerMillion === undefined && rate.supplierListOutputNanoUsdPerMillion === undefined
+        && rate.inputNanoUsdPerMillion === 0 && rate.outputNanoUsdPerMillion === 0 && rate.cachedInputNanoUsdPerMillion === undefined;
+    }
+    if (!isPositiveCount(rate.inputNanoUsdPerMillion) || !isPositiveCount(rate.outputNanoUsdPerMillion)) return false;
+    const paidModels: Partial<Record<GatewayTextProvider, readonly string[]>> = { DEEPSEEK: ['deepseek-flash'],
+      GLM: ['glm-4.7-flashx'], OPENAI: ['gpt-5-nano'], GEMINI: ['gemini-2.5-flash-lite'],
+      DEEPINFRA: ['meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo', 'deepseek-ai/DeepSeek-V4-Flash-0731'],
+      CHEAPERINFERENCE: ['beam', 'beam-1.0-501b-a23b'] };
+    if (!paidModels[transport.provider]?.includes(transport.model) || rate.supplierPerHttpRequestCeilingNanoUsd !== undefined) return false;
+    if (transport.provider === 'CHEAPERINFERENCE') {
+      if (cheaperInferenceMode() !== 'all' || !cheaperInferenceSharedAccessPermitted()
+        || typeof rate.minimumDiscountBasisPoints !== 'number' || !isCount(rate.minimumDiscountBasisPoints) || rate.minimumDiscountBasisPoints > 9999
+        || typeof rate.supplierListInputNanoUsdPerMillion !== 'number' || !isPositiveCount(rate.supplierListInputNanoUsdPerMillion)
+        || typeof rate.supplierListOutputNanoUsdPerMillion !== 'number' || !isPositiveCount(rate.supplierListOutputNanoUsdPerMillion)) return false;
+      // These maker-list amounts MUST come from the reviewed supplier catalog, not a guessed discounted quote.
+      // The documented server-side minimum-discount field caps each settled rate, including supplier failover.
+      const ceiling = (list: number) => Number((BigInt(list) * BigInt(10000 - rate.minimumDiscountBasisPoints!) + 9999n) / 10000n);
+      return rate.inputNanoUsdPerMillion >= ceiling(rate.supplierListInputNanoUsdPerMillion)
+        && rate.outputNanoUsdPerMillion >= ceiling(rate.supplierListOutputNanoUsdPerMillion)
+        && (rate.cachedInputNanoUsdPerMillion === undefined || (isCount(rate.cachedInputNanoUsdPerMillion) && rate.cachedInputNanoUsdPerMillion <= rate.inputNanoUsdPerMillion));
+    }
+    if (rate.minimumDiscountBasisPoints !== undefined || rate.supplierListInputNanoUsdPerMillion !== undefined || rate.supplierListOutputNanoUsdPerMillion !== undefined) return false;
+    // Builder's family-level GPT/unknown-host prices are deliberately unchanged.
+    // These are exact API pairs, not inferred aliases or supplier ceilings.
+    const minimum = transport.provider === 'OPENAI' ? { inputPerMTok: 0.05, outputPerMTok: 0.40, cacheReadPerMTok: 0.005 }
+      : transport.provider === 'DEEPINFRA' ? (transport.model === 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'
+        ? { inputPerMTok: 0.02, outputPerMTok: 0.04, cacheReadPerMTok: undefined }
+        : { inputPerMTok: 0.06, outputPerMTok: 0.18, cacheReadPerMTok: undefined })
+      : realRateFor(transport.provider, transport.model);
     const ceiling = realRateFor('KIMI', 'kimi-k2.7');
     if (rate.inputNanoUsdPerMillion < usdToNanoUsd(minimum.inputPerMTok)
       || rate.outputNanoUsdPerMillion < usdToNanoUsd(minimum.outputPerMTok)) return false;
@@ -257,12 +321,12 @@ function validate(authorization: GatewayTextAuthorization, payload: GatewayTextP
     const rate = t.rateCard!;
     if (r.mode !== 'free-first-authorized-paid' || !b.budget || b.budget.rateCardVersion !== rate.version
       || !b.priceBinding || !b.budgetAuthorizationBinding
-      || b.budget.amountNanoUsd < maximumCostNanoUsd(capability.inputTokens, capability.outputTokens,
-        rate.inputNanoUsdPerMillion, rate.outputNanoUsdPerMillion)) fail('POLICY_BLOCKED');
+      || b.budget.amountNanoUsd < (t.provider === 'MITRIFY' ? rate.supplierPerHttpRequestCeilingNanoUsd! : maximumCostNanoUsd(capability.inputTokens, capability.outputTokens,
+        rate.inputNanoUsdPerMillion, rate.outputNanoUsdPerMillion))) fail('POLICY_BLOCKED');
   } else if (b.budget || b.priceBinding) fail('POLICY_BLOCKED');
 }
 
-interface UsageReading { usage: ProviderUsage; cachedInputTokens?: number; liabilityComplete: boolean; reasoningTokens?: number; }
+interface UsageReading { tokenTariffComplete: boolean; usage: ProviderUsage; cachedInputTokens?: number; liabilityComplete: boolean; reasoningTokens?: number; }
 function readUsage(value: unknown): UsageReading | undefined {
   const u = raw(value); const inputTokens = count(u?.prompt_tokens); const outputTokens = count(u?.completion_tokens);
   if (inputTokens === undefined || outputTokens === undefined || !isCount(inputTokens + outputTokens)) return undefined;
@@ -287,7 +351,12 @@ function readUsage(value: unknown): UsageReading | undefined {
     && Object.keys(promptDetails).every(k => k === 'cached_tokens')
     && (u.completion_tokens_details === undefined || (!!completionDetails
       && Object.keys(completionDetails).every(k => k === 'reasoning_tokens')));
-  return { usage: { inputTokens, outputTokens }, liabilityComplete,
+  const tokenTariffComplete = !!u && u.total_tokens === inputTokens + outputTokens
+    && Object.keys(u).every(k => ['prompt_tokens', 'completion_tokens', 'total_tokens', 'prompt_cache_hit_tokens',
+      'prompt_cache_miss_tokens', 'prompt_tokens_details', 'completion_tokens_details', 'cached_tokens'].includes(k))
+    && (!promptDetails || Object.keys(promptDetails).every(k => k === 'cached_tokens'))
+    && (!completionDetails || Object.keys(completionDetails).every(k => k === 'reasoning_tokens'));
+  return { tokenTariffComplete, usage: { inputTokens, outputTokens }, liabilityComplete,
     ...(reasoningTokens === undefined ? {} : { reasoningTokens }), ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }) };
 }
 /** Round explicit reporting UP, including sub-nanodollar decimal reports. */
@@ -367,6 +436,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
     const payload = { prompt: input.prompt, systemPrompt: input.systemPrompt, schema: input.schema,
       images: input.images === undefined ? undefined : [...input.images], modelOverride: input.modelOverride, streaming: !!input.onChunk };
     validate(a, payload, Date.now());
+    if (a.transport.provider === 'MITRIFY') return await executeGatewayMitrify({ ...input, ...a, prompt: payload.prompt, systemPrompt: payload.systemPrompt }, () => { dispatchedClaim = a.claim; });
     const { transport: t, request } = a;
     controller = new AbortController();
     const signal = controller.signal;
@@ -395,10 +465,11 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
     };
     const messages = [...(payload.systemPrompt ? [{ role: 'system', content: payload.systemPrompt }] : []), { role: 'user', content: payload.prompt }];
     const body = JSON.stringify({ model: t.model, messages, stream: payload.streaming,
-      ...(t.provider === 'GROQ' ? { max_completion_tokens: request.capability.kind === 'text' ? request.capability.outputTokens : 0 }
+      ...(['GROQ', 'OPENAI'].includes(t.provider) ? { max_completion_tokens: request.capability.kind === 'text' ? request.capability.outputTokens : 0 }
         : { max_tokens: request.capability.kind === 'text' ? request.capability.outputTokens : 0 }),
       ...(['GLM', 'DEEPSEEK'].includes(t.provider) ? { thinking: { type: 'disabled' } } : {}),
-      ...(t.provider === 'GEMINI' ? { reasoning_effort: 'none' } : {}),
+      ...(t.provider === 'CHEAPERINFERENCE' ? { min_discount_percent: t.rateCard!.minimumDiscountBasisPoints! / 100, zdr: true } : {}),
+      ...(t.provider === 'GEMINI' ? { reasoning_effort: 'none' } : t.provider === 'OPENAI' ? { reasoning_effort: 'minimal' } : t.provider === 'CHEAPERINFERENCE' ? { reasoning_effort: 'low' } : {}),
       ...(payload.streaming && t.streamUsage ? { stream_options: { include_usage: true } } : {}) });
     // This callback is an exclusive durable dispatch gate, not a JSON boolean from ingress.
     if (await bounded(input.authorizeClaim(a)) !== true) fail('POLICY_BLOCKED');
@@ -465,6 +536,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
         paidUsageSeen = v;
         if (usage) {
           usage.liabilityComplete &&= exactModel && !paidUsageAmbiguous;
+          usage.tokenTariffComplete &&= exactModel && !paidUsageAmbiguous;
           const capability = a.request.capability;
           if (capability.kind !== 'text' || usage.usage.inputTokens > capability.inputTokens || usage.usage.outputTokens > capability.outputTokens) {
             return costAnomaly('paid-liability-contradiction');
@@ -475,14 +547,19 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
       }
       return !!usage;
     };
+    // The official GPT-5 nano alias resolves to this documented default snapshot.
+    // Request the owner's exact alias; accept only that same documented identity,
+    // never a newer nano/model or an arbitrary dated-name prefix match.
+    const matchesRequestedModel = (model: unknown) => model === t.model
+      || (t.provider === 'OPENAI' && t.model === 'gpt-5-nano' && model === 'gpt-5-nano-2025-08-07');
     const processPacket = async (packet: unknown, stream: boolean) => {
       const obj = raw(packet); if (!obj) fail('NETWORK');
       const extension = raw(obj.x_groq);
       // Billing contradiction survives every coexisting response-error/model marker.
-      const hasUsage = await rememberUsage(obj.usage, obj.model === t.model); const hasExtensionUsage = await rememberUsage(extension?.usage, obj.model === t.model);
+      const hasUsage = await rememberUsage(obj.usage, matchesRequestedModel(obj.model)); const hasExtensionUsage = await rememberUsage(extension?.usage, matchesRequestedModel(obj.model));
       await rememberUsage(raw(obj.error)?.usage); await rememberUsage(raw(extension?.error)?.usage);
       if (obj.error) throw remoteError(obj, t.provider);
-      if (obj.model !== undefined && obj.model !== t.model) fail('POLICY_BLOCKED');
+      if (obj.model !== undefined && !matchesRequestedModel(obj.model)) fail('POLICY_BLOCKED');
       if (extension?.error) throw remoteError(extension, t.provider);
       if (!Array.isArray(obj.choices) || obj.choices.length > 1) fail('NETWORK');
       const choice = raw(obj.choices[0]); if (!choice) { if (!stream || !usage) fail('NETWORK'); return; }
@@ -493,7 +570,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
       catch (error) {
         // A complete non-streaming exact-model terminal refusal is finished work,
         // independently of missing financial usage. A streamed refusal without DONE is not.
-        if (!stream && obj.model === t.model && typeof choice.finish_reason === 'string'
+        if (!stream && matchesRequestedModel(obj.model) && typeof choice.finish_reason === 'string'
           && (SAFETY_REASONS.has(choice.finish_reason.toLowerCase()) || ['stop', 'length'].includes(choice.finish_reason)) && error && typeof error === 'object') {
           completedCalls.set(error, { claim: evidenceBinding(a.claim), receivedAtMs: Date.now() });
         }
@@ -508,7 +585,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
       const text = typeof message.content === 'string' ? message.content : '';
       if (finishReason && (text || (reason && reason !== finishReason))) fail('NETWORK');
       finishReason = reason ?? finishReason;
-      if (reason && obj.model === t.model) exactTerminalModel = true;
+      if (reason && matchesRequestedModel(obj.model)) exactTerminalModel = true;
       if (text) {
         if (!hasUsage && !hasExtensionUsage) usage = undefined;
         content += text;
@@ -571,6 +648,20 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
         ...(usage.cachedInputTokens === undefined ? {} : { cachedInputTokens: usage.cachedInputTokens }),
         chargeBasis: 'conservative-ceiling', conservativeCeilingNanoUsd: ceiling, rateCardVersion: t.rateCard!.version,
       }) });
+      // Commercial pricing follows the same measured-token tariff/markup policy as
+      // legacy chat. This proof NEVER settles the separate supplier ledger as an invoice.
+      if (usage?.tokenTariffComplete && (!sawReasoning || usage.reasoningTokens !== undefined) && t.rateCard?.billingBasis === 'exact-token-tariff'
+        && (t.rateCard.cachedInputNanoUsdPerMillion === undefined || usage.cachedInputTokens !== undefined)) {
+        const cached = usage.cachedInputTokens ?? 0;
+        if (cached === 0 || t.rateCard.cachedInputNanoUsdPerMillion !== undefined) {
+          const tariffNanoUsd = maximumCostNanoUsd(usage.usage.inputTokens - cached, usage.usage.outputTokens,
+            t.rateCard.inputNanoUsdPerMillion, t.rateCard.outputNanoUsdPerMillion)
+            + maximumCostNanoUsd(cached, 0, t.rateCard.cachedInputNanoUsdPerMillion ?? 0, 0);
+          if (isCount(tariffNanoUsd)) tariffUsage.set(result, { claim: evidenceBinding(a.claim), usage: Object.freeze({
+            principalId: a.claim.binding.key.principalId, logicalRequestId: a.claim.binding.key.logicalRequestId,
+            physicalAttemptId: a.claim.binding.physicalAttemptId, tariffNanoUsd, rateCardVersion: t.rateCard.version }) });
+        }
+      }
       if (terminalReceivedAtMs !== undefined) completedCalls.set(result, { claim: evidenceBinding(a.claim), receivedAtMs: terminalReceivedAtMs });
       return result;
     } finally {

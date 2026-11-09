@@ -107,7 +107,8 @@ describe('a module is not an app to be done with (autopsy 50378049, Q-906 + Q-90
     it('a genuinely finished app still gets the checkpoint, with its reason', () => {
       const text = doneSteer(finished())!;
       expect(text).toContain('[BUILD CHECKPOINT]');
-      expect(text).toContain('100/100, no blockers');
+      expect(text).toContain('100/100, no static blockers');
+      expect(text).toContain('does not establish gameplay or user-journey success');
       // It still invites disagreement — an engine check cannot know what was asked for.
       expect(text).toContain('ignore this and finish that one thing');
     });

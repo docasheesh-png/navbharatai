@@ -1,3 +1,6 @@
+import { fixedTextChainEnabled } from '../AI/fixedTextChain';
+import { withConversationalGateway } from '../AI/InferenceGateway/conversationalIngress';
+import { maybeGatewayText, maybeGatewayVision, currentInferenceGatewayContext, runWithInferenceGatewayContext, InferenceGatewayTerminalError } from '../AI/InferenceGateway/runtime';
 import { placePlatformContext, platformContextInSystemEnabled } from '../lib/platformContext';
 import { cleanTurns } from '../../lib/platformTags';
 import crypto from 'crypto';
@@ -484,6 +487,39 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       ];
 
       let reply = '';
+      let fixedAuditNote: string | null = null;
+      const sdaGeminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
+      if (fixedTextChainEnabled()) {
+        await withConversationalGateway(req, res, { verifiedUid: sdaIdentity!.uid, surface: 'doctor', policyKey: 'doctor:text',
+          funding: sdaTier === 'paid' ? 'existing-professional' : 'platform-free-fallback', qualityTier: 'clinical', dataClass: 'health' }, async () => {
+          const basePrompt = [...historyForAI.map(turn => `${turn.role}: ${turn.content}`), `user: ${message}`].join('\n');
+          let prompt = basePrompt;
+          const readReports = async (instruction: string) => {
+            const result = await maybeGatewayVision({ kind: 'vision-pdf', prompt: instruction, systemPrompt: SDA_SYSTEM_FINAL, streaming: false,
+              attachments: reportFiles.map(f => ({ mimeType: f.fileType as 'image/png' | 'image/jpeg' | 'application/pdf', data: f.fileData })) });
+            if (!result?.ok || result.reason) throw new InferenceGatewayTerminalError('clinical-report-unavailable');
+            return result.content;
+          };
+          if (reportFiles.length) prompt += `\n\nReviewed report extraction:\n${await readReports('Read every attached report independently, preserve labels and uncertainty; do not prescribe.')}`;
+          const result = await maybeGatewayText({ prompt, systemPrompt: SDA_SYSTEM_FINAL });
+          if (!result?.ok || result.reason) throw new InferenceGatewayTerminalError('clinical-answer-incomplete');
+          reply = result.content;
+          sdaSpend = { provider: result.provider, model: result.model, inputTokens: result.usage?.inputTokens, outputTokens: result.usage?.outputTokens,
+            inferenceGateway: result.inferenceGateway, gatewayPricingProof: result.gatewayPricingProof };
+          if (process.env.SDA_VERIFY !== '0' && !(reply.trim().endsWith('?') && reply.length < 400)) {
+            const inherited = currentInferenceGatewayContext()!;
+            try {
+              await runWithInferenceGatewayContext({ ...inherited, policyKey: 'doctor:audit', excludedModelIds: [result.model] }, async () => {
+                let auditPrompt = buildAuditPrompt(basePrompt, reply, !!reportFiles.length);
+                if (reportFiles.length) auditPrompt += `\n\nIndependent report re-reading:\n${await readReports('Independently re-read all attached reports for an audit; preserve uncertainty and labels.')}`;
+                const audit = await maybeGatewayText({ prompt: auditPrompt, systemPrompt: SDA_SYSTEM_FINAL });
+                if (!audit?.ok || audit.reason) throw new InferenceGatewayTerminalError('clinical-audit-incomplete');
+                if (!isAuditReplyClean(audit.content)) fixedAuditNote = audit.content;
+              });
+            } catch { inherited.signal?.throwIfAborted(); fixedAuditNote = 'An independent automated safety cross-check was unavailable. Verify this advice clinically before acting.'; }
+          }
+        });
+      } else {
 
       // ── Shared helpers ───────────────────────────────────────────────────────
       // Build OpenAI-format message list (used by Claude proxy and Grok)
@@ -515,7 +551,6 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
 
       // ── Race: Grok + Gemini simultaneously (SDA primary pair) ──────────────
       const sdaGrokKey   = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
-      const sdaGeminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
 
       // Each racer returns what it answered AND what it cost (forensic audit 2026-10-04, P1): a paid turn
       // answered by the race used to leave `sdaSpend` null, so it was 'unmeasured' and charged ₹0 — every
@@ -713,6 +748,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         }
       }
 
+      } // Legacy-only generation; fixed selection never opens a direct-provider escape.
       if (!reply) {
         // Admin-facing detail stays in the log; the doctor gets an honest, on-brand busy message
         // (never internal provider/key detail — the client now shows this text directly).
@@ -750,7 +786,8 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // B — independent safety audit. Run only on actionable ADVICE (not on a plain
       // follow-up question), to keep cost/latency down. Fail-open, never blocks.
       let finalReply = cleanReply;
-      if (process.env.SDA_VERIFY !== '0') {
+      if (fixedAuditNote) finalReply = `${cleanReply}\n\n---\n**⚠️ Automated safety cross-check:**\n${fixedAuditNote}`;
+      if (!fixedTextChainEnabled() && process.env.SDA_VERIFY !== '0') {
         const isJustQuestion = cleanReply.trim().endsWith('?') && cleanReply.length < 400;
         const adviceRe = /\b(mg|mcg|ml|dose|dosage|tablet|capsule|syrup|inject|\biv\b|\bim\b|prescrib|treatment|manage|diagnos|differential|administer|refer|admit|start\b|give\b)/i;
         // A turn that analysed a report (image/PDF, sent or re-attached) is ALWAYS audited — the doctor
@@ -811,6 +848,13 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
 
         } catch (err: any) {
           if (sdaGate.tier === 'free') markFreeAnswerProviderFailure(req);
+          // The shared-quota producer owns generation errors after #4121. Keep selected
+          // fixed-chain outages terminal here too, without escaping quota settlement.
+          if (fixedTextChainEnabled()) {
+            console.error('[SDA] NavBharatAI conversational inference unavailable');
+            if (!res.destroyed && !res.headersSent && !res.writableEnded) res.status(503).json({ error: 'NavBharatAI is temporarily unavailable. Please try again shortly.' });
+            return;
+          }
           console.error('[SDA] Error:', err);
           if (!res.headersSent && !res.writableEnded) res.status(500).json({ error: 'Doctor AI hit an unexpected error. Please try again in a moment.' });
         }
@@ -821,6 +865,11 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         await produceAnswer();
       }
     } catch (err: any) {
+      if (fixedTextChainEnabled()) {
+        if (res.destroyed) return;
+        console.error('[SDA] NavBharatAI conversational inference unavailable');
+        return res.status(503).json({ error: 'NavBharatAI is temporarily unavailable. Please try again shortly.' });
+      }
       // Full detail to the server log (admin diagnostics); a safe, on-brand message to the doctor —
       // the client now shows this `error` text directly, so it must never leak internals.
       console.error('[SDA] Error:', err);

@@ -19,7 +19,7 @@ const snap = { 'src/App.tsx': 'x' };
 function io(over: Partial<GameRepairIO> = {}): GameRepairIO {
   return {
     repair: vi.fn(async () => true),
-    replay: vi.fn(async () => ({ defects: [], scopeMissing: [] })),
+    replay: vi.fn(async () => ({ defects: [], scopeMissing: [], proof: { outcome: 'passed' as const, score: 100 } })),
     changedSince: vi.fn(async () => 1),
     revert: vi.fn(async () => undefined),
     ...over,
@@ -46,14 +46,14 @@ describe('the repair is kept only when the game, played again, is better', () =>
     expect(gameRepairRecord(o).code).toBe('GAME_REPAIRED');
   });
   it('undone when nothing improved', async () => {
-    const i = io({ replay: vi.fn(async () => ({ defects: [D('GAME_DEFECT_INPUT_IGNORED')], scopeMissing: [] })) });
+    const i = io({ replay: vi.fn(async () => ({ defects: [D('GAME_DEFECT_INPUT_IGNORED')], scopeMissing: [], proof: { outcome: 'passed' as const, score: 100 } })) });
     const o = await run(i);
     expect(o.kept).toBe(false);
     expect(i.revert).toHaveBeenCalledWith(snap);
     expect(gameRepairRecord(o).code).toBe('GAME_REPAIR_UNREPAIRED');
   });
   it('undone when something new broke', async () => {
-    const i = io({ replay: vi.fn(async () => ({ defects: [D('GAME_DEFECT_RUNTIME_ERROR')], scopeMissing: [] })) });
+    const i = io({ replay: vi.fn(async () => ({ defects: [D('GAME_DEFECT_RUNTIME_ERROR')], scopeMissing: [], proof: { outcome: 'passed' as const, score: 100 } })) });
     expect((await run(i)).kept).toBe(false);
     expect(i.revert).toHaveBeenCalled();
   });

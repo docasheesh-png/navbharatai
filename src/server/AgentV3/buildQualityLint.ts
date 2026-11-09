@@ -21,12 +21,14 @@
 // affect an app. The call site wraps it the same way its neighbours are wrapped, so a throw here can
 // never reach the build.
 
+import ts from 'typescript';
 import {
   lintDesign, designSummary, TOKEN_MODULE_PATH, extractSpacingPx, offGridSpacing, MAX_OFFGRID, SPACING_GRID, type DesignLintResult,
 } from '../AppMakerLab/intelligence/DesignLinter';
 import { lintA11y, type A11yLintResult } from '../AppMakerLab/intelligence/A11yLinter';
 import { stripCommentsForMarkup } from './stripCodeComments';
 import { blankOurMarkup } from './ourInjectedMarkup';
+import { isKnownKitVersion } from '../lib/gameRecipeLayers';
 
 /**
  * Source files worth linting. Everything else is noise the linters would only mis-read.
@@ -124,6 +126,9 @@ export interface FileOffence {
 export const OFFENDERS_PER_TYPE = 3;
 
 export interface BuildQualityLint {
+  /** False means no relevant UI evidence, not a perfect application. Absent supports legacy callers. */
+  markupObserved?: boolean;
+  designObserved?: boolean;
   design: DesignLintResult;
   a11y: A11yLintResult;
   /** How many files actually contributed — 0 means nothing was lintable and the scores mean nothing. */
@@ -164,11 +169,14 @@ export interface BuildQualityLint {
  */
 export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | null {
   const parts: string[] = [];
+  const colorParts: string[] = [];
   let total = 0;
   let truncated = false;
   let fileCount = 0;
+  let markupObserved = false;
+  let styleObserved = false;
 
-  const selected: Array<[string, string]> = [];
+  const selected: Array<[string, string, string]> = [];
 
   for (const [path, content] of Object.entries(files || {})) {
     if (typeof path !== 'string' || typeof content !== 'string') continue;
@@ -179,7 +187,20 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
     // injected (autopsy 9c612cdb: our badge's `gap:6px` was the eighth off-grid value). Length-preserving.
     const shipped = shippedDesignText(path, content);
     parts.push(shipped);
-    selected.push([path, shipped]);
+    if (/\.(tsx|jsx?)$/i.test(path)) {
+      const source = ts.createSourceFile(path,shipped,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+      const visit = (node: ts.Node): void => {
+        if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) markupObserved = true;
+        ts.forEachChild(node,visit);
+      }; visit(source);
+    } else if (/\.(html|vue|svelte|astro)$/i.test(path) && /<[a-z][\w:-]*(?:\s|\/?\s*>)/i.test(shipped)) markupObserved = true;
+    if (/\.(css|scss|less|sass|styl)$/i.test(path) && shipped.trim()) styleObserved = true;
+    // BR1954/Q-2311: a byte-identical reviewed kit palette is not ad-hoc user UI colour.
+    // Only colour analysis uses this boundary. Accessibility, fonts and spacing still see every byte.
+    // Edited/unknown content, even at a kit path, remains fully judged.
+    const colorCode = isKnownKitVersion(path, content) ? '' : shipped;
+    colorParts.push(colorCode);
+    selected.push([path, shipped, colorCode]);
     total += content.length;
     fileCount++;
   }
@@ -189,10 +210,12 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
   if (fileCount === 0) return null;
 
   const joined = parts.join('\n');
-  const tokenModuleCode = selected.filter(([p]) => TOKEN_MODULE_PATH.test(p)).map(([, c]) => c).join('\n');
+  const tokenModuleCode = selected.filter(([p]) => TOKEN_MODULE_PATH.test(p)).map(([, , c]) => c).join('\n');
   const attributed = attributeOffenders(selected);
   return {
-    design: lintDesign(joined, { tokenModuleCode }),
+    markupObserved,
+    designObserved: markupObserved || styleObserved,
+    design: lintDesign(joined, { tokenModuleCode, colorCode: colorParts.join('\n') }),
     a11y: lintA11y(joined),
     fileCount,
     truncated,
@@ -212,12 +235,12 @@ const OFF_GRID_TYPE = 'off-grid-spacing';
  * measured for. Total on its inputs: a linter that throws on one file costs that file's attribution,
  * never the whole result.
  */
-function attributeOffenders(selected: ReadonlyArray<readonly [string, string]>): { offenders: Record<string, FileOffence[]>; fileCount: Record<string, number> } {
+function attributeOffenders(selected: ReadonlyArray<readonly [string, string, string]>): { offenders: Record<string, FileOffence[]>; fileCount: Record<string, number> } {
   const byType = new Map<string, FileOffence[]>();
-  for (const [path, content] of selected) {
+  for (const [path, content, colorCode] of selected) {
     let found: Array<{ type: string; count: number }> = [];
     try {
-      found = [...lintDesign(content, { tokenModuleCode: TOKEN_MODULE_PATH.test(path) ? content : '' }).violations, ...lintA11y(content).violations]
+      found = [...lintDesign(content, { tokenModuleCode: TOKEN_MODULE_PATH.test(path) ? colorCode : '', colorCode }).violations, ...lintA11y(content).violations]
         .filter((v) => v.type !== OFF_GRID_TYPE)
         .map((v) => ({ type: v.type, count: v.count }));
       // 🔴 EVERY FILE THAT ADDS TO THE SPACING COUNT IS NAMED (autopsy 9c612cdb). The headline counts
@@ -265,6 +288,7 @@ export function offenderNote(r: BuildQualityLint, type: string): string {
  */
 export function designLintSummary(r: BuildQualityLint, handledElsewhere = 0): string {
   const v = r.design.violations.length;
+  if (r.designObserved === false && !v) return `Design consistency not scored — no UI markup or stylesheet was observed across ${r.fileCount} source file(s); hooks/types are not evidence of a cohesive page.`;
   // Each finding once (autopsy e3b0ce25: the line read "grade A (98/100), 1 issue(s): ⚠ 4 spacing values
   // are off … 4 spacing values are off …" — `designSummary` already carries the score and every message).
   const head = `Design consistency ${r.design.score}/100 (${r.design.grade}) across ${r.fileCount} file(s)${r.truncated ? ', partially scanned' : ''}.`;
@@ -291,6 +315,7 @@ export const CLEAN_AFTER_OUR_FIX =
 /** One line for the build report, listing the real WCAG criteria rather than a score alone. */
 export function a11yLintSummary(r: BuildQualityLint): string {
   const v = r.a11y.violations;
+  if (r.markupObserved === false && !v.length) return `Accessibility not scored — no UI markup was observed across ${r.fileCount} source file(s); no WCAG page evidence was established.`;
   if (v.length === 0) return `Accessibility ${r.a11y.score}/100 (${r.a11y.grade}) — no common WCAG failures found across ${r.fileCount} file(s).`;
   return `Accessibility ${r.a11y.score}/100 (${r.a11y.grade}) across ${r.fileCount} file(s)${r.truncated ? ', partially scanned' : ''}. ${v.map((x) => `WCAG ${x.wcag}: ${x.message}${offenderNote(r, x.type)}`).join(' ')}`;
 }

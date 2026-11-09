@@ -1,3 +1,5 @@
+import { splitSeedOrphans, seedOrphanObservation } from './seedOrphanOwnership';
+import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
 import { ASSET_MODELS_PATH, localModelSubjects, readyModelFor, localModelLead } from './gameAssets/localModelNote';
 import { randomUUID } from 'node:crypto';
@@ -59,7 +61,7 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole, isPlanningOnlyRole, PLAN_YOURSELF_NOTE } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
-import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER } from './tscCommand';
+import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER, sharedBareTypecheckCommand } from './tscCommand';
 import { parseTscErrors, fixTypeOnlyValueImports as fixTypeOnlyValueImportsFromErrors, type TscError } from './EndgameRepair';
 import { tscCommandVerdict, looksLikeTypecheckCommand, tscVerdict, countTscErrors } from './TscGate';
 import { pathMissHint } from './suggestFilePath';
@@ -1134,6 +1136,8 @@ export class ToolDispatcher {
    * Unset ⇒ the gate behaves exactly as it did before authorship existed.
    */
   private authoredFiles?: () => Iterable<string>;
+  private platformSeedFiles?: () => Iterable<string>;
+  setPlatformSeedFiles(getter: () => Iterable<string>): void { this.platformSeedFiles = getter; }
 
   setAuthoredFiles(getter: () => Iterable<string>): void {
     if (typeof getter === 'function') this.authoredFiles = getter;
@@ -1302,7 +1306,9 @@ export class ToolDispatcher {
     content = sheetOnce.content;
     const kitKeep = kind === 'modify' ? this.keepDesignKit(rel, content, existingContent) : { content, note: '' };
     content = kitKeep.content;
-    const kitNote = kitKeep.note + sheetOnce.note;
+    const labels = labelAuthoredFields(rel, existingContent, content);
+    content = labels.code;
+    const kitNote = kitKeep.note + sheetOnce.note + labels.note;
     if (opts.allowOverwrite === false && kind === 'modify') {
       if (content !== existingContent) {
         refuse(`${rel} already exists — ${opts.source} will not replace it wholesale. Use edit_file, or pass overwrite: true if you really mean to replace it.`);
@@ -4212,11 +4218,11 @@ export class ToolDispatcher {
         type: 'tool_result',
         agent,
         callId: call.id,
-        ok: true,
+        ok: !visual?.isError,
         summary: redactSecrets(summarize(content)),
         ts: Date.now(),
       });
-      return { tool_use_id: call.id, content, is_error: false, image: visual?.image };
+      return { tool_use_id: call.id, content, is_error: visual?.isError ?? false, image: visual?.image };
     } catch (err) {
       if (err instanceof ToolRefusal) {
         this.events?.emit({
@@ -4271,7 +4277,7 @@ export class ToolDispatcher {
     return await callRemoteTool(server, tool, args);
   }
 
-  private async runVisual(call: ToolUse): Promise<{ content: string; image?: { base64: string; mimeType: string } }> {
+  private async runVisual(call: ToolUse): Promise<{ content: string; isError?: boolean; image?: { base64: string; mimeType: string } }> {
     const input = call.input;
     if (call.name === 'find_ui_element') {
       if (!this.actuator.scanUiElements) {
@@ -4331,7 +4337,8 @@ export class ToolDispatcher {
     const res = await this.actuator.browserAction(this.workspaceId, action as BrowserActionName, args);
     const routeNote = args.url ? await this.paramRouteNote(args.url) : '';
     return {
-      content: `Browser ${action}${args.selector ? ` on "${args.selector}"` : ''}${args.url ? ` → ${args.url}` : ''}: ${res.result}. Screenshot attached.${routeNote}`,
+      isError: /^ERROR:/i.test(res.result),
+      content: `Browser ${action}${args.selector ? ` on "${args.selector}"` : ''}${args.url ? ` → ${args.url}` : ''}: ${res.result}.${res.screenshot ? ' Screenshot attached.' : ''}${routeNote}`,
       image: res.screenshot ? { base64: res.screenshot, mimeType: 'image/png' } : undefined,
     };
   }
@@ -5714,8 +5721,9 @@ export class ToolDispatcher {
         // Parity with write_file: an edit that cuts design-kit rules out of the stylesheet keeps them
         // (autopsy e725e002 — this door was the one left open by the write-door guard).
         const editKit = this.keepDesignKit(path, deduped, existing);
-        const updated = editKit.content;
-        const editKitNote = editKit.note;
+        const labels = labelAuthoredFields(path, existing, editKit.content);
+        const updated = labels.code;
+        const editKitNote = editKit.note + labels.note;
         if (isSecretFilePath(path) && updated.includes(SECRET_MASK)) {
           refuse(secretPlaceholderWriteMessage(path));
         }
@@ -5744,7 +5752,7 @@ export class ToolDispatcher {
           agent,
           // Show the text that was ACTUALLY replaced (verbatim from the file) so the
           // diff is honest even when a whitespace-flexible match was used.
-          diff: { path, patch: miniDiff(matchedOld, newStr) },
+          diff: { path, patch: labels.repaired ? miniDiff(existing, updated) : miniDiff(matchedOld, newStr) },
           ts: Date.now(),
         });
         this.scheduleCheckpoint(`edit ${path}`);
@@ -5785,7 +5793,7 @@ export class ToolDispatcher {
         }
         const typoFix = fixNodeModulesTypo(rawCommand);
         const cdFix = fixSandboxWorkspaceCd(typoFix.command);
-        const command = cdFix.command;
+        const command = sharedBareTypecheckCommand(cdFix.command, this.tsBuildInfoId);
         // Scaffold guard: create-* generators (`npm create vite`, `npx create-*`,
         // `npm init <gen>`) require a newer Node than the fixed-version sandbox and
         // FAIL — after which the agent tends to improvise a nested project subdir.
@@ -7023,7 +7031,9 @@ export class ToolDispatcher {
             // An untouched file this build ORPHANED by removing its last import elsewhere is this build's doing
             // (autopsy 8257ca59) — said as such, at warning weight, never as "your existing code".
             const orphanedHere = split.preExisting.filter((o) => this._droppedImportStems.has(importStem(o.file)));
-            const reallyOld = split.preExisting.filter((o) => !orphanedHere.includes(o));
+            const seedOwnership = splitSeedOrphans(split.preExisting.filter((o) => !orphanedHere.includes(o)), this.platformSeedFiles?.() ?? []);
+            const reallyOld = seedOwnership.preExisting;
+            if (seedOwnership.platform.length > 0) extra.push({ severity: 'observation', label: seedOrphanObservation(seedOwnership.platform.map((o) => o.label)) });
             if (orphanedHere.length > 0) extra.push({ severity: 'medium', label: droppedImportOrphanLabel(orphanedHere.map((o) => o.label)) });
             if (reallyOld.length > 0) {
               extra.push({

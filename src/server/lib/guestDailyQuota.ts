@@ -1,3 +1,4 @@
+import { fixedTextChainEnabled } from '../AI/fixedTextChain';
 // One daily message budget for visitors who have not signed in (admin-mandated 2026-09-27).
 //
 // Admin, verbatim: "without login only 10 messages per day! iske bad login compulsory!! 11th message
@@ -53,6 +54,7 @@ export interface GuestInferenceAdmission {
   readonly principalId: string;
   readonly expiresAtMs: number;
   readonly day: string;
+  readonly surface?: GuestSurface;
 }
 const guestPrincipal = /^nb-free-guest:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const pendingAdmissions = new WeakMap<Request, GuestInferenceAdmission>();
@@ -74,20 +76,20 @@ export function isGuestInferenceAdmission(value: unknown): value is GuestInferen
   const now = Date.now();
   return admission.expiresAtMs > now && admission.day === indiaDay(now);
 }
-function issueGuestInferenceAdmission(req: Request, res: Response, principalId: string, day: string, now: number): void {
+function issueGuestInferenceAdmission(req: Request, res: Response, principalId: string, day: string, now: number, surface: GuestSurface): void {
   const prior = pendingAdmissions.get(req);
   if (prior) liveAdmissions.delete(prior);
   // End at India's midnight even when the request straddles a daily quota rollover.
   const dayEndMs = Date.parse(`${day}T00:00:00Z`) + 86_400_000 - 330 * 60_000;
-  const admission: GuestInferenceAdmission = Object.freeze({ kind: 'public-free-guest', principalId, day,
+  const admission: GuestInferenceAdmission = Object.freeze({ kind: 'public-free-guest', principalId, day, surface,
     expiresAtMs: Math.min(now + 120_000, dayEndMs) });
   pendingAdmissions.set(req, admission); liveAdmissions.add(admission);
   const revoke = () => { liveAdmissions.delete(admission); pendingAdmissions.delete(req); };
   res.once('finish', revoke); res.once('close', revoke);
 }
 function gatewayGuestSelected(surface: GuestSurface, env: NodeJS.ProcessEnv): boolean {
-  return surface === 'chat' && gatewayRolloutAllowsGuest(env) && parseEnvFlag(env.INFERENCE_GATEWAY_ENABLED) === true
-    && (!env.INFERENCE_GATEWAY_SURFACES?.trim() || env.INFERENCE_GATEWAY_SURFACES.split(',').map(s => s.trim()).includes('chat'));
+  return (surface === 'chat' || (fixedTextChainEnabled(env) && surface === 'repo-analyst')) && gatewayRolloutAllowsGuest(env) && parseEnvFlag(env.INFERENCE_GATEWAY_ENABLED) === true
+    && (fixedTextChainEnabled(env) || !env.INFERENCE_GATEWAY_SURFACES?.trim() || env.INFERENCE_GATEWAY_SURFACES.split(',').map(s => s.trim()).includes('chat'));
 }
 function guestStoreUnavailable(res: Response): void {
   if (!res.destroyed && !res.writableEnded) res.status(503).json({ code: 'INFERENCE_GATEWAY_UNAVAILABLE',
@@ -307,7 +309,7 @@ export function guestDailyQuota(
         if (!decision.durablePrincipalId || !guestPrincipal.test(decision.durablePrincipalId)
           || indiaDay(now()) !== day) { guestStoreUnavailable(res); return; }
         if (res.destroyed || res.writableEnded || res.writableFinished) return;
-        issueGuestInferenceAdmission(req, res, decision.durablePrincipalId, day, now());
+        issueGuestInferenceAdmission(req, res, decision.durablePrincipalId, day, now(), surface);
       }
       res.setHeader('X-Guest-Messages-Left', String(decision.remaining));
       return next();

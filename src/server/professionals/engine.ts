@@ -103,8 +103,7 @@ export type ProfessionalTier = 'free' | 'paid';
 // the exact same engine (admin 2026-07-24) with zero drift. This thin wrapper keeps the callers here
 // unchanged and preserves the professional-specific error message.
 async function resilientCall(systemPrompt: string, prompt: string, tier: ProfessionalTier, opts: ProfessionalChatOptions): Promise<ProfessionalAnswer> {
-  // A paid professional cannot borrow the FreeChain platform budget. Until its
-  // reviewed funding bridge exists, fixed-order selection is terminal, not legacy fallback.
+  // Fixed ingress must retain authenticated supplier funding and cannot escape to legacy.
   if (opts.fixedTextChainIngress && fixedTextChainEnabled() && !isGatewayRouteSelected()) throw new InferenceGatewayTerminalError('fixed-chain-professional-authority-unavailable');
   try {
     return await (opts.beforeGeneration
@@ -189,17 +188,17 @@ export async function runProfessionalChatWithUsage(
   // Direct internal calls without authenticated identity are not enrolled by
   // guessing a principal. Paid professionals are outside the Free product rollout.
   // A nested already-selected Free call must retain its boundary, never escape it.
-  if (!inherited && (!verifiedUserId || tier !== 'free' || opts.freeProductGateway !== true)) return run();
+  if (!inherited && (!verifiedUserId || (opts.fixedTextChainIngress !== true && (tier !== 'free' || opts.freeProductGateway !== true)))) return run();
   return runWithInferenceGatewayContext({
     principalId: inherited?.principalId ?? verifiedUserId!,
     tenantId: inherited?.tenantId ?? verifiedUserId!,
     surface: inherited?.surface ?? 'professional',
-    policyKey: `professional:${config.id}`,
+    policyKey: inherited?.surface === 'developer-api' ? inherited.policyKey : `professional:${config.id}`,
     // The registry has no reviewed domain/privacy classification yet. Do not
     // infer public/nonclinical from an expert's display name or the user's words.
     qualityTier: 'clinical',
     dataClass: 'health',
-    funding: inherited?.funding ?? 'platform-free-fallback',
+    funding: inherited?.funding ?? (tier === 'paid' ? 'existing-professional' : 'platform-free-fallback'),
     mode: strictFreeRequired() || inherited?.mode === 'strict-free' ? 'strict-free' : 'free-first-authorized-paid',
     deadlineAtMs: Math.min(inherited?.deadlineAtMs ?? Infinity, opts.deadlineAtMs ?? Date.now() + 90_000),
     signal: inherited?.signal && opts.signal ? AbortSignal.any([inherited.signal, opts.signal]) : inherited?.signal ?? opts.signal,

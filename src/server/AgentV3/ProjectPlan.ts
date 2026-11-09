@@ -327,7 +327,7 @@ export function roadmapDecision(input: {
 export function roadmapStandDownMessage(reason: RoadmapStandDown): string {
   return reason === 'project-mode'
     ? 'Mega-app roadmap stood down: Software Project Mode will decompose this build, so one planner runs instead of two.'
-    : 'Mega-app roadmap stood down: a tested template for this exact request is already seeded and is the finished app, so the whole app exists before the first model call — the job is to verify and polish it, not to plan it.';
+    : 'Mega-app roadmap stood down: this exact request selects a tested template containing the finished app; after seeding the builder can verify and polish it. Setup must still confirm successful seeding; template selection is not evidence that an app exists or runs.';
 }
 
 /** Why Software Project Mode did not steer this build — `null` means it did. */
@@ -461,11 +461,11 @@ export function projectModeDiagnosis(args: {
   if (args.templateIsTheApp) {
     return say(
       'template-is-the-app',
-      'Software Project Mode is ON for this account, but a tested template for this exact request is already seeded and is the finished app — no decomposition was needed.',
+      'Software Project Mode is ON for this account, but this exact request selects a tested template containing the finished app — decomposition stands down conditionally on setup seeding it. Template selection is not delivery evidence.',
       'A starter template is seeded only when the request is a starter chip\'s text exactly, and a simple-tier '
-        + 'template IS the finished app rather than a starting architecture. The build verifies and polishes it, '
+        + 'template IS intended as the finished app rather than a starting architecture. After setup confirms the seed, the build verifies and polishes it, '
         + 'which is what the admin decided for the complexity router on 2026-09-27; splitting a finished app into '
-        + 'modules would rewrite it across rounds and make the user wait for something that already existed.',
+        + 'modules would rewrite the selected app across rounds. Selection alone never establishes successful seeding or execution.',
     );
   }
 

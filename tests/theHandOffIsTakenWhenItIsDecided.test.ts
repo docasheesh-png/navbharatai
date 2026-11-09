@@ -109,7 +109,8 @@ function run(concurrency: number, opts: { holdMs?: number } = {}) {
       const paths = files.map((f) => f.path);
       writes.push({ paths, usePlayerLanded });
       events.push(`write:${paths.join(',')}`);
-      if (!usePlayerLanded) setTimeout(release, holdMs);
+      if (!usePlayerLanded && paths.some((path) => path !== 'src/types.ts')) setTimeout(release, holdMs);
+      return files.map((f) => ({ path: f.path, ok: true }));
     },
     maxRepairs: 0,
   } as never);
@@ -117,15 +118,18 @@ function run(concurrency: number, opts: { holdMs?: number } = {}) {
 }
 
 describe('Q-982 (A): the hand-off is taken when it is decided, whatever the tier shape', () => {
-  it('🔴 the report\'s shape (concurrency 8, a first tier of 3): the first write lands BEFORE usePlayer.ts, with the contract and useVideoList.ts', async () => {
+  it('🔴 the report\'s shape (concurrency 8, a first tier of 3): contract first, then the consumer hand-off lands BEFORE usePlayer.ts', async () => {
     const { p, writes } = run(8);
     const r = await p;
     expect(r.ok).toBe(false);
     expect(r.handedOff).toBe(true);
     expect(writes.length).toBeGreaterThan(0);
     expect(writes[0].usePlayerLanded).toBe(false);
-    expect(writes[0].paths).toContain('src/types.ts');
-    expect(writes[0].paths).toContain('src/hooks/useVideoList.ts');
+    expect(writes[0].paths).toEqual(['src/types.ts']);
+    const consumerSave = writes.find((w) => w.paths.includes('src/hooks/useVideoList.ts'))!;
+    expect(consumerSave.usePlayerLanded).toBe(false);
+    expect(consumerSave.paths).not.toContain('src/types.ts');
+    expect(writes.flatMap((w) => w.paths).filter((p) => p === 'src/types.ts')).toHaveLength(1);
     // The in-flight file is still waited for (Q-422, the admin's choice) and still handed over.
     expect([...(r.salvagedPaths ?? [])].sort()).toEqual(['src/hooks/usePlayer.ts', 'src/hooks/useVideoList.ts', 'src/types.ts']);
   }, RUN_TIMEOUT);
@@ -139,16 +143,21 @@ describe('Q-982 (A): the hand-off is taken when it is decided, whatever the tier
       const after = events.slice(decided + 1);
       const firstWrite = after.findIndex((e) => e.startsWith('write:'));
       const firstLanding = after.findIndex((e) => e.startsWith('landed:'));
-      expect(firstWrite, `concurrency ${concurrency}: nothing was saved after the decision`).toBeGreaterThanOrEqual(0);
-      if (firstLanding >= 0) expect(firstWrite, `concurrency ${concurrency}: ${after.join(' → ')}`).toBeLessThan(firstLanding);
-      // Every file finished before the decision is in that first write.
+      // The acknowledged contract was saved BEFORE generation. If the first consumer is the
+      // refusal (concurrency 1), there is nothing new to save at the decision. Never require a
+      // duplicate prerequisite write just to manufacture an early-save event.
       const finishedBefore = events.slice(0, decided).filter((e) => e.startsWith('landed:')).map((e) => e.slice('landed:'.length));
-      const firstPaths = after[firstWrite].slice('write:'.length).split(',');
-      for (const f of finishedBefore) expect(firstPaths, `concurrency ${concurrency}`).toContain(f);
+      if (finishedBefore.length > 0) {
+        expect(firstWrite, `concurrency ${concurrency}: finished consumers were not saved`).toBeGreaterThanOrEqual(0);
+        if (firstLanding >= 0) expect(firstWrite, `concurrency ${concurrency}: ${after.join(' → ')}`).toBeLessThan(firstLanding);
+        const firstPaths = after[firstWrite].slice('write:'.length).split(',');
+        for (const f of finishedBefore) expect(firstPaths, `concurrency ${concurrency}`).toContain(f);
+      }
+      expect(events.filter((e) => e.startsWith('write:') && e.slice('write:'.length).split(',').includes('src/types.ts'))).toHaveLength(1);
     }
   }, RUN_TIMEOUT);
 
-  it('a lane that is never told to hand off saves nothing early and reports no hand-off phase', async () => {
+  it('a lane without a hand-off saves only the prerequisite early and reports no hand-off phase', async () => {
     const writes: string[][] = [];
     const r = await runSimpleBuild({
       prompt: PROMPT, framework: 'vite-react', scaffoldPaths: ['index.html', 'src/App.tsx', 'src/main.tsx'],
@@ -160,11 +169,14 @@ describe('Q-982 (A): the hand-off is taken when it is decided, whatever the tier
         return block(path, path.endsWith('.tsx') ? 'export default function X() { return null; }' : 'export const x = 1;');
       },
       stopLane: () => null,
-      writeFiles: async (files: OneShotFile[]) => { writes.push(files.map((f) => f.path)); },
+      writeFiles: async (files: OneShotFile[]) => { writes.push(files.map((f) => f.path)); return files.map((f) => ({ path: f.path, ok: true })); },
       maxRepairs: 0,
     } as never);
     expect(r.ok).toBe(true);
-    expect(writes.length).toBe(1); // the lane's one final write, nothing early
+    expect(writes).toHaveLength(2); // prerequisite, then the lane's one final consumer write
+    expect(writes[0]).toEqual(['src/types.ts']);
+    expect(writes[1]).not.toContain('src/types.ts');
+    expect(writes[1]).toContain('src/App.tsx');
     expect(r.phases?.handOffWaitMs).toBeUndefined();
     expect(r.phases?.handOffSaveMs).toBeUndefined();
     expect(fastLanePhaseSummary(r.phases)).not.toContain('hand-off');
@@ -204,7 +216,7 @@ describe('Q-982 (A): the hand-off is taken when it is decided, whatever the tier
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     // A new call site that polls stopLane itself would decide without saving or stamping the ledger.
     expect(src.match(/deps\.stopLane\?\.\(\)/g)?.length).toBe(2);
-    expect(src).toContain('if (deps.stopLane?.()) break;');
+    expect(src).toContain('if (deps.yieldRequested?.() || deps.stopLane?.()) break;');
     // The decision is consulted where a call starts, where it returns a file, and where it fails.
     expect(src.match(/noteHandOffDecision\(\)/g)?.length).toBeGreaterThanOrEqual(3);
     expect(src).not.toContain('if (laneStopReason) saveForPreviewNow([file]);');

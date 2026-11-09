@@ -1,4 +1,7 @@
-import { executeGatewayMitrify } from '../../lib/mitrify';
+import { apiKeyStore } from '../../lib/ApiKeyStore';
+import { extractApiKey, hashApiKey, hasScope, type ApiScope } from '../../lib/ApiKeyManager';
+import { fixedTextChainEnabled, fixedTextChainScopeAllowed } from '../fixedTextChain';
+import { supplierFundingCollection, type ImplementedSupplierFunding } from './supplierFunding';
 import { assertCanaryLegacyAllowed } from '../../AgentV3/reliability/canarySpendGuard';
 /** Server-only composition. OFF is the only route back to a legacy text path. */
 import { gatewayRollout, gatewayRolloutAllowsUid } from './rollout';
@@ -27,7 +30,7 @@ import { FirestoreInferenceLedger } from './firestoreLedger';
 import { GatewayAuthorityStore } from './authorityStore';
 import { executeGatewayText, gatewayTextPayloadDigest } from './textTransport';
 import { executeGatewayOpenRouter } from './openRouterTransport';
-import { createGatewayFreePricingProof } from './pricingEvidence';
+import { createGatewayMeteredPricingProof, createGatewayFreePricingProof } from './pricingEvidence';
 import { executeGatewayEmbedding, gatewayEmbeddingPayloadDigest, type GatewayEmbeddingResult } from './embeddingTransport';
 import { executeGatewayGrounding, gatewayGroundingPayloadDigest, type GatewayGroundingResult } from './groundingTransport';
 import { executeGatewayVision, gatewayVisionPayloadDigest, type GatewayVisionPayload } from './visionTransport';
@@ -37,7 +40,7 @@ export interface GatewayTextInput {
   prompt: string;
   systemPrompt?: string;
   signal?: AbortSignal;
-  onChunk?: (chunk: string) => void | Promise<void>;
+  onChunk?: (chunk: string) => void;
   schema?: object;
   images?: string[];
   modelOverride?: string;
@@ -62,10 +65,13 @@ const entryLeases = new AsyncLocalStorage<{ active: boolean; uid: string; identi
 const privacyRank = { public: 0, personal: 1, confidential: 2, health: 3 };
 const qualityRank = { weak: 0, standard: 1, normal: 2, strong: 3, professional: 4, clinical: 5 };
 const FREE_SURFACES = new Set<Surface>(['chat', 'professional']);
+const CONVERSATIONAL_SURFACES = new Set<Surface>(['chat', 'professional', 'doctor', 'sda', 'developer-api']);
+function fixedConversation(surface?: Surface) { return fixedTextChainScopeAllowed() && fixedTextChainEnabled() && (!surface || CONVERSATIONAL_SURFACES.has(surface)); }
 /** Master OFF is the deployment default. An invalid ON configuration never silently falls back. */
 export function inferenceGatewayEnabled(surface?: Surface): boolean {
   if (parseEnvFlag(process.env.INFERENCE_GATEWAY_ENABLED) !== true) return false;
   if (!surface) return true;
+  if (fixedConversation(surface)) return true;
   if (!FREE_SURFACES.has(surface)) return false;
   const configured = process.env.INFERENCE_GATEWAY_SURFACES;
   return !configured?.trim() || configured.split(',').map(s => s.trim()).includes(surface);
@@ -73,14 +79,28 @@ export function inferenceGatewayEnabled(surface?: Surface): boolean {
 /** Verify the actual ingress token; a plain UID, req.body field or context is never an identity proof. */
 export async function runWithAuthenticatedInferenceGatewayRequest<T>(req: Request, fn: (uid: string | null, guest?: GatewayGuestContext) => T): Promise<Awaited<T>> {
   const selectedGuest = wasGatewayGuestSelected(req);
-  if (!inferenceGatewayEnabled() && !selectedGuest) return await fn(null);
+  if (!inferenceGatewayEnabled() && !selectedGuest && !fixedConversation()) return await fn(null);
   const cohort = gatewayRollout();
-  const surfaces = Object.freeze([...FREE_SURFACES].filter(surface => inferenceGatewayEnabled(surface)));
+  const surfaces = Object.freeze(fixedConversation() ? [...CONVERSATIONAL_SURFACES] : [...FREE_SURFACES].filter(surface => inferenceGatewayEnabled(surface)));
   const uid = await verifyFirebaseToken(req);
   const guest = uid ? null : takeGuestInferenceAdmission(req);
   const view = guest ? Object.freeze({ kind: guest.kind, principalId: guest.principalId, expiresAtMs: guest.expiresAtMs }) : undefined;
-  return await identities.run(Object.freeze({ uid, payloadBytes: admissionPayloadBytes(req.body), selectedGuest, surfaces, cohortSelected: gatewayRolloutAllowsUid(cohort, uid), ...(guest ? { guest } : {}) }), () => fn(uid, view));
+  return await identities.run(Object.freeze({ uid, payloadBytes: admissionPayloadBytes(req.body), selectedGuest, surfaces, cohortSelected: fixedConversation() || gatewayRolloutAllowsUid(cohort, uid), ...(guest ? { guest } : {}) }), () => fn(uid, view));
 }
+/** Independent developer-key authentication; a Firebase UID/body label cannot mint this boundary.
+ * Scopes/key identity are re-read after the existing API spend gate. Customer wallet charging
+ * remains in developerApi; provider liability uses the separately reviewed paid supplier pool. */
+export async function runWithApiKeyInferenceGatewayRequest<T>(req: Request,
+  expected: { uid: string; keyId: string; scopes: readonly ApiScope[] }, fn: (uid: string | null) => Promise<T>): Promise<T> {
+  if (!fixedConversation('developer-api')) return await fn(null);
+  const presented = extractApiKey({ 'x-api-key': req.headers['x-api-key'], authorization: req.headers.authorization });
+  const auth = presented ? await apiKeyStore.findByHash(hashApiKey(presented)) : null;
+  if (!auth || !expected.scopes.length || auth.userId !== expected.uid || auth.keyId !== expected.keyId
+    || !expected.scopes.every(scope => hasScope(auth.scopes, scope))) throw new InferenceGatewayTerminalError('context-unverified');
+  return await identities.run(Object.freeze({ uid: auth.userId, payloadBytes: admissionPayloadBytes(req.body), cohortSelected: true,
+    surfaces: Object.freeze(['developer-api'] as Surface[]) }), () => fn(auth.userId));
+}
+
 export function runWithInferenceGatewayContext<T>(context: InferenceGatewayContext, fn: () => T): T {
   const parent = contexts.getStore();
   const validExclusions = context.excludedModelIds === undefined || (Array.isArray(context.excludedModelIds)
@@ -95,7 +115,7 @@ export function runWithInferenceGatewayContext<T>(context: InferenceGatewayConte
   const identity = parent?.identity ?? identities.getStore();
   const selected = parent?.selected || identity?.selectedGuest === true || (identity
     ? identity.cohortSelected && identity.surfaces.includes(context.surface)
-    : inferenceGatewayEnabled(context.surface) && gatewayRollout().mode === 'all');
+    : (fixedConversation(context.surface) || (inferenceGatewayEnabled(context.surface) && gatewayRollout().mode === 'all')));
   // A non-canary keeps the exact legacy context; no private Gateway principal or telemetry is installed.
   if (!selected && !parent) return fn();
   return runWithGatewaySelection(selected, () => contexts.run({ context: Object.freeze({ ...context, ...(Array.isArray(context.excludedModelIds) ? { excludedModelIds: Object.freeze([...context.excludedModelIds]) } : {}), signal: parent?.context.signal && context.signal
@@ -107,16 +127,17 @@ export function isGatewayRouteSelected(): boolean { return contexts.getStore()?.
 
 function selectedCohortCurrent(state: ContextState): boolean {
   return inferenceGatewayEnabled(state.context.surface)
-    && gatewayRolloutAllowsUid(gatewayRollout(), state.identity?.uid);
+    && (fixedConversation(state.context.surface) || gatewayRolloutAllowsUid(gatewayRollout(), state.identity?.uid));
 }
 
 function verifiedPrincipal(state: ContextState): string | undefined {
   const { identity, context } = state;
   if (identity?.uid && identity.uid === context.principalId) return identity.uid;
   const guest = identity?.guest;
-  if (!identity?.uid && isGuestInferenceAdmission(guest) && context.surface === 'chat'
+  if (!identity?.uid && isGuestInferenceAdmission(guest)
+    && ((context.surface === 'chat' && (guest.surface ?? 'chat') === 'chat' && /^chat:text(?::(?:embedding|grounding|vision-image|vision-pdf))?$/.test(context.policyKey))
+      || (fixedConversation('professional') && context.surface === 'professional' && guest.surface === 'repo-analyst' && /^mode:repo-analyst:(?:chat|generate)$/.test(context.policyKey)))
     && context.funding === 'platform-free-fallback' && context.principalId === guest.principalId && context.tenantId === guest.principalId
-    && /^chat:text(?::(?:embedding|grounding|vision-image|vision-pdf))?$/.test(context.policyKey)
     && context.deadlineAtMs <= guest.expiresAtMs) return guest.principalId;
   return undefined;
 }
@@ -230,9 +251,10 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
     const db = getServerDb();
     if (!db) throw new InferenceGatewayTerminalError('authority-store-unavailable');
     const deployment = freeChainConfig();
-    if (deployment.errors.includes('FREE_CHAIN_PAID_DAILY_CAP_USD')) throw new InferenceGatewayTerminalError('invalid-paid-cap');
-    const paidPolicyObserved = !!await boundedControl(async () => readPaidPolicy(readData(await db.doc('free_chat_chain/paid_budget_policy').get())), context.deadlineAtMs, signal);
-    if (paidPolicyObserved) {
+    if (context.funding === 'platform-free-fallback' && deployment.errors.includes('FREE_CHAIN_PAID_DAILY_CAP_USD')) throw new InferenceGatewayTerminalError('invalid-paid-cap');
+    const fundingCollection = supplierFundingCollection(context.funding);
+    const paidPolicyObserved = !!await boundedControl(async () => readPaidPolicy(readData(await db.doc(`${fundingCollection}/paid_budget_policy`).get()), fundingCollection), context.deadlineAtMs, signal);
+    if (paidPolicyObserved && context.funding === 'platform-free-fallback') {
       const legacyStore = new FreeChainStore(db);
       await boundedControl(() => publishDeploymentPaidLimit(db, deployment.paidCapNanoUsd,
         () => legacyStore.observePaidBudgetPolicy(deployment.paidCapNanoUsd, Date.now(), true)), context.deadlineAtMs, signal);
@@ -246,7 +268,7 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
     const store = new GatewayAuthorityStore(db, context, key, payload, strictFreeRequired() || context.mode === 'strict-free', signal, admission.waitedMs, paidPolicyObserved);
     const issued = await boundedControl(() => store.issue(), context.deadlineAtMs, signal);
     const ledger = new FirestoreInferenceLedger(db, { now: Date.now,
-      principal: { principalId: context.principalId, tenantId: context.tenantId }, platformScope: issued.platformScope,
+      principal: { principalId: context.principalId, tenantId: context.tenantId }, platformScope: issued.platformScope, fundingBoundary: context.funding as ImplementedSupplierFunding,
       adminEmails: adminEmailList, requireConfigurationBinding: true });
     let response: AIProviderResponse | GatewayEmbeddingResult | GatewayGroundingResult | undefined;
     let committed = '';
@@ -264,7 +286,7 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
         const adapterInput = { ...input, profile: intent.candidate.profile,
           claim, request: intent.request, signal: dispatchSignal, markOutputVisible,
           reportCostAnomaly: (error: unknown) => store.recordTrustedCostAnomaly(error, claim),
-          ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; return onChunk(chunk); } } : {}),
+          ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; onChunk(chunk); } } : {}),
           assertDispatchPolicy: () => {
             if (dispatchSignal.aborted || (authorizationStarted && !store.isDispatchClaimCurrent(claim))) throw new InferenceGatewayTerminalError('dispatch-authority-expired');
             if (!verifiedPrincipal(state) || !selectedCohortCurrent(state) || (strictFreeRequired() && intent.request.mode !== 'strict-free')) {
@@ -285,17 +307,14 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
             : transport.kind === 'vision-pdf' && input.kind === 'vision-pdf'
             ? await executeGatewayVision({ ...adapterInput, payload: input, transport })
             : (transport.kind === undefined || transport.kind === 'text') && input.kind === 'text'
-            ? transport.provider === 'MITRIFY'
-              ? await executeGatewayMitrify({ ...adapterInput, ...input, signal: dispatchSignal, transport,
-                  ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; return onChunk(chunk); } } : {}) })
-              : transport.provider === 'OPENROUTER'
+            ? transport.provider === 'OPENROUTER'
               ? await executeGatewayOpenRouter({ ...adapterInput, ...input, signal: dispatchSignal, transport,
-                  ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; return onChunk(chunk); } } : {}) })
+                  ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; onChunk(chunk); } } : {}) })
               : await executeGatewayText({ ...adapterInput, ...input, signal: dispatchSignal, transport,
-                  ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; return onChunk(chunk); } } : {}) })
+                  ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; onChunk(chunk); } } : {}) })
             : (() => { throw new InferenceGatewayTerminalError('capability-transport-mismatch'); })();
           await store.releaseTrustedModelSlot(result, claim);
-          const gatewayPricingProof = 'content' in result ? createGatewayFreePricingProof(result, claim) : undefined;
+          const gatewayPricingProof = 'content' in result ? (createGatewayFreePricingProof(result, claim) ?? createGatewayMeteredPricingProof(result, claim)) : undefined;
           response = gatewayPricingProof && 'content' in result ? { ...result, gatewayPricingProof } : result;
           const usageEvidenceRef = await store.recordTrustedUsage(result, claim);
           return { binding: claim.binding, outcome: { kind: 'completed' as const }, outputVisible: 'outputVisible' in result ? result.outputVisible : false,
@@ -323,7 +342,7 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
       for (let replans = 0; replans < 2 && outcome.kind === 'stopped' && outcome.reason === 'admission-denied-replan-required'; replans++) {
         outcome = await executor.execute(key, signal);
       }
-      if (outcome.kind === 'completed' && response && (!('content' in response) || response.content.trim())) return { ...response, ok: true, ...('finishReason' in response && response.finishReason === 'length' ? { reason: 'stalled' as const } : {}), inferenceGateway: { version: 1, logicalRequestId: key.logicalRequestId, accounting: 'separate-ledger' } };
+      if (outcome.kind === 'completed' && response && (!('content' in response) || response.content.trim())) return { ...response, ok: true, inferenceGateway: { version: 1, logicalRequestId: key.logicalRequestId, accounting: 'separate-ledger' } };
       if (committed && selectedProvider && selectedModel) return { content: committed, provider: selectedProvider as AIProviderResponse['provider'],
         model: selectedModel, latencyMs: Date.now() - issued.createdAtMs, ok: true, reason: 'stalled',
         inferenceGateway: { version: 1, logicalRequestId: key.logicalRequestId, accounting: 'separate-ledger' } };

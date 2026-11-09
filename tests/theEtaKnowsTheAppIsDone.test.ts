@@ -85,7 +85,7 @@ describe('Q-1039 · A — the app is running, so the line says so and names no n
     for (let e = 0; e <= CAP; e += 15_000) {
       const d = etaTickLine(state({ elapsedMs: e, now: T0 + e, finalChecks: true, appRenderedAt: T0 + 350_000, plannedFiles: 40, filesDone: 12, evidenced: false }));
       expect(d.kind).toBe('final-checks');
-      expect(d.text).toMatch(/your app is built — running the final checks/);
+      expect(d.text).toMatch(/source files prepared — running the final checks/);
       expect(d.text).not.toMatch(NUMBER_LEFT);
     }
   });

@@ -74,7 +74,7 @@ const routeBody = ts.transpileModule(`
 type Flags = { stopped: boolean; interrupted: boolean; refused: boolean; degraded: boolean; misconfigured: boolean };
 function runRoute(buildDiag: BuildDiagnostics, flags: Partial<Flags> = {}): { starved: boolean; report: BuildDiagnosticsReport } {
   const env = {
-    stopped: false, interrupted: false, refused: false, degraded: false, misconfigured: false, ...flags,
+    stopped: false, interrupted: false, refused: false, degraded: false, misconfigured: false, sandboxUnavailable: false, ...flags,
     buildDiag, buildStarvedItsOutputBudget,
     abort: { signal: {} }, abortCauseOf: () => 'server_draining',
   };
@@ -310,7 +310,7 @@ describe('the actual route diagnostic uses existential evidence, preserving the 
     const interrupted = runRoute(diag, { interrupted: true });
     expect(interrupted.starved).toBe(true); // Preserve the existing predicate, not a new routing policy.
     expect(suppression(interrupted.report)).toMatchObject({ severity: 'warning', autoResolved: false });
-    expect(suppression(interrupted.report).message).toContain('our own platform interrupted this build (server_draining)');
+    expect(suppression(interrupted.report).message).toContain('sandbox unavailable: false; abort: server_draining');
     const stopped = runRoute(diagnostics(), { stopped: true, interrupted: true, refused: true, degraded: true, misconfigured: true });
     expect(stopped.starved).toBe(false);
     expect(suppression(stopped.report)).toMatchObject({ severity: 'info', autoResolved: true });

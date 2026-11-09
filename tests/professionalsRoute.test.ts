@@ -33,6 +33,7 @@ vi.mock('../src/server/lib/authMiddleware', () => ({
   buildRateLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
   enforceNotBanned: () => (_req: unknown, _res: unknown, next: () => void) => next(),
   verifyFirebaseIdentity: (...args: unknown[]) => verifyIdentityMock(...args),
+  verifyFirebaseToken: async (...args: unknown[]) => (await verifyIdentityMock(...args))?.uid ?? null,
 }));
 
 vi.mock('../src/server/lib/attachmentText', () => ({
@@ -57,7 +58,7 @@ describe('professional chat route — verified identity only', () => {
   });
 
   it.each(['legacy', 'fixed-v1'])('selects the internal chain option only from server policy %s', async policy => {
-    const prior = process.env.TEXT_CHAIN_POLICY; process.env.TEXT_CHAIN_POLICY = policy;
+    const prior = process.env.TEXT_CHAIN_POLICY; const priorGateway = process.env.INFERENCE_GATEWAY_ENABLED; process.env.TEXT_CHAIN_POLICY = policy; process.env.INFERENCE_GATEWAY_ENABLED = 'on';
     try {
       verifyIdentityMock.mockResolvedValue({ uid: 'uid-verified', email: null });
       const res = mockRes();
@@ -67,7 +68,7 @@ describe('professional chat route — verified identity only', () => {
       expect(opts.conversationId).toBe('conv-safe');
       if (policy === 'fixed-v1') expect(opts.fixedTextChainIngress).toBe(true);
       else expect(opts).not.toHaveProperty('fixedTextChainIngress');
-    } finally { if (prior === undefined) delete process.env.TEXT_CHAIN_POLICY; else process.env.TEXT_CHAIN_POLICY = prior; }
+    } finally { if (prior === undefined) delete process.env.TEXT_CHAIN_POLICY; else process.env.TEXT_CHAIN_POLICY = prior; if (priorGateway === undefined) delete process.env.INFERENCE_GATEWAY_ENABLED; else process.env.INFERENCE_GATEWAY_ENABLED = priorGateway; }
   });
 
   it('threads the VERIFIED uid into the engine (memory key), never the body userId', async () => {

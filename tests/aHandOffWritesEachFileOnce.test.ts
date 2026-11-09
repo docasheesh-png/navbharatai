@@ -140,7 +140,7 @@ function reportRun(ws: ReturnType<typeof workspace>, opts: { useVideoList?: stri
     stopLane: () => routeStop(rung),
     writeFiles: async (files: OneShotFile[]) => {
       const out = await ws.writeFiles(files);
-      if (!wrote) { wrote = true; opts.onFirstWrite?.(); setTimeout(release, 20); }
+      if (!wrote && files.some((f) => f.path !== 'src/types.ts')) { wrote = true; opts.onFirstWrite?.(); setTimeout(release, 20); }
       return out;
     },
   } as never);
@@ -320,8 +320,8 @@ describe('Q-982 (2): a file is named as written only when the workspace took it'
     const writes: string[] = [];
     const r = await reportRun({ ...plain, writeFiles: (async (files: OneShotFile[]) => { writes.push(...files.map((f) => f.path)); }) as never });
     expect(sorted(r.salvagedPaths)).toEqual(THREE);
-    // Unknown is never confirmed, so nothing is skipped: the early saves AND the salvage write each file.
-    for (const p of THREE) expect(writes.filter((w) => w === p).length, p).toBe(2);
+    // Unknown is never confirmed: contract prerequisite + hand-off + salvage; other leaves hand-off + salvage.
+    for (const p of THREE) expect(writes.filter((w) => w === p).length, p).toBe(p === 'src/types.ts' ? 3 : 2);
   }, RUN_TIMEOUT);
 });
 
@@ -397,7 +397,7 @@ describe('Q-982: one door for every lane write, so the census above covers them 
     expect(src).toMatch(/const read = readWriteOutcomes\(batch, await deps\.writeFiles\(batch\)\);/);
   });
 
-  it('🔒 the lane\'s three last writes skip what is already there', () => {
-    expect(src.match(/\.filter\(\(f\) => !alreadyThere\(f\)\)/g)?.length).toBe(3);
+  it('🔒 the early preview save and the lane\'s three last writes skip what is already there', () => {
+    expect(src.match(/\.filter\(\(f\) => !alreadyThere\(f\)\)/g)?.length).toBe(4);
   });
 });

@@ -117,7 +117,12 @@ describe('🔒 the route feeds the playtest into the gate on EVERY way the playt
     expect(route).toMatch(/gameProof = \{ outcome: playtestOutcome\(verdict\.code\)[^\n]*\n[^\n]*unplayed = true[^\n]*\n[\s\S]{0,200}gateEvidence\.game = gameProof\.outcome;/);
     expect(route.match(/gateEvidence\.game = 'not-run';/g)?.length).toBe(3);
     expect(route).toMatch(/if \(domKind\) \{[\s\S]{0,500}gateEvidence\.game = 'not-run';/);
-    expect(route).toMatch(/if \(gamePlayed\.defects\.length === 0\) gateEvidence\.game = 'passed';/);
+    const repairedStart = route.indexOf('if (outcome.kept && outcome.after) {');
+    expect(repairedStart).toBeGreaterThan(0);
+    const repaired = route.slice(repairedStart, route.indexOf('if (gameCompleteGateEnabled())', repairedStart));
+    expect(repaired).toMatch(/if \(outcome.proof\) \{\s+gameProof = \{ \.\.\.outcome\.proof \};\s+gateEvidence\.game = gameProof\.outcome;/);
+    expect(repaired).toMatch(/if \(gameProof\.outcome === 'passed'\) buildDiag\.resolveOnRecheck\('GAME_PLAYTEST_ISSUES'\);/);
+    expect(repaired).not.toMatch(/gateEvidence\.game = 'passed';/);
   });
 });
 

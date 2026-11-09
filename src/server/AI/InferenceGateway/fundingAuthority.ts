@@ -1,3 +1,4 @@
+import { supplierFundingSurface } from './supplierFunding';
 /**
  * Select an implemented funding authority without manufacturing one.
  *
@@ -43,7 +44,7 @@ export type GatewayFundingAuthorityResolution =
       readonly missingAuthority: MissingFundingAuthority };
 
 type FundingContext = Pick<InferenceGatewayContext, 'principalId' | 'tenantId' | 'surface' | 'funding'>;
-const PLATFORM_SURFACES = new Set<InferenceGatewayContext['surface']>(['chat', 'professional']);
+const PLATFORM_SURFACES = new Set<InferenceGatewayContext['surface']>(['chat', 'professional', 'doctor', 'sda']);
 const PLATFORM_AUTHORITY_REQUIRED = Object.freeze({ kind: 'platform-authority-required' } as const);
 const UNVERIFIED = Object.freeze({ kind: 'unavailable', reason: 'context-unverified' } as const);
 const unavailable = (missingAuthority: MissingFundingAuthority): GatewayFundingAuthorityResolution =>
@@ -68,7 +69,7 @@ export function resolveGatewayFundingAuthority(
       // from acquiring the shared platform pool by default. Catalog policy must
       // independently authorize this exact surface before any admission.
       return PLATFORM_SURFACES.has(context.surface) ? PLATFORM_AUTHORITY_REQUIRED : unavailable('surface-funding-mismatch');
-    case 'existing-professional': return unavailable('professional-predispatch-reservation');
+    case 'existing-professional': return supplierFundingSurface(context.funding, context.surface) ? PLATFORM_AUTHORITY_REQUIRED : unavailable('surface-funding-mismatch');
     case 'existing-tenant': return unavailable('tenant-predispatch-reservation');
     case 'funded-builder': return unavailable('builder-predispatch-reservation');
     case 'tenant-byok': return unavailable('byok-account-authorization');

@@ -24,7 +24,7 @@ export interface DesignRestatementDiag {
 
 /** One comparable fingerprint of a design verdict: the score and every message. PURE. */
 function designOf(r: BuildQualityLint): string {
-  return `${r.design.score}|${r.design.violations.map((v) => v.message).join('|')}`;
+  return `${r.designObserved ?? 'unknown'}|${r.design.score}|${r.design.violations.map((v) => v.message).join('|')}`;
 }
 
 /**

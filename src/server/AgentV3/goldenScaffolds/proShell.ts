@@ -209,6 +209,7 @@ export function Select(props: { label: string; value: string; onChange: (v: stri
     <label style={{ display: 'block', marginBottom: 10 }}>
       <span style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>{props.label}</span>
       <select
+        aria-label={props.label}
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
         style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--fg)', fontSize: 14 }}

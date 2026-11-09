@@ -22,6 +22,7 @@
 /** One element as captured from the rendered page by the browser-side scan. */
 export interface ScannedElement {
   tag: string;
+  role?: string;
   /** The class attribute verbatim — the single most useful field, because it greps straight to source. */
   className?: string;
   id?: string;
@@ -164,7 +165,7 @@ export function findUiElements(elements: ScannedElement[], query: string, limit 
       reasons.push(`small round element (${Math.round(el.rect?.w ?? 0)}×${Math.round(el.rect?.h ?? 0)}px)`);
     }
     if (want.wantsImage && (el.tag === 'img' || el.tag === 'svg')) { score += 30; structuralHit = true; reasons.push(`<${el.tag}>`); }
-    if (want.wantsButton && (el.tag === 'button' || el.tag === 'a')) { score += 30; structuralHit = true; reasons.push(`<${el.tag}>`); }
+    if (want.wantsButton && (el.tag === 'button' || el.tag === 'a' || el.role === 'button')) { score += 30; structuralHit = true; reasons.push(`<${el.tag}>`); }
     const isControl = el.tag === 'input' || el.tag === 'textarea' || el.tag === 'select';
     if (want.wantsField && isControl) { score += 30; structuralHit = true; reasons.push(`<${el.tag}${el.inputType ? ` type=${el.inputType}` : ''}>`); }
 
@@ -173,6 +174,14 @@ export function findUiElements(elements: ScannedElement[], query: string, limit 
     for (const term of want.textTerms) {
       if (hay.includes(term)) { score += 20; textHit = true; reasons.push(`matches "${term}"`); }
     }
+
+    // BR1956: a role alone does not answer a named-control request (an anonymous anchor
+    // previously ranked first for 'theme toggle button'). Generic 'button' queries still work.
+    if ((want.wantsButton || want.wantsField) && want.textTerms.length > 0
+      && (!textHit || !(want.wantsButton && (el.tag === 'button' || el.tag === 'a' || el.role === 'button') || want.wantsField && isControl))) continue;
+    // A text-only multiword lookup must not call the intro's generic 'question' the
+    // requested 'question content' or 'rate this question' section (BR1956).
+    if (!askedStructure && want.textTerms.length > 1 && !want.textTerms.every(term => hay.includes(term))) continue;
 
     // COLOUR ALONE IS NEVER A MATCH WHEN A SHAPE OR ROLE WAS NAMED. Asked for a "green dot", a green
     // BUTTON is not a weaker answer — it is a DIFFERENT OBJECT, and returning it is precisely how the

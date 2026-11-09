@@ -30,9 +30,9 @@ describe('Q-1024 — "your app is built" needs a built app', () => {
     expect(line).not.toMatch(BUILT);
   });
 
-  it('files written OR a rendered app earns the claim — either fact is enough', () => {
-    expect(etaPhaseLine({ elapsedMs: 300_000, finalChecks: true, appRenderedAt: 0, appExists: true })).toMatch(BUILT);
-    expect(etaPhaseLine({ elapsedMs: 300_000, finalChecks: true, appRenderedAt: 1_700_000_000_000 })).toMatch(BUILT);
+  it('files written OR a rendered app permits source-prepared wording, never an unmeasured completed-app claim', () => {
+    expect(etaPhaseLine({ elapsedMs: 300_000, finalChecks: true, appRenderedAt: 0, appExists: true })).toMatch(/source files prepared/);
+    expect(etaPhaseLine({ elapsedMs: 300_000, finalChecks: true, appRenderedAt: 1_700_000_000_000 })).toMatch(/source files prepared/);
   });
 
   it('`appExists: false` is not merely unknown — it is a denial, and it is honoured', () => {
@@ -42,7 +42,9 @@ describe('Q-1024 — "your app is built" needs a built app', () => {
   it('the sentence itself defaults to claiming NOTHING, so a new caller cannot leak the claim', () => {
     expect(finalChecksEtaLine(300_000)).not.toMatch(BUILT);
     expect(finalChecksEtaLine(300_000, false)).not.toMatch(BUILT);
-    expect(finalChecksEtaLine(300_000, true)).toMatch(BUILT);
+    expect(finalChecksEtaLine(300_000, true)).toMatch(/source files prepared/);
+    expect(finalChecksEtaLine(300_000, true)).not.toMatch(BUILT);
+    expect(etaPhaseLine({ elapsedMs: 300_000, finalChecks: true, appRenderedAt: 1_700_000_000_000 })).not.toMatch(BUILT);
     // Both forms still report the phase and the elapsed time — the fix removes a claim, not the line.
     for (const l of [finalChecksEtaLine(300_000), finalChecksEtaLine(300_000, true)]) {
       expect(l).toMatch(/running the final checks/);

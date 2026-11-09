@@ -76,6 +76,10 @@ export interface MeasuredFacts {
    * playable" claim about the game stands only on 'passed' (autopsy 61279465: "The 3D train simulator game is
    * complete and working properly" about a game the playtest timed out on). Omitted ⇒ not a canvas game, not judged.
    */
+  /** Explicit create/reload evidence only; a generic submit or paint cannot prove persistence. */
+  persistence?: 'passed' | 'failed' | 'not-run';
+  /** A functional journey outcome is distinct from rendering and static readiness. */
+  journeyOutcome?: 'passed' | 'failed' | 'not-run';
   gamePlayed?: 'passed' | 'failed' | 'not-run';
   /** Did a screenshot tool call complete during this build? */
   screenshotTaken: boolean;
@@ -151,7 +155,7 @@ export interface MeasuredFacts {
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable';
+export type ClaimKind = 'functionality-unverified' | 'persistence-unverified' | 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -433,6 +437,11 @@ const DESIGN_CLAIMED = new RegExp([
 
 const GAME_NAMED = /\b(game|simulator|simulation|playable|gameplay)\b/i;
 const GAME_WORKS_CLAIMED = /\b(complete and working|working (properly|perfectly|well|great|correctly)|works (properly|perfectly|well|great|correctly)|is (fully )?playable|fully playable|ready to play|fully functional|is working)\b/i;
+// BR1955's exact summary said all requested features / Milestone 1 Complete, not 'fully playable'.
+// Only an affirmative delivery claim on a line naming the game; plans/negations are not verdicts.
+const GAME_DELIVERED_CLAIM = /(?:\b(?:built|created|implemented|delivered)\b[^.!?\n]{0,160}\ball (?:the )?requested features\b|\bmilestone\s+\d+\s+complete\b)/i;
+const GAME_DELIVERY_NOT_ASSERTED = /\b(?:not|never|cannot|can't|isn't|is not|wasn't|doesn't|does not|will|would|could|should|plan(?:ning)?|when|if|until|before|once)\b/i;
+
 
 export function auditSummaryClaims(summary: string, facts: MeasuredFacts): ClaimContradiction[] {
   const text = String(summary ?? '');
@@ -524,7 +533,8 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
   // A GAME CALLED WORKING THAT NOBODY PLAYED (autopsy 61279465). Narrow: the same line must name the game and
   // claim it works or is playable — "the game has a start screen" is a description, not a verdict.
   if (facts.gamePlayed && facts.gamePlayed !== 'passed') {
-    const line = text.split(/\n+/).find((l) => GAME_NAMED.test(l) && GAME_WORKS_CLAIMED.test(l));
+    const line = text.split(/\n+/).find((l) => GAME_NAMED.test(l) && (GAME_WORKS_CLAIMED.test(l)
+      || (GAME_DELIVERED_CLAIM.test(l.replace(/[*_`]/g, '')) && !GAME_DELIVERY_NOT_ASSERTED.test(l))));
     if (line) {
       out.push({
         kind: 'game-claimed-playable',
@@ -534,6 +544,25 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
           : 'NavBharatAI could not finish playing it in a real browser, so whether it is playable is NOT VERIFIED',
       });
     }
+  }
+  if (facts.journeyOutcome && facts.journeyOutcome !== 'passed' && facts.gamePlayed !== 'passed') {
+    const line = text.split(/\n+/).find(l => /\b(?:app|features?|functionality)\b/i.test(l)
+      && /\b(?:fully functional|(?:successfully )?implemented and (?:thoroughly )?tested|tested end.to.end)\b/i.test(l.replace(/[*_`]/g, ''))
+      && !/\b(?:not|never|cannot|can't|isn't|is not|wasn't|doesn't|does not|will|would|could|should|plan(?:ning)?|when|if|until|before|once|unverified|untested|later)\b/i.test(l));
+    if (line) out.push({kind: 'functionality-unverified', claimed: 'that the app is fully functional or its requested features were tested end to end',
+      measured: facts.journeyOutcome === 'failed' ? 'a functional journey found problems; a rendered preview and a clean compiler do not override that result'
+        : 'no functional user journey completed on this run; static readiness and preview paint do not establish end-to-end behavior'});
+  }
+  if (facts.persistence && facts.persistence !== 'passed') {
+    const line = text.split(/\n+/).find(l => /\b(?:persist(?:s|ed|ence|ent)?|surviv(?:e|es|ed) (?:a )?(?:reload|refresh)|between sessions|after (?:a )?(?:reload|refresh)|saved (?:locally|permanently))\b/i.test(l)
+      && !/\b(?:not|never|cannot|can't|isn't|is not|wasn't|doesn't|does not|will|would|could|should|plan(?:ning)?|when|if|until|before|once|unverified|untested|later|todo|planned|supports?|no|can|may|might)\b/i.test(l));
+    if (line) out.push({
+      kind: 'persistence-unverified',
+      claimed: 'that entered data persists across reloads or sessions',
+      measured: facts.persistence === 'failed'
+        ? 'the create-and-reload journey found a problem; persistence was not verified'
+        : 'no create-and-reload journey completed on this run; rendering or clicking a control does not verify persistence',
+    });
   }
   if (!facts.screenshotTaken && SCREENSHOT_SEEN.test(text)) {
     out.push({

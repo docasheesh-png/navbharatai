@@ -230,3 +230,11 @@ export async function offerBugHunt(io: {
   io.say(bugHuntNotRunLine(answer));
   return { runReview: false, answer };
 }
+
+/** The optional offer promises an extra check on an app that already ran, never an infrastructure repair.
+ * Shared by the offer and paid-review doors; callers re-read Stop after waiting. No price/policy changes.
+ */
+export function completedAppReviewEligible(input: { ok: boolean; headroom: boolean; allowed: boolean;
+  deferred: boolean; runProven: boolean; stopped: boolean }): boolean {
+  return input.ok && input.headroom && input.allowed && !input.deferred && input.runProven && !input.stopped;
+}

@@ -65,6 +65,7 @@ export const PROVIDER_FAMILIES: readonly ProviderFamily[] = [
   { id: 'xai', name: 'xAI / Grok', keys: ['XAI_API_KEY', 'GROK_API_KEY'], hosts: () => ['api.x.ai'] },
   { id: 'openrouter', name: 'OpenRouter (Nemotron)', keys: ['OPENROUTER_API_KEY', 'NEMOTRON_API_KEY', 'FREE_CHAIN_OPENROUTER_API_KEY'], hosts: (e) => ['openrouter.ai', ...hostOf(e.NEMOTRON_BASE_URL)] },
   { id: 'deepinfra', name: 'DeepInfra', keys: ['DEEPINFRA_API_KEY', 'DEEPINFRA_TOKEN', 'FREE_CHAIN_DEEPINFRA_API_KEY'], hosts: () => ['api.deepinfra.com'] },
+  { id: 'mitrify', name: 'Mitrify', keys: ['MITRIFY_API_KEY'], hosts: (e) => ['mitrify.com', ...hostOf(e.MITRIFY_BASE_URL)] },
   { id: 'cheaperinference', name: 'CheaperInference', keys: ['CHEAPERINFERENCE_API_KEY', 'FREE_CHAIN_CHEAPINF_API_KEY'], hosts: () => ['api.cheaperinference.com'] },
   { id: 'groq', name: 'Groq', keys: ['GROQ_API_KEY', 'FREE_CHAIN_GROQ_API_KEY'], hosts: () => ['api.groq.com'] },
   { id: 'deepseek', name: 'DeepSeek Direct', keys: ['DEEPSEEK_API_KEY', 'FREE_CHAIN_DEEPSEEK_API_KEY'], hosts: () => ['api.deepseek.com'] },

@@ -1,9 +1,11 @@
+import { fixedTextChainEnabled } from '../fixedTextChain';
 /** Cohort configuration is not identity or inference authority. Never log the UID list. */
 export interface GatewayRollout {
   readonly mode: 'canary' | 'all' | 'invalid';
   readonly uids: readonly string[];
 }
 export function gatewayRollout(env: Record<string, string | undefined> = process.env): GatewayRollout {
+  if (fixedTextChainEnabled(env)) return { mode: 'all', uids: [] };
   const mode = env.INFERENCE_GATEWAY_ROLLOUT_MODE?.trim() || 'canary';
   const raw = env.INFERENCE_GATEWAY_CANARY_UIDS ?? '';
   if (!['canary', 'all'].includes(mode) || raw.length > 4127) return { mode: 'invalid', uids: [] };

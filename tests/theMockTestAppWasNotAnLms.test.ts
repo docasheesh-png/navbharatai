@@ -138,7 +138,7 @@ describe('3 · an invented nb- class is handed back like any other', () => {
     expect(doneStyleNote(['nb-demo-roles', '.badge-soft'], 'src/index.css')).toMatch(/Before you finish: 2 class name\(s\)[\s\S]*\.nb-demo-roles[\s\S]*EMPTY old_string/);
     expect(doneStyleNote([], 'src/index.css')).toBe('');
     const runner = read('src/server/AgentV3/AgentRunner.ts');
-    expect(runner).toMatch(/styleNote = doneStyleNote\(style\.missing, style\.sheet\)[\s\S]{0,200}if \(styleNote\) doneText = [\s\S]{0,80}else events\.emit\([\s\S]{0,120}The app looks complete/);
+    expect(runner).toMatch(/styleNote = doneStyleNote\(style\.missing, style\.sheet\)[\s\S]{0,200}if \(styleNote\) doneText = [\s\S]{0,80}else events\.emit\([\s\S]{0,120}Source\/build checks are clear/);
   });
 });
 

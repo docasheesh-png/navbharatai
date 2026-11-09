@@ -178,3 +178,12 @@ export function seedStateOf(written: ReadonlyMap<string, string>): 'platform-tem
   if (written.size === 0) return null;
   return holdsOnlyOurStarter(Object.fromEntries(written)) ? 'platform-template' : 'kept-seed';
 }
+
+/** Failed/malformed inventory is UNKNOWN, never evidence an existing user's app is empty. */
+export async function seedSourceInventory(list: () => Promise<string[]>): Promise<string[] | null> {
+  try {
+    const files = await list();
+    return Array.isArray(files) && files.every(p => typeof p === 'string')
+      ? files.filter(p => p.startsWith('src/')) : null;
+  } catch { return null; }
+}

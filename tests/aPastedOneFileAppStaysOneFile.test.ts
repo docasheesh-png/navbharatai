@@ -125,7 +125,10 @@ describe('the route wiring (source guards)', () => {
   });
 
   it('a seeded page is improved in place: no fast-lane regeneration, no milestones, no module plan', () => {
-    expect(route).toContain('const fastLaneWouldRun = !goldenPreseeded && pastedSeed.size === 0 && oneShotEnabled()');
+    const fastGateAt = route.indexOf('const fastLaneWouldRun = ');
+    expect(fastGateAt).toBeGreaterThan(-1);
+    const fastGate = route.slice(fastGateAt, route.indexOf(';', fastGateAt));
+    for (const required of ['!goldenPreseeded', '!sandboxUnavailable', 'pastedSeed.size === 0', 'oneShotEnabled()']) expect(fastGate).toContain(required);
     expect(route).toContain("if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode && !pastedFormat.keep) {");
     // UPDATED 2026-10-14 (autopsy e3135b7b, Q-1080): the gate gained `&& !templateIsTheFinishedApp(seededScaffold)`
     // — a seeded simple-tier template IS the finished app, so there is nothing to decompose. Pinned as a

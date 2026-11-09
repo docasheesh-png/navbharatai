@@ -1549,8 +1549,14 @@ export function playtestOutcome(code: string | null | undefined): 'passed' | 'fa
 // features the request NAMED. Never a gate and never a charge: an info line for the admin timeline.
 export interface GameScopeVerdict { code: 'GAME_SCOPE_OK' | 'GAME_SCOPE_GAP'; severity: 'info'; message: string; autoResolved: true }
 export function gameScopeVerdict(contract: GameScopeContract, files: Record<string, string>): GameScopeVerdict | null {
-  if (!contract || contract.requiredFeatures.length === 0) return null;
+  if (!contract) return null;
   const m = scopeMatch(contract, files);
+  if (m.unverified?.length) {
+    return { code: 'GAME_SCOPE_GAP', severity: 'info', autoResolved: true,
+      message: `Runner requirements retained but NOT functionally verified by this code scan: ${m.unverified.join(', ')}. `
+        + `Missing ordinary code signals: ${m.missing.join(', ') || 'none'}. This is not a gameplay pass, a repair order or a billing verdict.` };
+  }
+  if (contract.requiredFeatures.length === 0) return null;
   if (m.missing.length === 0) {
     return { code: 'GAME_SCOPE_OK', severity: 'info', autoResolved: true, message: `Every feature the request named is in the game's code: ${m.present.join(', ')}.` };
   }

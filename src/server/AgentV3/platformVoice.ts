@@ -40,6 +40,9 @@ type Rule = { re: RegExp; hinglish: (...g: string[]) => string; hindi: (...g: st
 
 /** The platform's own sentence shapes. Each must match the WHOLE line, so model prose is never touched. */
 export const PLATFORM_LINES: readonly Rule[] = [
+  { re: /^🧩 Generated (.+?) \((\d+)\/(\d+)\) — not saved yet\.$/,
+    hinglish: (p, n, total) => `🧩 ${p} ka code taiyaar (${n}/${total}) — abhi save nahi hua.`,
+    hindi: (p, n, total) => `🧩 ${p} का कोड तैयार (${n}/${total}) — अभी सहेजा नहीं गया।` },
   { re: /^Setting up your workspace…$/, hinglish: () => 'Aapka workspace taiyaar ho raha hai…', hindi: () => 'आपका वर्कस्पेस तैयार हो रहा है…' },
   { re: /^Planning the file list…$/, hinglish: () => 'Files ki list plan ho rahi hai…', hindi: () => 'फ़ाइलों की सूची तैयार हो रही है…' },
   { re: /^(\S+) Still working — (.+) so far$/, hinglish: (m, t) => `${m} Kaam chal raha hai — ab tak ${t}`, hindi: (m, t) => `${m} काम चल रहा है — अब तक ${t}` },

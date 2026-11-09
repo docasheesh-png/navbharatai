@@ -218,7 +218,7 @@ function App() {
 export default App;
 `;
 
-export const examPrepAppTsx = `import { useCallback, useEffect, useMemo, useState } from 'react';
+export const examPrepAppTsx = `import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ThemeToggle from './theme';
 
 // A sarkari mock test is not a quiz: it has SECTIONS, a clock for the whole paper, negative marking,
@@ -251,7 +251,15 @@ function loadHistory(): Attempt[] {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? (parsed as Attempt[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((row: unknown): row is Attempt => {
+      if (!row || typeof row !== 'object') return false;
+      const a = row as Attempt;
+      return typeof a.at === 'string' && Number.isFinite(Date.parse(a.at))
+        && Number.isFinite(a.score) && Number.isInteger(a.max) && a.max > 0
+        && [a.correct, a.wrong, a.skipped].every((n) => Number.isInteger(n) && n >= 0)
+        && a.correct + a.wrong + a.skipped === a.max;
+    }).slice(0, 20);
   } catch { return []; }
 }
 
@@ -259,6 +267,14 @@ function mmss(total: number): string {
   const m = Math.floor(Math.max(0, total) / 60);
   const s = Math.max(0, total) % 60;
   return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
+// One scoring rule for the whole paper and every section, including unanswered questions.
+function scoreAnswers(questions: Question[], picked: Record<string, number>) {
+  const correct = questions.filter((q) => picked[q.id] === q.answer).length;
+  const wrong = questions.filter((q) => picked[q.id] !== undefined && picked[q.id] !== q.answer).length;
+  return { correct, wrong, skipped: questions.length - correct - wrong,
+    score: correct - wrong * NEGATIVE, max: questions.length };
 }
 
 function App() {
@@ -271,25 +287,21 @@ function App() {
 
   useEffect(() => { try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch { /* private mode */ } }, [history]);
 
-  const result = useMemo(() => {
-    let correct = 0;
-    let wrong = 0;
-    for (const q of BANK) {
-      const p = picked[q.id];
-      if (p === undefined) continue;
-      if (p === q.answer) correct += 1; else wrong += 1;
-    }
-    const score = correct - wrong * NEGATIVE;
-    return { correct, wrong, skipped: BANK.length - correct - wrong, score, max: BANK.length };
-  }, [picked]);
+  const deadline = useRef<number | null>(null);
+  const submitted = useRef(true);
+  const result = useMemo(() => scoreAnswers(BANK, picked), [picked]);
 
   const begin = () => {
+    deadline.current = Date.now() + DURATION_SEC * 1000;
+    submitted.current = false;
     setPicked({}); setFlagged({}); setIndex(0); setLeft(DURATION_SEC); setStage('test');
   };
 
   // Declared BEFORE the effects that call it: a forward reference works at runtime, because the effect
   // closure only runs after render, but it reads as a bug and a real lint gate rejects it.
   const submit = useCallback(() => {
+    if (submitted.current) return;
+    submitted.current = true;
     setHistory((h) => [{ at: new Date().toISOString(), score: result.score, max: result.max, correct: result.correct, wrong: result.wrong, skipped: result.skipped }, ...h].slice(0, 20));
     setStage('result');
   }, [result]);
@@ -298,8 +310,11 @@ function App() {
   // keeps waking the tab for nothing.
   useEffect(() => {
     if (stage !== 'test') return;
-    const t = setInterval(() => setLeft((s) => s - 1), 1000);
-    return () => clearInterval(t);
+    // Browser timers are throttled in background tabs; callbacks are not elapsed seconds.
+    const tick = () => setLeft(Math.max(0, Math.ceil(((deadline.current ?? Date.now()) - Date.now()) / 1000)));
+    const t = setInterval(tick, 1000);
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick); };
   }, [stage]);
 
   useEffect(() => {
@@ -311,9 +326,7 @@ function App() {
     for (const q of BANK) if (!names.includes(q.section)) names.push(q.section);
     return names.map((name) => {
       const qs = BANK.filter((q) => q.section === name);
-      const correct = qs.filter((q) => picked[q.id] === q.answer).length;
-      const wrong = qs.filter((q) => picked[q.id] !== undefined && picked[q.id] !== q.answer).length;
-      return { name, total: qs.length, correct, wrong };
+      return { name, total: qs.length, ...scoreAnswers(qs, picked) };
     });
   }, [picked]);
 
@@ -374,7 +387,7 @@ function App() {
           {sections.map((s) => (
             <div className="row" style={{ justifyContent: 'space-between' }} key={s.name}>
               <span>{s.name}</span>
-              <span>{s.correct} / {s.total}</span>
+              <span>{s.score} / {s.total}</span>
             </div>
           ))}
           <button className="primary" onClick={() => setStage('start')}>Back to start</button>
@@ -428,7 +441,10 @@ function App() {
               key={i}
               className={picked[q.id] === i ? 'primary' : ''}
               style={{ textAlign: 'left' }}
-              onClick={() => setPicked({ ...picked, [q.id]: i })}
+              onClick={() => {
+                if (deadline.current !== null && Date.now() >= deadline.current) { setLeft(0); submit(); return; }
+                setPicked({ ...picked, [q.id]: i });
+              }}
             >
               {String.fromCharCode(65 + i)}. {opt}
             </button>
@@ -457,9 +473,10 @@ function App() {
               onClick={() => setIndex(i)}
               className={i === index ? 'primary' : picked[item.id] !== undefined ? 'badge badge-success' : flagged[item.id] ? 'badge badge-warning' : ''}
               style={{ minWidth: 40 }}
-              aria-label={'Go to question ' + (i + 1)}
+              aria-label={'Go to question ' + (i + 1) + (flagged[item.id] ? ' — marked for review' : '')}
+              aria-current={i === index ? 'step' : undefined}
             >
-              {i + 1}
+              {i + 1}{flagged[item.id] ? ' ⚑' : ''}
             </button>
           ))}
         </div>

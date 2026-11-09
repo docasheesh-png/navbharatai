@@ -23,3 +23,10 @@ export function binaryTextWriteRefusal(path: string): string | null {
     + '{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml"}). '
     + `If the app really needs a .${ext} file, create it with a command in the sandbox — binary files a command creates are saved with the project.`;
 }
+
+/** A text-only lane must hand asset acquisition to tools before generating or continuing bytes. */
+export const BINARY_TEXT_GENERATION_PREFIX = 'binary assets require the tool-capable builder, not text generation:';
+export function binaryTextGenerationProblem(files: ReadonlyArray<{ path: string }>): string | null {
+  const paths = files.filter((f) => isBinaryAsset(f.path)).map((f) => f.path);
+  return paths.length ? `${BINARY_TEXT_GENERATION_PREFIX} ${paths.join(', ')}` : null;
+}

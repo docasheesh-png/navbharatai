@@ -8,7 +8,7 @@ import type { ActuatorPort, SubAgentSpawn, ReadLedger, KitKeptTally, BuildToolBu
 import type { ShadowTwinTally } from './shadowTwin';
 import type { Checkpointer } from './GitManager';
 import { ToolDispatcher } from './ToolDispatcher';
-import { AgentRunner } from './AgentRunner';
+import { AgentRunner, type AgentRunnerOptions } from './AgentRunner';
 import { roleConfig } from './AgentRegistry';
 import { catalogForTools } from './ToolCatalog';
 import { agentLifecycle } from './AgentLifecycle';
@@ -35,6 +35,9 @@ import type { AgentRole, ToolName } from './types';
  * decoupled from AgentRunner and avoids a circular import.
  */
 export interface SubAgentDeps {
+  replyVoice?: AgentRunnerOptions['replyVoice'];
+  sandboxAdmissionBudget?: AgentRunnerOptions['sandboxAdmissionBudget'];
+  requestActionIssue?: AgentRunnerOptions['requestActionIssue'];
   client: TurnRunner;
   actuator: ActuatorPort;
   workspaceId: string;
@@ -363,6 +366,9 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       }
     };
     const runner = new AgentRunner({
+      replyVoice: deps.replyVoice,
+      sandboxAdmissionBudget: deps.sandboxAdmissionBudget,
+      requestActionIssue: deps.requestActionIssue,
       client: deps.client,
       dispatcher: childDispatcher,
       state: deps.state,

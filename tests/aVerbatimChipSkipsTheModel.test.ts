@@ -221,7 +221,7 @@ describe('Q-963 — a verbatim chip does not run a model', () => {
       'if (templateInstantPreviewEnabled()) {',
       "void dispatcher.dispatch({ id: 'template-instant-preview', name: 'update_preview'",
       '.catch(() => { /* the builder\'s own preview path still runs */ });',
-      'buildPrompt = goldenBuildPrompt(golden, buildPrompt, chipExtensionTextOf(prompt));',
+      "buildPrompt = goldenBuildPrompt(golden, buildPrompt, chipExtensionTextOf(prompt), { mustAuthorCode: surplusAdmissionDiag?.code === 'SURPLUS_ADMITTED' });",
       '} catch (seedErr) {',
     ]);
     // This proves write rejection precedes the flag, not that every outer-catch path leaves it false.

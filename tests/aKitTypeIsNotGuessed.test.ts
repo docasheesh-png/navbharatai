@@ -103,7 +103,7 @@ describe('the kit\'s types are handed over, not guessed (Q-909, autopsy 50378049
         expect(members).not.toContain(guessed);
       }
       // The heading is what turns that absence into an answer instead of a silence.
-      expect(kitTypeContract(files())).toContain('If a name is not here, the kit does not have it');
+      expect(kitTypeContract(files())).toContain('an unlisted name is not proof of absence');
     });
 
     it('every name the contract claims to cover is really declared where it says', () => {

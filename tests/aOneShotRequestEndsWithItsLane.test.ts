@@ -1,3 +1,4 @@
+import { createSteeringHandoff, STEERING_YIELD_REASON } from '../src/server/AgentV3/steeringHandoff';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -67,6 +68,7 @@ function routeHarness(chain: NamedRunner[]) {
   const wasted = vi.fn();
   const records: Array<Record<string, unknown>> = [];
   const env = {
+    steeringHandoff: createSteeringHandoff(() => [], () => true), STEERING_YIELD_REASON,
     abort: build, thinking: false, randomUUID, MAX_CONTINUATIONS, continueFastLaneGeneration,
     fastBuildModel: () => 'test-text-model',
     makeFastTextRunner: (onProviderUsed: (name: string) => void) => makeMultiProviderTurnRunner(chain, {

@@ -25,7 +25,7 @@ describe('.node_modules is a typo, never a folder', () => {
     const src = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
     expect(src).toMatch(/const typoFix = fixNodeModulesTypo\((?:reqStr\(input, 'command'\)|rawCommand)\);/);
     // Optional sandbox-cd rewrite may sit between typoFix and `command` (autopsy 7c3115a8).
-    expect(src).toMatch(/const command = (?:cdFix|typoFix)\.command;/);
+    expect(src).toMatch(/const command = sharedBareTypecheckCommand\(cdFix\.command, this\.tsBuildInfoId\);/);
     expect(src).toMatch(/fixSandboxWorkspaceCd\(typoFix\.command\)/);
     expect(src).toMatch(/if \(typoFix\.fixed\) out = /);
   });

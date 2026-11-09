@@ -36,6 +36,7 @@
 import { lintBuiltApp, designLintSummary, type BuildQualityLint } from './buildQualityLint';
 import { unlabelledFieldLines } from '../AppMakerLab/intelligence/A11yLinter';
 import { spacingSnapEnabled } from './spacingSnap';
+import { persistedStateFindings } from './persistedStateCheck';
 
 /**
  * A test file's JSX is a FIXTURE, not a screen — the one place this check must stay quiet.
@@ -131,6 +132,7 @@ export const MAX_NOTE_LINES = 3;
 function noteViolations(path: string, content: string, env: NodeJS.ProcessEnv): Array<{ type: string; message: string; count: number }> {
   if (typeof path !== 'string' || typeof content !== 'string' || !content.trim()) return [];
   if (TEST_FILE.test(path)) return [];
+  const storage = persistedStateFindings(path, content);
   let lint: ReturnType<typeof lintBuiltApp>;
   try {
     // One file in, one file judged — and `lintBuiltApp` returning null IS the "not a file we lint"
@@ -139,10 +141,10 @@ function noteViolations(path: string, content: string, env: NodeJS.ProcessEnv): 
   } catch {
     return [];
   }
-  if (!lint) return [];
+  if (!lint) return storage;
   try {
-    return [...lint.a11y.violations, ...lint.design.violations]
-      .filter((v) => !!v && noteCarries(v.type, env) && v.count > 0);
+    return [...storage, ...[...lint.a11y.violations, ...lint.design.violations]
+      .filter((v) => !!v && noteCarries(v.type, env) && v.count > 0)];
   } catch {
     return [];
   }
@@ -217,7 +219,7 @@ export function qualityNote(
   }
   if (!lines.length) return '';
 
-  // A11y first, then design — a screen reader failing is a harder defect than spacing, and the model
+  // Persisted-data boundaries first, then a11y/design; all are advisory, and the model
   // reads top-down. The wording says WHY it is arriving now, so it reads as a checklist item rather
   // than a complaint about work just done.
   return [

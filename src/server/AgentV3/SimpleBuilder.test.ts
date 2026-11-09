@@ -134,11 +134,11 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     const logs: string[] = [];
     const r = await runSimpleBuild(baseDeps({ log: (m) => logs.push(m) }));
     expect(r.ok).toBe(true);
-    const fileTicks = logs.filter((l) => l.startsWith('✓ '));
+    const fileTicks = logs.filter((l) => l.startsWith('🧩 Generated '));
     expect(fileTicks).toHaveLength(3); // one per genuinely-generated file, not a guess
     // Every path in the manifest gets its own tick, each counting up against the REAL total (3).
     for (const path of ['src/App.tsx', 'src/TodoList.tsx', 'src/index.css']) {
-      expect(fileTicks.some((l) => l.startsWith(`✓ ${path} (`) && l.endsWith('/3)'))).toBe(true);
+      expect(fileTicks.some((l) => l.startsWith(`🧩 Generated ${path} (`) && l.endsWith('/3) — not saved yet.'))).toBe(true);
     }
   });
 
@@ -278,7 +278,7 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     }));
     expect(r.ok).toBe(true);
     expect(r.filesWritten).toBe(2);
-    expect(logs.filter((l) => l.startsWith('✓ '))).toHaveLength(2); // NOT 3 — the failed file is honestly absent
+    expect(logs.filter((l) => l.startsWith('🧩 Generated '))).toHaveLength(2); // NOT 3 — the failed file is honestly absent
   });
 
   it('plans a manifest, generates each file individually, writes them, returns ok', async () => {

@@ -253,6 +253,56 @@ function baseStyles(vfs: VirtualFileSystem): string {
 }
 
 /**
+ * The starter entry imports `./index.css`, and a model can delete that file without removing the
+ * import. The preview used to stub the missing stylesheet as a JavaScript function, then a later
+ * crash was reported by phones as a blank page saying only "Script error." Supply the file as an
+ * empty stylesheet so the import is CSS, the app can mount, and the gap is not a boot failure.
+ * Existing stylesheets are never overwritten.
+ */
+export function supplyMissingStylesheets(files: Record<string, string>): string[] {
+  const supplied: string[] = [];
+  const seen = new Set<string>();
+  for (const importer of Object.keys(files)) {
+    if (!/\.(tsx?|jsx?|mjs|cjs)$/.test(importer)) continue;
+    const re = /['"]([^'"]+\.css)['"]/g;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(files[importer]))) {
+      const spec = stylesheetSpec(match[1]);
+      if (!spec) continue;
+      const path = resolveStylesheet(importer, spec);
+      if (!path || files[path] != null || seen.has(path)) continue;
+      seen.add(path);
+      files[path] = '/* preview: missing stylesheet supplied */\n';
+      supplied.push(path);
+    }
+  }
+  return supplied;
+}
+
+/** A relative or root stylesheet import. Bare package CSS (a dependency) is not ours to invent. */
+function stylesheetSpec(spec: string): string | null {
+  const bare = spec.split('?')[0].split('#')[0];
+  if (!/\.css$/i.test(bare) || /^(https?:)?\/\//.test(bare)) return null;
+  if (bare.startsWith('.') || bare.startsWith('/') || bare.startsWith('src/')) return bare;
+  return null;
+}
+
+/** Resolve `./index.css` imported by `src/main.tsx` to `src/index.css`. */
+function resolveStylesheet(importer: string, spec: string): string {
+  const bare = spec.replace(/^\/+/, '');
+  if (!spec.startsWith('.')) return bare;
+  const dir = importer.includes('/') ? importer.slice(0, importer.lastIndexOf('/')) : '';
+  const parts = `${dir ? `${dir}/` : ''}${spec}`.split('/');
+  const out: string[] = [];
+  for (const part of parts) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') out.pop();
+    else out.push(part);
+  }
+  return out.join('/');
+}
+
+/**
  * Build a self-contained, in-browser-bundled React preview document.
  * Returns an HTML string; if no entry module is found, falls back to a clear notice.
  */
@@ -267,6 +317,9 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, works
       if (text != null) gathered[path] = text;
     }
   }
+  // A saved project can import src/index.css after the file itself was never written. Put an empty
+  // stylesheet in the bundle so the import stays CSS — a JS stub here is what blanked the preview.
+  supplyMissingStylesheets(gathered);
   // CSS MODULES ARE REAL HERE (admin 2026-09-28, the unstyled "secret calculator"). Every `.module.css`
   // is scoped on the server and its class map shipped beside the sources, so `styles.card` is a real
   // class name in the page instead of `undefined`. Done BEFORE precompilation so the Babel-in-browser
@@ -836,6 +889,13 @@ ${previewBridgeSource('in-browser')}
           cache[resolved] = { exports: { __esModule: true, default: IMG_PLACEHOLDER } };
           return cache[resolved].exports;
         }
+        // A missing stylesheet is CSS, not a component. A function stub here is what the phone
+        // then reported as a blank page and a content-free "Script error."
+        if (/\\.css$/i.test(resolved) || /\\.css$/i.test(spec)) {
+          if (BUILDING) buildingLocal[resolved] = path; else missingLocal[resolved] = path;
+          cache[resolved] = { exports: { __esModule: true, default: {} } };
+          return cache[resolved].exports;
+        }
         if (BUILDING && nbaiIsScreenName(nbaiPartName(resolved))) {
           buildingLocal[resolved] = path;
           var part = nbaiBuildingPart(nbaiPartName(resolved));
@@ -907,8 +967,37 @@ ${previewBridgeSource('in-browser')}
     return ESM_ALT + spec;
   }
 
-  window.addEventListener('error', function (e) { showError((e && e.message) || 'Script error'); });
-  window.addEventListener('unhandledrejection', function (e) { showError((e && e.reason && e.reason.message) || e.reason || 'Promise rejected'); });
+  var lastBootDetail = '';
+  var origConsoleError = console.error;
+  console.error = function () {
+    try {
+      if (!lastBootDetail) {
+        var parts = [];
+        for (var i = 0; i < arguments.length; i++) {
+          var a = arguments[i];
+          if (a && typeof a === 'object' && (a.message || a.stack)) parts.push(String(a.message || a.stack));
+          else parts.push(String(a));
+        }
+        var line = parts.join(' ').trim();
+        if (line && line !== 'Script error.' && line !== 'Script error') lastBootDetail = line.slice(0, 1500);
+      }
+    } catch (ignore) {}
+    return origConsoleError.apply(console, arguments);
+  };
+  function bootErrorMessage(e) {
+    if (e && e.target && e.target !== window && e.target.nodeType === 1) return '';
+    var err = e && e.error;
+    var msg = (err && err.message) || (e && e.message) || '';
+    var stack = err && err.stack;
+    if (!msg || msg === 'Script error.' || msg === 'Script error') {
+      if (stack && stack !== msg) msg = stack;
+      else if (lastBootDetail) msg = lastBootDetail;
+      else msg = 'The app crashed while starting' + ((e && e.filename) ? (' (' + e.filename + ':' + (e.lineno || 0) + ')') : '') + '. The browser hid the real reason.';
+    } else if (stack && stack.indexOf(msg) < 0) msg = msg + '\\n' + stack;
+    return msg;
+  }
+  window.addEventListener('error', function (e) { var msg = bootErrorMessage(e); if (msg) showError(msg); });
+  window.addEventListener('unhandledrejection', function (e) { showError((e && e.reason && (e.reason.stack || e.reason.message)) || e.reason || 'Promise rejected'); });
 
   function loadScript(u){return new Promise(function(res){var s=document.createElement('script');s.src=u;s.onload=res;s.onerror=res;document.head.appendChild(s);});}
   var BABEL_FALLBACKS = ${JSON.stringify(BABEL_FALLBACKS)};

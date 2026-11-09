@@ -20,11 +20,13 @@ const code = codeOnly(route);
 
 describe('live token totals reach the report while the build is running', () => {
   it('captureTurnUsage snapshots the ledger into the diagnostics report', () => {
-    expect(code).toMatch(/buildDiag\.setLiveUsage\(\s*providerLedger\.byProvider\(\)/);
+    expect(code).toContain('const providerSnapshot = providerLedger.byProvider();');
+    expect(code).toMatch(/buildDiag\.setLiveUsage\(\s*providerSnapshot/);
   });
 
   it('it passes the running cache-hit total too, not just the provider split', () => {
-    expect(code).toMatch(/setLiveUsage\(providerLedger\.byProvider\(\),\s*billingCtx\.cacheReadInputTokens\)/);
+    expect(code).toMatch(/billingCtx\.cacheReadInputTokens = Object\.values\(providerSnapshot\)\s*\.reduce\(/);
+    expect(code).toMatch(/setLiveUsage\(providerSnapshot,\s*billingCtx\.cacheReadInputTokens\)/);
   });
 });
 

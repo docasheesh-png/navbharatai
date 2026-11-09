@@ -107,7 +107,11 @@ beforeEach(() => {
     FREE_CHAIN_ENABLED: 'on', FREE_CHAIN_ROLLOUT_PERCENT: '100', FREE_CHAIN_ORDER: 'groq,cloudflare',
     FREE_CHAIN_GROQ_API_KEY: 'synthetic-test-key', FREE_CHAIN_GROQ_FREE_VERIFIED_UNTIL: '2099-01-01',
     FREE_CHAIN_CF_API_TOKEN: 'synthetic-test-key', FREE_CHAIN_CF_FREE_VERIFIED_UNTIL: '2099-01-01', CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32),
-    FREE_CHAIN_GROQ_TPM: '1000000', FREE_CHAIN_GROQ_TPD: '10000000', FREE_CHAIN_CF_TPM: '1000000', FREE_CHAIN_CF_TPD: '10000000',
+    // Synthetic provider ceilings. The assertion below is the signed-in user ledger.
+    // Production Groq RPM and Cloudflare neuron caps are separate protections; they are
+    // not this user's 50-answer ceiling, and a refusal there still refunds the credit.
+    FREE_CHAIN_GROQ_RPM: '1000', FREE_CHAIN_GROQ_RPD: '10000', FREE_CHAIN_GROQ_TPM: '100000000', FREE_CHAIN_GROQ_TPD: '100000000',
+    FREE_CHAIN_CF_TPM: '1000000', FREE_CHAIN_CF_TPD: '10000000',
     FREE_CHAIN_CACHE_ENABLED: 'off', FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off', FREE_CHAIN_PAID_DAILY_CAP_USD: '0',
     CHEAPERINFERENCE: 'off', STRICT_FREE_MODULES_ENABLED: 'off', INFERENCE_GATEWAY_ENABLED: 'off',
     GUEST_DAILY_MESSAGES: 'off', DOSE_DIRECT_ANSWER: 'off', UNIFIED_WALLET_ENABLED: 'off', UNIFIED_WALLET_FREE_LIMIT: 'off',
@@ -132,6 +136,46 @@ describe('registered Free Chat routes with real user quota, admission queue and 
     }
     expect(m.execute).toHaveBeenCalledTimes(2);
     expect(m.execute.mock.calls.map(call => call[1].provider)).toEqual(['GROQ', 'GROQ']);
+  });
+  it('counts 25 unique successful turns, ignores a replay, and blocks only the 51st', async () => {
+    const send = route('/api/chat/navbharat');
+    const sibling = route('/api/chat/navbharatai');
+    for (let n = 1; n <= 24; n++) {
+      const res = new ResponseFixture();
+      await send(request(n, { message: `Unique question ${n}`, stream: true }), res);
+      expect(res.chunks.join('')).toContain('A synthetic useful answer.');
+      expect(res.chunks.join('')).toContain('[DONE]');
+    }
+    const siblingRes = new ResponseFixture();
+    await sibling(request(25, { message: 'Unique question 25', stream: true }), siblingRes);
+    expect(siblingRes.chunks.join('')).toContain('[DONE]');
+    expect(await status()).toMatchObject({ limit: 50, used: 25, reserved: 0, remaining: 25, inProgress: false });
+    const replay = new ResponseFixture();
+    await send(request(1, { message: 'Unique question 1 again', stream: true }), replay);
+    expect(replay.statusCode).toBe(429);
+    expect(replay.body.code).toBe('FREE_ANSWER_DUPLICATE');
+    expect(await status()).toMatchObject({ used: 25, remaining: 25, inProgress: false });
+    for (let n = 26; n <= 50; n++) {
+      const res = new ResponseFixture();
+      await send(request(n, { message: `Unique question ${n}`, stream: true }), res);
+      expect(res.chunks.join('')).toContain('[DONE]');
+      expect(res.chunks.join('')).toContain('A synthetic useful answer.');
+    }
+    expect(await status()).toMatchObject({ used: 50, remaining: 0, inProgress: false });
+    const blocked = new ResponseFixture();
+    await send(request(51, { message: 'One past the shared ceiling', stream: true }), blocked);
+    expect(blocked.statusCode).toBe(429);
+    expect(blocked.body.code).toBe('FREE_ANSWER_DAILY_LIMIT');
+    expect(await status()).toMatchObject({ used: 50, remaining: 0 });
+    expect(await status('another-ordinary-user')).toMatchObject({ used: 0, remaining: 50 });
+  });
+  it('a provider fallback still charges the logical answer once', async () => {
+    m.execute.mockRejectedValueOnce(new FreeChainProviderError('TIMEOUT'));
+    const res = new ResponseFixture();
+    await route()(request(1, { stream: true }), res);
+    expect(res.chunks.join('')).toContain('A synthetic useful answer.');
+    expect(m.execute.mock.calls.length).toBeGreaterThan(1);
+    expect(await status()).toMatchObject({ used: 1, remaining: 49, reserved: 0, inProgress: false });
   });
   it('preserves a requested script through real-route follow-ups and provider fallback', async () => {
     const history: Array<{ sender: string; text: string }> = [];

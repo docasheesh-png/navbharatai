@@ -183,6 +183,8 @@ export interface PriceQuote {
   readonly evidenceRef: string;
 }
 export interface BudgetAuthorization {
+  /** Trusted durable policy mode. Uncapped removes only the daily money ceiling. */
+  readonly budgetMode?: 'capped' | 'uncapped';
   readonly id: string;
   readonly principalId: string;
   readonly tenantId: string;

@@ -91,6 +91,21 @@ function simpleCommands(command: string): string[][] {
   return parts;
 }
 
+/** A deliberately narrow read-only classification using this module's existing tokenization.
+ * Absence from shellWriteTargets is NOT proof of a read. Unknown commands, shell expansion,
+ * compound commands, redirects and reader options that can execute/write never receive this exemption. */
+export function isPlainReadCommand(command: string): boolean {
+  if (!command || /[$`\\<>&\n]/.test(command)) return false;
+  const commands = simpleCommands(command);
+  if (commands.length !== 1) return false;
+  const [name, ...args] = commands[0];
+  if (!['rg', 'grep', 'cat', 'head', 'tail', 'ls', 'wc', 'stat', 'file', 'du', 'pwd'].includes(name)) return false;
+  if (name === 'rg' && args.some(a => /^(?:--pre|--hostname-bin)(?:=|$)/.test(a))) return false;
+  // file uses getopt_long, so unique abbreviations such as --comp also compile/write.
+  if (name === 'file' && args.some(a => /^-[^-]*C/.test(a) || (a.startsWith('--') && a.length > 2 && '--compile'.startsWith(a.split('=')[0])))) return false;
+  return true;
+}
+
 /** Every workspace file a command writes, as far as the shell's own syntax says. PURE. */
 export function shellWriteTargets(command: string): string[] {
   const found = new Set<string>();

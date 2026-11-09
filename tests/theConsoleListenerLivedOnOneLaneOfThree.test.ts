@@ -38,6 +38,7 @@ import {
   browsePageScript,
   browseConsoleCaptureEnabled,
   BROWSER_DAEMON_SCRIPT,
+  BROWSER_ACTION_SCRIPT, SCREENSHOT_CDP_SCRIPT, SCREENSHOT_SCRIPT, uiScanScript,
 } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
 import { auditSummaryClaims } from '../src/server/AgentV3/claimAudit';
 import { extractPageRoutes } from '../src/server/AgentV3/PageRouteCheck';
@@ -178,24 +179,34 @@ describe('lane C listens', () => {
 // put pre-repair errors inside the verdict's 3-minute window and report a fixed bug as surviving —
 // trading this problem for a worse one. So each lane is listed with its answer and its reason.
 describe('browser-lane census — a new lane must decide about the console', () => {
-  const LANES: Array<{ name: string; records: boolean; why: string }> = [
-    { name: 'BROWSER_DAEMON_SCRIPT', records: true, why: 'the agent-driven CDP session — the original recorder' },
-    { name: 'browsePageScript', records: true, why: 'the platform navigation on essentially every build — this autopsy' },
-    { name: 'SCREENSHOT_CDP_SCRIPT', records: true, why: 'connects to the daemon, so the daemon listeners already apply' },
-    { name: 'BROWSER_ACTION_SCRIPT', records: true, why: 'connects to the daemon, same' },
-    { name: 'SCREENSHOT_SCRIPT', records: false, why: 'a picture, taken at an arbitrary moment; its errors would land in the verdict window un-anchored to any repair' },
-    { name: 'shotBody (visual-edit element map)', records: false, why: 'same — a mid-build capture, deliberately not evidence about the finished app' },
+  const LANES: Array<{ name: string; script: string; records: boolean; why: string }> = [
+    { name: 'BROWSER_DAEMON_SCRIPT', script: BROWSER_DAEMON_SCRIPT, records: true, why: 'the agent-driven CDP session — the original recorder' },
+    { name: 'browsePageScript', script: browsePageScript(URL_UNDER_TEST), records: true, why: 'the platform navigation on essentially every build — this autopsy' },
+    { name: 'SCREENSHOT_CDP_SCRIPT', script: SCREENSHOT_CDP_SCRIPT, records: true, why: 'connects to the daemon, so the daemon listeners already apply' },
+    { name: 'BROWSER_ACTION_SCRIPT', script: BROWSER_ACTION_SCRIPT, records: true, why: 'connects to the daemon, same existing console owner' },
+    { name: 'SCREENSHOT_SCRIPT', script: SCREENSHOT_SCRIPT, records: true, why: 'existing independent screenshot has its own recorder; session proof is paint-anchored' },
+    { name: 'uiScanScript', script: uiScanScript(URL_UNDER_TEST), records: true, why: 'BR1956 observes the existing action daemon, never a separate mid-build browser' },
   ];
 
   it('every browser lane in the actuator is accounted for', () => {
-    // Each `const X = \`` / `function X(` that carries a chromium launch or a CDP connect.
-    const declared = (ACTUATOR_SRC.match(/chromium\.(launch|connectOverCDP)\(/g) ?? []).length;
-    expect(declared).toBe(LANES.length);
+    // BR1956 centralizes three logical lanes on ONE owner. Census both direct transport owners
+    // and helper consumers: a new launch OR a new shared-owner lane must force an explicit decision.
+    const declared = (ACTUATOR_SRC.match(/chromium\s*\.\s*(launch|connectOverCDP)\s*\(/g) ?? []).length;
+    expect(declared).toBe(4); // daemon, independent browse, independent screenshot, shared CDP owner
+    expect((ACTUATOR_SRC.match(/persistentBrowserPageJs\(/g) ?? []).length).toBe(4); // definition +3 consumers
+    for (const lane of LANES) expect((lane.script.match(/chromium\s*\.\s*(launch|connectOverCDP)\s*\(/g) ?? []).length, lane.name).toBe(1);
+    expect(ACTUATOR_SRC).toContain('const shotBody = uiScanScript(url)');
+    expect(ACTUATOR_SRC).toMatch(/await this\._ensureBrowserDaemon\(sandbox, workspaceId\);\s*const shotBody = uiScanScript\(url\)/);
   });
 
   it('the lanes that record really do, and the ones that do not are named', () => {
     const recording = LANES.filter((l) => l.records);
-    expect(recording.length).toBe(4);
+    expect(recording.length).toBe(6);
+    for (const lane of recording) expect(/connectOverCDP|\.on\(\s*'pageerror'/.test(lane.script), lane.name).toBe(true);
+    expect(uiScanScript(URL_UNDER_TEST)).toContain('chromium.connectOverCDP(');
+    expect(uiScanScript(URL_UNDER_TEST)).not.toContain('chromium.launch(');
+    expect(SCREENSHOT_SCRIPT).toMatch(/\.on\(\s*'pageerror'/);
+    expect(SCREENSHOT_SCRIPT).toMatch(/if\(painted\)\s*recSessionExisted\(\)/);
     for (const lane of LANES) expect(lane.why.length).toBeGreaterThan(20);
   });
 });

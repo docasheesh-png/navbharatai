@@ -96,7 +96,7 @@ describe('2 · the explorer presses a light/dark switch until the colours change
     }
     // PIN WIDENED (autopsy ca99778e): the call also carries the user's own words over a chip — and that CUSTOMISE
     // instruction keeps the same switch sentence, for every simple template.
-    expect(read('src/server/routes/agentv3.ts')).toContain('buildPrompt = goldenBuildPrompt(golden, buildPrompt, chipExtensionTextOf(prompt));');
+    expect(read('src/server/routes/agentv3.ts')).toContain("buildPrompt = goldenBuildPrompt(golden, buildPrompt, chipExtensionTextOf(prompt), { mustAuthorCode: surplusAdmissionDiag?.code === 'SURPLUS_ADMITTED' });");
     for (const g of GOLDEN_SCAFFOLDS.filter((x) => x.tier === 'simple')) {
       expect(goldenBuildPrompt(g, 'x', 'UP Police ke liye'), g.id).toContain("KEEP the template's own working controls — above all its light/dark switch (ThemeToggle in src/theme.tsx");
     }

@@ -1,3 +1,4 @@
+import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../src/server/AgentV3/steeringHandoff';
 import { proSandboxFee, proSandboxFeeFields } from '../src/server/AgentV3/proSandboxFee';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
@@ -218,8 +219,9 @@ async function runCaller(options: { files: Record<string, string>; replies?: str
   const runOne = vi.fn(runOneShot);
   const fullRunner = vi.fn(async () => ({ ok: false, summary: 'Synthetic runner retained the fallback category.', steps: 0, usage: accumulatedUsage, billedUsd: billedAmountUsd(accumulatedUsage, 'off') }));
   const env = {
+    originalPrompt: 'Build a synthetic note display.', steeringHandoff: createSteeringHandoff(() => [], () => true), STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord,
     prompt: 'Build a synthetic note display.', workspaceId: 'synthetic-workspace', framework: 'vite-react',
-    accumulatedUsage, abort, buildDiag, writtenFiles, finishingPaths,
+    accumulatedUsage, abort, buildDiag, writtenFiles, finishingPaths, sandboxUnavailable: false,
     laneFence: fence, runSimpleBuild: runSimple, runOneShot: runOne,
     fastGenerate: generate, fastPreview: preview, fastVerify: verify, fastRepair: repair,
     fastWrite: rawWrite, fastLog: (msg: string) => events.push({ type: 'narration', text: msg }),

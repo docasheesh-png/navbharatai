@@ -1,3 +1,4 @@
+import { listProfessionals } from '../../professionals/registry';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from '../../../../tests/helpers/routeTestUtils';
 const m = vi.hoisted(() => ({ verify: vi.fn(), identity: vi.fn(), gate: vi.fn(), engine: vi.fn(), document: vi.fn(), vision: vi.fn(), charge: vi.fn(), increment: vi.fn() }));
@@ -55,9 +56,9 @@ describe('professional Free product early ingress', () => {
     await route()(req({ message: 'read image', fileAttachments: [{ type: 'image/png', name: 'photo.png', base64: 'AA==' }] }), res);
     expect(res.body.reply).toBe('answer'); expect(m.vision).toHaveBeenCalledOnce(); expect(m.verify).not.toHaveBeenCalled();
   });
-  it('image-generation guidance is not enrolled in the text gateway', async () => {
+  it('image-generation guidance does not dispatch text or image inference', async () => {
     const res = mockRes(); await route()(req({ message: 'generate an image of a cat' }), res);
-    expect(res.statusCode).toBe(200); expect(m.verify).not.toHaveBeenCalled(); expect(m.engine).not.toHaveBeenCalled(); expect(m.vision).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(200); expect(m.engine).not.toHaveBeenCalled(); expect(m.vision).not.toHaveBeenCalled();
   });
   it('a changed authentication principal cannot borrow the earlier professional gate or profile identity', async () => {
     m.verify.mockResolvedValueOnce('different-user'); const res = mockRes();
@@ -78,3 +79,25 @@ vi.mock('../../lib/freeAnswerQuota', () => ({
   withFreeAnswerQuota: async (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(),
   markFreeAnswer: () => {}, markFreeAnswerProviderFailure: () => {}, assertFreeAnswerActive: () => {}, freeAnswerSignal: () => undefined,
 }));
+
+describe('owner fixed chain enrolls every professional entitlement', () => {
+  it.each(['free', 'paid'] as const)('overrides stale cohort and surface routing for %s without changing wallet billing', async tier => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'off'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'chat');
+    m.gate.mockResolvedValue({ ...freeGate, tier, billableFraction: tier === 'paid' ? 1 : 0 });
+    m.engine.mockImplementationOnce(async () => {
+      expect(currentInferenceGatewayContext()).toMatchObject({ principalId: 'verified-user', surface: 'professional', policyKey: 'professional:teacher_ai', funding: tier === 'paid' ? 'existing-professional' : 'platform-free-fallback' });
+      return { reply: 'fixed answer', spend: {} };
+    });
+    const res = mockRes(); await route()(req({ message: 'explain Newton laws', role: 'admin', funding: 'forged' }), res);
+    expect(res.statusCode).toBe(200); expect(res.body.reply).toBe('fixed answer'); expect(m.verify).toHaveBeenCalledOnce();
+    expect(m.engine.mock.calls[0][5].fixedTextChainIngress).toBe(true);
+    expect(m.charge.mock.calls[0][1].billableFraction).toBe(tier === 'paid' ? 1 : 0);
+  });
+});
+
+it.each(listProfessionals().map(p => p.id))('fixed chain boundary covers registered specialist %s', async id => {
+  vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'off');
+  m.engine.mockImplementationOnce(async () => { expect(currentInferenceGatewayContext()).toMatchObject({ surface: 'professional', policyKey: `professional:${id}`, funding: 'platform-free-fallback' }); return { reply: 'Specialist answer', spend: {} }; });
+  const res = mockRes(); await route()(mockReq({ params: { id }, body: { message: 'Please explain the next steps in detail', role: 'admin' } }), res);
+  expect(res.statusCode).toBe(200); expect(m.engine).toHaveBeenCalledOnce(); expect(m.verify).toHaveBeenCalledOnce();
+});

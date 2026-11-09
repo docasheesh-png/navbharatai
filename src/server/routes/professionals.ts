@@ -46,11 +46,11 @@ setInterval(() => professionalRecall.sweep(Date.now()), 60 * 60 * 1000);
 
 /** The authenticated Free product gate, not a namespace or client-supplied tier, enrolls a turn. */
 async function withFreeProfessionalGateway<T>(req: Request, input: { selected: boolean; uid: string | null; professionalId: string; deadlineAtMs: number; signal: AbortSignal }, run: () => Promise<T>): Promise<T> {
-  if (!input.selected || !inferenceGatewayEnabled('professional')) return run();
+  if ((!input.selected && !fixedTextChainEnabled()) || (!inferenceGatewayEnabled('professional') && !fixedTextChainEnabled())) return run();
   return runWithAuthenticatedInferenceGatewayRequest(req, () => runWithInferenceGatewayContext({
     principalId: input.uid ?? 'unauthenticated', tenantId: input.uid ?? 'unauthenticated', surface: 'professional',
     policyKey: `professional:${input.professionalId}`, qualityTier: 'clinical', dataClass: 'health',
-    funding: 'platform-free-fallback', mode: strictFreeRequired() ? 'strict-free' : 'free-first-authorized-paid',
+    funding: input.selected ? 'platform-free-fallback' : 'existing-professional', mode: strictFreeRequired() ? 'strict-free' : 'free-first-authorized-paid',
     deadlineAtMs: input.deadlineAtMs, signal: input.signal,
   }, () => runWithInferenceGatewayEntryAdmission(run)));
 }
@@ -289,7 +289,7 @@ export function registerProfessionalsRoutes(app: Express): void {
         const quotaSignal = freeAnswerSignal(req);
         const signal = quotaSignal ? AbortSignal.any([controller.signal, quotaSignal]) : controller.signal;
         return runWithInferenceScope(gate.tier === 'free' ? 'free-modules' : 'paid-professional', () =>
-          withFreeProfessionalGateway(req, { selected: countedFree, uid: verifiedUserId, professionalId: config.id, deadlineAtMs, signal }, run));
+          withFreeProfessionalGateway(req, { selected: gate.tier === 'free', uid: verifiedUserId, professionalId: config.id, deadlineAtMs, signal }, run));
       };
       if (countedFree) await withFreeAnswerQuota(req, res, dispatch, { uid: verifiedUserId, surface: 'professionals' });
       else await dispatch();

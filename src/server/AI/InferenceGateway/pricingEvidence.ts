@@ -2,7 +2,7 @@
 import type { AIProviderResponse } from '../Router/ProviderTypes';
 import type { DispatchClaim } from './executor';
 import { evidenceBinding } from './profiles';
-import { readGatewayTextUsage } from './textTransport';
+import { readGatewayTextTariffUsage, readGatewayTextUsage } from './textTransport';
 import { readGatewayOpenRouterUsage } from './openRouterTransport';
 import { readGatewayVisionUsage } from './visionTransport';
 
@@ -35,4 +35,22 @@ export function isGatewayFreePricingProof(proof: unknown, expected: Expected): p
   return !!record && !!record.dispatchBinding && record.provider === expected.provider && record.model === expected.model
     && record.logicalRequestId === expected.logicalRequestId
     && record.inputTokens === expected.usage?.inputTokens && record.outputTokens === expected.usage?.outputTokens;
+}
+
+/** Commercial measured tariff evidence, not a supplier invoice/reconciliation receipt. */
+export interface GatewayMeteredPricingProof { readonly kind: 'gateway-metered-tariff'; }
+const metered = new WeakMap<object, { provider: string; model: string; inputTokens: number; outputTokens: number;
+  logicalRequestId: string; physicalAttemptId: string; principalId: string; tariffNanoUsd: number; rateCardVersion: string }>();
+export function createGatewayMeteredPricingProof(result: AIProviderResponse, claim: DispatchClaim): GatewayMeteredPricingProof | undefined {
+  const usage = readGatewayTextTariffUsage(result, claim);
+  if (!usage || !result.usage || result.provider !== claim.binding.providerId || result.model !== claim.binding.modelId) return undefined;
+  const proof: GatewayMeteredPricingProof = Object.freeze({ kind: 'gateway-metered-tariff' });
+  metered.set(proof, Object.freeze({ ...usage, provider: result.provider, model: result.model, ...result.usage })); return proof;
+}
+export function readGatewayMeteredPricingProof(proof: unknown, expected: Expected) {
+  if (!proof || typeof proof !== 'object') return undefined;
+  const record = metered.get(proof);
+  return record && record.provider === expected.provider && record.model === expected.model
+    && record.logicalRequestId === expected.logicalRequestId && record.inputTokens === expected.usage?.inputTokens
+    && record.outputTokens === expected.usage?.outputTokens ? record : undefined;
 }

@@ -1,0 +1,16 @@
+{
+  "report": "BR1957",
+  "evidence": "L04/L05 capped draft previews, not delivered full source",
+  "previews": [
+    {
+      "responsePreview": "<<<FILE src/hooks/useCityStorage.ts>>>\nimport { useState, useEffect } from 'react';\nimport type { SelectedCity } from '../types';\n\nconst STORAGE_KEY = 'panchang_selected_city';\n\nexport function useCityStorage() {\n  const [selectedCity, setSelectedCity] = useState<SelectedCity | null>(null);\n  const [loading, setLoading] = useState(true);\n\n  useEffect(() => {\n    try {\n      const stored = localStorage.getItem(STORAGE_KEY);\n      if (stored) {\n        const parsed = JSON.parse(stored);\n        setSelectedCity(parsed);\n      }\n    } catch (error) {\n      console.error('Failed to parse stored city data:', error);\n    } finally {\n      setLoading(false);\n    }\n  }, []);\n\n  const saveCity = (city: SelectedCity) => {\n    try {\n      localStorage.setItem(STORAGE_KEY, JSON.stringify(city));\n      \u2026[truncated]",
+      "responseChars": 1203,
+      "finishReason": "end_turn"
+    },
+    {
+      "responsePreview": "<<<FILE src/hooks/useTheme.ts>>>\nimport { useState, useEffect } from 'react';\n\ntype Theme = 'light' | 'dark';\n\nexport const useTheme = (): [Theme, () => void] => {\n  const [theme, setTheme] = useState<Theme>('light');\n\n  useEffect(() => {\n    const savedTheme = localStorage.getItem('panchang-theme') as Theme | null;\n    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;\n    \n    if (savedTheme) {\n      setTheme(savedTheme);\n      document.documentElement.setAttribute('data-theme', savedTheme);\n    } else if (systemPrefersDark) {\n      setTheme('dark');\n      document.documentElement.setAttribute('data-theme', 'dark');\n    }\n  }, []);\n\n  const toggleTheme = () => {\n    const newTheme = theme === 'light' ? 'dark' : 'light';\n    setTheme(newTheme);\n    localS\u2026[truncated]",
+      "responseChars": 964,
+      "finishReason": "end_turn"
+    }
+  ]
+}

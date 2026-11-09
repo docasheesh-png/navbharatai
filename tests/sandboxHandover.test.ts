@@ -153,25 +153,25 @@ describe('the extrapolation is kept apart from the measurement', () => {
 });
 
 describe('the headline tells the truth even when the truth is "do not build this"', () => {
-  it('states the post-build share of billed life', () => {
+  it('labels workspace joins as timing proxies rather than billed life', () => {
     const h = handoverHeadline(tallyHandover([clean]));
-    expect(h).toContain('post-build holding is 60% of billed sandbox life');
-    expect(h).toContain('0.25h of that belongs to frontend-only apps');
+    expect(h).toContain('sampled timing proxies, not provider-billed intervals or measured savings');
+    expect(h).toContain('0.25h of the latter is associated with frontend-only manifests');
   });
 
   it('names the excluded builds instead of quietly dropping them', () => {
     const h = handoverHeadline(tallyHandover([clean, { ...clean, workspaceId: 'ws-z', sandboxPausedAt: undefined }]));
-    expect(h).toContain('1 of 2 builds could not be measured and are excluded, never counted as zero');
+    expect(h).toContain('1 of 2 builds could not be paired and are excluded, never counted as zero');
   });
 
   it('says plainly when nothing could be measured', () => {
     const h = handoverHeadline(tallyHandover([{ workspaceId: 'a' }]));
-    expect(h).toContain('No builds could be measured yet (1 looked at)');
+    expect(h).toContain('No builds could be paired yet (1 looked at)');
   });
 
-  it('labels the monthly figure as an extrapolation, right where it is stated', () => {
+  it('does not sell the legacy monthly projection as savings', () => {
     const day2 = { ...clean, workspaceId: 'ws-b', startedAt: T0 + 24 * HOUR, endedAt: T0 + 24 * HOUR + 10 * MIN, sandboxUpdatedAt: T0 + 24 * HOUR + 10 * MIN, sandboxPausedAt: T0 + 24 * HOUR + 25 * MIN };
-    expect(handoverHeadline(tallyHandover([clean, day2]))).toMatch(/an EXTRAPOLATION from this window, not a bill/);
+    expect(handoverHeadline(tallyHandover([clean, day2]))).toMatch(/legacy monthly projection is not a savings forecast/);
   });
 });
 

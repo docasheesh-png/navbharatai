@@ -101124,3 +101124,14 @@ The signed-in ledger already charges one successful logical answer once (50/day 
 
 ## 2026-11-09 — BR1958 current-main integration, I02/Q2601
 Independentreview passed1e625c05e; parent API dirty not reproduced by actual cleanmerge-tree/currentmain5fc61f1 and ordinarymergeb5596c0d (4130previewCSS/4131dailybadge). No manualconflict resolution. Actual newhead prerequisite frontend gate exposed4TS2769errors in incomingmain's DOM Event callback/boolean permission interface; real-hook hiddenEvent red expected1fetch/got3. F13 stable zero-argument focus/visibility callback with identical cleanup preserves explicit hidden settlement/invalidation refresh(true), timerpolling, quota/routing/servercounts and all12reviewed BR classes. I02 is an integration inspection item, not historicalBR1958failure; ledger35=29pending(18report2inspection9review),2priorfixed4blocked. AddonlyQ2601; keepallpriorowners/debt/Q2371/PR4109 and26priorclosedIDs unchanged. Earliergreen belongs1e625only; fullnewheadactualCI+6serialprivateemulators/mutations required, parentreview+merge, noBR1959.
+
+## 2026-11-09 — BR1959 autopsy (school management app, succeeded): fast-lane hand-off classes
+Owner t307u sequential audit, BR1959 only (boundary 1951..2105 frozen). This was a successful build. The fast lane was handed to the full builder at 379 s because of three things a deterministic pass could have fixed, and it shipped a phone-overflowing kit header and log-only create forms. Ledger: [docs/build-report-autopsy-BR1959.md](docs/build-report-autopsy-BR1959.md), plus [evidence for all 413 issues, 87 calls, 19 commands and 41 hashes](docs/build-report-autopsy-BR1959-evidence.json).
+- **F1.** Before `tsc`, the fast lane now adds undeclared packages to package.json at their pinned range and installs them. The preview's reconcile now reads the disk manifest.
+- **F2.** `import type` for contract types that are used but never imported.
+- **F3.** A nested wrapper that shadows its import and calls itself is re-pointed at an aliased import. This runs before the endgame's unused-import removal. A prompt rule forbids the shape.
+- **F4.** The kit's `.nb-header-actions` and `.nb-chips` may shrink; seed history is regenerated.
+- **F5.** The authenticity scan reports every log-only handler, including inline `}}` ones.
+- **F6.** Journey routes see a page wrapped in a route guard.
+
+Queue: Q-2602…Q-2611 (seven implemented, three 🟡 blocked: log-only-form outcome, react-router ^6 pin, summary-claim corrections). This commit also closes the 29 BR1958 rows resolved by #4132. Its four blockers, Q-2371 and the PR4109 row stay open. The historical app is not claimed repaired.

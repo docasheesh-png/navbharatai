@@ -100,9 +100,10 @@ describe('output cap and history trim', () => {
     expect(effectiveMaxOutput(c, 'cheapinf', 1024, 'fast')).toBe(1024);
     expect(effectiveMaxOutput(freeChainConfig({ FREE_CHAIN_OUTPUT_CAP_ENABLED: 'off' }), 'llama8b', 1024, 'normal')).toBe(1024);
   });
-  it('keeps the last N turns', () => {
+  it('keeps opening user facts and the latest turns inside the same budget', () => {
     const h = Array.from({ length: 10 }, (_, i) => ({ sender: 'user', text: String(i) }));
-    expect(trimHistory(on(), h).map((t: any) => t.text)).toEqual(['4', '5', '6', '7', '8', '9']);
+    expect(trimHistory(on(), h).map((t: any) => t.text)).toEqual(['0', '1', '6', '7', '8', '9']);
+    expect(trimHistory(on(), h.slice(0, 6)).map((t: any) => t.text)).toEqual(['0', '1', '2', '3', '4', '5']);
     expect(trimHistory(freeChainConfig({ FREE_CHAIN_HISTORY_TRIM_ENABLED: 'off' }), h)).toBe(h);
   });
 });
@@ -126,6 +127,10 @@ describe('stable prefix + compact prompt', () => {
     expect(out).not.toContain('GREETING map');
     for (const rule of ['Do NOT generate code', 'never infer religion', 'MIRROR THE USER', 'NavBharatAI Pro']) expect(out).toContain(rule);
     expect(compactCore(true)).toContain('ANSWER EVERY MESSAGE (MANDATORY)');
+    expect(compactCore(true)).toContain('latest user message is the only question');
+    expect(compactCore(true)).toContain('Roman Hinglish stays Roman Hinglish');
+    expect(compactCore(true)).toContain('Dr Asheesh and his team');
+    expect(compactCore(true)).toContain('Do not invent age');
     expect(Buffer.byteLength(compactCore(true)) / 4).toBeLessThan(1000);
   });
   it('unknown prompt shapes and both flags off are a no-op', () => {

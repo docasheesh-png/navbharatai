@@ -95,8 +95,9 @@ export function missingProLine(replyText: string, message: string, replyLanguage
 }
 
 /** The app-navigation block is only for messages about NavBharatAI itself (under FREE_CHAT_ANSWER_ALL). */
+/** Product navigation only. Ordinary words such as history, plan, pro, mode, or error are not a request for the app manual. */
 export function isAboutNavBharatAI(message: string): boolean {
-  return /navbharat|nav\s*bharat|नवभारत|\bmode\b|\bsetting|\bwallet\b|\bpro\b|\bhistory\b|\blogin\b|\bsign\s*in\b|\bbutton\b|\btab\b|\bscreen\b|\bmenu\b|\bpublish|\btemplate|\bthis app\b|is app|इस ऐप|\bfeature|\bplan\b|\bsubscription|\brecharge|\bpayment|\brefund|\bsupport\b|\bbug\b|\berror\b|kaam nahi|not working/i
+  return /nav\s*bharat|नवभारत|image generator|keys?\s*(?:&|and)\s*secrets|\bwallet\b|\brecharge\b|\bsubscription\b|sign[\s-]*in|\blogin\b|\bpublish\b|\btemplate\b|\bthis app\b|is app|इस ऐप/i
     .test(String(message ?? ''));
 }
 

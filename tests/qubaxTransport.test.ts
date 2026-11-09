@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Firestore } from 'firebase-admin/firestore';
-import { qubaxChatBinding, qubaxOwnerDispatch, qubaxReviewedApprovalCeiling, runApprovedQubaxChat, type QubaxChatOptions } from '../src/server/lib/qubax';
+import { qubaxChatBinding, qubaxReviewedApprovalCeiling, runApprovedQubaxChat, type QubaxChatOptions } from '../src/server/lib/qubax';
 import * as selector from '../src/server/lib/qubaxSelector';
 const env = { QUBAX_ENABLED: '1', QUBAX_API_KEY: 'synthetic-never-live-qubax-secret' };
 function fixture(stream = false) {
@@ -72,7 +72,7 @@ describe('Qubax exact evidence-bound single dispatch', () => {
     await expect(runApprovedQubaxChat(f.options, env)).rejects.toMatchObject({ code: 'QUBAX_APPROVAL_REVOKED', dispatched: false });
     expect(network).not.toHaveBeenCalled(); expect(f.releaseUndispatched).toHaveBeenCalledOnce();
   });
-  it.each([429, 503])('never retries %s or refunds ambiguous supplier liability', async status => {
+  it.each([401, 402, 403, 429, 500, 503])('never retries %s or refunds ambiguous supplier liability', async status => {
     const f = fixture(); network.mockResolvedValue(new Response('untrusted error', { status }));
     await expect(runApprovedQubaxChat(f.options, env)).rejects.toMatchObject({ code: 'QUBAX_HTTP_ERROR', status, dispatched: true });
     expect(network).toHaveBeenCalledOnce(); expect(f.releaseUndispatched).not.toHaveBeenCalled();
@@ -163,35 +163,5 @@ describe('Qubax exact evidence-bound single dispatch', () => {
   it('accepts logically identical gateway fields regardless of Firestore key order', () => {
     const f = fixture(), a = f.approval(); a.gateway = Object.fromEntries(Object.entries(a.gateway).reverse());
     expect(qubaxReviewedApprovalCeiling(a, { uid: 'owner', binding: f.binding, selection: f.selection, privateTurn: true, healthTurn: true, now: Date.now() })).toBe(1000);
-  });
-});
-
-describe('owner-level Qubax enable', () => {
-  const ownerEnv = { ...env, QUBAX_MODEL: 'qubax-text', QUBAX_MAX_USD_PER_REQUEST: '0.02' };
-  const history = [
-    { role: 'user', content: 'Earlier fact: my name is Meera.' },
-    { role: 'assistant', content: 'Noted.' },
-    { role: 'user', content: 'What is my name?' },
-  ];
-  it('does not authorize a call without a model or inside the one-dollar ceiling', () => {
-    expect(qubaxOwnerDispatch(env)).toBeNull();
-    expect(qubaxOwnerDispatch({ ...ownerEnv, QUBAX_MODEL: '' })).toBeNull();
-    expect(qubaxOwnerDispatch({ ...ownerEnv, QUBAX_MODEL: 'has space' })).toBeNull();
-    expect(qubaxOwnerDispatch({ ...ownerEnv, QUBAX_MAX_USD_PER_REQUEST: '1.01' })).toBeNull();
-    expect(qubaxOwnerDispatch({ ...ownerEnv, QUBAX_MAX_USD_PER_REQUEST: '0' })).toBeNull();
-  });
-  it('sends the whole history once to the owner model and reserves only the server cap', async () => {
-    const db = { doc: vi.fn(), runTransaction: vi.fn() };
-    const reserve = vi.fn().mockResolvedValue({ releaseUndispatched: vi.fn() });
-    network.mockResolvedValue(new Response(JSON.stringify({ model: 'qubax-text', choices: [{ index: 0, message: { content: 'Meera.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 20, completion_tokens: 2 } }), { headers: { 'content-type': 'application/json' } }));
-    const result = await runApprovedQubaxChat({ db: db as unknown as Firestore, uid: 'signed-in-user', requestId: 'turn-2', privateTurn: true, healthTurn: false,
-      body: { messages: history, max_tokens: 128, stream: false }, signal: new AbortController().signal, reserve }, ownerEnv);
-    expect(result).toMatchObject({ kind: 'response', content: 'Meera.', model: 'qubax-text' });
-    expect(db.doc).not.toHaveBeenCalled();
-    expect(reserve).toHaveBeenCalledExactlyOnceWith(20_000_000);
-    const wire = JSON.parse(String(network.mock.calls[0][1]?.body));
-    expect(wire.model).toBe('qubax-text');
-    expect(wire.messages).toEqual(history);
-    expect(network).toHaveBeenCalledOnce();
   });
 });

@@ -188,6 +188,7 @@ import { collectionsNeedingRetention } from '../lib/DataRetentionManager';
  * warning counts only what a human still has to decide.
  */
 const GROWING_COLLECTIONS: readonly string[] = [
+  'qubax_chat_approvals', 'qubax_review_audit', // Retained one-use approval fences and independent-review import receipts.
   'session_revocations', // Retained account-session security cutoffs; never silently purged.
   'free_answer_quota', // Shared Free answer admissions; bounded eight-day retention.
   'app_builds', 'build_sessions', 'build_sessions_v2', 'build_history_v2', 'user_build_history', 'user_costs', 'server_logs',

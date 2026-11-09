@@ -1,23 +1,22 @@
-import { createHash } from 'node:crypto';
-import { readTestChatAction, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_MAX_RESPONSE_CHARS,
+import { readTestChatAction, TEST_CHAT_MAX_MODEL_CHARS, TEST_CHAT_MAX_RESPONSE_CHARS,
   type TestChatAction, type TestChatReply, type TestChatStatus } from '../../lib/testChatBot';
-import { qubaxConfig, qubaxOwnerDispatch, QubaxError, runApprovedQubaxChat } from './qubax';
+import { qubaxConfig, QubaxError, runApprovedQubaxChat } from './qubax';
 import { getServerDb } from './serverDb';
-import { assertAiAvailable } from './aiMaintenance';
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { freeChainConfig } from '../AI/FreeChain/config';
 import { FreeChainStore } from '../AI/FreeChain/store';
+import { createTestChatPolicyFence, assertTestChatMaintenanceAtClaim } from './testChatPolicyFence';
+import { testChatPayload, testChatRequestId, testChatUid } from './testChatPayload';
 import { reserveMonthly, settleMonthly } from '../AI/FreeChain/masterPlan';
 
 export class TestChatUnavailable extends Error {
-  constructor(readonly reason: 'disabled' | 'configuration' | 'storage' | 'approval-or-budget' | 'invalid' | 'unconfirmed', readonly status = 503) { super(reason); }
+  constructor(readonly reason: 'disabled' | 'configuration' | 'storage' | 'approval-or-budget' | 'invalid' | 'unconfirmed' | 'catalog' | 'approval' | 'budget' | 'capacity' | 'selection' | 'capability', readonly status = 503, readonly diagnostic?: string) { super(reason); }
 }
 /** Reading this status never probes the provider, performs inference or reveals a credential. */
 export function testChatStatus(): TestChatStatus {
   let configured = false, enabled = false;
   try { const cfg = qubaxConfig(); configured = !!cfg.apiKey; enabled = cfg.enabled; } catch { /* Invalid config fails closed. */ }
-  const owner = qubaxOwnerDispatch();
-  return { providers: [{ id: 'qubax', label: 'Qubax', configured, enabled, model: owner?.modelId ?? null }], approvalRequired: !owner, noFallback: true };
+  return { providers: [{ id: 'qubax', label: 'Qubax', configured, enabled, model: null }], approvalRequired: true, noFallback: true };
 }
 
 /** Fixed server-owned registry. Adding a provider requires its reviewed adapter and tests, not an arbitrary URL/key. */
@@ -32,26 +31,30 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
   const db = getServerDb();
   if (!db) throw new TestChatUnavailable('storage');
   const cfg = freeChainConfig();
-  if (cfg.errors.some(e => /PAID_DAILY_CAP|MONTHLY_CAP|PAID_PER_USER/.test(e))) throw new TestChatUnavailable('approval-or-budget');
-  const uid = `admin-test-chat:${createHash('sha256').update(actor).digest('hex')}`;
-  const requestId = `test-chat:${action.provider}:${action.requestId}`;
+  if (cfg.errors.some(e => /PAID_DAILY_CAP|MONTHLY_CAP|PAID_PER_USER/.test(e))) throw new TestChatUnavailable('budget', 409, 'budget-configuration');
+  const uid = testChatUid(actor);
+  const payload = testChatPayload(action);
+  const requestId = testChatRequestId(action);
   const budget = new FreeChainStore(db);
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(90_000)]);
   const startedAt = Date.now();
+  const policyFence = createTestChatPolicyFence();
   const revalidate = async () => {
     bounded.throwIfAborted();
-    await assertAiAvailable();
+    await policyFence.refresh();
     assertLegacyInferenceAllowed('admin-test-chat-bot');
     if (!qubaxConfig().enabled) throw new TestChatUnavailable('disabled');
   };
-  await revalidate();
   try {
+    await revalidate();
     const result = await providers[action.provider]({ db, uid, requestId, signal: bounded,
       // Arbitrary typed context is never downgraded to public by a checkbox or a keyword classifier.
       // The independent exact-payload review must cover both private and health data classes.
-      privateTurn: true, healthTurn: true,
-      body: { messages: action.messages, max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS, stream: false },
+      privateTurn: payload.privateTurn, healthTurn: payload.healthTurn, body: payload.body,
+      requireIndependentReview: true,
       revalidate,
+      validateFinalClaim: async tx => { await assertTestChatMaintenanceAtClaim(db, tx); policyFence.assertCurrent(); },
+      beforeHttpDispatch: () => { bounded.throwIfAborted(); policyFence.assertCurrent(); },
       reserve: async maximumNanoUsd => {
         await revalidate();
         if (!Number.isSafeInteger(maximumNanoUsd) || maximumNanoUsd <= 0) return null;
@@ -80,14 +83,30 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         } };
       },
     });
-    if (result.kind === 'skipped') throw new TestChatUnavailable('approval-or-budget', 409);
-    if (!result.content.trim() || result.content.length > TEST_CHAT_MAX_RESPONSE_CHARS || result.model.length > 200) throw new TestChatUnavailable('unconfirmed');
+    if (result.kind === 'skipped') {
+      const reasons: Record<string, TestChatUnavailable['reason']> = {
+        'qubax-disabled-or-unconfigured': 'configuration', 'qubax-configuration': 'configuration',
+        'qubax-capability-excluded': 'capability', 'qubax-capacity': 'capacity',
+        'qubax-price-or-quality-unverified': 'catalog', 'qubax-selection-claim-mismatch': 'selection',
+        'qubax-data-approval-or-ceiling-unavailable': 'approval', 'qubax-budget': 'budget',
+      };
+      const reason = reasons[result.reason];
+      throw new TestChatUnavailable(reason ?? 'unconfirmed', 409, reason ? result.reason : undefined);
+    }
+    if (!result.content.trim() || result.content.length > TEST_CHAT_MAX_RESPONSE_CHARS || result.model.length > TEST_CHAT_MAX_MODEL_CHARS) throw new TestChatUnavailable('unconfirmed');
     // A successful text response is not an invoice. The reviewed maximum stays reserved until reconciled.
     return { requestId: action.requestId, provider: action.provider, content: result.content, model: result.model,
-      latencyMs: Math.max(0, Date.now() - startedAt), ...(result.usage ? { usage: result.usage } : {}), noFallback: true };
+      latencyMs: Math.max(0, Date.now() - startedAt), ...(result.usage ? { usage: result.usage } : {}), ...(payload.synthetic ? { syntheticMatch: result.content.trim() === '4' } : {}), noFallback: true };
   } catch (error) {
     if (error instanceof TestChatUnavailable) throw error;
-    if (error instanceof QubaxError) throw new TestChatUnavailable('unconfirmed');
+    if (error instanceof QubaxError) {
+      // Fixed identifiers only. A response failure still has unknown liability and never permits automatic retry.
+      const diagnostic = error.status === 401 ? 'qubax-auth-401' : error.status === 403 ? 'qubax-auth-403'
+        : error.status === 402 ? 'qubax-payment-402' : error.status === 429 ? 'qubax-rate-429'
+        : error.status >= 500 ? 'qubax-upstream-5xx'
+        : ['QUBAX_CANCELLED', 'QUBAX_INVALID_RESPONSE', 'QUBAX_INCOMPLETE_STREAM', 'QUBAX_POLICY_BLOCKED', 'QUBAX_APPROVAL_REVOKED'].includes(error.code) ? error.code : 'qubax-unavailable';
+      throw new TestChatUnavailable('unconfirmed', 503, diagnostic);
+    }
     throw new TestChatUnavailable('unconfirmed');
-  }
+  } finally { policyFence.close(); }
 }

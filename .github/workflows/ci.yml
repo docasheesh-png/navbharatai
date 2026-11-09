@@ -75,6 +75,7 @@ jobs:
           node --import ./node_modules/tsx/dist/loader.mjs scripts/sandbox-session-persistence.check.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/sandbox-session-persistence.log"
           node --import ./node_modules/tsx/dist/loader.mjs scripts/failedReportAutopsy.check.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/autopsy-drills.log"
           node --import ./node_modules/tsx/dist/loader.mjs scripts/deepinfraComparison.check.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/deepinfra-comparison.log"
+          npm run test:qubax-readiness:emulator -- --emulator 127.0.0.1:18781 --project demo-navbharatai-phase2 | tee "$RUNNER_TEMP/phase2-safety/qubax-readiness.log"
           node --import ./node_modules/tsx/dist/loader.mjs scripts/freeChainQuotaLane.check.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/free-chain-quota-lane.log"
           node --import ./node_modules/tsx/dist/loader.mjs scripts/mitrify-guest-emulator.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/mitrify-admission.log"
           node scripts/session-revocation-rules.check.mjs --emulator 127.0.0.1:18781 --project demo-navbharatai-phase2 | tee "$RUNNER_TEMP/phase2-safety/session-rules.log"

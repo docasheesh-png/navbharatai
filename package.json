@@ -20,6 +20,7 @@
     "typecheck:benchmark": "tsc -p tsconfig.benchmark.json",
     "test": "vitest run",
     "test:mitrify": "node --experimental-strip-types --test scripts/checks/mitrify.check.mjs",
+    "test:qubax-readiness:emulator": "node --import ./node_modules/tsx/dist/loader.mjs scripts/qubaxReadiness.check.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "gcloud:build": "gcloud builds submit --config=cloudbuild.yaml .",

@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const fake = vi.hoisted(() => ({ run: vi.fn(), config: vi.fn(), db: vi.fn(), maintenance: vi.fn(), policy: vi.fn(),
+const fake = vi.hoisted(() => ({ run: vi.fn(), config: vi.fn(), db: vi.fn(), maintenance: vi.fn(), policy: vi.fn(), observe: vi.fn(), unsubscribe: vi.fn(), observeUnavailable: vi.fn(), unsubscribeUnavailable: vi.fn(),
   budgetConfig: vi.fn(), reserve: vi.fn(), settle: vi.fn(), month: vi.fn(), settleMonth: vi.fn() }));
-vi.mock('./qubax', () => ({ runApprovedQubaxChat: fake.run, qubaxConfig: fake.config, qubaxOwnerDispatch: () => null,
+vi.mock('./qubax', () => ({ runApprovedQubaxChat: fake.run, qubaxConfig: fake.config,
   QubaxError: class extends Error { constructor(readonly code: string) { super(code); } } }));
 vi.mock('./serverDb', () => ({ getServerDb: fake.db }));
-vi.mock('./aiMaintenance', () => ({ assertAiAvailable: fake.maintenance }));
+vi.mock('./aiMaintenance', () => ({ MAINTENANCE_COLLECTION: 'platform_settings', MAINTENANCE_DOCUMENT: 'ai_maintenance',
+  aiMaintenanceStore: { start: () => {}, read: async () => (await fake.maintenance()) ?? { enabled: false },
+    onChange: (listener: unknown) => { fake.observe(listener); return () => fake.unsubscribe(); },
+    onUnavailable: (listener: unknown) => { fake.observeUnavailable(listener); return () => fake.unsubscribeUnavailable(); } } }));
 vi.mock('../AI/inferencePolicy', () => ({ assertLegacyInferenceAllowed: fake.policy }));
 vi.mock('../AI/FreeChain/config', () => ({ freeChainConfig: fake.budgetConfig }));
 vi.mock('../AI/FreeChain/store', () => ({ FreeChainStore: class { reservePaid = fake.reserve; settlePaid = fake.settle; } }));
@@ -29,7 +32,7 @@ describe('test chat provider isolation and admission', () => {
     const result = await runTestChat(action, 'operator@example.invalid', new AbortController().signal);
     expect(fake.run).toHaveBeenCalledOnce();
     expect(fake.run).toHaveBeenCalledWith(expect.objectContaining({ uid: expect.stringMatching(/^admin-test-chat:[a-f0-9]{64}$/),
-      requestId: `test-chat:qubax:${action.requestId}`, privateTurn: true, healthTurn: true,
+      requestId: `test-chat:qubax:${action.requestId}`, privateTurn: true, healthTurn: true, requireIndependentReview: true,
       body: { messages: action.messages, max_tokens: 1024, stream: false } }));
     expect(result).toMatchObject({ requestId: action.requestId, provider: 'qubax', content: reply.content, noFallback: true });
   });
@@ -49,7 +52,7 @@ describe('test chat provider isolation and admission', () => {
   });
   it.each([{ kind: 'skipped', reason: 'qubax-data-approval-or-ceiling-unavailable' }, null])('never retries or falls back after skipped/failed Qubax %#', async result => {
     if (result) fake.run.mockResolvedValue(result); else fake.run.mockRejectedValue(new Error('credential-and-private-provider-body'));
-    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: result ? 'approval-or-budget' : 'unconfirmed' });
+    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: result ? 'approval' : 'unconfirmed' });
     expect(fake.run).toHaveBeenCalledOnce();
   });
   it('uses shared daily/monthly admission, holds possible cost, and can release only an unused hold', async () => {
@@ -71,7 +74,7 @@ describe('test chat provider isolation and admission', () => {
       const receipt = await options.reserve(kind === 'invalid-ceiling' ? NaN : 50);
       expect(receipt).toBeNull(); return { kind: 'skipped', reason: 'qubax-budget' };
     });
-    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: kind === 'duplicate' ? 'unconfirmed' : 'approval-or-budget' });
+    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: kind === 'duplicate' ? 'unconfirmed' : 'budget' });
     if (kind === 'daily' || kind === 'duplicate') expect(fake.settleMonth).toHaveBeenCalledWith({ marker: 'db' }, '2026-11', 50, 0);
     if (kind === 'duplicate') expect(fake.settle).not.toHaveBeenCalled();
     if (kind === 'monthly' || kind === 'invalid-ceiling') expect(fake.reserve).not.toHaveBeenCalled();
@@ -86,4 +89,51 @@ describe('test chat provider isolation and admission', () => {
     expect(fake.reserve).toHaveBeenCalledOnce();
     expect(fake.run).toHaveBeenCalledOnce();
   });
+});
+
+it('uses a tiny public payload only for the exact single-turn synthetic prompt and reports the expected match', async () => {
+  const synthetic = { ...action, messages: [{ role: 'user' as const, content: 'What is 2 + 2? Reply with one number only.' }] };
+  fake.run.mockResolvedValue({ ...reply, content: '4' });
+  expect(await runTestChat(synthetic, 'actor', new AbortController().signal)).toMatchObject({ syntheticMatch: true });
+  expect(fake.run).toHaveBeenLastCalledWith(expect.objectContaining({ privateTurn: false, healthTurn: false, requireIndependentReview: true,
+    body: { messages: synthetic.messages, max_tokens: 16, stream: false } }));
+  fake.run.mockResolvedValue({ ...reply, content: '5' });
+  expect(await runTestChat(synthetic, 'actor', new AbortController().signal)).toMatchObject({ syntheticMatch: false });
+  await runTestChat({ ...synthetic, messages: [{ role: 'user', content: synthetic.messages[0].content + ' ' }] }, 'actor', new AbortController().signal);
+  expect(fake.run).toHaveBeenLastCalledWith(expect.objectContaining({ privateTurn: true, healthTurn: true, body: expect.objectContaining({ max_tokens: 1024 }) }));
+});
+it.each([['qubax-price-or-quality-unverified', 'catalog'], ['qubax-data-approval-or-ceiling-unavailable', 'approval'],
+  ['qubax-budget', 'budget'], ['qubax-capacity', 'capacity'], ['qubax-selection-claim-mismatch', 'selection']])('preserves %s diagnostics', async (diagnostic, reason) => {
+  fake.run.mockResolvedValue({ kind: 'skipped', reason: diagnostic });
+  await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason, diagnostic });
+  expect(fake.run).toHaveBeenCalledOnce();
+});
+
+it('accepts the same bounded model identifiers as reviewed catalog selection', async () => {
+  fake.run.mockResolvedValue({ ...reply, model: 'm'.repeat(256) });
+  expect((await runTestChat(action, 'actor', new AbortController().signal)).model).toHaveLength(256);
+  fake.run.mockResolvedValue({ ...reply, model: 'm'.repeat(257) });
+  await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'unconfirmed' });
+});
+
+it('cleans its scoped maintenance listener after both completion and an initial unavailable read', async () => {
+  await runTestChat(action, 'actor', new AbortController().signal); expect(fake.unsubscribe).toHaveBeenCalledOnce();
+  expect(fake.unsubscribeUnavailable).toHaveBeenCalledOnce();
+  fake.maintenance.mockResolvedValue({ enabled: false, unavailable: true });
+  await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toBeDefined();
+  expect(fake.unsubscribe).toHaveBeenCalledTimes(2); expect(fake.run).toHaveBeenCalledOnce();
+  expect(fake.unsubscribeUnavailable).toHaveBeenCalledTimes(2);
+});
+it('wires the authoritative final maintenance read and synchronous dispatch policy check', async () => {
+  const doc = vi.fn((path: string) => ({ path })); fake.db.mockReturnValue({ doc });
+  fake.run.mockImplementation(async options => {
+    const get = vi.fn(async () => ({ exists: true, data: () => ({ enabled: false }) }));
+    await options.validateFinalClaim({ get });
+    expect(doc).toHaveBeenCalledWith('platform_settings/ai_maintenance');
+    expect(get).toHaveBeenCalledOnce(); expect(typeof options.beforeHttpDispatch).toBe('function');
+    fake.policy.mockImplementation(() => { throw new Error('policy-revoked'); });
+    expect(() => options.beforeHttpDispatch()).toThrow();
+    return reply;
+  });
+  await runTestChat(action, 'actor', new AbortController().signal);
 });

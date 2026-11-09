@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import type { Firestore } from 'firebase-admin/firestore';
-import { getQubaxSelection, type QubaxSelection, type QubaxWorkload } from './qubaxSelector';
+import { canonicalQubaxReview, verifyQubaxReview } from './qubaxReviewSignature';
+import type { Firestore, Transaction } from 'firebase-admin/firestore';
+import { getQubaxSelection, QUBAX_CATALOG_PATH, selectQubaxCandidate, type QubaxSelection, type QubaxWorkload } from './qubaxSelector';
 
 type Env = Record<string, string | undefined>;
 export class QubaxError extends Error {
@@ -14,24 +15,6 @@ export function qubaxConfig(env: Env = process.env) {
   // One verified gateway origin. Never take a host, URL or credential from request JSON.
   return { enabled: env.QUBAX_ENABLED === '1', baseURL: 'https://api.qubax.ai/v1', apiKey: env.QUBAX_API_KEY?.trim() || '', maxInflight };
 }
-/** Owner switch. Replaces a per-payload Firestore approval. Absent or invalid values do not authorize a call.
- * The numeric cap is the maximum reserved for one HTTP request and cannot exceed one US dollar. */
-export function qubaxOwnerDispatch(env: Env = process.env): { modelId: string; ceilingNanoUsd: number } | null {
-  if (env.QUBAX_ENABLED !== '1' || !env.QUBAX_API_KEY?.trim()) return null;
-  const modelId = env.QUBAX_MODEL?.trim() ?? '';
-  const raw = env.QUBAX_MAX_USD_PER_REQUEST?.trim() ?? '';
-  if (!modelId || modelId.length > 200 || /[\s,]/.test(modelId) || !/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(raw)) return null;
-  const usd = Number(raw);
-  const ceilingNanoUsd = Math.round(usd * 1_000_000_000);
-  if (!(usd >= 0.000001) || usd > 1 || !Number.isSafeInteger(ceilingNanoUsd) || ceilingNanoUsd <= 0) return null;
-  return { modelId, ceilingNanoUsd };
-}
-function ownerSelection(owner: { modelId: string; ceilingNanoUsd: number }, now: number): QubaxSelection {
-  return Object.freeze({ modelId: owner.modelId, modelRevision: 'owner-enabled', sku: 'owner-enabled',
-    maximumNanoUsd: owner.ceilingNanoUsd, qubaxCostNanoUsd: owner.ceilingNanoUsd, officialCostNanoUsd: owner.ceilingNanoUsd,
-    discountBps: 0, evidenceBinding: hash(`qubax-owner-v1\0${owner.modelId}\0${owner.ceilingNanoUsd}`),
-    expiresAtMs: now + 60_000, reviewRef: 'owner-env' });
-}
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 export function qubaxWorkload(body: Record<string, unknown>): QubaxWorkload {
   const wire = JSON.stringify(body.messages);
@@ -39,17 +22,21 @@ export function qubaxWorkload(body: Record<string, unknown>): QubaxWorkload {
     // Every chat candidate must pass Hindi and general text gates, regardless of prompt language.
     language: 'hi', capability: 'text' };
 }
-export function qubaxChatBinding(uid: string, body: Record<string, unknown>, selection: QubaxSelection, env: Env = process.env) {
+/** One exact wire derivation for binding, independent review and physical dispatch. */
+export function qubaxWireBody<T extends Record<string, unknown>>(body: T, model: string) {
+  return { ...body, model, ...(body.stream === true ? { stream_options: { include_usage: true } } : {}) };
+}
+export function qubaxChatBinding(uid: string, body: Record<string, unknown>, selection: QubaxSelection, env: Env = process.env, approvedRequestId?: string) {
   const cfg = qubaxConfig(env);
-  const wire = JSON.stringify({ ...body, model: selection.modelId, ...(body.stream === true ? { stream_options: { include_usage: true } } : {}) });
+  const wire = JSON.stringify(qubaxWireBody(body, selection.modelId));
   const gateway = { baseURL: cfg.baseURL, model: selection.modelId, credentialBinding: hash(`qubax-credential-v1\0${cfg.apiKey}`), selectionBinding: hash(JSON.stringify(selection)) };
   const payloadDigest = hash(wire);
-  return { id: hash(JSON.stringify({ uid, payloadDigest, gateway })), payloadDigest, gateway };
+  return { id: hash(JSON.stringify({ uid, payloadDigest, gateway, ...(approvedRequestId ? { approvedRequestId } : {}) })), payloadDigest, gateway };
 }
 const refString = (v: unknown): v is string => typeof v === 'string' && !!v.trim();
 /** Only an independently reviewed exact payload and ALL possible downstream sellers grant disclosure. */
 export function qubaxReviewedApprovalCeiling(value: unknown, input: {
-  uid: string; binding: ReturnType<typeof qubaxChatBinding>; selection: QubaxSelection; privateTurn: boolean; healthTurn: boolean; now: number;
+  uid: string; binding: ReturnType<typeof qubaxChatBinding>; selection: QubaxSelection; privateTurn: boolean; healthTurn: boolean; now: number; requestId?: string;
 }): number | undefined {
   const a = value as any; const r = a?.dataReview; const c = a?.supplierContract;
   const classes = [...(input.privateTurn ? ['private'] : []), ...(input.healthTurn ? ['health'] : [])];
@@ -65,6 +52,17 @@ export function qubaxReviewedApprovalCeiling(value: unknown, input: {
     || !refString(c.evidenceRef) || !Number.isSafeInteger(c.perHttpRequestCeilingNanoUsd) || c.perHttpRequestCeilingNanoUsd <= 0
     || c.perHttpRequestCeilingNanoUsd < input.selection.qubaxCostNanoUsd
     || BigInt(c.perHttpRequestCeilingNanoUsd) * 10n > BigInt(input.selection.officialCostNanoUsd)) return undefined;
+  if (a.importedReview !== undefined) {
+    const imported = a.importedReview;
+    if (!imported || typeof imported.actor !== 'string') return undefined;
+    const review = verifyQubaxReview(imported.attestation, imported.actor, input.now);
+    if (!review || review.approvalId !== input.binding.id || review.payloadDigest !== input.binding.payloadDigest
+      || `test-chat:qubax:${review.requestId}` !== input.requestId
+      || review.model !== input.selection.modelId || review.modelRevision !== input.selection.modelRevision
+      || review.evidenceBinding !== input.selection.evidenceBinding || review.maximumNanoUsd !== c.perHttpRequestCeilingNanoUsd
+      || review.reviewedAtMs !== a.reviewedAtMs || review.expiresAtMs !== a.expiresAtMs
+      || canonicalQubaxReview(review.dataReview) !== canonicalQubaxReview(a.dataReview)) return undefined;
+  }
   return c.perHttpRequestCeilingNanoUsd;
 }
 function validBody(body: Record<string, unknown>): boolean {
@@ -79,7 +77,11 @@ export type QubaxChatOptions = {
   db: Firestore; uid: string; requestId: string; privateTurn: boolean; healthTurn: boolean;
   body: Record<string, unknown>; signal: AbortSignal; onChunk?: (text: string) => void | Promise<void>;
   revalidate?: () => Promise<void>; beforeHttpDispatch?: () => void;
+  /** Server-owned optional authority read, in the final one-use admission transaction. */
+  validateFinalClaim?: (tx: Transaction) => Promise<void>;
   /** Server Gateway claim binding. Never supplied by request JSON. */
+  /** Admin tests require independently signed evidence; legacy trusted-server Chat approvals remain compatible. */
+  requireIndependentReview?: boolean;
   expectedSelection?: { modelId: string; modelRevision: string; maximumNanoUsd: number };
   reserve: (maximumNanoUsd: number) => Promise<null | { releaseUndispatched(): Promise<void> }>;
 };
@@ -122,22 +124,17 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
   try {
     signal.throwIfAborted();
     const workload = qubaxWorkload(body);
-    // Gateway callers pin a catalog claim. Public chat and the admin test bot do not:
-    // the owner env then authorizes one model and one hard ceiling, with no per-message approval document.
-    const owner = expected ? null : qubaxOwnerDispatch(env);
-    const selection = owner ? ownerSelection(owner, Date.now()) : await bounded(getQubaxSelection(options.db, workload));
+    const selection = await bounded(getQubaxSelection(options.db, workload, undefined, false, options.requireIndependentReview));
     if (!selection) return { kind: 'skipped', reason: 'qubax-price-or-quality-unverified' };
     if (expected && (selection.modelId !== expected.modelId || selection.modelRevision !== expected.modelRevision
       || selection.maximumNanoUsd !== expected.maximumNanoUsd)) return { kind: 'skipped', reason: 'qubax-selection-claim-mismatch' };
-    const binding = qubaxChatBinding(options.uid, body, selection, env);
-    const digest = (a: any) => hash(JSON.stringify([a.kind, a.uid, a.payloadDigest, a.gateway, a.dataReview, a.supplierContract, a.reviewedAtMs, a.expiresAtMs]));
-    const approval = owner
-      ? { ceiling: owner.ceilingNanoUsd, digest: 'owner-env', expiresAtMs: selection.expiresAtMs }
-      : await bounded(options.db.runTransaction(async tx => {
-      const approvalRef = options.db.doc(`qubax_chat_approvals/${binding.id}`);
+    const binding = qubaxChatBinding(options.uid, body, selection, env, options.requireIndependentReview ? options.requestId : undefined);
+    const approvalRef = options.db.doc(`qubax_chat_approvals/${binding.id}`);
+    const digest = (a: any) => hash(JSON.stringify([a.kind, a.uid, a.payloadDigest, a.gateway, a.dataReview, a.supplierContract, a.reviewedAtMs, a.expiresAtMs, a.importedReview]));
+    const approval = await bounded(options.db.runTransaction(async tx => {
       const a = (await tx.get(approvalRef)).data();
-      const ceiling = qubaxReviewedApprovalCeiling(a, { uid: options.uid, binding, selection, privateTurn, healthTurn, now: Date.now() });
-      if (!a || ceiling === undefined) return null;
+      const ceiling = qubaxReviewedApprovalCeiling(a, { uid: options.uid, binding, selection, privateTurn, healthTurn, requestId: options.requestId, now: Date.now() });
+      if (!a || ceiling === undefined || (options.requireIndependentReview && !a.importedReview)) return null;
       signal.throwIfAborted();
       tx.update(approvalRef, { state: 'claimed', requestId: options.requestId, claimedAtMs: Date.now(), attemptsStarted: 0 });
       return { ceiling, digest: digest(a), expiresAtMs: a.expiresAtMs as number };
@@ -147,30 +144,41 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     signal.throwIfAborted(); await bounded(options.reserve(approval.ceiling).then(async receipt => { hold = receipt; if (signal.aborted) await releaseUnused(); return receipt; })); signal.throwIfAborted();
     if (!hold) return { kind: 'skipped', reason: 'qubax-budget' };
     await bounded(Promise.resolve().then(() => options.revalidate?.())); signal.throwIfAborted();
-    if (owner) {
-      const again = qubaxOwnerDispatch(env);
-      if (!again || again.modelId !== owner.modelId || again.ceilingNanoUsd !== owner.ceilingNanoUsd
-        || !qubaxConfig(env).enabled || qubaxConfig(env).apiKey !== cfg.apiKey) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
-    } else {
     // Re-read the catalog at dispatch: a cached discovery result cannot authorize stale/revoked evidence.
-    const currentSelection = await bounded(getQubaxSelection(options.db, workload, Date.now(), true));
+    const currentSelection = await bounded(getQubaxSelection(options.db, workload, Date.now(), true, options.requireIndependentReview));
     if (!currentSelection || JSON.stringify(currentSelection) !== JSON.stringify(selection)
-      || !qubaxConfig(env).enabled || qubaxChatBinding(options.uid, body, selection, env).id !== binding.id) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
-    await bounded(options.db.runTransaction(async tx => {
-      const approvalRef = options.db.doc(`qubax_chat_approvals/${binding.id}`);
+      || !qubaxConfig(env).enabled || qubaxChatBinding(options.uid, body, selection, env, options.requireIndependentReview ? options.requestId : undefined).id !== binding.id) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
+    const admission = await bounded(options.db.runTransaction(async tx => {
+      await options.validateFinalClaim?.(tx);
       const a = (await tx.get(approvalRef)).data();
+      // Signed catalog and one-use approval must belong to one coherent commit snapshot.
+      // Legacy server-managed Chat fixtures/approvals retain their existing path.
+      const catalog = options.requireIndependentReview || selection.signedCatalog
+        ? (await tx.get(options.db.doc(QUBAX_CATALOG_PATH))).data() : undefined;
+      const selected = catalog === undefined ? undefined : selectQubaxCandidate(catalog, workload, Date.now());
+      if ((options.requireIndependentReview || selection.signedCatalog) && (!selected || JSON.stringify(selected) !== JSON.stringify(selection))) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
       if (!a || a.state !== 'claimed' || a.requestId !== options.requestId || a.attemptsStarted !== 0
-        || digest(a) !== approval.digest || a.expiresAtMs <= Date.now()) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
+        || digest(a) !== approval.digest || a.expiresAtMs <= Date.now()
+        || qubaxReviewedApprovalCeiling({ ...a, state: 'approved' }, { uid: options.uid, binding, selection,
+          privateTurn, healthTurn, requestId: options.requestId, now: Date.now() }) !== approval.ceiling) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
       signal.throwIfAborted(); tx.update(approvalRef, { attemptsStarted: 1 });
+      return { approval: a, catalog };
     }));
-    }
-    signal.throwIfAborted();
-    if (Date.now() >= selection.expiresAtMs || !qubaxConfig(env).enabled || qubaxConfig(env).apiKey !== cfg.apiKey) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
-    options.beforeHttpDispatch?.(); signal.throwIfAborted();
+    const assertFinalAuthority = () => {
+      signal.throwIfAborted();
+      const now = Date.now();
+      if (now >= selection.expiresAtMs || !qubaxConfig(env).enabled || qubaxConfig(env).apiKey !== cfg.apiKey
+        || qubaxReviewedApprovalCeiling({ ...admission.approval, state: 'approved' }, { uid: options.uid, binding, selection,
+          privateTurn, healthTurn, requestId: options.requestId, now }) !== approval.ceiling
+        || ((options.requireIndependentReview || selection.signedCatalog)
+          && JSON.stringify(selectQubaxCandidate(admission.catalog, workload, now)) !== JSON.stringify(selection))) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
+    };
+    // No await between current trust/config/expiry revalidation and the physical HTTP call.
+    assertFinalAuthority(); options.beforeHttpDispatch?.(); assertFinalAuthority();
     entered = true; // A lost response is still a possible charge, never permission to replay.
     const response = await fetch(`${cfg.baseURL}/chat/completions`, { method: 'POST', redirect: 'error', signal,
       headers: { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, model: selection.modelId, ...(body.stream === true ? { stream_options: { include_usage: true } } : {}) }) });
+      body: JSON.stringify(qubaxWireBody(body, selection.modelId)) });
     if (!response.ok) { if (response.body) cancelBody(() => response.body!.cancel()); throw new QubaxError('QUBAX_HTTP_ERROR', response.status); }
     let finished = false; let usage: { inputTokens: number; outputTokens: number } | undefined;
     const inspect = async (value: any) => {

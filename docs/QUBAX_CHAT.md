@@ -35,7 +35,7 @@ positions. Skips do not consume physical attempts.
 ## Required independent evidence, not defaults
 
 No provider catalog or approval is seeded. Setting a key does **not** authorize
-production transmission. An existing trusted server operator must maintain:
+production transmission. Independent evidence must be obtained and recorded through a trusted server process:
 
 1. `qubax_catalog/active`, using the exported `QubaxCatalog` contract in
    `src/server/lib/qubaxSelector.ts`. Qubax and official prices must independently
@@ -53,7 +53,7 @@ production transmission. An existing trusted server operator must maintain:
    exact-payload, UID, credential, selected model/evidence and gateway binding.
    `qubaxReviewedApprovalCeiling` validates data disclosure and protection refs
    for **all possible downstream processors**, including private/health data
-   when applicable. A client consent checkbox cannot create these approvals.
+   when applicable. A client consent checkbox cannot create these approvals. The Admin Test Chat Bot now provides purpose-scoped independently signed catalog and exact-payload import, described in `TEST_CHAT_BOT.md`; it does not invent any of this evidence.
 5. For Gateway use, its existing account/terms/quality/privacy/quota catalog and
    migrated account authority. Qubax entries use provider `QUBAX`, legacy provider
    `qubax`, adapter `gateway-qubax-text-v1`, the selected exact model/revision,
@@ -108,3 +108,19 @@ covers exact approval, one-use claims, concurrency, no retry, claim/model pinnin
 revocation, rejected outputs and credential disclosure. FreeChain and Gateway
 integration tests cover placement and the existing budget boundary. These checks
 are not a live quality benchmark or evidence of actual paid savings.
+
+## Admin review workflow addendum (2026-11-09)
+
+The Admin surface now separates read-only readiness from signed catalog import,
+signed exact-payload approval and explicit send. Its transport requires independently
+signed evidence; existing trusted-server legacy Chat approvals stay compatible.
+Catalog and payload signer trust is rechecked at use, including after the final
+atomic catalog/approval admission. Signed publication expiry bounds selection and
+payload approval expiry. Immutable review receipts archive only bounded evidence
+and public verification keys, never prompts, replies or API credentials.
+
+No production trust root, supplier guarantee or price/quality approval is created
+by shipping this code. Public documentation still does not establish the required
+all-in per-request ceiling/exact model guarantee. Missing real evidence keeps the
+provider blocked. The new balance read is separate metadata and never replaces
+supplier enforcement. See `TEST_CHAT_BOT.md` for the operator contract and test limits.

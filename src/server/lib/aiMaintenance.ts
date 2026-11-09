@@ -63,6 +63,8 @@ export class AiMaintenanceStore {
   private pending: Promise<MaintenanceState> | null = null;
   private stopWatch?: () => void;
   private readonly listeners = new Set<(state: MaintenanceState) => void>();
+  // Opt-in strict observers; do not alter the serving path's recent-off fail-open state or notifications.
+  private readonly unavailableListeners = new Set<() => void>();
   constructor(private backend: () => MaintenanceBackend = firestoreBackend, private now: () => number = Date.now) {}
   private accept(state: MaintenanceState): MaintenanceState {
     this.value = state; this.readAt = this.now();
@@ -71,6 +73,10 @@ export class AiMaintenanceStore {
     return state;
   }
   onChange(fn: (state: MaintenanceState) => void): () => void { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
+  onUnavailable(fn: () => void): () => void { this.unavailableListeners.add(fn); return () => { this.unavailableListeners.delete(fn); }; }
+  private reportUnavailable(): void {
+    for (const fn of this.unavailableListeners) { try { fn(); } catch { /* Observers cannot change shared maintenance behavior. */ } }
+  }
   /** No paid calls on an unreadable setting. Never report a failed admin save as successful. */
   async read(): Promise<MaintenanceState> {
     if (this.value && this.now() - this.readAt < 2_000) return this.value;
@@ -89,6 +95,7 @@ export class AiMaintenanceStore {
         if (generation !== this.generation && this.value) return this.value;
         return this.accept(maintenanceState(data));
       } catch {
+        this.reportUnavailable();
         // Unreadable flag: never claim the admin paused AI. User copy is temporary high-demand (not technical).
         // Fail-open only when a recent successful read said enabled===false (no deliberate pause).
         const last = this.value;
@@ -105,9 +112,10 @@ export class AiMaintenanceStore {
     if (this.stopWatch) return;
     try {
       this.stopWatch = this.backend().subscribe?.(data => { this.generation++; this.accept(maintenanceState(data)); }, () => {
+        this.reportUnavailable();
         this.readAt = 0; this.stopWatch?.(); this.stopWatch = undefined;
       });
-    } catch { /* read() still refuses spending until storage can be read. */ }
+    } catch { this.reportUnavailable(); /* read() still refuses spending until storage can be read. */ }
   }
   async set(patch: { enabled?: boolean; autoEnabled?: boolean }): Promise<MaintenanceState> {
     const value = await this.backend().change(old => ({

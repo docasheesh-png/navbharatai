@@ -7,6 +7,7 @@ import { validRequestId } from '../lib/walletOps';
 import { registerInferenceGatewayAdminRoutes } from './inferenceGatewayAdmin';
 import { registerFreeChatChainRoutes } from './freeChatChainAdmin';
 import { registerDeepinfraComparisonRoutes } from './deepinfraComparison';
+import { registerTestChatBotRoutes } from './testChatBot';
 import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
 import { registerSurplusRegistryAdminRoutes } from './surplusRegistryAdmin';
 import { registerApiProvidersAdminRoutes } from './apiProvidersAdmin';
@@ -460,6 +461,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   registerGameAssetsAdminRoutes(app, verifyAdminToken);
   registerFreeChatChainRoutes(app, verifyAdminToken);
   registerDeepinfraComparisonRoutes(app, verifyAdminToken);
+  registerTestChatBotRoutes(app, verifyAdminToken);
   registerInferenceGatewayAdminRoutes(app, verifyAdminToken);
   registerAiMaintenanceRoutes(app, verifyAdminToken);
   registerFreeProgramRoutes(app, verifyAdminToken);

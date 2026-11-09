@@ -1,6 +1,7 @@
+import { runApprovedQubaxChat, QubaxError } from '../../lib/qubax';
 import { chatAttemptLimits, watchChatAttempt } from './attemptBudget';
 import { CHAT_SERVER_DEADLINE_MS, CHAT_PROVIDER_ATTEMPT_MS } from '../../../lib/chatDeadline';
-import { FIXED_TEXT_CHAIN, fixedTextChainRank } from '../fixedTextChain';
+import { FIXED_TEXT_CHAIN, fixedTextChainRank, fixedTextChainSurface, fixedTextChainSelected } from '../fixedTextChain';
 import { mitrifyConfig, MitrifyError, runApprovedMitrifyChain } from '../../lib/mitrify';
 import { capacityRevision, notifyCapacityReleased, waitForCapacity } from './capacityWait';
 import { switchedOffProviderFor } from '../../lib/providerSwitches';
@@ -204,7 +205,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     const exclusiveAdmin = !cfg.fixedOrder && input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
     const baseOrder = exclusiveAdmin ? (['cheapinf'] as ProviderId[]) : orderForUser(cfg, input.context.uid);
     let route: TurnRoute = exclusiveAdmin ? 'normal' : routed.route;
-    let order: Array<ProviderId | 'mitrify'> = cfg.fixedOrder ? [...FIXED_TEXT_CHAIN] : exclusiveAdmin ? baseOrder : orderForRoute(baseOrder, route, cfg.features.routeReorder);
+    let order: Array<ProviderId | 'mitrify' | 'qubax'> = cfg.fixedOrder ? [...FIXED_TEXT_CHAIN] : exclusiveAdmin ? baseOrder : orderForRoute(baseOrder, route, cfg.features.routeReorder);
     // A routed order with no usable rung (keys not configured yet, privacy) falls back to the plain order.
     if (!cfg.fixedOrder && !exclusiveAdmin && order !== baseOrder && !order.some(oid => { const r = cfg.rungs.find(x => x.id === oid); return !!r && !rungReason(r, cfg, input); })) { order = baseOrder; route = 'normal'; }
     trace.route = route; trace.routeReason = routed.reason;
@@ -267,6 +268,59 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           // Unknown liability, cancellation, or committed output never opens a direct fallback.
           if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
           if (content) { trace.rung = 'mitrify'; return done({ content: input.onChunk ? content : `${content}\n\nThe response was interrupted. Please try again.`, provider: 'MITRIFY', model: attempt.model, ok: true, reason: 'stalled', latencyMs: 0 }); }
+          break;
+        } finally { clearTimeout(timer); controller.abort(); }
+      }
+      if (id === 'qubax') {
+        // A malformed optional supplier must not take down the later healthy rungs.
+        const model = 'reviewed-selection';
+        const attempt = { provider: id, model, reason: 'pending', entered: false }; trace.attempts.push(attempt);
+        if (!paidBudgetReady) { attempt.reason = 'paid-budget-unavailable'; continue; }
+        if (!fixedTextChainSelected() || fixedTextChainSurface() !== 'chat') { attempt.reason = 'qubax-chat-only'; continue; }
+        if (trace.attempts.filter(a => a.entered).length >= cfg.maxAttempts) { attempt.reason = 'max-attempts'; break; }
+        // Preserve classification; server review must cover the exact payload and all required data classes.
+        const prepared = trimForRung(input.message, history, system, Number.MAX_SAFE_INTEGER)!;
+        const controller = new AbortController();
+        const qubaxLimits = chatAttemptLimits({ firstTokenMs: cfg.ttftMs, idleMs: 30000, hardCapMs: CHAT_PROVIDER_ATTEMPT_MS }, deadlineAt, order.length - position);
+        let timer = setTimeout(() => controller.abort(), qubaxLimits.firstTokenMs);
+        const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal;
+        let content = '';
+        try {
+          const result = await runApprovedQubaxChat({ db, uid: input.context.uid, requestId: `${requestId}:qubax`,
+            privateTurn: input.context.privateTurn, healthTurn: input.context.healthTurn, signal,
+            body: { messages: [{ role: 'system', content: prepared.systemPrompt }, { role: 'user', content: prepared.prompt }], max_tokens: cfg.features.replyMaxTokens, stream: true },
+            onChunk: value => {
+              if (signal.aborted) return;
+              if (value) { clearTimeout(timer); timer = setTimeout(() => controller.abort(), Math.min(30000, Math.max(1, deadlineAt - Date.now()))); }
+              content += value; input.onChunk?.(value);
+            },
+            revalidate: async () => {
+              const control = await readControls(db, cfg);
+              if (!control || control.enabled === false || !cfg.enabled) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
+            },
+            reserve: async maximumNanoUsd => {
+              triedQuota = true;
+              const control = await readControls(db, cfg).catch(() => null);
+              if (!control || control.enabled === false || !cfg.enabled) return null;
+              const month = cfg.features.monthlyCap ? await reserveMonthly(db, cfg.features.monthlyCapNanoUsd, maximumNanoUsd) : null;
+              if (cfg.features.monthlyCap && !month) return null;
+              let hold;
+              try { hold = await store.reservePaid({ uncappedRollout: true, requestId: `${requestId}:qubax`, uid: input.context.uid, maxCostNanoUsd: maximumNanoUsd, capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: CHAT_PAID_FALLBACK_PER_USER_LIMIT }); }
+              catch (error) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); throw error; }
+              if (hold && !hold.mayDispatch) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); throw new QubaxError('QUBAX_ADMISSION_UNCERTAIN'); }
+              if (!hold) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); return null; }
+              attempt.entered = true;
+              return { releaseUndispatched: async () => { await store.settlePaid(hold, 0); if (month) await settleMonthly(db, month, maximumNanoUsd, 0); } };
+            },
+          });
+          if (result.kind === 'skipped') { attempt.reason = result.reason; continue; }
+          attempt.reason = 'served'; trace.rung = 'qubax';
+          return done({ content: result.content, provider: 'QUBAX', model: result.model, ...(result.usage ? { usage: result.usage } : {}), ok: true, latencyMs: 0 });
+        } catch (error) {
+          attempt.reason = error instanceof QubaxError ? error.code.toLowerCase() : 'qubax-admission-unavailable';
+          // Unknown liability, cancellation, or committed output never opens a direct fallback.
+          if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
+          if (content) { trace.rung = 'qubax'; return done({ content: input.onChunk ? content : `${content}\n\nThe response was interrupted. Please try again.`, provider: 'QUBAX', model: attempt.model, ok: true, reason: 'stalled', latencyMs: 0 }); }
           break;
         } finally { clearTimeout(timer); controller.abort(); }
       }

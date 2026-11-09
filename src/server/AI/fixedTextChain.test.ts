@@ -9,6 +9,9 @@ describe('server-owned fixed text policy', () => {
     expect(fixedTextChainEnabled({ TEXT_CHAIN_POLICY: ' fixed-v1 ' })).toBe(true);
     expect(() => fixedTextChainEnabled({ TEXT_CHAIN_POLICY: 'fixed' })).toThrow('configuration');
     expect(FIXED_TEXT_CHAIN.indexOf('mitrify')).toBe(5);
+    expect(FIXED_TEXT_CHAIN.indexOf('qubax')).toBe(6);
+    expect(fixedTextChainRank({ providerId: 'QUBAX', modelId: 'reviewed-model', charging: 'metered' })).toBe(6);
+    expect(fixedTextChainRank({ providerId: 'QUBAX', modelId: 'reviewed-model', charging: 'verified-free-no-overage' })).toBeUndefined();
   });
   it.each(['builder', 'pro', 'published-app', 'image-generation'])('keeps %s excluded, including nested chat helpers', surface => {
     vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');

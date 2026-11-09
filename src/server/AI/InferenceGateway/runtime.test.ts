@@ -1,3 +1,5 @@
+import { qubaxChatBinding } from '../../lib/qubax';
+import * as qubaxSelector from '../../lib/qubaxSelector';
 vi.mock('../../lib/ApiKeyStore', () => ({ apiKeyStore: { findByHash: mocks.apiKey } }));
 import { mitrifyChainBinding } from '../../lib/mitrify';
 import { gatewayMitrifyBody } from './mitrifyTransport';
@@ -56,9 +58,9 @@ function context(overrides: Partial<InferenceGatewayContext> = {}): InferenceGat
     qualityTier: 'clinical', dataClass: 'health', funding: 'platform-free-fallback', mode: 'free-first-authorized-paid',
     deadlineAtMs: Date.now() + 90_000, ...overrides };
 }
-function fixture(paid = false, freeProvider: 'GLM' | 'GROQ' = 'GLM', quotaWindowMs = 61000, paidProvider: 'DEEPSEEK' | 'OPENAI' | 'MITRIFY' = 'DEEPSEEK') {
+function fixture(paid = false, freeProvider: 'GLM' | 'GROQ' = 'GLM', quotaWindowMs = 61000, paidProvider: 'DEEPSEEK' | 'OPENAI' | 'MITRIFY' | 'QUBAX' = 'DEEPSEEK') {
   const state = database(); const now = Date.now(); const provider = paid ? paidProvider : freeProvider; const legacyProvider = provider.toLowerCase();
-  const model = paid ? paidProvider === 'OPENAI' ? 'gpt-5-nano' : paidProvider === 'MITRIFY' ? 'mitrify/auto-cheap' : 'deepseek-flash' : freeProvider === 'GROQ' ? 'reviewed-groq-model' : 'glm-4.7-flash';
+  const model = paid ? paidProvider === 'OPENAI' ? 'gpt-5-nano' : paidProvider === 'QUBAX' ? 'reviewed-qubax-model' : paidProvider === 'MITRIFY' ? 'mitrify/auto-cheap' : 'deepseek-flash' : freeProvider === 'GROQ' ? 'reviewed-groq-model' : 'glm-4.7-flash';
   const payer = { kind: 'platform' as const, ownerId: 'reviewed-owner' };
   const quality = { tier: 'clinical' as const, gateId: 'synthetic-clinical-gate', gateVersion: 'v1' };
   const privacy = { dataClass: 'health' as const, policyId: 'synthetic-private-policy', allowedProcessingRegions: ['reviewed-region'], maxRetentionHours: 0, allowTraining: false, allowHumanReview: false };
@@ -68,15 +70,15 @@ function fixture(paid = false, freeProvider: 'GLM' | 'GROQ' = 'GLM', quotaWindow
       maxInputTokens: 4096, maxOutputTokens: 512, maxQueueWaitMs: 5000, firstOutputTimeoutMs: 5000, attemptTimeoutMs: 60_000, logicalLimitNanoUsd: 10_000_000 } },
     profiles: [{ accountCredentialBinding: gatewayTextCredentialBinding('synthetic-secret-never-live'),
       ...(paid ? {} : { freeBillingSafety: { kind: 'intrinsic-zero' as const, evidenceRef: 'reviewed-zero-price', reviewedAtMs: now - 100, expiresAtMs: now + 60_000 } }), canonicalModelId: paid ? 'deepseek-flash-canonical' : freeProvider === 'GROQ' ? 'reviewed-groq-canonical' : 'glm-flash-canonical', profile: { id: 'profile-one', version: 'v1', providerId: provider, modelId: model, modelRevision: 'reviewed-model-v1',
-      adapterId: provider === 'MITRIFY' ? 'gateway-mitrify-text-v1' : 'gateway-openai-text-v1', status: 'approved', serviceClass: 'production', product: 'inference-api', surfaces: ['chat'],
+      adapterId: provider === 'QUBAX' ? 'gateway-qubax-text-v1' : provider === 'MITRIFY' ? 'gateway-mitrify-text-v1' : 'gateway-openai-text-v1', status: 'approved', serviceClass: 'production', product: 'inference-api', surfaces: ['chat'],
       qualityApprovals: [quality], termsApprovals: ['reviewed-terms-v1'], capabilities: [{ kind: 'text', maxInputTokens: 4096, maxOutputTokens: 512, maxContextTokens: 4608, streaming: true, systemPrompt: true }],
       privacy: { dataClasses: ['health'], training: 'none', humanReview: 'none', retentionHours: 0, processingRegions: ['reviewed-region'] }, credentialOwner: payer,
       quotaDimensions: [{ scope: { providerId: provider, kind: 'account', id: 'reviewed-account-one' }, meter: 'requests/day' },
         { scope: { providerId: provider, kind: 'account', id: 'reviewed-account-one' }, meter: 'tokens/minute' }],
       charging: paid ? 'metered' : 'verified-free-no-overage', evidenceRef: 'catalog-reviewed-profile' },
-      transport: { provider, baseURL: paid ? paidProvider === 'OPENAI' ? 'https://api.openai.com/v1' : paidProvider === 'MITRIFY' ? 'https://mitrify.com/v1' : 'https://api.deepseek.com/v1' : freeProvider === 'GROQ' ? 'https://api.groq.com/openai/v1' : 'https://api.z.ai/api/paas/v4', model,
+      transport: { provider, baseURL: paid ? paidProvider === 'OPENAI' ? 'https://api.openai.com/v1' : paidProvider === 'QUBAX' ? 'https://api.qubax.ai/v1' : paidProvider === 'MITRIFY' ? 'https://mitrify.com/v1' : 'https://api.deepseek.com/v1' : freeProvider === 'GROQ' ? 'https://api.groq.com/openai/v1' : 'https://api.z.ai/api/paas/v4', model,
         maxOutputTokens: 512, timeoutMs: 60_000, streamUsage: true, credentialEnv: 'INFERENCE_GATEWAY_TEST_CREDENTIAL', credentialBinding: gatewayTextCredentialBinding('synthetic-secret-never-live'),
-        ...(paid ? { rateCard: provider === 'MITRIFY' ? { version: 'reviewed-inclusive-ceiling-v1', inputNanoUsdPerMillion: 0, outputNanoUsdPerMillion: 0, supplierPerHttpRequestCeilingNanoUsd: 1000000, verifiedAtMs: now - 100, expiresAtMs: now + 60000 } : { version: 'reviewed-rate-v1', inputNanoUsdPerMillion: 300_000_000, outputNanoUsdPerMillion: 1_200_000_000,
+        ...(paid ? { rateCard: (provider === 'MITRIFY' || provider === 'QUBAX') ? { version: 'reviewed-inclusive-ceiling-v1', inputNanoUsdPerMillion: 0, outputNanoUsdPerMillion: 0, supplierPerHttpRequestCeilingNanoUsd: 1000000, verifiedAtMs: now - 100, expiresAtMs: now + 60000 } : { version: 'reviewed-rate-v1', inputNanoUsdPerMillion: 300_000_000, outputNanoUsdPerMillion: 1_200_000_000,
           cachedInputNanoUsdPerMillion: 6_000_000, verifiedAtMs: now - 100, expiresAtMs: now + 60_000 } } : {}) },
       availability: { coolingUntilMs: 0, predictedQueueMs: 0, predictedFirstOutputMs: 10, predictedCompletionMs: 100 }, legacyProvider, migrationId: 'reviewed-migration-v1',
       review: { account: 'account-review', terms: 'terms-review', quality: 'quality-review', privacy: 'privacy-review', capability: 'capability-review', pricing: 'pricing-review' },
@@ -1163,4 +1165,48 @@ describe('professional exact-tariff proof survives real Gateway runtime',()=>{
   const expected=(100*approved.inputNanoUsdPerMillion+20*approved.outputNanoUsdPerMillion)/1e15;
   expect(chatTurnCost({...response,...response.usage},85)).toMatchObject({measured:true,costBasis:'metered-gateway',realUsd:expected});
  });
+});
+
+
+/** Qubax must traverse the same authority, quota and ONE paid ledger as other Chat suppliers. */
+function qubaxFixture(approve = true) {
+  vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); vi.stubEnv('QUBAX_ENABLED', '1'); vi.stubEnv('QUBAX_API_KEY', 'synthetic-secret-never-live');
+  const f = fixture(true, 'GLM', 61000, 'QUBAX'); const now = Date.now();
+  const selection: qubaxSelector.QubaxSelection = { modelId: 'reviewed-qubax-model', modelRevision: 'reviewed-model-v1', sku: 'synthetic-reviewed-sku',
+    maximumNanoUsd: 1000000, qubaxCostNanoUsd: 1000000, officialCostNanoUsd: 10000000, discountBps: 9000,
+    evidenceBinding: 'independent-price-and-quality-proof', expiresAtMs: now + 60000, reviewRef: 'reviewed-fixture-only' };
+  vi.spyOn(qubaxSelector, 'selectQubaxCandidate').mockReturnValue(selection);
+  vi.spyOn(qubaxSelector, 'getQubaxSelection').mockResolvedValue(selection);
+  f.docs.set(qubaxSelector.QUBAX_CATALOG_PATH, { kind: 'independent-synthetic-catalog-fixture' });
+  const body = gatewayMitrifyBody({ prompt: 'Hello', systemPrompt: 'Keep the complete instructions.', streaming: false }, 512);
+  const binding = qubaxChatBinding('verified-user', body, selection);
+  if (approve) f.docs.set(`qubax_chat_approvals/${binding.id}`, { kind: 'qubax-exact-data-approval-v1', uid: 'verified-user', state: 'approved', payloadDigest: binding.payloadDigest, gateway: binding.gateway,
+    dataReview: { entirePayloadReviewed: true, approvedDataClasses: ['private', 'health'], gatewayAndAllDownstreamProcessorsReviewed: true,
+      reviewRef: 'review', disclosureAuthorityRef: 'authority', processorTermsRef: 'terms', protectionsRef: 'protections' },
+    supplierContract: { currency: 'USD', hardCeilingEnforced: true, includesInternalRetriesFailoversAndFees: true, evidenceRef: 'supplier-enforced-inclusive-cap', perHttpRequestCeilingNanoUsd: 1000000 },
+    reviewedAtMs: now - 100, expiresAtMs: now + 59000 });
+  network.mockResolvedValue(new Response(JSON.stringify({ model: 'reviewed-qubax-model', choices: [{ message: { content: 'Qubax reviewed answer' }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 20 } }), { headers: { 'content-type': 'application/json' } }));
+  return f;
+}
+describe('Qubax Chat-only gateway vertical integration', () => {
+  it('uses the selected model and settles the ONE shared conservative ceiling without a legacy reservation', async () => {
+    const f = qubaxFixture(); expect(await run()).toMatchObject({ ok: true, provider: 'QUBAX', model: 'reviewed-qubax-model', content: 'Qubax reviewed answer' });
+    expect(network).toHaveBeenCalledOnce(); expect(network.mock.calls[0][0]).toBe('https://api.qubax.ai/v1/chat/completions');
+    const day = civilDayWindow(Date.now(), 'Asia/Kolkata');
+    expect(f.docs.get(`free_chat_chain/paid_day_${day.key}`)).toMatchObject({ pending: 0, heldNanoUsd: 0, spentNanoUsd: 1000000 });
+    expect([...f.docs.keys()].filter(k => k.includes('qubax_chat_approvals'))).toHaveLength(1);
+  });
+  it.each(['missing-approval', 'unverified-rates', 'wrong-model', 'wrong-revision', 'disabled'])('skips %s before provider transmission', async kind => {
+    const f = qubaxFixture(kind !== 'missing-approval');
+    if (kind === 'unverified-rates') vi.mocked(qubaxSelector.selectQubaxCandidate).mockReturnValue(null);
+    if (kind === 'wrong-model') f.catalog.profiles[0].transport.model = 'unverified-model';
+    if (kind === 'wrong-revision') f.catalog.profiles[0].profile.modelRevision = 'unverified-revision';
+    if (kind === 'disabled') vi.stubEnv('QUBAX_ENABLED', '0');
+    await expect(run()).rejects.toMatchObject({ code: 'INFERENCE_GATEWAY_TERMINAL' }); expect(network).not.toHaveBeenCalled();
+  });
+  it('retains uncertain charge and never retries gateway 503', async () => {
+    const f = qubaxFixture(); network.mockResolvedValue(new Response('not copied to logs', { status: 503 }));
+    await expect(run()).rejects.toMatchObject({ code: 'INFERENCE_GATEWAY_TERMINAL' }); expect(network).toHaveBeenCalledOnce();
+    const day = civilDayWindow(Date.now(), 'Asia/Kolkata'); expect(f.docs.get(`free_chat_chain/paid_day_${day.key}`)).toMatchObject({ pending: 1, heldNanoUsd: 1000000, spentNanoUsd: 0 });
+  });
 });

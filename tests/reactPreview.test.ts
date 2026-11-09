@@ -162,6 +162,26 @@ describe('buildReactPreview', () => {
     // Preview failures/notes are postMessage'd up to the host so they're captured into the build report.
     expect(html).toContain('__nbaiPreviewError');
   });
+
+  it('supplies a missing index.css imported by main, and does not replace one that was saved', () => {
+    const missing = { ...VITE_REACT_FIXTURE };
+    delete missing['src/index.css'];
+    const html = buildReactPreview(VirtualFileSystem.fromRecord(missing));
+    expect(html).toContain('preview: missing stylesheet supplied');
+    expect(html).toContain('"src/index.css"');
+    const kept = buildReactPreview(reactVfs());
+    expect(kept).not.toContain('preview: missing stylesheet supplied');
+    expect(kept).toContain('@tailwind base');
+  });
+
+  it('does not invent a stylesheet for a package import, and names a boot crash instead of Script error', () => {
+    const files = { ...VITE_REACT_FIXTURE, 'src/main.jsx': VITE_REACT_FIXTURE['src/main.jsx'] + "import 'simplebar/dist/simplebar.css';\n" };
+    const html = buildReactPreview(VirtualFileSystem.fromRecord(files));
+    expect(html).not.toContain('"simplebar/dist/simplebar.css"');
+    expect(html).toContain('bootErrorMessage');
+    expect(html).toContain('The browser hid the real reason.');
+    expect(html).not.toContain("showError((e && e.message) || 'Script error')");
+  });
 });
 
 describe('buildReactPreview — Visual Editor (v1) wiring', () => {

@@ -144,7 +144,7 @@ describe('the ladder really is wired, in the source', () => {
     expect(free).toMatch(/\[\s*openai\s*,\s*'gpt-5-nano'\s*,\s*\d+\s*\]/);
   });
 
-  it('climbs cheapest-first BY PRIORITY: lite(1.20) → nano(2.85) → flash(4.90)', () => {
+  it('uses the approved priority: Nano → Vertex Lite → Vertex Flash', () => {
     // ⚠️ By PRIORITY, not by source position — the two Vertex rungs are registered together, so
     // flash sits ABOVE nano in the file while ranking below it at runtime. Asserting the source
     // order would have pinned a detail that means nothing and broken on any harmless re-grouping.
@@ -153,9 +153,9 @@ describe('the ladder really is wired, in the source', () => {
       expect(hit, `no priority found for ${m}`).toBeTruthy();
       return Number(hit![1]);
     };
-    expect(prio('gemini-2.5-flash-lite')).toBeLessThan(prio('gpt-5-nano'));
-    expect(prio('gpt-5-nano')).toBeLessThan(prio('gemini-2.5-flash'));
-    // …and the prices really are in that order, so the ranking is not a coincidence.
+    expect(prio('gpt-5-nano')).toBeLessThan(prio('gemini-2.5-flash-lite'));
+    expect(prio('gemini-2.5-flash-lite')).toBeLessThan(prio('gemini-2.5-flash'));
+    // This is the user's requested order, not a claim that Nano is cheaper or free.
     expect(chatCostIndex('VERTEX', 'gemini-2.5-flash-lite'))
       .toBeLessThan(chatCostIndex('OPENAI', 'gpt-5-nano'));
     expect(chatCostIndex('OPENAI', 'gpt-5-nano'))

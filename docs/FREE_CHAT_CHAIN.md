@@ -474,7 +474,7 @@ budget (`FREE_TIER_PAID_DAILY_CAP_USD`, default $10, shared authority `free_chat
 
 | Surface | Free order | Notes |
 |---|---|---|
-| Legacy Free chat (`buildFree`) | GLM-4.7-flash → flash-lite → gpt-5-nano → flash | paid rungs wrapped by `cappedFreeTierRung` |
+| Legacy Free chat (`buildFree`) | GLM-4.7-flash → gpt-5-nano → Vertex flash-lite → Vertex flash | paid rungs wrapped by `cappedFreeTierRung` |
 | Teacher AI / professionals / Design / Debug / App-debug | GLM-4.7-flash → flash-lite → flash | **sequential** (`route`), not raced: one answer = one bill |
 | Doctor AI / SDA (free) | GLM → Vertex flash-lite → flash → Gemini flash-lite → flash | never 2.5-pro, Grok or Claude |
 | Free vision (chat photo/PDF, screenshot→prompt, avatar) | GLM-4.6V-flash → Vertex flash-lite → flash → Gemini flash-lite → flash | Grok-4 / 2.5-pro removed |

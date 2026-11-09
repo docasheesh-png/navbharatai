@@ -12,13 +12,13 @@ Historical Stop is respected. No stopped-app resume, production replay, paid mod
 
 ## Honest accounting / missing systems
 
-**32rows =23prevention/safeguard rows awaiting parent review+merge (5report-derived,8inspection including1new browser finding,10review-only),4already-fixed/guarded,5blocked. Seven bounded classes, NOT32historical failures.** The source-based math/input/Select findings are current-template inspection, not proof the historical partial app calculated incorrectly: its seed failed before delivery. No app had been judged finished.
+**34rows =25prevention/safeguard rows awaiting parent review+merge (7report/preview-derived,8inspection including1new browser finding,10review-only),4already-fixed/guarded,5blocked. Eight bounded classes, NOT34historical failures.** The source-based math/input/Select findings are current-template inspection, not proof the historical partial app calculated incorrectly: its seed failed before delivery. No app had been judged finished.
 
 Five historical buckets: **self-healed0; workaround2; skipped0; still-broken/result-imperfect6; struggle2**. These10distinct report items concern claims, accounting/census, capacity and alternative generation; they are not10broken apps. Cancellations and appropriately deferred tests are NOT classified as skipped defects. Uncertain draft attribution/store reconciliation is recorded separately, not inflated into proven failures.
 
-Missing subsystems/fixes: **F1** one build-local direct/tool admission owner (BR1952 missed directsetup/seed siblings); **F2** positively known source inventory before either seed; **F3** selection/seed/delivery distinctions on both planners and skipped-seed diagnostics; **F4** advisory applicability rather than perfect scores for hooks/types; **F5** independently reference-tested shared-generation lunar series; **F6** strict coordinate/civil-date/time admission in both siblings with visible invalid-input feedback; **F7** exact accessible naming in shared Select, proven by the real browser's initial failure and preserved exact-label assertion.
+Missing subsystems/fixes: **F1** one build-local direct/tool admission owner (BR1952 missed directsetup/seed siblings); **F2** positively known source inventory before either seed; **F3** selection/seed/delivery distinctions on both planners and skipped-seed diagnostics; **F4** advisory applicability rather than perfect scores for hooks/types; **F5** independently reference-tested shared-generation lunar series; **F6** strict coordinate/civil-date/time admission in both siblings with visible invalid-input feedback; **F7** exact accessible naming in shared Select, proven by the real browser's initial failure and preserved exact-label assertion; **F8** safe, non-mutating generated persisted-state warnings at the shared write-time and hook-only build boundaries. D13/D14 were feasible prevention engineering, not excused by missing full historical bodies.
 
-Proactive senior-engineering judgement: first-pass deterministic domain templates with independently checked astronomical fixtures beat paying a model to reinvent32files after admission failure. Unknown inventory must never authorize overwrites; no-UI evidence must never become a perfect page. The ceiling is genuine provider capacity plus the still-open schema-aware arbitrary-generated-state boundary, not a need for a larger quota or another planner. Do not silently substitute a calendar table or claim ceremonial precision. Existing public capabilities unchanged; no AppKnowledgeBase entry/UI feature required.
+Proactive senior-engineering judgement: first-pass deterministic domain templates with independently checked astronomical fixtures beat paying a model to reinvent32files after admission failure. Unknown inventory must never authorize overwrites; no-UI evidence must never become a perfect page. The ceiling is genuine provider capacity, not a need for a larger quota or another planner. F8 now closes the evidenced local unvalidated-storage pattern; it deliberately warns rather than inventing schemas or rewriting user data. This bounded lint is not universal semantic/schema validation. Do not silently substitute a calendar table or claim ceremonial precision. Existing public capabilities unchanged; no AppKnowledgeBase entry/UI feature required.
 
 Close ONLY25confirmed merged BR1956 prevention/safeguard rows (IDs below), retain its5blockers and all older rows including Q2371 **real DOM-gameplay evaluator engineering debt**, Q2439/Q2455/Q2464 and BR1955's10blockers. PR4109 uncertainStop/receipt ownership remains engineering work, not external-only capacity. No blanket closure of all BR1956 or all155reports.
 
@@ -108,19 +108,19 @@ Close ONLY25confirmed merged BR1956 prevention/safeguard rows (IDs below), retai
 - Root/class/sibling action: What: verify/repair that historical app. Needs a read-only artifact matching all4hashes and any earlier files, then a separately authorized isolated continuation/verification. User Stop legitimately cancelled8calls; no compile/preview/journey/test happened afterward. Missing completed app is NOT an engine failure and no automatic replay is allowed. Current template/browser fixes are prevention, not historical app repair.
 - Regression/reversion: All13call outcomes retained; real current-template synthetic browser is separately labelled.
 
-### D13 / Q-2544 — BLOCKED — NOT CLAIMED FIXED
-- Origin / historical bucket: draft-attribution/engineering / not an extra established historical failure.
+### D13 / Q-2544 — BLOCKED — HISTORICAL ATTRIBUTION ONLY
+- Origin / historical bucket: historical-draft-attribution / not an extra established historical failure.
 - Problem: Capped useCityStorage preview assigns JSON.parse output directly to selected-city state.
 - Evidence: L04 responsePreview; City/CustomCity/SelectedCity contract L02.
-- Root/class/sibling action: Historical draft is not a delivered app: missing fullbody prevents attribution of any unseen guard. Exact current-template city-index load already validates integer/range and catches storage access; real malformed-city/reload controls prove that bounded first-pass path. Arbitrary GENERATED domain-schema validation is NOT universally implemented by this patch: a generic rewrite without complete semantic schema can corrupt user data. That broader engineering capability remains open, not reclassified as external capacity or claimed solved by a prompt. Needs a reviewed schema-aware generated-state boundary and negative fixtures, plus exact historical hook for attribution.
-- Regression/reversion: Current seed malformed persisted city browser control; original hook remains unrepaired/unreplayed.
+- Root/class/sibling action: What: establish exact historical City-hook semantics and delivered artifact. Why: L04 preview is capped and the stopped full source/hash-matched app is absent. Needs: read-only exact hook/app artifact and receipts; no stopped-app replay. Tried: retained L02/L04 and current controlled seed/browser tests. F8/Q-2564 now implements the feasible source-aware parsed-storage-to-state warning class with exact-preview/bypass/validated-positive fixtures, shared write-time plus hook-only build warnings and no speculative rewriting. Only historical full-hook/app attribution remains blocked; no claim that old app was repaired.
+- Regression/reversion: Exact L04 fixture and F8 city taint/integration reversion controls; current malformed-city/reload browser retained.
 
-### D14 / Q-2545 — BLOCKED — NOT CLAIMED FIXED
-- Origin / historical bucket: draft-attribution/engineering / not an extra established historical failure.
+### D14 / Q-2545 — BLOCKED — HISTORICAL ATTRIBUTION ONLY
+- Origin / historical bucket: historical-draft-attribution / not an extra established historical failure.
 - Problem: Capped useTheme preview casts stored strings and reads storage without the safe shared-theme boundary.
 - Evidence: L05 responsePreview.
-- Root/class/sibling action: Current exact-template shared ThemeToggle already catches storage failures, whitelists light/dark/auto and defaults light; system preference applies only after explicit auto. It is not evidence the unfinished generated hook was fixed. Generic generated-hook contract enforcement remains engineering debt alongside D13, not merely missing historical files. Needs reviewed source-aware boundary plus exact hook for attribution; no speculative universal code rewriter added.
-- Regression/reversion: Existing golden shared-theme controls retained; no historical theme behavior claim.
+- Root/class/sibling action: What: establish exact historical theme-hook semantics and delivered artifact. Why: L05 preview is capped; full stopped hook/app is absent. Needs: read-only exact hook/app artifact and receipts, not a paid replay. Tried: retained L05 and existing safe shared ThemeToggle/browser tests. F8/Q-2565 now implements the feasible unchecked persisted-theme class: local supported light/dark/auto whitelists, casts/truthiness/fallback negatives, shared write-time plus build warnings. Only historical full-hook/app attribution remains blocked. No universal schema/code rewrite or historical repair claim.
+- Regression/reversion: Exact L05 fixture and F8 invalid-enum reversion; valid supported subsets, shared current-theme controls retained.
 
 ### P01 / Q-2546 — FIXED IN BRANCH — NOT MERGED
 - Origin / historical bucket: inspection / not an extra established historical failure.
@@ -233,6 +233,26 @@ Close ONLY25confirmed merged BR1956 prevention/safeguard rows (IDs below), retai
 - Evidence: GOLDEN_SCAFFOLD_SKIPPED catch/unknown inventory siblings.
 - Root/class/sibling action: F3/F2: unknown and thrown failures remain unresolved; explain no replacement is established and further work needs admission. Known pre-existing user source still legitimately preserves its owner.
 - Regression/reversion: Route state/message census, existing seed/golden/stop/routing cohorts; no pricing/release-policy change.
+
+## Independent-review correction: feasible generated-hook prevention (F8)
+
+The earlier D13/D14 engineering deferral was too broad. Capped source prevents complete historical attribution, **not** synthetic-testable prevention. The exact retained L04/L05 prefixes are committed as capped fixtures, not reconstructed full files. `persistedStateCheck.ts` binds identifiers without filesystem/module reads or evaluation and follows local initializer aliases from local/session storage through JSON.parse into React setters/initializers, and raw persisted strings into theme state/data-theme. Casts, comments, try/catch, truthy/null fallbacks and bad enum disjunctions do not stand in for validation. Existing explicit guarded branches/validated decoder calls and supported light/dark subsets remain intact; no auto choice is added.
+
+One pure checker is shared by write-time `qualityNote` in existing dispatcher lanes and unresolved `PERSISTED_STATE_BOUNDARY` build warnings outside the design/JSX-presence condition. No paid call, source/data rewrite, schema guess, failed write/build, new setting, lane replay, Stop or publication ownership change. It is an advisory detector, not universal validation: it follows single-file variable initializers, not arbitrary reassignments/interprocedural/property-container flows; explicit predicate/decoder implementations remain the app's responsibility and are not certified by their names. Those bounded limitations are not evidence of extra historical failures. Current controlled templates remain separately browser-proven; Q2371 and PR4109 debts are untouched.
+
+### D13-P / Q-2564 — FIXED IN BRANCH — NOT MERGED
+- Origin / historical bucket: report-preview-prevention / no additional historical-failure count.
+- Problem: Generated storage JSON can enter React state without a runtime shape check; safe seed alone did not protect generated replacements.
+- Evidence: L04 exact capped useCityStorage prefix; parent independent review of D13.
+- Root/class/sibling action: F8: pure TypeScript-symbol-bound storage/JSON/alias-to-React-state lint, including eager/lazy initializers. Shared qualityNote serves all existing write lanes; same check emits unresolved PERSISTED_STATE_BOUNDARY warnings at build end even without JSX. Explicit local guards/decoders respected. Warning only: no data/schema/code rewriting or extra model calls.
+- Regression/reversion: Exact retained preview, alias/cast/try/truthy/shadowed-symbol negatives; validated-positive controls; meaningful parsed-taint and shared-note red reversions.
+
+### D14-P / Q-2565 — FIXED IN BRANCH — NOT MERGED
+- Origin / historical bucket: report-preview-prevention / no additional historical-failure count.
+- Problem: Generated theme casts/truthiness accepted arbitrary persisted strings instead of validating supported modes.
+- Evidence: L05 exact capped useTheme prefix; parent independent review of D14.
+- Root/class/sibling action: F8: same shared single-file lint tracks persisted strings into theme state/data-theme; requires a local supported light/dark/auto whitelist, never adds auto or edits user choices/storage. Handles positive literal comparisons/includes/ternaries and rejects out-of-domain/weak guards. Does not certify opaque predicates or infer universal schemas.
+- Regression/reversion: Exact retained preview, invalid-enum/cast/truthy/fallback/bad-disjunction negatives; supported-subset/validated-decoder positives; invalid-mode red mutation. Existing theme/browser behavior retained.
 
 ## Complete retained issue coverage (array order, no omitted info records)
 

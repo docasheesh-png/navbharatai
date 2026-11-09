@@ -746,6 +746,7 @@ import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedCla
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
 import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../AgentV3/spacingSnap';
 import { filesANoteStillFlags } from '../AgentV3/writeTimeQualityCheck';
+import { persistedStateBuildWarnings } from '../AgentV3/persistedStateCheck';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
 import { buildServiceGraph } from '../AgentV3/serviceGraph';
@@ -21474,6 +21475,13 @@ async function noteBuildOutcome(
             // The deterministic design writers, BEFORE the lint (autopsy 9c612cdb — see `snapSpacing`).
             await restoreKitRules({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'before-repair');
             await snapSpacing({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'before-lint');
+            // BR1957: a hook-only project still needs persisted-state warnings. Advisory and read-only;
+            // no inferred schema, code/data rewrite, model call or change to Stop/green ownership.
+            if (hasUserApp) {
+              for (const message of persistedStateBuildWarnings(integrityFiles)) {
+                buildDiag.record({ phase: 'build', severity: 'warning', code: 'PERSISTED_STATE_BOUNDARY', ...obs(message) });
+              }
+            }
             const quality = hasUserApp ? lintBuiltApp(integrityFiles) : null;
             designShipped = quality;
             // `null` means nothing lintable was found. Recording a perfect score there would claim we

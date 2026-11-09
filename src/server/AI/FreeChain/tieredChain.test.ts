@@ -257,11 +257,12 @@ describe('fixed-order FreeChain opt-in', () => {
   const calls: string[] = [];
   vi.spyOn(mitrify, 'runApprovedMitrifyChain').mockImplementation(async () => { calls.push('mitrify'); return { kind: 'skipped', reason: 'not-approved' }; });
   vi.spyOn(qubax, 'runApprovedQubaxChat').mockImplementation(async options => {
-   calls.push('qubax'); expect(await options.reserve(400)).not.toBeNull(); await options.onChunk?.('Qubax only answer');
+   calls.push('qubax'); expect(await options.reserve(400)).not.toBeNull(); options.beforeHttpDispatch?.(); await options.onChunk?.('Qubax only answer');
    return { kind: 'response', content: 'Qubax only answer', model: 'reviewed-qubax-model' };
   });
   const result = await withFixedTextChainScope('chat', 'text', () => buildFreeChainRouter(db, fixed()).route(input()));
   expect(result).toMatchObject({ provider: 'QUBAX', content: 'Qubax only answer' }); expect(calls).toEqual(['mitrify', 'qubax']);
+  expect(result.freeChain?.attempts.find(a => a.provider === 'qubax')).toMatchObject({ entered: true, reason: 'served' });
   expect(m.paid).toHaveBeenCalledOnce(); expect(m.execute).toHaveBeenCalledTimes(4); expect(m.settle).not.toHaveBeenCalled();
  });
  it.each(['duplicate', 'error'])('releases only the new month hold when Qubax daily reservation is %s', async outcome => {
@@ -281,6 +282,52 @@ describe('fixed-order FreeChain opt-in', () => {
   const adapter = vi.spyOn(qubax, 'runApprovedQubaxChat').mockRejectedValue(new qubax.QubaxError('QUBAX_UNAVAILABLE', 0, false, true));
   const result = await withFixedTextChainScope('chat', 'text', () => buildFreeChainRouter(db, fixed()).route(input()));
   expect(result.ok).toBe(false); expect(m.execute).toHaveBeenCalledTimes(4); expect(adapter).toHaveBeenCalledOnce();
+ });
+ it.each(['QUBAX_APPROVAL_REVOKED', 'QUBAX_CANCELLED'])('continues after confirmed undispatched %s without spending a physical attempt', async code => {
+  vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');
+  for (let i = 0; i < 4; i++) m.execute.mockRejectedValueOnce(new FreeChainProviderError('SERVER'));
+  m.execute.mockImplementation(successful('later approved answer'));
+  const hold = { id: 'unused-qubax-hold', day: 'd', uidHash: 'u', maxCostNanoUsd: 400, createdAt: 0, mayDispatch: true };
+  m.paid.mockResolvedValue(hold);
+  vi.spyOn(qubax, 'runApprovedQubaxChat').mockImplementation(async options => {
+   const receipt = await options.reserve(400); expect(receipt).not.toBeNull();
+   await receipt!.releaseUndispatched(); throw new qubax.QubaxError(code);
+  });
+  const cfg = fixed({ FREE_CHAIN_MAX_ATTEMPTS: '5' });
+  const result = await withFixedTextChainScope('chat', 'text', () => buildFreeChainRouter(db, cfg).route(input()));
+  expect(result).toMatchObject({ ok: true, provider: 'DEEPINFRA', content: 'later approved answer' });
+  expect(m.execute).toHaveBeenCalledTimes(5); expect(m.paid).toHaveBeenCalledTimes(2);
+  expect(m.settle).toHaveBeenCalledWith(hold, 0);
+  expect(result.freeChain?.attempts.find(a => a.provider === 'qubax')).toMatchObject({ entered: false, reason: code.toLowerCase() });
+  expect(result.freeChain?.attempts.filter(a => a.entered)).toHaveLength(5);
+ });
+ it.each(['admission-uncertain', 'unknown-wrapped', 'unknown', 'dispatched', 'partial', 'callback-entered', 'caller-abort'])('does not fall through Qubax %s', async kind => {
+  vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');
+  m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
+  const controller = new AbortController();
+  vi.spyOn(qubax, 'runApprovedQubaxChat').mockImplementation(async options => {
+   if (kind === 'caller-abort') controller.abort();
+   if (kind === 'callback-entered') options.beforeHttpDispatch?.();
+   if (kind === 'unknown') throw new Error('uncertain admission');
+   throw new qubax.QubaxError(kind === 'admission-uncertain' ? 'QUBAX_ADMISSION_UNCERTAIN' : kind === 'unknown-wrapped' ? 'QUBAX_UNAVAILABLE' : 'QUBAX_APPROVAL_REVOKED', 0, kind === 'partial', kind === 'dispatched');
+  });
+  const result = await withFixedTextChainScope('chat', 'text', () => buildFreeChainRouter(db, fixed()).route({ ...input(), signal: controller.signal }));
+  expect(result.ok).toBe(false); expect(m.execute).toHaveBeenCalledTimes(4); expect(m.paid).not.toHaveBeenCalled();
+  expect(result.freeChain?.attempts.some(a => a.provider === 'llama8b')).toBe(false);
+  if (kind === 'caller-abort') expect(result.reason).toBe('aborted');
+ });
+ it('never refunds or replays a dispatched Qubax failure', async () => {
+  vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');
+  m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
+  m.paid.mockResolvedValue({ id: 'spent-qubax-hold', day: 'd', uidHash: 'u', maxCostNanoUsd: 400, createdAt: 0, mayDispatch: true });
+  vi.spyOn(qubax, 'runApprovedQubaxChat').mockImplementation(async options => {
+   expect(await options.reserve(400)).not.toBeNull(); options.beforeHttpDispatch?.();
+   throw new qubax.QubaxError('QUBAX_UNAVAILABLE', 0, false, true);
+  });
+  const result = await withFixedTextChainScope('chat', 'text', () => buildFreeChainRouter(db, fixed()).route(input()));
+  expect(result.ok).toBe(false); expect(m.execute).toHaveBeenCalledTimes(4); expect(m.paid).toHaveBeenCalledOnce();
+  expect(m.settle).not.toHaveBeenCalled();
+  expect(result.freeChain?.attempts.find(a => a.provider === 'qubax')).toMatchObject({ entered: true });
  });
  it('does not enroll nested Builder chat helpers into Qubax', async () => {
   vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));

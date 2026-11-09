@@ -76,4 +76,14 @@ describe('test chat provider isolation and admission', () => {
     if (kind === 'duplicate') expect(fake.settle).not.toHaveBeenCalled();
     if (kind === 'monthly' || kind === 'invalid-ceiling') expect(fake.reserve).not.toHaveBeenCalled();
   });
+  it('releases only the fresh monthly hold when daily admission rejects before dispatch', async () => {
+    fake.reserve.mockRejectedValue(new Error('daily reservation unavailable'));
+    fake.run.mockImplementation(async options => { await options.reserve(50); return reply; });
+    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'unconfirmed' });
+    expect(fake.settleMonth).toHaveBeenCalledExactlyOnceWith({ marker: 'db' }, '2026-11', 50, 0);
+    // The failed daily write may be uncertain. No receipt authorizes clearing that liability.
+    expect(fake.settle).not.toHaveBeenCalled();
+    expect(fake.reserve).toHaveBeenCalledOnce();
+    expect(fake.run).toHaveBeenCalledOnce();
+  });
 });

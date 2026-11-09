@@ -83,8 +83,17 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
   const controller = new AbortController(); const signal = AbortSignal.any([options.signal, controller.signal]);
   let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => controller.abort(), 60_000);
   const pendingWork = new Set<Promise<unknown>>();
-  async function bounded<T>(work: Promise<T>): Promise<T> {
+  function track<T>(work: Promise<T>): Promise<T> {
     pendingWork.add(work); void work.then(() => pendingWork.delete(work), () => pendingWork.delete(work));
+    return work;
+  }
+  function cancelBody(cancel: () => Promise<void>) {
+    // Cleanup must not delay an answer or cancellation. Retain the capacity slot
+    // until it settles, and observe rejection without replacing the actual result.
+    try { void track(cancel()); } catch { /* Synchronous cleanup failure is observed too. */ }
+  }
+  async function bounded<T>(work: Promise<T>): Promise<T> {
+    track(work);
     let abort: () => void = () => {};
     const cancelled = new Promise<never>((_, reject) => { abort = () => reject(new QubaxError('QUBAX_CANCELLED')); signal.addEventListener('abort', abort, { once: true }); });
     try { signal.throwIfAborted(); return await Promise.race([work, cancelled]); }
@@ -132,7 +141,7 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     const response = await fetch(`${cfg.baseURL}/chat/completions`, { method: 'POST', redirect: 'error', signal,
       headers: { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...body, model: selection.modelId, ...(body.stream === true ? { stream_options: { include_usage: true } } : {}) }) });
-    if (!response.ok) { await response.body?.cancel(); throw new QubaxError('QUBAX_HTTP_ERROR', response.status); }
+    if (!response.ok) { if (response.body) cancelBody(() => response.body!.cancel()); throw new QubaxError('QUBAX_HTTP_ERROR', response.status); }
     let finished = false; let usage: { inputTokens: number; outputTokens: number } | undefined;
     const inspect = async (value: any) => {
       signal.throwIfAborted();
@@ -180,7 +189,10 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
       }
       if (body.stream !== true) { pending += decoder.decode(); await inspect(JSON.parse(pending)); }
       else if (!done) throw new QubaxError('QUBAX_INCOMPLETE_STREAM');
-    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+    } finally {
+      cancelBody(() => reader.cancel());
+      try { reader.releaseLock(); } catch { /* A cancelled pending read may still own the lock. */ }
+    }
     if (!finished || !content.trim()) throw new QubaxError('QUBAX_INCOMPLETE_STREAM');
     signal.throwIfAborted(); await bounded(Promise.resolve().then(() => options.onChunk?.(content))); signal.throwIfAborted();
     return { kind: 'response', content, model: selection.modelId, ...(usage ? { usage } : {}) };

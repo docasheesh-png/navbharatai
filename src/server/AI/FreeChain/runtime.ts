@@ -289,6 +289,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           const result = await runApprovedQubaxChat({ db, uid: input.context.uid, requestId: `${requestId}:qubax`,
             privateTurn: input.context.privateTurn, healthTurn: input.context.healthTurn, signal,
             body: { messages: [{ role: 'system', content: prepared.systemPrompt }, { role: 'user', content: prepared.prompt }], max_tokens: cfg.features.replyMaxTokens, stream: true },
+            beforeHttpDispatch: () => { signal.throwIfAborted(); attempt.entered = true; },
             onChunk: value => {
               if (signal.aborted) return;
               if (value) { clearTimeout(timer); timer = setTimeout(() => controller.abort(), Math.min(30000, Math.max(1, deadlineAt - Date.now()))); }
@@ -309,7 +310,6 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
               catch (error) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); throw error; }
               if (hold && !hold.mayDispatch) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); throw new QubaxError('QUBAX_ADMISSION_UNCERTAIN'); }
               if (!hold) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); return null; }
-              attempt.entered = true;
               return { releaseUndispatched: async () => { await store.settlePaid(hold, 0); if (month) await settleMonthly(db, month, maximumNanoUsd, 0); } };
             },
           });
@@ -318,9 +318,14 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           return done({ content: result.content, provider: 'QUBAX', model: result.model, ...(result.usage ? { usage: result.usage } : {}), ok: true, latencyMs: 0 });
         } catch (error) {
           attempt.reason = error instanceof QubaxError ? error.code.toLowerCase() : 'qubax-admission-unavailable';
-          // Unknown liability, cancellation, or committed output never opens a direct fallback.
+          // Unknown liability, caller cancellation, or committed output never opens a direct fallback.
           if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
           if (content) { trace.rung = 'qubax'; return done({ content: input.onChunk ? content : `${content}\n\nThe response was interrupted. Please try again.`, provider: 'QUBAX', model: attempt.model, ok: true, reason: 'stalled', latencyMs: 0 }); }
+          // Fresh evidence can be revoked or expire before any physical call.
+          // Only confirmed unused attempts may fall through; unknown admission
+          // errors and duplicate holds must keep their original no-replay boundary.
+          if (error instanceof QubaxError && !error.dispatched && !error.partial && !attempt.entered
+            && ['QUBAX_APPROVAL_REVOKED', 'QUBAX_CANCELLED'].includes(error.code)) continue;
           break;
         } finally { clearTimeout(timer); controller.abort(); }
       }

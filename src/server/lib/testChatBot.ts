@@ -57,8 +57,16 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         const month = cfg.features.monthlyCap ? await reserveMonthly(db, cfg.features.monthlyCapNanoUsd, maximumNanoUsd) : null;
         if (cfg.features.monthlyCap && !month) return null;
         // Duplicate/uncertain reservations do not authorize another request. Never relax the shared caps.
-        const hold = await budget.reservePaid({ requestId, uid, maxCostNanoUsd: maximumNanoUsd,
-          capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
+        let hold;
+        try {
+          hold = await budget.reservePaid({ requestId, uid, maxCostNanoUsd: maximumNanoUsd,
+            capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
+        } catch (error) {
+          // This attempt never dispatched. Release only its fresh monthly hold;
+          // a rejected daily write has no receipt proving that liability can be cleared.
+          if (month) await settleMonthly(db, month, maximumNanoUsd, 0);
+          throw error;
+        }
         if (hold && !hold.mayDispatch) {
           // This is a new monthly hold for an already-claimed daily request, not that request's original hold.
           if (month) await settleMonthly(db, month, maximumNanoUsd, 0);

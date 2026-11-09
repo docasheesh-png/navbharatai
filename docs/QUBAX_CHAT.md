@@ -18,10 +18,17 @@ positions. Skips do not consume physical attempts.
   Gateway usage is accounted at a conservative ceiling, **not an invoice**;
   unknown or interrupted liability remains reserved. No unsafe replay follows
   a dispatched error, cancellation, refusal, or uncertain charge.
+- Confirmed pre-dispatch evidence revocation or internal timeout may skip to a
+  later eligible Chat rung. Caller cancellation, partial output, any possible
+  dispatch, and uncertain budget admission still stop the request. A reservation
+  alone does not count as a physical attempt.
 - Responses are bounded and buffered until complete to prevent partial answers
   or credentials split across SSE events from escaping. The current first-output
   deadline therefore applies to the full validated response. A slow complete
   reply may be rejected rather than emitted incrementally.
+- Response-body cleanup cannot delay a validated result or cancellation. Pending
+  cleanup retains its concurrency slot until it settles and never releases a
+  possibly spent budget hold.
 - A separate authenticated admin **Test Chat Bot** uses the same Qubax-only
   adapter without the production routing ladder. See `TEST_CHAT_BOT.md`.
 

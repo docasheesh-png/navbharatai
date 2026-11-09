@@ -101,6 +101,49 @@ describe('Qubax exact evidence-bound single dispatch', () => {
     network.mockResolvedValue(new Response('data: {"choices":[{"delta":{"content":"hello"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } }));
     expect(await runApprovedQubaxChat({ ...f.options, onChunk }, env)).toMatchObject({ kind: 'response', content: 'hello' }); expect(onChunk).toHaveBeenCalledExactlyOnceWith('hello');
   });
+  it.each(['complete', 'cancelled', 'http-error'])('settles %s promptly while noncooperative body cleanup retains capacity and spent money', async mode => {
+    const f = fixture(true), onChunk = vi.fn(), controller = new AbortController();
+    let releaseCleanup!: () => void;
+    const cleanup = new Promise<void>(resolve => { releaseCleanup = resolve; });
+    const cancel = vi.fn(() => cleanup);
+    const body = new ReadableStream<Uint8Array>({
+      start(stream) {
+        if (mode === 'complete') stream.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"hello"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'));
+      }, cancel,
+    });
+    network.mockResolvedValueOnce(new Response(body, { status: mode === 'http-error' ? 503 : 200, headers: { 'content-type': 'text/event-stream' } }));
+    const limited = { ...env, QUBAX_MAX_INFLIGHT: '1' };
+    let outcome: { result?: unknown; error?: unknown } | undefined;
+    const pending = runApprovedQubaxChat({ ...f.options, signal: controller.signal, onChunk }, limited)
+      .then(result => { outcome = { result }; }, error => { outcome = { error }; });
+    try {
+      await vi.waitFor(() => expect(network).toHaveBeenCalledOnce(), { timeout: 2_000, interval: 10 });
+      if (mode === 'cancelled') controller.abort();
+      await vi.waitFor(() => expect(outcome).toBeDefined(), { timeout: 2_000, interval: 10 });
+      expect(cancel).toHaveBeenCalledOnce();
+      if (mode === 'complete') { expect(outcome?.result).toMatchObject({ kind: 'response', content: 'hello' }); expect(onChunk).toHaveBeenCalledExactlyOnceWith('hello'); }
+      else {
+        expect(outcome?.error).toMatchObject({ code: mode === 'cancelled' ? 'QUBAX_CANCELLED' : 'QUBAX_HTTP_ERROR', dispatched: true });
+        expect(onChunk).not.toHaveBeenCalled();
+      }
+      const next = fixture();
+      expect(await runApprovedQubaxChat(next.options, limited)).toMatchObject({ kind: 'skipped', reason: 'qubax-capacity' });
+      expect(next.reserve).not.toHaveBeenCalled(); expect(network).toHaveBeenCalledOnce();
+      expect(f.releaseUndispatched).not.toHaveBeenCalled();
+    } finally { releaseCleanup(); await pending; }
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const next = fixture(); network.mockResolvedValueOnce(answer());
+    expect(await runApprovedQubaxChat(next.options, limited)).toMatchObject({ kind: 'response' });
+  });
+  it('observes rejected cleanup without hiding an approved response', async () => {
+    const f = fixture(true), onChunk = vi.fn();
+    const cancel = vi.fn().mockRejectedValue(new Error('synthetic cleanup failure'));
+    network.mockResolvedValueOnce(new Response(new ReadableStream({
+      start(stream) { stream.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"hello"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')); }, cancel,
+    }), { headers: { 'content-type': 'text/event-stream' } }));
+    expect(await runApprovedQubaxChat({ ...f.options, onChunk }, env)).toMatchObject({ kind: 'response', content: 'hello' });
+    expect(cancel).toHaveBeenCalledOnce(); expect(f.releaseUndispatched).not.toHaveBeenCalled();
+  });
   it('rejects caller-specified models, endpoints and tools without network', async () => {
     const f = fixture(); for (const extra of [{ model: 'other' }, { baseURL: 'https://evil.invalid' }, { tools: [] }]) {
       expect(await runApprovedQubaxChat({ ...f.options, body: { ...f.options.body, ...extra } }, env)).toMatchObject({ kind: 'skipped', reason: 'qubax-capability-excluded' });

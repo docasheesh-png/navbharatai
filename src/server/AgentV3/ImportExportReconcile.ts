@@ -46,6 +46,36 @@ async function loadTsMorph(): Promise<any | null> {
   try { TsMorph = await import('ts-morph'); return TsMorph; } catch { return null; }
 }
 
+/**
+ * Every name the TypeScript standard library declares globally (`Event`, `Response`, `Record`, `Node` …),
+ * read once from the installed compiler's own lib files. A project type that shares such a name
+ * (`export interface Event` in src/types.ts) still compiles WITHOUT an import — the reference silently
+ * binds the global — so the type arm of `addMissingProjectImports` only imports one of these names when
+ * the compiler itself reported it as undefined. `null` when the lib files cannot be read: then EVERY
+ * type import needs that compiler proof. Never throws.
+ */
+let LibGlobalNames: Set<string> | null | undefined;
+async function libGlobalNames(): Promise<Set<string> | null> {
+  if (LibGlobalNames !== undefined) return LibGlobalNames;
+  try {
+    const tsMod: any = await import('typescript');
+    const tsx = tsMod.default ?? tsMod;
+    const fs = await import('node:fs');
+    const pathMod = await import('node:path');
+    const dir = pathMod.dirname(tsx.getDefaultLibFilePath({}));
+    const names = new Set<string>();
+    const decl = /^\s*(?:export\s+)?(?:declare\s+)?(?:interface|type|class|var|const|let|function|namespace|enum)\s+([A-Za-z_$][\w$]*)/gm;
+    for (const f of fs.readdirSync(dir)) {
+      if (!/^lib\..*\.d\.ts$/.test(f)) continue;
+      const text = fs.readFileSync(pathMod.join(dir, f), 'utf8');
+      let m: RegExpExecArray | null;
+      while ((m = decl.exec(text)) !== null) names.add(m[1]);
+    }
+    LibGlobalNames = names.size > 0 ? names : null;
+  } catch { LibGlobalNames = null; }
+  return LibGlobalNames;
+}
+
 interface ExportShape {
   /** Local names of named exports. */
   named: Set<string>;
@@ -411,7 +441,52 @@ export async function addMissingProjectImports(files: Record<string, string>, op
     }
   }
 
-  if (candidates.size === 0) return unchanged;
+  // TYPE INDEX — the type-position half (autopsy BR1959, 2026-11-09). A school app's src/utils/api.ts
+  // used the contract's `Student`, `Teacher`, `Course` … in `Promise<Student[]>` and never imported them:
+  // TS2304 × many. Every deterministic pass skipped the file, because this function only ever knew VALUE
+  // exports and VALUE uses (`pk === TypeReference → continue`, `cap.runtime !== 'value' → skip`), and a
+  // paid repair, then the full builder, were spent on a fix with one correct answer. Same standard as the
+  // value half: a name only ONE project module exports (as a type or a value — any second claimant is
+  // ambiguous), used here as a TYPE, declared nowhere in this file (type parameters included), and either
+  // reported by the compiler or not a TypeScript global (see `libGlobalNames`). It is added as
+  // `import type`, which erases at build time, so it can never change what runs.
+  const typeOwners = new Map<string, Set<string>>();
+  for (const path of sources.keys()) {
+    try {
+      const surface = capabilities.exportsOf(path);
+      if (surface.uncertain) continue;
+      for (const [name, cap] of surface.exports) {
+        if (name === 'default' || !cap.type) continue;
+        if (!typeOwners.has(name)) typeOwners.set(name, new Set());
+        typeOwners.get(name)!.add(path);
+      }
+    } catch { /* skip a file we can't read exports from */ }
+  }
+  const typeCandidates = new Map<string, string>();
+  for (const [name, owners] of typeOwners) {
+    const all = new Set([...owners, ...(exportIndex.get(name) ?? [])]);
+    if (all.size !== 1) continue;
+    typeCandidates.set(name, [...all][0]);
+  }
+  const libGlobals = typeCandidates.size > 0 ? await libGlobalNames() : null;
+  // 🔒 SIDE-EFFECT GUARD (BR1959 review): a name the PROJECT declares globally — in a script-style `.d.ts`
+  // (no import/export) or inside `declare global { … }` — already resolves with no import, exactly like a lib
+  // global. Importing a same-named module type there could REBIND a reference that compiled, so such a name
+  // is imported only on the compiler's own TS2304 proof (`unresolved`). Over-approximated on purpose: any
+  // file with `declare global` contributes all its declared names, so the arm only ever does less.
+  const projectAmbient = new Set<string>();
+  if (typeCandidates.size > 0) {
+    const declName = /\b(?:interface|type|class|enum|namespace)\s+([A-Za-z_$][\w$]*)/g; // anywhere in the file: `declare global { interface X }` is often one line
+    for (const [path, content] of Object.entries(files)) {
+      if (typeof content !== 'string') continue;
+      const scriptDts = /\.d\.[cm]?ts$/.test(path) && !/^\s*(?:import|export)\b/m.test(content);
+      if (!scriptDts && !/\bdeclare\s+global\b/.test(content)) continue;
+      let m: RegExpExecArray | null;
+      while ((m = declName.exec(content)) !== null) projectAmbient.add(m[1]);
+    }
+  }
+
+  if (candidates.size === 0 && typeCandidates.size === 0) return unchanged;
 
   const added: AddedImport[] = [];
   const touched = new Set<string>();
@@ -487,7 +562,7 @@ export async function addMissingProjectImports(files: Record<string, string>, op
     try {
       for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
         const text = id.getText();
-        if (!candidates.has(text)) continue;
+        if (!candidates.has(text) && !typeCandidates.has(text)) continue;
         const list = idsByName.get(text);
         if (list) list.push(id); else idsByName.set(text, [id]);
       }
@@ -548,6 +623,44 @@ export async function addMissingProjectImports(files: Record<string, string>, op
         sf.addImportDeclaration({ moduleSpecifier: spec, namedImports: [name] });
         touched.add(path);
         added.push({ file: path, name, from: spec, statement: `import { ${name} } from "${spec}";` });
+      } catch { /* leave untouched on any mutation error */ }
+    }
+
+    // The TYPE arm (see TYPE INDEX above). A declaration file is never an importer: adding an import
+    // would turn its global declarations into a module's.
+    if (typeCandidates.size === 0 || /\.d\.[cm]?ts$/.test(path)) continue;
+    const typeParams = new Set<string>();
+    try {
+      for (const tp of sf.getDescendantsOfKind(SyntaxKind.TypeParameter)) {
+        const n = tp.getNameNode?.()?.getText?.(); if (n) typeParams.add(n);
+      }
+    } catch { continue; }
+    const addedHere = new Set(added.filter((a) => a.file === path).map((a) => a.name));
+    const typeBySpec = new Map<string, string[]>();
+    for (const [name, owner] of typeCandidates) {
+      if (owner === path || local.has(name) || typeParams.has(name) || addedHere.has(name)) continue;
+      if (!unresolved.has(name) && (libGlobals === null || libGlobals.has(name) || projectAmbient.has(name))) continue;
+      let usedAsType = false;
+      try {
+        for (const id of idsByName.get(name) ?? []) {
+          const parent = id.getParent?.();
+          if (parent?.getKind?.() !== SyntaxKind.TypeReference || parent.getTypeName?.() !== id) continue;
+          if (id.getFirstAncestorByKind?.(SyntaxKind.ImportDeclaration) || id.getFirstAncestorByKind?.(SyntaxKind.ExportDeclaration)) continue;
+          usedAsType = true;
+          break;
+        }
+      } catch { usedAsType = false; }
+      if (!usedAsType) continue;
+      const spec = relImportSpecifier(path, owner);
+      const list = typeBySpec.get(spec);
+      if (list) list.push(name); else typeBySpec.set(spec, [name]);
+    }
+    for (const [spec, names] of typeBySpec) {
+      names.sort();
+      try {
+        sf.addImportDeclaration({ moduleSpecifier: spec, namedImports: names, isTypeOnly: true });
+        touched.add(path);
+        for (const name of names) added.push({ file: path, name, from: spec, statement: `import type { ${names.join(', ')} } from "${spec}";` });
       } catch { /* leave untouched on any mutation error */ }
     }
   }
@@ -822,4 +935,160 @@ export async function reconcileAndReanalyze(files: Record<string, string>) {
   const rec = await reconcileImportExports(files);
   const report = await analyzeImportExports(rec.files);
   return { files: rec.files, fixes: rec.fixes, report };
+}
+
+export interface SelfShadowFix {
+  file: string;
+  /** The imported name the nested function shadowed. */
+  name: string;
+  /** The alias the import now binds, and the self-calls now call. */
+  alias: string;
+  from: string;
+  /** How many self-calls were pointed back at the import. */
+  calls: number;
+}
+
+/**
+ * 🔁 A WRAPPER THAT CALLS ITSELF INSTEAD OF THE FUNCTION IT WRAPS (autopsy BR1959, 2026-11-09).
+ *
+ * A school app's hooks imported `fetchCourses` from `../utils/api` and then, inside `useCourses`, declared
+ * `const fetchCourses = async () => { … const data = await fetchCourses(); … }` — the hook's own name, taken
+ * from the contract's return interface, is the api's name too. The local shadows the import, the "api call"
+ * is the wrapper calling itself (an endless recursion the moment it runs), and `tsc` reports only the
+ * symptom (TS2345: `void` is not assignable). Six hooks were written that way; the full builder fixed them
+ * one per turn, over about four minutes. The fix has ONE correct answer, so it is made here.
+ *
+ * 🔒 It acts only when ALL of these hold, read from the AST and the checker's own symbols:
+ *   • a plain value import `{ name }` (or `{ x as name }`) from a PROJECT module that really exports it as a value;
+ *   • not one reference in the file resolves to that import — the shadowing local took every use;
+ *   • a function of the same name is declared INSIDE another function (a module-level twin would be a
+ *     duplicate-declaration error, not this);
+ *   • that function calls its own name directly and UNCONDITIONALLY — not under an if / ?: / && / loop /
+ *     catch / callback, and with no earlier `return` or `throw` — so the call can only ever recurse forever.
+ *     A recursion with a base case is an algorithm and is never touched.
+ * Then the import binds a fresh alias and only those self-calls are pointed at it. Nothing else changes.
+ * Pure; never throws — on any problem the file is returned unchanged.
+ */
+export async function fixSelfShadowedImports(files: Record<string, string>): Promise<{ files: Record<string, string>; fixes: SelfShadowFix[] }> {
+  const unchanged = { files, fixes: [] as SelfShadowFix[] };
+  const mod = await loadTsMorph();
+  if (!mod) return unchanged;
+  const { SyntaxKind } = mod;
+  let project: any;
+  try {
+    project = new mod.Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true, compilerOptions: { allowJs: true, jsx: 2, noLib: true } });
+  } catch { return unchanged; }
+  const sources = new Map<string, any>();
+  for (const [path, content] of Object.entries(files)) {
+    if (!CODE_FILE.test(path) || typeof content !== 'string' || !/\bimport\b/.test(content)) continue;
+    try { sources.set(path, project.createSourceFile(path, content, { overwrite: true })); } catch { /* skip */ }
+  }
+  if (sources.size === 0) return unchanged;
+  const capabilities = createExportCapabilities(files);
+  const fileSet = new Set(Object.keys(files));
+  const FUNCTION_KINDS = new Set<number>([SyntaxKind.FunctionDeclaration, SyntaxKind.FunctionExpression, SyntaxKind.ArrowFunction, SyntaxKind.MethodDeclaration]);
+  // A self-call that runs on EVERY call of the function is a certain endless recursion — never an
+  // algorithm. A recursion with a base case (`n <= 0 ? 0 : walk(n - 1)`, an early `return`, a loop, a
+  // callback such as `setTimeout(() => poll())`) is left alone, whatever the imports say.
+  const BRANCH_KINDS = new Set<number>([
+    SyntaxKind.IfStatement, SyntaxKind.ConditionalExpression, SyntaxKind.SwitchStatement, SyntaxKind.CaseClause,
+    SyntaxKind.ForStatement, SyntaxKind.ForInStatement, SyntaxKind.ForOfStatement, SyntaxKind.WhileStatement,
+    SyntaxKind.DoStatement, SyntaxKind.CatchClause,
+  ].filter((k) => typeof k === 'number'));
+  const unconditionalSelfCall = (call: any, fn: any): boolean => {
+    for (let a = call.getParent?.(); a && a !== fn; a = a.getParent?.()) {
+      const k = a.getKind();
+      if (BRANCH_KINDS.has(k) || FUNCTION_KINDS.has(k)) return false;
+      if (k === SyntaxKind.BinaryExpression) {
+        const op = a.getOperatorToken?.()?.getKind?.();
+        if (op === SyntaxKind.AmpersandAmpersandToken || op === SyntaxKind.BarBarToken || op === SyntaxKind.QuestionQuestionToken) return false;
+      }
+      if (k === SyntaxKind.CallExpression && a.getQuestionDotTokenNode?.()) return false;
+    }
+    const at = call.getStart();
+    for (const k of [SyntaxKind.ReturnStatement, SyntaxKind.ThrowStatement]) {
+      for (const exit of fn.getDescendantsOfKind(k)) {
+        if (exit.getStart() >= at) continue;
+        let inner = false;
+        for (let a = exit.getParent?.(); a && a !== fn; a = a.getParent?.()) if (FUNCTION_KINDS.has(a.getKind())) { inner = true; break; }
+        if (!inner) return false; // an earlier way out of the function: a base case may exist
+      }
+    }
+    return true;
+  };
+  const fixes: SelfShadowFix[] = [];
+  const out: Record<string, string> = { ...files };
+
+  for (const [path, sf] of sources) {
+    try {
+      const text: string = sf.getFullText();
+      const edits: Array<{ start: number; end: number; text: string }> = [];
+      const taken = new Set<string>(sf.getDescendantsOfKind(SyntaxKind.Identifier).map((id: any) => id.getText()));
+      const fileFixes: SelfShadowFix[] = [];
+      for (const decl of sf.getImportDeclarations()) {
+        if (decl.isTypeOnly?.()) continue;
+        const spec = decl.getModuleSpecifierValue?.();
+        if (typeof spec !== 'string' || !spec.startsWith('.')) continue;
+        const target = resolveLocalTarget(path, spec, fileSet);
+        if (!target) continue;
+        let targetExports: any;
+        try { targetExports = capabilities.exportsOf(target); } catch { continue; }
+        if (!targetExports || targetExports.uncertain) continue;
+        for (const named of decl.getNamedImports?.() ?? []) {
+          if (named.isTypeOnly?.()) continue;
+          const importedName: string = named.getNameNode?.()?.getText?.() ?? '';
+          const bound = named.getAliasNode?.() ?? named.getNameNode?.();
+          const local: string = bound?.getText?.() ?? '';
+          if (!importedName || !local) continue;
+          if (targetExports.exports.get(importedName)?.runtime !== 'value') continue;
+          const importSym = bound.getSymbol?.();
+          if (!importSym) continue;
+          const sameText = sf.getDescendantsOfKind(SyntaxKind.Identifier).filter((id: any) => id.getText() === local && id !== bound && !id.getFirstAncestorByKind?.(SyntaxKind.ImportDeclaration));
+          if (sameText.some((id: any) => id.getSymbol?.() === importSym)) continue; // the import IS used somewhere
+          const selfCalls: any[] = [];
+          for (const id of sameText) {
+            const parent = id.getParent?.();
+            const pk = parent?.getKind?.();
+            let fn: any = null;
+            if (pk === SyntaxKind.FunctionDeclaration && parent.getNameNode?.() === id) fn = parent;
+            else if (pk === SyntaxKind.VariableDeclaration && parent.getNameNode?.() === id) {
+              const init = parent.getInitializer?.();
+              const ik = init?.getKind?.();
+              if (ik === SyntaxKind.ArrowFunction || ik === SyntaxKind.FunctionExpression) fn = init;
+            }
+            if (!fn) continue;
+            // Nested: some ancestor of the declaration is itself a function.
+            let anc = parent.getParent?.();
+            let nested = false;
+            while (anc) { if (FUNCTION_KINDS.has(anc.getKind())) { nested = true; break; } anc = anc.getParent?.(); }
+            if (!nested) continue;
+            const declSym = id.getSymbol?.();
+            if (!declSym) continue;
+            for (const call of fn.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+              const callee = call.getExpression?.();
+              if (callee?.getKind?.() !== SyntaxKind.Identifier || callee.getText() !== local) continue;
+              if (callee.getSymbol?.() !== declSym) continue;
+              if (!unconditionalSelfCall(call, fn)) continue;
+              selfCalls.push(callee);
+            }
+          }
+          if (selfCalls.length === 0) continue;
+          const base = `imported${local.charAt(0).toUpperCase()}${local.slice(1)}`;
+          let alias = base; let n = 2;
+          while (taken.has(alias)) alias = `${base}${n++}`;
+          taken.add(alias);
+          edits.push({ start: named.getStart(), end: named.getEnd(), text: `${importedName} as ${alias}` });
+          for (const callee of selfCalls) edits.push({ start: callee.getStart(), end: callee.getEnd(), text: alias });
+          fileFixes.push({ file: path, name: local, alias, from: spec, calls: selfCalls.length });
+        }
+      }
+      if (edits.length === 0) continue;
+      edits.sort((a, b) => b.start - a.start);
+      let next = text;
+      for (const e of edits) next = next.slice(0, e.start) + e.text + next.slice(e.end);
+      out[path] = next;
+      fixes.push(...fileFixes);
+    } catch { /* leave this file untouched */ }
+  }
+  return fixes.length > 0 ? { files: out, fixes } : unchanged;
 }

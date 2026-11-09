@@ -400,6 +400,24 @@ export function authenticityRepairInstruction(issues: AuthenticityIssue[]): stri
 }
 
 /** A concise, honest authenticity/completeness report for the agent. */
+/**
+ * How many findings the evaluate tool's CONFIDENCE score is charged for (−10 each, BuildConfidence.ts).
+ * 🔒 SIDE-EFFECT GUARD (BR1959 review): the scan now LISTS every log-only handler, where it used to list
+ * only the first per file. Listing is the honest report; charging the score per handler would be a second,
+ * unreviewed change — an App.tsx with eight placeholder submits would fall from −10 to −80 and swing the
+ * agent's verdict band. So `empty-handler` is still charged at most ONCE PER FILE, exactly as before; every
+ * other kind is charged per finding, unchanged. PURE.
+ */
+export function authenticityConfidenceCount(issues: AuthenticityIssue[]): number {
+  const handlerFiles = new Set<string>();
+  let n = 0;
+  for (const x of issues) {
+    if (x.kind === 'empty-handler') { if (handlerFiles.has(x.file)) continue; handlerFiles.add(x.file); }
+    n++;
+  }
+  return n;
+}
+
 export function authenticitySummary(issues: AuthenticityIssue[]): string {
   if (issues.length === 0) return 'Authenticity scan: ✓ No fake/incomplete code detected.';
   const order: Record<AuthenticitySeverity, number> = { high: 0, medium: 1, low: 2 };

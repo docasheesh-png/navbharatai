@@ -2550,8 +2550,9 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     // BR1959: +1 the FAST-LANE DEPENDENCY RECONCILE (fastLaneDependencies.ts) — inside the fast lane, whose
     // `fastLaneWouldRun` already requires `intent === 'new_build' && !projectModuleRef && !isImportTurn`, so it
     // never writes on a survey/import/edit turn. One site: the pinned package.json only after its write LANDED,
-    // or the bytes npm left on disk after an install the lane ran. It only ADDS declarations. Considered ✓.
-    expect(SRC).toContain('if (laneManifest !== null) writtenFiles.set(\'package.json\', laneManifest);');
+    // or the bytes npm left on disk after an install the lane ran, and only when the lane itself wrote package.json
+    // (a scaffold manifest read from disk is never credited to the build). It only ADDS declarations. Considered ✓.
+    expect(SRC).toContain('if (plan.manifest === \'written\' && laneManifest !== null) writtenFiles.set(\'package.json\', laneManifest);');
     expect(count).toBe(37);
   });
 

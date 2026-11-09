@@ -101136,3 +101136,4 @@ Owner t307u sequential audit, BR1959 only (boundary 1951..2105 frozen). This was
 
 Queue: Q-2602…Q-2611 (seven implemented, three 🟡 blocked: log-only-form outcome, react-router ^6 pin, summary-claim corrections). This commit also closes the 29 BR1958 rows resolved by #4132. Its four blockers, Q-2371 and the PR4109 row stay open. The historical app is not claimed repaired.
 - 2026-11-09 BR1959 follow-up: exact-head test:coverage on f79856f5c failed 2 censuses (writtenFiles count, unclassified FASTLANE_DEPS_RECONCILED); fixed: one audited writer site (census 37) + PROCESS_ONLY_CODES entry. No reruns used to pass.
+- 2026-11-09 BR1959 side-effect review (owner rule): F1 narrowed (disk manifest never credited as written), F2 narrowed (project-ambient types need TS2304 proof), F5 narrowed (confidence charged once per file); F3/F4/F6 kept with neighbour locks; +23 neighbour tests, mutation controls 16.

@@ -39,6 +39,18 @@ Scope: BR1959 only, inside the frozen audit boundary 1951..2105. Base `59a03712d
 
 Nothing here repairs the historical app; nor does it claim the two unreachable BR1959 journeys would now pass. Their source files were not captured.
 
+## Side-effect review (owner rule: no fix may create another problem)
+I checked each fix against its neighbours: the other build lanes, Free and Pro, chat, phone and desktop, and the existing guards. Three fixes were **narrowed**. None was dropped, and no fix needed a flag. No file in this PR touches chat routing, tier or plan gating, Stop, billing or preview quota. `tests/br1959FixesCreateNoNewProblem.test.ts` (23 tests) pins the neighbour behaviour. Mutation controls M9–M11 revert each narrowing and turn red.
+
+| Fix | Adjacent behaviour checked | Side-effect risk | Decision |
+|---|---|---|---|
+| F1 | Lanes it does not reach (architect, import, edit, module); an app that declares everything; aliases and builtins; existing manifest fields; the write fence and Stop; billing attribution | **Low after narrowing.** It is fast-lane only (new build, not import or module, Free and Pro alike). It is idempotent: nothing is written or installed when nothing is missing. It only adds, and a failure is a best-effort process-only diagnostic. The review found that a disk scaffold manifest became a file "written by this build". | **Narrowed:** the lane's copy is updated only when the lane itself wrote package.json (M9). Cost: one `npm install` before tsc, only when a package is missing (the lane used to hand off instead). |
+| F2 | Runtime on every lane; TS lib globals; project globals (`declare global`, script `.d.ts`); value uses; names already imported; two owners | **Low after narrowing.** `import type` erases, so runtime never changes. The review found that a project-ambient type could be rebound by a same-named module type. | **Narrowed:** project-ambient names, like lib globals, need the compiler's TS2304 proof (M10). |
+| F3 | Recursion with a base case; a shadow that never self-calls; files that use the import; package imports | **Low.** It acts only on a certain endless recursion. | Kept as is (M4, M4b, M5). |
+| F4 | Shop header, simple header and search-in-actions header at 390, 768 and 1280 px (headless Chrome iframes); existing apps via the Q-2337 kit refresh | **Low (measured).** All neighbours render pixel-identical before and after. Only an action row wider than the screen changes (783 or 405 px of sideways scroll → 0). | Kept; the neighbour rules are pinned byte for byte (M6). |
+| F5 | The paid high-severity stub heal; the agent's confidence score; effects with dependency lists; real handlers | **Low after narrowing.** `empty-handler` is medium, so it never enters the paid heal. The review found that the confidence score would have been charged −10 per handler (eight handlers: −80). | **Narrowed:** charged once per file, exactly as before (`authenticityConfidenceCount`, M11). Every handler is still listed. |
+| F6 | Guarded URLs that redirect to login; Suspense with a JSX fallback; self-closing layouts; siblings rendered before the page; unwrapped routes | **Low.** The runner marks a journey failed only after a submit, so a redirect stays UNREACHABLE. | Kept (M8, M8b). |
+
 ## Every item
 | ID / queue | Origin / bucket | Problem | State |
 |---|---|---|---|

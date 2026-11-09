@@ -469,6 +469,22 @@ export async function addMissingProjectImports(files: Record<string, string>, op
     typeCandidates.set(name, [...all][0]);
   }
   const libGlobals = typeCandidates.size > 0 ? await libGlobalNames() : null;
+  // 🔒 SIDE-EFFECT GUARD (BR1959 review): a name the PROJECT declares globally — in a script-style `.d.ts`
+  // (no import/export) or inside `declare global { … }` — already resolves with no import, exactly like a lib
+  // global. Importing a same-named module type there could REBIND a reference that compiled, so such a name
+  // is imported only on the compiler's own TS2304 proof (`unresolved`). Over-approximated on purpose: any
+  // file with `declare global` contributes all its declared names, so the arm only ever does less.
+  const projectAmbient = new Set<string>();
+  if (typeCandidates.size > 0) {
+    const declName = /\b(?:interface|type|class|enum|namespace)\s+([A-Za-z_$][\w$]*)/g; // anywhere in the file: `declare global { interface X }` is often one line
+    for (const [path, content] of Object.entries(files)) {
+      if (typeof content !== 'string') continue;
+      const scriptDts = /\.d\.[cm]?ts$/.test(path) && !/^\s*(?:import|export)\b/m.test(content);
+      if (!scriptDts && !/\bdeclare\s+global\b/.test(content)) continue;
+      let m: RegExpExecArray | null;
+      while ((m = declName.exec(content)) !== null) projectAmbient.add(m[1]);
+    }
+  }
 
   if (candidates.size === 0 && typeCandidates.size === 0) return unchanged;
 
@@ -623,7 +639,7 @@ export async function addMissingProjectImports(files: Record<string, string>, op
     const typeBySpec = new Map<string, string[]>();
     for (const [name, owner] of typeCandidates) {
       if (owner === path || local.has(name) || typeParams.has(name) || addedHere.has(name)) continue;
-      if (!unresolved.has(name) && (libGlobals === null || libGlobals.has(name))) continue;
+      if (!unresolved.has(name) && (libGlobals === null || libGlobals.has(name) || projectAmbient.has(name))) continue;
       let usedAsType = false;
       try {
         for (const id of idsByName.get(name) ?? []) {

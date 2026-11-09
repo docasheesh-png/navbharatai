@@ -19218,6 +19218,8 @@ async function noteBuildOutcome(
             const plan = fastLaneDependencyPlan(written, disk);
             // ONE writer site for the lane's package.json copy (census in agentv3.test.ts): the pinned manifest
             // that landed, then — after an install — the bytes npm left on disk, so the lane's copy equals the disk.
+            // Only when the lane OWNS the manifest (it wrote package.json): a scaffold manifest read from disk is
+            // updated on disk only, and never becomes a file this build is credited with writing (side-effect review).
             let laneManifest: string | null = null;
             let pinnedWritten = plan.packageJson === null;
             if (plan.packageJson !== null) {
@@ -19239,7 +19241,7 @@ async function noteBuildOutcome(
                 if (typeof after === 'string' && after.trim()) laneManifest = after;
               }
             }
-            if (laneManifest !== null) writtenFiles.set('package.json', laneManifest);
+            if (plan.manifest === 'written' && laneManifest !== null) writtenFiles.set('package.json', laneManifest);
             if (!command || !res) return;
             buildDiag.record({
               phase: 'build', severity: res.is_error ? 'warning' : 'info', code: 'FASTLANE_DEPS_RECONCILED', autoResolved: !res.is_error,

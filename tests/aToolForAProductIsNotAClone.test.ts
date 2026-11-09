@@ -65,7 +65,16 @@ describe('🔒 neighbours: a real clone request still escalates', () => {
     expect(scopeVerdict(p, { complex: true }).large).toBe(true);
   });
 
-  it('a tool noun far from the name does not shield a clone ask', () => {
-    expect(namesAsProduct('Make YouTube for kids, with a keyword generator later', YOUTUBE)).toBe(true);
+  it.each([
+    'make an app like YouTube seo generator', 'similar to Instagram caption generator but a full Instagram',
+    'YouTube video downloader jaisa pura YouTube banao', 'a WhatsApp chat analyzer clone',
+  ])('a likeness beside a tool noun still names the product: %s', (p) => {
+    const re = /youtube/i.test(p) ? YOUTUBE : /instagram/i.test(p) ? /\binstagram\b/i : /\bwhatsapp\b/i;
+    expect(namesAsProduct(p, re)).toBe(true);
   });
+
+  it.each(['Make YouTube for kids, with a keyword generator later', 'Make YouTube with a tag generator inside'])(
+    'a tool noun that does not directly follow the name does not shield a clone ask: %s', (p) => {
+      expect(namesAsProduct(p, YOUTUBE)).toBe(true);
+    });
 });

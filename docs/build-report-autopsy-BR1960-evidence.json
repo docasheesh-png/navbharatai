@@ -1914,7 +1914,7 @@
    "problem": "APP_SCOPE recorded 'LARGE — clone of YouTube' for 'Create a html code of youtube seo generator' while complexity routing scored it simple (15). scopeDispute could not stand it down (no small-app word), so the mega-roadmap planner ran: an extra 8.8 s model call (L01), the user-facing line 'YouTube SEO is a big app', a 5-step roadmap, and Project Mode deferred to it.",
    "fix": "F1 appScopeAnalyzer.ts: TOOL_FOR_AFTER — a famous name followed (optionally via an object noun and a topic noun) by a tool noun (generator, maker, downloader, analyzer, checker, calculator, tracker, …) names what the tool works on, not a clone target. Any likeness word before or after (like, jaisa, clone, copy) still wins.",
    "state": "IMPLEMENTED - merge pending",
-   "proof": "tests/aToolForAProductIsNotAClone.test.ts (target, scopeVerdict, 6 real-clone neighbours); 21 existing scope suites (374 tests) unchanged; corpus delta 78,007 strings → 1 change; mutations M1-tool-guard, M1b-likeness-wins",
+   "proof": "tests/aToolForAProductIsNotAClone.test.ts (target, scopeVerdict, 6 real-clone neighbours); 21 existing scope suites (374 tests) unchanged; corpus delta 78,007 strings → 1 change; mutations M1-tool-guard, M1b-likeness-wins, M1c-anchor",
    "sideEffectRisk": "LOW. Pure scope classifier used only on new_build/non-edit turns (Free and Pro alike; no chat, no client, no mobile/desktop difference). Direction is non-escalating only: it can remove a clone reason, never add one. Measured with origin/main vs branch over every prompt-like string in the test suite plus 1,524 real report app labels (78,007 strings): exactly one decision changed — the BR1960 prompt. Residual: a real clone phrased as '<Name> <tool noun>' without a likeness word would now build direct; the complexity router and feature-count signals still escalate it independently."
   },
   {
@@ -1996,7 +1996,7 @@
    "problem": "FE_BE_PARTITION: '9 frontend, 1 backend … A clean full-stack split exists' for an SPA with no server; the 1 backend was the client mock fetcher src/services/seoAPI.ts.",
    "fix": "F2 frontendBackendPartition.ts: src/services/, src/api/, src/models/ directly under the source root are 'shared' unless the same file set has an unambiguous server signal. classifyFile (single path) unchanged. CspMetaAnalysis pinned to the old reading via clientLayerAsBackend:true.",
    "state": "IMPLEMENTED - merge pending",
-   "proof": "tests/aClientServiceFolderIsNotAServer.test.ts (BR1960 file set, 8 real-backend neighbours, monorepo neighbour, classifyFile unchanged, CSP skip unchanged); existing partition/CSP/serviceGraph suites; mutations M2-client-layer, M2b-csp-pin",
+   "proof": "tests/aClientServiceFolderIsNotAServer.test.ts (BR1960 file set, 8 real-backend neighbours, monorepo neighbour, classifyFile unchanged, CSP skip unchanged); existing partition/CSP/serviceGraph suites; mutations M2-client-layer, M2b-csp-pin, M2c-server-evidence",
    "sideEffectRisk": "LOW after narrowing. Only consumer whose behaviour changes is the admin-only FE_BE_PARTITION advisory (autoResolved info; no gate, no user text, no tier/mobile difference). The CSP scan — the one agent-facing consumer — keeps its old skip by option, so no new CSP findings. Residual: a later turn that edits only src/services/* in a project whose server was written in an earlier turn now reads 'shared' instead of 'backend' in the advisory (it measures THIS turn's writes by design)."
   },
   {
@@ -2010,7 +2010,7 @@
    "problem": "EXPLORE_NOTHING_TO_PRESS: '(2 found, all deliberately skipped)' with no detail. collect() dropped hidden / disabled / overlay / our-badge / repeat controls with a silent continue, so a claimed reason was never recorded.",
    "fix": "F3 clickExplorer.ts: collect() counts silent drops by reason; the summary line carries `dropped`; parseExploreOutput validates it; the message names skipped-for-safety and dropped counts; detail lines 'NOT CONSIDERED — …'. Old sentence kept byte-for-byte when there are no drops or the field is absent (older runner).",
    "state": "IMPLEMENTED - merge pending",
-   "proof": "tests/aSkipIsNamedOrNotClaimed.test.ts (target + 4 neighbours: older output, all-zero, chosen>0, passing run & user card); 22 explorer suites; real headless Chrome run of the generated in-page collect() on the BR1960 shape (disabled Generate + hidden Copy): found 2, skipped [], dropped hidden 1 disabled 1; mutations M3-drop-count, M3b-old-sentence",
+   "proof": "tests/aSkipIsNamedOrNotClaimed.test.ts (target + 4 neighbours: older output, all-zero, chosen>0, passing run & user card); 22 explorer suites; real headless Chrome run of the generated in-page collect() on the BR1960 shape (disabled Generate + hidden Copy): found 2, skipped [], dropped hidden 1 disabled 1; mutations M3-honest-message, M3b-old-sentence, M3c-parse-sanitize, M3d-in-page-count, M3e-summary-field",
    "sideEffectRisk": "LOW. Admin text only: code, outcome, pressed, failures and gates unchanged; exploreUserSummary for 'nothing' stays empty; the 8-entry safety skip list is untouched (drops are counts, not entries). The in-page script gains only counters (syntax covered by the existing node --check test)."
   },
   {

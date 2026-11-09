@@ -227,7 +227,7 @@ import {
   a11yIssueCount, slowRouteCount,
 } from '../AgentV3/PageRouteCheck';
 import {
-  deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason, appHasNoDataEntry, appOnlyShowsWhatItHolds, dataEntryEvidence,
+  deriveJourneys, runnableJourneys, journeyScript, parseJourneyResults, persistenceEvidence, summarizeJourneys, noJourneyReason, appHasNoDataEntry, appOnlyShowsWhatItHolds, dataEntryEvidence,
   JOURNEY_TIMEOUT_MS, writesToUserDatabase,
 } from '../AgentV3/journeyDerivation';
 import {
@@ -23678,6 +23678,7 @@ async function noteBuildOutcome(
       // EVIDENCE, NEVER A GATE. And a journey that never reached the app's own behaviour is reported
       // UNREACHABLE, never FAILED — a login wall is not a defect.
       // The user-facing proof of the checks below. One card, several checks — see mergeUserProofs.
+      let persistenceProof: 'passed' | 'failed' | 'not-run' = 'not-run';
       let journeyProof: UserProof | null = null;
       let exploreProof: UserProof | null = null;
       // The phone-size check's own answer, kept for the user's proof card (buildProofCard.ts). It was
@@ -23700,10 +23701,15 @@ async function noteBuildOutcome(
           const journeyFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
           // A marker unique to this build, so "the item appeared" cannot pass on pre-existing data.
           const marker = `nbai-${buildStartedAt.toString(36)}`;
-          const journeys = deriveJourneys({
+          const derivedJourneys = deriveJourneys({
             files: journeyFiles,
             routes: extractPageRoutes(journeyFiles),
             marker,
+          });
+          const journeys = runnableJourneys(derivedJourneys, journeyFiles);
+          if (journeys.length < derivedJourneys.length) buildDiag.record({
+            phase: 'preview', severity: 'info', code: 'JOURNEY_WRITE_REFUSED', autoResolved: false,
+            message: 'Write journeys were not run against the user-owned database. A form-submit is still a write, not a read-only persistence check.',
           });
           if (journeys.length > 0) {
             const out = await withTimeout(
@@ -23711,6 +23717,7 @@ async function noteBuildOutcome(
               20_000 + journeys.length * JOURNEY_TIMEOUT_MS * 2, 'journey-check',
             );
             const journeyResults = parseJourneyResults(out.stdout);
+            persistenceProof = persistenceEvidence(journeys, journeyResults);
             const verdict = summarizeJourneys(journeyResults, journeys.length, out.stdout);
             // 'unreachable' is its own outcome, not a pass and not a failure — a login wall tells us
             // nothing about the app, and either other answer would be invented.
@@ -23760,7 +23767,7 @@ async function noteBuildOutcome(
               const proof = journeyUserSummary(journeyResults);
               if (proof.headline) journeyProof = proof;
             } catch { /* the proof is evidence for the user, never a gate on the build */ }
-          } else {
+          } else if (derivedJourneys.length === 0) {
             // A quiet result that explains itself. "Nothing ran" and "nothing could be derived" look
             // identical in a report unless one of them says which it was.
             buildDiag.record({
@@ -25140,6 +25147,8 @@ async function noteBuildOutcome(
           phoneLayout: phoneProof,
           // "complete and working properly" stands for a canvas game only when the playtest PASSED (autopsy 61279465).
           gamePlayed: gateEvidence.game,
+          persistence: persistenceProof,
+          journeyOutcome: gateEvidence.journeys === 'passed' ? 'passed' : gateEvidence.journeys === 'failed' ? 'failed' : 'not-run',
           screenshotTaken: buildDiag.toolWasUsed('screenshot'),
           // "✅ Login with Google" about a login whose password is written into the app (fakeFeatureScan.ts).
           fakeFeatures: fakeFeatures.map((f) => f.kind),

@@ -1,3 +1,4 @@
+import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { manifestArchitectureProblem } from './manifestArchitecture';
 import { STEERING_YIELD_REASON } from './steeringHandoff';
 import { binaryTextGenerationProblem, BINARY_TEXT_GENERATION_PREFIX } from './binaryTextWrite';
@@ -361,11 +362,18 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
         const disagreement = manifestArchitectureProblem(rawFiles.map((file) => file.path), deps.originalRequest);
         if (disagreement) throw new Error(disagreement);
       }
-      const parsed = rawFiles
-        .filter((f) => !provided.has(f.path))
-        .map((f) => ({ ...f, content: ensureReactValueImport(f.path, f.content) }));
+      const parsed = await Promise.all(rawFiles.filter((f) => !provided.has(f.path)).map(async (f) => {
+        const reactFile = { ...f, content: ensureReactValueImport(f.path, f.content) };
+        if (!labelAuthoredFields(f.path, '', reactFile.content).repaired) return reactFile;
+        const existing = deps.scaffoldPaths.includes(f.path) ? deps.readExisting ? await deps.readExisting(f.path).catch(() => null) : null : '';
+        const labels = labelAuthoredFields(f.path, existing, reactFile.content);
+        if (labels.repaired) deps.log?.(labels.note.trim());
+        return {...f,content:labels.code};
+      }));
       if (parsed.length < minFiles) throw new Error('no_files_parsed');
       if (lapsed) throw new Error('one-shot-cancelled');
+      // Save completed owned files before yielding to steering; the post-write outcome
+      // reports the yield and suppresses preview. A real hand-off still closes the fence.
 
       // 🔴 Q-982 (report 9c612cdb): the workspace reports a refused file as an outcome, not a throw, so a
       // resolved write is not a written app. The count and the success are what actually landed; a lane whose

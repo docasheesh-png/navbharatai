@@ -1063,6 +1063,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    */
   const [handover, setHandover] = useState<{
     headline: string;
+    observationNote?: string;
     tally: { examined: number; measured: number; buildHours: number; heldAfterHours: number; frontendOnlyCount: number; recoverableHours: number; unknown: Record<string, number> };
     projection: { spanDays: number; recoverableHoursPerDay: number; monthlyUsdEstimate: number };
     sample: Array<{ workspaceId: string; prompt: string; known: boolean; why?: string; buildMinutes?: number; heldAfterMinutes?: number; frontendOnly?: boolean }>;
@@ -5545,18 +5546,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <div className="bg-card border border-violet-500/25 rounded-[1.25rem] p-4 space-y-3">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Clock className="w-4 h-4 text-accent-text" />
-                    <h4 className="text-sm font-black text-ink tracking-tight">Where does a sandbox's billed time go?</h4>
+                    <h4 className="text-sm font-black text-ink tracking-tight">Sandbox timing observations</h4>
                       <span className="ml-auto">
-                        <ReportExportButtons label="Where does a sandbox's billed time go?" data={handover} tab="Build Reports" source="/api/admin/sandbox-handover" onStatus={toast} />
+                        <ReportExportButtons label="Sandbox timing observations" data={handover} tab="Build Reports" source="/api/admin/sandbox-handover" onStatus={toast} />
                       </span>
                   </div>
                   <p className="text-[12px] text-accent-text font-bold leading-relaxed">{handover.headline}</p>
+                  <p className="text-[11px] text-muted leading-relaxed" aria-label="Sandbox observation limits">
+                    Sampled observations, not verified billing or savings.
+                  </p>
+                  <details className="text-[11px] text-muted leading-relaxed">
+                    <summary className="cursor-pointer font-bold">Observation quality and limitations</summary>
+                    <p className="mt-2">{handover.observationNote ?? 'Observation quality unavailable. These records are not a complete billing history or measured savings.'}</p>
+                  </details>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     {([
-                      ['Real build work', `${handover.tally.buildHours}h`, 'text-info', 'a browser can never absorb this'],
-                      ['Held after the build', `${handover.tally.heldAfterHours}h`, 'text-warn', 'the only window Phase 3 targets'],
-                      ['Reclaimable', `${handover.tally.recoverableHours}h`, 'text-success', `frontend-only — ${handover.tally.frontendOnlyCount} builds`],
-                      ['Could not measure', `${handover.tally.examined - handover.tally.measured}`, 'text-muted', 'excluded, never counted as zero'],
+                      ['Reported build duration', `${handover.tally.buildHours}h`, 'text-info', 'wall time, not CPU work'],
+                      ['Recorded build-to-pause gap', `${handover.tally.heldAfterHours}h`, 'text-warn', 'workspace-only timing join'],
+                      ['Frontend-only recorded gap', `${handover.tally.recoverableHours}h`, 'text-success', `not savings; ${handover.tally.frontendOnlyCount} builds`],
+                      ['Could not pair', `${handover.tally.examined - handover.tally.measured}`, 'text-muted', 'excluded, never counted as zero'],
                     ] as const).map(([label, n, cls, hint]) => (
                       <div key={label} className="bg-surface border border-line rounded-xl p-3">
                         <div className={`text-2xl font-black tabular-nums ${cls}`}>{n}</div>
@@ -5566,54 +5574,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     ))}
                   </div>
                   {handover.minutes && handover.minutes.sessions > 0 && (
-                    // WHERE DO THE MINUTES GO. The bill said ~29 min a session; a build is ~5-7 of work.
-                    // "Idle" is the machine up with none of our operations running — a sweep/window
-                    // problem. "Running" is our commands — a machine or workload problem. Different fixes.
+                    // Legacy numeric fields stay compatible; the operation remainder is not waste.
                     <p className="text-[11px] text-muted leading-relaxed">
-                      <span className="font-black text-ink">Where the minutes go</span> (last {handover.minutes.sessions} ended sessions):{' '}
-                      up <span className="tabular-nums font-black text-ink">{handover.minutes.avgWallMin} min</span> ·{' '}
+                      <span className="font-black text-ink">Where the minutes go</span> (sample of {handover.minutes.sessions} observations with recorded end metadata):{' '}
+                      observed span <span className="tabular-nums font-black text-ink">{handover.minutes.avgWallMin} min</span> ·{' '}
                       running our operations <span className="tabular-nums font-black text-info">{handover.minutes.avgBusyMin} min</span> ·{' '}
-                      idle <span className="tabular-nums font-black text-warn">{handover.minutes.avgIdleMin} min</span>{' '}
-                      <span className="text-faint">({Math.round(handover.minutes.idleShare * 100)}% of billed time was nobody's work)</span>
+                      outside measured operations <span className="tabular-nums font-black text-warn">{handover.minutes.avgIdleMin} min</span>{' '}
+                      <span className="text-faint">({Math.round(handover.minutes.idleShare * 100)}% of observed span; may include model waits and active previews)</span>
                     </p>
                   )}
                   {handover.starts && handover.starts.total > 0 && (
-                    // WHY MACHINES START. 1,110 starts a month for one tester was the mystery; this is
-                    // the table that ends it. A large "preview-door" share means the live frame is
-                    // resuming paused machines; a large "files" share means reads are.
+                    // Daily counters record local create/connect observations, not provider starts.
                     <p className="text-[11px] text-muted leading-relaxed">
-                      <span className="font-black text-ink">Why machines started</span> (last {handover.starts.days} days, {handover.starts.total} starts):{' '}
+                      <span className="font-black text-ink">Recorded create/connect reasons</span> ({handover.starts.days} daily counter records, {handover.starts.total} observations):{' '}
                       {Object.entries(handover.starts.byReason).sort((a, b) => b[1] - a[1]).map(([reason, n], i) => (
                         <span key={reason}>{i > 0 ? ' · ' : ''}{reason} <span className="tabular-nums font-black text-ink">{n}</span></span>
                       ))}
                     </p>
                   )}
                   {handover.pauseCauses && handover.pauseCauses.total > 0 && (
-                    // WHO STOPS THE MACHINES. Before the lifetime heartbeat, most sandboxes were expected to
-                    // fall to the 20-minute orphan sweep — that expectation was arithmetic, not evidence.
-                    // This row is the evidence. "Provider / unknown" is a machine we never stamped: E2B's
-                    // own timer, a kill, or one still running — reported as unknown rather than guessed.
+                    // Missing pause metadata cannot identify the provider action or current state.
                     <p className="text-[11px] text-muted leading-relaxed">
-                      <span className="font-black text-ink">Who stopped them:</span>{' '}
+                      <span className="font-black text-ink">Recorded pause causes:</span>{' '}
                       idle sweep <span className="tabular-nums font-black text-info">{handover.pauseCauses.idleSweep}</span> ·{' '}
                       orphan sweep <span className="tabular-nums font-black text-warn">{handover.pauseCauses.orphanSweep}</span> ·{' '}
                       sweep (cause not recorded) <span className="tabular-nums font-black text-body">{handover.pauseCauses.sweepUnattributed}</span> ·{' '}
-                      provider / unknown <span className="tabular-nums font-black text-accent-text">{handover.pauseCauses.providerOrUnknown}</span>{' '}
-                      <span className="text-faint">of {handover.pauseCauses.total} recent sandboxes. A rising "provider" share after 2026-09-11 is the six-minute lifetime doing the reaping.</span>
+                      no recorded pause / unknown <span className="tabular-nums font-black text-accent-text">{handover.pauseCauses.providerOrUnknown}</span>{' '}
+                      <span className="text-faint">of {handover.pauseCauses.total} recent workspace records. Missing pause records do not identify provider action or current running state.</span>
                     </p>
-                  )}
-                  {/* The extrapolation is kept visually APART from the measured numbers above, and says
-                      what it is. The two must never be read as one row of equally solid figures. */}
-                  {handover.projection.monthlyUsdEstimate > 0 && (
-                    <div className="bg-surface border border-line rounded-xl p-3">
-                      <div className="text-[10px] font-black uppercase tracking-wider text-muted">Extrapolation, not a bill</div>
-                      <div className="text-[12px] text-body mt-1 leading-snug">
-                        Over the sample's <span className="tabular-nums font-black text-ink">{handover.projection.spanDays}</span> days that is{' '}
-                        <span className="tabular-nums font-black text-success">{handover.projection.recoverableHoursPerDay}h/day</span> reclaimable ≈{' '}
-                        <span className="tabular-nums font-black text-success">${handover.projection.monthlyUsdEstimate}/month</span>. Scaled from this
-                        window at the measured sandbox rate — the real bill moves with usage.
-                      </div>
-                    </div>
                   )}
                   {Object.entries(handover.tally.unknown).some(([, n]) => n > 0) && (
                     <div>
@@ -5625,7 +5613,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             <span className="leading-snug">{({
                               'no-build-window': 'the report never recorded a start and end (unsettled or legacy build)',
                               'no-sandbox-record': 'no durable sandbox record for that workspace',
-                              'never-paused': 'nothing ever stamped a pause — the hold is real but unmeasurable',
+                              'never-paused': 'no pause time was recorded; provider stop time is unknown',
                               'stale-pairing': 'the pause predates the build, so the record is about an earlier sandbox',
                             } as Record<string, string>)[why] ?? why}</span>
                           </div>
@@ -5642,11 +5630,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             {s.known ? (
                               <>
                                 <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-sky-500/40 text-info">{s.buildMinutes}m build</span>
-                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-warn">{s.heldAfterMinutes}m held</span>
-                                {s.frontendOnly && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-emerald-500/40 text-success">reclaimable</span>}
+                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-warn">{s.heldAfterMinutes}m recorded build-to-pause gap</span>
+                                {s.frontendOnly && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-emerald-500/40 text-success">frontend-only manifest</span>}
                               </>
                             ) : (
-                              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-line text-muted">not measurable · {s.why}</span>
+                              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-line text-muted">not paired · {s.why}</span>
                             )}
                           </div>
                           <div className="text-[11px] text-body mt-1 leading-snug">{s.prompt || <span className="text-faint">(no prompt recorded)</span>}</div>

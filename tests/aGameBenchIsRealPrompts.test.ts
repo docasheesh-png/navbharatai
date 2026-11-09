@@ -82,7 +82,8 @@ describe('readings come only from the build\'s own diagnostics', () => {
 
 describe('the runner', () => {
   it('a dry run lists the game corpus and starts no build', () => {
-    const out = execFileSync('npx', ['tsx', 'scripts/agentv3-reliability-bench.ts'], {
+    // Use the tested Node runtime and loader directly; the tsx CLI's IPC socket is unnecessary here.
+    const out = execFileSync(process.execPath, ['--import', 'tsx', 'scripts/agentv3-reliability-bench.ts'], {
       env: { ...process.env, BENCH_FIXTURE: 'game', BENCH_POWER_LEVEL: 'weak', BENCH_SET: 'full', BENCH_CONFIRM: '', BENCH_BASE_URL: 'http://localhost:1' },
       encoding: 'utf8', timeout: 60_000,
     });

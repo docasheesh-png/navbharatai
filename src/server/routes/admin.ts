@@ -102,6 +102,7 @@ import { runningBuildCount } from '../AgentV3/runningBuildRegistry';
 import { tallyHandover, projectHandover, handoverHeadline, handoverSample } from '../AgentV3/sandboxHandover';
 import { tallyPauseCauses } from '../AgentV3/sandboxLifetime';
 import { tallyMinutes, tallyStarts } from '../AgentV3/sandboxSessions';
+import { summarizeSandboxObservations, sandboxObservationNote } from '../AgentV3/sandboxObservationQuality';
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassMetaFromDiagnostics, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
 import { licenceExposures, licenceExposureHeadline, activeExposureCount } from '../../lib/licenceExposure';
@@ -1718,7 +1719,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // month and nothing recorded (sandboxSessions.ts). Ended sessions only; live ones are not final.
       const minutes = tallyMinutes(sandboxes.map((s) => s.session));
       const starts = tallyStarts(dailyStarts);
-      res.json({ headline: handoverHeadline(tally, projection), tally, projection, window: limit, sample, pauseCauses, minutes, starts });
+      const observationQuality = summarizeSandboxObservations(sandboxes, limit);
+      const observationNote = sandboxObservationNote(observationQuality);
+      res.json({ observationQuality, observationNote, headline: handoverHeadline(tally, projection), tally, projection, window: limit, sample, pauseCauses, minutes, starts });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to measure sandbox handover.' });
     }

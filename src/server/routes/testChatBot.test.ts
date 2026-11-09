@@ -29,7 +29,7 @@ describe('admin-only test chat boundary', () => {
     const request = await setup();
     expect((await request(undefined, false)).status).toBe(401); expect((await request(action, false)).status).toBe(401);
     expect((await request(action, false, false)).status).toBe(401);
-    expect(fake.status).not.toHaveBeenCalled(); expect(fake.run).not.toHaveBeenCalled();
+    expect(fake.status).not.toHaveBeenCalled(); expect(fake.run).not.toHaveBeenCalled(); expect(fake.audit).not.toHaveBeenCalled();
   });
   it('status loads are no-store and never start inference', async () => {
     fake.status.mockReturnValue({ noFallback: true }); const request = await setup(); const response = await request();
@@ -44,6 +44,8 @@ describe('admin-only test chat boundary', () => {
     fake.run.mockResolvedValue({ content: 'reply', noFallback: true }); const request = await setup();
     const response = await request(action); expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(fake.run).toHaveBeenCalledExactlyOnceWith(action, 'server-admin', expect.any(AbortSignal));
+    const metadata = { admin: 'server-admin', provider: action.provider, requestId: action.requestId };
+    expect(fake.audit.mock.calls).toEqual([['ADMIN_TEST_CHAT_STARTED', metadata], ['ADMIN_TEST_CHAT_FINISHED', metadata]]);
     expect(JSON.stringify(fake.audit.mock.calls)).not.toContain('Synthetic prompt'); expect(JSON.stringify(fake.audit.mock.calls)).not.toContain('reply');
   });
   it('uses safe unavailable errors and never reflects provider secrets', async () => {
@@ -53,6 +55,8 @@ describe('admin-only test chat boundary', () => {
     const failed = await request(action); expect(failed.status).toBe(503); const body = await failed.text();
     expect(body).not.toContain('secret-key'); expect(body).toContain('No other provider was tried');
     expect(JSON.stringify(fake.audit.mock.calls)).not.toContain('patient-record');
+    for (const [, metadata] of fake.audit.mock.calls) expect(metadata.admin).toBe('server-admin');
+    expect(fake.audit).toHaveBeenCalledWith('ADMIN_TEST_CHAT_FAILED', expect.objectContaining({ admin: 'server-admin', code: 'unconfirmed' }));
   });
   it('rejects oversized JSON before any paid action', async () => {
     const request = await setup(); expect((await request({ ...action, messages: [{ role: 'user', content: 'x'.repeat(270_000) }] })).status).toBe(413);

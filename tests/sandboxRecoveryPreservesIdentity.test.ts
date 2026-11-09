@@ -204,7 +204,9 @@ describe('known recovery behavior remains available', () => {
     expect(f.create).toHaveBeenCalledTimes(1);
     expect(f.restore).toHaveBeenCalledExactlyOnceWith(WS);
     expect(f.act.sandboxOrigin(WS)).toBe('created-after-failed-resume');
-    expect(f.session).toHaveBeenCalledWith(WS, expect.objectContaining({ sandboxId: 'new-machine', origin: 'created-after-failed-resume' }));
+    expect(f.touch).toHaveBeenCalledExactlyOnceWith(WS, 'new-machine');
+    expect(f.session).toHaveBeenCalledWith(WS, expect.objectContaining({ sandboxId: 'new-machine', origin: 'created-after-failed-resume' }), expect.any(Promise));
+    await expect(f.session.mock.calls[0]![2]).resolves.toBeUndefined();
   });
 });
 

@@ -91,7 +91,7 @@ export function TestChatBotPanel({ adminToken }: { adminToken: string }): React.
     <p className="text-sm text-muted">Use synthetic test text. Do not paste secrets, personal records or customer data. The visible conversation is sent on each turn. This page does not save transcripts; leaving it clears the chat. Qubax and its upstream providers may retain submitted content. <a href="https://qubax.ai/legal/privacy" target="_blank" rel="noreferrer" className="underline">Qubax privacy policy</a></p>
     <p className="text-sm text-muted">No paid inference runs just by opening this page. Sending needs an independent review of the exact payload, downstream processors and a supplier-enforced spending ceiling, plus the existing shared budget. This checkbox does not create those approvals.</p>
     {error && <p role="alert" className="text-danger">{error}</p>}
-    <div role="log" aria-label="Test conversation" aria-live="polite" className="max-h-[50vh] overflow-y-auto space-y-3 rounded-xl border border-line p-3">
+    <div role="log" aria-label="Test conversation" aria-live="polite" className="max-h-[50vh] supports-[height:100dvh]:max-h-[50dvh] min-h-0 overflow-y-auto space-y-3 rounded-xl border border-line p-3">
       {!messages.length && <p className="text-sm text-muted">Type your own test message below. Existing app conversations are not loaded here.</p>}
       {messages.map((message, index) => <article key={index} className="rounded-lg bg-well p-3"><h3 className="mb-1 text-sm font-semibold text-ink">{message.role === 'user' ? 'You' : 'Qubax response'}</h3><p className="whitespace-pre-wrap break-words text-sm">{message.content}</p></article>)}
     </div>

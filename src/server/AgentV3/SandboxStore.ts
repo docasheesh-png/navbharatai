@@ -18,6 +18,7 @@
 //   with the single-build-per-account lock (activeBuilds 409), two instances never resume the same
 //   sandbox concurrently. Mirrors DeploymentStore: VITEST-skip, best-effort, never throws/blocks a build.
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { getServerDb } from '../lib/serverDb';
 import { isUsableRecipe, type PreviewRecipe } from './previewRevival';
 import type { PauseCause } from './sandboxLifetime';
@@ -38,9 +39,9 @@ export interface SandboxRecord {
    */
   pausedBy?: PauseCause;
   /**
-   * The most recent sandbox SESSION for this workspace — how long it was up, how much of that our
-   * operations were running, what started it and what ended it (sandboxSessions.ts). Written at start
-   * and again at end, so an admin can read where the minutes went instead of inferring it from the bill.
+   * One local observation selected by reported start time, not a provider lifetime or billing record.
+   * Written at start and exact-ID end; clock skew, concurrent instances and failed writes can lose
+   * observations. End describes local accounting, never proof of provider pause or global ownership.
    */
   session?: SandboxSession;
   /**
@@ -85,6 +86,27 @@ export type SandboxRecoveryIdentity =
   | { state: 'missing' }
   | { state: 'unavailable' };
 
+// Session ordering is only reported client-clock order, never provider chronology or authority.
+function validSession(value: unknown): value is SandboxSession {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const s = value as SandboxSession;
+  return typeof s.sandboxId === 'string' && s.sandboxId.length > 0
+    && typeof s.origin === 'string' && s.origin.length > 0
+    && typeof s.reason === 'string' && s.reason.length > 0
+    && Number.isFinite(s.startedAt) && s.startedAt > 0
+    && Number.isFinite(s.busyMs) && s.busyMs >= 0
+    && Number.isInteger(s.ops) && s.ops >= 0
+    && (s.observationId === undefined || validObservationId(s.observationId))
+    && (s.endedAt === undefined || (Number.isFinite(s.endedAt) && s.endedAt >= s.startedAt))
+    && (s.endedBy === undefined || (s.endedAt !== undefined
+      && ['idle-sweep', 'orphan-sweep', 'dropped'].includes(s.endedBy)));
+}
+
+function validObservationId(value: unknown): value is string {
+  return typeof value === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 export class SandboxStore {
   private db: admin.firestore.Firestore | null = null;
   // Advance over raw documents, including already-paused records. Starting at the same oldest
@@ -123,31 +145,67 @@ export class SandboxStore {
   }
 
   /**
-   * A session began (create or resume). Best-effort, never awaited by a build: the session on the
-   * record, plus one increment on the UTC day's start counter under its reason — the two numbers the
-   * admin card reads to answer "why 37 starts a day?" and "where do the minutes go?".
+   * Best-effort local observation, NOT a provider start or billing event. The counter is independent
+   * and can differ from accepted observations. Neither write is awaited by app work.
+   *
+   * Wait only for the EXISTING initial identity-touch attempt; do not establish/repair identity here.
+   * Replace the whole nested map so a new start cannot inherit an old end. The reported-start high
+   * water mark rejects delayed smaller timestamps and ties, but clock skew can suppress observations
+   * or invert physical order. This is not allocation authority or a cross-instance lifecycle fence.
    */
-  async recordSessionStart(workspaceId: string, session: SandboxSession): Promise<void> {
+  async recordSessionStart(workspaceId: string, session: SandboxSession, afterIdentityTouch?: Promise<void>): Promise<void> {
     const db = this.getDb();
     if (!db || !workspaceId || !session?.sandboxId) return;
-    try {
-      await Promise.all([
-        db.collection('agentv3_sandboxes').doc(workspaceId).set({ workspaceId, session }, { merge: true }),
-        db.collection('agentv3_sandbox_starts').doc(dayKey(session.startedAt)).set(
-          { day: dayKey(session.startedAt), counts: { [session.reason]: admin.firestore.FieldValue.increment(1) } },
-          { merge: true },
-        ),
-      ]);
-    } catch { /* an observation must never block a build */ }
+    const start = { ...session }; // Capture before waiting: operation accounting mutates the local row.
+    const counter = async () => {
+      await db.collection('agentv3_sandbox_starts').doc(dayKey(start.startedAt)).set(
+        { day: dayKey(start.startedAt), counts: { [start.reason]: FieldValue.increment(1) } },
+        { merge: true },
+      );
+    };
+    const observation = async () => {
+      await afterIdentityTouch?.catch(() => {});
+      if (!validSession(start) || !validObservationId(start.observationId)
+        || start.endedAt !== undefined || start.endedBy !== undefined) return;
+      const ref = db.collection('agentv3_sandboxes').doc(workspaceId);
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const row = snap.data();
+        if (!snap.exists || row?.workspaceId !== workspaceId || row?.sandboxId !== start.sandboxId) return;
+        const previous: unknown = row.session;
+        if (previous !== undefined) {
+          if (!validSession(previous) || previous.observationId === start.observationId
+            || previous.startedAt >= start.startedAt) return;
+        }
+        tx.update(ref, { session: start });
+      });
+    };
+    // The matching end chains only to the session transaction: a rejected counter must not release
+    // it early, and a stuck counter must not delay it. Counter failures remain independent.
+    void counter().catch(() => {});
+    await observation().catch(() => {});
   }
 
-  /** The session ended (paused or dropped). Overwrites the record's session with its final numbers. */
+  /** Finish only this exact local observation; never infer a provider pause or replace another row. */
   async recordSessionEnd(workspaceId: string, session: SandboxSession): Promise<void> {
     const db = this.getDb();
-    if (!db || !workspaceId || !session?.sandboxId) return;
+    if (!db || !workspaceId || !validSession(session) || !validObservationId(session.observationId)
+      || session.endedAt === undefined || session.endedBy === undefined) return;
+    const end = { ...session };
     try {
-      await db.collection('agentv3_sandboxes').doc(workspaceId).set({ workspaceId, session }, { merge: true });
-    } catch { /* best-effort */ }
+      const ref = db.collection('agentv3_sandboxes').doc(workspaceId);
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const row = snap.data();
+        if (!snap.exists || row?.workspaceId !== workspaceId || row?.sandboxId !== end.sandboxId) return;
+        const current: unknown = row.session;
+        if (!validSession(current) || current.observationId !== end.observationId
+          || current.sandboxId !== end.sandboxId || current.startedAt !== end.startedAt
+          || current.origin !== end.origin || current.reason !== end.reason
+          || current.endedAt !== undefined) return;
+        tx.update(ref, { session: end });
+      });
+    } catch { /* best-effort: a missing/failed/ambiguous write remains unknown */ }
   }
 
   /** The last `days` UTC days of start counters, newest first. Bounded; never throws. */
@@ -210,13 +268,15 @@ export class SandboxStore {
    *
    * Merged, never overwritten: a snapshot must survive every later build that does not produce a new
    * one — the whole point is that it is there on the day the machine is not.
+   * A new capture with unknown source identity must clear the previous capture's hash, even at the
+   * same URL. This invalidates derived metadata only; it does not remove the saved artifact.
    */
   async saveSnapshot(workspaceId: string, url: string, at: number, filesHash?: string | null): Promise<void> {
     const db = this.getDb();
     if (!db || !workspaceId || !url) return;
     try {
       await db.collection('agentv3_sandboxes').doc(workspaceId).set(
-        { workspaceId, snapshotUrl: url, snapshotAt: at, ...(filesHash ? { snapshotFilesHash: filesHash } : {}), updatedAt: Date.now() },
+        { workspaceId, snapshotUrl: url, snapshotAt: at, snapshotFilesHash: filesHash || FieldValue.delete(), updatedAt: Date.now() },
         { merge: true },
       );
     } catch { /* best-effort — a fallback copy must never be able to fail a build */ }

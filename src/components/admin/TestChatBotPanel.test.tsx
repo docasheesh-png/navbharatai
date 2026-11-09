@@ -13,6 +13,10 @@ describe('separate Test Chat Bot panel', () => {
     expect(html).toContain('This checkbox does not create those approvals'); expect(html).toContain('disabled');
     expect(html).not.toContain('synthetic-admin-secret'); expect(html).not.toContain('type="password"');
   });
+  it('keeps conversation scrolling inside the visible mobile viewport with a fallback', () => {
+    const html = renderToStaticMarkup(<TestChatBotPanel adminToken="synthetic-admin" />);
+    expect(html).toContain('max-h-[50vh] supports-[height:100dvh]:max-h-[50dvh] min-h-0 overflow-y-auto');
+  });
   it('has a separate admin page and never imports or calls the production chat service', () => {
     expect(tabOfPage('test-chat-bot')).toBe('engines'); expect(resolvePage('test-chat-bot')).toBe('test-chat-bot');
     const panel = readFileSync('src/components/admin/TestChatBotPanel.tsx', 'utf8');

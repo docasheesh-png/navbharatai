@@ -26,19 +26,20 @@ export function registerTestChatBotRoutes(app: Express, verifyAdminToken: Reques
     res.setHeader('Cache-Control', 'private, no-store');
     const action = readTestChatAction(req.body);
     if (!action) { res.status(400).json({ error: errors.invalid, code: 'invalid' }); return; }
+    const actor = adminUsername();
     const controller = new AbortController();
     const disconnected = () => { if (!res.writableEnded) controller.abort(); };
     res.on('close', disconnected);
     try {
-      // Audit only operation metadata. Never record the prompt, reply, credential or upstream body.
-      audit('ADMIN_TEST_CHAT_STARTED', { provider: action.provider, requestId: action.requestId });
-      const reply = await runTestChat(action, adminUsername(), controller.signal);
-      audit('ADMIN_TEST_CHAT_FINISHED', { provider: action.provider, requestId: action.requestId });
+      // Audit only the server-verified actor and operation metadata. Never record the prompt, reply, credential or upstream body.
+      audit('ADMIN_TEST_CHAT_STARTED', { admin: actor, provider: action.provider, requestId: action.requestId });
+      const reply = await runTestChat(action, actor, controller.signal);
+      audit('ADMIN_TEST_CHAT_FINISHED', { admin: actor, provider: action.provider, requestId: action.requestId });
       if (!res.destroyed) res.json(reply);
     } catch (error) {
       const known = error instanceof TestChatUnavailable;
       const code = known ? error.reason : 'unconfirmed';
-      audit('ADMIN_TEST_CHAT_FAILED', { provider: action.provider, requestId: action.requestId, code });
+      audit('ADMIN_TEST_CHAT_FAILED', { admin: actor, provider: action.provider, requestId: action.requestId, code });
       if (!res.destroyed) res.status(known ? error.status : 503).json({ error: errors[code], code, noFallback: true });
     } finally { res.off('close', disconnected); }
   });

@@ -118,10 +118,10 @@ describe('wiring — the build records the identity, the final save confirms it,
     expect(block).toContain('sandboxStore.saveSnapshot(workspaceId, url, at, filesHash)');
   });
 
-  it('the store carries the hash on the same record as the copy, merged', () => {
+  it('the store carries a known hash and invalidates an unknown replacement hash, merged', () => {
     expect(store).toContain('snapshotFilesHash?: string;');
     const i = store.indexOf('async saveSnapshot(');
-    expect(store.slice(i, i + 700)).toContain("...(filesHash ? { snapshotFilesHash: filesHash } : {})");
+    expect(store.slice(i, i + 700)).toContain("snapshotFilesHash: filesHash || FieldValue.delete()");
   });
 
   it('🔒 the confirmation compares what was PERSISTED — the green guard may have restored a different tree', () => {

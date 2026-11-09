@@ -35,15 +35,17 @@ export function useFreeAnswerStatus(active = true): FreeAnswerStatus | null {
     const changed = () => { void refresh(true); clearTimeout(admissionTimer); admissionTimer = setTimeout(() => void refresh(true), 1000); };
     const storage = (event: StorageEvent) => { if (isFreeAnswerStorageKey(event.key)) changed(); };
     const unsubscribe = auth.onAuthStateChanged(identityChanged);
-    window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', refresh);
+    // DOM events are not the includeHidden permission; only explicit settlement/invalidation opts in.
+    const visibleRefresh = () => { void refresh(); };
+    window.addEventListener('focus', visibleRefresh);
+    document.addEventListener('visibilitychange', visibleRefresh);
     window.addEventListener(FREE_ANSWER_CHANGED, changed);
     window.addEventListener('storage', storage);
     const poll = setInterval(refresh, 15_000);
     void refresh();
     return () => {
       stopped = true; reader.invalidate(); unsubscribe(); clearTimeout(resetTimer); clearTimeout(admissionTimer); clearInterval(poll);
-      window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', visibleRefresh); document.removeEventListener('visibilitychange', visibleRefresh);
       window.removeEventListener(FREE_ANSWER_CHANGED, changed); window.removeEventListener('storage', storage);
     };
   }, [active]);

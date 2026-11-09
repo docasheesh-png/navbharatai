@@ -1888,6 +1888,17 @@
       "evidence": "F12 new wording seam",
       "fix": "F12: both0sand2sreport-shaped controls; existing absolute-origin/no-mark/module/edit gates retained and real11soverrun assertion updated exactly, not weakened.",
       "proof": "tests/br1958Prevention.test.ts behavioral/negative controls and production-door census; affected sibling suites; per-class behavioral mutations with exact-byte restoration; final-head full CI equivalent required."
+    },
+    {
+      "id": "I02",
+      "qid": "Q-2601",
+      "state": "pending",
+      "origin": "inspection",
+      "bucket": "broken",
+      "problem": "Incoming main4131 passed DOM Event objects into the boolean includeHidden parameter, causing4TS2769errors and bypassing hidden-tab suppression on focus/visibilitychange.",
+      "evidence": "Actual new-main b5596c0d prerequisite typecheck-frontend.log exits2 at hook38/39/46; behavioral red hiddenEvents expected1fetch/got3.",
+      "fix": "F13 integration-only adapter: stable zero-argument visibleRefresh callback for both DOM registrations and matching cleanup. refresh(true) settlement/invalidation remains unchanged, as do timer polling, user quota, routing and server counts. No casts or typecheck weakening.",
+      "proof": "New real-hook EventTarget fixture reproduces hidden fetches, verifies visible refresh and listener cleanup; existing main hidden-completion25/50 fixture retained. Dedicated behavioral Event-as-permission mutation plus actual frontend/compiler/fullCI+6serialemulators on final integrated head required."
     }
   ]
 }

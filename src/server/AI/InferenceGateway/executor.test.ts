@@ -792,6 +792,39 @@ describe('bounded control-plane waits and durable unknown-write ownership', () =
 });
 
 describe('bounded physical attempts and shared mock-ledger contracts', () => {
+  it.each([6, 12])('fixed Chat can reach its declared %s-call cap without the unrelated four-call truncation', async limit => {
+    const h = harness({ request: { fixedTextChain: 'v1', maxPhysicalAttempts: limit },
+      profiles: Array.from({ length: 13 }, (_, n) => ({ id: `free-${String(n).padStart(2, '0')}`, paid: false })) });
+    // Synthetic authoritative, zero-cost failure receipts only. These fixtures do
+    // not authenticate any live supplier outcome or authorize supplier replay.
+    h.ports.adapter.dispatch = vi.fn(async (intent, claim) => h.response(intent, claim, retry));
+    expect(await h.executor.execute(h.key)).toMatchObject({ kind: 'stopped', reason: 'attempt-limit' });
+    expect(h.ports.adapter.dispatch).toHaveBeenCalledTimes(limit);
+    expect(new Set(vi.mocked(h.ports.adapter.dispatch).mock.calls.map(([, claim]) => claim.binding.physicalAttemptId)).size).toBe(limit);
+    expect(h.ports.ledger.settle).toHaveBeenCalledTimes(limit);
+  });
+  it('fixed Chat returns a fifth eligible provider success after four verified free failures', async () => {
+    const h = harness({ request: { fixedTextChain: 'v1', maxPhysicalAttempts: 12 },
+      profiles: Array.from({ length: 6 }, (_, n) => ({ id: `free-${n}`, paid: false })) });
+    let calls = 0;
+    h.ports.adapter.dispatch = vi.fn(async (intent, claim) => h.response(intent, claim, ++calls === 5 ? { kind: 'completed' } : retry));
+    expect(await h.executor.execute(h.key)).toMatchObject({ kind: 'completed' });
+    expect(h.ports.adapter.dispatch).toHaveBeenCalledTimes(5);
+  });
+  it.each(['professional', 'doctor', 'sda', 'developer-api'] as const)('does not change the separate fixed %s execution ceiling', async surface => {
+    const h = harness({ request: { fixedTextChain: 'v1', maxPhysicalAttempts: 12, surface },
+      profiles: Array.from({ length: 6 }, (_, n) => ({ id: `free-${n}`, paid: false })) });
+    h.ports.adapter.dispatch = vi.fn(async (intent, claim) => h.response(intent, claim, retry));
+    expect(await h.executor.execute(h.key)).toMatchObject({ kind: 'stopped', reason: 'attempt-limit' });
+    expect(h.ports.adapter.dispatch).toHaveBeenCalledTimes(4);
+  });
+  it.each(['chat', 'builder', 'professional'] as const)('keeps nonfixed %s limited to four calls', async surface => {
+    const h = harness({ request: { surface },
+      profiles: Array.from({ length: 6 }, (_, n) => ({ id: `free-${n}`, paid: false })) });
+    h.ports.adapter.dispatch = vi.fn(async (intent, claim) => h.response(intent, claim, retry));
+    expect(await h.executor.execute(h.key)).toMatchObject({ kind: 'stopped', reason: 'attempt-limit' });
+    expect(h.ports.adapter.dispatch).toHaveBeenCalledTimes(4);
+  });
   it('allows at most the trusted request limit, even if candidates remain', async () => {
     const h = harness({ request: { maxPhysicalAttempts: 2 }, profiles: [1, 2, 3].map(n => ({ id: `free-${n}`, paid: false })) });
     h.ports.adapter.dispatch = vi.fn(async (intent, claim) => h.response(intent, claim, retry));
@@ -896,6 +929,17 @@ describe('explicit monetary evidence basis', () => {
 
 
 describe('fixed-order unresolved paid rejection', () => {
+  it('still stops on the fifth call when earlier free failures were safe but the paid rejection has unknown liability', async () => {
+    const h = harness({ request: { fixedTextChain: 'v1', maxPhysicalAttempts: 12 },
+      profiles: [...Array.from({ length: 4 }, (_, n) => ({ id: `free-${n}`, paid: false })), { id: 'paid-a', paid: true }, { id: 'paid-b', paid: true }] });
+    h.ports.adapter.dispatch = vi.fn(async (intent, claim) => claim.binding.budget
+      ? { binding: claim.binding, outcome: retry, outputVisible: false, rejectionEvidenceRef: 'http-rejection-not-billing-proof' }
+      : h.response(intent, claim, retry));
+    expect(await h.executor.execute(h.key)).toMatchObject({ kind: 'pending-reconciliation', reason: 'fixed-chain-billing-unresolved' });
+    expect(h.ports.adapter.dispatch).toHaveBeenCalledTimes(5); expect(h.ports.ledger.settle).toHaveBeenCalledTimes(4);
+    expect([...h.pending.values()]).toHaveLength(1);
+    expect(h.ports.ledger.releaseUndispatched).not.toHaveBeenCalled();
+  });
   it('retains the paid hold and stops after a rejection instead of opening another supplier', async () => {
     const h = harness({ request: { fixedTextChain: 'v1', maxPhysicalAttempts: 12 }, profiles: [{ id: 'paid-a', paid: true }, { id: 'paid-b', paid: true }] });
     h.ports.adapter.dispatch = vi.fn(async (intent, claim) => ({ binding: claim.binding, outcome: retry, outputVisible: false, rejectionEvidenceRef: 'http-rejection' }));

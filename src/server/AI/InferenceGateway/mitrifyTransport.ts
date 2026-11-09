@@ -1,4 +1,5 @@
 import { runApprovedMitrifyChain, mitrifyConfig, MitrifyError } from '../../lib/mitrify';
+import { SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS } from '../fixedTextChain';
 import { getServerDb } from '../../lib/serverDb';
 import { evidenceBinding } from './profiles';
 import type { DispatchClaim } from './executor';
@@ -37,7 +38,7 @@ export async function executeGatewayMitrify(input: GatewayTextInput, onHttpDispa
     const result = await runApprovedMitrifyChain({ db, uid: request.principalId, requestId: input.claim.binding.physicalAttemptId,
       // Preserve server classification. Health is private too; no keyword downgrade.
       privateTurn: request.privacy.dataClass !== 'public', healthTurn: request.privacy.dataClass === 'health', signal,
-      maxHttpAttempts: 1,
+      maxHttpAttempts: SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS,
       body: gatewayMitrifyBody({ prompt: input.prompt, systemPrompt: input.systemPrompt, streaming: !!input.onChunk }, request.capability.kind === 'text' ? request.capability.outputTokens : 0),
       reserve: async maximum => maximum <= ceiling ? { releaseUndispatched: async () => {} } : null,
       revalidate: async () => {

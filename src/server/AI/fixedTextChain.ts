@@ -2,6 +2,14 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 /** Requested order is preference only: never authority for privacy, capability or spend. */
 export const FIXED_TEXT_CHAIN = ['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'mitrify', 'qubax', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid'] as const;
 export const FIXED_TEXT_CHAIN_MAX_ATTEMPTS = 12;
+/** Requested Chat ceilings, not dispatch authority or permission to replay.
+ * Single-use supplier approvals still authorize only one physical call. Enabling
+ * another call requires independently authenticated zero-liability/no-generation
+ * evidence and a separately scoped approval; neither exists in the current adapter.
+ * These are application HTTP calls, never unobservable supplier seller retries.
+ */
+export const FIXED_CHAT_SUPPLIER_HTTP_ATTEMPT_CEILINGS = Object.freeze({ MITRIFY: 3, QUBAX: 3 } as const);
+export const SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS = 1;
 export function fixedTextChainEnabled(env: Record<string, string | undefined> = process.env): boolean {
   const policy = env.TEXT_CHAIN_POLICY?.trim() || 'legacy';
   if (policy !== 'legacy' && policy !== 'fixed-v1') throw new Error('TEXT_CHAIN_POLICY configuration is invalid.');

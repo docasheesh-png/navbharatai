@@ -265,6 +265,48 @@ describe('fixed-order FreeChain opt-in', () => {
   expect(result.freeChain?.attempts.find(a => a.provider === 'qubax')).toMatchObject({ entered: true, reason: 'served' });
   expect(m.paid).toHaveBeenCalledOnce(); expect(m.execute).toHaveBeenCalledTimes(4); expect(m.settle).not.toHaveBeenCalled();
  });
+ it.each(['duplicate', 'error'])('fixed Chat releases only the fresh Mitrify month hold on %s daily admission', async outcome => {
+  vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');
+  m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
+  const month = '2026-11';
+  vi.spyOn(masterPlan, 'reserveMonthly').mockResolvedValue(month); const release = vi.spyOn(masterPlan, 'settleMonthly').mockResolvedValue(undefined);
+  if (outcome === 'duplicate') m.paid.mockResolvedValue({ id: 'original-daily-hold', mayDispatch: false }); else m.paid.mockRejectedValue(new Error('uncertain daily storage'));
+  const adapter = vi.spyOn(mitrify, 'runApprovedMitrifyChain').mockImplementation(async options => {
+   expect(options.maxHttpAttempts).toBe(1); await options.reserve(400); throw new Error('must never reach dispatch');
+  });
+  const qubaxAdapter = vi.spyOn(qubax, 'runApprovedQubaxChat');
+  const cfg = fixed(); cfg.features.monthlyCap = true;
+  const result = await withFixedTextChainScope('chat', 'text', () => buildFreeChainRouter(db, cfg).route(input()));
+  expect(release).toHaveBeenCalledExactlyOnceWith(db, month, 400, 0); expect(m.settle).not.toHaveBeenCalled();
+  expect(result.freeChain?.attempts.find(a => a.provider === 'mitrify')).toMatchObject({ entered: false });
+  expect(adapter).toHaveBeenCalledOnce(); expect(qubaxAdapter).not.toHaveBeenCalled();
+ });
+ it.each([false, true])('fixed Chat counts Mitrify only at its dispatch boundary, entered=%s', async entered => {
+  vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');
+  m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
+  m.paid.mockResolvedValue({ id: 'mitrify-hold', day: 'd', uidHash: 'u', maxCostNanoUsd: 400, createdAt: 0, mayDispatch: true });
+  const adapter = vi.spyOn(mitrify, 'runApprovedMitrifyChain').mockImplementation(async options => {
+   expect(options.maxHttpAttempts).toBe(1); const receipt = await options.reserve(400); expect(receipt).not.toBeNull();
+   if (entered) options.beforeHttpDispatch?.(); else await receipt!.releaseUndispatched();
+   throw new mitrify.MitrifyError(entered ? 'MITRIFY_HTTP_429' : 'MITRIFY_APPROVAL_REVOKED', entered ? 429 : 0, false, entered);
+  });
+  const qubaxAdapter = vi.spyOn(qubax, 'runApprovedQubaxChat');
+  const result = await withFixedTextChainScope('chat', 'text', () => buildFreeChainRouter(db, fixed()).route(input()));
+  expect(result.freeChain?.attempts.find(a => a.provider === 'mitrify')).toMatchObject({ entered });
+  expect(result.freeChain?.attempts.filter(a => a.entered)).toHaveLength(entered ? 5 : 4);
+  expect(adapter).toHaveBeenCalledOnce(); expect(qubaxAdapter).not.toHaveBeenCalled();
+  expect(m.settle).toHaveBeenCalledTimes(entered ? 0 : 1);
+ });
+ it.each([429, 503])('fixed Chat never treats Mitrify HTTP%s as a zero-charge retry receipt', async status => {
+  vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
+  m.paid.mockResolvedValue({ id: 'possibly-spent', mayDispatch: true });
+  const adapter = vi.spyOn(mitrify, 'runApprovedMitrifyChain').mockImplementation(async options => {
+   await options.reserve(400); options.beforeHttpDispatch?.(); throw new mitrify.MitrifyError(`MITRIFY_HTTP_${status}`, status, false, true);
+  });
+  const qubaxAdapter = vi.spyOn(qubax, 'runApprovedQubaxChat');
+  const result = await withFixedTextChainScope('chat', 'text', () => buildFreeChainRouter(db, fixed()).route(input()));
+  expect(result.ok).toBe(false); expect(adapter).toHaveBeenCalledOnce(); expect(qubaxAdapter).not.toHaveBeenCalled(); expect(m.settle).not.toHaveBeenCalled();
+ });
  it.each(['duplicate', 'error'])('releases only the new month hold when Qubax daily reservation is %s', async outcome => {
   vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');
   m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));

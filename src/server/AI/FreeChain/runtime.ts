@@ -1,7 +1,7 @@
 import { runApprovedQubaxChat, QubaxError } from '../../lib/qubax';
 import { chatAttemptLimits, watchChatAttempt } from './attemptBudget';
 import { CHAT_SERVER_DEADLINE_MS, CHAT_PROVIDER_ATTEMPT_MS } from '../../../lib/chatDeadline';
-import { FIXED_TEXT_CHAIN, fixedTextChainRank, fixedTextChainSurface, fixedTextChainSelected } from '../fixedTextChain';
+import { FIXED_TEXT_CHAIN, fixedTextChainRank, fixedTextChainSurface, fixedTextChainSelected, SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS } from '../fixedTextChain';
 import { mitrifyConfig, MitrifyError, runApprovedMitrifyChain } from '../../lib/mitrify';
 import { capacityRevision, notifyCapacityReleased, waitForCapacity } from './capacityWait';
 import { switchedOffProviderFor } from '../../lib/providerSwitches';
@@ -218,6 +218,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     for (const [position, id] of order.entries()) {
       if (input.signal?.aborted || Date.now() >= deadlineAt) return done({ ...empty('aborted'), content: '' });
       if (id === 'mitrify') {
+        const fixedChat = fixedTextChainSelected() && fixedTextChainSurface() === 'chat';
         // A malformed optional supplier must not take down the later healthy rungs.
         let model: string;
         try { model = mitrifyConfig().model; } catch {
@@ -236,8 +237,9 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         let content = '';
         try {
           const result = await runApprovedMitrifyChain({ db, uid: input.context.uid, requestId: `${requestId}:mitrify`,
-            privateTurn: input.context.privateTurn, healthTurn: input.context.healthTurn, signal, maxHttpAttempts: 1,
+            privateTurn: input.context.privateTurn, healthTurn: input.context.healthTurn, signal, maxHttpAttempts: SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS,
             body: { messages: [{ role: 'system', content: prepared.systemPrompt }, { role: 'user', content: prepared.prompt }], max_tokens: cfg.features.replyMaxTokens, stream: true },
+            beforeHttpDispatch: () => { signal.throwIfAborted(); if (fixedChat) attempt.entered = true; },
             onChunk: value => {
               if (signal.aborted) return;
               if (value) { clearTimeout(timer); timer = setTimeout(() => controller.abort(), Math.min(30000, Math.max(1, deadlineAt - Date.now()))); }
@@ -253,10 +255,16 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
               if (!control || control.enabled === false || !cfg.enabled) return null;
               const month = cfg.features.monthlyCap ? await reserveMonthly(db, cfg.features.monthlyCapNanoUsd, maximumNanoUsd) : null;
               if (cfg.features.monthlyCap && !month) return null;
-              const hold = await store.reservePaid({ uncappedRollout: true, requestId: `${requestId}:mitrify`, uid: input.context.uid, maxCostNanoUsd: maximumNanoUsd, capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: CHAT_PAID_FALLBACK_PER_USER_LIMIT });
-              if (hold && !hold.mayDispatch) throw new MitrifyError('MITRIFY_ADMISSION_UNCERTAIN');
+              let hold;
+              try { hold = await store.reservePaid({ uncappedRollout: true, requestId: `${requestId}:mitrify`, uid: input.context.uid, maxCostNanoUsd: maximumNanoUsd, capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: CHAT_PAID_FALLBACK_PER_USER_LIMIT }); }
+              catch (error) { if (fixedChat && month) await settleMonthly(db, month, maximumNanoUsd, 0); throw error; }
+              // Only this fresh month hold is known unused. A duplicate or uncertain
+              // daily receipt may cover an earlier call and must never be refunded.
+              if (hold && !hold.mayDispatch) { if (fixedChat && month) await settleMonthly(db, month, maximumNanoUsd, 0); throw new MitrifyError('MITRIFY_ADMISSION_UNCERTAIN'); }
               if (!hold) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); return null; }
-              attempt.entered = true;
+              // A reservation is not a physical call. Preserve non-Chat accounting
+              // while fixed Chat records the conservative HTTP dispatch boundary.
+              if (!fixedChat) attempt.entered = true;
               return { releaseUndispatched: async () => { await store.settlePaid(hold, 0); if (month) await settleMonthly(db, month, maximumNanoUsd, 0); } };
             },
           });

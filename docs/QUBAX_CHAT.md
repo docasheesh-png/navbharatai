@@ -77,11 +77,12 @@ workload**, not a claim about actual billed savings without supplier receipts.
 
 ## Live readiness limitation
 
-This change does not invent an official-price API, scrape and certify prices,
-create accounts, purchase credits, or run a paid inference. No automated external
-source-verification publisher is implemented because a trustworthy documented
-source and supplier-enforced total charge contract have not been established.
-An independently maintained operator feed is required to keep evidence fresh.
+An opt-in [public price observation feed](QUBAX_PRICE_FEED.md) collects Qubax,
+OpenAI and Z.AI sources automatically, with bounded four-minute polling and
+five-minute expiry. It is separate from the reviewed catalog and never certifies
+unknown model mappings, fees, supplier ceilings, quality or disclosure approvals.
+It does not create accounts, purchase credits or run paid inference. Independently
+reviewed evidence is still required to populate and keep the dispatch catalog fresh.
 Without that feed, approvals, and reviewed downstream terms, Qubax deliberately
 remains unavailable and ordinary Chat continues through eligible later rungs.
 The Test Chat Bot instead shows unavailable and never calls another provider.

@@ -77,6 +77,17 @@ describe('Qubax exact evidence-bound single dispatch', () => {
     await expect(runApprovedQubaxChat(f.options, env)).rejects.toMatchObject({ code: 'QUBAX_HTTP_ERROR', status, dispatched: true });
     expect(network).toHaveBeenCalledOnce(); expect(f.releaseUndispatched).not.toHaveBeenCalled();
   });
+  it('cannot activate three tries with approval fields or a self-reported zero-charge error', async () => {
+    const f = fixture();
+    f.approval().maxHttpAttempts = 3;
+    Object.assign(f.approval().supplierContract, { zeroChargeOn429: true, generationRejected: true, billingReceiptRef: 'unverified-assertion' });
+    network.mockResolvedValue(new Response(JSON.stringify({ error: { code: 'rate_limit', actual_cost: 0, generation_rejected: true } }), { status: 429 }));
+    await expect(runApprovedQubaxChat(f.options, env)).rejects.toMatchObject({ status: 429, dispatched: true });
+    expect(f.approval().attemptsStarted).toBe(1); expect(network).toHaveBeenCalledOnce();
+    expect(f.releaseUndispatched).not.toHaveBeenCalled();
+    expect(await runApprovedQubaxChat({ ...f.options, requestId: 'fresh-request-id' }, env)).toMatchObject({ kind: 'skipped' });
+    expect(network).toHaveBeenCalledOnce();
+  });
   it('a network timeout remains terminal with held money', async () => {
     const f = fixture(); network.mockRejectedValue(new Error('raw provider secret'));
     await expect(runApprovedQubaxChat(f.options, env)).rejects.toMatchObject({ code: 'QUBAX_UNAVAILABLE', dispatched: true, message: 'Qubax request unavailable.' });

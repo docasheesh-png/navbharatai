@@ -34,8 +34,19 @@ positions. Skips do not consume physical attempts.
 
 ## Required independent evidence, not defaults
 
-No provider catalog or approval is seeded. Setting a key does **not** authorize
-production transmission. An existing trusted server operator must maintain:
+No provider catalog or approval is seeded. Setting a key does **not** by
+itself authorize production transmission.
+
+Public chat and the admin Test Chat Bot have a separate owner switch. All four
+must be set: `QUBAX_ENABLED=1`, `QUBAX_API_KEY`, `QUBAX_MODEL` (one model id),
+and `QUBAX_MAX_USD_PER_REQUEST` (a positive USD amount of at most `1`). That
+amount is the hard reserve for one HTTP call. The shared daily and monthly paid
+budgets still have to admit it. Guest 10/day and signed-in shared 50/day are
+unchanged. This path does not read `qubax_chat_approvals`. Gateway callers that
+pin `expectedSelection` do not use this switch; they keep the catalog and the
+exact approval below.
+
+An existing trusted server operator must maintain the catalog path for Gateway:
 
 1. `qubax_catalog/active`, using the exported `QubaxCatalog` contract in
    `src/server/lib/qubaxSelector.ts`. Qubax and official prices must independently
@@ -83,9 +94,11 @@ five-minute expiry. It is separate from the reviewed catalog and never certifies
 unknown model mappings, fees, supplier ceilings, quality or disclosure approvals.
 It does not create accounts, purchase credits or run paid inference. Independently
 reviewed evidence is still required to populate and keep the dispatch catalog fresh.
-Without that feed, approvals, and reviewed downstream terms, Qubax deliberately
-remains unavailable and ordinary Chat continues through eligible later rungs.
-The Test Chat Bot instead shows unavailable and never calls another provider.
+Gateway dispatch stays unavailable without that catalog and the exact approval.
+Public chat and the Test Chat Bot can still call Qubax through the owner switch
+above. If that switch is absent or the shared budget refuses the ceiling, Qubax
+is skipped and ordinary Chat continues through eligible later rungs. The Test
+Chat Bot never calls another provider.
 
 Qubax documents a gateway/marketplace. “Qubax only” means NavBharatAI sends only to
 Qubax; it does not mean the gateway performs inference itself or avoids upstream

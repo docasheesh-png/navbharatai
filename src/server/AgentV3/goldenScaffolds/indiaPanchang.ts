@@ -2,8 +2,8 @@
 //
 // Admin-requested 2026-09-12 ("brahm_muhrats, ya panchang, kundali jaise apps … aap isko real
 // professional banana"). Same contract as the other scaffold modules: complete hand-verified App.tsx
-// files, CI-proven to parse (esbuild) and compile (in-browser Babel preview), no backticks, no backslash
-// escapes, no nested template literals.
+// files, CI-proven to parse (esbuild) and compile (in-browser Babel preview). Shared generator text
+// is interpolated once; escaped regexes must survive into the standalone app source.
 //
 // 🔒 WHY THESE TWO COMPUTE INSTEAD OF LOOKING UP, and why that was the only honest option. The easy
 // version of a panchang app is a table of times somebody typed in for one city and one year. It looks
@@ -14,7 +14,7 @@
 // So the sunrise, sunset and solar noon come from the standard NOAA solar-position algorithm for the
 // chosen latitude and longitude (good to about a minute), every muhurat and kaal is DERIVED from those by
 // its documented traditional rule, and the tithi and nakshatra come from the sun and moon longitudes.
-// The moon uses the classical abbreviated lunar series, accurate to roughly a fifth of a degree — so the
+// The moon uses a truncated Meeus series, roughly a fifth of a degree for modern dates — so the
 // app SAYS that, rather than presenting a tithi boundary as exact.
 //
 // And the kundali stops where honesty requires: the ascendant and the bhava are exact spherical
@@ -22,11 +22,48 @@
 // Mangal through Shani need a planetary ephemeris this offline app does not carry, which the app states
 // plainly instead of placing a graha it had to guess.
 //
-// ⚠️ THE SHARED ASTRONOMY IS DUPLICATED INTO BOTH APPS ON PURPOSE, which is the one place this module
+// Lunar/input source is shared at generation time; each emitted app remains self-contained.
+// ⚠️ THE REMAINING ASTRONOMY IS DUPLICATED INTO BOTH APPS ON PURPOSE, which is the one place this module
 // breaks the repo's own de-duplication instinct. A golden scaffold must be a SELF-CONTAINED App.tsx (the
 // registry ships exactly one file per simple scaffold), so a shared module here would have to become a
 // file in the generated app — and then the builder, asked to change one app, could edit a file the other
 // depends on. The duplication is between two generated apps that never meet, not inside our codebase.
+
+const lunarAndInputSource = `/** Meeus Table47.A, eighteen leading periodic terms; no stored calendar values.
+ * Geocentric, not apparent: JD2448724.5 is133.162655deg in the full reference series.
+ */
+function moonLon(jd: number): number {
+  const t = (jd - 2451545) / 36525;
+  const lp = 218.3164477+481267.88123421*t-0.0015786*t*t+t*t*t/538841-t*t*t*t/65194000;
+  const d = 297.8501921+445267.1114034*t-0.0018819*t*t+t*t*t/545868-t*t*t*t/113065000;
+  const m = 357.5291092+35999.0502909*t-0.0001536*t*t+t*t*t/24490000;
+  const mp = 134.9633964+477198.8675055*t+0.0087414*t*t+t*t*t/69699-t*t*t*t/14712000;
+  const f = 93.2720950+483202.0175233*t-0.0036539*t*t-t*t*t/3526000+t*t*t*t/863310000;
+  const e = 1-0.002516*t-0.0000074*t*t;
+  const terms = [
+    [0,0,1,0,6288774],[2,0,-1,0,1274027],[2,0,0,0,658314],
+    [0,0,2,0,213618],[0,1,0,0,-185116],[0,0,0,2,-114332],
+    [2,0,-2,0,58793],[2,-1,-1,0,57066],[2,0,1,0,53322],
+    [2,-1,0,0,45758],[0,1,-1,0,-40923],[1,0,0,0,-34720],
+    [0,1,1,0,-30383],[2,0,0,-2,15327],[0,0,1,2,-12528],
+    [0,0,1,-2,10980],[4,0,-1,0,10675],[0,0,3,0,10034],
+  ];
+  let correction = 0;
+  for (const q of terms) correction += q[4]*Math.pow(e,Math.abs(q[1]))*Math.sin(norm360(q[0]*d+q[1]*m+q[2]*mp+q[3]*f)*DEG);
+  correction += 3958*Math.sin(norm360(119.75+131.849*t)*DEG)+1962*Math.sin(norm360(lp-f)*DEG)+318*Math.sin(norm360(53.09+479264.290*t)*DEG);
+  return norm360(lp+correction/1000000);
+}
+function validCoordinates(lat: number, lon: number): boolean {
+  return Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat)<=90 && Math.abs(lon)<=180;
+}
+function coordinateText(value: string): number { return value.trim()==='' ? NaN : Number(value); }
+function civilDate(iso: string): { y: number; mo: number; d: number; weekday: number } | null {
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(iso)) return null;
+  const [y,mo,d] = iso.split('-').map(Number); if (y<1) return null;
+  const date = new Date(0); date.setUTCFullYear(y,mo-1,d); date.setUTCHours(0,0,0,0);
+  return date.getUTCFullYear()===y && date.getUTCMonth()===mo-1 && date.getUTCDate()===d ? {y,mo,d,weekday:date.getUTCDay()} : null;
+}
+`;
 
 export const panchangAppTsx = `import { useMemo, useState } from 'react';
 import ThemeToggle from './theme';
@@ -70,26 +107,7 @@ function sunAt(jd: number) {
 }
 
 /** Geocentric ecliptic longitude of the moon — the classical abbreviated series (about 0.2 deg). */
-function moonLon(jd: number): number {
-  const t = (jd - 2451545) / 36525;
-  const lp = 218.3164477 + 481267.88123421 * t;
-  const d = 297.8501921 + 445267.1114034 * t;
-  const m = 357.5291092 + 35999.0502909 * t;
-  const mp = 134.9633964 + 477198.8675055 * t;
-  const lon = lp
-    + 6.289 * Math.sin(mp * DEG)
-    - 1.274 * Math.sin((2 * d - mp) * DEG)
-    + 0.658 * Math.sin(2 * d * DEG)
-    - 0.186 * Math.sin(m * DEG)
-    - 0.059 * Math.sin((2 * mp - 2 * d) * DEG)
-    - 0.057 * Math.sin((mp - 2 * d + m) * DEG)
-    + 0.053 * Math.sin((mp + 2 * d) * DEG)
-    + 0.046 * Math.sin((2 * d - m) * DEG)
-    - 0.041 * Math.sin((mp - m) * DEG)
-    - 0.035 * Math.sin(d * DEG)
-    - 0.031 * Math.sin((mp + m) * DEG);
-  return norm360(lon);
-}
+${lunarAndInputSource}
 
 /** Mean longitude of the ascending lunar node (Rahu). Exact enough to be quoted as given. */
 function rahuLon(jd: number): number {
@@ -222,17 +240,15 @@ function App() {
   };
 
   const place = manual
-    ? { name: 'मेरा स्थान (custom)', lat: parseFloat(latText) || 0, lon: parseFloat(lonText) || 0 }
+    ? { name: 'मेरा स्थान (custom)', lat: coordinateText(latText), lon: coordinateText(lonText) }
     : CITIES[cityIndex];
 
   const data = useMemo(() => {
-    const parts = dateISO.split('-').map((x) => parseInt(x, 10));
-    const y = parts[0];
-    const mo = parts[1];
-    const d = parts[2];
-    if (!y || !mo || !d) return null;
+    const date = civilDate(dateISO);
+    if (!date || !validCoordinates(place.lat,place.lon)) return null;
+    const {y,mo,d} = date;
     const sd = solarDay(y, mo, d, place.lat, place.lon);
-    const weekday = new Date(y, mo - 1, d).getDay();
+    const weekday = date.weekday;
 
     // Tithi / nakshatra are read at SUNRISE, which is the moment a panchang is stated for.
     const atSunrise = sd.sunrise === null ? sd.jd : julianDay0(y, mo, d) + (sd.sunrise / 60 - TZ) / 24;
@@ -329,7 +345,7 @@ function App() {
       </div>
 
       {!data ? (
-        <div className="nb-empty">एक मान्य तारीख़ चुनें।</div>
+        <div className="nb-empty">एक मान्य तारीख़ और स्थान चुनें (valid date and coordinates).</div>
       ) : (
         <div>
           <div className="card" style={{ marginBottom: 14 }}>
@@ -470,26 +486,7 @@ function sunAt(jd: number) {
 }
 
 /** Geocentric ecliptic longitude of the moon — the classical abbreviated series (about 0.2 deg). */
-function moonLon(jd: number): number {
-  const t = (jd - 2451545) / 36525;
-  const lp = 218.3164477 + 481267.88123421 * t;
-  const d = 297.8501921 + 445267.1114034 * t;
-  const m = 357.5291092 + 35999.0502909 * t;
-  const mp = 134.9633964 + 477198.8675055 * t;
-  const lon = lp
-    + 6.289 * Math.sin(mp * DEG)
-    - 1.274 * Math.sin((2 * d - mp) * DEG)
-    + 0.658 * Math.sin(2 * d * DEG)
-    - 0.186 * Math.sin(m * DEG)
-    - 0.059 * Math.sin((2 * mp - 2 * d) * DEG)
-    - 0.057 * Math.sin((mp - 2 * d + m) * DEG)
-    + 0.053 * Math.sin((mp + 2 * d) * DEG)
-    + 0.046 * Math.sin((2 * d - m) * DEG)
-    - 0.041 * Math.sin((mp - m) * DEG)
-    - 0.035 * Math.sin(d * DEG)
-    - 0.031 * Math.sin((mp + m) * DEG);
-  return norm360(lon);
-}
+${lunarAndInputSource}
 
 /** Mean longitude of the ascending lunar node (Rahu). Exact enough to be quoted as given. */
 function rahuLon(jd: number): number {
@@ -588,14 +585,13 @@ function ascendantDeg(lstDeg: number, latDeg: number, obliqDeg: number): number 
 
 /** Everything this app can honestly compute for one birth. Pure. */
 function chartFor(b: Birth) {
-  const dateParts = b.dob.split('-').map((x) => parseInt(x, 10));
+  const date = civilDate(b.dob);
+  if (!date || !validCoordinates(b.lat,b.lon) || !/^\\d{2}:\\d{2}$/.test(b.tob)) return null;
   const timeParts = b.tob.split(':').map((x) => parseInt(x, 10));
-  const y = dateParts[0];
-  const mo = dateParts[1];
-  const d = dateParts[2];
+  const {y,mo,d} = date;
   const hh = timeParts[0];
   const mi = timeParts[1];
-  if (!y || !mo || !d || !isFinite(hh) || !isFinite(mi)) return null;
+  if (!Number.isInteger(hh) || !Number.isInteger(mi) || hh<0 || hh>23 || mi<0 || mi>59) return null;
 
   const hours = hh + mi / 60;
   const jdUT = julianDay0(y, mo, d) + (hours - TZ) / 24;
@@ -665,17 +661,23 @@ export default function App() {
   const [screen, setScreen] = useState('chart');
   const [selected, setSelected] = useState('');
   const [adding, setAdding] = useState(false);
+  const [formError, setFormError] = useState('');
   const [form, setForm] = useState({ name: '', dob: '1995-01-01', tob: '06:30', cityIndex: '0', lat: '', lon: '' });
 
   const active = births.find((b) => b.id === selected) || births[0] || null;
   const chart = useMemo(() => (active ? chartFor(active) : null), [active]);
 
   const saveBirth = () => {
-    const idx = parseInt(form.cityIndex, 10);
+    const idx = Number(form.cityIndex);
     const custom = idx < 0;
-    const lat = custom ? parseFloat(form.lat) : CITIES[idx].lat;
-    const lon = custom ? parseFloat(form.lon) : CITIES[idx].lon;
-    if (!form.name.trim() || !isFinite(lat) || !isFinite(lon)) return;
+    const city = CITIES[idx];
+    if (!Number.isInteger(idx) || (custom && idx !== -1) || (!custom && !city)) { setFormError('मान्य जन्म स्थान चुनें (valid place).'); return; }
+    const lat = custom ? coordinateText(form.lat) : city.lat;
+    const lon = custom ? coordinateText(form.lon) : city.lon;
+    if (!form.name.trim() || !civilDate(form.dob) || !validCoordinates(lat,lon) || !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(form.tob)) {
+      setFormError('नाम, मान्य तिथि/समय, अक्षांश −90 से 90 और देशांतर −180 से 180 दें (valid birth details).'); return;
+    }
+    setFormError('');
     // add() mints the id itself, so the saved row is whatever it hands back — never an id made here.
     const created = add({
       name: form.name.trim(),
@@ -803,14 +805,15 @@ export default function App() {
             लग्न की राशि ही प्रथम भाव है।
           </p>
           <div className="alert" style={{ fontSize: 12 }}>
-            चंद्र की 0.2° की सीमा के कारण नक्षत्र या पाद बदलने के बिल्कुल किनारे पर प्रकाशित पंचांग से
+            आधुनिक तिथियों पर चंद्र की लगभग 0.2° की सीमा के कारण नक्षत्र या पाद बदलने के बिल्कुल किनारे पर प्रकाशित पंचांग से
             थोड़ा अन्तर हो सकता है। महत्वपूर्ण धार्मिक निर्णय के लिए स्थानीय आचार्य या पंचांग से मिला लें।
           </div>
         </Card>
       )}
 
       {adding && (
-        <Modal title="नया जन्म विवरण" onClose={() => setAdding(false)}>
+        <Modal title="नया जन्म विवरण" onClose={() => { setAdding(false); setFormError(''); }}>
+          {formError && <p role="alert">{formError}</p>}
           <Field label="नाम" value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="पूरा नाम" />
           <Field label="जन्म तिथि" type="date" value={form.dob} onChange={(v) => setForm({ ...form, dob: v })} />
           <Field label="जन्म समय (24 घंटे)" type="time" value={form.tob} onChange={(v) => setForm({ ...form, tob: v })} />

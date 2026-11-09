@@ -101139,3 +101139,11 @@ Owner t307u sequential audit, BR1959 only (boundary 1951..2105 frozen). This was
 Queue: Q-2602…Q-2611 (seven implemented, three 🟡 blocked: log-only-form outcome, react-router ^6 pin, summary-claim corrections). This commit also closes the 29 BR1958 rows resolved by #4132. Its four blockers, Q-2371 and the PR4109 row stay open. The historical app is not claimed repaired.
 - 2026-11-09 BR1959 follow-up: exact-head test:coverage on f79856f5c failed 2 censuses (writtenFiles count, unclassified FASTLANE_DEPS_RECONCILED); fixed: one audited writer site (census 37) + PROCESS_ONLY_CODES entry. No reruns used to pass.
 - 2026-11-09 BR1959 side-effect review (owner rule): F1 narrowed (disk manifest never credited as written), F2 narrowed (project-ambient types need TS2304 proof), F5 narrowed (confidence charged once per file); F3/F4/F6 kept with neighbour locks; +23 neighbour tests, mutation controls 16.
+
+## 2026-11-09 — BR1960 autopsy (YouTube SEO generator, succeeded): a tool for a product is not a clone
+Owner t307u sequential audit, BR1960 only (boundary 1951..2105 frozen). A one-screen SEO tag generator was scoped "LARGE — clone of YouTube", which cost an 8.8 s roadmap call and a "big app" message. Two admin diagnostics were also untrue. Ledger: [autopsy](docs/build-report-autopsy-BR1960.md), [evidence](docs/build-report-autopsy-BR1960-evidence.json).
+- **F1.** A famous name followed by a tool noun is what the tool works on; a likeness word still wins. Over 78,007 strings, one decision changed (this prompt).
+- **F2.** A client `src/services|api|models` layer is not a backend without a server signal. The CSP scan is pinned to the old reading (t311u).
+- **F3.** The click explorer records the controls it drops silently; "all deliberately skipped" is said only when true.
+
+Queue: Q-2612…Q-2617 (three implemented, three 🟡 blocked: html-code intent, compute journey, CSP on client-layer SPAs). This commit closes the seven BR1959 rows resolved by #4134. Q-2608/2610/2611, the BR1958 blockers, Q-2371 and the PR4109 row stay open.

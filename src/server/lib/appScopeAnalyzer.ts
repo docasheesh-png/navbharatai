@@ -152,6 +152,18 @@ const AUDIENCE_BEFORE = /\bfor\s+(?:the\s+|all\s+|our\s+|my\s+)?$/i;
 const LIKENESS_AFTER = /^[^.,;:!?\n]{0,40}\b(?:jaisa|jaise|jaisi|clone|replica|copy\s+(?:of|bana\w*))\b/i;
 const LIKENESS_BEFORE = /\b(?:like|jaisa|jaise|jaisi|clone\s+(?:of|like)|similar\s+to|inspired\s+by|copy\s+of|replica\s+of|version\s+of)\s+(?:the\s+|a\s+)?$/i;
 
+// 🔴 A TOOL FOR A PRODUCT IS NOT THE PRODUCT (autopsy BR1959-sequence BR1960, build 71738e8d, 2026-11-09).
+// "Create a html code of youtube seo generator" was recorded as *"LARGE — clone of YouTube"*: the name sits in
+// the request's SUBJECT, and a subject mention counts as intent (6452c0a9). But the name there MODIFIES the
+// thing asked for — an SEO generator FOR YouTube — exactly as "WhatsApp chat analyzer", "Uber fare calculator"
+// or "Amazon price tracker" do. The complexity router scored it 15 ("simple") and the build was one 15-file
+// tool; the clone verdict cost a planner call (8.8 s before the first file), told the user "YouTube SEO is a
+// big app", and handed the builder a five-step roadmap. The eighth shape of "the product being used": the name
+// followed by an optional subject word and a TOOL noun (generator, downloader, analyzer, checker, calculator,
+// tracker, optimizer …). Guarded by a likeness word like AUDIENCE_AFTER: "YouTube jaisa SEO generator" or
+// "a YouTube clone with a tag generator" still names a product to clone.
+const TOOL_FOR_AFTER = /^[\s/-]*(?:(?:video|channel|shorts?|reels?|post|posts|ads?|chat|chats|status|story|stories|profile|account|order|orders|fare|fares|price|prices|delivery|trip|ride|playlist|song|music)\s+)?(?:(?:seo|tags?|titles?|keywords?|hashtags?|captions?|descriptions?|bios?|scripts?|names?|usernames?|fonts?|text|emojis?|analytics|growth|earnings?|revenue|money|subscribers?|views?|likes?|followers?|engagement|rank(?:ing)?|cost|fare|price|split|bill)\s+)?(?:generators?|makers?|downloaders?|analy[sz]ers?|checkers?|calculators?|tools?|toolkits?|optimi[sz]ers?|planners?|schedulers?|trackers?|converters?|counters?|finders?|graders?|estimators?|extractors?|summari[sz]ers?)\b/i;
+
 /**
  * 🔴 A NAME IS NOT AN INTENT TO CLONE (autopsy 6452c0a9, 2026-10-21). The seventh shape of the same defect.
  *
@@ -187,6 +199,7 @@ export function namesAsProduct(text: string, re: RegExp, opts: ProductMentionOpt
     if (TOOL_BEFORE.test(before) || TOOL_BEFORE.test(listHead) || TOOL_AFTER.test(after)) continue;
     const after40 = noise(text.slice(at + m[0].length, at + m[0].length + 48));
     if (!LIKENESS_BEFORE.test(before) && !LIKENESS_AFTER.test(after40) && (AUDIENCE_AFTER.test(after) || AUDIENCE_BEFORE.test(before) || AUDIENCE_BEFORE.test(listHead))) continue;
+    if (!LIKENESS_BEFORE.test(before) && !LIKENESS_AFTER.test(after40) && TOOL_FOR_AFTER.test(after)) continue;
     if (opts.needsIntent && !LIKENESS_BEFORE.test(before) && !LIKENESS_AFTER.test(after40)
       && !(opts.subject && new RegExp(re.source, re.flags.replace('g', '')).test(opts.subject))) continue;
     return true;

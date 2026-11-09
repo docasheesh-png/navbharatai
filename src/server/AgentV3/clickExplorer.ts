@@ -299,6 +299,29 @@ export interface ExploreSummaryLine {
   chosen: number;
   /** Up to eight controls that were deliberately not pressed, with the reason. */
   skipped: Array<{ label: string; why: string }>;
+  /**
+   * Controls that were counted in `found` but never considered, by reason (BR1960). Before this, a control
+   * that was hidden, disabled, inside the error overlay, our own badge, or a repeat of one already seen was
+   * dropped without a word — and a page whose only two controls were dropped that way was reported as
+   * "all deliberately skipped" with an empty list. Absent on older runner output.
+   */
+  dropped?: ExploreDropped;
+}
+
+export interface ExploreDropped { hidden: number; disabled: number; overlay: number; ours: number; repeat: number }
+const DROP_KEYS: ReadonlyArray<keyof ExploreDropped> = ['hidden', 'disabled', 'overlay', 'ours', 'repeat'];
+const DROP_WORDS: Record<keyof ExploreDropped, string> = {
+  hidden: 'hidden or too small to press',
+  disabled: 'disabled (often until something is typed or chosen first)',
+  overlay: 'inside the error overlay',
+  ours: 'our own NavBharatAI badge',
+  repeat: 'a repeat of a control already counted',
+};
+
+/** The dropped counts as readable phrases, in a fixed order. PURE. */
+export function droppedPhrases(d: ExploreDropped | undefined): string[] {
+  if (!d) return [];
+  return DROP_KEYS.filter((k) => d[k] > 0).map((k) => `${d[k]} ${DROP_WORDS[k]}`);
 }
 
 export interface ExploreRun {
@@ -330,6 +353,9 @@ export function parseExploreOutput(stdout: string | null | undefined): ExploreRu
         skipped: Array.isArray(o.skipped)
           ? o.skipped.slice(0, 8).map((s: any) => ({ label: String(s?.label ?? '').slice(0, 60), why: String(s?.why ?? '').slice(0, 80) }))
           : [],
+        ...(o.dropped && typeof o.dropped === 'object'
+          ? { dropped: Object.fromEntries(DROP_KEYS.map((k) => [k, Number.isFinite(o.dropped[k]) && o.dropped[k] > 0 ? Math.floor(Number(o.dropped[k])) : 0])) as unknown as ExploreDropped }
+          : {}),
       };
     } else if (o.type === 'press' && VERDICTS.has(o.verdict)) {
       run.presses.push({
@@ -403,6 +429,18 @@ export interface ExploreVerdict {
   attempts?: PressResult[];
 }
 
+/**
+ * "ALL DELIBERATELY SKIPPED" MUST BE TRUE (BR1960). The runner's old output had no `dropped`, and the
+ * sentence is kept byte-for-byte for it. With `dropped`, the sentence names what actually happened: how
+ * many were skipped for a safety reason and how many were never pressable at all. PURE.
+ */
+function nothingToPressMessage(s: ExploreSummaryLine): string {
+  const phrases = droppedPhrases(s.dropped);
+  if (phrases.length === 0) return `No control on the home screen was safe to press (${s.found} found, all deliberately skipped).`;
+  const parts = [...(s.skipped.length ? [`${s.skipped.length} skipped for safety`] : []), ...phrases];
+  return `No control on the home screen could be pressed (${s.found} found: ${parts.join(', ')}).`;
+}
+
 /** Decide what the run proved. PURE; never throws. */
 export function summarizeExplore(run: ExploreRun): ExploreVerdict {
   const presses = run.presses.filter((p) => p.verdict !== 'skipped');
@@ -410,6 +448,7 @@ export function summarizeExplore(run: ExploreRun): ExploreVerdict {
   const detail = [
     ...run.presses.map((p) => `${p.verdict.toUpperCase()} ${pressName(p)} — ${p.note}${p.errors.length ? ` [${p.errors[0]}]` : ''}${p.verdict === 'ok' && !p.changed ? ' (nothing visibly changed)' : ''}`),
     ...(run.summary?.skipped ?? []).map((s) => `NOT PRESSED "${s.label}" — ${s.why}`),
+    ...droppedPhrases(run.summary?.dropped).map((d) => `NOT CONSIDERED — ${d}`),
     ...(run.outOfTime ? ['Stopped starting new presses: the check reached its own time limit.'] : []),
   ].join('\n');
 
@@ -425,7 +464,7 @@ export function summarizeExplore(run: ExploreRun): ExploreVerdict {
       outcome: 'nothing', code: 'EXPLORE_NOTHING_TO_PRESS', pressed: 0, failures: [], detail,
       message: run.summary.chosen > 0
         ? 'Controls were found but none could be pressed on a fresh load, so nothing was proven about them.'
-        : `No control on the home screen was safe to press (${run.summary.found} found, all deliberately skipped).`,
+        : nothingToPressMessage(run.summary),
     };
   }
   if (failures.length > 0) {
@@ -635,19 +674,21 @@ function collect(a) {
   const seen = new Set();
   const chosen = [];
   const skipped = [];
+  // Counted, never considered (BR1960): reported so "all deliberately skipped" is never said of these.
+  const dropped = { hidden: 0, disabled: 0, overlay: 0, ours: 0, repeat: 0 };
   for (const el of nodes) {
     const r = el.getBoundingClientRect();
     const st = getComputedStyle(el);
-    if (r.width < 2 || r.height < 2 || st.visibility === 'hidden' || st.display === 'none') continue;
-    if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
-    if (el.closest('vite-error-overlay, #nextjs-portal')) continue;
+    if (r.width < 2 || r.height < 2 || st.visibility === 'hidden' || st.display === 'none') { dropped.hidden++; continue; }
+    if (el.disabled || el.getAttribute('aria-disabled') === 'true') { dropped.disabled++; continue; }
+    if (el.closest('vite-error-overlay, #nextjs-portal')) { dropped.overlay++; continue; }
     // Our own "made by NavBharatAI" badge is not the app's control (its × hides it; nothing to test).
-    if (el.closest('[data-nbai-signature]')) continue;
+    if (el.closest('[data-nbai-signature]')) { dropped.ours++; continue; }
     const tag = el.tagName.toLowerCase();
     const label = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\\s+/g, ' ').trim().slice(0, 60);
     const href = tag === 'a' ? (el.getAttribute('href') || '') : '';
     const key = tag + '|' + label + '|' + href;
-    if (seen.has(key)) continue;
+    if (seen.has(key)) { dropped.repeat++; continue; }
     seen.add(key);
     let why = '';
     if (tag === 'a') {
@@ -672,7 +713,7 @@ function collect(a) {
       chosen.push({ i: chosen.length, tag, label, key, theme, view });
     }
   }
-  return { found: nodes.length, chosen, skipped, keys: Array.from(seen) };
+  return { found: nodes.length, chosen, skipped, dropped, keys: Array.from(seen) };
 }
 
 // The page's CONTENT, not its size: a calculator's 0 becoming 7 changes no length (autopsy 972acde5).
@@ -1111,7 +1152,7 @@ try {
     await page.close().catch(() => {});
   }
   if (plan) {
-    say({ type: 'summary', loaded: true, note: '', found: plan.found, chosen: plan.chosen.length, skipped: plan.skipped });
+    say({ type: 'summary', loaded: true, note: '', found: plan.found, chosen: plan.chosen.length, skipped: plan.skipped, dropped: plan.dropped });
     // Every control the first screen carries, pressed or not: a second-level control is one that was
     // NOT already there, so a header button present on every screen is never pressed twice.
     const firstScreen = new Set(plan.keys);

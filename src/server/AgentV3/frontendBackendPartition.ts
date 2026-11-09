@@ -56,13 +56,38 @@ export function classifyFile(path: string): FileSide {
  * dominate (≤ half of the FE+BE side files) — so a pure SPA (no backend) or a build that is mostly shared
  * glue is honestly reported as NOT cleanly splittable. Pure + deterministic.
  */
-export function partitionFrontendBackend(paths: readonly string[]): FbPartition {
+// A CLIENT LAYER IS NOT A SERVER (BR1960, report 1946f797). A Vite SPA kept its mock data fetcher in
+// `src/services/seoAPI.ts`; BACKEND_DIR matched `services/`, so the admin advisory said "1 backend … A clean
+// full-stack split exists" about an app with no server at all. `src/services`, `src/api` and `src/models`
+// directly under the source root are where front-end apps put fetch wrappers and data shapes. They are
+// backend only when the SAME file set also has an unambiguous server signal (a server/backend tree, a
+// routes/controllers/db layer, a server entry file). Otherwise they are 'shared' — never assigned a side.
+// `classifyFile` (single-path) is unchanged; this only applies across a whole file set.
+const CLIENT_LAYER = /^(?:\.\/)?src\/(?:services?|api|models?)\//i;
+const SERVER_ANCESTOR = /(^|\/)(server|backend)(\/|$)/i;
+
+/** True when a path is backend for a reason other than a client-layer directory under src/. */
+function isUnambiguousBackend(path: string): boolean {
+  if (classifyFile(path) !== 'backend') return false;
+  return !CLIENT_LAYER.test(path) || SERVER_ANCESTOR.test(path);
+}
+
+export interface PartitionOptions {
+  /** Keep the pre-BR1960 reading (a client layer under src/ always counts as backend). Used by the CSP
+   *  scan so its skip decision — and therefore the agent-facing findings — does not change. */
+  clientLayerAsBackend?: boolean;
+}
+
+export function partitionFrontendBackend(paths: readonly string[], opts: PartitionOptions = {}): FbPartition {
   const frontend: string[] = [];
   const backend: string[] = [];
   const shared: string[] = [];
   const other: string[] = [];
+  const serverEvidence = opts.clientLayerAsBackend === true || paths.some((p) => isUnambiguousBackend(String(p || '')));
   for (const path of paths) {
-    switch (classifyFile(path)) {
+    const side = classifyFile(path);
+    if (side === 'backend' && !serverEvidence && CLIENT_LAYER.test(String(path || ''))) { shared.push(path); continue; }
+    switch (side) {
       case 'frontend': frontend.push(path); break;
       case 'backend': backend.push(path); break;
       case 'shared': shared.push(path); break;

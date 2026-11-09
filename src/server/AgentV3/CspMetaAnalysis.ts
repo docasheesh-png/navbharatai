@@ -80,7 +80,9 @@ export function scanCsp(path: string, html: string): CspIssue[] {
 export function scanProjectCsp(files: Record<string, string>): CspIssue[] {
   const paths = Object.keys(files);
   // Static SPA only: if a server exists, CSP belongs in an HTTP header, not a meta tag — skip entirely.
-  if (partitionFrontendBackend(paths).backend.length > 0) return [];
+  // `clientLayerAsBackend` keeps this skip exactly as it was before BR1960 (t311u): the partition fix is an
+  // admin-advisory correction, and must not start emitting new CSP findings that an agent could act on.
+  if (partitionFrontendBackend(paths, { clientLayerAsBackend: true }).backend.length > 0) return [];
   const out: CspIssue[] = [];
   for (const [path, content] of Object.entries(files)) {
     if (!HTML_EXT.test(path) || SKIP_PATH.test(path)) continue;

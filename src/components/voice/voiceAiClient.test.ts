@@ -40,6 +40,13 @@ describe('Voice AI controls and pricing', () => {
     expect(() => voiceAudioBlob(btoa('<html>error</html>'), 'audio/wav')).toThrow();
     expect(() => voiceAudioBlob(btoa(wav), 'text/html')).toThrow();
   });
+  it('plays the delivered WAV from a blob URL, so the page media policy must allow blob', () => {
+    const src = readFileSync(new URL('./VoiceAI.tsx', import.meta.url), 'utf8');
+    expect(src).toContain('URL.createObjectURL(blob)');
+    expect(src).toContain('src={audio.url}');
+    expect(src).not.toContain('data:audio');
+    expect(voicePrice(36, 4)).toBe(0.144);
+  });
 });
 
 describe('Voice AI navigation and isolation', () => {

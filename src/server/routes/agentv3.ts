@@ -1,3 +1,7 @@
+import { completedAppReviewEligible } from '../AgentV3/optionalBugHunt';
+import { readSummaryManifest } from '../AgentV3/ProjectSummary';
+import { compilerNeedsPackageSetup, compilerRepairProven, PACKAGE_SETUP_REQUIRED } from '../AgentV3/compilerSetupBoundary';
+import { prepareGameSeedWorkspace } from '../AgentV3/gameSeedWorkspace';
 import { withReplyLanguage, replyVoiceForRequest } from '../AgentV3/replyLanguageBinding';
 import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
 import { createSandboxAdmissionBudget, sandboxAdmissionActuator } from '../AgentV3/sandboxAdmissionBudget';
@@ -433,7 +437,7 @@ import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
 import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets } from '../AgentV3/gameAssets/assetSeed';
-import { gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -14985,7 +14989,7 @@ async function noteBuildOutcome(
             let rmProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
             const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({
               model: fastBuildModel(),
-              system: `${megaRoadmapSystemPrompt()}\nSelected workspace architecture: ${framework}. Keep every step compatible with it. Do not invent a single-HTML constraint unless the user explicitly asked for it.`,
+              system: `${megaRoadmapSystemPrompt()}\nSelected workspace architecture: ${framework}. Keep every step compatible with it. Do not invent a single-HTML constraint unless the user explicitly asked for it.\n${gamePlannerCapability(prompt, framework)}`,
               messages: [{ role: 'user', content: megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals) }],
               tools: [],
               maxTokens: 4000,
@@ -16546,6 +16550,7 @@ async function noteBuildOutcome(
       // in NavBharatAI's own template. `modelAuthoredPaths` removes exactly the byte-exact seeded
       // entries and nothing else, so a template the model has since edited stays ours to answer for.
       dispatcher.setAuthoredFiles(() => modelAuthoredPaths(writtenFiles));
+      dispatcher.setPlatformSeedFiles(() => kitSeededFiles.keys());
       // …AND THE SAME SET MUST FORGET A FILE THE BUILD DELETED (autopsy 8b3dca5c). `writtenFiles` is
       // what the durable save is derived from, what `integrityFiles` is unioned with, and — through
       // `modelAuthoredPaths` above — what the authorship gate reads. Leaving a deleted path in it
@@ -17982,7 +17987,7 @@ async function noteBuildOutcome(
          */
         // A FLAT game (cards, a board, a grid, a quiz) is not a scene — see wantsSceneObjects. A game is read
         // the same way the game-kit seed reads it (`wantsSceneDetail`), so the two never disagree about 3D.
-        if (wantsSceneDetail(prompt)) {
+        if (wantsSceneDetail(gameTurnRequest(prompt, megaRoadmapActive?.steps[0]?.buildPrompt))) {
           const realism = realismIntent(prompt);
           // 🔴 NAMED BY PATH AND RECIPE, NEVER AS PRESENT (admin 2026-10-11, build 46e2d74b). This line said
           // "build every object with objects.ts" as if the file were in the project; it exists only after
@@ -18794,7 +18799,7 @@ async function noteBuildOutcome(
         } catch { /* a refresh that cannot run leaves the project exactly as it was */ }
       }
       if (intent === 'new_build' && !projectModuleRef && !isImportTurn) {
-        const kitPlan: GameKitRecipe[] = (() => { try { return gameKitPlan(prompt, framework); } catch { return []; } })();
+        const kitPlan: GameKitRecipe[] = (() => { try { return gameKitPlan(gameTurnRequest(prompt, milestoneRequest), framework); } catch { return []; } })();
         if (kitPlan.length === 0) {
           gameKitSkipReason = gameKitFrameworkSupported(framework)
             ? 'this request is not a game the kit serves'
@@ -18814,6 +18819,16 @@ async function noteBuildOutcome(
             if (!nobodysWorkHere) {
               gameKitSkipReason = `the workspace already holds ${existingSrc === null ? 'an unknown source inventory' : existingSrc.length + ' source file(s) that are not our untouched starter'}, and the kit is never written over somebody's work`;
             } else {
+              const prerequisite = await prepareGameSeedWorkspace({
+                stopped: () => abort.signal.aborted,
+                readManifest: () => actuator.readFile(workspaceId, 'package.json'),
+                recoverStarter: () => actuator.ensureWorkspace(workspaceId, framework),
+                takeScaffold: () => actuator.takeSeededScaffold?.(workspaceId),
+              });
+              for (const [path, content] of Object.entries(prerequisite.scaffold)) {
+                writtenFiles.set(path, content); preseededGolden.set(path, content);
+              }
+              if (!prerequisite.ready) throw new Error(prerequisite.reason);
               const kitThreeD = kitPlan.includes('generate_game_3d');
               events.emit({ type: 'narration', agent: 'architect', text: `🎮 Setting up NavBharatAI's game engine first — game loop, controls, sound effects and music${kitThreeD ? ', visual effects, the 3D world and a playable 3D shell' : ''} — so your game is built on it.`, ts: Date.now() });
               const writtenBeforeKit = new Map(writtenFiles);
@@ -18868,7 +18883,7 @@ async function noteBuildOutcome(
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_KIT_SEEDED', autoResolved: true, message: gameKitSeededMessage(kitResults, kitFiles, Date.now() - kitStartedAt),
                   detail: `recipes ${(kitRecipesMs / 1000).toFixed(1)} s` + (kitAssetsMs != null ? ` · 3D assets ${(kitAssetsMs / 1000).toFixed(1)} s (${kitAssetsStatus || 'unknown'})` : ' · 3D assets not prepared') });
                 if (localGameAssetHandoff) buildPrompt = `${localGameAssetHandoff}\n\n${buildPrompt}`;
-                buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt) })}\n\n---\n\n${buildPrompt}`;
+                buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(gameTurnRequest(prompt, milestoneRequest)) })}\n\n---\n\n${buildPrompt}`;
               } else {
                 gameKitSeedFailed = kitResults.length > 0;
                 gameKitSkipReason = kitResults.length > 0
@@ -18898,7 +18913,7 @@ async function noteBuildOutcome(
       // BR1954: existing-game edits, skipped/failed seeds and golden games also receive the contract.
       // Reuse held source, including only acknowledged refresh/seed changes; no project reset or paid probe.
       try {
-        const gameHandoff = gameTurnHandoff(prompt, {
+        const gameHandoff = gameTurnHandoff(gameTurnRequest(prompt, milestoneRequest), {
           ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles),
         }, { writingRun: expectsArtifacts, moduleTurn: !!projectModuleRef, importTurn: isImportTurn, stopped: abort.signal.aborted });
         gameContract = gameHandoff.contract;
@@ -20412,7 +20427,7 @@ async function noteBuildOutcome(
         // so restoring our version can never lose user intent. Same shape as the dead-server fix: when
         // the failure is in a file we own and there is one correct form, do the free certain thing.
         // Kill switch: AGENTV3_SCAFFOLD_RESTORE=off.
-        if (!check.ok && process.env.AGENTV3_SCAFFOLD_RESTORE !== 'off') {
+        if (!check.ok && !compilerNeedsPackageSetup(check.errors) && process.env.AGENTV3_SCAFFOLD_RESTORE !== 'off') {
           try {
             const brokenScaffold = scaffoldFilesInTscErrors(check.errors);
             const toRestore: { path: string; content: string }[] = [];
@@ -20437,7 +20452,9 @@ async function noteBuildOutcome(
             }
           } catch { /* deterministic restore is best-effort — fall through to the model repair below */ }
         }
-        if (!check.ok) {
+        if (!check.ok && compilerNeedsPackageSetup(check.errors)) {
+          buildDiag.record({ phase: 'build', severity: 'warning', code: 'OUTCOME_TYPECHECK_FAILED', message: PACKAGE_SETUP_REQUIRED, autoResolved: false });
+        } else if (!check.ok) {
           events.emit({ type: 'narration', agent: 'architect', text: '🔍 Type-checking the finished build — found type errors, fixing them…', ts: Date.now() });
           try {
             const currentFiles = Array.from(writtenFiles.entries()).map(([path, content]) => ({ path, content }));
@@ -20469,13 +20486,13 @@ async function noteBuildOutcome(
             console.log(`[AGENTV3] agentic tsc-gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
           }
           check = await runTsc();
-          if (check.ok) {
+          if (compilerRepairProven(check)) {
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Type errors fixed — the finished build now compiles cleanly.', ts: Date.now() });
           } else {
             // Type errors remain after one repair — record the honest end-state (do NOT flip result.ok;
             // the app is built and will be durably saved — ship-with-warning, like PREVIEW_FAILED).
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'OUTCOME_TYPECHECK_FAILED', message: 'Type errors remained after the agentic build and one repair pass.', autoResolved: false });
-            events.emit({ type: 'narration', agent: 'architect', text: '⚠️ Some TypeScript errors remain after one fix pass. Your files are saved — send a follow-up and I\'ll finish fixing them.', ts: Date.now() });
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'OUTCOME_TYPECHECK_FAILED', message: 'Type errors were not verified as resolved after the agentic build and one repair pass.', autoResolved: false });
+            events.emit({ type: 'narration', agent: 'architect', text: '⚠️ The TypeScript errors could not be verified as fixed. Your files are saved; further checking is needed.', ts: Date.now() });
           }
         }
         if (check.verified) gateEvidence.typecheck = check.ok ? 'passed' : 'failed';
@@ -25504,7 +25521,7 @@ async function noteBuildOutcome(
           // files this turn authored, by the reviewer's own rule (`reviewChangedPaths`); a fresh build's
           // headline names no count, so it keeps reading the whole map.
           const summaryPaths = isEditMode ? reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden) : [...writtenFiles.keys()];
-          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: summaryPaths.length, editMode: isEditMode, changedPaths: summaryPaths, platformAdded: isEditMode ? writtenFiles.size - summaryPaths.length : 0, awaitingShell: awaitsShellNow() });
+          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: summaryPaths.length, editMode: isEditMode, changedPaths: summaryPaths, platformAdded: isEditMode ? writtenFiles.size - summaryPaths.length : 0, awaitingShell: awaitsShellNow(), packageJson: await readSummaryManifest({ stopped: () => abort.signal.aborted, read: () => withTimeout(actuator.readFile(workspaceId, 'package.json'), 5_000, 'summary-manifest') }), runProven: runProof().proven });
           if (summaryText) events.emit({ type: 'narration', agent: 'architect', text: summaryText, ts: Date.now() });
         } catch { /* summary is best-effort — never affects the build */ }
       }
@@ -25574,7 +25591,7 @@ async function noteBuildOutcome(
        * stops the file type-checking. One call, one await.
        */
       const bugHunt = await offerBugHunt({
-        eligible: result.ok && reviewHeadroomOk && reviewerAllowed && !reviewDeferredToShell,
+        eligible: completedAppReviewEligible({ ok: result.ok, headroom: reviewHeadroomOk, allowed: reviewerAllowed, deferred: !!reviewDeferredToShell, runProven: runProof().proven, stopped: abort.signal.aborted }),
         hasUser: !!userId,
         newCallId: () => randomUUID(),
         ask: (gate) => emit({ type: 'permission_request', agent: 'reviewer', ts: Date.now(), ...gate }),
@@ -25582,7 +25599,7 @@ async function noteBuildOutcome(
         say: (text) => { try { events.emit({ type: 'narration', agent: 'reviewer', ts: Date.now(), text }); } catch { /* best-effort */ } },
         record: (message) => { try { buildDiag.record({ phase: 'build', severity: 'info', code: 'BUG_HUNT_NOT_RUN', message, autoResolved: true }); } catch { /* best-effort */ } },
       });
-      if (result.ok && reviewHeadroomOk && reviewerAllowed && !reviewDeferredToShell && bugHunt.runReview) {
+      if (completedAppReviewEligible({ ok: result.ok, headroom: reviewHeadroomOk, allowed: reviewerAllowed, deferred: !!reviewDeferredToShell, runProven: runProof().proven, stopped: abort.signal.aborted }) && bugHunt.runReview) {
         try {
           let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
           // The REAL project size, captured before the fallback below can shrink rFiles to just this
@@ -26231,8 +26248,8 @@ async function noteBuildOutcome(
       // run and made a working app free. Re-judged here against what actually ran (sandboxAvailability.ts),
       // before any reader below sees it.
       if (sandboxUnavailable) {
-        let servedEvidence: { commands?: ReadonlyArray<{ exitCode?: number | null }>; appRendered: boolean } = { appRendered: false };
-        try { servedEvidence = { commands: buildDiag.report()?.commands ?? [], appRendered: renderProvenNow() || buildObs.previewRendered }; }
+        let servedEvidence: { commands?: ReadonlyArray<{ exitCode?: number | null }>; appRendered: boolean; workspaceWriteAcknowledged: boolean } = { appRendered: false, workspaceWriteAcknowledged: sandboxAdmissionBudget.workspaceWriteAcknowledged };
+        try { servedEvidence = { ...servedEvidence, commands: buildDiag.report()?.commands ?? [], appRendered: renderProvenNow() || buildObs.previewRendered }; }
         catch { /* a report that cannot be read keeps the setup verdict, exactly as before */ }
         if (!sandboxWasUnavailable(true, servedEvidence)) {
           sandboxUnavailable = false;
@@ -26241,7 +26258,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'sandbox', severity: 'info', code: 'SANDBOX_RECOVERED', autoResolved: true,
               message: 'Setup could not reach the sandbox at first, but it served this build afterwards '
-                + (servedEvidence.appRendered ? '(the app rendered from it)' : '(commands ran in it)')
+                + (servedEvidence.appRendered ? '(the app rendered from it)' : servedEvidence.workspaceWriteAcknowledged ? '(workspace file writes were acknowledged)' : '(commands ran in it)')
                 + ' — the build is judged on what it produced, not on the setup attempt.',
             });
           } catch { /* diagnostics are best-effort */ }

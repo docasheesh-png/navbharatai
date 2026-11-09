@@ -223,9 +223,9 @@ export function readyOverrunNote(mark: ReadyMark | null | undefined, endStep: nu
   if (!mark) return 'The app was never judged finished during the build.';
   const steps = Math.max(0, endStep - mark.step);
   const secs = Math.max(0, Math.round((typeof mark.at === 'number' && typeof opts.endAt === 'number' ? opts.endAt - mark.at : endMs - mark.elapsedMs) / 1000));
-  if (steps === 0 && secs === 0) return `The app was judged finished at step ${mark.step} (${mark.score}/100) and the build ended there.`;
-  return `The app was judged finished at step ${mark.step} (${mark.score}/100); the build then ran `
-    + `${steps} more step(s) over ${secs}s before it ended.`;
+  if (steps === 0 && secs === 0) return `Structural readiness was judged finished at step ${mark.step} (${mark.score}/100) and the build ended there. This is not proof the app ran.`;
+  return `Structural readiness was judged finished at step ${mark.step} (${mark.score}/100); the build then ran `
+    + `${steps} more step(s) over ${secs}s before it ended. This is not proof the app ran.`;
 }
 
 /**

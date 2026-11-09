@@ -103,6 +103,9 @@ describe('output cap and history trim', () => {
   it('keeps opening user facts and the latest turns inside the same budget', () => {
     const h = Array.from({ length: 10 }, (_, i) => ({ sender: 'user', text: String(i) }));
     expect(trimHistory(on(), h).map((t: any) => t.text)).toEqual(['0', '1', '6', '7', '8', '9']);
+    const withCommand = [{ sender: 'user', text: 'My name is Meera.' }, { sender: 'user', text: 'devnaagri me bataao' }, ...h.slice(2)];
+    expect(trimHistory(on(), withCommand).map((t: any) => t.text)).not.toContain('devnaagri me bataao');
+    expect(trimHistory(on(), withCommand).map((t: any) => t.text)).toContain('My name is Meera.');
     expect(trimHistory(on(), h.slice(0, 6)).map((t: any) => t.text)).toEqual(['0', '1', '2', '3', '4', '5']);
     expect(trimHistory(freeChainConfig({ FREE_CHAIN_HISTORY_TRIM_ENABLED: 'off' }), h)).toBe(h);
   });

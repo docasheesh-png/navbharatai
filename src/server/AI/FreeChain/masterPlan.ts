@@ -5,6 +5,7 @@ import { readData, readPaidPolicy, FREE_CHAIN_COLLECTION } from './paidLedger';
  * Never logs prompts, keys or user text.
  */
 import { FREE_CHAT_LANGUAGE_RULE } from '../../lib/freeChatReplyLanguage';
+import { resolveChatReplyLanguage } from '../../../lib/chatReplyLanguage';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../../lib/prompts';
 import { freeChatModeGuide } from '../../lib/freeChatModeGuide';
 import { FREE_ANSWER_ALL_RULES } from '../../lib/freeChatReplies';
@@ -92,8 +93,15 @@ function isUserTurn(row: unknown): boolean {
   const turn = row as { sender?: unknown; role?: unknown };
   return turn.sender === 'user' || turn.role === 'user';
 }
+function turnText(row: unknown): string {
+  if (!row || typeof row !== 'object') return '';
+  const turn = row as { text?: unknown; content?: unknown };
+  return typeof turn.text === 'string' ? turn.text : typeof turn.content === 'string' ? turn.content : '';
+}
 /** Opening user facts stay inside the same turn budget. A flat tail cut dropped a name or place
- * stated before the recent window, including on the provider that answers after a fallback. */
+ * stated before the recent window, including on the provider that answers after a fallback.
+ * An explicit reply-language command is not a fact: it is already carried as the system instruction,
+ * and the six-turn window must still be able to drop that source turn. */
 export function trimHistory(cfg: FreeChainConfig, history: unknown[]): unknown[] {
   if (!cfg.features.historyTrim || !Array.isArray(history)) return history;
   const turns = cfg.features.historyTurns;
@@ -101,7 +109,7 @@ export function trimHistory(cfg: FreeChainConfig, history: unknown[]): unknown[]
   if (history.length <= turns) return history;
   const early: unknown[] = [];
   for (const row of history) {
-    if (!isUserTurn(row)) continue;
+    if (!isUserTurn(row) || resolveChatReplyLanguage(turnText(row))) continue;
     early.push(row);
     if (early.length >= Math.min(2, Math.max(0, turns - 1))) break;
   }

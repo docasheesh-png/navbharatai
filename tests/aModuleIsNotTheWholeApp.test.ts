@@ -174,7 +174,7 @@ describe('the wiring', () => {
     // condition (the user's own answer to the bug-hunt offer) and the guard failed for a change that
     // kept its property perfectly. What it exists to lock is that `!reviewDeferredToShell` gates the
     // review — so that is what it asks, and a later condition may be added without silently dropping it.
-    expect(route).toContain('if (result.ok && reviewHeadroomOk && reviewerAllowed && !reviewDeferredToShell');
+    expect(route).toContain('if (completedAppReviewEligible({ ok: result.ok, headroom: reviewHeadroomOk, allowed: reviewerAllowed, deferred: !!reviewDeferredToShell, runProven: runProof().proven, stopped: abort.signal.aborted }) && bugHunt.runReview)');
     expect(route).toMatch(/if \(pausedPlanRef && !projectModuleRef && result\.ok && runProof\(\)\.proven && retireUnbuiltPlan\(pausedPlanRef\)\)/);
   });
 

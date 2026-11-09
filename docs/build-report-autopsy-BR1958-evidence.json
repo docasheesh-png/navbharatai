@@ -1799,7 +1799,7 @@
       "problem": "Manifest preflight must preserve malformed/nonReact/user manifests and Stop ownership while keeping already-acknowledged starter bytes.",
       "evidence": "F2 new seam",
       "fix": "F2: one bounded recovery; exact existing bytes unchanged; before/during setupStop fixtures; no recipe afterStop.",
-      "proof": "tests/br1958Prevention.test.ts behavioral/negative controls and production-door census; affected sibling suites; per-class behavioral mutations with exact-byte restoration; final-head full CI equivalent required."
+      "proof": "tests/br1958Prevention.test.ts behavioral/negative controls and production-door census; affected sibling suites; per-class behavioral mutations with exact-byte restoration; final-head full CI equivalent required. Actual strict read-only write-site census rederived35to36 with exact ownership-safe preflight ACK callbacks/guard assertions; no survey writer added."
     },
     {
       "id": "R03",

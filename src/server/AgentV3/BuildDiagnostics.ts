@@ -1598,8 +1598,8 @@ export class BuildDiagnostics {
   private recordTimeToFirstCall(latencyMs?: number, answerMs?: number, fallbackMs?: number): void {
     if (this.llmCalls.length > 0) return; // only the first
     const elapsedMs = Math.max(0, this.now() - this.startedAt);
-    // Clamped to the elapsed time: a provider-reported latency longer than the whole build so far is
-    // not a measurement we can subtract, and a negative prep time would be worse than the old bug.
+    // Only compatible timing windows can be subtracted: a longer measured call may have been
+    // backfilled from before this timer. Neither a negative prep time nor a fabricated zero is valid.
     // BR1958: pre-build admission calls are backfilled after this timer starts. Clamping their
     // measured 2751ms into a 4ms window falsely reported a zero-second model call.
     const windowMismatch = typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs > elapsedMs;

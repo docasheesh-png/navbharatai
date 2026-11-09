@@ -2538,7 +2538,16 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     // kitSeededFiles), never to the model. Considered ✓.
     expect(SRC).toContain("if (intent === 'edit_existing' && !isImportTurn && !projectModuleRef && projectFilesAtTurnStart");
     expect(SRC).toContain('writtenFiles.set(p, c); preseededGolden.set(p, c); kitSeededFiles.set(p, c);');
-    expect(count).toBe(35);
+    // BR1958: +1 captured write owner, only acknowledged canonical starter bytes returned by
+    // prepareGameSeedWorkspace AFTER the same fresh/new-build/non-import/non-module preservation gate.
+    // Recovery uses the actuator's ownership-checked whole-inventory completion; it never writes a
+    // synthetic/user manifest. An in-flight Stop preserves already-ACKed bytes but starts no recipes.
+    expect(seed).toContain('const prerequisite = await prepareGameSeedWorkspace({');
+    expect(seed).toContain('recoverStarter: () => actuator.ensureWorkspace(workspaceId, framework)');
+    expect(seed).toContain('takeScaffold: () => actuator.takeSeededScaffold?.(workspaceId)');
+    expect(seed).toContain('writtenFiles.set(path, content); preseededGolden.set(path, content);');
+    expect(seed).toContain('if (!prerequisite.ready) throw new Error(prerequisite.reason)');
+    expect(count).toBe(36);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

@@ -12,7 +12,7 @@ Historical Stop is respected. No stopped-app resume, production replay, paid mod
 
 ## Honest accounting / missing systems
 
-**30rows =21prevention/safeguard rows awaiting parent review+merge (5report-derived,8inspection including1new browser finding,8review-only),4already-fixed/guarded,5blocked. Seven bounded classes, NOT30historical failures.** The source-based math/input/Select findings are current-template inspection, not proof the historical partial app calculated incorrectly: its seed failed before delivery. No app had been judged finished.
+**31rows =22prevention/safeguard rows awaiting parent review+merge (5report-derived,8inspection including1new browser finding,9review-only),4already-fixed/guarded,5blocked. Seven bounded classes, NOT31historical failures.** The source-based math/input/Select findings are current-template inspection, not proof the historical partial app calculated incorrectly: its seed failed before delivery. No app had been judged finished.
 
 Five historical buckets: **self-healed0; workaround2; skipped0; still-broken/result-imperfect6; struggle2**. These10distinct report items concern claims, accounting/census, capacity and alternative generation; they are not10broken apps. Cancellations and appropriately deferred tests are NOT classified as skipped defects. Uncertain draft attribution/store reconciliation is recorded separately, not inflated into proven failures.
 
@@ -334,3 +334,8 @@ Focused pre-freeze13-file safety cohort passed763tests before the new shared-Sel
 Only parent-confirmed merged predecessor rows close now: Q-2496, Q-2498, Q-2499, Q-2500, Q-2501, Q-2502, Q-2503, Q-2504, Q-2505, Q-2506, Q-2508, Q-2509, Q-2510, Q-2511, Q-2512, Q-2513, Q-2523, Q-2524, Q-2525, Q-2526, Q-2527, Q-2528, Q-2529, Q-2530, Q-2531. Retained BR1956 blockers: Q-2497, Q-2507, Q-2514, Q-2521, Q-2522.
 
 **NextBR1958 ONLY after parent confirms this BR1957 PR merged. Boundary2105 remains frozen.**
+
+
+## R09 / Q-2562 — FIXED IN BRANCH, review-only F4scope safeguard
+Complete production-reader census found post-repair verdict identity omitted the new observed-scope field: UI100 and hook-only100 compared equal and could retain the wrong earlier sentence. Include designObserved in the identity; actual equal-score UI→hooks and hooks→UI fixtures demand a new scoped verdict. The tool modelDesignLine shares the same scoped summary. This is new seam hardening, NOT another historical1957failure.
+Before any source edit the owned obsolete-head coverage process tree was stopped; full pipeline150145 returned actual1, not green. Its pre-gates/partialcoverage/reversion evidence remains under /workspace/br-autopsy-1957/attempt-91d0c83b2. No shared job, emulator or machine was killed; no code was edited underneath validation. The revised final head must rerun every gate and has a ninth behavioral fingerprint removal control.

@@ -6,6 +6,8 @@ import { seedSourceInventory, srcHoldsOnlyOurStarter } from '../src/server/Agent
 import { roadmapStandDownMessage, projectModeDiagnosis } from '../src/server/AgentV3/ProjectPlan';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../src/server/AgentV3/buildQualityLint';
 import { panchangAppTsx, kundaliAppTsx } from '../src/server/AgentV3/goldenScaffolds/indiaPanchang';
+import { restateDesignAfterRepair } from '../src/server/AgentV3/designAfterRepair';
+import { modelDesignLine } from '../src/server/AgentV3/writeTimeQualityCheck';
 import { proUiTsx } from '../src/server/AgentV3/goldenScaffolds/proShell';
 import { goldenComponentHarness } from './helpers/goldenComponentHarness';
 import { AgentRunner } from '../src/server/AgentV3/AgentRunner';
@@ -173,5 +175,19 @@ describe('BR1957 F7 shared select names exclude their option inventory',()=>{
     const tree=exports.Select({label:'जन्म स्थान',value:'0',onChange:()=>{},options:[{value:'0',label:'Delhi'},{value:'1',label:'Mumbai'}]});
     const select=tree.props.children.find((n:any)=>n.type==='select');expect(select.props['aria-label']).toBe('जन्म स्थान');
     expect(select.props.children).toHaveLength(2);expect(select.props.value).toBe('0');
+  });
+});
+
+
+describe('BR1957 F4 post-repair/tool applicability siblings',()=>{
+  it.each([true,false])('re-states equal numeric scores when UI evidence changes (startedWithUI=%s)',startedWithUI=>{
+    const ui={'src/App.tsx':'export default ()=> <main><h1>Sky</h1></main>'};
+    const logic={'src/hooks/useTheme.ts':'export const calculate = () => 42;'};
+    const before=lintBuiltApp(startedWithUI?ui:logic)!;const afterFiles=startedWithUI?logic:ui;
+    expect(before.design.score).toBe(lintBuiltApp(afterFiles)!.design.score);
+    const record=vi.fn();const after=restateDesignAfterRepair(afterFiles,before,{record,resolveOnRecheck:vi.fn(),retract:vi.fn()})!;
+    expect(record).toHaveBeenCalledOnce();expect(after.designObserved).toBe(!startedWithUI);
+    expect(record.mock.calls[0][0].message.includes('not scored')).toBe(startedWithUI);
+    expect(modelDesignLine(lintBuiltApp(logic))).toContain('not scored');
   });
 });

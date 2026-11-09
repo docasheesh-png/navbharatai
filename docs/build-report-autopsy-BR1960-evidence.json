@@ -1,0 +1,2109 @@
+{
+ "reportNumber": 1960,
+ "buildId": "71738e8d-10c7-4954-88c8-c32cba0ae517",
+ "workspaceId": "agentv3-V5WFOLu2szWL9f9yaL6OGLDHiUo1-7fdaaa82-1c95-4e65-8761-57ed3c2a1c41",
+ "reportDigest": "1946f7973c2fb3d4e79b396252ce0de5131cc96e9fec5cbe97a09a6934dad1b8",
+ "outcome": "succeeded",
+ "ok": true,
+ "prompt": "Create a html code of youtube seo generator",
+ "model": "qwen3-coder",
+ "framework": "vite-react",
+ "startedIST": "2026-11-08T09:07:38.331+05:30",
+ "endedIST": "2026-11-08T09:11:06.941+05:30",
+ "counts": {
+  "total": 135,
+  "errors": 0,
+  "warnings": 2,
+  "autoResolved": 0,
+  "workarounds": 0,
+  "leftOpen": 0,
+  "healRule": 3,
+  "unresolved": 4
+ },
+ "remoteAutopsy": "get_failed_build_autopsy: \"Failed report not found in retained storage\" (a succeeded build); no autopsy was written anywhere remote",
+ "evidenceLimits": "No generatedFiles were captured; delivered files are known only by manifest hash and by file names in issue/LLM-call previews. The cause of the two silently dropped controls (I111) is inferred from the code path and reproduced on a reconstructed page, not read from the report.",
+ "etaAccuracy": {
+  "promisedMs": 359157,
+  "lowMs": 237555,
+  "highMs": 624397,
+  "actualMs": 208610,
+  "ratio": 0.5808323379469146,
+  "withinBand": false,
+  "evidenced": true,
+  "line": "The user was shown 4.0 min–10.4 min (midpoint 6.0 min); the build took 3.5 min — 0.6× the midpoint and UNDER the band.",
+  "key": "app_unsized",
+  "source": "platform"
+ },
+ "billing": {
+  "userTier": "weak (free tier — cheap engines) · charged ₹0.16",
+  "charged": true,
+  "billedInr": 0.16,
+  "walletDebitedInr": 0.15
+ },
+ "issues": [
+  {
+   "ref": "I0",
+   "code": "FREE_BUILD_TIME_CAP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:38.331+05:30",
+   "tPlusS": 0.0,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Free build window: 25 min (a paid build would get 29 min)."
+  },
+  {
+   "ref": "I1",
+   "code": "APP_SCOPE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:38.334+05:30",
+   "tPlusS": 0.0,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D01"
+   ],
+   "message": "Scope: LARGE — clone of YouTube; a big-app planner runs next: Software Project Mode when the request is a project spec and the mode is on for this account, otherwise the mega-app roadmap (outcomes: PROJECT_MODE, MEGA_ROADMAP_*). Signals: asks to clone YouTube."
+  },
+  {
+   "ref": "I2",
+   "code": "TIER_LADDER",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:38.335+05:30",
+   "tPlusS": 0.0,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Weak ladder (default): GLM(glm-4.7-flashx) → KIMI(kimi-k2.7-code) → GLM(glm-4.7-flash)"
+  },
+  {
+   "ref": "I3",
+   "code": "COMPLEXITY_ROUTING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:38.335+05:30",
+   "tPlusS": 0.0,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Complexity: simple (score 15, model) — the build opens on the ladder's first rung."
+  },
+  {
+   "ref": "I4",
+   "code": "SURPLUS_ADMITTED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:38.336+05:30",
+   "tPlusS": 0.0,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Surplus admitted for Weak build (model=qwen3-coder)."
+  },
+  {
+   "ref": "I5",
+   "code": "TIME_TO_FIRST_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:38.336+05:30",
+   "tPlusS": 0.0,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "0s of preparation before the build's first model call began — sandbox setup, project restore and secrets loading all happen in it, and the user waits through every second. (Dependency install is NOT part of this wait: it runs in the background boot, concurrent with the build.) The first call itself "
+  },
+  {
+   "ref": "I6",
+   "code": "MEGA_ROADMAP_ACTIVE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:47.168+05:30",
+   "tPlusS": 8.8,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D01"
+   ],
+   "message": "Mega-app roadmap ACTIVE — building step 1 for a fast preview: 5 checkpoint(s), 2 with an honest infra ceiling: 1) SEO Keyword Analysis & Suggestions  2) Video Description Generator  3) Advanced Tag Generator + Export  4) Real YouTube API Integration [infra]  5) Performance Tracking Dashboard [infra]"
+  },
+  {
+   "ref": "I7",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:47.275+05:30",
+   "tPlusS": 8.9,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D01"
+   ],
+   "message": "YouTube SEO is a big app - I'll build a working SEO tool for video creators first (real suggestions in a few minutes) then add advanced features step-by-step."
+  },
+  {
+   "ref": "I8",
+   "code": "ETA_BASIS",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:47.557+05:30",
+   "tPlusS": 9.2,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D11"
+   ],
+   "message": "ETA ~4–10 min (midpoint ~6 min) · basis blended · confidence 0.86"
+  },
+  {
+   "ref": "I9",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:47.558+05:30",
+   "tPlusS": 9.2,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "⏱️ Estimated build time: ~4–10 min — how long 24 recent builds of this kind of app took on NavBharatAI. I'll replace it with your app's own figure as soon as I can measure how big it is."
+  },
+  {
+   "ref": "I10",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:47.558+05:30",
+   "tPlusS": 9.2,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Setting up your workspace…"
+  },
+  {
+   "ref": "I11",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:47.558+05:30",
+   "tPlusS": 9.2,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D01"
+   ],
+   "message": "Routing and ETA in 394ms (plus 8.8s of model calls — not setup)"
+  },
+  {
+   "ref": "I12",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:48.592+05:30",
+   "tPlusS": 10.3,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Workspace ready in 1s"
+  },
+  {
+   "ref": "I13",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:48.985+05:30",
+   "tPlusS": 10.7,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "GitHub storage ready in 0s"
+  },
+  {
+   "ref": "I14",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:49.879+05:30",
+   "tPlusS": 11.5,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Project checked in 1s — nothing needed restoring"
+  },
+  {
+   "ref": "I15",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:50.976+05:30",
+   "tPlusS": 12.6,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Build wiring ready in 1.1s"
+  },
+  {
+   "ref": "I16",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:51.104+05:30",
+   "tPlusS": 12.8,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Personal context loaded in 128ms"
+  },
+  {
+   "ref": "I17",
+   "code": "REQUEST_SCOPE_NOTE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:51.110+05:30",
+   "tPlusS": 12.8,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "The request matched none of the sign-in words this rule looks for (login, sign-in, account, password, OTP, roles, admin, private, PIN, biometric, …), and the requirement analyzer placed it in no domain whose features add access control, so this new build was told to add no login or accounts and no c"
+  },
+  {
+   "ref": "I18",
+   "code": "DOMAIN_KNOWLEDGE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:51.111+05:30",
+   "tPlusS": 12.8,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Domain knowledge: none — the build waited 0ms for it (asked beside setup, 12781ms in all)."
+  },
+  {
+   "ref": "I19",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:51.565+05:30",
+   "tPlusS": 13.2,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Project context prepared in 0.5s"
+  },
+  {
+   "ref": "I20",
+   "code": "CHANGE_CLASSIFIED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:51.631+05:30",
+   "tPlusS": 13.3,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "New app (0 part(s) named) — no earlier app on record to preserve · 0 requirement(s) on record · 0 re-probed for regression · 0 open issue(s) handed to the builder · impact 0 file(s) + 0 dependent(s)"
+  },
+  {
+   "ref": "I21",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:52.258+05:30",
+   "tPlusS": 13.9,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Prompt context gathered in 693ms"
+  },
+  {
+   "ref": "I22",
+   "code": "PROJECT_MODE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:52.259+05:30",
+   "tPlusS": 13.9,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D01"
+   ],
+   "message": "Software Project Mode is ON for this account, but the mega-app roadmap already owns this build."
+  },
+  {
+   "ref": "I23",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:52.480+05:30",
+   "tPlusS": 14.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Final preparation in 222ms"
+  },
+  {
+   "ref": "I24",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:53.112+05:30",
+   "tPlusS": 14.8,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Planning the file list…"
+  },
+  {
+   "ref": "I25",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:07:57.384+05:30",
+   "tPlusS": 19.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Designing the shared types & component contract…"
+  },
+  {
+   "ref": "I26",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:02.374+05:30",
+   "tPlusS": 24.0,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "📐 Wrote the shared contract as src/types.ts — 6 shared symbol(s) every file imports from one place."
+  },
+  {
+   "ref": "I27",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:02.376+05:30",
+   "tPlusS": 24.0,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Building 14 file(s) — one focused pass each…"
+  },
+  {
+   "ref": "I28",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:06.438+05:30",
+   "tPlusS": 28.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ src/hooks/useSEOSuggestions.ts (1/14)"
+  },
+  {
+   "ref": "I29",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:09.994+05:30",
+   "tPlusS": 31.7,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ src/services/seoAPI.ts (2/14)"
+  },
+  {
+   "ref": "I30",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:14.481+05:30",
+   "tPlusS": 36.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ src/utils/formatData.ts (3/14)"
+  },
+  {
+   "ref": "I31",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:16.777+05:30",
+   "tPlusS": 38.4,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ src/types/seoTypes.ts (4/14)"
+  },
+  {
+   "ref": "I32",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:26.001+05:30",
+   "tPlusS": 47.7,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ src/constants/sampleData.ts (5/14)"
+  },
+  {
+   "ref": "I33",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:30.343+05:30",
+   "tPlusS": 52.0,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ src/components/InputSection.tsx (6/14)"
+  },
+  {
+   "ref": "I34",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:36.028+05:30",
+   "tPlusS": 57.7,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ src/components/ResultsSection.tsx (7/14)"
+  },
+  {
+   "ref": "I35",
+   "code": "HEARTBEAT",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:38.327+05:30",
+   "tPlusS": 60.0,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "⏱ minute 1 — still working (last: ✓ src/components/ResultsSection.tsx (7/14))"
+  },
+  {
+   "ref": "I36",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:42.562+05:30",
+   "tPlusS": 64.2,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ src/components/TitleIdeas.tsx (8/14)"
+  },
+  {
+   "ref": "I37",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:45.919+05:30",
+   "tPlusS": 67.6,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ src/components/RelatedKeywords.tsx (9/14)"
+  },
+  {
+   "ref": "I38",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:55.129+05:30",
+   "tPlusS": 76.8,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ src/components/TagSuggestions.tsx (10/14)"
+  },
+  {
+   "ref": "I39",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:08:58.193+05:30",
+   "tPlusS": 79.9,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ index.html (11/14)"
+  },
+  {
+   "ref": "I40",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:01.163+05:30",
+   "tPlusS": 82.8,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ src/main.tsx (12/14)"
+  },
+  {
+   "ref": "I41",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:06.744+05:30",
+   "tPlusS": 88.4,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ src/App.tsx (13/14)"
+  },
+  {
+   "ref": "I42",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:18.628+05:30",
+   "tPlusS": 100.3,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ src/index.css (14/14)"
+  },
+  {
+   "ref": "I43",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:19.092+05:30",
+   "tPlusS": 100.8,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ write_file"
+  },
+  {
+   "ref": "I44",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:19.998+05:30",
+   "tPlusS": 101.7,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ write_file (1s)"
+  },
+  {
+   "ref": "I45",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:19.998+05:30",
+   "tPlusS": 101.7,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ write_file"
+  },
+  {
+   "ref": "I46",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.004+05:30",
+   "tPlusS": 101.7,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ write_file (1s)"
+  },
+  {
+   "ref": "I47",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.004+05:30",
+   "tPlusS": 101.7,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ write_file"
+  },
+  {
+   "ref": "I48",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.023+05:30",
+   "tPlusS": 101.7,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ write_file (1s)"
+  },
+  {
+   "ref": "I49",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.023+05:30",
+   "tPlusS": 101.7,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ write_file"
+  },
+  {
+   "ref": "I50",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.281+05:30",
+   "tPlusS": 102.0,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ write_file (1s)"
+  },
+  {
+   "ref": "I51",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.281+05:30",
+   "tPlusS": 102.0,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ write_file"
+  },
+  {
+   "ref": "I52",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.292+05:30",
+   "tPlusS": 102.0,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ write_file (1s)"
+  },
+  {
+   "ref": "I53",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.293+05:30",
+   "tPlusS": 102.0,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ write_file"
+  },
+  {
+   "ref": "I54",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.431+05:30",
+   "tPlusS": 102.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ write_file (0s)"
+  },
+  {
+   "ref": "I55",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.432+05:30",
+   "tPlusS": 102.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ write_file"
+  },
+  {
+   "ref": "I56",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.440+05:30",
+   "tPlusS": 102.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ write_file (0s)"
+  },
+  {
+   "ref": "I57",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.440+05:30",
+   "tPlusS": 102.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ write_file"
+  },
+  {
+   "ref": "I58",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.464+05:30",
+   "tPlusS": 102.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ write_file (0s)"
+  },
+  {
+   "ref": "I59",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.465+05:30",
+   "tPlusS": 102.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ write_file"
+  },
+  {
+   "ref": "I60",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.481+05:30",
+   "tPlusS": 102.2,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ write_file (1s)"
+  },
+  {
+   "ref": "I61",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.482+05:30",
+   "tPlusS": 102.2,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ write_file"
+  },
+  {
+   "ref": "I62",
+   "code": "EVENT",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.604+05:30",
+   "tPlusS": 102.3,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "• checkpoint"
+  },
+  {
+   "ref": "I63",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.954+05:30",
+   "tPlusS": 102.6,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ write_file (0s)"
+  },
+  {
+   "ref": "I64",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:20.956+05:30",
+   "tPlusS": 102.6,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Built your app — 15 file(s), each generated individually."
+  },
+  {
+   "ref": "I65",
+   "code": "EVENT",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:21.576+05:30",
+   "tPlusS": 103.2,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "• checkpoint"
+  },
+  {
+   "ref": "I66",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:26.836+05:30",
+   "tPlusS": 108.5,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D04"
+   ],
+   "message": "Found build errors — fixing them (attempt 1/1, contract-full)…"
+  },
+  {
+   "ref": "I67",
+   "code": "HEARTBEAT",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:38.362+05:30",
+   "tPlusS": 120.0,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "⏱ minute 2 — still working (last: Found build errors — fixing them (attempt 1/1, contract-full)…)"
+  },
+  {
+   "ref": "I68",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:38.434+05:30",
+   "tPlusS": 120.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "⏱️ Still building… 2 min in · ~9 min to go"
+  },
+  {
+   "ref": "I69",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:38.818+05:30",
+   "tPlusS": 120.5,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ write_file"
+  },
+  {
+   "ref": "I70",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:40.129+05:30",
+   "tPlusS": 121.8,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ write_file (1s)"
+  },
+  {
+   "ref": "I71",
+   "code": "EVENT",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:40.612+05:30",
+   "tPlusS": 122.3,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "• checkpoint"
+  },
+  {
+   "ref": "I72",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:43.356+05:30",
+   "tPlusS": 125.0,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D04"
+   ],
+   "message": "Build verified — the app compiles. ✓"
+  },
+  {
+   "ref": "I73",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:43.357+05:30",
+   "tPlusS": 125.0,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ bash"
+  },
+  {
+   "ref": "I74",
+   "code": "SANDBOX_CMD",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:44.184+05:30",
+   "tPlusS": 125.9,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D03"
+   ],
+   "message": "$ npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps → exit 0 (1s)"
+  },
+  {
+   "ref": "I75",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:44.879+05:30",
+   "tPlusS": 126.5,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ bash (2s)"
+  },
+  {
+   "ref": "I76",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:44.880+05:30",
+   "tPlusS": 126.5,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D03"
+   ],
+   "message": "📦 Installing 2 missing dependencies the code imports but package.json omitted: react, react-dom"
+  },
+  {
+   "ref": "I77",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:44.880+05:30",
+   "tPlusS": 126.5,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ bash"
+  },
+  {
+   "ref": "I78",
+   "code": "SANDBOX_CMD",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:47.048+05:30",
+   "tPlusS": 128.7,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D03"
+   ],
+   "message": "$ npm install --no-audit --no-fund react react-dom || npm install --no-audit --no-fund --legacy-peer-deps react react-dom → exit 0 (2s)"
+  },
+  {
+   "ref": "I79",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:49.469+05:30",
+   "tPlusS": 131.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ bash (5s)"
+  },
+  {
+   "ref": "I80",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:49.547+05:30",
+   "tPlusS": 131.2,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ bash"
+  },
+  {
+   "ref": "I81",
+   "code": "SANDBOX_CMD",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:09:56.383+05:30",
+   "tPlusS": 138.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "$ npm run dev → exit 0 (7s)"
+  },
+  {
+   "ref": "I82",
+   "code": "PREVIEW_PUBLISHED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:01.330+05:30",
+   "tPlusS": 143.0,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Preview address is live at https://5173-i8syjnv9qg94m47rlslhk.e2b.app — the server is listening. Whether the app itself renders is checked next."
+  },
+  {
+   "ref": "I83",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:01.419+05:30",
+   "tPlusS": 143.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ bash (12s)"
+  },
+  {
+   "ref": "I84",
+   "code": "TOOL_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:01.419+05:30",
+   "tPlusS": 143.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "▶ update_preview"
+  },
+  {
+   "ref": "I85",
+   "code": "TOOL_DONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:01.420+05:30",
+   "tPlusS": 143.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✓ update_preview (0s)"
+  },
+  {
+   "ref": "I86",
+   "code": "SIMPLE_BUILD_SUCCESS",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:01.421+05:30",
+   "tPlusS": 143.1,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D02",
+    "D12"
+   ],
+   "message": "Built your app file-by-file — 15 file(s)."
+  },
+  {
+   "ref": "I87",
+   "code": "FAST_LANE_PHASES",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:01.421+05:30",
+   "tPlusS": 143.1,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D04"
+   ],
+   "message": "Fast lane took 128.3s: plan 4.3s (3%), contract 5s (4%), generate 76.3s (59%), verify 9.1s (7%) over 2 run(s), repair 12s (9%) over 1 round(s), everything else 21.7s (17%)."
+  },
+  {
+   "ref": "I88",
+   "code": "OUTCOME_BUILD_PARTIAL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:01.421+05:30",
+   "tPlusS": 143.1,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Build outcome: BUILD_PARTIAL"
+  },
+  {
+   "ref": "I89",
+   "code": "DESIGN_KIT_KEPT",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:01.745+05:30",
+   "tPlusS": 143.4,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D04"
+   ],
+   "message": "2 stylesheet rewrite(s) dropped design-kit rules without restyling them; the rules were kept (.active, .alert, .alert-danger, .alert-success, .alert-warning, .badge, .badge-danger, .badge-success, .badge-warning, .btn, .btn-block, .btn-danger and 93 more)."
+  },
+  {
+   "ref": "I90",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:01.746+05:30",
+   "tPlusS": 143.4,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "⏱️ Almost done… 2 min in · your app is built — running the final checks."
+  },
+  {
+   "ref": "I91",
+   "code": "READY_BEFORE_END",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:01.746+05:30",
+   "tPlusS": 143.4,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "The app was never judged finished during the build."
+  },
+  {
+   "ref": "I92",
+   "code": "WRITE_TIME_TYPECHECK",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:02.457+05:30",
+   "tPlusS": 144.1,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D13"
+   ],
+   "message": "Write-time typecheck: never ran — not one write reached it, and 13 TypeScript file(s) written by a lane that does not write through the build's tools (the fast lane writes its whole file list at once and runs a single typecheck of its own) — nothing here says whether THAT check passed."
+  },
+  {
+   "ref": "I93",
+   "code": "SERVICE_GRAPH_SINGLE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:03.985+05:30",
+   "tPlusS": 145.7,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Single service: project (frontend on port 5173)."
+  },
+  {
+   "ref": "I94",
+   "code": "DESIGN_CONSISTENCY",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:03.996+05:30",
+   "tPlusS": 145.7,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Design consistency 100/100 (A) across 17 file(s). Design consistency: ✓ A (100/100) — cohesive palette, typography and spacing."
+  },
+  {
+   "ref": "I95",
+   "code": "ACCESSIBILITY",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:03.996+05:30",
+   "tPlusS": 145.7,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Accessibility 100/100 (A) — no common WCAG failures found across 17 file(s)."
+  },
+  {
+   "ref": "I96",
+   "code": "SCRIPT_INTEGRITY",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:03.996+05:30",
+   "tPlusS": 145.7,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Text integrity: every label reads in one script."
+  },
+  {
+   "ref": "I97",
+   "code": "POST_ANSWER_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:03.997+05:30",
+   "tPlusS": 145.7,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Post-answer integrity pass took 2s, of which loading the durable project was 0s (20 files)."
+  },
+  {
+   "ref": "I98",
+   "code": "E2E_SCAFFOLDED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:05.334+05:30",
+   "tPlusS": 147.0,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D13"
+   ],
+   "message": "An end-to-end test suite was written into your project (playwright.config.ts, e2e/smoke.spec.ts). It has not been run here — run it yourself with `npx playwright test` after `npm i -D @playwright/test && npx playwright install chromium`. It loads your app in a real browser and fails on a blank scree"
+  },
+  {
+   "ref": "I99",
+   "code": "STARTER_TESTS_SKIPPED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:07.138+05:30",
+   "tPlusS": 148.8,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D13"
+   ],
+   "message": "No starter unit tests were added — vitest is not declared in package.json."
+  },
+  {
+   "ref": "I100",
+   "code": "TIME_TO_FIRST_RENDER",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:08.756+05:30",
+   "tPlusS": 150.4,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "141s from build start to the first real-browser render of the app."
+  },
+  {
+   "ref": "I101",
+   "code": "IN_BUILD_GREEN_RACED",
+   "severity": "info",
+   "autoResolved": false,
+   "atIST": "2026-11-08T09:10:08.756+05:30",
+   "tPlusS": 150.4,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D09"
+   ],
+   "message": "The app rendered 141s into this build, but a file was written while it was being opened, so the state on disk is not the state that was proven — no snapshot taken; will try again."
+  },
+  {
+   "ref": "I102",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:10.916+05:30",
+   "tPlusS": 152.6,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "🧩 Added production defaults: og:title, og:description, twitter:card, theme-color, manifest link, icon link, apple-mobile-web-app-capable, apple-mobile-web-app-status-bar-style, mobile-web-app-capable, format-detection, native-feel baseline, service worker registration + public/manifest.webmanifest, "
+  },
+  {
+   "ref": "I103",
+   "code": "RENDER_STYLE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:13.174+05:30",
+   "tPlusS": 154.8,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "The rendered app carries its own styling (preview verify): 205 CSS rule(s) on the page; 1 of 1 button(s) styled; a font is set."
+  },
+  {
+   "ref": "I104",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:13.717+05:30",
+   "tPlusS": 155.4,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "✅ Preview verified — I opened the running app in a browser and it renders correctly."
+  },
+  {
+   "ref": "I105",
+   "code": "OUTCOME_BUILD_SUCCESS",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:13.930+05:30",
+   "tPlusS": 155.6,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Build outcome: BUILD_SUCCESS"
+  },
+  {
+   "ref": "I106",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:14.132+05:30",
+   "tPlusS": 155.8,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "🔒 Preview saved — it can be brought back any time, even after it sleeps."
+  },
+  {
+   "ref": "I107",
+   "code": "PREVIEW_REVIVAL_RECIPE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:14.132+05:30",
+   "tPlusS": 155.8,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "The revival recipe was stored and read back — this preview can be woken without rediscovery."
+  },
+  {
+   "ref": "I108",
+   "code": "APP_RENDERED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:14.137+05:30",
+   "tPlusS": 155.8,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D09"
+   ],
+   "message": "The app was opened in a real browser and rendered — recorded so every later verdict reads one proof instead of keeping its own."
+  },
+  {
+   "ref": "I109",
+   "code": "JOURNEY_NOT_DERIVED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:14.143+05:30",
+   "tPlusS": 155.8,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D05"
+   ],
+   "message": "No user journey was run — the fields in this app can be addressed, but none of its buttons reads as submitting them (no submit button and no add / save / create button), so no fill-and-submit journey was derived. That is a limit of this check, not a defect in the app.."
+  },
+  {
+   "ref": "I110",
+   "code": "MOBILE_LAYOUT_OK",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:17.191+05:30",
+   "tPlusS": 158.9,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Opened at phone size (390×844, touch): the page fits the screen and its controls are big enough to tap."
+  },
+  {
+   "ref": "I111",
+   "code": "EXPLORE_NOTHING_TO_PRESS",
+   "severity": "info",
+   "autoResolved": false,
+   "atIST": "2026-11-08T09:10:19.073+05:30",
+   "tPlusS": 160.7,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D07"
+   ],
+   "message": "No control on the home screen was safe to press (2 found, all deliberately skipped)."
+  },
+  {
+   "ref": "I112",
+   "code": "DECLARED_PORT",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:22.731+05:30",
+   "tPlusS": 164.4,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "This app declares it serves on port 5173 (from the dev server config's port). The preview will try that before any common-port guess."
+  },
+  {
+   "ref": "I113",
+   "code": "PROD_BUILD_OK",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:26.360+05:30",
+   "tPlusS": 168.0,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "The production build succeeded — this app is ready to publish and to package."
+  },
+  {
+   "ref": "I114",
+   "code": "PREVIEW_SNAPSHOT_SAVED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:28.837+05:30",
+   "tPlusS": 170.5,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D09"
+   ],
+   "message": "Kept a permanent copy of this build, so the preview still works after its live server expires."
+  },
+  {
+   "ref": "I115",
+   "code": "TEST_SUITE_UNVERIFIED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:29.699+05:30",
+   "tPlusS": 171.4,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D13"
+   ],
+   "message": "The only test suite here is the starter end-to-end suite NavBharatAI added for you (e2e/). It is not run in this build — run it in your own CI with `npm i -D @playwright/test && npx playwright test`. Nothing about it passed or failed here."
+  },
+  {
+   "ref": "I116",
+   "code": "CORRECTION_BUDGET",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:29.700+05:30",
+   "tPlusS": 171.4,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Correction reserve: 150s held back from generation"
+  },
+  {
+   "ref": "I117",
+   "code": "SANDBOX_SESSION",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:29.700+05:30",
+   "tPlusS": 171.4,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Sandbox session: 3.5 min up · 0.6 min running our operations (26) · 2.9 min idle (83%) · started by files · came up created-fresh"
+  },
+  {
+   "ref": "I118",
+   "code": "SANDBOX_PEAK_MEMORY",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:29.930+05:30",
+   "tPlusS": 171.6,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Peak memory during this build: 0.87 GB of 3.71 GB (the cgroup's own limit; template 4 GB) (23%, cgroup-v2 /user — the build raised the machine's high-water mark, so this is its own peak; it includes reclaimable file cache; 0 out-of-memory kills, 0 reclaim-throttle events during this build)"
+  },
+  {
+   "ref": "I119",
+   "code": "RELEASE_GATE",
+   "severity": "warning",
+   "autoResolved": false,
+   "atIST": "2026-11-08T09:10:29.930+05:30",
+   "tPlusS": 171.6,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D05"
+   ],
+   "message": "Release gate: YELLOW — It runs and renders — but no user journey was proven, so whether it actually SAVES anything is untested.\n  Proven: the app came up and rendered; the project typechecks\n  NOT established: no separate page routes were found to check — its home screen rendered above (screens swit"
+  },
+  {
+   "ref": "I120",
+   "code": "HEARTBEAT",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:38.362+05:30",
+   "tPlusS": 180.0,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "⏱ minute 3 — still working (last: 🔒 Preview saved — it can be brought back any time, even after it sleeps.)"
+  },
+  {
+   "ref": "I121",
+   "code": "REDTEAM_RAN",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:01.817+05:30",
+   "tPlusS": 203.5,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D13"
+   ],
+   "message": "Red-team pass: 4 hostile input case(s) in 30s (budget 30s), no crash."
+  },
+  {
+   "ref": "I122",
+   "code": "RUNTIME_VERIFIED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:02.332+05:30",
+   "tPlusS": 204.0,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D13"
+   ],
+   "message": "Runtime verified — the app ran in the browser with no actionable console errors after build."
+  },
+  {
+   "ref": "I123",
+   "code": "SIMULATED_RESULT_SHIPPED",
+   "severity": "warning",
+   "autoResolved": false,
+   "atIST": "2026-11-08T09:11:02.352+05:30",
+   "tPlusS": 204.0,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D10"
+   ],
+   "message": "A feature of the app returns made-up results in 3 place(s) — disclosed to the user in the summary."
+  },
+  {
+   "ref": "I124",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:03.182+05:30",
+   "tPlusS": 204.9,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D12"
+   ],
+   "message": "✅ Here's what I built:\nStack: React + Vite\n23 files, 6 components.\nComponents: App, InputSection, RelatedKeywords, ResultsSection, TagSuggestions, …\nRun: npm install && npm run dev. Use the Preview tab to see it live."
+  },
+  {
+   "ref": "I125",
+   "code": "FE_BE_PARTITION",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:03.207+05:30",
+   "tPlusS": 204.9,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D06"
+   ],
+   "message": "Of the 24 file(s) THIS TURN wrote: 9 frontend, 1 backend, 5 shared, 9 other (not a survey of the whole project). A clean full-stack split exists — this build is a candidate for parallel frontend/backend building (a future capability)."
+  },
+  {
+   "ref": "I126",
+   "code": "GREEN_GUARD_SAVE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:04.257+05:30",
+   "tPlusS": 205.9,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D09"
+   ],
+   "message": "The app was opened in a real browser and rendered — recorded as the last known good state."
+  },
+  {
+   "ref": "I127",
+   "code": "PREVIEW_SNAPSHOT_CURRENT",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:05.489+05:30",
+   "tPlusS": 207.2,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D09"
+   ],
+   "message": "The saved copy was built from exactly the files that were persisted — it is this app, and the preview can show it in place of a running machine."
+  },
+  {
+   "ref": "I128",
+   "code": "RESTORE_POINT",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:06.175+05:30",
+   "tPlusS": 207.8,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "A version was saved — the user can go back to this build from the Time Machine."
+  },
+  {
+   "ref": "I129",
+   "code": "BUILD_DISCOUNT",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:06.243+05:30",
+   "tPlusS": 207.9,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Build discount 10% applied: ₹0.17 → ₹0.16"
+  },
+  {
+   "ref": "I130",
+   "code": "CHANGE_RECORDED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:06.387+05:30",
+   "tPlusS": 208.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "CHG-0001 new-app/standard · 15 file(s) · status partial · gate YELLOW · requirements REQ-001 · issues ISS-001"
+  },
+  {
+   "ref": "I131",
+   "code": "CHANGE_RECORDED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:06.387+05:30",
+   "tPlusS": 208.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Issue queue: 1 opened, 0 reopened, 0 confirmed (now shown to the user and handed to edits), 0 fixed, 0 verified · 1 open"
+  },
+  {
+   "ref": "I132",
+   "code": "LADDER_DEPTH",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:06.715+05:30",
+   "tPlusS": 208.4,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "The ladder was not used — every delivered slice came from an engine outside it by design: SURPLUS (19)."
+  },
+  {
+   "ref": "I133",
+   "code": "PROVIDER_TIME_WASTED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:06.716+05:30",
+   "tPlusS": 208.4,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Provider time: no engine wasted any time this build (a call stopped by our own clock is not counted here, nor one the user stopped — see PROVIDER_FALLBACK / LLM_CALL_BUDGET_ENDED / LLM_CALL_STOPPED)."
+  },
+  {
+   "ref": "I134",
+   "code": "STRICT_TRIAL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:06.939+05:30",
+   "tPlusS": 208.6,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "TypeScript mode: loose-new"
+  },
+  {
+   "ref": "I135",
+   "code": "TODO_ONLY_TURNS",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:11:06.941+05:30",
+   "tPlusS": 208.6,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "No model turn while the app was generated was spent only on updating the plan (update_todo with no other tool call)."
+  }
+ ],
+ "selectedProblems": [
+  {
+   "code": "RELEASE_GATE",
+   "severity": "warning",
+   "message": "Release gate: YELLOW — It runs and renders — but no user journey was proven, so whether it actually SAVES anything is untested.\n  Proven: the app came up and rendered; the project typechecks\n  NOT established: no separate page routes were found to check — its home screen rendered above (screens swit"
+  },
+  {
+   "code": "SIMULATED_RESULT_SHIPPED",
+   "severity": "warning",
+   "message": "A feature of the app returns made-up results in 3 place(s) — disclosed to the user in the summary."
+  }
+ ],
+ "commands": [
+  {
+   "ref": "C00",
+   "atIST": "2026-11-08T09:09:44.184+05:30",
+   "tPlusS": 125.9,
+   "command": "npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps",
+   "exitCode": 0,
+   "durationMs": 826
+  },
+  {
+   "ref": "C01",
+   "atIST": "2026-11-08T09:09:47.048+05:30",
+   "tPlusS": 128.7,
+   "command": "npm install --no-audit --no-fund react react-dom || npm install --no-audit --no-fund --legacy-peer-deps react react-dom",
+   "exitCode": 0,
+   "durationMs": 2166
+  },
+  {
+   "ref": "C02",
+   "atIST": "2026-11-08T09:09:56.383+05:30",
+   "tPlusS": 138.1,
+   "command": "npm run dev",
+   "exitCode": 0,
+   "durationMs": 6834
+  }
+ ],
+ "llmCalls": [
+  {
+   "ref": "L00",
+   "atIST": "2026-11-08T09:07:38.336+05:30",
+   "tPlusS": 0.0,
+   "provider": "SURPLUS",
+   "model": "qwen3-coder",
+   "latencyMs": 3636,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 372,
+   "outputTokens": 2
+  },
+  {
+   "ref": "L01",
+   "atIST": "2026-11-08T09:07:47.165+05:30",
+   "tPlusS": 8.8,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 8828,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 1044,
+   "outputTokens": 608
+  },
+  {
+   "ref": "L02",
+   "atIST": "2026-11-08T09:07:57.376+05:30",
+   "tPlusS": 19.0,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 4257,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 958,
+   "outputTokens": 214
+  },
+  {
+   "ref": "L03",
+   "atIST": "2026-11-08T09:08:02.373+05:30",
+   "tPlusS": 24.0,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 4988,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 1142,
+   "outputTokens": 313
+  },
+  {
+   "ref": "L04",
+   "atIST": "2026-11-08T09:08:06.436+05:30",
+   "tPlusS": 28.1,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 4059,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 4347,
+   "outputTokens": 202
+  },
+  {
+   "ref": "L05",
+   "atIST": "2026-11-08T09:08:09.992+05:30",
+   "tPlusS": 31.7,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 7615,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 4325,
+   "outputTokens": 181
+  },
+  {
+   "ref": "L06",
+   "atIST": "2026-11-08T09:08:14.480+05:30",
+   "tPlusS": 36.1,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 12103,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 4353,
+   "outputTokens": 433
+  },
+  {
+   "ref": "L07",
+   "atIST": "2026-11-08T09:08:16.776+05:30",
+   "tPlusS": 38.4,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 14398,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 4324,
+   "outputTokens": 37
+  },
+  {
+   "ref": "L08",
+   "atIST": "2026-11-08T09:08:26.000+05:30",
+   "tPlusS": 47.7,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 23622,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 4347,
+   "outputTokens": 226
+  },
+  {
+   "ref": "L09",
+   "atIST": "2026-11-08T09:08:30.342+05:30",
+   "tPlusS": 52.0,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 4338,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 4873,
+   "outputTokens": 228
+  },
+  {
+   "ref": "L10",
+   "atIST": "2026-11-08T09:08:36.027+05:30",
+   "tPlusS": 57.7,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 10020,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 4873,
+   "outputTokens": 314
+  },
+  {
+   "ref": "L11",
+   "atIST": "2026-11-08T09:08:42.560+05:30",
+   "tPlusS": 64.2,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 16552,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 4873,
+   "outputTokens": 173
+  },
+  {
+   "ref": "L12",
+   "atIST": "2026-11-08T09:08:45.919+05:30",
+   "tPlusS": 67.6,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 19909,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 4871,
+   "outputTokens": 171
+  },
+  {
+   "ref": "L13",
+   "atIST": "2026-11-08T09:08:55.128+05:30",
+   "tPlusS": 76.8,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 29117,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 4871,
+   "outputTokens": 165
+  },
+  {
+   "ref": "L14",
+   "atIST": "2026-11-08T09:08:58.193+05:30",
+   "tPlusS": 79.9,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 31408,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 5027,
+   "outputTokens": 141
+  },
+  {
+   "ref": "L15",
+   "atIST": "2026-11-08T09:09:01.161+05:30",
+   "tPlusS": 82.8,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 2964,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 5641,
+   "outputTokens": 66
+  },
+  {
+   "ref": "L16",
+   "atIST": "2026-11-08T09:09:06.744+05:30",
+   "tPlusS": 88.4,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 8545,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 5645,
+   "outputTokens": 203
+  },
+  {
+   "ref": "L17",
+   "atIST": "2026-11-08T09:09:18.627+05:30",
+   "tPlusS": 100.3,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 11881,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 4226,
+   "outputTokens": 1139
+  },
+  {
+   "ref": "L18",
+   "atIST": "2026-11-08T09:09:38.817+05:30",
+   "tPlusS": 120.5,
+   "provider": "surplus",
+   "model": "qwen3-coder",
+   "latencyMs": 11970,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 5450,
+   "outputTokens": 1347
+  }
+ ],
+ "fileHashes": {
+  "src/types/seoTypes.ts": "05cc54ba074e62f0d330463bd52213af5aeae4680cf2b454c1354e90cd75371a",
+  "src/utils/formatData.ts": "8f350b2bf8db367a3d69959390a80be94adcdd8b7d3ffcb5d05aee2cdb1eed3c",
+  "src/types.ts": "ba74db04210ba9aa2d7daa40a02ac72d835963f4133aeec5911291271771f56b",
+  "src/hooks/useSEOSuggestions.ts": "7c1415a539d87827978ca3b9c5ba48c1d638f22ec22150edd01bafe274437e13",
+  "src/services/seoAPI.ts": "c40aa446746128a3a5296a740d72b9368411401b380337162bb4ecc7dc91e5f4",
+  "src/components/InputSection.tsx": "6f1e3807efa2662fb545297311cb18a3e9bdf34bb4cfc837717227a604899371",
+  "src/components/ResultsSection.tsx": "ac11e4bdd3d36c9dd36091d4ea6eba5aa6b62fd04a6c27db85d4345ea2e5aeaa",
+  "src/components/TitleIdeas.tsx": "49302728f03e034cb13db82fe1680125b2afae4444afea14ec847ab6de3acec4",
+  "src/constants/sampleData.ts": "a5ec276bb24548f2f4e3bfd64cff111616b727d24fbfead4e66ef5eb55a6392a",
+  "src/components/RelatedKeywords.tsx": "995e169616c76fb20dc30155a5fb6cba4890901cb821d4011d7a474d511faf22",
+  "src/components/TagSuggestions.tsx": "d2534dbb8098537c63369cdd1f609bacd2c8f933d27fbf016711916eef349a64",
+  "index.html": "fbb706284a1e26e6fd3f08a991f1d23b4c48ee1604cd7c4a9885da8d08099ede",
+  "src/App.tsx": "ae181a6372c0e70849396e6dd08602e6f7ce6cedc909e5d89d5a152887dff63c",
+  "src/main.tsx": "77fa9b8741bd3d1dc5334a529f4cfd92605ce8c8a1371a2d7a629382e88c81ee",
+  "src/index.css": "733bb0babe65f7460c2230f416c342623cedab588b88f7fae0e4bb9ebfa64335",
+  "package.json": "1811ef9f4c09193b187ee69c4b23609e8b24e4e18edd9cd63ba19d56d5349143",
+  "playwright.config.ts": "4c12f9930ae240a0c12a8e3af0aea6c78ad120ad19501b6701cd6788057622ba",
+  "e2e/smoke.spec.ts": "cee73df51a778fb3dac9b51cfcec6bd84b59eb0ba28e994890ff49be934eb84d",
+  "docs/decisions/ADR-001.md": "67cf2b3c9fae3971e287de1183affffe101da2963677ec3238acc10dfe4fea88",
+  "public/manifest.webmanifest": "319d6b6c34006c88e2111bc439e367f6f35a8336bc5ca2ccca4791dca17c0149",
+  "public/robots.txt": "16ceb5ee3e0dc13aa9adf31a3ebbe45a1d965b8c2b9f72eaf84e5911e140ed95",
+  "public/icon.svg": "681e934fb9654595d1ebe910ecedf075bc50b28a1ae69734c6862896212a93d0",
+  "public/sw.js": "35a870f8a2331b425ac740d02eaf39a7cf1bdbdfeefeab27ba3132e973b884b8",
+  "public/nbai-native.css": "54ffd43d5391c2a94f327eb7bc57c3161f10367cd8400b5c885766add507d901"
+ },
+ "ledger": [
+  {
+   "id": "D01",
+   "queue": "Q-2612",
+   "origin": "report",
+   "bucket": "waste",
+   "issues": [
+    "I1",
+    "I6",
+    "I7",
+    "I11",
+    "I22"
+   ],
+   "llmCalls": [
+    "L01"
+   ],
+   "problem": "APP_SCOPE recorded 'LARGE — clone of YouTube' for 'Create a html code of youtube seo generator' while complexity routing scored it simple (15). scopeDispute could not stand it down (no small-app word), so the mega-roadmap planner ran: an extra 8.8 s model call (L01), the user-facing line 'YouTube SEO is a big app', a 5-step roadmap, and Project Mode deferred to it.",
+   "fix": "F1 appScopeAnalyzer.ts: TOOL_FOR_AFTER — a famous name followed (optionally via an object noun and a topic noun) by a tool noun (generator, maker, downloader, analyzer, checker, calculator, tracker, …) names what the tool works on, not a clone target. Any likeness word before or after (like, jaisa, clone, copy) still wins.",
+   "state": "IMPLEMENTED - merge pending",
+   "proof": "tests/aToolForAProductIsNotAClone.test.ts (target, scopeVerdict, 6 real-clone neighbours); 21 existing scope suites (374 tests) unchanged; corpus delta 78,007 strings → 1 change; mutations M1-tool-guard, M1b-likeness-wins",
+   "sideEffectRisk": "LOW. Pure scope classifier used only on new_build/non-edit turns (Free and Pro alike; no chat, no client, no mobile/desktop difference). Direction is non-escalating only: it can remove a clone reason, never add one. Measured with origin/main vs branch over every prompt-like string in the test suite plus 1,524 real report app labels (78,007 strings): exactly one decision changed — the BR1960 prompt. Residual: a real clone phrased as '<Name> <tool noun>' without a likeness word would now build direct; the complexity router and feature-count signals still escalate it independently."
+  },
+  {
+   "id": "D02",
+   "queue": "Q-2615",
+   "origin": "report+inspection",
+   "bucket": "broken (intent)",
+   "issues": [
+    "I86"
+   ],
+   "problem": "The user asked for 'html code'; the build produced a 15-file React + Vite app (the roadmap step text even said 'HTML + JavaScript'). frameworkDetect deliberately ignores a bare 'html'.",
+   "fix": "none (blocked)",
+   "state": "🟡 BLOCKED — admin decision",
+   "proof": "Read SINGLE_HTML_FILE_SIGNAL / PLAIN_HTML_SIGNAL and both call sites (AgentV3Panel.tsx:1906, agentv3.ts:12013)",
+   "sideEffectRisk": "HIGH if changed now: resolveFrameworkSelection runs on every turn on client and server; a wider HTML signal could re-route edits on existing React projects and raise framework-conflict dialogs. Dropped per t311u."
+  },
+  {
+   "id": "D03",
+   "queue": null,
+   "origin": "report",
+   "bucket": "self-heal",
+   "issues": [
+    "I74",
+    "I76",
+    "I78"
+   ],
+   "commands": [
+    "C01"
+   ],
+   "problem": "After the fast lane, react and react-dom were reported as imported-but-undeclared and installed (2 s).",
+   "fix": "Already fixed: BR1959 D02 / Q-2603 (#4134, merged after this build ran).",
+   "state": "ALREADY HANDLED",
+   "proof": "#4134 e29e893db",
+   "sideEffectRisk": "n/a (no change)"
+  },
+  {
+   "id": "D04",
+   "queue": null,
+   "origin": "report",
+   "bucket": "self-heal",
+   "issues": [
+    "I66",
+    "I72",
+    "I87",
+    "I89"
+   ],
+   "llmCalls": [
+    "L18"
+   ],
+   "problem": "The model used three CSS classes it never defined; one contract-full repair round (12 s, L18) defined them. Two stylesheet rewrites dropped design-kit rules; DESIGN_KIT_KEPT kept them.",
+   "fix": "none — the stylesheet prompt already carries the class names the screens use; this is model non-compliance caught by existing guards.",
+   "state": "Not a defect",
+   "proof": "SimpleBuilder stylesheetClassContext; I72 'Build verified'",
+   "sideEffectRisk": "n/a (no change)"
+  },
+  {
+   "id": "D05",
+   "queue": "Q-2616",
+   "origin": "report",
+   "bucket": "skip",
+   "issues": [
+    "I109",
+    "I119"
+   ],
+   "problem": "JOURNEY_NOT_DERIVED: the only action is 'Generate', not a submit word, so no journey ran and RELEASE_GATE stayed YELLOW ('whether it actually SAVES anything is untested') for a compute-only tool.",
+   "fix": "none (blocked)",
+   "state": "🟡 BLOCKED — admin decision",
+   "proof": "journeyDerivation ~1757; autopsy 876afca9 recorded this as a limit of the check",
+   "sideEffectRisk": "HIGH if changed now: a compute-journey kind is a new release-gate feature; a weak definition could turn YELLOW into a false GREEN or fail working async tools. Dropped per t311u."
+  },
+  {
+   "id": "D06",
+   "queue": "Q-2613",
+   "origin": "report+inspection",
+   "bucket": "broken (admin honesty)",
+   "issues": [
+    "I125"
+   ],
+   "problem": "FE_BE_PARTITION: '9 frontend, 1 backend … A clean full-stack split exists' for an SPA with no server; the 1 backend was the client mock fetcher src/services/seoAPI.ts.",
+   "fix": "F2 frontendBackendPartition.ts: src/services/, src/api/, src/models/ directly under the source root are 'shared' unless the same file set has an unambiguous server signal. classifyFile (single path) unchanged. CspMetaAnalysis pinned to the old reading via clientLayerAsBackend:true.",
+   "state": "IMPLEMENTED - merge pending",
+   "proof": "tests/aClientServiceFolderIsNotAServer.test.ts (BR1960 file set, 8 real-backend neighbours, monorepo neighbour, classifyFile unchanged, CSP skip unchanged); existing partition/CSP/serviceGraph suites; mutations M2-client-layer, M2b-csp-pin",
+   "sideEffectRisk": "LOW after narrowing. Only consumer whose behaviour changes is the admin-only FE_BE_PARTITION advisory (autoResolved info; no gate, no user text, no tier/mobile difference). The CSP scan — the one agent-facing consumer — keeps its old skip by option, so no new CSP findings. Residual: a later turn that edits only src/services/* in a project whose server was written in an earlier turn now reads 'shared' instead of 'backend' in the advisory (it measures THIS turn's writes by design)."
+  },
+  {
+   "id": "D07",
+   "queue": "Q-2614",
+   "origin": "report+inspection",
+   "bucket": "broken (admin honesty)",
+   "issues": [
+    "I111"
+   ],
+   "problem": "EXPLORE_NOTHING_TO_PRESS: '(2 found, all deliberately skipped)' with no detail. collect() dropped hidden / disabled / overlay / our-badge / repeat controls with a silent continue, so a claimed reason was never recorded.",
+   "fix": "F3 clickExplorer.ts: collect() counts silent drops by reason; the summary line carries `dropped`; parseExploreOutput validates it; the message names skipped-for-safety and dropped counts; detail lines 'NOT CONSIDERED — …'. Old sentence kept byte-for-byte when there are no drops or the field is absent (older runner).",
+   "state": "IMPLEMENTED - merge pending",
+   "proof": "tests/aSkipIsNamedOrNotClaimed.test.ts (target + 4 neighbours: older output, all-zero, chosen>0, passing run & user card); 22 explorer suites; real headless Chrome run of the generated in-page collect() on the BR1960 shape (disabled Generate + hidden Copy): found 2, skipped [], dropped hidden 1 disabled 1; mutations M3-drop-count, M3b-old-sentence",
+   "sideEffectRisk": "LOW. Admin text only: code, outcome, pressed, failures and gates unchanged; exploreUserSummary for 'nothing' stays empty; the 8-entry safety skip list is untouched (drops are counts, not entries). The in-page script gains only counters (syntax covered by the existing node --check test)."
+  },
+  {
+   "id": "D08",
+   "queue": "Q-2617",
+   "origin": "inspection",
+   "bucket": "skip (latent)",
+   "issues": [],
+   "problem": "Sibling of D06: scanProjectCsp skips whenever the partition reports any backend, so an SPA with a client src/services/ layer is never CSP-scanned.",
+   "fix": "none (blocked; deliberately pinned in F2)",
+   "state": "🟡 BLOCKED — admin decision",
+   "proof": "tests/aClientServiceFolderIsNotAServer.test.ts pins the old skip",
+   "sideEffectRisk": "MEDIUM if enabled: new agent-facing missing-csp-meta findings; an agent acting on them could add a CSP meta that blocks the app's own scripts. Dropped per t311u."
+  },
+  {
+   "id": "D09",
+   "queue": null,
+   "origin": "report",
+   "bucket": "self-heal",
+   "issues": [
+    "I101",
+    "I108",
+    "I114",
+    "I126",
+    "I127"
+   ],
+   "problem": "IN_BUILD_GREEN_RACED: a write landed while the first render was proven; the later render was saved as last-known-good and snapshot.",
+   "fix": "none",
+   "state": "Not a defect",
+   "proof": "I126, I127",
+   "sideEffectRisk": "n/a"
+  },
+  {
+   "id": "D10",
+   "queue": null,
+   "origin": "report",
+   "bucket": "self-heal",
+   "issues": [
+    "I123"
+   ],
+   "problem": "SIMULATED_RESULT_SHIPPED: suggestions are generated locally (3 places); disclosed in the summary by the existing rule.",
+   "fix": "none",
+   "state": "Already handled (existing disclosure)",
+   "proof": "I123",
+   "sideEffectRisk": "n/a"
+  },
+  {
+   "id": "D11",
+   "queue": null,
+   "origin": "report",
+   "bucket": "struggle (benign)",
+   "issues": [
+    "I8"
+   ],
+   "problem": "ETA 4.0–10.4 min shown; build took 3.5 min (0.58×, under the band). The planner call from D01 is inside the 3.5 min.",
+   "fix": "none — an under-run is not a user harm; F1 removes the misrouted planner.",
+   "state": "Not a defect",
+   "proof": "etaAccuracy",
+   "sideEffectRisk": "n/a"
+  },
+  {
+   "id": "D12",
+   "queue": null,
+   "origin": "report",
+   "bucket": "context",
+   "issues": [
+    "I86",
+    "I124"
+   ],
+   "problem": "'15 file(s)' (the model's own files) vs '23 files' (the project graph incl. scaffold) — different scopes, both true.",
+   "fix": "none",
+   "state": "Not a defect",
+   "proof": "I86, I124",
+   "sideEffectRisk": "n/a"
+  },
+  {
+   "id": "D13",
+   "queue": null,
+   "origin": "report",
+   "bucket": "skip (disclosed)",
+   "issues": [
+    "I92",
+    "I98",
+    "I99",
+    "I115",
+    "I121",
+    "I122"
+   ],
+   "problem": "Write-time typecheck never ran in the fast lane (verify ran tsc instead); no starter unit tests (vitest undeclared); e2e scaffold not run; red team 4/4 no crash; runtime verified.",
+   "fix": "none",
+   "state": "Covered by existing disclosures",
+   "proof": "I72 build verified; I122",
+   "sideEffectRisk": "n/a"
+  }
+ ]
+}

@@ -1061,6 +1061,18 @@ REMOVING an extra website or extra domain: unused days are returned to the walle
     keywords: ['doctor ai', 'senior doctor', 'medical ai', 'clinical ai', 'doctor assistant', 'sda chat', 'doctor screen', 'open doctor', 'old case', 'previous case', 'purana case', 'case history', 'new case', 'past patient'],
   },
 
+  // ─── TEXT TO VOICE ──────────────────────────────────────────────────────
+  {
+    id: 'voice_ai',
+    name: 'NavBharatAI Voice AI',
+    path: 'AI chat → Mode → Voice AI (between Image Generator AI and Teacher AI)',
+    description: 'Converts entered text into downloadable speech audio. This is text-to-speech, not the separate live voice conversation feature. Requires sign-in and sufficient wallet credits. Availability, supported languages, built-in voices and the exact character-based price are shown before generating. Text is sent to an external speech service only after Generate is pressed. Drafts and generated audio are kept only in the current screen memory: download the WAV to keep it. It does not clone voices or build apps. It may be unavailable until the server is configured.',
+    howToUse: 'Open Voice AI, enter up to the displayed character limit, choose an offered language and voice, review the exact wallet price, then press Generate. Play the result or download its WAV file. Do not enter private or sensitive information. To close one Voice window, open Mode → Recent and press ✕ on that Voice row. Closing the parent AI chat tab closes all Voice windows inside it. A standalone Voice view has its own header chip with ✕. Download audio before closing because drafts and audio are not saved.',
+    relatedFeatures: ['billing'],
+    aiSurface: 'voice_ai',
+    keywords: ['voice ai', 'text to speech', 'text to voice', 'speech generation', 'awaz banao', 'audio banao', 'voice generation'],
+  },
+
   // ─── TEACHER AI ──────────────────────────────────────────────────────────
   {
     id: 'teacher_ai',

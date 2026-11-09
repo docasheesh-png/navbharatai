@@ -4911,3 +4911,16 @@ secret control token distinct from the gateway credential) gate an isolated
 synthetic guest endpoint. `MITRIFY_GUEST_TEST_TARGET` is an operator-runner origin,
 not an app setting. No values are configured by this change. See docs/mitrify.md
 for expiring shared admission, inclusive spend prerequisite and rollback.
+
+### Voice AI text-to-speech (2026-11-09)
+
+Separate from real-time voice conversations. Server-only configuration; never expose credentials to Vite/client bundles.
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `VOICE_AI_ENABLED` | `1` enables configured text-to-speech; other values leave it unavailable | disabled |
+| `SARVAM_API_KEY` | Existing owner's Sarvam API subscription credential | missing |
+| `SARVAM_TTS_INR_PER_1000_CHARS` | Reviewed supplier INR cost per 1,000 Unicode codepoints for the pinned model (0.001–1,000; outside this precision range stays disabled) | required |
+| `SARVAM_TTS_COST_TAX_PERCENT` | Explicit effective supplier tax percentage, including 0 if applicable | required |
+
+Retail quote is 2 × configured tax-inclusive supplier cost, expressed to six decimal places. A temporary hold rounds up to one paise only for reversible authorization; settlement releases that hold and debits the exact quoted fee with the shared fractional-token carry. This is not a tax invoice and does not establish the user's applicable output GST. Review the configured rate against the supplier account before enabling. Provider invoices remain authoritative; no actual savings or measured cost claim is made. Provider master switch and maintenance remain effective. The paid-voice dispatch scope is entered only after the wallet hold; other free-module policy is unchanged. No deployment/secret/paid account setup is performed merely by adding this code.

@@ -1,4 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
 import { pgShimSource, pgliteDataDir, PG_SHIM_PATH, PGLITE_VERSION } from '../src/server/runtime/browserBackend/pgShim';
 
 /**
@@ -13,6 +19,50 @@ import { pgShimSource, pgliteDataDir, PG_SHIM_PATH, PGLITE_VERSION } from '../sr
  * DELETE would report 0 and the handler would tell the user nothing was deleted. A stub written from
  * the same misunderstanding as the code would have agreed with it.
  */
+
+// Initdb creates the same pristine Postgres catalog for every memory-only engine. Snapshot it once;
+// each SQL test restores that immutable Blob into its OWN real engine/filesystem, never a shared DB.
+// Initdb runs in a bounded Node child, outside V8's instrumentation of third-party implementation
+// code. The shipped source is still generated here under coverage; all restored-engine SQL stays here.
+let pristineDataDir: Blob;
+let catalogDirectory: string | undefined;
+const execFileAsync = promisify(execFile);
+interface DatabaseProcessProof {
+  mode: 'catalog' | 'cold';
+  closed: boolean;
+  bytes?: number;
+  results?: PgResult[];
+  engineCount?: number;
+  constructorArgumentCounts?: number[];
+}
+
+async function databaseProcess(mode: 'catalog' | 'cold', input: string): Promise<DatabaseProcessProof> {
+  const { stdout } = await execFileAsync(process.execPath, [
+    fileURLToPath(new URL('./helpers/pgliteFixtureProcess.mjs', import.meta.url)), mode, input,
+  ], { timeout: 15_000, maxBuffer: 1_000_000, shell: false, encoding: 'utf8' });
+  // Inherit the managed environment unchanged. Nonzero exit, malformed or incomplete output fails
+  // the fixture; it must never fall back to a stub or quietly mark an unrun database check as passed.
+  const proof = JSON.parse(stdout) as DatabaseProcessProof;
+  if (proof?.mode !== mode || proof.closed !== true) throw new Error('Database fixture did not finish and close its engines');
+  if (mode === 'catalog' && !(Number.isInteger(proof.bytes) && proof.bytes! > 0)) throw new Error('Missing pristine catalog proof');
+  if (mode === 'cold' && (!Array.isArray(proof.results) || proof.results.length !== 3
+    || !Number.isInteger(proof.engineCount) || !Array.isArray(proof.constructorArgumentCounts))) {
+    throw new Error('Incomplete cold-start database proof');
+  }
+  return proof;
+}
+
+beforeAll(async () => {
+  catalogDirectory = await mkdtemp(join(tmpdir(), 'nbai-pg-fixture-'));
+  const catalog = join(catalogDirectory, 'pristine.tar');
+  const proof = await databaseProcess('catalog', catalog);
+  const bytes = await readFile(catalog);
+  expect(bytes.byteLength).toBe(proof.bytes);
+  pristineDataDir = new Blob([bytes]);
+});
+afterAll(async () => {
+  if (catalogDirectory) await rm(catalogDirectory, { recursive: true, force: true });
+});
 
 // The shipped browser shim deliberately keeps one workspace database open. Each test creates a
 // distinct shim/engine, so the fixture (not Pool.end()) must close every real engine afterwards.
@@ -30,12 +80,15 @@ async function loadPg(dataDir: string | null = null): Promise<{
 }> {
   const source = pgShimSource('@electric-sql/pglite', dataDir);
   const module = { exports: {} as Record<string, unknown> };
-  // The shim reaches for the browser's dynamic import(). In Node the same specifier resolves to the
-  // installed package, so the code under test is unmodified.
+  // The shim reaches for the browser's dynamic import(). The adapter only supplies an empty catalog
+  // to memory-only engines and tracks cleanup; every query runs through the shipped shim and Postgres.
   const importer = async (spec: string) => {
     const real = await import(/* @vite-ignore */ spec);
     return { ...real, PGlite: class extends real.PGlite {
-      constructor(...args: any[]) { super(...args); engines.push(this as unknown as { close(): Promise<void> }); }
+      constructor(...args: any[]) {
+        super(...(args.length === 0 ? [{ loadDataDir: pristineDataDir }] : args));
+        engines.push(this as unknown as { close(): Promise<void> });
+      }
     } };
   };
   new Function('module', 'exports', 'console', '__nbaiImport', source.replace(/\bimport\(PGLITE_URL\)/, '__nbaiImport(PGLITE_URL)'))(
@@ -49,13 +102,37 @@ interface PgClient { query: (t: unknown, v?: unknown) => Promise<PgResult>; rele
 
 describe('it really is Postgres', () => {
   it('creates a table, inserts and reads back', async () => {
-    const { Pool } = await loadPg();
-    const pool = new Pool();
-    await pool.query('CREATE TABLE items (id serial primary key, name text NOT NULL)');
-    await pool.query('INSERT INTO items (name) VALUES ($1)', ['Doodh']);
-    const r = await pool.query('SELECT * FROM items');
-    expect(engines).toHaveLength(1);
+    // Keep an honest cold-start smoke: the exact shipped shim constructs the installed PGlite with
+    // zero arguments and runs the same SQL, without a catalog supplied by the fixture.
+    const proof = await databaseProcess('cold', JSON.stringify({
+      source: pgShimSource('@electric-sql/pglite', null),
+      queries: [
+        { text: 'CREATE TABLE items (id serial primary key, name text NOT NULL)' },
+        { text: 'INSERT INTO items (name) VALUES ($1)', values: ['Doodh'] },
+        { text: 'SELECT * FROM items' },
+      ],
+    }));
+    const r = proof.results![2];
+    expect(proof.engineCount).toBe(1);
+    expect(proof.constructorArgumentCounts).toEqual([0]);
     expect(r.rows).toEqual([{ id: 1, name: 'Doodh' }]);
+  });
+
+  it('restores independent databases from the pristine catalog for distinct shim modules', async () => {
+    const first = await loadPg();
+    const a = new first.Pool();
+    await a.query('CREATE TABLE fixture_isolation (name text)');
+    await a.query('INSERT INTO fixture_isolation VALUES ($1)', ['first']);
+
+    const second = await loadPg();
+    const b = new second.Pool();
+    await expect(b.query('SELECT * FROM fixture_isolation')).rejects.toThrow(/does not exist/i);
+    expect(engines).toHaveLength(2);
+    expect(engines[0]).not.toBe(engines[1]);
+    await b.query('CREATE TABLE fixture_isolation (name text)');
+    await b.query('INSERT INTO fixture_isolation VALUES ($1)', ['second']);
+    expect((await a.query('SELECT * FROM fixture_isolation')).rows).toEqual([{ name: 'first' }]);
+    expect((await b.query('SELECT * FROM fixture_isolation')).rows).toEqual([{ name: 'second' }]);
   });
 
   it('enforces a real constraint — a query that would fail on a server fails here too', async () => {
@@ -173,6 +250,7 @@ describe('the call styles generated servers actually use', () => {
     const pool = new Pool();
     expect(() => pool.on('error', () => {})).not.toThrow();
     await expect(pool.end()).resolves.toBeUndefined();
+    expect(engines).toHaveLength(0);
   });
 
   it('new Client() works as well as new Pool()', async () => {

@@ -35,6 +35,7 @@ export const WALLET_FEATURES = [
   { id: 'image', label: 'Image Generator AI' },
   { id: 'api', label: 'Developer API' },
   { id: 'voice', label: 'Voice chat' },
+  { id: 'voice-generation', label: 'Voice AI' },
   { id: 'free-chat', label: 'NavBharatAI Chat' },
   { id: 'database', label: 'App database' },
   { id: 'other', label: 'Other' },

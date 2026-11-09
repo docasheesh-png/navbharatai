@@ -190,7 +190,8 @@ export function SidebarNav({
   // their stated door is *"Pro v5.0"*, and `AgentV3Panel`'s tab strip really does render on desktop
   // (`mobileFooter ? 'hidden lg:flex' : 'flex'`) carrying Preview, Files, Diff, Terminal and its own
   // build History. Only the ids whose door was the MOBILE BAR were stranded.
-  const SIDEBAR_HIDDEN = new Set(['git', 'preview', 'files', 'professionals', 'about', 'apk', 'diff', 'imagegen']);
+  // Voice has a fallback header chip, but its entry remains in the chat's Mode picker only.
+  const SIDEBAR_HIDDEN = new Set(['git', 'preview', 'files', 'professionals', 'about', 'apk', 'diff', 'imagegen', 'voice_ai']);
   const visibleItems = menuItems.filter(item => !SIDEBAR_HIDDEN.has(item.id) && enabledModules[item.id] !== false);
 
   // Settings appeared TWICE in the mobile drawer — once in this list, once as a System Matrix tile below

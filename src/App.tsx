@@ -42,7 +42,7 @@ import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
 // AgentV3Launcher removed — v5.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
 import { fetchBuildSession } from './services/buildService';
-import { Bot, Zap, MessageSquare, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Briefcase, LayoutGrid, Layers, Store, Info, Package, Wand2, FileDiff } from 'lucide-react';
+import { Bot, Zap, MessageSquare, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Briefcase, LayoutGrid, Layers, Store, Info, Package, Wand2, FileDiff, Mic } from 'lucide-react';
 import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
 // Play compliance (admin 2026-08-04): medical-class assistants are hidden inside the Play-distributed
@@ -69,11 +69,12 @@ import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav
 import { footerTapPlan, type ModeFooterKey } from './lib/footerSheets';
 import { startFreshCase, CASE_ID_KEY, CASE_DOC_KEY } from './lib/sdaCaseStore';
 import { newSdaCaseId } from './lib/sdaCaseId';
+const VoiceAI = lazy(() => import('./components/voice/VoiceAI').then(m => ({ default: m.VoiceAI })));
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
 import { warmModeChunksWhenIdle } from './lib/warmModeChunks';
 import { ActionDot } from './components/ActionDot';
 import type { ActionTone } from './lib/actionNavigator';
-import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, recentTargetFromId, startsFreshOnPick, recentModeEntries, recentRowClosable, nextRecentAfterClose, lastChatClosed, activeModeId } from './components/chat/modePicker';
+import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, VOICE_MODE_ID, recentTargetFromId, startsFreshOnPick, recentModeEntries, recentRowClosable, nextRecentAfterClose, lastChatClosed, activeModeId } from './components/chat/modePicker';
 import { headerTabFor, hiddenHeaderTabs } from './lib/headerTab';
 import { ReportSheet } from './components/ReportSheet';
 import { TestingNoticeCard } from './components/TestingNotice';
@@ -2607,6 +2608,9 @@ export default function App() {
     { id: 'apk',          label: 'APK Builder',       icon: Package },
     { id: 'diff',         label: 'Diff',              icon: FileDiff },
     { id: 'imagegen',     label: 'AI Image Gen',      icon: Wand2 },
+    // Mode keeps Voice inside its parent chat. Register its standalone fallback so it still has a
+    // closable chip without a parent; SIDEBAR_HIDDEN keeps Mode as its only navigation door.
+    { id: 'voice_ai',     label: 'Voice AI',          icon: Mic },
   ], []);
   /**
    * Which ids the header can draw a chip for — its registered menu items. `lib/headerTab.ts` asks this
@@ -2792,7 +2796,7 @@ export default function App() {
     }
   };
   /** "New chat" for the image studio or Doctor AI while it is already open: one more window. */
-  const newSlotViewWindow = (view: 'imagegen' | 'sda_chat'): void => {
+  const newSlotViewWindow = (view: 'imagegen' | 'voice_ai' | 'sda_chat'): void => {
     if (!chatSlotFree(openChats, openTabs, viewWindows)) { addToast(capMessage(), 'warning'); return; }
     let id = `img-${Date.now().toString(36)}`;
     if (view === 'sda_chat') {
@@ -2809,7 +2813,7 @@ export default function App() {
     toggleTab(view);
   };
   /** ✕ on an image-studio or Doctor AI row. The last window closes the view, exactly as before. */
-  const closeSlotViewWindow = (view: 'imagegen' | 'sda_chat', windowId: string): void => {
+  const closeSlotViewWindow = (view: 'imagegen' | 'voice_ai' | 'sda_chat', windowId: string): void => {
     const wins = viewWindowsFor(viewWindows, openTabs, view);
     if (wins.length <= 1) { closeTab(undefined, view); return; }
     const idx = wins.findIndex((w) => w.id === windowId);
@@ -2833,7 +2837,7 @@ export default function App() {
   /** A recent row → its chat: a FREE window by swap, an image/Doctor window by focus, a professional through toggleTab. */
   const switchToRecent = (view: string, windowId?: string): void => {
     if (view === 'nbi_chat') { showFreeWindow(windowId ?? DEFAULT_VIEW_WINDOW); return; }
-    if (view === IMAGE_MODE_ID || view === 'sda_chat') {
+    if (view === IMAGE_MODE_ID || view === VOICE_MODE_ID || view === 'sda_chat') {
       setActiveViewWindows(prev => ({ ...prev, [view]: windowId ?? DEFAULT_VIEW_WINDOW }));
       toggleTab(view as ViewType);
       return;
@@ -4101,8 +4105,8 @@ export default function App() {
                 if (target.view === 'nbi_chat') {
                   closeFreeWindow(viewWindowId);
                   if (!last) return; // FREE stays on screen (its neighbour, or a fresh chat) — nothing to move to
-                } else if (target.view === IMAGE_MODE_ID || target.view === 'sda_chat') {
-                  closeSlotViewWindow(target.view as 'imagegen' | 'sda_chat', viewWindowId);
+                } else if (target.view === IMAGE_MODE_ID || target.view === VOICE_MODE_ID || target.view === 'sda_chat') {
+                  closeSlotViewWindow(target.view as 'imagegen' | 'voice_ai' | 'sda_chat', viewWindowId);
                   if (wasOnScreen && next && next.view === target.view) return; // its sibling is now on screen
                 } else if (target.conversationId) closeChatWindow(undefined, target.conversationId);
                 else closeTab(undefined, target.view as ViewType);
@@ -4130,6 +4134,15 @@ export default function App() {
                 // Opened from HERE it lives inside the chat tab the user is in (no header chip of its
                 // own, that tab stays lit) and takes one of the five slots; already open, it is simply
                 // shown, through whichever door it came in by (from Other Tools it keeps its own tab).
+                if (id === VOICE_MODE_ID) {
+                  if (openTabs.includes('voice_ai')) { newSlotViewWindow('voice_ai'); return; }
+                  if (!chatSlotFree(openChats, openTabs, viewWindows)) { addToast(capMessage(), 'warning'); return; }
+                  const host = headerTabFor(activeView, tabOpeners, hasHeaderChip);
+                  if (toggleTab('voice_ai') && isModeSurface(host)) {
+                    setTabOpeners(prev => ({ ...prev, voice_ai: host as ViewType }));
+                  }
+                  return;
+                }
                 if (id === IMAGE_MODE_ID) {
                   if (!openTabs.includes(IMAGE_MODE_ID as ViewType)) {
                     if (!chatSlotFree(openChats, openTabs, viewWindows)) { addToast(capMessage(), 'warning'); return; }
@@ -4199,6 +4212,11 @@ export default function App() {
                 includeProfessionals={historyInitialFilter === 'free'}
                 onOpenProfessional={openProfessionalConversation} onDeleteProfessional={deleteProfessionalConversation} />)}
 
+          {openTabs.includes('voice_ai') && viewWindowsFor(viewWindows, openTabs, 'voice_ai').map(win => (
+            <div key={`${user?.uid ?? 'guest'}:voice:${win.id}`} className={activeView === 'voice_ai' && activeViewWindowOf('voice_ai') === win.id ? 'flex flex-1 min-h-0 min-w-0 overflow-hidden' : 'hidden'}>
+              <VoiceAI onScreen={activeView === 'voice_ai' && activeViewWindowOf('voice_ai') === win.id} userId={user?.uid} onOpenModePicker={modePickerOpener} />
+            </div>
+          ))}
           <ViewPanels
             imageWindowIds={viewWindowsFor(viewWindows, openTabs, IMAGE_MODE_ID).map((w) => w.id)}
             imageWindowOnScreen={activeViewWindowOf(IMAGE_MODE_ID)}

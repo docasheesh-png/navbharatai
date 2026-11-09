@@ -4,7 +4,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { parseEnvFlag } from '../lib/envFlag';
 import { assertNoUnclaimedGatewayDispatch } from './InferenceGateway/dispatchBoundary';
 
-export type InferenceScope = 'free-modules' | 'weak' | 'paid-builder' | 'paid-professional';
+export type InferenceScope = 'free-modules' | 'weak' | 'paid-builder' | 'paid-professional' | 'paid-voice';
 const surplusBuild = new AsyncLocalStorage<{ enabled: boolean }>();
 /** Narrow server-owned build boundary: unrelated requests and media keep their existing policy. */
 export function runWithSurplusBuild<T>(enabled: boolean, fn: () => T): T { return surplusBuild.run({ enabled }, fn); }

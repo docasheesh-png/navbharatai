@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
+import { restoreMutations } from './helpers/restoreMutationCensus';
 import { ALL_ABORT_CAUSES, abortBuild } from '../src/server/AgentV3/buildAbortCause';
 import { buildRemoveCommand } from '../src/server/AgentV3/GreenGuard';
 import { applySnapshotRestore, snapshotRestoreComplete, snapshotRestoredFiles, snapshotRestoreStopped, type SnapshotRestoreDeps, type SnapshotRestorePlan } from '../src/server/AgentV3/snapshotRestore';
@@ -16,45 +17,51 @@ function pending() {
   return { promise, release };
 }
 
-const RESTORE_NAME = /restore|revert|rollback/i;
+type RestoreCensusFile = { path: string; mutations: ReturnType<typeof restoreMutations> };
 
-function mayNameRestore(text: string): boolean {
-  if (RESTORE_NAME.test(text)) return true;
-  if (!text.includes('\\')) return false;
-  // Encoded characters (including malformed possible encodings) always need the AST. Remaining
-  // escapes can only retain their next character, insert a control character or continue a line:
-  // removing the slash/continuation overincludes those names instead of hiding an identity escape.
-  if (/\\(?:[ux]|[0-7])/i.test(text)) return true;
-  return RESTORE_NAME.test(text.replace(/\\(?:\r\n|[\r\n\u2028\u2029])/g, '').replace(/\\/g, ''));
+/** Fail closed if the child omitted a file, stopped early, or returned incomplete evidence. */
+function decodeRestoreCensusOutput(stdout: string, paths: readonly string[]): RestoreCensusFile[] {
+  const payload: unknown = JSON.parse(stdout);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Invalid restore census response');
+  const result = payload as Record<string, unknown>;
+  if (result.version !== 1 || result.completed !== true || !Array.isArray(result.files)
+    || result.files.length !== paths.length) throw new Error('Incomplete restore census response');
+  for (let i = 0; i < paths.length; i++) {
+    const value: unknown = result.files[i];
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Invalid restore census file ${i}`);
+    const file = value as Record<string, unknown>;
+    if (file.path !== paths[i] || !Array.isArray(file.mutations)) throw new Error(`Restore census inventory mismatch at ${i}`);
+    for (const value of file.mutations) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Invalid restore mutation in ${paths[i]}`);
+      const mutation = value as Record<string, unknown>;
+      if (typeof mutation.key !== 'string' || !mutation.key.startsWith(`${paths[i]}#`)
+        || typeof mutation.body !== 'string') throw new Error(`Incomplete restore mutation in ${paths[i]}`);
+    }
+  }
+  return result.files as RestoreCensusFile[];
 }
 
-function restoreMutations(path: string, text: string, parsed?: ts.SourceFile): Array<{ key: string; body: string }> {
-  if (!mayNameRestore(text)) return [];
-  const file = parsed ?? ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
-  const found: Array<{ key: string; body: string }> = [];
-  function visit(node: ts.Node) {
-    if (ts.isFunctionLike(node) && 'body' in node && node.body) {
-      const parent = node.parent;
-      const named = node.name ?? ((ts.isVariableDeclaration(parent) || ts.isPropertyAssignment(parent)) ? parent.name : undefined);
-      const literalName = named && ts.isComputedPropertyName(named) ? named.expression : named;
-      // Identifier/string .text decodes escaped spellings such as res\u0074ore. Other names retain
-      // the previous raw-text check, so this optimisation cannot narrow the existing census.
-      const name = literalName && (ts.isIdentifier(literalName) || ts.isStringLiteralLike(literalName))
-        ? literalName.text : named?.getText(file);
-      if (name && RESTORE_NAME.test(name)) {
-        let mutates = false;
-        function calls(child: ts.Node) {
-          if (ts.isCallExpression(child) && /(?:\.(?:writeFiles?|writeBinaryFile|removeFile|runCommand|write|remove|execInContainer|run|restore|git)|(?:^|\.)apply(?:Green)?SnapshotRestore|writeWorkspaceFiles|mergeWorkspaceFiles|saveWorkspaceFiles|removeWorkspaceFiles|execPromise)$/.test(child.expression.getText(file))) mutates = true;
-          ts.forEachChild(child, calls);
-        }
-        calls(node.body);
-        if (mutates) found.push({ key: `${path}#${name}`, body: node.getText(file) });
-      }
-    }
-    ts.forEachChild(node, visit);
+function readRestoreCensus(paths: readonly string[], snapshots: Record<string, string> = {}): RestoreCensusFile[] {
+  // Only this test's source parser runs outside Vitest's precise-coverage instrumentation. No app
+  // module executes in the child. Every source file and full function body returns for assertions.
+  // Keep the managed environment unchanged; never remove NODE_OPTIONS or coverage settings.
+  const child = spawnSync(process.execPath, [
+    '--experimental-strip-types', join(__dirname, 'helpers/restoreMutationCensusProcess.mjs'),
+  ], {
+    cwd: join(__dirname, '..'),
+    env: process.env,
+    input: JSON.stringify({ paths, snapshots }),
+    encoding: 'utf8',
+    shell: false,
+    timeout: 15_000,
+    killSignal: 'SIGKILL',
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (child.error) throw new Error(`Restore census child failed: ${child.error.message}`);
+  if (child.status !== 0 || child.signal !== null) {
+    throw new Error(`Restore census child exited ${child.status}, signal ${child.signal}: ${child.stderr}`);
   }
-  visit(file);
-  return found;
+  return decodeRestoreCensusOutput(child.stdout, paths);
 }
 
 describe('an automatic restore reports only what it applied', () => {
@@ -193,7 +200,84 @@ describe('automatic restore caller census', () => {
 vertContinued': async () => { await io.writeFile('a', 'green'); } };`, 'revertContinued'],
   ])('the census still finds a mutation with a %s name', (_label, escaped, name) => {
     expect(restoreMutations('escaped.ts', escaped).map((entry) => entry.key)).toEqual([`escaped.ts#${name}`]);
+    const parented = ts.createSourceFile('escaped.ts', escaped, ts.ScriptTarget.Latest, true);
+    expect(restoreMutations('escaped.ts', escaped)).toEqual(restoreMutations('escaped.ts', escaped, parented));
   });
+  it('still classifies nested restorers after an outer mutation and finds a late mutation', () => {
+    const fixture = `
+      async function restoreOuter() {
+        await io.writeFile('first', 'green');
+        async function revertNested() { await io.removeFile('extra'); }
+        const rollbackNested = async () => { await io.runCommand('undo'); };
+      }
+      async function restoreLate() { inspect(); if (ready) await io.writeFile('late', 'green'); }
+      async function restoreReadOnly() { inspect(); }
+    `;
+    expect(restoreMutations('nested.ts', fixture).map((entry) => entry.key)).toEqual([
+      'nested.ts#restoreOuter', 'nested.ts#revertNested', 'nested.ts#rollbackNested', 'nested.ts#restoreLate',
+    ]);
+    const parented = ts.createSourceFile('nested.ts', fixture, ts.ScriptTarget.Latest, true);
+    expect(restoreMutations('nested.ts', fixture)).toEqual(restoreMutations('nested.ts', fixture, parented));
+  });
+
+  it.each([
+    ['expressions.ts', "const restoreArrow = async () => io.write('a'); const revertExpression = async function () { await io.remove('b'); }; const other = function rollbackNamed() { io.run('c'); };"],
+    ['properties.ts', "const h = { restore: async () => io.write('a'), revert: async function () { await io.remove('b'); }, async rollback() { await io.run('c'); }, ['restoreComputed']: () => io.write('d'), [choose('revertDynamic')]: () => io.write('e') };"],
+    ['class.ts', "class H { async restore() { await io.write('a'); } rollback = () => io.remove('b'); get revert() { return () => io.run('undo'); } }"],
+    ['templates.ts', "const template = `value: ${function restoreTemplate() { io.write('a'); }}`; const h = { [`revertTemplate`]: () => io.remove('b') };"],
+    ['view.tsx', "const view = <button onClick={function restoreClick() { io.write('a'); }}>{(() => { const rollbackChild = () => io.remove('b'); return 'x'; })()}</button>;"],
+    ['recovered.ts', "const h = { ['restoreRecovered']: async () => { if (ready) io.write('a'); } ; async function rollbackOther() { io.run('b'); }"],
+  ])('carried parents match TypeScript parent links for every result and body in %s', (path, fixture) => {
+    const parented = ts.createSourceFile(path, fixture, ts.ScriptTarget.Latest, true);
+    expect(restoreMutations(path, fixture)).toEqual(restoreMutations(path, fixture, parented));
+  });
+
+  it('the fresh process returns the same complete bodies as the parented detector for every fixture', () => {
+    const fixtures: Array<[string, string]> = [
+      ['src/server/routes/agentv3.ts', "async function restoreSnapshotOnly() { await io.write('snapshot'); }"],
+      ['fixtures/empty.ts', 'export const value = 1;'],
+      ['fixtures/nested.ts', "async function restoreOuter() { await io.write('a'); const revertNested = async () => io.remove('b'); async function rollbackNested() { await io.run('c'); } }"],
+      ['fixtures/properties.ts', "const h = { restore: async function () { await io.write('a'); }, ['revertComputed']: () => io.remove('b'), [choose('rollbackDynamic')]: () => io.run('c') };"],
+      ['fixtures/unicode.ts', String.raw`async function res\u0074oreEscaped() { await io.write('a'); }`],
+      ['fixtures/hex.ts', String.raw`const h = { 're\x76ertHex': async () => io.remove('a') };`],
+      ['fixtures/computed.ts', String.raw`const h = { ['roll\u0062ackComputed']: async () => io.run('a') };`],
+      ['fixtures/identity.ts', String.raw`const h = { 'rest\oreIdentity': async () => io.write('a') };`],
+      ['fixtures/octal.ts', String.raw`const h = { 'res\164oreOctal': async () => io.write('a') };`],
+      ['fixtures/continued.ts', "const h = { 're\\\nvertContinued': async () => io.write('a') };"],
+      ['fixtures/template.ts', "const value = `x: ${function restoreTemplate() { io.write('a'); }}`; const h = { [`revertTemplate`]: () => io.remove('b') };"],
+      ['fixtures/view.tsx', "const view = <button onClick={function restoreClick() { io.write('a'); }}>{(() => { const rollbackChild = () => io.remove('b'); return 'x'; })()}</button>;"],
+      ['fixtures/recovered.ts', "const h = { ['restoreRecovered']: () => { io.write('a'); } ; function rollbackOther() { io.run('b'); }"],
+    ];
+    const paths = fixtures.map(([path]) => path);
+    const expected = fixtures.map(([path, text]) => ({
+      path,
+      mutations: restoreMutations(path, text, ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true)),
+    }));
+    expect(expected[0].mutations.map(({ key }) => key)).toEqual(['src/server/routes/agentv3.ts#restoreSnapshotOnly']);
+    expect(expected[1].mutations).toEqual([]);
+    expect(readRestoreCensus(paths, Object.fromEntries(fixtures))).toEqual(expected);
+  });
+
+  it('rejects incomplete, reordered, corrupt or truncated child evidence', () => {
+    const paths = ['fixtures/a.ts', 'fixtures/b.ts'];
+    const first = { path: paths[0], mutations: [{ key: `${paths[0]}#restore`, body: "function restore() { io.write('a'); }" }] };
+    const second = { path: paths[1], mutations: [] };
+    const complete = { version: 1, completed: true, files: [first, second] };
+    expect(decodeRestoreCensusOutput(JSON.stringify(complete), paths)).toEqual(complete.files);
+    for (const invalid of [
+      null,
+      { ...complete, version: 2 },
+      { ...complete, completed: false },
+      { ...complete, files: [first] },
+      { ...complete, files: [second, first] },
+      { ...complete, files: [first, first] },
+      { ...complete, files: [{ ...first, mutations: null }, second] },
+      { ...complete, files: [{ ...first, mutations: [{ key: `${paths[0]}#restore` }] }, second] },
+      { ...complete, files: [{ ...first, mutations: [{ key: `${paths[1]}#restore`, body: 'wrong path' }] }, second] },
+    ]) expect(() => decodeRestoreCensusOutput(JSON.stringify(invalid), paths)).toThrow();
+    expect(() => decodeRestoreCensusOutput('{"version":1,"completed":true,"files":[', paths)).toThrow();
+  });
+
   it('every route restore planner uses applied outcomes or the explicitly checked version restore', () => {
     let plans = 0;
     function visit(node: ts.Node) {
@@ -261,21 +345,26 @@ vertContinued': async () => { await io.writeFile('a', 'green'); } };`, 'revertCo
       'src/server/project/VersionStore.ts#restore': ['const vfs = new VirtualFileSystem()', 'return vfs'],
     };
     const found = new Set<string>();
+    const paths: string[] = [];
     function scan(dir: string) {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const path = `${dir}/${entry.name}`;
         if (entry.isDirectory()) { scan(path); continue; }
         if (!/\.[cm]?tsx?$/.test(path) || /\.(?:test|spec)\.[^.]+$/.test(path)) continue;
-        const text = path === 'src/server/routes/agentv3.ts' ? route : readFileSync(path, 'utf8');
-        for (const { key, body } of restoreMutations(path, text, path === 'src/server/routes/agentv3.ts' ? source : undefined)) {
-          found.add(key);
-          expect(policies[key], `Unclassified restore mutation: ${key}`).toBeDefined();
-          // The default live gate can be a function parameter, so inspect the whole function.
-          for (const required of policies[key] ?? []) expect(body, key).toContain(required);
-        }
+        paths.push(path);
       }
     }
     scan('src');
+    // Preserve the exact enumeration and the same route snapshot used by the other source checks.
+    // readRestoreCensus verifies one complete response per path, including files with no matches.
+    for (const file of readRestoreCensus(paths, { 'src/server/routes/agentv3.ts': route })) {
+      for (const { key, body } of file.mutations) {
+        found.add(key);
+        expect(policies[key], `Unclassified restore mutation: ${key}`).toBeDefined();
+        // The default live gate can be a function parameter, so inspect the whole function.
+        for (const required of policies[key] ?? []) expect(body, key).toContain(required);
+      }
+    }
     expect([...found].sort()).toEqual(Object.keys(policies).sort());
   });
 });

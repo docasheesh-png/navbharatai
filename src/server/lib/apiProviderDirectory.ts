@@ -46,6 +46,7 @@ export interface ApiProviderEntry {
 }
 
 export const API_PROVIDERS: readonly ApiProviderEntry[] = [
+  { id: 'sarvam', name: 'Sarvam AI', group: 'ai', envKeys: ['SARVAM_API_KEY'], usedFor: ['Voice AI text-to-speech'], billingUrl: 'https://indus.sarvam.ai/billing', billingHint: 'Open the account dashboard to check credits; no live balance API is configured.' },
   // ── AI providers ──
   { id: 'qubax', name: 'Qubax', group: 'ai', envKeys: ['QUBAX_API_KEY'], usedFor: ['Reviewed Chat fallback after Mitrify', 'Admin Test Chat Bot (Qubax only)'], billingUrl: 'https://qubax.ai/app/billing', billingHint: 'Billing → credits and usage; open the supplier page to check the balance' },
   { id: 'mitrify', name: 'Mitrify', group: 'ai', envKeys: ['MITRIFY_API_KEY'], usedFor: ['Reviewed conversational fallback (exact-payload approval required)'], billingUrl: null, billingHint: 'Supplier billing URL and balance API are not verified; ask the existing account operator. No balance is inferred.' },

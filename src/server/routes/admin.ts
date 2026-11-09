@@ -192,6 +192,7 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'free_answer_quota', // Shared Free answer admissions; bounded eight-day retention.
   'app_builds', 'build_sessions', 'build_sessions_v2', 'build_history_v2', 'user_build_history', 'user_costs', 'server_logs',
   'agentv3_build_requests',
+  'voice_ai_operations', // Financial holds and terminal replay tombstones; explicit retained-money policy.
   // Registry root documents are fixed, but their nested chunks/actions grow with catalog changes
   // and admin decisions; controls/health grow per model. Only history/routing are bounded rings.
   // Inventory the entire retained tree, not a misleading count of its two root documents.

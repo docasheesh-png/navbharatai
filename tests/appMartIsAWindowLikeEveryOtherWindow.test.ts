@@ -119,6 +119,33 @@ describe('every AI can tell the user how to close it', () => {
   });
 });
 
+describe('Voice AI has a closable fallback without a second navigation door', () => {
+  it('registers its own recognisable chip instead of adding an unregistered exception', () => {
+    expect(menuEntries().filter((entry) => entry.id === 'voice_ai')).toEqual([
+      { id: 'voice_ai', label: 'Voice AI', icon: 'Mic' },
+    ]);
+    expect(app).toMatch(/import \{[^}]*\bMic\b[^}]*\} from 'lucide-react'/);
+  });
+
+  it('keeps Voice in Mode only, hidden from both sidebar surfaces', () => {
+    const hidden = /const SIDEBAR_HIDDEN = new Set\(\[([^\]]*)\]\)/.exec(sidebar);
+    expect(hidden).not.toBeNull();
+    expect(hidden![1]).toContain("'voice_ai'");
+    expect(sidebar).toMatch(/visibleItems = menuItems\.filter\(item => !SIDEBAR_HIDDEN\.has\(item\.id\)/);
+  });
+
+  it('explains closing one Voice window versus closing its parent chat tab', () => {
+    const kb = readFileSync(join(root, 'src/server/AppContext/AppKnowledgeBase.ts'), 'utf8');
+    const start = kb.indexOf("id: 'voice_ai'");
+    const entry = kb.slice(start, kb.indexOf('\n  },', start));
+    expect(entry).toContain('Mode → Recent');
+    expect(entry).toContain('✕');
+    expect(entry).toContain('parent AI chat tab');
+    expect(entry).toContain('all Voice windows inside it');
+    expect(entry).toContain('header chip');
+  });
+});
+
 describe('the registry itself', () => {
   it('no id is registered twice — a duplicate would render two chips for one window', () => {
     const ids = menuEntries().map((e) => e.id);

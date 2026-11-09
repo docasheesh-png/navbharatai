@@ -60,7 +60,7 @@ import { PROFESSIONAL_CHATS } from '../professionals/professionalConfigs';
 import { isMedicalProfessionalId } from '../../lib/playCompliance';
 import { windowLabel, viewWindowsFor, DEFAULT_VIEW_WINDOW, type ChatWindow } from '../../lib/chatWindows';
 
-export type ModeKind = 'recent' | 'free' | 'image' | 'professional';
+export type ModeKind = 'recent' | 'free' | 'image' | 'voice' | 'professional';
 
 export interface ModeEntry {
   /**
@@ -120,6 +120,7 @@ export const FREE_MODE_ID = 'free';
  * separate id would have been a second copy to keep in sync.
  */
 export const IMAGE_MODE_ID = 'imagegen';
+export const VOICE_MODE_ID = 'voice_ai';
 
 /** Named like "NavBharatAI FREE" (admin 2026-09-23: "image generator ai 'free'"). Since 2026-10-05 the first 5
  *  pictures a day are free and the rest cost ₹1 each (#3547) — the name stays, the "always free" reason does not. */
@@ -165,6 +166,7 @@ export function modeNameFor(viewId: string): string | null {
   if (viewId === 'nbi_chat') return COPY.branding.aiChatName;
   if (viewId === 'sda_chat') return 'Doctor AI';
   if (viewId === IMAGE_MODE_ID) return IMAGE_MODE_NAME;
+  if (viewId === VOICE_MODE_ID) return 'Voice AI';
   return PROFESSIONAL_CHATS[viewId]?.name ?? null;
 }
 
@@ -172,6 +174,7 @@ export function modeNameFor(viewId: string): string | null {
 export function modeEmojiFor(viewId: string): string {
   if (viewId === 'nbi_chat') return '💬';
   if (viewId === IMAGE_MODE_ID) return '🎨';
+  if (viewId === VOICE_MODE_ID) return '🎙️';
   return MODE_EMOJI[viewId] ?? FALLBACK_EMOJI;
 }
 
@@ -204,7 +207,7 @@ export function recentRowClosable(id: string): boolean {
 }
 
 /** The single-chat views the Recent group lists, in the order the New group lists them too. */
-const RECENT_SINGLE_VIEWS: readonly string[] = ['nbi_chat', IMAGE_MODE_ID, 'sda_chat'];
+const RECENT_SINGLE_VIEWS: readonly string[] = ['nbi_chat', IMAGE_MODE_ID, VOICE_MODE_ID, 'sda_chat'];
 
 /**
  * THE RECENT GROUP: every chat that is open right now, one row each (2026-09-22). PURE.
@@ -292,6 +295,7 @@ export function newModeEntries(opts: { hideMedical: boolean }): ModeEntry[] {
   entries.push({ id: FREE_MODE_ID, name: COPY.branding.aiChatName, kind: 'free', emoji: '💬' });
   // The image studio, above Doctor AI (admin: "images generator ai … doctor ai se upar").
   entries.push({ id: IMAGE_MODE_ID, name: IMAGE_MODE_NAME, kind: 'image', emoji: modeEmojiFor(IMAGE_MODE_ID) });
+  entries.push({ id: VOICE_MODE_ID, name: 'Voice AI', kind: 'voice', emoji: modeEmojiFor(VOICE_MODE_ID) });
   // Doctor AI, then every professional.
   if (!opts.hideMedical) entries.push({ id: 'sda_chat', name: 'Doctor AI', kind: 'professional', emoji: MODE_EMOJI.sda_chat });
   for (const [id, config] of Object.entries(PROFESSIONAL_CHATS)) {
@@ -380,5 +384,5 @@ export function isModeSurface(view: string): boolean {
   // `imagegen` joined the list, so it must also carry the button — a row that takes you somewhere with
   // no way back is a trap, and the Mode button IS the way back on every other surface here.
   return view === 'nbi_chat' || view === 'professionals' || view === 'sda_chat'
-    || view === IMAGE_MODE_ID || view in PROFESSIONAL_CHATS;
+    || view === IMAGE_MODE_ID || view === VOICE_MODE_ID || view in PROFESSIONAL_CHATS;
 }

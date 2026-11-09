@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readTestChatAction, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_MAX_RESPONSE_CHARS,
   type TestChatAction, type TestChatReply, type TestChatStatus } from '../../lib/testChatBot';
-import { qubaxConfig, QubaxError, runApprovedQubaxChat } from './qubax';
+import { qubaxConfig, qubaxOwnerDispatch, QubaxError, runApprovedQubaxChat } from './qubax';
 import { getServerDb } from './serverDb';
 import { assertAiAvailable } from './aiMaintenance';
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
@@ -16,7 +16,8 @@ export class TestChatUnavailable extends Error {
 export function testChatStatus(): TestChatStatus {
   let configured = false, enabled = false;
   try { const cfg = qubaxConfig(); configured = !!cfg.apiKey; enabled = cfg.enabled; } catch { /* Invalid config fails closed. */ }
-  return { providers: [{ id: 'qubax', label: 'Qubax', configured, enabled, model: null }], approvalRequired: true, noFallback: true };
+  const owner = qubaxOwnerDispatch();
+  return { providers: [{ id: 'qubax', label: 'Qubax', configured, enabled, model: owner?.modelId ?? null }], approvalRequired: !owner, noFallback: true };
 }
 
 /** Fixed server-owned registry. Adding a provider requires its reviewed adapter and tests, not an arbitrary URL/key. */

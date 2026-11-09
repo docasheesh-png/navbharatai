@@ -69,7 +69,7 @@ export function mergeWallets(into: Wallet, other: Wallet, nowIso: string): Merge
 
   // Balance from first principles — this is what prevents welcome-farming AND carries debt.
   const explicitAdminCredit = into.adminBuildTokensRemaining !== undefined || other.adminBuildTokensRemaining !== undefined;
-  if (explicitAdminCredit && [into, other].some(w => Array.isArray(w.walletLedger)
+  if ([into, other].some(w => Array.isArray(w.walletLedger)
     && w.walletLedger.some((row: any) => Array.isArray(row?.openHolds) && row.openHolds.length > 0))) {
     throw new Error('Finish pending wallet reservations before merging these accounts. No balance changed.');
   }

@@ -29,6 +29,7 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
  * is on neither list.
  */
 const REVIEWED_SMALL: Record<string, string> = {
+  '/api/voice-ai/generate': 'strict five-key allowlist: at most 2,500 Unicode codepoints (5,000 UTF-16 units), language/voice catalog ids, UUID and numeric accepted price; centrally enforced 32 KB JSON cap, no attachments or endpoints',
   '/api/admin/game-assets/live-check': 'strict empty JSON object only; every caller field is rejected; no URL, asset id, prompt or credential is accepted; standard 1 MB parser cap unchanged',
   '/api/admin/provider-switches': 'strict four-key JSON allowlist: provider id from a fixed list, boolean on, 3–300 character reason, integer revision; every other field rejected; standard 1 MB parser cap unchanged',
   '/api/admin/api-providers/:id/account': 'strict one-key JSON allowlist: accountEmail, an email of at most 254 characters or empty; every other field rejected; provider id must be one of the directory ids; standard 1 MB parser cap unchanged',

@@ -45,6 +45,10 @@ function stripComments(src: string): string {
  * body: an interface is read to its BALANCED closing brace, so a nested object type cannot truncate it.
  */
 export function extractExportedDeclaration(source: string | null | undefined, name: string): string | null {
+  return extractDeclaration(source, name);
+}
+
+function extractDeclaration(source: string | null | undefined, name: string, parsedSources?: Map<string, ts.SourceFile>): string | null {
   const src = String(source ?? '');
   if (!src || src.length > 1_000_000 || !/^[A-Za-z_$][\w$]*$/.test(name)) return null;
 
@@ -74,16 +78,17 @@ export function extractExportedDeclaration(source: string | null | undefined, na
       return keys && keys.length ? `export type ${name} = ${keys.map((k) => `'${k}'`).join(' | ')};` : decl;
     }
   }
-  return exportedCallableOrClass(src, name);
+  return exportedCallableOrClass(src, name, parsedSources);
 }
 
 /** Public callable declarations, from the same source as the types — never guessed aliases.
  * Explicit return types let us omit implementations; inferred members retain labelled actual source.
  * This quotes a declared surface, not an inferred or inherited complete structural type.
  */
-function exportedCallableOrClass(source: string, name: string): string | null {
+function exportedCallableOrClass(source: string, name: string, parsedSources?: Map<string, ts.SourceFile>): string | null {
   try {
-    const sf = ts.createSourceFile('kit.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const sf = parsedSources?.get(source) ?? ts.createSourceFile('kit.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    parsedSources?.set(source, sf);
     if ((sf as ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics?.length) return null;
     const exported = (node: ts.Node) => ts.canHaveModifiers(node)
       && !!ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
@@ -233,11 +238,14 @@ const INDENT = '  ';
 export function kitTypeContract(files: Readonly<Record<string, string>> | null | undefined, maxChars = Infinity): string {
   const map = files ?? {};
   const sections: string[] = [];
+  // Several selected callables live in one large kit file. Parse that exact immutable source once
+  // for this contract only; standalone extraction and later calls retain their original behavior.
+  const parsedSources = new Map<string, ts.SourceFile>();
   for (const entry of CONTRACT) {
     const source = map[entry.file];
     if (typeof source !== 'string' || !source) continue;
     const decls = entry.names
-      .map((n) => extractExportedDeclaration(source, n))
+      .map((n) => extractDeclaration(source, n, parsedSources))
       .filter((d): d is string => !!d);
     if (decls.length === 0) continue;
     const body = `// ${entry.file}\n${decls.join('\n\n')}`;

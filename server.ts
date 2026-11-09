@@ -65,6 +65,7 @@ import { registerExplainCodeRoutes } from './src/server/routes/explainCode';
 import { registerDebugRoutes } from './src/server/routes/debug';
 import { registerWebsiteCheckupRoutes } from './src/server/routes/websiteCheckup';
 import { registerAppDebugRoutes } from './src/server/routes/appDebug';
+import { registerVoiceAiRoutes } from './src/server/routes/voiceAi';
 import { registerImageGenRoutes } from './src/server/routes/imageGen';
 import { registerDevtoolsProxyRoutes } from './src/server/routes/devtoolsProxy';
 import { registerScreenshotToPromptRoutes } from './src/server/routes/screenshotToPrompt';
@@ -827,6 +828,7 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   registerDebugRoutes(app); // AI Debugger — real free-tier AI error analysis (POST /api/debug)
   registerWebsiteCheckupRoutes(app); // Website Checkup — passive health check of the USER'S OWN published site (GET /api/website-checkup/sites, POST /api/website-checkup)
   registerAppDebugRoutes(app); // Full-App Debugger — whole-codebase scan (GET /api/app-debug/sources, POST /api/app-debug/run)
+  registerVoiceAiRoutes(app);
   registerImageGenRoutes(app); // AI Image Gen — real image generation on our own key (POST /api/image/generate)
   registerDevtoolsProxyRoutes(app); // API Tester — SSRF-guarded server proxy (POST /api/devtools/proxy)
   registerScreenshotToPromptRoutes(app); // Screenshot→Code — vision → build prompt (POST /api/screenshot/to-prompt)
@@ -1203,6 +1205,8 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
           // AND ONCE AT BOOT. Without this the first six hours of a fresh instance — which includes
           // every build right after a deploy — would still bill at the fallback.
           void refreshFx();
+          scheduler.register({ id: 'voice-ai-refund-recovery', schedule: { kind: 'everyMs', ms: 60_000 }, exclusive: true,
+            handler: async () => { await import('./src/server/lib/voiceAiStore').then(m => m.reconcileVoiceHolds()); } });
           scheduler.register({
             id: 'monitor-alerts',
             schedule: { kind: 'everyMs', ms: 15 * 60_000 },

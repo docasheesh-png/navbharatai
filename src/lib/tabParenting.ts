@@ -30,7 +30,7 @@ import { PROFESSIONAL_CHATS, PROFESSIONALS_IMPLEMENTED_ELSEWHERE } from '../comp
  * copy would silently miss it, which is exactly the class of bug this fixes.
  */
 export function childSurfaceIds(): string[] {
-  return [...Object.keys(PROFESSIONAL_CHATS), ...PROFESSIONALS_IMPLEMENTED_ELSEWHERE];
+  return ['voice_ai', ...Object.keys(PROFESSIONAL_CHATS), ...PROFESSIONALS_IMPLEMENTED_ELSEWHERE];
 }
 
 /**

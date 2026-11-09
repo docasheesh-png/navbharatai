@@ -12,7 +12,7 @@ Historical Stop is respected. No stopped-app resume, production replay, paid mod
 
 ## Honest accounting / missing systems
 
-**34rows =25prevention/safeguard rows awaiting parent review+merge (7report/preview-derived,8inspection including1new browser finding,10review-only),4already-fixed/guarded,5blocked. Eight bounded classes, NOT34historical failures.** The source-based math/input/Select findings are current-template inspection, not proof the historical partial app calculated incorrectly: its seed failed before delivery. No app had been judged finished.
+**35rows =26prevention/safeguard rows awaiting parent review+merge (7report/preview-derived,8inspection including1new browser finding,11review-only),4already-fixed/guarded,5blocked. Eight bounded classes, NOT35historical failures.** The source-based math/input/Select findings are current-template inspection, not proof the historical partial app calculated incorrectly: its seed failed before delivery. No app had been judged finished.
 
 Five historical buckets: **self-healed0; workaround2; skipped0; still-broken/result-imperfect6; struggle2**. These10distinct report items concern claims, accounting/census, capacity and alternative generation; they are not10broken apps. Cancellations and appropriately deferred tests are NOT classified as skipped defects. Uncertain draft attribution/store reconciliation is recorded separately, not inflated into proven failures.
 
@@ -253,6 +253,13 @@ One pure checker is shared by write-time `qualityNote` in existing dispatcher la
 - Evidence: L05 exact capped useTheme prefix; parent independent review of D14.
 - Root/class/sibling action: F8: same shared single-file lint tracks persisted strings into theme state/data-theme; requires a local supported light/dark/auto whitelist, never adds auto or edits user choices/storage. Handles positive literal comparisons/includes/ternaries and rejects out-of-domain/weak guards. Does not certify opaque predicates or infer universal schemas.
 - Regression/reversion: Exact retained preview, invalid-enum/cast/truthy/fallback/bad-disjunction negatives; supported-subset/validated-decoder positives; invalid-mode red mutation. Existing theme/browser behavior retained.
+
+### R11 / Q-2566 — FIXED IN BRANCH — NOT MERGED
+- Origin / historical bucket: review / no additional historical failure.
+- Problem: A new source-pattern warning must be explicitly classified and must not fabricate a successful/stopped build root cause or unsafe schema-fix offer.
+- Evidence: Self-review reproduced existing mandatory warning-classification ratchet:1failed/34passed on bfe78bbb4; obsolete validator stopped143 before any edit.
+- Root/class/sibling action: F8: declare a real app advisory in APP_FINDINGS_WITHOUT_AN_OFFER with reason (no generic schema rewrite); exact code excluded from root-cause promotion, not from visible unresolved findings or warning caveats. Warning cannot become a build-breaking error. Real errors and user Stop retain ownership.
+- Regression/reversion: Actual census red/green; BuildDiagnostics warning/error counts and unresolved visibility; real deriveRootCause success/Stop/real-error controls; separate classification-removal and root-cause-exclusion removal behavioral reversions.
 
 ## Complete retained issue coverage (array order, no omitted info records)
 

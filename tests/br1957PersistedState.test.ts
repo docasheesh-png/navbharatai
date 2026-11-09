@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { persistedStateFindings, persistedStateBuildWarnings } from '../src/server/AgentV3/persistedStateCheck';
 import { qualityNote, filesANoteStillFlags, MAX_NOTE_LINES } from '../src/server/AgentV3/writeTimeQualityCheck';
+import { BuildDiagnostics, deriveRootCause, isAppFinding } from '../src/server/AgentV3/BuildDiagnostics';
+import { APP_FINDINGS_WITHOUT_AN_OFFER, buildFindingSuggestions } from '../src/server/AgentV3/buildFindingSuggestions';
 import previews from './fixtures/br1957-storage-previews.json';
 const city = (body: string) => `import {useState,useEffect} from 'react';
 export function useCityStorage(){const [city,setCity]=useState(null);useEffect(()=>{${body}},[]);return city;}`;
@@ -105,6 +107,30 @@ describe('BR1957 F8 persisted browser state boundaries', () => {
     expect(scan(`function demo(localStorage){${city("setCity(JSON.parse(localStorage.getItem('city')));")}}`)).toEqual([]);
     expect(scan(`const useState=()=>[null,x=>x];const [city,setCity]=useState();setCity(JSON.parse(localStorage.getItem('city')));`)).toEqual([]);
     expect(scan(`const custom={useState:()=>[null,x=>x]};const [city,setCity]=custom.useState();setCity(JSON.parse(localStorage.getItem('city')));`)).toEqual([]);
+  });
+  it('new persisted warning is classified honestly, visible and unresolved, never a build-breaking error or invented schema offer', () => {
+    const d=new BuildDiagnostics({now:()=>1});
+    const issue={phase:'build' as const,severity:'warning' as const,code:'PERSISTED_STATE_BOUNDARY',message:'src/hooks/useCityStorage.ts: validate persisted fields',autoResolved:false};
+    d.record(issue);
+    expect(APP_FINDINGS_WITHOUT_AN_OFFER.has(issue.code)).toBe(true);
+    expect(isAppFinding(issue)).toBe(true);
+    expect(d.shippingIssueCount('error')).toBe(0);
+    expect(d.shippingIssueCount('warning')).toBe(1);
+    expect(d.report().issues.find(x=>x.code===issue.code)?.autoResolved).toBe(false);
+    expect(buildFindingSuggestions([issue])).toEqual([]);
+  });
+  it('new persisted warning can never headline success or user Stop as a fabricated runtime cause', () => {
+    const issue={ts:1,phase:'build' as const,severity:'warning' as const,code:'PERSISTED_STATE_BOUNDARY',message:'src/hooks/useCityStorage.ts: possible unchecked persisted state',autoResolved:false};
+    const success=deriveRootCause({issues:[issue],ok:true})??'';
+    expect(success).toContain('Build completed successfully');
+    expect(success).not.toContain(issue.message);
+    expect(success).toContain(issue.code);
+    const stop={...issue,ts:2,severity:'error' as const,code:'OUTCOME_STOPPED',message:'Build stopped by the user.'};
+    const stopped=deriveRootCause({issues:[issue,stop],ok:false})??'';
+    expect(stopped).not.toContain(issue.message);
+    expect(stopped).toMatch(/stop|user/i);
+    const error={...issue,ts:3,severity:'error' as const,code:'READINESS_BLOCKER',message:'Actual syntax failure prevents boot.'};
+    expect(deriveRootCause({issues:[issue,error],ok:false})).toContain(error.message);
   });
   it('all existing write lanes retain the one shared note path and data/lane ownership', () => {
     const dispatcher=readFileSync('src/server/AgentV3/ToolDispatcher.ts','utf8');

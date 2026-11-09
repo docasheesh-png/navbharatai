@@ -134,7 +134,8 @@ describe('BR 778d7c58 autopsy', () => {
     const registry = readFileSync(resolve(__dirname, '../src/server/AgentV3/goldenScaffolds/registry.ts'), 'utf8');
     const start = registry.indexOf('const KEEP_THE_SWITCH =');
     expect(start).toBeGreaterThanOrEqual(0);
-    const producer = registry.slice(start).replace('export function goldenBuildPrompt', 'function goldenBuildPrompt');
+    // Keep the producer's local contract bindings too; remove ESM syntax from this isolated function fixture.
+    const producer = registry.slice(start).replace(/^export /gm, '');
     expect(producer.split(current)).toHaveLength(2);
     const compile = (source: string): typeof goldenBuildPrompt => new Function(
       transformSync(source, { loader: 'ts', target: 'es2022' }).code + '; return goldenBuildPrompt;',

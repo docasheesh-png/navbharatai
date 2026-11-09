@@ -81,7 +81,7 @@ describe('1 · the fast lane hands off when told its engine now reasons before e
     const route = strip(src('src/server/routes/agentv3.ts'));
     expect(route).toContain("if (!fastLaneReasoningRung && fastLaneReasoningGateEnabled() && modelAlwaysReasons(servedBy.model)) {");
     expect(route).toContain("code: 'FAST_LANE_FELL_TO_REASONING_RUNG'");
-    expect(route).toContain('stopLane: () => (fastLaneReasoningRung');
+    expect(route).toContain('stopLane: () => (steeringHandoff.pending() ? STEERING_YIELD_REASON : fastLaneReasoningRung');
     const sb = strip(src('src/server/AgentV3/SimpleBuilder.ts'));
     expect(sb).toContain('const stop = deps.stopLane?.();');
     expect(sb).toContain('if (laneStopReason) throw new Error(`simple-build fast lane stopped early — ${laneStopReason}`);');

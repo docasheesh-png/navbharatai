@@ -126,7 +126,7 @@ export function judgeProdBuild(input: {
     }
     return {
       ok: true, ran: true, code: 'PROD_BUILD_OK',
-      message: 'The production build succeeded — this app is ready to publish and to package.',
+      message: 'The production bundle compiled successfully. Runtime, gameplay and release readiness are reported separately.',
     };
   }
   if (input.exitCode === 124 || input.exitCode === 137) {

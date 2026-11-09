@@ -28,6 +28,8 @@
 //
 // PURE. No I/O, no clock, never throws.
 
+import * as ts from 'typescript';
+
 /** Comments only — never code. Block comments first, then whole-line `//` comments. */
 function stripComments(src: string): string {
   return src
@@ -44,7 +46,7 @@ function stripComments(src: string): string {
  */
 export function extractExportedDeclaration(source: string | null | undefined, name: string): string | null {
   const src = String(source ?? '');
-  if (!src || !name) return null;
+  if (!src || src.length > 1_000_000 || !/^[A-Za-z_$][\w$]*$/.test(name)) return null;
 
   const iface = new RegExp(`export\\s+interface\\s+${name}\\s*(?:extends\\s+[^{]+)?\\{`).exec(src);
   if (iface) {
@@ -72,7 +74,74 @@ export function extractExportedDeclaration(source: string | null | undefined, na
       return keys && keys.length ? `export type ${name} = ${keys.map((k) => `'${k}'`).join(' | ')};` : decl;
     }
   }
-  return null;
+  return exportedCallableOrClass(src, name);
+}
+
+/** Public callable declarations, from the same source as the types — never guessed aliases.
+ * Explicit return types let us omit implementations; inferred members retain labelled actual source.
+ * This quotes a declared surface, not an inferred or inherited complete structural type.
+ */
+function exportedCallableOrClass(source: string, name: string): string | null {
+  try {
+    const sf = ts.createSourceFile('kit.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    if ((sf as ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics?.length) return null;
+    const exported = (node: ts.Node) => ts.canHaveModifiers(node)
+      && !!ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+    const publicMember = (node: ts.Node) => !(ts.canHaveModifiers(node) && ts.getModifiers(node)?.some(
+      (m) => m.kind === ts.SyntaxKind.PrivateKeyword || m.kind === ts.SyntaxKind.ProtectedKeyword))
+      && !('name' in node && node.name && ts.isPrivateIdentifier(node.name as ts.Node));
+    const quote = (node: ts.Node & { body?: ts.ConciseBody; type?: ts.TypeNode }) => {
+      if (node.body && (ts.isConstructorDeclaration(node) || node.type)) {
+        return tidy(source.slice(node.getStart(sf), node.body.getStart(sf)).trimEnd() + ';');
+      }
+      // An unannotated return/field is not an inferred type contract. Keep its actual source.
+      return (node.body || (ts.isPropertyDeclaration(node) && !node.type) ? '// Actual source; inferred shape not established.\n' : '')
+        + tidy(node.getText(sf));
+    };
+    const functions = sf.statements.filter((n): n is ts.FunctionDeclaration => ts.isFunctionDeclaration(n)
+      && n.name?.text === name && exported(n));
+    if (functions.length) {
+      const signatures = functions.some((n) => !n.body) ? functions.filter((n) => !n.body) : functions;
+      return signatures.map(quote).join('\n');
+    }
+    // BR1955: a string-typed action parameter is unusable without its actual default vocabulary.
+    // Quote only the selected exported const, with a literal initializer; never evaluate source.
+    for (const statement of sf.statements) {
+      if (!ts.isVariableStatement(statement) || !exported(statement)
+        || !(statement.declarationList.flags & ts.NodeFlags.Const)) continue;
+      const declaration = statement.declarationList.declarations.find((d) => ts.isIdentifier(d.name) && d.name.text === name);
+      const literal = (node: ts.Expression): boolean => ts.isStringLiteral(node) || ts.isNumericLiteral(node)
+        || node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword
+        || node.kind === ts.SyntaxKind.NullKeyword
+        || (ts.isArrayLiteralExpression(node) && node.elements.every((e) => ts.isExpression(e) && literal(e)))
+        || (ts.isObjectLiteralExpression(node) && node.properties.every((e) => ts.isPropertyAssignment(e)
+          && !ts.isComputedPropertyName(e.name) && literal(e.initializer)));
+      if (declaration?.initializer && literal(declaration.initializer)) return 'export const ' + ts.createPrinter({ removeComments: true }).printNode(ts.EmitHint.Unspecified, declaration, sf) + ';';
+    }
+    const cls = sf.statements.find((n): n is ts.ClassDeclaration => ts.isClassDeclaration(n)
+      && n.name?.text === name && exported(n));
+    if (!cls) return null;
+    const head = source.slice(cls.getStart(sf), cls.members.pos).replace(/\{\s*$/, '').trimEnd();
+    const members = cls.members.filter(publicMember).filter((member) => {
+      // An overload implementation is not callable by its union signature. As with functions,
+      // quote only declared overloads, and keep constructor/static/instance ownership distinct.
+      if (!(ts.isMethodDeclaration(member) || ts.isConstructorDeclaration(member)) || !member.body) return true;
+      const key = ts.isConstructorDeclaration(member) ? 'constructor' : member.name.getText(sf);
+      const isStatic = (node: ts.Node) => ts.canHaveModifiers(node)
+        && !!ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword);
+      return !cls.members.some((other) => other !== member &&
+        (ts.isMethodDeclaration(other) || ts.isConstructorDeclaration(other)) && !other.body &&
+        (ts.isConstructorDeclaration(other) ? 'constructor' : other.name.getText(sf)) === key &&
+        isStatic(other) === isStatic(member));
+    }).map((m) => {
+      // Initializers of explicitly typed fields add no public contract (and may be enormous).
+      if (ts.isPropertyDeclaration(m) && m.type && m.initializer) {
+        return tidy(source.slice(m.getStart(sf), m.type.end) + ';');
+      }
+      return quote(m as ts.ClassElement & { body?: ts.ConciseBody; type?: ts.TypeNode });
+    });
+    return `${head} {\n${members.map((m) => m.split('\n').map((l) => '  ' + l).join('\n')).join('\n')}\n}`;
+  } catch { return null; }
 }
 
 /** The top-level keys of `const NAME = { … }` in the source, in order — or null when it cannot be read with certainty. */
@@ -121,20 +190,28 @@ const CONTRACT: readonly ContractEntry[] = [
   // What `touchControls: { buttons: [...] }` takes. The reported build passed strings.
   { file: 'src/game/ui/touchControls.ts', names: ['TouchButton', 'TouchLayout', 'TouchControlsOptions'] },
   // 1b38d662: livery/color were guessed and Motorcycle was passed as an Object3D instead of .root.
-  { file: 'src/game/three/objects.ts', names: ['RoadOptions', 'RailTrackOptions', 'MotorcycleOptions', 'Motorcycle', 'VehicleTuning', 'VehicleState'] },
+  { file: 'src/game/three/objects.ts', names: ['RoadOptions', 'RailTrackOptions', 'HouseOptions', 'TreeOptions', 'MountainOptions', 'MotorcycleOptions', 'Motorcycle', 'VehicleTuning', 'VehicleState', 'createRoad', 'createHouse', 'createTree', 'createMountain'] },
   // cf1706d2 (2026-11-02): sharedMaterial('plastic' | 'rubber', …) and paletteColor('steel' | 'coal', …) —
   // six type errors and five fix-up rounds, because the two closed name lists were never handed over.
   // (RailTrackOptions above: the same build passed { path } to createRailTrack.)
-  { file: 'src/game/three/materials.ts', names: ['MaterialKind', 'PaletteName'] },
+  { file: 'src/game/three/materials.ts', names: ['MaterialKind', 'PaletteName', 'sharedMaterial', 'paletteColor'] },
+  // BR1954: Input.bind, EventBus.off, CameraRig.object and wrong factories/signatures were guessed.
+  { file: 'src/game/core/input.ts', names: ['ActionMap', 'DEFAULT_ACTIONS', 'Input'] },
+  { file: 'src/game/core/events.ts', names: ['EventBus'] },
+  { file: 'src/game/three/camera.ts', names: ['CameraRigOptions', 'CameraRig'] },
+  { file: 'src/game/three/humanoid.ts', names: ['HumanoidOptions', 'Humanoid', 'createHumanoid'] },
+  { file: 'src/game/three/world.ts', names: ['ScatterOptions', 'scatterInstances'] },
 ];
 
 /** Every name the contract covers, for the census that keeps this honest. */
 export const KIT_CONTRACT_NAMES: readonly string[] = CONTRACT.flatMap((e) => e.names);
+export const KIT_CONTRACT_FILES: readonly string[] = CONTRACT.map((e) => e.file);
 
 /** The heading, exported so the test pins the exact words the builder reads. */
 export const KIT_CONTRACT_HEADING =
-  "THE KIT'S TYPES — these are read from the files on disk, so do NOT guess a member and do NOT re-read "
-  + 'these files to find one. If a name is not here, the kit does not have it:';
+  "THE KIT'S TYPES AND PUBLIC APIs — quoted from the supplied source snapshot, not inferred. "
+  + 'Do NOT guess a member. This is a selected contract, not an exhaustive export inventory: '
+  + 'an unlisted name is not proof of absence. Read the producer for omitted or inferred details:';
 
 /**
  * ⚠️ DELIBERATELY NOT A ```-FENCED BLOCK, and this is load-bearing rather than cosmetic.
@@ -153,7 +230,7 @@ const INDENT = '  ';
  * The contract block for whatever kit files this seed actually wrote. '' when none of them is present
  * (a partial `include` set), because an empty heading would promise a contract and deliver nothing.
  */
-export function kitTypeContract(files: Readonly<Record<string, string>> | null | undefined): string {
+export function kitTypeContract(files: Readonly<Record<string, string>> | null | undefined, maxChars = Infinity): string {
   const map = files ?? {};
   const sections: string[] = [];
   for (const entry of CONTRACT) {
@@ -167,5 +244,13 @@ export function kitTypeContract(files: Readonly<Record<string, string>> | null |
     sections.push(body.split('\n').map((l) => (l ? INDENT + l : l)).join('\n'));
   }
   if (sections.length === 0) return '';
-  return `${KIT_CONTRACT_HEADING}\n${sections.join('\n\n')}`;
+  const full = `${KIT_CONTRACT_HEADING}\n${sections.join('\n\n')}`;
+  if (full.length <= maxChars) return full;
+  const marker = '\nINCOMPLETE API snapshot: declarations omitted by the context budget; read their producer before use.';
+  const cap = Number.isFinite(maxChars) ? Math.max(0, Math.floor(maxChars)) : Infinity;
+  let bounded = KIT_CONTRACT_HEADING;
+  for (const section of sections) {
+    if (bounded.length + section.length + marker.length + 2 <= cap) bounded += '\n\n' + section;
+  }
+  return (bounded + marker).slice(0, cap);
 }

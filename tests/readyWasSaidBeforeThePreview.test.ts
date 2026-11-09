@@ -35,8 +35,8 @@ describe('a planned handoff is not a failure in the report', () => {
     // ends — its root component's call can carry the decision, and the lane then ended on "root component was not
     // written" with the cause dropped. The two older signals still mark it; behaviour locked in
     // tests/aHandOffWritesEachFileOnce.test.ts.
-    expect(lane).toContain('const handedOff = handOffDecision !== null || isReasoningRungHandoff(e) || /reasons before every answer/i.test(reason);');
+    expect(lane).toContain('const handedOff = isSteeringYield(reason) || handOffDecision !== null || isReasoningRungHandoff(e) || /reasons before every answer/i.test(reason);');
     expect(lane).toContain('a planned handoff, not a failure.');
-    expect(read('src/server/routes/agentv3.ts')).toContain("sb.handedOff ? 'Fast-lane outcome: handed its plan to the full builder before a reasoning engine — not a failure.'");
+    expect(read('src/server/routes/agentv3.ts')).toContain("sb.handedOff ? plannedHandoffOutcome(sb.reason)");
   });
 });

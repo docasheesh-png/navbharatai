@@ -19,6 +19,8 @@
  */
 
 export interface SandboxServedEvidence {
+  /** A build-local actuator acknowledged a real file write; never a model/tool claim or durable mirror. */
+  workspaceWriteAcknowledged?: boolean;
   /** Commands recorded for this build, with their exit codes (null when the code was not captured). */
   commands?: ReadonlyArray<{ exitCode?: number | null }> | null;
   /** The app was opened in a real browser and rendered on this turn. */
@@ -27,7 +29,7 @@ export interface SandboxServedEvidence {
 
 /** Did anything prove the sandbox served this build? */
 export function sandboxServedTheBuild(evidence: SandboxServedEvidence): boolean {
-  if (evidence.appRendered === true) return true;
+  if (evidence.appRendered === true || evidence.workspaceWriteAcknowledged === true) return true;
   for (const c of evidence.commands ?? []) {
     const code = c?.exitCode;
     if (typeof code === 'number' && Number.isInteger(code) && code >= 0) return true;

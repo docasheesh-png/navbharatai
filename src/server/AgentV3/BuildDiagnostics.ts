@@ -165,6 +165,8 @@ export const PROCESS_ONLY_CODES = new Set([
   'RELEASE_GATE_UNPROVEN',       // "not evidence the app is broken — the absence of evidence that it works" (its own detail)
   'LAST_CHANCE_PROOF_UNAVAILABLE', // "an infrastructure limit here, never evidence about the app itself" (its own detail)
   'SANDBOX_UNAVAILABLE',         // "Infrastructure condition, not an app error." (its own message)
+  'SANDBOX_ADMISSION_EXHAUSTED',
+  'ONESHOT_SCOPE_YIELD',
   'RUNTIME_UNCHECKED',           // our console capture failed — the class `VERIFY_DID_NOT_RUN` above already names
   'CLAIM_UNSUPPORTED',           // OUR closing summary over-claimed, and the summary is corrected in place — the class of SUMMARY_OFF_TOPIC
   'TIMELINE_TRUNCATED',          // our diagnostics timeline hit its own entry cap
@@ -251,6 +253,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // …and not starting it for a GAME, which only the full builder's game recipes can build (autopsy 0bb437b4).
   'FAST_LANE_SKIPPED_GAME',
   'FAST_LANE_SKIPPED_IMAGE_APP',
+  'FAST_LANE_SKIPPED_SANDBOX', // BR1952: unavailable infrastructure, never an app defect or repair offer
   // …and the lane HANDING OFF because its chain fell to such a rung mid-lane (autopsy Study-Racer).
   'FAST_LANE_FELL_TO_REASONING_RUNG',
   'FAST_LANE_STAYED_ON_REASONING_RUNG', // Q-926: the lane's stay on a reasoning rung, measured — a fact about OUR routing
@@ -1595,17 +1598,21 @@ export class BuildDiagnostics {
   private recordTimeToFirstCall(latencyMs?: number, answerMs?: number, fallbackMs?: number): void {
     if (this.llmCalls.length > 0) return; // only the first
     const elapsedMs = Math.max(0, this.now() - this.startedAt);
-    // Clamped to the elapsed time: a provider-reported latency longer than the whole build so far is
-    // not a measurement we can subtract, and a negative prep time would be worse than the old bug.
-    const lat = typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs >= 0
-      ? Math.min(latencyMs, elapsedMs)
-      : undefined;
+    // Only compatible timing windows can be subtracted: a longer measured call may have been
+    // backfilled from before this timer. Neither a negative prep time nor a fabricated zero is valid.
+    // BR1958: pre-build admission calls are backfilled after this timer starts. Clamping their
+    // measured 2751ms into a 4ms window falsely reported a zero-second model call.
+    const windowMismatch = typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs > elapsedMs;
+    const lat = typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs >= 0 && !windowMismatch
+      ? latencyMs : undefined;
     // ⚠️ PREPARATION IS SUBTRACTED FROM THE CALLER'S WAIT, NEVER FROM THE ANSWERER'S TIME. Using `answerMs`
     // here would turn GLM's abandoned 15 s into "26s of preparation" — blaming setup for a provider crawl,
     // the misattribution autopsies dukaan and a38c6fef already paid for once.
     const seconds = Math.round((lat === undefined ? elapsedMs : elapsedMs - lat) / 1000);
     const callTime = lat === undefined ? null : BuildDiagnostics.firstCallTime(lat, answerMs, fallbackMs);
-    const message = lat === undefined
+    const message = windowMismatch
+      ? `The first recorded call reports ${Math.round(latencyMs! / 100) / 10}s latency, longer than the ${Math.round(elapsedMs / 100) / 10}s build timing window. Preparation and call timing cannot be separated from these timestamps; no zero-duration call or setup attribution is established.`
+      : lat === undefined
       // NEVER INVENT THE SPLIT. Without a latency we cannot separate the two, so we say the number is
       // an upper bound rather than repeating the old confident, wrong attribution.
       ? `${seconds}s passed before the build's first model call was recorded — this includes the call's own duration, which was not measured, so treat it as an upper bound on setup.`
@@ -1635,7 +1642,7 @@ export class BuildDiagnostics {
     // returned at 120s. Attributing 93s to "abandoned lanes" there would have replaced an accurate
     // sentence with a misleading one, i.e. exactly the failure this fix exists to prevent, committed by
     // the fix itself. Below the 60s line the ordinary wording is accurate and stays.
-    const abandoned = seconds >= 60 ? BuildDiagnostics.abandonedLaneWindow(this.issues, this.startedAt) : null;
+    const abandoned = !windowMismatch && seconds >= 60 ? BuildDiagnostics.abandonedLaneWindow(this.issues, this.startedAt) : null;
     const attributed = abandoned
       ? `${seconds}s passed before the build's first model call was recorded, and MOST OF IT WAS NOT SETUP: `
         + `${abandoned.seconds}s went to ${abandoned.lanes} fast build lane(s) that were started and then abandoned at their `
@@ -3318,6 +3325,8 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
   // which tells the reader their build FAILED because of a colour palette. `DESIGN_PAGE_INCONSISTENT`
   // was already here for exactly this reason; the whole-app grade was simply recorded under a
   // different code and so kept its eligibility.
+  // Source-pattern advisory, not an observed runtime failure or an explanation of Stop.
+  'PERSISTED_STATE_BOUNDARY',
   'DESIGN_CONSISTENCY',
   // Same class, same report: an accessibility grade is a quality note about the app, never the reason
   // a build did or did not work.

@@ -413,6 +413,22 @@ ${paintWaitJs('p')}
 })().catch(e=>{process.stderr.write(String(e));process.exit(1)});
 `.trim();
 
+/** BR1956: inspection must observe the same page the action tools drove, not a fresh home screen.
+ * Canonical URL comparison also prevents a trailing slash from resetting an in-memory SPA. */
+export function persistentBrowserPageJs(target = "''", width = '1280', height = '720'): string {
+  return `
+  const browser=await chromium.connectOverCDP('http://localhost:${CDP_PORT}');
+  const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:${width},height:${height}}});
+  let page=ctx.pages()[0]||await ctx.newPage();
+  await page.setViewportSize({width:${width},height:${height}}).catch(()=>{});
+  const requested=${target};
+  const canonical=(u)=>{try{return new URL(u).href;}catch{return u;}};
+  if(requested && canonical(page.url())!==canonical(requested)){
+    await page.goto(requested,{waitUntil:'domcontentloaded',timeout:15000});
+  }
+`;
+}
+
 // Screenshot via the SAME persistent CDP browser the agent drives (Phase 3),
 // so a screenshot taken after a browser_action flow (login, navigation) reflects
 // the real session/cookies/current-page — not a clean fresh browser. If a target
@@ -424,13 +440,7 @@ const {chromium}=require('playwright');
   const target=process.argv[2]||'';
   const vw=parseInt(process.argv[3],10)||1280;
   const vh=parseInt(process.argv[4],10)||720;
-  const browser=await chromium.connectOverCDP('http://localhost:${CDP_PORT}');
-  const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:vw,height:vh}});
-  let page=ctx.pages()[0]||await ctx.newPage();
-  await page.setViewportSize({width:vw,height:vh}).catch(()=>{});
-  if(target && page.url()!==target){
-    await page.goto(target,{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
-  }
+${persistentBrowserPageJs('target', 'vw', 'vh')}
 ${paintWaitJs('page')}
   // The daemon's listeners record this page's errors; this stamps that a browser LOOKED at it now (Q-2303).
   if(painted){ try{ require('fs').appendFileSync(${JSON.stringify(CONSOLE_LOG)}, JSON.stringify({t:Date.now(),kind:'session'})+'\\n'); }catch(e){} }
@@ -542,16 +552,14 @@ export const BROWSER_ACTION_SCRIPT = `
 const {chromium}=require('playwright');
 (async()=>{
   const a=JSON.parse(process.argv[2]||'{}');
-  const browser=await chromium.connectOverCDP('http://localhost:${CDP_PORT}');
-  const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:1280,height:720}});
-  let page=ctx.pages()[0]||await ctx.newPage();
-  await page.setViewportSize({width:1280,height:720}).catch(()=>{});
+${persistentBrowserPageJs()}
   let result='';
   let cursorX=640,cursorY=360;
   async function elCenter(sel){
     try{const el=await page.$(sel);if(el){const b=await el.boundingBox();if(b){return{x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)};}}return null;}catch(e){return null;}
   }
   try{
+    if(a.action!=='navigate' && page.url()==='about:blank') throw new Error('No app page is open in the shared browser. Navigate to the preview first; no interaction was performed.');
     if(a.action==='navigate'){await page.goto(a.url,{waitUntil:'networkidle',timeout:20000});result='Navigated to '+a.url;}
     else if(a.action==='click_xy'){cursorX=a.x;cursorY=a.y;await page.mouse.click(a.x,a.y);await page.waitForLoadState('networkidle',{timeout:8000}).catch(()=>{});result='Clicked ('+a.x+','+a.y+')';}
     else if(a.action==='type_text'){await page.keyboard.type(a.text||'');result='Typed text';}
@@ -583,13 +591,71 @@ const {chromium}=require('playwright');
   try{require('fs').writeFileSync('${TOOLS_DIR}/last-action.json', meta);}catch(_e){}
   // The daemon's listeners heard whatever this action made the page throw; this stamps that a browser was on
   // the app now (Q-2303), so a console read after the action counts it as a look.
-  try{require('fs').appendFileSync(${JSON.stringify(CONSOLE_LOG)}, JSON.stringify({t:Date.now(),kind:'session'})+'\\n');}catch(_e){}
+  if(url!=='about:blank')try{require('fs').appendFileSync(${JSON.stringify(CONSOLE_LOG)}, JSON.stringify({t:Date.now(),kind:'session'})+'\\n');}catch(_e){}
   // stdout is KEPT as a fallback: a sandbox that is already warm still holds the OLD script on disk,
   // and the TS side prefers the file only when it can read one. Small now, because of the cap.
   process.stdout.write(meta);
   process.exit(0);
 })().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
 `.trim();
+
+/** The exact bounded element scan, using the action browser's live state (BR1956). */
+export function uiScanScript(url: string): string {
+  return `
+const {chromium}=require('playwright');
+(async()=>{
+${persistentBrowserPageJs(JSON.stringify(url), '1280', '800')}
+  const p=page;
+${paintWaitJs('p')}
+  const out=await p.evaluate(()=>{
+    var res=[];
+    var all=document.querySelectorAll('body *');
+    for(var i=0;i<all.length && res.length<600;i++){
+      var e=all[i];
+      var r=e.getBoundingClientRect();
+      if(r.width<=0||r.height<=0) continue;              // invisible: no box
+      var cs=getComputedStyle(e);
+      if(cs.visibility==='hidden'||cs.display==='none'||Number(cs.opacity)===0) continue;
+      var host=e.closest?e.closest('[data-nbai-src]'):null;
+      var own=e.children.length===0?(e.textContent||'').trim():'';
+      // A form control has no text of its own: its NAME is its label (build b4745cb1 — the finder returned
+      // the label and the .field wrapper, never the <input id="desc"> itself).
+      var tg=e.tagName;
+      var isCtl=tg==='INPUT'||tg==='TEXTAREA'||tg==='SELECT';
+      var isNamed=isCtl||tg==='BUTTON'||tg==='A'||e.getAttribute('role')==='button';
+      var lab='';
+      if(isNamed){try{lab=((e.labels&&e.labels[0]&&e.labels[0].textContent)||e.getAttribute('aria-label')||e.getAttribute('placeholder')||e.getAttribute('name')||e.getAttribute('title')||'').trim();}catch(x){lab='';}}
+      var nm=isCtl?e.getAttribute('name'):null;
+      res.push({
+        tag:e.tagName.toLowerCase(),
+        role:e.getAttribute('role')||undefined,
+        className:typeof e.className==='string'?e.className.slice(0,240):'',
+        id:e.id||undefined,
+        text:(own||(isNamed?e.innerText:''))?String(own||(isNamed?e.innerText:'')).trim().slice(0,120):undefined,
+        label:lab?lab.slice(0,120):undefined,
+        inputType:isCtl?(e.getAttribute('type')||tg.toLowerCase()):undefined,
+        selector:(e.id?('#'+e.id):(nm?(tg.toLowerCase()+'[name="'+nm.replace(/"/g,'')+'"]'):'')||(e.tagName.toLowerCase()+(typeof e.className==='string'&&e.className.trim()?('.'+e.className.trim().split(/\\\\s+/).slice(0,3).join('.')):''))).slice(0,160),
+        source:host?(host.getAttribute('data-nbai-src')||undefined):undefined,
+        rect:{x:r.x,y:r.y,w:r.width,h:r.height},
+        bg:cs.backgroundColor,
+        color:cs.color,
+        borderRadius:cs.borderRadius,
+        src:e.tagName==='IMG'?(e.getAttribute('src')||undefined):undefined
+      });
+    }
+    return res;
+  }).catch(function(){return [];});
+  // A FILE, for the third time in this file and the same reason: stdout is capped at 64KB, and this
+  // payload GROWS WITH THE PAGE — every element carries a selector, text, a rect and four computed
+  // styles. So the richer the app, the more certainly the scan was truncated, and the caller's
+  // try/catch turned that into "no elements found". The engine went blind on exactly the pages it
+  // most needed to see, and said nothing, because an empty scan looks like a simple page.
+  try{require('fs').writeFileSync('${TOOLS_DIR}/last-scan.json', JSON.stringify(out));}catch(_e){}
+  process.stdout.write(JSON.stringify(out));
+  process.exit(0);
+})().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1)});
+`;
+}
 
 /**
  * Read a browser action's metadata, and NEVER throw a raw parser error at the model.
@@ -2907,60 +2973,8 @@ export class E2BActuator implements IEngineerActuator {
     // ⚠️ IN TOOLS_DIR, never /tmp: it shared browseUrl's SECOND bug too (see `toolsScriptPath`), so
     // after the quoting was fixed this had still never run — for a different reason, silently.
     const shotPath = toolsScriptPath('shot'); // TOOLS_DIR, never /tmp — see toolsScriptPath.
-    const shotBody = `
-const {chromium}=require('playwright');
-(async()=>{
-  const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
-  const p=await b.newPage();
-  await p.setViewportSize({width:1280,height:800});
-  await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
-${paintWaitJs('p')}
-  const out=await p.evaluate(()=>{
-    var res=[];
-    var all=document.querySelectorAll('body *');
-    for(var i=0;i<all.length && res.length<600;i++){
-      var e=all[i];
-      var r=e.getBoundingClientRect();
-      if(r.width<=0||r.height<=0) continue;              // invisible: no box
-      var cs=getComputedStyle(e);
-      if(cs.visibility==='hidden'||cs.display==='none'||Number(cs.opacity)===0) continue;
-      var host=e.closest?e.closest('[data-nbai-src]'):null;
-      var own=e.children.length===0?(e.textContent||'').trim():'';
-      // A form control has no text of its own: its NAME is its label (build b4745cb1 — the finder returned
-      // the label and the .field wrapper, never the <input id="desc"> itself).
-      var tg=e.tagName;
-      var isCtl=tg==='INPUT'||tg==='TEXTAREA'||tg==='SELECT';
-      var lab='';
-      if(isCtl){try{lab=((e.labels&&e.labels[0]&&e.labels[0].textContent)||e.getAttribute('aria-label')||e.getAttribute('placeholder')||e.getAttribute('name')||'').trim();}catch(x){lab='';}}
-      var nm=isCtl?e.getAttribute('name'):null;
-      res.push({
-        tag:e.tagName.toLowerCase(),
-        className:typeof e.className==='string'?e.className.slice(0,240):'',
-        id:e.id||undefined,
-        text:own?own.slice(0,120):undefined,
-        label:lab?lab.slice(0,120):undefined,
-        inputType:isCtl?(e.getAttribute('type')||tg.toLowerCase()):undefined,
-        selector:(e.id?('#'+e.id):(nm?(tg.toLowerCase()+'[name="'+nm.replace(/"/g,'')+'"]'):'')||(e.tagName.toLowerCase()+(typeof e.className==='string'&&e.className.trim()?('.'+e.className.trim().split(/\\\\s+/).slice(0,3).join('.')):''))).slice(0,160),
-        source:host?(host.getAttribute('data-nbai-src')||undefined):undefined,
-        rect:{x:r.x,y:r.y,w:r.width,h:r.height},
-        bg:cs.backgroundColor,
-        color:cs.color,
-        borderRadius:cs.borderRadius,
-        src:e.tagName==='IMG'?(e.getAttribute('src')||undefined):undefined
-      });
-    }
-    return res;
-  }).catch(function(){return [];});
-  // A FILE, for the third time in this file and the same reason: stdout is capped at 64KB, and this
-  // payload GROWS WITH THE PAGE — every element carries a selector, text, a rect and four computed
-  // styles. So the richer the app, the more certainly the scan was truncated, and the caller's
-  // try/catch turned that into "no elements found". The engine went blind on exactly the pages it
-  // most needed to see, and said nothing, because an empty scan looks like a simple page.
-  try{require('fs').writeFileSync('${TOOLS_DIR}/last-scan.json', JSON.stringify(out));}catch(_e){}
-  process.stdout.write(JSON.stringify(out));
-  await b.close();
-})().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1)});
-`;
+    await this._ensureBrowserDaemon(sandbox, workspaceId);
+    const shotBody = uiScanScript(url);
     await sandbox.files.write(shotPath, shotBody);
     // Same correction as browseUrl above: keep the reason. `scanned: false` was already the honest
     // answer, but on its own it cannot tell "this page has no elements" from "the browser never

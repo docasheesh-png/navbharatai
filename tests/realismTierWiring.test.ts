@@ -47,7 +47,7 @@ describe('the tier decision reaches the model', () => {
     expect(route, 'the 3D gate immediately before realismIntent() has moved or gone')
       // Since build 46e2d74b (2026-10-11) the gate is `wantsSceneDetail`: `wantsSceneObjects` for anything that is
       // not a game, and the game-kit seed's own 3D reading for a game — one answer for the route and the seed.
-      .toMatch(/if \(wantsSceneDetail\(prompt\)\) \{\n\s*const realism = realismIntent/);
+      .toMatch(/if \(wantsSceneDetail\(gameTurnRequest\(prompt, megaRoadmapActive\?\.steps\[0\]\?\.buildPrompt\)\)\) \{\n\s*const realism = realismIntent/);
     expect(wantsSceneDetail('make me a 3d racing game')).toBe(true);
     expect(wantsSceneDetail('a todo list app with dark mode')).toBe(false);
     expect(wantsSceneObjects('make me a 3d racing game')).toBe(true);

@@ -101,9 +101,12 @@ describe('it never invents the split it cannot measure', () => {
   });
 
   it('a latency longer than the whole build cannot produce a negative setup', () => {
-    // A provider clock disagreeing with ours must degrade to "0s of preparation", never to nonsense.
+    // An incompatible clock window cannot establish zero setup or a clamped call duration.
     const p = at(afterMs(30_000, 999_000))!;
-    expect(p.message).toMatch(/^0s of preparation/);
+    expect(p.message).toContain('999s latency');
+    expect(p.message).toContain('30s build timing window');
+    expect(p.message).toContain('cannot be separated');
+    expect(p.message).not.toMatch(/^0s of preparation|^-\d/);
     expect(p.severity).toBe('info');
   });
 });

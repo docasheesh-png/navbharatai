@@ -180,6 +180,8 @@ export function findOrphanComponents(graph: ProjectGraph): string[] {
   const orphans = new Set<string>();
   for (const sym of graph.symbols) {
     if (!isComponentName(sym.name)) continue;
+    // BR1958: an exported Props interface/type/enum is not a renderable component.
+    if (sym.kind === 'interface' || sym.kind === 'type' || sym.kind === 'enum') continue;
     if (!/\.(t|j)sx$/.test(sym.file)) continue;
     if (isEntryPoint(sym.file)) continue;
     if (importedFiles.has(sym.file)) continue;

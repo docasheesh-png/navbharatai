@@ -87,7 +87,9 @@ describe('the fast lane never tells the user about lanes', () => {
     const live = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
     expect(live).not.toContain('The fast lane ran out of time');
     // …and the honest replacement is there, saying the two things that are true and do matter.
-    const saved = userFacingLines(src).find((l) => l.includes('saved'));
+    // BR1952 now also says 'not saved yet' for generated buffers. That is not a
+    // kept-work claim; the actual hand-off line must still say saved AND still building.
+    const saved = userFacingLines(src).find((l) => l.includes('saved') && !l.includes('not saved yet'));
     expect(saved, 'a line telling the user their work is kept').toBeTruthy();
     expect(saved!.toLowerCase()).toContain('still building');
   });

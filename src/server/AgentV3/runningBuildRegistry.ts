@@ -48,6 +48,7 @@ export interface RunningBuild {
   /** Trusted text retained after the delivery queue is consumed; verifies a model's stop quote. */
   lastSteerMessage?: string;
   /** The language platform lines are shown in (platformVoice.ts) — from the prompt, switched by a mid-build ask. */
+  replyVoice?: 'en' | 'hinglish' | 'hindi';
   voice?: 'en' | 'hinglish' | 'hindi';
   /** The build's resolved power level — gates mid-build steering to the Full Team ('max') tier. */
   powerLevel?: string;

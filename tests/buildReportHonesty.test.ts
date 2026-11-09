@@ -135,7 +135,7 @@ describe('the write fence is wired into the real build, not just unit-tested', (
   });
 
   it('hands the workspace off to the full builder when no fast lane succeeded', () => {
-    expect(src).toContain('if (!result) laneFence.handoff();');
+    expect(src).toContain('if (!result) await laneFence.handoffAndDrain();');
   });
 
   it('records a refused zombie write in the build report', () => {

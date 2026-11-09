@@ -81,6 +81,8 @@ export interface Journey {
    * is a user's. See `reachAliasesFor` — set only where the two genuinely differ, never a guess.
    */
   reachAlso?: readonly string[];
+  /** Static, source-proven React view-state doors in the SAME component (BR1956), at most three. */
+  openControls?: readonly string[];
   /**
    * The form asks for a password: a sign-in or sign-up form. It is driven signed OUT (a session would
    * only redirect away from it), and it never becomes a create-persists journey — what is typed into it
@@ -182,14 +184,14 @@ export function isCredentialForm(tags: ReadonlyArray<{ tag: string }>): boolean 
 }
 
 /** Every `<button>` in a file with its inner text, read with the shared JSX reader (see `inputScans`). */
-function buttonsIn(source: string): Array<{ tag: string; inner: string }> {
-  const out: Array<{ tag: string; inner: string }> = [];
+function buttonsIn(source: string): Array<{ tag: string; inner: string; index: number }> {
+  const out: Array<{ tag: string; inner: string; index: number }> = [];
   for (const t of scanMarkup(source)) {
     if (!t.isElement || t.name !== 'button') continue;
     const start = t.index + t.tag.length;
     const end = source.indexOf('</button>', start);
     if (end < 0 || end - start > 200) continue;
-    out.push({ tag: t.tag, inner: source.slice(start, end) });
+    out.push({ tag: t.tag, inner: source.slice(start, end), index: t.index });
   }
   return out;
 }
@@ -589,9 +591,34 @@ const PERSIST_WRITE: ReadonlyArray<readonly [RegExp, string]> = [
   [/\b(?:localStorage|sessionStorage)\.\w+\s*=/, 'browser storage'],
   [/\b(?:indexedDB|IDBDatabase)\b/, 'a browser database'],
   [/\b(?:addDoc|setDoc|updateDoc|deleteDoc)\s*\(/, 'a database write'],
-  [/\.(?:insert|upsert|update|delete)\s*\(/, 'a database write'],
+
   [/method\s*:\s*["'](?:POST|PUT|PATCH|DELETE)/i, 'a write to its server'],
 ];
+
+/** A generic .update() is not persistence (BR1955's GameLoop). Require an actual call
+ * whose receiver comes from a datastore-shaped chain. Source evidence, not runtime/provider proof.
+ * AST calls exclude quoted examples/comments without banning an entire game-kit path.
+ */
+function datastoreWriteEvidence(src: string): string | null {
+  const sf = ts.createSourceFile('app.tsx', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const datastoreChain = (node: ts.Expression): boolean => {
+    if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return false;
+    return ['from', 'collection', 'doc'].includes(node.expression.name.text) || datastoreChain(node.expression.expression);
+  };
+  let found: string | null = null;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && ['insert', 'upsert', 'update', 'delete', 'add', 'set'].includes(node.expression.name.text)
+      && datastoreChain(node.expression.expression) && !NOT_APP_DATA_KEY.test(node.getText(sf))) {
+      found = node.getText(sf);
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
 
 /** Storage keys that are a display preference or ours, never the user's records. */
 const NOT_APP_DATA_KEY = /\b(?:theme|colou?r[-_]?scheme|dark[-_]?mode|font[-_]?scale|locale|language|consent|cookie|nbai|nb-)\b/i;
@@ -613,6 +640,7 @@ export function savedStateEvidence(files: Record<string, string>): { path: strin
       if (NOT_APP_DATA_KEY.test(line)) continue;
       return { path, what };
     }
+    if (datastoreWriteEvidence(src)) return { path, what: 'a database write' };
   }
   return null;
 }
@@ -865,27 +893,21 @@ const CREATE_WORDS = /\b(add|create|new|save|submit|post|send|register|sign\s*up
  * carry it, and only when that text says something unambiguous — a page whose only button says "Menu"
  * yields no journey rather than a journey that clicks the wrong thing.
  */
-export function submitTargetIn(source: string): Target | null {
-  // Read with the shared JSX reader — the old `<button\b[^>]*>` stopped at the `>` of `onClick={() => …}`,
-  // missed a `type="submit"` written after the handler, and handed the rest of the tag to Playwright as
-  // the button's "text" (see `inputScans`).
-  const buttons = buttonsIn(source);
-  const plainText = (inner: string): string => inner.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-  // 🔴 THE NAME A BROWSER GIVES THE BUTTON, NOT ITS INNER TEXT (autopsy 6cd698cc, 2026-10-01). The journey
-  // finds the button with getByRole('button', { name }) — an ACCESSIBLE-name match — and an `aria-label`
-  // replaces the inner text as that name. The chat app's send button was `<button type="submit"
-  // aria-label="Send message">➤</button>`; the journey asked for a button named "➤", found none, and
-  // reported "the submit control was not present on the running page" beside a send button on screen.
-  // A dynamic label or `aria-labelledby` is not a name we can read here, so it falls back to the role.
-  const accessibleName = (tag: string, inner: string): string | null => {
+function buttonAccessibleName(tag: string, inner: string): string | null {
     if (/\baria-labelledby\s*=/i.test(tag)) return null;
     if (/\baria-label\s*=/i.test(tag)) {
       const aria = ATTR(tag, 'aria-label'); // a quoted, static value — `aria-label={x}` reads as null
       return aria && !/[{}]/.test(aria) ? aria.trim() : null;
     }
-    const text = plainText(inner);
+    const text = inner.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     return text && !/[{}]/.test(text) ? text : null;
-  };
+}
+
+export function submitTargetIn(source: string): Target | null {
+  // Read with the shared JSX reader — the old `<button\b[^>]*>` stopped at the `>` of `onClick={() => …}`,
+  // missed a `type="submit"` written after the handler, and handed the rest of the tag to Playwright as
+  // the button's "text" (see `inputScans`).
+  const buttons = buttonsIn(source);
   for (const { tag } of buttons) {
     const testid = ATTR(tag, 'data-testid');
     if (testid && (/(submit|save|add|create)/i.test(testid) || /type\s*=\s*["']submit["']/i.test(tag))) {
@@ -894,14 +916,14 @@ export function submitTargetIn(source: string): Target | null {
   }
   for (const { tag, inner } of buttons) {
     if (/type\s*=\s*["']submit["']/i.test(tag)) {
-      const name = accessibleName(tag, inner);
+      const name = buttonAccessibleName(tag, inner);
       if (name) return { kind: 'text', value: name };
       return { kind: 'role', value: 'submit' };
     }
   }
   for (const { tag, inner } of buttons) {
-    const name = accessibleName(tag, inner);
-    const text = plainText(inner);
+    const name = buttonAccessibleName(tag, inner);
+    const text = inner.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     if (name && (CREATE_WORDS.test(name) || (text && !/[{}]/.test(text) && CREATE_WORDS.test(text)))) return { kind: 'text', value: name };
   }
   // `<input type="submit" value="Add">` — older markup, still real.
@@ -1001,9 +1023,14 @@ function submitHandlerBodies(src: string, submit: Target | null): string[] | nul
   let m: RegExpExecArray | null;
   while ((m = onSubmit.exec(src)) !== null) attrs.push({ index: m.index, len: m[0].length });
   if (attrs.length === 0 && submit?.kind === 'text') {
-    const text = submit.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const btn = new RegExp(`<button\\b[^>]*?\\bonClick\\s*=\\s*\\{(?=[\\s\\S]{0,200}?>\\s*${text}\\s*<)`).exec(src);
-    if (btn) attrs.push({ index: btn.index, len: btn[0].length });
+    // BR1956: the old lookahead crossed </button> and attributed Save review to Start test's
+    // harmless handler. Select the OWNED button before reading its onClick, using the same
+    // accessible name that selected the submit target (including icon buttons with aria-label).
+    for (const button of buttonsIn(src)) {
+      if (buttonAccessibleName(button.tag, button.inner) !== submit.value) continue;
+      const onClick = /\bonClick\s*=\s*\{/.exec(button.tag);
+      if (onClick) attrs.push({index: button.index + onClick.index, len: onClick[0].length});
+    }
   }
   if (attrs.length === 0) return null;
   const bodies: string[] = [];
@@ -1093,6 +1120,13 @@ export function writesToUserDatabase(files: Record<string, string>): boolean {
     .join('\n');
   return /createClient\s*\(\s*[^)]*supabase|@supabase\/supabase-js|firebase\/firestore|getFirestore\s*\(|mongodb(\+srv)?:\/\/|DATABASE_URL/i
     .test(joined);
+}
+
+/** The execution admission fence: downgrading to form-submit still POSTs, so it is not read-only. */
+export function runnableJourneys(journeys: readonly Journey[], files: Record<string, string>): Journey[] {
+  // A filename like Search.tsx is not proof that its form cannot POST. Only navigation
+  // is read-only by construction; never admit an unknown form on a user's real database.
+  return writesToUserDatabase(files) ? journeys.filter(j => j.kind === 'nav-click' && !j.writes) : [...journeys];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1350,6 +1384,80 @@ export function screenReachedByControl(path: string, route: string, files: Recor
 /** Component files that are neither pages nor tests — where a state-switched screen's form lives. */
 const SCREEN_FILE = /\.(?:t|j)sx$/i;
 
+/** Source-derived doors for forms hidden inside App.tsx itself, where a filename supplies no reach word.
+ * Only local React useState setters with literal arguments are admitted. No fetch/storage/dispatch,
+ * unknown callbacks, expressions, submit buttons or outward/write-labelled controls are explored. */
+export function stateDoorControls(source: string): string[] {
+  const sf = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  // Bind identifiers lexically: another component's same-named setter/handler is not evidence.
+  const host = ts.createCompilerHost({noLib:true,noResolve:true});
+  host.getSourceFile = file => file === 'App.tsx' ? sf : undefined;
+  host.fileExists = file => file === 'App.tsx';
+  host.readFile = () => undefined;
+  const checker = ts.createProgram(['App.tsx'], {noLib:true,noResolve:true}, host).getTypeChecker();
+  const symbol = (n: ts.Node): ts.Symbol | undefined => checker.getSymbolAtLocation(n);
+  const stateImports = new Set<ts.Symbol | undefined>();
+  const reactImports = new Set<ts.Symbol | undefined>();
+  for (const n of sf.statements) {
+    if (!ts.isImportDeclaration(n) || !ts.isStringLiteral(n.moduleSpecifier) || n.moduleSpecifier.text !== 'react') continue;
+    const c = n.importClause;
+    if (c?.name) reactImports.add(symbol(c.name));
+    if (c?.namedBindings && ts.isNamespaceImport(c.namedBindings)) reactImports.add(symbol(c.namedBindings.name));
+    if (c?.namedBindings && ts.isNamedImports(c.namedBindings)) for (const e of c.namedBindings.elements) {
+      if ((e.propertyName ?? e.name).text === 'useState') stateImports.add(symbol(e.name));
+    }
+  }
+  const setters = new Set<ts.Symbol | undefined>();
+  const handlers = new Map<ts.Symbol | undefined, ts.Node>();
+  const reassigned = new Set<ts.Symbol | undefined>();
+  const walk = (n: ts.Node, visit: (n: ts.Node) => void): void => { visit(n); ts.forEachChild(n, c => walk(c, visit)); };
+  walk(sf, n => {
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+      walk(n.left, target => { if (ts.isIdentifier(target)) reassigned.add(symbol(target)); });
+    }
+    if ((ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) && (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken) && ts.isIdentifier(n.operand)) reassigned.add(symbol(n.operand));
+    if (ts.isVariableDeclaration(n) && ts.isArrayBindingPattern(n.name) && n.initializer && ts.isCallExpression(n.initializer)) {
+      const c = n.initializer.expression;
+      const state = ts.isIdentifier(c) ? !!symbol(c) && stateImports.has(symbol(c))
+        : ts.isPropertyAccessExpression(c) && ts.isIdentifier(c.expression) && !!symbol(c.expression) && reactImports.has(symbol(c.expression)) && c.name.text === 'useState';
+      const setter = n.name.elements[1];
+      if (state && setter && ts.isBindingElement(setter) && ts.isIdentifier(setter.name)) setters.add(symbol(setter.name));
+    }
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && ts.isArrowFunction(n.initializer)) handlers.set(symbol(n.name), n.initializer.body);
+    if (ts.isFunctionDeclaration(n) && n.name && n.body) handlers.set(symbol(n.name), n.body);
+  });
+  const onlyState = (n: ts.Node): boolean => {
+    if (ts.isArrowFunction(n)) return onlyState(n.body);
+    if (ts.isBlock(n)) return n.statements.length > 0 && n.statements.length <= 4 && n.statements.every(x => ts.isExpressionStatement(x) && onlyState(x.expression));
+    if (!ts.isCallExpression(n) || !ts.isIdentifier(n.expression) || !symbol(n.expression) || !setters.has(symbol(n.expression)) || reassigned.has(symbol(n.expression)) || n.arguments.length !== 1) return false;
+    const arg = n.arguments[0];
+    return ts.isStringLiteral(arg) || ts.isNumericLiteral(arg) || arg.kind === ts.SyntaxKind.TrueKeyword || arg.kind === ts.SyntaxKind.FalseKeyword || arg.kind === ts.SyntaxKind.NullKeyword;
+  };
+  const out: string[] = [];
+  walk(sf, n => {
+    if (out.length >= 3 || !ts.isJsxElement(n) || n.openingElement.tagName.getText(sf) !== 'button') return;
+    const attrs = n.openingElement.attributes.properties;
+    const attr = (name: string) => attrs.find(a => ts.isJsxAttribute(a) && a.name.getText(sf) === name) as ts.JsxAttribute | undefined;
+    const stringAttr = (name: string) => { const x = attr(name)?.initializer; return x && ts.isStringLiteral(x) ? x.text : null; };
+    // An implicit button may submit its containing form; spreads/dynamic names can override ownership.
+    if (attrs.some(ts.isJsxSpreadAttribute) || attr('aria-labelledby') || attr('disabled') || stringAttr('type') !== 'button'
+      || (attr('aria-label') && stringAttr('aria-label') === null) || (attr('title') && stringAttr('title') === null)) return;
+    for (let parent: ts.Node | undefined = n.parent; parent && parent !== sf; parent = parent.parent) {
+      if (ts.isJsxElement(parent) && parent.openingElement.attributes.properties.some(a => ts.isJsxSpreadAttribute(a) || (ts.isJsxAttribute(a) && /^on(?:Click|Submit)(?:Capture)?$/.test(a.name.getText(sf))))) return;
+    }
+    const text = n.children.every(ts.isJsxText) ? n.children.map(x => (x as ts.JsxText).text).join(' ').replace(/\s+/g, ' ').trim() : '';
+    const names = [stringAttr('aria-label'), text, stringAttr('title')].filter((x): x is string => !!x);
+    const name = stringAttr('aria-label') || text;
+    if (!name || !/^(?:start|begin|continue|open|view|show|review|next)\b/i.test(name) || names.some(x => NEVER_PRESS.test(x) || WRITE_VERBS.test(x))) return;
+    const onClick = attr('onClick')?.initializer;
+    if (!onClick || !ts.isJsxExpression(onClick) || !onClick.expression) return;
+    const expr = onClick.expression;
+    const body = ts.isIdentifier(expr) ? reassigned.has(symbol(expr)) ? undefined : handlers.get(symbol(expr)) : expr;
+    if (body && onlyState(body) && !out.includes(name)) out.push(name);
+  });
+  return out;
+}
+
 export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
   const files = appOwnFiles(input?.files ?? {});
   const routes = input?.routes ?? [];
@@ -1430,6 +1538,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
           ? `Open the "${reach}" screen, create an item and check it survives a reload`
           : `Create an item on ${route} and check it survives a reload`,
         fields, submit, writes: true,
+        openControls: stateDoorControls(source),
         ...(reach ? { reach, ...(reachAliasesFor(reach).length > 0 ? { reachAlso: reachAliasesFor(reach) } : {}) } : {}),
       });
     } else {
@@ -1447,6 +1556,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
             ? `Open the "${reach}" screen, fill and submit its form without the app breaking`
             : `Fill and submit the form on ${route} without the app breaking`,
         fields, submit,
+        openControls: stateDoorControls(source),
         // A submit still POSTs. Treated as a write unless it is plainly a search/filter form.
         writes: !/search|filter|query/i.test(path),
         ...(reach ? { reach, ...(reachAliasesFor(reach).length > 0 ? { reachAlso: reachAliasesFor(reach) } : {}) } : {}),
@@ -1703,6 +1813,7 @@ export function journeyScript(previewUrl: string, journeys: readonly Journey[], 
     route: ${JSON.stringify(j.route)},
     reach: ${JSON.stringify(j.reach ?? null)},
     reachAlso: ${JSON.stringify(j.reachAlso ?? [])},
+    openControls: ${JSON.stringify(j.openControls ?? [])},
     // A sign-in form is driven signed OUT (a session would only redirect away from it); every other
     // journey runs behind the door when the app has one (signInExplore.ts).
     pageOpts: ${newPageOptionsExpr(isSignInRoute(j.route) || j.signIn ? null : opts.storageState)},
@@ -1766,7 +1877,7 @@ for (const j of journeys) {
         const names = await namesOf(c);
         const name = exact ? names.find((x) => x === exact) : names.find((x) => reachWords.some((w) => letters(x).includes(letters(w))));
         if (!name) continue;
-        if (NEVER.test(name) || REACH_SKIP.test(name)) continue;
+        if (names.some((x) => NEVER.test(x) || REACH_SKIP.test(x))) continue;
         if ((await c.getAttribute('type').catch(() => '')) === 'submit') continue;
         await c.click({ timeout: 4000 }).catch(() => {});
         await page.waitForTimeout(400);
@@ -1778,6 +1889,14 @@ for (const j of journeys) {
       const via = await pressReach(null);
       if (!via) { out.note = 'no visible control named after the "' + j.reach + '" screen was found to open it (looked for: ' + reachWords.join(', ') + ')'; throw new Error('no-reach'); }
       out.via = via;
+    }
+    // A same-file SPA has no screen filename to match. Try only source-proven local state doors,
+    // never arbitrary clicks, and retain the successful path for the persistence reload.
+    out.doors = [];
+    for (const name of j.openControls) {
+      if (await submitVisible()) break;
+      const via = await pressReach(name);
+      if (via) out.doors.push(via);
     }
     if (!(await submitVisible())) {
       const cands = page.locator('button, [role=button], a[href="#"], a:not([href])');
@@ -1838,6 +1957,7 @@ for (const j of journeys) {
         await page.waitForTimeout(400);
         // The screen the item lives on is not the one a reload lands on — open it again the same way.
         if (out.via) await pressReach(out.via);
+        for (const name of out.doors) await pressReach(name);
         const survived = await page.getByText(marker, { exact: false }).count();
         out.verdict = survived > 0 ? 'passed' : 'failed';
         out.note = survived > 0
@@ -1871,6 +1991,15 @@ export interface JourneyResult {
   step: string;
   note: string;
   errors: string[];
+}
+
+/** Only every planned create/reload journey passing establishes the blanket persistence claim. */
+export function persistenceEvidence(journeys: readonly Journey[], results: readonly JourneyResult[]): 'passed' | 'failed' | 'not-run' {
+  const expected = journeys.filter(j => j.kind === 'create-persists' && !j.signIn);
+  if (expected.length === 0) return 'not-run';
+  const own = results.filter(r => r.kind === 'create-persists' && expected.some(j => j.id === r.id));
+  if (own.some(r => r.verdict === 'failed')) return 'failed';
+  return expected.every(j => own.some(r => r.id === j.id && r.verdict === 'passed' && r.step === 'reload')) ? 'passed' : 'not-run';
 }
 
 /** Parse the runner's output. A malformed line is dropped, never guessed at. Pure; never throws. */

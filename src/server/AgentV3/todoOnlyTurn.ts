@@ -122,8 +122,8 @@ export function todoOnlyTurnsLine(tally: { turns: number; latencyMs: number; fir
 // 🔴 AND THE HAND-BACK WAS READ AND IGNORED (autopsy ca99778e, 2026-10-17). The architect's first turn and three
 // of the frontend sub-agent's turns (29.7 s) were plan-only, after the steer above. A rule a model may skip is a
 // preference; the structural answer is that a turn CANNOT be plan-only when the plan tool is not on offer. After
-// a plan-only turn, update_todo is withdrawn from the tools of the next turn(s) until the run does real work; a
-// second plan-only turn withdraws it for the rest of the run. The plan keeps advancing by itself as files land
+// a plan-only turn, update_todo is withdrawn for the rest of the writer run (BR1955: restoring it after
+// ordinary work allowed a second solo plan turn, despite the hand-back). The plan keeps advancing by itself as files land
 // (PlanProgress.ts), so nothing the user sees is lost. Kill switch `AGENTV3_TODO_WITHDRAW=off`. PURE.
 
 export type TodoWithdrawal = 'offered' | 'until-work' | 'for-run';
@@ -140,7 +140,9 @@ export function nextTodoWithdrawal(
 ): TodoWithdrawal {
   if (!todoWithdrawEnabled(env)) return 'offered';
   if (state === 'for-run') return 'for-run';
-  if (turn.todoOnly) return turn.plannedOnlyBefore ? 'for-run' : 'until-work';
+  // BR1955: real work between solo plan turns is not permission to spend another model turn on the plan.
+  // PlanProgress still advances it; nonwriting approval lanes are excluded by toolsThisTurn.
+  if (turn.todoOnly) return 'for-run';
   if (state === 'until-work' && turn.didOtherWork) return 'offered';
   return state;
 }

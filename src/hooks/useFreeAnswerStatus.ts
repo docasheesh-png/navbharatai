@@ -16,8 +16,12 @@ export function useFreeAnswerStatus(active = true): FreeAnswerStatus | null {
       clearTimeout(resetTimer);
       if (value) resetTimer = setTimeout(refresh, Math.max(1000, Math.min(86_400_000, value.resetsAt - Date.now() + 100)));
     });
-    async function refresh() {
-      if (stopped || document.visibilityState === 'hidden') return;
+    async function refresh(includeHidden = false) {
+      // The interval stays quiet while the document is hidden. A turn can still finish
+      // then — backgrounded tab, locked screen, or a mobile composer that reports hidden —
+      // and that completion has a new server count. Skipping it left the badge on the
+      // first in-flight reading (49/50) after later answers had already been counted.
+      if (stopped || (!includeHidden && document.visibilityState === 'hidden')) return;
       await reader.refresh(async () => {
         const identity = auth.currentUser?.uid;
         const headers = await authHeader();
@@ -28,18 +32,20 @@ export function useFreeAnswerStatus(active = true): FreeAnswerStatus | null {
       });
     }
     const identityChanged = () => { reader.invalidate(); setStatus(null); void refresh(); };
-    const changed = () => { void refresh(); clearTimeout(admissionTimer); admissionTimer = setTimeout(refresh, 1000); };
+    const changed = () => { void refresh(true); clearTimeout(admissionTimer); admissionTimer = setTimeout(() => void refresh(true), 1000); };
     const storage = (event: StorageEvent) => { if (isFreeAnswerStorageKey(event.key)) changed(); };
     const unsubscribe = auth.onAuthStateChanged(identityChanged);
-    window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', refresh);
+    // DOM events are not the includeHidden permission; only explicit settlement/invalidation opts in.
+    const visibleRefresh = () => { void refresh(); };
+    window.addEventListener('focus', visibleRefresh);
+    document.addEventListener('visibilitychange', visibleRefresh);
     window.addEventListener(FREE_ANSWER_CHANGED, changed);
     window.addEventListener('storage', storage);
     const poll = setInterval(refresh, 15_000);
     void refresh();
     return () => {
       stopped = true; reader.invalidate(); unsubscribe(); clearTimeout(resetTimer); clearTimeout(admissionTimer); clearInterval(poll);
-      window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', visibleRefresh); document.removeEventListener('visibilitychange', visibleRefresh);
       window.removeEventListener(FREE_ANSWER_CHANGED, changed); window.removeEventListener('storage', storage);
     };
   }, [active]);

@@ -250,7 +250,7 @@ describe('🔴 after the fast lane hands off at a reasoning rung, no one-shot wa
   });
 
   it('the route keeps the one-shot off the chain that just handed off, and says why', () => {
-    expect(ROUTE).toMatch(/oneShotStillViable\(sb\) && anotherLaneWorthTrying\(sb\.reason\) && !fastLaneReasoningRung\)/);
+    expect(ROUTE).toMatch(/oneShotStillViable\(sb\) && anotherLaneWorthTrying\(sb\.reason\) && !fastLaneReasoningRung && !steeringHandoff\.pending\(\)\)/);
     expect(ROUTE).toMatch(/classifyForOneShot\(analysis\?\.startTier\) && fastLaneReasoningRung\) \{\s*buildDiag\.record\(\{ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED'/);
   });
 });

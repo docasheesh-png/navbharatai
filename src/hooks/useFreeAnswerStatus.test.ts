@@ -30,6 +30,22 @@ describe('daily status browser lifecycle', () => {
     window.dispatchEvent(new Event(FREE_ANSWER_CHANGED)); await flush(); expect(state.value).toMatchObject({ remaining: 19, reserved: 1 });
     await vi.advanceTimersByTimeAsync(1000); expect(fetcher).toHaveBeenCalledTimes(3);
   });
+  it('applies the server count when a turn finishes while the document is hidden', async () => {
+    await mount();
+    doc.visibilityState = 'hidden';
+    fetcher.mockResolvedValue({ ok: true, json: async () => ({ limit: 50, used: 25, reserved: 0, remaining: 25, inProgress: false, resetsAt: START + 2000, day: '2027-01-15' }) });
+    window.dispatchEvent(new Event(FREE_ANSWER_CHANGED)); await flush();
+    expect(state.value).toMatchObject({ remaining: 25, used: 25, limit: 50 });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    if (typeof cleanup === 'function') cleanup(); cleanup = undefined;
+    doc.visibilityState = 'visible';
+    fetcher.mockClear();
+    await mount();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(state.value).toMatchObject({ remaining: 25, used: 25, limit: 50 });
+  });
   it('does not poll hidden or off-screen panes, and refreshes on visibility restoration', async () => {
     await mount(false); expect(fetcher).not.toHaveBeenCalled();
     await mount(); doc.visibilityState = 'hidden'; await vi.advanceTimersByTimeAsync(30_000); expect(fetcher).toHaveBeenCalledTimes(1);

@@ -592,3 +592,7 @@ The original27 console tests and every 404/paint/listener-order/off-switch/appen
 - Full run on b8a3cc965 exposed this audit's erroneous pre-write steering refusal. BR1952 requires completed in-flight files to settle once before ownership changes; queued steering is not Stop. The refusal was removed, all original BR1952 checks retained, and R05 corrected to assert saved receipts/yield/no preview instead of the incorrect zero-write draft. Existing Stop/deadline/write-fence ownership remains unchanged.
 - Avoid source reads for files with no safely repairable fields and preserve real React-import preprocessing. Existing electrical and starter-context caller assertions pass unchanged. The five blocker rows retain their factual what/why/needs/tried under the bold labels required by the queue invariant.
 - Corrected focused cohort:172 tests/6 files PASS, including all18 unchanged real PGlite tests. The interrupted full run's PGlite timeout is not silently called an external issue. Only a subsequent completed exact-head full gate may establish final PASS. Both interrupted red attempts are retained.
+
+
+## Parent-confirmed subsequent merge reconciliation
+Parent verified PR4128 exact39238bdd545d766c0aceb1cbde0986783410ff9d merged via69679e6206ade3a2a75c5c024f26946b82710ea3. BR1957 transactionally closes ONLY25pending prevention/safeguard rows;5blockers remain. Earlier authored pre-merge labels above are historical checkpoints, not current unmerged claims.

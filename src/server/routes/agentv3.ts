@@ -1,6 +1,6 @@
 import { withReplyLanguage, replyVoiceForRequest } from '../AgentV3/replyLanguageBinding';
 import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
-import { createSandboxAdmissionBudget } from '../AgentV3/sandboxAdmissionBudget';
+import { createSandboxAdmissionBudget, sandboxAdmissionActuator } from '../AgentV3/sandboxAdmissionBudget';
 import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges } from '../AI/RouterOne/catalogueAccounting';
 import { planKitRefresh } from '../lib/gameRecipeLayers';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
@@ -328,7 +328,7 @@ import { shouldAnswerPictureRequest, pictureAnswerEnabled, PICTURE_REQUEST_STEER
 import { shouldAnswerSpreadsheetRequest } from '../AgentV3/spreadsheetRequest';
 import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } from '../AgentV3/spreadsheetTurn';
 import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
-import { starterCompletedNote, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, seedStateOf, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
+import { starterCompletedNote, seedSourceInventory, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, seedStateOf, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
 import { writePlatformFiles, readWriteOutcomes, type WriteOutcome } from '../AgentV3/writeOutcomes';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
@@ -746,6 +746,7 @@ import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedCla
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
 import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../AgentV3/spacingSnap';
 import { filesANoteStillFlags } from '../AgentV3/writeTimeQualityCheck';
+import { persistedStateBuildWarnings } from '../AgentV3/persistedStateCheck';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
 import { buildServiceGraph } from '../AgentV3/serviceGraph';
@@ -11948,7 +11949,7 @@ async function noteBuildOutcome(
     const rawActuator = buildActuator();
     const parallelBuild = parallelBuildEnabled();
     const buildWriteLock = new PathWriteLock();
-    const actuator = parallelBuild ? lockedActuator(rawActuator, buildWriteLock) : rawActuator;
+    const actuator = sandboxAdmissionActuator(parallelBuild ? lockedActuator(rawActuator, buildWriteLock) : rawActuator, intentWorkspaceId, sandboxAdmissionBudget);
     const workspaceId = intentWorkspaceId;
     // GREEN FREEZE — clear any stale green latch for this workspace at the VERY START, before a single
     // write. This is the robust fix for the leak the adversarial review found (2026-08-12): a prior
@@ -18639,18 +18640,17 @@ async function noteBuildOutcome(
           // A chip the user ADDED words to seeds its template too (chipExtensionFor, autopsy ca99778e).
           const golden = seedableScaffoldFor(prompt);
           if (golden) {
-            const existingSrc = (await finalSteps.step('template check', () => actuator.listFiles(workspaceId).catch(() => [] as string[])))
-              .filter((p) => p.startsWith('src/'));
+            const existingSrc = await seedSourceInventory(() => finalSteps.step('template check', () => actuator.listFiles(workspaceId)));
             // "Nothing of anybody's is here", not "src/ is empty" — setup writes our own starter into a fresh
             // workspace, so src/ is never empty any more (autopsy 31254f9a; see `holdsOnlyOurStarter`).
-            const nobodysWorkHere = existingSrc.length === 0 || await srcHoldsOnlyOurStarter(
+            const nobodysWorkHere = existingSrc !== null && (existingSrc.length === 0 || await srcHoldsOnlyOurStarter(
               existingSrc, (p) => actuator.readFile(workspaceId, p).then((c) => (typeof c === 'string' ? c : null)),
-            );
+            ));
             if (!nobodysWorkHere) {
               // Said, not swallowed: the routing above already opened this build as a seeded template.
               buildDiag.record({
-                phase: 'build', severity: 'warning', code: 'GOLDEN_SCAFFOLD_SKIPPED', autoResolved: true,
-                message: `The tested "${golden.label}" template was NOT pre-seeded: the workspace already holds ${existingSrc.length} source file(s) that are not our untouched starter, and a template is never written over somebody's work. The build was routed as a seeded template.`,
+                phase: 'build', severity: 'warning', code: 'GOLDEN_SCAFFOLD_SKIPPED', autoResolved: existingSrc !== null,
+                message: `The tested "${golden.label}" template was NOT pre-seeded: the workspace already holds ${existingSrc === null ? 'an unknown source inventory' : existingSrc.length + ' source file(s) that are not our untouched starter'}, and a template is never written over somebody's work. The build was routed as a seeded template.`,
               });
             }
             if (nobodysWorkHere) {
@@ -18715,12 +18715,12 @@ async function noteBuildOutcome(
             }
           }
         } catch (seedErr) {
-          // Best-effort — a failure builds from scratch. But it is SAID, because the routing above opened
+          // A failure does not establish a replacement app. Say so because the routing above opened
           // this build as a seeded template (autopsy 31254f9a: a refused seed was invisible).
           try {
             buildDiag.record({
-              phase: 'build', severity: 'warning', code: 'GOLDEN_SCAFFOLD_SKIPPED', autoResolved: true,
-              message: `The tested template could not be pre-seeded (${String((seedErr as Error)?.message ?? seedErr).slice(0, 160)}), so the app is built from scratch. The build was routed as a seeded template.`,
+              phase: 'build', severity: 'warning', code: 'GOLDEN_SCAFFOLD_SKIPPED', autoResolved: false,
+              message: `The tested template could not be pre-seeded (${String((seedErr as Error)?.message ?? seedErr).slice(0, 160)}); no replacement app is established. The build was routed as a seeded template, but any further build still needs workspace admission.`,
             });
           } catch { /* observation only */ }
         }
@@ -18807,13 +18807,12 @@ async function noteBuildOutcome(
           gameKitSkipReason = 'the build starts from the page the user pasted';
         } else {
           try {
-            const existingSrc = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
-              .filter((p) => p.startsWith('src/'));
-            const nobodysWorkHere = existingSrc.length === 0 || await srcHoldsOnlyOurStarter(
+            const existingSrc = await seedSourceInventory(() => actuator.listFiles(workspaceId));
+            const nobodysWorkHere = existingSrc !== null && (existingSrc.length === 0 || await srcHoldsOnlyOurStarter(
               existingSrc, (p) => actuator.readFile(workspaceId, p).then((c) => (typeof c === 'string' ? c : null)),
-            );
+            ));
             if (!nobodysWorkHere) {
-              gameKitSkipReason = `the workspace already holds ${existingSrc.length} source file(s) that are not our untouched starter, and the kit is never written over somebody's work`;
+              gameKitSkipReason = `the workspace already holds ${existingSrc === null ? 'an unknown source inventory' : existingSrc.length + ' source file(s) that are not our untouched starter'}, and the kit is never written over somebody's work`;
             } else {
               const kitThreeD = kitPlan.includes('generate_game_3d');
               events.emit({ type: 'narration', agent: 'architect', text: `🎮 Setting up NavBharatAI's game engine first — game loop, controls, sound effects and music${kitThreeD ? ', visual effects, the 3D world and a playable 3D shell' : ''} — so your game is built on it.`, ts: Date.now() });
@@ -21476,6 +21475,13 @@ async function noteBuildOutcome(
             // The deterministic design writers, BEFORE the lint (autopsy 9c612cdb — see `snapSpacing`).
             await restoreKitRules({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'before-repair');
             await snapSpacing({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'before-lint');
+            // BR1957: a hook-only project still needs persisted-state warnings. Advisory and read-only;
+            // no inferred schema, code/data rewrite, model call or change to Stop/green ownership.
+            if (hasUserApp) {
+              for (const message of persistedStateBuildWarnings(integrityFiles)) {
+                buildDiag.record({ phase: 'build', severity: 'warning', code: 'PERSISTED_STATE_BOUNDARY', ...obs(message) });
+              }
+            }
             const quality = hasUserApp ? lintBuiltApp(integrityFiles) : null;
             designShipped = quality;
             // `null` means nothing lintable was found. Recording a perfect score there would claim we

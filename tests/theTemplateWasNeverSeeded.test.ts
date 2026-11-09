@@ -59,7 +59,7 @@ describe('§1 the template pre-seed asks "is anybody\'s work here?", not "is src
   });
 
   it('SOURCE: the route seeds on "nobody\'s work here", and SAYS when it does not', () => {
-    expect(route).toMatch(/const nobodysWorkHere = existingSrc\.length === 0 \|\| await srcHoldsOnlyOurStarter\(/);
+    expect(route.match(/const nobodysWorkHere = existingSrc !== null && \(existingSrc\.length === 0 \|\| await srcHoldsOnlyOurStarter\(/g)).toHaveLength(2);
     expect(route).toMatch(/if \(nobodysWorkHere\) \{/);
     expect(route).not.toMatch(/if \(existingSrc\.length === 0\) \{/);
     expect((route.match(/code: 'GOLDEN_SCAFFOLD_SKIPPED'/g) ?? []).length).toBe(2);

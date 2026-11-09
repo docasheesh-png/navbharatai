@@ -3321,6 +3321,8 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
   // which tells the reader their build FAILED because of a colour palette. `DESIGN_PAGE_INCONSISTENT`
   // was already here for exactly this reason; the whole-app grade was simply recorded under a
   // different code and so kept its eligibility.
+  // Source-pattern advisory, not an observed runtime failure or an explanation of Stop.
+  'PERSISTED_STATE_BOUNDARY',
   'DESIGN_CONSISTENCY',
   // Same class, same report: an accessibility grade is a quality note about the app, never the reason
   // a build did or did not work.

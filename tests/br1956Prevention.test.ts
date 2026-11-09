@@ -1,5 +1,6 @@
 import { labelAuthoredFields } from '../src/server/AppMakerLab/intelligence/A11yLinter';
 import { runOneShot } from '../src/server/AgentV3/OneShotBuilder';
+import { STEERING_YIELD_REASON } from '../src/server/AgentV3/steeringHandoff';
 import { runSimpleBuild } from '../src/server/AgentV3/SimpleBuilder';
 import { describe, expect, it } from 'vitest';
 import vm from 'node:vm';
@@ -225,12 +226,30 @@ describe('BR1956 upstream literal-placeholder label prevention, not invented his
     expect(result.ok).toBe(true);
     expect(written[0].content).toContain('aria-label="Write your review"');
     expect(written[0].content).not.toContain('aria-label="User owned"');
-    let cancelled = false, writes = 0;
-    const cancelledResult = await runOneShot({prompt:'review',framework:'vite-react',scaffoldPaths:['src/App.tsx'],
-      readExisting:async()=>{cancelled=true;return '';},yieldRequested:()=>cancelled,
+    let requested = false, writes = 0, previews = 0;
+    const yieldedResult = await runOneShot({prompt:'review',framework:'vite-react',scaffoldPaths:['src/App.tsx'],
+      readExisting:async()=>{requested=true;return '';},yieldRequested:()=>requested, startPreview:async()=>{previews++;},
       generate:async()=>`<<<FILE src/App.tsx>>>\n${raw}\n<<<ENDFILE>>>`,writeFiles:async()=>{writes++;}});
-    expect(cancelledResult.ok).toBe(false);
-    expect(writes).toBe(0);
+    expect(yieldedResult.ok).toBe(false);
+    expect(yieldedResult.reason).toBe(STEERING_YIELD_REASON);
+    expect(yieldedResult.filesWritten).toBe(1);
+    expect(yieldedResult.salvagedPaths).toEqual(['src/App.tsx']);
+    expect(writes).toBe(1);expect(previews).toBe(0);
+  });
+  it('both lanes avoid source reads without repairable fields, and one-shot still adds the real React value import', async () => {
+    for (const kind of ['one-shot','manifest'] as const) {
+      const reads:string[]=[],saved:Array<{path:string;content:string}>=[];
+      const deps={prompt:'state hook',framework:'vite-react',scaffoldPaths:['src/App.tsx'],shareContract:false,
+        readExisting:async(p:string)=>{reads.push(p);return 'user-owned starter';},
+        generate:async(_sys:string,user:string)=>{
+          if(user.includes('Plan the file list'))return 'src/App.tsx :: main\nsrc/Hook.tsx :: hook';
+          const p=kind==='one-shot'?'src/App.tsx':user.match(/write THIS file in full:\s*\n\s*([^\n]+)/)?.[1]?.trim()||'src/App.tsx';
+          return `<<<FILE ${p}>>>\nexport default function App(){const ref=React.useRef(null);return <div ref={ref}/>;}\n<<<ENDFILE>>>`;
+        },writeFiles:async(files:Array<{path:string;content:string}>)=>{saved.push(...files);}};
+      const result=await(kind==='one-shot'?runOneShot(deps):runSimpleBuild(deps));
+      expect(result.ok).toBe(true);expect(reads).toEqual([]);expect(saved.length).toBeGreaterThan(0);
+      expect(saved.every(f=>/import .*React/.test(f.content)&&f.content.includes('React.useRef'))).toBe(true);
+    }
   });
   it('the real manifest lane writes labelled acknowledged bytes and never mutates unchanged user fields', async () => {
     const written: Array<{path:string;content:string}> = [];
@@ -247,16 +266,18 @@ describe('BR1956 upstream literal-placeholder label prevention, not invented his
     expect(written.every(f=>f.content.includes('aria-label="Write your review"'))).toBe(true);
     expect(written.find(f=>f.path==='src/App.tsx')?.content).not.toContain('aria-label="User owned"');
   });
-  it('manifest lane also yields if steering arrives during the new source-read await', async () => {
-    let requested=false,writes=0;
+  it('manifest lane settles completed files then yields if steering arrives during the new source-read await', async () => {
+    let requested=false;const saved:string[]=[];
     const result=await runSimpleBuild({prompt:'Review app',framework:'vite-react',scaffoldPaths:['src/App.tsx'],shareContract:false,
-      yieldRequested:()=>requested,readExisting:async()=>{requested=true;return '';},
+      yieldRequested:()=>requested,stopLane:()=>requested?STEERING_YIELD_REASON:null,readExisting:async()=>{requested=true;return '';},
       generate:async(_sys,user)=> {
         if(user.includes('Plan the file list')) return 'src/App.tsx :: review app\nsrc/Review.tsx :: review fields';
         const file=(user.match(/write THIS file in full:\s*\n\s*([^\n]+)/)||[])[1]?.trim()||'src/App.tsx';
         return `<<<FILE ${file}>>>\n${raw}\n<<<ENDFILE>>>`;
-      },writeFiles:async()=>{writes++;}});
-    expect(result.ok).toBe(false);expect(writes).toBe(0);
+      },writeFiles:async files=>{saved.push(...files.map(f=>f.path));return files.map(f=>({path:f.path,ok:true}));}});
+    expect(result.ok).toBe(false);expect(result.reason).toBe(STEERING_YIELD_REASON);
+    expect(result.salvagedPaths).toContain('src/App.tsx');expect(saved).toContain('src/App.tsx');
+    expect(saved.filter(p=>p==='src/App.tsx')).toHaveLength(1);expect(result.stopped).not.toBe(true);
   });
   it('actual guarded tool writes and edit siblings use the shared normalizer, including explicit remove controls', async () => {
     const store = new Map<string,string>();

@@ -101085,3 +101085,9 @@ Parent owns independent review+merge. Source final exact-head gate evidence and 
 
 
 BR1956 final-gate correction: first full coverage candidate ff455fb85 failed the console-lane census after transport centralization. Stopped only its owned known-red tree (actual143), retained complete logs; strengthened direct-owner +helper-consumer +emitted-script/console-owner census without removing any original guard. Add review-only R07/Q2531. Correct tally now36 rows:25 prevention pending (16report/2inspection/7review),6already,5blocked. All final gates will rerun on corrected integrated head; no hosted-green claim.
+
+
+### BR1956 unpublished validation correction — 2026-11-09T05:40:07.302893+05:30 IST
+- The second draft b8a3cc965 full coverage correctly exposed a genuine regression introduced by this audit: a new pre-write yield check dropped completed fast-lane files and violated BR1952 once-only handoff ownership. Removed that check; settled owned writes still precede steering delivery, existing Stop/deadline/write fences remain. R05 now states the actual ownership contract, not the incorrect zero-write draft expectation. All prior BR1952 assertions are unchanged.
+- Normalization first checks for repairable fields before any sandbox source read; preserve React-value-import ordering and starter-page prompt isolation. Existing electrical/config caller guards pass unchanged. Blocked rows now carry the same measured four fields under required bold labels; queue invariant unchanged.
+- Focused six-suite reproduction after correction:172 tests PASS, including all18 real PGlite tests unchanged. The earlier full-run PGlite timeout is retained as an observed failure, not attributed to external infrastructure without evidence. Both interrupted full attempts remain red/incomplete; full CI still must pass on the final integrated head. No PR published and no merge/replay/deploy performed.

@@ -260,10 +260,10 @@ Only15 confirmed-parent-merged BR1955 rows close transactionally; its10 blockers
 
 ### R05 / Q-2529 — FIXED IN BRANCH — NOT MERGED
 - Origin/bucket: review / not an extra historical failure.
-- Problem: A steering instruction arriving during new async source reads must still yield before any fast-lane write.
+- Problem: Steering during new async source reads must preserve completed-file ownership and yield without a stale-scope success.
 - Evidence: New asynchronous normalization seam; not an old stop violation.
-- Root/class/sibling action: F5: recheck existing yieldRequested ownership immediately before writing in both fast lanes; preserve deadline/lane-write/stop owners.
-- Regression/reversion: Real manifest and one-shot instructions during reads give zero writes; late-yield surgical mutation; prior lane fences retained.
+- Root/class/sibling action: F5: settle completed owned writes, then report the existing steering yield without preview; preserve deadline/lane-write/Stop owners.
+- Regression/reversion: Real manifest and one-shot steering during reads saves each completed file once and reports yield; post-write stale-success mutation; unchanged BR1952 ownership/Stop regressions.
 
 ### R06 / Q-2530 — FIXED IN BRANCH — NOT MERGED
 - Origin/bucket: review / not an extra historical failure.
@@ -586,3 +586,9 @@ Final state: prevention FIXED IN BRANCH pending parent independent review+merge,
 The first full exact-head coverage attempt on ff455fb85 exposed one stale console-lane census: consolidation reduced direct transport declarations while keeping six logical scripts, and scan now shares the pre-existing daemon instead of an independent unrecorded browser. The known-red run was stopped (actual driver exit143), not claimed passed. Complete old evidence is retained under `/workspace/br-autopsy-1956/attempt-ff455fb85`; no source was edited under the running gate.
 
 The original27 console tests and every 404/paint/listener-order/off-switch/append/claim assertion remain. The census now separately locks all four direct transport owners, all three helper consumers, one real transport in every emitted logical script, actual scan caller daemon admission and its shared console ownership. A new owner OR shared-helper consumer must fail the census. Existing independent screenshot recorder remains unchanged and paint-anchored; the old census falsely called it non-recording. F1's actual old fresh-browser reversion must fail these stronger emitted-script assertions. No runtime workaround or threshold/test deletion. Final complete gates rerun on the corrected committed integration; R07 is not a historical1956 failure.
+
+
+## Unpublished validation corrections (not additional historical BR1956 failures)
+- Full run on b8a3cc965 exposed this audit's erroneous pre-write steering refusal. BR1952 requires completed in-flight files to settle once before ownership changes; queued steering is not Stop. The refusal was removed, all original BR1952 checks retained, and R05 corrected to assert saved receipts/yield/no preview instead of the incorrect zero-write draft. Existing Stop/deadline/write-fence ownership remains unchanged.
+- Avoid source reads for files with no safely repairable fields and preserve real React-import preprocessing. Existing electrical and starter-context caller assertions pass unchanged. The five blocker rows retain their factual what/why/needs/tried under the bold labels required by the queue invariant.
+- Corrected focused cohort:172 tests/6 files PASS, including all18 unchanged real PGlite tests. The interrupted full run's PGlite timeout is not silently called an external issue. Only a subsequent completed exact-head full gate may establish final PASS. Both interrupted red attempts are retained.

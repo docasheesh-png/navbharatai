@@ -19216,24 +19216,31 @@ async function noteBuildOutcome(
             const written = Object.fromEntries(writtenFiles);
             const disk = typeof written['package.json'] === 'string' ? null : await actuator.readFile(workspaceId, 'package.json').catch(() => null);
             const plan = fastLaneDependencyPlan(written, disk);
+            // ONE writer site for the lane's package.json copy (census in agentv3.test.ts): the pinned manifest
+            // that landed, then — after an install — the bytes npm left on disk, so the lane's copy equals the disk.
+            let laneManifest: string | null = null;
             let pinnedWritten = plan.packageJson === null;
             if (plan.packageJson !== null) {
               const pkgWrite = [{ path: 'package.json', content: plan.packageJson }];
               if (readWriteOutcomes(pkgWrite, await fastWrite(pkgWrite)).landed.length > 0) {
-                writtenFiles.set('package.json', plan.packageJson);
+                laneManifest = plan.packageJson;
                 pinnedWritten = true;
               }
             }
             const command = fastLaneDependencyInstallCommand(plan, pinnedWritten);
-            if (!command) return;
-            const names = [...plan.pinned.map((p) => p.package), ...plan.unpinned];
-            fastLog(`📦 Installing ${names.length} package(s) the code imports but package.json omitted: ${names.join(', ')}`);
-            const res = await dispatcher.dispatch({ id: `fast-deps-${stage}`, name: 'bash', input: { command } }, 'frontend');
-            // `npm install <name>` records the name in package.json on disk; keep the lane's copy equal to it.
-            if (writtenFiles.has('package.json')) {
-              const after = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
-              if (typeof after === 'string' && after.trim()) writtenFiles.set('package.json', after);
+            let res: { is_error?: boolean } | null = null;
+            if (command) {
+              const names = [...plan.pinned.map((p) => p.package), ...plan.unpinned];
+              fastLog(`📦 Installing ${names.length} package(s) the code imports but package.json omitted: ${names.join(', ')}`);
+              res = await dispatcher.dispatch({ id: `fast-deps-${stage}`, name: 'bash', input: { command } }, 'frontend');
+              // `npm install <name>` records the name in package.json on disk; keep the lane's copy equal to it.
+              if (laneManifest !== null || writtenFiles.has('package.json')) {
+                const after = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
+                if (typeof after === 'string' && after.trim()) laneManifest = after;
+              }
             }
+            if (laneManifest !== null) writtenFiles.set('package.json', laneManifest);
+            if (!command || !res) return;
             buildDiag.record({
               phase: 'build', severity: res.is_error ? 'warning' : 'info', code: 'FASTLANE_DEPS_RECONCILED', autoResolved: !res.is_error,
               message: fastLaneDependencyNote(plan, stage, !res.is_error),

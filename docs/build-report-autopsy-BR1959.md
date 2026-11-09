@@ -63,3 +63,9 @@ Nothing here repairs the historical app; nor does it claim the two unreachable B
 - Its four blockers (Q-2567, Q-2587, Q-2588, Q-2589) stay open, with their owner now `#4132 MERGED (59a03712d)`.
 - All earlier debt stays as it was, including Q-2371 and the PR4109 ownership row.
 - New rows are Q-2602…Q-2611: seven are implemented and three are blocked with what/why/needs/tried.
+
+## Exact-head CI caught two census failures in this branch (fixed before the PR)
+The first full `test:coverage` run on the frozen head f79856f5c failed 2 of 49,409 tests (3,246 of 3,248 files passed). Nothing was rerun to make it pass; the two failures were real, and both are fixed in the next commit:
+- **`agentv3.test.ts` writtenFiles census (expected 36, got 38).** F1 added two `writtenFiles.set` sites without auditing them. They are now a single site: the pinned package.json after its write lands, or the bytes npm left on disk after an install. It sits inside the fast lane, which `fastLaneWouldRun` gates on `new_build && !projectModuleRef && !isImportTurn`. The census is now 37, with that reasoning recorded.
+- **Problem-code ratchet (`aProblemTheUserIsShownCanBeActedOn`).** F1's new `FASTLANE_DEPS_RECONCILED` (warning when the install fails) had no home. It is now in `PROCESS_ONLY_CODES`. It describes our lane's own install, and a package still missing surfaces as the app's own TS2307/boot finding.
+- Why the related-suite runs missed both: they covered the changed modules' own tests and not these two repo-wide censuses. The full gate exists for exactly this.

@@ -119,6 +119,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // All WARNING/INFO, so the error count a RED gate reads cannot change and no bill moves.
   'FASTLANE_CONTINUATION_FAILED',    // our generation's continuation call failed; the complete files were kept
   'FASTLANE_TRUNCATED_FILE_DROPPED', // our output limit cut a file mid-write; we discarded it and rebuild it
+  'FASTLANE_DEPS_RECONCILED',        // our lane declared/installed packages the code imports (autopsy BR1959); a package still missing surfaces as the app's own TS2307/boot finding
   'IMPORT_DIAGNOSTIC',               // how our server-side GitHub import ran
   'IMPORT_DB_PROVISION_FAILED',      // the PostgreSQL WE set up in the sandbox failed its connection test
   'IMPORT_DB_MIGRATIONS_SKIPPED',    // our sandbox could not install the deps, so we skipped the migration

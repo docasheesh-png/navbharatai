@@ -260,7 +260,7 @@ describe('9 · the ETA line in the final checks, and after a hand-off', () => {
     // "your app is built" by the heartbeat tick), and passing it reproduces THIS report rather than
     // accommodating the change.
     const line = finalChecksEtaLine(12 * 60_000, true);
-    expect(line).toMatch(/your app is built — running the final checks/);
+    expect(line).toMatch(/source files prepared — running the final checks/);
     expect(line).not.toMatch(/to go|more to go/);
   });
 

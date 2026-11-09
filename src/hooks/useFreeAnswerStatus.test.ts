@@ -51,6 +51,20 @@ describe('daily status browser lifecycle', () => {
     await mount(); doc.visibilityState = 'hidden'; await vi.advanceTimersByTimeAsync(30_000); expect(fetcher).toHaveBeenCalledTimes(1);
     doc.visibilityState = 'visible'; doc.dispatchEvent(new Event('visibilitychange')); await flush(); expect(fetcher).toHaveBeenCalledTimes(2);
   });
+  it('never treats DOM events as includeHidden permission, and removes the same listener on cleanup', async () => {
+    await mount(); expect(fetcher).toHaveBeenCalledTimes(1);
+    doc.visibilityState = 'hidden';
+    doc.dispatchEvent(new Event('visibilitychange')); await flush();
+    window.dispatchEvent(new Event('focus')); await flush();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    doc.visibilityState = 'visible';
+    doc.dispatchEvent(new Event('visibilitychange')); await flush();
+    window.dispatchEvent(new Event('focus')); await flush();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    if (typeof cleanup === 'function') cleanup(); cleanup = undefined;
+    doc.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event('focus')); await flush();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
   it('clears previous account state immediately and ignores responses after unmount', async () => {
     await mount(); let finish!: (value: unknown) => void;
     fetcher.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));

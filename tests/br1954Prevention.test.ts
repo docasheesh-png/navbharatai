@@ -124,7 +124,7 @@ describe('BR1954 — the existing source/API contract is a prerequisite, not con
   });
   it('the real route binds the contract/ref and prepends it exactly once before either generation lane', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    expect(route.match(/gameTurnHandoff\(prompt,/g) ?? []).toHaveLength(1);
+    expect(route.match(/gameTurnHandoff\(gameTurnRequest\(prompt, milestoneRequest\),/g) ?? []).toHaveLength(1);
     const at = route.indexOf('const gameHandoff = gameTurnHandoff(');
     const lanes = route.indexOf('// ── ONE-SHOT FAST LANE', at);
     expect(at).toBeGreaterThan(0);
@@ -134,7 +134,7 @@ describe('BR1954 — the existing source/API contract is a prerequisite, not con
     expect(body).toContain('buildPrompt = `${gameHandoff.block}');
     expect(body).toContain('stopped: abort.signal.aborted');
     expect(route.match(/gameContract = buildGameContract\(/g) ?? []).toHaveLength(0);
-    expect(route).toContain('gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt) })');
+    expect(route).toContain('gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(gameTurnRequest(prompt, milestoneRequest)) })');
     // Preservation gates remain independently required; handoff cannot make an edit a fresh seed.
     expect(route).toContain("if (intent === 'new_build' && !projectModuleRef && !isImportTurn)");
     expect(route).toContain("if (intent === 'edit_existing' && !isImportTurn && !projectModuleRef && projectFilesAtTurnStart");

@@ -1,3 +1,4 @@
+import { splitSeedOrphans, seedOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
 import { ASSET_MODELS_PATH, localModelSubjects, readyModelFor, localModelLead } from './gameAssets/localModelNote';
@@ -1135,6 +1136,8 @@ export class ToolDispatcher {
    * Unset ⇒ the gate behaves exactly as it did before authorship existed.
    */
   private authoredFiles?: () => Iterable<string>;
+  private platformSeedFiles?: () => Iterable<string>;
+  setPlatformSeedFiles(getter: () => Iterable<string>): void { this.platformSeedFiles = getter; }
 
   setAuthoredFiles(getter: () => Iterable<string>): void {
     if (typeof getter === 'function') this.authoredFiles = getter;
@@ -7028,7 +7031,9 @@ export class ToolDispatcher {
             // An untouched file this build ORPHANED by removing its last import elsewhere is this build's doing
             // (autopsy 8257ca59) — said as such, at warning weight, never as "your existing code".
             const orphanedHere = split.preExisting.filter((o) => this._droppedImportStems.has(importStem(o.file)));
-            const reallyOld = split.preExisting.filter((o) => !orphanedHere.includes(o));
+            const seedOwnership = splitSeedOrphans(split.preExisting.filter((o) => !orphanedHere.includes(o)), this.platformSeedFiles?.() ?? []);
+            const reallyOld = seedOwnership.preExisting;
+            if (seedOwnership.platform.length > 0) extra.push({ severity: 'observation', label: seedOrphanObservation(seedOwnership.platform.map((o) => o.label)) });
             if (orphanedHere.length > 0) extra.push({ severity: 'medium', label: droppedImportOrphanLabel(orphanedHere.map((o) => o.label)) });
             if (reallyOld.length > 0) {
               extra.push({

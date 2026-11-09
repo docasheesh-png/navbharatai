@@ -49,6 +49,7 @@
 //
 // PURE — no I/O. The route supplies the outcomes; this module plans the run and words the handoff.
 
+import { hardConstraintLines } from '../lib/megaRoadmap';
 import { buildGameContract, gameContractBlock, gameScopeContractEnabled, type GameScopeContract } from './gameIntent';
 import { kitTypeContract, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
 import { namedNonSmartphone } from './deviceTarget';
@@ -307,4 +308,23 @@ export function gameTurnHandoff(
       + 'NOT a fresh sandbox read. If the compiler disagrees, read the current producer. '
       + 'Match the consumer to the library; never add a guessed API to make it fit.]\n' + api : '',
   ].filter(Boolean).join('\n\n') };
+}
+
+/** A milestone owns game preparation too. GTA in the later/full goal must not force a 3D shell
+ * under a canvas-only first slice. Explicit dimensional/device constraints still come from the user.
+ * No milestone => byte-identical original behavior. This changes no architecture or saved files.
+ */
+export function gameTurnRequest(original: string, milestone?: string | null): string {
+  if (!milestone) return original;
+  const explicit3D = SAYS_3D.test(original) && gameKitWants3D(original);
+  const explicit2D = /\b(?:2\s*-?\s*d|two\s*-?\s*dimensional)\b/i.test(original);
+  const phone = namedNonSmartphone(original);
+  return [milestone, 'This milestone belongs to a game.', ...hardConstraintLines(original),
+    explicit2D ? 'User constraint: 2D game.' : explicit3D ? 'User constraint: 3D game.' : '',
+    phone ? `User device constraint: ${phone.device}.` : ''].filter(Boolean).join('\n');
+}
+
+/** Available capability, not a claim that a seed succeeded or that an AAA clone is possible. */
+export function gamePlannerCapability(prompt: string, framework: string): string {
+  return gameKitPlan(prompt, framework).length ? 'Game capability: this React workspace supports the existing fixed-timestep input/audio runtime and optional Three.js 3D shell, camera and vehicle recipes. Plan a limited original playable slice in the selected React architecture; do not claim that 3D itself is unavailable, or promise a full commercial-game copy.' : '';
 }

@@ -58,7 +58,14 @@ function detectStack(graph: ProjectGraph): string {
  * claim "see it live" (the dishonest message a real build report showed while the preview never
  * rendered). Instead we point the user at the reliable paths: In-browser preview + Diagnose.
  */
-function runHint(stack: string, previewLive: boolean): string {
+function runHint(stack: string, previewLive: boolean, packageJson?: string | null): string {
+  if (packageJson !== undefined && stack !== 'Python') {
+    let dev: unknown;
+    try { dev = JSON.parse(packageJson ?? '').scripts?.dev; } catch { /* unavailable/malformed is not a command */ }
+    const command = typeof dev === 'string' && dev.trim() ? 'Run: npm install && npm run dev.'
+      : 'No verified npm dev command is available; inspect the project entry and package scripts.';
+    return command + (previewLive ? ' The Preview tab has a live server.' : ' Runtime is not verified; inspect the Preview tab for available preview options.');
+  }
   const runCmd = stack === 'Python'
     ? 'Run: pip install -r requirements.txt, then start the server.'
     : 'Run: npm install && npm run dev.';
@@ -95,6 +102,7 @@ export function isProjectSummaryNarration(text: string | null | undefined): bool
   const first = String(text ?? '').trimStart().split('\n')[0].trim();
   return first === ANALYSIS_ONLY_HEADLINE
     || first === BUILT_HEADLINE
+    || first === '📝 Source files prepared — runtime is not verified:'
     || /^🔍 I analyzed your project\. Your source files are untouched — I only wrote /.test(first)
     || /^🔍 I analyzed your project — none of your files were changed; NavBharatAI only added /.test(first)
     || /^✅ Done — I changed \d+ files? in your project/.test(first)
@@ -134,7 +142,7 @@ const ENGINE_CONFIG_PATH = /^(\.env(\..*)?|\.gitignore|\.npmrc|\.nvmrc)$/;
  */
 const NOTE_PATH = /\.(md|mdx|markdown|txt)$/i;
 
-export function summarizeProject(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean; changedFiles?: number; editMode?: boolean; changedPaths?: string[]; platformAdded?: number; awaitingShell?: string | null }): string {
+export function summarizeProject(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean; changedFiles?: number; editMode?: boolean; changedPaths?: string[]; platformAdded?: number; awaitingShell?: string | null; packageJson?: string | null; runProven?: boolean }): string {
   void request; // reserved for future tailoring; summary is graph-derived for now.
   if (!graph || graph.files.length === 0) return '';
   // Default TRUE (backward-compatible) — the caller passes the REAL preview state (whether a live
@@ -175,7 +183,7 @@ export function summarizeProject(graph: ProjectGraph, request: string, opts?: { 
   const awaitingShell = String(opts?.awaitingShell ?? '').trim();
   if (awaitingShell && !analysisOnly) {
     lines.push(`🧩 Built one part of your app${typeof changed === 'number' && changed > 0 ? `: ${changed} file${changed === 1 ? '' : 's'}${named}` : ''}.`);
-    lines.push(`Stack: ${stack}`);
+    lines.push(opts?.runProven === false ? `Detected source: ${stack} (not a verified runtime stack)` : `Stack: ${stack}`);
     lines.push(`There is nothing to open yet: the "${awaitingShell}" module puts the app together, and the preview starts then.`);
     return lines.join('\n');
   }
@@ -193,9 +201,9 @@ export function summarizeProject(graph: ProjectGraph, request: string, opts?: { 
   } else if (editRun) {
     lines.push(`✅ Done — I changed ${changed} file${changed === 1 ? '' : 's'} in your project${named}. Overview:`);
   } else {
-    lines.push(BUILT_HEADLINE);
+    lines.push(opts?.runProven === false ? '📝 Source files prepared — runtime is not verified:' : BUILT_HEADLINE);
   }
-  lines.push(`Stack: ${stack}`);
+  lines.push(opts?.runProven === false ? `Detected source: ${stack} (not a verified runtime stack)` : `Stack: ${stack}`);
 
   const counts: string[] = [`${graph.files.length} file${graph.files.length === 1 ? '' : 's'}`];
   if (graph.components.length) {
@@ -218,7 +226,7 @@ export function summarizeProject(graph: ProjectGraph, request: string, opts?: { 
     lines.push(`Routes: ${paths}${more}`);
   }
 
-  lines.push(runHint(stack, previewLive));
+  lines.push(runHint(stack, previewLive, opts?.packageJson));
 
   const out = lines.join('\n');
   if (out.length <= MAX_CHARS) return out;

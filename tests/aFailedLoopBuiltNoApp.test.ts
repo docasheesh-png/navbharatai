@@ -17,7 +17,8 @@ describe('🔴 the report case: files written by a loop that failed are not "you
   });
   it('the claim still stands for a loop that succeeded with files, and never for zero files', () => {
     expect(etaAppExists(4, false)).toBe(true);
-    expect(finalChecksEtaLine(167_000, etaAppExists(4, false))).toContain('your app is built');
+    expect(finalChecksEtaLine(167_000, etaAppExists(4, false))).toContain('source files prepared');
+    expect(finalChecksEtaLine(167_000, etaAppExists(4, false))).not.toContain('your app is built');
     expect(etaAppExists(0, false)).toBe(false);
     expect(etaAppExists(Number.NaN, false)).toBe(false);
   });

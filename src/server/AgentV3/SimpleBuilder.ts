@@ -1,3 +1,4 @@
+import { compilerNeedsPackageSetup, PACKAGE_SETUP_REQUIRED } from './compilerSetupBoundary';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { manifestArchitectureProblem } from './manifestArchitecture';
 import { STEERING_YIELD_REASON, isSteeringYield } from './steeringHandoff';
@@ -3022,7 +3023,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         }
       } catch { /* a free fix is best-effort — fall through to the model repair below */ }
     };
-    await mechanicalPass();
+    if (!compilerNeedsPackageSetup(verdict.errors)) await mechanicalPass();
     let promptingErrors = verdict.errors;
     while (!verdict.ok && attempt < maxRepairs && deps.repair && !deps.signal?.aborted) {
       // The same question the generation calls ask (`SimpleBuildDeps.stopLane`), asked before every
@@ -3031,6 +3032,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // consulted this; the repair loop — the lane's longest phase — never did.
       // No narration here: the hand-off line after the loop already says it, in the user's words.
       if (deps.yieldRequested?.() || deps.stopLane?.()) break;
+      if (compilerNeedsPackageSetup(verdict.errors)) { deps.log?.(PACKAGE_SETUP_REQUIRED); break; }
       attempt++;
       // GA-8: each attempt climbs the ordered strategy ladder so a retry is a genuinely DIFFERENT push
       // (contract-full → focus-offenders → contract-authority), not the identical prompt re-fired.

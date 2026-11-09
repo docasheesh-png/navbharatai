@@ -14,6 +14,7 @@ export function createSandboxAdmissionBudget() {
   let failures = 0;
   let actuatorOwnsAdmission = false;
   let admitted = false;
+  let workspaceWriteAcknowledged = false;
   let operationBarrier: Promise<unknown> | null = null;
   let recovery: Promise<ToolResult> | null = null;
   const exhausted = () => failures >= 2;
@@ -25,6 +26,9 @@ export function createSandboxAdmissionBudget() {
   const refused = (call: ToolUse): ToolResult => ({ tool_use_id: call.id, is_error: true, content: SANDBOX_ADMISSION_BLOCKED });
   return {
     get exhausted(): boolean { return exhausted(); },
+    get workspaceWriteAcknowledged(): boolean { return workspaceWriteAcknowledged; },
+    /** Called only after the matching build-local actuator write resolves, not from tool prose. */
+    acknowledgeWorkspaceWrite(): void { workspaceWriteAcknowledged = true; },
     /** One owner counts real actuator errors, not the same error again after a tool renders it. */
     useActuatorAdmission(): void { actuatorOwnsAdmission = true; },
     async operation<T>(run: () => Promise<T>): Promise<T> {
@@ -75,7 +79,11 @@ export function sandboxAdmissionActuator<T extends IEngineerActuator>(actuator: 
     if (typeof value !== 'function') return value;
     if (typeof key !== 'string' || !SANDBOX_ADMISSION_OPERATIONS.has(key)) return value.bind(target);
     return (...args: unknown[]) => args[0] === workspaceId
-      ? budget.operation(() => Reflect.apply(value, target, args))
+      ? budget.operation(async () => {
+        const result = await Reflect.apply(value, target, args);
+        if (key === 'writeFile' || key === 'writeBinaryFile') budget.acknowledgeWorkspaceWrite();
+        return result;
+      })
       : Reflect.apply(value, target, args);
   } });
 }

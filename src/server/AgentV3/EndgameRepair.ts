@@ -21,6 +21,7 @@
 // the single LLM call. Kill switch: AGENTV3_ENDGAME_REPAIR=off.
 
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports as fixProvenTypeOnlyValueImports } from './ImportExportReconcile';
+import { compilerNeedsPackageSetup, PACKAGE_SETUP_REQUIRED } from './compilerSetupBoundary';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import { countTscErrors, tscVerdict } from './TscGate';
 import { reactNamespaceValueUse } from './PostEditReviewer';
@@ -610,6 +611,7 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
     if (!checked1.verified) return { ...NO_ATTEMPT, clean: false, tscUnverified: true };
     const errors1 = checked1.errors;
     if (errors1.length === 0) return { ...NO_ATTEMPT, attempted: true }; // already clean — nothing to do
+    if (compilerNeedsPackageSetup(checked1.out)) { io.log?.(PACKAGE_SETUP_REQUIRED); return unverifiedVerdict(errors1.length); }
     io.log?.(`🔧 Endgame repair: ${errors1.length} compile error(s) left — fixing mechanically first…`);
     let files = await io.readFiles();
     const missing = unresolvedNames(errors1);

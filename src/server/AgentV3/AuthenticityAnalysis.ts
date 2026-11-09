@@ -229,12 +229,23 @@ const RULES: Rule[] = [
 ];
 
 /**
- * Detect a function/handler whose body is ONLY a single `console.log(...)` call
+ * A line that only CLOSES a handler body. Besides `}` / `};` / `})` / `});`, a handler written inline as a
+ * JSX attribute closes with the attribute's own brace and whatever JSX closes after it — `}}`, `}}>`, `}} />`,
+ * `}} />} />`, `}},` — a line of nothing but closers (autopsy BR1959: seven "create"/"edit" routes in the
+ * captured text passed `onSubmit={(x) => { console.log('Create student:', x); // In a real app, this would
+ * call the API }}` and the scan never saw them, because `}}` was not a closing line).
+ */
+const HANDLER_CLOSE_RE = /^\}[\s})\];,/>]*$/;
+
+/**
+ * Detect EVERY function/handler whose body is ONLY a single `console.log(...)` call
  * (or only a comment) — an empty/placeholder handler. Conservative: requires a
  * `{ ... }` block whose sole statement is a console.log or whose body is empty
- * but for a comment. Returns the 1-based line of the offending body, or 0.
+ * but for a comment. Returns the 1-based lines of the offending bodies (autopsy BR1959: only the
+ * FIRST was ever reported, so an App.tsx with eight placeholder handlers in its captured text read as one).
  */
-function emptyHandlerLine(lines: string[]): number {
+function emptyHandlerLines(lines: string[]): number[] {
+  const found: number[] = [];
   for (let i = 0; i < lines.length; i++) {
     // An opening brace that starts an actual FUNCTION/ARROW body — `) => {` or `function … {`. The
     // `=>` is REQUIRED (not optional): without it, a bare `) {` matched every control-flow header
@@ -247,7 +258,7 @@ function emptyHandlerLine(lines: string[]): number {
     let closed = false;
     for (let j = i + 1; j < lines.length && j < i + 8; j++) {
       const t = lines[j].trim();
-      if (t === '}' || t === '};' || t === '})' || t === '});') {
+      if (HANDLER_CLOSE_RE.test(t)) {
         closed = true;
         break;
       }
@@ -259,14 +270,13 @@ function emptyHandlerLine(lines: string[]): number {
       (b) => !b.text.startsWith('//') && !b.text.startsWith('/*') && !b.text.startsWith('*'),
     );
     if (meaningful.length === 1 && /^console\.log\s*\(/.test(meaningful[0].text)) {
-      return meaningful[0].line;
-    }
-    if (meaningful.length === 0 && body.length > 0) {
+      found.push(meaningful[0].line);
+    } else if (meaningful.length === 0 && body.length > 0) {
       // body has content but it is all comments → placeholder handler.
-      return body[0].line;
+      found.push(body[0].line);
     }
   }
-  return 0;
+  return found;
 }
 
 /**
@@ -319,8 +329,7 @@ export function scanAuthenticity(file: string, content: string): AuthenticityIss
       issues.push({ file, line: i + 1, kind: 'simulated-result', severity: 'medium', snippet: trimSnippet(line) });
     }
   }
-  const emptyLine = emptyHandlerLine(lines);
-  if (emptyLine > 0) {
+  for (const emptyLine of emptyHandlerLines(lines)) {
     issues.push({
       file,
       line: emptyLine,

@@ -2,7 +2,7 @@
 // (admin 2026-10-23, "Free user par bewajah paisa").
 //
 // ROOT CAUSE this fixes: FreeChain's $10/day owner budget (`FreeChain/spendCap.ts`) only guarded
-// FreeChain's own DeepSeek rung. The legacy `buildFree` ladder (flash-lite → gpt-5-nano → flash), the
+// FreeChain's own DeepSeek rung. The legacy `buildFree` ladder (gpt-5-nano → flash-lite → flash), the
 // `professional-free-fallback` universe (Teacher AI, Lawyer, Design, Debug, App-debug …), Doctor AI /
 // SDA's free path and the Free vision chain all reached PAID models with no daily ceiling at all.
 //

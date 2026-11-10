@@ -1,0 +1,39 @@
+{
+  "oppositeCount": 167,
+  "sameCount": 23,
+  "oppositeAnyFieldChanges": 0,
+  "falseEscalations": [],
+  "oppositeChanges": [],
+  "sameChangedTags": [
+    "report",
+    "case",
+    "br1955-glued",
+    "jaisa",
+    "wala",
+    "make",
+    "build-me",
+    "gtav",
+    "underscore",
+    "mujhe",
+    "ek",
+    "clone",
+    "similar",
+    "like",
+    "period",
+    "quiz-sibling",
+    "gtav-jaisa",
+    "make-us",
+    "tool-using",
+    "tool-wiki",
+    "tool-tips"
+  ],
+  "sameMismatchTwin": [],
+  "gate": {
+    "opposite_0_field_changes": true,
+    "opposite_0_smaller_to_LARGE": true,
+    "opposite_0_newly_famous_GTA": true,
+    "opposite_0_newly_wants3D": true,
+    "opposite_0_lite_to_real": true,
+    "report_matches_spaced_twin": true
+  }
+}

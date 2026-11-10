@@ -72,7 +72,8 @@ const FAMOUS_APPS: Array<{ name: string; re: RegExp }> = [
   { name: 'Free Fire', re: /\bfree\s?fire\b/i },
   { name: 'Fortnite', re: /\bfortnite\b/i },
   { name: 'Call of Duty', re: /\bcall of duty\b|\bcod\s?mobile\b/i },
-  { name: 'GTA', re: /\bgta\b|grand theft auto/i },
+  // BR1966: "gta5" / "gtav" / "gta-5" are the same title as "gta 5"; word-boundary \bgta\b fails because 5/v is a word character. Does not match gta50 or gta5cheats.
+  { name: 'GTA', re: /\bgta(?:\s*[-_]?\s*[5v])?\b|grand theft auto/i },
   { name: 'Minecraft', re: /\bminecraft\b/i },
   { name: 'Clash of Clans', re: /clash of clans|\bcoc\b/i },
   { name: 'Among Us', re: /\bamong us\b/i },

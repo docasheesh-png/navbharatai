@@ -101197,3 +101197,10 @@ Owner t311u sequential audit, BR1965 only (boundary 1951..2105 frozen). The plat
 - **F2.** Q-2632: whole-line `Handl(?:es?|ing) loading, timeout(s) and (API) errors` (optional properly/gracefully/correctly, optional period). Opposite-class corpus of 360 eight-item lists (56 real Handling-loading / Handling-timeout product features, EN/HI/Hinglish), built before the edit: 0 LARGE→smaller vs main.
 
 Queue: this commit closes Q-2632. New row Q-2633 (unpinned `@types/react` / `typescript` installs on a React 18 app). Q-2625/2627/2628/2629/2630/2631 and earlier blockers stay open.
+
+## 2026-11-10 — BR1966 autopsy (GTA5-style game, succeeded): glued gta5 is the same title as "gta 5"
+Owner t311u sequential audit, BR1966 only (boundary 1951..2105 frozen). "Pura gta5 wala game banaa do" succeeded in 10.55 min as an ordinary one-shot with a 2D DOM kit ("3D assets not prepared") because `\bgta\b` does not match concatenated "gta5". The spaced twin and the BR1955 fixture already cloned GTA and seeded the 3D kit. Ledger: [autopsy](docs/build-report-autopsy-BR1966.md), [evidence](docs/build-report-autopsy-BR1966-evidence.json).
+- **F1.** Neighbour locks: this prompt is a GTA clone and wants the 3D/real kit; it matches the spaced twin; India-map stays 2D/direct; `gta50` / `gta5cheats` stay unmatched; companion "using GTA5" follows "using GTA"; the existing claim-audit detector still flags this report's "ready to play" / "fully playable" sentences.
+- **F2.** Glued GTA titles `gta(?:\s*[-_]?\s*[5v])?` in APP_SCOPE, `DRAWN_IN_3D` and `realismIntent`. Opposite-class corpus of 167 prompts, built before the edit: 0 field changes (0 smaller→LARGE, 0 newly famousApp=GTA, 0 newly wants3D, 0 lite→real).
+
+Queue: this commit closes no earlier row. New rows Q-2634 (canvas-less DOM playtest) and Q-2635 (long-name "grand theft auto" still 2D/lite). Q-2633 and earlier blockers stay open. Q-2375 is not re-opened.

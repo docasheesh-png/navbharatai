@@ -284,7 +284,10 @@ const QUALITY_WHOLE_LINE: readonly RegExp[] = [
   /^(?:The\s+)?(?:app|UI|it)\s+(?:must|should)\s+be\s+responsive\.?$/i,
   // "Handle loading, timeout(s) and (API) errors (properly/gracefully)"
   /^Handle(?:s|ing)?\s+loading,?\s+timeouts?\s+and\s+(?:API\s+)?errors(?:\s+(?:properly|gracefully|correctly))?\.?$/i,
-  /^Handle(?:s|ing)?\s+errors(?:\s+(?:properly|gracefully|correctly))?\.?$/i,
+  // BR1964 / Q-2626: English gerund is "Handling" (the e is dropped). Handle(?:s|ing)?
+  // matches "Handleing", not "Handling". Whole-line only: Handl(?:es?|ing) errors
+  // (optional properly/gracefully/correctly, optional period).
+  /^Handl(?:es?|ing)\s+errors(?:\s+(?:properly|gracefully|correctly))?\.?$/i,
   // "Keep the existing <design|UI|layout|styling> (unchanged)" — optional short
   // brand words before the design noun so "Keep the existing NOVA AI design
   // and all working features unchanged" still matches, while "Keep existing

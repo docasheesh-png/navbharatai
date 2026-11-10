@@ -97,6 +97,14 @@ Sixth follow-up (close residuals at `1956cdd90` before review):
 - English publish verbs accept tense (`submitted`, `published`+to/on, `released`, `uploaded`, `publishing`) and a few intervening object words before `to`/`on` + store. Conjunctions and open-verbs are not objects, so "publish this then go to the Play Store" still matches. Bare "published" / "After we release" / "submit a review" still match.
 - Remaining residuals (not queued): "open the play store and submit karna" without a store particle; "released in the Play Store" (`in` is not to/on).
 
+Seventh follow-up (reviewer FAIL at `0911ab617` — 8-word publish idiom + idiom-wins dropped origin/main App Store opens):
+
+- Switch to precedence that cannot regress versus main. Rule A: an explicit open of the store itself always matches, whatever publish language is in the clause. Explicit = open/launch followed directly by (the) App/Play Store, or store + optional pe/par/me/mein/ko/se + khol. The only exclusion is a store-presence object immediately after that store name (listing, developer account, console, page for/of my|our|the|this app listing, screenshots, release). Hinglish khol followed by daal/publish/upload/submit + kar* in the same short phrase is not explicit.
+- Rule B: link/redirect/go keep clause-level publish idioms, plus publish-family language at the end of the clause (`go to the play store and publish my app`, and the parallel upload/submit-my-app/submit-karna forms).
+- The six lost origin/main repros match again, along with "released in the Play Store" and "open the play store and submit karna" (documented as an acceptable explicit open).
+- Strengthened regression gate: the whole corpus is run through origin/main's regex; any prompt main matched that is not on an explicit reviewed must-not-match list must still match.
+- Remaining residuals (not queued): "open the google play store" and "open up the App Store" (an extra word sits between open and the store, so they are not Rule A; origin/main also missed them).
+
 ## Queue
 
 This commit **closes no row** and **opens Q-2647 and Q-2648**. Q-2646, Q-2645, Q-2644, Q-2643, Q-2642, Q-2640, Q-2621, Q-2611, Q-2375 / Q-1068 and earlier blockers stay open.

@@ -65,7 +65,7 @@ Only after I enter BOTH my nickname and mobile number and press NEXT should my p
 - On reopening the app, show the welcome screen as requested.`;
 
 /** Same class: the user is asking to open WhatsApp, place a call, or open another app. */
-const SAME_CLASS_OPEN_APPS = [
+export const SAME_CLASS_OPEN_APPS = [
   'mujhe jarwis chahiye jo mujhe yaad dilaye, bolkar command le, aur whatsapp khole',
   'open WhatsApp',
   'send a WhatsApp message',
@@ -116,13 +116,23 @@ const SAME_CLASS_OPEN_APPS = [
   'Add an Open Play Store button so users can see other apps we published',
   'Build a music console with a button to open the Play Store',
   'play store kholo aur daal makhani recipe dikhao',
+  // #4165: Rule A explicit opens that origin/main captured via `open the app`
+  'Add a button to open the App Store after the app is published on the App Store',
+  'After the app is published on the App Store, add a button to open the App Store',
+  'open the App Store to see the book we published last year on the App Store',
+  'open the App Store to see the exclusive special edition we published on the App Store',
+  'open the App Store to read the blog post on the editorial page we published on the App Store',
+  'open the App Store after it is released on the Play Store',
+  'open the App Store after it is released in the Play Store',
+  // Explicit open (Rule A). Informal publish without a store+particle is acceptable here.
+  'open the play store and submit karna',
 ] as const;
 
 /**
  * Opposite class: a WhatsApp *number* / *id* is an identity field, and "open the app" means
  * launch this app. Own bypass attempts in both scripts and both directions.
  */
-const OPPOSITE_NOT_OPEN_APPS = [
+export const OPPOSITE_NOT_OPEN_APPS = [
   BR1974_PROMPT,
   'Enter Your WhatsApp Mobile Number',
   'WhatsApp number: 7093492611',

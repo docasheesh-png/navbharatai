@@ -13,6 +13,9 @@ import {
   OPEN_APPS_DEEP_BEFORE_LINK_SOURCE,
   OPEN_APPS_STORE_OPEN_VERBS_SOURCE,
   OPEN_APPS_LAUNCH_BEFORE_STORE_SOURCE,
+  OPEN_APPS_EXPLICIT_OPEN_BEFORE_STORE_SOURCE,
+  OPEN_APPS_STORE_PRESENCE_TAIL_SOURCE,
+  OPEN_APPS_BARE_PUBLISH_AT_END_SOURCE,
   OPEN_APPS_STORE_PARTICLES_SOURCE,
   OPEN_APPS_KHOL_SOURCE,
   OPEN_APPS_BARE_STORE,
@@ -23,8 +26,14 @@ import {
   OPEN_APPS_PUBLISH_VERB_GAP_SOURCE,
   enclosingClause,
   clauseHasOwnListingLanguage,
+  clauseHasBarePublishAtEnd,
   isDeepPrefixedLink,
 } from '../src/server/AgentV3/nativeCapabilities';
+import {
+  BR1974_PROMPT,
+  SAME_CLASS_OPEN_APPS,
+  OPPOSITE_NOT_OPEN_APPS,
+} from './aWhatsAppNumberIsNotAnOpenAppsRequest.test';
 
 function ids(p: string): string[] {
   return requestedCapabilities(p).map((c) => c.id);
@@ -40,6 +49,15 @@ const ORIGIN_MAIN_C072E0EB9_OPEN_APPS = /\b(call\s+(?:karo|kar|kare|kardo|mummy|
 function matchedOnOriginMain(prompt: string): boolean {
   return ORIGIN_MAIN_C072E0EB9_OPEN_APPS.test(withoutMachineText(prompt));
 }
+
+const SIX_LOST_ORIGIN_MAIN_REPROS = [
+  'Add a button to open the App Store after the app is published on the App Store',
+  'After the app is published on the App Store, add a button to open the App Store',
+  'open the App Store to see the book we published last year on the App Store',
+  'open the App Store to see the exclusive special edition we published on the App Store',
+  'open the App Store to read the blog post on the editorial page we published on the App Store',
+  'open the App Store after it is released on the Play Store',
+] as const;
 
 const REVIEWER_GENUINE_OPEN_STORE = [
   'open the app store so the user can submit a review',
@@ -98,9 +116,21 @@ const EARLIER_GENUINE_OPEN_REQUESTS = [
   'play store kholo aur daal banao',
 ] as const;
 
+const MORE_RULE_A_GENUINE_OPENS = [
+  ...SIX_LOST_ORIGIN_MAIN_REPROS,
+  'open the App Store after it is released in the Play Store',
+  // Explicit Rule A open. Informal "submit karna" without a store+particle is acceptable.
+  'open the play store and submit karna',
+  'open the App Store and publish karna',
+  'go to the play store and then check the browser console',
+  'go to the play store, then edit the listing',
+] as const;
+
 const GENUINE_OPEN_REQUESTS = [
   ...REVIEWER_GENUINE_OPEN_STORE,
   ...EARLIER_GENUINE_OPEN_REQUESTS,
+  ...MORE_RULE_A_GENUINE_OPENS,
+  ...SAME_CLASS_OPEN_APPS,
 ] as const;
 
 function fuzzDeepLinkPhrases(): string[] {
@@ -161,8 +191,6 @@ function fuzzEnglishTensePhrases(): { match: string[]; nomatch: string[] } {
       'After we release, a button should open the App Store',
       'open the App Store so the user can submit a review',
       'publish this then go to the Play Store',
-    ],
-    nomatch: [
       'open the App Store and publish our app to the Play Store',
       'open the App Store after it is submitted to the Play Store',
       'open the App Store after it is released on the Play Store',
@@ -170,44 +198,66 @@ function fuzzEnglishTensePhrases(): { match: string[]; nomatch: string[] } {
       'open the App Store while publishing on the app store',
       'open the Play Store and publish our new android app to the App Store',
       'open the App Store and publish our brand new updated android application to the Play Store',
-      'go to the play store after publishing our app to the Play Store',
       'open the App Store and uploaded the apk to the Play Store',
+      ...SIX_LOST_ORIGIN_MAIN_REPROS,
+    ],
+    nomatch: [
+      'go to the play store after publishing our app to the Play Store',
+      'go to the play store and publish',
+      'go to the play store and publish my app',
+      'redirect to the play store and publish our app',
+      'link to the play store and publish my app',
+      'go to the play store and upload my app',
+      'go to the play store and submit my app',
+      'go to the play store and submit karna',
+      'link to the play store and upload the apk',
     ],
   };
 }
 
 /**
- * Pair a genuine open with a store-publish idiom in the same clause.
- * Decision: the publish idiom wins (do not capture via the store alternative).
- * Justification: a single clause that both asks to open the store and names a
- * store-publish idiom is typically about this app's store presence (listing,
- * console, shipping). Capturing it would reintroduce the @capacitor/app-launcher
- * side-effect on publish language (t311u). Split across sentences, the open
- * clause still matches. Bare tokens (submit a review, screenshots carousel,
- * published, admin/music console, daal makhani) are not idioms, so those
- * genuine opens still match.
+ * Pair a store mention with publish/listing language.
+ * Rule A (explicit open/launch + store, or store + khol): the explicit open
+ * always wins, so origin/main `open the App Store …` captures cannot regress.
+ * Rule B (link/redirect/go): the clause-level publish idiom still wins, and
+ * so does bare `publish` at the end of the clause.
+ * Hinglish khol + daal/publish-kar in the same short phrase is not Rule A.
  */
 const PUBLISH_IDIOM_WITH_OPEN_PAIRS: { prompt: string; matches: boolean; reason: string }[] = [
-  { prompt: 'open the App Store and submit to the Play Store', matches: false, reason: 'submit to the store' },
-  { prompt: 'open the App Store and publish to the Play Store', matches: false, reason: 'publish to the store' },
-  { prompt: 'open the App Store and upload to the Play Store', matches: false, reason: 'upload to the store' },
-  { prompt: 'open the App Store and update the Play Store listing', matches: false, reason: 'store listing' },
-  { prompt: 'open the App Store next to the listing page', matches: false, reason: 'listing page' },
-  { prompt: 'open the App Store and edit the app listing', matches: false, reason: 'app listing' },
-  { prompt: 'open the App Store and the Play Console', matches: false, reason: 'Play Console' },
-  { prompt: 'open the App Store then add screenshots for the Play Store', matches: false, reason: 'screenshots for the store' },
-  { prompt: 'open the App Store after the app store release', matches: false, reason: 'store release' },
+  { prompt: 'open the App Store and submit to the Play Store', matches: true, reason: 'Rule A explicit open' },
+  { prompt: 'open the App Store and publish to the Play Store', matches: true, reason: 'Rule A explicit open' },
+  { prompt: 'open the App Store and upload to the Play Store', matches: true, reason: 'Rule A explicit open' },
+  { prompt: 'open the App Store and update the Play Store listing', matches: true, reason: 'Rule A explicit open' },
+  { prompt: 'open the App Store next to the listing page', matches: true, reason: 'Rule A explicit open' },
+  { prompt: 'open the App Store and edit the app listing', matches: true, reason: 'Rule A explicit open' },
+  { prompt: 'open the App Store and the Play Console', matches: true, reason: 'Rule A explicit open' },
+  { prompt: 'open the App Store then add screenshots for the Play Store', matches: true, reason: 'Rule A explicit open' },
+  { prompt: 'open the App Store after the app store release', matches: true, reason: 'Rule A explicit open' },
   { prompt: 'play store pe kholo aur daal dena', matches: false, reason: 'store pe + daal dena' },
   { prompt: 'play store ko khol ke daal do', matches: false, reason: 'store ko + daal do' },
   { prompt: 'play store pe khol ke publish karna', matches: false, reason: 'store pe + publish karna' },
   { prompt: 'play store pe khol ke upload karna', matches: false, reason: 'store pe + upload karna' },
   { prompt: 'play store pe khol ke submit karo', matches: false, reason: 'store pe + submit karo' },
   { prompt: 'play store ko khol ke publish kar do', matches: false, reason: 'store ko + publish kar do' },
-  { prompt: 'open the App Store and publish our app to the Play Store', matches: false, reason: 'publish + object + to the store' },
-  { prompt: 'open the App Store after it is submitted to the Play Store', matches: false, reason: 'submitted to the store' },
-  { prompt: 'open the App Store after it is released on the Play Store', matches: false, reason: 'released on the store' },
-  { prompt: 'open the App Store after it is uploaded to the Play Store', matches: false, reason: 'uploaded to the store' },
-  { prompt: 'open the App Store while publishing on the app store', matches: false, reason: 'publishing on the store' },
+  { prompt: 'open the App Store and publish our app to the Play Store', matches: true, reason: 'Rule A explicit open' },
+  { prompt: 'open the App Store after it is submitted to the Play Store', matches: true, reason: 'Rule A explicit open' },
+  { prompt: 'open the App Store after it is released on the Play Store', matches: true, reason: 'Rule A unlocked released-on' },
+  { prompt: 'open the App Store after it is uploaded to the Play Store', matches: true, reason: 'Rule A explicit open' },
+  { prompt: 'open the App Store while publishing on the app store', matches: true, reason: 'Rule A explicit open' },
+  { prompt: 'go to the play store and publish', matches: false, reason: 'Rule B + bare publish at end' },
+  { prompt: 'go to the play store and publish my app', matches: false, reason: 'Rule B + bare publish my app' },
+  { prompt: 'redirect to the play store and publish our app', matches: false, reason: 'Rule B + bare publish our app' },
+  { prompt: 'link to the play store and publish my app', matches: false, reason: 'Rule B + bare publish' },
+  { prompt: 'go to the play store and upload my app', matches: false, reason: 'Rule B + bare upload my app' },
+  { prompt: 'go to the play store and submit my app', matches: false, reason: 'Rule B + submit my app, not a review' },
+  { prompt: 'go to the play store and submit karna', matches: false, reason: 'Rule B + submit karna' },
+  { prompt: 'link to the play store and upload the apk', matches: false, reason: 'Rule B + upload the apk' },
+  { prompt: 'go to the play store after publishing our app to the Play Store', matches: false, reason: 'Rule B + publish to store idiom' },
+  { prompt: 'go to the play store and edit the app listing', matches: false, reason: 'Rule B + app listing' },
+  { prompt: 'go to the play store then edit the Play Console', matches: false, reason: 'Rule B + Play Console' },
+  { prompt: 'go to the play store and then the app store console', matches: false, reason: 'Rule B + store console' },
+  { prompt: 'go to the play store and then check the browser console', matches: true, reason: 'Rule B + bare browser console' },
+  { prompt: 'go to the play store, then edit the listing', matches: true, reason: 'Rule B + bare listing' },
   { prompt: 'open the App Store so the user can submit a review', matches: true, reason: 'bare submit, not submit to/on the store' },
   { prompt: 'Add a button to open the App Store, and a screenshots carousel on the home page', matches: true, reason: 'bare screenshots' },
   { prompt: 'After we release, a button should open the App Store', matches: true, reason: 'bare release' },
@@ -244,7 +294,13 @@ describe('open-apps store rules: exported sources', () => {
     expect(OPEN_APPS_STORE_OPEN_VERBS_SOURCE).toContain('go(?:es|ing)?');
     expect(OPEN_APPS_LAUNCH_BEFORE_STORE_SOURCE).toContain('launch(?:es|ing)?');
     expect(OPEN_APPS_LAUNCH_BEFORE_STORE_SOURCE).not.toMatch(/to\|on\|in/);
+    expect(OPEN_APPS_EXPLICIT_OPEN_BEFORE_STORE_SOURCE).toContain('open(?:s|ing)?');
+    expect(OPEN_APPS_STORE_PRESENCE_TAIL_SOURCE).toContain('listings?');
+    expect(OPEN_APPS_STORE_PRESENCE_TAIL_SOURCE).toContain('developer\\s+accounts?');
+    expect(OPEN_APPS_STORE_PRESENCE_TAIL_SOURCE).toContain('page\\s+(?:for|of)');
+    expect(OPEN_APPS_BARE_PUBLISH_AT_END_SOURCE).toContain('publish');
     expect(OPEN_APPS_STORE_PARTICLES_SOURCE).toContain('mein');
+    expect(OPEN_APPS_STORE_PARTICLES_SOURCE).toContain('ko');
     expect(OPEN_APPS_KHOL_SOURCE).toBe('khol\\w*');
     expect(OPEN_APPS_BARE_STORE).toBe(false);
     expect(OPEN_APPS_BARE_DRAWER).toBe(false);
@@ -254,12 +310,106 @@ describe('open-apps store rules: exported sources', () => {
   });
 });
 
+function uniquePrompts(items: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of items) {
+    if (seen.has(p)) continue;
+    seen.add(p);
+    out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Explicit, reviewed must-not-match list. Origin/main may match some of these
+ * (WhatsApp number fields, singular "open the app", "khol do play store listing");
+ * those intentional exclusions are listed here so the regression gate does not
+ * demand them back. Everything else that origin/main matched must still match.
+ */
+function reviewedMustNotMatchList(): string[] {
+  const { nomatch: hinglishNo } = fuzzHinglishParticlePhrases();
+  const { nomatch: tenseNo } = fuzzEnglishTensePhrases();
+  return uniquePrompts([
+    ...OPPOSITE_NOT_OPEN_APPS,
+    ...fuzzDeepLinkPhrases(),
+    ...fuzzListingDeterminerPhrases(),
+    ...hinglishNo,
+    ...tenseNo,
+    ...PUBLISH_IDIOM_WITH_OPEN_PAIRS.filter((row) => !row.matches).map((row) => row.prompt),
+    BR1974_PROMPT,
+    'a hyperlink to the play store',
+    'deeplink to Play Store',
+    'deep-link to the App Store',
+    'khol do play store listing',
+    'The app will undergo the Play Store review process',
+    'open the play storefront',
+    'go to the play store and publish',
+    'go to the play store and publish my app',
+    'go to the play store and upload my app',
+    'go to the play store and submit my app',
+    'go to the play store and submit karna',
+    'link to the play store and upload the apk',
+    'open the App Store listing',
+    'open the App Store screenshots',
+    'open the App Store release',
+    'please open the App Store listing page',
+    'open the Play Store console',
+  ]);
+}
+
+function wholeRegressionCorpus(): string[] {
+  const { match: hinglishYes, nomatch: hinglishNo } = fuzzHinglishParticlePhrases();
+  const { match: tenseYes, nomatch: tenseNo } = fuzzEnglishTensePhrases();
+  return uniquePrompts([
+    ...GENUINE_OPEN_REQUESTS,
+    ...OPPOSITE_NOT_OPEN_APPS,
+    ...SIX_LOST_ORIGIN_MAIN_REPROS,
+    ...fuzzDeepLinkPhrases(),
+    ...fuzzListingDeterminerPhrases(),
+    ...hinglishYes,
+    ...hinglishNo,
+    ...tenseYes,
+    ...tenseNo,
+    ...PUBLISH_IDIOM_WITH_OPEN_PAIRS.map((row) => row.prompt),
+    BR1974_PROMPT,
+    'a hyperlink to the play store',
+    'deeplink to Play Store',
+    'deep-link to the App Store',
+    'see other apps we published',
+    'open the App Store after it is released in the Play Store',
+    'open the play store and submit karna',
+    'go to the play store and publish',
+    'go to the play store and publish my app',
+    'go to the play store and upload my app',
+    'go to the play store and submit my app',
+    'go to the play store and submit karna',
+    'link to the play store and upload the apk',
+    'open the App Store listing',
+    'open the App Store screenshots',
+    'open the App Store release',
+    'please open the App Store listing page',
+    'open the Play Store console',
+    'go to the play store and then check the browser console',
+    'go to the play store, then edit the listing',
+  ]);
+}
+
 describe('open-apps store rules: origin/main c072e0eb9 regression gate', () => {
-  it('every genuine open that origin/main captured still matches at this head', () => {
-    const regressions = GENUINE_OPEN_REQUESTS.filter((p) => matchedOnOriginMain(p));
-    expect(regressions.length).toBeGreaterThan(10);
-    for (const p of regressions) {
-      expect(ids(p), `origin/main c072e0eb9 matched this genuine open: ${p}`).toContain('open-apps');
+  it('every corpus prompt that origin/main captured, except reviewed must-not-matches, still matches', () => {
+    const mustNot = new Set(reviewedMustNotMatchList());
+    const corpus = wholeRegressionCorpus();
+    expect(corpus.length).toBeGreaterThan(40);
+    const mainHits = corpus.filter((p) => matchedOnOriginMain(p));
+    expect(mainHits.length).toBeGreaterThan(15);
+    const required = mainHits.filter((p) => !mustNot.has(p));
+    expect(required.length).toBeGreaterThan(10);
+    for (const p of SIX_LOST_ORIGIN_MAIN_REPROS) {
+      expect(matchedOnOriginMain(p), `origin/main should have captured: ${p}`).toBe(true);
+      expect(mustNot.has(p), `lost repro must not be on the reviewed must-not-match list: ${p}`).toBe(false);
+    }
+    for (const p of required) {
+      expect(ids(p), `origin/main c072e0eb9 matched this prompt and it is not a reviewed must-not-match: ${p}`).toContain('open-apps');
     }
   });
 
@@ -269,12 +419,20 @@ describe('open-apps store rules: origin/main c072e0eb9 regression gate', () => {
     }
   });
 
+  it('the reviewed must-not-match set stays uncaptured', () => {
+    for (const p of reviewedMustNotMatchList()) {
+      expect(ids(p), p).not.toContain('open-apps');
+    }
+  });
+
   it('does not recapture origin/main hits that were not genuine opens', () => {
     expect(matchedOnOriginMain('Enter Your WhatsApp Mobile Number')).toBe(true);
     expect(matchedOnOriginMain('when I open the app')).toBe(true);
+    expect(matchedOnOriginMain('khol do play store listing')).toBe(true);
     expect(ids('Enter Your WhatsApp Mobile Number')).not.toContain('open-apps');
     expect(ids('when I open the app')).not.toContain('open-apps');
     expect(ids('open the app')).not.toContain('open-apps');
+    expect(ids('khol do play store listing')).not.toContain('open-apps');
   });
 });
 
@@ -307,7 +465,7 @@ describe('open-apps store rules: generated listing-determiner fuzz', () => {
 });
 
 describe('open-apps store rules: generated Hinglish particle fuzz', () => {
-  it('matches store+khol with particles unless the clause also has pe/par/me + daalna', () => {
+  it('matches store+khol with particles unless khol is followed by daal/publish-kar in the short phrase', () => {
     const { match, nomatch } = fuzzHinglishParticlePhrases();
     for (const p of match) expect(ids(p), p).toContain('open-apps');
     for (const p of nomatch) expect(ids(p), p).not.toContain('open-apps');
@@ -332,7 +490,7 @@ describe('open-apps store rules: khol do vs store listing', () => {
 });
 
 describe('open-apps store rules: publish idiom paired with a genuine open', () => {
-  it('publish idiom wins in the same clause; bare tokens do not', () => {
+  it('Rule A explicit opens match; Rule B keeps idiom-wins; Hinglish khol+daal/kar stays out', () => {
     for (const row of PUBLISH_IDIOM_WITH_OPEN_PAIRS) {
       if (row.matches) expect(ids(row.prompt), `${row.reason}: ${row.prompt}`).toContain('open-apps');
       else expect(ids(row.prompt), `${row.reason}: ${row.prompt}`).not.toContain('open-apps');
@@ -378,10 +536,30 @@ describe('open-apps store rules: self-hunt residuals', () => {
     expect(ids('After we release, a button should open the App Store')).toContain('open-apps');
     expect(ids('open the App Store so the user can submit a review')).toContain('open-apps');
   });
+
+  it('Rule A recovers the six lost origin/main App Store opens', () => {
+    for (const p of SIX_LOST_ORIGIN_MAIN_REPROS) {
+      expect(ids(p), p).toContain('open-apps');
+    }
+    expect(ids('open the App Store after it is released in the Play Store')).toContain('open-apps');
+    expect(ids('open the play store and submit karna')).toContain('open-apps');
+  });
+
+  it('Rule B excludes go-to-store plus bare publish at the end of the clause', () => {
+    expect(clauseHasBarePublishAtEnd('go to the play store and publish my app')).toBe(true);
+    expect(clauseHasBarePublishAtEnd('go to the play store and publish')).toBe(true);
+    expect(clauseHasBarePublishAtEnd('go to the play store and submit a review')).toBe(false);
+    expect(ids('go to the play store and publish my app')).not.toContain('open-apps');
+    expect(ids('go to the play store and publish')).not.toContain('open-apps');
+    expect(ids('go to the play store and upload my app')).not.toContain('open-apps');
+    expect(ids('go to the play store and submit my app')).not.toContain('open-apps');
+    expect(ids('go to the play store and submit karna')).not.toContain('open-apps');
+    expect(ids('go to the play store and submit a review')).toContain('open-apps');
+  });
 });
 
 describe('open-apps store rules: generated English tense/gap fuzz', () => {
-  it('allows tense and a few object words before to/on the store, but not bare published', () => {
+  it('Rule A keeps explicit opens that name a publish idiom; Rule B still excludes go/link + publish', () => {
     const { match, nomatch } = fuzzEnglishTensePhrases();
     for (const p of match) expect(ids(p), p).toContain('open-apps');
     for (const p of nomatch) expect(ids(p), p).not.toContain('open-apps');

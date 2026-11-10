@@ -86,20 +86,26 @@ export interface NativeCapability {
  * client bundle. The deep-link guard is a prefix test equivalent to
  * `(?<!deep(?:ly)?[\s-]*)` and does not itself use a lookbehind.
  *
- * 1. "link" is not a store-open verb when it is a deep-link (`deep link`, `deep  link`,
- *    `deep-link`, `deeplink`, `deeply link`).
- * 2. A store mention whose enclosing clause (text between `.` `!` `?` `;` or newlines —
- *    not commas) contains a store-publish *idiom* is not a request to open the store
- *    via @capacitor/app-launcher. Idioms, not bare tokens: submit/publish/upload to/on
- *    the store; Play Console / developer console / developer account; store listing /
- *    listing page / app listing; store screenshots / screenshots for the store; store
- *    release / release on the store; Hinglish daalna/daalo/daal dena/daal do after a
- *    store + pe/par/me/mein/ko/se particle, or publish/upload/submit karna/karo/kar do. Bare submit/screenshots/release/console/listing
- *    and the word "published" do not exclude.
- * 3. Post-nominal Hinglish `khol` after a store name still opens the store, unless that
- *    same clause also has a store-publish idiom (including pe/par/me + daalna).
- * 4. `khol do` still matches, except when its clause both names a store and has
- *    listing language (`khol do play store listing`).
+ * Precedence (must not regress versus origin/main `open the app` captures of
+ * "open the App Store …"):
+ *
+ * Rule A — explicit open of the store itself always matches, whatever publish
+ * language is in the clause. Explicit means: an open/launch verb followed
+ * directly by (the) App/Play Store, or the store name followed by Hinglish
+ * khol (kholo/kholna/khol ke dekho/khol do) with only pe/par/me/mein/ko/se
+ * between them. The only exclusion is a store-presence object immediately
+ * after that store name (listing, developer account, console, page for/of
+ * my|our|the|this app listing, screenshots, release). For Hinglish only, a
+ * khol followed by daal/publish/upload/submit + kar* in the same short phrase
+ * is not explicit (`play store pe/ko khol ke daal do`, `khol ke publish karna`).
+ *
+ * Rule B — weaker store forms (link / redirect / go to / page). Keep the
+ * clause-level store-publish idiom rule for these, plus bare publish-family
+ * language at the end of the clause (`go to the play store and publish my app`).
+ *
+ * "link" is not a store-open verb when it is a deep-link. `khol do` still
+ * matches, except when its clause both names a store and has listing language
+ * (`khol do play store listing`).
  */
 
 /** Call / WhatsApp / SMS / plural "open apps" — never store-specific. */
@@ -109,9 +115,9 @@ export const OPEN_APPS_CORE_SOURCE = String.raw`call\s+(?:karo|kar|kare|kardo|mu
 export const OPEN_APPS_STORE_TOKEN_SOURCE = String.raw`\b(?:app|play)[\s-]*store\b`;
 
 /**
- * Store-publish idioms. Present anywhere in the same clause as a store mention → do
- * not capture via the store alternative. Not bare tokens, and not bare "published"
- * (without to/on + store).
+ * Store-publish idioms. On a Rule B (weak) store form, present anywhere in the
+ * same clause → do not capture that mention. Not used to suppress a Rule A
+ * explicit open. Not bare tokens, and not bare "published" (without to/on + store).
  */
 const OPEN_APPS_LISTING_DETERMINER_SOURCE = String.raw`(?:(?:the|a|an|our|my|this)\s+)?`;
 
@@ -153,6 +159,18 @@ export const OPEN_APPS_STORE_OPEN_VERBS_SOURCE = String.raw`\b(?:open(?:s|ing)?|
 
 /** "launch the app store" — no to/on/in (those are publish idioms). */
 export const OPEN_APPS_LAUNCH_BEFORE_STORE_SOURCE = String.raw`\blaunch(?:es|ing)?(?:\s+(?:the|a|an|our|my))*\s+$`;
+
+/** Rule A: open/opens/opening followed directly by optional (the|a|an) before the store token. */
+export const OPEN_APPS_EXPLICIT_OPEN_BEFORE_STORE_SOURCE = String.raw`\bopen(?:s|ing)?(?:\s+(?:the|a|an))?\s+$`;
+
+/**
+ * Store-presence object immediately after a store name — the only Rule A exclusion.
+ * Bare "page" is not a presence object (`open play store page` still matches).
+ */
+export const OPEN_APPS_STORE_PRESENCE_TAIL_SOURCE = String.raw`(?:\s+(?:the|a|an|our|my|this))*\s+(?:listings?|developer\s+accounts?|developer\s+consoles?|consoles?|screenshots?|releases?|page\s+(?:for|of)\s+(?:my|our|the|this)(?:\s+own)?\s+app\s+listings?)\b`;
+
+/** Rule B: publish-family at the end of the clause (not "submit a review"). */
+export const OPEN_APPS_BARE_PUBLISH_AT_END_SOURCE = String.raw`\b(?:and|then|or)\s+(?:publish(?:\s+\w+){0,6}|upload(?:\s+\w+){0,6}|submit\s+(?:my|our|the|this)(?:\s+\w+){0,4}|(?:publish|upload|submit)\s+kar(?:na|o|do|\s+do|\s+dena|\s+de))\s*$`;
 
 export const OPEN_APPS_STORE_PARTICLES_SOURCE = String.raw`(?:mein|me|ko|par|pe|se)`;
 
@@ -203,24 +221,60 @@ function clauseHasStoreMention(clause: string): boolean {
   return new RegExp(OPEN_APPS_STORE_TOKEN_SOURCE, 'i').test(clause);
 }
 
-function storeOpeningBefore(text: string, storeIndex: number): boolean {
+export function storeHasImmediatePresenceObject(afterStore: string): boolean {
+  return new RegExp('^' + OPEN_APPS_STORE_PRESENCE_TAIL_SOURCE, 'i').test(afterStore);
+}
+
+export function clauseHasBarePublishAtEnd(clause: string): boolean {
+  return new RegExp(OPEN_APPS_BARE_PUBLISH_AT_END_SOURCE, 'i').test(clause.trim());
+}
+
+function hinglishKholFollowedByPublish(fromKhol: string): boolean {
+  const cut = fromKhol.search(/[.!?;\n]/);
+  const phrase = (cut >= 0 ? fromKhol.slice(0, cut) : fromKhol).slice(0, 80);
+  const afterKhol = phrase.replace(new RegExp('^' + OPEN_APPS_KHOL_SOURCE + String.raw`\b`, 'i'), '');
+  const nearbyMatch = afterKhol.match(/^(?:\s+\S+){0,5}/);
+  const nearby = nearbyMatch ? nearbyMatch[0] : '';
+  if (new RegExp(OPEN_APPS_HINGLISH_PUBLISH_DAAL_SOURCE, 'i').test(nearby)) return true;
+  if (new RegExp(OPEN_APPS_HINGLISH_PUBLISH_KAR_SOURCE, 'i').test(nearby)) return true;
+  return false;
+}
+
+/** Rule A English: open/launch directly before (the) store. */
+function isExplicitEnglishStoreOpen(text: string, storeIndex: number): boolean {
+  const before = text.slice(0, storeIndex);
+  if (new RegExp(OPEN_APPS_EXPLICIT_OPEN_BEFORE_STORE_SOURCE, 'i').test(before)) return true;
+  if (new RegExp(OPEN_APPS_LAUNCH_BEFORE_STORE_SOURCE, 'i').test(before)) return true;
+  return false;
+}
+
+/**
+ * Rule A Hinglish: store + optional pe/par/me/mein/ko/se + khol, unless that
+ * khol is followed by daal/publish/upload/submit + kar* in the same short phrase.
+ */
+function isExplicitHinglishStoreKhol(text: string, storeIndex: number, storeLen: number): boolean {
+  const after = text.slice(storeIndex + storeLen);
+  const head = new RegExp(
+    String.raw`^(?:\s+` + OPEN_APPS_STORE_PARTICLES_SOURCE + String.raw`)?[\s-]+(` + OPEN_APPS_KHOL_SOURCE + String.raw`)\b`,
+    'i',
+  );
+  const hm = head.exec(after);
+  if (!hm) return false;
+  const fromKhol = after.slice(hm.index + hm[0].length - hm[1].length);
+  if (hinglishKholFollowedByPublish(fromKhol)) return false;
+  return true;
+}
+
+/** Rule B: redirect / go / leftover open+det, or non-deep link, before the store. */
+function isWeakStoreFormBefore(text: string, storeIndex: number): boolean {
   const before = text.slice(0, storeIndex);
   if (new RegExp(OPEN_APPS_STORE_OPEN_VERBS_SOURCE + String.raw`(?:\s+(?:the|to|a|an|our|my))*\s+$`, 'i').test(before)) {
     return true;
   }
-  if (new RegExp(OPEN_APPS_LAUNCH_BEFORE_STORE_SOURCE, 'i').test(before)) return true;
   const linkTail = /\blink(?:s|ing)?(?:\s+(?:the|to|a|an|our|my))*\s+$/i;
   const lm = linkTail.exec(before);
   if (lm && !isDeepPrefixedLink(text, storeIndex - lm[0].length)) return true;
   return false;
-}
-
-function storeKholAfter(text: string, storeIndex: number, storeLen: number): boolean {
-  const after = text.slice(storeIndex + storeLen);
-  return new RegExp(
-    String.raw`^(?:\s+` + OPEN_APPS_STORE_PARTICLES_SOURCE + String.raw`)?[\s-]+` + OPEN_APPS_KHOL_SOURCE + String.raw`\b`,
-    'i',
-  ).test(after);
 }
 
 function drawerAsked(text: string): boolean {
@@ -256,10 +310,19 @@ export function openAppsAsked(text: string): boolean {
 
   const storeRe = new RegExp(OPEN_APPS_STORE_TOKEN_SOURCE, 'gi');
   while ((m = storeRe.exec(text))) {
-    const clause = enclosingClause(text, m.index);
-    if (clauseHasOwnListingLanguage(clause)) continue;
-    if (storeOpeningBefore(text, m.index)) return true;
-    if (storeKholAfter(text, m.index, m[0].length)) return true;
+    const after = text.slice(m.index + m[0].length);
+    if (storeHasImmediatePresenceObject(after)) continue;
+
+    // Rule A: explicit open always wins — do not apply clause-level idiom-wins.
+    if (isExplicitEnglishStoreOpen(text, m.index)) return true;
+    if (isExplicitHinglishStoreKhol(text, m.index, m[0].length)) return true;
+
+    // Rule B: weaker forms; store-publish idioms and bare publish-at-end win.
+    if (isWeakStoreFormBefore(text, m.index)) {
+      const clause = enclosingClause(text, m.index);
+      if (clauseHasOwnListingLanguage(clause) || clauseHasBarePublishAtEnd(clause)) continue;
+      return true;
+    }
   }
   return false;
 }

@@ -152,6 +152,22 @@ const AUDIENCE_BEFORE = /\bfor\s+(?:the\s+|all\s+|our\s+|my\s+)?$/i;
 const LIKENESS_AFTER = /^[^.,;:!?\n]{0,40}\b(?:jaisa|jaise|jaisi|clone|replica|copy\s+(?:of|bana\w*))\b/i;
 const LIKENESS_BEFORE = /\b(?:like|jaisa|jaise|jaisi|clone\s+(?:of|like)|similar\s+to|inspired\s+by|copy\s+of|replica\s+of|version\s+of)\s+(?:the\s+|a\s+)?$/i;
 
+// 🔴 "X KI TARAH" IS "LIKE X" (BR1961, report cd970693, 2026-11-08). Hindi "X ki/ke/ka tarah" is the
+// everyday equivalent of "like X" / "X jaisa". "Mujhe youtube ki tarah ek app Banakar do" names YouTube
+// as the product to clone. When planning context placed that earlier request after a follow-up first
+// line ("Ab main us app par khud kuch ficar cenj…"), requestSubject (the first line only) no longer
+// contained YouTube, and needsIntent then dropped the mention because "ki tarah" was not in
+// LIKENESS_AFTER (only jaisa/jaise/jaisi/clone/replica/copy). APP_SCOPE said "ordinary one-shot, no
+// mega-signal" while the file planner built a YouTube-like video app from the earlier request.
+// Tighter than jaisa's 40-char window (t311u, this change ESCALATES): the postposition must sit
+// immediately after the name — the spoken construction — so "youtube seo generator ki tarah" (a tool
+// like that tool) does not inherit a clone reason.
+const HINDI_LIKE_AFTER = /^[\s/-]*(?:ki|ke|ka)\s+tarah\b/i;
+
+function hasLikeness(before: string, after: string, after40: string): boolean {
+  return LIKENESS_BEFORE.test(before) || LIKENESS_AFTER.test(after40) || HINDI_LIKE_AFTER.test(after);
+}
+
 // 🔴 A TOOL FOR A PRODUCT IS NOT THE PRODUCT (autopsy BR1959-sequence BR1960, build 71738e8d, 2026-11-09).
 // "Create a html code of youtube seo generator" was recorded as *"LARGE — clone of YouTube"*: the name sits in
 // the request's SUBJECT, and a subject mention counts as intent (6452c0a9). But the name there MODIFIES the
@@ -198,9 +214,9 @@ export function namesAsProduct(text: string, re: RegExp, opts: ProductMentionOpt
     const listHead = before.replace(/(?:[\w.-]+\s*\/\s*)+$/, '');
     if (TOOL_BEFORE.test(before) || TOOL_BEFORE.test(listHead) || TOOL_AFTER.test(after)) continue;
     const after40 = noise(text.slice(at + m[0].length, at + m[0].length + 48));
-    if (!LIKENESS_BEFORE.test(before) && !LIKENESS_AFTER.test(after40) && (AUDIENCE_AFTER.test(after) || AUDIENCE_BEFORE.test(before) || AUDIENCE_BEFORE.test(listHead))) continue;
-    if (!LIKENESS_BEFORE.test(before) && !LIKENESS_AFTER.test(after40) && TOOL_FOR_AFTER.test(after)) continue;
-    if (opts.needsIntent && !LIKENESS_BEFORE.test(before) && !LIKENESS_AFTER.test(after40)
+    if (!hasLikeness(before, after, after40) && (AUDIENCE_AFTER.test(after) || AUDIENCE_BEFORE.test(before) || AUDIENCE_BEFORE.test(listHead))) continue;
+    if (!hasLikeness(before, after, after40) && TOOL_FOR_AFTER.test(after)) continue;
+    if (opts.needsIntent && !hasLikeness(before, after, after40)
       && !(opts.subject && new RegExp(re.source, re.flags.replace('g', '')).test(opts.subject))) continue;
     return true;
   }

@@ -101213,3 +101213,10 @@ Owner t311u sequential audit, BR1967 only (boundary 1951..2105 frozen). "Upgrade
 - **F2.** Not shipped. Expanding submit words, skipping the fast lane for mega-roadmap or video apps, tightening the unsized ETA band, or rewriting the simple-lane success summary each failed t311u or needs a product/copy decision.
 
 Queue: this commit closes no earlier row. New rows Q-2636 (Process-Story journey), Q-2637 (ETA under-band), Q-2638 (thin milestone summary). Q-2633/2634/2635 and earlier blockers stay open. Q-2616 is the English Generate sibling and is not rewritten.
+
+## 2026-11-10 — BR1968 autopsy (supermarket-simulator game, succeeded): lock ordinary 2D DOM path; queue famous-title 3D
+Owner t311u sequential audit, BR1968 only (boundary 1951..2105 frozen). "Make a game game was type of super market simulator make a game" succeeded in 12.84 min as an ordinary one-shot with a 2D kit ("3D assets not prepared") and a DOM supermarket UI. Explorer pressed "Start Game" (it responded); RELEASE_GATE YELLOW for design consistency 94/100 (15 colours) and no form journey. Historical silence (no GAME_PLAYTEST_NOT_RUN / CLAIM_UNSUPPORTED) is already closed by BR1951 (#4123) and BR1956 (#4128), both the next day. Ledger: [autopsy](docs/build-report-autopsy-BR1968.md), [evidence](docs/build-report-autopsy-BR1968-evidence.json).
+- **F1.** Neighbour locks: this prompt stays ordinary/direct and not famous; domain game skips the fast lane; 2D kit / genre simulator / dimension unspecified / realism lite; a DOM supermarket with Start Game is an unplayed `action` game (disclosed, not silent); the exact "ready to play" / "fully functional" recap is contradicted when those measurements are passed in; supermarket billing/inventory stay non-games; gta5 and an explicit 3D train simulator still want 3D.
+- **F2.** Not shipped. Escalating supermarket-simulator to a famous 3D clone, or widening canvas playtest to DOM controls, each failed t311u or is already queued (Q-2634).
+
+Queue: this commit closes no earlier row. New row Q-2639 (famous 3D supermarket-simulator title still 2D/lite). Q-2633–Q-2638 and earlier blockers stay open.

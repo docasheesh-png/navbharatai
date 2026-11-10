@@ -1,6 +1,6 @@
 # Test Chat Bot
 
-Open **Admin → AI Engines → Test Chat Bot**. This is a separate, reusable provider test surface with real text input and multi-turn context. It does not load, alter or save ordinary app conversations. The server-owned dropdown lists every text-chat provider adapter wired in NavBharatAI (chat-chain rungs, reviewed gateways, vision-capable text models, and named builder/pro engines). Selecting another provider starts a new conversation. Clients still cannot submit an endpoint, API key, model, tool, attachment or generation setting: they pick a server-defined id only.
+Open **Admin → AI Engines → Test Chat Bot**. This is a separate, reusable provider test surface with real text input and multi-turn context. It does not load, alter or save ordinary app conversations. The server-owned dropdown lists every text-chat provider adapter wired in NavBharatAI (chat-chain rungs, reviewed gateways, vision-capable text models, and named builder/pro engines). Selecting another provider starts a new conversation. Clients still cannot submit an endpoint, API key, tool, attachment or generation setting: they pick a server-defined provider id. An optional model field accepts only a short identifier (`letters`, numbers, and `.` `/` `:` `-`); leaving it blank uses the same cheapest-model selection as main chat.
 
 ## Isolation
 
@@ -14,8 +14,10 @@ When `QUBAX_ENABLED=1` and `QUBAX_API_KEY` are set, the server auto-selects a Qu
 
 Sending still uses the existing guards for that adapter:
 
-- **Qubax:** the live price-feed ranking above, the default `$0.02` (or `QUBAX_MAX_USD_PER_REQUEST`) reserve per try, and up to three market-selected models. The checkbox does not raise the cap. **Check Qubax balance** reads account metadata only and does not send a chat.
-- **Mitrify:** the existing exact-payload approval and supplier-enforced ceiling. This page does not mint that approval.
+- **Qubax:** the same `refreshQubaxPriceFeed` collector (on Send only, and only when `readQubaxMarketPlan` is empty) and the same `runApprovedQubaxChat` / `readQubaxMarketPlan` / `rankQubaxMarkets` ranking as user chat. The default `$0.02` (or `QUBAX_MAX_USD_PER_REQUEST`) reserve per try still applies, and the page may try up to three market-selected models. A typed model is used only when that shared plan is still empty; it does not write the shared model-switch ledger. If no model remains, the admin diagnostic includes feed freshness, priced-row counts and the last refresh status. The checkbox does not raise the cap. **Check Qubax balance** reads account metadata only and does not send a chat.
+- **Mitrify:** dispatched through the shared `createMitrifyClient` (gateway model `MITRIFY_MODEL` or `mitrify/auto-cheap`) whenever the server key is set. This page does not require `MITRIFY_CHAIN_ENABLED`, does not flip that user-chat flag, and does not mint a payload approval. There is no verified Mitrify invoice on this page; a conservative shared-budget hold using $1/MTok is reserved and unused configuration errors are released.
+- **OpenRouter verified-free:** enabled when the server key is set. A send uses `runRegistryRung` (and therefore `strictFreeText`) when `FREE_CHAIN_OPENROUTER_MODELS` is set, or `strictFreeText` without an allow-list when that list is empty — the same LiveRegistry verified-free ranking as main chat. A typed model becomes the allow-list and preferred id; the registry still requires `VERIFIED_FREE`.
+- **CheaperInference:** enabled when the server key is set, even if user-chat mode is `off` or shared-access. The adapter uses the same model string main chat would use (`CHEAPERINFERENCE_MODEL` or `beam`). This page does not change the user-chat sharing mode.
 - **Paid Free Chat rungs** with a verified rate card: one reservation against the existing shared daily and monthly budget, using that card and this page’s 1,024 output-token bound.
 - **Free rungs:** no paid reservation. Quota attestation used by user chat may be noted, but this page still calls only the selected provider when its credential is present.
 - **Kimi, Claude and Grok:** reserved from the existing in-repo rate card, then one official HTTP/SDK call with a 1,024 token bound. This page does not use the builder adapters’ larger default output caps.
@@ -36,7 +38,7 @@ OpenRouter raw error bodies are **not** captured here. Verified-free OpenRouter 
 ## Security, budgets and limits
 
 - Three routes use the existing admin token middleware: GET `/api/v1/admin/test-chat-bot/providers`, POST `/api/v1/admin/test-chat-bot/chat`, and POST `/api/v1/admin/test-chat-bot/balance`. Compatibility URLs remain available under the existing API version middleware.
-- Chat requests are exact-key validated: provider enum, UUID v4, disclosure confirmation and alternating user/assistant text messages ending in a user message. The balance route accepts only an empty JSON object.
+- Chat requests are exact-key validated: provider enum, UUID v4, disclosure confirmation, alternating user/assistant text messages ending in a user message, and an optional model id matching the safe identifier pattern. The balance route accepts only an empty JSON object.
 - Per chat request: 8,000 characters for a typed message, 32,000 total context characters, 64 messages, and 1,024 output tokens. These are payload bounds, not a three-question or lifetime quota. Start a new test chat when context is full.
 - The chat parser caps JSON at 256 KiB, including escaping. The balance route uses the standard 1 MB parser and rejects every caller field. Sends are limited to six per minute per client address, in addition to shared paid admission and provider capacity controls.
 - The client prevents overlapping double-click sends, cancels on unmount/session change, allows stopping a wait, validates the response identity and never automatically retries a failed request. A cancelled or uncertain request may still incur provider cost.

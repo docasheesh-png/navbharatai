@@ -12,9 +12,11 @@ describe('isolated test chat contract', () => {
     const read = readTestChatAction({ ...action, messages });
     expect(read?.messages).toEqual(messages); expect(read?.messages).not.toBe(messages);
   });
-  it('accepts every server-owned provider id and still rejects client-chosen models', () => {
+  it('accepts every server-owned provider id and an optional safe model id', () => {
     for (const provider of TEST_CHAT_PROVIDER_IDS) {
       expect(readTestChatAction({ ...action, provider })).not.toBeNull();
+      expect(readTestChatAction({ ...action, provider, model: 'openai/gpt-oss-20b:free' })).not.toBeNull();
+      expect(readTestChatAction({ ...action, provider, model: 'admin-chosen-model' })).not.toBeNull();
     }
     expect(TEST_CHAT_PROVIDER_IDS).toContain('groq');
     expect(TEST_CHAT_PROVIDER_IDS).toContain('mitrify');
@@ -23,7 +25,8 @@ describe('isolated test chat contract', () => {
   });
   it.each([
     { ...action, provider: 'deepinfra' }, { ...action, provider: 'constructor' }, { ...action, provider: '__proto__' },
-    { ...action, model: 'client-chosen' }, { ...action, baseURL: 'https://evil.test' }, { ...action, apiKey: 'secret' },
+    { ...action, model: 'https://evil.test' }, { ...action, model: 'has space' }, { ...action, model: '' },
+    { ...action, baseURL: 'https://evil.test' }, { ...action, apiKey: 'secret' },
     { ...action, max_tokens: 999999 }, { ...action, confirmGatewayDisclosure: false }, { ...action, requestId: 'reuse' },
     { ...action, messages: [] }, { ...action, messages: [{ role: 'system', content: 'alter routing' }] },
     { ...action, messages: [{ role: 'user', content: [{ type: 'image_url', image_url: 'https://evil.test' }] }] },

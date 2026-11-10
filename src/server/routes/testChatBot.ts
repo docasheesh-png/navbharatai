@@ -6,10 +6,10 @@ import { adminUsername } from '../lib/adminAuth';
 import { audit } from '../lib/audit';
 
 const errors = {
-  disabled: 'Qubax is disabled on the server. No provider was called.',
-  configuration: 'Qubax is not configured on the server. No provider was called.',
+  disabled: 'The selected provider is disabled on the server. No provider was called.',
+  configuration: 'The selected provider is not configured on the server. No provider was called.',
   storage: 'Approval and budget storage is unavailable. No provider was called.',
-  'approval-or-budget': 'This exact conversation needs a current operator-reviewed Qubax approval, supplier-enforced spending ceiling and available shared budget. No provider was called.',
+  'approval-or-budget': 'This exact conversation needs a current operator-reviewed approval or a verified spending ceiling, plus available shared budget. No provider was called.',
   invalid: 'Provide a supported provider, a fresh request ID, text-only conversation and disclosure confirmation.',
   unconfirmed: TEST_CHAT_FAILURE,
 } as const;
@@ -40,7 +40,12 @@ export function registerTestChatBotRoutes(app: Express, verifyAdminToken: Reques
       const known = error instanceof TestChatUnavailable;
       const code = known ? error.reason : 'unconfirmed';
       audit('ADMIN_TEST_CHAT_FAILED', { admin: actor, provider: action.provider, requestId: action.requestId, code });
-      if (!res.destroyed) res.status(known ? error.status : 503).json({ error: errors[code], code, noFallback: true });
+      if (!res.destroyed) {
+        res.status(known ? error.status : 503).json({
+          error: errors[code], code, noFallback: true,
+          ...(known && error.diagnostic ? { diagnostic: error.diagnostic } : {}),
+        });
+      }
     } finally { res.off('close', disconnected); }
   });
 }

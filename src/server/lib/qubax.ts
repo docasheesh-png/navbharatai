@@ -82,6 +82,8 @@ export type QubaxChatOptions = {
   /** Server Gateway claim binding. Never supplied by request JSON. */
   expectedSelection?: { modelId: string; modelRevision: string; maximumNanoUsd: number };
   reserve: (maximumNanoUsd: number) => Promise<null | { releaseUndispatched(): Promise<void> }>;
+  /** Admin Test Chat Bot only. User chat never passes this hook. */
+  onHttpError?: (detail: { status: number; body: string; requestId?: string }) => void;
 };
 export type QubaxChatResult = { kind: 'skipped'; reason: string } | { kind: 'response'; content: string; model: string; usage?: { inputTokens: number; outputTokens: number } };
 let inflight = 0;
@@ -171,7 +173,17 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     const response = await fetch(`${cfg.baseURL}/chat/completions`, { method: 'POST', redirect: 'error', signal,
       headers: { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...body, model: selection.modelId, ...(body.stream === true ? { stream_options: { include_usage: true } } : {}) }) });
-    if (!response.ok) { if (response.body) cancelBody(() => response.body!.cancel()); throw new QubaxError('QUBAX_HTTP_ERROR', response.status); }
+    if (!response.ok) {
+      if (options.onHttpError) {
+        let body = '';
+        try { body = await response.text(); } catch { body = ''; }
+        const requestId = response.headers.get('x-request-id') || response.headers.get('request-id') || undefined;
+        try { options.onHttpError({ status: response.status, body: body.slice(0, 4000), requestId }); } catch { /* Diagnostics must not replace the error. */ }
+      } else if (response.body) {
+        cancelBody(() => response.body!.cancel());
+      }
+      throw new QubaxError('QUBAX_HTTP_ERROR', response.status);
+    }
     let finished = false; let usage: { inputTokens: number; outputTokens: number } | undefined;
     const inspect = async (value: any) => {
       signal.throwIfAborted();

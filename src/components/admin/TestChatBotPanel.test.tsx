@@ -21,6 +21,8 @@ describe('separate Test Chat Bot panel', () => {
     expect(tabOfPage('test-chat-bot')).toBe('engines'); expect(resolvePage('test-chat-bot')).toBe('test-chat-bot');
     const panel = readFileSync('src/components/admin/TestChatBotPanel.tsx', 'utf8');
     expect(panel).toContain('/api/v1/admin/test-chat-bot');
+    expect(panel).toContain('Copy error details');
+    expect(panel).toContain('Provider error details');
     expect(panel).not.toMatch(/localStorage|sessionStorage|authedFetch|AIService|useChatEngine|\/api\/chat/);
     expect(readFileSync('src/components/AdminDashboard.tsx', 'utf8')).toContain('<TestChatBotPanel adminToken={adminToken} />');
     expect(readFileSync('src/server/routes/admin.ts', 'utf8')).toContain('registerTestChatBotRoutes(app, verifyAdminToken)');

@@ -52,7 +52,7 @@ export function isGatewayTerminalError(error: unknown): error is InferenceGatewa
   return error instanceof InferenceGatewayTerminalError;
 }
 /** Missing catalog, funding, or evidence. These happen before a provider call and must not blank public chat. */
-const GATEWAY_SETUP_MISS = new Set(['authority-store-unavailable', 'trusted-runtime-unavailable', 'context-unverified', 'funding-integration-unavailable', 'invalid-paid-cap', 'capability-integration-unavailable', 'fixed-chain-ingress-authority-unavailable', 'disabled-after-selection']);
+const GATEWAY_SETUP_MISS = new Set(['authority-store-unavailable', 'trusted-runtime-unavailable', 'context-unverified', 'funding-integration-unavailable', 'invalid-paid-cap', 'capability-integration-unavailable', 'fixed-chain-ingress-authority-unavailable']);
 export function isGatewaySetupMiss(error: unknown): boolean {
   return isGatewayTerminalError(error) && GATEWAY_SETUP_MISS.has(error.reason);
 }

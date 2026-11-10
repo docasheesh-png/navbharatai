@@ -7,13 +7,14 @@ import { adminUsername } from '../lib/adminAuth';
 import { audit } from '../lib/audit';
 
 const errors = {
-  disabled: 'Qubax is disabled on the server. No provider was called.',
-  configuration: 'Qubax is not configured on the server. No provider was called.',
+  disabled: 'The selected provider is disabled on the server. No provider was called.',
+  configuration: 'The selected provider is not configured on the server. No provider was called.',
   storage: 'Approval and budget storage is unavailable. No provider was called.',
+  'approval-or-budget': 'This exact conversation needs a current operator-reviewed approval or a verified spending ceiling, plus available shared budget. No provider was called.',
   budget: 'The shared daily or monthly budget cannot reserve this try. No provider was called.',
-  'no-model': 'No fresh Qubax model is at least 90% below its official price and passing the health probes. No provider was called.',
-  'tries-exhausted': 'The top three Qubax models did not return a valid answer. No other Qubax model was tried from this page.',
-  capacity: 'Qubax is already handling its maximum number of calls. No provider was called.',
+  'no-model': 'No eligible priced model is available for the selected provider. No provider was called.',
+  'tries-exhausted': 'The selected provider tried its allowed models and did not return a valid answer. No other NavBharatAI provider was tried.',
+  capacity: 'The selected provider is already handling its maximum number of calls. No provider was called.',
   capability: 'This test is outside the supported text conversation. No provider was called.',
   invalid: 'Provide a supported provider, a fresh request ID, text-only conversation and disclosure confirmation.',
   unconfirmed: TEST_CHAT_FAILURE,
@@ -62,7 +63,12 @@ export function registerTestChatBotRoutes(app: Express, verifyAdminToken: Reques
       const known = error instanceof TestChatUnavailable;
       const code = known ? error.reason : 'unconfirmed';
       audit('ADMIN_TEST_CHAT_FAILED', { admin: actor, provider: action.provider, requestId: action.requestId, code });
-      if (!res.destroyed) res.status(known ? error.status : 503).json({ error: errors[code], code, noFallback: true });
+      if (!res.destroyed) {
+        res.status(known ? error.status : 503).json({
+          error: errors[code], code, noFallback: true,
+          ...(known && error.diagnostic ? { diagnostic: error.diagnostic } : {}),
+        });
+      }
     } finally { res.off('close', disconnected); }
   });
 }

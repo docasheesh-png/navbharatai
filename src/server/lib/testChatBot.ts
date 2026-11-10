@@ -332,7 +332,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
     let configured = false, enabled = false;
     try { const cfg = qubaxConfig(); configured = !!cfg.apiKey; enabled = cfg.enabled; } catch { /* Invalid config fails closed. */ }
     const ceiling = qubaxRequestCeilingNanoUsd(process.env);
-    return { ...base, configured, enabled, model: null, billed: true, approvalRequired: !ceiling,
+    return { ...base, configured, enabled, model: null, billed: true, approvalRequired: false,
       ceilingUsd: ceiling ? nanoUsdToDecimal(ceiling) : null,
       ...(configured && enabled ? {} : { unavailableReason: !configured ? MISSING_KEY : 'This provider is disabled on the server.' }) };
   }
@@ -412,6 +412,25 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   };
 }
 
+const STATUS_TEXT_MAX = 400;
+function clipStatusText(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const text = value.replace(/\u0000/g, '').trim();
+  if (!text) return undefined;
+  return text.length <= STATUS_TEXT_MAX ? text : `${text.slice(0, STATUS_TEXT_MAX - 1)}…`;
+}
+function publishable(row: TestChatProviderStatus): TestChatProviderStatus {
+  const unavailableReason = clipStatusText(row.unavailableReason);
+  const note = clipStatusText(row.note);
+  const next = { ...row };
+  if (unavailableReason) next.unavailableReason = unavailableReason; else delete next.unavailableReason;
+  if (note) next.note = note; else delete next.note;
+  return next;
+}
+function unreadProvider(id: TestChatProviderId): TestChatProviderStatus {
+  return { id, label: META[id].label, configured: false, enabled: false, model: null, approvalRequired: false, billed: false,
+    unavailableReason: 'This provider’s status could not be read.' };
+}
 /** Admin status refreshes the market feed. The lease stops a stampede. A failure still returns the last status. */
 export async function loadTestChatStatus(): Promise<TestChatStatus> {
   const status = testChatStatus();
@@ -441,8 +460,10 @@ export async function loadTestChatStatus(): Promise<TestChatStatus> {
   } catch { return status; }
 }
 export function testChatStatus(): TestChatStatus {
-  const providers = TEST_CHAT_PROVIDER_IDS.map(providerStatus);
-  return { providers, approvalRequired: providers.some(p => p.approvalRequired), noFallback: true };
+  const providers = TEST_CHAT_PROVIDER_IDS.map(id => {
+    try { return publishable(providerStatus(id)); } catch { return unreadProvider(id); }
+  });
+  return { providers, approvalRequired: providers.some(p => p.approvalRequired === true), noFallback: true };
 }
 
 function needsSharedPaidConfig(id: TestChatProviderId): boolean {

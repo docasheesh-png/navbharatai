@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatTestChatDiagnostic, isTestChatDiagnostic, isTestChatReply, isTestChatStatus, readTestChatAction, TEST_CHAT_MAX_CONTEXT_CHARS, TEST_CHAT_PROVIDER_IDS } from './testChatBot';
+import { formatTestChatDiagnostic, isTestChatDiagnostic, isTestChatReply, isTestChatStatus, readPartialTestChatStatus, readTestChatAction, TEST_CHAT_MAX_CONTEXT_CHARS, TEST_CHAT_PROVIDER_IDS } from './testChatBot';
 
 const action = { provider: 'qubax', requestId: '1d2efc71-6d00-4514-83c0-e31461ea9f35', messages: [{ role: 'user', content: 'What is 2 + 2?' }], confirmGatewayDisclosure: true };
 const fullStatus = {
@@ -65,6 +65,12 @@ describe('isolated test chat contract', () => {
     expect(isTestChatStatus(withFeed)).toBe(true);
     expect(isTestChatStatus({ ...withFeed, feed: { ...withFeed.feed, pricedRows: -1 } })).toBe(false);
     expect(isTestChatStatus({ ...withFeed, providers: [withFeed.providers[0]] })).toBe(false);
+    const longNote = { ...fullStatus, providers: fullStatus.providers.map(item => item.id === 'mitrify' ? { ...item, note: 'm'.repeat(682) } : item) };
+    expect(isTestChatStatus(longNote)).toBe(false);
+    const partial = readPartialTestChatStatus(longNote);
+    expect(partial?.providers).toHaveLength(TEST_CHAT_PROVIDER_IDS.length);
+    expect(partial?.providers.find(item => item.id === 'qubax')?.configured).toBe(false);
+    expect(partial?.providers.find(item => item.id === 'mitrify')?.unavailableReason).toContain('could not be read');
     const attempts = { ...diagnostic, finalOutcome: 'tries-exhausted', attempts: [{
       model: 'model-a', latencyMs: 10, classification: 'rate-limit' as const, httpStatus: 429,
       providerCode: 'QUBAX_HTTP_ERROR', providerType: null, providerRequestId: 'a1', providerMessage: null, rawErrorBody: 'slow',

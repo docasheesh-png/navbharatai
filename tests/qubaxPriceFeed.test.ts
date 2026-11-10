@@ -20,13 +20,14 @@ describe('Qubax public price observation parsing', () => {
     expect(s.rows).toHaveLength(2);
     expect(s.rows[0]).toMatchObject({ inputNanoUsd: 3_700, outputNanoUsd: 100_000_000, cacheReadNanoUsd: null, allFeesIncluded: null, revision: null, tokenizer: null });
     expect(s.rows[1].inputNanoUsd).toBeNull();
+    expect(s.rows[0].discountHundredths).toBe(9_999);
     expect(JSON.stringify(s)).not.toMatch(/discount_pct|benchmark|99\.99|fixture-image/);
     expect(s).toMatchObject({ parser: 'qubax-public-price-parser-v1', sourceUpdatedAtMs: NOW, expiresAtMs: NOW + 300_000, bodySha256: expect.stringMatching(/^[a-f0-9]{64}$/) });
   });
   it('uses source-aware JSON lexemes instead of first rounding them to floating point', () => {
     expect(normalize(marketFixture().replace('0.0000037', '1e-7')).rows[0].inputNanoUsd).toBe(100);
-    expect(() => normalize(marketFixture().replace('0.0000037', '9007199.2547409911'))).toThrow();
-    expect(() => normalize(marketFixture().replace('0.0000037', '"0.0000037"'))).toThrow();
+    expect(normalize(marketFixture().replace('0.0000037', '9007199.2547409911')).rows[0].inputNanoUsd).toBeNull();
+    expect(normalize(marketFixture().replace('0.0000037', '"0.0000037"')).rows[0].inputNanoUsd).toBeNull();
   });
   it.each(['"input_per_1m"', '"input_per_\\u0031m"'])('rejects duplicate JSON member %s before parse loses the ambiguity', key => {
     const raw = marketFixture().replace('"input_per_1m":', `${key}:9,"input_per_1m":`);
@@ -44,31 +45,35 @@ describe('Qubax public price observation parsing', () => {
     const at = Date.parse(stamp), raw = JSON.parse(marketFixture(at)); raw.updated_at = stamp;
     expect(() => normalizeQubaxPriceSource('qubax', JSON.stringify(raw), feedHeaders('qubax', at), at, at)).toThrow();
   });
-  it.each(['duplicate', 'missing-rate', 'missing-stamp', 'future', 'stale', 'pagination', 'negative', 'bad-context'])('rejects %s market', reason => {
+  it.each(['missing-stamp', 'future', 'pagination'])('rejects %s market', reason => {
     const raw = JSON.parse(marketFixture());
-    if (reason === 'duplicate') raw.data.push(raw.data[0]);
-    if (reason === 'missing-rate') delete raw.data[0].input_per_1m;
     if (reason === 'missing-stamp') delete raw.updated_at;
     if (reason === 'future') raw.updated_at = new Date(NOW + 1).toISOString();
-    if (reason === 'stale') raw.updated_at = new Date(NOW - 300_000).toISOString();
     if (reason === 'pagination') raw.next_cursor = 'next';
-    if (reason === 'negative') raw.data[0].input_per_1m = -1;
-    if (reason === 'bad-context') raw.data[0].context_length = 0.5;
     expect(() => normalize(JSON.stringify(raw))).toThrow();
   });
-  it.each(['missing-date', 'old-date', 'future-date', 'negative-age', 'stale-age', 'stale-warning'])('rejects %s rather than renewing it', reason => {
+  it('skips a bad row and still publishes the rest of the market', () => {
+    const raw = JSON.parse(marketFixture());
+    raw.data.push(raw.data[0]);
+    raw.data.push({ ...raw.data[0], id: 'bad-context', context_length: 0.5 });
+    raw.data.push({ ...raw.data[0], id: 'negative', input_per_1m: -1 });
+    raw.data[0] = { ...raw.data[0] }; delete raw.data[0].input_per_1m;
+    const rows = normalize(JSON.stringify(raw)).rows;
+    expect(rows.map(row => row.sourceModelLabel)).toEqual(['fixture-text', 'fixture-multimodal', 'negative']);
+    expect(rows[0].inputNanoUsd).toBeNull();
+    expect(rows[2].inputNanoUsd).toBeNull();
+  });
+  it.each(['missing-date', 'future-date', 'negative-age', 'stale-warning'])('rejects %s rather than renewing it', reason => {
     const h = feedHeaders();
     if (reason === 'missing-date') h.delete('date');
-    if (reason === 'old-date') h.set('date', new Date(NOW - 300_000).toUTCString());
     if (reason === 'future-date') h.set('date', new Date(NOW + 1_000).toUTCString());
     if (reason === 'negative-age') h.set('age', '-1');
-    if (reason === 'stale-age') h.set('age', '300');
     if (reason === 'stale-warning') h.set('warning', '110 cache "Response is stale"');
     expect(() => normalize(marketFixture(), h)).toThrow();
   });
-  it('caps lifetime by oldest source/cache evidence, not only fetched time', () => {
-    const h = feedHeaders(); h.set('age', '120');
-    expect(normalize(marketFixture(NOW - 30_000), h).expiresAtMs).toBe(NOW + 180_000);
+  it('treats a successful Qubax fetch as fresh even when the CDN age is old', () => {
+    const h = feedHeaders(); h.set('age', '7288');
+    expect(normalize(marketFixture(NOW - 30_000), h).expiresAtMs).toBe(NOW + 300_000);
     expect(() => normalize(marketFixture(), h, NOW, NOW - 1)).toThrow();
   });
   it('keeps OpenAI standard context/cache dimensions and excludes batch prices', () => {
@@ -173,7 +178,7 @@ describe('bounded independent public GET collection', () => {
     }
     transport.mockResolvedValueOnce(response);
     await expect(collectQubaxPrices(transport, () => NOW)).rejects.toThrow('QUBAX_PRICE_FEED_UNAVAILABLE');
-    expect(transport).toHaveBeenCalledTimes(3);
+    expect(transport).toHaveBeenCalledTimes(1);
   });
   it('limits actual streamed bytes even without Content-Length', async () => {
     const transport = feedFetch();

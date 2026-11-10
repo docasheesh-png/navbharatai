@@ -18,10 +18,12 @@ positions. Skips do not consume physical attempts.
   Gateway usage is accounted at a conservative ceiling, **not an invoice**;
   unknown or interrupted liability remains reserved. No unsafe replay follows
   a dispatched error, cancellation, refusal, or uncertain charge.
-- Confirmed pre-dispatch evidence revocation or internal timeout may skip to a
-  later eligible Chat rung. Caller cancellation, partial output, any possible
-  dispatch, and uncertain budget admission still stop the request. A reservation
-  alone does not count as a physical attempt.
+- A Qubax miss never ends the turn. No eligible model, a stale feed, a timeout,
+  an empty reply, or the wrong language releases the unused try and the chat
+  chain continues with the same history. Caller cancellation still stops.
+  Partial text that was already shown is not replaced. A reservation alone does
+  not count as a physical attempt. Each try waits at most 8 seconds for the
+  first byte and 12 seconds overall.
 - Responses are bounded and buffered until complete to prevent partial answers
   or credentials split across SSE events from escaping. The current first-output
   deadline therefore applies to the full validated response. A slow complete
@@ -36,13 +38,15 @@ positions. Skips do not consume physical attempts.
 
 No provider catalog or approval is seeded. Setting a key does **not** by
 itself authorize a Gateway claim. Public chat and the admin Test Chat Bot use
-the live price feed instead. A model is eligible when both its input and output
-rates are at least 90% below the official OpenAI or Z.ai rate for that same
-model. `discount_pct` is ignored. Passing Hindi and English probes are ranked by
-success rate and latency. One turn tries the best three, releasing each failed
-try, then the normal chat chain continues with the same history. `QUBAX_MODEL`
-is only a backup when no model clears 90%. The per-try reserve defaults to
-`$0.02`. Gateway callers that pin `expectedSelection` still use the catalog below.
+the live Qubax market instead. A model is eligible when its own `discount_pct`
+is at least 90, it is text or multimodal, and one try fits the cap. Official
+price pages are not consulted. A model nobody has called in 24 hours waits for
+a passing Hindi and English probe, and a probe that answers in the wrong script
+fails. Ranking is probe quality, then the cheaper price. The reply must match
+the user's script or the next try runs. One turn tries the best three, then the
+normal chat chain continues with the same history. `QUBAX_MODEL` is only a
+backup when no model clears 90%. The per-try reserve defaults to `$0.02`.
+Gateway callers that pin `expectedSelection` still use the catalog below.
 
 An existing trusted server operator must maintain the catalog path for Gateway:
 

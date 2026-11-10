@@ -3,70 +3,78 @@ import { canonicalModelLabel, dueQubaxProbe, emptyProbeLedger, qubaxModelOverrid
 import { qubaxProbeAnswerSane, qubaxProbePrompt } from '../src/server/lib/qubaxProbe';
 
 const NOW = Date.parse('2026-11-10T02:00:00Z');
-const row = (sourceModelLabel: string, inputNanoUsd: number | null, outputNanoUsd: number | null, contextTokens: number | null = 8_000): QubaxObservedPrice => ({
+const row = (sourceModelLabel: string, inputNanoUsd: number | null, outputNanoUsd: number | null, contextTokens: number | null = 8_000, discountHundredths: number | null = 9_900, requests24h: number | null = 100): QubaxObservedPrice => ({
   sourceModelLabel, modality: 'text', contextTokens, contextBand: 'unspecified', serviceTier: 'standard', currency: 'USD', billingBasis: 'per-million-tokens',
   inputNanoUsd, outputNanoUsd, cacheReadNanoUsd: null, cacheWrite30mNanoUsd: null, cacheWrite12hNanoUsd: null, cacheStorage: 'unknown',
-  revision: null, tokenizer: null, sku: null, region: null, allFeesIncluded: null,
+  discountHundredths, requests24h, revision: null, tokenizer: null, sku: null, region: null, allFeesIncluded: null,
 });
 function ledger(ids: string[], latency: Record<string, number> = {}, success = 2): QubaxProbeLedger {
   const base = emptyProbeLedger(NOW);
   for (const id of ids) base.models[id] = { attempts: success, successes: success, hindi: { ok: true, latencyMs: latency[id] ?? 100, atMs: NOW - 1_000 }, english: { ok: true, latencyMs: latency[id] ?? 100, atMs: NOW - 1_000 } };
   return base;
 }
-const plan = (qubax: QubaxObservedPrice[], official: QubaxObservedPrice[], models: QubaxProbeLedger, pin = '') => rankQubaxMarkets({
-  rows: qubax, officialRows: official, expiresAtMs: NOW + 60_000, ledger: models, now: NOW,
+const plan = (qubax: QubaxObservedPrice[], models: QubaxProbeLedger | null, pin = '') => rankQubaxMarkets({
+  rows: qubax, expiresAtMs: NOW + 60_000, ledger: models, now: NOW,
   override: pin ? { mode: 'pinned', modelId: pin } : { mode: 'auto' },
 });
 
-describe('same-model 90% discount, then probe performance', () => {
-  it('matches the official label exactly and ignores a nearby name and a self-reported discount', () => {
+describe('Qubax discount, then probe performance, then the cheaper model', () => {
+  it('uses the Qubax discount and ignores a nearby name', () => {
     expect(canonicalModelLabel('GPT-5.4 (<272K context length)')).toBe('gpt-5.4');
     expect(canonicalModelLabel('gpt-4o-mini')).not.toBe(canonicalModelLabel('gpt-4o'));
-    const official = [row('gpt-4o-mini', 1_000, 2_000), row('gpt-4o', 10_000, 20_000), row('GLM-5.3', 5_000, 10_000)];
-    const qubax = [row('gpt-4o-mini', 100, 200), row('gpt-4o', 9_000, 19_000), row('glm-5.3', 400, 800)];
-    const ranked = plan(qubax, official, ledger(['gpt-4o-mini', 'gpt-4o', 'glm-5.3'], { 'glm-5.3': 50, 'gpt-4o-mini': 400 }));
+    const qubax = [
+      row('glm-5.3', 400, 800, 8_000, 9_500, 10),
+      row('gpt-4o-mini', 100, 200, 8_000, 9_900, 10),
+      row('nearby-model', 100, 200, 8_000, 8_900, 10_000),
+    ];
+    const ranked = plan(qubax, ledger(['glm-5.3', 'gpt-4o-mini', 'nearby-model'], { 'glm-5.3': 50, 'gpt-4o-mini': 400 }));
     expect(ranked.eligible.map(item => item.modelId)).toEqual(['glm-5.3', 'gpt-4o-mini']);
     expect(ranked.eligible[0].discountBps).toBeGreaterThanOrEqual(9_000);
     expect(ranked.backup).toBeNull();
   });
-  it('keeps a model that is only 89% cheaper out of the performance ranking', () => {
-    const official = [row('gpt-4o-mini', 1_000, 1_000)];
-    const ranked = plan([row('gpt-4o-mini', 100, 101)], official, ledger(['gpt-4o-mini']));
-    expect(ranked.eligible).toEqual([]);
+  it('keeps a model under 90% out of the ranking', () => {
+    expect(plan([row('gpt-4o-mini', 100, 101, 8_000, 8_999, 100)], ledger(['gpt-4o-mini'])).eligible).toEqual([]);
   });
-  it('ranks a slower higher-success model ahead of a cheaper faster one', () => {
-    const official = [row('gpt-4o-mini', 1_000, 2_000), row('glm-5.3', 5_000, 10_000)];
+  it('does not pick an unused model until a probe passes', () => {
+    const unused = row('gpt-oss-20b', 100, 100, 8_000, 9_995, 0);
+    const used = row('gemini-3-5-flash', 11_200_000, 67_400_000, 1_000_000, 9_925, 35_946);
+    expect(plan([unused, used], emptyProbeLedger(NOW)).eligible.map(item => item.modelId)).toEqual(['gemini-3-5-flash']);
+    expect(plan([unused], ledger(['gpt-oss-20b'])).eligible.map(item => item.modelId)).toEqual(['gpt-oss-20b']);
+  });
+  it('ranks a higher-success model ahead of a cheaper one, and the cheaper one on a tie', () => {
     const models = ledger(['gpt-4o-mini', 'glm-5.3'], { 'gpt-4o-mini': 50, 'glm-5.3': 900 }, 4);
     models.models['glm-5.3'].successes = 4;
     models.models['gpt-4o-mini'].successes = 3;
-    const ranked = plan([row('gpt-4o-mini', 10, 10), row('glm-5.3', 400, 800)], official, models);
+    const ranked = plan([row('gpt-4o-mini', 10, 10), row('glm-5.3', 400, 800)], models);
     expect(ranked.eligible.map(item => item.modelId)).toEqual(['glm-5.3', 'gpt-4o-mini']);
+    const tied = ledger(['cheap', 'dear'], { cheap: 100, dear: 100 });
+    expect(plan([row('dear', 100, 900), row('cheap', 100, 100)], tied).eligible.map(item => item.modelId)).toEqual(['cheap', 'dear']);
   });
-  it('strips a vendor prefix only when the remainder is the official model', () => {
-    const official = [row('gpt-4o-mini', 1_000, 2_000)];
-    const ranked = plan([row('openai-gpt-4o-mini', 100, 200), row('openai-gpt-4o', 100, 200)], official, ledger(['openai-gpt-4o-mini', 'openai-gpt-4o']));
-    expect(ranked.eligible.map(item => item.modelId)).toEqual(['openai-gpt-4o-mini']);
+  it('excludes a model whose one try would exceed the two-cent cap', () => {
+    const expensive = row('huge', 1_000_000_000, 100_000_000_000, 8_000, 9_900, 50);
+    expect(plan([expensive], ledger(['huge'])).eligible).toEqual([]);
   });
-  it('uses the pinned model only when nothing clears the official discount', () => {
-    const official = [row('gpt-4o', 1_000, 1_000)];
-    const qubax = [row('backup-model', 900, 900), row('gpt-4o', 900, 900)];
+  it('uses the pinned model only when nothing clears 90%', () => {
+    const qubax = [row('backup-model', 900, 900, 8_000, 1_000, 5), row('gpt-4o', 900, 900, 8_000, 1_000, 5)];
     const models = ledger(['backup-model', 'gpt-4o']);
-    expect(plan(qubax, official, models, 'backup-model').backup?.modelId).toBe('backup-model');
-    expect(plan(qubax, official, models, 'backup-model').eligible).toEqual([]);
-    const qualified = [row('backup-model', 900, 900), row('gpt-4o', 100, 100)];
-    expect(plan(qualified, official, models, 'backup-model').eligible[0].modelId).toBe('gpt-4o');
-    expect(plan(qualified, official, models, 'backup-model').backup).toBeNull();
+    expect(plan(qubax, models, 'backup-model').backup?.modelId).toBe('backup-model');
+    expect(plan(qubax, models, 'backup-model').eligible).toEqual([]);
+    const qualified = [row('backup-model', 900, 900, 8_000, 1_000, 5), row('gpt-4o', 100, 100, 8_000, 9_500, 5)];
+    expect(plan(qualified, models, 'backup-model').eligible[0].modelId).toBe('gpt-4o');
+    expect(plan(qualified, models, 'backup-model').backup).toBeNull();
   });
-  it('probes an eligible model before a cheaper model that cannot clear 90%', () => {
-    const official = [row('glm-5.3', 5_000, 10_000), row('gpt-4o-mini', 100, 100)];
-    const qubax = [row('cheap-unproven', 1, 1), row('glm-5.3', 400, 800), row('gpt-4o-mini', 90, 90)];
-    expect(dueQubaxProbe(qubax, official, emptyProbeLedger(NOW), NOW)?.modelId).toBe('glm-5.3');
+  it('probes a discounted model before one under 90%', () => {
+    const qubax = [row('cheap-unproven', 1, 1, 8_000, 5_000, 9), row('glm-5.3', 400, 800, 8_000, 9_500, 3)];
+    expect(dueQubaxProbe(qubax, [], emptyProbeLedger(NOW), NOW)?.modelId).toBe('glm-5.3');
   });
   it('accepts a probe only when the unique code comes back intact', () => {
     const prompt = qubaxProbePrompt('en', 'QXabc123');
     expect(prompt).toContain('QXabc123');
     expect(qubaxProbePrompt('hi', 'QXabc123')).toContain('QXabc123');
-    expect(qubaxProbeAnswerSane('QXabc123', 'QXabc123')).toBe(true);
+    expect(qubaxProbeAnswerSane('कोड QXabc123', 'QXabc123', 'hi')).toBe(true);
+    expect(qubaxProbeAnswerSane('code QXabc123', 'QXabc123', 'en')).toBe(true);
+    expect(qubaxProbeAnswerSane('QXabc123', 'QXabc123', 'hi')).toBe(false);
+    expect(qubaxProbeAnswerSane('कोड QXabc123', 'QXabc123', 'en')).toBe(false);
     expect(qubaxProbeAnswerSane('hello', 'QXabc123')).toBe(false);
     expect(qubaxProbeAnswerSane('', 'QXabc123')).toBe(false);
   });

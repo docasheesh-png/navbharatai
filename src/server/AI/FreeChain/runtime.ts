@@ -1,4 +1,4 @@
-import { runApprovedQubaxChat, QubaxError } from '../../lib/qubax';
+import { runApprovedQubaxChat, QubaxError, QUBAX_FIRST_BYTE_MS } from '../../lib/qubax';
 import { chatAttemptLimits, watchChatAttempt } from './attemptBudget';
 import { CHAT_SERVER_DEADLINE_MS, CHAT_PROVIDER_ATTEMPT_MS } from '../../../lib/chatDeadline';
 import { FIXED_TEXT_CHAIN, fixedTextChainRank, fixedTextChainSurface, fixedTextChainSelected, SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS } from '../fixedTextChain';
@@ -294,7 +294,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         // Preserve classification; server review must cover the exact payload and all required data classes.
         const prepared = trimForRung(input.message, history, system, Number.MAX_SAFE_INTEGER)!;
         const controller = new AbortController();
-        const qubaxLimits = chatAttemptLimits({ firstTokenMs: cfg.ttftMs, idleMs: 30000, hardCapMs: CHAT_PROVIDER_ATTEMPT_MS }, deadlineAt, order.length - position);
+        const qubaxLimits = chatAttemptLimits({ firstTokenMs: Math.min(cfg.ttftMs, QUBAX_FIRST_BYTE_MS), idleMs: 30000, hardCapMs: CHAT_PROVIDER_ATTEMPT_MS }, deadlineAt, order.length - position);
         let timer = setTimeout(() => controller.abort(), qubaxLimits.firstTokenMs);
         const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal;
         let content = '';
@@ -334,12 +334,8 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           // Unknown liability, caller cancellation, or committed output never opens a direct fallback.
           if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
           if (content) { trace.rung = 'qubax'; return done({ content: input.onChunk ? content : `${content}\n\nThe response was interrupted. Please try again.`, provider: 'QUBAX', model: attempt.model, ok: true, reason: 'stalled', latencyMs: 0 }); }
-          // Fresh evidence can be revoked or expire before any physical call.
-          // Only confirmed unused attempts may fall through; unknown admission
-          // errors and duplicate holds must keep their original no-replay boundary.
-          if (error instanceof QubaxError && !error.dispatched && !error.partial && !attempt.entered
-            && ['QUBAX_APPROVAL_REVOKED', 'QUBAX_CANCELLED'].includes(error.code)) continue;
-          break;
+          // Nothing was shown. A timeout, a bad reply, or a missing model must not end the turn.
+          continue;
         } finally { clearTimeout(timer); controller.abort(); }
       }
       const baseRung = cfg.rungs.find(r => r.id === id);

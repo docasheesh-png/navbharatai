@@ -116,85 +116,67 @@ function priced(row: QubaxObservedPrice): row is QubaxObservedPrice & { contextT
   return (row.modality === 'text' || row.modality === 'multimodal') && positive(row.contextTokens)
     && positive(row.inputNanoUsd) && positive(row.outputNanoUsd);
 }
-/** Official page label and the Qubax market id are the same model only after this exact normalization.
- * A context-length note is not a different model. A suffix, prefix or nearby name is. */
+/** A context-length note is not a different model. A suffix or nearby name is. */
 export function canonicalModelLabel(label: string): string {
   return label.toLowerCase().replace(/\s*\([^)]*context length\)\s*/gi, '').replace(/_/g, '-').replace(/[^a-z0-9.-]/g, '');
 }
-/** A vendor prefix counts as the same model only when the remainder is an official id already on the feed. */
-const VENDOR_PREFIX = /^(?:openai|google|anthropic|meta|alibaba|zhipu|deepseek|mistral|nvidia|xai)-/;
-export function officialRateFor(label: string, official: Map<string, { inputNanoUsd: number; outputNanoUsd: number }>): { inputNanoUsd: number; outputNanoUsd: number } | null {
-  const direct = canonicalModelLabel(label);
-  const exact = official.get(direct);
-  if (exact) return exact;
-  const stripped = direct.replace(VENDOR_PREFIX, '');
-  return stripped !== direct ? official.get(stripped) ?? null : null;
+/** Tokens assumed for one chat try when checking the per-request cap. Output matches the free-chain reply cap. */
+export const QUBAX_TRY_INPUT_TOKENS = 4_000;
+export const QUBAX_TRY_OUTPUT_TOKENS = 250;
+export function qubaxTryCostNano(inputNanoPerMillion: number, outputNanoPerMillion: number): number {
+  const nano = BigInt(inputNanoPerMillion) * BigInt(QUBAX_TRY_INPUT_TOKENS) + BigInt(outputNanoPerMillion) * BigInt(QUBAX_TRY_OUTPUT_TOKENS);
+  return Number(nano / 1_000_000n + (nano % 1_000_000n === 0n ? 0n : 1n));
 }
-function atLeast90Cheaper(qubaxNano: number, officialNano: number): boolean {
-  return officialNano > 0 && BigInt(qubaxNano) * 10n <= BigInt(officialNano);
+function deepDiscount(row: QubaxObservedPrice): boolean {
+  return integer(row.discountHundredths) && row.discountHundredths >= 9_000;
 }
-function discountBps(qubaxNano: number, officialNano: number): number {
-  return Number((BigInt(officialNano) - BigInt(qubaxNano)) * 10_000n / BigInt(officialNano));
+function withinCap(row: QubaxObservedPrice & { inputNanoUsd: number; outputNanoUsd: number }, ceiling: number): boolean {
+  return qubaxTryCostNano(row.inputNanoUsd, row.outputNanoUsd) <= ceiling;
 }
-/** Cheapest complete official band for that exact model. Qubax's own discount_pct is never read. */
-export function officialRatesByModel(rows: QubaxObservedPrice[]): Map<string, { inputNanoUsd: number; outputNanoUsd: number }> {
-  const rates = new Map<string, { inputNanoUsd: number; outputNanoUsd: number }>();
-  for (const row of rows) {
-    if (!positive(row.inputNanoUsd) || !positive(row.outputNanoUsd)) continue;
-    const id = canonicalModelLabel(row.sourceModelLabel);
-    if (!id) continue;
-    const current = rates.get(id);
-    if (!current || row.outputNanoUsd < current.outputNanoUsd || (row.outputNanoUsd === current.outputNanoUsd && row.inputNanoUsd < current.inputNanoUsd)) {
-      rates.set(id, { inputNanoUsd: row.inputNanoUsd, outputNanoUsd: row.outputNanoUsd });
-    }
-  }
-  return rates;
-}
-function choiceFor(row: QubaxObservedPrice & { contextTokens: number; inputNanoUsd: number; outputNanoUsd: number }, quality: NonNullable<ReturnType<typeof passing>>, official: { inputNanoUsd: number; outputNanoUsd: number } | null, expiresAtMs: number, backup: boolean): QubaxMarketChoice {
-  const qualified = !!official && atLeast90Cheaper(row.inputNanoUsd, official.inputNanoUsd) && atLeast90Cheaper(row.outputNanoUsd, official.outputNanoUsd);
+function choiceFor(row: QubaxObservedPrice & { contextTokens: number; inputNanoUsd: number; outputNanoUsd: number }, quality: ReturnType<typeof passing>, expiresAtMs: number, now: number, backup: boolean): QubaxMarketChoice {
+  const probed = quality ?? { successRateBps: 0, maxLatencyMs: Number.MAX_SAFE_INTEGER, probedAtMs: now };
   return { modelId: row.sourceModelLabel, inputNanoUsdPerMillion: row.inputNanoUsd, outputNanoUsdPerMillion: row.outputNanoUsd,
-    officialInputNanoUsdPerMillion: official?.inputNanoUsd ?? null, officialOutputNanoUsdPerMillion: official?.outputNanoUsd ?? null,
-    discountBps: qualified && official ? Math.min(discountBps(row.inputNanoUsd, official.inputNanoUsd), discountBps(row.outputNanoUsd, official.outputNanoUsd)) : null,
-    contextTokens: row.contextTokens, ...quality, expiresAtMs: Math.min(expiresAtMs, quality.probedAtMs + QUBAX_PROBE_TTL_MS), backup };
+    officialInputNanoUsdPerMillion: null, officialOutputNanoUsdPerMillion: null,
+    discountBps: integer(row.discountHundredths) ? row.discountHundredths : null,
+    contextTokens: row.contextTokens, ...probed, expiresAtMs: quality ? Math.min(expiresAtMs, quality.probedAtMs + QUBAX_PROBE_TTL_MS) : expiresAtMs, backup };
 }
-/** Eligible models are at least 90% below the official price of the same model. Rank is probe performance, never price. */
+/** Eligible: Qubax discount_pct >= 90, text or multimodal, and one try priced within the cap.
+ * A model with no requests in 24h is not chosen until a Hindi and English probe has passed. */
 export function rankQubaxMarkets(input: {
   rows: QubaxObservedPrice[];
-  officialRows: QubaxObservedPrice[];
+  officialRows?: QubaxObservedPrice[];
   expiresAtMs: number;
   ledger: QubaxProbeLedger | null;
   now: number;
   override: Exclude<QubaxModelOverride, { mode: 'invalid' }>;
+  ceilingNanoUsd?: number;
 }): QubaxMarketPlan {
   const empty = { eligible: [], backup: null };
-  if (!integer(input.now) || !integer(input.expiresAtMs) || input.expiresAtMs <= input.now || !input.ledger) return empty;
-  const official = officialRatesByModel(input.officialRows);
+  const ceiling = input.ceilingNanoUsd ?? 20_000_000;
+  if (!integer(input.now) || !integer(input.expiresAtMs) || input.expiresAtMs <= input.now || !positive(ceiling)) return empty;
+  const ledger = input.ledger ?? emptyProbeLedger(input.now);
   const seen = new Map<string, number>();
   for (const row of input.rows) if (priced(row)) seen.set(row.sourceModelLabel, (seen.get(row.sourceModelLabel) ?? 0) + 1);
   const eligible: QubaxMarketChoice[] = [];
   let backup: QubaxMarketChoice | null = null;
   for (const row of input.rows) {
-    if (!priced(row) || seen.get(row.sourceModelLabel) !== 1) continue;
-    const quality = passing(input.ledger.models[row.sourceModelLabel] ?? { attempts: 0, successes: 0, hindi: null, english: null }, input.now);
-    if (!quality) continue;
-    const rate = officialRateFor(row.sourceModelLabel, official);
-    const qualified = !!rate && atLeast90Cheaper(row.inputNanoUsd, rate.inputNanoUsd) && atLeast90Cheaper(row.outputNanoUsd, rate.outputNanoUsd);
-    if (qualified) eligible.push(choiceFor(row, quality, rate, input.expiresAtMs, false));
-    else if (input.override.mode === 'pinned' && row.sourceModelLabel === input.override.modelId) backup = choiceFor(row, quality, rate, input.expiresAtMs, true);
+    if (!priced(row) || seen.get(row.sourceModelLabel) !== 1 || !withinCap(row, ceiling)) continue;
+    const quality = passing(ledger.models[row.sourceModelLabel] ?? { attempts: 0, successes: 0, hindi: null, english: null }, input.now);
+    const used = integer(row.requests24h) && row.requests24h > 0;
+    const qualified = deepDiscount(row) && (used || !!quality);
+    if (qualified) eligible.push(choiceFor(row, quality, input.expiresAtMs, input.now, false));
+    else if (input.override.mode === 'pinned' && row.sourceModelLabel === input.override.modelId && (used || !!quality)) backup = choiceFor(row, quality, input.expiresAtMs, input.now, true);
   }
-  eligible.sort((a, b) => b.successRateBps - a.successRateBps || a.maxLatencyMs - b.maxLatencyMs || a.modelId.localeCompare(b.modelId));
+  const requests = new Map(input.rows.map(row => [row.sourceModelLabel, row.requests24h ?? 0]));
+  // Best probe first. Equal quality takes the cheaper model. Live usage only breaks a price tie.
+  eligible.sort((a, b) => b.successRateBps - a.successRateBps || a.maxLatencyMs - b.maxLatencyMs
+    || a.outputNanoUsdPerMillion - b.outputNanoUsdPerMillion || a.inputNanoUsdPerMillion - b.inputNanoUsdPerMillion
+    || (requests.get(b.modelId) ?? 0) - (requests.get(a.modelId) ?? 0) || a.modelId.localeCompare(b.modelId));
   return { eligible, backup: eligible.length ? null : backup };
 }
-export function dueQubaxProbe(rows: QubaxObservedPrice[], officialRows: QubaxObservedPrice[], ledger: QubaxProbeLedger, now: number, pin: string | null = null): { modelId: string; language: 'hi' | 'en' } | null {
-  const official = officialRatesByModel(officialRows);
-  const candidates = rows.filter(row => priced(row) && (pin === row.sourceModelLabel || (() => {
-    const rate = officialRateFor(row.sourceModelLabel, official);
-    return !!rate && atLeast90Cheaper(row.inputNanoUsd, rate.inputNanoUsd) && atLeast90Cheaper(row.outputNanoUsd, rate.outputNanoUsd);
-  })()));
-  const ranked = candidates.slice().sort((a, b) => {
-    const age = (id: string) => Math.max(ledger.models[id]?.english?.atMs ?? 0, ledger.models[id]?.hindi?.atMs ?? 0);
-    return age(a.sourceModelLabel) - age(b.sourceModelLabel) || a.sourceModelLabel.localeCompare(b.sourceModelLabel);
-  });
+export function dueQubaxProbe(rows: QubaxObservedPrice[], _officialRows: QubaxObservedPrice[] = [], ledger: QubaxProbeLedger, now: number, pin: string | null = null, ceilingNanoUsd = 20_000_000): { modelId: string; language: 'hi' | 'en' } | null {
+  const candidates = rows.filter(row => priced(row) && withinCap(row, ceilingNanoUsd) && (pin === row.sourceModelLabel || deepDiscount(row)));
+  const ranked = candidates.slice().sort((a, b) => (b.requests24h ?? 0) - (a.requests24h ?? 0) || a.sourceModelLabel.localeCompare(b.sourceModelLabel));
   let fallback: { modelId: string; language: 'hi' | 'en' } | null = null;
   for (const row of ranked) {
     const model = ledger.models[row.sourceModelLabel];
@@ -212,16 +194,14 @@ export function dueQubaxProbe(rows: QubaxObservedPrice[], officialRows: QubaxObs
 export interface QubaxFeedSummary {
   fresh: boolean; observedAtMs: number | null; pricedRows: number; officialMatches: number; discountEligible: number; probePassing: number;
 }
-export function summarizeQubaxFeed(rows: QubaxObservedPrice[], officialRows: QubaxObservedPrice[], ledger: QubaxProbeLedger | null, now: number, fresh: boolean, observedAtMs: number | null): QubaxFeedSummary {
-  const official = officialRatesByModel(officialRows);
+export function summarizeQubaxFeed(rows: QubaxObservedPrice[], _officialRows: QubaxObservedPrice[] = [], ledger: QubaxProbeLedger | null, now: number, fresh: boolean, observedAtMs: number | null, ceilingNanoUsd = 20_000_000): QubaxFeedSummary {
   let pricedRows = 0, officialMatches = 0, discountEligible = 0, probePassing = 0;
   for (const row of rows) {
     if (!priced(row)) continue;
     pricedRows += 1;
-    const rate = officialRateFor(row.sourceModelLabel, official);
-    if (!rate) continue;
+    if (!deepDiscount(row)) continue;
     officialMatches += 1;
-    if (atLeast90Cheaper(row.inputNanoUsd, rate.inputNanoUsd) && atLeast90Cheaper(row.outputNanoUsd, rate.outputNanoUsd)) discountEligible += 1;
+    if (withinCap(row, ceilingNanoUsd)) discountEligible += 1;
     if (ledger && passing(ledger.models[row.sourceModelLabel] ?? { attempts: 0, successes: 0, hindi: null, english: null }, now)) probePassing += 1;
   }
   return { fresh, observedAtMs, pricedRows, officialMatches, discountEligible, probePassing };
@@ -237,7 +217,7 @@ export async function readQubaxFeedSummary(db: Pick<Firestore, 'doc'>, now = Dat
       validProbeLedger(ledgerSnap.data(), now), now, true, (snapshot as QubaxPriceSnapshot).observedAtMs);
   } catch { return empty; }
 }
-export async function readQubaxMarketPlan(db: Pick<Firestore, 'doc'>, override: Exclude<QubaxModelOverride, { mode: 'invalid' }>, now = Date.now()): Promise<QubaxMarketPlan> {
+export async function readQubaxMarketPlan(db: Pick<Firestore, 'doc'>, override: Exclude<QubaxModelOverride, { mode: 'invalid' }>, now = Date.now(), ceilingNanoUsd = 20_000_000): Promise<QubaxMarketPlan> {
   try {
     const [priceSnap, ledgerSnap] = await Promise.all([
       db.doc(QUBAX_PRICE_FEED_DOCUMENT).get(),
@@ -247,8 +227,7 @@ export async function readQubaxMarketPlan(db: Pick<Firestore, 'doc'>, override: 
     if (!validQubaxPriceSnapshot(snapshot, now)) return { eligible: [], backup: null };
     const sources = (snapshot as QubaxPriceSnapshot).sources;
     return rankQubaxMarkets({ rows: sources.find(s => s.source === 'qubax')?.rows ?? [],
-      officialRows: sources.filter(s => s.source !== 'qubax').flatMap(s => s.rows),
-      expiresAtMs: (snapshot as QubaxPriceSnapshot).expiresAtMs, ledger: validProbeLedger(ledgerSnap.data(), now), now, override });
+      expiresAtMs: (snapshot as QubaxPriceSnapshot).expiresAtMs, ledger: validProbeLedger(ledgerSnap.data(), now), now, override, ceilingNanoUsd });
   } catch { return { eligible: [], backup: null }; }
 }
 export interface QubaxSwitchEntry {

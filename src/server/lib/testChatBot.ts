@@ -127,7 +127,7 @@ function adminQubaxFallback(modelId: string, now: number): QubaxMarketChoice {
 function describeQubaxFeed(feed: { fresh: boolean; observedAtMs: number | null; pricedRows: number; officialMatches: number; discountEligible: number; probePassing: number }, refreshStatus?: string): string {
   const observed = feed.observedAtMs != null ? new Date(feed.observedAtMs).toISOString() : 'never';
   const refresh = refreshStatus ? ` Last feed refresh: ${refreshStatus}.` : '';
-  return `Price feed ${feed.fresh ? `fresh ${observed}` : `not fresh (last observation ${observed})`}. ${feed.pricedRows} priced Qubax rows, ${feed.officialMatches} official name matches, ${feed.discountEligible} at least 90% cheaper, ${feed.probePassing} probe-ready.${refresh}`;
+  return `Price feed ${feed.fresh ? `fresh ${observed}` : `not fresh (last observation ${observed})`}. ${feed.pricedRows} priced Qubax rows, ${feed.officialMatches} at a 90%+ Qubax discount, ${feed.discountEligible} within the try cap, ${feed.probePassing} probe-ready.${refresh}`;
 }
 
 function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
@@ -217,7 +217,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   };
 }
 
-/** Reading this status never probes the provider, performs inference or reveals a credential. */
+/** Admin status refreshes the market feed. The lease stops a stampede. A failure still returns the last status. */
 export async function loadTestChatStatus(): Promise<TestChatStatus> {
   const status = testChatStatus();
   const ceiling = qubaxRequestCeilingNanoUsd(process.env);
@@ -226,6 +226,7 @@ export async function loadTestChatStatus(): Promise<TestChatStatus> {
   try {
     const db = getServerDb();
     if (!db) return status;
+    await refreshQubaxPriceFeed(process.env);
     const [plan, feed] = await Promise.all([readQubaxMarketPlan(db, override, Date.now()), readQubaxFeedSummary(db, Date.now())]);
     const choice = plan.eligible[0] ?? plan.backup;
     const providers = status.providers.map(p => {

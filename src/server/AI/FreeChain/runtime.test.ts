@@ -100,6 +100,16 @@ describe('free chat chain central dispatch', () => {
    expect(result.freeChain?.attempts.find(attempt => attempt.provider === 'qubax')?.reason).toBe('qubax-price-or-quality-unverified');
    spy.mockRestore();
  });
+ it('continues to the next provider when Qubax times out before any text', async () => {
+   const qubax = await import('../../lib/qubax');
+   const spy = vi.spyOn(qubax, 'runApprovedQubaxChat').mockRejectedValue(new qubax.QubaxError('QUBAX_CANCELLED', 0, false, true));
+   m.execute.mockRejectedValue(new FreeChainProviderError('MODEL_UNAVAILABLE'));
+   const result = await buildFreeChainRouter(db, config(DEFAULT_ORDER.join(','))).route(input());
+   const providers = result.freeChain?.attempts.map(attempt => attempt.provider) ?? [];
+   expect(providers.indexOf('cheapinf')).toBeGreaterThan(providers.indexOf('qubax'));
+   expect(result.freeChain?.attempts.find(attempt => attempt.provider === 'qubax')?.reason).toBe('qubax_cancelled');
+   spy.mockRestore();
+ });
  it('falls through in owner order and retains the four-physical-attempt bound', async () => {
    m.execute.mockRejectedValue(new FreeChainProviderError('MODEL_UNAVAILABLE'));
    const result = await buildFreeChainRouter(db, config(DEFAULT_ORDER.join(','))).route(input());

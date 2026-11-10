@@ -4927,14 +4927,14 @@ Retail quote is 2 × configured tax-inclusive supplier cost, expressed to six de
 
 ### Qubax owner enable (2026-11-09)
 
-Public chat and the admin Test Chat Bot call Qubax when `QUBAX_ENABLED=1` and `QUBAX_API_KEY` are set. No new Cloud Run variable is required. The price feed is on unless set to `0`. A model is eligible when its live Qubax input and output prices are at least 90% below the official price for that same model. The server probes eligible models and picks the best success rate and latency. One turn tries at most three of those models, then the normal chat chain continues.
+Public chat and the admin Test Chat Bot call Qubax when `QUBAX_ENABLED=1` and `QUBAX_API_KEY` are set. No new Cloud Run variable is required. The price feed is on unless set to `0` and is fresh when the Qubax market fetch succeeds. A model is eligible when its own `discount_pct` is at least 90, it is text or multimodal, and one try fits the cap. Official price pages are not used. The server probes Hindi and English, rejects the wrong script, and picks the best probe, then the cheaper price. A timeout, a bad reply, or no eligible model falls through to the next chat provider. One turn tries at most three models.
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
 | `QUBAX_ENABLED` | `1` allows calls | disabled |
 | `QUBAX_API_KEY` | Server-only Qubax credential | missing |
 | `QUBAX_PRICE_FEED_ENABLED` | `0` turns the public price feed off | on |
-| `QUBAX_MODEL` | Backup model id, used only when no model clears the 90% official discount | automatic |
+| `QUBAX_MODEL` | Backup model id, used only when no model clears a 90% Qubax discount | automatic |
 | `QUBAX_MAX_USD_PER_REQUEST` | Hard USD ceiling reserved for one try. `0.000001` to `1` | `0.02` |
 | `QUBAX_PROBE_DAILY_CAP_USD` | Most the health probes may reserve in one IST day | `0.10` |
 

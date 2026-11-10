@@ -406,7 +406,7 @@ describe('test chat provider isolation and admission', () => {
     const error = await runTestChat(action, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
     expect(error.reason).toBe('no-model');
     expect(error.diagnostic?.rawErrorBody).toContain('0 priced Qubax rows');
-    expect(error.diagnostic?.rawErrorBody).toContain('0 official name matches');
+    expect(error.diagnostic?.rawErrorBody).toContain('0 at a 90%+ Qubax discount');
     expect(error.diagnostic?.rawErrorBody).toContain('Last feed refresh: unavailable');
   });
   it.each(['disabled', 'terms-shared-access'] as const)('enables CheaperInference from its key even when user-chat mode is %s', async reason => {

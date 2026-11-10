@@ -133,8 +133,13 @@ export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
     // field (BR1974: a Chess Squad welcome-screen fix was handed @capacitor/app-launcher because
     // "Enter Your WhatsApp Mobile Number" matched a bare `whats\s*app`, and the brief also mentions
     // SMS/calling, so the builder added WhatsApp and SMS "contact support" the user never asked for).
-    // "when I open the app" is launching THIS app, not asking to open another one.
-    asks: /\b(call\s+(?:karo|kar|kare|kardo|mummy|mom|papa)|make\s+(?:a\s+)?call|whats\s*app(?![\s-]*(?:(?:ka|ki|ke|your|my|the|wala|wali)[\s-]+)?(?:mobile[\s-]*)?(?:numbers?|no\.?|num|phone|ids?)\b)|sms|open\s+(?:other\s+apps?|another\s+app|the\s+apps)|app\s+khol\w*|khol\s+do)\b/i,
+    // Singular "open the app" / "when I open the app" / "open the app to see…" / "opening the app"
+    // / "when the app opens" launch THIS app. "open the app settings" is this app's settings screen
+    // (in-app navigation), not another app. Plural "open apps" / "open the apps", and the frozen
+    // compounds "app store" / "play store" / "app drawer" (OS surfaces for other apps), still match.
+    // "open WhatsApp chat with this number" still matches — a later "number" after "chat" is not a
+    // WhatsApp-number identity field. (#4165 review: do not drop bare "open apps" or "app store".)
+    asks: /\b(call\s+(?:karo|kar|kare|kardo|mummy|mom|papa)|make\s+(?:a\s+)?call|whats\s*app(?![\s-]*(?:(?:ka|ki|ke|your|my|the|wala|wali)[\s-]+)?(?:mobile[\s-]*)?(?:numbers?|no\.?|num|phone|ids?)\b)|sms|open\s+(?:other\s+apps?|another\s+app|the\s+apps|apps)|(?:app|play)\s*store|app\s+drawer|app\s+khol\w*|khol\s+do)\b/i,
   },
   {
     id: 'contacts',

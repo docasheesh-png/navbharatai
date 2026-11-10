@@ -10,7 +10,7 @@
 // open-apps `asks` regex was edited.
 
 import { describe, it, expect } from 'vitest';
-import { requestedCapabilities, nativeCapabilityBrief } from '../src/server/AgentV3/nativeCapabilities';
+import { NATIVE_CAPABILITIES, requestedCapabilities, nativeCapabilityBrief } from '../src/server/AgentV3/nativeCapabilities';
 import { analyzeRequest } from '../src/server/AgentV3/RequestAnalyser';
 import { analyzeRequirementGaps } from '../src/server/lib/RequirementGapAnalyzer';
 import { COMPLEX_APP_SIGNAL, isComplexAppPrompt } from '../src/server/lib/appComplexitySignals';
@@ -75,6 +75,18 @@ const SAME_CLASS_OPEN_APPS = [
   'open another app',
   'open the apps',
   'app kholo',
+  // #4165: plural / store / drawer / WhatsApp-chat-with-number must match again
+  'open apps like YouTube',
+  'please open apps',
+  'open the app store',
+  'app store',
+  'play store',
+  'Open the Play Store',
+  'open WhatsApp chat with this number',
+  'open the app drawer',
+  'open apps installed on phone',
+  'please open the apps',
+  'users should be able to open apps from this screen',
 ] as const;
 
 /**
@@ -95,6 +107,17 @@ const OPPOSITE_NOT_OPEN_APPS = [
   'whenever I open the app',
   'Every time a new visitor opens the app, show the welcome screen',
   'Please completely fix the app starting flow',
+  // #4165: singular launch-this-app language must stay uncaptured
+  'open the app',
+  'when the app opens',
+  'open the app to see the dashboard',
+  'open the app settings',
+  'opening the app',
+  'please open the app',
+  'after opening the app',
+  'I open the app every morning',
+  'open the app first',
+  'open this app',
 ] as const;
 
 describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', () => {
@@ -133,5 +156,34 @@ describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', ()
     const a = analyzeRequest({ prompt: BR1974_PROMPT, buildIntent: 'new_build' } as Parameters<typeof analyzeRequest>[0]);
     expect(a.taskType).toBe('complex_app');
     expect(a.complexityScore).toBeGreaterThanOrEqual(40);
+  });
+
+  it('open-apps asks source keeps plural apps and store/drawer compounds without recapturing singular open-the-app', () => {
+    const src = NATIVE_CAPABILITIES.find((c) => c.id === 'open-apps')!.asks.source;
+    expect(src).toContain('|apps)');
+    expect(src).toContain('(?:app|play)\\s*store');
+    expect(src).toContain('app\\s+drawer');
+    expect(src).not.toContain('open\\s+(?:the\\s+)?(?:app|apps)');
+  });
+
+  it('#4165 decisions: app settings stay this-app; app drawer and opening-the-app are classified explicitly', () => {
+    // "open the app settings" does NOT match. "The app settings" is this application's
+    // settings screen (in-app navigation), the same class as "open the app to see…".
+    // Contrast "app store" / "app drawer", which are frozen compounds for OS surfaces
+    // that acquire or launch other apps — not "the app" + a trailing noun.
+    expect(requestedCapabilities('open the app settings').map((c) => c.id)).not.toContain('open-apps');
+    // "open the app drawer" DOES match: the Android/iOS app drawer is the launcher
+    // surface for installed apps, i.e. the open-apps capability family.
+    expect(requestedCapabilities('open the app drawer').map((c) => c.id)).toContain('open-apps');
+    // "open apps installed on phone" is a genuine request to launch other apps.
+    expect(requestedCapabilities('open apps installed on phone').map((c) => c.id)).toContain('open-apps');
+    // "opening the app" / "when the app opens" are this-app lifecycle language.
+    expect(requestedCapabilities('opening the app').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('when the app opens').map((c) => c.id)).not.toContain('open-apps');
+    // Pair: singular vs plural "please open …"
+    expect(requestedCapabilities('please open the app').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('please open apps').map((c) => c.id)).toContain('open-apps');
+    // A later "number" after "chat" is not a WhatsApp-number identity field.
+    expect(requestedCapabilities('open WhatsApp chat with this number').map((c) => c.id)).toContain('open-apps');
   });
 });

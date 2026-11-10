@@ -45,6 +45,19 @@ This is the same stray-word class as the contacts row (never a "Contact us" page
 | Tighten bare `sms` | Same `asks` regex. | "send an SMS" must keep open-apps. | Leave Q-2648. |
 | Raise or lower the free cap; mark unfinished work finished | First render at 285 s; POST_GREEN_WRITES 14; READY_BEFORE_END not measured on edits. | Billing / unfinished-as-finished. | Do not ship. TODO_ONLY_TURNS already Q-2375 / Q-1068. |
 
+## Review follow-up (#4165)
+
+F1 at `aba7e765` over-narrowed `open\s+` to only `other apps` / `another app` / `the apps`, so "open apps like YouTube", "please open apps" and "open the app store" missed the brief. The follow-up:
+
+- Matches plural `open apps` (no article) and keeps `open the apps` / `open other apps` / `open another app`.
+- Matches the frozen compounds `app store` / `play store` / `app drawer`.
+- Keeps singular launch-this-app language uncaptured: "open the app", "when I open the app", "when the app opens", "open the app to see…", "opening the app".
+- Decision: "open the app settings" stays uncaptured — that is this application's settings screen (in-app navigation), the same class as "open the app to see…". "app store" and "app drawer" are frozen compounds for OS surfaces that acquire or launch other apps, not "the app" plus a trailing noun.
+- Decision: "open the app drawer" matches, because the drawer is the launcher surface for installed apps.
+- "open WhatsApp chat with this number" still matches (a later "number" after "chat" is not a WhatsApp-number identity field).
+
+Accepted side-effect: a prompt that only mentions publishing to the App Store / Play Store now also receives the open-apps brief (the reviewer asked to match bare `app store` / `play store`). Neighbours (Contact-us, music player, todo, the BR1974 report prompt) stay uncaptured.
+
 ## Queue
 
 This commit **closes no row** and **opens Q-2647 and Q-2648**. Q-2646, Q-2645, Q-2644, Q-2643, Q-2642, Q-2640, Q-2621, Q-2611, Q-2375 / Q-1068 and earlier blockers stay open.

@@ -82,6 +82,7 @@
   "oppositeClassAssembledBeforeEdit": true,
   "shipped": [
     "F1 WhatsApp-number / open-the-app is not open-apps",
+    "F1 #4165 restore plural open-apps and store/drawer compounds",
     "F2 en/em dash in case-study lookbehind"
   ],
   "notShipped": [

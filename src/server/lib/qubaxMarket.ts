@@ -121,6 +121,15 @@ function priced(row: QubaxObservedPrice): row is QubaxObservedPrice & { contextT
 export function canonicalModelLabel(label: string): string {
   return label.toLowerCase().replace(/\s*\([^)]*context length\)\s*/gi, '').replace(/_/g, '-').replace(/[^a-z0-9.-]/g, '');
 }
+/** A vendor prefix counts as the same model only when the remainder is an official id already on the feed. */
+const VENDOR_PREFIX = /^(?:openai|google|anthropic|meta|alibaba|zhipu|deepseek|mistral|nvidia|xai)-/;
+export function officialRateFor(label: string, official: Map<string, { inputNanoUsd: number; outputNanoUsd: number }>): { inputNanoUsd: number; outputNanoUsd: number } | null {
+  const direct = canonicalModelLabel(label);
+  const exact = official.get(direct);
+  if (exact) return exact;
+  const stripped = direct.replace(VENDOR_PREFIX, '');
+  return stripped !== direct ? official.get(stripped) ?? null : null;
+}
 function atLeast90Cheaper(qubaxNano: number, officialNano: number): boolean {
   return officialNano > 0 && BigInt(qubaxNano) * 10n <= BigInt(officialNano);
 }
@@ -168,7 +177,7 @@ export function rankQubaxMarkets(input: {
     if (!priced(row) || seen.get(row.sourceModelLabel) !== 1) continue;
     const quality = passing(input.ledger.models[row.sourceModelLabel] ?? { attempts: 0, successes: 0, hindi: null, english: null }, input.now);
     if (!quality) continue;
-    const rate = official.get(canonicalModelLabel(row.sourceModelLabel)) ?? null;
+    const rate = officialRateFor(row.sourceModelLabel, official);
     const qualified = !!rate && atLeast90Cheaper(row.inputNanoUsd, rate.inputNanoUsd) && atLeast90Cheaper(row.outputNanoUsd, rate.outputNanoUsd);
     if (qualified) eligible.push(choiceFor(row, quality, rate, input.expiresAtMs, false));
     else if (input.override.mode === 'pinned' && row.sourceModelLabel === input.override.modelId) backup = choiceFor(row, quality, rate, input.expiresAtMs, true);
@@ -179,7 +188,7 @@ export function rankQubaxMarkets(input: {
 export function dueQubaxProbe(rows: QubaxObservedPrice[], officialRows: QubaxObservedPrice[], ledger: QubaxProbeLedger, now: number, pin: string | null = null): { modelId: string; language: 'hi' | 'en' } | null {
   const official = officialRatesByModel(officialRows);
   const candidates = rows.filter(row => priced(row) && (pin === row.sourceModelLabel || (() => {
-    const rate = official.get(canonicalModelLabel(row.sourceModelLabel));
+    const rate = officialRateFor(row.sourceModelLabel, official);
     return !!rate && atLeast90Cheaper(row.inputNanoUsd, rate.inputNanoUsd) && atLeast90Cheaper(row.outputNanoUsd, rate.outputNanoUsd);
   })()));
   const ranked = candidates.slice().sort((a, b) => {
@@ -199,6 +208,34 @@ export function dueQubaxProbe(rows: QubaxObservedPrice[], officialRows: QubaxObs
     }
   }
   return fallback;
+}
+export interface QubaxFeedSummary {
+  fresh: boolean; observedAtMs: number | null; pricedRows: number; officialMatches: number; discountEligible: number; probePassing: number;
+}
+export function summarizeQubaxFeed(rows: QubaxObservedPrice[], officialRows: QubaxObservedPrice[], ledger: QubaxProbeLedger | null, now: number, fresh: boolean, observedAtMs: number | null): QubaxFeedSummary {
+  const official = officialRatesByModel(officialRows);
+  let pricedRows = 0, officialMatches = 0, discountEligible = 0, probePassing = 0;
+  for (const row of rows) {
+    if (!priced(row)) continue;
+    pricedRows += 1;
+    const rate = officialRateFor(row.sourceModelLabel, official);
+    if (!rate) continue;
+    officialMatches += 1;
+    if (atLeast90Cheaper(row.inputNanoUsd, rate.inputNanoUsd) && atLeast90Cheaper(row.outputNanoUsd, rate.outputNanoUsd)) discountEligible += 1;
+    if (ledger && passing(ledger.models[row.sourceModelLabel] ?? { attempts: 0, successes: 0, hindi: null, english: null }, now)) probePassing += 1;
+  }
+  return { fresh, observedAtMs, pricedRows, officialMatches, discountEligible, probePassing };
+}
+export async function readQubaxFeedSummary(db: Pick<Firestore, 'doc'>, now = Date.now()): Promise<QubaxFeedSummary> {
+  const empty = { fresh: false, observedAtMs: null, pricedRows: 0, officialMatches: 0, discountEligible: 0, probePassing: 0 };
+  try {
+    const [priceSnap, ledgerSnap] = await Promise.all([db.doc(QUBAX_PRICE_FEED_DOCUMENT).get(), db.doc(QUBAX_PROBE_LEDGER_DOCUMENT).get()]);
+    const snapshot: unknown = priceSnap.data()?.snapshot;
+    if (!validQubaxPriceSnapshot(snapshot, now)) return empty;
+    const sources = (snapshot as QubaxPriceSnapshot).sources;
+    return summarizeQubaxFeed(sources.find(s => s.source === 'qubax')?.rows ?? [], sources.filter(s => s.source !== 'qubax').flatMap(s => s.rows),
+      validProbeLedger(ledgerSnap.data(), now), now, true, (snapshot as QubaxPriceSnapshot).observedAtMs);
+  } catch { return empty; }
 }
 export async function readQubaxMarketPlan(db: Pick<Firestore, 'doc'>, override: Exclude<QubaxModelOverride, { mode: 'invalid' }>, now = Date.now()): Promise<QubaxMarketPlan> {
   try {

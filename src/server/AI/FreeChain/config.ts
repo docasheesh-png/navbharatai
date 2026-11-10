@@ -41,6 +41,7 @@ export const TERMS_UNVERIFIED_IDS = ['bluesminds', 'requesty'] as const;
  * Free-tier Gemini is no longer in the default order (privacy); Nemotron Nano was removed.
  */
 export const DEFAULT_ORDER = ['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid'] as const;
+/** Chat dispatch inserts mitrify and qubax immediately after openrouter. They are not provider-config rungs. */
 /** Default chat routing; explicit OFF remains authoritative at every ingress. */
 export function freeChainEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const value = env.FREE_CHAIN_ENABLED;

@@ -1,6 +1,6 @@
 import { readTestChatAction, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_MAX_RESPONSE_CHARS,
   type TestChatAction, type TestChatReply, type TestChatStatus } from '../../lib/testChatBot';
-import { nanoUsdToDecimal, qubaxModelOverride, qubaxRequestCeilingNanoUsd, readQubaxMarketPlan } from './qubaxMarket';
+import { nanoUsdToDecimal, qubaxModelOverride, qubaxRequestCeilingNanoUsd, readQubaxFeedSummary, readQubaxMarketPlan } from './qubaxMarket';
 import { qubaxConfig, QubaxError, runApprovedQubaxChat } from './qubax';
 import { getServerDb } from './serverDb';
 import { assertAiAvailable } from './aiMaintenance';
@@ -31,10 +31,10 @@ export async function loadTestChatStatus(): Promise<TestChatStatus> {
   try {
     const db = getServerDb();
     if (!db) return status;
-    const plan = await readQubaxMarketPlan(db, override, Date.now());
+    const [plan, feed] = await Promise.all([readQubaxMarketPlan(db, override, Date.now()), readQubaxFeedSummary(db, Date.now())]);
     const choice = plan.eligible[0] ?? plan.backup;
-    if (!choice) return { ...status, approvalRequired: false, providers: [{ ...status.providers[0], model: null, ceilingUsd: nanoUsdToDecimal(ceiling), selection: 'none' }] };
-    return { ...status, approvalRequired: false, providers: [{ ...status.providers[0], model: choice.modelId, ceilingUsd: nanoUsdToDecimal(ceiling),
+    if (!choice) return { ...status, feed, approvalRequired: false, providers: [{ ...status.providers[0], model: null, ceilingUsd: nanoUsdToDecimal(ceiling), selection: 'none' }] };
+    return { ...status, feed, approvalRequired: false, providers: [{ ...status.providers[0], model: choice.modelId, ceilingUsd: nanoUsdToDecimal(ceiling),
       selection: choice.backup ? 'backup' : 'performance', inputUsdPerMillion: nanoUsdToDecimal(choice.inputNanoUsdPerMillion),
       outputUsdPerMillion: nanoUsdToDecimal(choice.outputNanoUsdPerMillion),
       officialInputUsdPerMillion: choice.officialInputNanoUsdPerMillion === null ? null : nanoUsdToDecimal(choice.officialInputNanoUsdPerMillion),

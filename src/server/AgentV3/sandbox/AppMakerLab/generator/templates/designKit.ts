@@ -395,9 +395,11 @@ small, .muted, .text-muted { color: var(--muted); }
 .nb-brand-icon { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 8px; object-fit: contain; }
 /* A dashboard topbar holds the page title (autopsy BR1972: "EDU AI – EXAMINATION ASSISTANT"
    made this header 508px wide on a 390px phone, because a flex item's min-width is its
-   content size). It may shrink and wrap, and a long title scrolls inside the bar instead
-   of widening the page. Existing apps that already copied the previous rule are not rewritten. */
-.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: auto; }
+   content size). It may shrink and wrap; overflow-wrap: anywhere lets an unbreakable title
+   break instead of widening the page. overflow-x is left visible: setting it to auto would
+   compute overflow-y as auto and clip absolute dropdowns and popovers inside the bar.
+   Existing apps that already copied a previous rule are not rewritten. */
+.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; }
 .nb-main { padding: 24px 20px; min-width: 0; }
 @media (max-width: 820px) {
   .nb-shell { grid-template-columns: 1fr; }

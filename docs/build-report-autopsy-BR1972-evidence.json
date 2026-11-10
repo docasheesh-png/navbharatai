@@ -102,6 +102,9 @@
         "min-width: 0",
         "max-width: 100%",
         "box-sizing: border-box",
+        "overflow-wrap: anywhere"
+      ],
+      "removedAfterReview": [
         "overflow-x: auto"
       ],
       "kept": [
@@ -112,7 +115,7 @@
       ],
       "existingAppsRewritten": false,
       "mobileLayoutCheckExemption": false,
-      "seedHistory": "node scripts/platformSeedHistory.mjs — 76 starter paths · 35 golden paths · 494 versions (7 new); add-only"
+      "seedHistory": "node scripts/platformSeedHistory.mjs after each kit edit — add-only; pre-BR1972, first-PR (overflow-x:auto), and current hashes all stay"
     }
   },
   "queued": [

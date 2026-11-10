@@ -166,36 +166,114 @@ function parseMitrifyListedModels(payload: unknown): ListedMitrifyModel[] {
   }
   return out;
 }
-function pickListedMitrifyModel(listed: readonly ListedMitrifyModel[], preferred: string | null): string | null {
-  if (!listed.length) return null;
-  const ids = new Set(listed.map(item => item.id));
-  if (preferred) return ids.has(preferred) ? preferred : null;
-  const priced = listed.filter(item => item.prompt != null && item.completion != null);
-  const pool = priced.length
-    ? [...priced].sort((a, b) => ((a.prompt as number) + (a.completion as number)) - ((b.prompt as number) + (b.completion as number)) || a.id.localeCompare(b.id))
-    : [...listed].sort((a, b) => Number(b.id === 'mitrify/auto-cheap') - Number(a.id === 'mitrify/auto-cheap') || a.id.localeCompare(b.id));
-  return pool[0]?.id ?? null;
+const MITRIFY_CATALOG_MAX_BYTES = 1_000_000;
+const MITRIFY_CATALOG_TIMEOUT_MS = 12_000;
+const MITRIFY_CATALOG_ERROR_BYTES = 4_000;
+function hasUsableMitrifyPrices(row: ListedMitrifyModel): boolean {
+  if (row.prompt == null || row.completion == null) return false;
+  try { usdToNanoUsd(row.prompt); usdToNanoUsd(row.completion); return true; } catch { return false; }
+}
+function describeListedMitrifyIds(ids: readonly string[]): string {
+  const shown = ids.slice(0, 20);
+  return `${shown.join(', ')}${ids.length > shown.length ? ` (+${ids.length - shown.length} more)` : ''}` || '(none)';
+}
+type MitrifyCatalogPick =
+  | { kind: 'picked'; model: ListedMitrifyModel; priced: boolean }
+  | { kind: 'empty' }
+  | { kind: 'not-listed'; ids: string[] }
+  | { kind: 'no-prices'; ids: string[] };
+function pickListedMitrifyModel(listed: readonly ListedMitrifyModel[], preferred: string | null): MitrifyCatalogPick {
+  if (!listed.length) return { kind: 'empty' };
+  const ids = listed.map(item => item.id);
+  const priced = listed.filter(hasUsableMitrifyPrices);
+  if (preferred) {
+    const row = listed.find(item => item.id === preferred);
+    if (!row) return { kind: 'not-listed', ids };
+    if (priced.length) return hasUsableMitrifyPrices(row) ? { kind: 'picked', model: row, priced: true } : { kind: 'no-prices', ids };
+    return preferred === 'mitrify/auto-cheap' ? { kind: 'picked', model: row, priced: false } : { kind: 'no-prices', ids };
+  }
+  if (priced.length) {
+    const [model] = [...priced].sort((a, b) => ((a.prompt as number) + (a.completion as number)) - ((b.prompt as number) + (b.completion as number)) || a.id.localeCompare(b.id));
+    return { kind: 'picked', model, priced: true };
+  }
+  const auto = listed.find(item => item.id === 'mitrify/auto-cheap');
+  return auto ? { kind: 'picked', model: auto, priced: false } : { kind: 'no-prices', ids };
+}
+async function readCappedUtf8(response: Response, maxBytes: number, onTooLarge: () => never): Promise<string> {
+  const length = Number(response.headers.get('content-length'));
+  if (Number.isFinite(length) && length > maxBytes) onTooLarge();
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > maxBytes) onTooLarge();
+      chunks.push(part.value);
+    }
+  } finally { await reader.cancel().catch(() => {}); }
+  return Buffer.concat(chunks).toString('utf8');
+}
+async function readCappedErrorBody(response: Response): Promise<string> {
+  if (!response.body) {
+    try { return (await response.text()).slice(0, MITRIFY_CATALOG_ERROR_BYTES); } catch { return ''; }
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      const next = part.value;
+      if (size + next.byteLength > MITRIFY_CATALOG_ERROR_BYTES) {
+        chunks.push(next.subarray(0, MITRIFY_CATALOG_ERROR_BYTES - size));
+        break;
+      }
+      chunks.push(next);
+      size += next.byteLength;
+    }
+  } finally { await reader.cancel().catch(() => {}); }
+  return Buffer.concat(chunks).toString('utf8');
 }
 async function loadMitrifyListedModels(signal: AbortSignal, sink: (detail: { status: number; body: string; requestId?: string }) => void): Promise<ListedMitrifyModel[]> {
   const cfg = mitrifyConfig();
   if (!present(cfg.apiKey)) throw new MitrifyError('MITRIFY_CONFIGURATION');
   let base: URL;
   try { base = new URL(cfg.baseURL); } catch { throw new MitrifyError('MITRIFY_CONFIGURATION'); }
-  const response = await fetch(`${base.href.replace(/\/$/, '')}/models`, {
-    method: 'GET', redirect: 'error', signal,
-    headers: { Authorization: `Bearer ${cfg.apiKey}`, Accept: 'application/json' },
-  });
-  if (!response.ok) {
-    let body = '';
-    try { body = await response.text(); } catch { body = ''; }
-    sink({
-      status: response.status, body: body.slice(0, 4000),
-      requestId: response.headers.get('x-request-id') || response.headers.get('request-id') || response.headers.get('x-mitrify-request-id') || undefined,
+  const catalogController = new AbortController();
+  const timer = setTimeout(() => catalogController.abort(), MITRIFY_CATALOG_TIMEOUT_MS);
+  const onParentAbort = () => catalogController.abort();
+  signal.addEventListener('abort', onParentAbort, { once: true });
+  if (signal.aborted) catalogController.abort();
+  try {
+    const response = await fetch(`${base.href.replace(/\/$/, '')}/models`, {
+      method: 'GET', redirect: 'error', signal: catalogController.signal,
+      headers: { Authorization: `Bearer ${cfg.apiKey}`, Accept: 'application/json' },
     });
-    throw new MitrifyError(response.status === 401 ? 'MITRIFY_CONFIGURATION' : `MITRIFY_HTTP_${response.status}`, response.status);
+    if (!response.ok) {
+      sink({
+        status: response.status, body: await readCappedErrorBody(response),
+        requestId: response.headers.get('x-request-id') || response.headers.get('request-id') || response.headers.get('x-mitrify-request-id') || undefined,
+      });
+      throw new MitrifyError(response.status === 401 ? 'MITRIFY_CONFIGURATION' : `MITRIFY_HTTP_${response.status}`, response.status);
+    }
+    if (!response.headers.get('content-type')?.includes('application/json')) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status);
+    const raw = await readCappedUtf8(response, MITRIFY_CATALOG_MAX_BYTES, () => { throw new MitrifyError('MITRIFY_CATALOG_TOO_LARGE'); });
+    try { return parseMitrifyListedModels(JSON.parse(raw)); }
+    catch { throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status); }
+  } catch (error) {
+    if (error instanceof MitrifyError) throw error;
+    if (signal.aborted) throw new MitrifyError('MITRIFY_CANCELLED');
+    if (catalogController.signal.aborted) throw new MitrifyError('MITRIFY_CATALOG_TIMEOUT');
+    throw new MitrifyError('MITRIFY_NETWORK');
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', onParentAbort);
   }
-  if (!response.headers.get('content-type')?.includes('application/json')) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status);
-  return parseMitrifyListedModels(await response.json());
 }
 function catalogTokenFree(value: unknown): boolean {
   return zero(value) || value === 0;
@@ -257,7 +335,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
     try { const cfg = mitrifyConfig(); configured = present(cfg.apiKey); model = cfg.model || null; } catch { configured = false; }
     const enabled = configured;
     return { ...base, configured, enabled, model, billed: true, approvalRequired: false,
-      note: 'This admin test calls Mitrify when its server key is set. At send time it reads Mitrify’s live /v1/models list and calls only a listed model (the cheapest priced row when the catalog includes prices). A typed model is accepted only if that list contains it. This does not turn on the user-chat chain flag or mint a payload approval.',
+      note: 'This admin test calls Mitrify when its server key is set. At send time it reads Mitrify’s live /v1/models list with a size cap and a short timeout, then calls only a listed model: the cheapest priced row when the catalog includes prices, or mitrify/auto-cheap if that alias is listed and the catalog has no prices. Otherwise it fails closed and names the listed ids. A typed model is accepted only if that list contains it. Catalog prices are used for the shared-budget reserve when present. This does not turn on the user-chat chain flag or mint a payload approval.',
       ...(enabled ? {} : { unavailableReason: MISSING_KEY }) };
   }
   if (meta.kind === 'surplus') {
@@ -522,19 +600,27 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         throw new MitrifyError(bounded.aborted ? 'MITRIFY_CANCELLED' : 'MITRIFY_NETWORK');
       }
       const preferred = requestedModel(action);
-      const picked = pickListedMitrifyModel(listed, preferred);
-      if (!picked) {
+      const selection = pickListedMitrifyModel(listed, preferred);
+      if (selection.kind !== 'picked') {
+        const ids = selection.kind === 'empty' ? [] : selection.ids;
         return fail('no-model', 503, {
           model: preferred ?? status.model, latencyMs: Math.max(0, Date.now() - startedAt),
-          providerCode: preferred ? 'MITRIFY_MODEL_NOT_LISTED' : 'MITRIFY_CATALOG_EMPTY',
-          providerMessage: preferred
+          providerCode: selection.kind === 'not-listed' ? 'MITRIFY_MODEL_NOT_LISTED' : selection.kind === 'empty' ? 'MITRIFY_CATALOG_EMPTY' : 'MITRIFY_NO_PRICES',
+          providerMessage: selection.kind === 'not-listed'
             ? 'The typed model is not in Mitrify’s live /v1/models list, so this admin test did not call it.'
-            : 'Mitrify’s live /v1/models list has no usable chat model for this admin test.',
+            : selection.kind === 'empty'
+              ? 'Mitrify’s live /v1/models list has no usable chat model for this admin test.'
+              : `Mitrify’s live /v1/models list has no usable prices, so this admin test did not pick an alphabetical model. Listed ids: ${describeListedMitrifyIds(ids)}.`,
           extraSecrets,
         });
       }
+      const picked = selection.model.id;
       dispatchedModel = picked;
-      const ceiling = quoteTokens(action.messages, 1, 1);
+      const ceiling = quoteTokens(
+        action.messages,
+        selection.priced ? selection.model.prompt as number : 1,
+        selection.priced ? selection.model.completion as number : 1,
+      );
       const receipt = ceiling > 0 ? await reserveShared(db, requestId, uid, ceiling) : null;
       if (ceiling > 0 && !receipt) throw new TestChatUnavailable('budget', 409);
       let content = '';
@@ -695,6 +781,8 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         providerRequestId: cap && 'requestId' in cap ? cap.requestId ?? null : null,
         aborted: error.code === 'MITRIFY_CANCELLED', extraSecrets,
         ...(gatewayTimeout ? { providerMessage: MITRIFY_GATEWAY_TIMEOUT } : {}),
+        ...(error.code === 'MITRIFY_CATALOG_TOO_LARGE' ? { providerMessage: 'Mitrify’s /v1/models response exceeded the admin catalog size cap, so this test did not call chat.' } : {}),
+        ...(error.code === 'MITRIFY_CATALOG_TIMEOUT' ? { providerMessage: 'Mitrify’s /v1/models list did not arrive within the admin catalog timeout, so this test did not call chat.' } : {}),
       });
     }
     return fail('unconfirmed', 503, { model: status.model, latencyMs: latency, extraSecrets });

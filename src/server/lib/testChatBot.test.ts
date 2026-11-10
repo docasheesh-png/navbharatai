@@ -6,7 +6,7 @@ const fake = vi.hoisted(() => ({ run: vi.fn(), config: vi.fn(), db: vi.fn(), mai
   marketPlan: undefined as undefined | ((...args: unknown[]) => unknown),
   feedSummary: undefined as undefined | ((...args: unknown[]) => unknown),
   catalogJson: undefined as undefined | ((...args: unknown[]) => unknown),
-  mitrifyCatalog: undefined as undefined | ((url: string) => Promise<unknown>) }));
+  mitrifyCatalog: undefined as undefined | ((url: string, init?: RequestInit) => Promise<unknown>) }));
 vi.mock('./qubax', () => ({ runApprovedQubaxChat: fake.run, qubaxConfig: fake.config,
   QubaxError: class extends Error { constructor(readonly code: string, readonly status = 0) { super(code); } } }));
 vi.mock('./qubaxPriceFeedRuntime', () => ({ refreshQubaxPriceFeed: (...args: unknown[]) => fake.refresh(...args) }));
@@ -69,7 +69,8 @@ vi.mock('../AI/FreeChain/providers/openAiCompatProvider', async importOriginal =
   };
 });
 import { loadTestChatStatus, runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
-import { TEST_CHAT_PROVIDER_IDS, type TestChatAction } from '../../lib/testChatBot';
+import { TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_PROVIDER_IDS, type TestChatAction } from '../../lib/testChatBot';
+import { maximumCostNanoUsd, usdToNanoUsd } from '../AI/FreeChain/spendCap';
 import { QubaxError } from './qubax';
 import { MitrifyError } from './mitrify';
 import { OfficialTestChatError } from './testChatBotOfficial';
@@ -84,12 +85,24 @@ const groqRung = {
 function budget(overrides: Record<string, unknown> = {}) {
   return { errors: [], paidCapNanoUsd: 100, paidPerUserDaily: 10, features: { monthlyCap: true, monthlyCapNanoUsd: 1000 }, rungs: [], ...overrides };
 }
-function mitrifyCatalogResponse(payload: unknown, status = 200) {
+function mitrifyQuotedHold(priceIn: number, priceOut: number): number {
+  const inputTokens = Buffer.byteLength(JSON.stringify(action.messages), 'utf8') + 256;
+  return maximumCostNanoUsd(inputTokens, TEST_CHAT_MAX_OUTPUT_TOKENS, usdToNanoUsd(priceIn), usdToNanoUsd(priceOut));
+}
+function mitrifyCatalogResponse(payload: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
+  const raw = JSON.stringify(payload);
+  const bytes = new TextEncoder().encode(raw);
   return {
     ok: status >= 200 && status < 300, status,
-    headers: new Headers({ 'content-type': 'application/json' }),
+    headers: new Headers({ 'content-type': 'application/json', 'content-length': String(bytes.byteLength), ...extraHeaders }),
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    }),
     json: async () => payload,
-    text: async () => JSON.stringify(payload),
+    text: async () => raw,
   };
 }
 beforeEach(() => {
@@ -99,9 +112,9 @@ beforeEach(() => {
   fake.feedSummary = undefined;
   fake.catalogJson = undefined;
   fake.mitrifyCatalog = undefined;
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (fake.mitrifyCatalog) return fake.mitrifyCatalog(url);
+    if (fake.mitrifyCatalog) return fake.mitrifyCatalog(url, init);
     if (url.replace(/\/$/, '').endsWith('/models')) return mitrifyCatalogResponse({ data: [{ id: 'mitrify/auto-cheap' }] });
     throw new Error(`unexpected fetch ${url}`);
   }));
@@ -407,10 +420,17 @@ describe('test chat provider isolation and admission', () => {
     const result = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal);
     expect(result).toMatchObject({ provider: 'mitrify', content: 'Hello from listed', model: 'mitrify/cheap', noFallback: true });
     expect(fake.mitrifyClient.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ MITRIFY_MODEL: 'mitrify/cheap' }));
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: mitrifyQuotedHold(0.1, 0.2) }));
+    expect(mitrifyQuotedHold(0.1, 0.2)).not.toBe(mitrifyQuotedHold(1, 1));
   });
   it('accepts a typed Mitrify model only when the live catalog lists it', async () => {
     vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
-    fake.mitrifyCatalog = async () => mitrifyCatalogResponse({ data: [{ id: 'mitrify/listed' }, { id: 'mitrify/auto-cheap' }] });
+    fake.mitrifyCatalog = async () => mitrifyCatalogResponse({
+      data: [
+        { id: 'mitrify/listed', pricing: { prompt: '3', completion: '3' } },
+        { id: 'mitrify/auto-cheap', pricing: { prompt: '9', completion: '9' } },
+      ],
+    });
     fake.mitrifyChat.mockImplementation(async (_body: unknown, options?: { onChunk?: (wire: Uint8Array) => void }) => {
       const payload = { model: 'mitrify/listed', choices: [{ delta: { content: 'Hello listed' }, finish_reason: 'stop' }] };
       await options?.onChunk?.(new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`));
@@ -446,6 +466,84 @@ describe('test chat provider isolation and admission', () => {
     expect(error.reason).toBe('unconfirmed');
     expect(error.diagnostic?.providerCode).toBe('MITRIFY_CONFIGURATION');
     expect(error.diagnostic?.httpStatus).toBe(401);
+    expect(fake.mitrifyChat).not.toHaveBeenCalled();
+    expect(fake.reserve).not.toHaveBeenCalled();
+  });
+  it('rejects a Mitrify catalog whose content-length exceeds the size cap', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyCatalog = async () => ({
+      ok: true, status: 200,
+      headers: new Headers({ 'content-type': 'application/json', 'content-length': '1000001' }),
+      body: new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{"data":[]}')); controller.close(); } }),
+    });
+    const error = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('unconfirmed');
+    expect(error.diagnostic?.providerCode).toBe('MITRIFY_CATALOG_TOO_LARGE');
+    expect(error.diagnostic?.providerMessage).toContain('catalog size cap');
+    expect(fake.mitrifyChat).not.toHaveBeenCalled();
+    expect(fake.reserve).not.toHaveBeenCalled();
+  });
+  it('rejects a Mitrify catalog once the streamed body exceeds the size cap', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyCatalog = async () => ({
+      ok: true, status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(1_000_001).fill(32));
+          controller.close();
+        },
+      }),
+    });
+    const error = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('unconfirmed');
+    expect(error.diagnostic?.providerCode).toBe('MITRIFY_CATALOG_TOO_LARGE');
+    expect(fake.mitrifyChat).not.toHaveBeenCalled();
+    expect(fake.reserve).not.toHaveBeenCalled();
+  });
+  it('rejects a Mitrify catalog that does not arrive within the short catalog timeout', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    vi.useFakeTimers();
+    fake.mitrifyCatalog = async (_url, init) => new Promise((_, reject) => {
+      const fail = () => reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+      if (init?.signal?.aborted) { fail(); return; }
+      init?.signal?.addEventListener('abort', fail, { once: true });
+    });
+    try {
+      const pending = runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal).catch(value => value);
+      await vi.advanceTimersByTimeAsync(12_000);
+      const error = await pending as TestChatUnavailable;
+      expect(error.reason).toBe('unconfirmed');
+      expect(error.diagnostic?.providerCode).toBe('MITRIFY_CATALOG_TIMEOUT');
+      expect(error.diagnostic?.providerMessage).toContain('catalog timeout');
+      expect(fake.mitrifyChat).not.toHaveBeenCalled();
+      expect(fake.reserve).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('calls only mitrify/auto-cheap when the catalog has no prices, never an alphabetical listed id', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyCatalog = async () => mitrifyCatalogResponse({
+      data: [{ id: 'alpha/other' }, { id: 'mitrify/auto-cheap' }, { id: 'zeta/other' }],
+    });
+    const result = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal);
+    expect(result).toMatchObject({ provider: 'mitrify', model: 'mitrify/auto-cheap' });
+    expect(fake.mitrifyClient.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ MITRIFY_MODEL: 'mitrify/auto-cheap' }));
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: mitrifyQuotedHold(1, 1) }));
+  });
+  it('fails closed and names listed ids when the catalog has no prices and auto-cheap is absent', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyCatalog = async () => mitrifyCatalogResponse({
+      data: [{ id: 'alpha/other' }, { id: 'zeta/other' }],
+    });
+    const error = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('no-model');
+    expect(error.diagnostic?.providerCode).toBe('MITRIFY_NO_PRICES');
+    expect(error.diagnostic?.providerMessage).toContain('no usable prices');
+    expect(error.diagnostic?.providerMessage).toContain('alphabetical');
+    expect(error.diagnostic?.providerMessage).toContain('alpha/other');
+    expect(error.diagnostic?.providerMessage).toContain('zeta/other');
     expect(fake.mitrifyChat).not.toHaveBeenCalled();
     expect(fake.reserve).not.toHaveBeenCalled();
   });

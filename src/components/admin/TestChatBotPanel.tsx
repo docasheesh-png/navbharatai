@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import { newRequestIdentity } from '../../lib/requestIdentity';
 import { formatTestChatDiagnostic, isTestChatDiagnostic, isTestChatReply, isTestChatStatus, readTestChatAction, TEST_CHAT_FAILURE, TEST_CHAT_MAX_CONTEXT_CHARS,
-  TEST_CHAT_MAX_MESSAGE_CHARS, type TestChatDiagnostic, type TestChatMessage, type TestChatProviderId, type TestChatReply, type TestChatStatus } from '../../lib/testChatBot';
+  TEST_CHAT_MAX_MESSAGE_CHARS, isAllowedTestChatModel, type TestChatDiagnostic, type TestChatMessage, type TestChatProviderId, type TestChatReply, type TestChatStatus } from '../../lib/testChatBot';
 
 const API = '/api/v1/admin/test-chat-bot';
 const button = 'min-h-11 rounded-lg border border-line px-3 py-2 text-sm text-ink disabled:opacity-40';
@@ -26,6 +26,7 @@ export function TestChatBotPanel({ adminToken }: { adminToken: string }): React.
   const [provider, setProvider] = useState<TestChatProviderId>('qubax');
   const [messages, setMessages] = useState<TestChatMessage[]>([]);
   const [draft, setDraft] = useState('');
+  const [modelDraft, setModelDraft] = useState('');
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -55,7 +56,7 @@ export function TestChatBotPanel({ adminToken }: { adminToken: string }): React.
   }, [adminToken]);
   useEffect(() => {
     epoch.current++; lock.current = false;
-    setMessages([]); setDraft(''); setAccepted(false); setBusy(false); setError(''); setDiagnostic(null); setBalance(''); setLastReply(null);
+    setMessages([]); setDraft(''); setModelDraft(''); setAccepted(false); setBusy(false); setError(''); setDiagnostic(null); setBalance(''); setLastReply(null);
     void load();
     return () => { epoch.current++; readAbort.current?.abort(); sendAbort.current?.abort(); };
   }, [load]);
@@ -69,7 +70,12 @@ export function TestChatBotPanel({ adminToken }: { adminToken: string }): React.
     if (!ready || !accepted || !draft.trim() || lock.current) return;
     const requestId = newRequestIdentity();
     if (!requestId) { setError('A secure request ID is unavailable in this browser. No test was sent.'); return; }
-    const action = readTestChatAction({ provider, requestId, messages: [...messages, { role: 'user', content: draft }], confirmGatewayDisclosure: true });
+    const typedModel = modelDraft.trim();
+    if (typedModel && !isAllowedTestChatModel(typedModel)) { setError('The optional model id uses only letters, numbers, and . / : -. No test was sent.'); return; }
+    const action = readTestChatAction({
+      provider, requestId, messages: [...messages, { role: 'user', content: draft }], confirmGatewayDisclosure: true,
+      ...(typedModel ? { model: typedModel } : {}),
+    });
     if (!action) { setError('This conversation is too long. Start a new test chat or shorten the message. No test was sent.'); return; }
     lock.current = true; setBusy(true); setAccepted(false); setError(''); setDiagnostic(null);
     const current = epoch.current, controller = new AbortController(); sendAbort.current = controller;
@@ -91,7 +97,7 @@ export function TestChatBotPanel({ adminToken }: { adminToken: string }): React.
     } catch { if (current === epoch.current) setError(TEST_CHAT_FAILURE); }
     finally { clearTimeout(timeout); if (current === epoch.current) { lock.current = false; setBusy(false); } }
   };
-  const clear = () => { setMessages([]); setDraft(''); setAccepted(false); setError(''); setDiagnostic(null); setBalance(''); setLastReply(null); };
+  const clear = () => { setMessages([]); setDraft(''); setModelDraft(''); setAccepted(false); setError(''); setDiagnostic(null); setBalance(''); setLastReply(null); };
   const copyError = () => {
     if (!diagnostic || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return;
     void navigator.clipboard.writeText(formatTestChatDiagnostic(diagnostic));
@@ -132,6 +138,7 @@ export function TestChatBotPanel({ adminToken }: { adminToken: string }): React.
     })}</select></label>
     <p role="status" className="text-sm">{statusLine}</p>
     {selected?.note && <p className="text-sm text-muted">{selected.note}</p>}
+    <label className="block text-sm">Model (optional)<input value={modelDraft} disabled={busy} onChange={event => { setModelDraft(event.target.value); setAccepted(false); }} placeholder="Leave blank to use the same cheapest-model selection as main chat" className="mt-1 block w-full rounded-lg border border-line bg-well p-3 text-ink" autoComplete="off" spellCheck={false} /></label>
     {status?.feed && <p className="text-sm text-muted">Price feed {status.feed.fresh ? `fresh ${new Date(status.feed.observedAtMs ?? 0).toISOString()}` : 'not fresh'}. {status.feed.pricedRows} priced Qubax rows, {status.feed.officialMatches} official name matches, {status.feed.discountEligible} at least 90% cheaper, {status.feed.probePassing} probe-ready.</p>}
     <p className="text-sm text-muted">Use synthetic test text. Do not paste secrets, personal records or customer data. The visible conversation is sent on each turn. This page does not save transcripts; leaving it clears the chat. {displayName}{selected?.internalRouting || provider === 'qubax' ? ' and any upstream processors' : ''} may retain submitted content. {selected?.privacyUrl || provider === 'qubax' ? <a href={selected?.privacyUrl ?? 'https://qubax.ai/legal/privacy'} target="_blank" rel="noreferrer" className="underline">{displayName} privacy policy</a> : 'Review that provider’s published privacy policy before sending anything other than synthetic test text.'}</p>
     <p className="text-sm text-muted">No paid inference runs just by opening this page. {status && selected && !approvalRequired ? 'Sending uses the server credential for the selected provider and any existing shared budget or per-request cap. This checkbox confirms the destination; it does not raise the cap.' : 'Sending needs an independent review of the exact payload, downstream processors and a supplier-enforced spending ceiling, plus the existing shared budget. This checkbox does not create those approvals.'}</p>

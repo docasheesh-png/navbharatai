@@ -135,11 +135,13 @@ export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
     // SMS/calling, so the builder added WhatsApp and SMS "contact support" the user never asked for).
     // Singular "open the app" / "when I open the app" / "open the app to see…" / "opening the app"
     // / "when the app opens" launch THIS app. "open the app settings" is this app's settings screen
-    // (in-app navigation), not another app. Plural "open apps" / "open the apps", and the frozen
-    // compounds "app store" / "play store" / "app drawer" (OS surfaces for other apps), still match.
-    // "open WhatsApp chat with this number" still matches — a later "number" after "chat" is not a
-    // WhatsApp-number identity field. (#4165 review: do not drop bare "open apps" or "app store".)
-    asks: /\b(call\s+(?:karo|kar|kare|kardo|mummy|mom|papa)|make\s+(?:a\s+)?call|whats\s*app(?![\s-]*(?:(?:ka|ki|ke|your|my|the|wala|wali)[\s-]+)?(?:mobile[\s-]*)?(?:numbers?|no\.?|num|phone|ids?)\b)|sms|open\s+(?:other\s+apps?|another\s+app|the\s+apps|apps)|(?:app|play)\s*store|app\s+drawer|app\s+khol\w*|khol\s+do)\b/i,
+    // (in-app navigation), not another app. Plural "open apps" / "open the apps" still match.
+    // "app store" / "play store" match only with an open/launch/redirect/link verb ("open the app
+    // store", "redirect to app store", "link to play store page") — never a publish/upload/listing
+    // mention (#4165: bare store handed @capacitor/app-launcher to "publish to the Play Store").
+    // Bare "app drawer" is the same risk (a navigation/hamburger drawer in THIS app), so it too
+    // needs that verb ("open the app drawer"). "open WhatsApp chat with this number" still matches.
+    asks: /\b(call\s+(?:karo|kar|kare|kardo|mummy|mom|papa)|make\s+(?:a\s+)?call|whats\s*app(?![\s-]*(?:(?:ka|ki|ke|your|my|the|wala|wali)[\s-]+)?(?:mobile[\s-]*)?(?:numbers?|no\.?|num|phone|ids?)\b)|sms|open\s+(?:other\s+apps?|another\s+app|the\s+apps|apps)|(?:open(?:s|ing)?|launch(?:es|ing)?|redirect(?:s|ing)?|link(?:s|ing)?)(?:\s+(?:the|to|a|an|our|my))*\s+(?:(?:app|play)\s*store|app\s+drawer)|app\s+khol\w*|khol\s+do)\b/i,
   },
   {
     id: 'contacts',

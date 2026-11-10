@@ -75,13 +75,16 @@ const SAME_CLASS_OPEN_APPS = [
   'open another app',
   'open the apps',
   'app kholo',
-  // #4165: plural / store / drawer / WhatsApp-chat-with-number must match again
+  // #4165: plural / verb+store / verb+drawer / WhatsApp-chat-with-number must match
   'open apps like YouTube',
   'please open apps',
   'open the app store',
-  'app store',
-  'play store',
   'Open the Play Store',
+  'button to open Play Store',
+  'redirect to app store',
+  'link to play store page',
+  'launch the app store',
+  'redirect to the Play Store',
   'open WhatsApp chat with this number',
   'open the app drawer',
   'open apps installed on phone',
@@ -118,6 +121,17 @@ const OPPOSITE_NOT_OPEN_APPS = [
   'I open the app every morning',
   'open the app first',
   'open this app',
+  // #4165: publish/listing language is not a request to open the store
+  'publish to App Store',
+  'upload to Play Store',
+  'Play Store listing',
+  'App Store screenshots',
+  'ready for app store release',
+  'play store pe daalna hai',
+  // Bare "app drawer" is a navigation drawer in this app, not the OS launcher
+  'add an app drawer',
+  'navigation app drawer',
+  'hamburger app drawer',
 ] as const;
 
 describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', () => {
@@ -158,12 +172,17 @@ describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', ()
     expect(a.complexityScore).toBeGreaterThanOrEqual(40);
   });
 
-  it('open-apps asks source keeps plural apps and store/drawer compounds without recapturing singular open-the-app', () => {
+  it('open-apps asks source verb-gates store/drawer and keeps plural apps without recapturing singular open-the-app', () => {
     const src = NATIVE_CAPABILITIES.find((c) => c.id === 'open-apps')!.asks.source;
     expect(src).toContain('|apps)');
     expect(src).toContain('(?:app|play)\\s*store');
     expect(src).toContain('app\\s+drawer');
+    expect(src).toContain('launch(?:es|ing)?');
+    expect(src).toContain('redirect(?:s|ing)?');
+    expect(src).toContain('link(?:s|ing)?');
     expect(src).not.toContain('open\\s+(?:the\\s+)?(?:app|apps)');
+    // Bare store must not be its own alternative (that was the rejected side-effect).
+    expect(src).not.toContain('|(?:app|play)\\s*store');
   });
 
   it('#4165 decisions: app settings stay this-app; app drawer and opening-the-app are classified explicitly', () => {
@@ -185,5 +204,20 @@ describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', ()
     expect(requestedCapabilities('please open apps').map((c) => c.id)).toContain('open-apps');
     // A later "number" after "chat" is not a WhatsApp-number identity field.
     expect(requestedCapabilities('open WhatsApp chat with this number').map((c) => c.id)).toContain('open-apps');
+    // Store matches only with an open/launch/redirect/link verb — never publish/listing language.
+    expect(requestedCapabilities('button to open Play Store').map((c) => c.id)).toContain('open-apps');
+    expect(requestedCapabilities('redirect to app store').map((c) => c.id)).toContain('open-apps');
+    expect(requestedCapabilities('link to play store page').map((c) => c.id)).toContain('open-apps');
+    expect(requestedCapabilities('publish to App Store').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('upload to Play Store').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('Play Store listing').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('App Store screenshots').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('ready for app store release').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('play store pe daalna hai').map((c) => c.id)).not.toContain('open-apps');
+    // Bare "app drawer" is risky: builders say it for a navigation/hamburger drawer in THIS app.
+    // Require the same verb, so "open the app drawer" still matches and "add an app drawer" does not.
+    expect(requestedCapabilities('add an app drawer').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('navigation app drawer').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('hamburger app drawer').map((c) => c.id)).not.toContain('open-apps');
   });
 });

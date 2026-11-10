@@ -56,7 +56,14 @@ F1 at `aba7e765` over-narrowed `open\s+` to only `other apps` / `another app` / 
 - Decision: "open the app drawer" matches, because the drawer is the launcher surface for installed apps.
 - "open WhatsApp chat with this number" still matches (a later "number" after "chat" is not a WhatsApp-number identity field).
 
-Accepted side-effect: a prompt that only mentions publishing to the App Store / Play Store now also receives the open-apps brief (the reviewer asked to match bare `app store` / `play store`). Neighbours (Contact-us, music player, todo, the BR1974 report prompt) stay uncaptured.
+The first follow-up at `060b32b0b` treated bare `app store` / `play store` as matches. That was rejected: a prompt that only says it will publish to the store must not pick up `@capacitor/app-launcher` (owner rule t311u — fix A must not create X). The reviewer asked for "open the app store", not a bare store mention.
+
+Second follow-up:
+
+- `app store` / `play store` match only with an open, launch, redirect, or link verb: "open the app store", "Open the Play Store", "button to open Play Store", "redirect to app store", "link to play store page", "launch the app store".
+- Must not match: "publish to App Store", "upload to Play Store", "Play Store listing", "App Store screenshots", "ready for app store release", Hinglish "play store pe daalna hai".
+- Decision: a bare "app drawer" is the same risk — builders ask for a navigation/hamburger drawer in THIS app ("add an app drawer"). Require the same verb, so "open the app drawer" still matches and "add an app drawer" / "navigation app drawer" / "hamburger app drawer" do not.
+- Ordinary merge of `origin/main` at `c072e0eb96ee3390d90e07b91d55f06bc54e6108` (#4166). No rebase.
 
 ## Queue
 

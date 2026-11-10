@@ -101183,3 +101183,10 @@ Owner t311u sequential audit, BR1963 only (boundary 1951..2105 frozen). "Build a
 - **F1.** Neighbour locks only: this prompt stays a 2D kit whose runtime includes events.ts even if `include` is `['meta']`; scope stays ordinary/direct; a manifest-less recovered workspace still cannot seed recipes; the unavailable notice no longer invites a retry.
 
 Queue: Q-2625…Q-2629 (#4148 residuals, queued not fixed). This commit closes the two BR1962 rows resolved by #4148 (Q-2623, Q-2624). Q-2620/2621/2622, Q-2615/2616/2617, Q-2608/2610/2611, the BR1958 blockers, Q-2371 and the PR4109 row stay open.
+
+## 2026-11-10 — BR1964 autopsy (exam-analyse app, failed at 25-min cap): ship Q-2626 Handling gerund; lock ordinary scope
+Owner t311u sequential audit, BR1964 only (boundary 1951..2105 frozen). "Mujhe higher exam hard exam analyse app banana hai" failed after the free 25-minute cap. A preview had been IN_BUILD_GREEN since minute 14; STYLE_RULES_RESUMED then handed 30 missing classes plus an a11y item back with about 80 s left. Scope was correctly ordinary/direct. Ledger: [autopsy](docs/build-report-autopsy-BR1964.md), [evidence](docs/build-report-autopsy-BR1964-evidence.json).
+- **F1.** Neighbour locks only: this short exam-analyse ask stays ordinary/direct; the RC-4 deadline-pause sentence for 37 files still matches this report.
+- **F2.** Q-2626: whole-line `Handl(?:es?|ing) errors` (optional properly/gracefully/correctly, optional period). Opposite-class corpus of 360 eight-item lists (56 real "Handling …" product features, EN/HI/Hinglish), built before the edit: 0 LARGE→smaller vs main.
+
+Queue: this commit closes Q-2626. New rows Q-2630 (late style hand-back), Q-2631 (25-min cap after a green preview), Q-2632 (sibling loading/timeouts gerund). Q-2625/2627/2628/2629 and earlier blockers stay open.

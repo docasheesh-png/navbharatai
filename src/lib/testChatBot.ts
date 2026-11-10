@@ -39,11 +39,16 @@ export const TEST_CHAT_DIAGNOSTIC_CLASSIFICATIONS = [
 ] as const;
 export type TestChatDiagnosticClassification = typeof TEST_CHAT_DIAGNOSTIC_CLASSIFICATIONS[number];
 export interface TestChatMessage { role: 'user' | 'assistant'; content: string }
+export const TEST_CHAT_MODEL_ID = /^[\w][\w./:-]{0,199}$/;
+export function isAllowedTestChatModel(value: string): boolean {
+  return TEST_CHAT_MODEL_ID.test(value) && !value.includes('://') && !/^https?:/i.test(value);
+}
 export interface TestChatAction {
   provider: TestChatProviderId;
   requestId: string;
   messages: TestChatMessage[];
   confirmGatewayDisclosure: true;
+  model?: string;
 }
 export interface TestChatProviderStatus {
   id: TestChatProviderId;
@@ -121,7 +126,8 @@ const PROVIDER_STATUS_KEYS = [
 const ATTEMPT_KEYS = ['model', 'latencyMs', 'classification', 'httpStatus', 'providerCode', 'providerType', 'providerRequestId', 'providerMessage', 'rawErrorBody'];
 const DIAGNOSTIC_KEYS = [...ATTEMPT_KEYS, 'provider', 'attempts', 'finalOutcome'];
 export function readTestChatAction(value: unknown): TestChatAction | null {
-  if (!record(value) || !exactKeys(value, ['provider', 'requestId', 'messages', 'confirmGatewayDisclosure'])
+  if (!record(value) || !exactKeys(value, ['provider', 'requestId', 'messages', 'confirmGatewayDisclosure', 'model'])
+    || (value.model !== undefined && (typeof value.model !== 'string' || !isAllowedTestChatModel(value.model)))
     || !TEST_CHAT_PROVIDER_IDS.includes(value.provider as TestChatProviderId)
     || typeof value.requestId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value.requestId)
     || value.confirmGatewayDisclosure !== true || !Array.isArray(value.messages)
@@ -137,7 +143,8 @@ export function readTestChatAction(value: unknown): TestChatAction | null {
     messages.push({ role, content: m.content });
   }
   if (messages.at(-1)?.role !== 'user') return null;
-  return { provider: value.provider as TestChatProviderId, requestId: value.requestId, messages, confirmGatewayDisclosure: true };
+  return { provider: value.provider as TestChatProviderId, requestId: value.requestId, messages, confirmGatewayDisclosure: true,
+    ...(typeof value.model === 'string' ? { model: value.model } : {}) };
 }
 function isProviderStatus(p: unknown, expectedId: TestChatProviderId): p is TestChatProviderStatus {
   return record(p) && exactKeys(p, PROVIDER_STATUS_KEYS) && p.id === expectedId && typeof p.label === 'string'

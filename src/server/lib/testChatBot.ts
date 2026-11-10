@@ -3,10 +3,10 @@ import { readTestChatAction, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_MAX_RESPONSE
   TEST_CHAT_PROVIDER_IDS,
   type TestChatAction, type TestChatDiagnostic, type TestChatProviderId, type TestChatProviderStatus,
   type TestChatReply, type TestChatStatus } from '../../lib/testChatBot';
-import { nanoUsdToDecimal, qubaxModelOverride, qubaxRequestCeilingNanoUsd, readQubaxFeedSummary, readQubaxMarketPlan } from './qubaxMarket';
-import { refreshQubaxPriceFeed } from './qubaxPriceFeedRuntime';
+import { nanoUsdToDecimal, qubaxModelOverride, qubaxRequestCeilingNanoUsd, readQubaxFeedSummary, readQubaxMarketPlan, type QubaxMarketChoice } from './qubaxMarket';
 import { qubaxConfig, QubaxError, runApprovedQubaxChat } from './qubax';
-import { mitrifyChainEnabled, mitrifyConfig, MitrifyError, runApprovedMitrifyChain } from './mitrify';
+import { refreshQubaxPriceFeed } from './qubaxPriceFeedRuntime';
+import { createMitrifyClient, mitrifyConfig, MitrifyError } from './mitrify';
 import { getServerDb } from './serverDb';
 import { assertAiAvailable } from './aiMaintenance';
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
@@ -16,6 +16,8 @@ import { reserveMonthly, settleMonthly } from '../AI/FreeChain/masterPlan';
 import { maximumCostNanoUsd, usdToNanoUsd } from '../AI/FreeChain/spendCap';
 import { OpenAiCompatProvider, FreeChainProviderError, type AdapterConfig, type AdminCapturedProviderError } from '../AI/FreeChain/providers/openAiCompatProvider';
 import { runRegistryRung } from '../AI/FreeChain/providers/openRouterRegistryRung';
+import { strictFreeText } from '../AI/LiveRegistry/runtime';
+import { FreeRoutingError } from '../AI/LiveRegistry/dispatcher';
 import { realRateFor } from '../AgentV3/providerRates';
 import { ROUTER_ONE_DEFAULT_MODEL } from '../AI/RouterOne/routerOne';
 import { buildTestChatDiagnostic } from './testChatBotDiagnostics';
@@ -110,6 +112,23 @@ function rungOf(id: ProviderId): RungConfig | undefined {
   return chainConfig()?.rungs?.find(r => r.id === id);
 }
 function present(value: string): boolean { return !!value && !/[\s,]/.test(value); }
+function requestedModel(action: TestChatAction): string | null {
+  const model = action.model?.trim() ?? '';
+  return model && model.length <= 200 && !/[\s,]/.test(model) ? model : null;
+}
+function adminQubaxFallback(modelId: string, now: number): QubaxMarketChoice {
+  return {
+    modelId, inputNanoUsdPerMillion: 1, outputNanoUsdPerMillion: 1,
+    officialInputNanoUsdPerMillion: null, officialOutputNanoUsdPerMillion: null,
+    discountBps: null, contextTokens: 1, successRateBps: 0, maxLatencyMs: 1,
+    probedAtMs: now, expiresAtMs: now + 60_000, backup: true,
+  };
+}
+function describeQubaxFeed(feed: { fresh: boolean; observedAtMs: number | null; pricedRows: number; officialMatches: number; discountEligible: number; probePassing: number }, refreshStatus?: string): string {
+  const observed = feed.observedAtMs != null ? new Date(feed.observedAtMs).toISOString() : 'never';
+  const refresh = refreshStatus ? ` Last feed refresh: ${refreshStatus}.` : '';
+  return `Price feed ${feed.fresh ? `fresh ${observed}` : `not fresh (last observation ${observed})`}. ${feed.pricedRows} priced Qubax rows, ${feed.officialMatches} at a 90%+ Qubax discount, ${feed.discountEligible} within the try cap, ${feed.probePassing} probe-ready.${refresh}`;
+}
 
 function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   const meta = META[id];
@@ -125,10 +144,10 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   if (meta.kind === 'mitrify') {
     let configured = false, model: string | null = null;
     try { const cfg = mitrifyConfig(); configured = present(cfg.apiKey); model = cfg.model || null; } catch { configured = false; }
-    const enabled = configured && mitrifyChainEnabled();
-    return { ...base, configured, enabled, model, billed: true, approvalRequired: true,
-      note: 'Each send still needs a reviewed exact-payload approval and a supplier-enforced ceiling. This page does not create that approval.',
-      ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY : 'Mitrify chain dispatch is not enabled on the server.' }) };
+    const enabled = configured;
+    return { ...base, configured, enabled, model, billed: true, approvalRequired: false,
+      note: 'This admin test calls Mitrify when its server key is set. It does not turn on the user-chat chain flag or mint a payload approval. Sending uses the existing shared budget.',
+      ...(enabled ? {} : { unavailableReason: MISSING_KEY }) };
   }
   if (meta.kind === 'surplus') {
     const configured = !!firstPresent(process.env, ['SURPLUS_API_KEY']);
@@ -176,21 +195,24 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   const rung = meta.rungId ? rungOf(meta.rungId) : undefined;
   const configured = !!rung?.configured;
   const reason = rung?.reason;
-  const blocked = !configured || (!!reason && BLOCKING_REASONS.has(reason));
+  const cheapinfUserFlag = meta.rungId === 'cheapinf' && configured && (reason === 'disabled' || reason === 'terms-shared-access');
+  const blocked = !configured || (!!reason && BLOCKING_REASONS.has(reason) && !cheapinfUserFlag);
   const note = reason === 'privacy'
     ? 'User chat may skip this provider for private turns; this admin test still calls only the selected provider.'
     : reason === 'free-plan-review-required'
       ? 'The free-plan review used by user chat is missing or expired; this admin test still calls only the selected provider.'
-      : undefined;
+      : meta.kind === 'openrouter'
+        ? 'A send uses the same LiveRegistry verified-free ranking as main chat (strictFreeText / runRegistryRung).'
+        : meta.rungId === 'cheapinf'
+          ? 'This admin test can call CheaperInference when its key is set, using the same model string main chat would use. It does not change the user-chat sharing mode.'
+        : undefined;
   const listed = chainConfig()?.openRouterModels ?? [];
   const model = (meta.kind === 'openrouter' ? (listed[0] ?? rung?.model ?? '') : rung?.model) || null;
-  const openrouterReady = meta.kind !== 'openrouter' || listed.length > 0;
-  const enabled = !blocked && configured && openrouterReady;
+  const enabled = !blocked && configured;
   return {
     ...base, configured, enabled, model: model || null, billed: !!(meta.rungId && isPaidRung(meta.rungId)), approvalRequired: false,
     ...(note ? { note } : {}),
     ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY
-      : !openrouterReady ? 'No verified-free OpenRouter model is configured on the server.'
       : REASON_TEXT[reason ?? ''] ?? 'This provider is not available for dispatch.' }),
   };
 }
@@ -281,6 +303,7 @@ async function reserveShared(db: Firestore, requestId: string, uid: string, maxi
 function unusedHoldSafe(error: unknown): boolean {
   if (error instanceof OfficialTestChatError) return error.providerCode === 'url-not-allowlisted' || error.providerCode === 'configuration';
   if (error instanceof FreeChainProviderError) return error.code === 'CONFIGURATION';
+  if (error instanceof MitrifyError) return error.code === 'MITRIFY_CONFIGURATION' || error.code === 'MITRIFY_UNSUPPORTED_REQUEST' || error.code === 'MITRIFY_BODY_TOO_LARGE';
   return false;
 }
 async function releaseIfUnused<T>(receipt: Awaited<ReturnType<typeof reserveShared>>, work: () => Promise<T>): Promise<T> {
@@ -330,12 +353,27 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
   const qubaxAttempts: Array<{ model: string; status: number | null; code: string; latencyMs: number; body?: string; requestId?: string }> = [];
   try {
     if (meta.kind === 'qubax') {
+      let refreshStatus: string | undefined;
+      const override = qubaxModelOverride(process.env);
+      const planEmpty = async () => {
+        if (override.mode === 'invalid') return true;
+        const plan = await readQubaxMarketPlan(db, override, Date.now());
+        return !plan.eligible.length && !plan.backup;
+      };
+      if (await planEmpty()) {
+        const refreshed = await refreshQubaxPriceFeed();
+        refreshStatus = refreshed.status;
+      }
+      const adminModel = requestedModel(action);
+      const stillEmpty = await planEmpty();
+      const adminFallbackTries = stillEmpty && adminModel ? [adminQubaxFallback(adminModel, Date.now())] : undefined;
       const result = await runApprovedQubaxChat({
         db, uid, requestId, signal: bounded, privateTurn: true, healthTurn: true,
         body: { messages: action.messages, max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS, stream: false },
         revalidate,
         onHttpError: detail => { captured = detail; },
         onAttemptError: detail => { if (qubaxAttempts.length < 8) qubaxAttempts.push(detail); },
+        ...(adminFallbackTries ? { adminFallbackTries } : {}),
         reserve: async (maximumNanoUsd, attemptKey) => {
           await revalidate();
           const receipt = await reserveShared(db, attemptKey ?? requestId, uid, maximumNanoUsd);
@@ -345,10 +383,15 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       if (result.kind === 'skipped') {
         const reason = SKIP_REASON[result.reason] ?? 'unconfirmed';
         const last = qubaxAttempts.at(-1);
+        let detailBody = last?.body ?? null;
+        if (result.reason === 'qubax-price-or-quality-unverified') {
+          const feed = await readQubaxFeedSummary(db, Date.now());
+          detailBody = describeQubaxFeed(feed, refreshStatus);
+        }
         throw new TestChatUnavailable(reason, 409, buildTestChatDiagnostic({
           extraSecrets, provider: action.provider, model: last?.model ?? status.model,
           latencyMs: Math.max(0, Date.now() - startedAt), httpStatus: last?.status ?? null,
-          providerCode: last?.code ?? result.reason, rawErrorBody: last?.body ?? null,
+          providerCode: last?.code ?? result.reason, rawErrorBody: detailBody,
           providerRequestId: last?.requestId ?? null, finalOutcome: reason,
           attempts: qubaxAttempts.map(item => ({
             model: item.model, latencyMs: item.latencyMs, httpStatus: item.status,
@@ -359,27 +402,38 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       return finish(action, result.content, result.model, startedAt, result.usage);
     }
     if (meta.kind === 'mitrify') {
-      const result = await runApprovedMitrifyChain({
-        db, uid, requestId, signal: bounded, privateTurn: true, healthTurn: true, maxHttpAttempts: 1,
-        body: { messages: action.messages, max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS, stream: false },
-        revalidate,
-        onHttpError: detail => { captured = detail; },
-        reserve: async maximumNanoUsd => {
-          await revalidate();
-          const receipt = await reserveShared(db, requestId, uid, maximumNanoUsd);
-          return receipt ? { releaseUndispatched: receipt.releaseUndispatched } : null;
-        },
+      const ceiling = quoteTokens(action.messages, 1, 1);
+      const receipt = ceiling > 0 ? await reserveShared(db, requestId, uid, ceiling) : null;
+      if (ceiling > 0 && !receipt) throw new TestChatUnavailable('budget', 409);
+      const result = await releaseIfUnused(receipt, async () => {
+        await revalidate();
+        return createMitrifyClient(process.env, metadata => console.info('[MITRIFY]', JSON.stringify(metadata)), {
+          onHttpError: detail => { captured = detail; },
+        }).chat({
+          messages: action.messages, max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS, stream: false,
+        }, { signal: bounded, maxAttempts: 1, beforeAttempt: async () => { await revalidate(); } });
       });
-      if (result.kind === 'skipped') throw new TestChatUnavailable('approval-or-budget', 409);
-      return finish(action, result.content, result.model, startedAt, result.usage);
+      const choice = result.data?.choices?.[0]?.message?.content;
+      const content = typeof choice === 'string' ? choice : '';
+      const reported = typeof result.data?.model === 'string' && result.data.model.trim()
+        ? result.data.model : (status.model || mitrifyConfig().model);
+      const tokens = result.data?.usage;
+      const usage = Number.isSafeInteger(tokens?.prompt_tokens) && Number.isSafeInteger(tokens?.completion_tokens)
+        ? { inputTokens: tokens.prompt_tokens as number, outputTokens: tokens.completion_tokens as number } : undefined;
+      return finish(action, content, reported, startedAt, usage);
     }
     if (meta.kind === 'surplus' || meta.kind === 'router-one') throw new TestChatUnavailable('disabled');
 
     if (meta.kind === 'openrouter') {
-      const models = chainConfig()?.openRouterModels ?? [];
-      if (!models.length) throw new TestChatUnavailable('configuration');
+      const listed = chainConfig()?.openRouterModels ?? [];
+      const admin = requestedModel(action);
       const prompt = action.messages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n\n');
-      const result = await runRegistryRung({ prompt, maxOutputTokens: TEST_CHAT_MAX_OUTPUT_TOKENS, signal: bounded }, models, models[0]);
+      const request = { prompt, maxOutputTokens: TEST_CHAT_MAX_OUTPUT_TOKENS, signal: bounded };
+      const result = admin
+        ? await runRegistryRung(request, [admin], admin)
+        : listed.length
+          ? await runRegistryRung(request, listed, listed[0])
+          : await strictFreeText({ ...request, maxAttempts: 1 as const });
       return finish(action, result.content, result.model, startedAt, result.usage);
     }
 
@@ -415,7 +469,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       }
     }
 
-    const adapter = compatAdapter(action.provider, detail => { captured = detail; });
+    const adapter = compatAdapter(action.provider, detail => { captured = detail; }, requestedModel(action));
     if (!adapter) {
       if (officialReceipt) {
         try { await officialReceipt.releaseUndispatched(); } catch { /* keep the configuration error */ }
@@ -467,6 +521,15 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         })),
       });
     }
+    if (error instanceof FreeRoutingError) {
+      const reason = error.code === 'NO_VERIFIED_FREE_MODEL' ? 'no-model' : 'unconfirmed';
+      return fail(reason, error.status || 503, {
+        model: status.model, latencyMs: latency, providerCode: error.code, extraSecrets,
+      });
+    }
+    if (error instanceof Error && error.message === 'FREE_CHAIN_REGISTRY_UNAVAILABLE') {
+      return fail('configuration', 503, { model: status.model, latencyMs: latency, providerCode: 'FREE_CHAIN_REGISTRY_UNAVAILABLE', extraSecrets });
+    }
     if (error instanceof MitrifyError) {
       const cap = captured && 'status' in captured ? captured : undefined;
       return fail('unconfirmed', 503, {
@@ -491,14 +554,14 @@ function finish(action: TestChatAction, content: string, model: string, startedA
     latencyMs: Math.max(0, Date.now() - startedAt), ...(usage ? { usage } : {}), noFallback: true };
 }
 
-function compatAdapter(id: TestChatProviderId, sink: (detail: AdminCapturedProviderError) => void): { provider: OpenAiCompatProvider; rung?: RungConfig } | null {
+function compatAdapter(id: TestChatProviderId, sink: (detail: AdminCapturedProviderError) => void, modelOverride?: string | null): { provider: OpenAiCompatProvider; rung?: RungConfig } | null {
   const meta = META[id];
   if (meta.kind === 'glm-vision') {
     const key = firstPresent(process.env, ['GLM_API_KEY', 'FREE_CHAIN_GLM_API_KEY']);
     if (!key) return null;
     return {
       provider: new OpenAiCompatProvider({
-        provider: 'GLM', key, model: 'glm-4.6v-flash', baseURL: 'https://api.z.ai/api/paas/v4',
+        provider: 'GLM', key, model: modelOverride || 'glm-4.6v-flash', baseURL: 'https://api.z.ai/api/paas/v4',
         priority: 0, maxOutputTokens: TEST_CHAT_MAX_OUTPUT_TOKENS, timeoutMs: 60_000, streamUsage: false, adminErrorDetail: sink,
       }),
     };
@@ -521,7 +584,7 @@ function compatAdapter(id: TestChatProviderId, sink: (detail: AdminCapturedProvi
   return {
     rung,
     provider: new OpenAiCompatProvider({
-      provider: adapterName, key: rung.key, envName: rung.keyEnv, model: rung.model, baseURL: rung.baseURL,
+      provider: adapterName, key: rung.key, envName: rung.keyEnv, model: modelOverride || rung.model, baseURL: rung.baseURL,
       priority: 0, maxOutputTokens: TEST_CHAT_MAX_OUTPUT_TOKENS, timeoutMs: 60_000, streamUsage: rung.streamUsage,
       extraBody: extraBodyFor(meta.rungId), adminErrorDetail: sink,
     }),

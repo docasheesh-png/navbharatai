@@ -65,4 +65,29 @@ describe('admin test chat does not change user chat', () => {
     expect(read('src/server/AI/InferenceGateway/qubaxTransport.ts')).not.toContain('onAttemptError');
     expect(read('src/server/lib/testChatBot.ts')).not.toMatch(/runFreeChain\b|orderForRoute\b|FIXED_TEXT_CHAIN/);
   });
+
+  it('reuses the main-chat selection engines and does not flip user-chat flags', () => {
+    const impl = read('src/server/lib/testChatBot.ts');
+    const qubax = read('src/server/lib/qubax.ts');
+    const runtime = read('src/server/AI/FreeChain/runtime.ts');
+    const mitrify = read('src/server/lib/mitrify.ts');
+    expect(impl).toContain('refreshQubaxPriceFeed');
+    expect(impl).toContain('readQubaxMarketPlan');
+    expect(impl).toContain('runApprovedQubaxChat');
+    expect(impl).toContain('runRegistryRung');
+    expect(impl).toContain('strictFreeText');
+    expect(impl).toContain('createMitrifyClient');
+    expect(impl).not.toContain('runApprovedMitrifyChain');
+    expect(impl).not.toMatch(/MITRIFY_CHAIN_ENABLED\s*=/);
+    expect(impl).not.toContain('openrouter.ai/api/v1/models');
+    expect(qubax).toContain('adminFallbackTries');
+    expect(qubax).toContain('readQubaxMarketPlan');
+    expect(runtime).toContain('runApprovedQubaxChat');
+    expect(runtime).toContain('runApprovedMitrifyChain');
+    expect(runtime).not.toContain('adminFallbackTries');
+    expect(runtime).not.toContain('runTestChat');
+    expect(read('src/server/AI/InferenceGateway/qubaxTransport.ts')).not.toContain('adminFallbackTries');
+    expect(mitrify).toContain("env.MITRIFY_CHAIN_ENABLED !== '1'");
+    expect(mitrify).toContain('runApprovedMitrifyChain');
+  });
 });

@@ -129,7 +129,12 @@ export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
     webFallback: 'plain tel:, sms: and https://wa.me links, which a phone browser also opens',
     androidPermissions: [],
     iosUsage: {},
-    asks: /\b(call\s+(?:karo|kar|kare|kardo|mummy|mom|papa)|make\s+(?:a\s+)?call|whats\s*app|sms|open\s+(?:the\s+)?(?:app|apps)|app\s+khol\w*|khol\s+do)\b/i,
+    // Opening WhatsApp / other apps — never a "WhatsApp number" / "WhatsApp mobile number" identity
+    // field (BR1974: a Chess Squad welcome-screen fix was handed @capacitor/app-launcher because
+    // "Enter Your WhatsApp Mobile Number" matched a bare `whats\s*app`, and the brief also mentions
+    // SMS/calling, so the builder added WhatsApp and SMS "contact support" the user never asked for).
+    // "when I open the app" is launching THIS app, not asking to open another one.
+    asks: /\b(call\s+(?:karo|kar|kare|kardo|mummy|mom|papa)|make\s+(?:a\s+)?call|whats\s*app(?![\s-]*(?:(?:ka|ki|ke|your|my|the|wala|wali)[\s-]+)?(?:mobile[\s-]*)?(?:numbers?|no\.?|num|phone|ids?)\b)|sms|open\s+(?:other\s+apps?|another\s+app|the\s+apps)|app\s+khol\w*|khol\s+do)\b/i,
   },
   {
     id: 'contacts',

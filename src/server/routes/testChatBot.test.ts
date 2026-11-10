@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const fake = vi.hoisted(() => ({ status: vi.fn(), run: vi.fn(), audit: vi.fn(), balance: vi.fn() }));
 vi.mock('../lib/qubaxBalance', () => ({ readQubaxBalance: fake.balance }));
 vi.mock('../lib/testChatBot', () => ({ testChatStatus: fake.status, loadTestChatStatus: fake.status, runTestChat: fake.run,
-  TestChatUnavailable: class extends Error { constructor(readonly reason: string, readonly status = 503) { super(reason); } } }));
+  TestChatUnavailable: class extends Error { constructor(readonly reason: string, readonly status = 503, readonly diagnostic?: unknown) { super(reason); } } }));
 vi.mock('../lib/audit', () => ({ audit: fake.audit }));
 vi.mock('../lib/adminAuth', () => ({ adminUsername: () => 'server-admin' }));
 import { registerTestChatBotRoutes } from './testChatBot';
@@ -37,7 +37,7 @@ describe('admin-only test chat boundary', () => {
     expect(await response.json()).toEqual({ noFallback: true }); expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(response.headers.get('x-api-version')).toBe('v1'); expect(fake.run).not.toHaveBeenCalled();
   });
-  it.each([{ ...action, provider: 'mitrify' }, { ...action, baseURL: 'https://evil.test' }, { ...action, confirmGatewayDisclosure: false },
+  it.each([{ ...action, provider: 'deepinfra' }, { ...action, baseURL: 'https://evil.test' }, { ...action, confirmGatewayDisclosure: false },
     { ...action, messages: [{ role: 'user', content: { file: 'private' } }] }])('rejects malformed and broadened dispatch %#', async body => {
     const request = await setup(); expect((await request(body)).status).toBe(400); expect(fake.run).not.toHaveBeenCalled();
   });
@@ -58,6 +58,22 @@ describe('admin-only test chat boundary', () => {
     expect(JSON.stringify(fake.audit.mock.calls)).not.toContain('patient-record');
     for (const [, metadata] of fake.audit.mock.calls) expect(metadata.admin).toBe('server-admin');
     expect(fake.audit).toHaveBeenCalledWith('ADMIN_TEST_CHAT_FAILED', expect.objectContaining({ admin: 'server-admin', code: 'unconfirmed' }));
+  });
+  it('includes admin-only redacted diagnostics without changing the safe fallback copy', async () => {
+    const diagnostic = {
+      provider: 'qubax', model: 'reported', latencyMs: 12, classification: 'auth', httpStatus: 401,
+      providerCode: 'invalid_api_key', providerType: 'authentication_error', providerRequestId: 'req_1',
+      providerMessage: 'denied', rawErrorBody: '{"error":"denied"}',
+    };
+    fake.run.mockRejectedValueOnce(new TestChatUnavailable('unconfirmed', 503, diagnostic));
+    const request = await setup();
+    const failed = await request(action);
+    expect(failed.status).toBe(503);
+    const body = await failed.json();
+    expect(body.error).toContain('No other provider was tried');
+    expect(body.code).toBe('unconfirmed');
+    expect(body.noFallback).toBe(true);
+    expect(body.diagnostic).toEqual(diagnostic);
   });
   it('checks balance metadata without sending a chat', async () => {
     fake.balance.mockResolvedValue({ status: 'available', currency: 'USD', balanceMicros: '1500000', checkedAtMs: 1 });

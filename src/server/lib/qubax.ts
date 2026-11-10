@@ -71,6 +71,9 @@ export type QubaxChatOptions = {
   /** Server Gateway claim binding. Never supplied by request JSON. */
   expectedSelection?: { modelId: string; modelRevision: string; maximumNanoUsd: number };
   reserve: (maximumNanoUsd: number, attemptKey?: string) => Promise<null | { releaseUndispatched(): Promise<void> }>;
+  /** Admin Test Chat Bot only. User chat never passes these hooks. */
+  onHttpError?: (detail: { status: number; body: string; requestId?: string }) => void;
+  onAttemptError?: (detail: { model: string; status: number | null; code: string; latencyMs: number; body?: string; requestId?: string }) => void;
 };
 export type QubaxChatResult = { kind: 'skipped'; reason: string } | { kind: 'response'; content: string; model: string; usage?: { inputTokens: number; outputTokens: number } };
 let inflight = 0;
@@ -123,6 +126,8 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     let lastModel: string | null = null;
     for (let attempt = 0; attempt < (marketTries.length || 1); attempt++) {
     const market = marketTries[attempt] ?? null;
+    const attemptStarted = Date.now();
+    let lastHttp: { status: number; body: string; requestId?: string } | undefined;
     const selection = market ? marketSelection(market, ceiling!, Date.now()) : await bounded(getQubaxSelection(options.db, workload));
     if (!selection) return { kind: 'skipped', reason: 'qubax-price-or-quality-unverified' };
     if (expected && (selection.modelId !== expected.modelId || selection.modelRevision !== expected.modelRevision
@@ -188,7 +193,20 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     const response = await fetch(`${cfg.baseURL}/chat/completions`, { method: 'POST', redirect: 'error', signal: attemptSignal,
       headers: { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...body, model: selection.modelId, ...(body.stream === true ? { stream_options: { include_usage: true } } : {}) }) });
-    if (!response.ok) { if (response.body) cancelBody(() => response.body!.cancel()); throw new QubaxError('QUBAX_HTTP_ERROR', response.status); }
+    if (!response.ok) {
+      if (options.onHttpError || options.onAttemptError) {
+        let body = '';
+        try { body = await response.text(); } catch { body = ''; }
+        const requestId = response.headers.get('x-request-id') || response.headers.get('request-id') || undefined;
+        lastHttp = { status: response.status, body: body.slice(0, 4000), requestId };
+        if (options.onHttpError) {
+          try { options.onHttpError({ status: response.status, body: body.slice(0, 4000), requestId }); } catch { /* Diagnostics must not replace the error. */ }
+        }
+      } else if (response.body) {
+        cancelBody(() => response.body!.cancel());
+      }
+      throw new QubaxError('QUBAX_HTTP_ERROR', response.status);
+    }
     let finished = false; let usage: { inputTokens: number; outputTokens: number } | undefined;
     const inspect = async (value: any) => {
       attemptSignal.throwIfAborted();
@@ -244,6 +262,19 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     attemptSignal.throwIfAborted(); await bounded(Promise.resolve().then(() => options.onChunk?.(content))); attemptSignal.throwIfAborted();
     return { kind: 'response', content, model: selection.modelId, ...(usage ? { usage } : {}) };
     } catch (error) {
+      if (options.onAttemptError) {
+        try {
+          const model = market?.modelId ?? selection.modelId;
+          options.onAttemptError({
+            model,
+            status: lastHttp?.status ?? (error instanceof QubaxError && error.status ? error.status : null),
+            code: error instanceof QubaxError ? error.code : 'QUBAX_UNAVAILABLE',
+            latencyMs: Math.max(0, Date.now() - attemptStarted),
+            ...(lastHttp?.body !== undefined ? { body: lastHttp.body } : {}),
+            ...(lastHttp?.requestId ? { requestId: lastHttp.requestId } : {}),
+          });
+        } catch { /* Diagnostics must not replace the error. */ }
+      }
       if (!market || options.signal.aborted) throw error;
       // A failed model is not a user charge. Release this try before another model, or before the next provider, reserves its own cap.
       entered = false;

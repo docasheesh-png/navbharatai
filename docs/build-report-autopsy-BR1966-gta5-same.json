@@ -1,0 +1,140 @@
+[
+  {
+    "prompt": "Pura gta5 wala game banaa do",
+    "twin": "Pura gta 5 wala game banaa do",
+    "tag": "report",
+    "class": "same"
+  },
+  {
+    "prompt": "Pura GTA5 wala game banaa do",
+    "twin": "Pura GTA 5 wala game banaa do",
+    "tag": "case",
+    "class": "same"
+  },
+  {
+    "prompt": "I want to make a game like gta5",
+    "twin": "I want to make a game like gta 5",
+    "tag": "br1955-glued",
+    "class": "same"
+  },
+  {
+    "prompt": "gta5 jaisa game banao",
+    "twin": "gta 5 jaisa game banao",
+    "tag": "jaisa",
+    "class": "same"
+  },
+  {
+    "prompt": "gta5 wala game",
+    "twin": "gta 5 wala game",
+    "tag": "wala",
+    "class": "same"
+  },
+  {
+    "prompt": "make gta5",
+    "twin": "make gta 5",
+    "tag": "make",
+    "class": "same"
+  },
+  {
+    "prompt": "Build me a GTA5",
+    "twin": "Build me a GTA 5",
+    "tag": "build-me",
+    "class": "same"
+  },
+  {
+    "prompt": "gtav wala game",
+    "twin": "gta v wala game",
+    "tag": "gtav",
+    "class": "same"
+  },
+  {
+    "prompt": "GTA-5 wala game",
+    "twin": "GTA 5 wala game",
+    "tag": "hyphen",
+    "class": "same"
+  },
+  {
+    "prompt": "gta_5 wala game",
+    "twin": "gta 5 wala game",
+    "tag": "underscore",
+    "class": "same"
+  },
+  {
+    "prompt": "gta-5 open world",
+    "twin": "gta 5 open world",
+    "tag": "hyphen-open",
+    "class": "same"
+  },
+  {
+    "prompt": "Mujhe gta5 jaisa game chahiye",
+    "twin": "Mujhe gta 5 jaisa game chahiye",
+    "tag": "mujhe",
+    "class": "same"
+  },
+  {
+    "prompt": "ek gta5 game banao",
+    "twin": "ek gta 5 game banao",
+    "tag": "ek",
+    "class": "same"
+  },
+  {
+    "prompt": "gta5 clone",
+    "twin": "gta 5 clone",
+    "tag": "clone",
+    "class": "same"
+  },
+  {
+    "prompt": "similar to gta5",
+    "twin": "similar to gta 5",
+    "tag": "similar",
+    "class": "same"
+  },
+  {
+    "prompt": "game like GTA5",
+    "twin": "game like GTA 5",
+    "tag": "like",
+    "class": "same"
+  },
+  {
+    "prompt": "Pura gta5 wala game banaa do.",
+    "twin": "Pura gta 5 wala game banaa do.",
+    "tag": "period",
+    "class": "same"
+  },
+  {
+    "prompt": "gta5 quiz banao",
+    "twin": "gta quiz banao",
+    "tag": "quiz-sibling",
+    "class": "same"
+  },
+  {
+    "prompt": "GTAV jaisa game",
+    "twin": "GTA V jaisa game",
+    "tag": "gtav-jaisa",
+    "class": "same"
+  },
+  {
+    "prompt": "make GTA_5",
+    "twin": "make GTA 5",
+    "tag": "make-us",
+    "class": "same"
+  },
+  {
+    "prompt": "using GTA5",
+    "twin": "using GTA",
+    "tag": "tool-using",
+    "class": "same"
+  },
+  {
+    "prompt": "GTA5 wiki",
+    "twin": "GTA wiki",
+    "tag": "tool-wiki",
+    "class": "same"
+  },
+  {
+    "prompt": "GTA5 tips and tricks",
+    "twin": "GTA tips and tricks",
+    "tag": "tool-tips",
+    "class": "same"
+  }
+]

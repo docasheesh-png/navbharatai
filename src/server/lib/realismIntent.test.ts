@@ -39,7 +39,7 @@ describe('realismIntent — the user asked for something REAL', () => {
   });
 
   it('naming a photoreal AAA title IS the realism ask', () => {
-    for (const s of ['GTA jaisa game banao', 'make it like Forza', 'PUBG style graphics']) {
+    for (const s of ['GTA jaisa game banao', 'make it like Forza', 'PUBG style graphics', 'GTA5 jaisa game banao', 'Pura gta5 wala game banaa do', 'gtav wala game']) {
       expect(tier(s), s).toBe('real');
     }
   });
@@ -57,6 +57,7 @@ describe('realismIntent — plain 3D stays LIGHT (the admin second rule)', () =>
 
   it('a prompt with no visual signal at all defaults to light', () => {
     expect(tier('build me a car racing game')).toBe('lite');
+    expect(tier('gta50 wala game')).toBe('lite');
     expect(tier('')).toBe('lite');
     expect(realismIntent(null).tier).toBe('lite');
   });

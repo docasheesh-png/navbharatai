@@ -208,6 +208,10 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     let order: Array<ProviderId | 'mitrify' | 'qubax'> = cfg.fixedOrder ? [...FIXED_TEXT_CHAIN] : exclusiveAdmin ? baseOrder : orderForRoute(baseOrder, route, cfg.features.routeReorder);
     // A routed order with no usable rung (keys not configured yet, privacy) falls back to the plain order.
     if (!cfg.fixedOrder && !exclusiveAdmin && order !== baseOrder && !order.some(oid => { const r = cfg.rungs.find(x => x.id === oid); return !!r && !rungReason(r, cfg, input); })) { order = baseOrder; route = 'normal'; }
+    if (!exclusiveAdmin && order.includes('openrouter') && !order.includes('qubax')) {
+      const at = order.indexOf('openrouter') + 1;
+      order = [...order.slice(0, at), 'mitrify', 'qubax', ...order.slice(at)];
+    }
     trace.route = route; trace.routeReason = routed.reason;
     // Re-scan only pre-reservation capacity refusals. The original queue-wait budget bounds
     // this wait too; no extra provider attempt, quota charge or unbounded timer is introduced.
@@ -284,7 +288,8 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         const model = 'reviewed-selection';
         const attempt = { provider: id, model, reason: 'pending', entered: false }; trace.attempts.push(attempt);
         if (!paidBudgetReady) { attempt.reason = 'paid-budget-unavailable'; continue; }
-        if (!fixedTextChainSelected() || fixedTextChainSurface() !== 'chat') { attempt.reason = 'qubax-chat-only'; continue; }
+        if (!fixedTextChainSelected() && fixedTextChainSurface()) { attempt.reason = 'qubax-chat-only'; continue; }
+        if (fixedTextChainSurface() && fixedTextChainSurface() !== 'chat') { attempt.reason = 'qubax-chat-only'; continue; }
         if (trace.attempts.filter(a => a.entered).length >= cfg.maxAttempts) { attempt.reason = 'max-attempts'; break; }
         // Preserve classification; server review must cover the exact payload and all required data classes.
         const prepared = trimForRung(input.message, history, system, Number.MAX_SAFE_INTEGER)!;

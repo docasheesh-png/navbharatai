@@ -27,7 +27,8 @@ export interface TestChatProviderStatus {
   officialOutputUsdPerMillion?: string | null;
   discountBps?: number | null;
 }
-export interface TestChatStatus { providers: TestChatProviderStatus[]; approvalRequired: boolean; noFallback: true }
+export interface TestChatFeedSummary { fresh: boolean; observedAtMs: number | null; pricedRows: number; officialMatches: number; discountEligible: number; probePassing: number }
+export interface TestChatStatus { providers: TestChatProviderStatus[]; approvalRequired: boolean; noFallback: true; feed?: TestChatFeedSummary }
 export interface TestChatReply {
   requestId: string;
   provider: TestChatProviderId;

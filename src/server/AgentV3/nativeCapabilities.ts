@@ -80,6 +80,141 @@ export interface NativeCapability {
   asks: RegExp;
 }
 
+/**
+ * BR1974 / #4165 — open-apps store rules. This file is server-only (not imported by
+ * `src/main.tsx` / `src/App.tsx`), so any lookbehind here would stay out of the Safari 14
+ * client bundle. The deep-link guard is a prefix test equivalent to
+ * `(?<!deep(?:ly)?[\s-]*)` and does not itself use a lookbehind.
+ *
+ * 1. "link" is not a store-open verb when it is a deep-link (`deep link`, `deep  link`,
+ *    `deep-link`, `deeplink`, `deeply link`).
+ * 2. A store mention whose enclosing clause (text between `.` `!` `?` `;` or newlines —
+ *    not commas) contains own-listing / publish language is not a request to open the
+ *    store via @capacitor/app-launcher.
+ * 3. Post-nominal Hinglish `khol` after a store name still opens the store, unless that
+ *    same clause also has daal/publish/upload (covered by the listing-language set).
+ * 4. `khol do` still matches, except when its clause both names a store and has
+ *    listing language (`khol do play store listing`).
+ */
+
+/** Call / WhatsApp / SMS / plural "open apps" — never store-specific. */
+export const OPEN_APPS_CORE_SOURCE = String.raw`call\s+(?:karo|kar|kare|kardo|mummy|mom|papa)|make\s+(?:a\s+)?call|whats\s*app(?![\s-]*(?:(?:ka|ki|ke|your|my|the|wala|wali)[\s-]+)?(?:mobile[\s-]*)?(?:numbers?|no\.?|num|phone|ids?)\b)|sms|open\s+(?:other\s+apps?|another\s+app|the\s+apps|apps)`;
+
+/** "app store", "play-store", "Play  Store", "playstore". */
+export const OPEN_APPS_STORE_TOKEN_SOURCE = String.raw`\b(?:app|play)[\s-]*store\b`;
+
+/**
+ * Own-listing / publish language. Present anywhere in the same clause as a store
+ * mention → do not capture via the store alternative.
+ */
+export const OPEN_APPS_OWN_LISTING_SOURCE = String.raw`\b(?:listings?|developer\s+accounts?|consoles?|releases?|screenshots?|publish\w*|uploads?|submit\w*|daal\w*)\b`;
+
+/** Equivalent of `(?<!deep(?:ly)?[\s-]*)` immediately before "link". */
+export const OPEN_APPS_DEEP_BEFORE_LINK_SOURCE = String.raw`deep(?:ly)?[\s-]*$`;
+
+export const OPEN_APPS_STORE_OPEN_VERBS_SOURCE = String.raw`\b(?:open(?:s|ing)?|redirect(?:s|ing)?|go(?:es|ing)?)`;
+
+/** "launch the app store" — no to/on/in (those are publish idioms). */
+export const OPEN_APPS_LAUNCH_BEFORE_STORE_SOURCE = String.raw`\blaunch(?:es|ing)?(?:\s+(?:the|a|an|our|my))*\s+$`;
+
+export const OPEN_APPS_STORE_PARTICLES_SOURCE = String.raw`(?:mein|me|ko|par|pe|se)`;
+
+export const OPEN_APPS_KHOL_SOURCE = String.raw`khol\w*`;
+
+/** Rejected #4165 side-effect: a bare store / drawer mention is not open-apps. */
+export const OPEN_APPS_BARE_STORE = false;
+export const OPEN_APPS_BARE_DRAWER = false;
+
+const CLAUSE_SEPARATORS = ['.', '!', '?', ';', '\n'] as const;
+
+/** The sentence/clause containing `index` (not split on commas). */
+export function enclosingClause(text: string, index: number): string {
+  let start = 0;
+  for (const sep of CLAUSE_SEPARATORS) {
+    const at = text.lastIndexOf(sep, Math.max(0, index - 1));
+    if (at + 1 > start) start = at + 1;
+  }
+  let end = text.length;
+  for (const sep of CLAUSE_SEPARATORS) {
+    const at = text.indexOf(sep, index);
+    if (at >= 0 && at < end) end = at;
+  }
+  return text.slice(start, end);
+}
+
+export function clauseHasOwnListingLanguage(clause: string): boolean {
+  return new RegExp(OPEN_APPS_OWN_LISTING_SOURCE, 'i').test(clause);
+}
+
+export function isDeepPrefixedLink(text: string, linkIndex: number): boolean {
+  return new RegExp(OPEN_APPS_DEEP_BEFORE_LINK_SOURCE, 'i').test(text.slice(0, linkIndex));
+}
+
+function clauseHasStoreMention(clause: string): boolean {
+  return new RegExp(OPEN_APPS_STORE_TOKEN_SOURCE, 'i').test(clause);
+}
+
+function storeOpeningBefore(text: string, storeIndex: number): boolean {
+  const before = text.slice(0, storeIndex);
+  if (new RegExp(OPEN_APPS_STORE_OPEN_VERBS_SOURCE + String.raw`(?:\s+(?:the|to|a|an|our|my))*\s+$`, 'i').test(before)) {
+    return true;
+  }
+  if (new RegExp(OPEN_APPS_LAUNCH_BEFORE_STORE_SOURCE, 'i').test(before)) return true;
+  const linkTail = /\blink(?:s|ing)?(?:\s+(?:the|to|a|an|our|my))*\s+$/i;
+  const lm = linkTail.exec(before);
+  if (lm && !isDeepPrefixedLink(text, storeIndex - lm[0].length)) return true;
+  return false;
+}
+
+function storeKholAfter(text: string, storeIndex: number, storeLen: number): boolean {
+  const after = text.slice(storeIndex + storeLen);
+  return new RegExp(
+    String.raw`^(?:\s+` + OPEN_APPS_STORE_PARTICLES_SOURCE + String.raw`)?[\s-]+` + OPEN_APPS_KHOL_SOURCE + String.raw`\b`,
+    'i',
+  ).test(after);
+}
+
+function drawerAsked(text: string): boolean {
+  const openDrawer = new RegExp(
+    OPEN_APPS_STORE_OPEN_VERBS_SOURCE + String.raw`(?:\s+(?:the|to|a|an|our|my))*\s+app\s+drawer\b`,
+    'i',
+  );
+  if (openDrawer.test(text)) return true;
+  if (new RegExp(String.raw`\blaunch(?:es|ing)?(?:\s+(?:the|a|an|our|my))*\s+app\s+drawer\b`, 'i').test(text)) return true;
+  const linkDrawer = /\blink(?:s|ing)?(?:\s+(?:the|to|a|an|our|my))*\s+app\s+drawer\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = linkDrawer.exec(text))) {
+    if (!isDeepPrefixedLink(text, m.index)) return true;
+  }
+  return false;
+}
+
+/** True when the prompt asks to open another app, WhatsApp, the store, or the OS app drawer. */
+export function openAppsAsked(text: string): boolean {
+  if (new RegExp(String.raw`\b(?:` + OPEN_APPS_CORE_SOURCE + String.raw`)\b`, 'i').test(text)) return true;
+  if (/\bapp\s+khol\w*\b/i.test(text)) return true;
+  if (OPEN_APPS_BARE_STORE && new RegExp(OPEN_APPS_STORE_TOKEN_SOURCE, 'i').test(text)) return true;
+  if (OPEN_APPS_BARE_DRAWER && /\bapp\s+drawer\b/i.test(text)) return true;
+
+  const kholDo = /\bkhol\s+do\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = kholDo.exec(text))) {
+    const clause = enclosingClause(text, m.index);
+    if (!(clauseHasStoreMention(clause) && clauseHasOwnListingLanguage(clause))) return true;
+  }
+
+  if (drawerAsked(text)) return true;
+
+  const storeRe = new RegExp(OPEN_APPS_STORE_TOKEN_SOURCE, 'gi');
+  while ((m = storeRe.exec(text))) {
+    const clause = enclosingClause(text, m.index);
+    if (clauseHasOwnListingLanguage(clause)) continue;
+    if (storeOpeningBefore(text, m.index)) return true;
+    if (storeKholAfter(text, m.index, m[0].length)) return true;
+  }
+  return false;
+}
+
 export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
   {
     id: 'reminders',
@@ -136,15 +271,11 @@ export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
     // Singular "open the app" / "when I open the app" / "open the app to see…" / "opening the app"
     // / "when the app opens" launch THIS app. "open the app settings" is this app's settings screen
     // (in-app navigation), not another app. Plural "open apps" / "open the apps" still match.
-    // "app store" / "play store" match only with an open/redirect/link/go verb, or "launch the
-    // app store" (no to/on/in — "launch to/on/in the Play Store" is a publish idiom). A store
-    // name followed by listing/developer/account/console/release/screenshots/"page for my …"
-    // is this app's store listing or console, not a request to open other apps. Post-nominal
-    // Hinglish "play store kholo" / "app store mein kholo" match; "play store pe daalna hai"
-    // does not (no khol). Bare store is never an alternative. "deep link" is not the link verb.
-    // "link to play store page for my own app listing" is a get-it-on / rate-us listing URL,
-    // not @capacitor/app-launcher (ambiguous → do not capture when "listing" is named).
-    asks: /\b(call\s+(?:karo|kar|kare|kardo|mummy|mom|papa)|make\s+(?:a\s+)?call|whats\s*app(?![\s-]*(?:(?:ka|ki|ke|your|my|the|wala|wali)[\s-]+)?(?:mobile[\s-]*)?(?:numbers?|no\.?|num|phone|ids?)\b)|sms|open\s+(?:other\s+apps?|another\s+app|the\s+apps|apps)|(?:open(?:s|ing)?|redirect(?:s|ing)?|(?<!deep\s)link(?:s|ing)?|go(?:es|ing)?)(?:\s+(?:the|to|a|an|our|my))*\s+(?:(?:app|play)\s*store(?![\s-]+(?:listings?|developers?|accounts?|consoles?|releases?|screenshots?|page\s+for\s+my\b))|app\s+drawer)|launch(?:es|ing)?(?:\s+(?:the|a|an|our|my))*\s+(?:(?:app|play)\s*store(?![\s-]+(?:listings?|developers?|accounts?|consoles?|releases?|screenshots?|page\s+for\s+my\b))|app\s+drawer)|(?:app|play)\s*store(?![\s-]+(?:listings?|developers?|accounts?|consoles?|releases?|screenshots?|page\s+for\s+my\b))(?:\s+(?:mein|me|ko|par|pe|se))?[\s-]+khol\w*|app\s+khol\w*|khol\s+do)\b/i,
+    // Store-opening vs own-listing, deep-link, and Hinglish khol are applied by
+    // `openAppsAsked` (clause-level rules). `asks` keeps the non-store core plus
+    // `khol do` / `app kholo` so table readers still see a regex; requestedCapabilities
+    // routes this row through openAppsAsked.
+    asks: new RegExp(String.raw`\b(?:` + OPEN_APPS_CORE_SOURCE + String.raw`|app\s+khol\w*|khol\s+do)\b`, 'i'),
   },
   {
     id: 'contacts',
@@ -302,7 +433,7 @@ export function requestedCapabilities(prompt: string | null | undefined): Native
   // A reference link's words ask for nothing (autopsy 33812996) — read without machine text.
   const text = typeof prompt === 'string' ? withoutMachineText(prompt) : '';
   if (!text.trim()) return [];
-  return NATIVE_CAPABILITIES.filter((c) => c.asks.test(text));
+  return NATIVE_CAPABILITIES.filter((c) => (c.id === 'open-apps' ? openAppsAsked(text) : c.asks.test(text)));
 }
 
 /** The capabilities an app ACTUALLY uses, read from its own package.json — evidence, not a guess. */

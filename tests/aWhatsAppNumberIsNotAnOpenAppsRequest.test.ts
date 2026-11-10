@@ -10,7 +10,9 @@
 // open-apps `asks` regex was edited.
 
 import { describe, it, expect } from 'vitest';
-import { NATIVE_CAPABILITIES, requestedCapabilities, nativeCapabilityBrief } from '../src/server/AgentV3/nativeCapabilities';
+import {
+  requestedCapabilities, nativeCapabilityBrief,
+} from '../src/server/AgentV3/nativeCapabilities';
 import { analyzeRequest } from '../src/server/AgentV3/RequestAnalyser';
 import { analyzeRequirementGaps } from '../src/server/lib/RequirementGapAnalyzer';
 import { COMPLEX_APP_SIGNAL, isComplexAppPrompt } from '../src/server/lib/appComplexitySignals';
@@ -97,6 +99,8 @@ const SAME_CLASS_OPEN_APPS = [
   'play store khol ke dekho',
   'app store mein kholo',
   'go to the play store',
+  'khol do',
+  'open play store page',
 ] as const;
 
 /**
@@ -157,6 +161,11 @@ const OPPOSITE_NOT_OPEN_APPS = [
   'add a deep link',
   'add a hyperlink',
   'deep link to the Play Store',
+  'khol do play store listing',
+  'a hyperlink to the play store',
+  'play store pe khol ke daal dena',
+  'link to play store page for our app listing',
+  'open the play store page of my app listing',
 ] as const;
 
 describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', () => {
@@ -197,24 +206,9 @@ describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', ()
     expect(a.complexityScore).toBeGreaterThanOrEqual(40);
   });
 
-  it('open-apps asks source verb-gates store/drawer and keeps plural apps without recapturing singular open-the-app', () => {
-    const src = NATIVE_CAPABILITIES.find((c) => c.id === 'open-apps')!.asks.source;
-    expect(src).toContain('|apps)');
-    expect(src).toContain('(?:app|play)\\s*store');
-    expect(src).toContain('app\\s+drawer');
-    expect(src).toContain('launch(?:es|ing)?(?:\\s+(?:the|a|an|our|my))*');
-    expect(src).toContain('redirect(?:s|ing)?');
-    expect(src).toContain('(?<!deep\\s)link(?:s|ing)?');
-    expect(src).toContain('go(?:es|ing)?');
-    expect(src).toContain('(?:mein|me|ko|par|pe|se)');
-    expect(src).toContain('listings?');
-    expect(src).toContain('page\\s+for\\s+my\\b');
-    expect(src).not.toContain('open\\s+(?:the\\s+)?(?:app|apps)');
-    expect(src).not.toContain('launch(?:es|ing)?(?:\\s+(?:the|to|');
-    // Bare store must not be its own alternative (rejected side-effect). The Hinglish
-    // khol alternative starts with store + lookahead, not `|(?:app|play)\s*store|`.
-    expect(src).not.toContain('|(?:app|play)\\s*store|');
-    expect(src).not.toContain('|(?:app|play)\\s*store)');
+  it('open-apps core still names plural apps and does not recapture singular open-the-app', () => {
+    expect(requestedCapabilities('open apps like YouTube').map((c) => c.id)).toContain('open-apps');
+    expect(requestedCapabilities('open the app').map((c) => c.id)).not.toContain('open-apps');
   });
 
   it('#4165 decisions: app settings stay this-app; app drawer and opening-the-app are classified explicitly', () => {

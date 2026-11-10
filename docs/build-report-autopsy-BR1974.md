@@ -73,6 +73,15 @@ Third follow-up (`5fb218c75` reviewer FAIL):
 - "deep link" is not the `link` verb (`(?<!deep\s)link`); "hyperlink" never was (no word boundary). "deep link to the Play Store" stays uncaptured.
 - False negatives restored without a bare store alternative: "play store kholo", "app store kholo", "play store kholna hai", "play store khol ke dekho", "app store mein kholo" (post-nominal Hinglish `khol`, optional mein/me/ko/par/pe/se), and "go to the play store". "play store pe daalna hai" and a bare "Play Store listing" stay unmatched.
 
+Fourth follow-up (`e71c4bd44` reviewer FAIL — stop patching literal phrases):
+
+- Store/link matching moved out of one mega-regex into `openAppsAsked` clause-level rules. `requestedCapabilities` routes the `open-apps` row through that function. Named sources (`OPEN_APPS_*`) are exported so mutations edit the actual logic.
+- Deep-link guard is a prefix test equivalent to `(?<!deep(?:ly)?[\s-]*)` and does not itself use a lookbehind (server-only file; `src/main.tsx` / `src/App.tsx` do not import it). "deep link", "deep  link", "Deep  Link", "deep-link", "deeplink", and "deeply link" never count as the link verb. `\blink` still keeps "hyperlink to the play store" out.
+- Own-listing exclusion is clause-level: if the same sentence/clause (split on `.!?`;` and newlines, not commas) as the store mention contains listing / developer account / console / release / screenshots / publish / upload / submit / daal(na) anywhere, do not capture via the store alternative. "link to play store page for our/the/this/my app listing" and "open the play store page of my app listing" stay out; "open play store page" and "link to play store page" still match.
+- Hinglish: any store+khol phrase in a clause that also has daal/publish/upload (including "play store pe khol ke daal dena") does not match. "play store pe khol ke dekho" and "play store kholo" still do.
+- `khol do` is excluded only when the same clause both names a store and has listing language, so "khol do play store listing" is out and plain "khol do" / "khol do play store" stay in.
+- Self-found residuals (conservative FNs of the requested clause rule, not new false positives): a genuine "open the play store" in the same clause as unrelated "console" / "release" / "screenshots" / "submit" / "publish" / Hinglish "daal" (lentils); commas are not clause boundaries so "open the play store, then edit the listing" is also excluded. Word boundaries on the store token and on open/go/launch verbs also stop "play storefront" and "undergo the Play Store review".
+
 ## Queue
 
 This commit **closes no row** and **opens Q-2647 and Q-2648**. Q-2646, Q-2645, Q-2644, Q-2643, Q-2642, Q-2640, Q-2621, Q-2611, Q-2375 / Q-1068 and earlier blockers stay open.

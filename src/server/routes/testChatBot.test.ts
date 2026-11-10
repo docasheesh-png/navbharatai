@@ -1,7 +1,8 @@
 import express from 'express';
 import type { Server } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const fake = vi.hoisted(() => ({ status: vi.fn(), run: vi.fn(), audit: vi.fn() }));
+const fake = vi.hoisted(() => ({ status: vi.fn(), run: vi.fn(), audit: vi.fn(), balance: vi.fn() }));
+vi.mock('../lib/qubaxBalance', () => ({ readQubaxBalance: fake.balance }));
 vi.mock('../lib/testChatBot', () => ({ testChatStatus: fake.status, loadTestChatStatus: fake.status, runTestChat: fake.run,
   TestChatUnavailable: class extends Error { constructor(readonly reason: string, readonly status = 503) { super(reason); } } }));
 vi.mock('../lib/audit', () => ({ audit: fake.audit }));
@@ -17,7 +18,7 @@ async function setup() {
   registerTestChatBotRoutes(app, (req, res, next) => { if (req.headers['x-admin-token'] === 'synthetic-admin') next(); else res.status(401).end(); });
   server = app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => server.once('listening', resolve));
   const { port } = server.address() as { port: number };
-  return (body?: unknown, authenticated = true, versioned = true) => fetch(`http://127.0.0.1:${port}/api/${versioned ? 'v1/' : ''}admin/test-chat-bot/${body === undefined ? 'providers' : 'chat'}`, {
+  return (body?: unknown, authenticated = true, versioned = true, path?: string) => fetch(`http://127.0.0.1:${port}/api/${versioned ? 'v1/' : ''}admin/test-chat-bot/${path ?? (body === undefined ? 'providers' : 'chat')}`, {
     method: body === undefined ? 'GET' : 'POST', headers: { ...(authenticated ? { 'x-admin-token': 'synthetic-admin' } : {}), 'Content-Type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -49,7 +50,7 @@ describe('admin-only test chat boundary', () => {
     expect(JSON.stringify(fake.audit.mock.calls)).not.toContain('Synthetic prompt'); expect(JSON.stringify(fake.audit.mock.calls)).not.toContain('reply');
   });
   it('uses safe unavailable errors and never reflects provider secrets', async () => {
-    const request = await setup(); fake.run.mockRejectedValueOnce(new TestChatUnavailable('approval-or-budget', 409));
+    const request = await setup(); fake.run.mockRejectedValueOnce(new TestChatUnavailable('budget', 409));
     const rejected = await request(action); expect(rejected.status).toBe(409); expect(await rejected.text()).toContain('No provider was called');
     fake.run.mockRejectedValueOnce(new Error('secret-key-and-patient-record'));
     const failed = await request(action); expect(failed.status).toBe(503); const body = await failed.text();
@@ -57,6 +58,14 @@ describe('admin-only test chat boundary', () => {
     expect(JSON.stringify(fake.audit.mock.calls)).not.toContain('patient-record');
     for (const [, metadata] of fake.audit.mock.calls) expect(metadata.admin).toBe('server-admin');
     expect(fake.audit).toHaveBeenCalledWith('ADMIN_TEST_CHAT_FAILED', expect.objectContaining({ admin: 'server-admin', code: 'unconfirmed' }));
+  });
+  it('checks balance metadata without sending a chat', async () => {
+    fake.balance.mockResolvedValue({ status: 'available', currency: 'USD', balanceMicros: '1500000', checkedAtMs: 1 });
+    const request = await setup();
+    const response = await request({}, true, true, 'balance');
+    expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ status: 'available', balanceMicros: '1500000' });
+    expect(fake.run).not.toHaveBeenCalled(); expect(JSON.stringify(fake.audit.mock.calls)).not.toContain('1500000');
+    expect((await request({ secret: 'no' }, true, true, 'balance')).status).toBe(400);
   });
   it('rejects oversized JSON before any paid action', async () => {
     const request = await setup(); expect((await request({ ...action, messages: [{ role: 'user', content: 'x'.repeat(270_000) }] })).status).toBe(413);

@@ -9,16 +9,23 @@
 // these fixtures are CSS declarations plus a 390×844 geometry model, not a live
 // Playwright pass. mobileLayoutCheck is not taught to ignore user headers.
 //
-// Reviewer FAIL on the first head: overflow-x:auto on .nb-topbar forces overflow-y
-// to auto (CSS Overflow), which clips absolute dropdowns and popovers inside the
-// bar. Today's rule keeps shrink/wrap/border-box and uses overflow-wrap:anywhere
-// so an unbreakable title breaks; overflow is left visible.
+// First head: overflow-x:auto on .nb-topbar forces overflow-y to auto (CSS
+// Overflow), which clips absolute dropdowns and popovers inside the bar.
+// Second head: overflow-wrap:anywhere on the container is inherited and shrinks
+// min-content, so a title squeezed beside the action buttons can break mid-word.
+// Today's rule keeps shrink/wrap/border-box, leaves overflow visible, and puts
+// min-width:0 and overflow-wrap:break-word on the title (`.nb-topbar h1` — the
+// kit does not define `.nb-page-title`).
 
 import { describe, it, expect } from 'vitest';
 import { DESIGN_KIT_CSS } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/designKit';
 import { isKnownSeedVersion } from '../src/server/AgentV3/seedVersions';
+import { kitClasses } from '../src/server/AgentV3/kitRestore';
 
 const NEW_TOPBAR =
+  '.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; }';
+const NEW_TITLE = '.nb-topbar h1 { min-width: 0; overflow-wrap: break-word; }';
+const SECOND_PR_TOPBAR =
   '.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; }';
 const FIRST_PR_TOPBAR =
   '.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: auto; }';
@@ -30,6 +37,10 @@ function declarations(selector: string): Record<string, string> {
   expect(at, `${selector} is in the kit`).toBeGreaterThan(-1);
   const body = DESIGN_KIT_CSS.slice(DESIGN_KIT_CSS.indexOf('{', at) + 1, DESIGN_KIT_CSS.indexOf('}', at));
   return Object.fromEntries(body.split(';').map((d) => d.trim()).filter(Boolean).map((d) => [d.slice(0, d.indexOf(':')).trim(), d.slice(d.indexOf(':') + 1).trim()]));
+}
+
+function withoutTitleRule(css: string): string {
+  return css.replace(`${NEW_TITLE}\n`, '');
 }
 
 /**
@@ -69,7 +80,7 @@ function topbarOnAPhone(opts: {
   paddingInline: number;
   maxWidth100: boolean;
   boxSizingBorderBox: boolean;
-  overflowWrapAnywhere: boolean;
+  titleCanWrap: boolean;
 }): { headerBox: number; pageOverflow: number } {
   const unconstrained = opts.titleContent + opts.paddingInline;
   let headerBox: number;
@@ -81,12 +92,98 @@ function topbarOnAPhone(opts: {
     // max-width: 100% on content-box caps the content box; padding still adds outside.
     headerBox = Math.min(opts.viewport, opts.titleContent) + opts.paddingInline;
   }
-  // An unbreakable title wraps/breaks inside the bar when overflow-wrap:anywhere is inherited.
-  // overflow-x:auto is NOT a way this test is allowed to pass (it would clip dropdowns).
-  const pageOverflow = opts.maxWidth100 && opts.boxSizingBorderBox && opts.overflowWrapAnywhere
-    ? 0
-    : Math.max(0, headerBox - opts.viewport);
-  return { headerBox, pageOverflow };
+  // overflow is visible (so dropdowns are not clipped). An unbreakable title that
+  // cannot wrap therefore paints past a capped header box and widens the page.
+  const painted = opts.maxWidth100 && opts.titleCanWrap ? headerBox : unconstrained;
+  return { headerBox, pageOverflow: Math.max(0, painted - opts.viewport) };
+}
+
+/**
+ * A topbar that also holds action buttons.
+ *
+ * overflow-wrap:anywhere is inherited and shrinks the title's min-content to about
+ * one glyph, so the title is packed into the leftover slice beside the buttons and
+ * a normal word then breaks mid-word.
+ *
+ * overflow-wrap:break-word does not shrink min-content (it is the longest word).
+ * Combined with the topbar's flex-wrap, a word that cannot sit beside the actions
+ * wraps the title onto its own row instead of breaking mid-word.
+ *
+ * An unbreakable title still fits a 390px phone when the title may shrink
+ * (min-width:0) and break-word can wrap the overflowing string.
+ */
+function titleBesideActions(opts: {
+  viewport: number;
+  paddingInline: number;
+  gap: number;
+  actionsWidth: number;
+  longestWordWidth: number;
+  titleMaxContent: number;
+  maxWidth100: boolean;
+  boxSizingBorderBox: boolean;
+  flexWrap: boolean;
+  overflowWrapAnywhereInherited: boolean;
+  titleMinWidth0: boolean;
+  titleOverflowWrapBreakWord: boolean;
+}): { headerBox: number; titleBox: number; wordBreaksMidWord: boolean; pageOverflow: number } {
+  const extras = opts.actionsWidth > 0 ? opts.gap + opts.actionsWidth : 0;
+  const unconstrained = opts.titleMaxContent + extras + opts.paddingInline;
+  let headerBox: number;
+  if (!opts.maxWidth100) {
+    headerBox = unconstrained;
+  } else if (opts.boxSizingBorderBox) {
+    headerBox = Math.min(opts.viewport, unconstrained);
+  } else {
+    headerBox = Math.min(opts.viewport, opts.titleMaxContent + extras) + opts.paddingInline;
+  }
+  const inner = Math.max(0, headerBox - opts.paddingInline);
+  const leftover = opts.actionsWidth > 0 ? inner - opts.gap - opts.actionsWidth : inner;
+
+  let titleBox: number;
+  if (opts.overflowWrapAnywhereInherited && opts.actionsWidth > 0) {
+    titleBox = Math.max(1, leftover);
+  } else if (
+    opts.flexWrap
+    && opts.actionsWidth > 0
+    && opts.longestWordWidth + opts.gap + opts.actionsWidth > inner
+  ) {
+    titleBox = inner;
+  } else if (opts.actionsWidth > 0) {
+    titleBox = Math.max(0, leftover);
+  } else {
+    titleBox = inner;
+  }
+
+  const canWrapOverflow = opts.titleOverflowWrapBreakWord || opts.overflowWrapAnywhereInherited;
+  const wordBreaksMidWord = opts.longestWordWidth > titleBox && canWrapOverflow;
+  const titleCanWrap = (opts.titleMinWidth0 && opts.titleOverflowWrapBreakWord) || opts.overflowWrapAnywhereInherited;
+  const painted = opts.maxWidth100 && opts.titleCanWrap ? headerBox : unconstrained;
+  return { headerBox, titleBox, wordBreaksMidWord, pageOverflow: Math.max(0, painted - opts.viewport) };
+}
+
+function flagsFromCss(): {
+  maxWidth100: boolean;
+  boxSizingBorderBox: boolean;
+  flexWrap: boolean;
+  overflowWrapAnywhereInherited: boolean;
+  titleMinWidth0: boolean;
+  titleOverflowWrapBreakWord: boolean;
+  titleCanWrap: boolean;
+} {
+  const topbar = declarations('.nb-topbar');
+  const title = declarations('.nb-topbar h1');
+  const overflowWrapAnywhereInherited = topbar['overflow-wrap'] === 'anywhere';
+  const titleMinWidth0 = title['min-width'] === '0';
+  const titleOverflowWrapBreakWord = title['overflow-wrap'] === 'break-word';
+  return {
+    maxWidth100: topbar['max-width'] === '100%',
+    boxSizingBorderBox: topbar['box-sizing'] === 'border-box',
+    flexWrap: topbar['flex-wrap'] === 'wrap',
+    overflowWrapAnywhereInherited,
+    titleMinWidth0,
+    titleOverflowWrapBreakWord,
+    titleCanWrap: (titleMinWidth0 && titleOverflowWrapBreakWord) && !overflowWrapAnywhereInherited,
+  };
 }
 
 describe('a dashboard topbar that holds a long title fits a phone', () => {
@@ -96,7 +193,7 @@ describe('a dashboard topbar that holds a long title fits a phone', () => {
     expect(d['max-width']).toBe('100%');
     expect(d['flex-wrap']).toBe('wrap');
     expect(d['box-sizing']).toBe('border-box');
-    expect(d['overflow-wrap']).toBe('anywhere');
+    expect(d['overflow-wrap']).toBeUndefined();
     // what it always was is kept: flex, centred, the same on-grid padding and gap
     expect(d.display).toBe('flex');
     expect(d['align-items']).toBe('center');
@@ -131,6 +228,18 @@ describe('a dashboard topbar that holds a long title fits a phone', () => {
     expect(clipsAbsoluteDropdown({ ...d, 'overflow-x': 'auto' })).toBe(true);
   });
 
+  it('the title (.nb-topbar h1) may shrink and uses overflow-wrap:break-word, not anywhere', () => {
+    const d = declarations('.nb-topbar h1');
+    expect(d['min-width']).toBe('0');
+    expect(d['overflow-wrap']).toBe('break-word');
+    expect(d['overflow-wrap']).not.toBe('anywhere');
+    // The kit does not define .nb-page-title (DashboardShell invented that name).
+    // Styling the h1 covers `<h1 class="nb-page-title">` without minting the class.
+    expect(/\n\.nb-page-title\s*\{/.test(DESIGN_KIT_CSS)).toBe(false);
+    expect(kitClasses().has('nb-page-title')).toBe(false);
+    expect(DESIGN_KIT_CSS).toContain(NEW_TITLE);
+  });
+
   it('the BR1959 header-action and chip shrink tokens stay as they were', () => {
     const actions = declarations('.nb-header-actions');
     expect(actions['min-width']).toBe('0');
@@ -147,35 +256,98 @@ describe('a dashboard topbar that holds a long title fits a phone', () => {
     const viewport = 390;
     const titleContent = 468;
     const paddingInline = 40; // 20 + 20 from padding: 12px 20px
+    const css = flagsFromCss();
     const before = topbarOnAPhone({
       viewport, titleContent, paddingInline,
-      maxWidth100: false, boxSizingBorderBox: false, overflowWrapAnywhere: false,
+      maxWidth100: false, boxSizingBorderBox: false, titleCanWrap: false,
     });
     expect(before.headerBox).toBe(508);
     // The report recorded 119 px of sideways scroll (508 − 390 = 118; 1 px of subpixel/rounding).
     expect(before.pageOverflow).toBe(118);
     const after = topbarOnAPhone({
       viewport, titleContent, paddingInline,
-      maxWidth100: true, boxSizingBorderBox: true, overflowWrapAnywhere: true,
+      maxWidth100: css.maxWidth100, boxSizingBorderBox: css.boxSizingBorderBox,
+      titleCanWrap: css.titleCanWrap,
     });
     expect(after.headerBox).toBe(390);
     expect(after.pageOverflow).toBe(0);
     // Without box-sizing: border-box, max-width: 100% would still let padding spill past the screen.
     const noBorderBox = topbarOnAPhone({
       viewport, titleContent, paddingInline,
-      maxWidth100: true, boxSizingBorderBox: false, overflowWrapAnywhere: true,
+      maxWidth100: true, boxSizingBorderBox: false, titleCanWrap: true,
     });
     expect(noBorderBox.headerBox).toBe(430);
     expect(noBorderBox.pageOverflow).toBe(40);
-    // overflow-x:auto is not modelled as a way to make the page fit — that token is the defect.
+    // A capped header whose title cannot wrap still paints past the viewport
+    // (overflow stays visible so dropdowns are not clipped).
+    const cappedButNoWrap = topbarOnAPhone({
+      viewport, titleContent, paddingInline,
+      maxWidth100: true, boxSizingBorderBox: true, titleCanWrap: false,
+    });
+    expect(cappedButNoWrap.headerBox).toBe(390);
+    expect(cappedButNoWrap.pageOverflow).toBe(118);
+  });
+
+  it('a title beside actions does not break a normal word mid-word, and an unbreakable title still fits at 390px', () => {
+    const viewport = 390;
+    const paddingInline = 40;
+    const gap = 12;
+    const actionsWidth = 220;
+    const longestWordWidth = 160; // "Examination" as one word, wider than leftover 118
+    const css = flagsFromCss();
+
+    const shipped = titleBesideActions({
+      viewport, paddingInline, gap, actionsWidth, longestWordWidth,
+      titleMaxContent: 280,
+      ...css,
+    });
+    expect(shipped.wordBreaksMidWord).toBe(false);
+    expect(shipped.titleBox).toBe(350);
+    expect(shipped.titleBox).toBeGreaterThanOrEqual(longestWordWidth);
+
+    // Control: inherited anywhere packs the title into leftover 118 px (350 − 12 − 220).
+    const residual = titleBesideActions({
+      viewport, paddingInline, gap, actionsWidth, longestWordWidth,
+      titleMaxContent: 280,
+      maxWidth100: true,
+      boxSizingBorderBox: true,
+      flexWrap: true,
+      overflowWrapAnywhereInherited: true,
+      titleMinWidth0: false,
+      titleOverflowWrapBreakWord: false,
+    });
+    expect(residual.titleBox).toBe(118);
+    expect(residual.wordBreaksMidWord).toBe(true);
+
+    const unbreakable = titleBesideActions({
+      viewport, paddingInline, gap, actionsWidth: 0, longestWordWidth: 468,
+      titleMaxContent: 468,
+      ...css,
+    });
+    expect(unbreakable.headerBox).toBe(390);
+    expect(unbreakable.pageOverflow).toBe(0);
+
+    const unbreakableBefore = titleBesideActions({
+      viewport, paddingInline, gap, actionsWidth: 0, longestWordWidth: 468,
+      titleMaxContent: 468,
+      maxWidth100: false,
+      boxSizingBorderBox: false,
+      flexWrap: false,
+      overflowWrapAnywhereInherited: false,
+      titleMinWidth0: false,
+      titleOverflowWrapBreakWord: false,
+    });
+    expect(unbreakableBefore.headerBox).toBe(508);
+    expect(unbreakableBefore.pageOverflow).toBe(118);
   });
 
   it('a workspace still holding the kit as it was before this fix is still recognised as OUR starter', () => {
-    const before = DESIGN_KIT_CSS
+    const before = withoutTitleRule(DESIGN_KIT_CSS)
       .replace(/\/\* A dashboard topbar holds the page title[\s\S]*?\*\/\n/, '')
       .replace(NEW_TOPBAR, OLD_TOPBAR);
     expect(before).not.toBe(DESIGN_KIT_CSS);
     expect(before).toContain(OLD_TOPBAR);
+    expect(before).not.toContain(NEW_TITLE);
     expect(isKnownSeedVersion('src/index.css', before)).toBe(true);
     expect(isKnownSeedVersion('src/index.css', DESIGN_KIT_CSS)).toBe(true);
     // The first PR head shipped overflow-x:auto with its original comment; that starter
@@ -185,12 +357,30 @@ describe('a dashboard topbar that holds a long title fits a phone', () => {
    content size). It may shrink and wrap, and a long title scrolls inside the bar instead
    of widening the page. Existing apps that already copied the previous rule are not rewritten. */
 `;
-    const firstPr = DESIGN_KIT_CSS
+    const firstPr = withoutTitleRule(DESIGN_KIT_CSS)
       .replace(/\/\* A dashboard topbar holds the page title[\s\S]*?\*\/\n/, firstPrComment)
       .replace(NEW_TOPBAR, FIRST_PR_TOPBAR);
     expect(firstPr).not.toBe(DESIGN_KIT_CSS);
     expect(firstPr).toContain(FIRST_PR_TOPBAR);
     expect(firstPr).toContain('scrolls inside the bar');
+    expect(firstPr).not.toContain(NEW_TITLE);
     expect(isKnownSeedVersion('src/index.css', firstPr)).toBe(true);
+
+    // The second PR head shipped overflow-wrap:anywhere on the container.
+    const secondPrComment = `/* A dashboard topbar holds the page title (autopsy BR1972: "EDU AI – EXAMINATION ASSISTANT"
+   made this header 508px wide on a 390px phone, because a flex item's min-width is its
+   content size). It may shrink and wrap; overflow-wrap: anywhere lets an unbreakable title
+   break instead of widening the page. overflow-x is left visible: setting it to auto would
+   compute overflow-y as auto and clip absolute dropdowns and popovers inside the bar.
+   Existing apps that already copied a previous rule are not rewritten. */
+`;
+    const secondPr = withoutTitleRule(DESIGN_KIT_CSS)
+      .replace(/\/\* A dashboard topbar holds the page title[\s\S]*?\*\/\n/, secondPrComment)
+      .replace(NEW_TOPBAR, SECOND_PR_TOPBAR);
+    expect(secondPr).not.toBe(DESIGN_KIT_CSS);
+    expect(secondPr).toContain(SECOND_PR_TOPBAR);
+    expect(secondPr).toContain('overflow-wrap: anywhere lets an unbreakable title');
+    expect(secondPr).not.toContain(NEW_TITLE);
+    expect(isKnownSeedVersion('src/index.css', secondPr)).toBe(true);
   });
 });

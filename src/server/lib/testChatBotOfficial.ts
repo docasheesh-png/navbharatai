@@ -8,7 +8,11 @@ const OPENAI_URLS = new Set([
   'https://api.moonshot.ai/v1/chat/completions',
   'https://api.moonshot.cn/v1/chat/completions',
   'https://api.x.ai/v1/chat/completions',
+  'https://openrouter.ai/api/v1/chat/completions',
 ]);
+const OPENROUTER_FREE_GUARD = {
+  provider: { allow_fallbacks: false, require_parameters: true, data_collection: 'deny', max_price: { prompt: 0, completion: 0, request: 0, image: 0 } },
+};
 
 export class OfficialTestChatError extends Error {
   constructor(
@@ -46,7 +50,10 @@ export async function runOfficialOpenAiCompatTest(input: {
     response = await fetch(input.url, {
       method: 'POST', redirect: 'error', signal: input.signal,
       headers: { Authorization: `Bearer ${input.apiKey}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ model: input.model, messages: input.messages, max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS, stream: false }),
+      body: JSON.stringify({
+        model: input.model, messages: input.messages, max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS, stream: false,
+        ...(input.url === 'https://openrouter.ai/api/v1/chat/completions' ? OPENROUTER_FREE_GUARD : {}),
+      }),
     });
   } catch (error) {
     if (input.signal.aborted) throw new OfficialTestChatError('cancelled', null, 'aborted', null, null, null, null);

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { formatTestChatDiagnostic } from '../../lib/testChatBot';
 import { buildTestChatDiagnostic, classifyTestChatFailure, redactTestChatDiagnosticText } from './testChatBotDiagnostics';
 
 describe('admin test chat diagnostic redaction', () => {
@@ -23,6 +24,7 @@ describe('admin test chat diagnostic redaction', () => {
     expect(classifyTestChatFailure({ httpStatus: 429 })).toBe('rate-limit');
     expect(classifyTestChatFailure({ httpStatus: 402 })).toBe('quota');
     expect(classifyTestChatFailure({ code: 'TIMEOUT' })).toBe('timeout');
+    expect(classifyTestChatFailure({ httpStatus: 504, code: 'MITRIFY_HTTP_504' })).toBe('timeout');
     expect(classifyTestChatFailure({ empty: true })).toBe('empty');
     expect(classifyTestChatFailure({ aborted: true })).toBe('cancelled');
     expect(classifyTestChatFailure({ code: 'NETWORK' })).toBe('network');
@@ -62,5 +64,15 @@ describe('admin test chat diagnostic redaction', () => {
     expect(cleaned).not.toContain(token);
     expect(cleaned).toContain('twentyfouraaaaaa');
     expect(cleaned).toContain('[redacted-secret]');
+  });
+
+  it('explains an HTTP 504 timeout in the copied admin diagnostic', () => {
+    const text = formatTestChatDiagnostic({
+      provider: 'mitrify', model: 'mitrify/auto-cheap', latencyMs: 55765, classification: 'timeout',
+      httpStatus: 504, providerCode: 'MITRIFY_HTTP_504', providerType: null, providerRequestId: null,
+      providerMessage: 'The provider gateway timed out (HTTP 504).', rawErrorBody: '<html>504 Gateway Time-out</html>',
+    });
+    expect(text).toContain('Meaning: the provider gateway timed out (HTTP 504)');
+    expect(text).toContain('provider-side gateway time-out');
   });
 });

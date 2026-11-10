@@ -229,6 +229,9 @@ export function formatTestChatDiagnostic(d: TestChatDiagnostic): string {
     `Provider: ${d.provider}`,
     ...(d.finalOutcome ? [`Final outcome: ${d.finalOutcome}`] : []),
     ...formatAttempt('', d),
+    ...((d.classification === 'timeout' && d.httpStatus === 504)
+      ? ['Meaning: the provider gateway timed out (HTTP 504) before a complete reply arrived. This is a provider-side gateway time-out, not a missing key.']
+      : []),
   ];
   if (d.attempts?.length) {
     d.attempts.forEach((attempt, index) => {

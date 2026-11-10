@@ -17,6 +17,8 @@ import { maximumCostNanoUsd, usdToNanoUsd } from '../AI/FreeChain/spendCap';
 import { OpenAiCompatProvider, FreeChainProviderError, type AdapterConfig, type AdminCapturedProviderError } from '../AI/FreeChain/providers/openAiCompatProvider';
 import { runRegistryRung } from '../AI/FreeChain/providers/openRouterRegistryRung';
 import { strictFreeText } from '../AI/LiveRegistry/runtime';
+import { exactModelId, zero } from '../AI/LiveRegistry/eligibility';
+import { catalogJson, OPENROUTER_MODELS_URL } from '../AI/LiveRegistry/sync';
 import { FreeRoutingError } from '../AI/LiveRegistry/dispatcher';
 import { realRateFor } from '../AgentV3/providerRates';
 import { ROUTER_ONE_DEFAULT_MODEL } from '../AI/RouterOne/routerOne';
@@ -116,6 +118,55 @@ function requestedModel(action: TestChatAction): string | null {
   const model = action.model?.trim() ?? '';
   return model && model.length <= 200 && !/[\s,]/.test(model) ? model : null;
 }
+const MITRIFY_GATEWAY_TIMEOUT = 'The provider gateway timed out (HTTP 504) before a complete reply arrived. This is a provider-side gateway time-out, not a missing key or an invalid model id.';
+function mitrifyOutputTokens(): number {
+  const cap = freeChainConfig()?.features.replyMaxTokens;
+  const shared = Number.isSafeInteger(cap) && (cap as number) >= 64 ? (cap as number) : 250;
+  return Math.min(TEST_CHAT_MAX_OUTPUT_TOKENS, shared);
+}
+function readMitrifyStreamEvent(wire: Uint8Array): { text?: string; model?: string; usage?: { inputTokens: number; outputTokens: number } } {
+  const payload = new TextDecoder().decode(wire).split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
+  if (!payload || payload === '[DONE]') return {};
+  const data = JSON.parse(payload);
+  const text = data?.choices?.[0]?.delta?.content ?? data?.choices?.[0]?.message?.content;
+  const tokens = data?.usage;
+  return {
+    ...(typeof text === 'string' && text ? { text } : {}),
+    ...(typeof data?.model === 'string' && data.model.trim() ? { model: data.model } : {}),
+    ...(Number.isSafeInteger(tokens?.prompt_tokens) && Number.isSafeInteger(tokens?.completion_tokens)
+      ? { usage: { inputTokens: tokens.prompt_tokens as number, outputTokens: tokens.completion_tokens as number } } : {}),
+  };
+}
+function catalogTokenFree(value: unknown): boolean {
+  return zero(value) || value === 0;
+}
+function isPublicCatalogFreeModel(model: unknown): model is { id: string } {
+  if (!model || typeof model !== 'object') return false;
+  const row = model as { id?: unknown; pricing?: { prompt?: unknown; completion?: unknown; request?: unknown }; architecture?: { input_modalities?: unknown; output_modalities?: unknown } };
+  if (typeof row.id !== 'string' || !exactModelId(row.id) || !row.id.endsWith(':free')) return false;
+  if (!catalogTokenFree(row.pricing?.prompt) || !catalogTokenFree(row.pricing?.completion)) return false;
+  if (row.pricing?.request !== undefined && !catalogTokenFree(row.pricing.request)) return false;
+  const input = row.architecture?.input_modalities;
+  const output = row.architecture?.output_modalities;
+  if (Array.isArray(input) && !input.includes('text')) return false;
+  if (Array.isArray(output) && !output.includes('text')) return false;
+  return true;
+}
+function registryDispatchUnavailable(error: unknown): boolean {
+  if (error instanceof FreeRoutingError) return error.code === 'FREE_REGISTRY_NOT_CONFIGURED';
+  return error instanceof Error && error.message === 'FREE_CHAIN_REGISTRY_UNAVAILABLE';
+}
+async function pickAdminOpenRouterFreeModel(input: { preferred: string | null; listed: readonly string[]; signal: AbortSignal }): Promise<string | null> {
+  const raw = await catalogJson(OPENROUTER_MODELS_URL, null, fetch, input.signal);
+  const rows = raw && typeof raw === 'object' && Array.isArray((raw as { data?: unknown }).data) ? (raw as { data: unknown[] }).data : [];
+  const free = rows.filter(isPublicCatalogFreeModel).map(row => row.id);
+  if (!free.length) return null;
+  const allowed = new Set(free);
+  if (input.preferred) return allowed.has(input.preferred) ? input.preferred : null;
+  const listedFree = input.listed.filter(id => allowed.has(id));
+  const pool = listedFree.length ? listedFree : [...free].sort((a, b) => a.localeCompare(b));
+  return pool[0] ?? null;
+}
 function adminQubaxFallback(modelId: string, now: number): QubaxMarketChoice {
   return {
     modelId, inputNanoUsdPerMillion: 1, outputNanoUsdPerMillion: 1,
@@ -202,7 +253,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
     : reason === 'free-plan-review-required'
       ? 'The free-plan review used by user chat is missing or expired; this admin test still calls only the selected provider.'
       : meta.kind === 'openrouter'
-        ? 'A send uses the same LiveRegistry verified-free ranking as main chat (strictFreeText / runRegistryRung).'
+        ? 'A send uses the same LiveRegistry verified-free ranking as main chat when that registry is configured (strictFreeText / runRegistryRung). If it is not, this page fetches OpenRouter’s public catalog at send time and calls only a model whose catalog price is 0/0 and whose id ends with :free. The reply names the chosen model. This does not change user-chat routing.'
         : meta.rungId === 'cheapinf'
           ? 'This admin test can call CheaperInference when its key is set, using the same model string main chat would use. It does not change the user-chat sharing mode.'
         : undefined;
@@ -405,21 +456,26 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       const ceiling = quoteTokens(action.messages, 1, 1);
       const receipt = ceiling > 0 ? await reserveShared(db, requestId, uid, ceiling) : null;
       if (ceiling > 0 && !receipt) throw new TestChatUnavailable('budget', 409);
-      const result = await releaseIfUnused(receipt, async () => {
+      let content = '';
+      let reported = status.model || mitrifyConfig().model;
+      let usage: { inputTokens: number; outputTokens: number } | undefined;
+      const maxTokens = mitrifyOutputTokens();
+      await releaseIfUnused(receipt, async () => {
         await revalidate();
         return createMitrifyClient(process.env, metadata => console.info('[MITRIFY]', JSON.stringify(metadata)), {
           onHttpError: detail => { captured = detail; },
         }).chat({
-          messages: action.messages, max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS, stream: false,
-        }, { signal: bounded, maxAttempts: 1, beforeAttempt: async () => { await revalidate(); } });
+          messages: action.messages, max_tokens: maxTokens, stream: true,
+        }, {
+          signal: bounded, maxAttempts: 1, beforeAttempt: async () => { await revalidate(); },
+          onChunk: (wire: Uint8Array) => {
+            const event = readMitrifyStreamEvent(wire);
+            if (event.text) content += event.text;
+            if (event.model) reported = event.model;
+            if (event.usage) usage = event.usage;
+          },
+        });
       });
-      const choice = result.data?.choices?.[0]?.message?.content;
-      const content = typeof choice === 'string' ? choice : '';
-      const reported = typeof result.data?.model === 'string' && result.data.model.trim()
-        ? result.data.model : (status.model || mitrifyConfig().model);
-      const tokens = result.data?.usage;
-      const usage = Number.isSafeInteger(tokens?.prompt_tokens) && Number.isSafeInteger(tokens?.completion_tokens)
-        ? { inputTokens: tokens.prompt_tokens as number, outputTokens: tokens.completion_tokens as number } : undefined;
       return finish(action, content, reported, startedAt, usage);
     }
     if (meta.kind === 'surplus' || meta.kind === 'router-one') throw new TestChatUnavailable('disabled');
@@ -429,12 +485,30 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       const admin = requestedModel(action);
       const prompt = action.messages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n\n');
       const request = { prompt, maxOutputTokens: TEST_CHAT_MAX_OUTPUT_TOKENS, signal: bounded };
-      const result = admin
-        ? await runRegistryRung(request, [admin], admin)
-        : listed.length
-          ? await runRegistryRung(request, listed, listed[0])
-          : await strictFreeText({ ...request, maxAttempts: 1 as const });
-      return finish(action, result.content, result.model, startedAt, result.usage);
+      try {
+        const result = admin
+          ? await runRegistryRung(request, [admin], admin)
+          : listed.length
+            ? await runRegistryRung(request, listed, listed[0])
+            : await strictFreeText({ ...request, maxAttempts: 1 as const });
+        return finish(action, result.content, result.model, startedAt, result.usage);
+      } catch (error) {
+        if (!registryDispatchUnavailable(error)) throw error;
+      }
+      const picked = await pickAdminOpenRouterFreeModel({ preferred: admin, listed, signal: bounded });
+      if (!picked) {
+        return fail('no-model', 503, {
+          model: admin ?? listed[0] ?? status.model, latencyMs: Math.max(0, Date.now() - startedAt),
+          providerCode: 'FREE_REGISTRY_NOT_CONFIGURED',
+          providerMessage: 'LiveRegistry is not configured, and the public OpenRouter catalog has no zero-price :free text model for this admin test.',
+          extraSecrets,
+        });
+      }
+      const key = firstPresent(process.env, ['OPENROUTER_API_KEY']) || rungOf('openrouter')?.key || '';
+      const result = await runOfficialOpenAiCompatTest({
+        url: 'https://openrouter.ai/api/v1/chat/completions', apiKey: key, model: picked, messages: action.messages, signal: bounded,
+      });
+      return finish(action, result.content, result.model || picked, startedAt, result.usage);
     }
 
     let officialReceipt: Awaited<ReturnType<typeof reserveShared>> = null;
@@ -532,11 +606,14 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
     }
     if (error instanceof MitrifyError) {
       const cap = captured && 'status' in captured ? captured : undefined;
+      const httpStatus = cap?.status ?? (error.status || null);
+      const gatewayTimeout = httpStatus === 504 || error.code === 'MITRIFY_HTTP_504';
       return fail('unconfirmed', 503, {
-        model: status.model, latencyMs: latency, httpStatus: cap?.status ?? (error.status || null), providerCode: error.code,
+        model: status.model, latencyMs: latency, httpStatus, providerCode: error.code,
         rawErrorBody: cap && 'body' in cap ? cap.body : null,
         providerRequestId: cap && 'requestId' in cap ? cap.requestId ?? null : null,
         aborted: error.code === 'MITRIFY_CANCELLED', extraSecrets,
+        ...(gatewayTimeout ? { providerMessage: MITRIFY_GATEWAY_TIMEOUT } : {}),
       });
     }
     return fail('unconfirmed', 503, { model: status.model, latencyMs: latency, extraSecrets });

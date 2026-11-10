@@ -8,7 +8,10 @@ const API = '/api/v1/admin/test-chat-bot';
 const button = 'min-h-11 rounded-lg border border-line px-3 py-2 text-sm text-ink disabled:opacity-40';
 const labelOf = (provider: TestChatProviderId, status: TestChatStatus | null): string =>
   status?.providers.find(p => p.id === provider)?.label ?? (provider === 'qubax' ? 'Qubax' : provider);
-const failureFromCode = (code: unknown, name: string): string => {
+const failureFromCode = (code: unknown, name: string, diagnostic?: TestChatDiagnostic | null): string => {
+  if (diagnostic?.httpStatus === 504 || diagnostic?.providerCode === 'MITRIFY_HTTP_504') {
+    return "The selected provider's gateway timed out (HTTP 504). That is a provider-side gateway time-out, not a missing key. No other NavBharatAI provider was tried.";
+  }
   if (code === 'budget') return 'The shared daily or monthly budget cannot reserve this try. No provider was called.';
   if (code === 'no-model') return 'No eligible priced model is available for the selected provider. No provider was called.';
   if (code === 'tries-exhausted') return 'The selected provider tried its allowed models and did not return a valid answer. No other NavBharatAI provider was tried.';
@@ -87,8 +90,9 @@ export function TestChatBotPanel({ adminToken }: { adminToken: string }): React.
       if (current !== epoch.current) return;
       if (!response.ok) {
         const payload = data && typeof data === 'object' ? data as { code?: unknown; diagnostic?: unknown } : {};
-        if (isTestChatDiagnostic(payload.diagnostic)) setDiagnostic(payload.diagnostic);
-        setError(failureFromCode(payload.code, displayName));
+        const detail = isTestChatDiagnostic(payload.diagnostic) ? payload.diagnostic : null;
+        if (detail) setDiagnostic(detail);
+        setError(failureFromCode(payload.code, displayName, detail));
         return;
       }
       if (!isTestChatReply(data) || data.requestId !== requestId || data.provider !== provider) { setError(TEST_CHAT_FAILURE); return; }

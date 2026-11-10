@@ -101177,3 +101177,9 @@ Owner t307u sequential audit, BR1962 only (boundary 1951..2105 frozen). A 12.5 s
 - **F2.** Numbered lines count unless the whole line is a tight anchored quality/acceptance constraint (no product-noun list). Reviewer examples (Responsive POS screen for tablets / Hinglish twin / Keep existing order history after migration) stay features. Adversarial corpus 120: 0 LARGE→smaller vs main. BR1962 is not LARGE.
 
 Queue: Q-2623 and Q-2624 (both implemented). This commit closes the two BR1961 rows resolved by #4146. Q-2620/2621/2622, Q-2615/2616/2617, Q-2608/2610/2611, the BR1958 blockers, Q-2371 and the PR4109 row stay open.
+
+## 2026-11-10 — BR1963 autopsy (India-map game, succeeded): lock the recovered-starter / no-retry gates; queue #4148 residuals
+Owner t311u sequential audit, BR1963 only (boundary 1951..2105 frozen). "Build a game with indian map" succeeded in 12.2 min after an E2B cap-20 unavailable that recovered into a workspace with only `src/` (no React starter). The kit on disk lacked events.ts; the builder abandoned it. Those preventable gaps were already fixed by #4132 (the next day) and #4146. This commit neighbour-locks them against this prompt and does not change a production heuristic. Ledger: [autopsy](docs/build-report-autopsy-BR1963.md), [evidence](docs/build-report-autopsy-BR1963-evidence.json).
+- **F1.** Neighbour locks only: this prompt stays a 2D kit whose runtime includes events.ts even if `include` is `['meta']`; scope stays ordinary/direct; a manifest-less recovered workspace still cannot seed recipes; the unavailable notice no longer invites a retry.
+
+Queue: Q-2625…Q-2629 (#4148 residuals, queued not fixed). This commit closes the two BR1962 rows resolved by #4148 (Q-2623, Q-2624). Q-2620/2621/2622, Q-2615/2616/2617, Q-2608/2610/2611, the BR1958 blockers, Q-2371 and the PR4109 row stay open.

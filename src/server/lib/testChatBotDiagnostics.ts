@@ -5,6 +5,7 @@ import {
   type TestChatDiagnosticClassification,
   type TestChatProviderId,
 } from '../../lib/testChatBot';
+import { pemPrivateKeyBlocks } from './pemKeyMaterial';
 
 const MAX_FIELD = 1_500;
 const ENV_NAME = /\b[A-Z][A-Z0-9_]{2,}(?:_API_KEY|_API_TOKEN|_TOKEN|_SECRET|_PASSWORD|_PRIVATE_KEY|_CREDENTIAL|_CLIENT_SECRET)\b/g;
@@ -14,7 +15,6 @@ const ASSIGNMENT = /\b(api[_-]?key|authorization|access[_-]?token|secret|passwor
 const GOOGLE_KEY = /\bAIza[0-9A-Za-z_-]{20,}\b/g;
 const AWS_ACCESS_KEY = /\bAKIA[0-9A-Z]{16}\b/g;
 const AWS_SECRET = /\b(?:aws[_-]?secret[_-]?access[_-]?key|secretAccessKey|SECRET_ACCESS_KEY)\s*[=:]\s*[A-Za-z0-9/+=]{30,}/gi;
-const PEM_BLOCK = /-----BEGIN[^-]{0,80}PRIVATE KEY-----[\s\S]*?-----END[^-]{0,80}PRIVATE KEY-----/g;
 const NEAR_SECRET = /\b(api[_-]?key|secret(?:[_-]?access[_-]?key)?|access[_-]?token|token|password|credential)\b([\s\S]{0,24}?)([A-Za-z0-9+/=_\-.]{24,})/gi;
 
 function highEntropy(token: string): boolean {
@@ -29,7 +29,7 @@ export function redactTestChatDiagnosticText(text: string, extraSecrets: readonl
     for (const secret of extraSecrets) {
       if (typeof secret === 'string' && secret.length >= 8) out = out.split(secret).join('[redacted-secret]');
     }
-    out = out.replace(PEM_BLOCK, '[redacted-secret]');
+    out = out.replace(pemPrivateKeyBlocks(), '[redacted-secret]');
     out = out.replace(GOOGLE_KEY, '[redacted-secret]');
     out = out.replace(AWS_ACCESS_KEY, '[redacted-secret]');
     out = out.replace(AWS_SECRET, 'aws_secret_access_key=[redacted-secret]');

@@ -87,4 +87,26 @@ describe('🔒 neighbours: existing likeness, tools, and a heading mention stay 
     expect(requestSubject(p)).toBe(BR1961_FOLLOW_UP);
     expect(analyzeAppScope(p).famousApp).toBeNull();
   });
+
+  // Reviewer residual on #4146: "X ke/ka tarah-tarah" / "X ke tarah tarah" means "various kinds of X",
+  // not "like X". When the name is not in the first-line subject, likeness was the only reason these
+  // escalated. Standalone they still clone via needsIntent's subject rule (6452c0a9) — not widened.
+  it.each([
+    'YouTube ke tarah-tarah ke videos',
+    'youtube ke tarah tarah ke tools',
+    'Instagram ki tarah-tarah photos',
+    'WhatsApp ka tarah-tarah status',
+  ])('"%s" after a follow-up first line is various kinds, not a likeness', (later) => {
+    const p = `${BR1961_FOLLOW_UP}\n\n${later}`;
+    expect(requestSubject(p)).toBe(BR1961_FOLLOW_UP);
+    const s = analyzeAppScope(p);
+    expect(s.famousApp).toBeNull();
+    expect(s.decision).toBe('direct');
+  });
+
+  it('standalone "YouTube ke tarah-tarah ke videos" still clones via first-line subject (6452c0a9)', () => {
+    const s = analyzeAppScope('YouTube ke tarah-tarah ke videos');
+    expect(s.famousApp).toBe('YouTube');
+    expect(s.decision).toBe('analyze');
+  });
 });

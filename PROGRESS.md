@@ -101170,3 +101170,10 @@ Owner t307u sequential audit, BR1961 only (boundary 1951..2105 frozen). A follow
 - **F2.** sandboxUnavailableNotice says we are still trying and that the user does not need to start again (a second Start would consume another sandbox slot). The fast-lane skip after setup failure was already #4124.
 
 Queue: Q-2618…Q-2622 (two implemented, three 🟡 blocked: exclusive-access phrasing, E2B cap of 20, paragraph-subject widening). This commit closes the three BR1960 rows resolved by #4135. Q-2615/2616/2617, Q-2608/2610/2611, the BR1958 blockers, Q-2371 and the PR4109 row stay open.
+
+## 2026-11-10 — BR1962 autopsy (NOVA AI real-AI edit, user-stopped): a quality checklist is not ten features; "tarah-tarah" is various kinds
+Owner t307u sequential audit, BR1962 only (boundary 1951..2105 frozen). A 12.5 s user-stopped edit of an existing NOVA AI app was scoped LARGE for "~10 distinct features" because a nine-item Requirements checklist was counted line-by-line; the user stop itself was honored and not charged. Reviewer residual on #4146: Hindi "ke/ka tarah-tarah" (various kinds) was not neighbour-locked. Ledger: [autopsy](docs/build-report-autopsy-BR1962.md), [evidence](docs/build-report-autopsy-BR1962-evidence.json).
+- **F1.** "X ke/ka tarah-tarah" / "X ke tarah tarah" is not a likeness word. Standalone subject mentions still clone (6452c0a9).
+- **F2.** Numbered lines in `featureCount` use the same `isFeatureLine` filters as the shared enumerator. Over 78,007 strings, analyze 282→277 (five platform JSDoc comments) and famous 178→178.
+
+Queue: Q-2623 and Q-2624 (both implemented). This commit closes the two BR1961 rows resolved by #4146. Q-2620/2621/2622, Q-2615/2616/2617, Q-2608/2610/2611, the BR1958 blockers, Q-2371 and the PR4109 row stay open.

@@ -261,6 +261,24 @@ export function notAFeatureLine(raw: string): boolean {
   return false;
 }
 
+/**
+ * The filters `enumeratedFeatureItems` applies to one candidate line. `featureCount`'s legacy
+ * numbered-line tally must use this too (BR1962, report be761ff8): a nine-item "Requirements"
+ * checklist of long implementation/QA sentences ("Inspect src/lib/aiService.ts", "Never display
+ * fake AI responses", "Keep the existing design unchanged") was counted as "~10 distinct features"
+ * and scoped LARGE, while the shared enumerator — which already drops clauses longer than
+ * MAX_ITEM_WORDS — saw only three short named parts. Over-counting spends a planner call; this
+ * can only LOWER the legacy tally, never raise it.
+ */
+export function isFeatureLine(raw: string): boolean {
+  if (notAFeatureLine(raw)) return false;
+  const item = tidy(raw);
+  if (!isItem(item)) return false;
+  if (isRecordAttribute(item)) return false;
+  if (STYLE_ADJECTIVE.test(item)) return false;
+  return true;
+}
+
 export function countEnumeratedFeatures(prompt: string): number {
   return Math.min(enumeratedFeatureItems(prompt).length, MAX_COUNTED);
 }

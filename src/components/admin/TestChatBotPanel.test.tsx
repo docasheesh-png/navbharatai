@@ -29,6 +29,8 @@ describe('separate Test Chat Bot panel', () => {
     expect(panel).toContain('priced Qubax rows');
     expect(panel).toContain('Price feed');
     expect(panel).toContain('isAllowedTestChatModel');
+    expect(panel).toContain('HTTP 504');
+    expect(panel).toContain('provider-side gateway time-out');
     expect(panel).toContain('modelDraft');
     expect(panel).not.toContain('No automatic retry');
     expect(panel).not.toMatch(/localStorage|sessionStorage|authedFetch|AIService|useChatEngine|\/api\/chat/);

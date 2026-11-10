@@ -71,6 +71,7 @@ describe('admin test chat does not change user chat', () => {
     const qubax = read('src/server/lib/qubax.ts');
     const runtime = read('src/server/AI/FreeChain/runtime.ts');
     const mitrify = read('src/server/lib/mitrify.ts');
+    const official = read('src/server/lib/testChatBotOfficial.ts');
     expect(impl).toContain('refreshQubaxPriceFeed');
     expect(impl).toContain('readQubaxMarketPlan');
     expect(impl).toContain('runApprovedQubaxChat');
@@ -79,7 +80,18 @@ describe('admin test chat does not change user chat', () => {
     expect(impl).toContain('createMitrifyClient');
     expect(impl).not.toContain('runApprovedMitrifyChain');
     expect(impl).not.toMatch(/MITRIFY_CHAIN_ENABLED\s*=/);
-    expect(impl).not.toContain('openrouter.ai/api/v1/models');
+    expect(impl).toContain('OPENROUTER_MODELS_URL');
+    expect(impl).toContain('catalogJson');
+    expect(impl).toContain('FREE_REGISTRY_NOT_CONFIGURED');
+    expect(impl).toContain("endsWith(':free')");
+    expect(impl).not.toMatch(/LIVE_MODEL_REGISTRY_ENABLED\s*=/);
+    expect(impl).not.toMatch(/FREE_CHAIN_OPENROUTER_MODELS\s*=/);
+    expect(official).toContain('https://openrouter.ai/api/v1/chat/completions');
+    expect(official).toContain('max_price');
+    expect(official).toContain('allow_fallbacks: false');
+    expect(runtime).not.toContain('catalogJson');
+    expect(runtime).toContain("rung.id === 'openrouter' && !cfg.openRouterModels.length");
+    expect(runtime).toContain('quality-allowlist-required');
     expect(qubax).toContain('adminFallbackTries');
     expect(qubax).toContain('readQubaxMarketPlan');
     expect(runtime).toContain('runApprovedQubaxChat');
@@ -89,5 +101,10 @@ describe('admin test chat does not change user chat', () => {
     expect(read('src/server/AI/InferenceGateway/qubaxTransport.ts')).not.toContain('adminFallbackTries');
     expect(mitrify).toContain("env.MITRIFY_CHAIN_ENABLED !== '1'");
     expect(mitrify).toContain('runApprovedMitrifyChain');
+    expect(runtime).toContain('max_tokens: cfg.features.replyMaxTokens, stream: true');
+    expect(impl).toContain('mitrifyOutputTokens');
+    expect(impl).toContain('max_tokens: maxTokens, stream: true');
+    expect(impl).toContain('createMitrifyClient');
+    expect(impl).not.toMatch(/MITRIFY_CHAIN_ENABLED\s*=/);
   });
 });

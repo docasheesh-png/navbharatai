@@ -4,7 +4,8 @@ const fake = vi.hoisted(() => ({ run: vi.fn(), config: vi.fn(), db: vi.fn(), mai
   compatCtor: vi.fn(), compatTurn: vi.fn(), officialOpenAi: vi.fn(), officialAnthropic: vi.fn(),
   refresh: vi.fn(), mitrifyClient: vi.fn(), mitrifyChat: vi.fn(), registryRung: vi.fn(), strictFree: vi.fn(),
   marketPlan: undefined as undefined | ((...args: unknown[]) => unknown),
-  feedSummary: undefined as undefined | ((...args: unknown[]) => unknown) }));
+  feedSummary: undefined as undefined | ((...args: unknown[]) => unknown),
+  catalogJson: undefined as undefined | ((...args: unknown[]) => unknown) }));
 vi.mock('./qubax', () => ({ runApprovedQubaxChat: fake.run, qubaxConfig: fake.config,
   QubaxError: class extends Error { constructor(readonly code: string, readonly status = 0) { super(code); } } }));
 vi.mock('./qubaxPriceFeedRuntime', () => ({ refreshQubaxPriceFeed: (...args: unknown[]) => fake.refresh(...args) }));
@@ -18,6 +19,15 @@ vi.mock('../AI/FreeChain/providers/openRouterRegistryRung', () => ({
 vi.mock('../AI/LiveRegistry/runtime', () => ({
   strictFreeText: (...args: unknown[]) => fake.strictFree(...args),
 }));
+vi.mock('../AI/LiveRegistry/sync', async importOriginal => {
+  const actual = await importOriginal<typeof import('../AI/LiveRegistry/sync')>();
+  return {
+    ...actual,
+    catalogJson: (...args: unknown[]) => fake.catalogJson
+      ? fake.catalogJson(...args)
+      : actual.catalogJson(...args as Parameters<typeof actual.catalogJson>),
+  };
+});
 vi.mock('./qubaxMarket', async importOriginal => {
   const actual = await importOriginal<typeof import('./qubaxMarket')>();
   return {
@@ -78,15 +88,17 @@ beforeEach(() => {
   vi.resetAllMocks();
   fake.marketPlan = undefined;
   fake.feedSummary = undefined;
+  fake.catalogJson = undefined;
   fake.config.mockReturnValue({ enabled: true, apiKey: 'synthetic-key' }); fake.db.mockReturnValue({ marker: 'db' });
   fake.budgetConfig.mockReturnValue(budget());
   fake.maintenance.mockResolvedValue(undefined); fake.month.mockResolvedValue('2026-11');
   fake.reserve.mockResolvedValue({ id: 'hold', mayDispatch: true }); fake.run.mockResolvedValue(reply);
   fake.refresh.mockResolvedValue({ status: 'unavailable' });
   fake.mitrifyClient.mockReturnValue({ chat: fake.mitrifyChat });
-  fake.mitrifyChat.mockResolvedValue({
-    status: 200, headers: {},
-    data: { model: 'mitrify/auto-cheap', choices: [{ message: { content: 'Hello from Mitrify' } }], usage: { prompt_tokens: 2, completion_tokens: 3 } },
+  fake.mitrifyChat.mockImplementation(async (_body: unknown, options?: { onChunk?: (wire: Uint8Array) => void }) => {
+    const payload = { model: 'mitrify/auto-cheap', choices: [{ delta: { content: 'Hello from Mitrify' }, finish_reason: 'stop' }], usage: { prompt_tokens: 2, completion_tokens: 3 } };
+    await options?.onChunk?.(new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`));
+    return { status: 200, headers: {}, data: undefined };
   });
   fake.registryRung.mockResolvedValue({ content: 'Hello from OpenRouter', model: 'openrouter/free', usage: { inputTokens: 2, outputTokens: 3 } });
   fake.strictFree.mockResolvedValue({ content: 'Hello from registry', model: 'registry/free', usage: { inputTokens: 2, outputTokens: 3 } });
@@ -321,9 +333,30 @@ describe('test chat provider isolation and admission', () => {
     expect(result).toMatchObject({ provider: 'mitrify', content: 'Hello from Mitrify', model: 'mitrify/auto-cheap', noFallback: true });
     expect(fake.mitrifyClient).toHaveBeenCalledOnce();
     expect(fake.mitrifyChat).toHaveBeenCalledOnce();
+    expect(fake.mitrifyChat.mock.calls[0]?.[0]).toMatchObject({ max_tokens: 250, stream: true, messages: action.messages });
+    expect(fake.mitrifyChat.mock.calls[0]?.[1]).toMatchObject({ maxAttempts: 1, onChunk: expect.any(Function) });
     expect(fake.run).not.toHaveBeenCalled();
     expect(fake.reserve).toHaveBeenCalledOnce();
     expect(process.env.MITRIFY_CHAIN_ENABLED).toBe('0');
+  });
+  it('caps a Mitrify admin send at the shared user-chain reply token limit', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.budgetConfig.mockReturnValue(budget({ features: { monthlyCap: true, monthlyCapNanoUsd: 1000, replyMaxTokens: 180 } }));
+    await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal);
+    expect(fake.mitrifyChat.mock.calls[0]?.[0]).toMatchObject({ max_tokens: 180, stream: true });
+  });
+  it('explains a Mitrify HTTP 504 as a provider gateway timeout', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyChat.mockImplementation(async (_body: unknown, options?: { onHttpError?: unknown }) => {
+      throw new MitrifyError('MITRIFY_HTTP_504', 504);
+    });
+    const error = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('unconfirmed');
+    expect(error.diagnostic).toMatchObject({
+      provider: 'mitrify', classification: 'timeout', httpStatus: 504, providerCode: 'MITRIFY_HTTP_504',
+    });
+    expect(error.diagnostic?.providerMessage).toContain('provider gateway timed out (HTTP 504)');
+    expect(error.diagnostic?.providerMessage).toContain('not a missing key');
   });
   it('releases an unused Mitrify hold when configuration fails before dispatch', async () => {
     vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
@@ -364,6 +397,58 @@ describe('test chat provider isolation and admission', () => {
     fake.budgetConfig.mockReturnValue(budget({ rungs: [openrouterRung], openRouterModels: [] }));
     await runTestChat({ ...action, provider: 'openrouter-verified-free', model: 'meta-llama/llama-3.3-70b-instruct:free' }, 'actor', new AbortController().signal);
     expect(fake.registryRung).toHaveBeenCalledWith(expect.anything(), ['meta-llama/llama-3.3-70b-instruct:free'], 'meta-llama/llama-3.3-70b-instruct:free');
+  });
+  it('falls back to a live public-catalog :free zero-price model when LiveRegistry is not configured', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'synthetic-or-key');
+    const openrouterRung = {
+      id: 'openrouter', configured: true, key: 'synthetic-or-key', keyEnv: 'OPENROUTER_API_KEY',
+      model: '', baseURL: 'https://openrouter.ai/api/v1', streamUsage: false, priceIn: 0, priceOut: 0,
+    };
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [openrouterRung], openRouterModels: [] }));
+    fake.strictFree.mockRejectedValue(new FreeRoutingError('FREE_REGISTRY_NOT_CONFIGURED'));
+    fake.catalogJson = vi.fn().mockResolvedValue({
+      data: [
+        { id: 'paid/model', pricing: { prompt: '1', completion: '1' } },
+        { id: 'zeta/older:free', pricing: { prompt: '0', completion: '0' } },
+        { id: 'alpha/cheap:free', pricing: { prompt: '0', completion: '0' }, architecture: { input_modalities: ['text'], output_modalities: ['text'] } },
+        { id: 'beta/almost:free', pricing: { prompt: '0.0001', completion: '0' } },
+        { id: 'gamma/zero', pricing: { prompt: '0', completion: '0' } },
+        { id: 'image/only:free', pricing: { prompt: '0', completion: '0' }, architecture: { input_modalities: ['image'], output_modalities: ['text'] } },
+      ],
+    });
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hello from catalog', model: 'alpha/cheap:free', usage: { inputTokens: 2, outputTokens: 3 } });
+    const result = await runTestChat({ ...action, provider: 'openrouter-verified-free' }, 'actor', new AbortController().signal);
+    expect(result).toMatchObject({ provider: 'openrouter-verified-free', content: 'Hello from catalog', model: 'alpha/cheap:free', noFallback: true });
+    expect(fake.catalogJson).toHaveBeenCalledWith('https://openrouter.ai/api/v1/models', null, fetch, expect.any(AbortSignal));
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'https://openrouter.ai/api/v1/chat/completions', model: 'alpha/cheap:free', apiKey: 'synthetic-or-key', messages: action.messages,
+    }));
+    expect(fake.strictFree).toHaveBeenCalledOnce();
+    expect(fake.run).not.toHaveBeenCalled();
+  });
+  it('accepts a typed OpenRouter model only when the live catalog lists it as free', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'synthetic-or-key');
+    const openrouterRung = {
+      id: 'openrouter', configured: true, key: 'synthetic-or-key', keyEnv: 'OPENROUTER_API_KEY',
+      model: '', baseURL: 'https://openrouter.ai/api/v1', streamUsage: false, priceIn: 0, priceOut: 0,
+    };
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [openrouterRung], openRouterModels: [] }));
+    fake.registryRung.mockRejectedValue(new Error('FREE_CHAIN_REGISTRY_UNAVAILABLE'));
+    fake.catalogJson = vi.fn().mockResolvedValue({
+      data: [
+        { id: 'paid/model', pricing: { prompt: '2', completion: '3' } },
+        { id: 'zeta/older:free', pricing: { prompt: '0', completion: '0' } },
+      ],
+    });
+    fake.officialOpenAi.mockResolvedValue({ content: 'Typed free model', model: 'zeta/older:free' });
+    const ok = await runTestChat({ ...action, provider: 'openrouter-verified-free', model: 'zeta/older:free' }, 'actor', new AbortController().signal);
+    expect(ok.model).toBe('zeta/older:free');
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ model: 'zeta/older:free' }));
+    fake.officialOpenAi.mockClear();
+    const error = await runTestChat({ ...action, provider: 'openrouter-verified-free', model: 'paid/model' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('no-model');
+    expect(error.diagnostic?.providerCode).toBe('FREE_REGISTRY_NOT_CONFIGURED');
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
   });
   it('maps a shared OpenRouter NO_VERIFIED_FREE_MODEL miss to no-model', async () => {
     const openrouterRung = {

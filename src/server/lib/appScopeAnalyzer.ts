@@ -16,7 +16,7 @@
 // PURE: no I/O, no clock, no model. Never throws. The exact thresholds are meant to be reviewed against
 // real prompts (the admin will eye-ball the classifications) and tuned here.
 
-import { countEnumeratedFeatures, notAFeatureLine, BIG_SOFTWARE_NOUN, sectionedSpecSize } from '../AgentV3/enumeratedFeatures';
+import { countEnumeratedFeatures, notAFeatureLine, isQualityAcceptanceLine, BIG_SOFTWARE_NOUN, sectionedSpecSize } from '../AgentV3/enumeratedFeatures';
 import { withoutMachineText } from './machineText';
 import { glossDevanagari, withEnglishReading } from './devanagariTechTerms';
 import { MEDIA_PLAYER_APP, withoutDeclinedSentences } from './RequirementGapAnalyzer';
@@ -162,7 +162,10 @@ const LIKENESS_BEFORE = /\b(?:like|jaisa|jaise|jaisi|clone\s+(?:of|like)|similar
 // Tighter than jaisa's 40-char window (t311u, this change ESCALATES): the postposition must sit
 // immediately after the name — the spoken construction — so "youtube seo generator ki tarah" (a tool
 // like that tool) does not inherit a clone reason.
-const HINDI_LIKE_AFTER = /^[\s/-]*(?:ki|ke|ka)\s+tarah\b/i;
+const HINDI_LIKE_AFTER = /^[\s/-]*(?:ki|ke|ka)\s+tarah(?![\s-]+tarah)\b/i;
+// "X ke/ka tarah-tarah" / "X ke tarah tarah" is Hindi for "various kinds of X", not "like X"
+// (reviewer residual on #4146 / BR1961). The negative lookahead keeps the spoken "like"
+// construction ("youtube ki tarah ek app") and drops the reduplicated form.
 
 function hasLikeness(before: string, after: string, after40: string): boolean {
   return LIKENESS_BEFORE.test(before) || LIKENESS_AFTER.test(after40) || HINDI_LIKE_AFTER.test(after);
@@ -290,10 +293,18 @@ function featureCount(raw: string): number {
   const sections = sectionedSpecSize(text);
   // A question or a setting on a bullet is not a feature either (autopsy 0311186f) — the same rule the
   // shared counter applies, so the two counts cannot disagree about one line.
-  const numbered = (text.match(/^\s*(?:\d+[.)]|[-*•])\s+\S.*$/gm) || []).filter((l) => !notAFeatureLine(l)).length;
+  // Numbered lines drop questions/assignments and lines whose WHOLE text is a tight
+  // quality/acceptance constraint (BR1962). The default is to count: a prefix such as
+  // "Responsive" or "Keep existing" is not enough (a shop list with "Responsive POS
+  // screen for tablets" must stay LARGE). MAX_ITEM_WORDS is not applied here.
+  // Markdown bullets keep the previous notAFeatureLine-only tally so a picture's
+  // visual-element list still witnesses autopsy 19641ab5.
+  const numbered = (text.match(/^\s*\d+[.)]\s+\S.*$/gm) || []).filter((l) => !notAFeatureLine(l) && !isQualityAcceptanceLine(l)).length;
+  const bullets = (text.match(/^\s*[-*•]\s+\S.*$/gm) || []).filter((l) => !notAFeatureLine(l)).length;
+
   const verbs = (text.match(/\b(add|build|create|include|with|support|allow|enable|manage|integrate)\b/gi) || []).length;
   // Numbered lists are the strongest signal; verbs are a softer one (halved).
-  const legacy = numbered + Math.floor(verbs / 2);
+  const legacy = numbered + bullets + Math.floor(verbs / 2);
   const counted = Math.max(legacy, countEnumeratedFeatures(text));
   return sections !== null ? Math.min(sections, counted) : counted;
 }

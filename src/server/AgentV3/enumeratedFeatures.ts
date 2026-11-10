@@ -261,6 +261,51 @@ export function notAFeatureLine(raw: string): boolean {
   return false;
 }
 
+/**
+ * A numbered line counts as a feature unless the WHOLE line matches a tight,
+ * anchored quality / acceptance constraint (BR1962, report be761ff8; #4148 reviews).
+ *
+ * Inverted default on purpose. The first F2 applied MAX_ITEM_WORDS=5 to every
+ * numbered line; the second used a closed product-noun list as a safety gate
+ * after prefix matches (`/^responsive\b/`, anywhere-`keep existing`). Those
+ * dropped genuine features such as "Responsive POS screen for tablets" and
+ * "Keep existing order history after migration", so an eight-item shop list
+ * (even under "ERP") went direct/small. This helper must not consult a noun
+ * list. A line that is not exactly one of the patterns below still counts.
+ * PURE.
+ */
+function stripLineMarker(raw: string): string {
+  return String(raw ?? '').replace(/[*_`]+/g, '').replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, '').trim();
+}
+
+const QUALITY_WHOLE_LINE: readonly RegExp[] = [
+  // bare "Responsive" / "Mobile responsive" — not "Responsive <module>"
+  /^(?:Mobile[- ]?)?Responsive\.?$/i,
+  /^(?:The\s+)?(?:app|UI|it)\s+(?:must|should)\s+be\s+responsive\.?$/i,
+  // "Handle loading, timeout(s) and (API) errors (properly/gracefully)"
+  /^Handle(?:s|ing)?\s+loading,?\s+timeouts?\s+and\s+(?:API\s+)?errors(?:\s+(?:properly|gracefully|correctly))?\.?$/i,
+  /^Handle(?:s|ing)?\s+errors(?:\s+(?:properly|gracefully|correctly))?\.?$/i,
+  // "Keep the existing <design|UI|layout|styling> (unchanged)" — optional short
+  // brand words before the design noun so "Keep the existing NOVA AI design
+  // and all working features unchanged" still matches, while "Keep existing
+  // order history after migration" does not.
+  /^Keep\s+(?:the\s+)?existing\s+(?:(?:[\w-]+)\s+){0,3}(?:design|UI|layout|styling)(?:\s+and\s+all\s+working\s+features)?(?:\s+unchanged)?\.?$/i,
+  // "Do not invent/hardcode/fake <API key|data|results>"
+  /^(?:Do\s+not|Don't|Dont)\s+(?:invent|hardcode|fake)\s+(?:an?\s+)?(?:API\s+key|data|results?|responses?|replies)\b.*$/i,
+  // "No demo/mock/fake results"
+  /^No\s+(?:demo|mock|fake|placeholder|dummy)\s+(?:results?|data|responses?|replies)\.?$/i,
+  // BR1962: "Never display fake AI responses."
+  /^Never\s+(?:display|show|return)\s+fake(?:\s+AI)?\s+(?:responses?|replies|results?|data)\.?$/i,
+  // "All tests (must) pass" / bare "Tests pass"
+  /^(?:All\s+)?tests?\s+(?:must\s+)?pass(?:es)?\.?$/i,
+];
+
+export function isQualityAcceptanceLine(raw: string): boolean {
+  const t = stripLineMarker(raw);
+  if (!t) return false;
+  return QUALITY_WHOLE_LINE.some((re) => re.test(t));
+}
+
 export function countEnumeratedFeatures(prompt: string): number {
   return Math.min(enumeratedFeatureItems(prompt).length, MAX_COUNTED);
 }

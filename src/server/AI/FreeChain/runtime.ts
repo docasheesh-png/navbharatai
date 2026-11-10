@@ -307,14 +307,14 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
               const control = await readControls(db, cfg);
               if (!control || control.enabled === false || !cfg.enabled) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
             },
-            reserve: async maximumNanoUsd => {
+            reserve: async (maximumNanoUsd, attemptKey) => {
               triedQuota = true;
               const control = await readControls(db, cfg).catch(() => null);
               if (!control || control.enabled === false || !cfg.enabled) return null;
               const month = cfg.features.monthlyCap ? await reserveMonthly(db, cfg.features.monthlyCapNanoUsd, maximumNanoUsd) : null;
               if (cfg.features.monthlyCap && !month) return null;
               let hold;
-              try { hold = await store.reservePaid({ uncappedRollout: true, requestId: `${requestId}:qubax`, uid: input.context.uid, maxCostNanoUsd: maximumNanoUsd, capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: CHAT_PAID_FALLBACK_PER_USER_LIMIT }); }
+              try { hold = await store.reservePaid({ uncappedRollout: true, requestId: attemptKey ?? `${requestId}:qubax`, uid: input.context.uid, maxCostNanoUsd: maximumNanoUsd, capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: CHAT_PAID_FALLBACK_PER_USER_LIMIT }); }
               catch (error) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); throw error; }
               if (hold && !hold.mayDispatch) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); throw new QubaxError('QUBAX_ADMISSION_UNCERTAIN'); }
               if (!hold) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); return null; }

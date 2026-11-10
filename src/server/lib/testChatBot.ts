@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readTestChatAction, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_MAX_RESPONSE_CHARS,
   type TestChatAction, type TestChatReply, type TestChatStatus } from '../../lib/testChatBot';
-import { qubaxConfig, qubaxOwnerDispatch, QubaxError, runApprovedQubaxChat } from './qubax';
+import { nanoUsdToDecimal, qubaxModelOverride, qubaxRequestCeilingNanoUsd, readQubaxMarketPlan } from './qubaxMarket';
+import { qubaxConfig, QubaxError, runApprovedQubaxChat } from './qubax';
 import { getServerDb } from './serverDb';
 import { assertAiAvailable } from './aiMaintenance';
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
@@ -13,11 +14,30 @@ export class TestChatUnavailable extends Error {
   constructor(readonly reason: 'disabled' | 'configuration' | 'storage' | 'approval-or-budget' | 'invalid' | 'unconfirmed', readonly status = 503) { super(reason); }
 }
 /** Reading this status never probes the provider, performs inference or reveals a credential. */
+export async function loadTestChatStatus(): Promise<TestChatStatus> {
+  const status = testChatStatus();
+  const ceiling = qubaxRequestCeilingNanoUsd(process.env);
+  const override = qubaxModelOverride(process.env);
+  if (!ceiling || override.mode === 'invalid') return status;
+  try {
+    const db = getServerDb();
+    if (!db) return status;
+    const plan = await readQubaxMarketPlan(db, override, Date.now());
+    const choice = plan.eligible[0] ?? plan.backup;
+    if (!choice) return { ...status, approvalRequired: false, providers: [{ ...status.providers[0], model: null, ceilingUsd: nanoUsdToDecimal(ceiling), selection: 'none' }] };
+    return { ...status, approvalRequired: false, providers: [{ ...status.providers[0], model: choice.modelId, ceilingUsd: nanoUsdToDecimal(ceiling),
+      selection: choice.backup ? 'backup' : 'performance', inputUsdPerMillion: nanoUsdToDecimal(choice.inputNanoUsdPerMillion),
+      outputUsdPerMillion: nanoUsdToDecimal(choice.outputNanoUsdPerMillion),
+      officialInputUsdPerMillion: choice.officialInputNanoUsdPerMillion === null ? null : nanoUsdToDecimal(choice.officialInputNanoUsdPerMillion),
+      officialOutputUsdPerMillion: choice.officialOutputNanoUsdPerMillion === null ? null : nanoUsdToDecimal(choice.officialOutputNanoUsdPerMillion),
+      discountBps: choice.discountBps }] };
+  } catch { return status; }
+}
 export function testChatStatus(): TestChatStatus {
   let configured = false, enabled = false;
   try { const cfg = qubaxConfig(); configured = !!cfg.apiKey; enabled = cfg.enabled; } catch { /* Invalid config fails closed. */ }
-  const owner = qubaxOwnerDispatch();
-  return { providers: [{ id: 'qubax', label: 'Qubax', configured, enabled, model: owner?.modelId ?? null }], approvalRequired: !owner, noFallback: true };
+  const ceiling = qubaxRequestCeilingNanoUsd(process.env);
+  return { providers: [{ id: 'qubax', label: 'Qubax', configured, enabled, model: null, ceilingUsd: ceiling ? nanoUsdToDecimal(ceiling) : null }], approvalRequired: !ceiling, noFallback: true };
 }
 
 /** Fixed server-owned registry. Adding a provider requires its reviewed adapter and tests, not an arbitrary URL/key. */
@@ -52,7 +72,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       privateTurn: true, healthTurn: true,
       body: { messages: action.messages, max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS, stream: false },
       revalidate,
-      reserve: async maximumNanoUsd => {
+      reserve: async (maximumNanoUsd, attemptKey) => {
         await revalidate();
         if (!Number.isSafeInteger(maximumNanoUsd) || maximumNanoUsd <= 0) return null;
         const month = cfg.features.monthlyCap ? await reserveMonthly(db, cfg.features.monthlyCapNanoUsd, maximumNanoUsd) : null;
@@ -60,7 +80,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         // Duplicate/uncertain reservations do not authorize another request. Never relax the shared caps.
         let hold;
         try {
-          hold = await budget.reservePaid({ requestId, uid, maxCostNanoUsd: maximumNanoUsd,
+          hold = await budget.reservePaid({ requestId: attemptKey ?? requestId, uid, maxCostNanoUsd: maximumNanoUsd,
             capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
         } catch (error) {
           // This attempt never dispatched. Release only its fresh monthly hold;

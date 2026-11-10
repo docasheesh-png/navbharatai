@@ -2,7 +2,7 @@ import express from 'express';
 import type { Server } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const fake = vi.hoisted(() => ({ status: vi.fn(), run: vi.fn(), audit: vi.fn() }));
-vi.mock('../lib/testChatBot', () => ({ testChatStatus: fake.status, runTestChat: fake.run,
+vi.mock('../lib/testChatBot', () => ({ testChatStatus: fake.status, loadTestChatStatus: fake.status, runTestChat: fake.run,
   TestChatUnavailable: class extends Error { constructor(readonly reason: string, readonly status = 503) { super(reason); } } }));
 vi.mock('../lib/audit', () => ({ audit: fake.audit }));
 vi.mock('../lib/adminAuth', () => ({ adminUsername: () => 'server-admin' }));

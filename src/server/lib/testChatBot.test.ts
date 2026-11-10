@@ -22,7 +22,7 @@ beforeEach(() => {
 });
 describe('test chat provider isolation and admission', () => {
   it('status only reveals server availability, never secrets or a ready/approved claim', () => {
-    expect(testChatStatus()).toEqual({ providers: [{ id: 'qubax', label: 'Qubax', configured: true, enabled: true, model: null }], approvalRequired: true, noFallback: true });
+    expect(testChatStatus()).toEqual({ providers: [{ id: 'qubax', label: 'Qubax', configured: true, enabled: true, model: null, ceilingUsd: null }], approvalRequired: true, noFallback: true });
     expect(fake.run).not.toHaveBeenCalled(); expect(fake.db).not.toHaveBeenCalled();
   });
   it('dispatches exactly the selected adapter with conservative data scope and bounded text', async () => {

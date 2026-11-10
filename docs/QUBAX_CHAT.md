@@ -34,8 +34,17 @@ positions. Skips do not consume physical attempts.
 
 ## Required independent evidence, not defaults
 
-No provider catalog or approval is seeded. Setting a key does **not** authorize
-production transmission. An existing trusted server operator must maintain:
+No provider catalog or approval is seeded. Setting a key does **not** by
+itself authorize a Gateway claim. Public chat and the admin Test Chat Bot use
+the live price feed instead. A model is eligible when both its input and output
+rates are at least 90% below the official OpenAI or Z.ai rate for that same
+model. `discount_pct` is ignored. Passing Hindi and English probes are ranked by
+success rate and latency. One turn tries the best three, releasing each failed
+try, then the normal chat chain continues with the same history. `QUBAX_MODEL`
+is only a backup when no model clears 90%. The per-try reserve defaults to
+`$0.02`. Gateway callers that pin `expectedSelection` still use the catalog below.
+
+An existing trusted server operator must maintain the catalog path for Gateway:
 
 1. `qubax_catalog/active`, using the exported `QubaxCatalog` contract in
    `src/server/lib/qubaxSelector.ts`. Qubax and official prices must independently

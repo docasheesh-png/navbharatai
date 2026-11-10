@@ -1,7 +1,7 @@
 import type { Express, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import { readTestChatAction, TEST_CHAT_FAILURE } from '../../lib/testChatBot';
-import { runTestChat, testChatStatus, TestChatUnavailable } from '../lib/testChatBot';
+import { loadTestChatStatus, runTestChat, TestChatUnavailable } from '../lib/testChatBot';
 import { adminUsername } from '../lib/adminAuth';
 import { audit } from '../lib/audit';
 
@@ -18,9 +18,9 @@ export function registerTestChatBotRoutes(app: Express, verifyAdminToken: Reques
   const reads = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false });
   const sends = rateLimit({ windowMs: 60_000, limit: 6, standardHeaders: 'draft-7', legacyHeaders: false,
     message: { error: 'Please wait before sending another test message. No provider was called.' } });
-  app.get('/api/admin/test-chat-bot/providers', verifyAdminToken, reads, (_req, res) => {
+  app.get('/api/admin/test-chat-bot/providers', verifyAdminToken, reads, async (_req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
-    res.json(testChatStatus());
+    res.json(await loadTestChatStatus());
   });
   app.post('/api/admin/test-chat-bot/chat', verifyAdminToken, sends, async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');

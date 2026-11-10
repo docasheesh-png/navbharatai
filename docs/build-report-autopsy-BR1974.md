@@ -82,6 +82,14 @@ Fourth follow-up (`e71c4bd44` reviewer FAIL — stop patching literal phrases):
 - `khol do` is excluded only when the same clause both names a store and has listing language, so "khol do play store listing" is out and plain "khol do" / "khol do play store" stay in.
 - Self-found residuals (conservative FNs of the requested clause rule, not new false positives): a genuine "open the play store" in the same clause as unrelated "console" / "release" / "screenshots" / "submit" / "publish" / Hinglish "daal" (lentils); commas are not clause boundaries so "open the play store, then edit the listing" is also excluded. Word boundaries on the store token and on open/go/launch verbs also stop "play storefront" and "undergo the Play Store review".
 
+Fifth follow-up (`9d51b7ba0` reviewer FAIL — bare tokens were a regression vs origin/main):
+
+- Clause-level exclusion stays, but it now binds to store-publish *idioms* only: submit/publish/upload to/on the store; Play Console / developer console / developer account; store listing / listing page / app listing; store screenshots / screenshots for the store; store release / release on the store; Hinglish daalna/daalo/daal dena/daal do after a store + pe/par/me/mein particle. Bare submit/screenshots/release/console/listing and the word "published" do not exclude.
+- Genuine opens that origin/main captured, and the listed App Store / Play Store equivalents, match again (submit a review, screenshots carousel, after we release, admin console, new release, apps we published, music console, daal makhani).
+- A hard regression gate snapshots open-apps.asks at origin/main `c072e0eb9` and asserts every genuine open in the corpus that matched there still matches at this head.
+- Same-clause pairing: a publish idiom wins over a genuine open (do not capture via the store alternative). Justification: that clause is typically about this app's store presence; splitting across sentences still matches the open. Bare tokens in those pairs still match.
+- Self-found residuals (tight idioms, not queued): "play store ko khol ke daal do" (ko is not pe/par/me); "play store pe khol ke publish/upload karna" (not daalna and not publish/upload to/on the store); "publish our app to the Play Store" / "submitted to" / "released on" with a genuine open in the same clause (extra words or tense beyond the listed idiom).
+
 ## Queue
 
 This commit **closes no row** and **opens Q-2647 and Q-2648**. Q-2646, Q-2645, Q-2644, Q-2643, Q-2642, Q-2640, Q-2621, Q-2611, Q-2375 / Q-1068 and earlier blockers stay open.

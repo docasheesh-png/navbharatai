@@ -86,6 +86,7 @@
     "F1 #4165 verb-gate store/drawer so publish-only mentions do not get open-apps",
     "F1 #4165 launch-to/on/in and listing tails are not open-apps; post-nominal khol and go-to match",
     "F1 #4165 clause-level store/link rules: deep-prefix, own-listing, khol+daal, khol-do+listing",
+    "F1 #4165 store-publish idioms not bare tokens; origin/main genuine-open regression gate",
     "F2 en/em dash in case-study lookbehind"
   ],
   "notShipped": [

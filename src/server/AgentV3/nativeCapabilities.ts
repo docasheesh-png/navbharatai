@@ -89,10 +89,15 @@ export interface NativeCapability {
  * 1. "link" is not a store-open verb when it is a deep-link (`deep link`, `deep  link`,
  *    `deep-link`, `deeplink`, `deeply link`).
  * 2. A store mention whose enclosing clause (text between `.` `!` `?` `;` or newlines —
- *    not commas) contains own-listing / publish language is not a request to open the
- *    store via @capacitor/app-launcher.
+ *    not commas) contains a store-publish *idiom* is not a request to open the store
+ *    via @capacitor/app-launcher. Idioms, not bare tokens: submit/publish/upload to/on
+ *    the store; Play Console / developer console / developer account; store listing /
+ *    listing page / app listing; store screenshots / screenshots for the store; store
+ *    release / release on the store; Hinglish daalna/daalo/daal dena/daal do after a
+ *    store + pe/par/me/mein particle. Bare submit/screenshots/release/console/listing
+ *    and the word "published" do not exclude.
  * 3. Post-nominal Hinglish `khol` after a store name still opens the store, unless that
- *    same clause also has daal/publish/upload (covered by the listing-language set).
+ *    same clause also has a store-publish idiom (including pe/par/me + daalna).
  * 4. `khol do` still matches, except when its clause both names a store and has
  *    listing language (`khol do play store listing`).
  */
@@ -104,10 +109,31 @@ export const OPEN_APPS_CORE_SOURCE = String.raw`call\s+(?:karo|kar|kare|kardo|mu
 export const OPEN_APPS_STORE_TOKEN_SOURCE = String.raw`\b(?:app|play)[\s-]*store\b`;
 
 /**
- * Own-listing / publish language. Present anywhere in the same clause as a store
- * mention → do not capture via the store alternative.
+ * Store-publish idioms. Present anywhere in the same clause as a store mention → do
+ * not capture via the store alternative. Not bare tokens, and not "published".
  */
-export const OPEN_APPS_OWN_LISTING_SOURCE = String.raw`\b(?:listings?|developer\s+accounts?|consoles?|releases?|screenshots?|publish\w*|uploads?|submit\w*|daal\w*)\b`;
+const OPEN_APPS_LISTING_DETERMINER_SOURCE = String.raw`(?:(?:the|a|an|our|my|this)\s+)?`;
+
+export const OPEN_APPS_HINGLISH_PUBLISH_PARTICLE_SOURCE = String.raw`\b(?:pe|par|me|mein)\b`;
+
+/** daalna / daalo / daal dena / daal do — not bare "daal" (daal makhani). */
+export const OPEN_APPS_HINGLISH_PUBLISH_DAAL_SOURCE = String.raw`\b(?:daalna|daalo|daal\s+dena|daal\s+do)\b`;
+
+export const OPEN_APPS_OWN_LISTING_SOURCE = [
+  String.raw`\bsubmit(?:s|ting)?\s+(?:to|on)\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
+  String.raw`\bpublish(?:es|ing)?\s+(?:to|on)\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
+  String.raw`\bupload(?:s|ing)?\s+to\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
+  String.raw`\bdeveloper\s+accounts?\b`,
+  String.raw`\b(?:play|developer)\s+console\b`,
+  OPEN_APPS_STORE_TOKEN_SOURCE + String.raw`(?:\s+(?:the|a|an|our|my|developer))*\s+console\b`,
+  OPEN_APPS_STORE_TOKEN_SOURCE + String.raw`(?:\s+(?:the|a|an|our|my|this))*\s+listings?\b`,
+  String.raw`\blisting\s+pages?\b`,
+  String.raw`\bapp\s+listings?\b`,
+  OPEN_APPS_STORE_TOKEN_SOURCE + String.raw`(?:\s+(?:the|a|an|our|my|this))*\s+screenshots?\b`,
+  String.raw`\bscreenshots?\s+(?:for|on|to)\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
+  OPEN_APPS_STORE_TOKEN_SOURCE + String.raw`(?:\s+(?:the|a|an|our|my|this))*\s+releases?\b`,
+  String.raw`\breleases?\s+(?:on|to)\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
+].join('|');
 
 /** Equivalent of `(?<!deep(?:ly)?[\s-]*)` immediately before "link". */
 export const OPEN_APPS_DEEP_BEFORE_LINK_SOURCE = String.raw`deep(?:ly)?[\s-]*$`;
@@ -142,8 +168,19 @@ export function enclosingClause(text: string, index: number): string {
   return text.slice(start, end);
 }
 
+function clauseHasHinglishStorePublish(clause: string): boolean {
+  // Particle must sit on the store ("play store pe …"), not an English "for me".
+  const storeThenParticle = new RegExp(
+    OPEN_APPS_STORE_TOKEN_SOURCE + String.raw`\s+` + OPEN_APPS_HINGLISH_PUBLISH_PARTICLE_SOURCE,
+    'i',
+  );
+  if (!storeThenParticle.test(clause)) return false;
+  return new RegExp(OPEN_APPS_HINGLISH_PUBLISH_DAAL_SOURCE, 'i').test(clause);
+}
+
 export function clauseHasOwnListingLanguage(clause: string): boolean {
-  return new RegExp(OPEN_APPS_OWN_LISTING_SOURCE, 'i').test(clause);
+  if (new RegExp(OPEN_APPS_OWN_LISTING_SOURCE, 'i').test(clause)) return true;
+  return clauseHasHinglishStorePublish(clause);
 }
 
 export function isDeepPrefixedLink(text: string, linkIndex: number): boolean {

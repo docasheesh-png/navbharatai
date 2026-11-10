@@ -101,6 +101,21 @@ const SAME_CLASS_OPEN_APPS = [
   'go to the play store',
   'khol do',
   'open play store page',
+  'open the app store so the user can submit a review',
+  'Add a button to open the App Store, and a screenshots carousel on the home page',
+  'After we release, a button should open the App Store',
+  'open the App Store from the admin console',
+  'open the App Store to see if a new release is available',
+  'Add an Open App Store button so users can see other apps we published',
+  'Build a music console with a button to open the App Store',
+  'open the play store so the user can submit a review',
+  'Add a button to open the Play Store, and a screenshots carousel on the home page',
+  'After we release, a button should open the Play Store',
+  'open the Play Store from the admin console',
+  'open the Play Store to see if a new release is available',
+  'Add an Open Play Store button so users can see other apps we published',
+  'Build a music console with a button to open the Play Store',
+  'play store kholo aur daal makhani recipe dikhao',
 ] as const;
 
 /**

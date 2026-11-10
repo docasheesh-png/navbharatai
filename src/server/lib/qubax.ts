@@ -291,8 +291,11 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
       if (!market) throw error;
       // No text was shown. Release this try, then the next model. A caller cancel still throws after the release.
       entered = false;
-      let freed = !hold || released;
-      if (hold && !released) { try { await hold.releaseUndispatched(); freed = true; } catch { freed = false; } }
+      let freed = released;
+      if (hold) {
+        if (released) freed = true;
+        else { try { await hold.releaseUndispatched(); freed = true; } catch { freed = false; } }
+      } else freed = true;
       if (!freed) throw error;
       hold = null; released = true; content = ''; lastModel = market.modelId;
       if (options.signal.aborted) throw error;

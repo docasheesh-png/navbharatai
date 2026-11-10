@@ -289,7 +289,7 @@ function track<T>(slot: CollectionSlot, work: Promise<T>): Promise<T> {
 function cleanup(slot: CollectionSlot, action: () => Promise<void>): void {
   try { void track(slot, action()).catch(() => {}); } catch { /* Synchronous cleanup failure has settled. */ }
 }
-async function fetchSource(source: QubaxPriceSource, transport: typeof fetch, clock: () => number, slot: CollectionSlot): Promise<QubaxPriceSourceSnapshot> {
+async function fetchSource(source: keyof typeof QUBAX_PRICE_SOURCES, transport: typeof fetch, clock: () => number, slot: CollectionSlot): Promise<QubaxPriceSourceSnapshot> {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), QUBAX_PRICE_FEED_FETCH_MS);
   const signal = controller.signal, startedAtMs = clock();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;

@@ -16,11 +16,16 @@
 // or a sentence about studying app development.
 
 import { describe, it, expect } from 'vitest';
-import { analyzeRequirementGaps, buildRequirementGuidance, missingDomainFeatures, namesASingleLearnerTool } from '../src/server/lib/RequirementGapAnalyzer';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { analyzeRequirementGaps, buildRequirementGuidance, missingDomainFeatures, namesASingleLearnerTool, PRACTICE_TOOL_SOURCE } from '../src/server/lib/RequirementGapAnalyzer';
 import { analyzeRequest } from '../src/server/AgentV3/RequestAnalyser';
 import { namesPersonalTool, SIMPLE_APP_SIGNAL } from '../src/server/lib/appComplexitySignals';
 import { analyzeAppScope } from '../src/server/lib/appScopeAnalyzer';
 import { gameKitPlan } from '../src/server/AgentV3/gameKitSeed';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 export const BR1973_PROMPT = 'Make study app for Maharashtra board students';
 
@@ -37,6 +42,17 @@ const SAME_CLASS = [
   'flashcards app for NEET biology',
   'UPSC previous year papers app',
   'question bank app for class 10 maths',
+  // Reviewer FAIL at b8bcda5fc: these must stay captured (the un-bounded lookbehind
+  // treated the "case" inside showcase/lowercase/uppercase/briefcase as "case ").
+  'showcase study app',
+  'lowercase study app',
+  'uppercase study app',
+  'briefcase study app',
+  'Make a showcase study app for Maharashtra board students',
+  'study  app',
+  'self-study app',
+  'bible study app',
+  'group study app',
 ] as const;
 
 /**
@@ -68,15 +84,27 @@ const OPPOSITE_NOT_A_STUDY_APP = [
  * included so they cannot become single-learner tools either.
  */
 const OPPOSITE_UNCAPTURED = [
-  // Case-study variants (reviewer).
+  // Case-study variants (reviewer at 9a39ae210).
   'case study app',
   'Build a case study app',
   'case study app for MBA students',
   'case-study app',
   'Case Study App',
-  // Craft-word hyphen/slash bypasses (reviewer).
+  // Reviewer FAIL at b8bcda5fc: multi-separator / punctuation / glued forms and Case/CASE.
+  'case  study app',
+  'case/study app',
+  'case, study app',
+  'case_study app',
+  'casestudy app',
+  'Case study app',
+  'CASE study app',
+  'group study app with admin',
+  // Craft-word hyphen/slash bypasses (reviewer) plus double-space craft phrases
+  // so study[\s-]+ does not open a new bypass past the lookahead.
   'study-app-development',
   'study app/development tutorial',
+  'study  app development',
+  'study  app/development tutorial',
   // "application" is not "app".
   'study application form',
   // Hindi / Hinglish twins of the case-study and craft-word misses.
@@ -180,5 +208,34 @@ describe("BR1973: a study app for board students is one learner's tool, not a sc
     expect(analyzeRequirementGaps('Make a bike racing game').domain).toBe('game');
     expect(namesASingleLearnerTool(EXAM_ANALYSE)).toBe(false);
     expect(namesASingleLearnerTool('Make an education app')).toBe(false);
+  });
+
+  it('a showcase study app for board students stays one learner\'s tool (not complex_app/58)', () => {
+    const p = 'Make a showcase study app for Maharashtra board students';
+    expect(namesASingleLearnerTool(p)).toBe(true);
+    const g = analyzeRequirementGaps(p);
+    expect(g.domain).toBe('education');
+    expect(g.likelyMissing).toEqual([]);
+    const a = SIZED(p);
+    expect(a.taskType).toBe('simple_app');
+    expect(a.complexityScore).toBeLessThan(40);
+  });
+
+  it('double-space, slash and comma case-study probes leak no longer (not simple_app)', () => {
+    for (const p of ['case  study app', 'case/study app', 'case, study app']) {
+      expect(namesASingleLearnerTool(p), p).toBe(false);
+      expect(namesPersonalTool(p), p).toBe(false);
+      expect(SIZED(p).taskType, p).not.toBe('simple_app');
+    }
+  });
+
+  it('the variable-length lookbehind compiles on this Node and does not ship to the browser bundle', () => {
+    expect(() => new RegExp(String.raw`(?<!\bcase[\s\-/,]+)study[\s-]+apps?`, 'i')).not.toThrow();
+    expect(PRACTICE_TOOL_SOURCE).toContain(String.raw`(?<!\bcase[\s\-/,]+)`);
+    expect(PRACTICE_TOOL_SOURCE).toContain(String.raw`study[\s-]+apps?`);
+    // Vite's client target includes safari14, which predates variable-length lookbehind.
+    // This regex lives only in the server analyser and must not be imported by the client entry.
+    expect(readFileSync(join(HERE, '..', 'src/main.tsx'), 'utf8')).not.toMatch('RequirementGapAnalyzer');
+    expect(readFileSync(join(HERE, '..', 'src/App.tsx'), 'utf8')).not.toMatch('RequirementGapAnalyzer');
   });
 });

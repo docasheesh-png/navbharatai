@@ -393,7 +393,16 @@ small, .muted, .text-muted { color: var(--muted); }
 .nb-sidebar a.active, .nb-nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .nb-nav { display: flex; flex-direction: column; gap: 4px; }
 .nb-brand-icon { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 8px; object-fit: contain; }
-.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); }
+/* A dashboard topbar holds the page title (autopsy BR1972: "EDU AI – EXAMINATION ASSISTANT"
+   made this header 508px wide on a 390px phone, because a flex item's min-width is its
+   content size). It may shrink and wrap. overflow-x is left visible: setting it to auto
+   would compute overflow-y as auto and clip absolute dropdowns and popovers inside the bar.
+   overflow-wrap is not set here: anywhere is inherited and shrinks min-content, so a title
+   squeezed beside the action buttons can break mid-word. The title (an h1; the kit does
+   not define .nb-page-title) gets min-width: 0 and overflow-wrap: break-word instead.
+   Existing apps that already copied a previous rule are not rewritten. */
+.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; }
+.nb-topbar h1 { min-width: 0; overflow-wrap: break-word; }
 .nb-main { padding: 24px 20px; min-width: 0; }
 @media (max-width: 820px) {
   .nb-shell { grid-template-columns: 1fr; }

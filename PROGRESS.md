@@ -101190,3 +101190,10 @@ Owner t311u sequential audit, BR1964 only (boundary 1951..2105 frozen). "Mujhe h
 - **F2.** Q-2626: whole-line `Handl(?:es?|ing) errors` (optional properly/gracefully/correctly, optional period). Opposite-class corpus of 360 eight-item lists (56 real "Handling …" product features, EN/HI/Hinglish), built before the edit: 0 LARGE→smaller vs main.
 
 Queue: this commit closes Q-2626. New rows Q-2630 (late style hand-back), Q-2631 (25-min cap after a green preview), Q-2632 (sibling loading/timeouts gerund). Q-2625/2627/2628/2629 and earlier blockers stay open.
+
+## 2026-11-10 — BR1965 autopsy (NOVA AI Fix-with-AI continue, succeeded): ship Q-2632 loading/timeouts gerund; lock continue scope
+Owner t311u sequential audit, BR1965 only (boundary 1951..2105 frozen). The platform "Fix with AI" sentence "Continue from where you left off and finish/fix the build so the app works end-to-end." succeeded in 8.8 min on an existing NOVA AI assistant (mock aiService replaced with window.NavAI.ask). Scope was correctly ordinary/direct; PROJECT_MODE created no new plan. Ledger: [autopsy](docs/build-report-autopsy-BR1965.md), [evidence](docs/build-report-autopsy-BR1965-evidence.json).
+- **F1.** Neighbour locks only: this platform continue sentence stays ordinary/direct and remains `CONTINUE_AND_FIX_BUILD_PROMPT`.
+- **F2.** Q-2632: whole-line `Handl(?:es?|ing) loading, timeout(s) and (API) errors` (optional properly/gracefully/correctly, optional period). Opposite-class corpus of 360 eight-item lists (56 real Handling-loading / Handling-timeout product features, EN/HI/Hinglish), built before the edit: 0 LARGE→smaller vs main.
+
+Queue: this commit closes Q-2632. New row Q-2633 (unpinned `@types/react` / `typescript` installs on a React 18 app). Q-2625/2627/2628/2629/2630/2631 and earlier blockers stay open.

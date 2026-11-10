@@ -282,8 +282,10 @@ const QUALITY_WHOLE_LINE: readonly RegExp[] = [
   // bare "Responsive" / "Mobile responsive" — not "Responsive <module>"
   /^(?:Mobile[- ]?)?Responsive\.?$/i,
   /^(?:The\s+)?(?:app|UI|it)\s+(?:must|should)\s+be\s+responsive\.?$/i,
-  // "Handle loading, timeout(s) and (API) errors (properly/gracefully)"
-  /^Handle(?:s|ing)?\s+loading,?\s+timeouts?\s+and\s+(?:API\s+)?errors(?:\s+(?:properly|gracefully|correctly))?\.?$/i,
+  // BR1965 / Q-2632: English gerund is "Handling" (the e is dropped). Handle(?:s|ing)?
+  // matches "Handleing", not "Handling". Whole-line only: Handl(?:es?|ing) loading,
+  // timeout(s) and (API) errors (optional properly/gracefully/correctly, optional period).
+  /^Handl(?:es?|ing)\s+loading,?\s+timeouts?\s+and\s+(?:API\s+)?errors(?:\s+(?:properly|gracefully|correctly))?\.?$/i,
   // BR1964 / Q-2626: English gerund is "Handling" (the e is dropped). Handle(?:s|ing)?
   // matches "Handleing", not "Handling". Whole-line only: Handl(?:es?|ing) errors
   // (optional properly/gracefully/correctly, optional period).

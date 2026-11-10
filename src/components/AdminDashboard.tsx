@@ -294,9 +294,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => { setUserLimit(USER_PAGE); setUserTotal(null); }, [userSearch, userSort, userPaid, userDir]);
   const [toastMsg, setToastMsg] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  // How new a user must be for the ₹150 welcome credit: joined within this many days.
-  const [giftDays, setGiftDays] = useState(7);
-
   // Settings state
 
   // Promo form
@@ -1875,43 +1872,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     }
   };
 
-  // ₹150 TO NEW USERS IN ONE PRESS (admin 2026-09-27). The server applies the three rules — joined
-  // within `giftDays`, ₹0 gift balance, never given before — and says who is skipped and why. The count
-  // the admin confirms is sent back, and the server refuses a press that would pay more than that.
-  const handleBulkWelcomeGift = async () => {
-    setActionLoading('bulk_gift');
-    try {
-      const check = await adminPost('/api/admin/welcome-gift/bulk', { dryRun: true, days: giftDays });
-      if (!check.ok) { toast('Could not check: ' + (check.error || 'unknown error')); return; }
-      const s = check.skipped || {};
-      const skippedLines =
-        `Not paid:\n` +
-        `  • ${s.alreadyGiven ?? 0} already received this credit\n` +
-        `  • ${s.hasGiftBalance ?? 0} still have gift balance\n` +
-        `  • ${s.notNew ?? 0} joined more than ${check.days} day(s) ago\n` +
-        (s.other ? `  • ${s.other} banned, merged or at the gift limit\n` : '');
-      if (!check.eligible) {
-        window.alert(`No new user needs the ₹${check.rupeesEach} credit right now.\n\n${skippedLines}`);
-        return;
-      }
-      const now = Math.min(check.eligible, check.maxPerPress);
-      const more = check.eligible > now ? `\n${check.eligible - now} more will remain for the next press.` : '';
-      if (!window.confirm(
-        `Give ₹${check.rupeesEach} to ${now.toLocaleString()} new user(s)?\n` +
-        `Total: ₹${(now * check.rupeesEach).toLocaleString()}\n\n` +
-        `Who gets it: joined in the last ${check.days} day(s), ₹0 gift balance, never received it before.\n\n` +
-        skippedLines +
-        `\nPressing again later never pays anyone twice.${more}`,
-      )) return;
-      const r = await adminPost('/api/admin/welcome-gift/bulk', { dryRun: false, days: check.days, expectedCount: check.eligible });
-      if (!r.ok) { toast('Not given: ' + (r.error || 'unknown error')); return; }
-      toast(`₹${r.totalRupees.toLocaleString()} given to ${r.paid} new user(s)` +
-        (r.skipped ? ` · ${r.skipped} skipped` : '') + (r.failed ? ` · ${r.failed} failed — press again` : '') +
-        (r.remaining ? ` · ${r.remaining} remaining` : ''));
-      fetchUsers();
-    } finally { setActionLoading(null); }
-  };
-
   // Merge a duplicate account's wallet INTO this user (one person = one wallet). The admin PROVES the
   // two accounts are the same person by supplying the source userId. Debt carries, welcome bonus counts
   // once, real purchases carry (server-side tested mergeWallets). Confirmed before running (irreversible).
@@ -2493,26 +2453,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   {effectiveUserDir === 'desc' ? <ArrowDown className="w-3.5 h-3.5" /> : <ArrowUp className="w-3.5 h-3.5" />}
                   {effectiveUserDir === 'desc' ? 'Desc' : 'Asc'}
                 </button>
-                <div className="flex items-center gap-1 bg-card p-1 rounded-xl border border-line">
-                  <label htmlFor="gift-days" className="pl-2 text-[10px] font-black uppercase tracking-wider text-muted">Joined in last</label>
-                  <select
-                    id="gift-days"
-                    value={giftDays}
-                    onChange={(e) => setGiftDays(Number(e.target.value))}
-                    className="bg-transparent text-[10px] font-black uppercase text-ink outline-none px-1 py-1.5"
-                  >
-                    {[1, 3, 7, 15, 30].map((d) => <option key={d} value={d}>{d} day{d > 1 ? 's' : ''}</option>)}
-                  </select>
-                  <button
-                    onClick={handleBulkWelcomeGift}
-                    disabled={actionLoading === 'bulk_gift'}
-                    title="Give ₹150 to users who joined recently, have ₹0 gift balance and never received it before"
-                    className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 text-on-accent rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-emerald-500 transition-all active:scale-95 disabled:opacity-50"
-                  >
-                    {actionLoading === 'bulk_gift' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
-                    Gift ₹150 to new users
-                  </button>
-                </div>
                 <button onClick={fetchUsers} className="flex items-center gap-2 px-4 py-2.5 bg-raised border border-line rounded-xl text-[10px] font-black uppercase tracking-wider text-ink hover:border-indigo-500 transition-all active:scale-95">
                   <RefreshCw className={`w-3.5 h-3.5 ${usersLoading ? 'animate-spin' : ''}`} /> Load
                 </button>

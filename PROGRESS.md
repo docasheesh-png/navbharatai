@@ -101241,3 +101241,10 @@ Owner t311u sequential audit, BR1971 only (boundary 1951..2105 frozen). "Continu
 - **F2.** BR1970 ledger nits carried here (no separate PR): the busy-line prompt is 68 characters, not 67; the Q-2641 label CSS is nowrap+ellipsis.
 
 Queue: this commit closes no row and opens no row. Q-2642, Q-2640, Q-2621, Q-2611, Q-2375 / Q-1068 and earlier blockers stay open.
+
+## 2026-11-10 — BR1972 autopsy (edu-ai examination assistant, succeeded): kit topbar shrinks on a phone
+Owner t311u sequential audit, BR1972 only (boundary 1951..2105 frozen). "मुझे एक education app बनाना है app नाम है edu ai examination Assistant" (70 characters) succeeded in 22.2 min as an ordinary one-shot of an existing workspace (BUILD_ORDER_READ_AS_EDIT). Preview rendered at 711 s; explorer repaired "View Material"; RELEASE_GATE YELLOW for no proven save-reload journey plus 119 px of sideways phone scroll from `<header class="nb-topbar">` “EDU AI – EXAMINATION ASSISTANT” (508 px wide on a 390 px phone). Ledger: [autopsy](docs/build-report-autopsy-BR1972.md), [evidence](docs/build-report-autopsy-BR1972-evidence.json).
+- **F1.** Neighbour locks: this prompt stays ordinary/direct and domain=general (not education, not game); "Make an education app" stays general; exam-analyse stays education; education-loan stays fintech; the recap "Fully responsive design that works on both mobile and desktop" is not SIZE_CLAIMED (Q-2611).
+- **F2.** Kit `.nb-topbar` now shrinks, wraps, and scrolls inside itself (`flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: auto`). Platform seed history added 7 hashes so the new kit is still "ours"; the previous kit remains recognised. Existing shipped apps are not rewritten.
+
+Queue: this commit closes no earlier row. New rows Q-2643 (edit_unsized ETA when a build-order is turned into an edit) and Q-2644 (education/examination words still domain=general). Q-2642, Q-2640, Q-2621, Q-2611, Q-2375 / Q-1068 and earlier blockers stay open. Q-2611 is not rewritten (this recap is sibling evidence).

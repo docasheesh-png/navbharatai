@@ -90,6 +90,13 @@ Fifth follow-up (`9d51b7ba0` reviewer FAIL — bare tokens were a regression vs 
 - Same-clause pairing: a publish idiom wins over a genuine open (do not capture via the store alternative). Justification: that clause is typically about this app's store presence; splitting across sentences still matches the open. Bare tokens in those pairs still match.
 - Self-found residuals (tight idioms, not queued): "play store ko khol ke daal do" (ko is not pe/par/me); "play store pe khol ke publish/upload karna" (not daalna and not publish/upload to/on the store); "publish our app to the Play Store" / "submitted to" / "released on" with a genuine open in the same clause (extra words or tense beyond the listed idiom).
 
+Sixth follow-up (close residuals at `1956cdd90` before review):
+
+- Hinglish publish particles include `ko` and `se`, so "play store ko khol ke daal do" and "play store se khol ke daal do" stay out. Plain "play store ko kholo" / "play store se kholo" still match.
+- Hinglish `publish`/`upload`/`submit` + `karna`/`karo`/`kardo`/`kar do`/`kar dena`/`kar de` after a store + particle is a publish idiom.
+- English publish verbs accept tense (`submitted`, `published`+to/on, `released`, `uploaded`, `publishing`) and a few intervening object words before `to`/`on` + store. Conjunctions and open-verbs are not objects, so "publish this then go to the Play Store" still matches. Bare "published" / "After we release" / "submit a review" still match.
+- Remaining residuals (not queued): "open the play store and submit karna" without a store particle; "released in the Play Store" (`in` is not to/on).
+
 ## Queue
 
 This commit **closes no row** and **opens Q-2647 and Q-2648**. Q-2646, Q-2645, Q-2644, Q-2643, Q-2642, Q-2640, Q-2621, Q-2611, Q-2375 / Q-1068 and earlier blockers stay open.

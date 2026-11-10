@@ -94,7 +94,7 @@ export interface NativeCapability {
  *    the store; Play Console / developer console / developer account; store listing /
  *    listing page / app listing; store screenshots / screenshots for the store; store
  *    release / release on the store; Hinglish daalna/daalo/daal dena/daal do after a
- *    store + pe/par/me/mein particle. Bare submit/screenshots/release/console/listing
+ *    store + pe/par/me/mein/ko/se particle, or publish/upload/submit karna/karo/kar do. Bare submit/screenshots/release/console/listing
  *    and the word "published" do not exclude.
  * 3. Post-nominal Hinglish `khol` after a store name still opens the store, unless that
  *    same clause also has a store-publish idiom (including pe/par/me + daalna).
@@ -110,19 +110,30 @@ export const OPEN_APPS_STORE_TOKEN_SOURCE = String.raw`\b(?:app|play)[\s-]*store
 
 /**
  * Store-publish idioms. Present anywhere in the same clause as a store mention → do
- * not capture via the store alternative. Not bare tokens, and not "published".
+ * not capture via the store alternative. Not bare tokens, and not bare "published"
+ * (without to/on + store).
  */
 const OPEN_APPS_LISTING_DETERMINER_SOURCE = String.raw`(?:(?:the|a|an|our|my|this)\s+)?`;
 
-export const OPEN_APPS_HINGLISH_PUBLISH_PARTICLE_SOURCE = String.raw`\b(?:pe|par|me|mein)\b`;
+export const OPEN_APPS_HINGLISH_PUBLISH_PARTICLE_SOURCE = String.raw`\b(?:pe|par|me|mein|ko|se)\b`;
 
 /** daalna / daalo / daal dena / daal do — not bare "daal" (daal makhani). */
 export const OPEN_APPS_HINGLISH_PUBLISH_DAAL_SOURCE = String.raw`\b(?:daalna|daalo|daal\s+dena|daal\s+do)\b`;
 
+/** publish/upload/submit karna, karo, kardo, kar do. */
+export const OPEN_APPS_HINGLISH_PUBLISH_KAR_SOURCE = String.raw`\b(?:publish|upload|submit)\s+kar(?:na|o|do|\s+do|\s+dena|\s+de)\b`;
+
+/**
+ * A few object words between a publish verb and to/on + store. Conjunctions and
+ * open-verbs are not objects, so "publish this then go to the Play Store" stays
+ * a go-to-store request rather than a publish-to-store idiom.
+ */
+export const OPEN_APPS_PUBLISH_VERB_GAP_SOURCE = String.raw`(?:\s+(?!and\b|or\b|then\b|but\b|so\b|go(?:es|ing)?\b|open(?:s|ing)?\b|launch(?:es|ing)?\b|redirect(?:s|ing)?\b|link(?:s|ing)?\b)\w+){0,8}`;
+
 export const OPEN_APPS_OWN_LISTING_SOURCE = [
-  String.raw`\bsubmit(?:s|ting)?\s+(?:to|on)\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
-  String.raw`\bpublish(?:es|ing)?\s+(?:to|on)\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
-  String.raw`\bupload(?:s|ing)?\s+to\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
+  String.raw`\bsubmit(?:s|ted|ting)?` + OPEN_APPS_PUBLISH_VERB_GAP_SOURCE + String.raw`\s+(?:to|on)\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
+  String.raw`\bpublish(?:es|ed|ing)?` + OPEN_APPS_PUBLISH_VERB_GAP_SOURCE + String.raw`\s+(?:to|on)\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
+  String.raw`\bupload(?:s|ed|ing)?` + OPEN_APPS_PUBLISH_VERB_GAP_SOURCE + String.raw`\s+(?:to|on)\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
   String.raw`\bdeveloper\s+accounts?\b`,
   String.raw`\b(?:play|developer)\s+console\b`,
   OPEN_APPS_STORE_TOKEN_SOURCE + String.raw`(?:\s+(?:the|a|an|our|my|developer))*\s+console\b`,
@@ -132,7 +143,7 @@ export const OPEN_APPS_OWN_LISTING_SOURCE = [
   OPEN_APPS_STORE_TOKEN_SOURCE + String.raw`(?:\s+(?:the|a|an|our|my|this))*\s+screenshots?\b`,
   String.raw`\bscreenshots?\s+(?:for|on|to)\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
   OPEN_APPS_STORE_TOKEN_SOURCE + String.raw`(?:\s+(?:the|a|an|our|my|this))*\s+releases?\b`,
-  String.raw`\breleases?\s+(?:on|to)\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
+  String.raw`\brelease(?:s|d|ing)?` + OPEN_APPS_PUBLISH_VERB_GAP_SOURCE + String.raw`\s+(?:on|to)\s+` + OPEN_APPS_LISTING_DETERMINER_SOURCE + OPEN_APPS_STORE_TOKEN_SOURCE,
 ].join('|');
 
 /** Equivalent of `(?<!deep(?:ly)?[\s-]*)` immediately before "link". */
@@ -175,7 +186,8 @@ function clauseHasHinglishStorePublish(clause: string): boolean {
     'i',
   );
   if (!storeThenParticle.test(clause)) return false;
-  return new RegExp(OPEN_APPS_HINGLISH_PUBLISH_DAAL_SOURCE, 'i').test(clause);
+  if (new RegExp(OPEN_APPS_HINGLISH_PUBLISH_DAAL_SOURCE, 'i').test(clause)) return true;
+  return new RegExp(OPEN_APPS_HINGLISH_PUBLISH_KAR_SOURCE, 'i').test(clause);
 }
 
 export function clauseHasOwnListingLanguage(clause: string): boolean {

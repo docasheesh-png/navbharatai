@@ -19,6 +19,8 @@ import {
   OPEN_APPS_BARE_DRAWER,
   OPEN_APPS_HINGLISH_PUBLISH_DAAL_SOURCE,
   OPEN_APPS_HINGLISH_PUBLISH_PARTICLE_SOURCE,
+  OPEN_APPS_HINGLISH_PUBLISH_KAR_SOURCE,
+  OPEN_APPS_PUBLISH_VERB_GAP_SOURCE,
   enclosingClause,
   clauseHasOwnListingLanguage,
   isDeepPrefixedLink,
@@ -137,14 +139,41 @@ function fuzzHinglishParticlePhrases(): { match: string[]; nomatch: string[] } {
     match.push(`app store ${p} kholo`);
     match.push(`Play Store ${p} Kholo`);
   }
-  // Publish particles are pe/par/me/mein (not ko/se): store + particle + daalna/daalo/daal dena/daal do.
-  for (const p of ['pe', 'mein', 'me', 'par']) {
+  // Publish particles are pe/par/me/mein/ko/se: store + particle + daal* or publish/upload/submit kar*.
+  for (const p of ['pe', 'mein', 'me', 'par', 'ko', 'se']) {
     nomatch.push(`play store ${p} khol ke daal dena`);
     nomatch.push(`play store ${p} khol ke daalna hai`);
     nomatch.push(`play store ${p} khol ke daal do`);
     nomatch.push(`app store ${p} khol ke daalo`);
+    for (const verb of ['publish', 'upload', 'submit']) {
+      for (const kar of ['karna', 'karo', 'kar do', 'kardo', 'kar dena', 'kar de']) {
+        nomatch.push(`play store ${p} khol ke ${verb} ${kar}`);
+      }
+    }
   }
   return { match, nomatch };
+}
+
+function fuzzEnglishTensePhrases(): { match: string[]; nomatch: string[] } {
+  return {
+    match: [
+      'Add an Open App Store button so users can see other apps we published',
+      'After we release, a button should open the App Store',
+      'open the App Store so the user can submit a review',
+      'publish this then go to the Play Store',
+    ],
+    nomatch: [
+      'open the App Store and publish our app to the Play Store',
+      'open the App Store after it is submitted to the Play Store',
+      'open the App Store after it is released on the Play Store',
+      'open the App Store after it is uploaded to the Play Store',
+      'open the App Store while publishing on the app store',
+      'open the Play Store and publish our new android app to the App Store',
+      'open the App Store and publish our brand new updated android application to the Play Store',
+      'go to the play store after publishing our app to the Play Store',
+      'open the App Store and uploaded the apk to the Play Store',
+    ],
+  };
 }
 
 /**
@@ -169,6 +198,16 @@ const PUBLISH_IDIOM_WITH_OPEN_PAIRS: { prompt: string; matches: boolean; reason:
   { prompt: 'open the App Store then add screenshots for the Play Store', matches: false, reason: 'screenshots for the store' },
   { prompt: 'open the App Store after the app store release', matches: false, reason: 'store release' },
   { prompt: 'play store pe kholo aur daal dena', matches: false, reason: 'store pe + daal dena' },
+  { prompt: 'play store ko khol ke daal do', matches: false, reason: 'store ko + daal do' },
+  { prompt: 'play store pe khol ke publish karna', matches: false, reason: 'store pe + publish karna' },
+  { prompt: 'play store pe khol ke upload karna', matches: false, reason: 'store pe + upload karna' },
+  { prompt: 'play store pe khol ke submit karo', matches: false, reason: 'store pe + submit karo' },
+  { prompt: 'play store ko khol ke publish kar do', matches: false, reason: 'store ko + publish kar do' },
+  { prompt: 'open the App Store and publish our app to the Play Store', matches: false, reason: 'publish + object + to the store' },
+  { prompt: 'open the App Store after it is submitted to the Play Store', matches: false, reason: 'submitted to the store' },
+  { prompt: 'open the App Store after it is released on the Play Store', matches: false, reason: 'released on the store' },
+  { prompt: 'open the App Store after it is uploaded to the Play Store', matches: false, reason: 'uploaded to the store' },
+  { prompt: 'open the App Store while publishing on the app store', matches: false, reason: 'publishing on the store' },
   { prompt: 'open the App Store so the user can submit a review', matches: true, reason: 'bare submit, not submit to/on the store' },
   { prompt: 'Add a button to open the App Store, and a screenshots carousel on the home page', matches: true, reason: 'bare screenshots' },
   { prompt: 'After we release, a button should open the App Store', matches: true, reason: 'bare release' },
@@ -183,10 +222,15 @@ describe('open-apps store rules: exported sources', () => {
   it('locks idiom-level listing language, deep-prefix, and no bare store', () => {
     expect(OPEN_APPS_CORE_SOURCE).toContain('|apps');
     expect(OPEN_APPS_STORE_TOKEN_SOURCE).toBe('\\b(?:app|play)[\\s-]*store\\b');
-    expect(OPEN_APPS_OWN_LISTING_SOURCE).toContain('submit(?:s|ting)?\\s+(?:to|on)');
-    expect(OPEN_APPS_OWN_LISTING_SOURCE).toContain('publish(?:es|ing)?\\s+(?:to|on)');
+    expect(OPEN_APPS_OWN_LISTING_SOURCE).toContain('submit(?:s|ted|ting)?');
+    expect(OPEN_APPS_OWN_LISTING_SOURCE).toContain('publish(?:es|ed|ing)?');
     expect(OPEN_APPS_OWN_LISTING_SOURCE).not.toContain('publish\\w*');
-    expect(OPEN_APPS_OWN_LISTING_SOURCE).toContain('upload(?:s|ing)?\\s+to');
+    expect(OPEN_APPS_OWN_LISTING_SOURCE).toContain('upload(?:s|ed|ing)?');
+    expect(OPEN_APPS_OWN_LISTING_SOURCE).toContain('release(?:s|d|ing)?');
+    expect(OPEN_APPS_PUBLISH_VERB_GAP_SOURCE).toContain('{0,8}');
+    expect(OPEN_APPS_HINGLISH_PUBLISH_KAR_SOURCE).toContain('publish|upload|submit');
+    expect(OPEN_APPS_HINGLISH_PUBLISH_PARTICLE_SOURCE).toContain('ko');
+    expect(OPEN_APPS_HINGLISH_PUBLISH_PARTICLE_SOURCE).toContain('se');
     expect(OPEN_APPS_OWN_LISTING_SOURCE).toContain('developer\\s+accounts?');
     expect(OPEN_APPS_OWN_LISTING_SOURCE).toContain('(?:play|developer)\\s+console');
     expect(OPEN_APPS_OWN_LISTING_SOURCE).toContain('app\\s+listings?');
@@ -270,6 +314,11 @@ describe('open-apps store rules: generated Hinglish particle fuzz', () => {
     expect(ids('play store pe khol ke dekho')).toContain('open-apps');
     expect(ids('play store kholo')).toContain('open-apps');
     expect(ids('play store pe khol ke daal dena')).not.toContain('open-apps');
+    expect(ids('play store ko khol ke daal do')).not.toContain('open-apps');
+    expect(ids('play store pe khol ke publish karna')).not.toContain('open-apps');
+    expect(ids('play store pe khol ke upload karna')).not.toContain('open-apps');
+    expect(ids('play store se khol ke daal do')).not.toContain('open-apps');
+    expect(ids('play store pe khol ke publish kar dena')).not.toContain('open-apps');
     expect(ids('play store kholo aur daal makhani recipe dikhao')).toContain('open-apps');
   });
 });
@@ -321,5 +370,20 @@ describe('open-apps store rules: self-hunt residuals', () => {
     expect(ids('open the play store and then check the browser console')).toContain('open-apps');
     expect(ids('open the play store, then edit the listing')).toContain('open-apps');
     expect(ids('play store kholo aur daal banao')).toContain('open-apps');
+  });
+
+  it('bare published/release/submit still allow a genuine store-open', () => {
+    expect(clauseHasOwnListingLanguage('see other apps we published')).toBe(false);
+    expect(ids('Add an Open App Store button so users can see other apps we published')).toContain('open-apps');
+    expect(ids('After we release, a button should open the App Store')).toContain('open-apps');
+    expect(ids('open the App Store so the user can submit a review')).toContain('open-apps');
+  });
+});
+
+describe('open-apps store rules: generated English tense/gap fuzz', () => {
+  it('allows tense and a few object words before to/on the store, but not bare published', () => {
+    const { match, nomatch } = fuzzEnglishTensePhrases();
+    for (const p of match) expect(ids(p), p).toContain('open-apps');
+    for (const p of nomatch) expect(ids(p), p).not.toContain('open-apps');
   });
 });

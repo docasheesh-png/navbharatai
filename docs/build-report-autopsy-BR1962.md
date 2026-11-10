@@ -24,13 +24,13 @@ Scope: BR1962 only, inside the frozen audit boundary 1951..2105. Base `568beed6c
 | Fix | Class | Where | Locks |
 |---|---|---|---|
 | F1 | Hindi "X ke/ka tarah-tarah" / "X ke tarah tarah" is "various kinds of X", not "like X". Reviewer residual on #4146. Standalone still clones via first-line subject (6452c0a9) — not widened. | `appScopeAnalyzer.ts` (`HINDI_LIKE_AFTER` negative lookahead) | `tests/aProductKiTarahIsAClone.test.ts` |
-| F2 | A numbered Requirements / QA checklist is not ten product features. Numbered lines use the same `isFeatureLine` filters as the shared enumerator (MAX_ITEM_WORDS / attributes / style). Only ever a smaller count. | `enumeratedFeatures.ts` (`isFeatureLine`), `appScopeAnalyzer.ts` (`featureCount`) | `tests/aQualityChecklistIsNotTenFeatures.test.ts` |
+| F2 | A numbered Requirements / QA checklist is not ten product features. Numbered (`1.`/`2.`) lines use the same `isFeatureLine` filters as the shared enumerator (MAX_ITEM_WORDS / attributes / style). Markdown bullets keep the previous `notAFeatureLine`-only tally so a picture's visual-element list still witnesses autopsy 19641ab5. Only ever a smaller count. | `enumeratedFeatures.ts` (`isFeatureLine`), `appScopeAnalyzer.ts` (`featureCount`) | `tests/aQualityChecklistIsNotTenFeatures.test.ts` |
 
 ## Side-effect review (owner rule t311u: no fix may create another problem)
 | Fix | Adjacent behaviour checked | Side-effect risk | Decision |
 |---|---|---|---|
 | F1 | BR1961 `youtube ki tarah` / `YouTube ke tarah ek app` still clone; tool phrases and heading mentions stay direct; standalone "YouTube ke tarah-tarah ke videos" still clones via subject (6452c0a9). 8 scope suites (116 tests) green. | **Low.** Tightening (non-escalating) of F1 only when `tarah` is reduplicated. | Kept, with neighbour locks |
-| F2 | Eight short numbered ERP features still LARGE; one-line comma list of eight modules still LARGE; `youtube ki tarah` still clones. Corpus 78,007: **analyze 282→277**, famous 178→178. The five flips are platform JSDoc comments with numbered defect lists, not user prompts. | **Low after measurement.** Only-ever-smaller count, the direction `featureCount` already claims. | Kept, with neighbour locks |
+| F2 | Eight short numbered ERP features still LARGE; one-line comma list of eight modules still LARGE; `youtube ki tarah` still clones. Corpus 78,007: **0 decision changes** (analyze 282, famous 178). The BR1962 checklist is not in that repo-string corpus; it is locked by its own test. | **Low after measurement.** Only-ever-smaller count, the direction `featureCount` already claims. | Kept, with neighbour locks |
 
 ## Every item
 | ID / queue | Origin / bucket | Problem | State |

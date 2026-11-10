@@ -105,6 +105,14 @@ describe('admin test chat does not change user chat', () => {
     expect(impl).toContain('mitrifyOutputTokens');
     expect(impl).toContain('max_tokens: maxTokens, stream: true');
     expect(impl).toContain('createMitrifyClient');
+    expect(impl).toContain('loadMitrifyListedModels');
+    expect(impl).toContain('pickListedMitrifyModel');
+    expect(impl).toContain('`${base.href.replace(/\\/$/, \'\')}/models`');
+    expect(impl).toContain('MITRIFY_MODEL: picked');
     expect(impl).not.toMatch(/MITRIFY_CHAIN_ENABLED\s*=/);
+    expect(impl).not.toMatch(/MITRIFY_MODEL\s*=/);
+    expect(runtime).not.toContain('loadMitrifyListedModels');
+    expect(runtime).not.toContain('pickListedMitrifyModel');
+    expect(mitrify).not.toContain('loadMitrifyListedModels');
   });
 });

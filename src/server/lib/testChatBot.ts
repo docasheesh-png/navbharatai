@@ -118,7 +118,7 @@ function requestedModel(action: TestChatAction): string | null {
   const model = action.model?.trim() ?? '';
   return model && model.length <= 200 && !/[\s,]/.test(model) ? model : null;
 }
-const MITRIFY_GATEWAY_TIMEOUT = 'The provider gateway timed out (HTTP 504) before a complete reply arrived. This is a provider-side gateway time-out, not a missing key or an invalid model id.';
+const MITRIFY_GATEWAY_TIMEOUT = 'The provider gateway timed out (HTTP 504) before a complete reply arrived. This admin test selected a model from Mitrify’s live /v1/models list first. The time-out is a provider-side gateway time-out, not a missing key.';
 function mitrifyOutputTokens(): number {
   const cap = freeChainConfig()?.features.replyMaxTokens;
   const shared = Number.isSafeInteger(cap) && (cap as number) >= 64 ? (cap as number) : 250;
@@ -136,6 +136,66 @@ function readMitrifyStreamEvent(wire: Uint8Array): { text?: string; model?: stri
     ...(Number.isSafeInteger(tokens?.prompt_tokens) && Number.isSafeInteger(tokens?.completion_tokens)
       ? { usage: { inputTokens: tokens.prompt_tokens as number, outputTokens: tokens.completion_tokens as number } } : {}),
   };
+}
+type ListedMitrifyModel = { id: string; prompt: number | null; completion: number | null };
+function mitrifyCatalogPrice(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
+  if (typeof value === 'string' && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) return Number(value);
+  return null;
+}
+function parseMitrifyListedModels(payload: unknown): ListedMitrifyModel[] {
+  const rows = payload && typeof payload === 'object' && Array.isArray((payload as { data?: unknown }).data)
+    ? (payload as { data: unknown[] }).data : [];
+  const out: ListedMitrifyModel[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const rec = row as { id?: unknown; object?: unknown; type?: unknown; pricing?: { prompt?: unknown; completion?: unknown; input?: unknown; output?: unknown } };
+    if (typeof rec.id !== 'string') continue;
+    const id = rec.id.trim();
+    if (!id || id.length > 200 || /[\s,]/.test(id) || /:\/\//.test(id) || /^https?:/i.test(id) || seen.has(id)) continue;
+    const kind = `${typeof rec.object === 'string' ? rec.object : ''} ${typeof rec.type === 'string' ? rec.type : ''} ${id}`.toLowerCase();
+    if (/(^|[^a-z])(embed|embedding|image|audio|tts|whisper|moderation|rerank)([^a-z]|$)/.test(kind) && !/(chat|instruct|completion)/.test(kind)) continue;
+    seen.add(id);
+    const pricing = rec.pricing && typeof rec.pricing === 'object' ? rec.pricing : {};
+    out.push({
+      id,
+      prompt: mitrifyCatalogPrice(pricing.prompt ?? pricing.input),
+      completion: mitrifyCatalogPrice(pricing.completion ?? pricing.output),
+    });
+  }
+  return out;
+}
+function pickListedMitrifyModel(listed: readonly ListedMitrifyModel[], preferred: string | null): string | null {
+  if (!listed.length) return null;
+  const ids = new Set(listed.map(item => item.id));
+  if (preferred) return ids.has(preferred) ? preferred : null;
+  const priced = listed.filter(item => item.prompt != null && item.completion != null);
+  const pool = priced.length
+    ? [...priced].sort((a, b) => ((a.prompt as number) + (a.completion as number)) - ((b.prompt as number) + (b.completion as number)) || a.id.localeCompare(b.id))
+    : [...listed].sort((a, b) => Number(b.id === 'mitrify/auto-cheap') - Number(a.id === 'mitrify/auto-cheap') || a.id.localeCompare(b.id));
+  return pool[0]?.id ?? null;
+}
+async function loadMitrifyListedModels(signal: AbortSignal, sink: (detail: { status: number; body: string; requestId?: string }) => void): Promise<ListedMitrifyModel[]> {
+  const cfg = mitrifyConfig();
+  if (!present(cfg.apiKey)) throw new MitrifyError('MITRIFY_CONFIGURATION');
+  let base: URL;
+  try { base = new URL(cfg.baseURL); } catch { throw new MitrifyError('MITRIFY_CONFIGURATION'); }
+  const response = await fetch(`${base.href.replace(/\/$/, '')}/models`, {
+    method: 'GET', redirect: 'error', signal,
+    headers: { Authorization: `Bearer ${cfg.apiKey}`, Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    let body = '';
+    try { body = await response.text(); } catch { body = ''; }
+    sink({
+      status: response.status, body: body.slice(0, 4000),
+      requestId: response.headers.get('x-request-id') || response.headers.get('request-id') || response.headers.get('x-mitrify-request-id') || undefined,
+    });
+    throw new MitrifyError(response.status === 401 ? 'MITRIFY_CONFIGURATION' : `MITRIFY_HTTP_${response.status}`, response.status);
+  }
+  if (!response.headers.get('content-type')?.includes('application/json')) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status);
+  return parseMitrifyListedModels(await response.json());
 }
 function catalogTokenFree(value: unknown): boolean {
   return zero(value) || value === 0;
@@ -197,7 +257,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
     try { const cfg = mitrifyConfig(); configured = present(cfg.apiKey); model = cfg.model || null; } catch { configured = false; }
     const enabled = configured;
     return { ...base, configured, enabled, model, billed: true, approvalRequired: false,
-      note: 'This admin test calls Mitrify when its server key is set. It does not turn on the user-chat chain flag or mint a payload approval. Sending uses the existing shared budget.',
+      note: 'This admin test calls Mitrify when its server key is set. At send time it reads Mitrify’s live /v1/models list and calls only a listed model (the cheapest priced row when the catalog includes prices). A typed model is accepted only if that list contains it. This does not turn on the user-chat chain flag or mint a payload approval.',
       ...(enabled ? {} : { unavailableReason: MISSING_KEY }) };
   }
   if (meta.kind === 'surplus') {
@@ -400,6 +460,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
   };
   await revalidate();
   const meta = META[action.provider];
+  let dispatchedModel = status.model;
   let captured: AdminCapturedProviderError | { status: number; body: string; requestId?: string } | undefined;
   const qubaxAttempts: Array<{ model: string; status: number | null; code: string; latencyMs: number; body?: string; requestId?: string }> = [];
   try {
@@ -453,16 +514,36 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       return finish(action, result.content, result.model, startedAt, result.usage);
     }
     if (meta.kind === 'mitrify') {
+      let listed: ListedMitrifyModel[];
+      try {
+        listed = await loadMitrifyListedModels(bounded, detail => { captured = detail; });
+      } catch (error) {
+        if (error instanceof MitrifyError) throw error;
+        throw new MitrifyError(bounded.aborted ? 'MITRIFY_CANCELLED' : 'MITRIFY_NETWORK');
+      }
+      const preferred = requestedModel(action);
+      const picked = pickListedMitrifyModel(listed, preferred);
+      if (!picked) {
+        return fail('no-model', 503, {
+          model: preferred ?? status.model, latencyMs: Math.max(0, Date.now() - startedAt),
+          providerCode: preferred ? 'MITRIFY_MODEL_NOT_LISTED' : 'MITRIFY_CATALOG_EMPTY',
+          providerMessage: preferred
+            ? 'The typed model is not in Mitrify’s live /v1/models list, so this admin test did not call it.'
+            : 'Mitrify’s live /v1/models list has no usable chat model for this admin test.',
+          extraSecrets,
+        });
+      }
+      dispatchedModel = picked;
       const ceiling = quoteTokens(action.messages, 1, 1);
       const receipt = ceiling > 0 ? await reserveShared(db, requestId, uid, ceiling) : null;
       if (ceiling > 0 && !receipt) throw new TestChatUnavailable('budget', 409);
       let content = '';
-      let reported = status.model || mitrifyConfig().model;
+      let reported = picked;
       let usage: { inputTokens: number; outputTokens: number } | undefined;
       const maxTokens = mitrifyOutputTokens();
       await releaseIfUnused(receipt, async () => {
         await revalidate();
-        return createMitrifyClient(process.env, metadata => console.info('[MITRIFY]', JSON.stringify(metadata)), {
+        return createMitrifyClient({ ...process.env, MITRIFY_MODEL: picked }, metadata => console.info('[MITRIFY]', JSON.stringify(metadata)), {
           onHttpError: detail => { captured = detail; },
         }).chat({
           messages: action.messages, max_tokens: maxTokens, stream: true,
@@ -609,7 +690,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       const httpStatus = cap?.status ?? (error.status || null);
       const gatewayTimeout = httpStatus === 504 || error.code === 'MITRIFY_HTTP_504';
       return fail('unconfirmed', 503, {
-        model: status.model, latencyMs: latency, httpStatus, providerCode: error.code,
+        model: dispatchedModel, latencyMs: latency, httpStatus, providerCode: error.code,
         rawErrorBody: cap && 'body' in cap ? cap.body : null,
         providerRequestId: cap && 'requestId' in cap ? cap.requestId ?? null : null,
         aborted: error.code === 'MITRIFY_CANCELLED', extraSecrets,

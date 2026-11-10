@@ -1,9 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const fake = vi.hoisted(() => ({ run: vi.fn(), config: vi.fn(), db: vi.fn(), maintenance: vi.fn(), policy: vi.fn(),
   budgetConfig: vi.fn(), reserve: vi.fn(), settle: vi.fn(), month: vi.fn(), settleMonth: vi.fn(),
-  compatCtor: vi.fn(), compatTurn: vi.fn(), officialOpenAi: vi.fn(), officialAnthropic: vi.fn() }));
+  compatCtor: vi.fn(), compatTurn: vi.fn(), officialOpenAi: vi.fn(), officialAnthropic: vi.fn(),
+  marketPlan: undefined as undefined | ((...args: unknown[]) => unknown),
+  feedSummary: undefined as undefined | ((...args: unknown[]) => unknown) }));
 vi.mock('./qubax', () => ({ runApprovedQubaxChat: fake.run, qubaxConfig: fake.config,
   QubaxError: class extends Error { constructor(readonly code: string, readonly status = 0) { super(code); } } }));
+vi.mock('./qubaxMarket', async importOriginal => {
+  const actual = await importOriginal<typeof import('./qubaxMarket')>();
+  return {
+    ...actual,
+    readQubaxMarketPlan: (...args: unknown[]) => fake.marketPlan
+      ? fake.marketPlan(...args)
+      : actual.readQubaxMarketPlan(...args as Parameters<typeof actual.readQubaxMarketPlan>),
+    readQubaxFeedSummary: (...args: unknown[]) => fake.feedSummary
+      ? fake.feedSummary(...args)
+      : actual.readQubaxFeedSummary(...args as Parameters<typeof actual.readQubaxFeedSummary>),
+  };
+});
 vi.mock('./testChatBotOfficial', async importOriginal => {
   const actual = await importOriginal<typeof import('./testChatBotOfficial')>();
   return {
@@ -31,7 +45,7 @@ vi.mock('../AI/FreeChain/providers/openAiCompatProvider', async importOriginal =
     },
   };
 });
-import { runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
+import { loadTestChatStatus, runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
 import { TEST_CHAT_PROVIDER_IDS, type TestChatAction } from '../../lib/testChatBot';
 import { QubaxError } from './qubax';
 import { OfficialTestChatError } from './testChatBotOfficial';
@@ -48,6 +62,8 @@ function budget(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.unstubAllEnvs();
   vi.resetAllMocks();
+  fake.marketPlan = undefined;
+  fake.feedSummary = undefined;
   fake.config.mockReturnValue({ enabled: true, apiKey: 'synthetic-key' }); fake.db.mockReturnValue({ marker: 'db' });
   fake.budgetConfig.mockReturnValue(budget());
   fake.maintenance.mockResolvedValue(undefined); fake.month.mockResolvedValue('2026-11');
@@ -237,5 +253,39 @@ describe('test chat provider isolation and admission', () => {
     expect(fake.settle).toHaveBeenCalledWith({ id: 'hold', mayDispatch: true }, 0);
     expect(fake.settleMonth).toHaveBeenCalledWith({ marker: 'db' }, '2026-11', expect.any(Number), 0);
     expect(fake.run).not.toHaveBeenCalled();
+  });
+  it('releases an unused official Gemini Flash hold when dispatch fails before the provider is called', async () => {
+    vi.stubEnv('GEMINI_API_KEY', 'synthetic-gemini-key-value');
+    fake.compatTurn.mockRejectedValue(new FreeChainProviderError('CONFIGURATION'));
+    const error = await runTestChat({ ...action, provider: 'gemini-2.5-flash' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('unconfirmed');
+    expect(error.diagnostic?.providerCode).toBe('CONFIGURATION');
+    expect(fake.compatTurn).toHaveBeenCalledOnce();
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+    expect(fake.officialAnthropic).not.toHaveBeenCalled();
+    expect(fake.reserve).toHaveBeenCalledOnce();
+    expect(fake.settle).toHaveBeenCalledOnce();
+    expect(fake.settle).toHaveBeenCalledWith({ id: 'hold', mayDispatch: true }, 0);
+    expect(fake.settleMonth).toHaveBeenCalledOnce();
+    expect(fake.settleMonth).toHaveBeenCalledWith({ marker: 'db' }, '2026-11', expect.any(Number), 0);
+    expect(fake.run).not.toHaveBeenCalled();
+  });
+  it('attaches the Qubax feed without collapsing the provider list', async () => {
+    vi.stubEnv('QUBAX_ENABLED', '1');
+    vi.stubEnv('QUBAX_API_KEY', 'synthetic-qubax-key-value');
+    fake.marketPlan = vi.fn().mockResolvedValue({ eligible: [], backup: null });
+    fake.feedSummary = vi.fn().mockResolvedValue({
+      fresh: true, observedAtMs: 1_700_000_000_000, pricedRows: 4, officialMatches: 3, discountEligible: 2, probePassing: 1,
+    });
+    const status = await loadTestChatStatus();
+    expect(status.providers.map(item => item.id)).toEqual([...TEST_CHAT_PROVIDER_IDS]);
+    expect(status.providers).toHaveLength(TEST_CHAT_PROVIDER_IDS.length);
+    expect(status.feed).toEqual({
+      fresh: true, observedAtMs: 1_700_000_000_000, pricedRows: 4, officialMatches: 3, discountEligible: 2, probePassing: 1,
+    });
+    expect(status.providers.find(item => item.id === 'qubax')).toMatchObject({
+      id: 'qubax', model: null, selection: 'none', ceilingUsd: '0.02', approvalRequired: false,
+    });
+    expect(status.providers.filter(item => item.id !== 'qubax').every(item => item.selection === undefined)).toBe(true);
   });
 });

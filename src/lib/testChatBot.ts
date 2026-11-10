@@ -65,7 +65,8 @@ export interface TestChatProviderStatus {
   officialOutputUsdPerMillion?: string | null;
   discountBps?: number | null;
 }
-export interface TestChatStatus { providers: TestChatProviderStatus[]; approvalRequired: boolean; noFallback: true }
+export interface TestChatFeedSummary { fresh: boolean; observedAtMs: number | null; pricedRows: number; officialMatches: number; discountEligible: number; probePassing: number }
+export interface TestChatStatus { providers: TestChatProviderStatus[]; approvalRequired: boolean; noFallback: true; feed?: TestChatFeedSummary }
 export interface TestChatReply {
   requestId: string;
   provider: TestChatProviderId;
@@ -155,10 +156,19 @@ function isProviderStatus(p: unknown, expectedId: TestChatProviderId): p is Test
     && (p.officialOutputUsdPerMillion === undefined || optionalDecimal(p.officialOutputUsdPerMillion))
     && (p.discountBps === undefined || p.discountBps === null || (Number.isInteger(p.discountBps) && (p.discountBps as number) >= 0 && (p.discountBps as number) <= 10_000));
 }
+function isFeedSummary(v: unknown): v is TestChatFeedSummary {
+  return record(v) && typeof v.fresh === 'boolean'
+    && (v.observedAtMs === null || (typeof v.observedAtMs === 'number' && Number.isFinite(v.observedAtMs)))
+    && Number.isInteger(v.pricedRows) && (v.pricedRows as number) >= 0
+    && Number.isInteger(v.officialMatches) && (v.officialMatches as number) >= 0
+    && Number.isInteger(v.discountEligible) && (v.discountEligible as number) >= 0
+    && Number.isInteger(v.probePassing) && (v.probePassing as number) >= 0;
+}
 export function isTestChatStatus(v: unknown): v is TestChatStatus {
   return record(v) && typeof v.approvalRequired === 'boolean' && v.noFallback === true && Array.isArray(v.providers)
     && v.providers.length === TEST_CHAT_PROVIDER_IDS.length
-    && v.providers.every((p, i) => isProviderStatus(p, TEST_CHAT_PROVIDER_IDS[i]));
+    && v.providers.every((p, i) => isProviderStatus(p, TEST_CHAT_PROVIDER_IDS[i]))
+    && (v.feed === undefined || isFeedSummary(v.feed));
 }
 export function isTestChatReply(v: unknown): v is TestChatReply {
   return record(v) && typeof v.requestId === 'string' && TEST_CHAT_PROVIDER_IDS.includes(v.provider as TestChatProviderId)

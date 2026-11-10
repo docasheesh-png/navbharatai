@@ -58,6 +58,10 @@ describe('isolated test chat contract', () => {
         : item),
     };
     expect(isTestChatStatus(market)).toBe(true);
+    const withFeed = { ...market, feed: { fresh: true, observedAtMs: 1_700_000_000_000, pricedRows: 4, officialMatches: 3, discountEligible: 2, probePassing: 1 } };
+    expect(isTestChatStatus(withFeed)).toBe(true);
+    expect(isTestChatStatus({ ...withFeed, feed: { ...withFeed.feed, pricedRows: -1 } })).toBe(false);
+    expect(isTestChatStatus({ ...withFeed, providers: [withFeed.providers[0]] })).toBe(false);
     const attempts = { ...diagnostic, finalOutcome: 'tries-exhausted', attempts: [{
       model: 'model-a', latencyMs: 10, classification: 'rate-limit' as const, httpStatus: 429,
       providerCode: 'QUBAX_HTTP_ERROR', providerType: null, providerRequestId: 'a1', providerMessage: null, rawErrorBody: 'slow',

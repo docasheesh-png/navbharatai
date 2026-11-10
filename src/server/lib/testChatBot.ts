@@ -3,7 +3,7 @@ import { readTestChatAction, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_MAX_RESPONSE
   TEST_CHAT_PROVIDER_IDS,
   type TestChatAction, type TestChatDiagnostic, type TestChatProviderId, type TestChatProviderStatus,
   type TestChatReply, type TestChatStatus } from '../../lib/testChatBot';
-import { nanoUsdToDecimal, qubaxModelOverride, qubaxRequestCeilingNanoUsd, readQubaxMarketPlan } from './qubaxMarket';
+import { nanoUsdToDecimal, qubaxModelOverride, qubaxRequestCeilingNanoUsd, readQubaxFeedSummary, readQubaxMarketPlan } from './qubaxMarket';
 import { qubaxConfig, QubaxError, runApprovedQubaxChat } from './qubax';
 import { mitrifyChainEnabled, mitrifyConfig, MitrifyError, runApprovedMitrifyChain } from './mitrify';
 import { getServerDb } from './serverDb';
@@ -203,7 +203,7 @@ export async function loadTestChatStatus(): Promise<TestChatStatus> {
   try {
     const db = getServerDb();
     if (!db) return status;
-    const plan = await readQubaxMarketPlan(db, override, Date.now());
+    const [plan, feed] = await Promise.all([readQubaxMarketPlan(db, override, Date.now()), readQubaxFeedSummary(db, Date.now())]);
     const choice = plan.eligible[0] ?? plan.backup;
     const providers = status.providers.map(p => {
       if (p.id !== 'qubax') return p;
@@ -218,7 +218,7 @@ export async function loadTestChatStatus(): Promise<TestChatStatus> {
         discountBps: choice.discountBps,
       };
     });
-    return { ...status, approvalRequired: providers.some(p => p.approvalRequired), providers };
+    return { ...status, feed, approvalRequired: providers.some(p => p.approvalRequired), providers };
   } catch { return status; }
 }
 export function testChatStatus(): TestChatStatus {
@@ -381,31 +381,31 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       return finish(action, result.content, result.model, startedAt, result.usage);
     }
 
+    let officialReceipt: Awaited<ReturnType<typeof reserveShared>> = null;
     if (meta.kind === 'kimi' || meta.kind === 'grok' || meta.kind === 'anthropic' || meta.kind === 'gemini-flash') {
       const model = status.model || (meta.kind === 'kimi' ? 'kimi-k2.7' : meta.kind === 'grok' ? 'grok-3-fast' : meta.kind === 'anthropic' ? 'claude-sonnet-4-6' : 'gemini-2.5-flash');
       const rateProvider = meta.kind === 'kimi' ? 'KIMI' : meta.kind === 'grok' ? 'GROK' : meta.kind === 'anthropic' ? 'ANTHROPIC' : 'GEMINI';
       let rate;
       try { rate = realRateFor(rateProvider, model); } catch { throw new TestChatUnavailable('budget', 409); }
       const ceiling = quoteTokens(action.messages, rate.inputPerMTok, rate.outputPerMTok);
-      let receipt: Awaited<ReturnType<typeof reserveShared>> = null;
       if (ceiling > 0) {
-        receipt = await reserveShared(db, requestId, uid, ceiling);
-        if (!receipt) throw new TestChatUnavailable('budget', 409);
+        officialReceipt = await reserveShared(db, requestId, uid, ceiling);
+        if (!officialReceipt) throw new TestChatUnavailable('budget', 409);
       }
       if (meta.kind === 'anthropic') {
         const key = firstPresent(process.env, ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY']);
-        const result = await releaseIfUnused(receipt, () => runOfficialAnthropicTest({ apiKey: key, model, messages: action.messages, signal: bounded }));
+        const result = await releaseIfUnused(officialReceipt, () => runOfficialAnthropicTest({ apiKey: key, model, messages: action.messages, signal: bounded }));
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
       if (meta.kind === 'kimi') {
         const base = (process.env.KIMI_BASE_URL?.trim() || 'https://api.moonshot.ai/v1').replace(/\/+$/, '');
-        const result = await releaseIfUnused(receipt, () => runOfficialOpenAiCompatTest({
+        const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
           url: `${base}/chat/completions`, apiKey: firstPresent(process.env, ['KIMI_API_KEY']), model, messages: action.messages, signal: bounded,
         }));
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
       if (meta.kind === 'grok') {
-        const result = await releaseIfUnused(receipt, () => runOfficialOpenAiCompatTest({
+        const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
           url: 'https://api.x.ai/v1/chat/completions',
           apiKey: firstPresent(process.env, ['XAI_API_KEY', 'GROK_API_KEY']), model, messages: action.messages, signal: bounded,
         }));
@@ -414,9 +414,14 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
     }
 
     const adapter = compatAdapter(action.provider, detail => { captured = detail; });
-    if (!adapter) throw new TestChatUnavailable('configuration');
-    let paidReceipt: Awaited<ReturnType<typeof reserveShared>> = null;
-    if (adapter.rung && isPaidRung(adapter.rung.id) && adapter.rung.priceIn > 0 && adapter.rung.priceOut > 0) {
+    if (!adapter) {
+      if (officialReceipt) {
+        try { await officialReceipt.releaseUndispatched(); } catch { /* keep the configuration error */ }
+      }
+      throw new TestChatUnavailable('configuration');
+    }
+    let paidReceipt: Awaited<ReturnType<typeof reserveShared>> = officialReceipt;
+    if (!paidReceipt && adapter.rung && isPaidRung(adapter.rung.id) && adapter.rung.priceIn > 0 && adapter.rung.priceOut > 0) {
       paidReceipt = await reserveShared(db, requestId, uid, quoteTokens(action.messages, adapter.rung.priceIn, adapter.rung.priceOut));
       if (!paidReceipt) throw new TestChatUnavailable('budget', 409);
     }

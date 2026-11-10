@@ -1,5 +1,5 @@
 import { CHAT_SERVER_DEADLINE_MS } from '../../lib/chatDeadline';
-import { fixedTextChainEnabled, withFixedTextChainScope } from '../AI/fixedTextChain';
+import { withFixedTextChainScope } from '../AI/fixedTextChain';
 import { withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
 import { chatAvailabilityMessage } from '../lib/chatAvailabilityMessage';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../lib/chatReplyLanguage';
@@ -13,7 +13,7 @@ import { usageLogFields } from '../AI/Router/usageLogFields';
 import { freeModuleInferenceScope, runAdmittedLegacyImageEdit } from '../AI/inferencePolicy';
 import { strictFreeRequired, StrictFreeCapabilityError } from '../AI/inferencePolicy';
 import type { Express, Request, Response } from 'express';
-import { currentInferenceGatewayContext, inferenceGatewayEnabled, isGatewayRouteSelected, isGatewayTerminalError, runWithAuthenticatedInferenceGatewayRequest, runWithInferenceGatewayContext, runWithInferenceGatewayEntryAdmission } from '../AI/InferenceGateway/runtime';
+import { currentInferenceGatewayContext, inferenceGatewayEnabled, isGatewayRouteSelected, isGatewaySetupMiss, isGatewayTerminalError, runWithAuthenticatedInferenceGatewayRequest, runWithInferenceGatewayContext, runWithInferenceGatewayEntryAdmission } from '../AI/InferenceGateway/runtime';
 import { onClientGone, onStreamClosed } from '../lib/clientDisconnect';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes ai_usage_logs (server-only).
@@ -84,7 +84,8 @@ async function withChatTextGateway<T>(req: Request, res: Response, handler: () =
     return;
   }
   const legacy = () => withFixedTextChainScope('chat', Array.isArray(req.body?.fileAttachments) && req.body.fileAttachments.length ? 'vision-pdf' : 'text', () => withFreeChainEntryAdmission(req, res, handler));
-  if (!fixedTextChainEnabled() && !inferenceGatewayEnabled('chat') && !wasGatewayGuestSelected(req)) return legacy();
+  // fixed-v1 alone must not replace public chat with a gateway that has no catalog.
+  if (!inferenceGatewayEnabled('chat') && !wasGatewayGuestSelected(req)) return legacy();
   const body = req.body;
   if (!body || (!body.message && !Array.isArray(body.fileAttachments))) return legacy();
   if (res.destroyed || res.writableEnded) return;
@@ -109,6 +110,7 @@ async function withChatTextGateway<T>(req: Request, res: Response, handler: () =
   } catch (error) {
     if (!isGatewayTerminalError(error)) throw error;
     if (controller.signal.aborted || res.destroyed || res.writableEnded) return;
+    if (!res.headersSent && isGatewaySetupMiss(error)) return legacy();
     const reply = strictFreeRequired() ? 'No verified free model is currently available. Please try again later.' : 'The AI service is temporarily unavailable. Please try again later.';
     const code = strictFreeRequired() ? 'STRICT_FREE_UNAVAILABLE' : 'INFERENCE_GATEWAY_UNAVAILABLE';
     if (req.body.stream === true) {
@@ -985,6 +987,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         res.end(`data: ${JSON.stringify({ c: 'The AI service is temporarily unavailable. Please try again later.', code: 'INFERENCE_GATEWAY_UNAVAILABLE' })}\n\n`);
       }
       if (!res.headersSent) {
+        // A missing gateway catalog is not a dead chat. The outer wrapper runs the free chain.
+        if (isGatewaySetupMiss(e)) throw e;
         // Never leak the raw inference error (may name a provider/model) to the client.
         if (strictFreeRequired()) return res.status(503).json({ code: 'STRICT_FREE_UNAVAILABLE', reply: 'No verified free model is currently available. Please try again later.', error: 'No paid fallback was used.' });
         if (isGatewayTerminalError(e)) return res.status(503).json({ code: 'INFERENCE_GATEWAY_UNAVAILABLE', reply: 'The AI service is temporarily unavailable. Please try again later.' });

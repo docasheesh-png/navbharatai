@@ -42,6 +42,11 @@ describe('same-model 90% discount, then probe performance', () => {
     const ranked = plan([row('gpt-4o-mini', 10, 10), row('glm-5.3', 400, 800)], official, models);
     expect(ranked.eligible.map(item => item.modelId)).toEqual(['glm-5.3', 'gpt-4o-mini']);
   });
+  it('strips a vendor prefix only when the remainder is the official model', () => {
+    const official = [row('gpt-4o-mini', 1_000, 2_000)];
+    const ranked = plan([row('openai-gpt-4o-mini', 100, 200), row('openai-gpt-4o', 100, 200)], official, ledger(['openai-gpt-4o-mini', 'openai-gpt-4o']));
+    expect(ranked.eligible.map(item => item.modelId)).toEqual(['openai-gpt-4o-mini']);
+  });
   it('uses the pinned model only when nothing clears the official discount', () => {
     const official = [row('gpt-4o', 1_000, 1_000)];
     const qubax = [row('backup-model', 900, 900), row('gpt-4o', 900, 900)];

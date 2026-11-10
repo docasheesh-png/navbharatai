@@ -101163,3 +101163,10 @@ Owner t307u sequential audit, BR1960 only (boundary 1951..2105 frozen). A one-sc
 - **F3.** The click explorer records the controls it drops silently; "all deliberately skipped" is said only when true.
 
 Queue: Q-2612…Q-2617 (three implemented, three 🟡 blocked: html-code intent, compute journey, CSP on client-layer SPAs). This commit closes the seven BR1959 rows resolved by #4134. Q-2608/2610/2611, the BR1958 blockers, Q-2371 and the PR4109 row stay open.
+
+## 2026-11-10 — BR1961 autopsy (YouTube-like follow-up, succeeded): Hindi "ki tarah" is a likeness; a busy sandbox is not a goodbye
+Owner t307u sequential audit, BR1961 only (boundary 1951..2105 frozen). A follow-up on "Mujhe youtube ki tarah ek app Banakar do" was scoped as an ordinary one-shot because "ki tarah" was not treated as "like", and the user was told to retry while the build continued after an E2B cap. Ledger: [autopsy](docs/build-report-autopsy-BR1961.md), [evidence](docs/build-report-autopsy-BR1961-evidence.json).
+- **F1.** Hindi "X ki/ke/ka tarah" immediately after a famous name is a likeness word. Over 78,007 strings, no decision changed.
+- **F2.** sandboxUnavailableNotice says we are still trying and that the user does not need to start again (a second Start would consume another sandbox slot). The fast-lane skip after setup failure was already #4124.
+
+Queue: Q-2618…Q-2622 (two implemented, three 🟡 blocked: exclusive-access phrasing, E2B cap of 20, paragraph-subject widening). This commit closes the three BR1960 rows resolved by #4135. Q-2615/2616/2617, Q-2608/2610/2611, the BR1958 blockers, Q-2371 and the PR4109 row stay open.

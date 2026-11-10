@@ -177,6 +177,28 @@ export function isTestChatStatus(v: unknown): v is TestChatStatus {
     && v.providers.every((p, i) => isProviderStatus(p, TEST_CHAT_PROVIDER_IDS[i]))
     && (v.feed === undefined || isFeedSummary(v.feed));
 }
+/** Keep every readable provider. One row that fails the text limit becomes "could not be read" and does not drop the others. */
+export function readPartialTestChatStatus(v: unknown): TestChatStatus | null {
+  if (!record(v) || !Array.isArray(v.providers)) return null;
+  const accepted = new Map<TestChatProviderId, TestChatProviderStatus>();
+  for (const row of v.providers) {
+    if (!record(row) || !TEST_CHAT_PROVIDER_IDS.includes(row.id as TestChatProviderId)) continue;
+    const id = row.id as TestChatProviderId;
+    if (isProviderStatus(row, id)) accepted.set(id, row);
+  }
+  if (!accepted.size) return null;
+  const providers = TEST_CHAT_PROVIDER_IDS.map(id => accepted.get(id) ?? {
+    id, label: id, configured: false, enabled: false, model: null, approvalRequired: false,
+    unavailableReason: 'This provider’s status could not be read.',
+  });
+  const feed = v.feed === undefined || isFeedSummary(v.feed) ? v.feed as TestChatFeedSummary | undefined : undefined;
+  return {
+    providers,
+    approvalRequired: typeof v.approvalRequired === 'boolean' ? v.approvalRequired : providers.some(p => p.approvalRequired === true),
+    noFallback: true,
+    ...(feed ? { feed } : {}),
+  };
+}
 export function isTestChatReply(v: unknown): v is TestChatReply {
   return record(v) && typeof v.requestId === 'string' && TEST_CHAT_PROVIDER_IDS.includes(v.provider as TestChatProviderId)
     && safeText(v.content, TEST_CHAT_MAX_RESPONSE_CHARS) && safeText(v.model, 200) && v.noFallback === true

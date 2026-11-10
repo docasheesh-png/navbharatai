@@ -8,6 +8,8 @@ describe('separate Test Chat Bot panel', () => {
   it('has actual text input, starts without inference, and discloses the gateway boundary', () => {
     const html = renderToStaticMarkup(<TestChatBotPanel adminToken="synthetic-admin-secret" />);
     expect(html).toContain('Test Chat Bot'); expect(html).toContain('<textarea'); expect(html).toContain('<select');
+    expect(html).toContain('value="mitrify"'); expect(html).toContain('value="qubax"');
+    expect(html).not.toContain('independent review of the exact payload');
     expect(html).toContain('Send to Qubax only'); expect(html).toContain('no NavBharatAI provider fallback');
     expect(html).toContain('Model (optional)'); expect(html).toContain('same cheapest-model selection as main chat');
     expect(html).toContain('upstream sellers'); expect(html).toContain('does not save transcripts');

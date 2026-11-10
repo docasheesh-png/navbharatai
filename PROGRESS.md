@@ -101234,3 +101234,10 @@ Owner t311u sequential audit, BR1970 only (boundary 1951..2105 frozen). "The AI 
 - **F2.** Q-2641 shipped: new "made by NavBharatAI" injections stay inside a 390×844 visual viewport (reviewer CSS plus right: calc(12px + 100% - 100vw) for a transformed wider containing block). Existing version-2 apps are not rewritten. mobileLayoutCheck is not taught to ignore the badge.
 
 Queue: this commit closes Q-2641 and opens Q-2642 (do not start a coding build when the prompt is only a known busy line). Q-2640, Q-2621, Q-2611 and earlier blockers stay open.
+
+## 2026-11-10 — BR1971 autopsy (succeeded continue after BR1970’s busy-line stop): lock ordinary continue; carry two BR1970 ledger nits
+Owner t311u sequential audit, BR1971 only (boundary 1951..2105 frozen). "Continue from where you left off and finish/fix the build so the app works end-to-end." succeeded in 5.44 min on the same workspace as BR1970, about 10 s after that user-stop. RELEASE_GATE GREEN; charged ₹1.21; ETA inside the 4.5–13.6 min band. Ledger: [autopsy](docs/build-report-autopsy-BR1971.md), [evidence](docs/build-report-autopsy-BR1971-evidence.json).
+- **F1.** Neighbour locks: this prompt is the platform continue constant and stays ordinary/direct; it is not a busy-service line (Q-2642 must match the current prompt only).
+- **F2.** BR1970 ledger nits carried here (no separate PR): the busy-line prompt is 68 characters, not 67; the Q-2641 label CSS is nowrap+ellipsis.
+
+Queue: this commit closes no row and opens no row. Q-2642, Q-2640, Q-2621, Q-2611, Q-2375 / Q-1068 and earlier blockers stay open.

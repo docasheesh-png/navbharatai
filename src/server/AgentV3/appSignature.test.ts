@@ -30,6 +30,7 @@ describe('appSignatureHtml — the badge markup', () => {
     expect(b).toContain('max-width:calc(100vw - 24px)');
     expect(b).toContain('min-width:0');
     expect(b).toContain('text-overflow:ellipsis');
+    expect(b).toContain('white-space:nowrap');
     expect(b).toContain('width:32px;height:32px;flex:none');
     expect(b).not.toMatch(/<link|<script|src=(?!"https:\/\/navbharatai)/); // no external resources
   });

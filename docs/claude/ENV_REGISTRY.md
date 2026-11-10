@@ -1651,7 +1651,7 @@ the code (it is actually read somewhere) on 2026-07-11.
   Referral is **split from the Free Program pause**: it follows `REFERRAL_REWARDS=on` only. New key
   **`REFERRAL_FOLLOWS_FREE_PAUSE`** (NOT set; default OFF): `on` restores pause ⇒ referral off. Gift ₹ is
   spendable on chat + coding only — hosting traffic (`feature: hosting*`) can no longer use gift; plans,
-  add-ons, remix, APK were already paid-only. The admin one-press ₹150 welcome gift is retired.
+  add-ons, remix, APK were already paid-only. The admin one-press ₹150 welcome gift has been removed.
   ⚠️ While the Free Program pause is ON, existing gift-spend rules still make ALL gift unspendable.
 - **🎁 THE FREE-CREDIT STEPS, FINAL PLAN (admin 2026-09-27, verbatim: *"sabhi pahle 50₹ do! (mobile +
   website) · fir refral code ke 100₹ (only mobile') · fir login par 50₹ (dono par) · fir mobile otp

@@ -211,6 +211,18 @@ describe('Qubax tries the top three eligible models on one turn', () => {
     expect(sent.result).toMatchObject({ kind: 'response', model: 'third' });
     expect(sent.models).toEqual(['best', 'second', 'third']); expect(sent.release).toHaveBeenCalledTimes(2);
   });
+  it('drops an English reply to a Hindi question and keeps the Hindi reply', async () => {
+    network.mockResolvedValueOnce(reply('best', 'Your name is Meera and this is a long English sentence.')).mockResolvedValueOnce(reply('second', 'आपका नाम मीरा है।'));
+    vi.spyOn(market, 'readQubaxMarketPlan').mockResolvedValue({ eligible: [choice('best', 10_000, 100), choice('second', 9_000, 100)], backup: null });
+    const release = vi.fn().mockResolvedValue(undefined);
+    const reserve = vi.fn().mockResolvedValue({ releaseUndispatched: release });
+    const db = { doc: vi.fn(() => ({})), runTransaction: vi.fn(async (run: (tx: { get: () => Promise<{ data: () => undefined }>; set: () => void }) => Promise<void>) => run({ get: async () => ({ data: () => undefined }), set: () => {} })) };
+    const hindi = [{ role: 'user', content: 'मेरा नाम क्या है?' }];
+    const result = await runApprovedQubaxChat({ db: db as unknown as Firestore, uid: 'signed-in-user', requestId: 'turn-hi', privateTurn: false, healthTurn: false,
+      body: { messages: hindi, max_tokens: 128, stream: false }, signal: new AbortController().signal, reserve }, env);
+    expect(result).toMatchObject({ kind: 'response', model: 'second', content: 'आपका नाम मीरा है।' });
+    expect(release).toHaveBeenCalledOnce();
+  });
   it('stops after three failures and does not keep the holds', async () => {
     network.mockResolvedValue(failed());
     const sent = await send([choice('best', 10_000, 100), choice('second', 9_000, 100), choice('third', 8_000, 100)]);

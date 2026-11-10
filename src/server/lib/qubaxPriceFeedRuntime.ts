@@ -14,13 +14,15 @@ export async function refreshQubaxPriceFeed(env: Env = process.env) {
     const { getServerDb } = await import('./serverDb');
     const db = getServerDb();
     if (!db) return { status: 'unavailable' as const };
-    return await syncQubaxPriceFeed(new QubaxPriceFeedStore(db));
+    const result = await syncQubaxPriceFeed(new QubaxPriceFeedStore(db));
+    if (result.status === 'synced') void import('./qubaxProbe').then(probe => probe.runScheduledQubaxProbe(env)).catch(() => {});
+    return result;
   } catch { return { status: 'unavailable' as const }; }
 }
 export function registerQubaxPriceFeed(scheduler: Pick<Scheduler, 'register' | 'runNow'>, env: Env = process.env): void {
   if (!qubaxPriceFeedEnabled(env)) return;
   scheduler.register({ id: QUBAX_PRICE_FEED_JOB, exclusive: true, schedule: { kind: 'everyMs', ms: QUBAX_PRICE_FEED_INTERVAL_MS },
-    handler: async () => { await refreshQubaxPriceFeed(env); await import('./qubaxProbe').then(probe => probe.runScheduledQubaxProbe(env)).catch(() => {}); } });
+    handler: async () => { await refreshQubaxPriceFeed(env); } });
   // Both startup and authenticated external ticks enter the same durable fence.
   void scheduler.runNow(QUBAX_PRICE_FEED_JOB).catch(() => {});
 }

@@ -293,11 +293,12 @@ function featureCount(raw: string): number {
   const sections = sectionedSpecSize(text);
   // A question or a setting on a bullet is not a feature either (autopsy 0311186f) — the same rule the
   // shared counter applies, so the two counts cannot disagree about one line.
-  // Numbered lines drop questions/assignments and lines that are clearly quality / acceptance /
-  // process constraints (BR1962). Long numbered PRODUCT features still count: MAX_ITEM_WORDS is
-  // not applied here (a shop-ERP of eight sentence-length features must stay LARGE). Markdown
-  // bullets keep the previous notAFeatureLine-only tally so a picture's visual-element list still
-  // witnesses autopsy 19641ab5 (tests/aPictureIsNotAnApp.test.ts).
+  // Numbered lines drop questions/assignments and lines whose WHOLE text is a tight
+  // quality/acceptance constraint (BR1962). The default is to count: a prefix such as
+  // "Responsive" or "Keep existing" is not enough (a shop list with "Responsive POS
+  // screen for tablets" must stay LARGE). MAX_ITEM_WORDS is not applied here.
+  // Markdown bullets keep the previous notAFeatureLine-only tally so a picture's
+  // visual-element list still witnesses autopsy 19641ab5.
   const numbered = (text.match(/^\s*\d+[.)]\s+\S.*$/gm) || []).filter((l) => !notAFeatureLine(l) && !isQualityAcceptanceLine(l)).length;
   const bullets = (text.match(/^\s*[-*•]\s+\S.*$/gm) || []).filter((l) => !notAFeatureLine(l)).length;
 

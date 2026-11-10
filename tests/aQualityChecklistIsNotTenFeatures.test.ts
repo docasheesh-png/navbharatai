@@ -5,8 +5,9 @@
 // featureCount's legacy numbered-line tally counted every Requirements: line, while the shared
 // enumerator (MAX_ITEM_WORDS, isItem) saw only three short named parts. Software Project Mode
 // did not create a plan (not a fresh build), but the same count on a new app would spend a
-// planner call. Numbered lines now drop only clearly quality / acceptance / process constraints
-// — long numbered product features still count (MAX_ITEM_WORDS is not applied to this tally).
+// planner call. Numbered lines now drop only when the WHOLE line is a tight, anchored
+// quality/acceptance constraint — long numbered product features still count, including
+// ones that start with quality words ("Responsive POS…", "Keep existing order history…").
 import { describe, it, expect } from 'vitest';
 import { analyzeAppScope } from '../src/server/lib/appScopeAnalyzer';
 import { countEnumeratedFeatures, enumeratedFeatureItems, isQualityAcceptanceLine } from '../src/server/AgentV3/enumeratedFeatures';
@@ -72,6 +73,36 @@ const HINGLISH_HOSPITAL = `Ek hospital management system banao:
 7. Emergency queue for arriving ambulances
 8. Daily duty roster for night nurses`;
 
+const SHOP_ERP_RESPONSIVE_POS = `Build a shop ERP:
+1. Login with an email and password
+2. Responsive POS screen for tablets
+3. Inventory alerts when stock is low
+4. Invoice PDFs for each completed order
+5. Full customer purchase history for each account
+6. Online payments for every completed order
+7. Staff roles with separate access permissions
+8. Daily email report of store sales`;
+
+const SHOP_ERP_HINGLISH_POS = `Build a shop ERP:
+1. Login with an email and password
+2. Responsive POS screen tablets ke liye
+3. Inventory alerts when stock is low
+4. Invoice PDFs for each completed order
+5. Full customer purchase history for each account
+6. Online payments for every completed order
+7. Staff roles with separate access permissions
+8. Daily email report of store sales`;
+
+const SHOP_ERP_KEEP_HISTORY = `Build a shop ERP:
+1. Login with an email and password
+2. Keep existing order history after migration
+3. Inventory alerts when stock is low
+4. Invoice PDFs for each completed order
+5. Full customer purchase history for each account
+6. Online payments for every completed order
+7. Staff roles with separate access permissions
+8. Daily email report of store sales`;
+
 const PHOTO = `[Image: 1000243024.jpg]
 The uploaded file is a portrait-style photograph of a woman. It is not a UI design, screenshot, mockup, or wireframe.
 
@@ -110,6 +141,21 @@ describe('🔒 neighbours: long numbered product lists still escalate', () => {
     // featureCount's legacy numbered tally must still see all eight.
     expect(countEnumeratedFeatures(SHOP_ERP_LONG)).toBe(0);
     expectLarge(SHOP_ERP_LONG, 'shop-ERP');
+  });
+
+  it('an 8-item shop ERP that includes "Responsive POS screen for tablets" stays LARGE', () => {
+    expect(isQualityAcceptanceLine('2. Responsive POS screen for tablets')).toBe(false);
+    expectLarge(SHOP_ERP_RESPONSIVE_POS, 'responsive POS');
+  });
+
+  it('an 8-item shop ERP that includes Hinglish "Responsive POS screen tablets ke liye" stays LARGE', () => {
+    expect(isQualityAcceptanceLine('2. Responsive POS screen tablets ke liye')).toBe(false);
+    expectLarge(SHOP_ERP_HINGLISH_POS, 'hinglish responsive POS');
+  });
+
+  it('an 8-item shop ERP that includes "Keep existing order history after migration" stays LARGE', () => {
+    expect(isQualityAcceptanceLine('2. Keep existing order history after migration')).toBe(false);
+    expectLarge(SHOP_ERP_KEEP_HISTORY, 'keep existing order history');
   });
 
   it('a Hindi shop-ERP of eight long numbered features stays LARGE', () => {
@@ -196,8 +242,10 @@ describe('isQualityAcceptanceLine is conservative', () => {
       '3. Handle errors gracefully',
       '4. no demo results',
       '5. Responsive',
+      '11. Mobile responsive',
+      '12. The UI must be responsive',
       '6. Tests pass',
-      '7. Inspect src/lib/aiService.ts.',
+      '13. All tests must pass',
       '8. Never display fake AI responses.',
       '9. Keep the existing NOVA AI design and all working features unchanged.',
       '10. Handle loading, timeout and API errors properly.',
@@ -221,6 +269,16 @@ describe('isQualityAcceptanceLine is conservative', () => {
       '3. Never miss a payment reminder',
       '4. Email aur password se login',
       '5. Is hafte ki sales dikhane wala dashboard',
+      '2. Responsive POS screen for tablets',
+      '2. Responsive POS screen tablets ke liye',
+      '2. Keep existing order history after migration',
+      '1. Handle COD payments at delivery',
+      '1. Do not allow guests to check out without payment',
+      '1. No-show tracking for appointments',
+      '1. Inspect src/lib/aiService.ts.',
+      '1. Identify nearby restaurants on a map',
+      '1. Error log viewer for failed payments',
+      '1. Test reports upload for each patient',
     ]) {
       expect(isQualityAcceptanceLine(line), line).toBe(false);
     }

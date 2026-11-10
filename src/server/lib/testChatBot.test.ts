@@ -547,6 +547,121 @@ describe('test chat provider isolation and admission', () => {
     expect(fake.mitrifyChat).not.toHaveBeenCalled();
     expect(fake.reserve).not.toHaveBeenCalled();
   });
+
+  it('treats numeric 0+0 catalog prices as unpriced and does not skip the budget hold', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyCatalog = async () => mitrifyCatalogResponse({
+      data: [{ id: 'mitrify/zero', pricing: { prompt: 0, completion: 0 } }],
+    });
+    const error = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('no-model');
+    expect(error.diagnostic?.providerCode).toBe('MITRIFY_NO_PRICES');
+    expect(error.diagnostic?.providerMessage).toContain('mitrify/zero');
+    expect(fake.mitrifyChat).not.toHaveBeenCalled();
+    expect(fake.reserve).not.toHaveBeenCalled();
+  });
+  it('treats string \"0\" catalog prices as unpriced', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyCatalog = async () => mitrifyCatalogResponse({
+      data: [{ id: 'mitrify/zero', pricing: { prompt: '0', completion: '0' } }],
+    });
+    const error = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('no-model');
+    expect(error.diagnostic?.providerCode).toBe('MITRIFY_NO_PRICES');
+    expect(fake.mitrifyChat).not.toHaveBeenCalled();
+    expect(fake.reserve).not.toHaveBeenCalled();
+  });
+  it('treats a catalog row as unpriced when only one side is 0', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyCatalog = async () => mitrifyCatalogResponse({
+      data: [{ id: 'mitrify/half', pricing: { prompt: '0.1', completion: 0 } }],
+    });
+    const error = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('no-model');
+    expect(error.diagnostic?.providerCode).toBe('MITRIFY_NO_PRICES');
+    expect(error.diagnostic?.providerMessage).toContain('mitrify/half');
+    expect(fake.mitrifyChat).not.toHaveBeenCalled();
+    expect(fake.reserve).not.toHaveBeenCalled();
+  });
+  it('ignores a 0+0 row when a really priced cheap model is also listed', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyCatalog = async () => mitrifyCatalogResponse({
+      data: [
+        { id: 'mitrify/zero', pricing: { prompt: 0, completion: 0 } },
+        { id: 'mitrify/cheap', pricing: { prompt: '0.1', completion: '0.2' } },
+      ],
+    });
+    fake.mitrifyChat.mockImplementation(async (_body: unknown, options?: { onChunk?: (wire: Uint8Array) => void }) => {
+      const payload = { model: 'mitrify/cheap', choices: [{ delta: { content: 'Hello from priced' }, finish_reason: 'stop' }] };
+      await options?.onChunk?.(new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`));
+      return { status: 200, headers: {}, data: undefined };
+    });
+    const result = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal);
+    expect(result).toMatchObject({ provider: 'mitrify', model: 'mitrify/cheap', content: 'Hello from priced' });
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: mitrifyQuotedHold(0.1, 0.2) }));
+    expect(mitrifyQuotedHold(0.1, 0.2)).toBeGreaterThan(0);
+  });
+  it('falls back to mitrify/auto-cheap when the only catalog prices are zero', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyCatalog = async () => mitrifyCatalogResponse({
+      data: [
+        { id: 'mitrify/zero', pricing: { prompt: 0, completion: 0 } },
+        { id: 'mitrify/auto-cheap' },
+      ],
+    });
+    const result = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal);
+    expect(result).toMatchObject({ provider: 'mitrify', model: 'mitrify/auto-cheap' });
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: mitrifyQuotedHold(1, 1) }));
+  });
+  it('treats tiny per-token-looking catalog prices as unpriced', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyCatalog = async () => mitrifyCatalogResponse({
+      data: [{ id: 'mitrify/tiny', pricing: { prompt: '0.0001', completion: '0.0002' } }],
+    });
+    const error = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('no-model');
+    expect(error.diagnostic?.providerCode).toBe('MITRIFY_NO_PRICES');
+    expect(error.diagnostic?.providerMessage).toContain('mitrify/tiny');
+    expect(fake.mitrifyChat).not.toHaveBeenCalled();
+    expect(fake.reserve).not.toHaveBeenCalled();
+  });
+  it('does not let tiny per-token-looking prices beat a real USD-per-MTok row', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyCatalog = async () => mitrifyCatalogResponse({
+      data: [
+        { id: 'mitrify/tiny', pricing: { prompt: '0.0001', completion: '0.0002' } },
+        { id: 'mitrify/cheap', pricing: { prompt: '0.1', completion: '0.2' } },
+      ],
+    });
+    fake.mitrifyChat.mockImplementation(async (_body: unknown, options?: { onChunk?: (wire: Uint8Array) => void }) => {
+      const payload = { model: 'mitrify/cheap', choices: [{ delta: { content: 'Hello from priced' }, finish_reason: 'stop' }] };
+      await options?.onChunk?.(new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`));
+      return { status: 200, headers: {}, data: undefined };
+    });
+    const result = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal);
+    expect(result).toMatchObject({ provider: 'mitrify', model: 'mitrify/cheap', content: 'Hello from priced' });
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: mitrifyQuotedHold(0.1, 0.2) }));
+  });
+  it('excludes image-like catalog ids such as flux.1-pro from the cheapest pick', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyCatalog = async () => mitrifyCatalogResponse({
+      data: [
+        { id: 'flux.1-pro', pricing: { prompt: '0.1', completion: '0.1' } },
+        { id: 'sdxl-base', pricing: { prompt: '0.1', completion: '0.1' } },
+        { id: 'stable-diffusion-v1', pricing: { prompt: '0.1', completion: '0.1' } },
+        { id: 'mitrify/chat', pricing: { prompt: '2', completion: '4' } },
+      ],
+    });
+    fake.mitrifyChat.mockImplementation(async (_body: unknown, options?: { onChunk?: (wire: Uint8Array) => void }) => {
+      const payload = { model: 'mitrify/chat', choices: [{ delta: { content: 'Hello from chat' }, finish_reason: 'stop' }] };
+      await options?.onChunk?.(new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`));
+      return { status: 200, headers: {}, data: undefined };
+    });
+    const result = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal);
+    expect(result).toMatchObject({ provider: 'mitrify', model: 'mitrify/chat', content: 'Hello from chat' });
+    expect(fake.mitrifyClient.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ MITRIFY_MODEL: 'mitrify/chat' }));
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: mitrifyQuotedHold(2, 4) }));
+  });
   it('enables OpenRouter from its key and uses shared strictFreeText when no allow-list is set', async () => {
     const openrouterRung = {
       id: 'openrouter', configured: true, key: 'synthetic-or-key', keyEnv: 'OPENROUTER_API_KEY',

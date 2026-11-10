@@ -116,6 +116,9 @@ describe('admin test chat does not change user chat', () => {
     expect(impl).toContain("id === 'mitrify/auto-cheap'");
     expect(impl).not.toContain("Number(b.id === 'mitrify/auto-cheap')");
     expect(impl).toContain('selection.priced ? selection.model.prompt');
+    expect(impl).toContain('MITRIFY_CATALOG_MIN_USD_PER_MTOK');
+    expect(impl).toContain('amount <= 0');
+    expect(impl).toContain('flux|sdxl|stable-diffusion');
     expect(impl).not.toMatch(/MITRIFY_CHAIN_ENABLED\s*=/);
     expect(impl).not.toMatch(/MITRIFY_MODEL\s*=/);
     expect(runtime).not.toContain('loadMitrifyListedModels');

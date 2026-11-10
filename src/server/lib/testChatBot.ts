@@ -138,10 +138,14 @@ function readMitrifyStreamEvent(wire: Uint8Array): { text?: string; model?: stri
   };
 }
 type ListedMitrifyModel = { id: string; prompt: number | null; completion: number | null };
+const MITRIFY_CATALOG_MIN_USD_PER_MTOK = 0.001;
 function mitrifyCatalogPrice(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
-  if (typeof value === 'string' && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) return Number(value);
-  return null;
+  let amount: number | null = null;
+  if (typeof value === 'number' && Number.isFinite(value)) amount = value;
+  else if (typeof value === 'string' && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) amount = Number(value);
+  if (amount == null || !Number.isFinite(amount) || amount <= 0) return null;
+  if (amount < MITRIFY_CATALOG_MIN_USD_PER_MTOK) return null;
+  try { usdToNanoUsd(amount); return amount; } catch { return null; }
 }
 function parseMitrifyListedModels(payload: unknown): ListedMitrifyModel[] {
   const rows = payload && typeof payload === 'object' && Array.isArray((payload as { data?: unknown }).data)
@@ -155,7 +159,7 @@ function parseMitrifyListedModels(payload: unknown): ListedMitrifyModel[] {
     const id = rec.id.trim();
     if (!id || id.length > 200 || /[\s,]/.test(id) || /:\/\//.test(id) || /^https?:/i.test(id) || seen.has(id)) continue;
     const kind = `${typeof rec.object === 'string' ? rec.object : ''} ${typeof rec.type === 'string' ? rec.type : ''} ${id}`.toLowerCase();
-    if (/(^|[^a-z])(embed|embedding|image|audio|tts|whisper|moderation|rerank)([^a-z]|$)/.test(kind) && !/(chat|instruct|completion)/.test(kind)) continue;
+    if (/(^|[^a-z])(embed|embedding|image|audio|tts|whisper|moderation|rerank|flux|sdxl|stable-diffusion)([^a-z]|$)/.test(kind) && !/(chat|instruct|completion)/.test(kind)) continue;
     seen.add(id);
     const pricing = rec.pricing && typeof rec.pricing === 'object' ? rec.pricing : {};
     out.push({
@@ -171,6 +175,8 @@ const MITRIFY_CATALOG_TIMEOUT_MS = 12_000;
 const MITRIFY_CATALOG_ERROR_BYTES = 4_000;
 function hasUsableMitrifyPrices(row: ListedMitrifyModel): boolean {
   if (row.prompt == null || row.completion == null) return false;
+  if (!(row.prompt > 0) || !(row.completion > 0)) return false;
+  if (row.prompt < MITRIFY_CATALOG_MIN_USD_PER_MTOK || row.completion < MITRIFY_CATALOG_MIN_USD_PER_MTOK) return false;
   try { usdToNanoUsd(row.prompt); usdToNanoUsd(row.completion); return true; } catch { return false; }
 }
 function describeListedMitrifyIds(ids: readonly string[]): string {
@@ -335,7 +341,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
     try { const cfg = mitrifyConfig(); configured = present(cfg.apiKey); model = cfg.model || null; } catch { configured = false; }
     const enabled = configured;
     return { ...base, configured, enabled, model, billed: true, approvalRequired: false,
-      note: 'This admin test calls Mitrify when its server key is set. At send time it reads Mitrify’s live /v1/models list with a size cap and a short timeout, then calls only a listed model: the cheapest priced row when the catalog includes prices, or mitrify/auto-cheap if that alias is listed and the catalog has no prices. Otherwise it fails closed and names the listed ids. A typed model is accepted only if that list contains it. Catalog prices are used for the shared-budget reserve when present. This does not turn on the user-chat chain flag or mint a payload approval.',
+      note: 'This admin test calls Mitrify when its server key is set. At send time it reads Mitrify’s live /v1/models list with a size cap and a short timeout, then calls only a listed chat model: the cheapest row whose prompt and completion are both greater than 0 and at least $0.001/MTok, or mitrify/auto-cheap if that alias is listed and the catalog has no usable prices. Zero, negative, and tiny per-token-looking prices do not count. Image-like ids (flux, sdxl, stable-diffusion) are excluded. Otherwise it fails closed and names the listed ids. Catalog prices are used for the shared-budget reserve when present. This does not turn on the user-chat chain flag or mint a payload approval.',
       ...(enabled ? {} : { unavailableReason: MISSING_KEY }) };
   }
   if (meta.kind === 'surplus') {

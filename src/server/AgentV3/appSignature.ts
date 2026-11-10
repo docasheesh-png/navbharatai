@@ -54,11 +54,21 @@ export const APP_SIGNATURE_CLOSE_LABEL = 'Hide the NavBharatAI badge';
  * off-grid value the app's own design score was charged for). The design lint no longer reads our badge at
  * all, but what we put into a user's app follows the rule we hold the app to — a census test enforces it.
  */
+// 🔴 Q-2641 / BR1969 (phone-size 42px sideways overflow of this badge). A transformed html/body
+// becomes the containing block for position:fixed and grows with overflowing app content (a wide
+// race track), so right:12px is 12px from that wide block — the badge is what MOBILE_LAYOUT_ISSUES
+// named. New injections keep the 32×32 CSS-only ×, stay a body-level sibling of #root, and pin
+// themselves to the visual viewport: left:auto, box-sizing:border-box, width:max-content,
+// max-width:calc(100vw - 24px), right/bottom max(12px, safe-area), and right also
+// calc(12px + 100% - 100vw) so a wider containing block still places the box at the visual
+// viewport’s bottom-right. The label can shrink (min-width:0 + ellipsis). Existing version-2
+// signed apps are not rewritten — hasCurrentAppSignature still matches "2". We do not exempt
+// [data-nbai-signature] from mobileLayoutCheck: if a badge still sticks out, it is named.
 export function appSignatureHtml(): string {
   const scope = `[${APP_SIGNATURE_MARKER}]`;
   return (
     `<div ${APP_SIGNATURE_MARKER}="${APP_SIGNATURE_VERSION}" ` +
-    `style="position:fixed;right:12px;bottom:12px;z-index:2147483647;display:flex;align-items:center;gap:4px">` +
+    `style="position:fixed;left:auto;right:max(12px, env(safe-area-inset-right, 0px), calc(12px + 100% - 100vw));bottom:max(12px, env(safe-area-inset-bottom, 0px));z-index:2147483647;display:flex;align-items:center;gap:4px;box-sizing:border-box;width:max-content;max-width:calc(100vw - 24px)">` +
     `<style>` +
     `${scope}>input:checked,${scope}>input:checked~a{display:none!important}` +
     `${scope}>input::before{content:"\\00d7";color:#ffffff;font:600 15px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}` +
@@ -70,7 +80,8 @@ export function appSignatureHtml(): string {
     `border:1px solid rgba(255,255,255,.14);box-shadow:0 2px 10px rgba(0,0,0,.28)">` +
     `<a href="${APP_SIGNATURE_URL}" target="_blank" rel="noopener noreferrer" ` +
     `aria-label="${APP_SIGNATURE_LABEL} — open navbharatai.com" ` +
-    `style="order:1;display:inline-flex;align-items:center;box-sizing:border-box;min-height:32px;` +
+    `style="order:1;display:inline-flex;align-items:center;box-sizing:border-box;min-width:0;min-height:32px;` +
+    `overflow:hidden;text-overflow:ellipsis;white-space:nowrap;` +
     `gap:8px;padding:8px 12px;background:#161b22;color:#ffffff;` +
     `font:600 12px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;text-decoration:none;` +
     `border-radius:9999px;box-shadow:0 2px 10px rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.14)">` +

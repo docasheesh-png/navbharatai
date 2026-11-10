@@ -894,9 +894,12 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
  * bank, a quiz, flashcards, previous-year papers, and a study app (BR1973). One source for the
  * requirement analyser here and for `SIMPLE_APP_SIGNAL` (appComplexitySignals.ts), so "is this a
  * quiz-family app?" has one answer. "study app development / security / architecture" is not a
- * study app — those are sentences about studying the craft, not a board-study tool.
+ * study app — those are sentences about studying the craft, not a board-study tool. A "case study
+ * app" is not one either (lookbehind: "case" plus a space or hyphen). The craft-word lookahead
+ * treats space, hyphen and slash as separators, so "study-app-development" and
+ * "study app/development" are not study apps.
  */
-export const PRACTICE_TOOL_SOURCE = String.raw`mock[\s-]?(?:tests?|exams?|papers?)|practice[\s-]?(?:tests?|papers?|sets?)|test[\s-]?series|question[\s-]?banks?|quiz(?:zes)?|flash[\s-]?cards?|pyqs?|previous[\s-]+(?:years?'?[\s-]+)?(?:papers?|questions?)|study[\s-]?apps?(?!\s+(?:development|dev|design|security|architecture|engineering|building))`;
+export const PRACTICE_TOOL_SOURCE = String.raw`mock[\s-]?(?:tests?|exams?|papers?)|practice[\s-]?(?:tests?|papers?|sets?)|test[\s-]?series|question[\s-]?banks?|quiz(?:zes)?|flash[\s-]?cards?|pyqs?|previous[\s-]+(?:years?'?[\s-]+)?(?:papers?|questions?)|(?<!case[\s-])study[\s-]?apps?(?![\s\-/]+(?:development|dev|design|security|architecture|engineering|building))`;
 const PRACTICE_TOOL_RE = new RegExp(String.raw`\b(?:${PRACTICE_TOOL_SOURCE})\b`, 'i');
 /** Words that put a second party or an institution into the request: people who manage, pay, enrol. */
 const INSTITUTION_SCOPE_RE = /\b(?:teachers?|tutors?|admins?|administrators?|staff|roles?|log\s?-?ins?|sign\s?-?(?:in|up)s?|accounts?|multi[\s-]?users?|institutes?|institutions?|coaching|schools?|colleges?|universit(?:y|ies)|academy|management|platform|portal|erp|lms|classrooms?|batch(?:es)?|enrol\w*|fees?|payments?|subscriptions?|courses?|lessons?|attendance)\b/i;
@@ -919,6 +922,9 @@ const INSTITUTION_SCOPE_RE = /\b(?:teachers?|tutors?|admins?|administrators?|sta
  * were injected. The fast lane built subjects/chapters/materials; the full builder then added auth,
  * roles, admin and enrolment screens and hit the free 25-minute cap. A study app for board students
  * is the same class as a mock-test app: one learner's tool, unless the user names an institution.
+ * Reviewer FAIL on #4164: the first pattern also matched "case study app" / "case-study app", and
+ * the craft-word lookahead only saw whitespace, so "study-app-development" and
+ * "study app/development" slipped through.
  */
 export function namesASingleLearnerTool(prompt: string): boolean {
   const t = String(prompt || '');

@@ -60,6 +60,36 @@ const OPPOSITE_NOT_A_STUDY_APP = [
   'Build an exam app',
 ] as const;
 
+/**
+ * Reviewer FAIL on #4164 at 9a39ae210: every phrase here must stay uncaptured as a single-learner
+ * tool. The first pattern matched "case study app" (and "case-study app") and sent them to
+ * simple_app/15 with the LMS gaps withdrawn; the craft-word lookahead only saw whitespace, so
+ * "study-app-development" and "study app/development" slipped through. Institution prompts are
+ * included so they cannot become single-learner tools either.
+ */
+const OPPOSITE_UNCAPTURED = [
+  // Case-study variants (reviewer).
+  'case study app',
+  'Build a case study app',
+  'case study app for MBA students',
+  'case-study app',
+  'Case Study App',
+  // Craft-word hyphen/slash bypasses (reviewer).
+  'study-app-development',
+  'study app/development tutorial',
+  // "application" is not "app".
+  'study application form',
+  // Hindi / Hinglish twins of the case-study and craft-word misses.
+  'MBA students ke liye case study app banao',
+  'mujhe case study app chahiye',
+  'study app development ka tutorial',
+  'mujhe study-app-development sikhna hai',
+  // Already-listed craft / non-tool phrases.
+  ...OPPOSITE_NOT_A_STUDY_APP,
+  // Institution prompts: a study/practice phrase that names a school or coaching stays uncaptured.
+  ...OPPOSITE_INSTITUTION,
+] as const;
+
 const SIZED = (prompt: string) => analyzeRequest({ prompt, buildIntent: 'new_build' } as Parameters<typeof analyzeRequest>[0]);
 
 describe("BR1973: a study app for board students is one learner's tool, not a school LMS", () => {
@@ -117,6 +147,27 @@ describe("BR1973: a study app for board students is one learner's tool, not a sc
   it('studying app development, or an exam with nothing named, is not a learner tool', () => {
     for (const p of OPPOSITE_NOT_A_STUDY_APP) {
       expect(namesASingleLearnerTool(p), p).toBe(false);
+    }
+  });
+
+  it('reviewer opposite-class phrases stay uncaptured; the report prompt stays captured', () => {
+    expect(namesASingleLearnerTool(BR1973_PROMPT)).toBe(true);
+    for (const p of OPPOSITE_UNCAPTURED) {
+      expect(namesASingleLearnerTool(p), p).toBe(false);
+    }
+  });
+
+  it('a case-study app for MBA students keeps the education LMS list and is not simple_app/15', () => {
+    const p = 'case study app for MBA students';
+    const g = analyzeRequirementGaps(p);
+    expect(g.domain).toBe('education');
+    expect(g.likelyMissing.length).toBeGreaterThan(0);
+    const a = SIZED(p);
+    expect(a.taskType).toBe('complex_app');
+    expect(a.complexityScore).toBeGreaterThanOrEqual(40);
+    for (const bare of ['case study app', 'Build a case study app', 'case-study app']) {
+      expect(namesPersonalTool(bare), bare).toBe(false);
+      expect(SIZED(bare).taskType, bare).not.toBe('simple_app');
     }
   });
 

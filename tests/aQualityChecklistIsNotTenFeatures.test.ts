@@ -240,6 +240,11 @@ describe('isQualityAcceptanceLine is conservative', () => {
       '1. Do not invent an API key',
       '2. Keep existing UI',
       '3. Handle errors gracefully',
+      '14. Handling errors',
+      '15. Handling errors.',
+      '16. Handling errors properly',
+      '17. Handling errors gracefully',
+      '18. Handling errors correctly',
       '4. no demo results',
       '5. Responsive',
       '11. Mobile responsive',
@@ -249,6 +254,11 @@ describe('isQualityAcceptanceLine is conservative', () => {
       '8. Never display fake AI responses.',
       '9. Keep the existing NOVA AI design and all working features unchanged.',
       '10. Handle loading, timeout and API errors properly.',
+      '19. Handling loading, timeout and API errors',
+      '20. Handling loading, timeout and API errors.',
+      '21. Handling loading, timeout and API errors properly',
+      '22. Handling loading, timeouts and API errors gracefully',
+      '23. Handling loading, timeout and errors correctly',
     ]) {
       expect(isQualityAcceptanceLine(line), line).toBe(true);
     }
@@ -279,8 +289,113 @@ describe('isQualityAcceptanceLine is conservative', () => {
       '1. Identify nearby restaurants on a map',
       '1. Error log viewer for failed payments',
       '1. Test reports upload for each patient',
+      '1. Handling customer refunds for COD orders',
+      '1. Handling errors from the payment gateway webhook',
+      '1. Handling errors and retries for UPI payouts',
+      '1. Handling error codes for GST invoices',
+      '1. Handling student copies board exam ke liye',
+      '1. Handling रिफंड requests for failed UPI payments',
+      '1. Handling errors!',
+      '1. Handling loading screens for the exam evaluator',
+      '1. Handling timeouts from the payment gateway webhook',
+      '1. Handling timeout retries for failed UPI payouts',
+      '1. Handling loading of GST invoices after e-way generation',
+      '1. Handling loading screens board exam ke liye',
+      '1. Handling रिफंड timeouts for failed UPI payments',
+      '1. Handling loading, timeout and API errors!',
     ]) {
       expect(isQualityAcceptanceLine(line), line).toBe(false);
     }
+  });
+});
+
+describe('BR1964 / Q-2626: Handling errors is quality; Handling <product> still counts', () => {
+  const shop = (line2: string) => `Build a shop ERP:
+1. Login with an email and password
+2. ${line2}
+3. Inventory alerts when stock is low
+4. Invoice PDFs for each completed order
+5. Full customer purchase history for each account
+6. Online payments for every completed order
+7. Staff roles with separate access permissions
+8. Daily email report of store sales`;
+
+  it('an 8-item shop ERP that includes "Handling customer refunds for COD orders" stays LARGE', () => {
+    expect(isQualityAcceptanceLine('2. Handling customer refunds for COD orders')).toBe(false);
+    expectLarge(shop('Handling customer refunds for COD orders'), 'handling refunds');
+  });
+
+  it('an 8-item shop ERP that includes "Handling errors from the payment gateway webhook" stays LARGE', () => {
+    expect(isQualityAcceptanceLine('2. Handling errors from the payment gateway webhook')).toBe(false);
+    expectLarge(shop('Handling errors from the payment gateway webhook'), 'handling errors from webhook');
+  });
+
+  it('a Hinglish 8-item shop ERP that includes "Handling student copies board exam ke liye" stays LARGE', () => {
+    const p = `Ek shop ERP banao:
+1. Email aur password se user login
+2. Handling student copies board exam ke liye
+3. Stock kam hone par inventory alerts
+4. Har order ke liye invoice PDF
+5. Har customer ki poori purchase history
+6. Online payments har order par lena
+7. Staff ke liye alag alag roles
+8. Rozana email report store ko bhejna`;
+    expect(isQualityAcceptanceLine('2. Handling student copies board exam ke liye')).toBe(false);
+    expectLarge(p, 'hinglish handling copies');
+  });
+
+  it('whole-line "Handling errors" is a quality line (the English gerund now matches)', () => {
+    expect(isQualityAcceptanceLine('2. Handling errors')).toBe(true);
+    expect(isQualityAcceptanceLine('Handling errors properly')).toBe(true);
+    expect(isQualityAcceptanceLine('Handling errors!')).toBe(false); // Q-2627 residual
+    // A shop ERP that replaces one product line with "Handling errors" can still
+    // reach featureCount 8 via floor(verbs/2). This test locks the line, not a
+    // whole-prompt LARGE drop.
+  });
+});
+
+describe('BR1965 / Q-2632: Handling loading/timeouts is quality; Handling <product> still counts', () => {
+  const shop = (line2: string) => `Build a shop ERP:
+1. Login with an email and password
+2. ${line2}
+3. Inventory alerts when stock is low
+4. Invoice PDFs for each completed order
+5. Full customer purchase history for each account
+6. Online payments for every completed order
+7. Staff roles with separate access permissions
+8. Daily email report of store sales`;
+
+  it('an 8-item shop ERP that includes "Handling loading screens for the exam evaluator" stays LARGE', () => {
+    expect(isQualityAcceptanceLine('2. Handling loading screens for the exam evaluator')).toBe(false);
+    expectLarge(shop('Handling loading screens for the exam evaluator'), 'handling loading screens');
+  });
+
+  it('an 8-item shop ERP that includes "Handling timeouts from the payment gateway webhook" stays LARGE', () => {
+    expect(isQualityAcceptanceLine('2. Handling timeouts from the payment gateway webhook')).toBe(false);
+    expectLarge(shop('Handling timeouts from the payment gateway webhook'), 'handling timeouts from webhook');
+  });
+
+  it('a Hinglish 8-item shop ERP that includes "Handling loading screens board exam ke liye" stays LARGE', () => {
+    const p = `Ek shop ERP banao:
+1. Email aur password se user login
+2. Handling loading screens board exam ke liye
+3. Stock kam hone par inventory alerts
+4. Har order ke liye invoice PDF
+5. Har customer ki poori purchase history
+6. Online payments har order par lena
+7. Staff ke liye alag alag roles
+8. Rozana email report store ko bhejna`;
+    expect(isQualityAcceptanceLine('2. Handling loading screens board exam ke liye')).toBe(false);
+    expectLarge(p, 'hinglish handling loading screens');
+  });
+
+  it('whole-line "Handling loading, timeout and API errors" is a quality line (the English gerund now matches)', () => {
+    expect(isQualityAcceptanceLine('2. Handling loading, timeout and API errors')).toBe(true);
+    expect(isQualityAcceptanceLine('Handling loading, timeout and API errors properly')).toBe(true);
+    expect(isQualityAcceptanceLine('Handling loading, timeouts and errors correctly')).toBe(true);
+    expect(isQualityAcceptanceLine('Handling loading, timeout and API errors!')).toBe(false); // Q-2627 residual
+    // A shop ERP that replaces one product line with this quality phrase can still
+    // reach featureCount 8 via floor(verbs/2). This test locks the line, not a
+    // whole-prompt LARGE drop.
   });
 });

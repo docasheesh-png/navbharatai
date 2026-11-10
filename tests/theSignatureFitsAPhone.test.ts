@@ -98,6 +98,7 @@ describe('Q-2641: new injections keep the badge inside a 390×844 phone', () => 
     expect(b).toContain('bottom:max(12px, env(safe-area-inset-bottom, 0px))');
     expect(b).toContain('min-width:0');
     expect(b).toContain('text-overflow:ellipsis');
+    expect(b).toContain('white-space:nowrap');
     expect(b).toContain(APP_SIGNATURE_LABEL);
     const out = injectAppSignature(PLAIN);
     expect(out.indexOf(APP_SIGNATURE_MARKER)).toBeGreaterThan(out.indexOf('id="root"'));

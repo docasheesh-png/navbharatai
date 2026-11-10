@@ -61,7 +61,7 @@ export const APP_SIGNATURE_CLOSE_LABEL = 'Hide the NavBharatAI badge';
 // themselves to the visual viewport: left:auto, box-sizing:border-box, width:max-content,
 // max-width:calc(100vw - 24px), right/bottom max(12px, safe-area), and right also
 // calc(12px + 100% - 100vw) so a wider containing block still places the box at the visual
-// viewport’s bottom-right. The label can shrink (min-width:0 + ellipsis). Existing version-2
+// viewport’s bottom-right. The label can shrink (min-width:0 + nowrap + ellipsis). Existing version-2
 // signed apps are not rewritten — hasCurrentAppSignature still matches "2". We do not exempt
 // [data-nbai-signature] from mobileLayoutCheck: if a badge still sticks out, it is named.
 export function appSignatureHtml(): string {

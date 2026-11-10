@@ -26,6 +26,7 @@ export const BR1970_PROMPT = 'The AI service is temporarily busy. Please try aga
 describe('BR1970: a service-busy line is still admitted as an ordinary ask today', () => {
   it("this report's prompt is the English busy line without the emoji, and stays ordinary/direct", () => {
     expect(freeBusyMessage('Please build me an app')).toBe(`${BR1970_PROMPT} 🙏`);
+    expect(BR1970_PROMPT).toHaveLength(68);
     expect(BR1970_PROMPT).toBe(freeBusyMessage('Please build me an app').replace(/\s*🙏\s*$/u, ''));
     const scope = analyzeAppScope(BR1970_PROMPT);
     expect(scope.decision).toBe('direct');

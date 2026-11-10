@@ -8,11 +8,14 @@ privacy reviews, quality benchmarks, or exact-payload approvals.
 
 ## Activation and cadence
 
-The existing server operator can enable `QUBAX_PRICE_FEED_ENABLED=1`. It defaults
-off. A Qubax key or `QUBAX_ENABLED` does not activate this feed; enabling the feed
-does not activate inference. This change does not set production environment
-variables, create Cloud Scheduler infrastructure, or perform production writes
-during development/tests.
+The feed is on unless `QUBAX_PRICE_FEED_ENABLED=0`. A Qubax key does not change
+that switch, and collecting prices does not by itself authorize a call. Fresh
+Qubax rows are compared with the official OpenAI and Z.ai rows in the same
+snapshot. A model is eligible only when its Qubax input and output rates are at
+least 90% below the official rates for that same normalized model name.
+`discount_pct` from Qubax is not used. Among eligible models that pass the
+server's Hindi and English health probes, the best success rate and latency
+wins. The comparison does not prefer the cheapest row.
 
 The shared scheduler registers `qubax-public-price-feed`, runs it at startup and
 every four minutes while the process is running, and includes it in the existing

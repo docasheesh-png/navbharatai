@@ -19,6 +19,13 @@ export interface TestChatProviderStatus {
   configured: boolean;
   enabled: boolean;
   model: string | null;
+  ceilingUsd?: string | null;
+  selection?: 'performance' | 'backup' | 'none';
+  inputUsdPerMillion?: string | null;
+  outputUsdPerMillion?: string | null;
+  officialInputUsdPerMillion?: string | null;
+  officialOutputUsdPerMillion?: string | null;
+  discountBps?: number | null;
 }
 export interface TestChatStatus { providers: TestChatProviderStatus[]; approvalRequired: boolean; noFallback: true }
 export interface TestChatReply {

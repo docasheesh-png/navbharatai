@@ -22,7 +22,7 @@ beforeEach(() => {
 });
 describe('test chat provider isolation and admission', () => {
   it('status only reveals server availability, never secrets or a ready/approved claim', () => {
-    expect(testChatStatus()).toEqual({ providers: [{ id: 'qubax', label: 'Qubax', configured: true, enabled: true, model: null }], approvalRequired: true, noFallback: true });
+    expect(testChatStatus()).toEqual({ providers: [{ id: 'qubax', label: 'Qubax', configured: true, enabled: true, model: null, ceilingUsd: null }], approvalRequired: true, noFallback: true });
     expect(fake.run).not.toHaveBeenCalled(); expect(fake.db).not.toHaveBeenCalled();
   });
   it('dispatches exactly the selected adapter with conservative data scope and bounded text', async () => {
@@ -47,10 +47,19 @@ describe('test chat provider isolation and admission', () => {
     const controller = new AbortController(); controller.abort();
     await expect(runTestChat(action, 'actor', controller.signal)).rejects.toBeDefined(); expect(fake.run).not.toHaveBeenCalled();
   });
-  it.each([{ kind: 'skipped', reason: 'qubax-data-approval-or-ceiling-unavailable' }, null])('never retries or falls back after skipped/failed Qubax %#', async result => {
-    if (result) fake.run.mockResolvedValue(result); else fake.run.mockRejectedValue(new Error('credential-and-private-provider-body'));
-    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: result ? 'approval-or-budget' : 'unconfirmed' });
+  it.each([
+    ['qubax-price-or-quality-unverified', 'no-model'],
+    ['qubax-budget', 'budget'],
+    ['qubax-tries-exhausted', 'tries-exhausted'],
+    ['qubax-data-approval-or-ceiling-unavailable', 'unconfirmed'],
+  ])('names skip %s as %s and does not try another provider', async (reason, code) => {
+    fake.run.mockResolvedValue({ kind: 'skipped', reason });
+    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: code });
     expect(fake.run).toHaveBeenCalledOnce();
+  });
+  it('does not disclose a provider failure body', async () => {
+    fake.run.mockRejectedValue(new Error('credential-and-private-provider-body'));
+    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'unconfirmed' });
   });
   it('uses shared daily/monthly admission, holds possible cost, and can release only an unused hold', async () => {
     let receipt: any;
@@ -71,7 +80,7 @@ describe('test chat provider isolation and admission', () => {
       const receipt = await options.reserve(kind === 'invalid-ceiling' ? NaN : 50);
       expect(receipt).toBeNull(); return { kind: 'skipped', reason: 'qubax-budget' };
     });
-    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: kind === 'duplicate' ? 'unconfirmed' : 'approval-or-budget' });
+    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: kind === 'duplicate' ? 'unconfirmed' : 'budget' });
     if (kind === 'daily' || kind === 'duplicate') expect(fake.settleMonth).toHaveBeenCalledWith({ marker: 'db' }, '2026-11', 50, 0);
     if (kind === 'duplicate') expect(fake.settle).not.toHaveBeenCalled();
     if (kind === 'monthly' || kind === 'invalid-ceiling') expect(fake.reserve).not.toHaveBeenCalled();

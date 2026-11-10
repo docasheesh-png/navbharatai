@@ -8,7 +8,11 @@ const API = '/api/v1/admin/test-chat-bot';
 const button = 'min-h-11 rounded-lg border border-line px-3 py-2 text-sm text-ink disabled:opacity-40';
 const failure = (data: unknown): string => {
   const code = data && typeof data === 'object' ? (data as { code?: unknown }).code : null;
-  if (code === 'approval-or-budget') return 'This exact conversation needs an operator-reviewed Qubax approval, supplier-enforced spending ceiling and available shared budget. No provider was called.';
+  if (code === 'budget') return 'The shared daily or monthly budget cannot reserve this try. No provider was called.';
+  if (code === 'no-model') return 'No fresh Qubax model is at least 90% below its official price and passing the health probes. No provider was called.';
+  if (code === 'tries-exhausted') return 'The top three Qubax models did not return a valid answer. No other Qubax model was tried from this page.';
+  if (code === 'capacity') return 'Qubax is already handling its maximum number of calls. No provider was called.';
+  if (code === 'capability') return 'This test is outside the supported text conversation. No provider was called.';
   if (code === 'disabled' || code === 'configuration') return 'Qubax is disabled or not configured on the server. No provider was called.';
   if (code === 'storage') return 'Approval and budget storage is unavailable. No provider was called.';
   if (code === 'invalid') return 'The conversation is invalid or too long. Start a new test chat or shorten the message. No provider was called.';
@@ -23,6 +27,7 @@ export function TestChatBotPanel({ adminToken }: { adminToken: string }): React.
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [balance, setBalance] = useState('');
   const [lastReply, setLastReply] = useState<TestChatReply | null>(null);
   const epoch = useRef(0), lock = useRef(false);
   const readAbort = useRef<AbortController | null>(null), sendAbort = useRef<AbortController | null>(null);
@@ -77,19 +82,29 @@ export function TestChatBotPanel({ adminToken }: { adminToken: string }): React.
     finally { clearTimeout(timeout); if (current === epoch.current) { lock.current = false; setBusy(false); } }
   };
   const clear = () => { setMessages([]); setDraft(''); setAccepted(false); setError(''); setLastReply(null); };
+  const checkBalance = async () => {
+    setBalance('Checking the Qubax account balance. This does not send a chat.');
+    try {
+      const response = await fetch(`${API}/balance`, { method: 'POST', cache: 'no-store', headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' }, body: '{}' });
+      const data: unknown = await response.json();
+      const row = data && typeof data === 'object' ? data as { status?: unknown; balanceMicros?: unknown; code?: unknown } : {};
+      setBalance(row.status === 'available' && typeof row.balanceMicros === 'string' ? `Qubax balance: ${row.balanceMicros} micro-USD. This is account metadata, not a chat charge.` : `Balance check: ${typeof row.code === 'string' ? row.code : 'unavailable'}. No chat call was made.`);
+    } catch { setBalance('Balance check failed. No chat call was made.'); }
+  };
   return <section aria-label="Test Chat Bot" className="rounded-2xl border border-line bg-card p-4 space-y-4 text-body">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h2 className="text-lg font-semibold text-ink">Test Chat Bot</h2>
-      <div className="flex flex-wrap gap-2"><button type="button" className={button} disabled={busy || loading} onClick={() => void load()}>Refresh provider status</button><button type="button" className={button} disabled={busy} onClick={clear}>New test chat</button></div>
+      <div className="flex flex-wrap gap-2"><button type="button" className={button} disabled={busy || loading} onClick={() => void load()}>Refresh provider status</button><button type="button" className={button} disabled={busy} onClick={() => void checkBalance()}>Check Qubax balance</button><button type="button" className={button} disabled={busy} onClick={clear}>New test chat</button></div>
     </div>
     <p className="text-sm text-muted">A separate admin test chat. Only the selected provider is called; there is no NavBharatAI provider fallback. Qubax may route to upstream sellers and retry among them. A gateway response does not independently verify the underlying model.</p>
     <label className="block text-sm">Test provider<select className="mt-1 block w-full rounded-lg border border-line bg-well p-3 text-ink" value={provider} disabled={busy} onChange={event => {
       const next = status?.providers.find(p => p.id === event.target.value);
       if (next && next.id !== provider) { setProvider(next.id); clear(); }
     }}>{(status?.providers ?? [{ id: 'qubax', label: 'Qubax' }]).map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
-    <p role="status" className="text-sm">{busy ? 'Waiting for the selected provider… No automatic retry.' : loading ? 'Reading server configuration…' : !selected ? 'Provider status unavailable.' : !selected.configured ? 'Qubax is not configured on the server.' : !selected.enabled ? 'Qubax is disabled on the server.' : status && !status.approvalRequired ? `Qubax is enabled${selected.model ? ` for ${selected.model}` : ''}. Each send reserves at most the server spending cap, then makes one call.` : 'Qubax is configured. Each exact conversation still requires reviewed data and spending approval.'}</p>
+    <p role="status" className="text-sm">{busy ? 'Waiting for the selected provider… No automatic retry.' : loading ? 'Reading server configuration…' : !selected ? 'Provider status unavailable.' : !selected.configured ? 'Qubax is not configured on the server.' : !selected.enabled ? 'Qubax is disabled on the server.' : status && !status.approvalRequired ? `Qubax auto-selected ${selected.model ?? 'no model yet'}${selected.selection === 'backup' ? ' (backup)' : ''}. Live Qubax price ${selected.inputUsdPerMillion ?? '—'} in / ${selected.outputUsdPerMillion ?? '—'} out USD per million tokens${selected.discountBps != null ? ` (${(selected.discountBps / 100).toFixed(1)}% below the official price)` : ''}. Each try reserves at most $${selected.ceilingUsd ?? '0.02'}.` : 'Qubax is configured. Each exact conversation still requires reviewed data and spending approval.'}</p>
     <p className="text-sm text-muted">Use synthetic test text. Do not paste secrets, personal records or customer data. The visible conversation is sent on each turn. This page does not save transcripts; leaving it clears the chat. Qubax and its upstream providers may retain submitted content. <a href="https://qubax.ai/legal/privacy" target="_blank" rel="noreferrer" className="underline">Qubax privacy policy</a></p>
     <p className="text-sm text-muted">No paid inference runs just by opening this page. {status && !status.approvalRequired ? 'Sending uses the owner server switch and its hard per-request spending cap, plus the existing shared budget. This checkbox confirms the destination; it does not raise the cap.' : 'Sending needs an independent review of the exact payload, downstream processors and a supplier-enforced spending ceiling, plus the existing shared budget. This checkbox does not create those approvals.'}</p>
+    {balance && <p role="status" className="text-sm text-muted">{balance}</p>}
     {error && <p role="alert" className="text-danger">{error}</p>}
     <div role="log" aria-label="Test conversation" aria-live="polite" className="max-h-[50vh] supports-[height:100dvh]:max-h-[50dvh] min-h-0 overflow-y-auto space-y-3 rounded-xl border border-line p-3">
       {!messages.length && <p className="text-sm text-muted">Type your own test message below. Existing app conversations are not loaded here.</p>}

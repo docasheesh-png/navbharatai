@@ -101227,3 +101227,10 @@ Owner t311u sequential audit, BR1969 only (boundary 1951..2105 frozen). "Mujhe a
 - **F2.** Not shipped. Treating vehicle+race as domain=game and giving it the 3D kit needs two coordinated classifier gates; event/info phrases must not escalate. Badge CSS change would affect every signed app.
 
 Queue: this commit closes no earlier row. New rows Q-2640 (vehicle+race without the word game) and Q-2641 (signature overflow / all-device-sizes claim). Q-2633–Q-2639 and earlier blockers stay open. Q-2611 is the English responsive-summary sibling and is not rewritten.
+
+## 2026-11-10 — BR1970 autopsy (stopped busy-service line): lock ordinary admission; ship Q-2641 badge CSS
+Owner t311u sequential audit, BR1970 only (boundary 1951..2105 frozen). "The AI service is temporarily busy. Please try again in 1-2 minutes." stopped in 9.7 s after SANDBOX_UNAVAILABLE (E2B cap of 20, Q-2621). The user stopped; nothing was written; not charged. The prompt is the platform English busy line without the emoji. Ledger: [autopsy](docs/build-report-autopsy-BR1970.md), [evidence](docs/build-report-autopsy-BR1970-evidence.json).
+- **F1.** Neighbour locks: this prompt stays ordinary/direct; it is the English busy line without the emoji; a user-stop before writes is never charged.
+- **F2.** Q-2641 shipped: new "made by NavBharatAI" injections stay inside a 390×844 visual viewport (reviewer CSS plus right: calc(12px + 100% - 100vw) for a transformed wider containing block). Existing version-2 apps are not rewritten. mobileLayoutCheck is not taught to ignore the badge.
+
+Queue: this commit closes Q-2641 and opens Q-2642 (do not start a coding build when the prompt is only a known busy line). Q-2640, Q-2621, Q-2611 and earlier blockers stay open.

@@ -32,6 +32,13 @@ describe('admin-only test chat boundary', () => {
     expect((await request(action, false, false)).status).toBe(401);
     expect(fake.status).not.toHaveBeenCalled(); expect(fake.run).not.toHaveBeenCalled(); expect(fake.audit).not.toHaveBeenCalled();
   });
+  it('a thrown status builder still returns a list instead of failing the page', async () => {
+    fake.status.mockRejectedValueOnce(new Error('one provider failed')).mockReturnValueOnce({ providers: [{ id: 'qubax', label: 'Qubax' }], approvalRequired: false, noFallback: true });
+    const request = await setup(); const response = await request();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ providers: [{ id: 'qubax', label: 'Qubax' }], approvalRequired: false, noFallback: true });
+    expect(fake.run).not.toHaveBeenCalled();
+  });
   it('status loads are no-store and never start inference', async () => {
     fake.status.mockReturnValue({ noFallback: true }); const request = await setup(); const response = await request();
     expect(await response.json()).toEqual({ noFallback: true }); expect(response.headers.get('cache-control')).toBe('private, no-store');

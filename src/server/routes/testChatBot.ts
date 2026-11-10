@@ -1,7 +1,7 @@
 import type { Express, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import { readTestChatAction, TEST_CHAT_FAILURE } from '../../lib/testChatBot';
-import { loadTestChatStatus, runTestChat, TestChatUnavailable } from '../lib/testChatBot';
+import { loadTestChatStatus, runTestChat, testChatStatus, TestChatUnavailable } from '../lib/testChatBot';
 import { readQubaxBalance } from '../lib/qubaxBalance';
 import { adminUsername } from '../lib/adminAuth';
 import { audit } from '../lib/audit';
@@ -26,7 +26,8 @@ export function registerTestChatBotRoutes(app: Express, verifyAdminToken: Reques
     message: { error: 'Please wait before sending another test message. No provider was called.' } });
   app.get('/api/admin/test-chat-bot/providers', verifyAdminToken, reads, async (_req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
-    res.json(await loadTestChatStatus());
+    try { res.json(await loadTestChatStatus()); }
+    catch { res.json(testChatStatus()); }
   });
   app.post('/api/admin/test-chat-bot/balance', verifyAdminToken, reads, async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');

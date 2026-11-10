@@ -68,8 +68,8 @@ vi.mock('../AI/FreeChain/providers/openAiCompatProvider', async importOriginal =
     },
   };
 });
+import { isTestChatStatus, readPartialTestChatStatus, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_PROVIDER_IDS, type TestChatAction } from '../../lib/testChatBot';
 import { loadTestChatStatus, runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
-import { TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_PROVIDER_IDS, type TestChatAction } from '../../lib/testChatBot';
 import { maximumCostNanoUsd, usdToNanoUsd } from '../AI/FreeChain/spendCap';
 import { QubaxError } from './qubax';
 import { MitrifyError } from './mitrify';
@@ -136,10 +136,10 @@ describe('test chat provider isolation and admission', () => {
   it('status only reveals server availability, never secrets or a ready/approved claim', () => {
     const status = testChatStatus();
     expect(status.noFallback).toBe(true);
-    expect(status.approvalRequired).toBe(true);
+    expect(status.approvalRequired).toBe(false);
     expect(status.providers.map(item => item.id)).toEqual([...TEST_CHAT_PROVIDER_IDS]);
     expect(status.providers.find(item => item.id === 'qubax')).toMatchObject({
-      id: 'qubax', label: 'Qubax', configured: true, enabled: true, model: null, ceilingUsd: null, approvalRequired: true,
+      id: 'qubax', label: 'Qubax', configured: true, enabled: true, model: null, ceilingUsd: null, approvalRequired: false,
     });
     expect(JSON.stringify(status)).not.toContain('synthetic-key');
     expect(JSON.stringify(status)).not.toMatch(/QUBAX_API_KEY|FREE_CHAIN_|MITRIFY_API_KEY/);
@@ -350,6 +350,20 @@ describe('test chat provider isolation and admission', () => {
       id: 'qubax', model: null, selection: 'none', ceilingUsd: '0.02', approvalRequired: false,
     });
     expect(status.providers.filter(item => item.id !== 'qubax').every(item => item.selection === undefined)).toBe(true);
+    expect(isTestChatStatus(status)).toBe(true);
+    expect((status.providers.find(item => item.id === 'mitrify')?.note ?? '').length).toBeLessThanOrEqual(400);
+  });
+  it('keeps Qubax when one provider note is longer than the client allows', () => {
+    const status = testChatStatus();
+    const broken = {
+      ...status,
+      providers: status.providers.map(item => item.id === 'mitrify' ? { ...item, note: 'x'.repeat(682) } : item),
+    };
+    expect(isTestChatStatus(broken)).toBe(false);
+    const partial = readPartialTestChatStatus(broken);
+    expect(partial?.providers.map(item => item.id)).toEqual([...TEST_CHAT_PROVIDER_IDS]);
+    expect(partial?.providers.find(item => item.id === 'qubax')?.id).toBe('qubax');
+    expect(partial?.providers.find(item => item.id === 'mitrify')).toMatchObject({ enabled: false, unavailableReason: 'This provider’s status could not be read.' });
   });
 
   it('enables Mitrify from its key alone and dispatches through createMitrifyClient', async () => {

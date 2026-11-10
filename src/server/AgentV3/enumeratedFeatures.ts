@@ -262,21 +262,63 @@ export function notAFeatureLine(raw: string): boolean {
 }
 
 /**
- * The filters `enumeratedFeatureItems` applies to one candidate line. `featureCount`'s legacy
- * numbered-line tally must use this too (BR1962, report be761ff8): a nine-item "Requirements"
- * checklist of long implementation/QA sentences ("Inspect src/lib/aiService.ts", "Never display
- * fake AI responses", "Keep the existing design unchanged") was counted as "~10 distinct features"
- * and scoped LARGE, while the shared enumerator — which already drops clauses longer than
- * MAX_ITEM_WORDS — saw only three short named parts. Over-counting spends a planner call; this
- * can only LOWER the legacy tally, never raise it.
+ * A numbered quality / acceptance / process constraint is not a product feature (BR1962,
+ * report be761ff8, and the #4148 review of the first F2).
+ *
+ * The first F2 applied `isItem` / MAX_ITEM_WORDS=5 to every numbered line, so a realistic
+ * "Build a shop ERP:" plus eight sentence-length product features (login, dashboard,
+ * inventory alerts, …) dropped to decision direct / size small. `megaProjectSignals.features`
+ * also reads `countEnumeratedFeatures`, so nothing rescued it — a failed-build /
+ * one-shot-large-app risk. This helper must therefore only fire on lines that are
+ * clearly meta: requirement verbs, error-handling quality, preserve-existing, no-demo /
+ * no-fake, responsive, tests-pass — and, for the verb-shaped ones, no product noun.
+ * A long numbered product feature still counts. PURE.
  */
-export function isFeatureLine(raw: string): boolean {
-  if (notAFeatureLine(raw)) return false;
-  const item = tidy(raw);
-  if (!isItem(item)) return false;
-  if (isRecordAttribute(item)) return false;
-  if (STYLE_ADJECTIVE.test(item)) return false;
-  return true;
+const PRODUCT_FEATURE_NOUN =
+  /\b(?:log[- ]?ins?|sign[- ]?ups?|sign[- ]?ins?|auth(?:entication)?|dashboards?|inventor(?:y|ies)|stocks?|invoices?|invoicing|payments?|checkouts?|carts?|orders?|customers?|clients?|staff|employees?|roles?|permissions?|reports?|analytics|charts?|notifications?|alerts?|chats?|messages?|messaging|calendars?|bookings?|appointments?|profiles?|search(?:es)?|filters?|uploads?|downloads?|videos?|audio|players?|feeds?|comments?|wallets?|subscriptions?|billing|catalog(?:ue)?s?|products?|categories|reviews?|ratings?|wishlists?|coupons?|attendance|exams?|timetables?|library|transport|students?|teachers?|fees?|payroll|pharmacy|tickets?|queues?|maps?|restaurants?|shops?|stores?|sales?|shipping|deliver(?:y|ies)|history|pdfs?|invoices?)\b/i;
+
+function hasProductNoun(t: string): boolean {
+  return PRODUCT_FEATURE_NOUN.test(t);
+}
+
+function stripLineMarker(raw: string): string {
+  return String(raw ?? '').replace(/[*_`]+/g, '').replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, '').trim();
+}
+
+/** The object of "handle" is loading / timeout / errors — not a product module. */
+const HANDLE_QUALITY =
+  /\bhandle(?:s|d|ing)?\s+(?:(?:the|any|all)\s+)?(?:loading(?:\s*,\s*|\s+and\s+|\s+))*(?:(?:api|network|connection|server|request)\s+)?(?:timeouts?(?:\s*,\s*|\s+and\s+|\s+))*(?:(?:api|network|connection|server|request)\s+)?(?:errors?|exceptions?|failures?)\s*(?:properly|gracefully|correctly)?\.?$/i;
+
+export function isQualityAcceptanceLine(raw: string): boolean {
+  const t = stripLineMarker(raw);
+  if (!t) return false;
+
+  // Preserve-existing is quality even when a product word also appears
+  // ("Keep the existing NOVA AI design and all working features unchanged").
+  if (/\bkeep\s+(the\s+)?existing\b/i.test(t)) return true;
+  if (/\b(unchanged|as[- ]is)\b/i.test(t) && /\b(existing|current|design|ui|layout|features?)\b/i.test(t)) return true;
+  if (/\b(?:existing|current)\s+(?:ui|design|layout|code)\b.{0,40}\b(?:rakho|rakhna|same|mat\s+badlo|na\s+badlo|unchanged)\b/i.test(t)) return true;
+  if (/\b(?:ui|design|layout)\s+(?:ko\s+)?(?:same\s+)?(?:rakho|rakhna|mat\s+badlo)\b/i.test(t)) return true;
+
+  // Error-handling quality: the grammatical object is loading/timeout/errors.
+  if (HANDLE_QUALITY.test(t)) return true;
+  if (/\berrors?\s+(?:should\s+be\s+|are\s+|must\s+be\s+)?handled\s+(?:gracefully|properly|correctly)?\b/i.test(t)) return true;
+  if (/\b(?:errors?|erroron|galti(?:yan)?|galati(?:yan)?)\b.{0,30}\b(?:handle|sambhalo|theek\s+se)\b/i.test(t)) return true;
+
+  // Constraint / process / QA lines — only when they name no product module.
+  // "Never miss a payment reminder" and "Identify nearby restaurants on a map" must still count.
+  if (hasProductNoun(t)) return false;
+
+  if (/^(never|do not|don't|dont|do\s+not)\b/i.test(t)) return true;
+  if (/^(inspect|identify|review|examine|look at|read)\b/i.test(t)) return true;
+  if (/\bno\s+(?:demo|fake|placeholder|dummy)(?:\s+(?:results?|data|responses?|replies|values?))?\s*[.!]?\s*$/i.test(t)) return true;
+  if (/^responsive\b/i.test(t)) return true;
+  if (/\b(?:app|ui|site|page|layout|design)\s+(?:should\s+be|must\s+be|is|needs?\s+to\s+be)\s+responsive\b/i.test(t)) return true;
+  if (/\b(?:all\s+)?(?:unit\s+|integration\s+|e2e\s+)?tests?\s+pass(?:es|ing)?\b/i.test(t)) return true;
+  if (/\b(?:typechecks?|type[- ]?checks?|lints?|ci)\s+pass(?:es)?\b/i.test(t)) return true;
+  if (/\b(?:fake|demo|galat)\s+(?:response|responses|result|results|data|reply|replies)\b.{0,30}\b(?:mat|nahi|nahin)\b/i.test(t)) return true;
+  if (/\b(?:mat|nahi|nahin)\s+(?:dikhana|dikhna|banana|dikhao)\b/i.test(t) && /(?:fake|demo|galat)/i.test(t)) return true;
+  return false;
 }
 
 export function countEnumeratedFeatures(prompt: string): number {

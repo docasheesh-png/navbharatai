@@ -1,6 +1,6 @@
 # BR1962 — a stopped "real AI" edit, and a Requirements checklist counted as ten features
 
-Scope: BR1962 only, inside the frozen audit boundary 1951..2105. Base `568beed6c359c0999bc7cbaee9f3178188373fb2` (current origin/main; BR1961 PR #4146 squash-merged at 2026-11-10 09:21:49 IST after independent PASS of exact head `d9150bb84`). F1/F2 source and tests from that head byte-match main. The parent reviews and merges this PR; BR1963 is not started. Nothing was replayed, deployed or reconfigured; no provider was called, and no autopsy was written to a remote service.
+Scope: BR1962 only, inside the frozen audit boundary 1951..2105. Branched from `568beed6c359c0999bc7cbaee9f3178188373fb2` (the #4146 squash-merge of BR1961, which was origin/main at branch creation — not claimed as current main; later ordinary merges bring subsequent main, including #4147). F1 source from that head byte-matches that merge; F2 was rewritten after the #4148 review. The parent reviews and merges this PR; BR1963 is not started. Nothing was replayed, deployed or reconfigured; no provider was called, and no autopsy was written to a remote service.
 
 ## Identity and evidence
 - Prompt: **"Now I want to make NOVA AI a real AI assistant."** plus a review note that `src/lib/aiService.ts` returns demo results, a nine-item Requirements checklist (inspect the file, connect a real service, Hindi/English, history, errors, never show fake replies, keep the existing design), and an instruction not to invent an API key. Test questions: "Who is the President of India?" and "भारत की राजधानी क्या है?".
@@ -12,7 +12,7 @@ Scope: BR1962 only, inside the frozen audit boundary 1951..2105. Base `568beed6c
 - **Evidence limits.** Nothing was written, so there are no generated files. No stored transcript beyond this prompt. The "Your review identified…" wording was not found as a platform template.
 
 ## Five buckets (report-backed)
-1 broken (D01 false LARGE from a quality checklist) · 1 residual pin (R1 tarah-tarah, from the #4146 review) · 1 self-heal/correct-stop (D02) · 1 struggle (D03 ETA, not testable) · 6 context/skip = 10 rows: 2 implemented, 0 blocked, 8 not-a-defect / covered / not independently fixable.
+1 broken (D01 false LARGE from a quality checklist) · 1 residual pin (R1 tarah-tarah, from the #4146 review) · 1 self-heal/correct-stop (D02) · 1 struggle (D03 ETA, not independently fixable) · 6 context/skip = 10 rows: 2 implemented, 0 blocked, 8 not-a-defect / covered / not independently fixable / not independently proven (D08).
 
 ## What happened (IST)
 1. **09:10:14.** APP_SCOPE: *"LARGE — ~10 distinct features requested"* (I1). The shared enumerator (`countEnumeratedFeatures`) sees only three short named parts; `featureCount`'s legacy numbered tally counted all nine Requirements lines plus halved verbs (`support` / `with`) = 10. **→ D01, F2.** Complexity COMPLEX 27 (I3); Surplus admitted (I4).
@@ -24,13 +24,13 @@ Scope: BR1962 only, inside the frozen audit boundary 1951..2105. Base `568beed6c
 | Fix | Class | Where | Locks |
 |---|---|---|---|
 | F1 | Hindi "X ke/ka tarah-tarah" / "X ke tarah tarah" is "various kinds of X", not "like X". Reviewer residual on #4146. Standalone still clones via first-line subject (6452c0a9) — not widened. | `appScopeAnalyzer.ts` (`HINDI_LIKE_AFTER` negative lookahead) | `tests/aProductKiTarahIsAClone.test.ts` |
-| F2 | A numbered Requirements / QA checklist is not ten product features. Numbered (`1.`/`2.`) lines use the same `isFeatureLine` filters as the shared enumerator (MAX_ITEM_WORDS / attributes / style). Markdown bullets keep the previous `notAFeatureLine`-only tally so a picture's visual-element list still witnesses autopsy 19641ab5. Only ever a smaller count. | `enumeratedFeatures.ts` (`isFeatureLine`), `appScopeAnalyzer.ts` (`featureCount`) | `tests/aQualityChecklistIsNotTenFeatures.test.ts` |
+| F2 | A numbered quality / acceptance / process constraint is not a product feature. Numbered (`1.`/`2.`) lines drop only clearly-meta lines (requirement verbs with no product noun, handle-errors/loading/timeout, keep-existing, no-demo / no-fake, responsive, tests-pass). Long numbered product features still count — `MAX_ITEM_WORDS` is not applied to this tally (the first F2's word-limit dropped a shop-ERP of eight sentence-length features). Markdown bullets keep the previous `notAFeatureLine`-only tally so a picture's visual-element list still witnesses autopsy 19641ab5. | `enumeratedFeatures.ts` (`isQualityAcceptanceLine`), `appScopeAnalyzer.ts` (`featureCount`) | `tests/aQualityChecklistIsNotTenFeatures.test.ts` |
 
 ## Side-effect review (owner rule t311u: no fix may create another problem)
 | Fix | Adjacent behaviour checked | Side-effect risk | Decision |
 |---|---|---|---|
 | F1 | BR1961 `youtube ki tarah` / `YouTube ke tarah ek app` still clone; tool phrases and heading mentions stay direct; standalone "YouTube ke tarah-tarah ke videos" still clones via subject (6452c0a9). 8 scope suites (116 tests) green. | **Low.** Tightening (non-escalating) of F1 only when `tarah` is reduplicated. | Kept, with neighbour locks |
-| F2 | Eight short numbered ERP features still LARGE; one-line comma list of eight modules still LARGE; `youtube ki tarah` still clones. Corpus 78,007: **0 decision changes** (analyze 282, famous 178). The BR1962 checklist is not in that repo-string corpus; it is locked by its own test. | **Low after measurement.** Only-ever-smaller count, the direction `featureCount` already claims. | Kept, with neighbour locks |
+| F2 | Shop-ERP of eight sentence-length numbered product features stays LARGE; Hindi and Hinglish long numbered product lists stay LARGE; short numbered ERP and the one-line eight-module comma list stay LARGE; `aPictureIsNotAnApp` photo description stays analyze/large; `youtube ki tarah` still clones. Synthetic corpus of 39 prompts (34 long numbered product lists, 1 mixed product+quality, 1 picture, 3 quality checklists): **0 LARGE→smaller on a real feature list**; 3 intended quality-checklist drops (including BR1962). The 78,007 repo-string corpus does not cover this class and is not used as the safety proof. | **Low after the narrow filter and the synthetic corpus.** The first F2 (`isFeatureLine` / `MAX_ITEM_WORDS=5` on numbered lines) was a failed-build / one-shot-large-app risk and was replaced. | Kept, with neighbour locks and synthetic corpus |
 
 ## Every item
 | ID / queue | Origin / bucket | Problem | State |

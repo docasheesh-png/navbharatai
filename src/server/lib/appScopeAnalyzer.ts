@@ -16,7 +16,7 @@
 // PURE: no I/O, no clock, no model. Never throws. The exact thresholds are meant to be reviewed against
 // real prompts (the admin will eye-ball the classifications) and tuned here.
 
-import { countEnumeratedFeatures, notAFeatureLine, isFeatureLine, BIG_SOFTWARE_NOUN, sectionedSpecSize } from '../AgentV3/enumeratedFeatures';
+import { countEnumeratedFeatures, notAFeatureLine, isQualityAcceptanceLine, BIG_SOFTWARE_NOUN, sectionedSpecSize } from '../AgentV3/enumeratedFeatures';
 import { withoutMachineText } from './machineText';
 import { glossDevanagari, withEnglishReading } from './devanagariTechTerms';
 import { MEDIA_PLAYER_APP, withoutDeclinedSentences } from './RequirementGapAnalyzer';
@@ -293,11 +293,12 @@ function featureCount(raw: string): number {
   const sections = sectionedSpecSize(text);
   // A question or a setting on a bullet is not a feature either (autopsy 0311186f) — the same rule the
   // shared counter applies, so the two counts cannot disagree about one line.
-  // Numbered lines use the shared item filters (BR1962: a Requirements checklist of long
-  // implementation/QA sentences is not ten product features). Markdown bullets keep the
-  // previous notAFeatureLine-only tally so a picture's visual-element list still witnesses
-  // autopsy 19641ab5 (tests/aPictureIsNotAnApp.test.ts) — F2 is numbered-only on purpose.
-  const numbered = (text.match(/^\s*\d+[.)]\s+\S.*$/gm) || []).filter((l) => isFeatureLine(l)).length;
+  // Numbered lines drop questions/assignments and lines that are clearly quality / acceptance /
+  // process constraints (BR1962). Long numbered PRODUCT features still count: MAX_ITEM_WORDS is
+  // not applied here (a shop-ERP of eight sentence-length features must stay LARGE). Markdown
+  // bullets keep the previous notAFeatureLine-only tally so a picture's visual-element list still
+  // witnesses autopsy 19641ab5 (tests/aPictureIsNotAnApp.test.ts).
+  const numbered = (text.match(/^\s*\d+[.)]\s+\S.*$/gm) || []).filter((l) => !notAFeatureLine(l) && !isQualityAcceptanceLine(l)).length;
   const bullets = (text.match(/^\s*[-*•]\s+\S.*$/gm) || []).filter((l) => !notAFeatureLine(l)).length;
 
   const verbs = (text.match(/\b(add|build|create|include|with|support|allow|enable|manage|integrate)\b/gi) || []).length;

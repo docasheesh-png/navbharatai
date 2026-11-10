@@ -90,6 +90,13 @@ const SAME_CLASS_OPEN_APPS = [
   'open apps installed on phone',
   'please open the apps',
   'users should be able to open apps from this screen',
+  // #4165: Hinglish post-nominal khol and "go to the play store"
+  'play store kholo',
+  'app store kholo',
+  'play store kholna hai',
+  'play store khol ke dekho',
+  'app store mein kholo',
+  'go to the play store',
 ] as const;
 
 /**
@@ -132,6 +139,24 @@ const OPPOSITE_NOT_OPEN_APPS = [
   'add an app drawer',
   'navigation app drawer',
   'hamburger app drawer',
+  // #4165: launch to/on/in a store is a publish idiom, not "launch the app store"
+  'we will launch to the Play Store next week',
+  'launch to the App Store',
+  'launch on Play Store',
+  'launch on the Play Store',
+  'launch in the App Store',
+  'launch our play store listing',
+  // Store + listing/developer/account/console is this app's store presence
+  'open a Play Store developer account',
+  'open our Play Store console',
+  'link to play store page for my own app listing',
+  'get it on Play Store',
+  'rate us on the Play Store',
+  'deep link',
+  'hyperlink',
+  'add a deep link',
+  'add a hyperlink',
+  'deep link to the Play Store',
 ] as const;
 
 describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', () => {
@@ -177,12 +202,19 @@ describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', ()
     expect(src).toContain('|apps)');
     expect(src).toContain('(?:app|play)\\s*store');
     expect(src).toContain('app\\s+drawer');
-    expect(src).toContain('launch(?:es|ing)?');
+    expect(src).toContain('launch(?:es|ing)?(?:\\s+(?:the|a|an|our|my))*');
     expect(src).toContain('redirect(?:s|ing)?');
-    expect(src).toContain('link(?:s|ing)?');
+    expect(src).toContain('(?<!deep\\s)link(?:s|ing)?');
+    expect(src).toContain('go(?:es|ing)?');
+    expect(src).toContain('(?:mein|me|ko|par|pe|se)');
+    expect(src).toContain('listings?');
+    expect(src).toContain('page\\s+for\\s+my\\b');
     expect(src).not.toContain('open\\s+(?:the\\s+)?(?:app|apps)');
-    // Bare store must not be its own alternative (that was the rejected side-effect).
-    expect(src).not.toContain('|(?:app|play)\\s*store');
+    expect(src).not.toContain('launch(?:es|ing)?(?:\\s+(?:the|to|');
+    // Bare store must not be its own alternative (rejected side-effect). The Hinglish
+    // khol alternative starts with store + lookahead, not `|(?:app|play)\s*store|`.
+    expect(src).not.toContain('|(?:app|play)\\s*store|');
+    expect(src).not.toContain('|(?:app|play)\\s*store)');
   });
 
   it('#4165 decisions: app settings stay this-app; app drawer and opening-the-app are classified explicitly', () => {
@@ -219,5 +251,35 @@ describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', ()
     expect(requestedCapabilities('add an app drawer').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('navigation app drawer').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('hamburger app drawer').map((c) => c.id)).not.toContain('open-apps');
+    // launch + to/on/in + store is "ship the app", not "launch the store".
+    expect(requestedCapabilities('we will launch to the Play Store next week').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('launch to the App Store').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('launch on Play Store').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('launch our play store listing').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('launch the app store').map((c) => c.id)).toContain('open-apps');
+    // Store tails that name this app's listing / developer console.
+    expect(requestedCapabilities('open a Play Store developer account').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('open our Play Store console').map((c) => c.id)).not.toContain('open-apps');
+    // Decision: "link to play store page for my own app listing" does NOT match.
+    // A get-it-on / rate-us button that points at THIS app's store listing is not a
+    // request to open other apps via @capacitor/app-launcher. The phrase names
+    // "listing". When that is ambiguous, lean toward not capturing it — an https://
+    // play.google.com/store URL works without the open-apps brief. "link to play
+    // store page" without listing language still matches.
+    expect(requestedCapabilities('link to play store page').map((c) => c.id)).toContain('open-apps');
+    expect(requestedCapabilities('link to play store page for my own app listing').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('get it on Play Store').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('rate us on the Play Store').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('deep link').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('hyperlink').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('deep link to the Play Store').map((c) => c.id)).not.toContain('open-apps');
+    // Post-nominal Hinglish khol and "go to the play store" must match; daalna must not.
+    expect(requestedCapabilities('play store kholo').map((c) => c.id)).toContain('open-apps');
+    expect(requestedCapabilities('app store kholo').map((c) => c.id)).toContain('open-apps');
+    expect(requestedCapabilities('play store kholna hai').map((c) => c.id)).toContain('open-apps');
+    expect(requestedCapabilities('play store khol ke dekho').map((c) => c.id)).toContain('open-apps');
+    expect(requestedCapabilities('app store mein kholo').map((c) => c.id)).toContain('open-apps');
+    expect(requestedCapabilities('go to the play store').map((c) => c.id)).toContain('open-apps');
+    expect(requestedCapabilities('play store pe daalna hai').map((c) => c.id)).not.toContain('open-apps');
   });
 });

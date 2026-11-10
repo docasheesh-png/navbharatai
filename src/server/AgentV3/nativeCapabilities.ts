@@ -136,12 +136,15 @@ export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
     // Singular "open the app" / "when I open the app" / "open the app to see…" / "opening the app"
     // / "when the app opens" launch THIS app. "open the app settings" is this app's settings screen
     // (in-app navigation), not another app. Plural "open apps" / "open the apps" still match.
-    // "app store" / "play store" match only with an open/launch/redirect/link verb ("open the app
-    // store", "redirect to app store", "link to play store page") — never a publish/upload/listing
-    // mention (#4165: bare store handed @capacitor/app-launcher to "publish to the Play Store").
-    // Bare "app drawer" is the same risk (a navigation/hamburger drawer in THIS app), so it too
-    // needs that verb ("open the app drawer"). "open WhatsApp chat with this number" still matches.
-    asks: /\b(call\s+(?:karo|kar|kare|kardo|mummy|mom|papa)|make\s+(?:a\s+)?call|whats\s*app(?![\s-]*(?:(?:ka|ki|ke|your|my|the|wala|wali)[\s-]+)?(?:mobile[\s-]*)?(?:numbers?|no\.?|num|phone|ids?)\b)|sms|open\s+(?:other\s+apps?|another\s+app|the\s+apps|apps)|(?:open(?:s|ing)?|launch(?:es|ing)?|redirect(?:s|ing)?|link(?:s|ing)?)(?:\s+(?:the|to|a|an|our|my))*\s+(?:(?:app|play)\s*store|app\s+drawer)|app\s+khol\w*|khol\s+do)\b/i,
+    // "app store" / "play store" match only with an open/redirect/link/go verb, or "launch the
+    // app store" (no to/on/in — "launch to/on/in the Play Store" is a publish idiom). A store
+    // name followed by listing/developer/account/console/release/screenshots/"page for my …"
+    // is this app's store listing or console, not a request to open other apps. Post-nominal
+    // Hinglish "play store kholo" / "app store mein kholo" match; "play store pe daalna hai"
+    // does not (no khol). Bare store is never an alternative. "deep link" is not the link verb.
+    // "link to play store page for my own app listing" is a get-it-on / rate-us listing URL,
+    // not @capacitor/app-launcher (ambiguous → do not capture when "listing" is named).
+    asks: /\b(call\s+(?:karo|kar|kare|kardo|mummy|mom|papa)|make\s+(?:a\s+)?call|whats\s*app(?![\s-]*(?:(?:ka|ki|ke|your|my|the|wala|wali)[\s-]+)?(?:mobile[\s-]*)?(?:numbers?|no\.?|num|phone|ids?)\b)|sms|open\s+(?:other\s+apps?|another\s+app|the\s+apps|apps)|(?:open(?:s|ing)?|redirect(?:s|ing)?|(?<!deep\s)link(?:s|ing)?|go(?:es|ing)?)(?:\s+(?:the|to|a|an|our|my))*\s+(?:(?:app|play)\s*store(?![\s-]+(?:listings?|developers?|accounts?|consoles?|releases?|screenshots?|page\s+for\s+my\b))|app\s+drawer)|launch(?:es|ing)?(?:\s+(?:the|a|an|our|my))*\s+(?:(?:app|play)\s*store(?![\s-]+(?:listings?|developers?|accounts?|consoles?|releases?|screenshots?|page\s+for\s+my\b))|app\s+drawer)|(?:app|play)\s*store(?![\s-]+(?:listings?|developers?|accounts?|consoles?|releases?|screenshots?|page\s+for\s+my\b))(?:\s+(?:mein|me|ko|par|pe|se))?[\s-]+khol\w*|app\s+khol\w*|khol\s+do)\b/i,
   },
   {
     id: 'contacts',

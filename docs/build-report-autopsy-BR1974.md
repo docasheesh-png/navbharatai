@@ -65,6 +65,14 @@ Second follow-up:
 - Decision: a bare "app drawer" is the same risk — builders ask for a navigation/hamburger drawer in THIS app ("add an app drawer"). Require the same verb, so "open the app drawer" still matches and "add an app drawer" / "navigation app drawer" / "hamburger app drawer" do not.
 - Ordinary merge of `origin/main` at `c072e0eb96ee3390d90e07b91d55f06bc54e6108` (#4166). No rebase.
 
+Third follow-up (`5fb218c75` reviewer FAIL):
+
+- `launch` only counts as "launch the app store" (optional the/a/an/our/my). `launch to/on/in` the store is a publish idiom: "we will launch to the Play Store next week", "launch to the App Store", "launch on Play Store" stay uncaptured.
+- A store name followed by listing/developer/account/console/release/screenshots/"page for my …" is this app's store presence: "open a Play Store developer account", "open our Play Store console", "launch our play store listing" stay uncaptured.
+- Decision: "link to play store page for my own app listing" does **not** match. A get-it-on / rate-us button pointing at this app's listing is not a request to open other apps via `@capacitor/app-launcher`. Ambiguous + names "listing" → do not capture. "link to play store page" without listing language still matches.
+- "deep link" is not the `link` verb (`(?<!deep\s)link`); "hyperlink" never was (no word boundary). "deep link to the Play Store" stays uncaptured.
+- False negatives restored without a bare store alternative: "play store kholo", "app store kholo", "play store kholna hai", "play store khol ke dekho", "app store mein kholo" (post-nominal Hinglish `khol`, optional mein/me/ko/par/pe/se), and "go to the play store". "play store pe daalna hai" and a bare "Play Store listing" stay unmatched.
+
 ## Queue
 
 This commit **closes no row** and **opens Q-2647 and Q-2648**. Q-2646, Q-2645, Q-2644, Q-2643, Q-2642, Q-2640, Q-2621, Q-2611, Q-2375 / Q-1068 and earlier blockers stay open.

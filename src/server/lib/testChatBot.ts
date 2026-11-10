@@ -4,6 +4,7 @@ import { readTestChatAction, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_MAX_RESPONSE
   type TestChatAction, type TestChatDiagnostic, type TestChatProviderId, type TestChatProviderStatus,
   type TestChatReply, type TestChatStatus } from '../../lib/testChatBot';
 import { nanoUsdToDecimal, qubaxModelOverride, qubaxRequestCeilingNanoUsd, readQubaxFeedSummary, readQubaxMarketPlan } from './qubaxMarket';
+import { refreshQubaxPriceFeed } from './qubaxPriceFeedRuntime';
 import { qubaxConfig, QubaxError, runApprovedQubaxChat } from './qubax';
 import { mitrifyChainEnabled, mitrifyConfig, MitrifyError, runApprovedMitrifyChain } from './mitrify';
 import { getServerDb } from './serverDb';
@@ -194,7 +195,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   };
 }
 
-/** Reading this status never probes the provider, performs inference or reveals a credential. */
+/** Admin status refreshes the market feed. The lease stops a stampede. A failure still returns the last status. */
 export async function loadTestChatStatus(): Promise<TestChatStatus> {
   const status = testChatStatus();
   const ceiling = qubaxRequestCeilingNanoUsd(process.env);
@@ -203,6 +204,7 @@ export async function loadTestChatStatus(): Promise<TestChatStatus> {
   try {
     const db = getServerDb();
     if (!db) return status;
+    await refreshQubaxPriceFeed(process.env);
     const [plan, feed] = await Promise.all([readQubaxMarketPlan(db, override, Date.now()), readQubaxFeedSummary(db, Date.now())]);
     const choice = plan.eligible[0] ?? plan.backup;
     const providers = status.providers.map(p => {

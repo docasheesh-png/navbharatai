@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
+import { noteQubaxModelSwitch, qubaxModelOverride, qubaxRequestCeilingNanoUsd, qubaxSwitchReason, QUBAX_TRIES_PER_TURN, readQubaxMarketPlan, type QubaxMarketChoice } from './qubaxMarket';
 import { getQubaxSelection, type QubaxSelection, type QubaxWorkload } from './qubaxSelector';
 
 type Env = Record<string, string | undefined>;
@@ -14,23 +15,11 @@ export function qubaxConfig(env: Env = process.env) {
   // One verified gateway origin. Never take a host, URL or credential from request JSON.
   return { enabled: env.QUBAX_ENABLED === '1', baseURL: 'https://api.qubax.ai/v1', apiKey: env.QUBAX_API_KEY?.trim() || '', maxInflight };
 }
-/** Owner switch. Replaces a per-payload Firestore approval. Absent or invalid values do not authorize a call.
- * The numeric cap is the maximum reserved for one HTTP request and cannot exceed one US dollar. */
-export function qubaxOwnerDispatch(env: Env = process.env): { modelId: string; ceilingNanoUsd: number } | null {
-  if (env.QUBAX_ENABLED !== '1' || !env.QUBAX_API_KEY?.trim()) return null;
-  const modelId = env.QUBAX_MODEL?.trim() ?? '';
-  const raw = env.QUBAX_MAX_USD_PER_REQUEST?.trim() ?? '';
-  if (!modelId || modelId.length > 200 || /[\s,]/.test(modelId) || !/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(raw)) return null;
-  const usd = Number(raw);
-  const ceilingNanoUsd = Math.round(usd * 1_000_000_000);
-  if (!(usd >= 0.000001) || usd > 1 || !Number.isSafeInteger(ceilingNanoUsd) || ceilingNanoUsd <= 0) return null;
-  return { modelId, ceilingNanoUsd };
-}
-function ownerSelection(owner: { modelId: string; ceilingNanoUsd: number }, now: number): QubaxSelection {
-  return Object.freeze({ modelId: owner.modelId, modelRevision: 'owner-enabled', sku: 'owner-enabled',
-    maximumNanoUsd: owner.ceilingNanoUsd, qubaxCostNanoUsd: owner.ceilingNanoUsd, officialCostNanoUsd: owner.ceilingNanoUsd,
-    discountBps: 0, evidenceBinding: hash(`qubax-owner-v1\0${owner.modelId}\0${owner.ceilingNanoUsd}`),
-    expiresAtMs: now + 60_000, reviewRef: 'owner-env' });
+function marketSelection(choice: QubaxMarketChoice, ceilingNanoUsd: number, now: number): QubaxSelection {
+  return Object.freeze({ modelId: choice.modelId, modelRevision: choice.backup ? 'backup-model' : 'market-performance', sku: choice.backup ? 'backup-model' : 'market-performance',
+    maximumNanoUsd: ceilingNanoUsd, qubaxCostNanoUsd: ceilingNanoUsd, officialCostNanoUsd: choice.officialOutputNanoUsdPerMillion ?? ceilingNanoUsd,
+    discountBps: choice.discountBps ?? 0, evidenceBinding: hash(`qubax-market-v1\0${choice.modelId}\0${choice.inputNanoUsdPerMillion}\0${choice.outputNanoUsdPerMillion}\0${ceilingNanoUsd}`),
+    expiresAtMs: Math.max(now + 1_000, choice.expiresAtMs), reviewRef: choice.backup ? 'backup-model' : 'market-performance' });
 }
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 export function qubaxWorkload(body: Record<string, unknown>): QubaxWorkload {
@@ -81,9 +70,10 @@ export type QubaxChatOptions = {
   revalidate?: () => Promise<void>; beforeHttpDispatch?: () => void;
   /** Server Gateway claim binding. Never supplied by request JSON. */
   expectedSelection?: { modelId: string; modelRevision: string; maximumNanoUsd: number };
-  reserve: (maximumNanoUsd: number) => Promise<null | { releaseUndispatched(): Promise<void> }>;
-  /** Admin Test Chat Bot only. User chat never passes this hook. */
+  reserve: (maximumNanoUsd: number, attemptKey?: string) => Promise<null | { releaseUndispatched(): Promise<void> }>;
+  /** Admin Test Chat Bot only. User chat never passes these hooks. */
   onHttpError?: (detail: { status: number; body: string; requestId?: string }) => void;
+  onAttemptError?: (detail: { model: string; status: number | null; code: string; latencyMs: number; body?: string; requestId?: string }) => void;
 };
 export type QubaxChatResult = { kind: 'skipped'; reason: string } | { kind: 'response'; content: string; model: string; usage?: { inputTokens: number; outputTokens: number } };
 let inflight = 0;
@@ -124,35 +114,64 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
   try {
     signal.throwIfAborted();
     const workload = qubaxWorkload(body);
-    // Gateway callers pin a catalog claim. Public chat and the admin test bot do not:
-    // the owner env then authorizes one model and one hard ceiling, with no per-message approval document.
-    const owner = expected ? null : qubaxOwnerDispatch(env);
-    const selection = owner ? ownerSelection(owner, Date.now()) : await bounded(getQubaxSelection(options.db, workload));
+    // Gateway callers pin a catalog claim. Public chat and the admin test bot re-rank the fresh feed
+    // on every turn and try at most three eligible models before the normal chain continues.
+    const override = expected ? null : qubaxModelOverride(env);
+    const automatic = override && override.mode !== 'invalid' ? override : null;
+    const ceiling = expected || !automatic ? null : qubaxRequestCeilingNanoUsd(env);
+    const plan = !expected && automatic && ceiling
+      ? await bounded(readQubaxMarketPlan(options.db, automatic, Date.now())) : null;
+    const marketTries: QubaxMarketChoice[] = plan ? (plan.eligible.length ? plan.eligible.slice(0, QUBAX_TRIES_PER_TURN) : plan.backup ? [plan.backup] : []) : [];
+    if (!expected && !marketTries.length) return { kind: 'skipped', reason: 'qubax-price-or-quality-unverified' };
+    let lastModel: string | null = null;
+    for (let attempt = 0; attempt < (marketTries.length || 1); attempt++) {
+    const market = marketTries[attempt] ?? null;
+    const attemptStarted = Date.now();
+    let lastHttp: { status: number; body: string; requestId?: string } | undefined;
+    const selection = market ? marketSelection(market, ceiling!, Date.now()) : await bounded(getQubaxSelection(options.db, workload));
     if (!selection) return { kind: 'skipped', reason: 'qubax-price-or-quality-unverified' };
     if (expected && (selection.modelId !== expected.modelId || selection.modelRevision !== expected.modelRevision
       || selection.maximumNanoUsd !== expected.maximumNanoUsd)) return { kind: 'skipped', reason: 'qubax-selection-claim-mismatch' };
     const binding = qubaxChatBinding(options.uid, body, selection, env);
     const digest = (a: any) => hash(JSON.stringify([a.kind, a.uid, a.payloadDigest, a.gateway, a.dataReview, a.supplierContract, a.reviewedAtMs, a.expiresAtMs]));
-    const approval = owner
-      ? { ceiling: owner.ceilingNanoUsd, digest: 'owner-env', expiresAtMs: selection.expiresAtMs }
+    const approval = market
+      ? { ceiling: ceiling!, digest: 'market-performance', expiresAtMs: selection.expiresAtMs }
       : await bounded(options.db.runTransaction(async tx => {
       const approvalRef = options.db.doc(`qubax_chat_approvals/${binding.id}`);
       const a = (await tx.get(approvalRef)).data();
-      const ceiling = qubaxReviewedApprovalCeiling(a, { uid: options.uid, binding, selection, privateTurn, healthTurn, now: Date.now() });
-      if (!a || ceiling === undefined) return null;
+      const approvedCeiling = qubaxReviewedApprovalCeiling(a, { uid: options.uid, binding, selection, privateTurn, healthTurn, now: Date.now() });
+      if (!a || approvedCeiling === undefined) return null;
       signal.throwIfAborted();
       tx.update(approvalRef, { state: 'claimed', requestId: options.requestId, claimedAtMs: Date.now(), attemptsStarted: 0 });
-      return { ceiling, digest: digest(a), expiresAtMs: a.expiresAtMs as number };
+      return { ceiling: approvedCeiling, digest: digest(a), expiresAtMs: a.expiresAtMs as number };
     }));
     if (!approval) return { kind: 'skipped', reason: 'qubax-data-approval-or-ceiling-unavailable' };
     clearTimeout(timer); timer = setTimeout(() => controller.abort(), Math.max(1, Math.min(60_000, approval.expiresAtMs - Date.now())));
-    signal.throwIfAborted(); await bounded(options.reserve(approval.ceiling).then(async receipt => { hold = receipt; if (signal.aborted) await releaseUnused(); return receipt; })); signal.throwIfAborted();
+    const attemptController = new AbortController();
+    const attemptTimer = setTimeout(() => attemptController.abort(), Math.max(1, Math.min(60_000, approval.expiresAtMs - Date.now())));
+    const attemptSignal = AbortSignal.any([options.signal, attemptController.signal]);
+    signal.throwIfAborted();
+    try {
+    const reserved = market ? options.reserve(approval.ceiling, `${options.requestId}:q${attempt + 1}`) : options.reserve(approval.ceiling);
+    await bounded(reserved.then(async receipt => { hold = receipt; if (attemptSignal.aborted) await releaseUnused(); return receipt; })); attemptSignal.throwIfAborted();
     if (!hold) return { kind: 'skipped', reason: 'qubax-budget' };
-    await bounded(Promise.resolve().then(() => options.revalidate?.())); signal.throwIfAborted();
-    if (owner) {
-      const again = qubaxOwnerDispatch(env);
-      if (!again || again.modelId !== owner.modelId || again.ceilingNanoUsd !== owner.ceilingNanoUsd
-        || !qubaxConfig(env).enabled || qubaxConfig(env).apiKey !== cfg.apiKey) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
+    await bounded(Promise.resolve().then(() => options.revalidate?.())); attemptSignal.throwIfAborted();
+    if (market) {
+      const again = await readQubaxMarketPlan(options.db, automatic!, Date.now());
+      const still = again.eligible.find(row => row.modelId === market.modelId) ?? (market.backup && again.backup?.modelId === market.modelId ? again.backup : null);
+      if (!still || still.inputNanoUsdPerMillion !== market.inputNanoUsdPerMillion || still.outputNanoUsdPerMillion !== market.outputNanoUsdPerMillion
+        || qubaxRequestCeilingNanoUsd(env) !== ceiling || !qubaxConfig(env).enabled || qubaxConfig(env).apiKey !== cfg.apiKey) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
+      if (attempt === 0) {
+        const pricedIds = new Set(plan!.eligible.map(row => row.modelId));
+        const reason = qubaxSwitchReason(lastModel, market, plan!, pricedIds, pricedIds);
+        if (reason !== 'unchanged') void noteQubaxModelSwitch(options.db, { atMs: Date.now(), fromModel: lastModel, toModel: market.modelId, reason,
+          qubaxInputNanoUsd: market.inputNanoUsdPerMillion, qubaxOutputNanoUsd: market.outputNanoUsdPerMillion,
+          officialInputNanoUsd: market.officialInputNanoUsdPerMillion, officialOutputNanoUsd: market.officialOutputNanoUsdPerMillion,
+          discountBps: market.discountBps, backup: market.backup }).catch(() => {});
+      } else void noteQubaxModelSwitch(options.db, { atMs: Date.now(), fromModel: lastModel, toModel: market.modelId, reason: 'provider-failed',
+        qubaxInputNanoUsd: market.inputNanoUsdPerMillion, qubaxOutputNanoUsd: market.outputNanoUsdPerMillion,
+        officialInputNanoUsd: market.officialInputNanoUsdPerMillion, officialOutputNanoUsd: market.officialOutputNanoUsdPerMillion,
+        discountBps: market.discountBps, backup: market.backup }).catch(() => {});
     } else {
     // Re-read the catalog at dispatch: a cached discovery result cannot authorize stale/revoked evidence.
     const currentSelection = await bounded(getQubaxSelection(options.db, workload, Date.now(), true));
@@ -168,17 +187,21 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     }
     signal.throwIfAborted();
     if (Date.now() >= selection.expiresAtMs || !qubaxConfig(env).enabled || qubaxConfig(env).apiKey !== cfg.apiKey) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
-    options.beforeHttpDispatch?.(); signal.throwIfAborted();
-    entered = true; // A lost response is still a possible charge, never permission to replay.
-    const response = await fetch(`${cfg.baseURL}/chat/completions`, { method: 'POST', redirect: 'error', signal,
+    options.beforeHttpDispatch?.(); attemptSignal.throwIfAborted();
+    entered = true; // A lost response is still a possible supplier charge until this try is released.
+    content = '';
+    const response = await fetch(`${cfg.baseURL}/chat/completions`, { method: 'POST', redirect: 'error', signal: attemptSignal,
       headers: { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...body, model: selection.modelId, ...(body.stream === true ? { stream_options: { include_usage: true } } : {}) }) });
     if (!response.ok) {
-      if (options.onHttpError) {
+      if (options.onHttpError || options.onAttemptError) {
         let body = '';
         try { body = await response.text(); } catch { body = ''; }
         const requestId = response.headers.get('x-request-id') || response.headers.get('request-id') || undefined;
-        try { options.onHttpError({ status: response.status, body: body.slice(0, 4000), requestId }); } catch { /* Diagnostics must not replace the error. */ }
+        lastHttp = { status: response.status, body: body.slice(0, 4000), requestId };
+        if (options.onHttpError) {
+          try { options.onHttpError({ status: response.status, body: body.slice(0, 4000), requestId }); } catch { /* Diagnostics must not replace the error. */ }
+        }
       } else if (response.body) {
         cancelBody(() => response.body!.cancel());
       }
@@ -186,7 +209,7 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     }
     let finished = false; let usage: { inputTokens: number; outputTokens: number } | undefined;
     const inspect = async (value: any) => {
-      signal.throwIfAborted();
+      attemptSignal.throwIfAborted();
       if (!value || value.error || (value.model !== undefined && value.model !== selection.modelId)
         || JSON.stringify(value).includes(cfg.apiKey) || !Array.isArray(value.choices) || value.choices.length > 1) throw new QubaxError('QUBAX_INVALID_RESPONSE');
       const choice = value.choices[0]; const msg = body.stream === true ? choice?.delta : choice?.message;
@@ -215,7 +238,7 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
       const contentType = response.headers.get('content-type') || '';
       if (!contentType.includes(body.stream === true ? 'text/event-stream' : 'application/json')) throw new QubaxError('QUBAX_INVALID_RESPONSE');
       for (;;) {
-        signal.throwIfAborted(); const item = await bounded(reader.read()); signal.throwIfAborted(); if (item.done) break;
+        attemptSignal.throwIfAborted(); const item = await bounded(reader.read()); attemptSignal.throwIfAborted(); if (item.done) break;
         bytes += item.value.byteLength; if (bytes > 2 * 1024 * 1024) throw new QubaxError('QUBAX_INVALID_RESPONSE');
         pending += decoder.decode(item.value, { stream: true });
         if (body.stream === true) {
@@ -236,8 +259,34 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
       try { reader.releaseLock(); } catch { /* A cancelled pending read may still own the lock. */ }
     }
     if (!finished || !content.trim()) throw new QubaxError('QUBAX_INCOMPLETE_STREAM');
-    signal.throwIfAborted(); await bounded(Promise.resolve().then(() => options.onChunk?.(content))); signal.throwIfAborted();
+    attemptSignal.throwIfAborted(); await bounded(Promise.resolve().then(() => options.onChunk?.(content))); attemptSignal.throwIfAborted();
     return { kind: 'response', content, model: selection.modelId, ...(usage ? { usage } : {}) };
+    } catch (error) {
+      if (options.onAttemptError) {
+        try {
+          const model = market?.modelId ?? selection.modelId;
+          options.onAttemptError({
+            model,
+            status: lastHttp?.status ?? (error instanceof QubaxError && error.status ? error.status : null),
+            code: error instanceof QubaxError ? error.code : 'QUBAX_UNAVAILABLE',
+            latencyMs: Math.max(0, Date.now() - attemptStarted),
+            ...(lastHttp?.body !== undefined ? { body: lastHttp.body } : {}),
+            ...(lastHttp?.requestId ? { requestId: lastHttp.requestId } : {}),
+          });
+        } catch { /* Diagnostics must not replace the error. */ }
+      }
+      if (!market || options.signal.aborted) throw error;
+      // A failed model is not a user charge. Release this try before another model, or before the next provider, reserves its own cap.
+      entered = false;
+      let freed = false;
+      if (hold) { try { await hold.releaseUndispatched(); freed = true; } catch { freed = false; } }
+      if (!freed) throw error;
+      hold = null; released = true; content = ''; lastModel = market.modelId;
+      if (attempt + 1 >= marketTries.length) return { kind: 'skipped', reason: 'qubax-tries-exhausted' };
+      released = false;
+    } finally { clearTimeout(attemptTimer); attemptController.abort(); }
+    }
+    return { kind: 'skipped', reason: 'qubax-tries-exhausted' };
   } catch (error) {
     throw new QubaxError(error instanceof QubaxError ? error.code : signal.aborted ? 'QUBAX_CANCELLED' : 'QUBAX_UNAVAILABLE',
       error instanceof QubaxError ? error.status : 0, !!content, entered);

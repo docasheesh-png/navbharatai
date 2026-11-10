@@ -1,9 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const fake = vi.hoisted(() => ({ run: vi.fn(), config: vi.fn(), db: vi.fn(), maintenance: vi.fn(), policy: vi.fn(),
   budgetConfig: vi.fn(), reserve: vi.fn(), settle: vi.fn(), month: vi.fn(), settleMonth: vi.fn(),
-  compatCtor: vi.fn(), compatTurn: vi.fn() }));
-vi.mock('./qubax', () => ({ runApprovedQubaxChat: fake.run, qubaxConfig: fake.config, qubaxOwnerDispatch: () => null,
+  compatCtor: vi.fn(), compatTurn: vi.fn(), officialOpenAi: vi.fn(), officialAnthropic: vi.fn() }));
+vi.mock('./qubax', () => ({ runApprovedQubaxChat: fake.run, qubaxConfig: fake.config,
   QubaxError: class extends Error { constructor(readonly code: string, readonly status = 0) { super(code); } } }));
+vi.mock('./testChatBotOfficial', async importOriginal => {
+  const actual = await importOriginal<typeof import('./testChatBotOfficial')>();
+  return {
+    ...actual,
+    runOfficialOpenAiCompatTest: (...args: unknown[]) => fake.officialOpenAi(...args),
+    runOfficialAnthropicTest: (...args: unknown[]) => fake.officialAnthropic(...args),
+  };
+});
 vi.mock('./serverDb', () => ({ getServerDb: fake.db }));
 vi.mock('./aiMaintenance', () => ({ assertAiAvailable: fake.maintenance }));
 vi.mock('../AI/inferencePolicy', () => ({ assertLegacyInferenceAllowed: fake.policy }));
@@ -26,6 +34,7 @@ vi.mock('../AI/FreeChain/providers/openAiCompatProvider', async importOriginal =
 import { runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
 import { TEST_CHAT_PROVIDER_IDS, type TestChatAction } from '../../lib/testChatBot';
 import { QubaxError } from './qubax';
+import { OfficialTestChatError } from './testChatBotOfficial';
 import { FreeChainProviderError } from '../AI/FreeChain/providers/openAiCompatProvider';
 const action: TestChatAction = { provider: 'qubax', requestId: '1d2efc71-6d00-4514-83c0-e31461ea9f35', messages: [{ role: 'user', content: 'Synthetic test question' }], confirmGatewayDisclosure: true };
 const reply = { kind: 'response', content: 'Synthetic reply', model: 'qubax-reported-model', usage: { inputTokens: 10, outputTokens: 4 } };
@@ -37,6 +46,7 @@ function budget(overrides: Record<string, unknown> = {}) {
   return { errors: [], paidCapNanoUsd: 100, paidPerUserDaily: 10, features: { monthlyCap: true, monthlyCapNanoUsd: 1000 }, rungs: [], ...overrides };
 }
 beforeEach(() => {
+  vi.unstubAllEnvs();
   vi.resetAllMocks();
   fake.config.mockReturnValue({ enabled: true, apiKey: 'synthetic-key' }); fake.db.mockReturnValue({ marker: 'db' });
   fake.budgetConfig.mockReturnValue(budget());
@@ -49,7 +59,9 @@ describe('test chat provider isolation and admission', () => {
     expect(status.noFallback).toBe(true);
     expect(status.approvalRequired).toBe(true);
     expect(status.providers.map(item => item.id)).toEqual([...TEST_CHAT_PROVIDER_IDS]);
-    expect(status.providers.find(item => item.id === 'qubax')).toMatchObject({ id: 'qubax', label: 'Qubax', configured: true, enabled: true, model: null });
+    expect(status.providers.find(item => item.id === 'qubax')).toMatchObject({
+      id: 'qubax', label: 'Qubax', configured: true, enabled: true, model: null, ceilingUsd: null, approvalRequired: true,
+    });
     expect(JSON.stringify(status)).not.toContain('synthetic-key');
     expect(JSON.stringify(status)).not.toMatch(/QUBAX_API_KEY|FREE_CHAIN_|MITRIFY_API_KEY/);
     expect(fake.run).not.toHaveBeenCalled(); expect(fake.db).not.toHaveBeenCalled();
@@ -59,7 +71,7 @@ describe('test chat provider isolation and admission', () => {
     expect(fake.run).toHaveBeenCalledOnce();
     expect(fake.run).toHaveBeenCalledWith(expect.objectContaining({ uid: expect.stringMatching(/^admin-test-chat:[a-f0-9]{64}$/),
       requestId: `test-chat:qubax:${action.requestId}`, privateTurn: true, healthTurn: true,
-      body: { messages: action.messages, max_tokens: 1024, stream: false }, onHttpError: expect.any(Function) }));
+      body: { messages: action.messages, max_tokens: 1024, stream: false }, onHttpError: expect.any(Function), onAttemptError: expect.any(Function) }));
     expect(result).toMatchObject({ requestId: action.requestId, provider: 'qubax', content: reply.content, noFallback: true });
     expect(fake.compatTurn).not.toHaveBeenCalled();
   });
@@ -78,10 +90,19 @@ describe('test chat provider isolation and admission', () => {
     const controller = new AbortController(); controller.abort();
     await expect(runTestChat(action, 'actor', controller.signal)).rejects.toBeDefined(); expect(fake.run).not.toHaveBeenCalled();
   });
-  it.each([{ kind: 'skipped', reason: 'qubax-data-approval-or-ceiling-unavailable' }, null])('never retries or falls back after skipped/failed Qubax %#', async result => {
-    if (result) fake.run.mockResolvedValue(result); else fake.run.mockRejectedValue(new Error('credential-and-private-provider-body'));
-    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: result ? 'approval-or-budget' : 'unconfirmed' });
+  it.each([
+    ['qubax-price-or-quality-unverified', 'no-model'],
+    ['qubax-budget', 'budget'],
+    ['qubax-tries-exhausted', 'tries-exhausted'],
+    ['qubax-data-approval-or-ceiling-unavailable', 'unconfirmed'],
+  ])('names skip %s as %s and does not try another provider', async (reason, code) => {
+    fake.run.mockResolvedValue({ kind: 'skipped', reason });
+    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: code });
     expect(fake.run).toHaveBeenCalledOnce();
+  });
+  it('does not disclose a provider failure body', async () => {
+    fake.run.mockRejectedValue(new Error('credential-and-private-provider-body'));
+    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'unconfirmed' });
   });
   it('uses shared daily/monthly admission, holds possible cost, and can release only an unused hold', async () => {
     let receipt: any;
@@ -102,7 +123,7 @@ describe('test chat provider isolation and admission', () => {
       const receipt = await options.reserve(kind === 'invalid-ceiling' ? NaN : 50);
       expect(receipt).toBeNull(); return { kind: 'skipped', reason: 'qubax-budget' };
     });
-    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: kind === 'duplicate' ? 'unconfirmed' : 'approval-or-budget' });
+    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: kind === 'duplicate' ? 'unconfirmed' : 'budget' });
     if (kind === 'daily' || kind === 'duplicate') expect(fake.settleMonth).toHaveBeenCalledWith({ marker: 'db' }, '2026-11', 50, 0);
     if (kind === 'duplicate') expect(fake.settle).not.toHaveBeenCalled();
     if (kind === 'monthly' || kind === 'invalid-ceiling') expect(fake.reserve).not.toHaveBeenCalled();
@@ -159,7 +180,7 @@ describe('test chat provider isolation and admission', () => {
   it('does not invent a paid reservation for free groq and still fail-closes Qubax when the paid cap is unconfigured', async () => {
     fake.budgetConfig.mockReturnValue(budget({ errors: ['FREE_CHAIN_PAID_DAILY_CAP_USD'], rungs: [groqRung] }));
     fake.compatTurn.mockResolvedValue({ content: 'free groq', model: 'openai/gpt-oss-120b' });
-    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'approval-or-budget' });
+    await expect(runTestChat(action, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'budget' });
     expect(fake.run).not.toHaveBeenCalled();
     const groq = await runTestChat({ ...action, provider: 'groq' }, 'actor', new AbortController().signal);
     expect(groq.content).toBe('free groq');
@@ -180,6 +201,41 @@ describe('test chat provider isolation and admission', () => {
     expect(error.reason).toBe('unconfirmed');
     expect(error.diagnostic).toMatchObject({ provider: 'groq', classification: 'rate-limit', httpStatus: 429, providerRequestId: 'groq-1' });
     expect(JSON.stringify(error.diagnostic)).not.toContain('synthetic-groq-key');
+    expect(fake.run).not.toHaveBeenCalled();
+  });
+  it('uses a distinct request id for each Qubax market try reservation', async () => {
+    fake.run.mockImplementation(async options => {
+      await options.reserve(50, `${options.requestId}:q1`);
+      await options.reserve(40, `${options.requestId}:q2`);
+      return reply;
+    });
+    await runTestChat(action, 'actor', new AbortController().signal);
+    expect(fake.reserve).toHaveBeenNthCalledWith(1, expect.objectContaining({ requestId: `test-chat:qubax:${action.requestId}:q1`, maxCostNanoUsd: 50 }));
+    expect(fake.reserve).toHaveBeenNthCalledWith(2, expect.objectContaining({ requestId: `test-chat:qubax:${action.requestId}:q2`, maxCostNanoUsd: 40 }));
+  });
+  it('records each Qubax market attempt and the final tries-exhausted outcome', async () => {
+    fake.run.mockImplementation(async options => {
+      options.onAttemptError?.({ model: 'model-a', status: 429, code: 'QUBAX_HTTP_ERROR', latencyMs: 12, body: 'slow down', requestId: 'a1' });
+      options.onAttemptError?.({ model: 'model-b', status: 500, code: 'QUBAX_HTTP_ERROR', latencyMs: 20, body: 'boom', requestId: 'b1' });
+      options.onAttemptError?.({ model: 'model-c', status: null, code: 'QUBAX_INCOMPLETE_STREAM', latencyMs: 8 });
+      return { kind: 'skipped', reason: 'qubax-tries-exhausted' };
+    });
+    const error = await runTestChat(action, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('tries-exhausted');
+    expect(error.diagnostic?.finalOutcome).toBe('tries-exhausted');
+    expect(error.diagnostic?.attempts).toHaveLength(3);
+    expect(error.diagnostic?.attempts?.[0]).toMatchObject({ model: 'model-a', httpStatus: 429, providerCode: 'QUBAX_HTTP_ERROR' });
+    expect(error.diagnostic?.attempts?.[2]).toMatchObject({ model: 'model-c', providerCode: 'QUBAX_INCOMPLETE_STREAM' });
+  });
+  it('releases an unused official paid hold when dispatch is rejected before any network call', async () => {
+    vi.stubEnv('KIMI_API_KEY', 'synthetic-kimi-key-value');
+    fake.officialOpenAi.mockRejectedValue(new OfficialTestChatError('unknown', null, 'url-not-allowlisted', null, null, null, null));
+    const error = await runTestChat({ ...action, provider: 'kimi' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('unconfirmed');
+    expect(error.diagnostic?.providerCode).toBe('url-not-allowlisted');
+    expect(fake.reserve).toHaveBeenCalledOnce();
+    expect(fake.settle).toHaveBeenCalledWith({ id: 'hold', mayDispatch: true }, 0);
+    expect(fake.settleMonth).toHaveBeenCalledWith({ marker: 'db' }, '2026-11', expect.any(Number), 0);
     expect(fake.run).not.toHaveBeenCalled();
   });
 });

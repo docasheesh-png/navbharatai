@@ -1,10 +1,10 @@
-import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import { readTestChatAction, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_MAX_RESPONSE_CHARS,
   TEST_CHAT_PROVIDER_IDS,
   type TestChatAction, type TestChatDiagnostic, type TestChatProviderId, type TestChatProviderStatus,
   type TestChatReply, type TestChatStatus } from '../../lib/testChatBot';
-import { qubaxConfig, qubaxOwnerDispatch, QubaxError, runApprovedQubaxChat } from './qubax';
+import { nanoUsdToDecimal, qubaxModelOverride, qubaxRequestCeilingNanoUsd, readQubaxMarketPlan } from './qubaxMarket';
+import { qubaxConfig, QubaxError, runApprovedQubaxChat } from './qubax';
 import { mitrifyChainEnabled, mitrifyConfig, MitrifyError, runApprovedMitrifyChain } from './mitrify';
 import { getServerDb } from './serverDb';
 import { assertAiAvailable } from './aiMaintenance';
@@ -19,8 +19,18 @@ import { realRateFor } from '../AgentV3/providerRates';
 import { ROUTER_ONE_DEFAULT_MODEL } from '../AI/RouterOne/routerOne';
 import { buildTestChatDiagnostic } from './testChatBotDiagnostics';
 import { OfficialTestChatError, runOfficialAnthropicTest, runOfficialOpenAiCompatTest } from './testChatBotOfficial';
+import { testChatRequestId, testChatUid } from './testChatPayload';
 
-type UnavailableReason = 'disabled' | 'configuration' | 'storage' | 'approval-or-budget' | 'invalid' | 'unconfirmed';
+type UnavailableReason = 'disabled' | 'configuration' | 'storage' | 'approval-or-budget' | 'budget' | 'no-model' | 'tries-exhausted' | 'capacity' | 'capability' | 'invalid' | 'unconfirmed';
+const SKIP_REASON: Record<string, UnavailableReason> = {
+  'qubax-disabled-or-unconfigured': 'configuration',
+  'qubax-configuration': 'configuration',
+  'qubax-capability-excluded': 'capability',
+  'qubax-capacity': 'capacity',
+  'qubax-price-or-quality-unverified': 'no-model',
+  'qubax-budget': 'budget',
+  'qubax-tries-exhausted': 'tries-exhausted',
+};
 export class TestChatUnavailable extends Error {
   constructor(readonly reason: UnavailableReason, readonly status = 503, readonly diagnostic?: TestChatDiagnostic) { super(reason); }
 }
@@ -106,8 +116,9 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   if (meta.kind === 'qubax') {
     let configured = false, enabled = false;
     try { const cfg = qubaxConfig(); configured = !!cfg.apiKey; enabled = cfg.enabled; } catch { /* Invalid config fails closed. */ }
-    const owner = qubaxOwnerDispatch();
-    return { ...base, configured, enabled, model: owner?.modelId ?? null, billed: true, approvalRequired: !owner,
+    const ceiling = qubaxRequestCeilingNanoUsd(process.env);
+    return { ...base, configured, enabled, model: null, billed: true, approvalRequired: !ceiling,
+      ceilingUsd: ceiling ? nanoUsdToDecimal(ceiling) : null,
       ...(configured && enabled ? {} : { unavailableReason: !configured ? MISSING_KEY : 'This provider is disabled on the server.' }) };
   }
   if (meta.kind === 'mitrify') {
@@ -184,6 +195,32 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
 }
 
 /** Reading this status never probes the provider, performs inference or reveals a credential. */
+export async function loadTestChatStatus(): Promise<TestChatStatus> {
+  const status = testChatStatus();
+  const ceiling = qubaxRequestCeilingNanoUsd(process.env);
+  const override = qubaxModelOverride(process.env);
+  if (!ceiling || override.mode === 'invalid') return status;
+  try {
+    const db = getServerDb();
+    if (!db) return status;
+    const plan = await readQubaxMarketPlan(db, override, Date.now());
+    const choice = plan.eligible[0] ?? plan.backup;
+    const providers = status.providers.map(p => {
+      if (p.id !== 'qubax') return p;
+      if (!choice) return { ...p, model: null, ceilingUsd: nanoUsdToDecimal(ceiling), selection: 'none' as const, approvalRequired: false };
+      return {
+        ...p, model: choice.modelId, ceilingUsd: nanoUsdToDecimal(ceiling), approvalRequired: false,
+        selection: choice.backup ? 'backup' as const : 'performance' as const,
+        inputUsdPerMillion: nanoUsdToDecimal(choice.inputNanoUsdPerMillion),
+        outputUsdPerMillion: nanoUsdToDecimal(choice.outputNanoUsdPerMillion),
+        officialInputUsdPerMillion: choice.officialInputNanoUsdPerMillion === null ? null : nanoUsdToDecimal(choice.officialInputNanoUsdPerMillion),
+        officialOutputUsdPerMillion: choice.officialOutputNanoUsdPerMillion === null ? null : nanoUsdToDecimal(choice.officialOutputNanoUsdPerMillion),
+        discountBps: choice.discountBps,
+      };
+    });
+    return { ...status, approvalRequired: providers.some(p => p.approvalRequired), providers };
+  } catch { return status; }
+}
 export function testChatStatus(): TestChatStatus {
   const providers = TEST_CHAT_PROVIDER_IDS.map(providerStatus);
   return { providers, approvalRequired: providers.some(p => p.approvalRequired), noFallback: true };
@@ -239,6 +276,21 @@ async function reserveShared(db: Firestore, requestId: string, uid: string, maxi
   } };
 }
 
+function unusedHoldSafe(error: unknown): boolean {
+  if (error instanceof OfficialTestChatError) return error.providerCode === 'url-not-allowlisted' || error.providerCode === 'configuration';
+  if (error instanceof FreeChainProviderError) return error.code === 'CONFIGURATION';
+  return false;
+}
+async function releaseIfUnused<T>(receipt: Awaited<ReturnType<typeof reserveShared>>, work: () => Promise<T>): Promise<T> {
+  try { return await work(); }
+  catch (error) {
+    if (receipt && unusedHoldSafe(error)) {
+      try { await receipt.releaseUndispatched(); } catch { /* Do not mask the original error. */ }
+    }
+    throw error;
+  }
+}
+
 export async function runTestChat(value: TestChatAction, actor: string, signal: AbortSignal): Promise<TestChatReply> {
   const action = readTestChatAction(value);
   if (!action) throw new TestChatUnavailable('invalid', 400);
@@ -250,10 +302,10 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
   if (!db) throw new TestChatUnavailable('storage');
   const cfg = freeChainConfig();
   if (needsSharedPaidConfig(action.provider) && cfg.errors.some(e => /PAID_DAILY_CAP|MONTHLY_CAP|PAID_PER_USER/.test(e))) {
-    throw new TestChatUnavailable('approval-or-budget');
+    throw new TestChatUnavailable('budget', 409);
   }
-  const uid = `admin-test-chat:${createHash('sha256').update(actor).digest('hex')}`;
-  const requestId = `test-chat:${action.provider}:${action.requestId}`;
+  const uid = testChatUid(actor);
+  const requestId = testChatRequestId(action);
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(90_000)]);
   const startedAt = Date.now();
   const extraSecrets = secretsFor(action.provider);
@@ -273,6 +325,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
   await revalidate();
   const meta = META[action.provider];
   let captured: AdminCapturedProviderError | { status: number; body: string; requestId?: string } | undefined;
+  const qubaxAttempts: Array<{ model: string; status: number | null; code: string; latencyMs: number; body?: string; requestId?: string }> = [];
   try {
     if (meta.kind === 'qubax') {
       const result = await runApprovedQubaxChat({
@@ -280,13 +333,27 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         body: { messages: action.messages, max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS, stream: false },
         revalidate,
         onHttpError: detail => { captured = detail; },
-        reserve: async maximumNanoUsd => {
+        onAttemptError: detail => { if (qubaxAttempts.length < 8) qubaxAttempts.push(detail); },
+        reserve: async (maximumNanoUsd, attemptKey) => {
           await revalidate();
-          const receipt = await reserveShared(db, requestId, uid, maximumNanoUsd);
+          const receipt = await reserveShared(db, attemptKey ?? requestId, uid, maximumNanoUsd);
           return receipt ? { releaseUndispatched: receipt.releaseUndispatched } : null;
         },
       });
-      if (result.kind === 'skipped') throw new TestChatUnavailable('approval-or-budget', 409);
+      if (result.kind === 'skipped') {
+        const reason = SKIP_REASON[result.reason] ?? 'unconfirmed';
+        const last = qubaxAttempts.at(-1);
+        throw new TestChatUnavailable(reason, 409, buildTestChatDiagnostic({
+          extraSecrets, provider: action.provider, model: last?.model ?? status.model,
+          latencyMs: Math.max(0, Date.now() - startedAt), httpStatus: last?.status ?? null,
+          providerCode: last?.code ?? result.reason, rawErrorBody: last?.body ?? null,
+          providerRequestId: last?.requestId ?? null, finalOutcome: reason,
+          attempts: qubaxAttempts.map(item => ({
+            model: item.model, latencyMs: item.latencyMs, httpStatus: item.status,
+            providerCode: item.code, rawErrorBody: item.body ?? null, providerRequestId: item.requestId ?? null,
+          })),
+        }));
+      }
       return finish(action, result.content, result.model, startedAt, result.usage);
     }
     if (meta.kind === 'mitrify') {
@@ -294,6 +361,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         db, uid, requestId, signal: bounded, privateTurn: true, healthTurn: true, maxHttpAttempts: 1,
         body: { messages: action.messages, max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS, stream: false },
         revalidate,
+        onHttpError: detail => { captured = detail; },
         reserve: async maximumNanoUsd => {
           await revalidate();
           const receipt = await reserveShared(db, requestId, uid, maximumNanoUsd);
@@ -317,44 +385,46 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       const model = status.model || (meta.kind === 'kimi' ? 'kimi-k2.7' : meta.kind === 'grok' ? 'grok-3-fast' : meta.kind === 'anthropic' ? 'claude-sonnet-4-6' : 'gemini-2.5-flash');
       const rateProvider = meta.kind === 'kimi' ? 'KIMI' : meta.kind === 'grok' ? 'GROK' : meta.kind === 'anthropic' ? 'ANTHROPIC' : 'GEMINI';
       let rate;
-      try { rate = realRateFor(rateProvider, model); } catch { throw new TestChatUnavailable('approval-or-budget', 409); }
+      try { rate = realRateFor(rateProvider, model); } catch { throw new TestChatUnavailable('budget', 409); }
       const ceiling = quoteTokens(action.messages, rate.inputPerMTok, rate.outputPerMTok);
+      let receipt: Awaited<ReturnType<typeof reserveShared>> = null;
       if (ceiling > 0) {
-        const receipt = await reserveShared(db, requestId, uid, ceiling);
-        if (!receipt) throw new TestChatUnavailable('approval-or-budget', 409);
+        receipt = await reserveShared(db, requestId, uid, ceiling);
+        if (!receipt) throw new TestChatUnavailable('budget', 409);
       }
       if (meta.kind === 'anthropic') {
         const key = firstPresent(process.env, ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY']);
-        const result = await runOfficialAnthropicTest({ apiKey: key, model, messages: action.messages, signal: bounded });
+        const result = await releaseIfUnused(receipt, () => runOfficialAnthropicTest({ apiKey: key, model, messages: action.messages, signal: bounded }));
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
       if (meta.kind === 'kimi') {
         const base = (process.env.KIMI_BASE_URL?.trim() || 'https://api.moonshot.ai/v1').replace(/\/+$/, '');
-        const result = await runOfficialOpenAiCompatTest({
+        const result = await releaseIfUnused(receipt, () => runOfficialOpenAiCompatTest({
           url: `${base}/chat/completions`, apiKey: firstPresent(process.env, ['KIMI_API_KEY']), model, messages: action.messages, signal: bounded,
-        });
+        }));
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
       if (meta.kind === 'grok') {
-        const result = await runOfficialOpenAiCompatTest({
+        const result = await releaseIfUnused(receipt, () => runOfficialOpenAiCompatTest({
           url: 'https://api.x.ai/v1/chat/completions',
           apiKey: firstPresent(process.env, ['XAI_API_KEY', 'GROK_API_KEY']), model, messages: action.messages, signal: bounded,
-        });
+        }));
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
     }
 
     const adapter = compatAdapter(action.provider, detail => { captured = detail; });
     if (!adapter) throw new TestChatUnavailable('configuration');
+    let paidReceipt: Awaited<ReturnType<typeof reserveShared>> = null;
     if (adapter.rung && isPaidRung(adapter.rung.id) && adapter.rung.priceIn > 0 && adapter.rung.priceOut > 0) {
-      const receipt = await reserveShared(db, requestId, uid, quoteTokens(action.messages, adapter.rung.priceIn, adapter.rung.priceOut));
-      if (!receipt) throw new TestChatUnavailable('approval-or-budget', 409);
+      paidReceipt = await reserveShared(db, requestId, uid, quoteTokens(action.messages, adapter.rung.priceIn, adapter.rung.priceOut));
+      if (!paidReceipt) throw new TestChatUnavailable('budget', 409);
     }
-    const result = await adapter.provider.executeTurn({
+    const result = await releaseIfUnused(paidReceipt, () => adapter.provider.executeTurn({
       prompt: action.messages.at(-1)?.content ?? '',
       messages: action.messages,
       signal: bounded,
-    });
+    }));
     return finish(action, result.content, result.model, startedAt, result.usage);
   } catch (error) {
     if (error instanceof TestChatUnavailable) throw error;
@@ -378,16 +448,24 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
     }
     if (error instanceof QubaxError) {
       const cap = captured && 'status' in captured ? captured : undefined;
+      const last = qubaxAttempts.at(-1);
       return fail('unconfirmed', 503, {
-        model: status.model, latencyMs: latency, httpStatus: cap?.status ?? (error.status || null),
-        providerCode: error.code, rawErrorBody: cap && 'body' in cap ? cap.body : null,
-        providerRequestId: cap && 'requestId' in cap ? cap.requestId ?? null : null,
-        aborted: error.code === 'QUBAX_CANCELLED', extraSecrets,
+        model: last?.model ?? status.model, latencyMs: latency, httpStatus: last?.status ?? cap?.status ?? (error.status || null),
+        providerCode: last?.code ?? error.code, rawErrorBody: last?.body ?? (cap && 'body' in cap ? cap.body : null),
+        providerRequestId: last?.requestId ?? (cap && 'requestId' in cap ? cap.requestId ?? null : null),
+        aborted: error.code === 'QUBAX_CANCELLED', extraSecrets, finalOutcome: 'unconfirmed',
+        attempts: qubaxAttempts.map(item => ({
+          model: item.model, latencyMs: item.latencyMs, httpStatus: item.status,
+          providerCode: item.code, rawErrorBody: item.body ?? null, providerRequestId: item.requestId ?? null,
+        })),
       });
     }
     if (error instanceof MitrifyError) {
+      const cap = captured && 'status' in captured ? captured : undefined;
       return fail('unconfirmed', 503, {
-        model: status.model, latencyMs: latency, httpStatus: error.status || null, providerCode: error.code,
+        model: status.model, latencyMs: latency, httpStatus: cap?.status ?? (error.status || null), providerCode: error.code,
+        rawErrorBody: cap && 'body' in cap ? cap.body : null,
+        providerRequestId: cap && 'requestId' in cap ? cap.requestId ?? null : null,
         aborted: error.code === 'MITRIFY_CANCELLED', extraSecrets,
       });
     }

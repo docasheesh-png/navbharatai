@@ -40,4 +40,27 @@ describe('admin test chat diagnostic redaction', () => {
     expect(diagnostic.httpStatus).toBe(401);
     expect(diagnostic.providerCode).toBe('invalid_api_key');
   });
+
+  it('redacts Google AIza keys, PEM blocks, AWS secrets and high-entropy tokens near key words', () => {
+    const google = 'AIzaSyDabcdefghijklmnopqrstuvwx12345';
+    const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAabcdefghijklmnopqrstuvwxyz0123456789+/==\n-----END RSA PRIVATE KEY-----';
+    const awsId = 'AKIAIOSFODNN7EXAMPLE';
+    const awsSecret = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
+    const token = 'k8QvN2mX9pL4sR7tY1wZ3aB5cD6eF0gH';
+    const cleaned = redactTestChatDiagnosticText([
+      `google key ${google}`,
+      pem,
+      `aws id ${awsId}`,
+      `aws_secret_access_key=${awsSecret}`,
+      `the secret is ${token}`,
+      'please mention the password hint named twentyfouraaaaaa',
+    ].join('\n'));
+    expect(cleaned).not.toContain(google);
+    expect(cleaned).not.toContain('MIIEowIBAAKCAQEAabcdefghijklmnopqrstuvwxyz0123456789');
+    expect(cleaned).not.toContain(awsId);
+    expect(cleaned).not.toContain(awsSecret);
+    expect(cleaned).not.toContain(token);
+    expect(cleaned).toContain('twentyfouraaaaaa');
+    expect(cleaned).toContain('[redacted-secret]');
+  });
 });

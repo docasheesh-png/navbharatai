@@ -50,5 +50,20 @@ describe('isolated test chat contract', () => {
     expect(isTestChatDiagnostic(diagnostic)).toBe(true);
     expect(formatTestChatDiagnostic(diagnostic)).toContain('HTTP status: 401');
     expect(isTestChatDiagnostic({ ...diagnostic, classification: 'made-up' })).toBe(false);
+    const market = {
+      ...fullStatus,
+      providers: fullStatus.providers.map(item => item.id === 'qubax'
+        ? { ...item, ceilingUsd: '0.02', selection: 'performance' as const, inputUsdPerMillion: '0.1', outputUsdPerMillion: '0.2',
+          officialInputUsdPerMillion: '1', officialOutputUsdPerMillion: '2', discountBps: 9000 }
+        : item),
+    };
+    expect(isTestChatStatus(market)).toBe(true);
+    const attempts = { ...diagnostic, finalOutcome: 'tries-exhausted', attempts: [{
+      model: 'model-a', latencyMs: 10, classification: 'rate-limit' as const, httpStatus: 429,
+      providerCode: 'QUBAX_HTTP_ERROR', providerType: null, providerRequestId: 'a1', providerMessage: null, rawErrorBody: 'slow',
+    }] };
+    expect(isTestChatDiagnostic(attempts)).toBe(true);
+    expect(formatTestChatDiagnostic(attempts)).toContain('Final outcome: tries-exhausted');
+    expect(formatTestChatDiagnostic(attempts)).toContain('Attempt 1');
   });
 });

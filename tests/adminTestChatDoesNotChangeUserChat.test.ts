@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { unavailableChatReply, CHAT_ROUTE_UNAVAILABLE } from '../src/lib/chatRouteOutcome';
 import { FIXED_TEXT_CHAIN } from '../src/server/AI/fixedTextChain';
 import { redactProviderError, redactProvidersText } from '../src/server/lib/providerRedaction';
+import { QUBAX_TRIES_PER_TURN } from '../src/server/lib/qubaxMarket';
 
 const read = (path: string) => readFileSync(path, 'utf8');
 
@@ -44,5 +45,24 @@ describe('admin test chat does not change user chat', () => {
     const files = walk('src').filter(path => /\.(?:ts|tsx)$/.test(path) && !path.startsWith('src/server/') && !/\.test\.[tj]sx?$/.test(path));
     const importers = files.filter(path => /(?:from\s+|import\s*\(\s*)['"][^'"]*\/testChatBot['"]/.test(read(path)));
     expect(importers).toEqual(['src/components/admin/TestChatBotPanel.tsx']);
+  });
+
+  it('keeps user-chat Qubax market auto-select and three tries unchanged', () => {
+    expect(QUBAX_TRIES_PER_TURN).toBe(3);
+    const runtime = read('src/server/AI/FreeChain/runtime.ts');
+    const qubax = read('src/server/lib/qubax.ts');
+    const market = read('src/server/lib/qubaxMarket.ts');
+    expect(market).toContain('export const QUBAX_TRIES_PER_TURN = 3');
+    expect(qubax).toContain('readQubaxMarketPlan');
+    expect(qubax).toContain('marketTries');
+    expect(qubax).toContain('qubax-tries-exhausted');
+    expect(qubax).toContain('QUBAX_TRIES_PER_TURN');
+    expect(runtime).toContain('attemptKey ?? `${requestId}:qubax`');
+    expect(runtime).not.toContain('onHttpError');
+    expect(runtime).not.toContain('onAttemptError');
+    expect(runtime).not.toContain('adminErrorDetail');
+    expect(runtime).not.toContain('runTestChat');
+    expect(read('src/server/AI/InferenceGateway/qubaxTransport.ts')).not.toContain('onAttemptError');
+    expect(read('src/server/lib/testChatBot.ts')).not.toMatch(/runFreeChain\b|orderForRoute\b|FIXED_TEXT_CHAIN/);
   });
 });

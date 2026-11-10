@@ -23,6 +23,9 @@ describe('separate Test Chat Bot panel', () => {
     expect(panel).toContain('/api/v1/admin/test-chat-bot');
     expect(panel).toContain('Copy error details');
     expect(panel).toContain('Provider error details');
+    expect(panel).toContain('Check Qubax balance');
+    expect(panel).toContain('up to three');
+    expect(panel).not.toContain('No automatic retry');
     expect(panel).not.toMatch(/localStorage|sessionStorage|authedFetch|AIService|useChatEngine|\/api\/chat/);
     expect(readFileSync('src/components/AdminDashboard.tsx', 'utf8')).toContain('<TestChatBotPanel adminToken={adminToken} />');
     expect(readFileSync('src/server/routes/admin.ts', 'utf8')).toContain('registerTestChatBotRoutes(app, verifyAdminToken)');

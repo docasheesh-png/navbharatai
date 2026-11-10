@@ -57,6 +57,13 @@ export interface TestChatProviderStatus {
   billed?: boolean;
   internalRouting?: boolean;
   approvalRequired?: boolean;
+  ceilingUsd?: string | null;
+  selection?: 'performance' | 'backup' | 'none';
+  inputUsdPerMillion?: string | null;
+  outputUsdPerMillion?: string | null;
+  officialInputUsdPerMillion?: string | null;
+  officialOutputUsdPerMillion?: string | null;
+  discountBps?: number | null;
 }
 export interface TestChatStatus { providers: TestChatProviderStatus[]; approvalRequired: boolean; noFallback: true }
 export interface TestChatReply {
@@ -67,6 +74,17 @@ export interface TestChatReply {
   latencyMs: number;
   usage?: { inputTokens: number; outputTokens: number };
   noFallback: true;
+}
+export interface TestChatAttemptDiagnostic {
+  model: string | null;
+  latencyMs: number;
+  classification: TestChatDiagnosticClassification;
+  httpStatus: number | null;
+  providerCode: string | null;
+  providerType: string | null;
+  providerRequestId: string | null;
+  providerMessage: string | null;
+  rawErrorBody: string | null;
 }
 export interface TestChatDiagnostic {
   provider: TestChatProviderId;
@@ -79,6 +97,8 @@ export interface TestChatDiagnostic {
   providerRequestId: string | null;
   providerMessage: string | null;
   rawErrorBody: string | null;
+  attempts?: TestChatAttemptDiagnostic[];
+  finalOutcome?: string;
 }
 export interface TestChatFailure {
   error: string;
@@ -91,8 +111,14 @@ const exactKeys = (v: Record<string, unknown>, keys: string[]) => Object.keys(v)
 const safeText = (v: unknown, max: number): v is string => typeof v === 'string' && v.trim().length > 0 && v.length <= max && !v.includes('\u0000');
 const optionalText = (v: unknown, max: number): boolean => typeof v === 'string' && v.length > 0 && v.length <= max && !v.includes('\u0000');
 const optionalHttps = (v: unknown): boolean => v === null || (typeof v === 'string' && /^https:\/\/[A-Za-z0-9.-]+(?:\/[\w._~:/?#[\]@!$&'()*+,;=%-]*)?$/.test(v) && v.length <= 300);
-const PROVIDER_STATUS_KEYS = ['id', 'label', 'configured', 'enabled', 'model', 'unavailableReason', 'privacyUrl', 'note', 'billed', 'internalRouting', 'approvalRequired'];
-const DIAGNOSTIC_KEYS = ['provider', 'model', 'latencyMs', 'classification', 'httpStatus', 'providerCode', 'providerType', 'providerRequestId', 'providerMessage', 'rawErrorBody'];
+const optionalDecimal = (v: unknown): boolean => v === null || (typeof v === 'string' && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(v) && v.length <= 40);
+const PROVIDER_STATUS_KEYS = [
+  'id', 'label', 'configured', 'enabled', 'model', 'unavailableReason', 'privacyUrl', 'note', 'billed',
+  'internalRouting', 'approvalRequired', 'ceilingUsd', 'selection', 'inputUsdPerMillion', 'outputUsdPerMillion',
+  'officialInputUsdPerMillion', 'officialOutputUsdPerMillion', 'discountBps',
+];
+const ATTEMPT_KEYS = ['model', 'latencyMs', 'classification', 'httpStatus', 'providerCode', 'providerType', 'providerRequestId', 'providerMessage', 'rawErrorBody'];
+const DIAGNOSTIC_KEYS = [...ATTEMPT_KEYS, 'provider', 'attempts', 'finalOutcome'];
 export function readTestChatAction(value: unknown): TestChatAction | null {
   if (!record(value) || !exactKeys(value, ['provider', 'requestId', 'messages', 'confirmGatewayDisclosure'])
     || !TEST_CHAT_PROVIDER_IDS.includes(value.provider as TestChatProviderId)
@@ -120,7 +146,14 @@ function isProviderStatus(p: unknown, expectedId: TestChatProviderId): p is Test
     && (p.note === undefined || optionalText(p.note, 400))
     && (p.billed === undefined || typeof p.billed === 'boolean')
     && (p.internalRouting === undefined || typeof p.internalRouting === 'boolean')
-    && (p.approvalRequired === undefined || typeof p.approvalRequired === 'boolean');
+    && (p.approvalRequired === undefined || typeof p.approvalRequired === 'boolean')
+    && (p.ceilingUsd === undefined || optionalDecimal(p.ceilingUsd))
+    && (p.selection === undefined || p.selection === 'performance' || p.selection === 'backup' || p.selection === 'none')
+    && (p.inputUsdPerMillion === undefined || optionalDecimal(p.inputUsdPerMillion))
+    && (p.outputUsdPerMillion === undefined || optionalDecimal(p.outputUsdPerMillion))
+    && (p.officialInputUsdPerMillion === undefined || optionalDecimal(p.officialInputUsdPerMillion))
+    && (p.officialOutputUsdPerMillion === undefined || optionalDecimal(p.officialOutputUsdPerMillion))
+    && (p.discountBps === undefined || p.discountBps === null || (Number.isInteger(p.discountBps) && (p.discountBps as number) >= 0 && (p.discountBps as number) <= 10_000));
 }
 export function isTestChatStatus(v: unknown): v is TestChatStatus {
   return record(v) && typeof v.approvalRequired === 'boolean' && v.noFallback === true && Array.isArray(v.providers)
@@ -134,6 +167,18 @@ export function isTestChatReply(v: unknown): v is TestChatReply {
     && (v.usage === undefined || (record(v.usage) && Number.isSafeInteger(v.usage.inputTokens) && (v.usage.inputTokens as number) >= 0
       && Number.isSafeInteger(v.usage.outputTokens) && (v.usage.outputTokens as number) >= 0));
 }
+function isTestChatAttempt(v: unknown): v is TestChatAttemptDiagnostic {
+  return record(v) && exactKeys(v, ATTEMPT_KEYS)
+    && (v.model === null || safeText(v.model, 200))
+    && typeof v.latencyMs === 'number' && Number.isFinite(v.latencyMs) && v.latencyMs >= 0
+    && TEST_CHAT_DIAGNOSTIC_CLASSIFICATIONS.includes(v.classification as TestChatDiagnosticClassification)
+    && (v.httpStatus === null || (typeof v.httpStatus === 'number' && Number.isInteger(v.httpStatus) && v.httpStatus >= 100 && v.httpStatus <= 599))
+    && (v.providerCode === null || optionalText(v.providerCode, 200))
+    && (v.providerType === null || optionalText(v.providerType, 200))
+    && (v.providerRequestId === null || optionalText(v.providerRequestId, 200))
+    && (v.providerMessage === null || optionalText(v.providerMessage, 1600))
+    && (v.rawErrorBody === null || optionalText(v.rawErrorBody, 1600));
+}
 export function isTestChatDiagnostic(v: unknown): v is TestChatDiagnostic {
   return record(v) && exactKeys(v, DIAGNOSTIC_KEYS)
     && TEST_CHAT_PROVIDER_IDS.includes(v.provider as TestChatProviderId)
@@ -145,21 +190,36 @@ export function isTestChatDiagnostic(v: unknown): v is TestChatDiagnostic {
     && (v.providerType === null || optionalText(v.providerType, 200))
     && (v.providerRequestId === null || optionalText(v.providerRequestId, 200))
     && (v.providerMessage === null || optionalText(v.providerMessage, 1600))
-    && (v.rawErrorBody === null || optionalText(v.rawErrorBody, 1600));
+    && (v.rawErrorBody === null || optionalText(v.rawErrorBody, 1600))
+    && (v.attempts === undefined || (Array.isArray(v.attempts) && v.attempts.length > 0 && v.attempts.length <= 8 && v.attempts.every(isTestChatAttempt)))
+    && (v.finalOutcome === undefined || optionalText(v.finalOutcome, 200));
+}
+function formatAttempt(prefix: string, d: Pick<TestChatAttemptDiagnostic, 'model' | 'classification' | 'httpStatus' | 'providerCode' | 'providerType' | 'providerRequestId' | 'providerMessage' | 'rawErrorBody' | 'latencyMs'>): string[] {
+  return [
+    `${prefix}Model: ${d.model ?? '(not reported)'}`,
+    `${prefix}Classification: ${d.classification}`,
+    `${prefix}HTTP status: ${d.httpStatus ?? '(not reported)'}`,
+    `${prefix}Provider code: ${d.providerCode ?? '(not reported)'}`,
+    `${prefix}Provider type: ${d.providerType ?? '(not reported)'}`,
+    `${prefix}Provider request id: ${d.providerRequestId ?? '(not reported)'}`,
+    `${prefix}Latency: ${d.latencyMs} ms`,
+    `${prefix}Message: ${d.providerMessage ?? '(not reported)'}`,
+    `${prefix}Raw body: ${d.rawErrorBody ?? '(not reported)'}`,
+  ];
 }
 export function formatTestChatDiagnostic(d: TestChatDiagnostic): string {
-  return [
+  const lines = [
     `Provider: ${d.provider}`,
-    `Model: ${d.model ?? '(not reported)'}`,
-    `Classification: ${d.classification}`,
-    `HTTP status: ${d.httpStatus ?? '(not reported)'}`,
-    `Provider code: ${d.providerCode ?? '(not reported)'}`,
-    `Provider type: ${d.providerType ?? '(not reported)'}`,
-    `Provider request id: ${d.providerRequestId ?? '(not reported)'}`,
-    `Latency: ${d.latencyMs} ms`,
-    `Message: ${d.providerMessage ?? '(not reported)'}`,
-    `Raw body: ${d.rawErrorBody ?? '(not reported)'}`,
-  ].join('\n');
+    ...(d.finalOutcome ? [`Final outcome: ${d.finalOutcome}`] : []),
+    ...formatAttempt('', d),
+  ];
+  if (d.attempts?.length) {
+    d.attempts.forEach((attempt, index) => {
+      lines.push(`--- Attempt ${index + 1} ---`);
+      lines.push(...formatAttempt('', attempt));
+    });
+  }
+  return lines.join('\n');
 }
 /** Safe fallback when a reply cannot be confirmed. Admin diagnostics may add a separate redacted payload. */
 export const TEST_CHAT_FAILURE = 'Test response could not be confirmed. No other provider was tried. A dispatched request may still have cost; do not automatically retry.';

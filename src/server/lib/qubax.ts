@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import { noteQubaxModelSwitch, qubaxModelOverride, qubaxRequestCeilingNanoUsd, qubaxSwitchReason, QUBAX_TRIES_PER_TURN, readQubaxMarketPlan, type QubaxMarketChoice } from './qubaxMarket';
+import { qubaxReplyMatchesUser } from './qubaxLanguage';
 import { getQubaxSelection, type QubaxSelection, type QubaxWorkload } from './qubaxSelector';
+
+/** A silent Qubax try must not hold the user. The next model, then the next provider, gets the same history. */
+export const QUBAX_FIRST_BYTE_MS = 8_000;
+export const QUBAX_TRY_MS = 12_000;
 
 type Env = Record<string, string | undefined>;
 export class QubaxError extends Error {
@@ -93,7 +98,7 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
   inflight++;
   let hold: Awaited<ReturnType<QubaxChatOptions['reserve']>> = null; let entered = false; let content = '';
   const controller = new AbortController(); const signal = AbortSignal.any([options.signal, controller.signal]);
-  let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => controller.abort(), 60_000);
+  let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => controller.abort(), QUBAX_TRY_MS * QUBAX_TRIES_PER_TURN);
   const pendingWork = new Set<Promise<unknown>>();
   function track<T>(work: Promise<T>): Promise<T> {
     pendingWork.add(work); void work.then(() => pendingWork.delete(work), () => pendingWork.delete(work));
@@ -122,10 +127,13 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     const automatic = override && override.mode !== 'invalid' ? override : null;
     const ceiling = expected ? null : qubaxRequestCeilingNanoUsd(env);
     const plan = !expected && automatic && ceiling
-      ? await bounded(readQubaxMarketPlan(options.db, automatic, Date.now())) : null;
+      ? await bounded(readQubaxMarketPlan(options.db, automatic, Date.now(), ceiling)) : null;
     const marketTries: QubaxMarketChoice[] = plan ? (plan.eligible.length ? plan.eligible.slice(0, QUBAX_TRIES_PER_TURN) : plan.backup ? [plan.backup] : []) : [];
     if (!expected && !marketTries.length && options.adminFallbackTries?.length) marketTries.push(...options.adminFallbackTries.slice(0, QUBAX_TRIES_PER_TURN));
-    if (!expected && !marketTries.length) return { kind: 'skipped', reason: 'qubax-price-or-quality-unverified' };
+    if (!expected && !marketTries.length) {
+      void import('./qubaxPriceFeedRuntime').then(job => job.refreshQubaxPriceFeed(env)).catch(() => {});
+      return { kind: 'skipped', reason: 'qubax-price-or-quality-unverified' };
+    }
     let lastModel: string | null = null;
     for (let attempt = 0; attempt < (marketTries.length || 1); attempt++) {
     const market = marketTries[attempt] ?? null;
@@ -150,9 +158,12 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
       return { ceiling: approvedCeiling, digest: digest(a), expiresAtMs: a.expiresAtMs as number };
     }));
     if (!approval) return { kind: 'skipped', reason: 'qubax-data-approval-or-ceiling-unavailable' };
-    clearTimeout(timer); timer = setTimeout(() => controller.abort(), Math.max(1, Math.min(60_000, approval.expiresAtMs - Date.now())));
     const attemptController = new AbortController();
-    const attemptTimer = setTimeout(() => attemptController.abort(), Math.max(1, Math.min(60_000, approval.expiresAtMs - Date.now())));
+    let attemptTimer = setTimeout(() => attemptController.abort(), Math.max(1, Math.min(QUBAX_FIRST_BYTE_MS, approval.expiresAtMs - Date.now())));
+    const extendAfterFirstByte = () => {
+      clearTimeout(attemptTimer);
+      attemptTimer = setTimeout(() => attemptController.abort(), Math.max(1, Math.min(QUBAX_TRY_MS, attemptStarted + QUBAX_TRY_MS - Date.now(), approval.expiresAtMs - Date.now())));
+    };
     const attemptSignal = AbortSignal.any([options.signal, attemptController.signal]);
     signal.throwIfAborted();
     try {
@@ -163,7 +174,7 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     if (market) {
       const adminPin = !!options.adminFallbackTries?.some(row => row.modelId === market.modelId);
       if (!adminPin) {
-      const again = await readQubaxMarketPlan(options.db, automatic!, Date.now());
+      const again = await readQubaxMarketPlan(options.db, automatic!, Date.now(), ceiling!);
       const still = again.eligible.find(row => row.modelId === market.modelId) ?? (market.backup && again.backup?.modelId === market.modelId ? again.backup : null);
       if (!still || still.inputNanoUsdPerMillion !== market.inputNanoUsdPerMillion || still.outputNanoUsdPerMillion !== market.outputNanoUsdPerMillion
         || qubaxRequestCeilingNanoUsd(env) !== ceiling || !qubaxConfig(env).enabled || qubaxConfig(env).apiKey !== cfg.apiKey) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
@@ -246,6 +257,7 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
       if (!contentType.includes(body.stream === true ? 'text/event-stream' : 'application/json')) throw new QubaxError('QUBAX_INVALID_RESPONSE');
       for (;;) {
         attemptSignal.throwIfAborted(); const item = await bounded(reader.read()); attemptSignal.throwIfAborted(); if (item.done) break;
+        if (bytes === 0 && item.value.byteLength > 0) extendAfterFirstByte();
         bytes += item.value.byteLength; if (bytes > 2 * 1024 * 1024) throw new QubaxError('QUBAX_INVALID_RESPONSE');
         pending += decoder.decode(item.value, { stream: true });
         if (body.stream === true) {
@@ -266,6 +278,7 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
       try { reader.releaseLock(); } catch { /* A cancelled pending read may still own the lock. */ }
     }
     if (!finished || !content.trim()) throw new QubaxError('QUBAX_INCOMPLETE_STREAM');
+    if (market && !qubaxReplyMatchesUser(body.messages as { role?: string; content?: string }[], content)) throw new QubaxError('QUBAX_LANGUAGE_MISMATCH');
     attemptSignal.throwIfAborted(); await bounded(Promise.resolve().then(() => options.onChunk?.(content))); attemptSignal.throwIfAborted();
     return { kind: 'response', content, model: selection.modelId, ...(usage ? { usage } : {}) };
     } catch (error) {
@@ -282,13 +295,17 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
           });
         } catch { /* Diagnostics must not replace the error. */ }
       }
-      if (!market || options.signal.aborted) throw error;
-      // A failed model is not a user charge. Release this try before another model, or before the next provider, reserves its own cap.
+      if (!market) throw error;
+      // No text was shown. Release this try, then the next model. A caller cancel still throws after the release.
       entered = false;
-      let freed = false;
-      if (hold) { try { await hold.releaseUndispatched(); freed = true; } catch { freed = false; } }
+      let freed = released;
+      if (hold) {
+        if (released) freed = true;
+        else { try { await hold.releaseUndispatched(); freed = true; } catch { freed = false; } }
+      } else freed = true;
       if (!freed) throw error;
       hold = null; released = true; content = ''; lastModel = market.modelId;
+      if (options.signal.aborted) throw error;
       if (attempt + 1 >= marketTries.length) return { kind: 'skipped', reason: 'qubax-tries-exhausted' };
       released = false;
     } finally { clearTimeout(attemptTimer); attemptController.abort(); }

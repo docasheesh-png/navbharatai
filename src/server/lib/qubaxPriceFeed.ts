@@ -9,11 +9,14 @@ export const QUBAX_PRICE_FEED_MAX_BYTES = 2_000_000;
 export const QUBAX_PRICE_FEED_MAX_SNAPSHOT_BYTES = 750_000;
 export const QUBAX_PRICE_SOURCES = Object.freeze({
   qubax: 'https://api.qubax.ai/v1/market/models',
+});
+/** Kept only so an old page can still be inspected. Collection never fetches these, so a stale page cannot block a Qubax publish. */
+const DEMOTED_PRICE_PAGES = Object.freeze({
   openai: 'https://developers.openai.com/api/docs/pricing.md',
   zai: 'https://docs.z.ai/guides/overview/pricing.md',
 });
-export type QubaxPriceSource = keyof typeof QUBAX_PRICE_SOURCES;
-const SOURCE_IDS = Object.keys(QUBAX_PRICE_SOURCES) as QubaxPriceSource[];
+export type QubaxPriceSource = keyof typeof QUBAX_PRICE_SOURCES | keyof typeof DEMOTED_PRICE_PAGES;
+const SOURCE_IDS = Object.keys(QUBAX_PRICE_SOURCES) as Array<keyof typeof QUBAX_PRICE_SOURCES>;
 const KIND = 'qubax-public-price-observations-v1' as const;
 const PARSER = 'qubax-public-price-parser-v1';
 const MAX_ROWS = 2_000;
@@ -38,6 +41,9 @@ export interface QubaxObservedPrice {
   cacheWrite30mNanoUsd: number | null;
   cacheWrite12hNanoUsd: number | null;
   cacheStorage: 'unknown' | 'limited-time-free';
+  /** Hundredths of a percent from Qubax discount_pct. 9000 means 90.00%. Null means the field was absent or unreadable. */
+  discountHundredths: number | null;
+  requests24h: number | null;
   /** Null in this observation contract ALWAYS means unknown, never zero/unavailable. */
   revision: null;
   tokenizer: null;
@@ -72,7 +78,7 @@ export interface QubaxPriceSnapshot {
 const emptyPrice = (label: string): QubaxObservedPrice => ({ sourceModelLabel: label, modality: 'text', contextTokens: null,
   contextBand: 'unspecified', serviceTier: 'unspecified', currency: 'USD', billingBasis: 'per-million-tokens',
   inputNanoUsd: null, outputNanoUsd: null, cacheReadNanoUsd: null, cacheWrite30mNanoUsd: null, cacheWrite12hNanoUsd: null,
-  cacheStorage: 'unknown', revision: null, tokenizer: null, sku: null, region: null, allFeesIncluded: null });
+  cacheStorage: 'unknown', discountHundredths: null, requests24h: null, revision: null, tokenizer: null, sku: null, region: null, allFeesIncluded: null });
 
 /** Decimal lexemes, not binary floating point. Sub-nanodollar/unsafe values fail closed. */
 export function decimalNanoUsd(value: string): number {
@@ -142,9 +148,20 @@ function marketJson(raw: string): unknown {
   });
 }
 function marketRate(v: unknown): number | null {
-  if (v === null) return null;
-  if (!(v instanceof JsonDecimal)) return fail();
-  return decimalNanoUsd(v.source);
+  if (v === null || v === undefined) return null;
+  if (!(v instanceof JsonDecimal)) return null;
+  try { return decimalNanoUsd(v.source); } catch { return null; }
+}
+function hundredths(v: unknown): number | null {
+  if (!(v instanceof JsonDecimal) || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(v.source)) return null;
+  const n = Number(v.source);
+  if (!Number.isFinite(n) || n < 0 || n > 100) return null;
+  return Math.round(n * 100);
+}
+function count24h(v: unknown): number | null {
+  if (!(v instanceof JsonDecimal) || !/^(?:0|[1-9]\d*)$/.test(v.source)) return null;
+  const n = Number(v.source);
+  return Number.isSafeInteger(n) ? n : null;
 }
 function parseMarket(raw: string): { rows: QubaxObservedPrice[]; updatedAtMs: number } {
   const body = marketJson(raw);
@@ -156,19 +173,19 @@ function parseMarket(raw: string): { rows: QubaxObservedPrice[]; updatedAtMs: nu
   if (!time(updatedAtMs) || new Date(updatedAtMs).toISOString() !== canonicalStamp) return fail();
   const ids = new Set<string>(), rows: QubaxObservedPrice[] = [];
   for (const entry of body.data) {
-    if (!record(entry) || !text(entry.id) || !/^[a-zA-Z0-9][a-zA-Z0-9_.:/-]*$/.test(entry.id) || ids.has(entry.id)) return fail();
+    // One bad row must not throw away the rest of the market.
+    if (!record(entry) || !text(entry.id) || !/^[a-zA-Z0-9][a-zA-Z0-9_.:/-]*$/.test(entry.id) || ids.has(entry.id)) continue;
     ids.add(entry.id);
     if (entry.unit !== null || !['TEXT', 'MULTIMODAL'].includes(String(entry.modality))) continue;
     let contextTokens: number | null = null;
     if (entry.context_length !== null && entry.context_length !== undefined) {
-      // The live catalog includes zero-context media/experimental rows. They have
-      // no usable text capacity; exclude them rather than inventing a capacity.
       if (entry.context_length instanceof JsonDecimal && entry.context_length.source === '0') continue;
-      if (!(entry.context_length instanceof JsonDecimal) || !/^[1-9]\d{0,8}$/.test(entry.context_length.source)) return fail();
+      if (!(entry.context_length instanceof JsonDecimal) || !/^[1-9]\d{0,8}$/.test(entry.context_length.source)) continue;
       contextTokens = Number(entry.context_length.source);
     }
     rows.push({ ...emptyPrice(entry.id), modality: entry.modality === 'TEXT' ? 'text' : 'multimodal', contextTokens,
-      inputNanoUsd: marketRate(entry.input_per_1m), outputNanoUsd: marketRate(entry.output_per_1m) });
+      inputNanoUsd: marketRate(entry.input_per_1m), outputNanoUsd: marketRate(entry.output_per_1m),
+      discountHundredths: hundredths(entry.discount_pct), requests24h: count24h(entry.requests_24h) });
   }
   if (!rows.length) return fail();
   return { rows, updatedAtMs };
@@ -237,7 +254,7 @@ function parseZai(raw: string): QubaxObservedPrice[] {
 }
 
 export function normalizeQubaxPriceSource(source: QubaxPriceSource, raw: string, headers: Headers, startedAtMs: number, observedAtMs: number): QubaxPriceSourceSnapshot {
-  if (!SOURCE_IDS.includes(source) || !time(startedAtMs) || !time(observedAtMs) || observedAtMs < startedAtMs || Buffer.byteLength(raw) > QUBAX_PRICE_FEED_MAX_BYTES) return fail();
+  if ((source !== 'qubax' && source !== 'openai' && source !== 'zai') || !time(startedAtMs) || !time(observedAtMs) || observedAtMs < startedAtMs || Buffer.byteLength(raw) > QUBAX_PRICE_FEED_MAX_BYTES) return fail();
   const httpDateMs = Date.parse(headers.get('date') ?? '');
   const age = headers.get('age');
   const httpAgeSeconds = age === null ? null : /^\d{1,9}$/.test(age) ? Number(age) : NaN;
@@ -247,10 +264,13 @@ export function normalizeQubaxPriceSource(source: QubaxPriceSource, raw: string,
   const rows = market?.rows ?? (source === 'openai' ? parseOpenai(raw) : parseZai(raw));
   const sourceUpdatedAtMs = market?.updatedAtMs ?? null;
   if (sourceUpdatedAtMs !== null && sourceUpdatedAtMs > observedAtMs) return fail();
-  const expiresAtMs = Math.min(startedAtMs, httpDateMs, observedAtMs - (httpAgeSeconds ?? 0) * 1_000, sourceUpdatedAtMs ?? startedAtMs) + QUBAX_PRICE_FEED_TTL_MS;
+  // A successful Qubax market fetch is fresh for five minutes. A CDN Age on some other host must not pre-expire it.
+  const expiresAtMs = source === 'qubax'
+    ? observedAtMs + QUBAX_PRICE_FEED_TTL_MS
+    : Math.min(startedAtMs, httpDateMs, observedAtMs - (httpAgeSeconds ?? 0) * 1_000, sourceUpdatedAtMs ?? startedAtMs) + QUBAX_PRICE_FEED_TTL_MS;
   const keys = rows.map(r => `${r.sourceModelLabel}\0${r.contextBand}\0${r.serviceTier}`);
   if (expiresAtMs <= observedAtMs || !rows.length || rows.length > MAX_ROWS || new Set(keys).size !== keys.length) return fail();
-  return { source, url: QUBAX_PRICE_SOURCES[source], parser: PARSER, bodySha256: sha(raw), startedAtMs, observedAtMs,
+  return { source, url: source === 'qubax' ? QUBAX_PRICE_SOURCES.qubax : DEMOTED_PRICE_PAGES[source], parser: PARSER, bodySha256: sha(raw), startedAtMs, observedAtMs,
     httpDateMs, httpAgeSeconds, sourceUpdatedAtMs, expiresAtMs,
     coverage: source === 'qubax' ? 'market-text-token-rows' : source === 'openai' ? 'flagship-standard-only' : 'latest-and-current-text-only', rows };
 }
@@ -269,7 +289,7 @@ function track<T>(slot: CollectionSlot, work: Promise<T>): Promise<T> {
 function cleanup(slot: CollectionSlot, action: () => Promise<void>): void {
   try { void track(slot, action()).catch(() => {}); } catch { /* Synchronous cleanup failure has settled. */ }
 }
-async function fetchSource(source: QubaxPriceSource, transport: typeof fetch, clock: () => number, slot: CollectionSlot): Promise<QubaxPriceSourceSnapshot> {
+async function fetchSource(source: keyof typeof QUBAX_PRICE_SOURCES, transport: typeof fetch, clock: () => number, slot: CollectionSlot): Promise<QubaxPriceSourceSnapshot> {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), QUBAX_PRICE_FEED_FETCH_MS);
   const signal = controller.signal, startedAtMs = clock();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -310,7 +330,7 @@ async function fetchSource(source: QubaxPriceSource, transport: typeof fetch, cl
   }
 }
 
-/** Exactly three independent GETs; no retries, dynamic URLs, or partial publication. */
+/** One Qubax market GET. Official price pages are not fetched, so a stale page cannot block publication. */
 export async function collectQubaxPrices(transport: typeof fetch = fetch, clock: () => number = Date.now): Promise<QubaxPriceSnapshot> {
   // Deadlines return promptly, but noncooperative fetch/read/cleanup retains this one
   // process-wide slot. A later scheduler tick must not accumulate detached work.
@@ -336,7 +356,7 @@ export function validQubaxPriceSnapshot(value: unknown, now: number): value is Q
     || typeof value.version !== 'string' || !/^[a-f0-9]{64}$/.test(value.version)
     || !time(value.startedAtMs) || !time(value.observedAtMs) || !time(value.expiresAtMs)
     || value.startedAtMs > value.observedAtMs || value.observedAtMs > now || value.expiresAtMs <= now
-    || value.expiresAtMs > value.startedAtMs + QUBAX_PRICE_FEED_TTL_MS || !Array.isArray(value.sources) || value.sources.length !== 3) return false;
+    || value.expiresAtMs > value.startedAtMs + QUBAX_PRICE_FEED_TTL_MS || !Array.isArray(value.sources) || value.sources.length !== SOURCE_IDS.length) return false;
   for (const [i, s] of value.sources.entries()) {
     if (!record(s) || s.source !== SOURCE_IDS[i] || s.url !== QUBAX_PRICE_SOURCES[SOURCE_IDS[i]] || s.parser !== PARSER
       || typeof s.bodySha256 !== 'string' || !/^[a-f0-9]{64}$/.test(s.bodySha256)
@@ -345,7 +365,9 @@ export function validQubaxPriceSnapshot(value: unknown, now: number): value is Q
       || s.httpAgeSeconds !== null && !time(s.httpAgeSeconds) || s.sourceUpdatedAtMs !== null && (!time(s.sourceUpdatedAtMs) || s.sourceUpdatedAtMs > s.observedAtMs)
       || s.source === 'qubax' && s.sourceUpdatedAtMs === null || s.source !== 'qubax' && s.sourceUpdatedAtMs !== null
       || s.expiresAtMs <= now || value.expiresAtMs > s.expiresAtMs
-      || s.expiresAtMs > Math.min(s.startedAtMs, s.httpDateMs, s.observedAtMs - Number(s.httpAgeSeconds ?? 0) * 1_000, Number(s.sourceUpdatedAtMs ?? s.startedAtMs)) + QUBAX_PRICE_FEED_TTL_MS
+      || (s.source === 'qubax'
+        ? s.expiresAtMs > s.observedAtMs + QUBAX_PRICE_FEED_TTL_MS
+        : s.expiresAtMs > Math.min(s.startedAtMs, s.httpDateMs, s.observedAtMs - Number(s.httpAgeSeconds ?? 0) * 1_000, Number(s.sourceUpdatedAtMs ?? s.startedAtMs)) + QUBAX_PRICE_FEED_TTL_MS)
       || !Array.isArray(s.rows) || !s.rows.length || s.rows.length > MAX_ROWS) return false;
     const identities = new Set<string>();
     for (const r of s.rows) {
@@ -353,6 +375,8 @@ export function validQubaxPriceSnapshot(value: unknown, now: number): value is Q
         || !['short', 'long', 'unspecified'].includes(String(r.contextBand)) || !['standard', 'unspecified'].includes(String(r.serviceTier))
         || r.currency !== 'USD' || r.billingBasis !== 'per-million-tokens' || !['unknown', 'limited-time-free'].includes(String(r.cacheStorage))
         || r.contextTokens !== null && (!time(r.contextTokens) || r.contextTokens === 0)
+        || r.discountHundredths !== null && r.discountHundredths !== undefined && (!time(r.discountHundredths) || r.discountHundredths > 10_000)
+        || r.requests24h !== null && r.requests24h !== undefined && !time(r.requests24h)
         || !['revision', 'tokenizer', 'sku', 'region', 'allFeesIncluded'].every(k => r[k] === null)
         || !['inputNanoUsd', 'outputNanoUsd', 'cacheReadNanoUsd', 'cacheWrite30mNanoUsd', 'cacheWrite12hNanoUsd'].every(k => r[k] === null || time(r[k]))) return false;
       const identity = `${r.sourceModelLabel}\0${r.contextBand}\0${r.serviceTier}`;

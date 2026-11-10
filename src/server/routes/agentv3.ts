@@ -3788,7 +3788,11 @@ export function isReportAdmin(email: GrantEmail | null | undefined): boolean {
  *  raw provider text — an end user can't act on an infra/billing issue and must not see one. The real
  *  reason is recorded in the build report (buildDiag detail) for the admin. Pure + exported. */
 export function sandboxUnavailableNotice(): string {
-  return "Note: the build engine is temporarily unavailable, so I can't create files right now. I can still chat and plan with you — please try building again in a little while.";
+  // BR1961 (report cd970693): setup failed (E2B cap of 20 concurrent sandboxes), this line told the
+  // user they could not create files and should "try building again", and the build then continued for
+  // 20 minutes and delivered an app. A second Start from that goodbye consumes another sandbox slot
+  // and makes the cap worse. The tool-capable builder keeps trying (FAST_LANE_SKIPPED_SANDBOX); say so.
+  return "Note: the build engine is temporarily unavailable — I'm still trying to start it and will write your files as soon as I can. You don't need to start the build again.";
 }
 
 /**

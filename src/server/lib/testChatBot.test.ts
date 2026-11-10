@@ -2,10 +2,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const fake = vi.hoisted(() => ({ run: vi.fn(), config: vi.fn(), db: vi.fn(), maintenance: vi.fn(), policy: vi.fn(),
   budgetConfig: vi.fn(), reserve: vi.fn(), settle: vi.fn(), month: vi.fn(), settleMonth: vi.fn(),
   compatCtor: vi.fn(), compatTurn: vi.fn(), officialOpenAi: vi.fn(), officialAnthropic: vi.fn(),
+  refresh: vi.fn(), mitrifyClient: vi.fn(), mitrifyChat: vi.fn(), registryRung: vi.fn(), strictFree: vi.fn(),
   marketPlan: undefined as undefined | ((...args: unknown[]) => unknown),
   feedSummary: undefined as undefined | ((...args: unknown[]) => unknown) }));
 vi.mock('./qubax', () => ({ runApprovedQubaxChat: fake.run, qubaxConfig: fake.config,
   QubaxError: class extends Error { constructor(readonly code: string, readonly status = 0) { super(code); } } }));
+vi.mock('./qubaxPriceFeedRuntime', () => ({ refreshQubaxPriceFeed: (...args: unknown[]) => fake.refresh(...args) }));
+vi.mock('./mitrify', async importOriginal => {
+  const actual = await importOriginal<typeof import('./mitrify')>();
+  return { ...actual, createMitrifyClient: (...args: unknown[]) => fake.mitrifyClient(...args) };
+});
+vi.mock('../AI/FreeChain/providers/openRouterRegistryRung', () => ({
+  runRegistryRung: (...args: unknown[]) => fake.registryRung(...args),
+}));
+vi.mock('../AI/LiveRegistry/runtime', () => ({
+  strictFreeText: (...args: unknown[]) => fake.strictFree(...args),
+}));
 vi.mock('./qubaxMarket', async importOriginal => {
   const actual = await importOriginal<typeof import('./qubaxMarket')>();
   return {
@@ -48,8 +60,10 @@ vi.mock('../AI/FreeChain/providers/openAiCompatProvider', async importOriginal =
 import { loadTestChatStatus, runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
 import { TEST_CHAT_PROVIDER_IDS, type TestChatAction } from '../../lib/testChatBot';
 import { QubaxError } from './qubax';
+import { MitrifyError } from './mitrify';
 import { OfficialTestChatError } from './testChatBotOfficial';
 import { FreeChainProviderError } from '../AI/FreeChain/providers/openAiCompatProvider';
+import { FreeRoutingError } from '../AI/LiveRegistry/dispatcher';
 const action: TestChatAction = { provider: 'qubax', requestId: '1d2efc71-6d00-4514-83c0-e31461ea9f35', messages: [{ role: 'user', content: 'Synthetic test question' }], confirmGatewayDisclosure: true };
 const reply = { kind: 'response', content: 'Synthetic reply', model: 'qubax-reported-model', usage: { inputTokens: 10, outputTokens: 4 } };
 const groqRung = {
@@ -68,6 +82,14 @@ beforeEach(() => {
   fake.budgetConfig.mockReturnValue(budget());
   fake.maintenance.mockResolvedValue(undefined); fake.month.mockResolvedValue('2026-11');
   fake.reserve.mockResolvedValue({ id: 'hold', mayDispatch: true }); fake.run.mockResolvedValue(reply);
+  fake.refresh.mockResolvedValue({ status: 'unavailable' });
+  fake.mitrifyClient.mockReturnValue({ chat: fake.mitrifyChat });
+  fake.mitrifyChat.mockResolvedValue({
+    status: 200, headers: {},
+    data: { model: 'mitrify/auto-cheap', choices: [{ message: { content: 'Hello from Mitrify' } }], usage: { prompt_tokens: 2, completion_tokens: 3 } },
+  });
+  fake.registryRung.mockResolvedValue({ content: 'Hello from OpenRouter', model: 'openrouter/free', usage: { inputTokens: 2, outputTokens: 3 } });
+  fake.strictFree.mockResolvedValue({ content: 'Hello from registry', model: 'registry/free', usage: { inputTokens: 2, outputTokens: 3 } });
 });
 describe('test chat provider isolation and admission', () => {
   it('status only reveals server availability, never secrets or a ready/approved claim', () => {
@@ -288,4 +310,119 @@ describe('test chat provider isolation and admission', () => {
     });
     expect(status.providers.filter(item => item.id !== 'qubax').every(item => item.selection === undefined)).toBe(true);
   });
+
+  it('enables Mitrify from its key alone and dispatches through createMitrifyClient', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    vi.stubEnv('MITRIFY_CHAIN_ENABLED', '0');
+    const row = testChatStatus().providers.find(item => item.id === 'mitrify');
+    expect(row).toMatchObject({ configured: true, enabled: true, approvalRequired: false, model: 'mitrify/auto-cheap' });
+    expect(row?.unavailableReason).toBeUndefined();
+    const result = await runTestChat({ ...action, provider: 'mitrify' }, 'operator@example.invalid', new AbortController().signal);
+    expect(result).toMatchObject({ provider: 'mitrify', content: 'Hello from Mitrify', model: 'mitrify/auto-cheap', noFallback: true });
+    expect(fake.mitrifyClient).toHaveBeenCalledOnce();
+    expect(fake.mitrifyChat).toHaveBeenCalledOnce();
+    expect(fake.run).not.toHaveBeenCalled();
+    expect(fake.reserve).toHaveBeenCalledOnce();
+    expect(process.env.MITRIFY_CHAIN_ENABLED).toBe('0');
+  });
+  it('releases an unused Mitrify hold when configuration fails before dispatch', async () => {
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-mitrify-key-value');
+    fake.mitrifyChat.mockRejectedValue(new MitrifyError('MITRIFY_CONFIGURATION'));
+    const error = await runTestChat({ ...action, provider: 'mitrify' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('unconfirmed');
+    expect(error.diagnostic?.providerCode).toBe('MITRIFY_CONFIGURATION');
+    expect(fake.reserve).toHaveBeenCalledOnce();
+    expect(fake.settle).toHaveBeenCalledWith({ id: 'hold', mayDispatch: true }, 0);
+    expect(fake.settleMonth).toHaveBeenCalledWith({ marker: 'db' }, '2026-11', expect.any(Number), 0);
+  });
+  it('enables OpenRouter from its key and uses shared strictFreeText when no allow-list is set', async () => {
+    const openrouterRung = {
+      id: 'openrouter', configured: true, key: 'synthetic-or-key', keyEnv: 'OPENROUTER_API_KEY',
+      model: '', baseURL: 'https://openrouter.ai/api/v1', streamUsage: false, priceIn: 0, priceOut: 0,
+    };
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [openrouterRung], openRouterModels: [] }));
+    const row = testChatStatus().providers.find(item => item.id === 'openrouter-verified-free');
+    expect(row).toMatchObject({ configured: true, enabled: true });
+    expect(row?.unavailableReason).toBeUndefined();
+    const result = await runTestChat({ ...action, provider: 'openrouter-verified-free' }, 'actor', new AbortController().signal);
+    expect(result.content).toBe('Hello from registry');
+    expect(fake.strictFree).toHaveBeenCalledOnce();
+    expect(fake.strictFree).toHaveBeenCalledWith(expect.objectContaining({ maxAttempts: 1, prompt: expect.stringContaining('Synthetic test question') }));
+    expect(fake.registryRung).not.toHaveBeenCalled();
+    expect(fake.run).not.toHaveBeenCalled();
+  });
+  it('reuses runRegistryRung when OpenRouter has an allow-list or an admin-typed model', async () => {
+    const openrouterRung = {
+      id: 'openrouter', configured: true, key: 'synthetic-or-key', keyEnv: 'OPENROUTER_API_KEY',
+      model: '', baseURL: 'https://openrouter.ai/api/v1', streamUsage: false, priceIn: 0, priceOut: 0,
+    };
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [openrouterRung], openRouterModels: ['openai/gpt-oss-20b:free'] }));
+    await runTestChat({ ...action, provider: 'openrouter-verified-free' }, 'actor', new AbortController().signal);
+    expect(fake.registryRung).toHaveBeenCalledWith(expect.objectContaining({ maxOutputTokens: 1024 }), ['openai/gpt-oss-20b:free'], 'openai/gpt-oss-20b:free');
+    expect(fake.strictFree).not.toHaveBeenCalled();
+    fake.registryRung.mockClear();
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [openrouterRung], openRouterModels: [] }));
+    await runTestChat({ ...action, provider: 'openrouter-verified-free', model: 'meta-llama/llama-3.3-70b-instruct:free' }, 'actor', new AbortController().signal);
+    expect(fake.registryRung).toHaveBeenCalledWith(expect.anything(), ['meta-llama/llama-3.3-70b-instruct:free'], 'meta-llama/llama-3.3-70b-instruct:free');
+  });
+  it('maps a shared OpenRouter NO_VERIFIED_FREE_MODEL miss to no-model', async () => {
+    const openrouterRung = {
+      id: 'openrouter', configured: true, key: 'synthetic-or-key', keyEnv: 'OPENROUTER_API_KEY',
+      model: '', baseURL: 'https://openrouter.ai/api/v1', streamUsage: false, priceIn: 0, priceOut: 0,
+    };
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [openrouterRung], openRouterModels: [] }));
+    fake.strictFree.mockRejectedValue(new FreeRoutingError('NO_VERIFIED_FREE_MODEL'));
+    await expect(runTestChat({ ...action, provider: 'openrouter-verified-free' }, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'no-model' });
+    expect(fake.strictFree).toHaveBeenCalledOnce();
+  });
+  it('refreshes an empty Qubax plan through the shared collector then dispatches the shared ranker', async () => {
+    let reads = 0;
+    fake.marketPlan = vi.fn().mockImplementation(async () => {
+      reads += 1;
+      return reads === 1 ? { eligible: [], backup: null } : { eligible: [{ modelId: 'shared-cheap-model' }], backup: null };
+    });
+    fake.refresh.mockResolvedValue({ status: 'synced' });
+    await runTestChat(action, 'actor', new AbortController().signal);
+    expect(fake.refresh).toHaveBeenCalledOnce();
+    expect(fake.run).toHaveBeenCalledOnce();
+    expect(fake.run.mock.calls[0]?.[0].adminFallbackTries).toBeUndefined();
+  });
+  it('passes a typed Qubax model only after the shared plan stays empty', async () => {
+    fake.marketPlan = vi.fn().mockResolvedValue({ eligible: [], backup: null });
+    fake.refresh.mockResolvedValue({ status: 'unavailable' });
+    await runTestChat({ ...action, model: 'admin-chosen-model' }, 'actor', new AbortController().signal);
+    expect(fake.refresh).toHaveBeenCalledOnce();
+    expect(fake.run).toHaveBeenCalledWith(expect.objectContaining({
+      adminFallbackTries: [expect.objectContaining({ modelId: 'admin-chosen-model', backup: true })],
+    }));
+  });
+  it('explains a Qubax no-model skip with feed counts and the last refresh status', async () => {
+    fake.marketPlan = vi.fn().mockResolvedValue({ eligible: [], backup: null });
+    fake.feedSummary = vi.fn().mockResolvedValue({
+      fresh: false, observedAtMs: null, pricedRows: 0, officialMatches: 0, discountEligible: 0, probePassing: 0,
+    });
+    fake.refresh.mockResolvedValue({ status: 'unavailable' });
+    fake.run.mockResolvedValue({ kind: 'skipped', reason: 'qubax-price-or-quality-unverified' });
+    const error = await runTestChat(action, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('no-model');
+    expect(error.diagnostic?.rawErrorBody).toContain('0 priced Qubax rows');
+    expect(error.diagnostic?.rawErrorBody).toContain('0 official name matches');
+    expect(error.diagnostic?.rawErrorBody).toContain('Last feed refresh: unavailable');
+  });
+  it.each(['disabled', 'terms-shared-access'] as const)('enables CheaperInference from its key even when user-chat mode is %s', async reason => {
+    const cheap = {
+      id: 'cheapinf', configured: true, key: 'synthetic-cheap-key', keyEnv: 'CHEAPERINFERENCE_API_KEY',
+      model: 'beam', baseURL: 'https://api.cheaperinference.com/v1', streamUsage: false, priceIn: 0, priceOut: 0, reason,
+    };
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [cheap] }));
+    fake.compatTurn.mockResolvedValue({ content: 'Hello from beam', model: 'beam' });
+    const row = testChatStatus().providers.find(item => item.id === 'cheaperinference-beam');
+    expect(row).toMatchObject({ configured: true, enabled: true, model: 'beam' });
+    expect(row?.unavailableReason).toBeUndefined();
+    const result = await runTestChat({ ...action, provider: 'cheaperinference-beam' }, 'actor', new AbortController().signal);
+    expect(result.content).toBe('Hello from beam');
+    expect(fake.compatCtor).toHaveBeenCalledWith(expect.objectContaining({ provider: 'CHEAPERINFERENCE', model: 'beam' }));
+    expect(fake.run).not.toHaveBeenCalled();
+  });
 });
+

@@ -74,6 +74,8 @@ export type QubaxChatOptions = {
   /** Admin Test Chat Bot only. User chat never passes these hooks. */
   onHttpError?: (detail: { status: number; body: string; requestId?: string }) => void;
   onAttemptError?: (detail: { model: string; status: number | null; code: string; latencyMs: number; body?: string; requestId?: string }) => void;
+  /** Admin Test Chat Bot only. Used only when the shared market plan is empty. User chat never passes this. */
+  adminFallbackTries?: QubaxMarketChoice[];
 };
 export type QubaxChatResult = { kind: 'skipped'; reason: string } | { kind: 'response'; content: string; model: string; usage?: { inputTokens: number; outputTokens: number } };
 let inflight = 0;
@@ -118,16 +120,18 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     // on every turn and try at most three eligible models before the normal chain continues.
     const override = expected ? null : qubaxModelOverride(env);
     const automatic = override && override.mode !== 'invalid' ? override : null;
-    const ceiling = expected || !automatic ? null : qubaxRequestCeilingNanoUsd(env);
+    const ceiling = expected ? null : qubaxRequestCeilingNanoUsd(env);
     const plan = !expected && automatic && ceiling
       ? await bounded(readQubaxMarketPlan(options.db, automatic, Date.now())) : null;
     const marketTries: QubaxMarketChoice[] = plan ? (plan.eligible.length ? plan.eligible.slice(0, QUBAX_TRIES_PER_TURN) : plan.backup ? [plan.backup] : []) : [];
+    if (!expected && !marketTries.length && options.adminFallbackTries?.length) marketTries.push(...options.adminFallbackTries.slice(0, QUBAX_TRIES_PER_TURN));
     if (!expected && !marketTries.length) return { kind: 'skipped', reason: 'qubax-price-or-quality-unverified' };
     let lastModel: string | null = null;
     for (let attempt = 0; attempt < (marketTries.length || 1); attempt++) {
     const market = marketTries[attempt] ?? null;
     const attemptStarted = Date.now();
     let lastHttp: { status: number; body: string; requestId?: string } | undefined;
+    if (market && (!ceiling || ceiling <= 0)) return { kind: 'skipped', reason: 'qubax-price-or-quality-unverified' };
     const selection = market ? marketSelection(market, ceiling!, Date.now()) : await bounded(getQubaxSelection(options.db, workload));
     if (!selection) return { kind: 'skipped', reason: 'qubax-price-or-quality-unverified' };
     if (expected && (selection.modelId !== expected.modelId || selection.modelRevision !== expected.modelRevision
@@ -157,18 +161,21 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     if (!hold) return { kind: 'skipped', reason: 'qubax-budget' };
     await bounded(Promise.resolve().then(() => options.revalidate?.())); attemptSignal.throwIfAborted();
     if (market) {
+      const adminPin = !!options.adminFallbackTries?.some(row => row.modelId === market.modelId);
+      if (!adminPin) {
       const again = await readQubaxMarketPlan(options.db, automatic!, Date.now());
       const still = again.eligible.find(row => row.modelId === market.modelId) ?? (market.backup && again.backup?.modelId === market.modelId ? again.backup : null);
       if (!still || still.inputNanoUsdPerMillion !== market.inputNanoUsdPerMillion || still.outputNanoUsdPerMillion !== market.outputNanoUsdPerMillion
         || qubaxRequestCeilingNanoUsd(env) !== ceiling || !qubaxConfig(env).enabled || qubaxConfig(env).apiKey !== cfg.apiKey) throw new QubaxError('QUBAX_APPROVAL_REVOKED');
-      if (attempt === 0) {
+      }
+      if (!adminPin && attempt === 0) {
         const pricedIds = new Set(plan!.eligible.map(row => row.modelId));
         const reason = qubaxSwitchReason(lastModel, market, plan!, pricedIds, pricedIds);
         if (reason !== 'unchanged') void noteQubaxModelSwitch(options.db, { atMs: Date.now(), fromModel: lastModel, toModel: market.modelId, reason,
           qubaxInputNanoUsd: market.inputNanoUsdPerMillion, qubaxOutputNanoUsd: market.outputNanoUsdPerMillion,
           officialInputNanoUsd: market.officialInputNanoUsdPerMillion, officialOutputNanoUsd: market.officialOutputNanoUsdPerMillion,
           discountBps: market.discountBps, backup: market.backup }).catch(() => {});
-      } else void noteQubaxModelSwitch(options.db, { atMs: Date.now(), fromModel: lastModel, toModel: market.modelId, reason: 'provider-failed',
+      } else if (!adminPin) void noteQubaxModelSwitch(options.db, { atMs: Date.now(), fromModel: lastModel, toModel: market.modelId, reason: 'provider-failed',
         qubaxInputNanoUsd: market.inputNanoUsdPerMillion, qubaxOutputNanoUsd: market.outputNanoUsdPerMillion,
         officialInputNanoUsd: market.officialInputNanoUsdPerMillion, officialOutputNanoUsd: market.officialOutputNanoUsdPerMillion,
         discountBps: market.discountBps, backup: market.backup }).catch(() => {});

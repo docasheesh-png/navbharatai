@@ -101204,3 +101204,10 @@ Owner t311u sequential audit, BR1966 only (boundary 1951..2105 frozen). "Pura gt
 - **F2.** Glued GTA titles `gta(?:\s*[-_]?\s*[5v])?` in APP_SCOPE, `DRAWN_IN_3D` and `realismIntent`. Opposite-class corpus of 167 prompts, built before the edit: 0 field changes (0 smaller→LARGE, 0 newly famousApp=GTA, 0 newly wants3D, 0 lite→real).
 
 Queue: this commit closes no earlier row. New rows Q-2634 (canvas-less DOM playtest) and Q-2635 (long-name "grand theft auto" still 2D/lite). Q-2633 and earlier blockers stay open. Q-2375 is not re-opened.
+
+## 2026-11-10 — BR1967 autopsy (AI anime video generator, succeeded): stays LARGE; Process-Story journey queued
+Owner t311u sequential audit, BR1967 only (boundary 1951..2105 frozen). "Upgrade my AI Anime Video Generator…" succeeded in 3.32 min as LARGE (~12 features) with a 6-step mega-roadmap, then the fast lane shipped milestone 1 as a 7-file simple success (designed: Q-975). Explorer pressed "कहानी संसाधित करें" (nothing visibly changed); RELEASE_GATE YELLOW because Process/संसाधित is not a submit word. Ledger: [autopsy](docs/build-report-autopsy-BR1967.md), [evidence](docs/build-report-autopsy-BR1967-evidence.json).
+- **F1.** Neighbour locks: this prompt stays LARGE (~12 distinct features); a video/anime generator is not `fastLaneSkipsImageApp`; "कहानी संसाधित करें" / "Process Story" / "Generate" / "Calculate" still do not match CREATE_WORDS; Save/Add still do.
+- **F2.** Not shipped. Expanding submit words, skipping the fast lane for mega-roadmap or video apps, tightening the unsized ETA band, or rewriting the simple-lane success summary each failed t311u or needs a product/copy decision.
+
+Queue: this commit closes no earlier row. New rows Q-2636 (Process-Story journey), Q-2637 (ETA under-band), Q-2638 (thin milestone summary). Q-2633/2634/2635 and earlier blockers stay open. Q-2616 is the English Generate sibling and is not rewritten.

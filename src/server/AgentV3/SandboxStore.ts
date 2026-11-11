@@ -466,14 +466,11 @@ export class SandboxStore {
    * caller throttles (shouldTouchDurable), so this is roughly one write per build per few minutes.
    */
   async touch(workspaceId: string, sandboxId: string): Promise<void> {
-    const db = this.getDb();
-    if (!db || !workspaceId || !sandboxId) return;
-    try {
-      await db.collection('agentv3_sandboxes').doc(workspaceId).set(
-        { workspaceId, sandboxId, updatedAt: Date.now() },
-        { merge: true },
-      );
-    } catch { /* best-effort — never block a build */ }
+    // A touch is an activity refresh, NOT an allocation write. A stale process may still
+    // hold an old sandboxId after another instance has replaced the workspace allocation.
+    // A merge-set here would overwrite that newer identity (or recreate a record after clear()).
+    // Only advance updatedAt when the durable record still names this exact sandbox.
+    await this.touchIfCurrent(workspaceId, sandboxId);
   }
 
   /** A heartbeat may refresh an existing allocation, never resurrect or replace its identity. */

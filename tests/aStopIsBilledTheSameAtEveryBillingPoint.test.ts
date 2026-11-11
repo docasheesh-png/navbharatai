@@ -30,7 +30,7 @@ import { decideMarkupOnProof, markupWaiverSettledLine } from '../src/server/Agen
 import { buildBillingLabel } from '../src/server/AgentV3/buildBillingLabel';
 import { builderWrittenCount } from '../src/server/AgentV3/gameKitSeed';
 import {
-  maybeApplySurplusStopTokenFloor,
+  decideSurplusStopTokenFloor,
   surplusTokenUsageFromLedger,
   surplusStopTokenFloorAdminMessage,
   SURPLUS_STOP_COST_ESTIMATED,
@@ -319,7 +319,7 @@ function compileEnrichment(source: string) {
       powerLevelReqEffective, userId, email, actuator, workspaceId, barrenPhases, usdInrRate,
       isAgentV3FreeUser, freeTierBuildActive, billingAppliesTo, onlyOpus, noClaudeBuild, absorbedWorkDetail,
       Date, buildResultRef, userCostStore, debitWalletForBuild, getDb, coordination,
-      maybeApplySurplusStopTokenFloor, surplusTokenUsageFromLedger, surplusStopTokenFloorAdminMessage,
+      decideSurplusStopTokenFloor, surplusTokenUsageFromLedger, surplusStopTokenFloorAdminMessage,
       SURPLUS_STOP_COST_ESTIMATED, builderWrittenCount, kitSeededFiles } = ports;
     let watchdogBilledUsd = 0;
     let watchdogLivePreview = { seconds: 0, usd: 0, measuredSeconds: 0 };
@@ -374,7 +374,8 @@ async function watchdogWithWaiver(c: WaiverCase, run = runEnrichment) {
       setBilling: (value: Record<string, unknown>) => { order.push('billing'); snapshots.push(value); },
     },
     billingCtx: { providerLedger: ledger, buildStartedAt: startedAt, preseededGolden: files(c.preseeded ?? 0),
-      expectsArtifacts: c.expectsArtifacts !== false, appFirstRenderedAt: renderedAt(c), cacheReadInputTokens: 12 },
+      expectsArtifacts: c.expectsArtifacts !== false, appFirstRenderedAt: renderedAt(c), cacheReadInputTokens: 12,
+      kitSeededFiles: new Map(), previewVerifiedFailed: false },
     buildObs: { previewRendered: c.rendered === true }, buildUsage: { total: () => usage },
     writtenFiles: files(c.written ?? 9), abort: signal(c.cause === undefined ? 'user-stop' : c.cause),
     stylePassWindow: styleWindow(c), isEditMode: c.edit === true, ok: c.ok !== false,
@@ -383,7 +384,7 @@ async function watchdogWithWaiver(c: WaiverCase, run = runEnrichment) {
     barrenPhases: [], usdInrRate: () => 100, isAgentV3FreeUser: () => false, freeTierBuildActive: false,
     billingAppliesTo: () => c.billingActive !== false, onlyOpus: false, noClaudeBuild: false,
     absorbedWorkDetail: () => 'synthetic', Date: { now: () => STOP_AT }, buildResultRef: { ok: c.ok !== false },
-    maybeApplySurplusStopTokenFloor, surplusTokenUsageFromLedger, surplusStopTokenFloorAdminMessage,
+    decideSurplusStopTokenFloor, surplusTokenUsageFromLedger, surplusStopTokenFloorAdminMessage,
     SURPLUS_STOP_COST_ESTIMATED, builderWrittenCount, kitSeededFiles: new Map(),
     userCostStore: { record: async (...args: unknown[]) => { costRecords.push(args); } },
     debitWalletForBuild: async (...args: unknown[]) => { order.push('debit'); debits.push(args); return { ok: true, tokensDebited: 1, tokenBalance: 2 }; },

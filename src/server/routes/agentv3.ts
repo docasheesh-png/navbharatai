@@ -16,7 +16,7 @@ import { createSurplusScopeAsk, SURPLUS_SCOPE_TIMEOUT_MS } from '../AI/SurplusRe
 import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibility';
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
 import {
-  maybeApplySurplusStopTokenFloor,
+  decideSurplusStopTokenFloor,
   surplusTokenUsageFromLedger,
   surplusStopTokenFloorAdminMessage,
   SURPLUS_STOP_COST_ESTIMATED,
@@ -13146,7 +13146,7 @@ async function noteBuildOutcome(
     // `expectsArtifacts` rides here for the same reason the ledger does: it is computed deep inside
     // the build block, and the deadline finalizer — defined above it, called after it — needs the
     // same fact the settle path uses, or the two would price one build by different rules.
-    const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number; cacheReadInputTokens?: number; expectsArtifacts?: boolean; preseededGolden?: Map<string, string>; appFirstRenderedAt?: number | null } = {};
+    const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number; cacheReadInputTokens?: number; expectsArtifacts?: boolean; preseededGolden?: Map<string, string>; appFirstRenderedAt?: number | null; kitSeededFiles?: Map<string, string>; previewVerifiedFailed?: boolean } = {};
     /**
      * Phases this build has POSITIVELY ESTABLISHED delivered nothing a caller could use, so their
      * spend is ours and not the user's (see `billingPhase.ts`).
@@ -13323,18 +13323,26 @@ async function noteBuildOutcome(
           // Kill switch: AGENTV3_BILL_SURPLUS_STOP_TOKEN_FLOOR=off (unset/empty means ON).
           // Mutates the decided real-cost figure so the extracted Stop/discount/setBilling slices
           // (which still read `decided.realCostUsd`) cannot drift from this path.
-          const watchdogSurplusStopFloor = maybeApplySurplusStopTokenFloor({
+          // ONE helper with the normal settle (`decideSurplusStopTokenFloor`): same own-file count
+          // (builderWrittenCount minus unchanged starter) and the same already-zeroed facts (empty
+          // build + unrendered / server-down preview). Own-file / zeroing math lives in the helper,
+          // not as extra `preseededUnchangedCount(` calls in this file, so the route-wide pin stays
+          // honest and this path cannot invent a charge the settle would have zeroed.
+          const watchdogSurplusStopFloor = decideSurplusStopTokenFloor({
             powerLevel: String(powerLevelReqEffective ?? ''),
             surplusUnsettledAbsorbed: decided.surplusUnsettledAbsorbed === true,
             abortCause: abortCauseOf(abort.signal),
-            // The finalizer is outside the `kitSeededFiles` block, and an extra
-            // `preseededUnchangedCount(` here would break the route-wide call-count pin. Seed-only
-            // writes still go to ₹0 in settleStopOrFailure on this path.
-            builderWroteCount: writtenFiles.size,
+            writtenFiles,
+            kitSeededFiles: billingCtx.kitSeededFiles,
+            preseededGolden: billingCtx.preseededGolden,
             previewProven: wdPreviewProven,
             freeListed: isAgentV3FreeUser(userId, email),
             usage: surplusTokenUsageFromLedger(billingCtx.providerLedger.entries()),
             editingExistingApp: isEditMode,
+            expectsArtifacts: billingCtx.expectsArtifacts === true,
+            previewVerifiedFailed: billingCtx.previewVerifiedFailed === true,
+            emptyBuildOk: ok,
+            stoppedByUser: abortCauseOf(abort.signal) === 'user-stop',
           });
           if (watchdogSurplusStopFloor) {
             watchdogBilledUsd += watchdogSurplusStopFloor.usd;
@@ -18800,6 +18808,7 @@ async function noteBuildOutcome(
       let gameContract: GameScopeContract | null = null;
       /** Path → the exact content the game-kit seed wrote (the kit, its layers, package.json). See `builderWroteCount`. */
       const kitSeededFiles = new Map<string, string>();
+      billingCtx.kitSeededFiles = kitSeededFiles;
       /**
        * HOW MANY FILES THE BUILDER PRODUCED — `writtenFiles` minus every game-kit file it never touched.
        *
@@ -22322,6 +22331,7 @@ async function noteBuildOutcome(
         } catch { /* diagnostics are best-effort — never blocks a build */ }
       }
       let previewVerifiedFailed = false;
+      billingCtx.previewVerifiedFailed = false;
       // GT-11. Billing still reads previewVerifiedFailed. The gate does not:
       // a server that will not stay up is not "the app did not render".
       let previewRenderFailed = false;
@@ -23541,7 +23551,7 @@ async function noteBuildOutcome(
                 detail: devServerLastWordsDetail(lastWords),
                 autoResolved: false,
               });
-              previewVerifiedFailed = true;
+              previewVerifiedFailed = true; billingCtx.previewVerifiedFailed = true;
               previewServerDown = true;
               break;
             }
@@ -23585,7 +23595,7 @@ async function noteBuildOutcome(
           buildDiag.record({ phase: 'preview', severity: 'warning', code: 'PREVIEW_NOT_RENDERED', message: problems.slice(0, 4).join(' | ').slice(0, 500), autoResolved: false });
           // Out of repair budget OR the wall-clock cap is near → stop and report honestly.
           if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
-            previewVerifiedFailed = true; // the eyes saw it NOT render, and the heal budget is spent — billing zeroes below
+            previewVerifiedFailed = true; billingCtx.previewVerifiedFailed = true; // the eyes saw it NOT render, and the heal budget is spent — billing zeroes below
             previewRenderFailed = true;
             // RUNTIME HONESTY (deep-test 2026-07-18 — "onLinkClick is not a function"): the live preview
             // genuinely did NOT render / crashed at RUNTIME and the heal budget is spent. Record it as an
@@ -27419,18 +27429,24 @@ async function noteBuildOutcome(
       // still has recorded tokens. The stop rules can only REDUCE a bill, so they cannot invent a
       // charge from $0. This narrow floor estimates the Surplus share at the cheapest published
       // real rate, at cost, no markup, no sandbox fee. Kill switch: AGENTV3_BILL_SURPLUS_STOP_TOKEN_FLOOR=off
-      // (unset/empty means ON). Applied after empty/unrendered zeroing and before the stop rules, at
-      // BOTH billing points, so they cannot diverge.
-      const surplusStopFloor = maybeApplySurplusStopTokenFloor({
+      // (unset/empty means ON). Both billing points call `decideSurplusStopTokenFloor` with the same
+      // already-zeroed facts (empty build + unrendered / server-down preview) and the same own-file
+      // count, so a finalizer that settles first cannot invent a charge the normal settle would zero.
+      const surplusStopFloor = decideSurplusStopTokenFloor({
         powerLevel: String(powerLevelReqEffective ?? ''),
         surplusUnsettledAbsorbed: surplusUnsettledAbsorbed === true,
         abortCause: abortCauseOf(abort.signal),
-        builderWroteCount: builderWroteCount(),
+        writtenFiles,
+        kitSeededFiles,
+        preseededGolden,
         previewProven: appSeenRunningForBill,
         freeListed: isAgentV3FreeUser(userId, email),
         usage: surplusTokenUsageFromLedger(providerLedger.entries()),
-        alreadyZeroedReason: zeroBillReason,
         editingExistingApp: isEditMode,
+        expectsArtifacts,
+        previewVerifiedFailed,
+        emptyBuildOk: result.ok === true,
+        stoppedByUser: stoppedByUser(buildDiag.report().issues),
       });
       if (surplusStopFloor) {
         effectiveBilledUsd += surplusStopFloor.usd;

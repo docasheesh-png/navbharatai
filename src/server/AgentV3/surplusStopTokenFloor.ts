@@ -24,6 +24,9 @@ import { SURPLUS_OBSERVATION_CANDIDATES } from '../AI/SurplusRegistry/config';
 import { envFlag, parseEnvFlag } from '../lib/envFlag';
 import { realRateCard } from './providerRates';
 import type { BilledUsage, TokenRate } from './pricing';
+import { builderWrittenCount } from './gameKitSeed';
+import { preseededUnchangedCount } from './cancelledBuildBilling';
+import { zeroBillReasonFor } from './zeroBillReason';
 
 export const SURPLUS_STOP_TOKEN_FLOOR_FLAG = 'AGENTV3_BILL_SURPLUS_STOP_TOKEN_FLOOR';
 
@@ -219,3 +222,92 @@ export function surplusStopTokenFloorAdminMessage(d: SurplusStopTokenFloorDecisi
 }
 
 export const SURPLUS_STOP_COST_ESTIMATED = 'SURPLUS_STOP_COST_ESTIMATED';
+
+/** Same wording the normal settle writes when `zeroBillForUnrenderedPreview` fires (including a dead preview server). */
+export const UNRENDERED_PREVIEW_ZERO_REASON =
+  'preview did not render on verification — "preview is EARNED", so free';
+
+/**
+ * Files the user is holding that are the builder's work, not our untouched starter and not an
+ * unchanged game-kit seed. Seed-only and kit-only are 0, so neither settle point can invent a
+ * floor estimate (or log SURPLUS_STOP_COST_ESTIMATED) for them.
+ */
+export function surplusStopOwnFileCount(
+  written: ReadonlyMap<string, string>,
+  kitSeeded: ReadonlyMap<string, string> | null | undefined,
+  preseededGolden: Iterable<[string, string]> | null | undefined,
+): number {
+  const builderWrote = builderWrittenCount(written, kitSeeded ?? new Map());
+  return Math.max(0, builderWrote - preseededUnchangedCount(preseededGolden, written));
+}
+
+/** Empty-build and unrendered / server-down preview reasons, matching the normal settle. */
+export function surplusStopAlreadyZeroedReason(input: {
+  expectsArtifacts: boolean;
+  /** `builderWrittenCount` (kit-unchanged excluded), NOT the seed-only subtraction. */
+  builderWroteCount: number;
+  previewVerifiedFailed: boolean;
+  emptyBuildOk?: boolean;
+  stoppedByUser?: boolean;
+}): string | undefined {
+  if (input.expectsArtifacts && input.builderWroteCount === 0) {
+    return zeroBillReasonFor({
+      ok: input.emptyBuildOk === true,
+      stoppedByUser: input.stoppedByUser === true,
+    });
+  }
+  if (input.expectsArtifacts && input.previewVerifiedFailed === true) {
+    return UNRENDERED_PREVIEW_ZERO_REASON;
+  }
+  return undefined;
+}
+
+export interface SurplusStopSettleFacts {
+  powerLevel: string | null | undefined;
+  surplusUnsettledAbsorbed: boolean;
+  abortCause: string;
+  writtenFiles: ReadonlyMap<string, string>;
+  kitSeededFiles?: ReadonlyMap<string, string> | null;
+  preseededGolden?: Iterable<[string, string]> | null;
+  previewProven: boolean;
+  freeListed: boolean;
+  usage: BilledUsage;
+  editingExistingApp?: boolean;
+  expectsArtifacts: boolean;
+  /** The server's own preview verification failed, including a dead preview server (ok may still be true). */
+  previewVerifiedFailed: boolean;
+  /** `result.ok` / deadline-finalizer `ok` — only used to word the empty-build reason. */
+  emptyBuildOk?: boolean;
+  stoppedByUser?: boolean;
+  enabled?: boolean;
+}
+
+/**
+ * THE ONE FLOOR DECISION for both billing points. Own-file count, empty-build and
+ * unrendered / server-down preview zeroing are computed here, so the deadline finalizer
+ * cannot invent a charge the normal settle would have already zeroed.
+ */
+export function decideSurplusStopTokenFloor(
+  facts: SurplusStopSettleFacts,
+  env: NodeJS.ProcessEnv = process.env,
+): SurplusStopTokenFloorDecision | null {
+  const builderWrote = builderWrittenCount(facts.writtenFiles, facts.kitSeededFiles ?? new Map());
+  return maybeApplySurplusStopTokenFloor({
+    enabled: facts.enabled,
+    powerLevel: facts.powerLevel,
+    surplusUnsettledAbsorbed: facts.surplusUnsettledAbsorbed,
+    abortCause: facts.abortCause,
+    builderWroteCount: surplusStopOwnFileCount(facts.writtenFiles, facts.kitSeededFiles, facts.preseededGolden),
+    previewProven: facts.previewProven,
+    freeListed: facts.freeListed,
+    usage: facts.usage,
+    alreadyZeroedReason: surplusStopAlreadyZeroedReason({
+      expectsArtifacts: facts.expectsArtifacts,
+      builderWroteCount: builderWrote,
+      previewVerifiedFailed: facts.previewVerifiedFailed,
+      emptyBuildOk: facts.emptyBuildOk,
+      stoppedByUser: facts.stoppedByUser,
+    }),
+    editingExistingApp: facts.editingExistingApp,
+  }, env);
+}

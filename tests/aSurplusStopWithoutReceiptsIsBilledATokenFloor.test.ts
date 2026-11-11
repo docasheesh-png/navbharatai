@@ -16,15 +16,21 @@ import {
   SURPLUS_STOP_TOKEN_FLOOR_FLAG,
   SURPLUS_VERIFIED_POLICY_MULTIPLIER,
   SURPLUS_STOP_COST_ESTIMATED,
+  UNRENDERED_PREVIEW_ZERO_REASON,
   cheapestPublishedSurplusRate,
+  decideSurplusStopTokenFloor,
   hasRealTokenCounts,
   isSurplusStopTokenFloorOn,
   maybeApplySurplusStopTokenFloor,
   publishedRateForSurplusModel,
+  surplusStopAlreadyZeroedReason,
+  surplusStopOwnFileCount,
   surplusStopTokenFloorAdminMessage,
   surplusTokenUsageFromLedger,
   tokenFloorCostUsd,
+  type SurplusStopTokenFloorDecision,
   type SurplusStopTokenFloorFacts,
+  type SurplusStopSettleFacts,
 } from '../src/server/AgentV3/surplusStopTokenFloor';
 
 /** Tokens recorded on BR2279 (build 82f2651a-…): providerTokens.SURPLUS + cacheReadInputTokens. */
@@ -301,12 +307,25 @@ describe('the route and the docs carry the same rule at both billing points', ()
   const routing = readFileSync(join(root, 'docs/claude/ROUTING_AND_BILLING.md'), 'utf8');
   const envDoc = readFileSync(join(root, 'docs/claude/ENV_REGISTRY.md'), 'utf8');
 
-  it('both settle paths call maybeApplySurplusStopTokenFloor, so they cannot diverge', () => {
-    const hits = route.split('maybeApplySurplusStopTokenFloor(').length - 1;
-    expect(hits).toBeGreaterThanOrEqual(2);
+  it('both settle paths call the same decideSurplusStopTokenFloor helper with the same already-zeroed facts', () => {
+    expect(route.split('decideSurplusStopTokenFloor(').length - 1).toBe(2);
+    expect(route.split('maybeApplySurplusStopTokenFloor(').length - 1).toBe(0);
     expect(route).toContain('SURPLUS_STOP_COST_ESTIMATED');
     expect(route).toContain('surplusUnsettledAbsorbed');
     expect(route).toContain('realCostEstimated');
+    expect(route).toContain('billingCtx.kitSeededFiles');
+    expect(route).toContain('billingCtx.previewVerifiedFailed');
+    // Each call site must pass the zeroing and own-file facts; a site that dropped them would drift.
+    const calls = route.split('decideSurplusStopTokenFloor(').slice(1);
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      const body = call.slice(0, call.indexOf('});') + 3);
+      expect(body).toMatch(/previewVerifiedFailed/);
+      expect(body).toMatch(/expectsArtifacts/);
+      expect(body).toMatch(/kitSeededFiles/);
+      expect(body).toMatch(/preseededGolden/);
+      expect(body).toMatch(/writtenFiles/);
+    }
   });
 
   it('#4026 still absorbs unverifiable Surplus at ₹0 inside decideBuildBilledUsd — the floor is applied later, only at stop', () => {
@@ -317,9 +336,204 @@ describe('the route and the docs carry the same rule at both billing points', ()
   it('ROUTING_AND_BILLING records the owner-approved 2026-11-11 exception, and the flag is a default-ON kill switch', () => {
     expect(routing).toMatch(/2026-11-11/);
     expect(routing).toMatch(/token-floor estimate|token floor estimate|floor estimate/i);
+    expect(routing).toContain('decideSurplusStopTokenFloor');
+    expect(routing).toMatch(/server-down/);
     expect(routing).toContain(FLAG);
     expect(envDoc).toContain(FLAG);
+    expect(envDoc).toContain('decideSurplusStopTokenFloor');
     expect(envDoc).toMatch(/default ON/i);
     expect(envDoc).toMatch(/off/i);
+    expect(envDoc).toMatch(/server-down|unrendered/);
+  });
+});
+
+function mapOf(n: number, prefix: string, body = (i: number) => `${prefix}-${i}`): Map<string, string> {
+  const m = new Map<string, string>();
+  for (let i = 0; i < n; i++) m.set(`${prefix}${i}`, body(i));
+  return m;
+}
+
+function world(over: Partial<SurplusStopSettleFacts> & { seedOnly?: boolean; kitOnly?: boolean } = {}): SurplusStopSettleFacts {
+  const { seedOnly, kitOnly, ...facts } = over;
+  let writtenFiles = facts.writtenFiles ?? mapOf(26, 'app');
+  let preseededGolden = facts.preseededGolden ?? new Map<string, string>();
+  let kitSeededFiles = facts.kitSeededFiles ?? new Map<string, string>();
+  if (seedOnly) {
+    writtenFiles = mapOf(12, 'seed');
+    preseededGolden = new Map(writtenFiles);
+  }
+  if (kitOnly) {
+    kitSeededFiles = mapOf(30, 'kit');
+    writtenFiles = new Map(kitSeededFiles);
+  }
+  return {
+    powerLevel: 'weak',
+    surplusUnsettledAbsorbed: true,
+    abortCause: 'user-stop',
+    writtenFiles,
+    kitSeededFiles,
+    preseededGolden,
+    previewProven: false,
+    freeListed: false,
+    usage: BR2279_TOKENS,
+    editingExistingApp: false,
+    expectsArtifacts: true,
+    previewVerifiedFailed: false,
+    emptyBuildOk: true,
+    stoppedByUser: true,
+    ...facts,
+    writtenFiles: facts.writtenFiles ?? writtenFiles,
+    kitSeededFiles: facts.kitSeededFiles ?? kitSeededFiles,
+    preseededGolden: facts.preseededGolden ?? preseededGolden,
+  };
+}
+
+/** How the normal settle reads the facts (locals in the route). */
+function floorFromNormalSettle(w: SurplusStopSettleFacts, env?: NodeJS.ProcessEnv) {
+  return decideSurplusStopTokenFloor({
+    powerLevel: w.powerLevel,
+    surplusUnsettledAbsorbed: w.surplusUnsettledAbsorbed,
+    abortCause: w.abortCause,
+    writtenFiles: w.writtenFiles,
+    kitSeededFiles: w.kitSeededFiles,
+    preseededGolden: w.preseededGolden,
+    previewProven: w.previewProven,
+    freeListed: w.freeListed,
+    usage: w.usage,
+    editingExistingApp: w.editingExistingApp,
+    expectsArtifacts: w.expectsArtifacts,
+    previewVerifiedFailed: w.previewVerifiedFailed,
+    emptyBuildOk: w.emptyBuildOk,
+    stoppedByUser: w.stoppedByUser,
+  }, env);
+}
+
+/** How the deadline finalizer reads the same facts (via billingCtx copies). */
+function floorFromFinalizer(w: SurplusStopSettleFacts, env?: NodeJS.ProcessEnv) {
+  const billingCtx = {
+    kitSeededFiles: w.kitSeededFiles,
+    preseededGolden: w.preseededGolden,
+    expectsArtifacts: w.expectsArtifacts,
+    previewVerifiedFailed: w.previewVerifiedFailed,
+  };
+  return decideSurplusStopTokenFloor({
+    powerLevel: w.powerLevel,
+    surplusUnsettledAbsorbed: w.surplusUnsettledAbsorbed,
+    abortCause: w.abortCause,
+    writtenFiles: w.writtenFiles,
+    kitSeededFiles: billingCtx.kitSeededFiles,
+    preseededGolden: billingCtx.preseededGolden,
+    previewProven: w.previewProven,
+    freeListed: w.freeListed,
+    usage: w.usage,
+    editingExistingApp: w.editingExistingApp,
+    expectsArtifacts: billingCtx.expectsArtifacts === true,
+    previewVerifiedFailed: billingCtx.previewVerifiedFailed === true,
+    emptyBuildOk: w.emptyBuildOk,
+    stoppedByUser: w.abortCause === 'user-stop',
+  }, env);
+}
+
+/** The review's bug: writtenFiles.size, no already-zeroed / previewVerifiedFailed facts. */
+function floorFromBuggyFinalizer(w: SurplusStopSettleFacts, env?: NodeJS.ProcessEnv) {
+  return maybeApplySurplusStopTokenFloor({
+    powerLevel: w.powerLevel,
+    surplusUnsettledAbsorbed: w.surplusUnsettledAbsorbed,
+    abortCause: w.abortCause,
+    builderWroteCount: w.writtenFiles.size,
+    previewProven: w.previewProven,
+    freeListed: w.freeListed,
+    usage: w.usage,
+    editingExistingApp: w.editingExistingApp,
+  }, env);
+}
+
+function snapshot(d: SurplusStopTokenFloorDecision | null) {
+  if (!d) return null;
+  return { usd: d.usd, rateModel: d.rateModel, fallback: d.fallback, input: d.usage.inputTokens, output: d.usage.outputTokens };
+}
+
+function assertFloorParity(w: SurplusStopSettleFacts, env?: NodeJS.ProcessEnv) {
+  expect(snapshot(floorFromFinalizer(w, env)), 'finalizer drifted from the normal settle').toEqual(snapshot(floorFromNormalSettle(w, env)));
+}
+
+describe('both settle points agree: server-down preview and seed-only must stay ₹0', () => {
+  it('a server-down preview (previewVerifiedFailed, preview not proven, ok still true) is ₹0 at both points, and logs no estimate event', () => {
+    const w = world({
+      previewVerifiedFailed: true,
+      previewProven: false,
+      emptyBuildOk: true, // the review's race: verification failed, the build still ok
+    });
+    expect(w.writtenFiles.size).toBe(26);
+    expect(surplusStopAlreadyZeroedReason({
+      expectsArtifacts: true,
+      builderWroteCount: 26,
+      previewVerifiedFailed: true,
+    })).toBe(UNRENDERED_PREVIEW_ZERO_REASON);
+    expect(floorFromNormalSettle(w)).toBeNull();
+    expect(floorFromFinalizer(w)).toBeNull();
+    // A recorded event is only written when the helper returns a decision.
+    expect(floorFromNormalSettle(w) && SURPLUS_STOP_COST_ESTIMATED).toBeFalsy();
+    expect(floorFromFinalizer(w) && SURPLUS_STOP_COST_ESTIMATED).toBeFalsy();
+  });
+
+  it('the pre-fix finalizer would have charged the BR2279 floor for that server-down race', () => {
+    const w = world({ previewVerifiedFailed: true, previewProven: false, emptyBuildOk: true });
+    const leaked = floorFromBuggyFinalizer(w);
+    expect(leaked).not.toBeNull();
+    expect(leaked!.usd).toBeGreaterThan(0);
+    expect(leaked!.usd).toBeCloseTo(0.159237, 6);
+  });
+
+  it('a seed-only stop (unchanged starter) is ₹0 and logs no SURPLUS_STOP_COST_ESTIMATED at both points', () => {
+    const w = world({ seedOnly: true });
+    expect(w.writtenFiles.size).toBe(12);
+    expect(surplusStopOwnFileCount(w.writtenFiles, w.kitSeededFiles, w.preseededGolden)).toBe(0);
+    expect(floorFromNormalSettle(w)).toBeNull();
+    expect(floorFromFinalizer(w)).toBeNull();
+    expect(floorFromNormalSettle(w) && SURPLUS_STOP_COST_ESTIMATED).toBeFalsy();
+    expect(floorFromFinalizer(w) && SURPLUS_STOP_COST_ESTIMATED).toBeFalsy();
+    // The pre-fix finalizer counted writtenFiles.size and would have logged the event.
+    expect(floorFromBuggyFinalizer(w)).not.toBeNull();
+  });
+
+  it('kit-only (unchanged game-kit seed) is also 0 own files at both points', () => {
+    const w = world({ kitOnly: true });
+    expect(surplusStopOwnFileCount(w.writtenFiles, w.kitSeededFiles, w.preseededGolden)).toBe(0);
+    expect(floorFromNormalSettle(w)).toBeNull();
+    expect(floorFromFinalizer(w)).toBeNull();
+  });
+});
+
+describe('parity: both settle points give identical floor decisions across the neighbour matrix', () => {
+  const cases: Array<{ name: string; world: SurplusStopSettleFacts; env?: NodeJS.ProcessEnv }> = [
+    { name: 'BR2279-shaped charge', world: world() },
+    { name: 'server-down preview, ok true', world: world({ previewVerifiedFailed: true, emptyBuildOk: true }) },
+    { name: 'seed-only starter', world: world({ seedOnly: true }) },
+    { name: 'kit-only seed', world: world({ kitOnly: true }) },
+    { name: 'empty written', world: world({ writtenFiles: new Map() }) },
+    { name: 'missing tokens', world: world({ usage: { inputTokens: 0, outputTokens: 0 } }) },
+    { name: 'non-stop watchdog', world: world({ abortCause: 'watchdog' }) },
+    { name: 'seen-running preview', world: world({ previewProven: true }) },
+    { name: 'verified receipt', world: world({ surplusUnsettledAbsorbed: false }) },
+    { name: 'admin-free', world: world({ freeListed: true }) },
+    { name: 'non-Weak', world: world({ powerLevel: 'off' }) },
+    { name: 'unverified edit', world: world({ editingExistingApp: true }) },
+    { name: 'explicit off', world: world(), env: { [FLAG]: 'off' } },
+    { name: 'import turn, no artifacts expected', world: world({ expectsArtifacts: false, previewVerifiedFailed: true }) },
+  ];
+
+  it.each(cases)('$name', ({ world: w, env }) => {
+    assertFloorParity(w, env);
+  });
+
+  it('a mutation that drops the finalizer already-zeroed facts fails this parity check', () => {
+    const serverDown = world({ previewVerifiedFailed: true, emptyBuildOk: true });
+    const seed = world({ seedOnly: true });
+    expect(() => expect(snapshot(floorFromBuggyFinalizer(serverDown))).toEqual(snapshot(floorFromNormalSettle(serverDown)))).toThrow();
+    expect(() => expect(snapshot(floorFromBuggyFinalizer(seed))).toEqual(snapshot(floorFromNormalSettle(seed)))).toThrow();
+    // The fixed finalizer still matches.
+    assertFloorParity(serverDown);
+    assertFloorParity(seed);
   });
 });

@@ -493,6 +493,24 @@ small, .muted, .text-muted { color: var(--muted); }
    stacked, products in one long column, and an MRP that was not struck through. These are the shapes
    every Indian shopping app shares — Blinkit, Zepto, BigBasket — so they are drawn here once. */
 .nb-header { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 16px; background: color-mix(in srgb, var(--card) 90%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+/* A site header (.nb-header) often sits a long company name and a
+   section-link list inside an inner nowrap .row (autopsy BR1975:
+   Header.tsx put .nb-brand and <nav><ul class="row gap-24"> in
+   <div class="container row ...">, so the <nav> was 296px wide and
+   reached x=650 on a 390px phone — 260px of sideways scroll).
+   Wrapping the <header> or the <nav> does not help: they are not
+   the nowrap flex boxes. On phone widths only, those inner .row
+   boxes and the header's nav list may wrap and shrink. :where()
+   keeps specificity at zero. display is unchanged (.row is already
+   flex; a block nav ul ignores flex-wrap). overflow is left
+   visible (BR1972). Game HUDs (.nb-game-hud) and card/article
+   headers do not use .nb-header, so they are untouched. Desktop
+   is unchanged (the query does not apply). Existing apps that
+   already copied a previous rule are not rewritten. */
+@media (max-width: 640px) {
+  :where(.nb-header .row),
+  :where(.nb-header nav ul) { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+}
 .nb-brand { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 1.2rem; font-weight: 800; letter-spacing: -0.01em; color: var(--fg); text-decoration: none; }
 .nb-brand:hover { text-decoration: none; }
 /* A header action row may hold a whole nav of chips (autopsy BR1959: ten nav chips made this row 1364px wide

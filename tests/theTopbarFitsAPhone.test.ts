@@ -43,6 +43,12 @@ function withoutTitleRule(css: string): string {
   return css.replace(`${NEW_TITLE}\n`, '');
 }
 
+function withoutMarketingHeaderRules(css: string): string {
+  return css
+    .replace(/\/\* A site header \(\.nb-header\)[\s\S]*?\*\/\n/, '')
+    .replace(/@media \(max-width: 640px\) \{\n  :where\(\.nb-header \.row\),\n  :where\(\.nb-header nav ul\) \{ flex-wrap: wrap; min-width: 0; max-width: 100%; \}\n\}\n/, '');
+}
+
 /**
  * CSS Overflow: if overflow-x is not visible, a missing/visible overflow-y computes to auto
  * (and vice versa). A non-visible computed axis makes the box a scroll container that clips
@@ -342,7 +348,7 @@ describe('a dashboard topbar that holds a long title fits a phone', () => {
   });
 
   it('a workspace still holding the kit as it was before this fix is still recognised as OUR starter', () => {
-    const before = withoutTitleRule(DESIGN_KIT_CSS)
+    const before = withoutTitleRule(withoutMarketingHeaderRules(DESIGN_KIT_CSS))
       .replace(/\/\* A dashboard topbar holds the page title[\s\S]*?\*\/\n/, '')
       .replace(NEW_TOPBAR, OLD_TOPBAR);
     expect(before).not.toBe(DESIGN_KIT_CSS);
@@ -357,7 +363,7 @@ describe('a dashboard topbar that holds a long title fits a phone', () => {
    content size). It may shrink and wrap, and a long title scrolls inside the bar instead
    of widening the page. Existing apps that already copied the previous rule are not rewritten. */
 `;
-    const firstPr = withoutTitleRule(DESIGN_KIT_CSS)
+    const firstPr = withoutTitleRule(withoutMarketingHeaderRules(DESIGN_KIT_CSS))
       .replace(/\/\* A dashboard topbar holds the page title[\s\S]*?\*\/\n/, firstPrComment)
       .replace(NEW_TOPBAR, FIRST_PR_TOPBAR);
     expect(firstPr).not.toBe(DESIGN_KIT_CSS);
@@ -374,7 +380,7 @@ describe('a dashboard topbar that holds a long title fits a phone', () => {
    compute overflow-y as auto and clip absolute dropdowns and popovers inside the bar.
    Existing apps that already copied a previous rule are not rewritten. */
 `;
-    const secondPr = withoutTitleRule(DESIGN_KIT_CSS)
+    const secondPr = withoutTitleRule(withoutMarketingHeaderRules(DESIGN_KIT_CSS))
       .replace(/\/\* A dashboard topbar holds the page title[\s\S]*?\*\/\n/, secondPrComment)
       .replace(NEW_TOPBAR, SECOND_PR_TOPBAR);
     expect(secondPr).not.toBe(DESIGN_KIT_CSS);

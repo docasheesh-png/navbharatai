@@ -128,6 +128,29 @@ describe('the orphan scan advances without unbounded database reads', () => {
 });
 
 describe('busy heartbeats preserve durable allocation identity', () => {
+  it('the general touch path cannot overwrite a replacement allocation', async () => {
+    const record = old('a');
+    const f = fixture([record]);
+    f.records.set('a', { ...record, sandboxId: 'new-machine' });
+
+    await f.store.touch('a', record.sandboxId);
+
+    expect(f.update).not.toHaveBeenCalled();
+    expect(f.records.get('a')?.sandboxId).toBe('new-machine');
+    expect(f.records.get('a')?.updatedAt).toBe(record.updatedAt);
+  });
+
+  it('the general touch path cannot recreate a cleared allocation', async () => {
+    const record = old('a');
+    const f = fixture([record]);
+    f.records.delete('a');
+
+    await f.store.touch('a', record.sandboxId);
+
+    expect(f.update).not.toHaveBeenCalled();
+    expect(f.records.has('a')).toBe(false);
+  });
+
   it('refreshes only the timestamp of the existing matching allocation', async () => {
     const record = old('a');
     const f = fixture([record]);

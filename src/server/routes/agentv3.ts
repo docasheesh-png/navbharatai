@@ -15,6 +15,12 @@ import { isRouterOneAccountingProvider, routerOneAccountingFetch } from '../AI/R
 import { createSurplusScopeAsk, SURPLUS_SCOPE_TIMEOUT_MS } from '../AI/SurplusRegistry/scopeAdmission';
 import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibility';
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
+import {
+  maybeApplySurplusStopTokenFloor,
+  surplusTokenUsageFromLedger,
+  surplusStopTokenFloorAdminMessage,
+  SURPLUS_STOP_COST_ESTIMATED,
+} from '../AgentV3/surplusStopTokenFloor';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
 import { surplusFallbackDisabledFor, surplusFallbackDisabledForTier, surplusRawErrorReporter } from '../AI/SurplusRegistry/surplusNoFallback';
@@ -1892,6 +1898,12 @@ export function decideBuildBilledUsd(
    * build where no turn starved — i.e. on the normal path this whole change is a no-op.
    */
   absorbedUnbilledUsd: number;
+  /**
+   * Set only when Surplus receipts could not be settled and this path absorbed that spend at ₹0
+   * (#4026). Absent on every other return, so existing equality tests stay unchanged. The
+   * 2026-11-11 Weak/Surplus stop token floor reads this later; it does not change this function's bill.
+   */
+  surplusUnsettledAbsorbed?: true;
 } {
   const routerOneEntries = providerLedger.entries().filter(e => isRouterOneAccountingProvider(e.provider));
   if (routerOneEntries.length) {
@@ -1926,11 +1938,13 @@ export function decideBuildBilledUsd(
     // "unavailable". Billing never decides a build's outcome: unverifiable Surplus spend is absorbed (₹0 to
     // the user, never an estimate), loudly logged for reconciliation, and the result stays what it was.
     let surplus: { chargeUsd: string; actualUsd: string; absorbedUsd: string };
+    let surplusUnsettledAbsorbed = false;
     try { surplus = surplusBuildCharges(surplusEntries, barrenPhases); }
     catch (error) {
       if (!(error instanceof SurplusAccountingUnavailableError)) throw error;
       console.error(`[AGENTV3 BILLING] Surplus receipts unsettled for user ${userId} — ${surplusEntries.length} Surplus call(s) absorbed at ₹0; reconcile from the Surplus audit store.`);
       surplus = { chargeUsd: '0', actualUsd: '0', absorbedUsd: '0' };
+      surplusUnsettledAbsorbed = true;
     }
     const legacyEntries = providerLedger.entries().filter(e => e.provider.toUpperCase() !== 'SURPLUS');
     const surplusTokens = surplusEntries.reduce((sum, e) => ({ inputTokens: sum.inputTokens + e.usage.inputTokens, outputTokens: sum.outputTokens + e.usage.outputTokens }), { inputTokens: 0, outputTokens: 0 });
@@ -1940,7 +1954,8 @@ export function decideBuildBilledUsd(
     const legacy = decideBuildBilledUsd(legacyView, { inputTokens: Math.max(0, sinkTotal.inputTokens - surplusTokens.inputTokens), outputTokens: Math.max(0, sinkTotal.outputTokens - surplusTokens.outputTokens) }, powerLevel, userId, email, sandboxUsd, barrenPhases);
     return { ...legacy, effectiveBilledUsd: legacy.effectiveBilledUsd + Number(surplus.chargeUsd),
       reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal),
-      realCostUsd: legacy.realCostUsd + Number(surplus.actualUsd), absorbedUnbilledUsd: legacy.absorbedUnbilledUsd + Number(surplus.absorbedUsd) };
+      realCostUsd: legacy.realCostUsd + Number(surplus.actualUsd), absorbedUnbilledUsd: legacy.absorbedUnbilledUsd + Number(surplus.absorbedUsd),
+      ...(surplusUnsettledAbsorbed ? { surplusUnsettledAbsorbed: true as const } : {}) };
   }
   const reconciledProviderUsage = reconcileWithSink(providerLedger.byProvider(), sinkTotal);
   const flatBilledUsd = billedAmountUsd(sinkTotal, powerLevel);
@@ -13303,6 +13318,32 @@ async function noteBuildOutcome(
             awaitingShell: awaitsShellNow(),
           });
           watchdogBilledUsd = wdMarkup.billedUsd;
+          // OWNER 2026-11-11 (BR2279): same token-floor estimate as the normal settle, applied before
+          // the Stop rules and after the markup waiver, so both billing points decide alike.
+          // Kill switch: AGENTV3_BILL_SURPLUS_STOP_TOKEN_FLOOR=off (unset/empty means ON).
+          // Mutates the decided real-cost figure so the extracted Stop/discount/setBilling slices
+          // (which still read `decided.realCostUsd`) cannot drift from this path.
+          const watchdogSurplusStopFloor = maybeApplySurplusStopTokenFloor({
+            powerLevel: String(powerLevelReqEffective ?? ''),
+            surplusUnsettledAbsorbed: decided.surplusUnsettledAbsorbed === true,
+            abortCause: abortCauseOf(abort.signal),
+            // The finalizer is outside the `kitSeededFiles` block, and an extra
+            // `preseededUnchangedCount(` here would break the route-wide call-count pin. Seed-only
+            // writes still go to ₹0 in settleStopOrFailure on this path.
+            builderWroteCount: writtenFiles.size,
+            previewProven: wdPreviewProven,
+            freeListed: isAgentV3FreeUser(userId, email),
+            usage: surplusTokenUsageFromLedger(billingCtx.providerLedger.entries()),
+            editingExistingApp: isEditMode,
+          });
+          if (watchdogSurplusStopFloor) {
+            watchdogBilledUsd += watchdogSurplusStopFloor.usd;
+            decided.realCostUsd += watchdogSurplusStopFloor.usd;
+            buildDiagRef?.record({
+              phase: 'build', severity: 'info', code: SURPLUS_STOP_COST_ESTIMATED, autoResolved: true,
+              message: surplusStopTokenFloorAdminMessage(watchdogSurplusStopFloor),
+            });
+          }
           // 🔴 A USER STOP IS BILLED BY THE STOP RULES ON THIS PATH TOO (pre-deploy review round 4). This
           // finalizer used to bill every `ok` build in full. A typed "stop" or a Stop pressed on another
           // instance aborts the build without ending its stream, so this cap could settle that build first
@@ -13373,8 +13414,9 @@ async function noteBuildOutcome(
               });
             }
           }
-          watchdogSandboxFee = proSandboxFee(watchdogBilledUsd);
-          watchdogBilledUsd = watchdogSandboxFee.totalUsd;
+          // The token-floor estimate is billed at cost: no 2.5% sandbox service fee.
+          watchdogSandboxFee = watchdogSurplusStopFloor ? proSandboxFee(0) : proSandboxFee(watchdogBilledUsd);
+          if (!watchdogSurplusStopFloor) watchdogBilledUsd = watchdogSandboxFee.totalUsd;
           recordBuildTelemetryOnce({
             ok,
             previewAllowed: buildObs.previewRendered,
@@ -13398,10 +13440,12 @@ async function noteBuildOutcome(
               billingActive: billingAppliesTo(userId, email),
               billedUsd: watchdogBilledUsd,
               billedInr: watchdogBilledInr,
+              estimated: !!watchdogSurplusStopFloor && watchdogBilledUsd > 0,
             }),
             billedUsd: Math.round(watchdogBilledUsd * 1_000_000) / 1_000_000,
             billedInr: watchdogBilledInr,
             realCostUsd: Math.round(decided.realCostUsd * 1_000_000) / 1_000_000,
+            ...(watchdogSurplusStopFloor ? { realCostEstimated: true as const } : {}),
             sandboxCostUsd: Math.round(decided.sandboxUsd * 1_000_000) / 1_000_000,
             ...proSandboxFeeFields(watchdogSandboxFee),
             powerMode: onlyOpus,
@@ -27022,12 +27066,14 @@ async function noteBuildOutcome(
         realCostRemainder: realCostRemainderForFailure,
         // The platform's OWN cost, recorded beside the bill on every settle (success or failure) —
         // the admin cost card's source of truth. Priced by the same call that priced the bill.
-        realCostUsd: decidedRealCostUsd, sandboxUsd: decidedSandboxUsd,
+        realCostUsd: decidedRealCostUsdIn, sandboxUsd: decidedSandboxUsd,
         // What we spent on turns that produced nothing and did NOT pass on to the user. Recorded
         // so the gap between real cost and bill is EXPLAINED rather than merely visible — a number
         // the admin cannot account for is the same problem as a number that is wrong.
         absorbedUnbilledUsd: decidedAbsorbedUsd,
+        surplusUnsettledAbsorbed,
       } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd, barrenPhases);
+      let decidedRealCostUsd = decidedRealCostUsdIn;
       // A VERSION THE USER CAN GO BACK TO (2026-09-20). The Time Machine reads `build_history`, which
       // until today only the LEGACY builder ever wrote — so it showed "No saved versions yet" for every
       // app this engine has ever made. Written here AND in the deadline finalizer, keyed by the same
@@ -27369,6 +27415,31 @@ async function noteBuildOutcome(
       // and `finalizeOnDeadline` calls the SAME function, so a Stop is billed by the same rules whichever
       // settle runs first. The kill switches (AGENTV3_BILL_CANCELLED, AGENTV3_BILL_LATE_STOP_RULES) are read
       // in `stopBillingSwitches` and nowhere else.
+      // OWNER 2026-11-11 (BR2279): a Weak/Surplus user-stop whose receipts were absorbed at ₹0
+      // still has recorded tokens. The stop rules can only REDUCE a bill, so they cannot invent a
+      // charge from $0. This narrow floor estimates the Surplus share at the cheapest published
+      // real rate, at cost, no markup, no sandbox fee. Kill switch: AGENTV3_BILL_SURPLUS_STOP_TOKEN_FLOOR=off
+      // (unset/empty means ON). Applied after empty/unrendered zeroing and before the stop rules, at
+      // BOTH billing points, so they cannot diverge.
+      const surplusStopFloor = maybeApplySurplusStopTokenFloor({
+        powerLevel: String(powerLevelReqEffective ?? ''),
+        surplusUnsettledAbsorbed: surplusUnsettledAbsorbed === true,
+        abortCause: abortCauseOf(abort.signal),
+        builderWroteCount: builderWroteCount(),
+        previewProven: appSeenRunningForBill,
+        freeListed: isAgentV3FreeUser(userId, email),
+        usage: surplusTokenUsageFromLedger(providerLedger.entries()),
+        alreadyZeroedReason: zeroBillReason,
+        editingExistingApp: isEditMode,
+      });
+      if (surplusStopFloor) {
+        effectiveBilledUsd += surplusStopFloor.usd;
+        decidedRealCostUsd += surplusStopFloor.usd;
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: SURPLUS_STOP_COST_ESTIMATED, autoResolved: true,
+          message: surplusStopTokenFloorAdminMessage(surplusStopFloor),
+        });
+      }
       const stopSettlement = settleStopOrFailure({
         failed: zeroBillForFailedBuild(result.ok),
         switches: stopBillingSwitches(process.env),
@@ -27489,8 +27560,9 @@ async function noteBuildOutcome(
         } catch { /* a discount that cannot be decided is no discount — the ordinary price stands */ }
       }
 
-      const settledSandboxFee = proSandboxFee(effectiveBilledUsd);
-      effectiveBilledUsd = settledSandboxFee.totalUsd;
+      // The token-floor estimate is billed at cost: no measured sandbox and no 2.5% service fee.
+      const settledSandboxFee = surplusStopFloor ? proSandboxFee(0) : proSandboxFee(effectiveBilledUsd);
+      if (!surplusStopFloor) effectiveBilledUsd = settledSandboxFee.totalUsd;
 
       // THE BILL IS NOW SETTLED — every zeroing rule above has had its say. Only here can the
       // waiver's explanation be true, and only if the waived amount is still what the user pays:
@@ -27808,10 +27880,12 @@ async function noteBuildOutcome(
               // here means money owed and not taken. The watchdog label is built BEFORE its debit
               // and therefore passes nothing, which is the truthful answer there.
               walletDebited: !!walletDebit && walletDebit.tokensDebited > 0,
+              estimated: !!surplusStopFloor && effectiveBilledUsd > 0,
             }),
             billedUsd: Math.round(effectiveBilledUsd * 1_000_000) / 1_000_000,
             billedInr: settledBilledInr,
             realCostUsd: Math.round(decidedRealCostUsd * 1_000_000) / 1_000_000,
+            ...(surplusStopFloor ? { realCostEstimated: true as const } : {}),
             sandboxCostUsd: Math.round(decidedSandboxUsd * 1_000_000) / 1_000_000,
             ...proSandboxFeeFields(settledSandboxFee),
             ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited } : {}),

@@ -659,6 +659,16 @@ nothing to run and stay free and unmetered; metering them would be friction with
   Estimating tokens from string length would produce a number that LOOKS like a measurement and would
   land on a real user's bill. We eat it. Keep `free-model` (measured, genuinely ₹0) and `unmeasured`
   (we do not know) as SEPARATE outcomes — only the second is costing us money silently.
+  ⚠️ **EXCEPTION, owner-approved 2026-11-11 (BR2279).** The rule above still holds for chat and for
+  ordinary builds: we never invent a cost from missing tokens, and unverifiable Surplus receipts are
+  still absorbed at ₹0 inside `decideBuildBilledUsd` (#4026). When a Weak/Surplus user STOPS after
+  their own files were written, with no proven running preview, and the report has real token counts,
+  a FLOOR estimate may be billed at real cost (no markup, no sandbox fee) from those counts × the
+  cheapest published Surplus-universe rate in `providerRates.ts`. The charge is labelled estimated,
+  capped at the verified Surplus policy (10× the same estimate), and is off only when
+  `AGENTV3_BILL_SURPLUS_STOP_TOKEN_FLOOR=off` (default ON; unset or empty means ON). Missing or zero
+  tokens, empty builds, verified receipts, seen-running previews, non-stop failures, admin-free users
+  and non-Weak tiers are unchanged. See `surplusStopTokenFloor.ts`.
 - **Never charged:** an anonymous caller (no wallet), the admin free-list, and a **Professional Pass
   holder** (the Pass IS the payment — charging the wallet on top bills them twice for one thing).
 - **Charge AFTER the answer, never awaited into the response.** A money-path failure must not cost the
@@ -798,6 +808,18 @@ Router One's prospective verified model-expense multiplier is 2.5, once, not 10;
 Surplus remains 10. Positive Router One settlement is NOT implemented without
 verified request/account-bound final supplier receipts; its unknown expense is
 still absorbed and audited, never priced from Sonnet or token tariffs.
+
+### Owner exception — 2026-11-11: Weak/Surplus user-stop token-floor estimate (BR2279)
+
+Unverifiable Surplus receipts stay absorbed at ₹0 inside `decideBuildBilledUsd` (#4026) — this
+does not invent a cost there. The owner-approved exception is applied later, only at both stop
+settlement points, and only when every gate holds: Weak, Surplus unsettled, explicit user-stop,
+builder-written files > 0, no proven running preview, real token counts on the report, and not
+already zeroed (empty build, unrendered preview, unverified edit, admin-free). The bill is a
+FLOOR estimate at real cost (recorded tokens × the cheapest defensible published Surplus rate,
+today `glm-5.3-flash`), no markup, no sandbox fee, labelled estimated, and never above the
+verified Surplus policy (10× the same estimate). Kill switch `AGENTV3_BILL_SURPLUS_STOP_TOKEN_FLOOR=off`
+restores today's ₹0 absorb; unset or empty means ON. See `src/server/AgentV3/surplusStopTokenFloor.ts`.
 
 ALL Pro bands replace measured sandbox billing with a SERVICE FEE equal to 2.5%
 of the pre-sandbox user subtotal AFTER existing waiver/stop/free rules and build

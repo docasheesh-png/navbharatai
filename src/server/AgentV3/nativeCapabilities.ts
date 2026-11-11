@@ -194,10 +194,14 @@ export const OPEN_APPS_CONDITIONAL_AFTER_APP = ['from', 'with', 'for', 'it'] as 
 
 /**
  * Reviewed this-app continuations after from/with/for/it.
+ * Case-sensitive lowercase, the same way `settings` is handled, so
+ * "from Home Assistant", "from Login Manager", and "for Home Assistant"
+ * still match like origin/main. Bare `home` denies only when it is
+ * followed by end of text, punctuation, or `screen`.
  * `my` is bound to home / home screen so "from my list of installed apps"
  * and "for my Instagram" still match like origin/main.
  */
-export const OPEN_APPS_THIS_APP_CONTINUATION_SOURCE = String.raw`(?:my\s+home(?:\s+screen)?\b|(?:the\s+)?home(?:\s+screen)?\b|login\b)`;
+export const OPEN_APPS_THIS_APP_CONTINUATION_SOURCE = String.raw`(?:my\s+home(?:\s+screen)?\b|the\s+home(?:\s+screen)?\b|home(?:\s+screen\b|[ \t]*(?=[.,;:!?…'"“”‘’()\[\]{}\-—–/\\\n\r]|$))|login\b)`;
 
 /** Horizontal whitespace only — a newline or any punctuation must break. */
 const AFTER_APP_HORIZONTAL_WS = /^[ \t]+/;
@@ -208,7 +212,8 @@ function appStoreOpenHasPresenceTail(afterStore: string): boolean {
 
 function isThisAppContinuation(afterWord: string): boolean {
   const rest = afterWord.replace(AFTER_APP_HORIZONTAL_WS, '');
-  return new RegExp('^' + OPEN_APPS_THIS_APP_CONTINUATION_SOURCE, 'i').test(rest);
+  // Case-sensitive lowercase, the same way `settings` is handled.
+  return new RegExp('^' + OPEN_APPS_THIS_APP_CONTINUATION_SOURCE).test(rest);
 }
 
 function isAfterAppDenied(word: string, afterWord = ''): boolean {
@@ -231,7 +236,9 @@ function afterAppIsTerminal(rest: string): boolean {
 /**
  * Origin/main's `open (the)? app` capture, minus (a) end-of-text / punctuation /
  * newline and (b) the reviewed denylist. `from`/`with`/`for`/`it` deny only
- * with a reviewed this-app continuation. `called`/`named` stay allowed.
+ * with a reviewed this-app continuation (home/login lowercase, same as
+ * `settings`; bare `home` only at end of text, punctuation, or `screen`).
+ * `called`/`named` stay allowed.
  */
 export function openNamedAppAsked(text: string): boolean {
   const openRe = new RegExp(String.raw`\b(?:` + OPEN_APPS_NAMED_APP_OPEN_SOURCE + String.raw`)\b`, 'gi');

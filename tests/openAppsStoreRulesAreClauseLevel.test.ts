@@ -115,6 +115,7 @@ export const REVIEWED_MUST_NOT_MATCH = [
   'open the app from home',
   'open the app from the home screen',
   'open the app from login',
+  'open the app from home screen',
   'open the app in a new window',
   'open the app after login',
 ] as const;
@@ -226,10 +227,12 @@ describe('open-apps: exported sources', () => {
     expect([...OPEN_APPS_AFTER_APP_DENYLIST]).not.toContain('it');
     expect([...OPEN_APPS_CONDITIONAL_AFTER_APP]).toEqual(['from', 'with', 'for', 'it']);
     expect(OPEN_APPS_THIS_APP_CONTINUATION_SOURCE).toContain('my\\s+home');
-    expect(OPEN_APPS_THIS_APP_CONTINUATION_SOURCE).toContain('home(?:\\s+screen)?');
-    expect(OPEN_APPS_THIS_APP_CONTINUATION_SOURCE).toContain('(?:the\\s+)?home(?:\\s+screen)?');
+    expect(OPEN_APPS_THIS_APP_CONTINUATION_SOURCE).toContain('the\\s+home');
     expect(OPEN_APPS_THIS_APP_CONTINUATION_SOURCE).toContain('login');
+    expect(OPEN_APPS_THIS_APP_CONTINUATION_SOURCE).toContain('home(?:\\s+screen\\b|');
+    expect(OPEN_APPS_THIS_APP_CONTINUATION_SOURCE).not.toContain('(?:the\\s+)?home(?:\\s+screen)?');
     const namedSrc = readFileSync(join(__dirname, '..', 'src/server/AgentV3/nativeCapabilities.ts'), 'utf8');
+    expect(namedSrc).not.toContain("OPEN_APPS_THIS_APP_CONTINUATION_SOURCE, 'i'");
     expect(namedSrc).toContain("if (word === 'settings') return true;");
     expect(namedSrc).toContain('if (rest === \'\') continue; // (a) end of text');
     expect(namedSrc).toContain('const AFTER_APP_HORIZONTAL_WS = /^[ \\t]+/;');
@@ -404,6 +407,10 @@ describe('open-apps: named-app recovery vs sentence-case pitfalls', () => {
       'open the app it',
       'open the app from my list of installed apps',
       'open the app for my Instagram',
+      'open the app from Home Assistant',
+      'open the app from Login Manager',
+      'open the app for Home Assistant',
+      'open the app from home assistant',
     ];
     for (const p of keeps) {
       expect(matchedOnOriginMain(p), `origin/main should have captured: ${p}`).toBe(true);
@@ -414,6 +421,8 @@ describe('open-apps: named-app recovery vs sentence-case pitfalls', () => {
       'open the app from home',
       'open the app from the home screen',
       'open the app from login',
+      'open the app from home screen',
+      'open the app from home.',
       'open the app in a new window',
       'open the app after login',
       'open the app now',

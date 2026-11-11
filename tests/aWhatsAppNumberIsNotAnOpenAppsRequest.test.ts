@@ -87,6 +87,10 @@ export const NAMED_APP_REVIEW_REPROS = [
   'open the app it is linked to',
   'open the app from my list of installed apps',
   'open the app for my Instagram',
+  'open the app from Home Assistant',
+  'open the app from Login Manager',
+  'open the app for Home Assistant',
+  'open the app from home assistant',
 ] as const;
 
 /** Casual / lowercase names origin/main captured via `open the app`. */
@@ -179,6 +183,7 @@ export const OPPOSITE_NOT_OPEN_APPS = [
   'open the app from home',
   'open the app from the home screen',
   'open the app from login',
+  'open the app from home screen',
   'open the app in a new window',
   'open the app after login',
   'open the app now',

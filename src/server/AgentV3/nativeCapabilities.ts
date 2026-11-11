@@ -97,13 +97,14 @@ export interface NativeCapability {
  *    listing / screenshots / release / release notes / listing page.
  * 5. `open the app drawer` is matched explicitly so dropping singular
  *    `open the app` does not lose a main capture.
- * 6. `open(?:\s+the)?\s+app` followed by horizontal whitespace only (no
- *    newline or punctuation) and then `called`/`named` + a name, or a
- *    capitalized proper-name token, matches — recovering origin/main
- *    captures such as "open the app Instagram" / "open the app called Spotify".
- *    The capitalized-token path is case-sensitive so "open the app settings"
- *    stays out. A newline or any punctuation after `app` breaks the match
- *    ("When I open the app\nShow…", "open the app. Then…").
+ * 6. Singular `open(?:\s+the)?\s+app` keeps origin/main's capture, then
+ *    excludes only when what follows is (a) end of text, punctuation, or a
+ *    newline, or (b) a reviewed denylist of function/continuation words
+ *    (to, first, settings lowercase, every, and, then, …) derived from the
+ *    BR1974 prompt and the must-not-match corpus. Lowercase app names
+ *    (instagram, youtube, iMessage, eBay) therefore match like main.
+ *    `called`/`named` stay allowed. `settings` is denied only in lowercase
+ *    so "open the app Settings on the phone" still matches.
  *
  * Play Store / go-to / link / redirect / kholo / launch-store opens are not
  * new captures here; they are queued as Q-2649.
@@ -131,11 +132,51 @@ export const OPEN_APPS_NAMED_APP_OPEN_SOURCE = String.raw`open(?:\s+the)?\s+app`
 export const OPEN_APPS_NAMED_APP_CALLED_SOURCE = String.raw`(?:called|named)[ \t]+[A-Za-z][\w'-]*`;
 
 /**
- * Capitalized proper-name token. Must be used WITHOUT the `i` flag: in JS,
- * `[A-Z]` with `i` also matches lowercase, which would recapture
- * "open the app settings".
+ * Reviewed denylist of function/continuation words after `open (the)? app`.
+ * `settings` is matched case-sensitively (lowercase only) so the Settings app
+ * still matches. Every other entry is matched case-insensitively.
+ *
+ * Corpus-derived (word immediately after `open the app` in must-not-match):
+ *   to, first, settings, every
+ * User-requested launch-this-app function words:
+ *   and, then, again, when, for, in, on, with, after, before,
+ *   daily, now, once, so, it, is, will, should, screen, page
+ * Prompt / must-not-match similar phrasing:
+ *   see ("open the app to see"), show ("when I open the app, show",
+ *   "opens the app, show the welcome screen"), dashboard (BR1974 personal
+ *   dashboard after opening)
+ * Similar preposition to for/in/on/with/after/before: from
  */
-export const OPEN_APPS_NAMED_APP_PROPER_NAME_SOURCE = String.raw`[A-Z][A-Za-z0-9]*`;
+export const OPEN_APPS_AFTER_APP_DENYLIST = [
+  'to',
+  'first',
+  'settings',
+  'every',
+  'and',
+  'then',
+  'again',
+  'when',
+  'for',
+  'in',
+  'on',
+  'with',
+  'after',
+  'before',
+  'from',
+  'daily',
+  'now',
+  'once',
+  'so',
+  'it',
+  'is',
+  'will',
+  'should',
+  'screen',
+  'page',
+  'see',
+  'show',
+  'dashboard',
+] as const;
 
 /** Horizontal whitespace only — a newline or any punctuation must break. */
 const AFTER_APP_HORIZONTAL_WS = /^[ \t]+/;
@@ -144,42 +185,39 @@ function appStoreOpenHasPresenceTail(afterStore: string): boolean {
   return new RegExp('^' + OPEN_APPS_APP_STORE_PRESENCE_TAIL_SOURCE, 'i').test(afterStore);
 }
 
-type NamedAppHit = 'called' | 'capitalized';
-
-function namedAppHitAfter(rest: string): NamedAppHit | null {
-  if (new RegExp('^' + OPEN_APPS_NAMED_APP_CALLED_SOURCE, 'i').test(rest)) return 'called';
-  // Case-sensitive: do not pass an `i` flag here.
-  const cap = new RegExp('^' + OPEN_APPS_NAMED_APP_PROPER_NAME_SOURCE + String.raw`\b`).exec(rest);
-  if (!cap) return null;
-  // "open the App Store …" is a capitalized-token hit on "Store"; keep the
-  // reviewed presence-tail exclusion so we do not recapture those forms.
-  if (/^store$/i.test(cap[0]) && appStoreOpenHasPresenceTail(rest.slice(cap[0].length))) return null;
-  return 'capitalized';
+function isAfterAppDenied(word: string): boolean {
+  if (word === 'settings') return true;
+  if (word.toLowerCase() === 'settings') return false;
+  return (OPEN_APPS_AFTER_APP_DENYLIST as readonly string[]).includes(word.toLowerCase());
 }
 
-function eachNamedAppRest(text: string, pred: (rest: string) => boolean): boolean {
+function afterAppIsTerminal(rest: string): boolean {
+  if (rest === '') return true;
+  if (/^[\n\r]/.test(rest)) return true;
+  if (/^[.,;:!?…'"“”‘’()\[\]{}\-—–/\\]/.test(rest)) return true;
+  return false;
+}
+
+/**
+ * Origin/main's `open (the)? app` capture, minus (a) end-of-text / punctuation /
+ * newline and (b) the reviewed denylist. `called`/`named` stay allowed.
+ */
+export function openNamedAppAsked(text: string): boolean {
   const openRe = new RegExp(String.raw`\b(?:` + OPEN_APPS_NAMED_APP_OPEN_SOURCE + String.raw`)\b`, 'gi');
   let m: RegExpExecArray | null;
   while ((m = openRe.exec(text))) {
     const after = text.slice(m.index + m[0].length);
-    if (!AFTER_APP_HORIZONTAL_WS.test(after)) continue;
     const rest = after.replace(AFTER_APP_HORIZONTAL_WS, '');
-    if (pred(rest)) return true;
+    if (rest === '') continue; // (a) end of text
+    if (afterAppIsTerminal(rest)) continue; // (a) newline or punctuation
+    if (/^store\b/i.test(rest) && appStoreOpenHasPresenceTail(rest.replace(/^store\b/i, ''))) continue;
+    if (new RegExp('^' + OPEN_APPS_NAMED_APP_CALLED_SOURCE, 'i').test(rest)) return true;
+    const word = /^[A-Za-z0-9][A-Za-z0-9'_-]*/.exec(rest);
+    if (!word) continue;
+    if (isAfterAppDenied(word[0])) continue; // (b) denylist
+    return true;
   }
   return false;
-}
-
-/** True when `open (the) app` is followed by called/named + a name, or a capitalized app name. */
-export function openNamedAppAsked(text: string): boolean {
-  return eachNamedAppRest(text, (rest) => namedAppHitAfter(rest) !== null);
-}
-
-/**
- * The capitalized-token path only. Every prompt this accepts must also be an
- * origin/main hit — asserted by the two-sided gate.
- */
-export function openNamedAppCapitalizedTokenAsked(text: string): boolean {
-  return eachNamedAppRest(text, (rest) => namedAppHitAfter(rest) === 'capitalized');
 }
 
 /** True when the prompt asks to open another app, WhatsApp, the App Store, or the OS app drawer. */
@@ -258,9 +296,9 @@ export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
     // (in-app navigation), not another app. Plural "open apps" / "open the apps" still match.
     // `open the app store` is named explicitly so dropping singular `open the app` does not
     // lose origin/main captures; reviewed presence tails (listing / screenshots / release /
-    // release notes / listing page) are applied by `openAppsAsked`. Named-app recovery
-    // (`open the app Instagram` / `open the app called Spotify`) is also applied there:
-    // the capitalized-token test must stay case-sensitive and cannot live in this `i` regex.
+    // release notes / listing page) are applied by `openAppsAsked`. Singular `open (the)? app`
+    // keeps origin/main's capture except (a) end-of-text / punctuation / newline and (b) the
+    // reviewed after-app denylist (settings is lowercase-only). `called`/`named` stay allowed.
     // Play Store / go-to / link / redirect / kholo / launch-store opens are Q-2649. `asks`
     // is documentation; requestedCapabilities routes this row through openAppsAsked.
     asks: new RegExp(String.raw`\b(?:` + OPEN_APPS_CORE_SOURCE + String.raw`|app\s+khol\w*|khol\s+do|` + OPEN_APPS_APP_STORE_OPEN_SOURCE + String.raw`|` + OPEN_APPS_APP_DRAWER_OPEN_SOURCE + String.raw`)\b`, 'i'),

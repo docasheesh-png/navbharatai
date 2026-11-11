@@ -13,14 +13,14 @@ import {
   OPEN_APPS_APP_DRAWER_OPEN_SOURCE,
   OPEN_APPS_NAMED_APP_OPEN_SOURCE,
   OPEN_APPS_NAMED_APP_CALLED_SOURCE,
-  OPEN_APPS_NAMED_APP_PROPER_NAME_SOURCE,
-  openNamedAppCapitalizedTokenAsked,
+  OPEN_APPS_AFTER_APP_DENYLIST,
 } from '../src/server/AgentV3/nativeCapabilities';
 import {
   BR1974_PROMPT,
   SAME_CLASS_OPEN_APPS,
   OPPOSITE_NOT_OPEN_APPS,
   NAMED_APP_REVIEW_REPROS,
+  NAMED_APP_CASUAL_REPROS,
   NAMED_APP_SENTENCE_CASE_PITFALLS,
 } from './aWhatsAppNumberIsNotAnOpenAppsRequest.test';
 
@@ -54,6 +54,28 @@ function uniquePrompts(items: readonly string[]): string[] {
  * Small and justified — WhatsApp identity fields, singular launch-this-app language,
  * and the reviewed App Store presence tails.
  */
+
+const COMMON_LOWERCASE_APP_NAMES = [
+  'instagram', 'youtube', 'spotify', 'gmail', 'maps',
+  'imessage', 'ebay', 'netflix', 'telegram', 'facebook',
+  'twitter', 'tiktok', 'snapchat', 'uber', 'chrome',
+  'safari', 'photos', 'clock', 'calculator', 'whatsapp',
+  'reddit', 'discord', 'zoom', 'slack',
+] as const;
+
+function generatedLowercaseAppPhrases(): string[] {
+  const out: string[] = [];
+  for (const name of COMMON_LOWERCASE_APP_NAMES) {
+    out.push(`open the app ${name}`);
+    out.push(`open app ${name}`);
+  }
+  return out;
+}
+
+function generatedDenylistPhrases(): string[] {
+  return OPEN_APPS_AFTER_APP_DENYLIST.flatMap((word) => [`open the app ${word}`, `open app ${word}`]);
+}
+
 export const REVIEWED_MUST_NOT_MATCH = [
   // WhatsApp number / id / phone fields (the BR1974 report class).
   BR1974_PROMPT,
@@ -83,6 +105,8 @@ export const REVIEWED_MUST_NOT_MATCH = [
   'open the App Store release notes',
   'open the App Store listing page',
   'please open the App Store listing page',
+  // Generated: open (the)? app + every denylist word.
+  ...generatedDenylistPhrases(),
 ] as const;
 
 /**
@@ -145,7 +169,10 @@ function wholeRegressionCorpus(): string[] {
     ...SIX_LOST_ORIGIN_MAIN_REPROS,
     ...PLAY_STORE_REVIEW_REPROS,
     ...NAMED_APP_REVIEW_REPROS,
+    ...NAMED_APP_CASUAL_REPROS,
     ...NAMED_APP_SENTENCE_CASE_PITFALLS,
+    ...generatedLowercaseAppPhrases(),
+    ...generatedDenylistPhrases(),
     BR1974_PROMPT,
     'open the App Store after it is released in the Play Store',
     'open the App Store version of our game',
@@ -174,11 +201,20 @@ describe('open-apps: exported sources', () => {
     expect(OPEN_APPS_NAMED_APP_CALLED_SOURCE).toContain('called');
     expect(OPEN_APPS_NAMED_APP_CALLED_SOURCE).toContain('named');
     expect(OPEN_APPS_NAMED_APP_CALLED_SOURCE).toContain('[ \\t]+');
-    expect(OPEN_APPS_NAMED_APP_PROPER_NAME_SOURCE).toBe('[A-Z][A-Za-z0-9]*');
+    expect(OPEN_APPS_AFTER_APP_DENYLIST).toContain('to');
+    expect(OPEN_APPS_AFTER_APP_DENYLIST).toContain('first');
+    expect(OPEN_APPS_AFTER_APP_DENYLIST).toContain('settings');
+    expect(OPEN_APPS_AFTER_APP_DENYLIST).toContain('every');
+    expect(OPEN_APPS_AFTER_APP_DENYLIST).toContain('see');
+    expect(OPEN_APPS_AFTER_APP_DENYLIST).toContain('show');
+    expect(OPEN_APPS_AFTER_APP_DENYLIST).toContain('dashboard');
+    expect([...OPEN_APPS_AFTER_APP_DENYLIST]).not.toContain('instagram');
+    expect([...OPEN_APPS_AFTER_APP_DENYLIST]).not.toContain('youtube');
     const namedSrc = readFileSync(join(__dirname, '..', 'src/server/AgentV3/nativeCapabilities.ts'), 'utf8');
-    expect(namedSrc).toContain("new RegExp('^' + OPEN_APPS_NAMED_APP_PROPER_NAME_SOURCE + String.raw`\\b`)");
-    expect(namedSrc).not.toMatch(/OPEN_APPS_NAMED_APP_PROPER_NAME_SOURCE \+ String\.raw`\\b`, 'i'/);
+    expect(namedSrc).toContain("if (word === 'settings') return true;");
+    expect(namedSrc).toContain('if (rest === \'\') continue; // (a) end of text');
     expect(namedSrc).toContain('const AFTER_APP_HORIZONTAL_WS = /^[ \\t]+/;');
+    expect(namedSrc).not.toContain('OPEN_APPS_NAMED_APP_PROPER_NAME_SOURCE');
     const here = join(__dirname, '..');
     expect(readFileSync(join(here, 'src/main.tsx'), 'utf8')).not.toMatch('nativeCapabilities');
     expect(readFileSync(join(here, 'src/App.tsx'), 'utf8')).not.toMatch('nativeCapabilities');
@@ -280,7 +316,7 @@ describe('open-apps: Q-2649 store forms stay unmatched', () => {
 describe('open-apps: named-app recovery vs sentence-case pitfalls', () => {
   it('matches the reviewed named-app repros that origin/main captured', () => {
     const mustNot = new Set<string>(REVIEWED_MUST_NOT_MATCH);
-    for (const p of NAMED_APP_REVIEW_REPROS) {
+    for (const p of [...NAMED_APP_REVIEW_REPROS, ...NAMED_APP_CASUAL_REPROS]) {
       expect(matchedOnOriginMain(p), `origin/main should have captured: ${p}`).toBe(true);
       expect(mustNot.has(p), `named-app repro must not be on the must-not-match list: ${p}`).toBe(false);
       expect(ids(p), p).toContain('open-apps');
@@ -293,6 +329,7 @@ describe('open-apps: named-app recovery vs sentence-case pitfalls', () => {
     }
     expect(ids('open the app')).not.toContain('open-apps');
     expect(ids('open the app settings')).not.toContain('open-apps');
+    expect(ids('open the app to see')).not.toContain('open-apps');
     expect(ids('open the app to see the dashboard')).not.toContain('open-apps');
     expect(ids('open the app first')).not.toContain('open-apps');
     expect(ids('when I open the app, show the welcome screen')).not.toContain('open-apps');
@@ -301,15 +338,35 @@ describe('open-apps: named-app recovery vs sentence-case pitfalls', () => {
     expect(ids(BR1974_PROMPT)).not.toContain('open-apps');
   });
 
-  it('any capitalized-token capture is a subset of what origin/main captured', () => {
+  it('every capture in the corpus is an origin/main hit', () => {
     const corpus = wholeRegressionCorpus();
-    let capHits = 0;
+    let hits = 0;
     for (const p of corpus) {
-      if (openNamedAppCapitalizedTokenAsked(withoutMachineText(p))) {
-        capHits += 1;
-        expect(matchedOnOriginMain(p), `capitalized-token capture must be an origin/main hit: ${p}`).toBe(true);
+      if (ids(p).includes('open-apps')) {
+        hits += 1;
+        expect(matchedOnOriginMain(p), `capture must be an origin/main hit: ${p}`).toBe(true);
       }
     }
-    expect(capHits).toBeGreaterThan(5);
+    expect(hits).toBeGreaterThan(20);
+  });
+
+  it('generated open-the-app + lowercase app names match like origin/main', () => {
+    const phrases = generatedLowercaseAppPhrases();
+    expect(phrases.length).toBeGreaterThan(20);
+    for (const p of phrases) {
+      expect(matchedOnOriginMain(p), p).toBe(true);
+      expect(ids(p), p).toContain('open-apps');
+    }
+  });
+
+  it('generated open-the-app + every denylist word stays unmatched', () => {
+    const phrases = generatedDenylistPhrases();
+    expect(phrases.length).toBe(OPEN_APPS_AFTER_APP_DENYLIST.length * 2);
+    for (const p of phrases) {
+      expect(matchedOnOriginMain(p), `origin/main should have captured (we exclude it): ${p}`).toBe(true);
+      expect(ids(p), p).not.toContain('open-apps');
+    }
+    expect(ids('open the app Settings on the phone')).toContain('open-apps');
+    expect(ids('open the app settings')).not.toContain('open-apps');
   });
 });

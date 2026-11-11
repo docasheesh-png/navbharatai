@@ -124,3 +124,11 @@ Ninth follow-up (reviewer FAIL at `c98a731b8` — dropping singular `open the ap
 - Bare `open the app`, lowercase `open the app settings`, `open the app to see…`, `open the app first`, `when I open the app, show…`, `whenever I open the app`, `I open the app every morning`, the WhatsApp set, and the BR1974 Chess Squad prompt stay unmatched.
 - A newline or any punctuation after `app` breaks the match: `When I open the app\nShow the welcome screen` and `open the app. Then…` stay out. The capitalized-token test is case-sensitive (`[A-Z]` without the `i` flag) so a JS `i` class cannot recapture `open the app settings`.
 - The two-sided gate now includes those repros and pitfalls, and asserts that every capitalized-token capture is a subset of what origin/main captured.
+
+Tenth follow-up (reviewer FAIL at `3562741e4` — capitalized-token-only recovery dropped lowercase names origin/main captured):
+
+- Invert the after-`app` rule so it cannot regress versus main: keep `open(?:\s+the)?\s+app`, and exclude only when what follows is (a) end of text, punctuation, or a newline, or (b) a reviewed denylist of function/continuation words.
+- Final denylist: to, first, settings (lowercase only), every, and, then, again, when, for, in, on, with, after, before, from, daily, now, once, so, it, is, will, should, screen, page, see, show, dashboard. `settings` is case-sensitive so "open the app Settings on the phone" still matches. `called`/`named` stay allowed.
+- iMessage, eBay, and lowercase instagram / youtube / spotify / gmail / maps / `open app spotify` match again, along with the twelve earlier named-app repros.
+- Bare `open the app`, `open the app settings`, `open the app to see`, `open the app first`, `when I open the app, show`, `whenever I open the app`, `I open the app every morning`, `When I open the app\nShow…`, `open the app. Then…`, the WhatsApp set, and the Chess Squad prompt stay unmatched.
+- The two-sided gate asserts every capture is an origin/main hit, and every main hit not on the reviewed must-not-match list still matches. A generated corpus covers `open the app` / `open app` plus common lowercase app names, and plus every denylist word.

@@ -80,6 +80,18 @@ export const NAMED_APP_REVIEW_REPROS = [
   'open the app Settings on the phone',
 ] as const;
 
+/** Casual / lowercase names origin/main captured via `open the app`. */
+export const NAMED_APP_CASUAL_REPROS = [
+  'open the app iMessage',
+  'open the app eBay',
+  'open the app instagram',
+  'open the app youtube',
+  'open the app spotify',
+  'open the app gmail',
+  'open the app maps',
+  'open app spotify',
+] as const;
+
 /** Sentence-case / newline / punctuation after singular `open the app` must not match. */
 export const NAMED_APP_SENTENCE_CASE_PITFALLS = [
   'When I open the app\nShow the welcome screen',
@@ -127,6 +139,7 @@ export const SAME_CLASS_OPEN_APPS = [
   'open the App Store and publish karna',
   'open the App Store version of our game',
   ...NAMED_APP_REVIEW_REPROS,
+  ...NAMED_APP_CASUAL_REPROS,
 ] as const;
 
 export const OPPOSITE_NOT_OPEN_APPS = [
@@ -331,6 +344,9 @@ describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', ()
     expect(requestedCapabilities('play store pe daalna hai').map((c) => c.id)).not.toContain('open-apps');
     // Named-app launches origin/main captured via `open the app` + a name.
     for (const p of NAMED_APP_REVIEW_REPROS) {
+      expect(requestedCapabilities(p).map((c) => c.id), p).toContain('open-apps');
+    }
+    for (const p of NAMED_APP_CASUAL_REPROS) {
       expect(requestedCapabilities(p).map((c) => c.id), p).toContain('open-apps');
     }
     expect(requestedCapabilities('open the app Settings on the phone').map((c) => c.id)).toContain('open-apps');

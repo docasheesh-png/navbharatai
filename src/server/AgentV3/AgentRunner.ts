@@ -1437,6 +1437,10 @@ export class AgentRunner {
                 // the actionable next step (e.g. the weak-tier "switch to a stronger tier" guidance). The user
                 // just gets one honest, calm headline. AGENTV3_VERBOSE_READINESS=on restores the old detailed
                 // summary (blockers dump + labelled agent prose) for deep debugging.
+                const starterBlocker = readiness.blockers.some(isStarterBlocker);
+                // Preserve the full final turn before starterSummary shortens the user-facing status.
+                // A prior read_file is not implementation work, but it must not erase a question the route records.
+                if (starterBlocker && !starvedTurn && turn.text.trim()) modelAnswer = turn.text.trim();
                 if ((process.env.AGENTV3_VERBOSE_READINESS ?? '').trim().toLowerCase() === 'on') {
                   const blockers = readiness.blockers.length
                     ? ` Must fix before it's production-ready: ${readiness.blockers.join('; ')}.`
@@ -1446,7 +1450,7 @@ export class AgentRunner {
                     ? `\n\n———\nWhat the agent reported (may overstate — the readiness verdict above is the real status):\n\n${claim}`
                     : '';
                   summary = `⚠️ Readiness gate: NOT READY — score ${readiness.score}/100. This build is not production-ready yet.${blockers}${claimBlock}`;
-                } else if (readiness.blockers.some(isStarterBlocker)) {
+                } else if (starterBlocker) {
                   // Nothing was built — "a couple of things still need fixing" would invent a small fix
                   // list for an app that does not exist, and discard the model's own finding of WHY
                   // (autopsy 0d297b25: it had correctly found the project was never in the workspace).

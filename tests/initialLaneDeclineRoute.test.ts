@@ -257,6 +257,8 @@ async function runCaller(options: { files: Record<string, string>; replies?: str
     // These presentation-only fakes are reached by NON-decline controls, never used to decide admission.
     answerOnlyNow: () => false, assessBuildInput: () => ({ buildable: true }), freeTierUpsellMessage: () => 'SYNTHETIC_UPSELL',
     interruptedBeforeAnyVerdict, zeroBillReasonFor, buildBillingLabel, chargeRecordFields, proSandboxFee, proSandboxFeeFields,
+    // The production setBilling/fee lines may mention this 2026-11-11 flag; decline cases never apply it.
+    surplusStopFloor: null,
     usdInrRate: () => 80, email: undefined, isAgentV3FreeUser: () => false, billingActive: true,
     walletDebit: null, decidedRealCostUsd: 1, decidedSandboxUsd: 0, onlyOpus: false, noClaudeBuild: false,
     leakedClaudeProvider: null, projectContinue: {}, buildId: 'synthetic-build', promptHash: 'synthetic-prompt',

@@ -99,11 +99,13 @@ describe('fenced atomic Qubax observation publication', () => {
 });
 
 describe('opt-in scheduling and source-only runtime', () => {
-  it('does not activate because a Qubax key or inference flag is present', async () => {
+  it('is on unless the operator sets an explicit zero', async () => {
     const env = { QUBAX_API_KEY: 'synthetic-only', QUBAX_ENABLED: '1' }, fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
-    expect(qubaxPriceFeedEnabled(env)).toBe(false);
-    expect(await refreshQubaxPriceFeed(env)).toEqual({ status: 'disabled' });
+    expect(qubaxPriceFeedEnabled(env)).toBe(true);
+    expect(qubaxPriceFeedEnabled({})).toBe(true);
+    expect(qubaxPriceFeedEnabled({ ...env, QUBAX_PRICE_FEED_ENABLED: '0' })).toBe(false);
+    expect(await refreshQubaxPriceFeed({ QUBAX_PRICE_FEED_ENABLED: '0' })).toEqual({ status: 'disabled' });
     expect(getServerDb).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
   });
   it('registers startup and 4-minute exclusive tick without modifying existing jobs', async () => {
@@ -118,7 +120,7 @@ describe('opt-in scheduling and source-only runtime', () => {
     env.QUBAX_PRICE_FEED_ENABLED = '0'; getServerDb.mockClear();
     await job.handler(); expect(getServerDb).not.toHaveBeenCalled();
     const disabled = { register: vi.fn(), runNow: vi.fn() };
-    registerQubaxPriceFeed(disabled, {}); expect(disabled.register).not.toHaveBeenCalled();
+    registerQubaxPriceFeed(disabled, { QUBAX_PRICE_FEED_ENABLED: '0' }); expect(disabled.register).not.toHaveBeenCalled();
   });
   it('participates in the existing authenticated external tick and bypasses only the generic lease', () => {
     const server = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');

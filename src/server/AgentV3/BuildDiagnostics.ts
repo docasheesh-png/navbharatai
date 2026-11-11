@@ -689,8 +689,10 @@ export interface PreviewErrorRecord {
 /**
  * Billing & tier facts for THIS build (admin 2026-07-11: "free user / paid user, app kisne banaya,
  * kaun se providers fail hue" — the 2-day billing/provider system must show up in the report).
- * Written at settle time from the REAL charge (never an estimate); absent on a build that never
- * reached settle (e.g. a pre-stream refusal).
+ * Written at settle time from the settled charge. Ordinary builds record a verified figure, never
+ * an estimate. The owner-approved 2026-11-11 exception (BR2279 Weak/Surplus user-stop token floor)
+ * may record an estimated real cost; those rows set `realCostEstimated: true`.
+ * Absent on a build that never reached settle (e.g. a pre-stream refusal).
  */
 export interface BuildBillingRecord {
   /** Who the build ran for, from `buildBillingLabel` (one rule at both settle paths): 'free-list (admin/tester)' |
@@ -720,6 +722,8 @@ export interface BuildBillingRecord {
    * stored call log and says so.
    */
   realCostUsd?: number;
+  /** True when `realCostUsd` is the 2026-11-11 Weak/Surplus stop token-floor estimate, not a settled receipt. */
+  realCostEstimated?: true;
   /** Internal VM expense at the configured hourly rate (USD); 0 is unavailable if no rate exists. Not the customer service fee. */
   sandboxCostUsd?: number;
   preSandboxSubtotalUsd?: number;

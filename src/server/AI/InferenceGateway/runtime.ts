@@ -51,6 +51,11 @@ export { InferenceGatewayTerminalError } from './dispatchBoundary';
 export function isGatewayTerminalError(error: unknown): error is InferenceGatewayTerminalError {
   return error instanceof InferenceGatewayTerminalError;
 }
+/** Missing catalog, funding, or evidence. These happen before a provider call and must not blank public chat. */
+const GATEWAY_SETUP_MISS = new Set(['authority-store-unavailable', 'trusted-runtime-unavailable', 'context-unverified', 'funding-integration-unavailable', 'invalid-paid-cap', 'capability-integration-unavailable', 'fixed-chain-ingress-authority-unavailable']);
+export function isGatewaySetupMiss(error: unknown): boolean {
+  return isGatewayTerminalError(error) && GATEWAY_SETUP_MISS.has(error.reason);
+}
 interface GatewayIngressIdentity { readonly payloadBytes: number; readonly uid: string | null; readonly cohortSelected: boolean; readonly surfaces: readonly Surface[]; readonly guest?: GuestInferenceAdmission; readonly selectedGuest?: boolean; }
 export type GatewayGuestContext = Pick<GuestInferenceAdmission, 'kind' | 'principalId' | 'expiresAtMs'>;
 const identities = new AsyncLocalStorage<Readonly<GatewayIngressIdentity>>();

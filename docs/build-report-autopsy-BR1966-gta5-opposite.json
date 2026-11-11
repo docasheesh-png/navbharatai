@@ -1,0 +1,837 @@
+[
+  {
+    "prompt": "Build a calculator",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "A todo list app",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Make a timer",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "stopwatch app please",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "weather app for Delhi",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "notes app with folders",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "invoice generator for my shop",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "quiz app for students",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "flashcard app",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "habit tracker",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "pomodoro timer",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "unit converter",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "password generator",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "QR code generator",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "landing page for my bakery",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "portfolio website",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "business card site",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "recipe book",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "menu card for a cafe",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "countdown clock",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "expense tracker",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "budget app",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "offline dictionary",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "survey form for feedback",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "poll app for a classroom",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Make a notepad",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "counter app",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "tip calculator",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "age calculator",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "BMI calculator",
+    "tag": "ordinary-en",
+    "class": "opposite"
+  },
+  {
+    "prompt": "calculator banao",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "mujhe timer chahiye",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "ek todo list banao",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "weather app banao",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "notes app chahiye",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "invoice banana hai",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "quiz banao",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "flashcard app banao",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "habit tracker banao",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "pomodoro timer chahiye",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "ek calculator app banana hai",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "mujhe notes likhne wali app chahiye",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "simple weather dekho",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "kharcha tracker banao",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "bill invoice generator",
+    "tag": "ordinary-hi",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Build a game with indian map",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Mujhe higher exam hard exam analyse app banana hai",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Continue from where you left off and finish/fix the build so the app works end-to-end.",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "html code of youtube seo generator",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "I want to make a game like gta 5",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Mujhe youtube ki tarah ek app Banakar do",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "school ERP with students, teachers, attendance, fees, exams, timetable, library, transport",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "youtube seo generator",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "YouTube tag generator",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Pura gta wala game banaa do",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Pura gta 5 wala game banaa do",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gta wala game banao",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gta jaisa game banao",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "GTA jaisa game banao",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "grand theft auto wala game",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gta v wala game",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gta 5 jaisa game",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "I want to make a game like GTA V",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "make a game like gta",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Build me an Instagram",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "make a WhatsApp clone",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "zomato jaisa app",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "make it like Forza",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "PUBG style graphics",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Ab main us app par khud kuch ficar cenj kar sakta hu aur Koi nahin",
+    "tag": "neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gta50 wala game",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gta500 wala game",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gta51 high score board",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gta5cheats website",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "download gta5cheats",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gta5guide download page",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "mygta5game",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "thegta5experience",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "a data aggregator",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "digital clock",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "digital portfolio",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gtable reservation app",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "metadata viewer",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "navigate to settings",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "aggregate sales dashboard",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gta6 wala game",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gta4 wala game",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gtavc wala game",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gta10 leaderboard",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gta55 tournament",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "install gtable",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "digital art gallery",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "aggregation pipeline viewer",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "instagram table booking",
+    "tag": "lookalike",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Build a racing game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "driving game banao",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "open world village game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "first person maze",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "fps game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "minecraft style game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "battle royale game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "flight simulator",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "card game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "board game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "puzzle game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "ludo game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "chess game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "snake game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "tic tac toe",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Build a 2d platformer",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "typing race game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Build a quiz about cars",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "memory card game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "ek 3d game banao",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "make a 3d game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "three dimensional maze",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "a village farming game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "gaon wala game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Build a quiz",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "uno card game",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "sudoku puzzle",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "wordle clone",
+    "tag": "game-neighbour",
+    "class": "opposite"
+  },
+  {
+    "prompt": "YouTube SEO generator for my channel",
+    "tag": "tool-mention",
+    "class": "opposite"
+  },
+  {
+    "prompt": "instagram hashtag tool",
+    "tag": "tool-mention",
+    "class": "opposite"
+  },
+  {
+    "prompt": "WhatsApp click-to-chat widget",
+    "tag": "tool-mention",
+    "class": "opposite"
+  },
+  {
+    "prompt": "using YouTube urls in a playlist picker",
+    "tag": "tool-mention",
+    "class": "opposite"
+  },
+  {
+    "prompt": "GTA wiki",
+    "tag": "tool-mention",
+    "class": "opposite"
+  },
+  {
+    "prompt": "GTA tips and tricks",
+    "tag": "tool-mention",
+    "class": "opposite"
+  },
+  {
+    "prompt": "using GTA",
+    "tag": "tool-mention",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Open GTA",
+    "tag": "tool-mention",
+    "class": "opposite"
+  },
+  {
+    "prompt": "youtube login page tutorial",
+    "tag": "tool-mention",
+    "class": "opposite"
+  },
+  {
+    "prompt": "via Instagram API",
+    "tag": "tool-mention",
+    "class": "opposite"
+  },
+  {
+    "prompt": "a real-time multiplayer 3d game",
+    "tag": "realism-fp",
+    "class": "opposite"
+  },
+  {
+    "prompt": "realtime chat in the game",
+    "tag": "realism-fp",
+    "class": "opposite"
+  },
+  {
+    "prompt": "let players pay with real money",
+    "tag": "realism-fp",
+    "class": "opposite"
+  },
+  {
+    "prompt": "test it with real users",
+    "tag": "realism-fp",
+    "class": "opposite"
+  },
+  {
+    "prompt": "connect real data from an API",
+    "tag": "realism-fp",
+    "class": "opposite"
+  },
+  {
+    "prompt": "a 3d game with real-time multiplayer",
+    "tag": "realism-fp",
+    "class": "opposite"
+  },
+  {
+    "prompt": "ek 3d racing game banao",
+    "tag": "realism-fp",
+    "class": "opposite"
+  },
+  {
+    "prompt": "build me a car racing game",
+    "tag": "realism-fp",
+    "class": "opposite"
+  },
+  {
+    "prompt": "real time leaderboard",
+    "tag": "realism-fp",
+    "class": "opposite"
+  },
+  {
+    "prompt": "Build a shop ERP with:\n1. Responsive POS screen for tablets\n2. Keep existing order history after migration\n3. Inventory sync across warehouses\n4. GST invoice export\n5. Supplier payments and COD refunds\n6. Staff attendance and payroll\n7. Customer loyalty points\n8. Delivery partner assignment",
+    "tag": "shop-erp",
+    "class": "opposite"
+  },
+  {
+    "prompt": "School app with:\n1. Student roster\n2. Teacher timetable\n3. Attendance register\n4. Fees collection\n5. Exam marks\n6. Library catalogue\n7. Transport routes\n8. Handling customer refunds for COD orders",
+    "tag": "eight-item",
+    "class": "opposite"
+  },
+  {
+    "prompt": "School app with:\n1. Student roster\n2. Teacher timetable\n3. Attendance register\n4. Fees collection\n5. Exam marks\n6. Library catalogue\n7. Transport routes\n8. Handling loading screens for the exam evaluator",
+    "tag": "eight-item",
+    "class": "opposite"
+  },
+  {
+    "prompt": "School app with:\n1. Student roster\n2. Teacher timetable\n3. Attendance register\n4. Fees collection\n5. Exam marks\n6. Library catalogue\n7. Transport routes\n8. Handling timeouts from the payment gateway webhook",
+    "tag": "eight-item",
+    "class": "opposite"
+  },
+  {
+    "prompt": "School app with:\n1. Student roster\n2. Teacher timetable\n3. Attendance register\n4. Fees collection\n5. Exam marks\n6. Library catalogue\n7. Transport routes\n8. Handle errors.",
+    "tag": "eight-item",
+    "class": "opposite"
+  },
+  {
+    "prompt": "School app with:\n1. Student roster\n2. Teacher timetable\n3. Attendance register\n4. Fees collection\n5. Exam marks\n6. Library catalogue\n7. Transport routes\n8. Handling errors properly",
+    "tag": "eight-item",
+    "class": "opposite"
+  },
+  {
+    "prompt": "bmi calculator with history",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "water reminder app",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "color picker tool",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "markdown previewer",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "json formatter",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "regex tester",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "lorem ipsum generator",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "random name picker",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "dice roller",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "coin flip app",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "yes no spinner",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "attendance tally counter",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "simple blog",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "guestbook",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "contact form",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "rsvp page",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "wedding invitation site",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "pet names list",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "grocery list",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  },
+  {
+    "prompt": "shopping checklist",
+    "tag": "ordinary-extra",
+    "class": "opposite"
+  }
+]

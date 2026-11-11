@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Firestore } from 'firebase-admin/firestore';
-import { qubaxChatBinding, qubaxOwnerDispatch, qubaxReviewedApprovalCeiling, runApprovedQubaxChat, type QubaxChatOptions } from '../src/server/lib/qubax';
+import { qubaxChatBinding, qubaxReviewedApprovalCeiling, runApprovedQubaxChat, type QubaxChatOptions } from '../src/server/lib/qubax';
+import * as market from '../src/server/lib/qubaxMarket';
 import * as selector from '../src/server/lib/qubaxSelector';
 const env = { QUBAX_ENABLED: '1', QUBAX_API_KEY: 'synthetic-never-live-qubax-secret' };
 function fixture(stream = false) {
@@ -20,7 +21,8 @@ function fixture(stream = false) {
     chain = pending.then(() => {}, () => {}); return pending;
   } } as unknown as Firestore;
   const releaseUndispatched = vi.fn().mockResolvedValue(undefined), reserve = vi.fn().mockResolvedValue({ releaseUndispatched });
-  const options: QubaxChatOptions = { db, uid: 'owner', requestId: 'request-one', privateTurn: true, healthTurn: true, body, signal: new AbortController().signal, reserve };
+  const options: QubaxChatOptions = { db, uid: 'owner', requestId: 'request-one', privateTurn: true, healthTurn: true, body, signal: new AbortController().signal, reserve,
+    expectedSelection: { modelId: selection.modelId, modelRevision: selection.modelRevision, maximumNanoUsd: selection.maximumNanoUsd } };
   return { options, binding, selection, reserve, releaseUndispatched, approval: () => approval, setApproval: (a: any) => { approval = a; } };
 }
 const answer = () => new Response(JSON.stringify({ model: 'reviewed-model', choices: [{ index: 0, message: { content: 'नमस्ते, कैसे मदद करूँ?' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 10 } }), { headers: { 'content-type': 'application/json' } });
@@ -166,32 +168,71 @@ describe('Qubax exact evidence-bound single dispatch', () => {
   });
 });
 
-describe('owner-level Qubax enable', () => {
-  const ownerEnv = { ...env, QUBAX_MODEL: 'qubax-text', QUBAX_MAX_USD_PER_REQUEST: '0.02' };
+describe('Qubax tries the top three eligible models on one turn', () => {
   const history = [
     { role: 'user', content: 'Earlier fact: my name is Meera.' },
     { role: 'assistant', content: 'Noted.' },
     { role: 'user', content: 'What is my name?' },
   ];
-  it('does not authorize a call without a model or inside the one-dollar ceiling', () => {
-    expect(qubaxOwnerDispatch(env)).toBeNull();
-    expect(qubaxOwnerDispatch({ ...ownerEnv, QUBAX_MODEL: '' })).toBeNull();
-    expect(qubaxOwnerDispatch({ ...ownerEnv, QUBAX_MODEL: 'has space' })).toBeNull();
-    expect(qubaxOwnerDispatch({ ...ownerEnv, QUBAX_MAX_USD_PER_REQUEST: '1.01' })).toBeNull();
-    expect(qubaxOwnerDispatch({ ...ownerEnv, QUBAX_MAX_USD_PER_REQUEST: '0' })).toBeNull();
+  const choice = (modelId: string, successRateBps: number, maxLatencyMs: number): market.QubaxMarketChoice => ({
+    modelId, inputNanoUsdPerMillion: 100, outputNanoUsdPerMillion: 200, officialInputNanoUsdPerMillion: 2_000, officialOutputNanoUsdPerMillion: 4_000,
+    discountBps: 9_500, contextTokens: 8_000, successRateBps, maxLatencyMs, probedAtMs: Date.now(), expiresAtMs: Date.now() + 60_000, backup: false,
   });
-  it('sends the whole history once to the owner model and reserves only the server cap', async () => {
-    const db = { doc: vi.fn(), runTransaction: vi.fn() };
-    const reserve = vi.fn().mockResolvedValue({ releaseUndispatched: vi.fn() });
-    network.mockResolvedValue(new Response(JSON.stringify({ model: 'qubax-text', choices: [{ index: 0, message: { content: 'Meera.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 20, completion_tokens: 2 } }), { headers: { 'content-type': 'application/json' } }));
-    const result = await runApprovedQubaxChat({ db: db as unknown as Firestore, uid: 'signed-in-user', requestId: 'turn-2', privateTurn: true, healthTurn: false,
-      body: { messages: history, max_tokens: 128, stream: false }, signal: new AbortController().signal, reserve }, ownerEnv);
-    expect(result).toMatchObject({ kind: 'response', content: 'Meera.', model: 'qubax-text' });
-    expect(db.doc).not.toHaveBeenCalled();
-    expect(reserve).toHaveBeenCalledExactlyOnceWith(20_000_000);
-    const wire = JSON.parse(String(network.mock.calls[0][1]?.body));
-    expect(wire.model).toBe('qubax-text');
-    expect(wire.messages).toEqual(history);
-    expect(network).toHaveBeenCalledOnce();
+  const reply = (model: string, content: string) => new Response(JSON.stringify({ model, choices: [{ index: 0, message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 20, completion_tokens: 2 } }), { headers: { 'content-type': 'application/json' } });
+  const failed = () => new Response('no', { status: 503, headers: { 'content-type': 'text/plain' } });
+  async function send(eligible: market.QubaxMarketChoice[]) {
+    vi.spyOn(market, 'readQubaxMarketPlan').mockResolvedValue({ eligible, backup: null });
+    const release = vi.fn().mockResolvedValue(undefined);
+    const reserve = vi.fn().mockResolvedValue({ releaseUndispatched: release });
+    const db = { doc: vi.fn(() => ({})), runTransaction: vi.fn(async (run: (tx: { get: () => Promise<{ data: () => undefined }>; set: () => void }) => Promise<void>) => run({ get: async () => ({ data: () => undefined }), set: () => {} })) };
+    const result = await runApprovedQubaxChat({ db: db as unknown as Firestore, uid: 'signed-in-user', requestId: 'turn-2', privateTurn: false, healthTurn: false,
+      body: { messages: history, max_tokens: 128, stream: false }, signal: new AbortController().signal, reserve }, env);
+    const models = network.mock.calls.map(call => JSON.parse(String(call[1]?.body)).model as string);
+    const messages = network.mock.calls.map(call => JSON.parse(String(call[1]?.body)).messages);
+    return { result, reserve, release, models, messages };
+  }
+  it('uses the top model and the same history when that model answers', async () => {
+    network.mockResolvedValue(reply('best', 'Meera.'));
+    const sent = await send([choice('best', 10_000, 100), choice('second', 9_000, 100), choice('third', 8_000, 100)]);
+    expect(sent.result).toMatchObject({ kind: 'response', content: 'Meera.', model: 'best' });
+    expect(sent.models).toEqual(['best']); expect(sent.messages).toEqual([history]);
+    expect(sent.reserve).toHaveBeenCalledExactlyOnceWith(20_000_000, 'turn-2:q1'); expect(sent.release).not.toHaveBeenCalled();
+  });
+  it('releases the failed top try and answers with the second model', async () => {
+    network.mockResolvedValueOnce(failed()).mockResolvedValueOnce(reply('second', 'Meera.'));
+    const sent = await send([choice('best', 10_000, 100), choice('second', 9_000, 100), choice('third', 8_000, 100)]);
+    expect(sent.result).toMatchObject({ kind: 'response', model: 'second', content: 'Meera.' });
+    expect(sent.models).toEqual(['best', 'second']); expect(sent.messages).toEqual([history, history]);
+    expect(sent.release).toHaveBeenCalledOnce(); expect(sent.reserve).toHaveBeenNthCalledWith(2, 20_000_000, 'turn-2:q2');
+  });
+  it('reaches the third model only after the first two fail', async () => {
+    network.mockResolvedValueOnce(failed()).mockResolvedValueOnce(failed()).mockResolvedValueOnce(reply('third', 'Meera.'));
+    const sent = await send([choice('best', 10_000, 100), choice('second', 9_000, 100), choice('third', 8_000, 100)]);
+    expect(sent.result).toMatchObject({ kind: 'response', model: 'third' });
+    expect(sent.models).toEqual(['best', 'second', 'third']); expect(sent.release).toHaveBeenCalledTimes(2);
+  });
+  it('drops an English reply to a Hindi question and keeps the Hindi reply', async () => {
+    network.mockResolvedValueOnce(reply('best', 'Your name is Meera and this is a long English sentence.')).mockResolvedValueOnce(reply('second', 'आपका नाम मीरा है।'));
+    vi.spyOn(market, 'readQubaxMarketPlan').mockResolvedValue({ eligible: [choice('best', 10_000, 100), choice('second', 9_000, 100)], backup: null });
+    const release = vi.fn().mockResolvedValue(undefined);
+    const reserve = vi.fn().mockResolvedValue({ releaseUndispatched: release });
+    const db = { doc: vi.fn(() => ({})), runTransaction: vi.fn(async (run: (tx: { get: () => Promise<{ data: () => undefined }>; set: () => void }) => Promise<void>) => run({ get: async () => ({ data: () => undefined }), set: () => {} })) };
+    const hindi = [{ role: 'user', content: 'मेरा नाम क्या है?' }];
+    const result = await runApprovedQubaxChat({ db: db as unknown as Firestore, uid: 'signed-in-user', requestId: 'turn-hi', privateTurn: false, healthTurn: false,
+      body: { messages: hindi, max_tokens: 128, stream: false }, signal: new AbortController().signal, reserve }, env);
+    expect(result).toMatchObject({ kind: 'response', model: 'second', content: 'आपका नाम मीरा है।' });
+    expect(release).toHaveBeenCalledOnce();
+  });
+  it('stops after three failures and does not keep the holds', async () => {
+    network.mockResolvedValue(failed());
+    const sent = await send([choice('best', 10_000, 100), choice('second', 9_000, 100), choice('third', 8_000, 100)]);
+    expect(sent.result).toMatchObject({ kind: 'skipped', reason: 'qubax-tries-exhausted' });
+    expect(sent.models).toEqual(['best', 'second', 'third']); expect(sent.release).toHaveBeenCalledTimes(3); expect(sent.reserve).toHaveBeenCalledTimes(3);
+  });
+  it('does not invent a third try when only two models are eligible', async () => {
+    network.mockResolvedValueOnce(failed()).mockResolvedValueOnce(reply('second', 'Meera.'));
+    const sent = await send([choice('best', 10_000, 100), choice('second', 9_000, 100)]);
+    expect(sent.result).toMatchObject({ kind: 'response', model: 'second' });
+    expect(sent.models).toEqual(['best', 'second']); expect(network).toHaveBeenCalledTimes(2);
   });
 });

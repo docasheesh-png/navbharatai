@@ -99,6 +99,8 @@ export async function runApprovedMitrifyChain(options: {
   db: Firestore; uid: string; body: Record<string, unknown>; privateTurn: boolean; healthTurn: boolean;
   requestId: string; signal: AbortSignal; maxHttpAttempts?: number; onChunk?: (text: string) => void | Promise<void>; revalidate?: () => Promise<void>; beforeHttpDispatch?: () => void;
   reserve: (maximumNanoUsd: number) => Promise<null | { releaseUndispatched(): Promise<void> }>;
+  /** Admin Test Chat Bot only. User chat never passes this hook. */
+  onHttpError?: (detail: { status: number; body: string; requestId?: string }) => void;
 }, env: Env = process.env, log: Log = defaultLog): Promise<
   { kind: 'skipped'; reason: string } |
   { kind: 'response'; content: string; model: string; usage?: { inputTokens: number; outputTokens: number } }
@@ -157,7 +159,7 @@ export async function runApprovedMitrifyChain(options: {
     await untilCancelled(() => pendingHold, signal);
     signal.throwIfAborted();
     if (!hold) return { kind: 'skipped', reason: 'mitrify-budget' };
-    const result = await createMitrifyClient(requestEnv, log).chat(body, { signal, maxAttempts: maxHttpAttempts,
+    const result = await createMitrifyClient(requestEnv, log, options.onHttpError ? { onHttpError: options.onHttpError } : undefined).chat(body, { signal, maxAttempts: maxHttpAttempts,
       beforeAttempt: async () => {
         if (env.MITRIFY_CHAIN_ENABLED !== '1' || mitrifyChainBinding(options.uid, body, env).id !== binding.id) throw new MitrifyError('MITRIFY_APPROVAL_REVOKED');
         await untilCancelled(async () => { await options.revalidate?.(); }, signal);
@@ -301,7 +303,7 @@ function statusCode(status: number): string {
   return status === 401 ? 'MITRIFY_CONFIGURATION' : status === 400 ? 'MITRIFY_BAD_REQUEST' : `MITRIFY_HTTP_${status}`;
 }
 
-export function createMitrifyClient(env: Env = process.env, log: Log = defaultLog) {
+export function createMitrifyClient(env: Env = process.env, log: Log = defaultLog, hooks?: { onHttpError?: (detail: { status: number; body: string; requestId?: string }) => void }) {
   const config = mitrifyConfig(env);
   function endpoint(path: string): string {
     let url: URL;
@@ -334,8 +336,16 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
       log({ ...safeHeaders(response, config.apiKey), status: response.status, latencyMs: Date.now() - started, attempt });
       if (response.ok) return response;
       const retryAfter = response.headers.get('retry-after');
-      await response.body?.cancel();
-      if (![429, 503].includes(response.status) || attempt >= maxAttempts - 1) {
+      const willRetry = [429, 503].includes(response.status) && attempt < maxAttempts - 1;
+      if (!willRetry && hooks?.onHttpError) {
+        let body = '';
+        try { body = await response.text(); } catch { body = ''; }
+        const requestId = response.headers.get('x-request-id') || response.headers.get('request-id') || undefined;
+        try { hooks.onHttpError({ status: response.status, body: body.slice(0, 4000), requestId }); } catch { /* Diagnostics must not replace the error. */ }
+      } else {
+        await response.body?.cancel();
+      }
+      if (!willRetry) {
         const code = statusCode(response.status);
         log({ code, status: response.status });
         throw new MitrifyError(code, response.status);

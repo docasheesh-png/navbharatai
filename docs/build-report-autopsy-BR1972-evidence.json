@@ -1,0 +1,132 @@
+{
+  "identity": {
+    "reportNumber": 1972,
+    "outcome": "succeeded",
+    "ok": true,
+    "prompt": "मुझे एक education app बनाना है app नाम है edu ai examination Assistant",
+    "promptLength": 70,
+    "promptHash": "cfab2b35",
+    "reportDigest": "4b5e20283f40ca373e901643fa4be1d07f208a40db5e4f2f53f65d698e7ee4bf",
+    "buildId": "11db03b6-c471-499f-ab12-3b5e8d307b34",
+    "workspaceId": "agentv3-dWGmhPeEI0UoeH1ah6tCxcO9Ybo2-8eb46ee9-35c8-46f3-af38-2b25b1851727",
+    "sessionId": "8eb46ee9-35c8-46f3-af38-2b25b1851727",
+    "listHistoryId": "1794110195095",
+    "startedAt": 1794110195095,
+    "endedAt": 1794111527799,
+    "startedAtIST": "2026-11-08 09:26:35.095 IST",
+    "endedAtIST": "2026-11-08 09:48:47.799 IST",
+    "durationMs": 1332704,
+    "model": "qwen3-coder",
+    "framework": "vite-react",
+    "builtBy": "SURPLUS",
+    "rootCause": "This build SUCCEEDED, so nothing recorded here caused a failure. The most severe item still unresolved against the app, which is worth reading but did not stop anything: Opened at phone size (390×844, touch): the page scrolls SIDEWAYS by 119px on a 390px screen — sticking out: <header class=\"nb-topbar\"> \"EDU AI – EXAMINATION ASSISTANT\" (508px wide, reaching 508px)."
+  },
+  "reportBytes": {
+    "originalSha256": "7b960d7c67e43c19cf99e62fb83a4134d001141badf13ab71f7e083001bff6c3",
+    "originalBytes": 205947,
+    "prettySha256": "661e37c4551260b3c697cce108ef6fa08372c3b628ac3c837feecda8e259fa27",
+    "prettyBytes": 247471,
+    "digestMatchesList": true
+  },
+  "billing": {
+    "userTier": "weak (free tier — cheap engines) · not charged",
+    "charged": false,
+    "billedButNotDebited": false,
+    "walletDebited": false,
+    "billedUsd": 0,
+    "billedInr": 0,
+    "realCostUsd": 0,
+    "sandboxCostUsd": 0.061252,
+    "preSandboxSubtotalUsd": 0,
+    "sandboxFeeUsd": 0,
+    "sandboxFeePct": 2.5,
+    "powerMode": false,
+    "powerLevel": "weak",
+    "noClaude": true
+  },
+  "etaAccuracy": {
+    "promisedMs": 400087,
+    "lowMs": 272484,
+    "highMs": 815089,
+    "actualMs": 1302704,
+    "ratio": 3.256051808731601,
+    "withinBand": false,
+    "evidenced": true,
+    "line": "The user was shown 4.5 min–13.6 min (midpoint 6.7 min); the build took 21.7 min — 3.3× the midpoint and OVER the band (not counting 0.5 min spent waiting for the user's answer).",
+    "key": "edit_unsized",
+    "source": "platform"
+  },
+  "requestAnalysis": {
+    "taskType": "edit_unsized",
+    "complexityScore": 15,
+    "startTier": "gemini",
+    "startBand": "cheapest band"
+  },
+  "userWaitMs": 30000,
+  "counts": {
+    "total": 489,
+    "errors": 0,
+    "warnings": 7,
+    "autoResolved": 5,
+    "workarounds": 0,
+    "leftOpen": 0,
+    "healRule": 3,
+    "unresolved": 3
+  },
+  "llmCalls": 82,
+  "commands": 40,
+  "measuredOnMainBeforeEdit": {
+    "analyzeAppScope": {
+      "decision": "direct",
+      "size": "small",
+      "famousApp": null,
+      "signal": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)"
+    },
+    "analyzeRequirementGaps.domain": "general",
+    "gameKitPlan.length": 0,
+    "neighbours": {
+      "Mujhe higher exam hard exam analyse app banana hai": "education",
+      "Make an education app": "general",
+      "examination Assistant": "general",
+      "education loan app": "fintech",
+      "Make a bike racing game": "game"
+    },
+    "recapFullyResponsiveIsSizeClaimed": false
+  },
+  "shipped": {
+    "f1": "neighbour locks only — no classifier change",
+    "f2": {
+      "selector": ".nb-topbar",
+      "added": [
+        "flex-wrap: wrap",
+        "min-width: 0",
+        "max-width: 100%",
+        "box-sizing: border-box",
+        "overflow-wrap: anywhere"
+      ],
+      "removedAfterReview": [
+        "overflow-x: auto"
+      ],
+      "kept": [
+        "display: flex",
+        "align-items: center",
+        "gap: 12px",
+        "padding: 12px 20px"
+      ],
+      "existingAppsRewritten": false,
+      "mobileLayoutCheckExemption": false,
+      "seedHistory": "node scripts/platformSeedHistory.mjs after each kit edit — add-only; pre-BR1972, first-PR (overflow-x:auto), and current hashes all stay"
+    }
+  },
+  "queued": [
+    "Q-2643",
+    "Q-2644"
+  ],
+  "notShipped": [
+    "Q-2611 widening of SIZE_CLAIMED",
+    "domain=education for education/examination words",
+    "invert BUILD_ORDER_READ_AS_EDIT",
+    "domain=game for MCQ/exam assistant",
+    "mobileLayoutCheck header exemption"
+  ]
+}

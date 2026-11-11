@@ -37,7 +37,14 @@ describe('a header action row that holds a whole nav fits a phone', () => {
 
   it('a workspace still holding the kit as it was before this fix is still recognised as OUR starter', () => {
     // Reconstructed from today's kit by undoing exactly this change (the comment and the four declarations).
+    // Later kit edits (BR1972's .nb-topbar shrink/wrap) must be undone too, or this
+    // reconstruction is no longer byte-equal to the recorded pre-BR1959 starter.
     const before = DESIGN_KIT_CSS
+      .replace(/\/\* A site header \(\.nb-header\)[\s\S]*?\*\/\n/, '')
+      .replace(/@media \(max-width: 640px\) \{\n  :where\(\.nb-header \.row\),\n  :where\(\.nb-header nav ul\) \{ flex-wrap: wrap; min-width: 0; max-width: 100%; \}\n\}\n/, '')
+      .replace(/\/\* A dashboard topbar holds the page title[\s\S]*?\*\/\n/, '')
+      .replace('.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; }', '.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); }')
+      .replace('.nb-topbar h1 { min-width: 0; overflow-wrap: break-word; }\n', '')
       .replace(/\/\* A header action row may hold a whole nav[\s\S]*?\*\/\n/, '')
       .replace('.nb-header-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; min-width: 0; max-width: 100%; }', '.nb-header-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }')
       .replace('overflow-x: auto; min-width: 0; max-width: 100%; padding: 4px 0;', 'overflow-x: auto; padding: 4px 0;');

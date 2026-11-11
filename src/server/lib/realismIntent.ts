@@ -40,7 +40,8 @@ const REAL_INTENT: RegExp[] = [
   /\b(?:sach\s*much|sachmuch|sach\s*me\s*(?:jaisa|asli))\b/i,
   /\b100\s*%\s*(?:real|asli|realistic|sahi)?\b/i,
   // "GTA jaisa", "PUBG jaisa" — naming a photoreal AAA title IS the realism ask.
-  /\b(?:gta|pubg|bgmi|forza|need\s*for\s*speed|nfs|far\s*cry|witcher|cyberpunk|red\s*dead|assassin'?s?\s*creed)\b/i,
+  // BR1966: "gta5" / "gtav" / "gta-5" are the same title as "gta 5" (spaced form already matched).
+  /\b(?:gta(?:\s*[-_]?\s*[5v])?|pubg|bgmi|forza|need\s*for\s*speed|nfs|far\s*cry|witcher|cyberpunk|red\s*dead|assassin'?s?\s*creed)\b/i,
   // Devanagari
   /(?:असली|यथार्थ|वास्तविक|हूबहू|हुबहु|सजीव|फोटो\s*रियल)/,
   /(?:रियलिस्टिक|रीयलिस्टिक)/,

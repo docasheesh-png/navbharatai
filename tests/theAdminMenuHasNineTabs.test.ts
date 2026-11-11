@@ -110,7 +110,6 @@ const FEATURE_HOME: Record<string, string | string[]> = {
   'handleTokenAdjust(u.userId': 'users',
   'handleBan(u.userId': 'users',
   'handleMerge(u.userId)': 'users',
-  'handleBulkWelcomeGift': 'users',
   'markUserReport(openReport.report.id': 'userreports',
   'handleBan(openReport.report.target.ownerUid': 'userreports',
   // Apps

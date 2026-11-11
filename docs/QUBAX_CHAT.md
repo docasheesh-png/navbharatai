@@ -18,10 +18,12 @@ positions. Skips do not consume physical attempts.
   Gateway usage is accounted at a conservative ceiling, **not an invoice**;
   unknown or interrupted liability remains reserved. No unsafe replay follows
   a dispatched error, cancellation, refusal, or uncertain charge.
-- Confirmed pre-dispatch evidence revocation or internal timeout may skip to a
-  later eligible Chat rung. Caller cancellation, partial output, any possible
-  dispatch, and uncertain budget admission still stop the request. A reservation
-  alone does not count as a physical attempt.
+- A Qubax miss never ends the turn. No eligible model, a stale feed, a timeout,
+  an empty reply, or the wrong language releases the unused try and the chat
+  chain continues with the same history. Caller cancellation still stops.
+  Partial text that was already shown is not replaced. A reservation alone does
+  not count as a physical attempt. Each try waits at most 8 seconds for the
+  first byte and 12 seconds overall.
 - Responses are bounded and buffered until complete to prevent partial answers
   or credentials split across SSE events from escaping. The current first-output
   deadline therefore applies to the full validated response. A slow complete
@@ -35,16 +37,16 @@ positions. Skips do not consume physical attempts.
 ## Required independent evidence, not defaults
 
 No provider catalog or approval is seeded. Setting a key does **not** by
-itself authorize production transmission.
-
-Public chat and the admin Test Chat Bot have a separate owner switch. All four
-must be set: `QUBAX_ENABLED=1`, `QUBAX_API_KEY`, `QUBAX_MODEL` (one model id),
-and `QUBAX_MAX_USD_PER_REQUEST` (a positive USD amount of at most `1`). That
-amount is the hard reserve for one HTTP call. The shared daily and monthly paid
-budgets still have to admit it. Guest 10/day and signed-in shared 50/day are
-unchanged. This path does not read `qubax_chat_approvals`. Gateway callers that
-pin `expectedSelection` do not use this switch; they keep the catalog and the
-exact approval below.
+itself authorize a Gateway claim. Public chat and the admin Test Chat Bot use
+the live Qubax market instead. A model is eligible when its own `discount_pct`
+is at least 90, it is text or multimodal, and one try fits the cap. Official
+price pages are not consulted. A model nobody has called in 24 hours waits for
+a passing Hindi and English probe, and a probe that answers in the wrong script
+fails. Ranking is probe quality, then the cheaper price. The reply must match
+the user's script or the next try runs. One turn tries the best three, then the
+normal chat chain continues with the same history. `QUBAX_MODEL` is only a
+backup when no model clears 90%. The per-try reserve defaults to `$0.02`.
+Gateway callers that pin `expectedSelection` still use the catalog below.
 
 An existing trusted server operator must maintain the catalog path for Gateway:
 
@@ -94,11 +96,15 @@ five-minute expiry. It is separate from the reviewed catalog and never certifies
 unknown model mappings, fees, supplier ceilings, quality or disclosure approvals.
 It does not create accounts, purchase credits or run paid inference. Independently
 reviewed evidence is still required to populate and keep the dispatch catalog fresh.
-Gateway dispatch stays unavailable without that catalog and the exact approval.
-Public chat and the Test Chat Bot can still call Qubax through the owner switch
-above. If that switch is absent or the shared budget refuses the ceiling, Qubax
-is skipped and ordinary Chat continues through eligible later rungs. The Test
-Chat Bot never calls another provider.
+Gateway callers that pin `expectedSelection` remain unavailable without the
+reviewed catalog and the exact approval. Public chat and the admin Test Chat Bot
+instead use the live-market path described above; that path does not read
+`qubax_chat_approvals`. A missing or stale market feed leaves the shared market
+plan empty; the admin-only typed-model fallback may still be available (see
+`TEST_CHAT_BOT.md`). Every dispatched try still requires the
+per-request reserve and shared budget admission. If no Qubax try succeeds,
+ordinary Chat continues through eligible later rungs with the same history.
+The Test Chat Bot never falls back to another provider.
 
 Qubax documents a gateway/marketplace. “Qubax only” means NavBharatAI sends only to
 Qubax; it does not mean the gateway performs inference itself or avoids upstream

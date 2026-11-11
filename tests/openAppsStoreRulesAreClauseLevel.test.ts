@@ -14,6 +14,8 @@ import {
   OPEN_APPS_NAMED_APP_OPEN_SOURCE,
   OPEN_APPS_NAMED_APP_CALLED_SOURCE,
   OPEN_APPS_AFTER_APP_DENYLIST,
+  OPEN_APPS_CONDITIONAL_AFTER_APP,
+  OPEN_APPS_THIS_APP_CONTINUATION_SOURCE,
 } from '../src/server/AgentV3/nativeCapabilities';
 import {
   BR1974_PROMPT,
@@ -107,6 +109,14 @@ export const REVIEWED_MUST_NOT_MATCH = [
   'please open the App Store listing page',
   // Generated: open (the)? app + every denylist word.
   ...generatedDenylistPhrases(),
+  // Reviewed this-app continuations after from/with/for/it, plus the
+  // clear launch-this-app denials that use other denylist words.
+  'open the app from my home screen',
+  'open the app from home',
+  'open the app from the home screen',
+  'open the app from login',
+  'open the app in a new window',
+  'open the app after login',
 ] as const;
 
 /**
@@ -210,6 +220,15 @@ describe('open-apps: exported sources', () => {
     expect(OPEN_APPS_AFTER_APP_DENYLIST).toContain('dashboard');
     expect([...OPEN_APPS_AFTER_APP_DENYLIST]).not.toContain('instagram');
     expect([...OPEN_APPS_AFTER_APP_DENYLIST]).not.toContain('youtube');
+    expect([...OPEN_APPS_AFTER_APP_DENYLIST]).not.toContain('from');
+    expect([...OPEN_APPS_AFTER_APP_DENYLIST]).not.toContain('with');
+    expect([...OPEN_APPS_AFTER_APP_DENYLIST]).not.toContain('for');
+    expect([...OPEN_APPS_AFTER_APP_DENYLIST]).not.toContain('it');
+    expect([...OPEN_APPS_CONDITIONAL_AFTER_APP]).toEqual(['from', 'with', 'for', 'it']);
+    expect(OPEN_APPS_THIS_APP_CONTINUATION_SOURCE).toContain('my\\s+home');
+    expect(OPEN_APPS_THIS_APP_CONTINUATION_SOURCE).toContain('home(?:\\s+screen)?');
+    expect(OPEN_APPS_THIS_APP_CONTINUATION_SOURCE).toContain('(?:the\\s+)?home(?:\\s+screen)?');
+    expect(OPEN_APPS_THIS_APP_CONTINUATION_SOURCE).toContain('login');
     const namedSrc = readFileSync(join(__dirname, '..', 'src/server/AgentV3/nativeCapabilities.ts'), 'utf8');
     expect(namedSrc).toContain("if (word === 'settings') return true;");
     expect(namedSrc).toContain('if (rest === \'\') continue; // (a) end of text');
@@ -368,5 +387,40 @@ describe('open-apps: named-app recovery vs sentence-case pitfalls', () => {
     }
     expect(ids('open the app Settings on the phone')).toContain('open-apps');
     expect(ids('open the app settings')).not.toContain('open-apps');
+  });
+
+  it('from/with/for/it keep a following target and deny only a reviewed this-app continuation', () => {
+    const keeps = [
+      'open the app from the list of installed apps',
+      'users should be able to open the app from the list of installed apps',
+      'open the app with this package name',
+      'open the app with package name com.spotify.music',
+      'open the app for Instagram',
+      'when the user taps, open the app it is linked to',
+      'open the app it is linked to',
+      'open the app from',
+      'open the app with',
+      'open the app for',
+      'open the app it',
+      'open the app from my list of installed apps',
+      'open the app for my Instagram',
+    ];
+    for (const p of keeps) {
+      expect(matchedOnOriginMain(p), `origin/main should have captured: ${p}`).toBe(true);
+      expect(ids(p), p).toContain('open-apps');
+    }
+    const denials = [
+      'open the app from my home screen',
+      'open the app from home',
+      'open the app from the home screen',
+      'open the app from login',
+      'open the app in a new window',
+      'open the app after login',
+      'open the app now',
+    ];
+    for (const p of denials) {
+      expect(matchedOnOriginMain(p), `origin/main should have captured (we exclude it): ${p}`).toBe(true);
+      expect(ids(p), p).not.toContain('open-apps');
+    }
   });
 });

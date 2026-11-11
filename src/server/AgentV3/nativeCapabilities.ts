@@ -105,6 +105,13 @@ export interface NativeCapability {
  *    (instagram, youtube, iMessage, eBay) therefore match like main.
  *    `called`/`named` stay allowed. `settings` is denied only in lowercase
  *    so "open the app Settings on the phone" still matches.
+ * 7. `from` / `with` / `for` / `it` are not unconditional denials. They
+ *    deny only when a reviewed this-app continuation follows (my home /
+ *    my home screen, home / home screen, the home screen, login). Any
+ *    other continuation — the list of (installed) apps, a package name
+ *    or id, `for <app>`, `it is linked to` — matches like origin/main.
+ *    Clear launch-this-app denials that use other denylist words stay
+ *    denied: "in a new window", "after login", "now".
  *
  * Play Store / go-to / link / redirect / kholo / launch-store opens are not
  * new captures here; they are queued as Q-2649.
@@ -139,13 +146,18 @@ export const OPEN_APPS_NAMED_APP_CALLED_SOURCE = String.raw`(?:called|named)[ \t
  * Corpus-derived (word immediately after `open the app` in must-not-match):
  *   to, first, settings, every
  * User-requested launch-this-app function words:
- *   and, then, again, when, for, in, on, with, after, before,
- *   daily, now, once, so, it, is, will, should, screen, page
+ *   and, then, again, when, in, on, after, before,
+ *   daily, now, once, so, is, will, should, screen, page
  * Prompt / must-not-match similar phrasing:
  *   see ("open the app to see"), show ("when I open the app, show",
  *   "opens the app, show the welcome screen"), dashboard (BR1974 personal
  *   dashboard after opening)
- * Similar preposition to for/in/on/with/after/before: from
+ *
+ * `from` / `with` / `for` / `it` used to sit here and dropped genuine
+ * opens origin/main captured ("from the list of installed apps",
+ * "with this package name", "for Instagram", "it is linked to").
+ * They now live in OPEN_APPS_CONDITIONAL_AFTER_APP and deny only when a
+ * reviewed this-app continuation follows.
  */
 export const OPEN_APPS_AFTER_APP_DENYLIST = [
   'to',
@@ -156,18 +168,14 @@ export const OPEN_APPS_AFTER_APP_DENYLIST = [
   'then',
   'again',
   'when',
-  'for',
   'in',
   'on',
-  'with',
   'after',
   'before',
-  'from',
   'daily',
   'now',
   'once',
   'so',
-  'it',
   'is',
   'will',
   'should',
@@ -178,6 +186,19 @@ export const OPEN_APPS_AFTER_APP_DENYLIST = [
   'dashboard',
 ] as const;
 
+/**
+ * After `open (the)? app`, these words deny only when a reviewed this-app
+ * continuation follows. Unknown continuations behave like origin/main.
+ */
+export const OPEN_APPS_CONDITIONAL_AFTER_APP = ['from', 'with', 'for', 'it'] as const;
+
+/**
+ * Reviewed this-app continuations after from/with/for/it.
+ * `my` is bound to home / home screen so "from my list of installed apps"
+ * and "for my Instagram" still match like origin/main.
+ */
+export const OPEN_APPS_THIS_APP_CONTINUATION_SOURCE = String.raw`(?:my\s+home(?:\s+screen)?\b|(?:the\s+)?home(?:\s+screen)?\b|login\b)`;
+
 /** Horizontal whitespace only — a newline or any punctuation must break. */
 const AFTER_APP_HORIZONTAL_WS = /^[ \t]+/;
 
@@ -185,10 +206,19 @@ function appStoreOpenHasPresenceTail(afterStore: string): boolean {
   return new RegExp('^' + OPEN_APPS_APP_STORE_PRESENCE_TAIL_SOURCE, 'i').test(afterStore);
 }
 
-function isAfterAppDenied(word: string): boolean {
+function isThisAppContinuation(afterWord: string): boolean {
+  const rest = afterWord.replace(AFTER_APP_HORIZONTAL_WS, '');
+  return new RegExp('^' + OPEN_APPS_THIS_APP_CONTINUATION_SOURCE, 'i').test(rest);
+}
+
+function isAfterAppDenied(word: string, afterWord = ''): boolean {
   if (word === 'settings') return true;
   if (word.toLowerCase() === 'settings') return false;
-  return (OPEN_APPS_AFTER_APP_DENYLIST as readonly string[]).includes(word.toLowerCase());
+  const lower = word.toLowerCase();
+  if ((OPEN_APPS_CONDITIONAL_AFTER_APP as readonly string[]).includes(lower)) {
+    return isThisAppContinuation(afterWord);
+  }
+  return (OPEN_APPS_AFTER_APP_DENYLIST as readonly string[]).includes(lower);
 }
 
 function afterAppIsTerminal(rest: string): boolean {
@@ -200,7 +230,8 @@ function afterAppIsTerminal(rest: string): boolean {
 
 /**
  * Origin/main's `open (the)? app` capture, minus (a) end-of-text / punctuation /
- * newline and (b) the reviewed denylist. `called`/`named` stay allowed.
+ * newline and (b) the reviewed denylist. `from`/`with`/`for`/`it` deny only
+ * with a reviewed this-app continuation. `called`/`named` stay allowed.
  */
 export function openNamedAppAsked(text: string): boolean {
   const openRe = new RegExp(String.raw`\b(?:` + OPEN_APPS_NAMED_APP_OPEN_SOURCE + String.raw`)\b`, 'gi');
@@ -214,7 +245,7 @@ export function openNamedAppAsked(text: string): boolean {
     if (new RegExp('^' + OPEN_APPS_NAMED_APP_CALLED_SOURCE, 'i').test(rest)) return true;
     const word = /^[A-Za-z0-9][A-Za-z0-9'_-]*/.exec(rest);
     if (!word) continue;
-    if (isAfterAppDenied(word[0])) continue; // (b) denylist
+    if (isAfterAppDenied(word[0], rest.slice(word[0].length))) continue; // (b) denylist
     return true;
   }
   return false;

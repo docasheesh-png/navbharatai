@@ -1,0 +1,88 @@
+{
+  "schema": "navbharatai.v3.build-report-autopsy/1",
+  "report": "BR2295",
+  "buildId": "8f0da6e8-1549-4d1a-92a4-017875bd01d0",
+  "createdAt": "2026-11-10T16:01:18.420Z",
+  "prompt": "src/game/fx/synth.ts",
+  "manifestModel": "glm-5.3-flash",
+  "deliveredProvider": "SURPLUS",
+  "deliveredModels": [
+    "qwen3-coder",
+    "glm-5.3-flash"
+  ],
+  "framework": "vite-react",
+  "durationMs": 122916,
+  "estimatedDurationMs": {
+    "low": 485930,
+    "high": 854190,
+    "promised": 549074,
+    "ratio": 0.22386053610260184
+  },
+  "result": {
+    "ok": false,
+    "totalEvents": 69,
+    "errors": 3,
+    "warnings": 2,
+    "autoResolved": 0,
+    "leftOpen": 2,
+    "unresolved": 4,
+    "applicationFilesProduced": 0
+  },
+  "appEvidence": {
+    "gameDomainSelected": true,
+    "gameKitSeededFiles": 12,
+    "starterEntryUntouched": true,
+    "previewHttpStatus": 200,
+    "previewRenderedStarterOnly": true,
+    "releaseGate": "RED",
+    "testsPresent": false,
+    "typecheckRan": false,
+    "e2eRan": false
+  },
+  "outcomeEvidence": {
+    "unfinishedResumeStoodDown": "asked-the-user",
+    "modelAnswerNotPreservedAfterReadOnlyTool": true,
+    "finalOutcome": "OUTCOME_UNEXPLAINED"
+  },
+  "billing": {
+    "userCharged": false,
+    "billedUsd": 0,
+    "billedInr": 0,
+    "recordedSandboxCostUsd": 0.005611,
+    "providerCost": "unverified because a SURPLUS usage/receipt mapping was unavailable"
+  },
+  "provider": {
+    "ladderUsed": false,
+    "surplusOutsideLadder": "admitted by design",
+    "usageWarning": "USAGE_NOT_REPORTED",
+    "runnerTransport": "stream:false"
+  },
+  "keySignals": [
+    "REQUIREMENT_GAPS: domain=game; path segment game contaminated domain detection",
+    "GAME_KIT_SEEDED: 12 platform seed files; no application files were produced",
+    "READINESS_BLOCKER: entry point remained the seeded starter template",
+    "RENDERED_ONLY_THE_STARTER: HTTP 200 preview was not an application render",
+    "RELEASE_GATE: RED; no app was proven to run or ship",
+    "OUTCOME_UNEXPLAINED: no specific terminal outcome was recorded"
+  ],
+  "fixes": [
+    "Recognize bare source/config paths as file references, not build orders",
+    "Strip source paths before domain keyword analysis",
+    "Preserve full final model turn on starter-blocker stand-down after read-only tools",
+    "Record OUTCOME_ASKED_USER for a genuine user-directed question with no builder output",
+    "Record OUTCOME_EMPTY_BUILD for a genuine empty build that did not ask or decline",
+    "Normalize outcome severity and autoResolved flags in BuildDiagnostics",
+    "Correct SURPLUS usage-warning guidance for its non-streaming transport"
+  ],
+  "residualRisks": [
+    "SURPLUS did not yield a usable provider usage/receipt mapping; exact provider cost remains unverified",
+    "PROGRESS.md append is deferred while PR #4170 owns that file",
+    "GitHub CI has not yet been run against the final branch state"
+  ],
+  "unchangedCorrectSafeguards": [
+    "Starter-page detection",
+    "Release gate RED on an unbuilt app",
+    "No user charge for the empty failed build",
+    "No fabricated provider token or cost estimate"
+  ]
+}

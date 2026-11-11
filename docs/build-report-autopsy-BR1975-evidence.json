@@ -31,7 +31,7 @@
     "billedUsd": 0,
     "sandboxCostUsd": 0.021844,
     "powerLevel": "weak",
-    "userTier": "weak (free tier \u2014 cheap engines) \u00b7 not charged"
+    "userTier": "weak (free tier — cheap engines) · not charged"
   },
   "etaAccuracy": {
     "promisedMs": 353661,
@@ -58,13 +58,13 @@
   "readyBeforeEnd": "step 20 (92/100); then 6 more steps / 101s",
   "manifestFileCount": 22,
   "mobileLayout": {
-    "viewport": "390\u00d7844",
+    "viewport": "390×844",
     "sidewaysPx": 260,
     "stickingOut": "<nav> Home Services About Contact (296px wide, reaching 650px)",
     "smallControls": [
-      "Services 67\u00d724",
-      "About 47\u00d724",
-      "Contact 62\u00d724"
+      "Services 67×24",
+      "About 47×24",
+      "Contact 62×24"
     ]
   },
   "unresolvedCodes": [
@@ -74,16 +74,23 @@
   ],
   "oppositeClassAssembledBeforeEdit": true,
   "shipped": [
-    "F1_where_header_wraps_on_a_phone"
+    "F1_nb_header_inner_row_wraps_on_a_phone"
   ],
   "notShipped": [
     "fast-lane retry of a syntax-refused Footer write",
     "DESIGN_KIT_VOCABULARY company-header line",
     "release-gate or bug-hunt policy changes",
+    "display changes or 32px min-height on header nav links",
     "Q-2649",
     "Q-2650",
     "Q-2651",
     "Q-2652"
   ],
-  "newQueueRows": []
+  "newQueueRows": [],
+  "reviewFollowUp": {
+    "failedHead": "c201c6e6bd0b82820206c0978fdaf74ca2c28622",
+    "pr": 4168,
+    "cause": "Wrapped header/nav instead of the inner nowrap .row / ul.row; :where(header) nav was (0,0,1); display:flex on every header nav; all header elements affected; model assumed brand and nav were direct header children; comment said nav reached 650px.",
+    "fix": "@media (max-width: 640px) { :where(.nb-header .row), :where(.nb-header nav ul) { flex-wrap: wrap; min-width: 0; max-width: 100%; } }"
+  }
 }

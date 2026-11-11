@@ -45,10 +45,8 @@ function withoutTitleRule(css: string): string {
 
 function withoutMarketingHeaderRules(css: string): string {
   return css
-    .replace(/\/\* A marketing-site <header>[\s\S]*?\*\/\n/, '')
-    .replace(':where(header) { flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; }\n', '')
-    .replace(':where(header) nav { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; max-width: 100%; }\n', '')
-    .replace(':where(header) nav a { display: inline-flex; align-items: center; min-height: 32px; }\n', '');
+    .replace(/\/\* A site header \(\.nb-header\)[\s\S]*?\*\/\n/, '')
+    .replace(/@media \(max-width: 640px\) \{\n  :where\(\.nb-header \.row\),\n  :where\(\.nb-header nav ul\) \{ flex-wrap: wrap; min-width: 0; max-width: 100%; \}\n\}\n/, '');
 }
 
 /**

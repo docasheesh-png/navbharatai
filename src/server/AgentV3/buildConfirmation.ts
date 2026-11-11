@@ -35,6 +35,7 @@ import {
   readsAsQuestion,
   wantsFreshStart,
 } from './IntentClassifier';
+import { namesNoObject } from './buildableInput';
 
 /**
  * A WHOLE PRODUCT, as opposed to a part of one. `IntentClassifier`'s build nouns also list parts — table,
@@ -89,6 +90,11 @@ export function buildConfirmation(message: string): BuildConfirmation {
     }
   }
   if (readsAsQuestion(lower)) return { confirmed: false, reason: 'question' };
+  // BR1976: a category word ("App", "website") is not a deliverable. PRODUCT_NOUN matches `apps?`
+  // and would otherwise confirm a billed invented stub. High-confidence orders and edits above are
+  // unchanged — "make an app" / "app banao" stay explicit-order (the ask-what-to-build gate still
+  // asks about them) and "add it to this app" stays an explicit edit.
+  if (text && namesNoObject(text)) return { confirmed: false, reason: 'names-nothing-to-build' };
   if (firstNewBuildOrder(lower) || DEVANAGARI_BUILD_VERB.test(text) || PRODUCT_NOUN.test(text)) {
     return { confirmed: true, reason: 'names-something-to-build' };
   }

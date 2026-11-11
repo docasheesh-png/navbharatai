@@ -226,11 +226,6 @@ const HANDLED_FOLLOW_UPS: Record<string, Handled> = {
     why: '"<website>" stands for an address; with one, the message is a certain order the builder works on with its real browser',
     proof: () => reachesConfirmedWork('look at https://example.com'),
   },
-  app: {
-    handler: `${BUILD_ROUTE}; src/server/AgentV3/buildConfirmation.ts`,
-    why: `the message names a product, so it confirms a build (buildConfirmation: names-something-to-build); ${RECAP}`,
-    proof: () => reachesConfirmedWork('app'),
-  },
   yes: {
     handler: 'src/server/AgentV3/buildConfirmation.ts (isOfferAcceptance) → src/server/routes/agentv3.ts',
     why: 'a "yes" to an offer to build builds the ORIGINAL request, within OFFER_LIFETIME_MS',

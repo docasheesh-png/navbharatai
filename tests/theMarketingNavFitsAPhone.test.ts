@@ -81,11 +81,13 @@ function marketingHeaderOnAPhone(opts: {
   } else {
     rowWidth = opts.prefixWidth + navUsed;
   }
-  if (opts.headerMaxWidth100) {
-    rowWidth = Math.min(opts.viewport, rowWidth);
-  }
-  const painted = opts.flexWrap || opts.headerMaxWidth100 ? rowWidth : opts.prefixWidth + opts.navContent;
-  return { rowWidth, pageOverflow: Math.max(0, painted - opts.viewport) };
+  // max-width: 100% caps the header's used box, but overflow stays visible
+  // (BR1972: overflow-x:auto clips dropdowns). Descendants that stick out
+  // still paint and widen the page, so headerMaxWidth100 must not hide
+  // sideways scroll here. flex-wrap (or a nav that is itself narrower
+  // than the phone) is what removes this report's 260px overflow.
+  void opts.headerMaxWidth100;
+  return { rowWidth, pageOverflow: Math.max(0, rowWidth - opts.viewport) };
 }
 
 function flagsFromCss(): {
@@ -148,12 +150,15 @@ describe('a marketing-site header nav fits a phone', () => {
     const navContent = 296;
     const prefixWidth = 650 - 296;
     const css = flagsFromCss();
+    expect(css.flexWrap).toBe(true);
+    expect(css.headerMaxWidth100).toBe(true);
     const now = marketingHeaderOnAPhone({
       viewport,
       prefixWidth,
       navContent,
       ...css,
     });
+    expect(now.rowWidth).toBe(354);
     expect(now.pageOverflow).toBe(0);
 
     const onMain = marketingHeaderOnAPhone({
@@ -166,6 +171,20 @@ describe('a marketing-site header nav fits a phone', () => {
     });
     expect(onMain.rowWidth).toBe(650);
     expect(onMain.pageOverflow).toBe(260);
+
+    // Two-sided: dropping flex-wrap while leaving max-width:100% and a
+    // wrapping nav (296px < 390px) still paints a 650px row, because
+    // visible overflow is not clipped by max-width.
+    const wrapDropped = marketingHeaderOnAPhone({
+      viewport,
+      prefixWidth,
+      navContent,
+      flexWrap: false,
+      headerMaxWidth100: true,
+      navFlexWrap: true,
+    });
+    expect(wrapDropped.rowWidth).toBe(650);
+    expect(wrapDropped.pageOverflow).toBe(260);
   });
 
   it('a block hero header is not turned into a flex row', () => {

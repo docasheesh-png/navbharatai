@@ -1,0 +1,121 @@
+{
+  "identity": {
+    "reportNumber": 1977,
+    "outcome": "failed",
+    "ok": false,
+    "prompt": "Mujhko bahut achcha 3D mein game chahie Lata Mangeshkar City ek Indian city jaisa design hona chahiye Koi bad mein game khelne jaaye to pahle usko player milega uske bad vah player se kuchh bhi kam karvaega aur uske bad uske pass ka Paisa aaega aur Paisa aane ke bad vah kuchh gadiyan matlab jo kharidna chahe vah kharidega aur usmein kadhai hoga to police usko utha Le jayegi aur usko police se bhi chhutane ke liye Paisa hi lagega ekadam realistic rahana chahie 3D mein game hona chahie",
+    "promptLength": 488,
+    "promptHash": "421851e4",
+    "reportDigest": "2aebc560a0811300de61d5155a28a6421b5f51ad78cd20b4a907ba257e11b29d",
+    "buildId": "3ceaebe9-ff65-4682-b806-8e49e6579edc",
+    "workspaceId": "agentv3-Y21knFI3ricyMNInmQIbDWkPwpB3-91b16c31-a878-43d6-8ad9-0b419857f8f5",
+    "historyId": "1794111457314",
+    "sessionId": "91b16c31-a878-43d6-8ad9-0b419857f8f5",
+    "model": "qwen3-coder",
+    "framework": "vite-react",
+    "builtBy": "SURPLUS",
+    "startedAt": 1794111457314,
+    "endedAt": 1794112877359,
+    "startedAtIST": "2026-11-08 09:47:37.314 IST",
+    "endedAtIST": "2026-11-08 10:11:17.359 IST",
+    "durationMs": 1420045
+  },
+  "truncation": {
+    "complete": false,
+    "kept": 500,
+    "total": 508,
+    "note": "first 250 + last 250; 8 middle timeline entries gone"
+  },
+  "counts": {
+    "total": 507,
+    "errors": 10,
+    "warnings": 18,
+    "autoResolved": 14,
+    "leftOpen": 3,
+    "healRule": 3,
+    "unresolved": 43
+  },
+  "billing": {
+    "charged": false,
+    "billedUsd": 0,
+    "billedInr": 0,
+    "realCostUsd": 0.01235,
+    "sandboxCostUsd": 0.064124,
+    "powerLevel": "weak",
+    "zeroBillReason": "build did not succeed — \"working app or free\", so no charge"
+  },
+  "etaAccuracy": {
+    "key": "game",
+    "withinBand": false,
+    "ratio": 1.9940167351678642,
+    "actualMs": 1420045,
+    "lowMs": 630255,
+    "highMs": 1040806,
+    "promisedMs": 712153,
+    "line": "The user was shown 10.5 min–17.3 min (midpoint 11.9 min); the build took 23.7 min — 2.0× the midpoint and OVER the band."
+  },
+  "requestAnalysis": {
+    "taskType": "complex_app",
+    "complexityScore": 63,
+    "startTier": "sonnet",
+    "startBand": "standard band"
+  },
+  "recordedContract": {
+    "genre": "unknown",
+    "dimension": "3d",
+    "controls": [],
+    "requiredFeatures": [],
+    "winLoseNamed": false,
+    "vehicle": null,
+    "camera": "unspecified",
+    "subjects": [
+      "building"
+    ],
+    "externalAssets": false
+  },
+  "gameKitSeeded": {
+    "recipes": [
+      "generate_game_runtime",
+      "generate_game_3d",
+      "generate_game_vfx",
+      "generate_melody",
+      "generate_game_shell"
+    ],
+    "files": 3,
+    "recipeSeconds": 22.4,
+    "assets": "0.0 s (off)"
+  },
+  "releaseGate": {
+    "color": "RED",
+    "blockers": [
+      "src/game/lata-city/car imported by LataCityGame.ts (written later at 10:08:07 IST, after the 10:06:04 missing-file gate)",
+      "src/game/ui/touchControls.ts missing DEFAULT_TOUCH_BUTTONS (imported by Game.ts:19) after the 10:05:55 frontend overwrite"
+    ]
+  },
+  "manifestFileCount": 48,
+  "indexHtmlPresent": false,
+  "appTsxExcerpt": "import React, { useState } from 'react';\nimport { GameCanvas } from './game/GameCanvas';\n\nfunction App() {\n  const [gameStarted, setGameStarted] = useState(false);\n\n  if (!gameStarted) {\n    return (\n      <div className=\"nb-game-screen\">\n        <div className=",
+  "lataCityGameExcerpt": "  // Set up lighting and environment\n  ctx.lights.preset = 'sunset';\n  ctx.renderer.setClearColor(new THREE.Color(0.5, 0.7, 0.9));\n  \n  // Create terrain\n  const terrain = createTerrain({ \n    size: 200, \n    palette: 'indianVillage'",
+  "shipped": {
+    "F1_gadiyan_is_a_car": "VEHICLES car regex accepts gadi/gadiyan/gadiya/gaadiyan/gaadiyaan as well as gaadi. This prompt becomes vehicle:car, camera third-person, genre still unknown.",
+    "F2_empty_recipe_success_is_not_a_seed": "After the recipe loop the route counts files that changed versus writtenBeforeKit and downgradeEmptyKitSeedSuccesses refuses to claim GAME_KIT_SEEDED (and to prepare 3D assets) unless filesWritten >= okRecipes. A healthy ~30-file seed is unchanged."
+  },
+  "notShipped": [
+    "auto-regenerate DEFAULT_TOUCH_BUTTONS (Q-2270)",
+    "re-scan missing-file gate after every late write",
+    "new contract slots for police / Paisa / jobs",
+    "mega-project / APP_SCOPE / ETA retune",
+    "charging or release-gate policy",
+    "prettier start screen or stub canvas",
+    "Q-2649",
+    "Q-2650",
+    "Q-2651",
+    "Q-2652",
+    "Q-2653 (queued, not implemented)",
+    "Q-2654 (queued, not implemented)"
+  ],
+  "queuedFrom4169Review": [
+    "Q-2653",
+    "Q-2654"
+  ]
+}

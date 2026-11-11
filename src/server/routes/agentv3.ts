@@ -443,7 +443,7 @@ import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
 import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets } from '../AgentV3/gameAssets/assetSeed';
-import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -18908,6 +18908,13 @@ async function noteBuildOutcome(
                   kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? '') });
                 }
                 kitRecipesMs = Date.now() - kitStartedAt;
+                // BR1977: recipes report ok (`!r.is_error`) even when they wrote nothing —
+                // this build claimed five recipes and 3 files after SANDBOX_UNAVAILABLE.
+                // Count only files that landed during the recipe loop (not later L3 assets)
+                // and refuse to claim a seed — or to prepare 3D assets on a missing 3D layer —
+                // unless at least as many files landed as recipes that said they succeeded.
+                const recipeFiles = [...writtenFiles].filter(([p, c]) => writtenBeforeKit.get(p) !== c).length;
+                downgradeEmptyKitSeedSuccesses(kitResults, recipeFiles);
                 if (gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted) {
                   // Default-off L3; all bytes and manifests are acknowledged durably before handoff.
                   // Source/provider failures leave the successful L1/L2 kit intact.

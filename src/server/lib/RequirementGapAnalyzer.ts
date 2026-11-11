@@ -897,11 +897,11 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
  * study app — those are sentences about studying the craft, not a board-study tool. A "case study
  * app" is not one either: the lookbehind is word-bounded and variable-length (`(?<!\bcase[\s\-/,]+)`)
  * so "showcase / lowercase / briefcase study app" stay study apps, while "case  study",
- * "case/study" and "case, study" do not. `study[\s-]+` accepts one or more spaces or hyphens
+ * "case/study", "case, study" and "case–study" / "case—study" (U+2013/U+2014) do not. `study[\s-]+` accepts one or more spaces or hyphens
  * ("study  app"). The craft-word lookahead still treats space, hyphen and slash as separators.
  * This regex is compiled only on the server (Node); it is not imported by the Vite client bundle.
  */
-export const PRACTICE_TOOL_SOURCE = String.raw`mock[\s-]?(?:tests?|exams?|papers?)|practice[\s-]?(?:tests?|papers?|sets?)|test[\s-]?series|question[\s-]?banks?|quiz(?:zes)?|flash[\s-]?cards?|pyqs?|previous[\s-]+(?:years?'?[\s-]+)?(?:papers?|questions?)|(?<!\bcase[\s\-/,]+)study[\s-]+apps?(?![\s\-/]+(?:development|dev|design|security|architecture|engineering|building))`;
+export const PRACTICE_TOOL_SOURCE = String.raw`mock[\s-]?(?:tests?|exams?|papers?)|practice[\s-]?(?:tests?|papers?|sets?)|test[\s-]?series|question[\s-]?banks?|quiz(?:zes)?|flash[\s-]?cards?|pyqs?|previous[\s-]+(?:years?'?[\s-]+)?(?:papers?|questions?)|(?<!\bcase[\s\-/,–—]+)study[\s-]+apps?(?![\s\-/]+(?:development|dev|design|security|architecture|engineering|building))`;
 const PRACTICE_TOOL_RE = new RegExp(String.raw`\b(?:${PRACTICE_TOOL_SOURCE})\b`, 'i');
 /** Words that put a second party or an institution into the request: people who manage, pay, enrol. */
 const INSTITUTION_SCOPE_RE = /\b(?:teachers?|tutors?|admins?|administrators?|staff|roles?|log\s?-?ins?|sign\s?-?(?:in|up)s?|accounts?|multi[\s-]?users?|institutes?|institutions?|coaching|schools?|colleges?|universit(?:y|ies)|academy|management|platform|portal|erp|lms|classrooms?|batch(?:es)?|enrol\w*|fees?|payments?|subscriptions?|courses?|lessons?|attendance)\b/i;

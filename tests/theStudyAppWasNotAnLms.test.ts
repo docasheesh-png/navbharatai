@@ -94,6 +94,9 @@ const OPPOSITE_UNCAPTURED = [
   'case  study app',
   'case/study app',
   'case, study app',
+  // BR1974 extra: en dash U+2013 and em dash U+2014 still leaked ('case–study app').
+  'case–study app',
+  'case—study app',
   'case_study app',
   'casestudy app',
   'Case study app',
@@ -221,6 +224,14 @@ describe("BR1973: a study app for board students is one learner's tool, not a sc
     expect(a.complexityScore).toBeLessThan(40);
   });
 
+  it('en-dash and em-dash case-study probes leak no longer (not simple_app)', () => {
+    for (const p of ['case–study app', 'case—study app']) {
+      expect(namesASingleLearnerTool(p), p).toBe(false);
+      expect(namesPersonalTool(p), p).toBe(false);
+      expect(SIZED(p).taskType, p).not.toBe('simple_app');
+    }
+  });
+
   it('double-space, slash and comma case-study probes leak no longer (not simple_app)', () => {
     for (const p of ['case  study app', 'case/study app', 'case, study app']) {
       expect(namesASingleLearnerTool(p), p).toBe(false);
@@ -230,8 +241,8 @@ describe("BR1973: a study app for board students is one learner's tool, not a sc
   });
 
   it('the variable-length lookbehind compiles on this Node and does not ship to the browser bundle', () => {
-    expect(() => new RegExp(String.raw`(?<!\bcase[\s\-/,]+)study[\s-]+apps?`, 'i')).not.toThrow();
-    expect(PRACTICE_TOOL_SOURCE).toContain(String.raw`(?<!\bcase[\s\-/,]+)`);
+    expect(() => new RegExp(String.raw`(?<!\bcase[\s\-/,–—]+)study[\s-]+apps?`, 'i')).not.toThrow();
+    expect(PRACTICE_TOOL_SOURCE).toContain(String.raw`(?<!\bcase[\s\-/,–—]+)`);
     expect(PRACTICE_TOOL_SOURCE).toContain(String.raw`study[\s-]+apps?`);
     // Vite's client target includes safari14, which predates variable-length lookbehind.
     // This regex lives only in the server analyser and must not be imported by the client entry.

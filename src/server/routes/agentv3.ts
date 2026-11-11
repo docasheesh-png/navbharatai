@@ -23551,7 +23551,7 @@ async function noteBuildOutcome(
                 detail: devServerLastWordsDetail(lastWords),
                 autoResolved: false,
               });
-              previewVerifiedFailed = true; billingCtx.previewVerifiedFailed = true;
+              previewVerifiedFailed = true; billingCtx.previewVerifiedFailed = previewVerifiedFailed;
               previewServerDown = true;
               break;
             }
@@ -23595,7 +23595,7 @@ async function noteBuildOutcome(
           buildDiag.record({ phase: 'preview', severity: 'warning', code: 'PREVIEW_NOT_RENDERED', message: problems.slice(0, 4).join(' | ').slice(0, 500), autoResolved: false });
           // Out of repair budget OR the wall-clock cap is near → stop and report honestly.
           if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
-            previewVerifiedFailed = true; billingCtx.previewVerifiedFailed = true; // the eyes saw it NOT render, and the heal budget is spent — billing zeroes below
+            previewVerifiedFailed = true; billingCtx.previewVerifiedFailed = previewVerifiedFailed; // the eyes saw it NOT render, and the heal budget is spent — billing zeroes below
             previewRenderFailed = true;
             // RUNTIME HONESTY (deep-test 2026-07-18 — "onLinkClick is not a function"): the live preview
             // genuinely did NOT render / crashed at RUNTIME and the heal budget is spent. Record it as an

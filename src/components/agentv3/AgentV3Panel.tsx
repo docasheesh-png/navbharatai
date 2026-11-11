@@ -36,6 +36,7 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
 import type { SiteAnalyticsView, RollbackChoiceView, SiteConfigView } from './HostingChooser';
 import { PublishCelebration } from './PublishCelebration';
+import { WhatsAppShareLink } from '../share/WhatsAppShareLink';
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 import { auth as firebaseAuth } from '../../lib/firebase';
 import { celebrationFor, type CelebrationKind } from '../../lib/firstPublish';
@@ -4691,6 +4692,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               <ExternalLink className="w-3 h-3 opacity-60" />
             </a>
           )}
+          {liveUrl && <WhatsAppShareLink variant="bar" appUrl={liveUrl} />}
         </div>
       </div>
 
@@ -6824,6 +6826,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     <span className="flex-1 text-left truncate">Live site — {liveUrl.replace(/^https?:\/\//, '')}</span>
                     <ExternalLink className="w-3 h-3 opacity-60" />
                   </a>
+                )}
+                {liveUrl && (
+                  <div className="px-4 py-2">
+                    <WhatsAppShareLink appUrl={liveUrl} />
+                  </div>
                 )}
                 <div className="my-1 border-t border-line" />
                 <button

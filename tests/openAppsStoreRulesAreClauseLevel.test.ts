@@ -11,11 +11,17 @@ import {
   OPEN_APPS_APP_STORE_OPEN_SOURCE,
   OPEN_APPS_APP_STORE_PRESENCE_TAIL_SOURCE,
   OPEN_APPS_APP_DRAWER_OPEN_SOURCE,
+  OPEN_APPS_NAMED_APP_OPEN_SOURCE,
+  OPEN_APPS_NAMED_APP_CALLED_SOURCE,
+  OPEN_APPS_NAMED_APP_PROPER_NAME_SOURCE,
+  openNamedAppCapitalizedTokenAsked,
 } from '../src/server/AgentV3/nativeCapabilities';
 import {
   BR1974_PROMPT,
   SAME_CLASS_OPEN_APPS,
   OPPOSITE_NOT_OPEN_APPS,
+  NAMED_APP_REVIEW_REPROS,
+  NAMED_APP_SENTENCE_CASE_PITFALLS,
 } from './aWhatsAppNumberIsNotAnOpenAppsRequest.test';
 
 function ids(p: string): string[] {
@@ -68,6 +74,8 @@ export const REVIEWED_MUST_NOT_MATCH = [
   'please open the app',
   'I open the app every morning',
   'open the app first',
+  // Newline or punctuation after singular open-the-app (sentence-case pitfalls).
+  ...NAMED_APP_SENTENCE_CASE_PITFALLS,
   // Reviewed App Store presence tails — the only allowed store exclusion vs main.
   'open the App Store listing',
   'open the App Store screenshots',
@@ -136,6 +144,8 @@ function wholeRegressionCorpus(): string[] {
     ...REVIEWED_MUST_MATCH,
     ...SIX_LOST_ORIGIN_MAIN_REPROS,
     ...PLAY_STORE_REVIEW_REPROS,
+    ...NAMED_APP_REVIEW_REPROS,
+    ...NAMED_APP_SENTENCE_CASE_PITFALLS,
     BR1974_PROMPT,
     'open the App Store after it is released in the Play Store',
     'open the App Store version of our game',
@@ -160,6 +170,15 @@ describe('open-apps: exported sources', () => {
     expect(OPEN_APPS_APP_STORE_PRESENCE_TAIL_SOURCE).toContain('release\\s+notes');
     expect(OPEN_APPS_APP_STORE_PRESENCE_TAIL_SOURCE).toContain('releases?');
     expect(OPEN_APPS_APP_DRAWER_OPEN_SOURCE).toBe('open\\s+(?:the\\s+)?app[\\s-]+drawer\\b');
+    expect(OPEN_APPS_NAMED_APP_OPEN_SOURCE).toBe('open(?:\\s+the)?\\s+app');
+    expect(OPEN_APPS_NAMED_APP_CALLED_SOURCE).toContain('called');
+    expect(OPEN_APPS_NAMED_APP_CALLED_SOURCE).toContain('named');
+    expect(OPEN_APPS_NAMED_APP_CALLED_SOURCE).toContain('[ \\t]+');
+    expect(OPEN_APPS_NAMED_APP_PROPER_NAME_SOURCE).toBe('[A-Z][A-Za-z0-9]*');
+    const namedSrc = readFileSync(join(__dirname, '..', 'src/server/AgentV3/nativeCapabilities.ts'), 'utf8');
+    expect(namedSrc).toContain("new RegExp('^' + OPEN_APPS_NAMED_APP_PROPER_NAME_SOURCE + String.raw`\\b`)");
+    expect(namedSrc).not.toMatch(/OPEN_APPS_NAMED_APP_PROPER_NAME_SOURCE \+ String\.raw`\\b`, 'i'/);
+    expect(namedSrc).toContain('const AFTER_APP_HORIZONTAL_WS = /^[ \\t]+/;');
     const here = join(__dirname, '..');
     expect(readFileSync(join(here, 'src/main.tsx'), 'utf8')).not.toMatch('nativeCapabilities');
     expect(readFileSync(join(here, 'src/App.tsx'), 'utf8')).not.toMatch('nativeCapabilities');
@@ -255,5 +274,42 @@ describe('open-apps: Q-2649 store forms stay unmatched', () => {
     for (const p of PLAY_STORE_REVIEW_REPROS) {
       expect(ids(p), p).not.toContain('open-apps');
     }
+  });
+});
+
+describe('open-apps: named-app recovery vs sentence-case pitfalls', () => {
+  it('matches the reviewed named-app repros that origin/main captured', () => {
+    const mustNot = new Set<string>(REVIEWED_MUST_NOT_MATCH);
+    for (const p of NAMED_APP_REVIEW_REPROS) {
+      expect(matchedOnOriginMain(p), `origin/main should have captured: ${p}`).toBe(true);
+      expect(mustNot.has(p), `named-app repro must not be on the must-not-match list: ${p}`).toBe(false);
+      expect(ids(p), p).toContain('open-apps');
+    }
+  });
+
+  it('does not match sentence-case pitfalls where a newline or punctuation follows app', () => {
+    for (const p of NAMED_APP_SENTENCE_CASE_PITFALLS) {
+      expect(ids(p), JSON.stringify(p)).not.toContain('open-apps');
+    }
+    expect(ids('open the app')).not.toContain('open-apps');
+    expect(ids('open the app settings')).not.toContain('open-apps');
+    expect(ids('open the app to see the dashboard')).not.toContain('open-apps');
+    expect(ids('open the app first')).not.toContain('open-apps');
+    expect(ids('when I open the app, show the welcome screen')).not.toContain('open-apps');
+    expect(ids('whenever I open the app')).not.toContain('open-apps');
+    expect(ids('I open the app every morning')).not.toContain('open-apps');
+    expect(ids(BR1974_PROMPT)).not.toContain('open-apps');
+  });
+
+  it('any capitalized-token capture is a subset of what origin/main captured', () => {
+    const corpus = wholeRegressionCorpus();
+    let capHits = 0;
+    for (const p of corpus) {
+      if (openNamedAppCapitalizedTokenAsked(withoutMachineText(p))) {
+        capHits += 1;
+        expect(matchedOnOriginMain(p), `capitalized-token capture must be an origin/main hit: ${p}`).toBe(true);
+      }
+    }
+    expect(capHits).toBeGreaterThan(5);
   });
 });

@@ -64,6 +64,31 @@ Only after I enter BOTH my nickname and mobile number and press NEXT should my p
 - Keep each member's dashboard and points separate.
 - On reopening the app, show the welcome screen as requested.`;
 
+/** Genuine named-app launches origin/main captured via `open the app` + a name. */
+export const NAMED_APP_REVIEW_REPROS = [
+  'add a button to open the app Instagram',
+  'open the app called Spotify',
+  'open the app YouTube from my app',
+  'a shortcut to open the app Maps',
+  'open the app named Telegram',
+  'please open the app Gmail',
+  'users can open the app Netflix',
+  'open app Instagram',
+  'open the app Phone',
+  'open the app Camera',
+  'Add a shortcut that will open the app YouTube when tapped',
+  'open the app Settings on the phone',
+] as const;
+
+/** Sentence-case / newline / punctuation after singular `open the app` must not match. */
+export const NAMED_APP_SENTENCE_CASE_PITFALLS = [
+  'When I open the app\nShow the welcome screen',
+  'open the app. Then…',
+  'open the app. Then show the welcome screen',
+  'open the app, Instagram',
+  'open the app\nInstagram',
+] as const;
+
 /** Same class: the user is asking to open WhatsApp, place a call, or open another app. */
 export const SAME_CLASS_OPEN_APPS = [
   'mujhe jarwis chahiye jo mujhe yaad dilaye, bolkar command le, aur whatsapp khole',
@@ -101,6 +126,7 @@ export const SAME_CLASS_OPEN_APPS = [
   'open the App Store after it is released in the Play Store',
   'open the App Store and publish karna',
   'open the App Store version of our game',
+  ...NAMED_APP_REVIEW_REPROS,
 ] as const;
 
 export const OPPOSITE_NOT_OPEN_APPS = [
@@ -127,6 +153,7 @@ export const OPPOSITE_NOT_OPEN_APPS = [
   'I open the app every morning',
   'open the app first',
   'open this app',
+  ...NAMED_APP_SENTENCE_CASE_PITFALLS,
   'publish to App Store',
   'upload to Play Store',
   'Play Store listing',
@@ -302,5 +329,14 @@ describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', ()
     expect(requestedCapabilities('app store mein kholo').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('go to the play store').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('play store pe daalna hai').map((c) => c.id)).not.toContain('open-apps');
+    // Named-app launches origin/main captured via `open the app` + a name.
+    for (const p of NAMED_APP_REVIEW_REPROS) {
+      expect(requestedCapabilities(p).map((c) => c.id), p).toContain('open-apps');
+    }
+    expect(requestedCapabilities('open the app Settings on the phone').map((c) => c.id)).toContain('open-apps');
+    expect(requestedCapabilities('open the app settings').map((c) => c.id)).not.toContain('open-apps');
+    for (const p of NAMED_APP_SENTENCE_CASE_PITFALLS) {
+      expect(requestedCapabilities(p).map((c) => c.id), JSON.stringify(p)).not.toContain('open-apps');
+    }
   });
 });

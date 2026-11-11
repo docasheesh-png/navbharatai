@@ -90,6 +90,7 @@
     "F1 #4165 close publish FPs: ko/se particles, Hinglish karna, English tense/object-gap",
     "F1 #4165 Rule A explicit-open always wins; Rule B keeps idiom-wins; origin/main corpus gate",
     "F1 #4165 cut store matching back to origin/main plus App Store presence tails; queue Q-2649; two-sided corpus gate",
+    "F1 #4165 restore named-app launches after open the app (called/named or capitalized token; newline/punctuation breaks)",
     "F2 en/em dash in case-study lookbehind"
   ],
   "notShipped": [

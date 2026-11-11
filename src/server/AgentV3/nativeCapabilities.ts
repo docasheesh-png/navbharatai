@@ -80,6 +80,202 @@ export interface NativeCapability {
   asks: RegExp;
 }
 
+/**
+ * BR1974 / #4165 — open-apps matching is origin/main c072e0eb9 plus the
+ * actual BR1974 fixes, and nothing else. This file is server-only (not imported
+ * by `src/main.tsx` / `src/App.tsx`).
+ *
+ * Same as origin/main: call / make-a-call / whatsapp / sms / `open apps` /
+ * `open the apps` / `app khol*` / `khol do`.
+ *
+ * BR1974-only changes:
+ * 1. WhatsApp number/id/phone fields (including Hinglish) do not match.
+ * 2. Singular `open the app` and `open the app settings` do not match.
+ * 3. Plural `open apps` / `open the apps` still match (they already did on main).
+ * 4. `open the app store` is matched explicitly — the same captures main made
+ *    via the `open the app` prefix — except the reviewed presence tails
+ *    listing / screenshots / release / release notes / listing page.
+ * 5. `open the app drawer` is matched explicitly so dropping singular
+ *    `open the app` does not lose a main capture.
+ * 6. Singular `open(?:\s+the)?\s+app` keeps origin/main's capture, then
+ *    excludes only when what follows is (a) end of text, punctuation, or a
+ *    newline, or (b) a reviewed denylist of function/continuation words
+ *    (to, first, settings lowercase, every, and, then, …) derived from the
+ *    BR1974 prompt and the must-not-match corpus. Lowercase app names
+ *    (instagram, youtube, iMessage, eBay) therefore match like main.
+ *    `called`/`named` stay allowed. `settings` is denied only in lowercase
+ *    so "open the app Settings on the phone" still matches.
+ * 7. `from` / `with` / `for` / `it` are not unconditional denials. They
+ *    deny only when a reviewed this-app continuation follows (my home /
+ *    my home screen, home / home screen, the home screen, login). Any
+ *    other continuation — the list of (installed) apps, a package name
+ *    or id, `for <app>`, `it is linked to` — matches like origin/main.
+ *    Clear launch-this-app denials that use other denylist words stay
+ *    denied: "in a new window", "after login", "now".
+ *
+ * Play Store / go-to / link / redirect / kholo / launch-store opens are not
+ * new captures here; they are queued as Q-2649.
+ */
+
+/** Call / WhatsApp-not-a-number-field / SMS / plural "open apps". */
+export const OPEN_APPS_CORE_SOURCE = String.raw`call\s+(?:karo|kar|kare|kardo|mummy|mom|papa)|make\s+(?:a\s+)?call|whats\s*app(?![\s-]*(?:(?:ka|ki|ke|your|my|the|wala|wali)[\s-]+)?(?:mobile[\s-]*)?(?:numbers?|no\.?|num|phone|ids?)\b)|sms|open\s+(?:the\s+)?apps`;
+
+/**
+ * Explicit `open the app store` / `open app store`. Matches the same prompts
+ * origin/main captured via `open the app` + the "store" compound. Not Play Store.
+ */
+export const OPEN_APPS_APP_STORE_OPEN_SOURCE = String.raw`open\s+(?:the\s+)?app[\s-]+store\b`;
+
+/** Reviewed presence tails after `open the App Store` that may be excluded. */
+export const OPEN_APPS_APP_STORE_PRESENCE_TAIL_SOURCE = String.raw`[\s-]+(?:listing\s+pages?|listings?|screenshots?|release\s+notes|releases?)\b`;
+
+/** Recovers origin/main's `open the app` prefix on the drawer compound. */
+export const OPEN_APPS_APP_DRAWER_OPEN_SOURCE = String.raw`open\s+(?:the\s+)?app[\s-]+drawer\b`;
+
+/** `open` + optional `the` + `app`. The junction AFTER `app` is applied in code. */
+export const OPEN_APPS_NAMED_APP_OPEN_SOURCE = String.raw`open(?:\s+the)?\s+app`;
+
+/** `called`/`named` plus a name, joined only by spaces or tabs. */
+export const OPEN_APPS_NAMED_APP_CALLED_SOURCE = String.raw`(?:called|named)[ \t]+[A-Za-z][\w'-]*`;
+
+/**
+ * Reviewed denylist of function/continuation words after `open (the)? app`.
+ * `settings` is matched case-sensitively (lowercase only) so the Settings app
+ * still matches. Every other entry is matched case-insensitively.
+ *
+ * Corpus-derived (word immediately after `open the app` in must-not-match):
+ *   to, first, settings, every
+ * User-requested launch-this-app function words:
+ *   and, then, again, when, in, on, after, before,
+ *   daily, now, once, so, is, will, should, screen, page
+ * Prompt / must-not-match similar phrasing:
+ *   see ("open the app to see"), show ("when I open the app, show",
+ *   "opens the app, show the welcome screen"), dashboard (BR1974 personal
+ *   dashboard after opening)
+ *
+ * `from` / `with` / `for` / `it` used to sit here and dropped genuine
+ * opens origin/main captured ("from the list of installed apps",
+ * "with this package name", "for Instagram", "it is linked to").
+ * They now live in OPEN_APPS_CONDITIONAL_AFTER_APP and deny only when a
+ * reviewed this-app continuation follows.
+ */
+export const OPEN_APPS_AFTER_APP_DENYLIST = [
+  'to',
+  'first',
+  'settings',
+  'every',
+  'and',
+  'then',
+  'again',
+  'when',
+  'in',
+  'on',
+  'after',
+  'before',
+  'daily',
+  'now',
+  'once',
+  'so',
+  'is',
+  'will',
+  'should',
+  'screen',
+  'page',
+  'see',
+  'show',
+  'dashboard',
+] as const;
+
+/**
+ * After `open (the)? app`, these words deny only when a reviewed this-app
+ * continuation follows. Unknown continuations behave like origin/main.
+ */
+export const OPEN_APPS_CONDITIONAL_AFTER_APP = ['from', 'with', 'for', 'it'] as const;
+
+/**
+ * Reviewed this-app continuations after from/with/for/it.
+ * Case-sensitive lowercase, the same way `settings` is handled, so
+ * "from Home Assistant", "from Login Manager", and "for Home Assistant"
+ * still match like origin/main. Bare `home` denies only when it is
+ * followed by end of text, punctuation, or `screen`.
+ * `my` is bound to home / home screen so "from my list of installed apps"
+ * and "for my Instagram" still match like origin/main.
+ */
+export const OPEN_APPS_THIS_APP_CONTINUATION_SOURCE = String.raw`(?:my\s+home(?:\s+screen)?\b|the\s+home(?:\s+screen)?\b|home(?:\s+screen\b|[ \t]*(?=[.,;:!?…'"“”‘’()\[\]{}\-—–/\\\n\r]|$))|login\b)`;
+
+/** Horizontal whitespace only — a newline or any punctuation must break. */
+const AFTER_APP_HORIZONTAL_WS = /^[ \t]+/;
+
+function appStoreOpenHasPresenceTail(afterStore: string): boolean {
+  return new RegExp('^' + OPEN_APPS_APP_STORE_PRESENCE_TAIL_SOURCE, 'i').test(afterStore);
+}
+
+function isThisAppContinuation(afterWord: string): boolean {
+  const rest = afterWord.replace(AFTER_APP_HORIZONTAL_WS, '');
+  // Case-sensitive lowercase, the same way `settings` is handled.
+  return new RegExp('^' + OPEN_APPS_THIS_APP_CONTINUATION_SOURCE).test(rest);
+}
+
+function isAfterAppDenied(word: string, afterWord = ''): boolean {
+  if (word === 'settings') return true;
+  if (word.toLowerCase() === 'settings') return false;
+  const lower = word.toLowerCase();
+  if ((OPEN_APPS_CONDITIONAL_AFTER_APP as readonly string[]).includes(lower)) {
+    return isThisAppContinuation(afterWord);
+  }
+  return (OPEN_APPS_AFTER_APP_DENYLIST as readonly string[]).includes(lower);
+}
+
+function afterAppIsTerminal(rest: string): boolean {
+  if (rest === '') return true;
+  if (/^[\n\r]/.test(rest)) return true;
+  if (/^[.,;:!?…'"“”‘’()\[\]{}\-—–/\\]/.test(rest)) return true;
+  return false;
+}
+
+/**
+ * Origin/main's `open (the)? app` capture, minus (a) end-of-text / punctuation /
+ * newline and (b) the reviewed denylist. `from`/`with`/`for`/`it` deny only
+ * with a reviewed this-app continuation (home/login lowercase, same as
+ * `settings`; bare `home` only at end of text, punctuation, or `screen`).
+ * `called`/`named` stay allowed.
+ */
+export function openNamedAppAsked(text: string): boolean {
+  const openRe = new RegExp(String.raw`\b(?:` + OPEN_APPS_NAMED_APP_OPEN_SOURCE + String.raw`)\b`, 'gi');
+  let m: RegExpExecArray | null;
+  while ((m = openRe.exec(text))) {
+    const after = text.slice(m.index + m[0].length);
+    const rest = after.replace(AFTER_APP_HORIZONTAL_WS, '');
+    if (rest === '') continue; // (a) end of text
+    if (afterAppIsTerminal(rest)) continue; // (a) newline or punctuation
+    if (/^store\b/i.test(rest) && appStoreOpenHasPresenceTail(rest.replace(/^store\b/i, ''))) continue;
+    if (new RegExp('^' + OPEN_APPS_NAMED_APP_CALLED_SOURCE, 'i').test(rest)) return true;
+    const word = /^[A-Za-z0-9][A-Za-z0-9'_-]*/.exec(rest);
+    if (!word) continue;
+    if (isAfterAppDenied(word[0], rest.slice(word[0].length))) continue; // (b) denylist
+    return true;
+  }
+  return false;
+}
+
+/** True when the prompt asks to open another app, WhatsApp, the App Store, or the OS app drawer. */
+export function openAppsAsked(text: string): boolean {
+  if (new RegExp(String.raw`\b(?:` + OPEN_APPS_CORE_SOURCE + String.raw`)\b`, 'i').test(text)) return true;
+  if (/\bapp\s+khol\w*\b/i.test(text)) return true;
+  if (/\bkhol\s+do\b/i.test(text)) return true;
+  if (new RegExp(String.raw`\b` + OPEN_APPS_APP_DRAWER_OPEN_SOURCE, 'i').test(text)) return true;
+  if (openNamedAppAsked(text)) return true;
+
+  const storeRe = new RegExp(String.raw`\b` + OPEN_APPS_APP_STORE_OPEN_SOURCE, 'gi');
+  let m: RegExpExecArray | null;
+  while ((m = storeRe.exec(text))) {
+    const after = text.slice(m.index + m[0].length);
+    if (appStoreOpenHasPresenceTail(after)) continue;
+    return true;
+  }
+  return false;
+}
+
 export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
   {
     id: 'reminders',
@@ -129,7 +325,21 @@ export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
     webFallback: 'plain tel:, sms: and https://wa.me links, which a phone browser also opens',
     androidPermissions: [],
     iosUsage: {},
-    asks: /\b(call\s+(?:karo|kar|kare|kardo|mummy|mom|papa)|make\s+(?:a\s+)?call|whats\s*app|sms|open\s+(?:the\s+)?(?:app|apps)|app\s+khol\w*|khol\s+do)\b/i,
+    // Opening WhatsApp / other apps — never a "WhatsApp number" / "WhatsApp mobile number" identity
+    // field (BR1974: a Chess Squad welcome-screen fix was handed @capacitor/app-launcher because
+    // "Enter Your WhatsApp Mobile Number" matched a bare `whats\s*app`, and the brief also mentions
+    // SMS/calling, so the builder added WhatsApp and SMS "contact support" the user never asked for).
+    // Singular "open the app" / "when I open the app" / "open the app to see…" / "opening the app"
+    // / "when the app opens" launch THIS app. "open the app settings" is this app's settings screen
+    // (in-app navigation), not another app. Plural "open apps" / "open the apps" still match.
+    // `open the app store` is named explicitly so dropping singular `open the app` does not
+    // lose origin/main captures; reviewed presence tails (listing / screenshots / release /
+    // release notes / listing page) are applied by `openAppsAsked`. Singular `open (the)? app`
+    // keeps origin/main's capture except (a) end-of-text / punctuation / newline and (b) the
+    // reviewed after-app denylist (settings is lowercase-only). `called`/`named` stay allowed.
+    // Play Store / go-to / link / redirect / kholo / launch-store opens are Q-2649. `asks`
+    // is documentation; requestedCapabilities routes this row through openAppsAsked.
+    asks: new RegExp(String.raw`\b(?:` + OPEN_APPS_CORE_SOURCE + String.raw`|app\s+khol\w*|khol\s+do|` + OPEN_APPS_APP_STORE_OPEN_SOURCE + String.raw`|` + OPEN_APPS_APP_DRAWER_OPEN_SOURCE + String.raw`)\b`, 'i'),
   },
   {
     id: 'contacts',
@@ -287,7 +497,7 @@ export function requestedCapabilities(prompt: string | null | undefined): Native
   // A reference link's words ask for nothing (autopsy 33812996) — read without machine text.
   const text = typeof prompt === 'string' ? withoutMachineText(prompt) : '';
   if (!text.trim()) return [];
-  return NATIVE_CAPABILITIES.filter((c) => c.asks.test(text));
+  return NATIVE_CAPABILITIES.filter((c) => (c.id === 'open-apps' ? openAppsAsked(text) : c.asks.test(text)));
 }
 
 /** The capabilities an app ACTUALLY uses, read from its own package.json — evidence, not a guess. */

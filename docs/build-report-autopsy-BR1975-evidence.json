@@ -1,0 +1,89 @@
+{
+  "identity": {
+    "reportNumber": 1975,
+    "outcome": "succeeded",
+    "ok": true,
+    "prompt": "Give me one one website code for name satyam engineering works",
+    "promptLength": 62,
+    "promptWords": 11,
+    "promptHash": "bfddc296",
+    "reportDigest": "73de62fcf7e24319cd4f3fde4a74256baa2af0350ae228105ea27090f70c2746",
+    "buildId": "6e1d025c-af45-496e-ae4a-c9cbe93ece07",
+    "workspaceId": "agentv3-JhJBVKmrXyPxm2Pxr69lDF4Eco43-58312807-b27d-4d4f-ab38-0d2a13e81657",
+    "historyId": "1794111117203",
+    "sessionId": "58312807-b27d-4d4f-ab38-0d2a13e81657",
+    "model": "qwen3-coder",
+    "framework": "vite-react",
+    "builtBy": "SURPLUS",
+    "startedAt": 1794111117203,
+    "endedAt": 1794111593384,
+    "startedAtIST": "2026-11-08 09:41:57.203 IST",
+    "endedAtIST": "2026-11-08 09:49:53.384 IST",
+    "durationMs": 476181,
+    "userWaitMs": 30000
+  },
+  "reportBytes": 111754,
+  "truncation": {
+    "complete": true
+  },
+  "billing": {
+    "charged": false,
+    "billedUsd": 0,
+    "sandboxCostUsd": 0.021844,
+    "powerLevel": "weak",
+    "userTier": "weak (free tier \u2014 cheap engines) \u00b7 not charged"
+  },
+  "etaAccuracy": {
+    "promisedMs": 353661,
+    "lowMs": 237555,
+    "highMs": 596917,
+    "actualMs": 446181,
+    "ratio": 1.2616064536378058,
+    "withinBand": true,
+    "evidenced": true,
+    "key": "app_unsized",
+    "source": "platform"
+  },
+  "requestAnalysis": {
+    "taskType": "app_unsized",
+    "complexityScore": 15,
+    "startTier": "gemini",
+    "startBand": "cheapest band"
+  },
+  "nativeCapabilityObserved": false,
+  "complexityRouting": "simple (score 15, model)",
+  "changeClassified": "New app (0 parts named)",
+  "firstRenderSec": 229,
+  "postGreenWrites": 10,
+  "readyBeforeEnd": "step 20 (92/100); then 6 more steps / 101s",
+  "manifestFileCount": 22,
+  "mobileLayout": {
+    "viewport": "390\u00d7844",
+    "sidewaysPx": 260,
+    "stickingOut": "<nav> Home Services About Contact (296px wide, reaching 650px)",
+    "smallControls": [
+      "Services 67\u00d724",
+      "About 47\u00d724",
+      "Contact 62\u00d724"
+    ]
+  },
+  "unresolvedCodes": [
+    "PLATFORM_WRITE_REFUSED",
+    "MOBILE_LAYOUT_ISSUES",
+    "RELEASE_GATE"
+  ],
+  "oppositeClassAssembledBeforeEdit": true,
+  "shipped": [
+    "F1_where_header_wraps_on_a_phone"
+  ],
+  "notShipped": [
+    "fast-lane retry of a syntax-refused Footer write",
+    "DESIGN_KIT_VOCABULARY company-header line",
+    "release-gate or bug-hunt policy changes",
+    "Q-2649",
+    "Q-2650",
+    "Q-2651",
+    "Q-2652"
+  ],
+  "newQueueRows": []
+}

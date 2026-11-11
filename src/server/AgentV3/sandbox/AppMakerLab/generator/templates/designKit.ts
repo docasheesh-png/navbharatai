@@ -403,6 +403,20 @@ small, .muted, .text-muted { color: var(--muted); }
    Existing apps that already copied a previous rule are not rewritten. */
 .nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; }
 .nb-topbar h1 { min-width: 0; overflow-wrap: break-word; }
+/* A marketing-site <header> often sits a long company name beside a <nav> of
+   section links (autopsy BR1975: "Satyam Engineering Works" + "Home Services
+   About Contact" — the <nav> reached 650px on a 390px phone, 260px of sideways
+   scroll, and three links were 24px tall). The kit already wraps .nb-header and
+   .nb-topbar, but generated markup that uses a bare <header> still overflows.
+   :where() keeps specificity at zero: flex-wrap applies when the header is
+   already a flex row and is ignored on a block hero header; a later, more
+   specific rule can opt out. overflow is left visible (BR1972: overflow-x:auto
+   clips dropdowns). overflow-wrap is not set on the container (anywhere is
+   inherited and breaks title words). Existing apps that already copied a
+   previous rule are not rewritten. */
+:where(header) { flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; }
+:where(header) nav { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; max-width: 100%; }
+:where(header) nav a { display: inline-flex; align-items: center; min-height: 32px; }
 .nb-main { padding: 24px 20px; min-width: 0; }
 @media (max-width: 820px) {
   .nb-shell { grid-template-columns: 1fr; }

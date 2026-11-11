@@ -40,6 +40,10 @@ describe('a header action row that holds a whole nav fits a phone', () => {
     // Later kit edits (BR1972's .nb-topbar shrink/wrap) must be undone too, or this
     // reconstruction is no longer byte-equal to the recorded pre-BR1959 starter.
     const before = DESIGN_KIT_CSS
+      .replace(/\/\* A marketing-site <header>[\s\S]*?\*\/\n/, '')
+      .replace(':where(header) { flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; }\n', '')
+      .replace(':where(header) nav { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; max-width: 100%; }\n', '')
+      .replace(':where(header) nav a { display: inline-flex; align-items: center; min-height: 32px; }\n', '')
       .replace(/\/\* A dashboard topbar holds the page title[\s\S]*?\*\/\n/, '')
       .replace('.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; }', '.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); }')
       .replace('.nb-topbar h1 { min-width: 0; overflow-wrap: break-word; }\n', '')

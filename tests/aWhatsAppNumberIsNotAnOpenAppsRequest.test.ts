@@ -73,34 +73,18 @@ export const SAME_CLASS_OPEN_APPS = [
   'whatsapp kholo',
   'make a call',
   'call mummy',
-  'open other apps',
-  'open another app',
   'open the apps',
   'app kholo',
-  // #4165: plural / verb+store / verb+drawer / WhatsApp-chat-with-number must match
   'open apps like YouTube',
   'please open apps',
   'open the app store',
-  'Open the Play Store',
-  'button to open Play Store',
-  'redirect to app store',
-  'link to play store page',
-  'launch the app store',
-  'redirect to the Play Store',
   'open WhatsApp chat with this number',
   'open the app drawer',
   'open apps installed on phone',
   'please open the apps',
   'users should be able to open apps from this screen',
-  // #4165: Hinglish post-nominal khol and "go to the play store"
-  'play store kholo',
-  'app store kholo',
-  'play store kholna hai',
-  'play store khol ke dekho',
-  'app store mein kholo',
-  'go to the play store',
   'khol do',
-  'open play store page',
+  'khol do play store listing',
   'open the app store so the user can submit a review',
   'Add a button to open the App Store, and a screenshots carousel on the home page',
   'After we release, a button should open the App Store',
@@ -108,15 +92,6 @@ export const SAME_CLASS_OPEN_APPS = [
   'open the App Store to see if a new release is available',
   'Add an Open App Store button so users can see other apps we published',
   'Build a music console with a button to open the App Store',
-  'open the play store so the user can submit a review',
-  'Add a button to open the Play Store, and a screenshots carousel on the home page',
-  'After we release, a button should open the Play Store',
-  'open the Play Store from the admin console',
-  'open the Play Store to see if a new release is available',
-  'Add an Open Play Store button so users can see other apps we published',
-  'Build a music console with a button to open the Play Store',
-  'play store kholo aur daal makhani recipe dikhao',
-  // #4165: Rule A explicit opens that origin/main captured via `open the app`
   'Add a button to open the App Store after the app is published on the App Store',
   'After the app is published on the App Store, add a button to open the App Store',
   'open the App Store to see the book we published last year on the App Store',
@@ -124,14 +99,10 @@ export const SAME_CLASS_OPEN_APPS = [
   'open the App Store to read the blog post on the editorial page we published on the App Store',
   'open the App Store after it is released on the Play Store',
   'open the App Store after it is released in the Play Store',
-  // Explicit open (Rule A). Informal publish without a store+particle is acceptable here.
-  'open the play store and submit karna',
+  'open the App Store and publish karna',
+  'open the App Store version of our game',
 ] as const;
 
-/**
- * Opposite class: a WhatsApp *number* / *id* is an identity field, and "open the app" means
- * launch this app. Own bypass attempts in both scripts and both directions.
- */
 export const OPPOSITE_NOT_OPEN_APPS = [
   BR1974_PROMPT,
   'Enter Your WhatsApp Mobile Number',
@@ -146,7 +117,6 @@ export const OPPOSITE_NOT_OPEN_APPS = [
   'whenever I open the app',
   'Every time a new visitor opens the app, show the welcome screen',
   'Please completely fix the app starting flow',
-  // #4165: singular launch-this-app language must stay uncaptured
   'open the app',
   'when the app opens',
   'open the app to see the dashboard',
@@ -157,25 +127,21 @@ export const OPPOSITE_NOT_OPEN_APPS = [
   'I open the app every morning',
   'open the app first',
   'open this app',
-  // #4165: publish/listing language is not a request to open the store
   'publish to App Store',
   'upload to Play Store',
   'Play Store listing',
   'App Store screenshots',
   'ready for app store release',
   'play store pe daalna hai',
-  // Bare "app drawer" is a navigation drawer in this app, not the OS launcher
   'add an app drawer',
   'navigation app drawer',
   'hamburger app drawer',
-  // #4165: launch to/on/in a store is a publish idiom, not "launch the app store"
   'we will launch to the Play Store next week',
   'launch to the App Store',
   'launch on Play Store',
   'launch on the Play Store',
   'launch in the App Store',
   'launch our play store listing',
-  // Store + listing/developer/account/console is this app's store presence
   'open a Play Store developer account',
   'open our Play Store console',
   'link to play store page for my own app listing',
@@ -186,11 +152,50 @@ export const OPPOSITE_NOT_OPEN_APPS = [
   'add a deep link',
   'add a hyperlink',
   'deep link to the Play Store',
-  'khol do play store listing',
   'a hyperlink to the play store',
   'play store pe khol ke daal dena',
   'link to play store page for our app listing',
   'open the play store page of my app listing',
+  // Reviewed App Store presence tails (the one allowed exclusion vs origin/main).
+  'open the App Store listing',
+  'open the App Store screenshots',
+  'open the App Store release',
+  'open the App Store release notes',
+  'open the App Store listing page',
+  'please open the App Store listing page',
+  // Q-2649: store forms origin/main did not capture stay unmatched.
+  'open other apps',
+  'open another app',
+  'Open the Play Store',
+  'button to open Play Store',
+  'redirect to app store',
+  'link to play store page',
+  'launch the app store',
+  'redirect to the Play Store',
+  'play store kholo',
+  'app store kholo',
+  'play store kholna hai',
+  'play store khol ke dekho',
+  'app store mein kholo',
+  'go to the play store',
+  'open play store page',
+  'open the play store so the user can submit a review',
+  'Add a button to open the Play Store, and a screenshots carousel on the home page',
+  'After we release, a button should open the Play Store',
+  'open the Play Store from the admin console',
+  'open the Play Store to see if a new release is available',
+  'Add an Open Play Store button so users can see other apps we published',
+  'Build a music console with a button to open the Play Store',
+  'play store kholo aur daal makhani recipe dikhao',
+  'open the play store and submit karna',
+  'open the Play Store version of our game',
+  'open the Play Store developer page',
+  'open the Play Store agreement',
+  'open the Play Store review guidelines',
+  'open the Play Store data safety form',
+  'open the Play Store promo campaign',
+  'open the Play Store Connect dashboard',
+  'open the Play Store for my developer account',
 ] as const;
 
 describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', () => {
@@ -255,10 +260,10 @@ describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', ()
     expect(requestedCapabilities('please open apps').map((c) => c.id)).toContain('open-apps');
     // A later "number" after "chat" is not a WhatsApp-number identity field.
     expect(requestedCapabilities('open WhatsApp chat with this number').map((c) => c.id)).toContain('open-apps');
-    // Store matches only with an open/launch/redirect/link verb — never publish/listing language.
-    expect(requestedCapabilities('button to open Play Store').map((c) => c.id)).toContain('open-apps');
-    expect(requestedCapabilities('redirect to app store').map((c) => c.id)).toContain('open-apps');
-    expect(requestedCapabilities('link to play store page').map((c) => c.id)).toContain('open-apps');
+    // Play Store / go-to / link / redirect opens are Q-2649 (origin/main did not match them).
+    expect(requestedCapabilities('button to open Play Store').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('redirect to app store').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('link to play store page').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('publish to App Store').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('upload to Play Store').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('Play Store listing').map((c) => c.id)).not.toContain('open-apps');
@@ -275,30 +280,27 @@ describe('BR1974: a WhatsApp number field is not a request to open WhatsApp', ()
     expect(requestedCapabilities('launch to the App Store').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('launch on Play Store').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('launch our play store listing').map((c) => c.id)).not.toContain('open-apps');
-    expect(requestedCapabilities('launch the app store').map((c) => c.id)).toContain('open-apps');
+    expect(requestedCapabilities('launch the app store').map((c) => c.id)).not.toContain('open-apps');
     // Store tails that name this app's listing / developer console.
     expect(requestedCapabilities('open a Play Store developer account').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('open our Play Store console').map((c) => c.id)).not.toContain('open-apps');
-    // Decision: "link to play store page for my own app listing" does NOT match.
-    // A get-it-on / rate-us button that points at THIS app's store listing is not a
-    // request to open other apps via @capacitor/app-launcher. The phrase names
-    // "listing". When that is ambiguous, lean toward not capturing it — an https://
-    // play.google.com/store URL works without the open-apps brief. "link to play
-    // store page" without listing language still matches.
-    expect(requestedCapabilities('link to play store page').map((c) => c.id)).toContain('open-apps');
+    // Q-2649: origin/main did not match "link to play store page" (with or without
+    // listing language). A get-it-on / rate-us button that points at THIS app's
+    // store listing is not a request to open other apps via @capacitor/app-launcher.
+    expect(requestedCapabilities('link to play store page').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('link to play store page for my own app listing').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('get it on Play Store').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('rate us on the Play Store').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('deep link').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('hyperlink').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('deep link to the Play Store').map((c) => c.id)).not.toContain('open-apps');
-    // Post-nominal Hinglish khol and "go to the play store" must match; daalna must not.
-    expect(requestedCapabilities('play store kholo').map((c) => c.id)).toContain('open-apps');
-    expect(requestedCapabilities('app store kholo').map((c) => c.id)).toContain('open-apps');
-    expect(requestedCapabilities('play store kholna hai').map((c) => c.id)).toContain('open-apps');
-    expect(requestedCapabilities('play store khol ke dekho').map((c) => c.id)).toContain('open-apps');
-    expect(requestedCapabilities('app store mein kholo').map((c) => c.id)).toContain('open-apps');
-    expect(requestedCapabilities('go to the play store').map((c) => c.id)).toContain('open-apps');
+    // Post-nominal Hinglish store+khol and "go to the play store" are Q-2649.
+    expect(requestedCapabilities('play store kholo').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('app store kholo').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('play store kholna hai').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('play store khol ke dekho').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('app store mein kholo').map((c) => c.id)).not.toContain('open-apps');
+    expect(requestedCapabilities('go to the play store').map((c) => c.id)).not.toContain('open-apps');
     expect(requestedCapabilities('play store pe daalna hai').map((c) => c.id)).not.toContain('open-apps');
   });
 });

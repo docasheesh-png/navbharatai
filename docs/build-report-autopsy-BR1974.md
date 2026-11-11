@@ -43,6 +43,7 @@ This is the same stray-word class as the contacts row (never a "Contact us" page
 | F2 add U+2013/U+2014 to `(?<!\bcase[\s\-/,]+)` | Showcase/lowercase/briefcase, "study  app", self-study, bible study and the report study-app prompt stay captured. Earlier case-study / craft-word / institution opposite-class phrases stay uncaptured. | `study[\s-]+` does not itself accept en/em dashes, so a "study–app" (en-dash, no space) would not newly become a study app. | Ship. Mutation: dropping the two dashes turns red. |
 | Demote `dashboard` so a personal dashboard is not complex_app/68 | COMPLEX_APP_SIGNAL. | Would also demote admin dashboards / SaaS consoles. Weak preflight independently said model. | Leave Q-2647. |
 | Tighten bare `sms` | Same `asks` regex. | "send an SMS" must keep open-apps. | Leave Q-2648. |
+| Capture Play Store / go-to / link / redirect / kholo / launch store opens | Independent reviews found a new false-positive class each round versus origin/main (version of our game, developer page, agreement, review guidelines, data safety form, promo campaign, Connect dashboard, developer account, plus earlier publish-only / launch-to / listing / deep-link / Hinglish daal-kar classes). | Leave Q-2649. |
 | Raise or lower the free cap; mark unfinished work finished | First render at 285 s; POST_GREEN_WRITES 14; READY_BEFORE_END not measured on edits. | Billing / unfinished-as-finished. | Do not ship. TODO_ONLY_TURNS already Q-2375 / Q-1068. |
 
 ## Review follow-up (#4165)
@@ -107,4 +108,12 @@ Seventh follow-up (reviewer FAIL at `0911ab617` — 8-word publish idiom + idiom
 
 ## Queue
 
-This commit **closes no row** and **opens Q-2647 and Q-2648**. Q-2646, Q-2645, Q-2644, Q-2643, Q-2642, Q-2640, Q-2621, Q-2611, Q-2375 / Q-1068 and earlier blockers stay open.
+This commit **closes no row**. It opened Q-2647 and Q-2648, and now opens **Q-2649** (Play Store / go-to / link / redirect / kholo / launch store opens). Q-2646, Q-2645, Q-2644, Q-2643, Q-2642, Q-2640, Q-2621, Q-2611, Q-2375 / Q-1068 and earlier blockers stay open.
+
+Eighth follow-up (reviewer FAIL at `a9973b7cc` — Rule A's open-ended tail created Play Store false positives versus origin/main):
+
+- Store phrases behave like origin/main `c072e0eb9`, with only one change: the reviewed App Store presence tails (`open the App Store listing` / `screenshots` / `release` / `release notes` / `listing page`) may stay unmatched.
+- App Store forms that main matched via `open the app` still match (`open the app store`, the six lost repros, `open the App Store version of our game`). Store forms that main did not match stay unmatched: Play Store opens, `go to the play store`, link/redirect to the store, `play store kholo`, `launch the app store`, and the review FPs (version of our game, developer page, agreement, review guidelines, data safety form, promo campaign, Connect dashboard, for my developer account).
+- Rule A/Rule B new captures and the idiom machinery that only existed to gate them are removed. `khol do play store listing` matches again (main captured it via `khol do`; it is not an App Store presence-tail form).
+- Actual BR1974 fixes stay: WhatsApp number/id field exclusion (including Hinglish); singular `open the app` / `open the app settings` unmatched; plural `open apps` / `open apps like YouTube` matched; `open WhatsApp chat with this number` matched; explicit `open the app store` and `open the app drawer` so dropping singular `open the app` does not lose those main captures.
+- Two-sided regression gate over the whole corpus, review repros included: (a) every prompt main matched still matches, except the small reviewed must-not-match list (WhatsApp fields, singular open-the-app, App Store presence tails); (b) every prompt main missed still does not match, except the small reviewed must-match list (plural open-apps phrases and `open WhatsApp chat with this number`, which main already captured).

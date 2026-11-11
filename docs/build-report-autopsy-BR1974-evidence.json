@@ -89,15 +89,18 @@
     "F1 #4165 store-publish idioms not bare tokens; origin/main genuine-open regression gate",
     "F1 #4165 close publish FPs: ko/se particles, Hinglish karna, English tense/object-gap",
     "F1 #4165 Rule A explicit-open always wins; Rule B keeps idiom-wins; origin/main corpus gate",
+    "F1 #4165 cut store matching back to origin/main plus App Store presence tails; queue Q-2649; two-sided corpus gate",
     "F2 en/em dash in case-study lookbehind"
   ],
   "notShipped": [
     "Q-2647 dashboard→complex_app",
     "Q-2648 bare sms",
+    "Q-2649 Play Store / go-to / link / redirect / kholo / launch store opens",
     "TODO_ONLY_TURNS already Q-2375/Q-1068"
   ],
   "newQueueRows": [
     "Q-2647",
-    "Q-2648"
+    "Q-2648",
+    "Q-2649"
   ]
 }

@@ -4805,6 +4805,21 @@ not been independently verified. This note is not runtime authority — Admin/se
   retired — z routes like any same-tier user; only this billing waiver remains.) Remove the
   whole thing later by deleting `zTestAccount.ts` call sites.
 
+- **`AGENTV3_BILL_SURPLUS_STOP_TOKEN_FLOOR`** (⚠️ NOT set in Cloud Run; **default ON**; `off` is the
+  kill switch — added 2026-11-11, owner-approved BR2279 exception). When a Weak/Surplus build is
+  stopped by the user after their own files were written, Surplus receipts could not be settled
+  (#4026 still absorbs at ₹0 inside `decideBuildBilledUsd`), the preview was never proven running,
+  and the report has real token counts, both settlement points call the same helper
+  (`decideSurplusStopTokenFloor`) and bill a FLOOR estimate at real cost (no markup, no sandbox
+  fee), labelled estimated. That helper applies the same empty-build and unrendered / server-down
+  preview zeroing and the same own-file count (builder writes minus unchanged starter) at both
+  points, so the deadline finalizer cannot invent a charge the normal settle would have zeroed.
+  Unset, empty, or an unrecognised typo means ON; only an explicit `off` / `false` / `0` disables
+  it and restores the ₹0 absorb. Never invents a cost from missing or zero tokens. Does not change
+  empty-build, seed-only, verified-receipt, seen-running, non-stop failure, admin/tester-free, or
+  non-Weak paths. Code: `surplusStopTokenFloor.ts`. This entry is documentation only — this change
+  does not write the flag on Cloud Run.
+
 ### 2026-11-01 owner pricing/routing revision
 
 The earlier sandbox-time billing entry is superseded for Pro builds. Customer

@@ -1734,6 +1734,45 @@ export class E2BActuator implements IEngineerActuator {
       freshCreate = true;
       this._sandboxOrigin.set(workspaceId, 'created-fresh');
     }
+    // The allocation CAS is authoritative across Cloud Run instances. A loser must never publish
+    // or use a sandbox that the durable workspace record does not name.
+    if (resumeEnabled) {
+      const recorded = await sandboxStore.recordAllocation(workspaceId, null, sandbox.sandboxId, resumeId ?? null);
+      if (!recorded) {
+        const winner = await sandboxStore.lookupRecoveryIdentity(workspaceId).catch(() => ({ state: 'unavailable' as const }));
+        if (winner.state !== 'found') {
+          if (freshCreate) {
+            await withTimeout(Sandbox.kill(sandbox.sandboxId), 10_000, 'Sandbox.kill(unrecorded-allocation)').catch((e) => {
+              console.warn('[SANDBOX] Could not kill unrecorded allocation after CAS failure:', String((e as any)?.message ?? e));
+            });
+          }
+          this._sandboxOrigin.delete(workspaceId);
+          throw new SandboxRecoveryUnavailableError();
+        }
+        if (winner.sandboxId !== sandbox.sandboxId) {
+          // A newly created loser is ours to discard. A resumed old machine may still be in use by
+          // another request, so never kill it merely because another instance installed a new id.
+          if (!freshCreate) {
+            this._sandboxOrigin.delete(workspaceId);
+            throw new SandboxRecoveryUnavailableError();
+          }
+          await withTimeout(Sandbox.kill(sandbox.sandboxId), 10_000, 'Sandbox.kill(losing-allocation)').catch((e) => {
+            console.warn('[SANDBOX] Could not kill losing allocation after CAS conflict:', String((e as any)?.message ?? e));
+          });
+          try {
+            sandbox = await withTimeout(Sandbox.connect(winner.sandboxId, this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.connect(winning-allocation)');
+            await sandbox.setTimeout(sandboxLifetimeMs()).catch(() => {});
+            this._lastLifetimeExtend.set(workspaceId, Date.now());
+            this._sandboxOrigin.set(workspaceId, 'resumed');
+            freshCreate = false;
+          } catch {
+            this._sandboxOrigin.delete(workspaceId);
+            throw new SandboxRecoveryUnavailableError();
+          }
+        }
+      }
+    }
+
     this.sandboxes.set(workspaceId, sandbox);
     usageTracker.record(workspaceId, 'sandbox');
     // WHY, not just THAT: the zone names the caller (a build, the preview door, a wake, a publish,
@@ -1751,17 +1790,10 @@ export class E2BActuator implements IEngineerActuator {
     this._busySince.delete(workspaceId);
     const startSnapshot = { ...session };
     if (!this._sandboxStartedAt.has(workspaceId)) this._sandboxStartedAt.set(workspaceId, Date.now());
-    // Persist the first allocation before any session observation. A normal activity touch is
-    // intentionally conditional and cannot create a missing record; this compare-and-set is the
-    // allocation write, fenced by the identity observed before connect/create so a stale creator
-    // cannot replace a sandbox another instance has already installed.
     this._lastDurableTouch.delete(workspaceId);
-    const identityTouch = sandboxResumeEnabled()
-      ? sandboxStore.recordAllocation(workspaceId, null, sandbox.sandboxId, resumeId ?? null)
-      : undefined;
-    if (sandboxResumeEnabled()) {
+    if (resumeEnabled) {
       this._sessionStartWrites.set(session,
-        sandboxStore.recordSessionStart(workspaceId, startSnapshot, identityTouch).catch(() => {}));
+        sandboxStore.recordSessionStart(workspaceId, startSnapshot).catch(() => {}));
     }
     // RECREATE-AFTER-DEATH restore: a fresh sandbox comes back EMPTY, so the app goes back INTO it —
     // from the durable store first and this instance's warm cache second. See `_restoreFreshSandbox`.

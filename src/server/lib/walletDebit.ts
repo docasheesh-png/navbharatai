@@ -799,7 +799,6 @@ export async function settleWalletHold(
   tx: { rollupRef: string; holdId: string; feature?: WalletFeature; billedInr: number },
   knownOwnerId?: string,
 ): Promise<{ ok: true; settled: boolean } | { ok: false; error: string }> {
-  recordFeatureSpend(tx, userId);
   if (!db) return { ok: false, error: 'Database not initialized' };
   try {
     const ownerId = knownOwnerId || await walletOwnerId(db, userId);
@@ -811,6 +810,9 @@ export async function settleWalletHold(
       if (result.applied) t.set(walletRef, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? snap.data() : null, result.wallet, 'wallet-debit'));
       return result.applied;
     });
+    // Feature spend is a settlement metric, not a hold-attempt metric. The transaction returns
+    // false for duplicate settles and missing/already-closed holds, so count only the first commit.
+    if (settled) recordFeatureSpend(tx, userId);
     return { ok: true, settled };
   } catch (err: any) {
     return { ok: false, error: err?.message || 'Wallet settle transaction failed' };

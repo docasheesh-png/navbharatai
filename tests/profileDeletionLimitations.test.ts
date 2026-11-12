@@ -3,8 +3,10 @@ import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 
 const state = vi.hoisted(() => ({
   account: 'deleted',
+  eraseOriginals: vi.fn(),
   deleteDerived: vi.fn(),
 }));
+vi.mock('../src/server/lib/proAttachmentStore', () => ({ proAttachmentStore: { erase: state.eraseOriginals } }));
 vi.mock('../src/server/lib/authMiddleware', async (original) => ({
   ...await original<typeof import('../src/server/lib/authMiddleware')>(),
   verifyFirebaseIdentity: async () => ({ uid: 'alice', email: null }),
@@ -46,6 +48,7 @@ const handler = captureRoutes(registerProfileRoutes).get('DELETE /api/profile')!
 beforeEach(() => {
   state.account = 'deleted';
   vi.clearAllMocks();
+  state.eraseOriginals.mockReset().mockResolvedValue(undefined);
   state.deleteDerived.mockResolvedValue({
     uid: 'alice', collections: [], totalDeleted: 4, keys: { bots: 0, historySessions: 1 },
     limitations: [LEGACY_HISTORY_ERASURE_LIMITATION, WORKSPACE_OWNERSHIP_ERASURE_LIMITATION],
@@ -57,6 +60,7 @@ describe('account deletion reports legacy history attribution as an unresolved l
   it('confirms the removed account while retaining the known limitation without invented counts', async () => {
     const res = mockRes();
     await handler(mockReq({ body: { confirm: 'DELETE' } }), res);
+    expect(state.eraseOriginals).toHaveBeenCalledWith('alice');
     expect(res.statusCode).toBe(200);
     expect(res.body.accountDeleted).toBe(true);
     expect(res.body.message).toContain('Your account has been deleted.');

@@ -54,6 +54,7 @@ export interface BodyRoute {
  */
 export const LARGE_BODY_ROUTES: readonly BodyRoute[] = [
   // ── Build and chat with attachments ──────────────────────────────────────────────────────────────
+  { path: '/api/agentv3/attachments', why: '`base64` — one private original, bounded to15MiB raw (20MiB base64 plus JSON); Pro file picker' },
   { path: '/api/agentv3/chat', why: '`attachments` — images, PDFs and ZIPs as base64 with the build prompt (useAgentV3Build.ts; client guard attachmentLimits.ts, 22 MB raw)' },
   { path: '/api/agentv3/import-files', why: '`files` — folder and ZIP import batches (App.tsx, masterZipImport.ts)' },
   { path: '/api/chat/navbharat', why: '`fileAttachments` (base64) and `history` (useChatEngine.ts)' },
@@ -328,3 +329,4 @@ export function formBodyParser(opts: JsonBodyParserOptions = {}): RequestHandler
     });
   };
 }
+

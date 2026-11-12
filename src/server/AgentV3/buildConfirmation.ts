@@ -27,6 +27,7 @@
  * PURE. No I/O, no clock, no env.
  */
 
+import { isSourcePathOnly } from '../lib/sourcePathPrompt';
 import {
   classifyIntentWithConfidence,
   firstNewBuildOrder,
@@ -71,6 +72,8 @@ export function buildConfirmationEnabled(env: NodeJS.ProcessEnv = process.env): 
 /** Does this message itself confirm that an app should be built now? PURE. */
 export function buildConfirmation(message: string): BuildConfirmation {
   const text = typeof message === 'string' ? message.trim() : '';
+  // Defense in depth: a bare file location is not a build order, even if another classifier changes.
+  if (isSourcePathOnly(text)) return { confirmed: false, reason: 'names-nothing-to-build' };
   const lower = text.toLowerCase();
   if (text && isExplicitCompleteBuild(text)) return { confirmed: true, reason: 'complete-build' };
   if (text && wantsFreshStart(text)) return { confirmed: true, reason: 'fresh-start' };

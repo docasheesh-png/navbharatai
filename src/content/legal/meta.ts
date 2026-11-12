@@ -43,7 +43,7 @@ export const LEGAL_META: LegalMeta[] = [
     id: 'legal_terms',
     title: 'Terms of Service',
     subtitle: 'The rules of using NavBharatAI — tokens, payments, your app ownership',
-    updated: '30 October 2026',
+    updated: '11 November 2026',
     settingsTile: true,
   },
   {
@@ -91,3 +91,4 @@ export const LEGAL_META: LegalMeta[] = [
     settingsTile: false,
   },
 ];
+

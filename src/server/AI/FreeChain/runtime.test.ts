@@ -17,6 +17,7 @@ import { buildFreeChainRouter, maybeFreeChain, freeChainAdminView, freeChainAdmi
 import { FreeRoutingError } from '../LiveRegistry/dispatcher';
 import { DEFAULT_ORDER, freeChainConfig } from './config';
 import { CHAT_SERVER_DEADLINE_MS } from '../../../lib/chatDeadline';
+import { FIXED_TEXT_CHAIN, prioritizeChatSuppliers } from '../fixedTextChain';
 import { applySwitchedOff, __resetProviderSwitchesForTests } from '../../lib/providerSwitches';
 import { getBreaker, resetAllBreakers } from '../Router/CircuitBreaker';
 import { FreeChainProviderError } from './providers/openAiCompatProvider';
@@ -903,8 +904,11 @@ describe('fixed chain recovery and cancellation', () => {
    cfg.ttftMs = 90000; let lateChunk!: (value: string) => void; const chunks: string[] = [];
    m.execute.mockImplementationOnce(async arg => { lateChunk = arg.onChunk; await new Promise(() => {}); }).mockImplementation(successful('second'));
    const pending = buildFreeChainRouter(db, cfg).route({ ...input(), onChunk: s => chunks.push(s) });
-   // Shared server deadline / twelve remaining positions; watchdog samples each second.
-   await vi.advanceTimersByTimeAsync(Math.floor(CHAT_SERVER_DEADLINE_MS / 12) + 1000);
+   // Optional suppliers are skipped first; GLM receives the budget for the
+   // remaining positions, not the separate maximum-dispatch count.
+   const order = prioritizeChatSuppliers(FIXED_TEXT_CHAIN, undefined);
+   const remainingPositions = order.length - order.indexOf('glm45');
+   await vi.advanceTimersByTimeAsync(Math.floor(CHAT_SERVER_DEADLINE_MS / remainingPositions) + 1000);
    expect(await pending).toMatchObject({ ok: true, model: 'glm-4.7-flash', content: 'second' });
    lateChunk('stale'); expect(chunks).toEqual(['second']);
    expect(m.execute).toHaveBeenCalledTimes(2);

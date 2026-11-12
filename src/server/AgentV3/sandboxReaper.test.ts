@@ -67,15 +67,21 @@ describe('pause failures warn without destructive escalation', () => {
     expect(PAUSE_FAILURE_WARNING_THRESHOLD).toBe(3);
   });
 
-  it('neither automatic sweep kills nor settles an unconfirmed pause', () => {
+  it('allocated workspace sweeps never kill on an unconfirmed pause; only rejected CAS losers may be destroyed', () => {
     const src = readFileSync(new URL('./sandbox/EngineerAI/actuators/E2BActuator.ts', import.meta.url), 'utf8');
     const start = src.indexOf('private async _sweepIdleSandboxes(');
     const end = src.indexOf('private _touchDurable(', start);
-    const sweeps = src.slice(start, end);
+    const rejected = src.indexOf('const pendingOrphans = await sandboxStore.listPendingOrphanAllocations(50)', start);
+    expect(start).toBeGreaterThan(-1); expect(rejected).toBeGreaterThan(start); expect(end).toBeGreaterThan(rejected);
+    const sweeps = src.slice(start, rejected);
     expect(sweeps).not.toMatch(/(?:this\.killSandbox|Sandbox\.kill)\(/);
     expect(sweeps).not.toContain('markPaused(');
     expect(sweeps).not.toContain('shouldMarkPausedAfterFailure');
     expect(sweeps).not.toContain('actionAfterPauseFailure');
+    const cleanup = src.slice(rejected, end);
+    expect(cleanup).toContain('for (const orphan of pendingOrphans)');
+    expect(cleanup).toContain('Sandbox.kill(orphan.sandboxId)');
+    expect(cleanup).not.toMatch(/Sandbox\.kill\((?:rec|current)\.sandboxId/);
     expect(src).toContain('SANDBOX_PAUSE_UNCONFIRMED');
     expect(src).not.toContain('SANDBOX_PAUSE_FAILED_KILLED');
     // Public/manual kill support is separate from unattended cost sweeping.

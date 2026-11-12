@@ -6,11 +6,11 @@
 // to the RAW uid's wallet. With WALLET_MERGE_RESOLVE=on, money paid by a merged user landed on the
 // retired wallet that nothing reads or spends. Every credit path now resolves through this one helper.
 //
-// No-op unless WALLET_MERGE_RESOLVE=on (the same switch the debit side reads). On any resolver error
-// the raw uid is used, which is exactly the old behaviour — never worse than before.
+// No-op unless WALLET_MERGE_RESOLVE=on (the same switch the debit side reads). If canonical ownership
+// cannot be verified, fail the credit so the payment/webhook can retry instead of crediting a retired wallet.
 
 import { doc, getDoc } from './serverDb';
-import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
+import { resolveCanonicalWalletIdStrict, walletMergeResolveEnabled } from './walletResolve';
 
 export async function creditWalletId(
   db: any,
@@ -19,7 +19,7 @@ export async function creditWalletId(
   read: (db: any, uid: string) => Promise<string | null | undefined> = readMergedInto,
 ): Promise<string> {
   if (!uid || !walletMergeResolveEnabled(env)) return uid;
-  return resolveCanonicalWalletId((u) => read(db, u), uid).catch(() => uid);
+  return resolveCanonicalWalletIdStrict((u) => read(db, u), uid);
 }
 
 async function readMergedInto(db: any, u: string): Promise<string | null> {

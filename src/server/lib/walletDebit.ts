@@ -3,7 +3,7 @@ import { doc, getDoc, runTransaction } from './serverDb'; // admin-SDK binding (
 import { inrToDebitTokens, TOKENS_PER_RUPEE } from './payments';
 import { giftAfterSpend, giftRemaining, paidSpendableTokens, giftUsagePatch, unavailableGiftTokens, adminBuildRemaining } from './giftSpend';
 import { freeProgramPausedHint } from './freeProgramHint';
-import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
+import { resolveCanonicalWalletIdStrict, walletMergeResolveEnabled } from './walletResolve';
 import { WALLET_OPS, walletOpId } from './walletOps';
 import { withLedgerV2 } from './ledgerV2';
 
@@ -577,16 +577,16 @@ function recordFeatureSpend(tx: { feature?: WalletFeature; billedInr?: number },
 
 /**
  * The wallet a charge for `userId` lands on: the CANONICAL one when this account was merged into another
- * (no-op unless WALLET_MERGE_RESOLVE=on). Best-effort: on any resolver error the raw uid is used. One
+ * (no-op unless WALLET_MERGE_RESOLVE=on). Strict: a resolver error aborts this debit rather than charging a retired wallet. One
  * copy, shared by every debit, hold and release, so a hold and its release can never resolve to two
  * different wallets.
  */
 async function walletOwnerId(db: any, userId: string): Promise<string> {
   if (!walletMergeResolveEnabled()) return userId;
-  return resolveCanonicalWalletId(async (u) => {
+  return resolveCanonicalWalletIdStrict(async (u) => {
     const s = await getDoc(doc(db, 'user_token_wallets', u));
     return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
-  }, userId).catch(() => userId);
+  }, userId);
 }
 
 /**
@@ -799,7 +799,6 @@ export async function settleWalletHold(
   tx: { rollupRef: string; holdId: string; feature?: WalletFeature; billedInr: number },
   knownOwnerId?: string,
 ): Promise<{ ok: true; settled: boolean } | { ok: false; error: string }> {
-  recordFeatureSpend(tx, userId);
   if (!db) return { ok: false, error: 'Database not initialized' };
   try {
     const ownerId = knownOwnerId || await walletOwnerId(db, userId);
@@ -811,6 +810,9 @@ export async function settleWalletHold(
       if (result.applied) t.set(walletRef, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? snap.data() : null, result.wallet, 'wallet-debit'));
       return result.applied;
     });
+    // Feature spend is a settlement metric, not a hold-attempt metric. The transaction returns
+    // false for duplicate settles and missing/already-closed holds, so count only the first commit.
+    if (settled) recordFeatureSpend(tx, userId);
     return { ok: true, settled };
   } catch (err: any) {
     return { ok: false, error: err?.message || 'Wallet settle transaction failed' };

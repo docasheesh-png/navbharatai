@@ -164,12 +164,11 @@ export class SandboxStore {
         const rawCurrent = snap.exists ? snap.data()?.sandboxId : undefined;
         const current = typeof rawCurrent === 'string' && rawCurrent.trim() ? rawCurrent.trim() : null;
         if (current !== expectedSandboxId) return;
-        tx.set(ref, {
-          workspaceId,
-          userId: userId ?? 'anon',
-          sandboxId,
-          updatedAt: Date.now(),
-        }, { merge: true });
+        const patch: Record<string, unknown> = { workspaceId, sandboxId, updatedAt: Date.now() };
+        // A caller without verified user identity must preserve existing ownership metadata; writing
+        // the fallback string 'anon' here would erase a real owner on every resumed allocation.
+        if (userId) patch.userId = userId;
+        tx.set(ref, patch, { merge: true });
       });
     } catch { /* best-effort — never block a build; a newer identity always wins */ }
   }

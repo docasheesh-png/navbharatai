@@ -576,9 +576,8 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         const { default: OpenAI } = await import('openai');
         const c = new OpenAI({ apiKey: sdaGrokKey, baseURL: 'https://api.x.ai/v1' });
 
-        // For images: use current Grok vision-capable models (shared list, env-overridable)
-        // For text: use standard Grok-3 models
-        const models = isImage ? grokVisionModels(sdaVisionTier) : ['grok-3', 'grok-3-fast'];
+        // This direct Grok path is multimodal-only; use the shared, env-overridable vision model list.
+        const models = grokVisionModels(sdaVisionTier);
         const grokImages = reportFiles.filter((f) => f.fileType.startsWith('image/'));
         const userContent: any = grokImages.length > 0
           ? [

@@ -31,6 +31,7 @@ import { useSocialStats, useSignedIn, webKey, apkKey, fetchFeed, askToSignIn } f
 import { BROWSE_VIEWS, kindFilterOptions, shelvesFor, emptyViewMessage, viewNeedsSignIn, type BrowseView, type KindFilter } from './appMart/browseViews';
 import { readStoreStatus, storeStatusReport, type StoreStatus } from './appMart/storeStatus';
 import { parseAppMartTarget } from '../../lib/appMartTarget';
+import { WhatsAppShareLink } from '../share/WhatsAppShareLink';
 import { writeFailure } from '../../lib/serverAnswer';
 import { readAdminReason } from '../../lib/adminActionReason';
 import { REVIEW_REASON_CONTRACT } from '../../lib/storeReviewReason';
@@ -1313,6 +1314,11 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                           className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-emerald-500/30 hover:bg-emerald-500/15 text-[11px] font-semibold"><Copy size={11} /> Copy</button>
                       </div>
                     )}
+                    {pubResult.shareUrl && (
+                      <div className="mt-2">
+                        <WhatsAppShareLink appUrl={pubResult.shareUrl} appName={pickName} />
+                      </div>
+                    )}
                   </div>
                 )}
                 {/* A small banner BELOW the success message — in the flow, never over it. Only after a real success. */}
@@ -1434,6 +1440,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                         onClick={() => { void navigator.clipboard?.writeText(`${window.location.origin}/store/app/${a.id}`); }}
                         className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-[11px] text-body transition-colors"
                       ><Link2 size={11} /> Copy link</button>
+                      {!a.requiresPassword && (
+                        <WhatsAppShareLink
+                          appUrl={`${window.location.origin}/store/app/${a.id}`}
+                          appName={a.name}
+                          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-bold text-on-accent hover:bg-emerald-500 touch-manipulation"
+                        />
+                      )}
                       <button
                         onClick={() => setPlayingId(a.id)}
                         className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-[11px] text-body transition-colors"
@@ -1844,6 +1857,14 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
             >
               <Play size={14} /> Open the app
             </button>
+            {!detailApp.requiresPassword && (
+              <div className="mt-2">
+                <WhatsAppShareLink
+                  appUrl={`${window.location.origin}/store/app/${detailApp.id}`}
+                  appName={detailApp.name}
+                />
+              </div>
+            )}
             <div id="app-mart-comments">
               <CommentsSection
                 key={webKey(detailApp.id)}
@@ -1919,6 +1940,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
             >
               <Download size={17} /> {dlBusy ? 'Preparing…' : 'Download .apk'}
             </button>
+            <div className="mt-2">
+              <WhatsAppShareLink appName={openApp.appName} />
+            </div>
             {/* 🔒 A REFUSED DOWNLOAD MUST SAY SO. The old `<a>` could only ever navigate; a signed-out
                 user would have met the server's page instead of a sentence here. */}
             {dlError && (

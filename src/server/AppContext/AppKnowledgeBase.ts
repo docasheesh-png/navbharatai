@@ -2280,6 +2280,18 @@ NOTE: Does NOT build apps (use NavBharatAI Pro for that).`,
     nav: { view: 'cicd' },
   },
   {
+    id: 'whatsapp_share',
+    name: 'Send your app on WhatsApp',
+    path: 'After you publish: the live-app card, the Live site button, App Mart → My apps, and next to Download .apk',
+    description: 'A WhatsApp button that opens a chat with a ready Hindi message and your app\'s public link. If the app also has a public APK file link, that link is included. A private download (the signed App Mart download, which expires, or the file GitHub keeps for your account) is never pasted into the message — the button instead asks you to attach the APK you downloaded. The English line on the button says Send on WhatsApp.',
+    howToUse: 'Publish the app, or open App Mart → My apps, or finish an APK download. Tap "WhatsApp पर भेजें" / Send on WhatsApp. WhatsApp opens with the message filled in. Check it, then send. Nothing is posted until you press send in WhatsApp.',
+    relatedFeatures: ['nav_app_store', 'apk_builder', 'pro_chat'],
+    keywords: [
+      'whatsapp', 'whatsapp par bhejo', 'share on whatsapp', 'app share', 'link share',
+      'whatsapp share', 'bhejo', 'family ko bhejo', 'apk share', 'send app',
+    ],
+  },
+  {
     id: 'nav_app_store',
     name: 'App Mart — play apps others made, install Android apps, and publish your own',
     path: 'Sidebar menu → App Mart, or Home → App Mart (the 5th card on the Home page — it is NO LONGER inside Other AI), or the direct link navbharatai.com/store (same as navbharatai.com/?view=appstore). ADDED 2026-09-21: App Mart is now in the SIDEBAR MENU and, once open, it has its own tab in the header strip beside the other open windows — with an ✕ to close it, exactly like Settings or Code Studio. Before this it opened correctly but showed no header tab at all, so the only way out was to navigate somewhere else and leave it open behind you. If a user asks "app mart band kaise karu": press the ✕ on its tab in the header.',

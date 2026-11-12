@@ -69,7 +69,7 @@ describe('sharing — the first thing anyone does with their first link', () => 
 
   it('names the app when we know it, and stays personal when we do not', () => {
     expect(shareText('https://x.in', 'Chai Counter')).toContain('Chai Counter');
-    expect(shareText('https://x.in')).toContain('my first app');
+    expect(shareText('https://x.in')).toContain('अपना ऐप');
     expect(shareText('https://x.in')).toContain('NavBharatAI');
   });
 

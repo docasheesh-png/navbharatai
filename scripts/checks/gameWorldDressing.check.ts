@@ -12,7 +12,7 @@ import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { REVIEWED_GAME_ASSETS } from '../../src/server/AgentV3/gameAssets/providers';
-import { generateGameAssetRuntime } from '../../src/server/lib/Game3DGenerator';
+import { generateAssetModelLoader, generateGameAssetRuntime } from '../../src/server/lib/GameAssetRuntimeGenerator';
 import { generateWorldDressingModule, sceneryFor, type DressingLayout } from '../../src/server/AgentV3/gameAssets/worldDressing';
 
 const SCENES: Array<{ name: string; prompt: string; boxer?: true }> = [
@@ -40,7 +40,7 @@ async function main() {
         ...(c.hiddenNodes ? { hidden: [...c.hiddenNodes] } : {}), ...(c.animationRoles ? { roles: { ...c.animationRoles } } : {}) } as any;
     }
     await writeFile(join(fixture, 'src/game/three/externalAssets.ts'), generateGameAssetRuntime());
-    await writeFile(join(fixture, 'src/game/three/assetModels.ts'), `import { loadGameAsset, type GameAssetHandle, type LocalGameAsset } from './externalAssets';\nconst assets: Record<string, LocalGameAsset> = ${JSON.stringify(local)};\nexport function loadRequestedAsset(subject: string, fallback: () => GameAssetHandle, signal?: AbortSignal): Promise<GameAssetHandle> {\n  return assets[subject] ? loadGameAsset(assets[subject], fallback, signal) : Promise.resolve(fallback());\n}\n`);
+    await writeFile(join(fixture, 'src/game/three/assetModels.ts'), generateAssetModelLoader(local));
     await writeFile(join(fixture, 'src/game/three/worldDressing.ts'), generateWorldDressingModule(plan.subjects, plan.layout as DressingLayout));
     // The game itself: ground, a road along Z (racing), a player spot at the origin — then ONE dressWorld call.
     await writeFile(join(fixture, 'main.ts'), `import * as THREE from 'three';

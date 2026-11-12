@@ -27,6 +27,7 @@ describe('a recipe brings the layers it imports', () => {
     const missing = missingLayerFiles(ran, new Set(Object.keys(ran)));
     expect([...missing.keys()].sort()).toEqual([
       'src/game/three/camera.ts',
+      'src/game/three/collision.ts',
       // Game.ts gives the player a body (createHumanoid) since 2026-10-05 — an empty controller left the
       // third-person hero invisible — so the closure brings humanoid.ts too.
       'src/game/three/humanoid.ts',

@@ -45,6 +45,7 @@ import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
 import { groundScene } from './three/surfaces';
+import { setSceneColliders } from './three/collision';
 import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle } from './three/objects';
 import { CharacterController } from './play/character';
@@ -78,7 +79,7 @@ export interface GameOptions {
    */
   camera?: CameraKind;
   shadows?: boolean;
-  /** Build the world here: add meshes, return the ones the player collides with. */
+  /** Add the world here. Return any extra custom colliders for the player, vehicles and camera. */
   setup?: (ctx: GameContext) => THREE.Object3D[] | void;
   /** Your gameplay. Runs at a FIXED 60Hz. */
   update?: (ctx: GameContext, delta: number) => void;
@@ -287,10 +288,8 @@ export class Game {
     const colliders = this.asGame(() => options.setup?.(this.context)) || [];
     this.setupDone = true;
     this.syncTouchLayout();
-    if (Array.isArray(colliders)) {
-      this.player.setColliders(colliders);
-      this.rig.setCollidables(colliders);
-    }
+    if (Array.isArray(colliders)) setSceneColliders(this.scene, colliders);
+    this.rig.setCollisionScene(this.scene);
 
     this.loop = new GameLoop(
       (delta) => this.fixedUpdate(delta),
@@ -1172,7 +1171,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       '    setup: (ctx) => {\n' +
       '      const ground = createTerrain({ size: 120 });\n' +
       '      ctx.scene.add(ground);\n' +
-      '      return [ground];            // what the player collides with\n' +
+      '      return [ground];            // extra colliders share the same scene physics\n' +
       '    },\n' +
       '    update: (ctx, dt) => {\n' +
       '      // YOUR GAMEPLAY. Fixed 60Hz. Emit events; never call particles or audio directly.\n' +

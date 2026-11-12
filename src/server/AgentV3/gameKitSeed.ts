@@ -241,7 +241,11 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
           : ' For a car, bike or ridden animal, keep the camera BEHIND it, opposite its nose.')
         + (has('generate_game_3d')
           ? ' Move a vehicle with driveVehicle(...) and createVehicleState(...) from src/game/three/objects.ts (they'
-            + ' own the steering signs and the starting speed), and build every object with the builders in that file.'
+            + ' own steering, starting speed and contact with the world), and build objects with the kit factories.'
+            + ' Kit buildings, tree trunks and terrain are collidable automatically. Mark custom walls, stairs and'
+            + ' platforms with markWorldCollider(mesh) from src/game/three/collision.ts. For custom movers,'
+            + ' use sweepWorldCapsules with worldColliders before applying movement. Verify that walls and'
+            + ' trunks block, low steps climb and roofs stop jumps.'
           : '')
       : twoD,
     failed.length > 0

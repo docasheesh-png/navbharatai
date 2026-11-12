@@ -2370,7 +2370,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       description:
         'Add the character controller for a game. Call generate_game_runtime (and generate_game_3d for '
         + '3D) first. Emits src/game/play: a PURE motor holding all the "feel" arithmetic, plus a thin '
-        + 'three.js controller that does the raycasts. '
+        + 'three.js controller that sweeps the character body against the world and probes floor height. '
         + 'IT INCLUDES THE THINGS THAT MAKE MOVEMENT FEEL GOOD, and they look like bugs on paper so do NOT '
         + 'strip them: coyote time (jump still works ~100ms after walking off a ledge — without it a '
         + 'player who presses a frame late gets nothing and the game feels unresponsive), jump buffering '
@@ -2439,7 +2439,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'underwater/neon) each with hemisphere + key + ambient, fitted shadow camera and matched fog, '
         + 'material presets with believable roughness/metalness plus shared PALETTES, camera rigs '
         + '(third-person with wall collision, first-person, top-down, side-scroller) and procedural world '
-        + 'building — seeded value-noise terrain and InstancedMesh scatter. '
+        + 'building — seeded value-noise terrain and InstancedMesh scatter. Shared collision geometry '
+        + 'for terrain, building walls, tree trunks and custom solid meshes. '
         + 'It ALSO emits the three things that decide whether a scene reads as real rather than as '
         + 'coloured cardboard: environment.ts (a real sky + image-based reflections — without it a '
         + 'PBR metal has nothing to reflect and renders near-black), surfaces.ts (brick, wood, bark, '
@@ -2457,7 +2458,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             type: 'array',
             items: { type: 'string' },
             description:
-              'Optional subset: renderer, lighting, materials, camera, world, environment, surfaces, '
+              'Optional subset: renderer, lighting, materials, camera, world, collision, environment, surfaces, '
               + 'humanoid, objects, atmosphere. Default = all; imports are pulled in automatically. '
               + 'atmosphere = createAtmosphere(): a running day-night clock (sun, moon, stars, street lamps '
               + 'on at dusk) and weather (clear, cloudy, rain, storm with lightning, snow, fog, dust); '

@@ -12,6 +12,7 @@
 
 import { describe, it, expect } from 'vitest';
 import ts from 'typescript';
+import { Capsule } from 'three/addons/math/Capsule.js';
 import { generateGame3D } from '../src/server/lib/Game3DGenerator';
 import { THREE_STUB, SURFACES_STUB, walk, worldPos, type Obj3D } from './helpers/threeStub';
 
@@ -25,6 +26,8 @@ function loadObjects(): Record<string, (o?: Record<string, unknown>) => unknown>
   const req = (id: string): unknown => {
     if (id === 'three') return THREE_STUB;
     if (id.endsWith('surfaces')) return SURFACES_STUB;
+    if (id === './collision') return { markWorldCollider: (object: Obj3D) => object };
+    if (id === 'three/addons/math/Capsule.js') return { Capsule };
     throw new Error('the generated objects.ts should not import ' + id);
   };
   // eslint-disable-next-line no-new-func

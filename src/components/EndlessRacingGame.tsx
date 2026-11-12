@@ -51,7 +51,7 @@ function pointAtDistance(points: Point[], distance: number) {
 export function EndlessRacingGame() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<InputState>({ up: false, down: false, left: false, right: false });
-  const [trackIndex, setTrackIndex] = useState(0);
+  const trackIndex = 0;
   const [speed, setSpeed] = useState(0);
   const [lap, setLap] = useState(1);
   const [isRunning, setIsRunning] = useState(false);
@@ -176,20 +176,20 @@ export function EndlessRacingGame() {
   }, []);
 
   const restart = () => { inputRef.current = { up: false, down: false, left: false, right: false }; setSpeed(0); setLap(1); setIsRunning(false); setResetToken(value => value + 1); };
-  const button = (direction: keyof InputState, Icon: React.ComponentType<{ className?: string }>, label: string) => <button key={direction} aria-label={label} onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); inputRef.current[direction] = true; }} onPointerUp={() => { inputRef.current[direction] = false; }} onPointerCancel={() => { inputRef.current[direction] = false; }} onPointerLeave={() => { inputRef.current[direction] = false; }} className="touch-none rounded-lg bg-white/10 p-3 text-white active:bg-indigo-500"><Icon className="h-4 w-4" /></button>;
+  const button = (direction: keyof InputState, Icon: React.ComponentType<{ className?: string }>, label: string) => <button key={direction} aria-label={label} onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); inputRef.current[direction] = true; }} onPointerUp={() => { inputRef.current[direction] = false; }} onPointerCancel={() => { inputRef.current[direction] = false; }} onPointerLeave={() => { inputRef.current[direction] = false; }} className="touch-none rounded-lg bg-raised p-3 text-ink active:bg-accent active:text-on-accent"><Icon className="h-4 w-4" /></button>;
 
-  return <section className="mt-10 rounded-2xl border border-emerald-400/20 bg-[#101a19] p-4 sm:p-6">
+  return <section className="mt-10 rounded-2xl border border-line bg-card p-4 sm:p-6">
     <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-      <div><p className="text-[10px] font-black uppercase tracking-[.2em] text-emerald-300">Playable demo · continuous closed circuit</p><h3 className="mt-1 text-xl font-black text-white">Endless Track Racer</h3></div>
-      <div className="flex items-center gap-3 text-xs text-slate-300"><span className="flex items-center gap-1.5"><Gauge className="h-4 w-4 text-amber-300" />{speed} km/h</span><span className="flex items-center gap-1.5"><Flag className="h-4 w-4 text-emerald-300" />Lap {lap}</span></div>
+      <div><p className="text-[10px] font-black uppercase tracking-[.2em] text-success">Playable demo · continuous closed circuit</p><h3 className="mt-1 text-xl font-black text-ink">Endless Track Racer</h3></div>
+      <div className="flex items-center gap-3 text-xs text-body"><span className="flex items-center gap-1.5"><Gauge className="h-4 w-4 text-warn" />{speed} km/h</span><span className="flex items-center gap-1.5"><Flag className="h-4 w-4 text-success" />Lap {lap}</span></div>
     </div>
     <div className="mb-3 flex flex-wrap items-center gap-2">
-      <span className="rounded-lg border border-white/10 bg-[#182221] px-3 py-2 text-xs font-bold text-emerald-200">Auto track: {TRACKS[trackIndex]}</span>
-      <button onClick={() => setIsRunning(!isRunning)} className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white">{isRunning ? 'Pause' : speed > 0 ? 'Resume' : 'Start race'}</button>
-      <button onClick={restart} className="flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-xs font-bold text-white"><RotateCcw className="h-3.5 w-3.5" />Restart</button>
-      <span className="text-[11px] text-slate-500">Keyboard: WASD / arrows · Mobile: hold buttons below</span>
+      <span className="rounded-lg border border-line bg-raised px-3 py-2 text-xs font-bold text-success">Auto track: {TRACKS[trackIndex]}</span>
+      <button onClick={() => setIsRunning(!isRunning)} className="rounded-lg bg-accent px-4 py-2 text-xs font-bold text-on-accent">{isRunning ? 'Pause' : speed > 0 ? 'Resume' : 'Start race'}</button>
+      <button onClick={restart} className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-xs font-bold text-ink"><RotateCcw className="h-3.5 w-3.5" />Restart</button>
+      <span className="text-[11px] text-muted">Keyboard: WASD / arrows · Mobile: hold buttons below</span>
     </div>
-    <canvas ref={canvasRef} aria-label={`${TRACKS[trackIndex]} top-down racing game`} className="block h-[340px] w-full rounded-xl border border-white/10 sm:h-[460px]" />
-    <div className="mt-3 flex items-center justify-between gap-3"><span className="text-[10px] text-slate-500">Track is a closed loop; progress wraps at the seam. Road position is clamped, with no vertical flight state.</span><div className="flex gap-2">{button('left', ArrowLeft, 'Steer left')}{button('down', ArrowDown, 'Brake')}{button('up', ArrowUp, 'Accelerate')}{button('right', ArrowRight, 'Steer right')}</div></div>
+    <canvas ref={canvasRef} aria-label={`${TRACKS[trackIndex]} top-down racing game`} className="block h-[340px] w-full rounded-xl border border-line sm:h-[460px]" />
+    <div className="mt-3 flex items-center justify-between gap-3"><span className="text-[10px] text-muted">Track is a closed loop; progress wraps at the seam. Road position is clamped, with no vertical flight state.</span><div className="flex gap-2">{button('left', ArrowLeft, 'Steer left')}{button('down', ArrowDown, 'Brake')}{button('up', ArrowUp, 'Accelerate')}{button('right', ArrowRight, 'Steer right')}</div></div>
   </section>;
 }

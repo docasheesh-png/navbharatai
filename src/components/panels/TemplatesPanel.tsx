@@ -12,6 +12,8 @@ import {
   Package, Plus, X, IndianRupee, Languages, FileText, Building2, Gamepad2, Rocket,
 } from 'lucide-react';
 import { templateMeta, CATEGORY_ORDER, type TemplateCategory } from './curatedTemplateMeta';
+import { GameTemplateCatalog } from '../GameTemplateCatalog';
+import { EndlessRacingGame } from '../EndlessRacingGame';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -422,6 +424,9 @@ export function TemplatesPanel({
             );
           })}
         </div>
+
+        <EndlessRacingGame />
+        <GameTemplateCatalog onUse={onSelectTemplate} />
 
         {/* My Saved Templates */}
         <div className="mt-12">

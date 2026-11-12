@@ -3,6 +3,7 @@ import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 import { SubmissionScope } from './submissionScope';
 import { shouldOfferFeatureCard } from './featureConfirm';
+import { needsOpaqueStorage, attachmentResponse, validStoredAttachment, opaqueAttachmentNotice } from '../../lib/proAttachmentClient';
 
 // Execute the actual panel send closure, not a second implementation. Browser/rendering dependencies
 // are injected so delayed I/O, double-clicks and stale callbacks can be tested without a paid build.
@@ -25,6 +26,9 @@ function harness(overrides: Record<string, unknown> = {}) {
     state: { narration: [], checkpoints: [], activity: [], activityLog: [] }, userMsgs: [], agentHistory: [],
     autoContinueRef: {}, planContinuesRef: {}, lastPlanRemainingRef: {}, noProgressRef: {}, lastFilesWrittenRef: {},
     setQueueContinuationWaiting: vi.fn(), stopVoice: vi.fn(), setQuickRepliesUsedTs: vi.fn(), setInterruptedResume: vi.fn(),
+    needsOpaqueStorage, attachmentResponse, validStoredAttachment, opaqueAttachmentNotice,
+    firebaseAuth: { currentUser: null }, originalUploadAttemptsRef: { current: new Set<string>() },
+    setStoredAttachmentsRevision: vi.fn(), originalFileBase64: vi.fn(async () => 'AA=='),
     checkAttachmentSizes: () => ({ ok: true }), fileToAttachment: vi.fn(async () => ({ name: 'attachment' })),
     setUserMsgs: setter('userMsgs'), setAgentHistory: setter('agentHistory'), setCheckpointHistory: setter('checkpointHistory'),
     setSubmissionPhase: setter('submissionPhase'), setFwConflict: setter('fwConflict'), setFeatureConfirm: setter('featureConfirm'),
@@ -160,6 +164,7 @@ describe('real Pro send preflight', () => {
     // Same scope as the actual panel handlers, with a previous workspace already present.
     const deps = {
       unsending: false, localSubmissionMessagesRef: h.deps.localSubmissionMessagesRef,
+      sessionIdRef: h.deps.sessionIdRef, removeLocalOriginals: vi.fn(async () => true),
       cancelSubmission: h.cancel, invalidateQueuedContinuation: vi.fn(), setUnsending: vi.fn(),
       state: { workspaceId: 'prior-workspace' }, unsend: vi.fn(async () => true), stop: vi.fn(),
       setUserMsgs: h.deps.setUserMsgs, setAgentHistory: h.deps.setAgentHistory,
@@ -170,6 +175,7 @@ describe('real Pro send preflight', () => {
     const js = ts.transpileModule(`${source}\nreturn ${name};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
     const handler = new Function(...Object.keys(deps), js)(...Object.values(deps));
     await handler(message.ts, message.text);
+    expect(deps.removeLocalOriginals).toHaveBeenCalledWith('original', message.ts);
     expect(deps.unsend).not.toHaveBeenCalled();
     expect(deps.stop).not.toHaveBeenCalled();
     expect(h.observed.userMsgs).toEqual([]);
@@ -177,6 +183,36 @@ describe('real Pro send preflight', () => {
     await pending;
     expect(h.deps.start).not.toHaveBeenCalled();
     if (name === 'handleEdit') expect(h.deps.setPrompt).toHaveBeenLastCalledWith(message.text);
+  });
+  it.each(['handleUnsend', 'handleEdit'])('%s keeps a local message when original deletion is unconfirmed', async (name) => {
+    const conversion = deferred<object>();
+    const h = harness({ files: [{ name: 'image.png' }], fileToAttachment: () => conversion.promise });
+    const pending = h.send();
+    const message = h.observed.userMsgs[0];
+    const deps = {
+      unsending: false, localSubmissionMessagesRef: h.deps.localSubmissionMessagesRef,
+      sessionIdRef: h.deps.sessionIdRef, removeLocalOriginals: vi.fn(async () => false),
+      cancelSubmission: h.cancel, invalidateQueuedContinuation: vi.fn(), setUnsending: vi.fn(),
+      state: { workspaceId: 'prior-workspace' }, unsend: vi.fn(async () => true), stop: vi.fn(),
+      setUserMsgs: h.deps.setUserMsgs, setAgentHistory: h.deps.setAgentHistory,
+      setPrompt: h.deps.setPrompt, setTimeout: vi.fn(), composerRef: { current: null },
+    };
+    const begin = panel.indexOf(`  const ${name} = async`);
+    const source = panel.slice(begin, panel.indexOf('\n  };', begin) + 5);
+    const js = ts.transpileModule(`${source}\nreturn ${name};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+    const handler = new Function(...Object.keys(deps), js)(...Object.values(deps));
+    h.deps.setPrompt.mockClear();
+    await handler(message.ts, message.text);
+    expect(deps.removeLocalOriginals).toHaveBeenCalledWith('original', message.ts);
+    expect(deps.unsend).not.toHaveBeenCalled();
+    expect(deps.stop).not.toHaveBeenCalled();
+    expect(h.observed.userMsgs).toEqual([message]);
+    expect(deps.localSubmissionMessagesRef.current.has(message.ts)).toBe(true);
+    expect(deps.setUnsending).toHaveBeenLastCalledWith(false);
+    expect(h.deps.setPrompt).not.toHaveBeenCalled();
+    conversion.resolve({ name: 'image.png' });
+    await pending;
+    expect(h.deps.start).not.toHaveBeenCalled();
   });
   it('hands off to the hook before stream EOF, without stale cleanup unlocking a newer request', async () => {
     const stream = deferred<void>();
@@ -209,7 +245,7 @@ describe('real Pro send preflight', () => {
     expect(panel).toContain('running || isBusy()');
     expect(panel).toContain('onCancel={cancelSubmission}');
     expect(panel.match(/const localOnly = localSubmissionMessagesRef.current.has\(ts\)/g)).toHaveLength(2);
-    expect(panel.match(/if \(!localOnly\) \{\s*if \(state.workspaceId\) purged = await unsend\(\)/g)).toHaveLength(2);
+    expect(panel.match(/if \(!localOnly\) \{\s*if \(state.workspaceId\) purged = await unsend\(\{ attachmentSessionId, attachmentMessageId: String\(ts\) \}\)/g)).toHaveLength(2);
     expect(panel).toContain('running || submissionRef.current.busy || queueClaimInFlightRef.current');
   });
 });

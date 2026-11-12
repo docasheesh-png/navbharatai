@@ -6,7 +6,7 @@ import { Firestore } from '@google-cloud/firestore';
 const host = process.argv[process.argv.indexOf('--emulator') + 1];
 assert.ok(process.argv.includes('--emulator') && /^127\.0\.0\.1:\d+$/.test(host), 'Explicit loopback --emulator required');
 process.env.FIRESTORE_EMULATOR_HOST = host;
-const { SandboxStore } = await import('../src/server/AgentV3/SandboxStore.ts');
+const { SandboxStore, sandboxOrphanDocumentId } = await import('../src/server/AgentV3/SandboxStore.ts');
 const { snapshotMatchesFiles } = await import('../src/server/AgentV3/snapshotIdentity.ts');
 const db = new Firestore({ projectId: 'demo-navbharatai-phase2', host, ssl: false });
 const store = new SandboxStore(() => db);
@@ -18,6 +18,8 @@ const end = (s) => ({ ...s, endedAt: s.startedAt + 10, endedBy: 'dropped', busyM
 const read = async () => (await ref.get()).data();
 const a = make(), b = make(200);
 const pending = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
+const orphanCollection = db.collection('agentv3_sandbox_orphans');
+const orphanRefs = [];
 let checks = 0;
 const check = (actual, expected) => { assert.deepEqual(actual, expected); checks++; };
 try {
@@ -69,18 +71,31 @@ try {
   await ref.set(identity); await store.recordSessionEnd(workspaceId, end(a)); check(await read(), identity);
   await store.recordSessionStart(workspaceId, a); check((await read()).session, a);
 
-  // Exactly one EXISTING touch, then the telemetry chain. No telemetry may create identity itself.
-  await ref.delete(); const touch = pending();
-  const originalTouch = touch.promise.then(() => store.touch(workspaceId, identity.sandboxId));
-  const originalStart = store.recordSessionStart(workspaceId, a, originalTouch);
+  // Allocation CAS commits before telemetry; neither telemetry nor touch creates identity.
+  await ref.delete(); const allocation = pending();
+  const originalAllocation = allocation.promise.then(() => store.recordAllocation(workspaceId, identity.userId, identity.sandboxId, null));
+  const originalStart = originalAllocation.then(async (admitted) => {
+    check(admitted, true);
+    await store.recordSessionStart(workspaceId, a);
+  });
   const queuedEnd = originalStart.then(() => store.recordSessionEnd(workspaceId, end(a)));
-  check(await read(), undefined); touch.resolve(); await queuedEnd;
+  check(await read(), undefined); allocation.resolve(); await queuedEnd;
   check((await read()).session, end(a)); check((await read()).sandboxId, identity.sandboxId);
   await ref.delete();
-  await store.recordSessionStart(workspaceId, a, Promise.reject(Error('initial touch failed')));
-  await store.recordSessionEnd(workspaceId, end(a)); check(await read(), undefined);
   await store.touch(workspaceId, identity.sandboxId);
-  await store.recordSessionStart(workspaceId, a, Promise.reject(Error('touch committed; ACK lost')));
+  await store.recordSessionStart(workspaceId, a);
+  await store.recordSessionEnd(workspaceId, end(a)); check(await read(), undefined);
+  // A wrong expected identity cannot create a record or admit telemetry.
+  check(await store.recordAllocation(workspaceId, identity.userId, identity.sandboxId, 'stale-vm'), false);
+  await store.recordSessionStart(workspaceId, a); check(await read(), undefined);
+  // Lost allocation ACK is unconfirmed, but the real committed identity can be reconciled.
+  const allocationAckLostStore = new SandboxStore(() => ({
+    collection: db.collection.bind(db),
+    runTransaction: async (callback) => { await db.runTransaction(callback); throw Error('allocation ACK lost'); },
+  }));
+  check(await allocationAckLostStore.recordAllocation(workspaceId, identity.userId, identity.sandboxId, null), false);
+  check((await store.lookupRecoveryIdentity(workspaceId)).sandboxId, identity.sandboxId);
+  await store.recordSessionStart(workspaceId, a);
   check((await read()).session, a);
 
   // Actual committed start with simulated lost acknowledgement, then exact-ID end.
@@ -92,17 +107,19 @@ try {
   await ackLostStore.recordSessionStart(workspaceId, a);
   await store.recordSessionEnd(workspaceId, end(a)); check((await read()).session, end(a));
 
-  await ref.set(identity); const deletedTouch = pending();
-  const afterDeletion = store.recordSessionStart(workspaceId, a, deletedTouch.promise);
-  await ref.delete(); deletedTouch.resolve(); await afterDeletion; check(await read(), undefined);
+  await ref.set(identity); const startGate = pending();
+  const afterDeletion = startGate.promise.then(() => store.recordSessionStart(workspaceId, a));
+  await ref.delete(); startGate.resolve(); await afterDeletion; check(await read(), undefined);
 
-  // Unchanged old touch race is deliberately exposed: telemetry cannot repair allocation authority.
+  // Stale touch and stale allocation CAS cannot replace the newer durable identity.
   const newer = { ...b, sandboxId: 'new-vm' };
   await ref.set({ ...identity, sandboxId: newer.sandboxId, session: newer });
-  await store.touch(workspaceId, a.sandboxId); // Existing unconditional identity writer can roll it back.
+  await store.touch(workspaceId, a.sandboxId);
+  check(await store.recordAllocation(workspaceId, identity.userId, a.sandboxId, a.sandboxId), false);
   await store.recordSessionStart(workspaceId, a);
+  check((await read()).sandboxId, newer.sandboxId); check((await read()).session, newer);
   await store.recordSessionEnd(workspaceId, end(newer));
-  check((await read()).sandboxId, a.sandboxId); check((await read()).session, newer);
+  check((await read()).sandboxId, newer.sandboxId); check((await read()).session, end(newer));
 
   await ref.set({ ...identity, session: { ...a, startedAt: 999999 } });
   await store.recordSessionStart(workspaceId, b);
@@ -124,8 +141,38 @@ try {
   check(snapshotMatchesFiles((await read()).snapshotFilesHash, 'old-hash'), false);
   await ref.delete(); await store.saveSnapshot(workspaceId, 'first-synthetic-url', 5);
   check((await read()).snapshotFilesHash, undefined); check((await read()).snapshotAt, 5);
-  console.log(`PASS: ${checks} real Firestore session integrity assertions, concurrent instances, fresh-touch sequencing, lost ACKs, deletion, explicit unchanged old-touch identity race, and snapshot hash invalidation. No E2B calls.`);
+  // Real transaction migration: retain necessary pending cleanup, never user linkage.
+  for (const action of ['read', 'retry', 'handled', 'enqueue']) {
+    const sandboxId = `synthetic-orphan-${randomUUID()}`;
+    const oldRef = orphanCollection.doc(sandboxId);
+    const hashedRef = orphanCollection.doc(sandboxOrphanDocumentId(sandboxId));
+    const cursorRef = orphanCollection.doc('navbharatai-orphan-sweep-cursor-v1');
+    orphanRefs.push(oldRef, hashedRef, cursorRef);
+    await oldRef.set({ sandboxId, workspaceId: 'synthetic-private-workspace', userId: 'synthetic-owner', reason: 'legacy-free-text', status: 'pending', attempts: 2 });
+    await cursorRef.set({ lastDocumentId: sandboxId });
+    if (action === 'read') check((await store.listPendingOrphanAllocations()).some(row => row.sandboxId === sandboxId), true);
+    if (action === 'retry') await store.noteOrphanAllocationAttempt(sandboxId);
+    if (action === 'handled') check(await store.markOrphanAllocationHandled(sandboxId, 'killed'), true);
+    if (action === 'enqueue') check(await store.recordOrphanAllocation(sandboxId, 'losing-allocation'), true);
+    check((await oldRef.get()).exists, false);
+    const migrated = (await hashedRef.get()).data();
+    check(migrated.workspaceId, undefined); check(migrated.userId, undefined);
+    check(migrated.reason === 'legacy-free-text', false);
+    check((await cursorRef.get()).data()?.lastDocumentId === sandboxId, false);
+    // After resolution, duplicate enqueues cannot reintroduce ANY raw identity.
+    check(await store.markOrphanAllocationHandled(sandboxId, 'killed'), true);
+    check(await store.recordOrphanAllocation(sandboxId, 'unrecorded-allocation'), true);
+    const terminal = (await hashedRef.get()).data();
+    check(Object.keys(terminal).sort(), ['resolvedAt', 'status']); check(terminal.status, 'killed');
+    // A late pre-migration writer cannot override the terminal digest fence.
+    await oldRef.set({ sandboxId, workspaceId: 'synthetic-private-workspace', status: 'pending' });
+    check((await store.listPendingOrphanAllocations()).some(row => row.sandboxId === sandboxId), false);
+    check((await oldRef.get()).exists, false);
+    await hashedRef.delete();
+  }
+  console.log(`PASS: ${checks} real Firestore session integrity assertions, concurrent instances, allocation-CAS sequencing, lost ACKs, deletion, stale-touch and stale-CAS rejection, snapshot hash invalidation, and legacy orphan privacy migration/replay fences. No E2B calls.`);
 } finally {
+  for (const orphanRef of orphanRefs) await orphanRef.delete();
   await ref.delete(); // Exact synthetic document only, explicit loopback emulator above.
   await db.terminate();
 }

@@ -255,12 +255,12 @@ export class SandboxStore {
    * Best-effort local observation, NOT a provider start or billing event. The counter is independent
    * and can differ from accepted observations. Neither write is awaited by app work.
    *
-   * Wait only for an optional initial identity write; do not establish/repair allocation identity here.
+   * Allocation identity is already committed before this observation is requested.
    * Replace the whole nested map so a new start cannot inherit an old end. The reported-start high
    * water mark rejects delayed smaller timestamps and ties, but clock skew can suppress observations
    * or invert physical order. This is not allocation authority or a cross-instance lifecycle fence.
    */
-  async recordSessionStart(workspaceId: string, session: SandboxSession, afterIdentityTouch?: Promise<void>): Promise<void> {
+  async recordSessionStart(workspaceId: string, session: SandboxSession): Promise<void> {
     const db = this.getDb();
     if (!db || !workspaceId || !session?.sandboxId) return;
     const start = { ...session }; // Capture before waiting: operation accounting mutates the local row.
@@ -271,7 +271,6 @@ export class SandboxStore {
       );
     };
     const observation = async () => {
-      await afterIdentityTouch?.catch(() => {});
       if (!validSession(start) || !validObservationId(start.observationId)
         || start.endedAt !== undefined || start.endedBy !== undefined) return;
       const ref = db.collection('agentv3_sandboxes').doc(workspaceId);

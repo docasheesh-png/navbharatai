@@ -41,6 +41,7 @@ describe('diagnostic outcomes and provider usage notes retain their actual meani
     expect(issue?.severity).toBe('warning');
     expect(issue?.detail).toContain('non-streaming runner (stream: false)');
     expect(issue?.detail).toContain('unmeasured');
+    expect(issue?.detail).toContain('do not infer zero cost or change the global streaming flag');
     expect(issue?.detail).not.toContain('AGENTV3_STREAM_BUILD_CALLS');
   });
 

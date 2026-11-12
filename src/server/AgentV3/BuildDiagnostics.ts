@@ -1150,7 +1150,7 @@ export class BuildDiagnostics {
     if (issue.code === 'USAGE_NOT_REPORTED' && /\bSURPLUS\b/i.test(usageContext)) {
       issue = {
         ...issue,
-        detail: 'SURPLUS uses the dedicated non-streaming runner (stream: false), so AGENTV3_STREAM_BUILD_CALLS and stream_options.include_usage do not apply to this call. This turn did not produce a usable provider usage/receipt mapping. Keep the provider cost unmeasured and reconcile against the provider receipt or invoice; do not infer zero cost or change the global streaming flag for this warning.',
+        detail: 'SURPLUS uses the dedicated non-streaming runner (stream: false), so streaming configuration and streamed-usage options do not apply to this call. This turn did not produce a usable provider usage/receipt mapping. Keep the provider cost unmeasured and reconcile against the provider receipt or invoice; do not infer zero cost or change the global streaming flag for this warning.',
       };
     }
     if (issue.code === 'SANDBOX_CMD' && typeof issue.message === 'string' && /\btypecheck\b/i.test(issue.message)) {

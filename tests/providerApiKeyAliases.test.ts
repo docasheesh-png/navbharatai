@@ -80,7 +80,7 @@ describe('shared provider API key aliases', () => {
     expect(await provider.healthCheck()).toBe(true);
   });
 
-  it('prefers ANTHROPIC_API_KEY and stays disabled when neither Claude key exists', async () => {
+  it('prefers ANTHROPIC_API_KEY and reports disabled when neither Claude key exists', async () => {
     process.env.CLAUDE_API_KEY = 'claude-alias';
     process.env.ANTHROPIC_API_KEY = 'anthropic-primary';
     expect(resolveAnthropicApiKey()).toBe('anthropic-primary');
@@ -88,6 +88,6 @@ describe('shared provider API key aliases', () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.CLAUDE_API_KEY;
     expect(resolveAnthropicApiKey()).toBeUndefined();
-    expect(() => new AnthropicProvider()).toThrow(/ANTHROPIC_API_KEY \/ CLAUDE_API_KEY/);
+    expect(await new AnthropicProvider().healthCheck()).toBe(false);
   });
 });

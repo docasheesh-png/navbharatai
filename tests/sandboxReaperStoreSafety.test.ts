@@ -134,7 +134,7 @@ describe('the orphan scan advances without unbounded database reads', () => {
 describe('new sandbox allocations are durably persisted without replacing a newer identity', () => {
   it('creates the first allocation when the observed identity was missing', async () => {
     const f = fixture([]);
-    await f.store.recordAllocation('a', 'test-user', 'machine-new', null);
+    expect(await f.store.recordAllocation('a', 'test-user', 'machine-new', null)).toBe(true);
     expect(f.set).toHaveBeenCalledWith({ id: 'a' }, expect.objectContaining({
       workspaceId: 'a', userId: 'test-user', sandboxId: 'machine-new', updatedAt: expect.any(Number),
     }), { merge: true });
@@ -143,21 +143,28 @@ describe('new sandbox allocations are durably persisted without replacing a newe
 
   it('replaces only the exact expired sandbox observed before a failed resume', async () => {
     const f = fixture([old('a')]);
-    await f.store.recordAllocation('a', 'test-user', 'machine-replacement', 'machine-a');
+    expect(await f.store.recordAllocation('a', 'test-user', 'machine-replacement', 'machine-a')).toBe(true);
     expect(f.records.get('a')?.sandboxId).toBe('machine-replacement');
     expect(f.set).toHaveBeenCalledTimes(1);
   });
 
   it('does not replace verified owner metadata when the allocation caller has no uid', async () => {
     const f = fixture([old('a')]);
-    await f.store.recordAllocation('a', null, 'machine-a', 'machine-a');
+    expect(await f.store.recordAllocation('a', null, 'machine-a', 'machine-a')).toBe(true);
     expect(f.records.get('a')?.userId).toBe('test-user');
+  });
+
+  it('reports an unavailable transaction as an allocation failure', async () => {
+    const f = fixture([]);
+    f.db.runTransaction.mockRejectedValueOnce(new Error('unavailable'));
+    expect(await f.store.recordAllocation('a', null, 'machine-new', null)).toBe(false);
+    expect(f.set).not.toHaveBeenCalled();
   });
 
   it('does not overwrite an allocation installed by another instance after the read', async () => {
     const f = fixture([old('a')]);
     f.records.set('a', { ...old('a'), sandboxId: 'machine-newer' });
-    await f.store.recordAllocation('a', 'test-user', 'machine-stale', 'machine-a');
+    expect(await f.store.recordAllocation('a', 'test-user', 'machine-stale', 'machine-a')).toBe(false);
     expect(f.records.get('a')?.sandboxId).toBe('machine-newer');
     expect(f.set).not.toHaveBeenCalled();
   });

@@ -44,7 +44,7 @@ export function requireMfaEnrollmentAllowed(data: Record<string, unknown> | null
 
 export function pendingAdminMfaSecret(data: Record<string, unknown> | null, now: number, decryptSecret: (value: string) => string): string {
   requireMfaEnrollmentAllowed(data, decryptSecret);
-  if (!data || typeof data.pending_expires_at_ms !== 'number' || data.pending_expires_at_ms <= now ||
+  if (!Number.isFinite(now) || !data || typeof data.pending_expires_at_ms !== 'number' || !Number.isFinite(data.pending_expires_at_ms) || data.pending_expires_at_ms <= now ||
       data.pending_expires_at_ms > now + 10 * 60_000 || typeof data.encrypted_pending !== 'string' || !data.encrypted_pending) {
     throw new AdminMfaPolicyError(400, 'No current pending enrolment. Start enrolment again.');
   }

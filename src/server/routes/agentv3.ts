@@ -1821,8 +1821,8 @@ function billableSandboxDetail(
   actuator: unknown,
   workspaceId: string | null | undefined,
   buildStartedAtMs?: number,
-): { seconds: number; usd: number; measuredSeconds: number } {
-  const none = { seconds: 0, usd: 0, measuredSeconds: 0 };
+): { seconds: number; usd: number; measuredSeconds: number; expenseMeasured: boolean } {
+  const none = { seconds: 0, usd: 0, measuredSeconds: 0, expenseMeasured: false };
   try {
     const fn = (actuator as any)?.sandboxHeldSeconds;
     if (typeof fn !== 'function' || !workspaceId) return none;
@@ -1851,7 +1851,7 @@ function billableSandboxDetail(
     // Expense telemetry only. The user fee is derived separately from the settled subtotal.
     // measuredSeconds retains measured time even when the verified hourly rate is unavailable.
     return usd > 0
-      ? { seconds: billable, usd, measuredSeconds: billable }
+      ? { seconds: billable, usd, measuredSeconds: billable, expenseMeasured: true }
       : { ...none, measuredSeconds: billable };
   } catch {
     return none;
@@ -27808,7 +27808,8 @@ async function noteBuildOutcome(
           // Sonnet's price read as a $1,257 loss. These two lines are the whole fix for that, and
           // they cost nothing — both numbers were already in scope, one variable away.
           realCostUsd: decidedRealCostUsd,
-          sandboxUsd: decidedSandboxUsd,
+          // An unset/invalid E2B rate makes VM expense UNKNOWN, not a measured $0.
+          sandboxUsd: livePreviewCharge.expenseMeasured ? decidedSandboxUsd : undefined,
           // Per-RUNG tokens. `reconciledProviderUsage` above names only the vendor, and one vendor
           // holds rungs 20x apart in price, so no downstream reader could price it.
           modelUsage: modelUsageFromEntries(providerLedger.entries()),

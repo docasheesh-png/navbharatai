@@ -53,11 +53,11 @@ export function adminTokenTtlMs(rawHours?: string): number {
 }
 
 /**
- * Mint a TIME-STAMPED admin token: `<issuedAtMs>.<HMAC(pass, "admin:v2:<user>:<issuedAtMs>")>`. The
+ * Mint a TIME-STAMPED admin token: `<issuedAtMs>.<HMAC(signingKey, "admin:v2:<user>:<issuedAtMs>")>`. The
  * issued-at is part of the signed payload, so it cannot be forged forward. Pure.
  */
-export function mintAdminToken(pass: string, username: string, issuedAtMs: number): string {
-  const sig = crypto.createHmac('sha256', pass).update(`admin:v2:${username}:${issuedAtMs}`).digest('hex');
+export function mintAdminToken(signingKey: string, username: string, issuedAtMs: number): string {
+  const sig = crypto.createHmac('sha256', signingKey).update(`admin:v2:${username}:${issuedAtMs}`).digest('hex');
   return `${issuedAtMs}.${sig}`;
 }
 
@@ -94,6 +94,15 @@ export function adminCredential(raw: string | undefined, fallback = ''): string 
 export const adminUsername = (): string => adminCredential(process.env.ADMIN_USERNAME, 'aashishcpmt09');
 export const adminPassword = (): string => adminCredential(process.env.ADMIN_PASSWORD, '');
 
+/** Independent 256-bit server secret. No legacy/password fallback: stage owner recovery before cutover. */
+export function adminSessionSigningKey(): string {
+  const key = adminCredential(process.env.ADMIN_SESSION_SIGNING_KEY, '');
+  const password = adminPassword();
+  if (!password || !/^[a-fA-F0-9]{64}$/.test(key) || key.toLowerCase() === password.toLowerCase()) return '';
+  return key.toLowerCase();
+}
+
+
 /**
  * Is this request carrying a valid admin session? THE check every admin-gated route uses.
  *
@@ -105,7 +114,7 @@ export function adminRequestOk(req: Request): boolean {
   const header = req.headers['x-admin-token'];
   const token = typeof header === 'string' ? header : '';
   if (!token) return false;
-  return verifyAdminTokenValue(token, adminPassword(), adminUsername(), Date.now(), adminTokenTtlMs(process.env.ADMIN_TOKEN_TTL_HOURS));
+  return verifyAdminTokenValue(token, adminSessionSigningKey(), adminUsername(), Date.now(), adminTokenTtlMs(process.env.ADMIN_TOKEN_TTL_HOURS));
 }
 
 /**
@@ -128,3 +137,4 @@ export function requireAdmin(req: Request, res: { status: (n: number) => { json:
   }
   next();
 }
+

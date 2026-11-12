@@ -2,10 +2,14 @@
  * BLD-2: GET-one, DELETE and pin must trust only a verified identity.
  * A claimed ?userId= is not enough to read, pin, or wipe someone else's app.
  */
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
+
+const originals = vi.hoisted(() => ({ erase: vi.fn(), list: vi.fn() }));
+vi.mock('../src/server/lib/proAttachmentStore', () => ({ proAttachmentStore: originals }));
+beforeEach(() => { originals.erase.mockReset().mockResolvedValue(undefined); originals.list.mockReset().mockResolvedValue([]); });
 
 process.env.VITEST = 'true';
 process.env.AGENTV3_ENABLED = 'true';
@@ -47,6 +51,7 @@ describe('a stranger cannot delete your conversation (BLD-2)', () => {
     await del(claimed({ params: { id: SID } }), res);
     expect([401, 403, 404]).toContain(res.statusCode);
     expect(await store.get(SID)).not.toBeNull();
+    expect(originals.erase).not.toHaveBeenCalled();
   });
 
   it('(b) DELETE with the verified header succeeds and the record is gone', async () => {
@@ -58,6 +63,19 @@ describe('a stranger cannot delete your conversation (BLD-2)', () => {
     }), res);
     expect(res.statusCode).toBe(200);
     expect(await store.get(SID)).toBeNull();
+    expect(originals.erase).toHaveBeenCalledWith(VICTIM, { sessionId: SID });
+  });
+
+  it('retains an owned conversation if original-file deletion is unconfirmed', async () => {
+    const id = 'retryOriginalDelete01';
+    await store.create({ id, userId: VICTIM, workspaceId: id, title: 'retry', createdAt: Date.now(), messages: [] });
+    originals.erase.mockRejectedValueOnce(new Error('private storage unavailable'));
+    const res = mockRes();
+    await del(mockReq({ params: { id }, headers: { 'x-test-verified-uid': VICTIM } }), res);
+    expect(res.statusCode).toBe(503);
+    expect(res.body.retryable).toBe(true);
+    expect(await store.get(id)).not.toBeNull();
+    expect(originals.erase).toHaveBeenCalledWith(VICTIM, { sessionId: id });
   });
 
   it('(c) pin without a verified identity is refused; with it, it sticks', async () => {

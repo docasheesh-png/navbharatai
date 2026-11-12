@@ -195,6 +195,18 @@ describe('🔒 every path that takes money now names itself', () => {
     expect(walletDebit.split('recordFeatureSpend(tx, userId)').length - 1).toBe(3);
   });
 
+  it('held feature spend is counted only after the hold is actually settled', () => {
+    const at = walletDebit.indexOf('export async function settleWalletHold(');
+    const settle = walletDebit.slice(at);
+    const transaction = settle.indexOf('const settled = await runTransaction');
+    const metric = settle.indexOf('if (settled) recordFeatureSpend(tx, userId);');
+    expect(at).toBeGreaterThan(-1);
+    expect(transaction).toBeGreaterThan(-1);
+    expect(metric).toBeGreaterThan(transaction);
+    expect(settle.slice(0, metric)).not.toContain('recordFeatureSpend(tx, userId)');
+    expect(settle.slice(metric)).toMatch(/^if \(settled\) recordFeatureSpend\(tx, userId\);/);
+  });
+
   it('the admin route stops discarding the ledger it already had', () => {
     const routes = read('src/server/routes/reports.ts');
     expect(routes).toContain('spendByFeature(');

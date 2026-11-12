@@ -96,9 +96,15 @@ five-minute expiry. It is separate from the reviewed catalog and never certifies
 unknown model mappings, fees, supplier ceilings, quality or disclosure approvals.
 It does not create accounts, purchase credits or run paid inference. Independently
 reviewed evidence is still required to populate and keep the dispatch catalog fresh.
-Without that feed, approvals, and reviewed downstream terms, Qubax deliberately
-remains unavailable and ordinary Chat continues through eligible later rungs.
-The Test Chat Bot instead shows unavailable and never calls another provider.
+Gateway callers that pin `expectedSelection` remain unavailable without the
+reviewed catalog and the exact approval. Public chat and the admin Test Chat Bot
+instead use the live-market path described above; that path does not read
+`qubax_chat_approvals`. A missing or stale market feed leaves the shared market
+plan empty; the admin-only typed-model fallback may still be available (see
+`TEST_CHAT_BOT.md`). Every dispatched try still requires the
+per-request reserve and shared budget admission. If no Qubax try succeeds,
+ordinary Chat continues through eligible later rungs with the same history.
+The Test Chat Bot never falls back to another provider.
 
 Qubax documents a gateway/marketplace. “Qubax only” means NavBharatAI sends only to
 Qubax; it does not mean the gateway performs inference itself or avoids upstream

@@ -529,7 +529,16 @@ describe('fixed text chain uses approved candidates in owner order', () => {
   function choices(r: RoutingRequest) { return models.map(([providerId, modelId], i) => candidate(r, `rung-${i}`, i >= 5, { providerId, modelId, quotaDimensions: [{ scope: { providerId, kind: 'organization', id: 'shared-org' }, meter: 'requests/day' }] })); }
   it.each(['chat', 'professional', 'doctor', 'sda', 'developer-api'] as const)('orders eligible %s profiles without cheaper-price or latency reordering', surface => {
     const r = fixed({ surface }); const cs = choices(r); const b = { ...budget(r), allowedProfileIds: cs.map(c => c.profile.id) };
-    for (let i = 0; i < cs.length; i++) expect(plan(planInference(context(r, cs.slice(i).reverse(), b).input)).profileId).toBe(`rung-${i}`);
+    const ordered = surface === 'chat' ? [cs[5], ...cs.filter((_, i) => i !== 5)] : cs;
+    for (let i = 0; i < ordered.length; i++) expect(plan(planInference(context(r, ordered.slice(i).reverse(), b).input)).profileId).toBe(ordered[i].profile.id);
+  });
+  it('puts admitted Mitrify first and Qubax second without changing other fallbacks', () => {
+    const r = fixed(); const cs = choices(r);
+    const q = candidate(r, 'qubax', true, { providerId: 'QUBAX', modelId: 'reviewed-model', quotaDimensions: [{ scope: { providerId: 'QUBAX', kind: 'organization', id: 'shared-org' }, meter: 'requests/day' }] });
+    const ordered = [cs[5], q, ...cs.filter((_, i) => i !== 5)];
+    const b = { ...budget(r), allowedProfileIds: ordered.map(c => c.profile.id) };
+    for (let i = 0; i < ordered.length; i++)
+      expect(plan(planInference(context(r, ordered.slice(i).reverse(), b).input)).profileId).toBe(ordered[i].profile.id);
   });
   it('does not replay a failed profile or exclude the next model solely for sharing its provider', () => {
     const r = fixed({ attempts: [{ physicalAttemptId: 'prior', profileId: 'rung-0', outcome: 'definite-failure', failureClass: 'retryable-provider-failure', outputVisible: false }] });

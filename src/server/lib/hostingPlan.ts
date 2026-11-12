@@ -36,7 +36,7 @@ import { computeDebitedWallet } from './walletDebit';
 import { ledgerPatch } from './walletStatement';
 import { checkPlanPayable, giftRemaining, paidSpendableTokens } from './giftSpend';
 import { inrToDebitTokens, inrToWalletTokens, TOKENS_PER_RUPEE } from './payments';
-import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
+import { resolveCanonicalWalletIdStrict, walletMergeResolveEnabled } from './walletResolve';
 import { WALLET_OPS, validRequestId, walletOpId } from './walletOps';
 import { withLedgerV2 } from './ledgerV2';
 import { envFlag } from './envFlag';
@@ -635,10 +635,10 @@ export function appsToPauseOnLapse(
 
 async function canonicalId(db: any, uid: string): Promise<string> {
   if (!walletMergeResolveEnabled()) return uid;
-  return resolveCanonicalWalletId(async (u) => {
+  return resolveCanonicalWalletIdStrict(async (u) => {
     const s = await getDoc(doc(db, 'user_token_wallets', u));
     return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
-  }, uid).catch(() => uid);
+  }, uid);
 }
 
 /**

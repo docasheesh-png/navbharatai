@@ -13,7 +13,7 @@ vi.mock('../../lib/freeAnswerQuota', () => ({
   freeAnswerSignal: () => undefined,
 }));
 vi.mock('./runtime', async original => ({ ...await original<typeof import('./runtime')>(), maybeGatewayText: m.gateway }));
-vi.mock('../AIRouterManager', () => ({ AIRouterManager: { getRouter: () => ({ routeRaced: m.legacy }) } }));
+vi.mock('../AIRouterManager', () => ({ AIRouterManager: { getRouter: () => ({ route: m.legacy }) } }));
 vi.mock('../../lib/aiTurnCharge', () => ({ chargeForAiTurn: m.charge }));
 vi.mock('../../lib/attachmentText', () => ({ extractDocumentText: m.document }));
 vi.mock('../../lib/vertexGenAI', () => ({ vertexGenAI: () => ({ models: { generateContent: m.vertex } }) }));
@@ -59,15 +59,15 @@ describe('Doctor AI retains its original routing, audit and billing', () => {
     try {
       vi.stubEnv('GEMINI_API_KEY', 'test-only-key');
       m.gate.mockResolvedValue({ allow: true, tier: 'paid', uid: 'verified-doctor', countsAgainstFree: false, billableFraction: 1 });
-      m.direct.mockImplementationOnce(async () => {
+      m.legacy.mockImplementationOnce(async () => {
         expect(currentInferenceGatewayContext()).toBeUndefined();
-        return { text: 'Refer now.', usageMetadata: { promptTokenCount: 25, candidatesTokenCount: 10 } };
+        return { response: { content: 'Refer now.', provider: 'GEMINI', model: 'gemini-2.5-flash', usage: { inputTokens: 25, outputTokens: 10 } }, telemetry: { success: true } };
       });
       m.direct.mockResolvedValueOnce({ text: 'OK, but check oxygen saturation.' });
       const res = mockRes(); await route()(request(), res);
       expect(res.statusCode).toBe(200); expect(res.body.reply).toContain('Automated safety cross-check');
-      expect(res.body.reply).toContain('check oxygen saturation'); expect(m.direct).toHaveBeenCalledTimes(2);
-      expect(m.direct.mock.calls[1][0].model).toBe('gemini-2.5-flash');
+      expect(res.body.reply).toContain('check oxygen saturation'); expect(m.legacy).toHaveBeenCalledOnce(); expect(m.direct).toHaveBeenCalledOnce();
+      expect(m.direct.mock.calls[0][0].model).toBe('gemini-2.5-flash');
       expect(m.gateway).not.toHaveBeenCalled(); expect(m.verify).not.toHaveBeenCalled(); expect(m.burn).not.toHaveBeenCalled();
       expect(m.charge.mock.calls[0][1].billableFraction).toBe(1);
       expect(m.charge.mock.calls[0][2]).toMatchObject({ provider: 'GEMINI', inputTokens: 25, outputTokens: 10 });

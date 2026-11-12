@@ -328,12 +328,12 @@ export function foldCostTelemetry(
     };
   }
 
-  // 🔒 A BUILD THAT DID NOT REPORT A REAL COST ADDS NOTHING AND IS NOT COUNTED. `measuredReal` is
-  // deliberately a check on the NUMBER, not on truthiness: a genuinely free build costs $0.00 and
-  // must still count toward coverage, while an absent value must not read as a zero-cost build.
-  const measuredReal = Number.isFinite(entry.realCostUsd);
+  // 🔒 A build is fully measured only when BOTH provider spend and sandbox spend are present.
+  // The fields have the same optionality contract: an absent VM figure is not a $0 VM bill.
+  // Check finiteness, not truthiness, so a genuinely free provider/VM cost of $0 still counts.
+  const measuredReal = Number.isFinite(entry.realCostUsd) && Number.isFinite(entry.sandboxUsd);
   const buildRealUsd = measuredReal
-    ? Math.max(0, entry.realCostUsd as number) + Math.max(0, Number.isFinite(entry.sandboxUsd) ? (entry.sandboxUsd as number) : 0)
+    ? Math.max(0, entry.realCostUsd as number) + Math.max(0, entry.sandboxUsd as number)
     : 0;
 
   return {

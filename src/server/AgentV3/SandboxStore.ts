@@ -18,12 +18,29 @@
 //   with the single-build-per-account lock (activeBuilds 409), two instances never resume the same
 //   sandbox concurrently. Mirrors DeploymentStore: VITEST-skip, best-effort, never throws/blocks a build.
 import * as admin from 'firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { createHash } from 'node:crypto';
+import { FieldValue, FieldPath } from 'firebase-admin/firestore';
 import { getServerDb } from '../lib/serverDb';
 import { isUsableRecipe, type PreviewRecipe } from './previewRevival';
 import type { PauseCause } from './sandboxLifetime';
 import type { SandboxSession } from './sandboxSessions';
 import { dayKey } from './sandboxSessions';
+
+/** Minimal cleanup identity, not a reversible workspace/user key. */
+export function sandboxOrphanDocumentId(sandboxId: string): string {
+  return createHash('sha256').update(`sandbox-orphan-v1:${sandboxId}`).digest('hex');
+}
+
+function orphanPendingFields(sandboxId: string, row: Record<string, any> = {}) {
+  return {
+    sandboxId, status: 'pending',
+    reason: row.reason === 'losing-allocation' ? 'losing-allocation' : 'unrecorded-allocation',
+    createdAt: Number.isFinite(Number(row.createdAt)) ? Number(row.createdAt) : Date.now(),
+    updatedAt: Date.now(),
+    attempts: Number.isFinite(Number(row.attempts)) ? Number(row.attempts) : 0,
+    ...(Number.isFinite(Number(row.lastAttemptAt)) ? { lastAttemptAt: Number(row.lastAttemptAt) } : {}),
+  };
+}
 
 export interface SandboxRecord {
   workspaceId: string;
@@ -145,15 +162,134 @@ export class SandboxStore {
   }
 
   /**
+   * Persist a newly created or resumed allocation without allowing a stale creator to replace
+   * a newer sandbox. Returns false on a compare-and-set conflict or unavailable storage; callers
+   * must not publish an allocation unless it was persisted or the same identity is still current.
+   * expectedSandboxId is the identity observed before connect/create: null means no allocation;
+   * a string means a failed-resume replacement or same-id resume.
+   */
+  async recordAllocation(
+    workspaceId: string,
+    userId: string | null,
+    sandboxId: string,
+    expectedSandboxId: string | null,
+  ): Promise<boolean> {
+    const db = this.getDb();
+    if (!db || !workspaceId || !sandboxId) return false;
+    try {
+      const ref = db.collection('agentv3_sandboxes').doc(workspaceId);
+      return await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const rawCurrent = snap.exists ? snap.data()?.sandboxId : undefined;
+        const current = typeof rawCurrent === 'string' && rawCurrent.trim() ? rawCurrent.trim() : null;
+        if (current !== expectedSandboxId) return false;
+        const patch: Record<string, unknown> = { workspaceId, sandboxId, updatedAt: Date.now() };
+        // A caller without verified user identity must preserve existing ownership metadata; writing
+        // the fallback string 'anon' here would erase a real owner on every resumed allocation.
+        if (userId) patch.userId = userId;
+        tx.set(ref, patch, { merge: true });
+        return true;
+      });
+    } catch { return false; /* the caller must not use an allocation it could not persist */ }
+  }
+
+  /** Transactional migration/replay fence shared by enqueue, retry and resolution. */
+  private async _updateOrphan(
+    sandboxId: string,
+    change: (row: Record<string, any> | undefined) => Record<string, any> | null,
+  ): Promise<Record<string, any> | null> {
+    const db = this.getDb();
+    if (!db || !sandboxId) return null;
+    const collection = db.collection('agentv3_sandbox_orphans');
+    const ref = collection.doc(sandboxOrphanDocumentId(sandboxId));
+    const legacyRef = collection.doc(encodeURIComponent(sandboxId));
+    const cursorRef = collection.doc('navbharatai-orphan-sweep-cursor-v1');
+    return db.runTransaction(async tx => {
+      const [snap, legacy, cursor] = await Promise.all([tx.get(ref), tx.get(legacyRef), tx.get(cursorRef)]);
+      const rows = [snap.data(), legacy.data()];
+      // A terminal fence always wins over a delayed old-schema pending write.
+      const row = rows.find(r => r?.status === 'paused' || r?.status === 'killed') ?? rows.find(Boolean);
+      const next = row?.status === 'paused' || row?.status === 'killed'
+        ? { status: row.status, resolvedAt: Number(row.resolvedAt) || Date.now() }
+        : change(row);
+      if (!next) return null;
+      tx.set(ref, next); // Replacement strips legacy workspace/user fields.
+      if (legacy.exists && legacyRef.id !== ref.id) tx.delete(legacyRef);
+      const oldCursor = cursor.data()?.lastDocumentId;
+      if (typeof oldCursor === 'string' && !/^[a-f0-9]{64}$/.test(oldCursor)) {
+        tx.set(cursorRef, { lastDocumentId: null, updatedAt: Date.now() });
+      }
+      return next;
+    });
+  }
+
+  /** Preserve cleanup authority across account deletion, without workspace/user linkage. */
+  async recordOrphanAllocation(sandboxId: string, reason: 'losing-allocation' | 'unrecorded-allocation'): Promise<boolean> {
+    try {
+      return !!await this._updateOrphan(sandboxId, row => orphanPendingFields(sandboxId, { ...row, reason }));
+    } catch { return false; }
+  }
+
+  /** Bounded rotating queue; legacy pending rows are sanitized before returning them. */
+  async listPendingOrphanAllocations(limit = 50): Promise<Array<{ sandboxId: string; reason: string; attempts: number }>> {
+    const db = this.getDb();
+    if (!db) return [];
+    try {
+      const collection = db.collection('agentv3_sandbox_orphans');
+      const pageSize = Math.max(1, Math.min(200, limit));
+      const cursorRef = collection.doc('navbharatai-orphan-sweep-cursor-v1');
+      const base = collection.where('status', '==', 'pending').orderBy(FieldPath.documentId());
+      const rows = await db.runTransaction(async tx => {
+        const cursorSnap = await tx.get(cursorRef);
+        const rawCursor = cursorSnap.data()?.lastDocumentId;
+        const cursor = typeof rawCursor === 'string' && /^[a-f0-9]{64}$/.test(rawCursor) ? rawCursor : null;
+        let snap = await tx.get((cursor ? base.startAfter(cursor) : base).limit(pageSize));
+        if (!snap.docs.length && cursor) snap = await tx.get(base.limit(pageSize));
+        // Never retain a legacy plaintext provider ID in the sweep cursor.
+        const last = snap.docs.at(-1)?.id;
+        tx.set(cursorRef, { lastDocumentId: last && /^[a-f0-9]{64}$/.test(last) ? last : null, updatedAt: Date.now() });
+        return snap.docs.map(doc => doc.data());
+      });
+      const pending: Array<{ sandboxId: string; reason: string; attempts: number }> = [];
+      for (const row of rows) {
+        if (typeof row.sandboxId !== 'string' || !row.sandboxId) continue;
+        const current = await this._updateOrphan(row.sandboxId, live =>
+          live?.status === 'pending' && live.sandboxId === row.sandboxId ? orphanPendingFields(row.sandboxId, live) : null);
+        if (current?.status === 'pending') pending.push({ sandboxId: current.sandboxId, reason: current.reason, attempts: current.attempts });
+      }
+      return pending;
+    } catch { return []; }
+  }
+
+  /** Terminal digest-only fences survive stale retries without retaining plaintext identity. */
+  async markOrphanAllocationHandled(sandboxId: string, action: 'paused' | 'killed'): Promise<boolean> {
+    try {
+      return !!await this._updateOrphan(sandboxId, row =>
+        row?.status === 'pending' && row.sandboxId === sandboxId ? { status: action, resolvedAt: Date.now() } : null);
+    } catch { return false; }
+  }
+
+  /** Keep failed cleanup retryable, stripping any old user linkage in the same transaction. */
+  async noteOrphanAllocationAttempt(sandboxId: string): Promise<void> {
+    try {
+      await this._updateOrphan(sandboxId, row => {
+        if (row?.status !== 'pending' || row.sandboxId !== sandboxId) return null;
+        const pending = orphanPendingFields(sandboxId, row);
+        return { ...pending, attempts: pending.attempts + 1, lastAttemptAt: Date.now() };
+      });
+    } catch { /* retry on the next durable sweep */ }
+  }
+
+  /**
    * Best-effort local observation, NOT a provider start or billing event. The counter is independent
    * and can differ from accepted observations. Neither write is awaited by app work.
    *
-   * Wait only for the EXISTING initial identity-touch attempt; do not establish/repair identity here.
+   * Allocation identity is already committed before this observation is requested.
    * Replace the whole nested map so a new start cannot inherit an old end. The reported-start high
    * water mark rejects delayed smaller timestamps and ties, but clock skew can suppress observations
    * or invert physical order. This is not allocation authority or a cross-instance lifecycle fence.
    */
-  async recordSessionStart(workspaceId: string, session: SandboxSession, afterIdentityTouch?: Promise<void>): Promise<void> {
+  async recordSessionStart(workspaceId: string, session: SandboxSession): Promise<void> {
     const db = this.getDb();
     if (!db || !workspaceId || !session?.sandboxId) return;
     const start = { ...session }; // Capture before waiting: operation accounting mutates the local row.
@@ -164,7 +300,6 @@ export class SandboxStore {
       );
     };
     const observation = async () => {
-      await afterIdentityTouch?.catch(() => {});
       if (!validSession(start) || !validObservationId(start.observationId)
         || start.endedAt !== undefined || start.endedBy !== undefined) return;
       const ref = db.collection('agentv3_sandboxes').doc(workspaceId);
@@ -466,14 +601,11 @@ export class SandboxStore {
    * caller throttles (shouldTouchDurable), so this is roughly one write per build per few minutes.
    */
   async touch(workspaceId: string, sandboxId: string): Promise<void> {
-    const db = this.getDb();
-    if (!db || !workspaceId || !sandboxId) return;
-    try {
-      await db.collection('agentv3_sandboxes').doc(workspaceId).set(
-        { workspaceId, sandboxId, updatedAt: Date.now() },
-        { merge: true },
-      );
-    } catch { /* best-effort — never block a build */ }
+    // A touch is an activity refresh, NOT an allocation write. A stale process may still
+    // hold an old sandboxId after another instance has replaced the workspace allocation.
+    // A merge-set here would overwrite that newer identity (or recreate a record after clear()).
+    // Only advance updatedAt when the durable record still names this exact sandbox.
+    await this.touchIfCurrent(workspaceId, sandboxId);
   }
 
   /** A heartbeat may refresh an existing allocation, never resurrect or replace its identity. */

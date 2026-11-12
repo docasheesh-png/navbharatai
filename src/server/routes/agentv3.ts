@@ -741,6 +741,7 @@ import {
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, fleetEmptyBasisNote, etaTaskKey, etaBuildKind, type EtaBuildKind } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxExpenseUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
+import { rateIsConfigured } from '../AgentV3/sandboxRate';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { scopeCallAudit, recordScopeFailure } from '../lib/scopeFailureReports';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
@@ -808,6 +809,8 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
 import { buildActuator } from './actuatorFactory';
 import { bindSessionReconnectForTests } from '../AgentV3/WorkspaceRegistry';
 import { envFlag } from '../lib/envFlag';
+import { proAttachmentStore } from '../lib/proAttachmentStore';
+import { attachmentSessionForConversation, eraseConversationOriginals } from '../lib/proAttachmentLifecycle';
 import {
   workspaceOwnershipOk as sharedWorkspaceOwnershipOk,
   verifiedWorkspaceReadOk as sharedVerifiedWorkspaceReadOk,
@@ -1821,8 +1824,8 @@ function billableSandboxDetail(
   actuator: unknown,
   workspaceId: string | null | undefined,
   buildStartedAtMs?: number,
-): { seconds: number; usd: number; measuredSeconds: number } {
-  const none = { seconds: 0, usd: 0, measuredSeconds: 0 };
+): { seconds: number; usd: number; measuredSeconds: number; expenseMeasured: boolean } {
+  const none = { seconds: 0, usd: 0, measuredSeconds: 0, expenseMeasured: false };
   try {
     const fn = (actuator as any)?.sandboxHeldSeconds;
     if (typeof fn !== 'function' || !workspaceId) return none;
@@ -1847,12 +1850,13 @@ function billableSandboxDetail(
     if (!Number.isFinite(started) || started <= 0) return none;
     const buildSeconds = Math.max(0, (Date.now() - started) / 1000);
     const billable = Math.min(seconds, buildSeconds);
+    const expenseMeasured = rateIsConfigured();
     const usd = sandboxExpenseUsd(sandboxCost(billable));
-    // Expense telemetry only. The user fee is derived separately from the settled subtotal.
-    // measuredSeconds retains measured time even when the verified hourly rate is unavailable.
+    // Availability comes from the verified rate, NOT the rounded USD amount: a real short run may
+    // legitimately round below $0.000001. Keep billing seconds zero when no positive fee is shown.
     return usd > 0
-      ? { seconds: billable, usd, measuredSeconds: billable }
-      : { ...none, measuredSeconds: billable };
+      ? { seconds: billable, usd, measuredSeconds: billable, expenseMeasured }
+      : { ...none, measuredSeconds: billable, expenseMeasured };
   } catch {
     return none;
   }
@@ -4452,6 +4456,15 @@ export function registerAgentV3Routes(app: Express): void {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access === 'ok') {
+          // Remove original bytes first. On failure leave the transcript available for retry.
+          if (userId && rec?.userId === userId) {
+            try {
+              await eraseConversationOriginals(proAttachmentStore, userId,
+                attachmentSessionForConversation(userId, cid, rec));
+            } catch {
+              return res.status(503).json({ error: 'Private file removal could not complete. The chat was kept so you can retry.', retryable: true });
+            }
+          }
           // GA-1 — cascade purge: delete the conversation AND every per-workspace store it owned
           // (files/plan/memory/diagnostics/deployment). conversationId === workspaceId (#837), so the
           // shallow store.remove used to orphan all of that data forever. Best-effort; never throws.
@@ -6932,6 +6945,20 @@ async function noteBuildOutcome(
         if (access === 'forbidden') { forbidden = true; continue; }
         if (access !== 'ok' || !rec) continue;
 
+        // Originals use the stable client message timestamp, not a guessed server turn time.
+        // Scope fences revoke pending uploads before the transcript can disappear.
+        if (verifiedUid && rec.userId === verifiedUid) {
+          const attachmentSession = attachmentSessionForConversation(verifiedUid, cid, rec);
+          if (req.body?.attachmentSessionId !== undefined && req.body.attachmentSessionId !== attachmentSession) {
+            return res.status(409).json({ error: 'The attachment chat does not match this message. Reopen the chat and retry.' });
+          }
+          try {
+            await eraseConversationOriginals(proAttachmentStore, verifiedUid, attachmentSession,
+              req.body?.attachmentMessageId, true);
+          } catch {
+            return res.status(503).json({ error: 'Private file removal could not complete. The message was kept so you can retry Unsend.', retryable: true });
+          }
+        }
         // 2) Truncate the durable transcript to just before the last real user prompt.
         const keep = unsendKeepCount(rec.messages);
         if (keep < rec.messages.length) {
@@ -27815,7 +27842,8 @@ async function noteBuildOutcome(
           // Sonnet's price read as a $1,257 loss. These two lines are the whole fix for that, and
           // they cost nothing — both numbers were already in scope, one variable away.
           realCostUsd: decidedRealCostUsd,
-          sandboxUsd: decidedSandboxUsd,
+          // An unset/invalid E2B rate makes VM expense UNKNOWN, not a measured $0.
+          sandboxUsd: livePreviewCharge.expenseMeasured ? decidedSandboxUsd : undefined,
           // Per-RUNG tokens. `reconciledProviderUsage` above names only the vendor, and one vendor
           // holds rungs 20x apart in price, so no downstream reader could price it.
           modelUsage: modelUsageFromEntries(providerLedger.entries()),
@@ -28635,3 +28663,4 @@ async function noteBuildOutcome(
 
   }));
 }
+

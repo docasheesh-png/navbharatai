@@ -225,6 +225,10 @@ describe('the panel wires the scoped handoff into its existing queue lifecycle',
   it.each(['handleUnsend', 'handleEdit'])('%s invalidates a waiting handoff before the purge can wait', (name) => {
     const handler = source.slice(source.indexOf(`const ${name} = async`), source.indexOf(`const ${name} = async`) + 1000);
     expect(handler.indexOf('invalidateQueuedContinuation();')).toBeGreaterThan(0);
-    expect(handler.indexOf('invalidateQueuedContinuation();')).toBeLessThan(handler.indexOf('await unsend()'));
+    const invalidateAt = handler.indexOf('invalidateQueuedContinuation();');
+    const localPurgeAt = handler.indexOf('await removeLocalOriginals(attachmentSessionId, ts)');
+    const serverPurgeAt = handler.indexOf('await unsend({ attachmentSessionId, attachmentMessageId: String(ts) })');
+    expect(localPurgeAt).toBeGreaterThan(invalidateAt);
+    expect(serverPurgeAt).toBeGreaterThan(invalidateAt);
   });
 });

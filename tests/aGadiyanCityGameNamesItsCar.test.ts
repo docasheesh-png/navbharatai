@@ -1,19 +1,12 @@
 /**
- * BR1977 — "Lata Mangeshkar City" Hinglish 3D request.
+ * BR1977 — synthetic Hinglish 3D city-game regression.
  *
- * The user asked for a realistic 3D Indian-city game where the player works,
- * earns Paisa, and buys gadiyan (cars); crime leads to a police arrest that
- * bail (also Paisa) undoes. The platform recorded a game contract with
- * vehicle:null (it already knew "gaadi" but not "gadiyan") and GAME_KIT_SEEDED
- * listing five recipes and 3 files after SANDBOX_UNAVAILABLE. The builder was
- * told the kit was on disk; six seconds later src/game/core/events.ts was
- * missing. It invented src/game/lata-city/car (written after the missing-file
- * gate), the preview 404'd, and RELEASE_GATE stayed RED.
+ * The fixture is invented for testing, not a customer prompt. It preserves
+ * the city/building, 3D and gadiyan tokens needed to distinguish a car-owning
+ * city game from a racing request.
  *
  * F1: gadi / gadiyan / gaadiyan are the same vehicle as gaadi.
- * F2: a recipe "success" with fewer landed files than successful recipes
- *     is not a seeded kit — do not tell the builder the files are on disk,
- *     and do not prepare 3D assets on a missing 3D layer.
+ * F2: recipe success without enough landed files is not a seeded kit.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -29,7 +22,7 @@ import {
   type GameKitSeedResult,
 } from '../src/server/AgentV3/gameKitSeed';
 
-const PROMPT = 'Mujhko bahut achcha 3D mein game chahie Lata Mangeshkar City ek Indian city jaisa design hona chahiye Koi bad mein game khelne jaaye to pahle usko player milega uske bad vah player se kuchh bhi kam karvaega aur uske bad uske pass ka Paisa aaega aur Paisa aane ke bad vah kuchh gadiyan matlab jo kharidna chahe vah kharidega aur usmein kadhai hoga to police usko utha Le jayegi aur usko police se bhi chhutane ke liye Paisa hi lagega ekadam realistic rahana chahie 3D mein game hona chahie';
+const PROMPT = 'Ek 3D Indian city game banao. Player kaam karke paise kamayega aur gadiyan kharidega. City mein buildings hon; police aur bail ka system ho. Realistic 3D duniya chahiye.';
 
 const INTENT = readFileSync(resolve(__dirname, '../src/server/AgentV3/gameIntent.ts'), 'utf8');
 const SEED = readFileSync(resolve(__dirname, '../src/server/AgentV3/gameKitSeed.ts'), 'utf8');

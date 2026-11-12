@@ -1676,11 +1676,33 @@ export class E2BActuator implements IEngineerActuator {
    * refuses without creating or restoring a replacement.
    */
   /** Kill a newly-created machine that lost the durable allocation CAS. */
-  private async _killUnrecordedSandbox(sandbox: Sandbox, reason: string): Promise<void> {
+  private async _killUnrecordedSandbox(workspaceId: string, sandbox: Sandbox, reason: string): Promise<void> {
     const killed = await withTimeout(Sandbox.kill(sandbox.sandboxId), 10_000, reason).catch(() => false);
-    if (!killed) {
-      console.warn(`[SANDBOX] Could not confirm kill of unrecorded allocation ${sandbox.sandboxId.slice(0, 12)} (${reason}); bounding its remaining lifetime`);
-      await sandbox.setTimeout(60_000).catch(() => {});
+    if (killed) return;
+
+    // Try a cloud-side pause before relying on expiry. If it succeeds, record the terminal state
+    // when possible; otherwise retain a durable pending orphan for the cross-instance sweeper.
+    const paused = await this.pauseSandbox(sandbox.sandboxId).catch(() => false);
+    if (paused) {
+      const recorded = await sandboxStore.recordOrphanAllocation(workspaceId, sandbox.sandboxId, reason);
+      if (recorded) await sandboxStore.markOrphanAllocationHandled(sandbox.sandboxId, 'paused');
+      return;
+    }
+
+    // A successful cap is a temporary backstop, not proof of cleanup: still persist the orphan so
+    // another instance can pause/kill it on the next durable sweep.
+    const capped = await sandbox.setTimeout(60_000).then(() => true).catch(() => false);
+    const recorded = await sandboxStore.recordOrphanAllocation(workspaceId, sandbox.sandboxId, reason);
+    if (recorded) {
+      if (!capped) console.error(`SANDBOX_ORPHAN_CLEANUP_PENDING ${sandbox.sandboxId.slice(0, 12)}; durable sweep will retry`);
+      return;
+    }
+
+    // If Firestore cannot retain the orphan either, make one final provider kill attempt and emit
+    // an explicit critical signal rather than silently treating failed cleanup as success.
+    const retryKilled = await withTimeout(Sandbox.kill(sandbox.sandboxId), 10_000, `${reason}-retry`).catch(() => false);
+    if (!retryKilled && !capped) {
+      console.error(`SANDBOX_ORPHAN_UNTRACKED_CRITICAL ${sandbox.sandboxId.slice(0, 12)}; provider kill, pause, timeout cap and durable record all failed`);
     }
   }
 
@@ -1750,7 +1772,7 @@ export class E2BActuator implements IEngineerActuator {
       if (!recorded) {
         const winner = await sandboxStore.lookupRecoveryIdentity(workspaceId).catch(() => ({ state: 'unavailable' as const }));
         if (winner.state !== 'found') {
-          if (freshCreate) await this._killUnrecordedSandbox(sandbox, 'unrecorded-allocation');
+          if (freshCreate) await this._killUnrecordedSandbox(workspaceId, sandbox, 'unrecorded-allocation');
           this._sandboxOrigin.delete(workspaceId);
           this._lastLifetimeExtend.delete(workspaceId);
           throw new SandboxRecoveryUnavailableError();
@@ -1763,7 +1785,7 @@ export class E2BActuator implements IEngineerActuator {
             this._lastLifetimeExtend.delete(workspaceId);
             throw new SandboxRecoveryUnavailableError();
           }
-          await this._killUnrecordedSandbox(sandbox, 'losing-allocation');
+          await this._killUnrecordedSandbox(workspaceId, sandbox, 'losing-allocation');
           try {
             sandbox = await withTimeout(Sandbox.connect(winner.sandboxId, this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.connect(winning-allocation)');
             await sandbox.setTimeout(sandboxLifetimeMs()).catch(() => {});

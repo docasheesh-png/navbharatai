@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { getServerDb, doc, getDoc, runTransaction } from './serverDb';
 import { computeRolledUpDebit, computeRolledUpRelease, MAX_OPEN_HOLDS } from './walletDebit';
-import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
+import { resolveCanonicalWalletIdStrict, walletMergeResolveEnabled } from './walletResolve';
 import { withLedgerV2 } from './ledgerV2';
 import { featureRollupRef, TOKENS_PER_RUPEE } from './walletFeature';
 import { VoiceAiError } from './voiceAi';
@@ -18,7 +18,7 @@ export function voiceOperationId(uid: string, requestId: string): string {
  */
 export async function reserveVoice(uid: string, requestId: string, feeInr: number, now = Date.now(), db = getServerDb()): Promise<VoiceHold> {
   if (!db) throw new VoiceAiError('storage');
-  const ownerId = walletMergeResolveEnabled() ? await resolveCanonicalWalletId(async id => {
+  const ownerId = walletMergeResolveEnabled() ? await resolveCanonicalWalletIdStrict(async id => {
     const s = await getDoc(doc(db, 'user_token_wallets', id)); return s.exists() ? s.data()?.mergedInto : null;
   }, uid) : uid;
   const id = voiceOperationId(uid, requestId);

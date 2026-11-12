@@ -1,4 +1,6 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { attachMenuPosition } from '../lib/attachMenuPosition';
 import { Camera, Image as ImageIcon, FileText, Paperclip, Folder, FolderOpen } from 'lucide-react';
 import { isFolderImportSupported } from '../lib/folderImport';
 import { zipAccept } from '../lib/zipPicker';
@@ -15,7 +17,7 @@ import { zipAccept } from '../lib/zipPicker';
 // iOS Safari (admin 2026-10-26 phone report: Free paperclip "does nothing"):
 //   1) `display:none` / Tailwind `hidden` file inputs ignore programmatic .click().
 //   2) setTimeout(.click) drops the user-gesture, so the picker never opens.
-// Both are fixed below: visually-hidden inputs + synchronous click in the same tap.
+// File/photo rows use direct native inputs. Project ZIP keeps its synchronous gesture-bound picker.
 
 /** Visually hidden but still "visible" to iOS Safari's file-picker gesture rules. */
 export const ATTACH_FILE_INPUT_CLASS =
@@ -62,19 +64,52 @@ export function AttachMenu({
   onOpenFolder,
 }: AttachMenuProps) {
   const [open, setOpen] = useState(false);
-  const cameraRef = useRef<HTMLInputElement | null>(null);
-  const galleryRef = useRef<HTMLInputElement | null>(null);
-  const fileRef = useRef<HTMLInputElement | null>(null);
   const zipRef = useRef<HTMLInputElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [position, setPosition] = useState<React.CSSProperties>({ visibility: 'hidden' });
+
+  // A fixed child can still be trapped by a transformed/filtered composer ancestor.
+  // Portal to body and measure the real trigger/visual viewport instead of guessing 72px.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const trigger = triggerRef.current;
+      const menu = menuRef.current;
+      if (!trigger || !menu) return;
+      const vv = window.visualViewport;
+      setPosition(attachMenuPosition(trigger.getBoundingClientRect(), {
+        left: vv?.offsetLeft ?? 0, top: vv?.offsetTop ?? 0,
+        width: vv?.width ?? window.innerWidth, height: vv?.height ?? window.innerHeight,
+      }, menu.scrollHeight));
+    };
+    place();
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(place);
+    if (menuRef.current) observer?.observe(menuRef.current);
+    if (triggerRef.current) observer?.observe(triggerRef.current);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    window.visualViewport?.addEventListener('resize', place);
+    window.visualViewport?.addEventListener('scroll', place);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+      window.visualViewport?.removeEventListener('resize', place);
+      window.visualViewport?.removeEventListener('scroll', place);
+    };
+  }, [open]);
+
+  useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
 
   // Close on outside tap / Escape (matches the rest of the app's popovers).
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent | TouchEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); triggerRef.current?.focus(); } };
     // pointerdown covers mouse + touch without the touchstart-then-click race that could
     // dismiss the sheet before a menu item's click fires on some iOS WebKit builds.
     document.addEventListener('pointerdown', onDown);
@@ -95,17 +130,19 @@ export function AttachMenu({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onFiles(e.target.files);
     e.target.value = ''; // allow re-picking the same file
+    setOpen(false);
   };
 
-  const OPTIONS: Array<{ key: string; icon: React.ReactNode; label: string; ref: React.RefObject<HTMLInputElement | null> }> = [
-    { key: 'camera', icon: <Camera className="w-4 h-4" />, label: 'Take Photo', ref: cameraRef },
-    { key: 'gallery', icon: <ImageIcon className="w-4 h-4" />, label: 'Choose photo or video', ref: galleryRef },
-    { key: 'file', icon: <FileText className="w-4 h-4" />, label: 'Choose file', ref: fileRef },
+  const OPTIONS: Array<{ key: string; icon: React.ReactNode; label: string; accept: string; capture?: 'environment' }> = [
+    { key: 'camera', icon: <Camera className="w-4 h-4" />, label: 'Take Photo', accept: 'image/*', capture: 'environment' },
+    { key: 'gallery', icon: <ImageIcon className="w-4 h-4" />, label: 'Choose photo or video', accept: 'image/*,video/*' },
+    { key: 'file', icon: <FileText className="w-4 h-4" />, label: 'Choose file', accept: fileAccept },
   ];
 
   return (
     <div ref={rootRef} className="relative shrink-0">
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         aria-haspopup="menu"
@@ -120,23 +157,28 @@ export function AttachMenu({
         )}
       </button>
 
-      {open && (
+      {open && typeof document !== 'undefined' && createPortal(
         <div
+          ref={menuRef}
+          style={position}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
           role="menu"
           data-attach-menu=""
-          className="absolute bottom-full left-0 mb-2 z-[60] min-w-[220px] rounded-2xl border border-line bg-card shadow-2xl overflow-hidden max-sm:fixed max-sm:left-3 max-sm:right-3 max-sm:bottom-[calc(var(--nb-composer-menu-bottom,72px))] max-sm:mb-0 max-sm:z-[80] max-sm:max-h-[min(50dvh,320px)] max-sm:overflow-y-auto max-sm:w-auto max-sm:min-w-0 max-sm:max-w-[calc(100vw-24px)]"
+          className="fixed z-[200] rounded-2xl border border-line bg-card shadow-2xl overflow-y-auto overscroll-contain"
         >
           {OPTIONS.map((o) => (
-            <button
-              key={o.key}
-              type="button"
-              role="menuitem"
-              onClick={() => pick(o.ref)}
-              className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-body hover:bg-raised transition-colors"
-            >
+            <label key={o.key} className="relative w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-body hover:bg-raised focus-within:bg-raised transition-colors">
               <span className="text-muted">{o.icon}</span>
               <span>{o.label}</span>
-            </button>
+              {/* The tap lands on the native input itself. No synthetic .click(), no lost
+                  user activation in iOS/WKWebView, and the input stays mounted until change. */}
+              <input type="file" aria-label={o.label} role="menuitem"
+                accept={o.accept || undefined} capture={o.capture}
+                multiple={o.capture ? false : multiple} disabled={disabled}
+                className="absolute inset-0 h-full w-full opacity-0 cursor-pointer"
+                onChange={handleChange} onCancel={() => setOpen(false)} />
+            </label>
           ))}
           {onZipProject && (
             <button
@@ -164,14 +206,9 @@ export function AttachMenu({
               <span>Open project folder<span className="block text-[11px] text-faint">No zipping, no upload of extras — pick the folder itself</span></span>
             </button>
           )}
-        </div>
+        </div>, document.body
       )}
 
-      {/* Real, separate inputs — each offers a different native source.
-          Visually hidden (NOT display:none) so iOS Safari still honors .click(). */}
-      <input ref={cameraRef} type="file" accept="image/*" capture="environment" className={ATTACH_FILE_INPUT_CLASS} tabIndex={-1} aria-hidden="true" onChange={handleChange} />
-      <input ref={galleryRef} type="file" accept="image/*,video/*" multiple={multiple} className={ATTACH_FILE_INPUT_CLASS} tabIndex={-1} aria-hidden="true" onChange={handleChange} />
-      <input ref={fileRef} type="file" accept={fileAccept} multiple={multiple} className={ATTACH_FILE_INPUT_CLASS} tabIndex={-1} aria-hidden="true" onChange={handleChange} />
       {/* Project import — its OWN single-file picker, routed to onZipProject (never onFiles), so a
           project can never re-enter the attachment/base64 path that capped it at 18 MB. */}
       <input
@@ -190,3 +227,4 @@ export function AttachMenu({
     </div>
   );
 }
+

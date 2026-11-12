@@ -256,6 +256,32 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
   return `${head}\n\n${contract ? `${contract}\n\n` : ''}${sections.join('\n\n')}`;
 }
 
+/**
+ * BR1977: `run_recipe` reports ok as `!r.is_error` even when it wrote nothing
+ * (sandbox unavailable, a silent no-op). The route then recorded GAME_KIT_SEEDED
+ * listing five recipes and 3 files, and told the builder the kit was on disk.
+ * Six seconds later `src/game/core/events.ts` was missing. A claim is honest
+ * only when at least as many files landed as recipes that said they succeeded
+ * (a healthy 3D seed writes ~30). PURE.
+ */
+export function kitSeedClaimIsHonest(okRecipes: number, filesWritten: number): boolean {
+  if (!Number.isFinite(okRecipes) || !Number.isFinite(filesWritten)) return false;
+  if (okRecipes <= 0) return false;
+  return filesWritten >= okRecipes;
+}
+
+/** Downgrade empty recipe "successes" in place so the handoff cannot say the kit is on disk. */
+export function downgradeEmptyKitSeedSuccesses(results: GameKitSeedResult[], filesWritten: number): void {
+  const reportedOk = results.filter((r) => r.ok).length;
+  if (kitSeedClaimIsHonest(reportedOk, filesWritten)) return;
+  for (const r of results) {
+    if (r.ok) {
+      r.ok = false;
+      r.content = `reported success but only ${filesWritten} file(s) landed for ${reportedOk} recipe(s)`;
+    }
+  }
+}
+
 /** The admin line for GAME_KIT_SEEDED. PURE. */
 export function gameKitSeededMessage(results: readonly GameKitSeedResult[], files: number, ms: number): string {
   const done = results.filter((r) => r.ok).map((r) => r.recipe);

@@ -129,6 +129,17 @@ describe('🔴 nothing is faked: live, failed, manual and not-set are four diffe
     expect(d.rows.find((r) => r.id === 'openrouter')!.configuredKeys).toEqual(['OPENROUTER_API_KEY', 'NEMOTRON_API_KEY']);
   });
 
+  it('the Gemini GOOGLE_API_KEY alias appears as configured with its existing billing link', async () => {
+    const { f, calls } = fakeFetch({});
+    const d = await readApiProviderDirectory({ env: { GOOGLE_API_KEY: SECRET }, fetchImpl: f as any });
+    expect(d.rows.find(r => r.id === 'gemini')).toMatchObject({
+      configured: true, configuredKeys: ['GOOGLE_API_KEY'],
+      billingUrl: 'https://aistudio.google.com/billing', balance: { kind: 'manual' },
+    });
+    expect(calls).toEqual([]);
+    expect(JSON.stringify(d)).not.toContain(SECRET);
+  });
+
   it('the custom image provider’s link follows IMAGE_PROVIDER, and an unknown one says so', async () => {
     const d1 = await readApiProviderDirectory({ env: { IMAGE_API_KEY: SECRET, IMAGE_PROVIDER: 'stability' } });
     expect(d1.rows.find((r) => r.id === 'custom-image')!.billingUrl).toBe('https://platform.stability.ai/account/credits');

@@ -16,7 +16,7 @@ import { isGatewayRouteSelected, isGatewayTerminalError } from '../AI/InferenceG
 // The chain (identical to what the professionals used):
 //   1. professional-free  → GLM-4.7-Flash (leader, both tiers).
 //   2. on failure: free tier → professional-free-fallback (Vertex Gemini flash / flash-lite);
-//                  paid tier → professional (RACE Grok × Gemini × Vertex → Claude-Haiku last resort).
+//                  paid tier → professional (Grok → Gemini → Vertex → Claude-Haiku, sequential fallback).
 //
 // WHITE-LABEL: this returns raw model content; callers keep their own white-label system prompts, so no
 // provider identity ever leaks to the user.
@@ -116,10 +116,10 @@ export async function callProfessionalAIWithUsage(
   assertProfessionalDispatch(opts);
   const fallbackNs = tier === 'free' ? 'professional-free-fallback' : 'professional';
   const router = AIRouterManager.getRouter(fallbackNs);
-  // FREE: one rung at a time (flash-lite → flash), so one answer is one bill. PAID keeps its race.
-  const { response, telemetry } = tier === 'free'
-    ? await (opts?.signal ? router.route(prompt, systemPrompt, undefined, undefined, opts.signal) : router.route(prompt, systemPrompt))
-    : await (opts?.signal ? router.routeRaced(prompt, systemPrompt, undefined, opts.signal) : router.routeRaced(prompt, systemPrompt));
+  // Both tiers walk their fallback ladder sequentially: only the provider that answers is billed.
+  const { response, telemetry } = await (opts?.signal
+    ? router.route(prompt, systemPrompt, undefined, undefined, opts.signal)
+    : router.route(prompt, systemPrompt));
   if (telemetry.success && response.content?.trim()) return answer(response);
   throw new Error('All AI providers failed.');
 }

@@ -635,10 +635,10 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
 
       // ── Isolated PROFESSIONAL namespace router (text-only) ────────────────
       // SDA is part of the PROFESSIONAL universe — one isolated, provably-separate
-      // universe defined once in AIRouterManager (P0.1). routeRaced fires
-      // Grok × Gemini × Vertex concurrently and uses Claude Haiku ONLY if all
-      // three fail. Multimodal (image/PDF) requests keep the inline Vertex/Claude
-      // path below, which handles attachments.
+      // universe defined once in AIRouterManager (P0.1). The paid chain is sequential:
+      // Grok → Gemini → Vertex → Claude Haiku. A fallback is called only after the
+      // preceding provider fails, avoiding paid speculative calls whose answers are discarded.
+      // Multimodal (image/PDF) requests keep the inline Vertex/Claude path below.
       if (!reply && !isImage && !isPDF) {
         try {
           const histText = historyForAI
@@ -647,9 +647,9 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           const fallbackPrompt = histText ? `${histText}\nDr: ${message}` : message;
           // TIER: free → GLM-flash (the professional-free universe) leads, EXACTLY like every other
           // professional; if GLM is empty the Vertex fallback below finishes the free chain (GLM → Vertex).
-          // Paid → the full race (Grok × Gemini × Vertex → Claude). Never Grok/Claude on the free tier.
+          // Paid → the full sequential fallback (Grok → Gemini → Vertex → Claude). Never Grok/Claude on the free tier.
           const professionalRouter = AIRouterManager.getRouter(sdaTier === 'free' ? 'professional-free' : 'professional');
-          const { response, telemetry } = await professionalRouter.routeRaced(fallbackPrompt, SDA_SYSTEM_FINAL);
+          const { response, telemetry } = await professionalRouter.route(fallbackPrompt, SDA_SYSTEM_FINAL);
           if (telemetry.success && response.content?.trim()) {
             reply = response.content;
             // ONE WALLET: keep what this answer cost so the turn can be charged like any other AI.

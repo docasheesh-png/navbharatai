@@ -60,7 +60,7 @@ function fixture(initial: SandboxRecord[]) {
     })),
   };
   return {
-    records, queries, update, db,
+    records, queries, update, set, db,
     store: new SandboxStore(() => db as unknown as admin.firestore.Firestore),
     fail: (value: boolean) => { failQuery = value; },
   };

@@ -53,10 +53,15 @@ describe('allocation identity is durable before session observation; telemetry s
   it('does not publish, restore, or record a session until the initial allocation CAS succeeds', async () => {
     const f = fixture();
     const allocationGate = deferred<boolean>();
-    f.allocation.mockReturnValueOnce(allocationGate.promise);
+    const allocationStarted = deferred();
+    f.allocation.mockImplementationOnce(() => {
+      allocationStarted.resolve();
+      return allocationGate.promise;
+    });
 
     const creating = f.internal.getSandbox('ws');
-    await Promise.resolve(); await Promise.resolve();
+    // Wait for the actual allocation boundary, not an assumed number of microtasks.
+    await allocationStarted.promise;
     expect(f.create).toHaveBeenCalledOnce();
     expect(f.allocation).toHaveBeenCalledWith('ws', null, 'vm-1', null);
     expect(f.restore).not.toHaveBeenCalled();

@@ -1749,6 +1749,7 @@ export class E2BActuator implements IEngineerActuator {
         if (winner.state !== 'found') {
           if (freshCreate) await this._killUnrecordedSandbox(sandbox.sandboxId, 'unrecorded-allocation');
           this._sandboxOrigin.delete(workspaceId);
+          this._lastLifetimeExtend.delete(workspaceId);
           throw new SandboxRecoveryUnavailableError();
         }
         if (winner.sandboxId !== sandbox.sandboxId) {
@@ -1756,6 +1757,7 @@ export class E2BActuator implements IEngineerActuator {
           // another request, so never kill it merely because another instance installed a new id.
           if (!freshCreate) {
             this._sandboxOrigin.delete(workspaceId);
+            this._lastLifetimeExtend.delete(workspaceId);
             throw new SandboxRecoveryUnavailableError();
           }
           await this._killUnrecordedSandbox(sandbox.sandboxId, 'losing-allocation');
@@ -1767,6 +1769,7 @@ export class E2BActuator implements IEngineerActuator {
             freshCreate = false;
           } catch {
             this._sandboxOrigin.delete(workspaceId);
+            this._lastLifetimeExtend.delete(workspaceId);
             throw new SandboxRecoveryUnavailableError();
           }
         }

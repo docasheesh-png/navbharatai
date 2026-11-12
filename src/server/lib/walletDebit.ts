@@ -3,7 +3,7 @@ import { doc, getDoc, runTransaction } from './serverDb'; // admin-SDK binding (
 import { inrToDebitTokens, TOKENS_PER_RUPEE } from './payments';
 import { giftAfterSpend, giftRemaining, paidSpendableTokens, giftUsagePatch, unavailableGiftTokens, adminBuildRemaining } from './giftSpend';
 import { freeProgramPausedHint } from './freeProgramHint';
-import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
+import { resolveCanonicalWalletIdStrict, walletMergeResolveEnabled } from './walletResolve';
 import { WALLET_OPS, walletOpId } from './walletOps';
 import { withLedgerV2 } from './ledgerV2';
 
@@ -577,7 +577,7 @@ function recordFeatureSpend(tx: { feature?: WalletFeature; billedInr?: number },
 
 /**
  * The wallet a charge for `userId` lands on: the CANONICAL one when this account was merged into another
- * (no-op unless WALLET_MERGE_RESOLVE=on). Best-effort: on any resolver error the raw uid is used. One
+ * (no-op unless WALLET_MERGE_RESOLVE=on). Strict: a resolver error aborts this debit rather than charging a retired wallet. One
  * copy, shared by every debit, hold and release, so a hold and its release can never resolve to two
  * different wallets.
  */
@@ -586,7 +586,7 @@ async function walletOwnerId(db: any, userId: string): Promise<string> {
   return resolveCanonicalWalletId(async (u) => {
     const s = await getDoc(doc(db, 'user_token_wallets', u));
     return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
-  }, userId).catch(() => userId);
+  }, userId);
 }
 
 /**

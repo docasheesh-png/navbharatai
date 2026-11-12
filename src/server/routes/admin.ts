@@ -45,20 +45,14 @@ import {
   listDailyBuildOutcomes, summariseBuildOutcomes, cureFamily, cureSplit,
 } from '../lib/mobileBuildOutcomeStore';
 import { summarizeReferrals, selfPayoutTokens } from '../lib/referralAdminSummary';
-import { ledgerPatch } from '../lib/walletStatement';
 import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled, STEP_RUPEES, type RewardStep } from '../lib/referralRewards';
 import { runReferralPreflight } from '../lib/referralPreflight';
 import { listDailyClaimOutcomes, summariseClaimOutcomes } from '../lib/referralClaimOutcomes';
 import { listDailyOtpOutcomes, summariseOtpOutcomes } from '../lib/otpOutcomes';
 import { runPushPreflight } from '../lib/pushPreflight';
 import { adminEmailList } from '../lib/adminEmails';
-import { mirroredCreditPatch, adminCreditActivationRefusal } from '../lib/walletMirror';
 import { playRefundCheckView, PLAY_VOIDED_JOB } from '../lib/playVoidedPurchases';
 import { JOB_RUNS_COLLECTION } from '../lib/schedulerTick';
-import {
-  welcomeGiftEligible, walletRefusal, planWelcomeGift, parseNewUserDays, bulkWelcomeGiftRefusal,
-  ADMIN_WELCOME_GIFT_TOKENS, ADMIN_WELCOME_GIFT_RUPEES, BULK_WELCOME_GIFT_MAX, NEW_USER_MAX_DAYS,
-} from '../lib/adminWelcomeGift';
 import { audit } from '../lib/audit';
 import { previewAdminGiftReclassification, confirmAdminGiftReclassification, AdminGiftReclassificationError } from '../lib/adminGiftReclassification';
 import { readAdminReason, readTokenDelta, broadcastScopeConfirmed } from '../../lib/adminActionReason';
@@ -188,11 +182,11 @@ import { collectionsNeedingRetention } from '../lib/DataRetentionManager';
  * warning counts only what a human still has to decide.
  */
 const GROWING_COLLECTIONS: readonly string[] = [
-  'qubax_chat_approvals', 'qubax_review_audit', // Retained one-use approval fences and independent-review import receipts.
   'session_revocations', // Retained account-session security cutoffs; never silently purged.
   'free_answer_quota', // Shared Free answer admissions; bounded eight-day retention.
   'app_builds', 'build_sessions', 'build_sessions_v2', 'build_history_v2', 'user_build_history', 'user_costs', 'server_logs',
   'agentv3_build_requests',
+  'agentv3_sandbox_orphans', // Pending resource cleanup and digest-only terminal fences; explicitly retained.
   'voice_ai_operations', // Financial holds and terminal replay tombstones; explicit retained-money policy.
   // Registry root documents are fixed, but their nested chunks/actions grow with catalog changes
   // and admin decisions; controls/health grow per model. Only history/routing are bounded rings.
@@ -2597,105 +2591,6 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       if (e instanceof AdminTokenAdjustmentError) return res.status(e.status).json({ error: e.message });
       res.status(500).json({ error: 'Internal server error.' });
     }
-  });
-
-  /**
-   * The ONE transaction that pays the admin's welcome credit to one NEW user (rules in
-   * `adminWelcomeGift.ts`). Eligibility is re-read inside it, so any account is paid once — whether
-   * the press is repeated or two admins press at once.
-   */
-  const grantWelcomeGift = async (db: any, userId: string, nowIso: string) => {
-    const walletRef = doc(db, 'user_token_wallets', userId);
-    return runTransaction(db, async (tx: any) => {
-      const fresh = await tx.get(walletRef);
-      if (!fresh.exists()) return { ok: false as const, status: 404, error: 'User not found' };
-      const w = fresh.data();
-      // Rules 2 and 3 re-read HERE, inside the transaction: a gift that landed since the check, or a
-      // second press, finds the wallet no longer eligible and pays nothing.
-      if (!welcomeGiftEligible(w)) return { ok: false as const, status: 409, error: walletRefusal(w) ?? 'not-eligible' };
-      if (w.mergedInto) return { ok: false as const, status: 409, error: 'This account is merged; select its canonical account. No credit was added.' };
-      const activationRefusal = adminCreditActivationRefusal(w);
-      if (activationRefusal) return { ok: false as const, status: 409, error: activationRefusal };
-      const patch = mirroredCreditPatch(w, ADMIN_WELCOME_GIFT_TOKENS, 'admin-build');
-      tx.update(walletRef, {
-        ...patch,
-        // Gift money, counted against the ₹400 lifetime gift ceiling like every other gift.
-        freeGiftedTokens: Number(w.freeGiftedTokens || 0) + ADMIN_WELCOME_GIFT_TOKENS,
-        totalTokensPurchased: Number(w.totalTokensPurchased || 0) + ADMIN_WELCOME_GIFT_TOKENS,
-        adminWelcomeGiftAt: nowIso,
-        ...ledgerPatch(w, {
-          type: 'purchase',
-          amountCoinsOrTokens: ADMIN_WELCOME_GIFT_TOKENS,
-          moneySpent: 0,
-          timestamp: nowIso,
-          description: `Welcome credit: ₹${ADMIN_WELCOME_GIFT_RUPEES} added by NavBharatAI`,
-          creditSource: 'admin-build',
-          adminBuildTokensDelta: ADMIN_WELCOME_GIFT_TOKENS,
-        }),
-        updatedAt: nowIso,
-      });
-      return { ok: true as const, newBalance: patch.tokenBalance };
-    });
-  };
-
-  /**
-   * ₹150 TO NEW USERS IN ONE PRESS (admin 2026-09-27). Rules in `adminWelcomeGift.ts`: joined within
-   * the chosen number of days, ₹0 gift balance, never given before.
-   * `{ dryRun: true, days }` answers who would be paid and why everyone else is skipped; a real press
-   * must carry that count as `expectedCount` and is refused if it would pay more. Each account goes
-   * through `grantWelcomeGift`, so none is paid twice.
-   */
-  app.post('/api/admin/welcome-gift/bulk', verifyAdminToken, async (req: Request, res: Response) => {
-    const db = getDb() as any;
-    const days = parseNewUserDays(req.body?.days);
-    if (days === null) {
-      return res.status(400).json({ ok: false, error: `Choose how new: a whole number of days from 1 to ${NEW_USER_MAX_DAYS}.` });
-    }
-    try {
-      // The WHOLE wallet, deliberately: `walletRefusal` and `planWelcomeGift` are money rules over many fields,
-      // and a projection that missed one would decide a payment on `undefined` (audit 2026-10-11 left this one).
-      const snap = await getDocs(collection(db, 'user_token_wallets'));
-      const wallets = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as Array<{ id: string } & Record<string, unknown>>;
-      // The join date is the users list's own ("Joined" column): Firebase Auth, else the wallet's
-      // createdAt. Looked up only for wallets the money rules would allow, so a press costs few calls.
-      const payable = wallets.filter((w) => walletRefusal(w) === null).map((w) => w.id);
-      const authMeta = await fetchAuthMetadata(payable, await firebaseAuthBatch(), payable.length);
-      const nowMs = Date.now();
-      const plan = planWelcomeGift(
-        wallets,
-        (id, w) => resolveJoinedAt(authMeta.get(id) ?? null, w.createdAt).atMs,
-        nowMs,
-        days,
-      );
-      const eligible = plan.payIds.length;
-      const summary = {
-        days, eligible, checked: plan.checked, skipped: plan.skipped,
-        rupeesEach: ADMIN_WELCOME_GIFT_RUPEES, totalRupees: eligible * ADMIN_WELCOME_GIFT_RUPEES,
-        maxPerPress: BULK_WELCOME_GIFT_MAX,
-      };
-      if (req.body?.dryRun === true) return res.json({ ok: true, ...summary });
-
-      const refusal = bulkWelcomeGiftRefusal(req.body?.expectedCount, eligible);
-      if (refusal) return res.status(409).json({ ok: false, error: refusal, ...summary });
-
-      const batch = plan.payIds.slice(0, BULK_WELCOME_GIFT_MAX);
-      const nowIso = new Date(nowMs).toISOString();
-      let paid = 0, skipped = 0, failed = 0;
-      // A few at a time: each is its own transaction on its own wallet, so they do not contend.
-      for (let i = 0; i < batch.length; i += 8) {
-        const results = await Promise.allSettled(batch.slice(i, i + 8).map((uid) => grantWelcomeGift(db, uid, nowIso)));
-        for (const r of results) {
-          if (r.status === 'rejected') failed++;
-          else if (r.value.ok) paid++;
-          else skipped++;
-        }
-      }
-      audit('ADMIN_WELCOME_GIFT_BULK', { admin: adminUsername(), days, paid, skipped, failed, tokensEach: ADMIN_WELCOME_GIFT_TOKENS, ip: req.ip });
-      res.json({
-        ok: true, days, paid, skipped, failed, remaining: eligible - batch.length,
-        rupeesEach: ADMIN_WELCOME_GIFT_RUPEES, totalRupees: paid * ADMIN_WELCOME_GIFT_RUPEES,
-      });
-    } catch (e: any) { console.error('[ADMIN] bulk welcome-gift failed:', e?.message); res.status(500).json({ ok: false, error: 'Internal server error.' }); }
   });
 
   // THE BUILD DISCOUNT (admin 2026-09-25) — the percentage taken off every charged build, set from

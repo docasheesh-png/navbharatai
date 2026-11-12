@@ -11,6 +11,7 @@
 // It changes NO build flow — it is a tool the planner can call (or a future clarification pass can consume).
 // Real, complete, unit-tested. (The interactive "pause and ask the user" loop is a deliberate follow-up.)
 
+import { withoutSourcePaths } from './sourcePathPrompt';
 import { withoutUrls } from './promptUrls';
 import { indicDomainMatches, usesIndicScript } from './indicDomainTerms';
 import { withoutMachineText } from './machineText';
@@ -570,7 +571,10 @@ export function stripNonDomainUses(input: string): string {
   // A link names a place, never a feature — `play.google.com/store/...` made a search app a shop
   // (a9f8d186 / 33812996). Blanked first, by BOTH helpers two sessions wrote for this class.
   const text = withoutUrls(String(input || ''));
-  let out = withoutMachineText(text);
+  // A source path locates code; its directory names are not product-domain requirements.
+  // Strip paths in this shared function so both domain entry points receive the same clean prompt.
+  const withoutPaths = withoutSourcePaths(text);
+  let out = withoutMachineText(withoutPaths);
   for (const re of NON_DOMAIN_USES) out = out.replace(re, ' ');
   // A prompt that names the React Native toolchain anywhere is using "Expo" as its name every time —
   // "if the project uses Expo, configure EAS" has no construction of its own to match. Conditional on
@@ -861,8 +865,8 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
   // proposed student / teacher / admin roles, enrolment and fees — every one of which needs a second
   // person and a server the user had just ruled out. The domain is still NAMED (reports read it); only
   // the features and questions it would have ADDED are withdrawn, because the user already answered them.
-  // The same withdrawal for one learner's practice tool (autopsy 73648e12): a mock test app has no
-  // teachers, courses or fees unless the user names them.
+  // The same withdrawal for one learner's study or practice tool (autopsy 73648e12 / BR1973): a
+  // mock-test or study app has no teachers, courses or fees unless the user names them.
   if (declaresSinglePersonApp(original) || namesASingleLearnerTool(original)) {
     likelyMissing.length = 0;
     return { domain: domain ? domain.key : 'general', mentioned, likelyMissing, nonFunctional, india: detectIndiaContext(original), clarifyingQuestions: [] };
@@ -890,18 +894,25 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
 }
 
 /**
- * The practice tools a learner uses on their own: a mock test, a practice paper, a test series, a question
- * bank, a quiz, flashcards, previous-year papers. One source for the requirement analyser here and for
- * `SIMPLE_APP_SIGNAL` (appComplexitySignals.ts), so "is this a quiz-family app?" has one answer.
+ * The tools a learner uses on their own: a mock test, a practice paper, a test series, a question
+ * bank, a quiz, flashcards, previous-year papers, and a study app (BR1973). One source for the
+ * requirement analyser here and for `SIMPLE_APP_SIGNAL` (appComplexitySignals.ts), so "is this a
+ * quiz-family app?" has one answer. "study app development / security / architecture" is not a
+ * study app — those are sentences about studying the craft, not a board-study tool. A "case study
+ * app" is not one either: the lookbehind is word-bounded and variable-length (`(?<!\bcase[\s\-/,]+)`)
+ * so "showcase / lowercase / briefcase study app" stay study apps, while "case  study",
+ * "case/study", "case, study" and "case–study" / "case—study" (U+2013/U+2014) do not. `study[\s-]+` accepts one or more spaces or hyphens
+ * ("study  app"). The craft-word lookahead still treats space, hyphen and slash as separators.
+ * This regex is compiled only on the server (Node); it is not imported by the Vite client bundle.
  */
-export const PRACTICE_TOOL_SOURCE = String.raw`mock[\s-]?(?:tests?|exams?|papers?)|practice[\s-]?(?:tests?|papers?|sets?)|test[\s-]?series|question[\s-]?banks?|quiz(?:zes)?|flash[\s-]?cards?|pyqs?|previous[\s-]+(?:years?'?[\s-]+)?(?:papers?|questions?)`;
+export const PRACTICE_TOOL_SOURCE = String.raw`mock[\s-]?(?:tests?|exams?|papers?)|practice[\s-]?(?:tests?|papers?|sets?)|test[\s-]?series|question[\s-]?banks?|quiz(?:zes)?|flash[\s-]?cards?|pyqs?|previous[\s-]+(?:years?'?[\s-]+)?(?:papers?|questions?)|(?<!\bcase[\s\-/,–—]+)study[\s-]+apps?(?![\s\-/]+(?:development|dev|design|security|architecture|engineering|building))`;
 const PRACTICE_TOOL_RE = new RegExp(String.raw`\b(?:${PRACTICE_TOOL_SOURCE})\b`, 'i');
 /** Words that put a second party or an institution into the request: people who manage, pay, enrol. */
 const INSTITUTION_SCOPE_RE = /\b(?:teachers?|tutors?|admins?|administrators?|staff|roles?|log\s?-?ins?|sign\s?-?(?:in|up)s?|accounts?|multi[\s-]?users?|institutes?|institutions?|coaching|schools?|colleges?|universit(?:y|ies)|academy|management|platform|portal|erp|lms|classrooms?|batch(?:es)?|enrol\w*|fees?|payments?|subscriptions?|courses?|lessons?|attendance)\b/i;
 
 /**
- * Is this a request for ONE learner's practice tool — a mock test, a quiz, flashcards — and nothing that
- * brings in an institution? PURE.
+ * Is this a request for ONE learner's study or practice tool — a mock test, a quiz, flashcards, a
+ * study app — and nothing that brings in an institution? PURE.
  *
  * 🔴 AUTOPSY 73648e12 + 2f723acb (2026-10-01). *"Build a mock test app for UPSC drug inspector exam 2026
  * based on previous papers, make it interactive"* matched the education domain on the word "exam", and
@@ -911,6 +922,17 @@ const INSTITUTION_SCOPE_RE = /\b(?:teachers?|tutors?|admins?|administrators?|sta
  * named a TOOL for one person preparing for an exam; the institution features belong to a school or a
  * coaching centre the user never mentioned. A request that names one (a coaching, a school, teachers,
  * logins, fees, courses) keeps the domain's full list.
+ *
+ * 🔴 BR1973 (2026-11-08). *"Make study app for Maharashtra board students"* matched education on
+ * "students" the same way, but "study app" was not in the practice-tool list, so the six LMS features
+ * were injected. The fast lane built subjects/chapters/materials; the full builder then added auth,
+ * roles, admin and enrolment screens and hit the free 25-minute cap. A study app for board students
+ * is the same class as a mock-test app: one learner's tool, unless the user names an institution.
+ * Reviewer FAIL on #4164 at 9a39ae210: the first pattern also matched "case study app" /
+ * "case-study app", and the craft-word lookahead only saw whitespace. Reviewer FAIL at b8bcda5fc:
+ * `(?<!case[\s-])` had no word boundary, so "showcase / lowercase / briefcase study app" were
+ * missed; "case  study", "case/study" and "case, study" still leaked. The lookbehind is now
+ * `(?<!\bcase[\s\-/,]+)` and `study[\s-]+` accepts multiple separators.
  */
 export function namesASingleLearnerTool(prompt: string): boolean {
   const t = String(prompt || '');

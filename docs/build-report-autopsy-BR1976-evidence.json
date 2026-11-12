@@ -1,0 +1,137 @@
+{
+  "identity": {
+    "reportNumber": 1976,
+    "outcome": "succeeded",
+    "ok": true,
+    "prompt": "App",
+    "promptLength": 3,
+    "promptWords": 1,
+    "promptHash": "81f51acc",
+    "reportDigest": "edf4ad5b434d17064a1d3b2876fdfdfe984db448596814642751a6a258c0b067",
+    "buildId": "37d99d01-8a67-4252-9a61-5a233c7f7e19",
+    "workspaceId": "agentv3-DiJ1KF8g8DQCDBcHMQjbLbL3yAA2-03f966e1-66e5-4bf9-a2b4-18c0769908e6",
+    "historyId": "1794111442888",
+    "sessionId": "03f966e1-66e5-4bf9-a2b4-18c0769908e6",
+    "model": "qwen3-coder",
+    "framework": "vite-react",
+    "builtBy": "SURPLUS",
+    "startedAt": 1794111442888,
+    "endedAt": 1794111555593,
+    "startedAtIST": "2026-11-08 09:47:22.888 IST",
+    "endedAtIST": "2026-11-08 09:49:15.593 IST",
+    "durationMs": 112705,
+    "userWaitMs": 0
+  },
+  "reportBytes": 50440,
+  "truncation": {
+    "complete": true
+  },
+  "billing": {
+    "charged": true,
+    "billedUsd": 0.001024,
+    "billedInr": 0.1,
+    "walletDebitedInr": 0.09,
+    "walletTokensDebited": 9,
+    "sandboxCostUsd": 0.005127,
+    "powerLevel": "weak",
+    "userTier": "weak (free tier \u2014 cheap engines) \u00b7 charged \u20b90.10"
+  },
+  "etaAccuracy": {
+    "promisedMs": 353661,
+    "lowMs": 237555,
+    "highMs": 596917,
+    "actualMs": 112705,
+    "ratio": 0.31868088367108616,
+    "withinBand": false,
+    "evidenced": true,
+    "key": "app_unsized",
+    "source": "platform",
+    "line": "The user was shown 4.0 min\u20139.9 min (midpoint 5.9 min); the build took 1.9 min \u2014 0.3\u00d7 the midpoint and UNDER the band."
+  },
+  "requestAnalysis": {
+    "taskType": "app_unsized",
+    "complexityScore": 15,
+    "startTier": "gemini",
+    "startBand": "cheapest band"
+  },
+  "nativeCapabilityObserved": false,
+  "complexityRouting": "simple (score 15, model)",
+  "changeClassified": "New app (0 parts named) \u2014 no earlier app on record to preserve",
+  "firstRenderSec": 80,
+  "postGreenWrites": 0,
+  "readyBeforeEnd": "The app was never judged finished during the build",
+  "manifestFileCount": 15,
+  "manifestFiles": [
+    "docs/decisions/ADR-001.md",
+    "e2e/smoke.spec.ts",
+    "index.html",
+    "package.json",
+    "playwright.config.ts",
+    "public/icon.svg",
+    "public/manifest.webmanifest",
+    "public/nbai-native.css",
+    "public/robots.txt",
+    "public/sw.js",
+    "src/App.tsx",
+    "src/index.css",
+    "src/main.tsx",
+    "src/types.ts",
+    "vite.config.ts"
+  ],
+  "deliveredAppTsx": {
+    "source": "report.llmCalls[6].responsePreview FILE block",
+    "title": "Welcome to Your App",
+    "cta": "Get Started",
+    "ctaHasHandler": false,
+    "root": "div.container > div.stack.center > div.card.stack.center > h1 + p.muted + div.row > button.btn-primary",
+    "hasNbHeader": false
+  },
+  "mobileLayout": {
+    "viewport": "390\u00d7844",
+    "ok": true,
+    "explore": "OK \"Get Started\" \u2014 it responded (nothing visibly changed)"
+  },
+  "unresolvedCodes": [
+    "IN_BUILD_GREEN_RACED"
+  ],
+  "classifierOnCurrentMain": {
+    "assessBuildInput_App": {
+      "buildable": false,
+      "reason": "no-object"
+    },
+    "shouldAskWhatToBuild_starterEmpty": true,
+    "buildConfirmation_App_before": {
+      "confirmed": true,
+      "reason": "names-something-to-build"
+    },
+    "buildConfirmation_App_after": {
+      "confirmed": false,
+      "reason": "names-nothing-to-build"
+    },
+    "classifyIntentWithConfidence_App": {
+      "intent": "new_build",
+      "confidence": "low",
+      "signal": "build-signal"
+    }
+  },
+  "oppositeClassAssembledBeforeEdit": true,
+  "shipped": [
+    "F1_category_word_does_not_confirm_a_build"
+  ],
+  "notShipped": [
+    "repair of the dead Get Started button",
+    "ETA band retune",
+    "IN_BUILD_GREEN_RACED bookkeeping",
+    "release-gate policy for a no-op CTA",
+    "BR1975 optional residuals (tap targets, 641-649px band, nav > ul)",
+    "Q-2649",
+    "Q-2650",
+    "Q-2651",
+    "Q-2652"
+  ],
+  "newQueueRows": [],
+  "br1975OptionalResiduals": {
+    "queued": false,
+    "reason": "Not present in this report (no header nav; phone check was OK at 390px). Same safety reasons as BR1975: min-height does nothing on inline a; the 641-649 sliver is 9px; nav > ul is a minor tightening of an already-merged selector."
+  }
+}

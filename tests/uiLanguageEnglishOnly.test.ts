@@ -75,6 +75,10 @@ const ALLOWED: Record<string, string> = {
   // Matches undo / pehle wala / वापस intent in what the USER typed so Pro can open the version
   // picker. Regex only — never rendered as a label (same category as useChatEngine / imageEdit).
   'src/lib/versionUndoIntent.ts': "input parsing of the user's undo/go-back message, never rendered as UI",
+  // Owner 2026-11-11: the WhatsApp share message is Hindi because that is the
+  // text a family chat reads. The button beside it always shows English
+  // ("Send on WhatsApp") from WhatsAppShareLink.tsx, which has no Devanagari.
+  'src/lib/whatsappShare.ts': 'owner-requested Hindi WhatsApp message; the visible control also has an English label',
 };
 
 function walk(dir: string, out: string[] = []): string[] {

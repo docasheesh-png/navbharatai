@@ -225,7 +225,7 @@ export const INDIAN_AI_ASSISTANT_PAGE: MarketingPage = {
     },
   ],
   faq: [
-    { q: 'Is NavBharatAI free?', a: 'NavBharatAI Chat is offered free. Building apps, some specialist assistants and voice features are paid from your wallet, and the price is shown before you spend. See Pricing.' },
+    { q: 'Is NavBharatAI free?', a: 'AI chat has a daily usage allowance. Eligible use beyond that allowance is paid from your wallet at the displayed rate; guests must sign in to continue. Check the in-app counter and Wallet & Billing for the limits and price that apply to you. App building and other paid features use the same wallet. See Pricing.' },
     { q: 'Which languages does it understand?', a: 'Hindi, English and Hinglish (Hindi written in English letters) are the languages the product is designed around.' },
     { q: 'Is there an app?', a: 'Yes — NavBharatAI is on Google Play, and it also works in any modern browser.' },
   ],
@@ -283,7 +283,7 @@ export const HINDI_AI_ASSISTANT_PAGE: MarketingPage = {
   faq: [
     { q: 'Can I type Hindi in English letters?', a: 'Yes. Hinglish such as "kal ka mausam kaisa rahega" is understood like any other question.' },
     { q: 'Will it answer in Hindi?', a: 'Ask for it — "Hindi me jawab do" — and the assistant is designed to reply in the language you ask for.' },
-    { q: 'Is it free?', a: 'NavBharatAI Chat is offered free. Paid features show their price before you spend anything. See Pricing.' },
+    { q: 'Is it free?', a: 'AI chat has a daily usage allowance. Eligible use beyond that allowance is paid from your wallet at the displayed rate; guests must sign in to continue. Check the in-app counter and Wallet & Billing for the limits and price that apply to you. See Pricing.' },
   ],
   cta: { label: 'Start a chat', href: '/' },
   related: [INDIAN_AI_ASSISTANT_PATH, AI_APP_BUILDER_PATH, PRICING_PATH, ABOUT_PATH],
@@ -293,16 +293,16 @@ export const PRICING_PAGE: MarketingPage = {
   path: PRICING_PATH,
   title: 'Pricing — NavBharatAI',
   description:
-    `NavBharatAI pricing in rupees: free chat, pay-as-you-go app building from your wallet, and hosting plans from ₹${HOSTING_TIERS[0].priceInr} for ${HOSTING_TIERS[0].days} days.`,
+    `NavBharatAI pricing in rupees: chat allowances and wallet-paid use, pay-as-you-go app building from your wallet, and hosting plans from ₹${HOSTING_TIERS[0].priceInr} for ${HOSTING_TIERS[0].days} days.`,
   h1: 'Pricing',
   intro: [
     'NavBharatAI has no compulsory monthly subscription. You top up a wallet in rupees and pay for the work you actually use. Hosting plans are optional and add more published apps, your own domain and apps with a real server.',
   ],
   sections: [
     {
-      heading: 'Free',
+      heading: 'Included allowances',
       bullets: [
-        'NavBharatAI Chat, in Hindi, English and Hinglish.',
+        'AI chat has a daily usage allowance. Eligible use beyond that allowance is paid from your wallet at the displayed rate; guests must sign in to continue. Check the in-app counter and Wallet & Billing for the limits and price that apply to you.',
         'Playing apps and games on [App Mart](/store) — no account needed.',
         `Keep up to ${FREE_PUBLISHED_APPS} apps published on a NavBharatAI link, with up to ${FREE_FRONTEND_GB} GB of visitor traffic a month. Free apps carry a small "Made with NavBharatAI" badge and cannot run a server.`,
       ],
@@ -312,6 +312,7 @@ export const PRICING_PAGE: MarketingPage = {
       bullets: [
         `Top up your wallet in rupees by UPI or card. ₹1 buys ${TOKENS_PER_RUPEE} wallet tokens.`,
         'Building and changing apps is paid from the wallet, based on the work each build actually used.',
+        'Free welcome credit, when offered, is promotional credit for eligible accounts, not unlimited free chat or app building. Availability, verification requirements, amount and permitted uses are shown in the app; credit is not automatic when an account is created.',
         FAILED_BUILD_RULE,
         STOPPED_BUILD_RULE,
         'Some features — voice chat, some specialist assistants, Android .apk builds — are paid, and the price is shown before you use them.',
@@ -356,3 +357,4 @@ export const PAGE_LABELS: Readonly<Record<string, string>> = {
   '/contact': 'Contact',
   '/store': 'App Mart',
 };
+

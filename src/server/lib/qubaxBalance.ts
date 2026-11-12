@@ -1,20 +1,18 @@
 import { qubaxConfig } from './qubax';
-import type { TestChatBalance, TestChatBalanceCode } from '../../lib/testChatBot';
 
 export const QUBAX_BALANCE_TIMEOUT_MS = 10_000;
 export const QUBAX_BALANCE_MAX_BYTES = 16_384;
-export type QubaxBalanceCode = TestChatBalanceCode;
-export type QubaxBalanceSnapshot = TestChatBalance;
+export type QubaxBalanceCode = 'disabled' | 'configuration' | 'cancelled' | 'busy' | 'timeout' | 'authentication' | 'permission' | 'rate-limit' | 'provider-error' | 'invalid-response' | 'unavailable';
+export type QubaxBalanceSnapshot = { status: 'unknown'; code: QubaxBalanceCode } | { status: 'available'; currency: 'USD'; balanceMicros: string; checkedAtMs: number };
 
 class BalanceFailure extends Error {
   constructor(readonly code: QubaxBalanceCode) { super('Qubax balance metadata unavailable.'); }
 }
 
 let pending = false;
-/** Explicit metadata check only. Never inference, a spending authorization, or proof
- * that this key belongs to a previously funded account. No response body is logged. */
+/** Explicit metadata read. It does not start a chat call or authorize spending. */
 export async function readQubaxBalance(options: {
-  signal?: AbortSignal; env?: Record<string, string | undefined>;
+  signal?: AbortSignal; env?: Record<string, string | undefined>; fetchImpl?: typeof fetch;
 } = {}): Promise<QubaxBalanceSnapshot> {
   let cfg: ReturnType<typeof qubaxConfig>;
   try { cfg = qubaxConfig(options.env); } catch { return { status: 'unknown', code: 'configuration' }; }
@@ -33,7 +31,7 @@ export async function readQubaxBalance(options: {
   });
   const work = (async (): Promise<QubaxBalanceSnapshot> => {
     signal.throwIfAborted();
-    const response = await fetch(`${cfg.baseURL}/billing/balance`, {
+    const response = await (options.fetchImpl ?? fetch)(`${cfg.baseURL}/billing/balance`, {
       method: 'GET', redirect: 'error', signal,
       headers: { Authorization: `Bearer ${cfg.apiKey}`, Accept: 'application/json' },
     });
@@ -43,11 +41,9 @@ export async function readQubaxBalance(options: {
       signal.throwIfAborted();
       if (!response.ok) throw new BalanceFailure(response.status === 401 ? 'authentication'
         : response.status === 403 ? 'permission' : response.status === 429 ? 'rate-limit' : 'provider-error');
-      if (response.redirected || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')
-        || !response.body) throw new BalanceFailure('invalid-response');
+      if (response.redirected || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '') || !response.body) throw new BalanceFailure('invalid-response');
       const advertisedLength = response.headers.get('content-length');
-      if (advertisedLength !== null && (!/^\d+$/.test(advertisedLength)
-        || Number(advertisedLength) > QUBAX_BALANCE_MAX_BYTES)) throw new BalanceFailure('invalid-response');
+      if (advertisedLength !== null && (!/^\d+$/.test(advertisedLength) || Number(advertisedLength) > QUBAX_BALANCE_MAX_BYTES)) throw new BalanceFailure('invalid-response');
       reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8', { fatal: true });
       let raw = '', bytes = 0;
@@ -57,34 +53,24 @@ export async function readQubaxBalance(options: {
         if (item.done) { complete = true; break; }
         bytes += item.value.byteLength;
         if (bytes > QUBAX_BALANCE_MAX_BYTES) throw new BalanceFailure('invalid-response');
-        try { raw += decoder.decode(item.value, { stream: true }); }
-        catch { throw new BalanceFailure('invalid-response'); }
+        try { raw += decoder.decode(item.value, { stream: true }); } catch { throw new BalanceFailure('invalid-response'); }
       }
       try { raw += decoder.decode(); } catch { throw new BalanceFailure('invalid-response'); }
       let value: unknown;
       try { value = JSON.parse(raw); } catch { throw new BalanceFailure('invalid-response'); }
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BalanceFailure('invalid-response');
-      const v = value as Record<string, unknown>;
-      // Official example uses numeric micro-USD and USD. Preserve the authoritative
-      // integer amount; missing, negative, inconsistent or unsafe amounts are unknown.
-      if (v.currency !== 'USD' || !Number.isSafeInteger(v.balance_micros) || (v.balance_micros as number) < 0
-        || typeof v.balance_usd !== 'number' || !Number.isFinite(v.balance_usd) || v.balance_usd < 0
-        || Math.round(v.balance_usd * 1_000_000) !== v.balance_micros
-        || Math.abs(v.balance_usd * 1_000_000 - (v.balance_micros as number)) > 0.01) throw new BalanceFailure('invalid-response');
-      signal.throwIfAborted();
-      return { status: 'available', currency: 'USD', balanceMicros: String(v.balance_micros), checkedAtMs: Date.now() };
+      const row = value as Record<string, unknown>;
+      if (row.currency !== 'USD' || !Number.isSafeInteger(row.balance_micros) || (row.balance_micros as number) < 0
+        || typeof row.balance_usd !== 'number' || !Number.isFinite(row.balance_usd) || row.balance_usd < 0
+        || Math.round(row.balance_usd * 1_000_000) !== row.balance_micros) throw new BalanceFailure('invalid-response');
+      return { status: 'available', currency: 'USD', balanceMicros: String(row.balance_micros), checkedAtMs: Date.now() };
     } finally {
-      // Keep the single in-flight slot until uncooperative reads/cancellation settle.
-      // The caller's deadline races this work and remains prompt even in that case.
-      if (!complete) {
-        try { if (reader) await reader.cancel(); else if (response.body) await response.body.cancel(); } catch { /* no raw error disclosure */ }
-      }
-      try { reader?.releaseLock(); } catch { /* pending cancellation may retain the lock */ }
+      if (!complete) { try { if (reader) await reader.cancel(); else if (response.body) await response.body.cancel(); } catch { /* no body is retained */ } }
+      try { reader?.releaseLock(); } catch { /* a pending read may still own the lock */ }
     }
   })();
   void work.then(() => { pending = false; }, () => { pending = false; });
   try { return await Promise.race([work, cancelled]); }
-  catch (error) { return { status: 'unknown', code: error instanceof BalanceFailure ? error.code
-    : signal.aborted ? options.signal?.aborted ? 'cancelled' : 'timeout' : 'unavailable' }; }
+  catch (error) { return { status: 'unknown', code: error instanceof BalanceFailure ? error.code : signal.aborted ? (options.signal?.aborted ? 'cancelled' : 'timeout') : 'unavailable' }; }
   finally { clearTimeout(timeout); signal.removeEventListener('abort', abort); controller.abort(); }
 }

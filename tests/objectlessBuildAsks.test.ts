@@ -164,6 +164,12 @@ describe('the route only asks when NOTHING else can say what to build', () => {
  */
 describe('a category word is not a deliverable', () => {
   for (const prompt of [
+    'App',
+    'app',
+    'APP',
+    'website',
+    'application',
+    'an app',
     'app banao',
     'ek app banao',
     'website banao',

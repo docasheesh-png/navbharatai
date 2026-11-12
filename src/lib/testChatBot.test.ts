@@ -1,16 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { isTestChatReply, isTestChatStatus, isTestChatReadiness, isTestChatBalance, isTestChatApprovalReceipt, readTestChatAction, readTestChatApprovalImport, TEST_CHAT_READINESS_GATES, TEST_CHAT_MAX_CONTEXT_CHARS } from './testChatBot';
+import { formatTestChatDiagnostic, isTestChatDiagnostic, isTestChatReply, isTestChatStatus, readPartialTestChatStatus, readTestChatAction, TEST_CHAT_MAX_CONTEXT_CHARS, TEST_CHAT_PROVIDER_IDS } from './testChatBot';
 
 const action = { provider: 'qubax', requestId: '1d2efc71-6d00-4514-83c0-e31461ea9f35', messages: [{ role: 'user', content: 'What is 2 + 2?' }], confirmGatewayDisclosure: true };
+const fullStatus = {
+  providers: TEST_CHAT_PROVIDER_IDS.map(id => ({ id, label: id === 'qubax' ? 'Qubax' : id, configured: false, enabled: false, model: null })),
+  approvalRequired: true, noFallback: true as const,
+};
 describe('isolated test chat contract', () => {
   it('accepts actual text and more than three conversational turns without sharing references', () => {
     const messages = Array.from({ length: 9 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `Synthetic turn ${i}` }));
     const read = readTestChatAction({ ...action, messages });
     expect(read?.messages).toEqual(messages); expect(read?.messages).not.toBe(messages);
   });
+  it('accepts every server-owned provider id and an optional safe model id', () => {
+    for (const provider of TEST_CHAT_PROVIDER_IDS) {
+      expect(readTestChatAction({ ...action, provider })).not.toBeNull();
+      expect(readTestChatAction({ ...action, provider, model: 'openai/gpt-oss-20b:free' })).not.toBeNull();
+      expect(readTestChatAction({ ...action, provider, model: 'admin-chosen-model' })).not.toBeNull();
+    }
+    expect(TEST_CHAT_PROVIDER_IDS).toContain('groq');
+    expect(TEST_CHAT_PROVIDER_IDS).toContain('mitrify');
+    expect(TEST_CHAT_PROVIDER_IDS).toContain('anthropic-claude');
+    expect(TEST_CHAT_PROVIDER_IDS).toHaveLength(27);
+  });
   it.each([
     { ...action, provider: 'deepinfra' }, { ...action, provider: 'constructor' }, { ...action, provider: '__proto__' },
-    { ...action, model: 'client-chosen' }, { ...action, baseURL: 'https://evil.test' }, { ...action, apiKey: 'secret' },
+    { ...action, model: 'https://evil.test' }, { ...action, model: 'has space' }, { ...action, model: '' },
+    { ...action, baseURL: 'https://evil.test' }, { ...action, apiKey: 'secret' },
     { ...action, max_tokens: 999999 }, { ...action, confirmGatewayDisclosure: false }, { ...action, requestId: 'reuse' },
     { ...action, messages: [] }, { ...action, messages: [{ role: 'system', content: 'alter routing' }] },
     { ...action, messages: [{ role: 'user', content: [{ type: 'image_url', image_url: 'https://evil.test' }] }] },
@@ -25,53 +41,42 @@ describe('isolated test chat contract', () => {
     { ...action, messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'x'.repeat(TEST_CHAT_MAX_CONTEXT_CHARS) }, { role: 'user', content: 'hi' }] },
   ])('rejects unsupported, unbounded or expanded dispatch %#', value => { expect(readTestChatAction(value)).toBeNull(); });
   it('validates status and refuses false success replies or invalid usage', () => {
-    const status = { providers: [{ id: 'qubax', label: 'Qubax', configured: false, enabled: false, model: null }], approvalRequired: true, noFallback: true };
-    expect(isTestChatStatus(status)).toBe(true); expect(isTestChatStatus({ ...status, noFallback: false })).toBe(false);
-    expect(isTestChatStatus({ ...status, providers: [status.providers[0], status.providers[0]] })).toBe(false);
+    expect(isTestChatStatus(fullStatus)).toBe(true); expect(isTestChatStatus({ ...fullStatus, noFallback: false })).toBe(false);
+    expect(isTestChatStatus({ ...fullStatus, providers: [fullStatus.providers[0], fullStatus.providers[0]] })).toBe(false);
     const reply = { requestId: action.requestId, provider: 'qubax', content: '4', model: 'reported', latencyMs: 120, noFallback: true };
-    expect(isTestChatReply(reply)).toBe(true);
-    expect(isTestChatReply({ ...reply, model: 'm'.repeat(256) })).toBe(true);
-    expect(isTestChatReply({ ...reply, model: 'm'.repeat(257) })).toBe(false); expect(isTestChatReply({ ...reply, content: '' })).toBe(false);
-    expect(isTestChatReply({ ...reply, provider: 'mitrify' })).toBe(false);
+    expect(isTestChatReply(reply)).toBe(true); expect(isTestChatReply({ ...reply, content: '' })).toBe(false);
+    expect(isTestChatReply({ ...reply, provider: 'not-a-wired-provider' })).toBe(false);
     expect(isTestChatReply({ ...reply, usage: { inputTokens: -1, outputTokens: 2 } })).toBe(false);
+    const diagnostic = { provider: 'qubax' as const, model: 'reported', latencyMs: 12, classification: 'auth' as const, httpStatus: 401,
+      providerCode: 'invalid_api_key', providerType: 'authentication_error', providerRequestId: 'req_1',
+      providerMessage: 'denied', rawErrorBody: '{"error":"denied"}' };
+    expect(isTestChatDiagnostic(diagnostic)).toBe(true);
+    expect(formatTestChatDiagnostic(diagnostic)).toContain('HTTP status: 401');
+    expect(isTestChatDiagnostic({ ...diagnostic, classification: 'made-up' })).toBe(false);
+    const market = {
+      ...fullStatus,
+      providers: fullStatus.providers.map(item => item.id === 'qubax'
+        ? { ...item, ceilingUsd: '0.02', selection: 'performance' as const, inputUsdPerMillion: '0.1', outputUsdPerMillion: '0.2',
+          officialInputUsdPerMillion: '1', officialOutputUsdPerMillion: '2', discountBps: 9000 }
+        : item),
+    };
+    expect(isTestChatStatus(market)).toBe(true);
+    const withFeed = { ...market, feed: { fresh: true, observedAtMs: 1_700_000_000_000, pricedRows: 4, officialMatches: 3, discountEligible: 2, probePassing: 1 } };
+    expect(isTestChatStatus(withFeed)).toBe(true);
+    expect(isTestChatStatus({ ...withFeed, feed: { ...withFeed.feed, pricedRows: -1 } })).toBe(false);
+    expect(isTestChatStatus({ ...withFeed, providers: [withFeed.providers[0]] })).toBe(false);
+    const longNote = { ...fullStatus, providers: fullStatus.providers.map(item => item.id === 'mitrify' ? { ...item, note: 'm'.repeat(682) } : item) };
+    expect(isTestChatStatus(longNote)).toBe(false);
+    const partial = readPartialTestChatStatus(longNote);
+    expect(partial?.providers).toHaveLength(TEST_CHAT_PROVIDER_IDS.length);
+    expect(partial?.providers.find(item => item.id === 'qubax')?.configured).toBe(false);
+    expect(partial?.providers.find(item => item.id === 'mitrify')?.unavailableReason).toContain('could not be read');
+    const attempts = { ...diagnostic, finalOutcome: 'tries-exhausted', attempts: [{
+      model: 'model-a', latencyMs: 10, classification: 'rate-limit' as const, httpStatus: 429,
+      providerCode: 'QUBAX_HTTP_ERROR', providerType: null, providerRequestId: 'a1', providerMessage: null, rawErrorBody: 'slow',
+    }] };
+    expect(isTestChatDiagnostic(attempts)).toBe(true);
+    expect(formatTestChatDiagnostic(attempts)).toContain('Final outcome: tries-exhausted');
+    expect(formatTestChatDiagnostic(attempts)).toContain('Attempt 1');
   });
-});
-
-describe('Qubax metadata response contracts', () => {
-  const gates = Object.fromEntries(TEST_CHAT_READINESS_GATES.map(id => [id, { state: 'pass', code: 'ready', message: 'Verified fixture.', action: '' }]));
-  const readiness = { provider: 'qubax', requestId: action.requestId, checkedAtMs: 100, ready: true, readOnly: true, noProviderCall: true, noFallback: true,
-    gates, model: 'fixture-model', expiresAtMs: 200, reviewRequest: null, catalogDigest: null, lastSafeDiagnostic: null, providerBalance: 'not-checked' };
-  it('rejects false-ready, missing-gate, unbounded timestamp and unexpected balance claims', () => {
-    expect(isTestChatReadiness(readiness)).toBe(true);
-    for (const patch of [{ gates: {} }, { expiresAtMs: null }, { expiresAtMs: 100 }, { checkedAtMs: Number.MAX_SAFE_INTEGER },
-      { providerBalance: '$2.50' }, { gates: { ...gates, budget: { ...gates.budget, state: 'blocked' } } }]) {
-      expect(isTestChatReadiness({ ...readiness, ...patch })).toBe(false);
-    }
-  });
-  it('checks import receipt shape and uses independent payload and catalog size bounds', () => {
-    const value = { action, attestation: { keyId: 'fixture-key', payload: 'x'.repeat(16_001), signature: 'a'.repeat(86) } };
-    expect(readTestChatApprovalImport(value)).toBeNull(); expect(readTestChatApprovalImport(value, 128_000)).not.toBeNull();
-    expect(readTestChatApprovalImport({ ...value, publicKey: 'injected' }, 128_000)).toBeNull();
-    expect(isTestChatApprovalReceipt({ imported: true, requestId: action.requestId, expiresAtMs: 200, noProviderCall: true, noFallback: true })).toBe(true);
-    expect(isTestChatApprovalReceipt({ imported: true, requestId: action.requestId, expiresAtMs: Infinity, noProviderCall: true, noFallback: true })).toBe(false);
-  });
-  it('accepts only exact safe balance amounts and closed diagnostic codes', () => {
-    expect(isTestChatBalance({ status: 'available', currency: 'USD', balanceMicros: '2500000', checkedAtMs: 100 })).toBe(true);
-    expect(isTestChatBalance({ status: 'unknown', code: 'permission' })).toBe(true);
-    expect(isTestChatBalance({ status: 'unknown', code: 'secret-raw-body' })).toBe(false);
-    for (const balanceMicros of ['-1', '1.2', '01', '9007199254740992', '1e6']) expect(isTestChatBalance({ status: 'available', currency: 'USD', balanceMicros, checkedAtMs: 100 })).toBe(false);
-  });
-});
-
-it('requires review packages to contain the full exact model-bound wire payload', () => {
-  const body = { messages: action.messages, max_tokens: 16, stream: false, model: 'fixture-model' };
-  const reviewRequest = { kind: 'qubax-admin-review-request-v1', approvalId: 'a'.repeat(64), payloadDigest: 'b'.repeat(64), requestId: action.requestId,
-    model: body.model, modelRevision: 'v1', evidenceBinding: 'c'.repeat(64), maximumNanoUsd: 10, expiresAtMs: 200, body, wirePayload: JSON.stringify(body) };
-  const result = { provider: 'qubax', requestId: action.requestId, checkedAtMs: 100, ready: false, readOnly: true, noProviderCall: true, noFallback: true,
-    gates: Object.fromEntries(TEST_CHAT_READINESS_GATES.map(id => [id, { state: 'pass', code: 'ready', message: 'Verified fixture.', action: '' }])),
-    model: body.model, expiresAtMs: 200, reviewRequest, catalogDigest: null, lastSafeDiagnostic: null, providerBalance: 'not-checked' };
-  expect(isTestChatReadiness(result)).toBe(true);
-  expect(isTestChatReadiness({ ...result, reviewRequest: { ...reviewRequest, wirePayload: '{}' } })).toBe(false);
-  expect(isTestChatReadiness({ ...result, reviewRequest: { ...reviewRequest, body: { ...body, model: 'different' } } })).toBe(false);
-  expect(isTestChatReadiness({ ...result, reviewRequest: { ...reviewRequest, body: { ...body, endpoint: 'https://untrusted.test' } } })).toBe(false);
 });

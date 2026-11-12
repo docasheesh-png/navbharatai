@@ -1,265 +1,74 @@
-# Admin Test Chat Bot: Qubax readiness and independent review
+# Test Chat Bot
 
-Open **Admin → AI Engines → Test Chat Bot**. This isolated surface uses Qubax only,
-with no automatic retry or other NavBharatAI provider fallback. It does not change
-ordinary Chat, App/Pro Builder, image, voice or embedding routing. The existing
-13-position Chat chain remains unchanged, with Qubax after Mitrify and before
-CheaperInference. Prompts and replies stay in component memory and are not saved
-to conversation history, browser storage or audit records.
+Open **Admin → AI Engines → Test Chat Bot**. This is a separate, reusable provider test surface with real text input and multi-turn context. It does not load, alter or save ordinary app conversations. The server-owned dropdown lists every text-chat provider adapter wired in NavBharatAI (chat-chain rungs, reviewed gateways, vision-capable text models, and named builder/pro engines). Selecting another provider starts a new conversation. Clients still cannot submit an endpoint, API key, tool, attachment or generation setting: they pick a server-defined provider id. An optional model field accepts only a short identifier (`letters`, numbers, and `.` `/` `:` `-`); leaving it blank uses the same cheapest-model selection as main chat.
 
-## Root cause and evidence limits
+## Read-only provider status
 
-The earlier provider status checked only configuration. It did not inspect the
-reviewed catalog, exact approval or shared budgets. The transport returned distinct
-pre-dispatch skip reasons, but `runTestChat` collapsed them into `approval-or-budget`.
-There was no admin route to record a legitimate independent review. These are
-verified code defects. **The exact missing production prerequisite is not known
-without a read of the intended deployed revision and its safety store.** No live
-secret, production catalog, account balance or paid response was inspected during
-this implementation.
+Opening the page or choosing **Refresh provider status** reads configuration and the
+stored Qubax market/probe snapshot only. It does not refresh the external feed,
+start a probe, reserve money or send inference. A missing or stale snapshot is not
+proof that a provider is ready; displayed selection is informational, not send authority.
+The scheduled collector and an explicit test send retain their existing refresh,
+selection, budget and dispatch behavior. **Check Qubax balance** remains a separate
+explicit account-metadata action.
 
-Configuring `QUBAX_ENABLED=1` and a server key does not supply pricing, quality,
-disclosure approval or enforceable supplier liability. A reported account deposit is not evidence of its current balance or this key's ownership.
+This is the narrowed read-only diagnostic portion of the earlier admin-readiness
+proposal. It does not introduce signed catalog/payload imports, new dispatch gates,
+or a change to ordinary Chat or Qubax selection.
 
-## Read-only checks
+## Isolation
 
-**Check Qubax Readiness** submits the exact pending action to the authenticated
-server and reads configuration, independent catalog signatures, pricing/quality/
-supplier evidence, exact approval, maintenance/inference policy, and the existing
-shared daily/monthly/per-user budget ledgers. It never calls Qubax, creates an
-approval, claims a request or reserves money. Budget availability is a snapshot,
-not a reservation; send repeats actual atomic admission. All pending read branches
-retain a bounded capacity slot until settled, including after a caller deadline.
+NavBharatAI calls only the selected provider; there is no fallback to another NavBharatAI provider. Qubax follows the same market auto-select as user chat and may try up to three of its own market-selected models after a failed try is released. Other listed providers make one call from this page. Some entries are gateways (Qubax, OpenRouter, Mitrify, Surplus, Router One) and may route internally among upstream sellers. A gateway response does not independently verify the underlying model. End-user chat routing, brand-hiding and error text are unchanged.
 
-The result includes separate gate codes and operator actions, not raw Firestore
-records or credentials. Missing, malformed, stale, unsigned/revoked catalog,
-unverified prices/quality/supplier cap, missing/expired/used/mismatched approval,
-duplicate request and insufficient/corrupt budgets are distinct. The diagnostic
-is the current check's first failing gate, not a claim to have queried historical
-provider logs. Request outcome, latency, actual reported provider/model and safe
-error code are shown separately.
+## Availability is not dispatch approval
 
-**Check provider balance** is a separate, explicit read. It calls only the official
-fixed `GET https://api.qubax.ai/v1/billing/balance` with the existing server key.
-It is never run on page load or as part of readiness. Its response is a bounded
-USD balance snapshot or a fixed safe error; no raw response, key or account
-identifier reaches the browser or logs. It proves neither the identity of a
-previously funded account nor a supplier-enforced per-request cap.
+The UI is usable for composing a message when a provider is unconfigured. Unconfigured or blocked entries appear in the dropdown as disabled, with a reason that does not name environment variables or reveal credentials. A configured status is **not** a successful connection check. Refreshing this page asks the server to collect the Qubax market (admin only, lease-limited). It does not send a chat.
 
-## Independent reviewer setup: external prerequisite
+When `QUBAX_ENABLED=1` and `QUBAX_API_KEY` are set, the server auto-selects a Qubax model from that market for both user chat and this admin page. The status line shows that model, its Qubax price, and its Qubax discount. The same payload includes freshness, priced rows, rows at a 90%+ Qubax discount, rows inside the try cap, and the probe-ready count. No `QUBAX_MODEL` or extra per-request cap has to be added: the reserve defaults to `$0.02` per try and still uses the shared paid budget. A failed try, including a reply in the wrong language, is released. After three failed models, user chat continues the normal chain; this admin page reports `tries-exhausted` and does not call another provider. Guest and signed-in daily answer quotas are unchanged.
 
-The security operator must independently enroll reviewer public keys in the
-server-only `QUBAX_REVIEWER_KEYS_JSON` configuration. This panel cannot generate,
-register, replace or enable a trust key. **No trust keys are seeded, and this
-change does not configure production trust or secrets.** Absent or malformed
-setup is unavailable, never implicit approval.
+Sending still uses the existing guards for that adapter:
 
-The configuration is a JSON array of at most 20 exact-key records:
+- **Qubax:** the same `refreshQubaxPriceFeed` collector (on Send only, and only when `readQubaxMarketPlan` is empty) and the same `runApprovedQubaxChat` / `readQubaxMarketPlan` / `rankQubaxMarkets` ranking as user chat. The default `$0.02` (or `QUBAX_MAX_USD_PER_REQUEST`) reserve per try still applies, and the page may try up to three market-selected models. A typed model is used only when that shared plan is still empty; it does not write the shared model-switch ledger. If no model remains, the admin diagnostic includes feed freshness, priced-row counts and the last refresh status. The checkbox does not raise the cap. **Check Qubax balance** reads account metadata only and does not send a chat.
+- **Mitrify:** dispatched through the shared `createMitrifyClient` whenever the server key is set. Mitrify’s public pilot documents only `GET /v1/models` and `POST /v1/chat/completions`, with `Authorization: Bearer mtf_live_...`. At send time this page fetches that live `/models` list (no completion call) with the same style of size cap as OpenRouter `catalogJson` (1 MB, tighter than 12 MB: reject an oversized `content-length`, stream the body, and abort once the cap is exceeded) and its own 12-second timeout, so a hung catalog cannot consume the 90-second send budget. It calls only a listed chat model: the cheapest row whose prompt and completion are both finite and greater than 0. Zero, `"0"`, negative values, and a mix where only one side is priced count as unpriced. Mitrify does not document whether catalog prices are USD per million tokens or per token, so a value below `$0.001`/MTok is treated as an untrusted per-token-looking price and the row is unpriced (no conversion). Image-like ids (`image`, `flux`, `sdxl`, `stable-diffusion`) are excluded unless the id also looks like chat/instruct/completion. If the catalog then has no usable prices, the page calls `mitrify/auto-cheap` only when that alias is listed; otherwise it fails closed and names the listed ids. It never falls through to an alphabetical listed id. A typed model is accepted only if that list contains it (and is priced when the catalog has prices). The shared client still overwrites `model` from its config, so the page passes the listed id as `MITRIFY_MODEL` for that one admin client only and does not change user-chat defaults. A send uses `stream: true` and the same reply token cap as main chat (`FREE_CHAIN_REPLY_MAX_TOKENS`, default 250, still bounded by this page’s 1,024). When catalog prices are present they are used for the shared-budget reserve; otherwise the conservative $1/MTok placeholder is used only for `mitrify/auto-cheap`. Existing daily and monthly caps still apply. This page does not require `MITRIFY_CHAIN_ENABLED`, does not flip that user-chat flag, and does not mint a payload approval. An HTTP 504 after a listed model is selected is a provider gateway time-out (often nginx in front of Mitrify), not a missing key.
+- **OpenRouter verified-free:** enabled when the server key is set. When LiveRegistry is configured (`LIVE_MODEL_REGISTRY_ENABLED` plus `OPENROUTER_API_KEY`), a send uses `runRegistryRung` (and therefore `strictFreeText`) when `FREE_CHAIN_OPENROUTER_MODELS` is set, or `strictFreeText` without an allow-list when that list is empty — the same verified-free ranking as main chat. A typed model becomes the allow-list and preferred id; the registry still requires `VERIFIED_FREE`. If LiveRegistry is not configured, this page does not flip that user-chat flag. At send time it fetches OpenRouter’s public `/api/v1/models` catalog through the shared `catalogJson` helper and calls only a model whose catalog `pricing.prompt` and `pricing.completion` are 0 and whose id ends with `:free`. A typed model is accepted only when that live catalog lists it as free; priced models are never called. The reply names the chosen model. The official request also sets OpenRouter `max_price` to 0 with `allow_fallbacks: false`. User-chat OpenRouter still requires `LIVE_MODEL_REGISTRY_ENABLED` and, separately, a `FREE_CHAIN_OPENROUTER_MODELS` allow-list.
+- **CheaperInference:** enabled when the server key is set, even if user-chat mode is `off` or shared-access. The adapter uses the same model string main chat would use (`CHEAPERINFERENCE_MODEL` or `beam`). This page does not change the user-chat sharing mode.
+- **Paid Free Chat rungs** with a verified rate card: one reservation against the existing shared daily and monthly budget, using that card and this page’s 1,024 output-token bound.
+- **Free rungs:** no paid reservation. Quota attestation used by user chat may be noted, but this page still calls only the selected provider when its credential is present.
+- **Kimi, Claude and Grok:** reserved from the existing in-repo rate card, then one official HTTP/SDK call with a 1,024 token bound. This page does not use the builder adapters’ larger default output caps.
+- **Surplus and Router One:** listed so the admin can see configuration, but **not dispatched**. They have no verified per-request spending ceiling on this page, and Surplus’s production transport retries. This page will not invent a cap or reuse that retry path.
 
-- `keyId`: unique 1–80-character identifier using letters, digits, `_` or `-`.
-- `reviewerId`: the independently verified reviewer's identity, distinct from the
-  server-authenticated requesting admin. A second login to the shared admin
-  account is not independent review. Governance must verify human/organizational
-  independence; differing identifier strings alone cannot prove it.
-- `publicKeyPem`: an Ed25519 SubjectPublicKeyInfo `PUBLIC KEY`, never a private key.
-- `purpose`: `qubax-catalog-review-v1` or `qubax-exact-payload-v1`.
-- `enabled`: boolean; removing or disabling a key revokes its imported evidence.
+Guest and signed-in daily answer quotas are unchanged. This route exposes no approval writer and does not change provider account settings. Typed content is conservatively treated as private and potentially health-related.
 
-Only current deployment-controlled keys authorize operations. Key-purpose
-separation, signer identity, exact signatures and expiry are checked server-side
-on import and again at selection/claim/dispatch. A revoked key archived in an old
-receipt cannot restore authority. Rotate/provision keys through the separately
-authorized deployment/security process, never by changing a client form.
+## Admin error details
 
-## Recording a legitimately reviewed catalog
+If the selected provider returns no answer or an error, the admin-only response includes a redacted diagnostic: HTTP status, provider error code/type, a timeout vs network vs auth vs quota vs rate-limit classification, latency, provider and model id, request id when the provider returned one, and a truncated raw body/message. API keys, tokens, secrets, PEM material, AWS secret patterns, Google `AIza*` keys and environment-variable names are stripped before display. End-user chat errors stay brand-safe and do not use this payload.
 
-1. Obtain authoritative supplier enforcement evidence and independent exact
-   model/revision, price, all-fee and quality review. **Do not fill unknown fields
-   with optimistic values.** Public market observations never become a reviewed
-   catalog automatically.
-2. Run readiness to obtain `catalogDigest` (null if no active catalog). Give the
-   independent reviewer this concurrency binding and the desired bounded workload.
-3. The catalog reviewer prepares the existing `QubaxCatalog` schema in
-   `src/server/lib/qubaxSelector.ts`, with real evidence references and original
-   observation timestamps. Import allows at most 50 candidates, validates every
-   candidate, rejects unknown fields, and preserves every original timestamp.
-4. The reviewer independently signs a canonical payload with exactly: `kind`
-   (`qubax-admin-catalog-review-v1`), `catalog`, `previousCatalogDigest`,
-   `reviewedAtMs`, and `expiresAtMs`. The signed expiry is at most five minutes
-   after review and no later than eligible catalog evidence. Import checks the
-   current catalog digest and strictly increasing source observation time in one
-   transaction, preventing replay, rollback and overwriting a concurrent update.
-5. Paste the returned signed envelope into **Import reviewed catalog**. An import
-   only records independently reviewed evidence; it makes no provider call and
-   creates no payload approval. Refresh readiness afterward.
+When Qubax tries more than one market-selected model, the diagnostic lists each attempt (model, HTTP status, provider code, latency and redacted body) and the final outcome.
 
-There is intentionally no copy-paste "approved" catalog example. An independent
-signature authenticates the reviewer, **not the truth of an invented supplier
-contract**. Qubax's public docs checked 2026-11-09 describe key-level routing,
-best-effort trusted sellers, internal failover, prepaid funds and monthly key
-budgets. They do **not** establish the required enforceable all-in per-HTTP cost
-ceiling, exact downstream model/revision pin or comprehensive processor guarantee.
-Unless independently obtained authoritative evidence establishes these, Qubax
-must remain blocked. Never replace them with token estimates, `min_discount`, a
-balance, a local reservation or a signed admin assertion.
+Mitrify raw error bodies are captured only when this page supplies an optional hook. User chat does not pass that hook and still cancels unread HTTP error bodies.
 
-## Exact-payload review and one explicit send
+OpenRouter raw error bodies are **not** captured when this page uses the shared LiveRegistry dispatcher (the same path as user chat). Adding an admin-only body hook there would touch that user-chat path. The thrown HTTP status and error code are still shown. When LiveRegistry is not configured, the public-catalog fallback uses the admin official OpenAI-compat helper, which does capture a redacted body.
 
-1. Use **Prepare synthetic test** for exactly:
-   `What is 2 + 2? Reply with one number only.`
-   Only this exact single user message with no history is server-classified public
-   and limited to 16 output tokens. All other typed/history payloads retain the
-   conservative private-and-health review requirement and 1,024 output-token cap.
-   Clients cannot submit their own generation limit or data class.
-2. Run readiness. When an eligible signed catalog and reviewer trust exist, copy
-   the generated review package. Its `body` includes the selected model, and
-   `wirePayload` is the exact JSON string sent as UTF-8; hash that string directly.
-   It also identifies the request ID, payload
-   digest, model/revision, evidence digest, maximum liability, expiry and opaque
-   approval ID. The ID binds server UID, endpoint, credential generation,
-   selected evidence and request ID; the credential and its digest are not exposed.
-3. An independent payload reviewer checks the **entire actual wire payload** and
-   all possible downstream processors, terms, disclosure authority and protections.
-   They sign exactly these fields: `kind` (`qubax-admin-review-v1`), `approvalId`,
-   `payloadDigest`, `requestId`, `model`, `modelRevision`, `evidenceBinding`,
-   `maximumNanoUsd`, `reviewedAtMs`, `expiresAtMs`, and `dataReview`.
-   `dataReview` contains `entirePayloadReviewed`,
-   `gatewayAndAllDownstreamProcessorsReviewed`, `approvedDataClasses`, `reviewRef`,
-   `disclosureAuthorityRef`, `processorTermsRef`, and `protectionsRef`, according to
-   `QubaxSignedReview` in `qubaxReviewSignature.ts`. These declarations require a
-   real review, not an admin checkbox. Review references should identify evidence,
-   not contain copied private records.
-4. Import the signed approval. The server recomputes every binding against a fresh
-   catalog, uses its independently reviewed supplier ceiling, enforces a maximum
-   five-minute approval expiry no later than selection/signature expiry, and
-   atomically creates an immutable approval plus audit receipt. Existing records
-   cannot be overwritten or resurrected. A new explicitly authorized request has
-   a distinct approval binding; it still needs a new independent review.
-5. Recheck readiness, then explicitly press **Send**. No import/check initiates
-   inference. One request claims one approval and reserves the existing shared
-   budgets before one HTTP attempt. Concurrent or duplicate sends cannot start a
-   second call. The initial verification authorization remains **one paid
-   synthetic request maximum**. This work performs none. A later separate test
-   requires its own authorization and independent approval.
+## Security, budgets and limits
 
-The disclosure checkbox confirms the intended destination for the submission.
-It is never the independent review or authority to mint a supplier cap. Edits,
-context changes, model/evidence changes, credential rotation and request-ID changes
-invalidate the approval. Selection is force-refreshed before dispatch. Unknown
-liability, cancellation, timeout, interruption or provider HTTP error does not
-permit automatic replay or release of possible-spend holds. A text response is
-not an invoice. Synthetic output is separately checked for `4`; a different valid
-text response is not reported as passing that expected-answer check.
+- Three routes use the existing admin token middleware: GET `/api/v1/admin/test-chat-bot/providers`, POST `/api/v1/admin/test-chat-bot/chat`, and POST `/api/v1/admin/test-chat-bot/balance`. Compatibility URLs remain available under the existing API version middleware.
+- Chat requests are exact-key validated: provider enum, UUID v4, disclosure confirmation, alternating user/assistant text messages ending in a user message, and an optional model id matching the safe identifier pattern. The balance route accepts only an empty JSON object.
+- Per chat request: 8,000 characters for a typed message, 32,000 total context characters, 64 messages, and 1,024 output tokens. These are payload bounds, not a three-question or lifetime quota. Start a new test chat when context is full.
+- The chat parser caps JSON at 256 KiB, including escaping. The balance route uses the standard 1 MB parser and rejects every caller field. Sends are limited to six per minute per client address, in addition to shared paid admission and provider capacity controls.
+- The client prevents overlapping double-click sends, cancels on unmount/session change, allows stopping a wait, validates the response identity and never automatically retries a failed request. A cancelled or uncertain request may still incur provider cost.
+- A request ID is reserved in the existing shared budget before paid dispatch. Duplicate daily claims do not authorize another call. If daily admission fails, only this attempt's fresh, undispatched monthly hold is released; an uncertain daily write is not cleared without a receipt. Known-unused pre-dispatch holds (official URL/key rejected before any network call, or a paid adapter configuration error before dispatch, including Gemini Flash which reserves an official hold then dispatches through its allowlisted compat adapter) are released; possible dispatched cost stays reserved because token usage is not a verified invoice.
+- Prompts/replies are held in component memory and transmitted only for the explicitly requested test. They are not written to browser storage, app chat history or the audit trail. Audit entries contain operation metadata only. Balance audits record status, not the balance amount.
 
-### Signing format
+## Out of scope
 
-The envelope has exactly `keyId`, `payload`, and `signature`. `payload` is the
-canonical JSON **string**: recursively sorted object keys, array order unchanged,
-no whitespace, and JSON primitive encoding. Duplicate members/noncanonical strings
-are rejected. `signature` is the unpadded base64url encoding of a 64-byte Ed25519
-signature over UTF-8 domain prefix followed by that exact string:
+Image-only, voice-only and non-AI service APIs are not chat adapters and are not listed. Vertex AI has no isolated text-test adapter on this page (it uses the server Google identity). Surplus and Router One are listed but not called, for the spending-ceiling reason above.
 
-- Catalog domain: `navbharatai:qubax-catalog-review:v1` followed by one NUL byte.
-- Payload domain: `navbharatai:qubax-exact-payload-review:v1` followed by one NUL byte.
+## Offline validation
 
-Canonicalization and verification contracts are exported in
-`qubaxReviewSignature.ts`. The reviewer signs outside this shared admin session
-with their separately controlled private key. Private keys are never uploaded.
-The exact inference payload digest is SHA-256 of the UTF-8 `wirePayload` string.
-Binding, review and send use one shared wire-body helper, including the selected
-model and streaming usage options when applicable. The review packet's
-`JSON.stringify(body)` equals `wirePayload`; it is distinct from the canonical
-signing encoding and should not be reserialized by a different implementation.
-
-The import action is `{ action, attestation }`, where `action` is the exact same
-validated pending chat action and `attestation` is the envelope. Payload review
-strings are bounded to 16,000 characters; catalog review strings to 128,000.
-There is no arbitrary URL fetch, document attachment, client key-registration or
-unchecked JSON-to-Firestore writer.
-
-## Authentication, storage and auditing
-
-All routes use the existing server admin token gate and no-store responses:
-
-- GET `/api/v1/admin/test-chat-bot/providers` (configuration presence only).
-- POST `/api/v1/admin/test-chat-bot/readiness` (exact pending action, read-only).
-- POST `/api/v1/admin/test-chat-bot/catalog` (independently signed evidence import).
-- POST `/api/v1/admin/test-chat-bot/approval` (independently signed exact review).
-- POST `/api/v1/admin/test-chat-bot/balance` (empty object, explicit metadata read).
-- POST `/api/v1/admin/test-chat-bot/chat` (one explicitly initiated dispatch).
-
-The permanent unversioned compatibility URLs remain available. The central
-parser limits readiness/chat/approval JSON to 256 KiB, catalog JSON to 512 KiB,
-and balance to 1 KiB. Reads share a 30/minute limit; sends/imports share 6/minute.
-Typed context stays bounded to 64 alternating messages and 32,000 total characters.
-
-Firestore client rules remain default-deny for `qubax_catalog`,
-`qubax_chat_approvals`, and `qubax_review_audit`. The active catalog is replaced
-atomically. Approval and immutable audit records deliberately persist as replay
-and liability fences. Audit receipts archive the bounded signed evidence envelope,
-public SPKI verification key, fingerprint, purpose, actor hash and timestamps for
-historical verification. No prompt, response or credential is in those receipts.
-Archived keys never authorize live use. The request audit log contains only
-server actor, operation/request IDs and fixed safe outcome codes, never envelopes,
-raw upstream bodies or private conversations.
-
-The ordinary Chat path retains its existing trusted-server legacy evidence format
-for compatibility. **Admin test sends require independently signed catalog and
-payload evidence.** Imported signed evidence is reverified even when used by a
-legacy consumer, so trust revocation cannot be bypassed through that path.
-
-## Verification status and commands
-
-All added automated scenarios use generated ephemeral test signing keys, synthetic
-credentials, in-memory transactional stores and mocked network responses. The new
-lifecycle test exercises real import/readiness/transport code returning mocked `4`,
-including concurrent claims. It is not a live provider result, invoice, production
-configuration check or actual-emulator proof of the new import transactions.
-
-Focused command (run only when the shared validation slot is available):
+The focused tests mock adapters and exercise only local HTTP servers. They do not make paid inference calls:
 
 ```sh
-npx vitest run src/lib/testChatBot.test.ts src/server/lib/testChatBot.test.ts src/server/lib/qubaxReadiness.test.ts src/server/lib/qubaxBalance.test.ts src/server/routes/testChatBot.test.ts src/components/admin/TestChatBotPanel.test.tsx tests/qubaxSelector.test.ts tests/qubaxTransport.test.ts tests/everyCollectionIsClassified.test.ts tests/everySubcollectionIsClassified.test.ts tests/adminActionsNeedAReason.test.ts tests/aRequestBodyIsOnlyAsLargeAsItsRouteNeeds.test.ts
+npx vitest run src/lib/testChatBot.test.ts src/server/lib/testChatBot.test.ts src/server/lib/testChatBotDiagnostics.test.ts src/server/lib/testChatBotOfficial.test.ts src/server/routes/testChatBot.test.ts src/components/admin/TestChatBotPanel.test.tsx tests/theAdminMenuHasNineTabs.test.ts tests/aRequestBodyIsOnlyAsLargeAsItsRouteNeeds.test.ts tests/adminActionsNeedAReason.test.ts tests/adminTestChatDoesNotChangeUserChat.test.ts src/server/AI/FreeChain/providers/openAiCompatProvider.test.ts
 ```
 
-The repository's full current CI workflow, coverage, typechecks, lint/source
-censuses, build/boot/dependency gates and applicable database drills remain required.
-Do not call unrun checks passed. Production deployment, trust/secret configuration,
-real supplier enforcement evidence and a separately authorized single live test
-remain external gates. No status is complete without its own evidence.
-
-Official references checked read-only:
-https://qubax.ai/docs/chat-completions
-https://qubax.ai/docs/routing-modes
-https://qubax.ai/docs/pricing
-https://qubax.ai/legal/privacy
-
-### Final maintenance and policy boundary
-
-Admin paid tests use a request-scoped observed-maintenance revocation latch and a
-strict initial status read: an unavailable status blocks this isolated test even
-when the general serving path retains its existing recent-off fail-open behavior.
-The final catalog/approval transaction also reads `platform_settings/ai_maintenance`.
-A missing document retains the existing default-off policy; an existing malformed,
-paused or unavailable state cannot authorize the call.
-An opt-in observer also latches locally known failed reads or watch errors without
-changing the general serving policy. Immediately before HTTP,
-the request checks its observed-maintenance latch and the current synchronous
-inference policy, without an intervening await. Listeners are always removed.
-Readiness likewise rechecks config, signing roots, evidence expiry and observed
-policy changes after its awaited reads, rather than labeling old gates freshly ready.
-
-This gives a coherent authorization snapshot at atomic admission and immediately
-honors locally observed revocation. It cannot synchronously observe a remote
-maintenance write that occurs after admission but before watcher delivery, and it
-does not claim to cancel such an unseen change or revoke an already dispatched call.
-
-The separately added real-emulator transaction drill is invoked with:
-
-```sh
-npm run test:qubax-readiness:emulator -- --emulator 127.0.0.1:18781 --project demo-navbharatai-phase2
-```
-
-It requires the loopback demo-project emulator and uses only synthetic credentials
-and mocked provider calls. Its execution status must be reported separately from
-source review and the unit suite.
+Run the repository's full required CI gates separately. A mock response is not evidence of live credentials, pricing, approval, model quality or production readiness.

@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { qubaxCatalogPublicationExpiry, verifyQubaxCatalogPublication } from './qubaxReviewSignature';
 import type { Firestore } from 'firebase-admin/firestore';
 
 /** Server-owned evidence only. Firestore's default-deny rules exclude client writes.
@@ -97,7 +96,6 @@ export interface QubaxSelection {
   readonly evidenceBinding: string;
   readonly expiresAtMs: number;
   readonly reviewRef: string;
-  readonly signedCatalog?: true;
 }
 
 type RecordValue = Record<string, unknown>;
@@ -124,30 +122,24 @@ function price(value: unknown, source: QubaxPriceEvidence['source'], now: number
     && (value.cacheWriteNanoUsdPerMillionTokens === null || integer(value.cacheWriteNanoUsdPerMillionTokens));
 }
 
-function candidatePrice(value: unknown, workload: QubaxWorkload, now: number): value is QubaxCatalogCandidate {
-  return record(value) && reference(value.modelId) && value.modelId.length <= 256
-    && positive(value.maxInputTokens) && positive(value.maxOutputTokens)
-    && value.maxInputTokens >= workload.inputTokens && value.maxOutputTokens >= workload.outputTokens
-    && price(value.qubax, 'qubax', now) && price(value.official, 'official', now)
-    && scopeKeys.every(key => (value.qubax as QubaxPriceEvidence).scope[key] === (value.official as QubaxPriceEvidence).scope[key]);
-}
-function supplierContract(value: unknown, now: number): boolean {
-  return record(value) && fresh(value, now) && reference(value.reviewRef)
-    && value.hardCeilingEnforced === true && value.includesInternalRetriesFailoversAndFees === true
-    && value.exactModelAndRevisionEnforced === true && positive(value.perHttpRequestCeilingNanoUsd);
-}
-function quality(value: unknown, catalog: QubaxCatalog, now: number): boolean {
-  return record(value) && value.approved === true && value.policyId === QUBAX_QUALITY_POLICY.id
-    && value.benchmarkRef === catalog.benchmarkRef && reference(value.reviewRef)
-    && integer(value.reviewedAtMs) && value.reviewedAtMs <= now && positive(value.expiresAtMs) && value.expiresAtMs > now
-    && score(value.textScoreBps) && value.textScoreBps >= QUBAX_QUALITY_POLICY.minTextScoreBps
-    && score(value.hindiScoreBps) && value.hindiScoreBps >= QUBAX_QUALITY_POLICY.minHindiScoreBps
-    && score(value.successRateBps) && value.successRateBps >= QUBAX_QUALITY_POLICY.minSuccessRateBps
-    && positive(value.p95LatencyMs) && value.p95LatencyMs <= QUBAX_QUALITY_POLICY.maxP95LatencyMs
-    && positive(value.sampleCount) && value.sampleCount >= QUBAX_QUALITY_POLICY.minSampleCount;
-}
 function candidate(value: unknown, catalog: QubaxCatalog, workload: QubaxWorkload, now: number): value is QubaxCatalogCandidate {
-  return candidatePrice(value, workload, now) && supplierContract(value.supplierContract, now) && quality(value.quality, catalog, now);
+  if (!record(value) || !reference(value.modelId) || value.modelId.length > 256
+    || !positive(value.maxInputTokens) || !positive(value.maxOutputTokens)
+    || value.maxInputTokens < workload.inputTokens || value.maxOutputTokens < workload.outputTokens
+    || !price(value.qubax, 'qubax', now) || !price(value.official, 'official', now)
+    || !scopeKeys.every(key => (value.qubax as QubaxPriceEvidence).scope[key] === (value.official as QubaxPriceEvidence).scope[key])) return false;
+  const contract = value.supplierContract, q = value.quality;
+  return record(contract) && fresh(contract, now) && reference(contract.reviewRef)
+    && contract.hardCeilingEnforced === true && contract.includesInternalRetriesFailoversAndFees === true
+    && contract.exactModelAndRevisionEnforced === true && positive(contract.perHttpRequestCeilingNanoUsd)
+    && record(q) && q.approved === true && q.policyId === QUBAX_QUALITY_POLICY.id
+    && q.benchmarkRef === catalog.benchmarkRef && reference(q.reviewRef)
+    && integer(q.reviewedAtMs) && q.reviewedAtMs <= now && positive(q.expiresAtMs) && q.expiresAtMs > now
+    && score(q.textScoreBps) && q.textScoreBps >= QUBAX_QUALITY_POLICY.minTextScoreBps
+    && score(q.hindiScoreBps) && q.hindiScoreBps >= QUBAX_QUALITY_POLICY.minHindiScoreBps
+    && score(q.successRateBps) && q.successRateBps >= QUBAX_QUALITY_POLICY.minSuccessRateBps
+    && positive(q.p95LatencyMs) && q.p95LatencyMs <= QUBAX_QUALITY_POLICY.maxP95LatencyMs
+    && positive(q.sampleCount) && q.sampleCount >= QUBAX_QUALITY_POLICY.minSampleCount;
 }
 
 const MILLION = 1_000_000n;
@@ -189,8 +181,6 @@ export function selectQubaxCandidate(catalog: unknown, workload: QubaxWorkload, 
     || !record(catalog) || catalog.kind !== 'qubax-reviewed-chat-catalog-v1' || !fresh(catalog, now)
     || !reference(catalog.independentReviewRef) || !reference(catalog.benchmarkRef)
     || !Array.isArray(catalog.candidates) || catalog.candidates.length > 1_000) return null;
-  const publicationExpiry = catalog.publication !== undefined ? qubaxCatalogPublicationExpiry(catalog, now) : undefined;
-  if (catalog.publication !== undefined && publicationExpiry === undefined) return null;
   const reviewed = catalog as unknown as QubaxCatalog;
   // One dispatch alias cannot stand for multiple revisions or conflicting prices.
   const counts = new Map<string, number>();
@@ -202,11 +192,10 @@ export function selectQubaxCandidate(catalog: unknown, workload: QubaxWorkload, 
     const ceiling = BigInt(entry.supplierContract.perHttpRequestCeilingNanoUsd);
     if (q > ceiling || official <= 0n || official > MAX_SAFE || ceiling * 10n > official) continue;
     const expiresAtMs = Math.min(reviewed.expiresAtMs, entry.qubax.expiresAtMs, entry.official.expiresAtMs,
-      entry.supplierContract.expiresAtMs, entry.quality.expiresAtMs, publicationExpiry ?? Number.MAX_SAFE_INTEGER);
+      entry.supplierContract.expiresAtMs, entry.quality.expiresAtMs);
     const evidenceBinding = createHash('sha256').update('qubax-selection-v1\0').update(canonical({
       catalog: { kind: reviewed.kind, observedAtMs: reviewed.observedAtMs, expiresAtMs: reviewed.expiresAtMs,
         evidenceRef: reviewed.evidenceRef, independentReviewRef: reviewed.independentReviewRef, benchmarkRef: reviewed.benchmarkRef },
-      ...(publicationExpiry === undefined ? {} : { publication: catalog.publication }),
       entry, workload: { inputTokens: workload.inputTokens, outputTokens: workload.outputTokens,
         language: workload.language ?? 'hi', capability: 'text' },
     })).digest('hex');
@@ -214,7 +203,7 @@ export function selectQubaxCandidate(catalog: unknown, workload: QubaxWorkload, 
       modelRevision: entry.qubax.scope.revision, sku: entry.qubax.scope.sku,
       maximumNanoUsd: Number(ceiling), qubaxCostNanoUsd: Number(ceiling), officialCostNanoUsd: Number(official),
       discountBps: Number((official - ceiling) * 10_000n / official), expiresAtMs,
-      evidenceBinding, reviewRef: reviewed.independentReviewRef, ...(publicationExpiry === undefined ? {} : { signedCatalog: true as const }) }) });
+      evidenceBinding, reviewRef: reviewed.independentReviewRef }) });
   }
   // Reviewed task-specific Hindi/text quality, then observed reliability/latency,
   // then cost. No static cross-provider model leaderboard or price-first downgrade.
@@ -230,7 +219,7 @@ export function selectQubaxCandidate(catalog: unknown, workload: QubaxWorkload, 
 export function createQubaxSelector(readCatalog: () => Promise<unknown>, clock: () => number = Date.now) {
   let cached: { value: unknown; readAtMs: number } | undefined;
   let pending: Promise<unknown> | undefined;
-  return async (workload: QubaxWorkload, forceRefresh = false, atMs?: number, requireSigned = false): Promise<QubaxSelection | null> => {
+  return async (workload: QubaxWorkload, forceRefresh = false, atMs?: number): Promise<QubaxSelection | null> => {
     const requestedWorkload = { ...workload };
     const currentTime = () => atMs ?? clock();
     const now = currentTime();
@@ -252,59 +241,16 @@ export function createQubaxSelector(readCatalog: () => Promise<unknown>, clock: 
       }
       await pending;
     }
-    if (requireSigned && (!record(cached?.value) || !verifyQubaxCatalogPublication(cached.value, currentTime()))) return null;
     return selectQubaxCandidate(cached?.value, requestedWorkload, currentTime());
   };
 }
 
 const selectors = new WeakMap<Firestore, ReturnType<typeof createQubaxSelector>>();
-export async function getQubaxSelection(db: Firestore, workload: QubaxWorkload, now?: number, forceRefresh = false, requireSigned = false): Promise<QubaxSelection | null> {
+export async function getQubaxSelection(db: Firestore, workload: QubaxWorkload, now?: number, forceRefresh = false): Promise<QubaxSelection | null> {
   let selector = selectors.get(db);
   if (!selector) {
     selector = createQubaxSelector(async () => (await db.doc(QUBAX_CATALOG_PATH).get()).data());
     selectors.set(db, selector);
   }
-  return selector(workload, forceRefresh, now, requireSigned);
-}
-
-/** Diagnostics use the same validators as admission. No raw evidence, credentials or source references leave this boundary. */
-export function inspectQubaxCatalog(value: unknown, workload: QubaxWorkload, now = Date.now(), requireSigned = false): {
-  catalog: 'ready' | 'missing' | 'invalid' | 'unsigned' | 'stale' | 'pricing-unverified' | 'savings-unverified';
-  quality: 'ready' | 'unverified' | 'unknown'; supplierCeiling: 'ready' | 'unverified' | 'unknown';
-  selection: QubaxSelection | null;
-} {
-  const absent = { quality: 'unknown' as const, supplierCeiling: 'unknown' as const, selection: null };
-  if (value === undefined || value === null) return { catalog: 'missing', ...absent };
-  if (!record(value) || value.kind !== 'qubax-reviewed-chat-catalog-v1' || !reference(value.independentReviewRef)
-    || !reference(value.benchmarkRef) || !reference(value.evidenceRef) || !Array.isArray(value.candidates)
-    || !value.candidates.length || value.candidates.length > 1000) return { catalog: 'invalid', ...absent };
-  if (!fresh(value, now)) return { catalog: 'stale', ...absent };
-  if ((requireSigned || value.publication !== undefined) && !verifyQubaxCatalogPublication(value, now)) return { catalog: 'unsigned', ...absent };
-  const reviewed = value as unknown as QubaxCatalog;
-  const selection = selectQubaxCandidate(value, workload, now);
-  if (selection) return { catalog: 'ready', quality: 'ready', supplierCeiling: 'ready', selection };
-  const priced = reviewed.candidates.filter(entry => candidatePrice(entry, workload, now)
-    && reviewed.candidates.filter(other => other?.modelId === entry.modelId).length === 1);
-  if (!priced.length) return { catalog: 'pricing-unverified', ...absent };
-  // Diagnose one coherent candidate, never combine the quality of one with another's ceiling.
-  const ranked = priced.map(entry => ({ entry, quality: quality(entry.quality, reviewed, now), supplier: supplierContract(entry.supplierContract, now) }))
-    .sort((a, b) => Number(b.quality) + Number(b.supplier) - Number(a.quality) - Number(a.supplier));
-  const best = ranked[0];
-  return { catalog: best.quality && best.supplier ? 'savings-unverified' : 'ready',
-    quality: best.quality ? 'ready' : 'unverified', supplierCeiling: best.supplier ? 'ready' : 'unverified', selection: null };
-}
-
-/** Strict import-only shape. Unknown fields cannot persist prompts, private records or unreviewed claims in catalog storage. */
-export function isQubaxCatalogImportShape(value: unknown): value is QubaxCatalog {
-  const exact = (v: unknown, names: readonly string[]): v is Record<string, unknown> => record(v)
-    && Object.keys(v).length === names.length && Object.keys(v).every(k => names.includes(k));
-  const evidence = ['observedAtMs', 'expiresAtMs', 'evidenceRef'];
-  const priceKeys = [...evidence, 'source', 'scope', ...amounts, 'cacheReadNanoUsdPerMillionTokens', 'cacheWriteNanoUsdPerMillionTokens', 'allFeesIncluded', 'reviewRef'];
-  return exact(value, [...evidence, 'kind', 'benchmarkRef', 'independentReviewRef', 'candidates'])
-    && Array.isArray(value.candidates) && value.candidates.length > 0 && value.candidates.length <= 50
-    && value.candidates.every(entry => exact(entry, ['modelId', 'maxInputTokens', 'maxOutputTokens', 'qubax', 'official', 'supplierContract', 'quality'])
-      && exact(entry.qubax, priceKeys) && exact(entry.official, priceKeys)
-      && exact(entry.qubax.scope, scopeKeys) && exact(entry.official.scope, scopeKeys)
-      && exact(entry.supplierContract, [...evidence, 'reviewRef', 'hardCeilingEnforced', 'includesInternalRetriesFailoversAndFees', 'exactModelAndRevisionEnforced', 'perHttpRequestCeilingNanoUsd'])
-      && exact(entry.quality, ['policyId', 'benchmarkRef', 'reviewRef', 'reviewedAtMs', 'expiresAtMs', 'textScoreBps', 'hindiScoreBps', 'successRateBps', 'p95LatencyMs', 'sampleCount', 'approved']));
+  return selector(workload, forceRefresh, now);
 }

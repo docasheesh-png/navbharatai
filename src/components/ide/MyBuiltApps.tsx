@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Package, RefreshCw, Trash2, AlertTriangle, Clock, CheckCircle2, X } from 'lucide-react';
 import { PublishToNavStore } from './PublishToNavStore';
+import { WhatsAppShareLink } from '../share/WhatsAppShareLink';
 import { writeFailure } from '../../lib/serverAnswer';
 import { deliverFile } from '../../lib/downloadFile';
 
@@ -223,6 +224,9 @@ export function MyBuiltApps({ ghHeaders }: { ghHeaders: (extra?: Record<string, 
                     ))}
                     {/* App Mart takes only the .apk — the store installs apps, and a .aab is a Play
                         Store bundle no phone can install. Same rule the build screen follows. */}
+                    {st.artifacts.some((a) => /apk/i.test(String(a.name))) && (
+                      <WhatsAppShareLink appName={app.appName || app.repo} />
+                    )}
                     {st.artifacts.filter((a) => /apk/i.test(String(a.name))).map((a) => (
                       <PublishToNavStore
                         key={`pub-${a.id}`}

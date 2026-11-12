@@ -47,6 +47,28 @@ describe('a build starts only when the message confirms it (Q-200)', () => {
     expect(buildConfirmation('continue').confirmed).toBe(true);
   });
 
+  it('a category word is not a deliverable — BR1976 prompt "App"', () => {
+    // PRODUCT_NOUN matches `apps?` / website / application, so a bare category used to confirm a
+    // build of an invented stub ("Welcome to Your App" + a dead Get Started). The ask-what-to-build
+    // gate already classifies these as no-object; confirmation must not disagree.
+    for (const prompt of ['App', 'app', 'APP', 'website', 'application', 'an app']) {
+      expect(buildConfirmation(prompt), prompt).toEqual({ confirmed: false, reason: 'names-nothing-to-build' });
+    }
+    // Neighbours: a real noun, or an order that names one, still confirms.
+    expect(buildConfirmation('calculator').confirmed).toBe(true);
+    expect(buildConfirmation('todo app').confirmed).toBe(true);
+    expect(buildConfirmation('shop app banao').confirmed).toBe(true);
+    expect(buildConfirmation('build a notes app').confirmed).toBe(true);
+    expect(buildConfirmation('ek billing app banao').confirmed).toBe(true);
+    expect(buildConfirmation('a todo app for my shop with categories').confirmed).toBe(true);
+    expect(buildConfirmation('continue').confirmed).toBe(true);
+    expect(buildConfirmation('fix the login button colour').confirmed).toBe(true);
+    expect(buildConfirmation('make it real').confirmed).toBe(true);
+    // The knowledge base must not tell the user to say "app" (that phrase was extracted as a
+    // promised follow-up and locked the old confirmation).
+    expect(readFileSync('src/server/AppContext/AppKnowledgeBase.ts', 'utf8')).not.toMatch(/say "app"/);
+  });
+
   it('a short yes is an acceptance; a yes with a new request is not', () => {
     for (const m of ['haan', 'Haan bana do', 'yes please', 'ok build it', 'avunu', 'हाँ बना दो', 'go ahead', 'theek hai bana do']) {
       expect(isOfferAcceptance(m), m).toBe(true);

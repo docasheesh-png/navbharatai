@@ -79,8 +79,8 @@ describe('the shapes people actually send', () => {
     expect(v.message).toMatch(/for example/i);
   });
 
-  it('one bare word is too short', () => {
-    expect(assessBuildInput('app').buildable).toBe(false);
+  it('one bare word is not buildable — "app" is a category (no-object), not too-short', () => {
+    expect(assessBuildInput('app')).toMatchObject({ buildable: false, reason: 'no-object' });
     expect(MIN_INSTRUCTION_WORDS).toBe(2);
   });
 

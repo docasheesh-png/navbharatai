@@ -1,18 +1,54 @@
 /** Shared, strict boundary for the isolated provider test surface. No provider SDKs here. */
-export const TEST_CHAT_PROVIDER_IDS = ['qubax'] as const;
+export const TEST_CHAT_PROVIDER_IDS = [
+  'glm-4.5-flash',
+  'glm-4.7-flash',
+  'groq',
+  'cloudflare-workers-ai',
+  'openrouter-verified-free',
+  'mitrify',
+  'qubax',
+  'cheaperinference-beam',
+  'deepinfra-llama-3.1-8b-turbo',
+  'deepinfra-deepseek-v4-flash',
+  'openai-gpt-5-nano',
+  'glm-4.7-flashx',
+  'gemini-2.5-flash-lite-paid',
+  'gemini-2.5-flash-lite-free',
+  'deepseek-flash',
+  'nvidia-nemotron',
+  'modelscope',
+  'llm7',
+  'bluesminds',
+  'requesty',
+  'glm-4.6v-flash',
+  'gemini-2.5-flash',
+  'surplus',
+  'router-one',
+  'anthropic-claude',
+  'kimi',
+  'xai-grok',
+] as const;
 export type TestChatProviderId = typeof TEST_CHAT_PROVIDER_IDS[number];
 export const TEST_CHAT_MAX_MESSAGE_CHARS = 8_000;
 export const TEST_CHAT_MAX_CONTEXT_CHARS = 32_000;
 export const TEST_CHAT_MAX_MESSAGES = 64;
 export const TEST_CHAT_MAX_OUTPUT_TOKENS = 1_024;
 export const TEST_CHAT_MAX_RESPONSE_CHARS = 32_000;
-export const TEST_CHAT_MAX_MODEL_CHARS = 256;
+export const TEST_CHAT_DIAGNOSTIC_CLASSIFICATIONS = [
+  'timeout', 'network', 'auth', 'quota', 'rate-limit', 'http', 'empty', 'cancelled', 'unknown',
+] as const;
+export type TestChatDiagnosticClassification = typeof TEST_CHAT_DIAGNOSTIC_CLASSIFICATIONS[number];
 export interface TestChatMessage { role: 'user' | 'assistant'; content: string }
+export const TEST_CHAT_MODEL_ID = /^[\w][\w./:-]{0,199}$/;
+export function isAllowedTestChatModel(value: string): boolean {
+  return TEST_CHAT_MODEL_ID.test(value) && !value.includes('://') && !/^https?:/i.test(value);
+}
 export interface TestChatAction {
   provider: TestChatProviderId;
   requestId: string;
   messages: TestChatMessage[];
   confirmGatewayDisclosure: true;
+  model?: string;
 }
 export interface TestChatProviderStatus {
   id: TestChatProviderId;
@@ -20,8 +56,22 @@ export interface TestChatProviderStatus {
   configured: boolean;
   enabled: boolean;
   model: string | null;
+  unavailableReason?: string;
+  privacyUrl?: string | null;
+  note?: string;
+  billed?: boolean;
+  internalRouting?: boolean;
+  approvalRequired?: boolean;
+  ceilingUsd?: string | null;
+  selection?: 'performance' | 'backup' | 'none';
+  inputUsdPerMillion?: string | null;
+  outputUsdPerMillion?: string | null;
+  officialInputUsdPerMillion?: string | null;
+  officialOutputUsdPerMillion?: string | null;
+  discountBps?: number | null;
 }
-export interface TestChatStatus { providers: TestChatProviderStatus[]; approvalRequired: true; noFallback: true }
+export interface TestChatFeedSummary { fresh: boolean; observedAtMs: number | null; pricedRows: number; officialMatches: number; discountEligible: number; probePassing: number }
+export interface TestChatStatus { providers: TestChatProviderStatus[]; approvalRequired: boolean; noFallback: true; feed?: TestChatFeedSummary }
 export interface TestChatReply {
   requestId: string;
   provider: TestChatProviderId;
@@ -29,15 +79,55 @@ export interface TestChatReply {
   model: string;
   latencyMs: number;
   usage?: { inputTokens: number; outputTokens: number };
-  syntheticMatch?: boolean;
   noFallback: true;
 }
+export interface TestChatAttemptDiagnostic {
+  model: string | null;
+  latencyMs: number;
+  classification: TestChatDiagnosticClassification;
+  httpStatus: number | null;
+  providerCode: string | null;
+  providerType: string | null;
+  providerRequestId: string | null;
+  providerMessage: string | null;
+  rawErrorBody: string | null;
+}
+export interface TestChatDiagnostic {
+  provider: TestChatProviderId;
+  model: string | null;
+  latencyMs: number;
+  classification: TestChatDiagnosticClassification;
+  httpStatus: number | null;
+  providerCode: string | null;
+  providerType: string | null;
+  providerRequestId: string | null;
+  providerMessage: string | null;
+  rawErrorBody: string | null;
+  attempts?: TestChatAttemptDiagnostic[];
+  finalOutcome?: string;
+}
+export interface TestChatFailure {
+  error: string;
+  code: string;
+  noFallback: true;
+  diagnostic?: TestChatDiagnostic;
+}
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-const timestamp = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) >= 0 && Number(v) <= 8_640_000_000_000_000;
 const exactKeys = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).every(k => keys.includes(k));
 const safeText = (v: unknown, max: number): v is string => typeof v === 'string' && v.trim().length > 0 && v.length <= max && !v.includes('\u0000');
+const optionalText = (v: unknown, max: number): boolean => typeof v === 'string' && v.length > 0 && v.length <= max && !v.includes('\u0000');
+const optionalHttps = (v: unknown): boolean => v === null || (typeof v === 'string' && /^https:\/\/[A-Za-z0-9.-]+(?:\/[\w._~:/?#[\]@!$&'()*+,;=%-]*)?$/.test(v) && v.length <= 300);
+const optionalDecimal = (v: unknown): boolean => v === null || (typeof v === 'string' && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(v) && v.length <= 40);
+const PROVIDER_STATUS_KEYS = [
+  'id', 'label', 'configured', 'enabled', 'model', 'unavailableReason', 'privacyUrl', 'note', 'billed',
+  'internalRouting', 'approvalRequired', 'ceilingUsd', 'selection', 'inputUsdPerMillion', 'outputUsdPerMillion',
+  'officialInputUsdPerMillion', 'officialOutputUsdPerMillion', 'discountBps',
+];
+const ATTEMPT_KEYS = ['model', 'latencyMs', 'classification', 'httpStatus', 'providerCode', 'providerType', 'providerRequestId', 'providerMessage', 'rawErrorBody'];
+const DIAGNOSTIC_KEYS = [...ATTEMPT_KEYS, 'provider', 'attempts', 'finalOutcome'];
 export function readTestChatAction(value: unknown): TestChatAction | null {
-  if (!record(value) || !exactKeys(value, ['provider', 'requestId', 'messages', 'confirmGatewayDisclosure'])
+  if (!record(value) || !exactKeys(value, ['provider', 'requestId', 'messages', 'confirmGatewayDisclosure', 'model'])
+    || (value.model !== undefined && (typeof value.model !== 'string' || !isAllowedTestChatModel(value.model)))
     || !TEST_CHAT_PROVIDER_IDS.includes(value.provider as TestChatProviderId)
     || typeof value.requestId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value.requestId)
     || value.confirmGatewayDisclosure !== true || !Array.isArray(value.messages)
@@ -53,128 +143,125 @@ export function readTestChatAction(value: unknown): TestChatAction | null {
     messages.push({ role, content: m.content });
   }
   if (messages.at(-1)?.role !== 'user') return null;
-  return { provider: value.provider as TestChatProviderId, requestId: value.requestId, messages, confirmGatewayDisclosure: true };
+  return { provider: value.provider as TestChatProviderId, requestId: value.requestId, messages, confirmGatewayDisclosure: true,
+    ...(typeof value.model === 'string' ? { model: value.model } : {}) };
+}
+function isProviderStatus(p: unknown, expectedId: TestChatProviderId): p is TestChatProviderStatus {
+  return record(p) && exactKeys(p, PROVIDER_STATUS_KEYS) && p.id === expectedId && typeof p.label === 'string'
+    && typeof p.configured === 'boolean' && typeof p.enabled === 'boolean' && (p.model === null || safeText(p.model, 200))
+    && (p.unavailableReason === undefined || optionalText(p.unavailableReason, 400))
+    && (p.privacyUrl === undefined || optionalHttps(p.privacyUrl))
+    && (p.note === undefined || optionalText(p.note, 400))
+    && (p.billed === undefined || typeof p.billed === 'boolean')
+    && (p.internalRouting === undefined || typeof p.internalRouting === 'boolean')
+    && (p.approvalRequired === undefined || typeof p.approvalRequired === 'boolean')
+    && (p.ceilingUsd === undefined || optionalDecimal(p.ceilingUsd))
+    && (p.selection === undefined || p.selection === 'performance' || p.selection === 'backup' || p.selection === 'none')
+    && (p.inputUsdPerMillion === undefined || optionalDecimal(p.inputUsdPerMillion))
+    && (p.outputUsdPerMillion === undefined || optionalDecimal(p.outputUsdPerMillion))
+    && (p.officialInputUsdPerMillion === undefined || optionalDecimal(p.officialInputUsdPerMillion))
+    && (p.officialOutputUsdPerMillion === undefined || optionalDecimal(p.officialOutputUsdPerMillion))
+    && (p.discountBps === undefined || p.discountBps === null || (Number.isInteger(p.discountBps) && (p.discountBps as number) >= 0 && (p.discountBps as number) <= 10_000));
+}
+function isFeedSummary(v: unknown): v is TestChatFeedSummary {
+  return record(v) && typeof v.fresh === 'boolean'
+    && (v.observedAtMs === null || (typeof v.observedAtMs === 'number' && Number.isFinite(v.observedAtMs)))
+    && Number.isInteger(v.pricedRows) && (v.pricedRows as number) >= 0
+    && Number.isInteger(v.officialMatches) && (v.officialMatches as number) >= 0
+    && Number.isInteger(v.discountEligible) && (v.discountEligible as number) >= 0
+    && Number.isInteger(v.probePassing) && (v.probePassing as number) >= 0;
 }
 export function isTestChatStatus(v: unknown): v is TestChatStatus {
-  return record(v) && v.approvalRequired === true && v.noFallback === true && Array.isArray(v.providers)
+  return record(v) && typeof v.approvalRequired === 'boolean' && v.noFallback === true && Array.isArray(v.providers)
     && v.providers.length === TEST_CHAT_PROVIDER_IDS.length
-    && v.providers.every((p, i) => record(p) && p.id === TEST_CHAT_PROVIDER_IDS[i] && typeof p.label === 'string'
-      && typeof p.configured === 'boolean' && typeof p.enabled === 'boolean' && (p.model === null || safeText(p.model, TEST_CHAT_MAX_MODEL_CHARS)));
+    && v.providers.every((p, i) => isProviderStatus(p, TEST_CHAT_PROVIDER_IDS[i]))
+    && (v.feed === undefined || isFeedSummary(v.feed));
+}
+/** Keep every readable provider. One row that fails the text limit becomes "could not be read" and does not drop the others. */
+export function readPartialTestChatStatus(v: unknown): TestChatStatus | null {
+  if (!record(v) || !Array.isArray(v.providers)) return null;
+  const accepted = new Map<TestChatProviderId, TestChatProviderStatus>();
+  for (const row of v.providers) {
+    if (!record(row) || !TEST_CHAT_PROVIDER_IDS.includes(row.id as TestChatProviderId)) continue;
+    const id = row.id as TestChatProviderId;
+    if (isProviderStatus(row, id)) accepted.set(id, row);
+  }
+  if (!accepted.size) return null;
+  const providers = TEST_CHAT_PROVIDER_IDS.map(id => accepted.get(id) ?? {
+    id, label: id, configured: false, enabled: false, model: null, approvalRequired: false,
+    unavailableReason: 'This provider’s status could not be read.',
+  });
+  const feed = v.feed === undefined || isFeedSummary(v.feed) ? v.feed as TestChatFeedSummary | undefined : undefined;
+  return {
+    providers,
+    approvalRequired: typeof v.approvalRequired === 'boolean' ? v.approvalRequired : providers.some(p => p.approvalRequired === true),
+    noFallback: true,
+    ...(feed ? { feed } : {}),
+  };
 }
 export function isTestChatReply(v: unknown): v is TestChatReply {
   return record(v) && typeof v.requestId === 'string' && TEST_CHAT_PROVIDER_IDS.includes(v.provider as TestChatProviderId)
-    && safeText(v.content, TEST_CHAT_MAX_RESPONSE_CHARS) && safeText(v.model, TEST_CHAT_MAX_MODEL_CHARS) && v.noFallback === true
+    && safeText(v.content, TEST_CHAT_MAX_RESPONSE_CHARS) && safeText(v.model, 200) && v.noFallback === true
     && typeof v.latencyMs === 'number' && Number.isFinite(v.latencyMs) && v.latencyMs >= 0
-    && (v.syntheticMatch === undefined || typeof v.syntheticMatch === 'boolean')
     && (v.usage === undefined || (record(v.usage) && Number.isSafeInteger(v.usage.inputTokens) && (v.usage.inputTokens as number) >= 0
       && Number.isSafeInteger(v.usage.outputTokens) && (v.usage.outputTokens as number) >= 0));
 }
-/** Never display an arbitrary provider/server exception, which can contain credentials or prompts. */
+function isTestChatAttempt(v: unknown): v is TestChatAttemptDiagnostic {
+  return record(v) && exactKeys(v, ATTEMPT_KEYS)
+    && (v.model === null || safeText(v.model, 200))
+    && typeof v.latencyMs === 'number' && Number.isFinite(v.latencyMs) && v.latencyMs >= 0
+    && TEST_CHAT_DIAGNOSTIC_CLASSIFICATIONS.includes(v.classification as TestChatDiagnosticClassification)
+    && (v.httpStatus === null || (typeof v.httpStatus === 'number' && Number.isInteger(v.httpStatus) && v.httpStatus >= 100 && v.httpStatus <= 599))
+    && (v.providerCode === null || optionalText(v.providerCode, 200))
+    && (v.providerType === null || optionalText(v.providerType, 200))
+    && (v.providerRequestId === null || optionalText(v.providerRequestId, 200))
+    && (v.providerMessage === null || optionalText(v.providerMessage, 1600))
+    && (v.rawErrorBody === null || optionalText(v.rawErrorBody, 1600));
+}
+export function isTestChatDiagnostic(v: unknown): v is TestChatDiagnostic {
+  return record(v) && exactKeys(v, DIAGNOSTIC_KEYS)
+    && TEST_CHAT_PROVIDER_IDS.includes(v.provider as TestChatProviderId)
+    && (v.model === null || safeText(v.model, 200))
+    && typeof v.latencyMs === 'number' && Number.isFinite(v.latencyMs) && v.latencyMs >= 0
+    && TEST_CHAT_DIAGNOSTIC_CLASSIFICATIONS.includes(v.classification as TestChatDiagnosticClassification)
+    && (v.httpStatus === null || (typeof v.httpStatus === 'number' && Number.isInteger(v.httpStatus) && v.httpStatus >= 100 && v.httpStatus <= 599))
+    && (v.providerCode === null || optionalText(v.providerCode, 200))
+    && (v.providerType === null || optionalText(v.providerType, 200))
+    && (v.providerRequestId === null || optionalText(v.providerRequestId, 200))
+    && (v.providerMessage === null || optionalText(v.providerMessage, 1600))
+    && (v.rawErrorBody === null || optionalText(v.rawErrorBody, 1600))
+    && (v.attempts === undefined || (Array.isArray(v.attempts) && v.attempts.length > 0 && v.attempts.length <= 8 && v.attempts.every(isTestChatAttempt)))
+    && (v.finalOutcome === undefined || optionalText(v.finalOutcome, 200));
+}
+function formatAttempt(prefix: string, d: Pick<TestChatAttemptDiagnostic, 'model' | 'classification' | 'httpStatus' | 'providerCode' | 'providerType' | 'providerRequestId' | 'providerMessage' | 'rawErrorBody' | 'latencyMs'>): string[] {
+  return [
+    `${prefix}Model: ${d.model ?? '(not reported)'}`,
+    `${prefix}Classification: ${d.classification}`,
+    `${prefix}HTTP status: ${d.httpStatus ?? '(not reported)'}`,
+    `${prefix}Provider code: ${d.providerCode ?? '(not reported)'}`,
+    `${prefix}Provider type: ${d.providerType ?? '(not reported)'}`,
+    `${prefix}Provider request id: ${d.providerRequestId ?? '(not reported)'}`,
+    `${prefix}Latency: ${d.latencyMs} ms`,
+    `${prefix}Message: ${d.providerMessage ?? '(not reported)'}`,
+    `${prefix}Raw body: ${d.rawErrorBody ?? '(not reported)'}`,
+  ];
+}
+export function formatTestChatDiagnostic(d: TestChatDiagnostic): string {
+  const lines = [
+    `Provider: ${d.provider}`,
+    ...(d.finalOutcome ? [`Final outcome: ${d.finalOutcome}`] : []),
+    ...formatAttempt('', d),
+    ...((d.classification === 'timeout' && d.httpStatus === 504)
+      ? ['Meaning: the provider gateway timed out (HTTP 504) before a complete reply arrived. This is a provider-side gateway time-out, not a missing key.']
+      : []),
+  ];
+  if (d.attempts?.length) {
+    d.attempts.forEach((attempt, index) => {
+      lines.push(`--- Attempt ${index + 1} ---`);
+      lines.push(...formatAttempt('', attempt));
+    });
+  }
+  return lines.join('\n');
+}
+/** Safe fallback when a reply cannot be confirmed. Admin diagnostics may add a separate redacted payload. */
 export const TEST_CHAT_FAILURE = 'Test response could not be confirmed. No other provider was tried. A dispatched request may still have cost; do not automatically retry.';
-
-export const TEST_CHAT_SYNTHETIC_PROMPT = 'What is 2 + 2? Reply with one number only.';
-export const TEST_CHAT_SYNTHETIC_OUTPUT_TOKENS = 16;
-export const TEST_CHAT_READINESS_GATES = ['configured', 'enabled', 'catalog', 'quality', 'supplierCeiling', 'payloadApproval', 'budget', 'reviewerTrust', 'dispatchPolicy'] as const;
-export type TestChatReadinessGateId = typeof TEST_CHAT_READINESS_GATES[number];
-export interface TestChatReadinessGate {
-  state: 'pass' | 'blocked' | 'unknown';
-  code: string;
-  message: string;
-  action: string;
-}
-/** Sanitized, server-derived review metadata. No credential or credential digest is exposed. */
-export interface TestChatReviewRequest {
-  kind: 'qubax-admin-review-request-v1';
-  approvalId: string;
-  payloadDigest: string;
-  requestId: string;
-  model: string;
-  modelRevision: string;
-  evidenceBinding: string;
-  maximumNanoUsd: number;
-  expiresAtMs: number;
-  body: { messages: TestChatMessage[]; max_tokens: number; stream: false; model: string };
-  /** Exact bytes sent as UTF-8; hash this string rather than reserializing with another implementation. */
-  wirePayload: string;
-}
-export interface TestChatReadiness {
-  provider: 'qubax';
-  requestId: string;
-  checkedAtMs: number;
-  ready: boolean;
-  readOnly: true;
-  noProviderCall: true;
-  noFallback: true;
-  gates: Record<TestChatReadinessGateId, TestChatReadinessGate>;
-  model: string | null;
-  expiresAtMs: number | null;
-  reviewRequest: TestChatReviewRequest | null;
-  catalogDigest: string | null;
-  lastSafeDiagnostic: string | null;
-  /** Neither local budget nor successful inference proves the gateway balance or charge. */
-  providerBalance: 'not-checked';
-}
-export interface TestChatApprovalImport {
-  action: TestChatAction;
-  attestation: { keyId: string; payload: string; signature: string };
-}
-export interface TestChatApprovalReceipt {
-  imported: true;
-  requestId: string;
-  expiresAtMs: number;
-  noProviderCall: true;
-  noFallback: true;
-}
-export function readTestChatApprovalImport(v: unknown, maxPayloadChars = 16_000): TestChatApprovalImport | null {
-  if (!record(v) || !exactKeys(v, ['action', 'attestation'])) return null;
-  const action = readTestChatAction(v.action), a = v.attestation;
-  if (!action || !record(a) || !exactKeys(a, ['keyId', 'payload', 'signature'])
-    || typeof a.keyId !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(a.keyId)
-    || !safeText(a.payload, maxPayloadChars) || typeof a.signature !== 'string' || !/^[A-Za-z0-9_-]{86}$/.test(a.signature)) return null;
-  return { action, attestation: { keyId: a.keyId, payload: a.payload, signature: a.signature } };
-}
-export function isTestChatReadiness(v: unknown): v is TestChatReadiness {
-  return record(v) && v.provider === 'qubax' && typeof v.requestId === 'string'
-    && timestamp(v.checkedAtMs) && typeof v.ready === 'boolean' && v.readOnly === true
-    && v.noProviderCall === true && v.noFallback === true && v.providerBalance === 'not-checked'
-    && (v.model === null || safeText(v.model, TEST_CHAT_MAX_MODEL_CHARS)) && (v.expiresAtMs === null || timestamp(v.expiresAtMs))
-    && (v.catalogDigest === null || (typeof v.catalogDigest === 'string' && /^[a-f0-9]{64}$/.test(v.catalogDigest)))
-    && (v.lastSafeDiagnostic === null || safeText(v.lastSafeDiagnostic, 100)) && record(v.gates)
-    && TEST_CHAT_READINESS_GATES.every(id => { const g = (v.gates as Record<string, unknown>)[id];
-      return record(g) && ['pass', 'blocked', 'unknown'].includes(g.state as string) && safeText(g.code, 100)
-        && safeText(g.message, 600) && typeof g.action === 'string' && g.action.length <= 600;
-    }) && (v.reviewRequest === null || (isTestChatReviewRequest(v.reviewRequest) && v.reviewRequest.requestId === v.requestId && v.reviewRequest.model === v.model))
-    && (!v.ready || (timestamp(v.expiresAtMs) && v.expiresAtMs > Number(v.checkedAtMs)
-      && TEST_CHAT_READINESS_GATES.every(id => ((v.gates as Record<string, TestChatReadinessGate>)[id]).state === 'pass')));
-}
-function isTestChatReviewRequest(v: unknown): v is TestChatReviewRequest {
-  return record(v) && v.kind === 'qubax-admin-review-request-v1'
-    && ['approvalId', 'payloadDigest', 'evidenceBinding'].every(k => typeof v[k] === 'string' && /^[a-f0-9]{64}$/.test(v[k] as string))
-    && typeof v.requestId === 'string' && safeText(v.model, TEST_CHAT_MAX_MODEL_CHARS) && safeText(v.modelRevision, 2048)
-    && Number.isSafeInteger(v.maximumNanoUsd) && (v.maximumNanoUsd as number) > 0 && timestamp(v.expiresAtMs)
-    && record(v.body) && exactKeys(v.body, ['messages', 'max_tokens', 'stream', 'model']) && v.body.model === v.model
-    && typeof v.wirePayload === 'string' && v.wirePayload.length <= 256_000 && v.wirePayload === JSON.stringify(v.body)
-    && v.body.stream === false && Number.isSafeInteger(v.body.max_tokens) && Number(v.body.max_tokens) >= 1 && Number(v.body.max_tokens) <= TEST_CHAT_MAX_OUTPUT_TOKENS
-    && !!readTestChatAction({ provider: 'qubax', requestId: v.requestId, messages: v.body.messages, confirmGatewayDisclosure: true });
-}
-export function isTestChatApprovalReceipt(v: unknown): v is TestChatApprovalReceipt {
-  return record(v) && v.imported === true && typeof v.requestId === 'string' && timestamp(v.expiresAtMs)
-    && v.noProviderCall === true && v.noFallback === true;
-}
-
-export const TEST_CHAT_BALANCE_CODES = ['disabled', 'configuration', 'busy', 'cancelled', 'timeout', 'authentication', 'permission', 'rate-limit', 'provider-error', 'invalid-response', 'unavailable'] as const;
-export type TestChatBalanceCode = typeof TEST_CHAT_BALANCE_CODES[number];
-export type TestChatBalance = { status: 'available'; currency: 'USD'; balanceMicros: string; checkedAtMs: number }
-  | { status: 'unknown'; code: TestChatBalanceCode };
-export function isTestChatBalance(v: unknown): v is TestChatBalance {
-  return record(v) && ((v.status === 'available' && v.currency === 'USD' && typeof v.balanceMicros === 'string'
-    && /^(0|[1-9][0-9]{0,15})$/.test(v.balanceMicros) && Number(v.balanceMicros) <= Number.MAX_SAFE_INTEGER && timestamp(v.checkedAtMs))
-    || (v.status === 'unknown' && typeof v.code === 'string' && TEST_CHAT_BALANCE_CODES.includes(v.code as TestChatBalanceCode)));
-}
-
-export const TEST_CHAT_FAILURE_CODES = ['disabled', 'configuration', 'storage', 'approval-or-budget', 'invalid', 'unconfirmed', 'catalog', 'approval', 'budget', 'capacity', 'selection', 'capability'] as const;
-export const TEST_CHAT_DIAGNOSTIC_CODES = ['budget-configuration', 'qubax-disabled-or-unconfigured', 'qubax-configuration', 'qubax-capability-excluded', 'qubax-capacity',
-  'qubax-price-or-quality-unverified', 'qubax-selection-claim-mismatch', 'qubax-data-approval-or-ceiling-unavailable', 'qubax-budget',
-  'qubax-auth-401', 'qubax-auth-403', 'qubax-payment-402', 'qubax-rate-429', 'qubax-upstream-5xx', 'qubax-unavailable',
-  'QUBAX_CANCELLED', 'QUBAX_INVALID_RESPONSE', 'QUBAX_INCOMPLETE_STREAM', 'QUBAX_POLICY_BLOCKED', 'QUBAX_APPROVAL_REVOKED'] as const;
-export const TEST_CHAT_REVIEW_ERROR_CODES = ['invalid', 'trust-unavailable', 'catalog-unavailable', 'review-invalid', 'approval-conflict', 'catalog-conflict', 'storage-unavailable', 'capacity'] as const;

@@ -1,18 +1,19 @@
 # Public Qubax price observations
 
-The server can automatically collect Qubax marketplace prices and independent
-official price pages. This is an **observation feed**, not paid-inference
-authorization, an all-in quote, or proof of realized savings. It does not modify
-Builder routing, the reviewed Chat catalog, supplier contracts, account authority,
-privacy reviews, quality benchmarks, or exact-payload approvals.
+The server collects the Qubax marketplace. This is an **observation feed**, not an
+all-in quote or proof of realized savings. It does not modify Builder routing, the
+reviewed Chat catalog, supplier contracts, account authority, or privacy reviews.
 
 ## Activation and cadence
 
-The existing server operator can enable `QUBAX_PRICE_FEED_ENABLED=1`. It defaults
-off. A Qubax key or `QUBAX_ENABLED` does not activate this feed; enabling the feed
-does not activate inference. This change does not set production environment
-variables, create Cloud Scheduler infrastructure, or perform production writes
-during development/tests.
+The feed is on unless `QUBAX_PRICE_FEED_ENABLED=0`. A snapshot is fresh when the
+Qubax market fetch succeeds. Official price pages are not fetched and cannot
+block publication. One bad market row is skipped. A model is eligible when
+`discount_pct` is at least 90, the row is text or multimodal, and one try
+(4,000 input tokens and 250 output tokens) fits the per-try cap, which defaults
+to `$0.02`. A model with `requests_24h` of 0 is not chosen until a Hindi and an
+English probe pass, and those probes reject the wrong script. Ranking is probe
+success, then latency, then the cheaper price. Live usage breaks a price tie.
 
 The shared scheduler registers `qubax-public-price-feed`, runs it at startup and
 every four minutes while the process is running, and includes it in the existing
@@ -32,29 +33,18 @@ extra retry timer: the next startup or scheduled attempt performs the retry.
 
 ## Fixed sources and intentionally limited coverage
 
-All requests are unauthenticated public HTTPS **GETs** with no cookies, credentials
-or user data. Exactly these three URLs are allowed:
+The only URL the collector fetches is `https://api.qubax.ai/v1/market/models`:
+token-priced TEXT/MULTIMODAL rows, excluding zero context capacity. The request
+is an unauthenticated public HTTPS GET. OpenAI and Z.ai page parsers remain in
+the module for inspection and are not on the publish path.
 
-- `https://api.qubax.ai/v1/market/models`: token-priced TEXT/MULTIMODAL rows,
-  excluding rows advertising zero context capacity.
-- `https://developers.openai.com/api/docs/pricing.md`: flagship **Standard**
-  pricing only, retaining distinct short/long context rows and explicit cache
-  rates. Batch/Flex, Fast, regional, specialized and media sections are excluded.
-- `https://docs.z.ai/guides/overview/pricing.md`: latest and current text-model
-  tables only. Conditional free cache storage remains labeled conditional.
-
-This deliberately does not claim coverage of every Qubax model or official
-provider. Model labels remain source labels. There is no heuristic alias join,
-supplier selection or provider inferred from a market label.
-
-Qubax's documented `benchmark` and `discount_pct` are OpenRouter-relative and
-are not used. Its blended price is not used as an equivalent-workload price.
-See [Qubax's market contract](https://qubax.ai/docs/market).
+`discount_pct` and `requests_24h` from that payload are the eligibility inputs.
+The blended `price` field is not the try cost. See [Qubax's market contract](https://qubax.ai/docs/market).
 
 ## Bounds, provenance and unknowns
 
-- Exact decimal lexemes are converted to integer nano-USD. Negative, unsafe or
-  sub-nanodollar rates fail closed instead of rounding a discount into existence.
+- Exact decimal lexemes are converted to integer nano-USD. A negative, unsafe or
+  sub-nanodollar rate drops that row. It does not reject the rest of the market.
 - Each GET has a ten-second deadline and a two-megabyte decoded body bound.
   Redirects, unexpected content types, private/reserved connection addresses,
   invalid UTF-8 and changed/ambiguous supported table schemas are rejected.
@@ -95,12 +85,10 @@ supplier-enforced total liability including internal retries/failovers, current
 Hindi/text quality and downstream data protections. Public tariffs alone cannot
 establish those facts. Missing evidence deliberately skips Qubax.
 
-The user priority remains **at least 90% verified savings first, then response
-quality**. The existing selector filters by savings and ranks the eligible
-reviewed options by quality, reliability, latency and conservative cost.
-Qubax's key-level routing policies and transparent internal seller failover are
-not a documented per-request seller/revision pin or an all-in charge cap.
-`min_discount` alone cannot supply the independent official comparison.
+Public chat uses this feed, not an official-page comparison. The order is: the
+user always gets a reply (a miss falls through), the reply matches the user's
+script, then the cheaper model among equal probe results. The catalog selector
+is unchanged for a Gateway caller that pins `expectedSelection`.
 See [Qubax routing modes](https://qubax.ai/docs/routing-modes).
 
 ## Verification

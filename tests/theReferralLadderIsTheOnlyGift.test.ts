@@ -141,6 +141,7 @@ describe('the retired grants are gone from the code, not just switched off', () 
     'src/server/lib/interimWelcomeGift.ts',
     'src/server/lib/welcomeGiftExclusion.ts',
     'src/server/lib/welcomeBackfill.ts',
+    'src/server/lib/adminWelcomeGift.ts',
     'src/components/panels/FreeGiftBanner.tsx',
     'src/components/panels/PhoneBonusCard.tsx',
   ];
@@ -151,9 +152,19 @@ describe('the retired grants are gone from the code, not just switched off', () 
 
   it('nothing in the app imports them or calls the claim route', () => {
     const hits = [...filesUnder('src'), 'server.ts']
-      .filter((f) => /(welcomeBonus|giftPlan|weeklyTopUp|interimWelcomeGift|welcomeGiftExclusion|welcomeBackfill|FreeGiftBanner|PhoneBonusCard)'/.test(codeOf(f))
-        || codeOf(f).includes('claim-phone-bonus'));
+      .filter((f) => /(welcomeBonus|giftPlan|weeklyTopUp|interimWelcomeGift|welcomeGiftExclusion|welcomeBackfill|adminWelcomeGift|FreeGiftBanner|PhoneBonusCard)'/.test(codeOf(f))
+        || codeOf(f).includes('claim-phone-bonus')
+        || codeOf(f).includes('/api/admin/welcome-gift/bulk'));
     expect(hits).toEqual([]);
+  });
+
+  it('the one-press ₹150 bulk new-user gift is gone, not just switched off', () => {
+    const admin = codeOf('src/server/routes/admin.ts');
+    const panel = codeOf('src/components/AdminDashboard.tsx');
+    expect(admin).not.toMatch(/welcome-gift\/bulk/);
+    expect(admin).not.toContain('grantWelcomeGift');
+    expect(panel).not.toContain('handleBulkWelcomeGift');
+    expect(panel).not.toMatch(/Gift ₹150 to new users/);
   });
 
   it('the retired-bonus size is read ONLY to understand old wallets in a merge', () => {

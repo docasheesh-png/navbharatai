@@ -110,6 +110,7 @@ const ALLOWED: Record<string, string> = {
   'src/lib/freeChatChainView.ts': 'shared schema/validation for the admin-only Free Chat Chain panel and server controls; no ordinary chat labels',
   'src/components/admin/DeepinfraComparisonPanel.tsx': 'mounted only in the server-authenticated admin dashboard; operators must review exact candidate identities and paid rates before a comparison',
   'src/lib/deepinfraComparison.ts': 'fixed model identities and schema consumed only by that admin comparison panel and server, never public engine labels',
+  'src/lib/testChatBot.ts': 'shared schema/validation for the admin-only Test Chat Bot panel and server; provider ids are operator-facing and never ordinary chat labels',
   // The USER'S OWN third-party integrations. Naming them IS the feature.
   'src/components/ide/APIMarketplace.tsx': "catalogue of APIs the USER can add to THEIR app",
   'src/components/ide/AIChat.tsx': "the IDE's bring-your-own-key provider picker",

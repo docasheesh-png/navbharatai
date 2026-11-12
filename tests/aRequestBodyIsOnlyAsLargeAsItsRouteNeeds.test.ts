@@ -34,11 +34,8 @@ const REVIEWED_SMALL: Record<string, string> = {
   '/api/admin/provider-switches': 'strict four-key JSON allowlist: provider id from a fixed list, boolean on, 3–300 character reason, integer revision; every other field rejected; standard 1 MB parser cap unchanged',
   '/api/admin/api-providers/:id/account': 'strict one-key JSON allowlist: accountEmail, an email of at most 254 characters or empty; every other field rejected; provider id must be one of the directory ids; standard 1 MB parser cap unchanged',
   '/api/admin/free-chat-chain/deepinfra-comparison': 'strict four-key allowlist: UUID run id, 64-character tariff digest, literal true consent and 10–500 character audit reason; no prompts/files/credentials, centrally enforced 4 KB parser cap',
-  '/api/admin/test-chat-bot/chat': 'strict four-key allowlist: provider enum, UUID request id, literal disclosure confirmation and at most 64 alternating text messages capped at 32,000 total characters; centrally enforced 256 KB parser cap, no attachments/credentials/endpoints',
-  '/api/admin/test-chat-bot/readiness': 'same strict four-key text action as test chat: at most 64 alternating messages and 32,000 total characters; centrally enforced 256 KB JSON cap; read-only checks, no attachments/credentials/endpoints',
-  '/api/admin/test-chat-bot/approval': 'strict action/attestation allowlist: bounded 32,000-character text action plus at most 16,000 canonical signed review characters, 80-character key id and 86-character signature; centrally enforced 256 KB JSON cap, no supplied keys/files/endpoints',
-  '/api/admin/test-chat-bot/catalog': 'strict action/attestation allowlist: bounded text action plus at most 128,000 signed catalog characters, 80-character key id and 86-character signature; every catalog candidate is strictly validated, at most 50; centrally enforced 512 KB JSON cap, no source documents/credentials/endpoints',
-  '/api/admin/test-chat-bot/balance': 'strict empty JSON object only; all caller fields rejected; centrally enforced 1 KB JSON cap, fixed server endpoint and saved credential, no prompt/account/credential input',
+  '/api/admin/test-chat-bot/chat': 'strict five-key allowlist: provider enum, UUID request id, literal disclosure confirmation, at most 64 alternating text messages capped at 32,000 total characters, and an optional model id matching a short safe identifier; centrally enforced 256 KB parser cap, no attachments/credentials/endpoints',
+  '/api/admin/test-chat-bot/balance': 'strict empty JSON object only; every caller field is rejected; no prompt, credential, model or amount is accepted; standard 1 MB parser cap unchanged',
   '/api/auth/sessions/revoke': 'strict one-key JSON allowlist: confirm must be true; every other field rejected, no UID/files/credentials/prompts; standard 1 MB parser cap unchanged',
   '/api/admin/surplus-registry/connection-test': 'strict empty JSON object only; every caller field is rejected, no prompts, models, credentials, reviews or budgets; standard 1 MB parser cap unchanged',
   '/api/admin/surplus-registry/credential-check': 'strict empty JSON object only; every caller field is rejected, saved server credential only and no account response body; standard 1 MB parser cap unchanged',
@@ -79,6 +76,7 @@ const REVIEWED_SMALL: Record<string, string> = {
   '/api/agentv3/publish': 'ids and the deploy choice; the files come from the server, not the body',
   '/api/agentv3/preview-error': '`message` is cut to 4,000 characters by the client and the server; `source` is a word',
   '/api/agentv3/preview-error/auto-repair': '`message` is cut to 4,000 characters by the client and the server; the rest are ids and a framework word (Q-148)',
+  '/api/agentv3/unsend': 'workspace and attachment scope ids only, never attachment bytes: session must match the owned conversation; message id is at most 160 word/hyphen characters; retains the 1 MB parser cap',
   '/api/agentv3/respond': '`requestId` and `approved`',
   '/api/agentv3/steer': '`message` is cut to 2,000 characters (sanitizeSteerMessage)',
   '/api/agentv3/queue/enqueue': '`prompt` is refused over MAX_PROMPT_LEN (20,000 characters)',
@@ -404,7 +402,7 @@ describe('the path matcher', () => {
   });
 
   it('ordinary routes are small and keep no raw bytes', () => {
-    for (const p of ['/api/auth/send-otp', '/api/profile/budget', '/api/agentv3/stop', '/api/payment/create-order']) {
+    for (const p of ['/api/auth/send-otp', '/api/profile/budget', '/api/agentv3/stop', '/api/agentv3/unsend', '/api/v1/agentv3/unsend', '/api/payment/create-order']) {
       expect(isLargeBodyRoute(p), p).toBe(false);
       expect(needsRawBody(p), p).toBe(false);
     }
@@ -428,6 +426,8 @@ describe('jsonBodyParser on a live Express app', () => {
       res.json({ size: JSON.stringify(req.body ?? null).length, raw: Buffer.isBuffer(raw) ? raw.length : null });
     };
     app.post('/api/agentv3/chat', echo);
+    app.post('/api/agentv3/unsend', echo);
+    app.post('/api/v1/agentv3/unsend', echo);
     app.post('/api/auth/send-otp', echo);
     app.post('/api/payment/webhook', echo);
     app.post('/api/bots/whatsapp/webhook/:botId', echo);
@@ -441,6 +441,15 @@ describe('jsonBodyParser on a live Express app', () => {
 
   const post = (path: string, body: string) => fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
   const big = JSON.stringify({ attachments: [{ base64: 'A'.repeat(3 * 1024 * 1024) }] }); // ~3 MB
+
+  it.each(['/api/agentv3/unsend', '/api/v1/agentv3/unsend'])('scope-only unsend %s accepts IDs but rejects attachment-sized bodies', async path => {
+    const scoped = await post(path, JSON.stringify({ workspaceId: 'agentv3-owner-chat', attachmentSessionId: 'chat', attachmentMessageId: '123' }));
+    expect(scoped.status).toBe(200);
+    expect((await scoped.json()).raw).toBeNull();
+    const oversized = await post(path, big);
+    expect(oversized.status).toBe(413);
+    expect((await oversized.json()).code).toBe('BODY_TOO_LARGE');
+  });
 
   it('a 3 MB attachment reaches the build chat', async () => {
     const res = await post('/api/agentv3/chat', big);

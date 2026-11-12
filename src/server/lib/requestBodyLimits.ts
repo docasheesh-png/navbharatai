@@ -54,6 +54,7 @@ export interface BodyRoute {
  */
 export const LARGE_BODY_ROUTES: readonly BodyRoute[] = [
   // ── Build and chat with attachments ──────────────────────────────────────────────────────────────
+  { path: '/api/agentv3/attachments', why: '`base64` — one private original, bounded to15MiB raw (20MiB base64 plus JSON); Pro file picker' },
   { path: '/api/agentv3/chat', why: '`attachments` — images, PDFs and ZIPs as base64 with the build prompt (useAgentV3Build.ts; client guard attachmentLimits.ts, 22 MB raw)' },
   { path: '/api/agentv3/import-files', why: '`files` — folder and ZIP import batches (App.tsx, masterZipImport.ts)' },
   { path: '/api/chat/navbharat', why: '`fileAttachments` (base64) and `history` (useChatEngine.ts)' },
@@ -146,11 +147,7 @@ export interface SmallBodyRoute extends BodyRoute {
 export const SMALL_BODY_ROUTES: readonly SmallBodyRoute[] = [
   { path: '/api/voice-ai/generate', limit: '32kb', why: 'VoiceAI submits at most 2,500 Unicode codepoints plus four small quote/selection fields; no attachments or caller endpoint' },
   { path: '/api/admin/free-chat-chain/deepinfra-comparison', limit: '4kb', why: 'fixed comparison approval: one UUID, one tariff digest, one boolean and a 500-character reason; never prompts, files or credentials' },
-  { path: '/api/admin/test-chat-bot/readiness', limit: '256kb', why: 'same bounded exact text action as test chat; read-only safety checks, no inference' },
-  { path: '/api/admin/test-chat-bot/approval', limit: '256kb', why: 'bounded text action plus at most 16,000 canonical signed review characters; no credentials or attachments' },
-  { path: '/api/admin/test-chat-bot/catalog', limit: '512kb', why: 'bounded text action plus at most 128,000 signed catalog characters with JSON escaping; no source documents or credentials' },
-  { path: '/api/admin/test-chat-bot/balance', limit: '1kb', why: 'explicit empty metadata request; server owns the provider key and endpoint' },
-  { path: '/api/admin/test-chat-bot/chat', limit: '256kb', why: 'strict four-key text-only test chat: at most 64 messages and 32,000 total UTF-16 characters, allowing JSON escaping; no attachments, keys or endpoints' },
+  { path: '/api/admin/test-chat-bot/chat', limit: '256kb', why: 'strict five-key text-only test chat: provider, request id, disclosure confirmation, at most 64 messages and 32,000 total UTF-16 characters, and an optional safe model id; no attachments, keys or endpoints' },
   { path: '/api/failedbr/mcp', limit: '64kb', why: 'bounded JSON-RPC arguments and optional evidence-linked autopsy metadata; never full reports or files' },
   { path: '/api/failedbr/reports/:workspaceId/:historyId/autopsy', limit: '64kb', why: 'bounded separate review metadata, counts and evidence links; never the saved report' },
   { path: '/api/failedbr/oauth/register', limit: '16kb', why: 'bounded OAuth client name and at most five redirect URLs' },
@@ -332,3 +329,4 @@ export function formBodyParser(opts: JsonBodyParserOptions = {}): RequestHandler
     });
   };
 }
+

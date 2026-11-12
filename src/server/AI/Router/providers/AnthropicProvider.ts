@@ -2,6 +2,13 @@ import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
 import Anthropic from '@anthropic-ai/sdk';
 
+/** Resolve the same Claude key aliases accepted by SDA's direct fallback. */
+export function resolveAnthropicApiKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return [env.ANTHROPIC_API_KEY, env.CLAUDE_API_KEY]
+    .map((value) => value?.trim())
+    .find((value): value is string => !!value);
+}
+
 /** Detect an image's MIME type from its base64 leading bytes (JPEG/PNG/GIF/WebP). */
 export function sniffImageMime(base64: string): string {
   if (base64.startsWith('/9j/')) return 'image/jpeg';
@@ -14,7 +21,7 @@ export function sniffImageMime(base64: string): string {
 export class AnthropicProvider implements AIProvider {
   name: 'ANTHROPIC' = 'ANTHROPIC';
   priority = 4;
-  /** Set true in the PROFESSIONAL universe so Claude is tried only after the race fails. */
+  /** Set true in the PROFESSIONAL universe so Claude is tried only after earlier fallback rungs fail. */
   lastResort = false;
 
   private client: Anthropic;
@@ -29,9 +36,11 @@ export class AnthropicProvider implements AIProvider {
   // killed every fallback chain that constructed this provider without an explicit model.
   constructor(modelId = 'claude-sonnet-4-6') {
     this.modelId = modelId;
-    console.log("ANTHROPIC_API_KEY check:", !!process.env.ANTHROPIC_API_KEY);
+    const apiKey = resolveAnthropicApiKey();
+    if (!apiKey) throw new Error('Anthropic API key is not configured (ANTHROPIC_API_KEY / CLAUDE_API_KEY)');
+    console.log("[ANTHROPIC] API key present:", !!apiKey);
     // Native Anthropic endpoint only — the aicredits proxy has been removed.
-    this.client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    this.client = new Anthropic({ apiKey });
   }
 
   async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[], signal?: AbortSignal): Promise<AIProviderResponse> {
@@ -120,6 +129,6 @@ export class AnthropicProvider implements AIProvider {
   }
 
   async healthCheck(): Promise<boolean> {
-    return !!process.env.ANTHROPIC_API_KEY;
+    return !!resolveAnthropicApiKey();
   }
 }

@@ -79,7 +79,7 @@ export function firestoreWalletReader(db: Firestore | null): WalletReader {
     // unless WALLET_MERGE_RESOLVE=on; a resolver error propagates to the reader, which reports balance as unknown.
     let ownerId = userId;
     if (walletMergeResolveEnabled()) {
-      ownerId = await resolveCanonicalWalletId(async (u) => {
+      ownerId = await resolveCanonicalWalletIdStrict(async (u) => {
         const s = await getDoc(doc(db as any, 'user_token_wallets', u));
         return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
       }, userId);

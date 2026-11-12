@@ -251,7 +251,7 @@ export function computeAddonRemoval(
 
 async function canonicalId(db: any, uid: string): Promise<string> {
   if (!walletMergeResolveEnabled()) return uid;
-  return resolveCanonicalWalletId(async (u) => {
+  return resolveCanonicalWalletIdStrict(async (u) => {
     const s = await getDoc(doc(db, 'user_token_wallets', u));
     return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
   }, uid);

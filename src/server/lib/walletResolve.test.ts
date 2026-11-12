@@ -82,3 +82,21 @@ describe('resolveCanonicalWalletIdStrict (financial paths)', () => {
       .rejects.toBeInstanceOf(WalletOwnerResolutionError);
   });
 });
+
+
+describe('strict wallet resolution never normalizes account identity', () => {
+  it.each([' A', 'A '])('rejects malformed starting uid %j before reading any wallet', async (uid) => {
+    const lookedUp: string[] = [];
+    await expect(resolveCanonicalWalletIdStrict(async id => { lookedUp.push(id); return null; }, uid))
+      .rejects.toBeInstanceOf(WalletOwnerResolutionError);
+    expect(lookedUp).toEqual([]);
+  });
+
+  it.each([' B', 'B '])('rejects malformed pointer %j without looking up the normalized account', async (pointer) => {
+    const lookedUp: string[] = [];
+    await expect(resolveCanonicalWalletIdStrict(async id => { lookedUp.push(id); return pointer; }, 'A'))
+      .rejects.toBeInstanceOf(WalletOwnerResolutionError);
+    expect(lookedUp).toEqual(['A']);
+    expect(lookedUp).not.toContain('B');
+  });
+});

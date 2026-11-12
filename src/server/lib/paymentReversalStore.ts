@@ -155,7 +155,7 @@ export async function applyOrderReversal(
   const buyerUid = String((pre.data() as { userId?: unknown })?.userId ?? '');
   let walletOwner = buyerUid;
   if (walletOwner && walletMergeResolveEnabled()) {
-    walletOwner = await resolveCanonicalWalletId(async (u) => {
+    walletOwner = await resolveCanonicalWalletIdStrict(async (u) => {
       const s = await getDoc(doc(db, 'user_token_wallets', u));
       return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
     }, walletOwner);

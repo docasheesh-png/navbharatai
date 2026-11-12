@@ -30,8 +30,9 @@ export async function resolveCanonicalWalletIdStrict(
   uid: string,
   maxHops = 5,
 ): Promise<string> {
-  const start = typeof uid === 'string' ? uid.trim() : '';
-  if (!start || !Number.isSafeInteger(maxHops) || maxHops < 1) {
+  // Wallet IDs are opaque: normalization could target a different account.
+  const start = typeof uid === 'string' ? uid : '';
+  if (!start || start !== start.trim() || !Number.isSafeInteger(maxHops) || maxHops < 1) {
     throw new WalletOwnerResolutionError('Wallet ownership input is invalid.');
   }
 
@@ -45,10 +46,10 @@ export async function resolveCanonicalWalletIdStrict(
       throw new WalletOwnerResolutionError();
     }
     if (raw === null || raw === undefined) return null;
-    if (typeof raw !== 'string' || !raw.trim()) {
+    if (typeof raw !== 'string' || !raw || raw !== raw.trim()) {
       throw new WalletOwnerResolutionError('Wallet merge metadata is invalid.');
     }
-    return raw.trim();
+    return raw;
   };
 
   for (let hop = 0; hop < maxHops; hop += 1) {

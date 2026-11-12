@@ -1,3 +1,4 @@
+import { resolveAdminMfaDocument, unavailableAdminMfa, requireMfaEnrollmentAllowed, pendingAdminMfaSecret, AdminMfaPolicyError, type AdminMfaState } from '../lib/adminMfaState';
 import { getChatOutcomeObservation } from '../AI/chatOutcomeObservation';
 import { adjustAdminBuildTokens, AdminTokenAdjustmentError } from '../lib/adminTokenAdjustment';
 import { adminTokenAdjustmentReceipt } from '../lib/adminTokenAdjustmentReceipt';
@@ -287,25 +288,20 @@ const PLATFORM_MARGIN_DAYS = 30;
 const ADMIN_MFA_DOC = 'admin_mfa';
 const ADMIN_MFA_ID = 'config';
 
-interface AdminMfaState { enabled: boolean; secret: string | null; envManaged: boolean }
-
-/** Resolve the ACTIVE admin TOTP state (env override wins; else Firestore enrolment). */
+/** Resolve ACTIVE MFA state. Failed/ambiguous reads block admin only, never weaken MFA. */
 async function getAdminMfa(): Promise<AdminMfaState> {
   const env = (process.env.ADMIN_TOTP_SECRET || '').trim();
-  if (env) return { enabled: true, secret: env, envManaged: true };
+  if (env) return { available: true, enabled: true, secret: env, envManaged: true };
   const db = getDb() as any;
-  if (!db) return { enabled: false, secret: null, envManaged: false };
+  if (!db) return unavailableAdminMfa();
   try {
     const snap = await getDoc(doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID));
-    const data = snap.exists() ? snap.data() : null;
-    if (data?.enabled && data?.encrypted_secret) {
-      const secret = decrypt(data.encrypted_secret);
-      if (secret) return { enabled: true, secret, envManaged: false };
-    }
-  } catch (err) {
-    console.error('[ADMIN_MFA] state read failed:', err);
+    return resolveAdminMfaDocument(snap.exists() ? snap.data() : null, decrypt);
+  } catch {
+    // Do not log decrypted values, raw database errors, or MFA record contents.
+    console.error('[ADMIN_MFA] state unavailable');
+    return unavailableAdminMfa();
   }
-  return { enabled: false, secret: null, envManaged: false };
 }
 
 /**
@@ -404,6 +400,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // P-SEC.3 — second factor: if MFA is active, require a valid TOTP code BEFORE the
       // token is issued. A correct password alone is not enough once MFA is enrolled.
       const mfa = await getAdminMfa();
+      if (!mfa.available) {
+        return res.status(503).json({ error: 'Admin verification temporarily unavailable. Please try again later.' });
+      }
       if (mfa.enabled && mfa.secret) {
         if (!totpCode) {
           audit('ADMIN_LOGIN_MFA_REQUIRED', { username, ip: req.ip });
@@ -469,14 +468,20 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
   app.get('/api/admin/mfa/status', verifyAdminToken, async (_req: Request, res: Response) => {
     const mfa = await getAdminMfa();
+    if (!mfa.available) {
+      return res.status(503).json({ error: 'Admin verification temporarily unavailable. Please try again later.' });
+    }
     res.json({ enabled: mfa.enabled, envManaged: mfa.envManaged });
   });
 
   // Begin enrolment: generate a fresh secret, store it as PENDING (encrypted), return the
   // otpauth URI + the base32 key (for the user to add to their authenticator app). Not yet
   // active until /verify confirms the user can produce a valid code.
-  app.post('/api/admin/mfa/enroll', verifyAdminToken, async (_req: Request, res: Response) => {
+  app.post('/api/admin/mfa/enroll', adminLimiter, verifyAdminToken, async (_req: Request, res: Response) => {
     const mfa = await getAdminMfa();
+    if (!mfa.available) {
+      return res.status(503).json({ error: 'Admin verification temporarily unavailable. Please try again later.' });
+    }
     if (mfa.envManaged) {
       return res.status(409).json({ error: 'MFA is managed by ADMIN_TOTP_SECRET on the server and cannot be re-enrolled here.' });
     }
@@ -485,13 +490,20 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const secret = generateTotpSecret();
     const label = `NavBharatAI:${adminUsername()}`;
     try {
-      await setDoc(doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID), {
-        enabled: false,
-        encrypted_pending: encrypt(secret),
-        updated_at: new Date().toISOString(),
-      }, { merge: true });
+      const ref = doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID);
+      await runTransaction(db, async (tx: any) => {
+        const snap = await tx.get(ref);
+        requireMfaEnrollmentAllowed(snap.exists() ? snap.data() : null, decrypt);
+        tx.set(ref, {
+          enabled: false,
+          encrypted_pending: encrypt(secret),
+          pending_expires_at_ms: Date.now() + 10 * 60_000,
+          updated_at: new Date().toISOString(),
+        }, { merge: true });
+      });
     } catch (err) {
-      console.error('[ADMIN_MFA] enrol write failed:', err);
+      if (err instanceof AdminMfaPolicyError) return res.status(err.status).json({ error: err.message });
+      console.error('[ADMIN_MFA] enrol write failed');
       audit('ADMIN_MFA_ENROLL_STARTED', { admin: adminUsername(), result: 'failed', ip: _req.ip });
       return res.status(500).json({ error: 'Failed to start MFA enrolment.' });
     }
@@ -500,39 +512,46 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     res.json({ secret, otpauthUri: totpAuthUri(secret, label, 'NavBharatAI') });
   });
 
-  // Confirm enrolment (or rotation): a valid code against the PENDING secret promotes it to
+  // Confirm first enrolment only: an active factor cannot be replaced by this endpoint. A valid code promotes
   // the ACTIVE secret and turns MFA on.
-  app.post('/api/admin/mfa/verify', verifyAdminToken, async (req: Request, res: Response) => {
+  app.post('/api/admin/mfa/verify', adminLimiter, verifyAdminToken, async (req: Request, res: Response) => {
     const code = String(req.body?.code || '').trim();
     const db = getDb() as any;
     if (!db) return res.status(503).json({ error: 'Database unavailable.' });
     try {
-      const snap = await getDoc(doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID));
-      const data = snap.exists() ? snap.data() : null;
-      const pending = data?.encrypted_pending ? decrypt(data.encrypted_pending) : '';
-      if (!pending) return res.status(400).json({ error: 'No pending enrolment. Start enrolment first.' });
-      if (!verifyTotp(pending, code)) {
-        audit('ADMIN_MFA_VERIFY_FAILED', { admin: adminUsername(), ip: req.ip });
-        return res.status(401).json({ error: 'Invalid code. Try again.' });
+      if ((process.env.ADMIN_TOTP_SECRET || '').trim()) {
+        return res.status(409).json({ error: 'Server-managed MFA cannot be changed here.' });
       }
-      await setDoc(doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID), {
-        enabled: true,
-        encrypted_secret: encrypt(pending),
-        encrypted_pending: '',
-        enrolled_at: new Date().toISOString(),
-      }, { merge: true });
+      const ref = doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID);
+      await runTransaction(db, async (tx: any) => {
+        const snap = await tx.get(ref);
+        const data = snap.exists() ? snap.data() : null;
+        const pending = pendingAdminMfaSecret(data, Date.now(), decrypt);
+        if (!verifyTotp(pending, code)) throw new AdminMfaPolicyError(401, 'Invalid code. Try again.');
+        tx.set(ref, {
+          enabled: true,
+          encrypted_secret: encrypt(pending),
+          encrypted_pending: '',
+          pending_expires_at_ms: 0,
+          enrolled_at: new Date().toISOString(),
+        }, { merge: true });
+      });
       audit('ADMIN_MFA_ENABLED', { admin: adminUsername(), ip: req.ip });
       res.json({ ok: true, enabled: true });
     } catch (err) {
-      console.error('[ADMIN_MFA] verify failed:', err);
+      if (err instanceof AdminMfaPolicyError) return res.status(err.status).json({ error: err.message });
+      console.error('[ADMIN_MFA] verify failed');
       res.status(500).json({ error: 'Failed to verify MFA.' });
     }
   });
 
   // Disable MFA: requires a valid CURRENT code (so a hijacked session can't silently strip it).
-  app.post('/api/admin/mfa/disable', verifyAdminToken, async (req: Request, res: Response) => {
+  app.post('/api/admin/mfa/disable', adminLimiter, verifyAdminToken, async (req: Request, res: Response) => {
     const code = String(req.body?.code || '').trim();
     const mfa = await getAdminMfa();
+    if (!mfa.available) {
+      return res.status(503).json({ error: 'Admin verification temporarily unavailable. Please try again later.' });
+    }
     if (mfa.envManaged) {
       return res.status(409).json({ error: 'MFA is managed by ADMIN_TOTP_SECRET on the server and cannot be disabled here.' });
     }
@@ -544,14 +563,24 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const db = getDb() as any;
     if (!db) return res.status(503).json({ error: 'Database unavailable.' });
     try {
-      await setDoc(doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID), {
-        enabled: false, encrypted_secret: '', encrypted_pending: '',
-        disabled_at: new Date().toISOString(),
-      }, { merge: true });
+      const ref = doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID);
+      await runTransaction(db, async (tx: any) => {
+        const snap = await tx.get(ref);
+        const current = resolveAdminMfaDocument(snap.exists() ? snap.data() : null, decrypt);
+        if (!current.available) throw new AdminMfaPolicyError(503, 'Admin verification temporarily unavailable.');
+        if (!current.enabled || !current.secret || !verifyTotp(current.secret, code)) {
+          throw new AdminMfaPolicyError(401, 'Authenticator changed. Verify the current code again.');
+        }
+        tx.set(ref, {
+          enabled: false, encrypted_secret: '', encrypted_pending: '', pending_expires_at_ms: 0,
+          disabled_at: new Date().toISOString(),
+        }, { merge: true });
+      });
       audit('ADMIN_MFA_DISABLED', { admin: adminUsername(), ip: req.ip });
       res.json({ ok: true, enabled: false });
     } catch (err) {
-      console.error('[ADMIN_MFA] disable failed:', err);
+      if (err instanceof AdminMfaPolicyError) return res.status(err.status).json({ error: err.message });
+      console.error('[ADMIN_MFA] disable failed');
       res.status(500).json({ error: 'Failed to disable MFA.' });
     }
   });
@@ -3787,3 +3816,4 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 }
+

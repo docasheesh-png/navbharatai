@@ -10,8 +10,18 @@ The environment-managed factor remains authoritative. No normal chat/build/provi
 
 Initial enrolment and activation now use transactions; active factors cannot be overwritten by either endpoint. Pending setup expires in 10 minutes. Disable rechecks the current factor transactionally. MFA mutation routes use the existing admin rate limiter. This is a containment fix, not a new rotation UI.
 
-This patch does NOT fix password-derived token signatures, session revocation,
-Store role fallback, passkeys, cookie transport, or security-centre UI. It is not ready for merge
+The draft now requires an independent `ADMIN_SESSION_SIGNING_KEY` (64 hexadecimal characters,
+generated from 32 cryptographically random bytes) for login and every shared admin gate. It must
+not equal ADMIN_PASSWORD. There is NO password fallback. Existing password-signed tokens will be
+rejected after cutover. Store moderation now reads only NAV_STORE_ADMINS, never AGENTV3_FREE_LIST.
+No environment variables were created or changed by this patch.
+
+DO NOT DEPLOY until the owner has approved and verified independent signing-key provisioning,
+explicit Store owner access, current MFA record availability and tested recovery. Missing signing
+configuration will intentionally deny admin authentication; missing Store list denies moderation.
+Do not merge this draft based only on focused tests.
+
+This patch does NOT implement per-session revocation, passkeys, cookie transport, or security-centre UI. It is not ready for merge
 until route/integration tests and the complete CI workflow pass on the full current source tree.
 
 ## Next implementation gates
@@ -28,7 +38,7 @@ until route/integration tests and the complete CI workflow pass on the full curr
    a pending encrypted secret expires, and verify both the change authorization and current pending
    version within an atomic transaction. Concurrent rotation, disable, stale pending confirmation,
    and replay must be negative tests. Revoke sessions using a committed auth-version increment.
-4. Introduce an explicit Store admin allowlist. Inventory existing verified owner access first;
+4. The draft explicit Store admin allowlist needs verified owner access configured before activation;
    do not silently remove the only owner path. Free build grants must not authorize moderation.
 5. Deliver HttpOnly/Secure/SameSite cookies together with CSRF protections, exact-origin checks,
    logout/revoke endpoints, corresponding frontend changes, and every shared gate migration.

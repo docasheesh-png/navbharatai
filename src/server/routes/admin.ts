@@ -273,6 +273,7 @@ import {
   safeStrEqual,
   adminUsername,
   adminPassword,
+  adminSessionSigningKey,
 } from '../lib/adminAuth';
 
 /** The window the Business panel's platform margin covers (Q-114). */
@@ -341,6 +342,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const totpCode = String(req.body?.totp || '').trim();
     const validUser = adminUsername();
     const validPass = adminPassword();
+    const signingKey = adminSessionSigningKey();
     // The shared address key (real address, IPv6 grouped by /56): a raw `req.ip` let one IPv6 host try a
     // fresh address per guess and never meet the lockout (audit 2026-10-11).
     const clientIp = addressRateKey(req);
@@ -385,8 +387,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       return res.status(429).json({ error: 'Too many admin requests.' });
     }
 
-    if (!validPass) {
-      audit('ADMIN_LOGIN_BLOCKED', { reason: 'ADMIN_PASSWORD not set', ip: req.ip });
+    if (!validPass || !signingKey) {
+      audit('ADMIN_LOGIN_BLOCKED', { reason: 'Admin credential/signing configuration incomplete', ip: req.ip });
       return res.status(503).json({ error: 'Admin access not configured on server.' });
     }
 
@@ -422,7 +424,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       if (adminLockoutEnabled()) { recordAdminSuccess(clientIp); await sharedGuard.recordSuccess(clientIp); }
       // SEC Phase 5 (F8): a TIME-STAMPED token with a 30-day TTL (was a static, never-expiring HMAC).
       // The issued-at is signed in, so a leaked token now expires instead of granting permanent access.
-      const token = mintAdminToken(validPass, username, Date.now());
+      const token = mintAdminToken(signingKey, username, Date.now());
       audit('ADMIN_LOGIN_SUCCESS', { username, ip: req.ip, mfa: mfa.enabled });
       return res.json({ ok: true, token });
     }
@@ -439,11 +441,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   const verifyAdminToken = (req: Request, res: Response, next: NextFunction) => {
     const token = req.headers['x-admin-token'] as string;
     const validPass = adminPassword();
-    if (!validPass || !token) return res.status(401).json({ error: 'Admin token required.' });
+    const signingKey = adminSessionSigningKey();
+    if (!validPass || !signingKey || !token) return res.status(401).json({ error: 'Admin token required.' });
     // SEC Phase 5 (F8): verify the signature AND the TTL — an expired/legacy/forged token is rejected
     // (the admin re-logs in; their password still works). A 401 (not 403) on expiry so the client
     // knows to prompt for login rather than treat it as a permissions error.
-    if (!verifyAdminTokenValue(token, validPass, adminUsername(), Date.now(), adminTokenTtlMs(process.env.ADMIN_TOKEN_TTL_HOURS))) {
+    if (!verifyAdminTokenValue(token, signingKey, adminUsername(), Date.now(), adminTokenTtlMs(process.env.ADMIN_TOKEN_TTL_HOURS))) {
       audit('ADMIN_ACCESS_DENIED', { ip: req.ip, path: req.path });
       return res.status(401).json({ error: 'Admin session expired — please log in again.' });
     }

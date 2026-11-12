@@ -99,7 +99,9 @@ export function adminSessionSigningKey(): string {
   const key = adminCredential(process.env.ADMIN_SESSION_SIGNING_KEY, '');
   const password = adminPassword();
   if (!password || !/^[a-fA-F0-9]{64}$/.test(key) || key.toLowerCase() === password.toLowerCase()) return '';
-  return key.toLowerCase();
+  // Bind sessions to the current password too, so password rotation still revokes old tokens.
+  // The independent random master key remains necessary; knowing the password cannot mint a session.
+  return crypto.createHmac('sha256', key.toLowerCase()).update(`admin:session-key:v3:${password}`).digest('hex');
 }
 
 

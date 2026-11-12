@@ -16,10 +16,13 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, posix, resolve } from 'node:path';
+import { dirname, join, posix, relative, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(dirname(new URL(import.meta.url).pathname), '..');
+// URL.pathname is percent-encoded and begins with `/C:/` on Windows. Passing it through
+// path.resolve produces `C:\\C:\\...`; fileURLToPath handles Windows paths and spaces correctly.
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'src/server/lib/gameKitHistory.ts');
 // Every module GAME_RECIPES (gameRecipeLayers.ts) draws on. The census test checks this list against it.
 const GENERATORS = [
@@ -45,7 +48,14 @@ async function filesOf(entry, rev) {
             const importer = a.importer && a.importer !== '<stdin>' ? a.importer : entry;
             // esbuild reports an absolute sourcefile for stdin on current versions. read() takes
             // repository-relative paths in BOTH working-tree and historical-revision mode.
-            const from = posix.dirname(posix.isAbsolute(importer) ? posix.relative(ROOT, importer) : importer);
+            // esbuild can return a native Windows path for stdin's importer. Convert it to
+            // slash-separated repository-relative form before using the git-style resolver below.
+            const importerPosix = importer.replaceAll('\\\\', '/');
+            const rootPosix = ROOT.replaceAll('\\\\', '/');
+            const importerIsAbsolute = posix.isAbsolute(importerPosix) || /^[A-Za-z]:\\//.test(importerPosix);
+            const from = posix.dirname(importerIsAbsolute
+              ? relative(rootPosix, importerPosix).replaceAll('\\\\', '/')
+              : importerPosix);
             const base = posix.normalize(posix.join(from, a.path));
             for (const ext of ['', '.ts', '.tsx', '/index.ts']) {
               const p = base + ext;

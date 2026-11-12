@@ -8,7 +8,7 @@ import { listEqNewestFirst, INDEX_SAFE_FETCH_CAP, epochMillis } from '../lib/fir
 import { requireUserMatch } from '../lib/authMiddleware';
 import { appLockBlocks } from '../lib/appLockEnforce';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
-import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
+import { resolveCanonicalWalletIdStrict, walletMergeResolveEnabled } from '../lib/walletResolve';
 import { readHostingPlanStatus, purchaseHostingPlan, setHostingPlanAutoRenew, planDays } from '../lib/hostingPlan';
 import { hostingPeriodUsageStore } from '../AgentV3/HostingPeriodUsageStore';
 import { periodStartFrom } from '../lib/hostingOverage';
@@ -30,7 +30,7 @@ import { routeParam, routeParams } from '../lib/expressCompat';
  *  WALLET_MERGE_RESOLVE=on, so a merged/retired account transparently reads its unified wallet. */
 async function canonicalWalletId(db: any, uid: string): Promise<string> {
   if (!walletMergeResolveEnabled()) return uid;
-  return resolveCanonicalWalletId(async (u) => {
+  return resolveCanonicalWalletIdStrict(async (u) => {
     const s = await getDoc(doc(db, 'user_token_wallets', u));
     return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
   }, uid);

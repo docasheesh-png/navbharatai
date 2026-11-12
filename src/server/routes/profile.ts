@@ -14,6 +14,7 @@ import { getServerDb as getDb } from '../lib/serverDb';
 import { firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { maskWalletForView, freeProgramPaused } from '../lib/freeProgram';
 import { verifyFirebaseToken, verifyFirebaseIdentity, deleteAuthAccount, rateLimiter } from '../lib/authMiddleware';
+import { proAttachmentStore } from '../lib/proAttachmentStore';
 import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
 import { deleteUserDerivedIdData, LEGACY_HISTORY_ERASURE_LIMITATION, WORKSPACE_OWNERSHIP_ERASURE_LIMITATION } from '../lib/derivedIdErase';
 import { deleteUserWorkspaceData } from '../lib/workspaceDataErase';
@@ -289,6 +290,17 @@ export function registerProfileRoutes(app: Express): void {
     const db = getRetentionDb();
     if (!db) return res.status(503).json({ error: 'Data store unavailable — please try again shortly.' });
     try {
+      // Originals must be removed before their metadata or sign-in. A failure keeps
+      // the owner able to retry; the store fences new uploads during account erasure.
+      try {
+        await proAttachmentStore.erase(identity.uid);
+      } catch {
+        return res.status(503).json({
+          ok: false, accountDeleted: false,
+          error: 'Private attachment removal could not complete. Your sign-in is retained so you can retry account deletion.',
+          proAttachments: { removed: false, retryRequired: true },
+        });
+      }
       // DERIVED IDS FIRST OF ALL — BEFORE ANYTHING THAT DELETES THE KEYS THEY ARE DERIVED FROM.
       // `derivedIdErase` reaches documents whose id is BUILT from a key rather than equal to one:
       // Exact-owner bot ids must be resolved before their parent records disappear. Legacy history
@@ -383,6 +395,7 @@ export function registerProfileRoutes(app: Express): void {
         snapshots,
         // A separate storage outcome, never folded into Firestore's document deletion count.
         workspaceAssetObjects,
+        proAttachments: { removed: true },
         /**
          * Its own line, and the one line here that is NOT a deletion count. `totalDeIdentified` is how
          * many published listings were kept and stripped of their author; `totalDeleted`, how many were
@@ -408,3 +421,4 @@ async function fetchWallet(userId: string): Promise<any | null> {
     return null;
   }
 }
+

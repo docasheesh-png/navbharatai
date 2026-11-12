@@ -2,7 +2,7 @@
  * Professional free/paid two-tier ladder (admin 2026-07-09) — regression lock.
  *
  * Tier 1: 'professional-free' (GLM-4.7-Flash only) is tried first.
- * Tier 2: the paid 'professional' universe (RACE Grok × Gemini × Vertex → Haiku)
+ * Tier 2: the paid 'professional' universe (sequential Grok → Gemini → Vertex → Haiku)
  *         runs ONLY when the free tier fails, errors, or returns empty.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -24,14 +24,14 @@ const CONFIG: ProfessionalConfig = {
 };
 
 function routerReturning(content: string, success = true) {
-  return { routeRaced: vi.fn().mockResolvedValue({ response: { content }, telemetry: { success } }) };
+  return { routeRaced: vi.fn().mockResolvedValue({ response: { content }, telemetry: { success } }), route: vi.fn().mockResolvedValue({ response: { content }, telemetry: { success } }) };
 }
 
 function routerThrowing(msg: string) {
-  return { routeRaced: vi.fn().mockRejectedValue(new Error(msg)) };
+  return { routeRaced: vi.fn().mockRejectedValue(new Error(msg)), route: vi.fn().mockRejectedValue(new Error(msg)) };
 }
 
-describe('professional two-tier ladder (free GLM-flash → paid race)', () => {
+describe('professional two-tier ladder (free GLM-flash → paid sequential fallback)', () => {
   beforeEach(() => getRouterMock.mockReset());
 
   it('a successful free-tier answer never touches the paid universe', async () => {
@@ -43,6 +43,7 @@ describe('professional two-tier ladder (free GLM-flash → paid race)', () => {
     expect(reply).toBe('free answer');
     expect(free.routeRaced).toHaveBeenCalledTimes(1);
     expect(paid.routeRaced).not.toHaveBeenCalled();
+    expect(paid.route).not.toHaveBeenCalled();
   });
 
   it('a free-tier failure falls through to the paid universe', async () => {
@@ -52,7 +53,8 @@ describe('professional two-tier ladder (free GLM-flash → paid race)', () => {
 
     const reply = await runProfessionalChat(CONFIG, 'hello');
     expect(reply).toBe('paid answer');
-    expect(paid.routeRaced).toHaveBeenCalledTimes(1);
+    expect(paid.route).toHaveBeenCalledTimes(1);
+    expect(paid.routeRaced).not.toHaveBeenCalled();
   });
 
   it('an EMPTY free-tier reply (success but blank) also falls through to paid', async () => {

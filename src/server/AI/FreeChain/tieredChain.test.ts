@@ -215,7 +215,7 @@ describe('fixed-order FreeChain opt-in', () => {
   expect(cfg.stickySpread).toBe(false); expect(cfg.features.routeReorder).toBe(false); expect(cfg.cacheEnabled).toBe(false); expect(cfg.maxAttempts).toBe(12);
   expect(fixed({ FREE_CHAIN_MAX_ATTEMPTS: '2' }).maxAttempts).toBe(2);
  });
- it.each([false, true])('starts GLM45 then GLM47 and stops on success, streaming=%s', streaming => {
+ it.each([false, true])('falls back to GLM45 then GLM47 when optional suppliers are unavailable, streaming=%s', streaming => {
   m.execute.mockRejectedValueOnce(new FreeChainProviderError('SERVER')).mockImplementation(successful('second answer'));
   const chunks: string[] = [];
   return buildFreeChainRouter(db, fixed()).route({ ...input(), ...(streaming ? { onChunk: (s: string) => chunks.push(s) } : {}) }).then(result => {
@@ -223,7 +223,7 @@ describe('fixed-order FreeChain opt-in', () => {
    if (streaming) expect(chunks).toEqual(['second answer']);
   });
  });
- it('does not let the admin exclusive selector bypass the requested free-first order', async () => {
+ it('does not let the admin exclusive selector bypass the requested supplier-first order', async () => {
   vi.stubEnv('CHEAPERINFERENCE', 'admin');
   await buildFreeChainRouter(db, fixed()).route({ ...input(), context: { ...input().context, isAdmin: true } });
   expect(m.execute.mock.calls[0][1].model).toBe('glm-4.5-flash');
@@ -247,7 +247,7 @@ describe('fixed-order FreeChain opt-in', () => {
   expect(result).toMatchObject({ provider: 'MITRIFY', content: 'approved reply', ok: true });
   expect(admitted).toHaveBeenCalledOnce(); expect(m.paid).toHaveBeenCalledOnce();
   expect(m.paid.mock.calls[0][0]).toMatchObject({ uid: 'owner', maxCostNanoUsd: 400, capNanoUsd: fixed().paidCapNanoUsd });
-  expect(m.execute.mock.calls.map(c => c[1].model)).toEqual(['glm-4.5-flash', 'glm-4.7-flash', 'openai/gpt-oss-120b', '@cf/meta/llama-3.3-70b-instruct-fp8-fast']);
+  expect(m.execute).not.toHaveBeenCalled();
   expect(m.settle).not.toHaveBeenCalled(); if (streaming) expect(chunks).toEqual(['approved reply']);
  });
   it('hands the same turn to the next chat provider after three Qubax models fail', async () => {
@@ -277,7 +277,7 @@ describe('fixed-order FreeChain opt-in', () => {
   const result = await withFixedTextChainScope('chat', 'text', () => buildFreeChainRouter(db, fixed()).route(input()));
   expect(result).toMatchObject({ provider: 'QUBAX', content: 'Qubax only answer' }); expect(calls).toEqual(['mitrify', 'qubax']);
   expect(result.freeChain?.attempts.find(a => a.provider === 'qubax')).toMatchObject({ entered: true, reason: 'served' });
-  expect(m.paid).toHaveBeenCalledOnce(); expect(m.execute).toHaveBeenCalledTimes(4); expect(m.settle).not.toHaveBeenCalled();
+  expect(m.paid).toHaveBeenCalledOnce(); expect(m.execute).not.toHaveBeenCalled(); expect(m.settle).not.toHaveBeenCalled();
  });
  it.each(['duplicate', 'error'])('fixed Chat releases only the fresh Mitrify month hold on %s daily admission', async outcome => {
   vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');
@@ -307,7 +307,7 @@ describe('fixed-order FreeChain opt-in', () => {
   const qubaxAdapter = vi.spyOn(qubax, 'runApprovedQubaxChat');
   const result = await withFixedTextChainScope('chat', 'text', () => buildFreeChainRouter(db, fixed()).route(input()));
   expect(result.freeChain?.attempts.find(a => a.provider === 'mitrify')).toMatchObject({ entered });
-  expect(result.freeChain?.attempts.filter(a => a.entered)).toHaveLength(entered ? 5 : 4);
+  expect(result.freeChain?.attempts.filter(a => a.entered)).toHaveLength(entered ? 1 : 0);
   expect(adapter).toHaveBeenCalledOnce(); expect(qubaxAdapter).not.toHaveBeenCalled();
   expect(m.settle).toHaveBeenCalledTimes(entered ? 0 : 1);
  });
@@ -409,7 +409,7 @@ describe('fixed-order FreeChain opt-in', () => {
   });
   const chunks: string[] = []; const result = await buildFreeChainRouter(db, fixed()).route({ ...input(), onChunk: s => chunks.push(s) });
   expect(result).toMatchObject({ provider: 'MITRIFY', reason: 'stalled' }); expect(chunks).toEqual(['partial']);
-  expect(m.execute).toHaveBeenCalledTimes(4); expect(m.paid).toHaveBeenCalledOnce(); expect(m.settle).not.toHaveBeenCalled();
+  expect(m.execute).not.toHaveBeenCalled(); expect(m.paid).toHaveBeenCalledOnce(); expect(m.settle).not.toHaveBeenCalled();
  });
  it('health classification cannot bypass configuration and reviewed admission', async () => {
   vi.stubEnv('MITRIFY_CHAIN_ENABLED', '1'); m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));

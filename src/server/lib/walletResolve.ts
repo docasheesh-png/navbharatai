@@ -6,9 +6,9 @@
 // `mergedInto` pointer to the CANONICAL wallet id, so every wallet operation for a retired account
 // transparently reads/writes the account it was merged into — the user sees ONE wallet however they log in.
 //
-// PURE (the Firestore read is injected) + loop-safe + fail-safe: any error, a cycle, or exceeding the hop
-// bound resolves to the last known id (never throws, never loops forever). Gated by WALLET_MERGE_RESOLVE so
-// it is a no-op until the admin turns it on after verifying a real merge.
+// The legacy resolver below is best-effort and must not be used for financial writes: it can return a
+// retired uid after a read error or malformed chain. Financial paths use resolveCanonicalWalletIdStrict(),
+// which fails closed. Both are gated by WALLET_MERGE_RESOLVE, default OFF until a real merge is verified.
 
 /** Is the canonical-wallet resolver active? Default OFF — flip WALLET_MERGE_RESOLVE=on to enable. */
 

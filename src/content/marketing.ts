@@ -312,7 +312,7 @@ export const PRICING_PAGE: MarketingPage = {
       bullets: [
         `Top up your wallet in rupees by UPI or card. ₹1 buys ${TOKENS_PER_RUPEE} wallet tokens.`,
         'Building and changing apps is paid from the wallet, based on the work each build actually used.',
-        'Free welcome credit, when offered, is promotional credit for eligible accounts, not unlimited free chat or app building. Availability, verification requirements, amount and permitted uses are shown in the app; creating an account alone does not guarantee a credit award.',
+        'Free welcome credit, when offered, is promotional credit for eligible accounts, not unlimited free chat or app building. Availability, verification requirements, amount and permitted uses are shown in the app; credit is not automatic when an account is created.',
         FAILED_BUILD_RULE,
         STOPPED_BUILD_RULE,
         'Some features — voice chat, some specialist assistants, Android .apk builds — are paid, and the price is shown before you use them.',

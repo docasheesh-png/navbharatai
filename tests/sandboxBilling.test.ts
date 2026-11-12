@@ -198,8 +198,11 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
   it('unknown E2B rate stays unmeasured in build cost telemetry instead of becoming $0', () => {
     const at = route.indexOf('function billableSandboxDetail');
     const fn = route.slice(at, at + 2600);
-    expect(fn).toContain('expenseMeasured: false');
-    expect(fn).toContain('expenseMeasured: true');
+    expect(fn).toContain('const expenseMeasured = rateIsConfigured();');
+    expect(fn).toContain('{ seconds: billable, usd, measuredSeconds: billable, expenseMeasured }');
+    expect(fn).toContain('{ ...none, measuredSeconds: billable, expenseMeasured }');
+    // A tiny but valid configured cost can round to $0.000000; availability must not depend on usd > 0.
+    expect(fn).not.toContain('const expenseMeasured = usd > 0');
     // Keep the numeric zero for the billing decision, but omit it from telemetry when its rate is unknown.
     expect(route).toContain('sandboxUsd: livePreviewCharge.expenseMeasured ? decidedSandboxUsd : undefined,');
   });

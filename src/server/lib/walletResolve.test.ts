@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
+import { resolveCanonicalWalletId, resolveCanonicalWalletIdStrict, WalletOwnerResolutionError, walletMergeResolveEnabled } from './walletResolve';
 
 describe('walletMergeResolveEnabled', () => {
   it('is OFF by default and only "on" enables it', () => {
@@ -45,5 +45,40 @@ describe('resolveCanonicalWalletId', () => {
   it('ignores a non-string / empty pointer', async () => {
     expect(await resolveCanonicalWalletId(async () => '' as any, 'A')).toBe('A');
     expect(await resolveCanonicalWalletId(async () => undefined, 'A')).toBe('A');
+  });
+});
+
+
+describe('resolveCanonicalWalletIdStrict (financial paths)', () => {
+  const chain = (map: Record<string, string>) => async (uid: string) => map[uid] ?? null;
+
+  it('resolves a valid multi-hop merge chain', async () => {
+    expect(await resolveCanonicalWalletIdStrict(chain({ A: 'B', B: 'C' }), 'A')).toBe('C');
+  });
+
+  it('returns the current uid only when the pointer is terminal', async () => {
+    expect(await resolveCanonicalWalletIdStrict(chain({}), 'A')).toBe('A');
+    expect(await resolveCanonicalWalletIdStrict(chain({ A: 'A' }), 'A')).toBe('A');
+  });
+
+  it('fails closed when the Firestore pointer read throws', async () => {
+    await expect(resolveCanonicalWalletIdStrict(async () => { throw new Error('firestore down'); }, 'A'))
+      .rejects.toBeInstanceOf(WalletOwnerResolutionError);
+  });
+
+  it('fails closed on cycles instead of returning an arbitrary member', async () => {
+    await expect(resolveCanonicalWalletIdStrict(chain({ A: 'B', B: 'A' }), 'A'))
+      .rejects.toBeInstanceOf(WalletOwnerResolutionError);
+  });
+
+  it('fails closed when merge metadata is malformed', async () => {
+    await expect(resolveCanonicalWalletIdStrict(async () => '' as any, 'A'))
+      .rejects.toBeInstanceOf(WalletOwnerResolutionError);
+  });
+
+  it('fails closed when the merge chain exceeds the configured hop bound', async () => {
+    const longChain: Record<string, string> = { A: 'B', B: 'C', C: 'D', D: 'E' };
+    await expect(resolveCanonicalWalletIdStrict(chain(longChain), 'A', 2))
+      .rejects.toBeInstanceOf(WalletOwnerResolutionError);
   });
 });

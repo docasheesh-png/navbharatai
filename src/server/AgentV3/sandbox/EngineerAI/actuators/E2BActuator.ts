@@ -1552,11 +1552,8 @@ export class E2BActuator implements IEngineerActuator {
         if (settled) this._pauseFailures.delete(orphan.sandboxId);
         continue;
       }
+      // pauseSandbox already updates the in-process failure counter; persist one durable attempt here.
       await sandboxStore.noteOrphanAllocationAttempt(orphan.sandboxId);
-      const failures = this._notePauseFailure(orphan.sandboxId);
-      if (failures === PAUSE_FAILURE_WARNING_THRESHOLD) {
-        console.error(`SANDBOX_ORPHAN_CLEANUP_REPEATED_FAILURE ${orphan.sandboxId.slice(0, 12)} attempts=${orphan.attempts + 1}`);
-      }
     }
   }
 

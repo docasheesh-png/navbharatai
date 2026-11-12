@@ -208,22 +208,25 @@ export class SandboxStore {
       const collection = db.collection('agentv3_sandbox_orphans');
       const pageSize = Math.max(1, Math.min(200, limit));
       const cursorRef = collection.doc('__navbharatai_orphan_sweep_cursor__');
-      const cursorSnap = await cursorRef.get();
-      const cursorData = cursorSnap.data();
-      const cursor = typeof cursorData?.lastDocumentId === 'string' ? cursorData.lastDocumentId : null;
       const base = collection.where('status', '==', 'pending').orderBy(admin.firestore.FieldPath.documentId());
-      let query = cursor ? base.startAfter(cursor) : base;
-      let snap = await query.limit(pageSize).get();
-      // Wrap around when the cursor reaches the end. This rotates the bounded batch across all
-      // pending docs instead of retrying the same first page forever.
-      if (!snap.docs.length && cursor) {
-        await cursorRef.set({ lastDocumentId: null, updatedAt: Date.now() }, { merge: true });
-        snap = await base.limit(pageSize).get();
-      }
-      if (snap.docs.length) {
-        await cursorRef.set({ lastDocumentId: snap.docs[snap.docs.length - 1].id, updatedAt: Date.now() }, { merge: true });
-      }
-      return snap.docs.map((doc) => doc.data()).filter((row) =>
+      // Reserve each page transactionally so concurrent Cloud Run instances cannot keep moving
+      // the shared cursor backward and starving orphan records beyond the first page.
+      const docs = await db.runTransaction(async (tx) => {
+        const cursorSnap = await tx.get(cursorRef);
+        const cursorData = cursorSnap.data();
+        const cursor = typeof cursorData?.lastDocumentId === 'string' ? cursorData.lastDocumentId : null;
+        let snap = await tx.get((cursor ? base.startAfter(cursor) : base).limit(pageSize));
+        // Wrap around when the cursor reaches the end. This rotates the bounded batch across all
+        // pending docs instead of retrying the same first page forever.
+        if (!snap.docs.length && cursor) snap = await tx.get(base.limit(pageSize));
+        if (snap.docs.length) {
+          tx.set(cursorRef, { lastDocumentId: snap.docs[snap.docs.length - 1].id, updatedAt: Date.now() }, { merge: true });
+        } else if (cursor) {
+          tx.set(cursorRef, { lastDocumentId: null, updatedAt: Date.now() }, { merge: true });
+        }
+        return snap.docs;
+      });
+      return docs.map((doc) => doc.data()).filter((row) =>
         row && typeof row.workspaceId === 'string' && typeof row.sandboxId === 'string' && row.sandboxId.length > 0,
       ).map((row) => ({
         workspaceId: row.workspaceId as string,

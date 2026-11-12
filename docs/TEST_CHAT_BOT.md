@@ -2,6 +2,20 @@
 
 Open **Admin → AI Engines → Test Chat Bot**. This is a separate, reusable provider test surface with real text input and multi-turn context. It does not load, alter or save ordinary app conversations. The server-owned dropdown lists every text-chat provider adapter wired in NavBharatAI (chat-chain rungs, reviewed gateways, vision-capable text models, and named builder/pro engines). Selecting another provider starts a new conversation. Clients still cannot submit an endpoint, API key, tool, attachment or generation setting: they pick a server-defined provider id. An optional model field accepts only a short identifier (`letters`, numbers, and `.` `/` `:` `-`); leaving it blank uses the same cheapest-model selection as main chat.
 
+## Read-only provider status
+
+Opening the page or choosing **Refresh provider status** reads configuration and the
+stored Qubax market/probe snapshot only. It does not refresh the external feed,
+start a probe, reserve money or send inference. A missing or stale snapshot is not
+proof that a provider is ready; displayed selection is informational, not send authority.
+The scheduled collector and an explicit test send retain their existing refresh,
+selection, budget and dispatch behavior. **Check Qubax balance** remains a separate
+explicit account-metadata action.
+
+This is the narrowed read-only diagnostic portion of the earlier admin-readiness
+proposal. It does not introduce signed catalog/payload imports, new dispatch gates,
+or a change to ordinary Chat or Qubax selection.
+
 ## Isolation
 
 NavBharatAI calls only the selected provider; there is no fallback to another NavBharatAI provider. Qubax follows the same market auto-select as user chat and may try up to three of its own market-selected models after a failed try is released. Other listed providers make one call from this page. Some entries are gateways (Qubax, OpenRouter, Mitrify, Surplus, Router One) and may route internally among upstream sellers. A gateway response does not independently verify the underlying model. End-user chat routing, brand-hiding and error text are unchanged.

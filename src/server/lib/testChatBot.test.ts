@@ -333,6 +333,27 @@ describe('test chat provider isolation and admission', () => {
     expect(fake.settleMonth).toHaveBeenCalledWith({ marker: 'db' }, '2026-11', expect.any(Number), 0);
     expect(fake.run).not.toHaveBeenCalled();
   });
+  it.each(['stored', 'empty', 'unavailable'] as const)('provider status only reads stored Qubax diagnostics (%s)', async mode => {
+    vi.stubEnv('QUBAX_ENABLED', '1');
+    vi.stubEnv('QUBAX_API_KEY', 'synthetic-qubax-key-value');
+    const { qubaxConfig } = await vi.importActual<typeof import('./qubax')>('./qubax');
+    fake.config.mockImplementation(qubaxConfig);
+    fake.marketPlan = vi.fn().mockResolvedValue({ eligible: [], backup: null });
+    fake.feedSummary = mode === 'unavailable' ? vi.fn().mockRejectedValue(new Error('store unavailable'))
+      : vi.fn().mockResolvedValue({ fresh: mode === 'stored', observedAtMs: mode === 'stored' ? 1_700_000_000_000 : null,
+        pricedRows: mode === 'stored' ? 4 : 0, officialMatches: 0, discountEligible: 0, probePassing: 0 });
+    const status = await loadTestChatStatus();
+    expect(isTestChatStatus(status)).toBe(true);
+    expect(status.providers.map(item => item.id)).toEqual([...TEST_CHAT_PROVIDER_IDS]);
+    expect(fake.marketPlan).toHaveBeenCalledOnce();
+    expect(fake.feedSummary).toHaveBeenCalledOnce();
+    // The refresh function can schedule paid probes; even a missing snapshot must not call it.
+    expect(fake.refresh).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    for (const operation of [fake.run, fake.reserve, fake.month, fake.settle, fake.settleMonth,
+      fake.compatTurn, fake.officialOpenAi, fake.officialAnthropic, fake.mitrifyChat,
+      fake.registryRung, fake.strictFree]) expect(operation).not.toHaveBeenCalled();
+  });
   it('attaches the Qubax feed without collapsing the provider list', async () => {
     vi.stubEnv('QUBAX_ENABLED', '1');
     vi.stubEnv('QUBAX_API_KEY', 'synthetic-qubax-key-value');

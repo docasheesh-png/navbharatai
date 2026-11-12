@@ -431,7 +431,7 @@ function unreadProvider(id: TestChatProviderId): TestChatProviderStatus {
   return { id, label: META[id].label, configured: false, enabled: false, model: null, approvalRequired: false, billed: false,
     unavailableReason: 'This provider’s status could not be read.' };
 }
-/** Admin status refreshes the market feed. The lease stops a stampede. A failure still returns the last status. */
+/** Admin status reads stored market diagnostics only. Failed reads retain configuration status. */
 export async function loadTestChatStatus(): Promise<TestChatStatus> {
   const status = testChatStatus();
   const ceiling = qubaxRequestCeilingNanoUsd(process.env);
@@ -440,7 +440,8 @@ export async function loadTestChatStatus(): Promise<TestChatStatus> {
   try {
     const db = getServerDb();
     if (!db) return status;
-    await refreshQubaxPriceFeed(process.env);
+    // Status is observation only. Refresh can schedule paid probes; leave it to
+    // scheduled collection or an explicit send, never opening/refreshing this page.
     const [plan, feed] = await Promise.all([readQubaxMarketPlan(db, override, Date.now()), readQubaxFeedSummary(db, Date.now())]);
     const choice = plan.eligible[0] ?? plan.backup;
     const providers = status.providers.map(p => {

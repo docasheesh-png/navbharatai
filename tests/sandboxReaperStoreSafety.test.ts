@@ -148,6 +148,12 @@ describe('new sandbox allocations are durably persisted without replacing a newe
     expect(f.set).toHaveBeenCalledTimes(1);
   });
 
+  it('does not replace verified owner metadata when the allocation caller has no uid', async () => {
+    const f = fixture([old('a')]);
+    await f.store.recordAllocation('a', null, 'machine-a', 'machine-a');
+    expect(f.records.get('a')?.userId).toBe('test-user');
+  });
+
   it('does not overwrite an allocation installed by another instance after the read', async () => {
     const f = fixture([old('a')]);
     f.records.set('a', { ...old('a'), sandboxId: 'machine-newer' });

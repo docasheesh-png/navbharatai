@@ -82,7 +82,7 @@ import { liveCostLabel } from './liveCostLabel';
 import { MessageActions } from './MessageActions';
 import { partitionStarters, pickerSections } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
-import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
+import { checkAttachmentSizes, stageAttachmentFiles } from '../../lib/attachmentLimits';
 import { deployBlockedReason } from '../../lib/deployGuard';
 import { simplifyHealthLines } from '../../lib/buildHealthDisplay';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
@@ -1677,12 +1677,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // Read a File as base64 (no data: prefix); downscale large images to keep the
   // payload small and vision-optimal, exactly like the other chat surfaces.
   const fileToAttachment = (file: File): Promise<{ name: string; type: string; base64: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       const isImage = file.type.startsWith('image/') && file.type !== 'image/svg+xml';
       const raw = () => {
         const reader = new FileReader();
         reader.onload = () => resolve({ name: file.name, type: file.type || 'application/octet-stream', base64: (reader.result as string).split(',')[1] || '' });
-        reader.onerror = () => resolve({ name: file.name, type: file.type, base64: '' });
+        reader.onerror = () => reject(new Error(`Could not read \"${file.name}\". Choose the file again; it has not been uploaded.`));
+        reader.onabort = () => reject(new Error(`Reading \"${file.name}\" was cancelled. Choose the file again.`));
         reader.readAsDataURL(file);
       };
       if (!isImage) return raw();
@@ -1707,24 +1708,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       img.src = url;
     });
 
-  // ROOT-CAUSE FIX (admin 2026-07-26: "zip upload complete ho jaata hai lekin files v5 me nahi
-  // aati") — this used to filter out any file over a hardcoded 15 MB with NO feedback at all, so a
-  // large zip silently vanished from the attachment list right here, before it ever reached the
-  // send-time size guard (Fix 36a / checkAttachmentSizes) whose entire job is to explain WHY an
-  // oversized upload can't go through. Two size limits had drifted apart — a silent one (15 MB, here)
-  // and an honest one (MAX_ATTACHMENT_BYTES, attachmentLimits.ts) — and the silent one always won.
-  // Now there is ONE limit, and a rejected file gets the same honest, actionable message as a
-  // rejected send, immediately, so the user knows their upload never happened and why.
+  // Picker filters are convenience only: accept all names, then enforce shared size/count
+  // limits and explain every rejected item instead of silently slicing at eight.
   const addFiles = (list: FileList | null) => {
     if (!list) return;
-    const incoming = Array.from(list);
-    const tooBig = incoming.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
-    const picked = incoming.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
-    if (tooBig.length > 0) {
-      const verdict = checkAttachmentSizes(tooBig);
-      setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${verdict.reason || 'One or more files are too large to attach.'}`, ts: Date.now() }]);
+    const staged = stageAttachmentFiles(files, Array.from(list));
+    if (staged.rejected.length > 0) {
+      setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${staged.rejected.map((r) => r.reason).join('\n')}`, ts: Date.now() }]);
     }
-    if (picked.length > 0) setFiles((prev) => [...prev, ...picked].slice(0, 8));
+    if (staged.accepted.length > 0) setFiles([...files, ...staged.accepted]);
   };
 
   // `override` — programmatic sends (the GitHub repo picker's 1-click import): supplies its own
@@ -5974,7 +5966,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   (the SAME flow as the glowing template button — 2 entries, one system). */}
               <AttachMenu
                 onFiles={(fl) => addFiles(fl)}
-                fileAccept="image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.js,.ts,.tsx,.jsx,.py,.css"
+                fileAccept=""
                 disabled={running}
                 badge={files.length}
                 title="Attach (photo, gallery, file, or a website screenshot → app)"
@@ -7645,3 +7637,4 @@ function colorizeDiff(patch: string): React.ReactNode {
     return <div key={i} className={cls}>{line}</div>;
   });
 }
+

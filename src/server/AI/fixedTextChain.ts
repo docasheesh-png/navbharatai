@@ -1,6 +1,21 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 /** Requested order is preference only: never authority for privacy, capability or spend. */
 export const FIXED_TEXT_CHAIN = ['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'mitrify', 'qubax', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid'] as const;
+/** Reorder existing Chat rungs only; never enroll absent suppliers or change other surfaces. */
+export function prioritizeChatSuppliers<T extends string>(order: readonly T[], surface: string | undefined): T[] {
+  if (surface !== undefined && surface !== 'chat') return [...order];
+  return [
+    ...order.filter(id => id === 'mitrify'),
+    ...order.filter(id => id === 'qubax'),
+    ...order.filter(id => id !== 'mitrify' && id !== 'qubax'),
+  ];
+}
+/** Gateway retains identical eligibility; only eligible Chat candidate preference changes. */
+export function chatTextChainRank(profile: { providerId: string; modelId: string; charging: string }, surface: string): number | undefined {
+  const rank = fixedTextChainRank(profile);
+  if (surface !== 'chat' || rank === undefined) return rank;
+  return rank === 5 ? 0 : rank === 6 ? 1 : rank < 5 ? rank + 2 : rank;
+}
 export const FIXED_TEXT_CHAIN_MAX_ATTEMPTS = 12;
 /** Requested Chat ceilings, not dispatch authority or permission to replay.
  * Single-use supplier approvals still authorize only one physical call. Enabling

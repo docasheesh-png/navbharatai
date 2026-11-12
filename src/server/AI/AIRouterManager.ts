@@ -202,14 +202,13 @@ export class AIRouterManager {
 
   // PROFESSIONAL universe (Doctor AI / SDA + every config-driven professional:
   // Teacher, Lawyer, CA, Astrologer, Kisan, …). Fully isolated from FREE and PRO.
-  // Routing shape (via AIRouter.routeRaced): RACE Grok × Gemini × Vertex
-  // concurrently — first non-empty success wins; ONLY if all three fail, fall back
-  // to Claude Haiku (last resort). Honors the "Grok primary, Claude last" core law.
+  // Routing shape (via AIRouter.route): Grok → Gemini → Vertex → Claude Haiku.
+  // Sequential fallback means only the first successful provider is billed; Claude remains last resort.
   private static buildProfessional(): AIRouter {
     const router = new AIRouter("professional");
-    console.log('[ROUTER_MGR] Building PROFESSIONAL chain: RACE(Grok × Gemini × Vertex) → Claude Haiku(last resort)');
+    console.log('[ROUTER_MGR] Building PROFESSIONAL chain: Grok → Gemini → Vertex → Claude Haiku (sequential fallback)');
 
-    // ── Race participants (fired concurrently) ──
+    // ── Fallback rungs (called sequentially only when the prior rung fails) ──
     try {
       const grok = new GrokProvider();
       router.registerProvider(slot(grok, 1, 'grok-3'));
@@ -225,7 +224,7 @@ export class AIRouterManager {
       router.registerProvider(slot(vertex, 3, 'gemini-2.5-flash'));
     } catch {}
 
-    // ── Last resort ONLY: Claude Haiku (cheap, reached only if the race fails) ──
+    // ── Last resort ONLY: Claude Haiku (cheap, reached only if all earlier rungs fail) ──
     try {
       const claude = new AnthropicProvider('claude-haiku-4-5-20251001');
       claude.priority = 99;
@@ -239,9 +238,8 @@ export class AIRouterManager {
   // PROFESSIONAL-FREE universe (admin 2026-07-09): the free first-attempt tier for the
   // config-driven professionals. It contains ONLY GLM-4.7-Flash ($0 in/out on Z.AI) — the
   // caller (professionals/engine.ts) tries this universe first and, on any failure or
-  // rate-limit, falls back to the full PAID professional universe above, which stays
-  // byte-for-byte unchanged (RACE Grok × Gemini × Vertex → Claude Haiku). Keeping the free
-  // tier as its own single-provider universe (instead of mixing GLM into the paid race)
+  // rate-limit, falls back to the full PAID professional universe above (sequential Grok → Gemini → Vertex → Claude Haiku). Keeping the free
+  // tier as its own single-provider universe (instead of mixing GLM into the paid fallback chain)
   // means a successful free answer fires ZERO paid provider calls, and a missing
   // GLM_API_KEY makes this universe inert (healthCheck false) so behaviour degrades to
   // exactly today's paid path.

@@ -41,6 +41,15 @@ export interface AppFeature {
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
+    id: 'pro_attachment_picker',
+    name: 'Pro file attachments and project import',
+    path: 'NavBharatAI Pro → paperclip → Choose file',
+    description: 'Choose file allows any filename to be selected, including HTML and extensionless source files. Supported documents, images and bounded UTF-8 text/code can be analyzed. HTML is read as source, not executed. Selecting a file does not mean every binary format can be read or that original bytes are saved into the project. Unsupported formats are reported honestly. Each chat attachment is limited to 15 MB, with at most 8 files and 22 MB combined per message. The attachment menu scrolls within the visible viewport above the composer rather than being clipped by the footer.',
+    howToUse: 'Tap the paperclip, Choose file, select files and send a question. Use the separate Import project (.zip) option for a project archive; its import rules and limits are separate. Remove or split files when a size or count warning appears. If a file cannot be read, select it again rather than assuming it uploaded.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['attach', 'upload file', 'html', 'choose file', 'file picker', 'attachment limit'],
+  },
+  {
     id: 'shared_free_daily_answers',
     name: 'Shared Free daily answer ceiling',
     path: 'Free chat or Professionals → Shared Free daily ceiling',
@@ -3970,3 +3979,4 @@ BIDIRECTIONAL SELECTION: (1) pick a framework in the picker (⚙ → Framework o
 export function getFeatureById(id: string): AppFeature | null {
   return APP_KNOWLEDGE_BASE.find(f => f.id === id) ?? null;
 }
+

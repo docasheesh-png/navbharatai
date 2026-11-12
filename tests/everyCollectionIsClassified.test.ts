@@ -406,6 +406,12 @@ const UNREADABLE_RECEIVERS: Record<string, string> = {
 
 /** A new document-ref alias is excused only in its verified file, never everywhere named `ref`. */
 const SCOPED_DOCUMENT_RECEIVERS: Record<string, Record<string, { why: string; assignment: RegExp }>> = {
+  'src/server/lib/proAttachmentStore.ts': {
+    ref: {
+      why: 'verified-owner encoded UID document under pro_attachment_owners_v1; deleted_scopes children are explicitly swept by eraseScopes after the account upload fence and original-byte deletion',
+      assignment: /const ref = db\(\)\.collection\(PRO_ATTACHMENT_COLLECTION\)\.doc\(Buffer\.from\(uid\)\.toString\('base64url'\)\)/,
+    },
+  },
   'src/server/AI/FreeChain/control.ts': {
     ref: { why: 'controlRef returns the fixed free_chat_chain/state document; its actions child has an explicit 180-day subcollection retention policy',
       assignment: /const ref = controlRef\(db\)/ },

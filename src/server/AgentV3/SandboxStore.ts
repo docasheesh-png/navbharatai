@@ -154,23 +154,24 @@ export class SandboxStore {
     userId: string | null,
     sandboxId: string,
     expectedSandboxId: string | null,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const db = this.getDb();
-    if (!db || !workspaceId || !sandboxId) return;
+    if (!db || !workspaceId || !sandboxId) return false;
     try {
       const ref = db.collection('agentv3_sandboxes').doc(workspaceId);
-      await db.runTransaction(async (tx) => {
+      return await db.runTransaction(async (tx) => {
         const snap = await tx.get(ref);
         const rawCurrent = snap.exists ? snap.data()?.sandboxId : undefined;
         const current = typeof rawCurrent === 'string' && rawCurrent.trim() ? rawCurrent.trim() : null;
-        if (current !== expectedSandboxId) return;
+        if (current !== expectedSandboxId) return false;
         const patch: Record<string, unknown> = { workspaceId, sandboxId, updatedAt: Date.now() };
         // A caller without verified user identity must preserve existing ownership metadata; writing
         // the fallback string 'anon' here would erase a real owner on every resumed allocation.
         if (userId) patch.userId = userId;
         tx.set(ref, patch, { merge: true });
+        return true;
       });
-    } catch { /* best-effort — never block a build; a newer identity always wins */ }
+    } catch { return false; /* the caller must not use an allocation it could not persist */ }
   }
 
   /**

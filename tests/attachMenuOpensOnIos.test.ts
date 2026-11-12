@@ -33,7 +33,26 @@ describe('AttachMenu opens the file picker on iOS Safari', () => {
 
   it('keeps the sheet readable on a phone (fixed escape, not clipped in the tools strip)', () => {
     expect(source).toContain('data-attach-menu');
-    expect(source).toContain('max-sm:fixed');
-    expect(source).toContain('max-sm:z-[80]');
+    expect(source).toContain('createPortal(');
+    expect(source).toContain('document.body');
+    expect(source).toContain('fixed z-[200]');
+  });
+});
+
+
+describe('Pro native file selection regression', () => {
+  it('places a full-size native input on each picker row and keeps it mounted until change', () => {
+    expect(source).toContain('absolute inset-0 h-full w-full opacity-0 cursor-pointer');
+    expect(source).toContain('accept={o.accept || undefined}');
+    expect(source).toContain('onChange={handleChange}');
+    expect(source).toContain("e.target.value = ''");
+    expect(source).toContain('onPointerDown={(event) => event.stopPropagation()}');
+  });
+  it('does not filter Pro HTML or unknown file extensions out of the operating system picker', () => {
+    const pro = readFileSync(join(__dirname, '../src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
+    expect(pro).toContain('fileAccept=""');
+    expect(pro).toContain('stageAttachmentFiles(files, Array.from(list))');
+    expect(pro).toContain('reader.onerror = () => reject(');
+    expect(pro).toContain('reader.onabort = () => reject(');
   });
 });

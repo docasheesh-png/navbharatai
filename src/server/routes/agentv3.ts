@@ -443,7 +443,7 @@ import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
 import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets } from '../AgentV3/gameAssets/assetSeed';
-import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -809,6 +809,8 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
 import { buildActuator } from './actuatorFactory';
 import { bindSessionReconnectForTests } from '../AgentV3/WorkspaceRegistry';
 import { envFlag } from '../lib/envFlag';
+import { proAttachmentStore } from '../lib/proAttachmentStore';
+import { attachmentSessionForConversation, eraseConversationOriginals } from '../lib/proAttachmentLifecycle';
 import {
   workspaceOwnershipOk as sharedWorkspaceOwnershipOk,
   verifiedWorkspaceReadOk as sharedVerifiedWorkspaceReadOk,
@@ -4454,6 +4456,15 @@ export function registerAgentV3Routes(app: Express): void {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access === 'ok') {
+          // Remove original bytes first. On failure leave the transcript available for retry.
+          if (userId && rec?.userId === userId) {
+            try {
+              await eraseConversationOriginals(proAttachmentStore, userId,
+                attachmentSessionForConversation(userId, cid, rec));
+            } catch {
+              return res.status(503).json({ error: 'Private file removal could not complete. The chat was kept so you can retry.', retryable: true });
+            }
+          }
           // GA-1 — cascade purge: delete the conversation AND every per-workspace store it owned
           // (files/plan/memory/diagnostics/deployment). conversationId === workspaceId (#837), so the
           // shallow store.remove used to orphan all of that data forever. Best-effort; never throws.
@@ -6934,6 +6945,20 @@ async function noteBuildOutcome(
         if (access === 'forbidden') { forbidden = true; continue; }
         if (access !== 'ok' || !rec) continue;
 
+        // Originals use the stable client message timestamp, not a guessed server turn time.
+        // Scope fences revoke pending uploads before the transcript can disappear.
+        if (verifiedUid && rec.userId === verifiedUid) {
+          const attachmentSession = attachmentSessionForConversation(verifiedUid, cid, rec);
+          if (req.body?.attachmentSessionId !== undefined && req.body.attachmentSessionId !== attachmentSession) {
+            return res.status(409).json({ error: 'The attachment chat does not match this message. Reopen the chat and retry.' });
+          }
+          try {
+            await eraseConversationOriginals(proAttachmentStore, verifiedUid, attachmentSession,
+              req.body?.attachmentMessageId, true);
+          } catch {
+            return res.status(503).json({ error: 'Private file removal could not complete. The message was kept so you can retry Unsend.', retryable: true });
+          }
+        }
         // 2) Truncate the durable transcript to just before the last real user prompt.
         const keep = unsendKeepCount(rec.messages);
         if (keep < rec.messages.length) {
@@ -18910,6 +18935,13 @@ async function noteBuildOutcome(
                   kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? '') });
                 }
                 kitRecipesMs = Date.now() - kitStartedAt;
+                // BR1977: recipes report ok (`!r.is_error`) even when they wrote nothing —
+                // this build claimed five recipes and 3 files after SANDBOX_UNAVAILABLE.
+                // Count only files that landed during the recipe loop (not later L3 assets)
+                // and refuse to claim a seed — or to prepare 3D assets on a missing 3D layer —
+                // unless at least as many files landed as recipes that said they succeeded.
+                const recipeFiles = [...writtenFiles].filter(([p, c]) => writtenBeforeKit.get(p) !== c).length;
+                downgradeEmptyKitSeedSuccesses(kitResults, recipeFiles);
                 if (gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted) {
                   // Default-off L3; all bytes and manifests are acknowledged durably before handoff.
                   // Source/provider failures leave the successful L1/L2 kit intact.
@@ -28631,3 +28663,4 @@ async function noteBuildOutcome(
 
   }));
 }
+

@@ -235,6 +235,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [analytics, setAnalytics] = useState<any>(null);
   // Q-680: a refused analytics read is said, never drawn as a platform with 0 users and ₹0 revenue.
   const [analyticsError, setAnalyticsError] = useState('');
+  const [analyticsRefreshedAt, setAnalyticsRefreshedAt] = useState<number | null>(null);
   /**
    * Who came to NavBharatAI itself — website visits, app opens and the people who signed in.
    *
@@ -1350,7 +1351,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       const r = await fetch('/api/admin/analytics', { headers });
       const a = await readAnswer(r, (b): b is Record<string, unknown> =>
         isRecord(b) && typeof b.totalUsers === 'number' && typeof b.totalRevenue === 'number');
-      if (a.ok) { setAnalytics(a.value); setAnalyticsError(''); }
+      if (a.ok) { setAnalytics(a.value); setAnalyticsError(''); setAnalyticsRefreshedAt(Date.now()); }
       else setAnalyticsError(a.sentence);
     } catch (e) { console.error(e); setAnalyticsError(e instanceof Error ? e.message : 'Could not reach the server.'); }
     finally { setLoading(false); }
@@ -2853,9 +2854,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </div>
 
               <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
-                <div>
-                  <h3 className="text-sm font-black text-ink uppercase tracking-tight">API Usage Ranking</h3>
-                  <p className="text-[10px] text-muted font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Most to least used chat providers' : 'Most to least used providers'}</p>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">API Usage Ranking</h3>
+                    <p className="text-[10px] text-muted font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Most to least used chat providers' : 'Most to least used providers'}</p>
+                    <p className="text-xs text-muted mt-1">All retained chat usage records, not the current routing priority. Admin provider test-bot calls are separate. Changing the chain does not reset this history.</p>
+                    <p className="text-xs text-muted mt-1">{analyticsRefreshedAt === null ? 'Not refreshed yet' : `Last refreshed: ${new Date(analyticsRefreshedAt).toLocaleString()}`}</p>
+                    {analyticsError && <p role="alert" className="text-xs text-danger mt-1">Refresh failed. Previously loaded figures may be stale.</p>}
+                  </div>
+                  <button type="button" onClick={fetchAnalytics} disabled={loading} aria-label="Refresh API usage ranking" className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs font-bold text-ink disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button>
                 </div>
                 <div className="space-y-3">
                   {(analytics?.providerRanking || []).length === 0 && (

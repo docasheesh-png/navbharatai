@@ -1,7 +1,7 @@
 import { runApprovedQubaxChat, QubaxError, QUBAX_FIRST_BYTE_MS } from '../../lib/qubax';
 import { chatAttemptLimits, watchChatAttempt } from './attemptBudget';
 import { CHAT_SERVER_DEADLINE_MS, CHAT_PROVIDER_ATTEMPT_MS } from '../../../lib/chatDeadline';
-import { FIXED_TEXT_CHAIN, fixedTextChainRank, fixedTextChainSurface, fixedTextChainSelected, SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS } from '../fixedTextChain';
+import { prioritizeChatSuppliers, FIXED_TEXT_CHAIN, fixedTextChainRank, fixedTextChainSurface, fixedTextChainSelected, SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS } from '../fixedTextChain';
 import { mitrifyConfig, MitrifyError, runApprovedMitrifyChain } from '../../lib/mitrify';
 import { capacityRevision, notifyCapacityReleased, waitForCapacity } from './capacityWait';
 import { switchedOffProviderFor } from '../../lib/providerSwitches';
@@ -211,6 +211,11 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     if (!exclusiveAdmin && order.includes('openrouter') && !order.includes('qubax')) {
       const at = order.indexOf('openrouter') + 1;
       order = [...order.slice(0, at), 'mitrify', 'qubax', ...order.slice(at)];
+    }
+    // Owner preference applies only after existing enrollment and route selection.
+    // Keep exclusive tests, provider switches, admission and supplier adapters unchanged.
+    if (!exclusiveAdmin && !(cfg.fixedOrder && fixedTextChainSurface() && !fixedTextChainSelected())) {
+      order = prioritizeChatSuppliers(order, fixedTextChainSurface());
     }
     trace.route = route; trace.routeReason = routed.reason;
     // Re-scan only pre-reservation capacity refusals. The original queue-wait budget bounds

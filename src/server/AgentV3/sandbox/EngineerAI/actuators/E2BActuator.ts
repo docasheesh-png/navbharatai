@@ -1751,10 +1751,14 @@ export class E2BActuator implements IEngineerActuator {
     this._busySince.delete(workspaceId);
     const startSnapshot = { ...session };
     if (!this._sandboxStartedAt.has(workspaceId)) this._sandboxStartedAt.set(workspaceId, Date.now());
-    // Durable from the FIRST moment the sandbox exists, not from the end of the build — that gap was
-    // what made a running build indistinguishable from an abandoned one.
+    // Persist the first allocation before any session observation. A normal activity touch is
+    // intentionally conditional and cannot create a missing record; this compare-and-set is the
+    // allocation write, fenced by the identity observed before connect/create so a stale creator
+    // cannot replace a sandbox another instance has already installed.
     this._lastDurableTouch.delete(workspaceId);
-    const identityTouch = this._touchDurable(workspaceId, sandbox.sandboxId);
+    const identityTouch = sandboxResumeEnabled()
+      ? sandboxStore.recordAllocation(workspaceId, null, sandbox.sandboxId, resumeId ?? null)
+      : undefined;
     if (sandboxResumeEnabled()) {
       this._sessionStartWrites.set(session,
         sandboxStore.recordSessionStart(workspaceId, startSnapshot, identityTouch).catch(() => {}));

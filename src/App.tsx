@@ -4024,6 +4024,7 @@ export default function App() {
               savedTemplates={savedTemplates}
               hasGeneratedCode={hasGeneratedCode}
               onSelectTemplate={(prompt) => { setInput(prompt); toggleTab('nbi_chat'); }}
+              onSelectGameTemplate={(prompt) => { setV3PendingFix({ text: prompt, nonce: Date.now(), autoSend: true }); toggleTab('nbi_pro_chat'); }}
               onRequireAuth={() => { setShowAuth(true); addToast('Sign in to use Pro templates', 'warning'); }}
               onSaveCurrentTemplate={saveCurrentAsTemplate}
               onDeleteSavedTemplate={(id) => setSavedTemplates(prev => prev.filter(x => x.id !== id))}

@@ -93,8 +93,14 @@ export function loadAllowlist(path = '.audit-allowlist.json') {
 /** Run `npm audit --json` and return the parsed object (audit exits non-zero when vulns exist — we read stdout regardless). */
 function runNpmAudit() {
   let out = '';
+  // `npm` is a .cmd shim on Windows and cannot be spawned by execFileSync without a shell. npm
+  // exposes its actual CLI entry point while running scripts, so invoke that with this Node binary
+  // (works on Windows and CI Linux without shell quoting).
+  const npmCli = process.env.npm_execpath;
   try {
-    out = execFileSync('npm', ['audit', '--json'], { encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 });
+    out = npmCli
+      ? execFileSync(process.execPath, [npmCli, 'audit', '--json'], { encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 })
+      : execFileSync('npm', ['audit', '--json'], { encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 });
   } catch (err) {
     out = err.stdout ? err.stdout.toString() : '';
   }

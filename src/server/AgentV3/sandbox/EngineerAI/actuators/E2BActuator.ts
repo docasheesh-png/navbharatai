@@ -1535,6 +1535,29 @@ export class E2BActuator implements IEngineerActuator {
         this._notePauseFailure(rec.sandboxId);
       }
     }
+
+    // CAS losers that could not be killed/capped are stored independently of the winning workspace
+    // allocation. Retry them here; they are never eligible for resume or user traffic.
+    const pendingOrphans = await sandboxStore.listPendingOrphanAllocations(50).catch(() => []);
+    for (const orphan of pendingOrphans) {
+      const paused = await this.pauseSandbox(orphan.sandboxId).catch(() => false);
+      if (paused) {
+        const settled = await sandboxStore.markOrphanAllocationHandled(orphan.sandboxId, 'paused').catch(() => false);
+        if (settled) this._pauseFailures.delete(orphan.sandboxId);
+        continue;
+      }
+      const killed = await withTimeout(Sandbox.kill(orphan.sandboxId), 10_000, 'Sandbox.kill(pending-orphan)').catch(() => false);
+      if (killed) {
+        const settled = await sandboxStore.markOrphanAllocationHandled(orphan.sandboxId, 'killed').catch(() => false);
+        if (settled) this._pauseFailures.delete(orphan.sandboxId);
+        continue;
+      }
+      await sandboxStore.noteOrphanAllocationAttempt(orphan.sandboxId);
+      const failures = this._notePauseFailure(orphan.sandboxId);
+      if (failures === PAUSE_FAILURE_WARNING_THRESHOLD) {
+        console.error(`SANDBOX_ORPHAN_CLEANUP_REPEATED_FAILURE ${orphan.sandboxId.slice(0, 12)} attempts=${orphan.attempts + 1}`);
+      }
+    }
   }
 
   /**

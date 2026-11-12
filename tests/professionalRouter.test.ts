@@ -102,9 +102,11 @@ describe('paid professional routing avoids speculative duplicate provider spend'
     const sda = readFileSync(join(process.cwd(), 'src/server/routes/sda.ts'), 'utf8');
     expect(routing).toContain('router.route(prompt, systemPrompt, undefined, undefined, opts.signal)');
     expect(routing).not.toContain('router.routeRaced(prompt, systemPrompt, undefined, opts.signal)');
-    expect(sda).toContain('professionalRouter.route(fallbackPrompt, SDA_SYSTEM_FINAL, undefined, undefined, inherited.signal)');
+    expect(sda).toContain('professionalRouter.route(fallbackPrompt, SDA_SYSTEM_FINAL, undefined, undefined, requestSignal)');
     expect(sda).not.toContain('professionalRouter.routeRaced(');
     expect(sda).toContain('runSequentialProviderFallback(sdaRacers');
+    expect(sda).toContain('const requestSignal = currentFreeAnswerSignal();');
+    expect(sda).toContain('}, requestSignal);');
     expect(sda).not.toContain('Promise.any(sdaRacers');
     // Paid text is handled once by the shared chain; direct races and direct Vertex/Claude retries are multimodal-only.
     expect(sda).toContain('if (sdaGrokKey && isImage && sdaTier === \'paid\')');

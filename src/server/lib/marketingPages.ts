@@ -154,7 +154,7 @@ export function renderAboutPage(origin: string, overrides?: AboutOverrides | nul
     `<h2>${md(a.teamHeading)}</h2>\n<p>${md(a.team)}</p>`,
     `<h2>${md(a.visionHeading)}</h2>\n<p>${md(a.vision)}</p>`,
     `<h2>${md(a.promisesHeading)}</h2>\n${a.promises.map((p) => `<h3>${md(p.title)}</h3>\n<p>${md(p.body)}</p>`).join('\n')}`,
-    `<h2>Pricing</h2>\n<p>Chat is offered free; building is paid from a rupee wallet, and hosting plans are optional. The details are on the <a href="${PRICING_PATH}">Pricing</a> page.</p>`,
+    `<h2>Pricing</h2>\n<p>Chat has a daily allowance, with eligible additional use paid from the wallet. Building is paid from the same rupee wallet, and hosting plans are optional. The details are on the <a href="${PRICING_PATH}">Pricing</a> page.</p>`,
     `<h2>${md(a.honestyHeading)}</h2>\n<p>${md(a.honesty)}</p>`,
     `<h2>${md(a.contactHeading)}</h2>\n<p>Email <a href="mailto:${email}">${email}</a> — in English or Hindi. See <a href="/contact">Contact</a> for what to write about and how quickly we answer, and <a href="/grievance">Grievance Redressal</a> for formal complaints.</p>`,
     `<h2>Official links</h2>\n<ul>\n${officialLinks.join('\n')}\n</ul>`,
@@ -166,3 +166,4 @@ export function renderAboutPage(origin: string, overrides?: AboutOverrides | nul
     jsonLd: pageJsonLd({ url: `${origin}${ABOUT_PATH}`, name: ABOUT_TITLE, description: ABOUT_DESCRIPTION, type: 'AboutPage' }),
   });
 }
+

@@ -5,8 +5,8 @@
 // encoded request safely under the platform cap, and the guard REFUSES oversized sends with a clear,
 // actionable message instead of a silent death.
 
-/** Max raw bytes for a single attachment (18 MB raw ≈ 24 MB base64 — safe under the 32 MB cap). */
-export const MAX_ATTACHMENT_BYTES = 18 * 1024 * 1024;
+/** Shared client/server ceiling: 15 MB raw, within both parser and request limits. */
+export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 /** Max combined raw bytes across all attachments in one message. */
 export const MAX_TOTAL_ATTACHMENT_BYTES = 22 * 1024 * 1024;
 
@@ -36,3 +36,27 @@ export function checkAttachmentSizes(files: ReadonlyArray<{ name: string; size: 
   }
   return { ok: true };
 }
+
+/** Stage new attachments without silently dropping files or exceeding the send-time caps. */
+export function stageAttachmentFiles<T extends { name: string; size: number }>(
+  current: readonly T[],
+  incoming: readonly T[],
+  maxFiles = 8,
+): { accepted: T[]; rejected: Array<{ file: T; reason: string }> } {
+  const accepted: T[] = [];
+  const rejected: Array<{ file: T; reason: string }> = [];
+  for (const file of incoming) {
+    if (current.length + accepted.length >= maxFiles) {
+      rejected.push({ file, reason: `"${file.name}" was not attached: at most ${maxFiles} files can be sent at once. Remove a file or send these separately.` });
+      continue;
+    }
+    const verdict = checkAttachmentSizes([...current, ...accepted, file]);
+    if (!verdict.ok) {
+      rejected.push({ file, reason: verdict.reason || `"${file.name}" could not be attached.` });
+      continue;
+    }
+    accepted.push(file);
+  }
+  return { accepted, rejected };
+}
+

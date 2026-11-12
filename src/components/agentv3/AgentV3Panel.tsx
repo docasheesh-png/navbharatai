@@ -1808,7 +1808,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     if (!override) setImportUrl(''); // consume the set-by-hand import URL on first send
     const savedOriginals = new Set<File>();
     try {
-      const classified = await Promise.all(sendFiles.map(async (file) => ({ file, opaque: await needsOpaqueStorage(file) })));
+      // Keep text-only sends synchronous through preflight; classification is I/O only for files.
+      const classified = sendFiles.length > 0
+        ? await Promise.all(sendFiles.map(async (file) => ({ file, opaque: await needsOpaqueStorage(file) })))
+        : [];
       if (!isCurrent()) return;
       const opaqueFiles = classified.filter((item) => item.opaque).map((item) => item.file);
       const readableFiles = classified.filter((item) => !item.opaque).map((item) => item.file);

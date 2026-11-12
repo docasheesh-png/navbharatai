@@ -24,6 +24,9 @@ function fixture(initial: SandboxRecord[]) {
   const update = vi.fn((ref: { id: string }, fields: object) => {
     records.set(ref.id, { ...records.get(ref.id)!, ...fields });
   });
+  const set = vi.fn((ref: { id: string }, fields: Partial<SandboxRecord>) => {
+    records.set(ref.id, { ...(records.get(ref.id) ?? { workspaceId: ref.id, userId: 'test-user', sandboxId: '', updatedAt: 0 }), ...fields } as SandboxRecord);
+  });
   const db = {
     collection: vi.fn(() => ({
       doc: (id: string) => ({ id }),
@@ -50,13 +53,14 @@ function fixture(initial: SandboxRecord[]) {
         return query;
       },
     })),
-    runTransaction: vi.fn(async (run: (tx: object) => Promise<boolean>) => run({
+    runTransaction: vi.fn(async (run: (tx: object) => Promise<unknown>) => run({
       get: async (ref: { id: string }) => snapshot(ref.id, records.get(ref.id)),
       update,
+      set,
     })),
   };
   return {
-    records, queries, update, db,
+    records, queries, update, set, db,
     store: new SandboxStore(() => db as unknown as admin.firestore.Firestore),
     fail: (value: boolean) => { failQuery = value; },
   };
@@ -127,7 +131,69 @@ describe('the orphan scan advances without unbounded database reads', () => {
   });
 });
 
+describe('new sandbox allocations are durably persisted without replacing a newer identity', () => {
+  it('creates the first allocation when the observed identity was missing', async () => {
+    const f = fixture([]);
+    expect(await f.store.recordAllocation('a', 'test-user', 'machine-new', null)).toBe(true);
+    expect(f.set).toHaveBeenCalledWith({ id: 'a' }, expect.objectContaining({
+      workspaceId: 'a', userId: 'test-user', sandboxId: 'machine-new', updatedAt: expect.any(Number),
+    }), { merge: true });
+    expect(f.records.get('a')?.sandboxId).toBe('machine-new');
+  });
+
+  it('replaces only the exact expired sandbox observed before a failed resume', async () => {
+    const f = fixture([old('a')]);
+    expect(await f.store.recordAllocation('a', 'test-user', 'machine-replacement', 'machine-a')).toBe(true);
+    expect(f.records.get('a')?.sandboxId).toBe('machine-replacement');
+    expect(f.set).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not replace verified owner metadata when the allocation caller has no uid', async () => {
+    const f = fixture([old('a')]);
+    expect(await f.store.recordAllocation('a', null, 'machine-a', 'machine-a')).toBe(true);
+    expect(f.records.get('a')?.userId).toBe('test-user');
+  });
+
+  it('reports an unavailable transaction as an allocation failure', async () => {
+    const f = fixture([]);
+    f.db.runTransaction.mockRejectedValueOnce(new Error('unavailable'));
+    expect(await f.store.recordAllocation('a', null, 'machine-new', null)).toBe(false);
+    expect(f.set).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite an allocation installed by another instance after the read', async () => {
+    const f = fixture([old('a')]);
+    f.records.set('a', { ...old('a'), sandboxId: 'machine-newer' });
+    expect(await f.store.recordAllocation('a', 'test-user', 'machine-stale', 'machine-a')).toBe(false);
+    expect(f.records.get('a')?.sandboxId).toBe('machine-newer');
+    expect(f.set).not.toHaveBeenCalled();
+  });
+});
+
 describe('busy heartbeats preserve durable allocation identity', () => {
+  it('the general touch path cannot overwrite a replacement allocation', async () => {
+    const record = old('a');
+    const f = fixture([record]);
+    f.records.set('a', { ...record, sandboxId: 'new-machine' });
+
+    await f.store.touch('a', record.sandboxId);
+
+    expect(f.update).not.toHaveBeenCalled();
+    expect(f.records.get('a')?.sandboxId).toBe('new-machine');
+    expect(f.records.get('a')?.updatedAt).toBe(record.updatedAt);
+  });
+
+  it('the general touch path cannot recreate a cleared allocation', async () => {
+    const record = old('a');
+    const f = fixture([record]);
+    f.records.delete('a');
+
+    await f.store.touch('a', record.sandboxId);
+
+    expect(f.update).not.toHaveBeenCalled();
+    expect(f.records.has('a')).toBe(false);
+  });
+
   it('refreshes only the timestamp of the existing matching allocation', async () => {
     const record = old('a');
     const f = fixture([record]);

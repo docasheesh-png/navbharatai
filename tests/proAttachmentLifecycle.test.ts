@@ -13,6 +13,9 @@ describe('verified original deletion scope', () => {
     expect(attachmentSessionForConversation('a', 'agentv3-other-chat', { userId: 'a' })).toBeNull();
     expect(attachmentSessionForConversation('a', '../bad', { userId: 'a' })).toBeNull();
   });
+  it.each(['', '../bad', 'a'.repeat(65)])('refuses unusable verified owner %j even for a legacy alias', uid => {
+    expect(attachmentSessionForConversation(uid, 'v3_chat', { userId: uid })).toBeNull();
+  });
   it('uses explicit message identity only and waits for deletion success', async () => {
     const store = { list: vi.fn().mockResolvedValue([]), erase: vi.fn().mockRejectedValue(new Error('storage down')) };
     await expect(eraseConversationOriginals(store, 'a', 'chat', '123', true)).rejects.toThrow('storage down');

@@ -29,6 +29,7 @@
  */
 // The ONE dependency this otherwise self-contained classifier takes: a pure, I/O-free constants
 // module shared with the client, so the platform's own generated prompt has a single definition.
+import { isSourcePathOnly } from '../lib/sourcePathPrompt';
 import { isPlatformContinuePrompt } from '../../lib/continueBuildPrompts';
 import { isPlatformFixRequest, looksLikeMachineError } from '../../lib/platformFixRequest';
 import { platformSuggestedReply } from './platformSuggestedReplies';
@@ -974,6 +975,10 @@ export function classifyIntentWithConfidence(message: string): IntentWithConfide
 function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence {
   const text = typeof message === 'string' ? message.trim() : '';
   if (!text) return { intent: 'new_build', confidence: 'low' };
+
+  // A bare source path identifies a file, not an instruction to create a new application.
+  // Keep it in chat so the assistant can ask what the user wants done with that file.
+  if (isSourcePathOnly(text)) return { intent: 'chat', confidence: 'high', signal: 'source-path-only' };
 
   const lower = text.toLowerCase();
 

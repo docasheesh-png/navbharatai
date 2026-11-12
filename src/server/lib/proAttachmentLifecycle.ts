@@ -1,3 +1,5 @@
+import { workspacePrefixFor } from './workspaceIdentity';
+
 /** Attachment scope selection is NOT workspace authorization. Call only after the
  * conversation's persisted owner has been checked; storage always receives verified UID. */
 export function attachmentSessionForConversation(
@@ -5,7 +7,8 @@ export function attachmentSessionForConversation(
 ): string | null {
   if (record.userId !== uid) return null;
   const id = record.workspaceId || conversationId;
-  const prefix = `agentv3-${uid}-`;
+  const prefix = workspacePrefixFor(uid);
+  if (!prefix) return null;
   const session = id.startsWith(prefix) ? id.slice(prefix.length)
     : id.startsWith('v3_') ? id.slice(3)
       : id.startsWith('agentv3-') ? null : id;

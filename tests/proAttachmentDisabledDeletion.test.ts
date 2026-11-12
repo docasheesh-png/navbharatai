@@ -11,12 +11,24 @@ import { eraseConversationOriginals } from '../src/server/lib/proAttachmentLifec
 // Firestore remains available for ordinary conversations; GCS is deliberately absent.
 function fixture() {
   const documents = new Map<string, any>();
+  const batchSizes: number[] = [];
   const collection = (path: string): any => ({
     doc: (id: string) => ({ path: `${path}/${id}`, collection: (name: string) => collection(`${path}/${id}/${name}`) }),
-    limit: () => ({ get: async () => ({ empty: true, docs: [] }) }),
+    limit: (count: number) => ({ get: async () => {
+      const docs = [...documents.keys()].filter(key => key.startsWith(path + '/') && !key.slice(path.length + 1).includes('/'))
+        .slice(0, count).map(key => ({ ref: { path: key } }));
+      return { empty: docs.length === 0, docs };
+    } }),
   });
   mocks.db = {
     collection,
+    batch: () => {
+      const deletes: string[] = [];
+      return { delete: (ref: { path: string }) => { deletes.push(ref.path); }, commit: async () => {
+        if (deletes.length > 500) throw new Error('Firestore batch limit exceeded');
+        batchSizes.push(deletes.length); for (const path of deletes) documents.delete(path);
+      } };
+    },
     runTransaction: async (run: (tx: any) => Promise<unknown>) => {
       const writes = new Map<string, any>();
       const result = await run({
@@ -29,7 +41,7 @@ function fixture() {
   };
   const store = new ProAttachmentStore(firebaseAttachmentBackend(), () => ({ maxBytes: 1000, maxFiles: 3 }));
   const ownerPath = `${PRO_ATTACHMENT_COLLECTION}/${Buffer.from('alice').toString('base64url')}`;
-  return { store, documents, ownerPath };
+  return { store, documents, ownerPath, batchSizes };
 }
 
 beforeEach(() => {
@@ -48,6 +60,16 @@ describe('disabled original uploads do not require a bucket to erase empty scope
     expect(mocks.bucketName).not.toHaveBeenCalled();
     expect(mocks.storage).not.toHaveBeenCalled();
     if (scope === 'chat' || scope === 'message') expect([...documents.keys()].some(key => key.includes('/deleted_scopes/'))).toBe(true);
+  });
+
+  it('erases more than 500 scope fences in bounded pages while retaining the blocked owner', async () => {
+    const { store, documents, ownerPath, batchSizes } = fixture();
+    for (let i = 0; i < 1201; i++) documents.set(`${ownerPath}/deleted_scopes/scope-${i}`, { blocked: true });
+    await store.erase('alice');
+    expect(batchSizes).toEqual([200, 200, 200, 200, 200, 200, 1]);
+    expect([...documents.keys()]).toEqual([ownerPath]);
+    expect(documents.get(ownerPath).blocked).toBe(true);
+    expect(mocks.storage).not.toHaveBeenCalled();
   });
 
   it('still refuses transcript removal when an existing original cannot be removed', async () => {

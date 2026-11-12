@@ -443,7 +443,7 @@ import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
 import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets } from '../AgentV3/gameAssets/assetSeed';
-import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -741,6 +741,7 @@ import {
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, fleetEmptyBasisNote, etaTaskKey, etaBuildKind, type EtaBuildKind } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxExpenseUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
+import { rateIsConfigured } from '../AgentV3/sandboxRate';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { scopeCallAudit, recordScopeFailure } from '../lib/scopeFailureReports';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
@@ -1823,8 +1824,8 @@ function billableSandboxDetail(
   actuator: unknown,
   workspaceId: string | null | undefined,
   buildStartedAtMs?: number,
-): { seconds: number; usd: number; measuredSeconds: number } {
-  const none = { seconds: 0, usd: 0, measuredSeconds: 0 };
+): { seconds: number; usd: number; measuredSeconds: number; expenseMeasured: boolean } {
+  const none = { seconds: 0, usd: 0, measuredSeconds: 0, expenseMeasured: false };
   try {
     const fn = (actuator as any)?.sandboxHeldSeconds;
     if (typeof fn !== 'function' || !workspaceId) return none;
@@ -1849,12 +1850,13 @@ function billableSandboxDetail(
     if (!Number.isFinite(started) || started <= 0) return none;
     const buildSeconds = Math.max(0, (Date.now() - started) / 1000);
     const billable = Math.min(seconds, buildSeconds);
+    const expenseMeasured = rateIsConfigured();
     const usd = sandboxExpenseUsd(sandboxCost(billable));
-    // Expense telemetry only. The user fee is derived separately from the settled subtotal.
-    // measuredSeconds retains measured time even when the verified hourly rate is unavailable.
+    // Availability comes from the verified rate, NOT the rounded USD amount: a real short run may
+    // legitimately round below $0.000001. Keep billing seconds zero when no positive fee is shown.
     return usd > 0
-      ? { seconds: billable, usd, measuredSeconds: billable }
-      : { ...none, measuredSeconds: billable };
+      ? { seconds: billable, usd, measuredSeconds: billable, expenseMeasured }
+      : { ...none, measuredSeconds: billable, expenseMeasured };
   } catch {
     return none;
   }
@@ -18933,6 +18935,13 @@ async function noteBuildOutcome(
                   kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? '') });
                 }
                 kitRecipesMs = Date.now() - kitStartedAt;
+                // BR1977: recipes report ok (`!r.is_error`) even when they wrote nothing —
+                // this build claimed five recipes and 3 files after SANDBOX_UNAVAILABLE.
+                // Count only files that landed during the recipe loop (not later L3 assets)
+                // and refuse to claim a seed — or to prepare 3D assets on a missing 3D layer —
+                // unless at least as many files landed as recipes that said they succeeded.
+                const recipeFiles = [...writtenFiles].filter(([p, c]) => writtenBeforeKit.get(p) !== c).length;
+                downgradeEmptyKitSeedSuccesses(kitResults, recipeFiles);
                 if (gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted) {
                   // Default-off L3; all bytes and manifests are acknowledged durably before handoff.
                   // Source/provider failures leave the successful L1/L2 kit intact.
@@ -27833,7 +27842,8 @@ async function noteBuildOutcome(
           // Sonnet's price read as a $1,257 loss. These two lines are the whole fix for that, and
           // they cost nothing — both numbers were already in scope, one variable away.
           realCostUsd: decidedRealCostUsd,
-          sandboxUsd: decidedSandboxUsd,
+          // An unset/invalid E2B rate makes VM expense UNKNOWN, not a measured $0.
+          sandboxUsd: livePreviewCharge.expenseMeasured ? decidedSandboxUsd : undefined,
           // Per-RUNG tokens. `reconciledProviderUsage` above names only the vendor, and one vendor
           // holds rungs 20x apart in price, so no downstream reader could price it.
           modelUsage: modelUsageFromEntries(providerLedger.entries()),

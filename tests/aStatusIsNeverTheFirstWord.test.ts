@@ -68,7 +68,6 @@ describe('the CREATE-OR-UPDATE writers keep their merge — a first write must s
     ['src/server/AgentV3/DeploymentStore.ts', 'record'],
     ['src/server/AgentV3/SandboxStore.ts', 'record'],
     ['src/server/AgentV3/SandboxStore.ts', 'saveSnapshot'],
-    ['src/server/AgentV3/SandboxStore.ts', 'touch'],
   ];
   for (const [file, method] of KEEP) {
     it(`${file.split('/').pop()} → ${method} still merges`, () => {
@@ -78,6 +77,18 @@ describe('the CREATE-OR-UPDATE writers keep their merge — a first write must s
 });
 
 describe('the honesty half — a missing record is reported, never invented', () => {
+  it('sandbox heartbeat updates only the matching existing allocation, never creates or replaces one', () => {
+    const source = stripComments(read('src/server/AgentV3/SandboxStore.ts'));
+    expect(methodBody(source, 'touch')).toContain('await this.touchIfCurrent(workspaceId, sandboxId)');
+    const body = methodBody(source.slice(source.indexOf('async touchIfCurrent(')), 'touchIfCurrent');
+    expect(body).toContain('db.runTransaction(');
+    expect(body).toContain('await tx.get(ref)');
+    const guard = body.indexOf('if (!snap.exists || snap.data()?.sandboxId !== sandboxId) return false;');
+    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(guard).toBeLessThan(body.indexOf('tx.update(ref, { updatedAt: Date.now() })'));
+    expect(body).not.toMatch(/\.set\(|merge:\s*true/);
+  });
+
   it('revokeShare returns before writing when the share does not exist', () => {
     const body = methodBody(stripComments(read('src/server/lib/ShareStore.ts')), 'revokeShare');
     expect(body.indexOf('if (!snap.exists) return;')).toBeLessThan(body.indexOf(".update({ status: 'revoked' })"));

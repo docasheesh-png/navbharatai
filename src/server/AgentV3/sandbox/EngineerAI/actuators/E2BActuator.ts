@@ -1535,6 +1535,26 @@ export class E2BActuator implements IEngineerActuator {
         this._notePauseFailure(rec.sandboxId);
       }
     }
+
+    // CAS losers that could not be killed/capped are stored independently of the winning workspace
+    // allocation. Retry them here; they are never eligible for resume or user traffic.
+    const pendingOrphans = await sandboxStore.listPendingOrphanAllocations(50).catch(() => []);
+    for (const orphan of pendingOrphans) {
+      const paused = await this.pauseSandbox(orphan.sandboxId).catch(() => false);
+      if (paused) {
+        const settled = await sandboxStore.markOrphanAllocationHandled(orphan.sandboxId, 'paused').catch(() => false);
+        if (settled) this._pauseFailures.delete(orphan.sandboxId);
+        continue;
+      }
+      const killed = await withTimeout(Sandbox.kill(orphan.sandboxId), 10_000, 'Sandbox.kill(pending-orphan)').catch(() => false);
+      if (killed) {
+        const settled = await sandboxStore.markOrphanAllocationHandled(orphan.sandboxId, 'killed').catch(() => false);
+        if (settled) this._pauseFailures.delete(orphan.sandboxId);
+        continue;
+      }
+      // pauseSandbox already updates the in-process failure counter; persist one durable attempt here.
+      await sandboxStore.noteOrphanAllocationAttempt(orphan.sandboxId);
+    }
   }
 
   /**
@@ -1675,6 +1695,37 @@ export class E2BActuator implements IEngineerActuator {
    * Split out of `getSandbox` so the in-flight lock above has something to hold. Unknown recovery
    * refuses without creating or restoring a replacement.
    */
+  /** Kill a newly-created machine that lost the durable allocation CAS. */
+  private async _killUnrecordedSandbox(workspaceId: string, sandbox: Sandbox, reason: 'losing-allocation' | 'unrecorded-allocation'): Promise<void> {
+    const killed = await withTimeout(Sandbox.kill(sandbox.sandboxId), 10_000, reason).catch(() => false);
+    if (killed) return;
+
+    // Try a cloud-side pause before relying on expiry. If it succeeds, record the terminal state
+    // when possible; otherwise retain a durable pending orphan for the cross-instance sweeper.
+    const paused = await this.pauseSandbox(sandbox.sandboxId).catch(() => false);
+    if (paused) {
+      const recorded = await sandboxStore.recordOrphanAllocation(sandbox.sandboxId, reason);
+      if (recorded) await sandboxStore.markOrphanAllocationHandled(sandbox.sandboxId, 'paused');
+      return;
+    }
+
+    // A successful cap is a temporary backstop, not proof of cleanup: still persist the orphan so
+    // another instance can pause/kill it on the next durable sweep.
+    const capped = await sandbox.setTimeout(60_000).then(() => true).catch(() => false);
+    const recorded = await sandboxStore.recordOrphanAllocation(sandbox.sandboxId, reason);
+    if (recorded) {
+      if (!capped) console.error(`SANDBOX_ORPHAN_CLEANUP_PENDING ${sandbox.sandboxId.slice(0, 12)}; durable sweep will retry`);
+      return;
+    }
+
+    // If Firestore cannot retain the orphan either, make one final provider kill attempt and emit
+    // an explicit critical signal rather than silently treating failed cleanup as success.
+    const retryKilled = await withTimeout(Sandbox.kill(sandbox.sandboxId), 10_000, `${reason}-retry`).catch(() => false);
+    if (!retryKilled && !capped) {
+      console.error(`SANDBOX_ORPHAN_UNTRACKED_CRITICAL ${sandbox.sandboxId.slice(0, 12)}; provider kill, pause, timeout cap and durable record all failed`);
+    }
+  }
+
   private async _createSandbox(workspaceId: string, resumeSandboxId?: string, framework?: string): Promise<Sandbox> {
     assertCanaryLegacyAllowed('sandbox-infrastructure');
     assertNotCanaryWorkspace(workspaceId);
@@ -1734,6 +1785,42 @@ export class E2BActuator implements IEngineerActuator {
       freshCreate = true;
       this._sandboxOrigin.set(workspaceId, 'created-fresh');
     }
+    // The allocation CAS is authoritative across Cloud Run instances. A loser must never publish
+    // or use a sandbox that the durable workspace record does not name.
+    if (resumeEnabled) {
+      const recorded = await sandboxStore.recordAllocation(workspaceId, null, sandbox.sandboxId, resumeId ?? null);
+      if (!recorded) {
+        const winner = await sandboxStore.lookupRecoveryIdentity(workspaceId).catch(() => ({ state: 'unavailable' as const }));
+        if (winner.state !== 'found') {
+          if (freshCreate) await this._killUnrecordedSandbox(workspaceId, sandbox, 'unrecorded-allocation');
+          this._sandboxOrigin.delete(workspaceId);
+          this._lastLifetimeExtend.delete(workspaceId);
+          throw new SandboxRecoveryUnavailableError();
+        }
+        if (winner.sandboxId !== sandbox.sandboxId) {
+          // A newly created loser is ours to discard. A resumed old machine may still be in use by
+          // another request, so never kill it merely because another instance installed a new id.
+          if (!freshCreate) {
+            this._sandboxOrigin.delete(workspaceId);
+            this._lastLifetimeExtend.delete(workspaceId);
+            throw new SandboxRecoveryUnavailableError();
+          }
+          await this._killUnrecordedSandbox(workspaceId, sandbox, 'losing-allocation');
+          try {
+            sandbox = await withTimeout(Sandbox.connect(winner.sandboxId, this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.connect(winning-allocation)');
+            await sandbox.setTimeout(sandboxLifetimeMs()).catch(() => {});
+            this._lastLifetimeExtend.set(workspaceId, Date.now());
+            this._sandboxOrigin.set(workspaceId, 'resumed');
+            freshCreate = false;
+          } catch {
+            this._sandboxOrigin.delete(workspaceId);
+            this._lastLifetimeExtend.delete(workspaceId);
+            throw new SandboxRecoveryUnavailableError();
+          }
+        }
+      }
+    }
+
     this.sandboxes.set(workspaceId, sandbox);
     usageTracker.record(workspaceId, 'sandbox');
     // WHY, not just THAT: the zone names the caller (a build, the preview door, a wake, a publish,
@@ -1751,13 +1838,10 @@ export class E2BActuator implements IEngineerActuator {
     this._busySince.delete(workspaceId);
     const startSnapshot = { ...session };
     if (!this._sandboxStartedAt.has(workspaceId)) this._sandboxStartedAt.set(workspaceId, Date.now());
-    // Durable from the FIRST moment the sandbox exists, not from the end of the build — that gap was
-    // what made a running build indistinguishable from an abandoned one.
     this._lastDurableTouch.delete(workspaceId);
-    const identityTouch = this._touchDurable(workspaceId, sandbox.sandboxId);
-    if (sandboxResumeEnabled()) {
+    if (resumeEnabled) {
       this._sessionStartWrites.set(session,
-        sandboxStore.recordSessionStart(workspaceId, startSnapshot, identityTouch).catch(() => {}));
+        sandboxStore.recordSessionStart(workspaceId, startSnapshot).catch(() => {}));
     }
     // RECREATE-AFTER-DEATH restore: a fresh sandbox comes back EMPTY, so the app goes back INTO it —
     // from the durable store first and this instance's warm cache second. See `_restoreFreshSandbox`.

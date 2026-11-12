@@ -741,6 +741,7 @@ import {
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, fleetEmptyBasisNote, etaTaskKey, etaBuildKind, type EtaBuildKind } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxExpenseUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
+import { rateIsConfigured } from '../AgentV3/sandboxRate';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { scopeCallAudit, recordScopeFailure } from '../lib/scopeFailureReports';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
@@ -1847,12 +1848,13 @@ function billableSandboxDetail(
     if (!Number.isFinite(started) || started <= 0) return none;
     const buildSeconds = Math.max(0, (Date.now() - started) / 1000);
     const billable = Math.min(seconds, buildSeconds);
+    const expenseMeasured = rateIsConfigured();
     const usd = sandboxExpenseUsd(sandboxCost(billable));
-    // Expense telemetry only. The user fee is derived separately from the settled subtotal.
-    // measuredSeconds retains measured time even when the verified hourly rate is unavailable.
+    // Availability comes from the verified rate, NOT the rounded USD amount: a real short run may
+    // legitimately round below $0.000001. Keep billing seconds zero when no positive fee is shown.
     return usd > 0
-      ? { seconds: billable, usd, measuredSeconds: billable, expenseMeasured: true }
-      : { ...none, measuredSeconds: billable };
+      ? { seconds: billable, usd, measuredSeconds: billable, expenseMeasured }
+      : { ...none, measuredSeconds: billable, expenseMeasured };
   } catch {
     return none;
   }

@@ -81,20 +81,21 @@ describe('free chat chain central dispatch', () => {
    expect(m.execute.mock.calls.every(call => ['glm-4.5-flash', 'glm-4.7-flash', 'openai/gpt-oss-120b', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'].includes(call[1].model))).toBe(true);
  });
 
- it.each(['hello', 'solve 2 + 2', 'exam notes', 'fever symptoms'])('keeps GLM first for default routing: %s', async message => {
+ it.each(['hello', 'solve 2 + 2', 'exam notes', 'fever symptoms'])('keeps GLM as the first ordinary fallback when optional suppliers are unavailable: %s', async message => {
    const cfg = config(DEFAULT_ORDER.join(','));
    const result = await buildFreeChainRouter(db, cfg).route({ ...input(), message });
    expect(result).toMatchObject({ ok: true, model: 'glm-4.5-flash' });
    expect(m.execute).toHaveBeenCalledOnce();
    expect(m.paid).not.toHaveBeenCalled();
  });
- it('tries Qubax after the free rungs on the legacy order and continues when it is unavailable', async () => {
+ it('tries Qubax before the free rungs on the legacy order and continues when it is unavailable', async () => {
    const qubax = await import('../../lib/qubax');
    const spy = vi.spyOn(qubax, 'runApprovedQubaxChat').mockResolvedValue({ kind: 'skipped', reason: 'qubax-price-or-quality-unverified' });
    m.execute.mockRejectedValue(new FreeChainProviderError('MODEL_UNAVAILABLE'));
    const result = await buildFreeChainRouter(db, config(DEFAULT_ORDER.join(','))).route(input());
    const providers = result.freeChain?.attempts.map(attempt => attempt.provider) ?? [];
-   expect(providers.indexOf('openrouter')).toBeLessThan(providers.indexOf('qubax'));
+   expect(providers.slice(0, 2)).toEqual(['mitrify', 'qubax']);
+   expect(providers.indexOf('qubax')).toBeLessThan(providers.indexOf('openrouter'));
    expect(providers.indexOf('qubax')).toBeLessThan(providers.indexOf('cheapinf'));
    expect(spy).toHaveBeenCalled();
    expect(result.freeChain?.attempts.find(attempt => attempt.provider === 'qubax')?.reason).toBe('qubax-price-or-quality-unverified');
@@ -915,7 +916,7 @@ describe('fixed chain recovery and cancellation', () => {
    const result = await buildFreeChainRouter(db, cfg).route(input());
    expect(result.ok).toBe(false);
    expect(result.freeChain?.attempts.map(attempt => attempt.provider)).toEqual([
-     'glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'mitrify', 'qubax', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid',
+     'mitrify', 'qubax', 'glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid',
    ]);
    expect(result.freeChain?.attempts.find(a => a.provider === 'mitrify')).toMatchObject({ entered: false, reason: 'mitrify-configuration' });
    expect(m.execute).not.toHaveBeenCalled();

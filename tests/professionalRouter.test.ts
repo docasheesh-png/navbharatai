@@ -104,6 +104,11 @@ describe('paid professional routing avoids speculative duplicate provider spend'
     expect(routing).not.toContain('router.routeRaced(prompt, systemPrompt, undefined, opts.signal)');
     expect(sda).toContain('professionalRouter.route(fallbackPrompt, SDA_SYSTEM_FINAL)');
     expect(sda).not.toContain('professionalRouter.routeRaced(');
+    // Paid text is handled once by the shared chain; direct races and direct Vertex/Claude retries are multimodal-only.
+    expect(sda).toContain('if (sdaGrokKey && isImage && sdaTier === \'paid\')');
+    expect(sda).toContain('if (sdaGeminiKey && (isImage || isPDF))');
+    expect(sda).toContain('if (!reply && (isImage || isPDF || sdaTier === \'free\'))');
+    expect(sda).toContain('if (!reply && sdaTier === \'paid\' && (isImage || isPDF))');
   });
 
   it('a successful first rung does not call later providers', async () => {

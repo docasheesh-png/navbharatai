@@ -539,7 +539,10 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       audit('ADMIN_MFA_ENABLED', { admin: adminUsername(), ip: req.ip });
       res.json({ ok: true, enabled: true });
     } catch (err) {
-      if (err instanceof AdminMfaPolicyError) return res.status(err.status).json({ error: err.message });
+      if (err instanceof AdminMfaPolicyError) {
+        if (err.status === 401) audit('ADMIN_MFA_VERIFY_FAILED', { admin: adminUsername(), ip: req.ip });
+        return res.status(err.status).json({ error: err.message });
+      }
       console.error('[ADMIN_MFA] verify failed');
       res.status(500).json({ error: 'Failed to verify MFA.' });
     }

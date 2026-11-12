@@ -13,6 +13,7 @@ import { extractDocumentText } from '../lib/attachmentText';
 import { claudeVisionAnswerModel, grokVisionModels, geminiVisionModels, vertexVisionModels } from '../lib/visionModels';
 import { estimateTextTokens, geminiUsage, reserveFreeTierPaid, settleFreeTierPaid, FREE_TIER_PAID_OUTPUT_QUOTE, type FreeTierPaidHold } from '../lib/freeTierPaidCap';
 import { freeBusyMessage } from '../lib/freeBusyMessage';
+import { runSequentialProviderFallback } from '../lib/sequentialProviderFallback';
 import { vertexGenAI } from '../lib/vertexGenAI';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { computeClinicalTool, AVAILABLE_CLINICAL_TOOLS } from '../lib/clinical/calculators';
@@ -618,17 +619,16 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       });
 
       if (sdaRacers.length > 0) {
-        const sdaAcs = sdaRacers.map(() => new AbortController());
-        try {
-          const sdaWinner = await Promise.any(
-            sdaRacers.map((fn, i) => fn(sdaAcs[i].signal).then(won => {
-              sdaAcs.forEach((ac, j) => { if (j !== i && !ac.signal.aborted) ac.abort(); });
-              console.log(`[SDA] Race won by ${i === 0 ? 'Grok' : 'Gemini'}`);
-              return won;
-            }))
-          );
-          if (sdaWinner?.text?.trim()) { reply = sdaWinner.text; sdaSpend = sdaWinner.spend; }
-        } catch { console.warn('[SDA] Race (Grok+Gemini) both failed → Vertex/Claude'); }
+        const sdaWinner = await runSequentialProviderFallback(sdaRacers, (error, index) => {
+          console.warn(`[SDA] ${index === 0 ? 'Grok' : 'Gemini'} failed; trying the next multimodal provider:`, String(error));
+        });
+        if (sdaWinner?.text?.trim()) {
+          console.log(`[SDA] Sequential multimodal fallback answered via ${sdaWinner.spend.provider}`);
+          reply = sdaWinner.text;
+          sdaSpend = sdaWinner.spend;
+        } else {
+          console.warn('[SDA] Sequential multimodal providers exhausted → Vertex/Claude');
+        }
       }
 
       // ── Isolated PROFESSIONAL namespace router (text-only) ────────────────

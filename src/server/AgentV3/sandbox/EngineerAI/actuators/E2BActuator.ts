@@ -1696,7 +1696,7 @@ export class E2BActuator implements IEngineerActuator {
    * refuses without creating or restoring a replacement.
    */
   /** Kill a newly-created machine that lost the durable allocation CAS. */
-  private async _killUnrecordedSandbox(workspaceId: string, sandbox: Sandbox, reason: string): Promise<void> {
+  private async _killUnrecordedSandbox(workspaceId: string, sandbox: Sandbox, reason: 'losing-allocation' | 'unrecorded-allocation'): Promise<void> {
     const killed = await withTimeout(Sandbox.kill(sandbox.sandboxId), 10_000, reason).catch(() => false);
     if (killed) return;
 
@@ -1704,7 +1704,7 @@ export class E2BActuator implements IEngineerActuator {
     // when possible; otherwise retain a durable pending orphan for the cross-instance sweeper.
     const paused = await this.pauseSandbox(sandbox.sandboxId).catch(() => false);
     if (paused) {
-      const recorded = await sandboxStore.recordOrphanAllocation(workspaceId, sandbox.sandboxId, reason);
+      const recorded = await sandboxStore.recordOrphanAllocation(sandbox.sandboxId, reason);
       if (recorded) await sandboxStore.markOrphanAllocationHandled(sandbox.sandboxId, 'paused');
       return;
     }
@@ -1712,7 +1712,7 @@ export class E2BActuator implements IEngineerActuator {
     // A successful cap is a temporary backstop, not proof of cleanup: still persist the orphan so
     // another instance can pause/kill it on the next durable sweep.
     const capped = await sandbox.setTimeout(60_000).then(() => true).catch(() => false);
-    const recorded = await sandboxStore.recordOrphanAllocation(workspaceId, sandbox.sandboxId, reason);
+    const recorded = await sandboxStore.recordOrphanAllocation(sandbox.sandboxId, reason);
     if (recorded) {
       if (!capped) console.error(`SANDBOX_ORPHAN_CLEANUP_PENDING ${sandbox.sandboxId.slice(0, 12)}; durable sweep will retry`);
       return;

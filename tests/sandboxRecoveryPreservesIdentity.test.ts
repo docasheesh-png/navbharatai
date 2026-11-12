@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Sandbox, SandboxNotFoundError, FileNotFoundError, AuthenticationError, RateLimitError } from 'e2b';
 import { E2BActuator } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
+import { sandboxLifetimeMs } from '../src/server/AgentV3/sandboxLifetime';
 import { sandboxStore } from '../src/server/AgentV3/SandboxStore';
 import { SandboxRecoveryUnavailableError, isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable } from '../src/server/AgentV3/SandboxRecoveryError';
 
@@ -198,14 +199,14 @@ describe('known recovery behavior remains available', () => {
     expect(f.lookup).toHaveBeenCalledTimes(mode === 'disabled' ? 0 : 1);
   });
 
-  it('a fresh allocation that loses the durable CAS is killed and reconnects to the winner', async () => {
+  it.each([false, true])('a fresh CAS loser keeps durable cleanup after emergency cap failure=%s and reconnects to the winner', async (capFails) => {
     const f = fixture();
     f.lookup.mockResolvedValueOnce({ state: 'missing' }).mockResolvedValueOnce({ state: 'found', sandboxId: 'winning-machine' });
     f.allocation.mockResolvedValueOnce(false);
     const winner = machine('winning-machine');
     f.connect.mockResolvedValueOnce(winner as unknown as Sandbox);
     const kill = vi.spyOn(Sandbox, 'kill').mockResolvedValue(false);
-    f.fresh.setTimeout.mockRejectedValueOnce(new Error('timeout cap unavailable'));
+    if (capFails) f.fresh.setTimeout.mockRejectedValueOnce(new Error('timeout cap unavailable'));
     const pause = vi.spyOn(f.act, 'pauseSandbox').mockResolvedValue(false);
     const orphan = vi.spyOn(sandboxStore, 'recordOrphanAllocation').mockResolvedValue(true);
 
@@ -214,11 +215,27 @@ describe('known recovery behavior remains available', () => {
     expect(f.create).toHaveBeenCalledTimes(1);
     expect(kill).toHaveBeenCalledWith('new-machine');
     expect(pause).toHaveBeenCalledWith('new-machine');
-    expect(f.fresh.setTimeout).toHaveBeenCalledWith(60_000);
-    expect(orphan).toHaveBeenCalledWith(WS, 'new-machine', 'losing-allocation');
+    expect(f.fresh.setTimeout).toHaveBeenCalledExactlyOnceWith(60_000);
+    expect(winner.setTimeout).toHaveBeenCalledWith(sandboxLifetimeMs());
+    expect(winner.setTimeout).not.toHaveBeenCalledWith(60_000);
+    expect(orphan).toHaveBeenCalledWith('new-machine', 'losing-allocation');
     expect(f.connect).toHaveBeenCalledWith('winning-machine', expect.any(Object));
     expect(f.restore).not.toHaveBeenCalled();
     expect(f.act.sandboxOrigin(WS)).toBe('resumed');
+  });
+
+  it('failed pause of an allocated workspace never kills it or marks it settled', async () => {
+    const f = fixture();
+    const row = { workspaceId: WS, userId: 'owner', sandboxId: OLD, updatedAt: Date.now() - 60 * 60_000 };
+    vi.spyOn(sandboxStore, 'listStale').mockResolvedValue([row]);
+    vi.spyOn(sandboxStore, 'getRecord').mockResolvedValue(row);
+    vi.spyOn(sandboxStore, 'listPendingOrphanAllocations').mockResolvedValue([]);
+    const pause = vi.spyOn(f.act, 'pauseSandbox').mockResolvedValue(false);
+    const kill = vi.spyOn(Sandbox, 'kill').mockResolvedValue(true);
+    const settled = vi.spyOn(sandboxStore, 'markPausedIfUnchanged').mockResolvedValue(true);
+    await (f.act as any)._sweepOrphanSandboxes();
+    expect(pause).toHaveBeenCalledWith(OLD);
+    expect(kill).not.toHaveBeenCalled(); expect(settled).not.toHaveBeenCalled();
   });
 
   it('the durable orphan sweep pauses a retained CAS loser and marks it handled', async () => {

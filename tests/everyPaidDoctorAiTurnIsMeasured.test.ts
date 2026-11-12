@@ -26,9 +26,9 @@ describe('census: every provider answer in sda.ts records its usage', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('a racer returns its spend with its text, and the winner\'s spend is kept', () => {
+  it('a sequential provider returns its spend with its text, and the winner\'s spend is kept', () => {
     expect(src).toMatch(/type SdaRacerFn = \(signal: AbortSignal\) => Promise<\{ text: string; spend: ChatTurnUsage \}>/);
-    expect(src).toMatch(/reply = sdaWinner\.text; sdaSpend = sdaWinner\.spend;/);
+    expect(src).toMatch(/reply = sdaWinner\.text;\s*sdaSpend = sdaWinner\.spend;/);
   });
 
   it('the route is rate-limited', () => {

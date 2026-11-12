@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 
 const state = vi.hoisted(() => ({
+  eraseOriginals: vi.fn(),
   uid: 'abc' as string | null,
   docs: new Map<string, Record<string, unknown>>(),
   deleted: [] as string[],
@@ -60,6 +61,9 @@ const db = {
 vi.mock('../src/server/lib/serverDb', async (original) => ({
   ...await original<typeof import('../src/server/lib/serverDb')>(), getServerDb: () => db,
 }));
+// The real attachment backend has separate transactional deletion coverage.
+// This fixture owns workspace erasure; model its new mandatory prerequisite explicitly.
+vi.mock('../src/server/lib/proAttachmentStore', () => ({ proAttachmentStore: { erase: state.eraseOriginals } }));
 vi.mock('firebase-admin', async (original) => ({
   ...await original<typeof import('firebase-admin')>(), apps: [{}], initializeApp: vi.fn(),
   firestore: Object.assign(() => db, { FieldPath: { documentId: () => '__name__' } }),
@@ -98,6 +102,7 @@ const foreignBot = 'b1b2c3d4e5f60718293a4b5c';
 const ws = 'agentv3-abc-d-session1';
 
 beforeEach(() => {
+  state.eraseOriginals.mockReset().mockResolvedValue(undefined);
   state.uid = 'abc'; state.docs.clear(); state.deleted.length = 0; state.queried.length = 0;
   state.bucketCopies.clear(); state.channels.clear(); state.listedSnapshots = 0;
   state.authDeletes.mockReset().mockResolvedValue('deleted');
@@ -132,6 +137,7 @@ describe('registered account deletion never turns a legacy UID prefix into forei
     const preserved = [...state.docs.entries()].filter(([path]) => !ownExactPaths.includes(path));
     const res = mockRes();
     await handler(mockReq({ body: { confirm: 'DELETE' } }), res);
+    expect(state.eraseOriginals).toHaveBeenCalledWith(state.uid);
     expect(res.statusCode).toBe(200);
     expect(res.body.derived.collections.find((entry: any) => entry.collection === 'bot_sessions')).toMatchObject({ documents: 1, error: undefined });
     for (const [path, value] of preserved) expect(state.docs.get(path), path).toEqual(value);
@@ -158,6 +164,7 @@ describe('registered account deletion never turns a legacy UID prefix into forei
     const preserved = [...state.docs.entries()];
     const res = mockRes();
     await handler(mockReq({ body: { confirm: 'DELETE' } }), res);
+    expect(state.eraseOriginals).toHaveBeenCalledWith(state.uid);
     expect(res.statusCode).toBe(200);
     expect([...state.docs.entries()]).toEqual(preserved);
     expect(res.body.synced).toMatchObject({ chunks: 0, manifestDeleted: false, probed: 0, refusal: 'ownership-unverified' });
@@ -182,5 +189,18 @@ describe('registered account deletion never turns a legacy UID prefix into forei
     expect(res.statusCode).toBe(400);
     expect(state.deleted).toEqual([]);
     expect(state.queried).toEqual([]);
+  });
+});
+
+
+describe('private originals are a mandatory account-erasure prerequisite', () => {
+  it('does not delete the account when original-file deletion cannot be confirmed', async () => {
+    state.eraseOriginals.mockRejectedValueOnce(new Error('private backend unavailable'));
+    const res = mockRes();
+    await handler(mockReq({ body: { confirm: 'DELETE' } }), res);
+    expect(state.eraseOriginals).toHaveBeenCalledWith('abc');
+    expect(res.statusCode).toBe(503);
+    expect(res.body.accountDeleted).toBe(false);
+    expect(state.authDeletes).not.toHaveBeenCalled();
   });
 });

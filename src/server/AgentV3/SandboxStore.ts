@@ -18,12 +18,29 @@
 //   with the single-build-per-account lock (activeBuilds 409), two instances never resume the same
 //   sandbox concurrently. Mirrors DeploymentStore: VITEST-skip, best-effort, never throws/blocks a build.
 import * as admin from 'firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { createHash } from 'node:crypto';
+import { FieldValue, FieldPath } from 'firebase-admin/firestore';
 import { getServerDb } from '../lib/serverDb';
 import { isUsableRecipe, type PreviewRecipe } from './previewRevival';
 import type { PauseCause } from './sandboxLifetime';
 import type { SandboxSession } from './sandboxSessions';
 import { dayKey } from './sandboxSessions';
+
+/** Minimal cleanup identity, not a reversible workspace/user key. */
+export function sandboxOrphanDocumentId(sandboxId: string): string {
+  return createHash('sha256').update(`sandbox-orphan-v1:${sandboxId}`).digest('hex');
+}
+
+function orphanPendingFields(sandboxId: string, row: Record<string, any> = {}) {
+  return {
+    sandboxId, status: 'pending',
+    reason: row.reason === 'losing-allocation' ? 'losing-allocation' : 'unrecorded-allocation',
+    createdAt: Number.isFinite(Number(row.createdAt)) ? Number(row.createdAt) : Date.now(),
+    updatedAt: Date.now(),
+    attempts: Number.isFinite(Number(row.attempts)) ? Number(row.attempts) : 0,
+    ...(Number.isFinite(Number(row.lastAttemptAt)) ? { lastAttemptAt: Number(row.lastAttemptAt) } : {}),
+  };
+}
 
 export interface SandboxRecord {
   workspaceId: string;
@@ -176,94 +193,89 @@ export class SandboxStore {
     } catch { return false; /* the caller must not use an allocation it could not persist */ }
   }
 
-  /** Persist an allocation that lost CAS and could not be killed, capped, or paused immediately. */
-  async recordOrphanAllocation(workspaceId: string, sandboxId: string, reason: string): Promise<boolean> {
+  /** Transactional migration/replay fence shared by enqueue, retry and resolution. */
+  private async _updateOrphan(
+    sandboxId: string,
+    change: (row: Record<string, any> | undefined) => Record<string, any> | null,
+  ): Promise<Record<string, any> | null> {
     const db = this.getDb();
-    if (!db || !sandboxId) return false;
+    if (!db || !sandboxId) return null;
+    const collection = db.collection('agentv3_sandbox_orphans');
+    const ref = collection.doc(sandboxOrphanDocumentId(sandboxId));
+    const legacyRef = collection.doc(encodeURIComponent(sandboxId));
+    const cursorRef = collection.doc('navbharatai-orphan-sweep-cursor-v1');
+    return db.runTransaction(async tx => {
+      const [snap, legacy, cursor] = await Promise.all([tx.get(ref), tx.get(legacyRef), tx.get(cursorRef)]);
+      const rows = [snap.data(), legacy.data()];
+      // A terminal fence always wins over a delayed old-schema pending write.
+      const row = rows.find(r => r?.status === 'paused' || r?.status === 'killed') ?? rows.find(Boolean);
+      const next = row?.status === 'paused' || row?.status === 'killed'
+        ? { status: row.status, resolvedAt: Number(row.resolvedAt) || Date.now() }
+        : change(row);
+      if (!next) return null;
+      tx.set(ref, next); // Replacement strips legacy workspace/user fields.
+      if (legacy.exists && legacyRef.id !== ref.id) tx.delete(legacyRef);
+      const oldCursor = cursor.data()?.lastDocumentId;
+      if (typeof oldCursor === 'string' && !/^[a-f0-9]{64}$/.test(oldCursor)) {
+        tx.set(cursorRef, { lastDocumentId: null, updatedAt: Date.now() });
+      }
+      return next;
+    });
+  }
+
+  /** Preserve cleanup authority across account deletion, without workspace/user linkage. */
+  async recordOrphanAllocation(sandboxId: string, reason: 'losing-allocation' | 'unrecorded-allocation'): Promise<boolean> {
     try {
-      const ref = db.collection('agentv3_sandbox_orphans').doc(encodeURIComponent(sandboxId));
-      await db.runTransaction(async (tx) => {
-        const snap = await tx.get(ref);
-        const row = snap.exists ? snap.data() : undefined;
-        if (row?.status === 'paused' || row?.status === 'killed') return;
-        tx.set(ref, {
-          workspaceId,
-          sandboxId,
-          reason,
-          status: 'pending',
-          createdAt: Number.isFinite(Number(row?.createdAt)) ? Number(row?.createdAt) : Date.now(),
-          updatedAt: Date.now(),
-          attempts: Number.isFinite(Number(row?.attempts)) ? Number(row?.attempts) : 0,
-        }, { merge: true });
-      });
-      return true;
+      return !!await this._updateOrphan(sandboxId, row => orphanPendingFields(sandboxId, { ...row, reason }));
     } catch { return false; }
   }
 
-  /** Pending untracked allocations; bounded so a failed cleanup cannot grow a hot-path query forever. */
-  async listPendingOrphanAllocations(limit = 50): Promise<Array<{ workspaceId: string; sandboxId: string; reason: string; attempts: number }>> {
+  /** Bounded rotating queue; legacy pending rows are sanitized before returning them. */
+  async listPendingOrphanAllocations(limit = 50): Promise<Array<{ sandboxId: string; reason: string; attempts: number }>> {
     const db = this.getDb();
     if (!db) return [];
     try {
       const collection = db.collection('agentv3_sandbox_orphans');
       const pageSize = Math.max(1, Math.min(200, limit));
-      const cursorRef = collection.doc('__navbharatai_orphan_sweep_cursor__');
-      const base = collection.where('status', '==', 'pending').orderBy(admin.firestore.FieldPath.documentId());
-      // Reserve each page transactionally so concurrent Cloud Run instances cannot keep moving
-      // the shared cursor backward and starving orphan records beyond the first page.
-      const docs = await db.runTransaction(async (tx) => {
+      const cursorRef = collection.doc('navbharatai-orphan-sweep-cursor-v1');
+      const base = collection.where('status', '==', 'pending').orderBy(FieldPath.documentId());
+      const rows = await db.runTransaction(async tx => {
         const cursorSnap = await tx.get(cursorRef);
-        const cursorData = cursorSnap.data();
-        const cursor = typeof cursorData?.lastDocumentId === 'string' ? cursorData.lastDocumentId : null;
+        const rawCursor = cursorSnap.data()?.lastDocumentId;
+        const cursor = typeof rawCursor === 'string' && /^[a-f0-9]{64}$/.test(rawCursor) ? rawCursor : null;
         let snap = await tx.get((cursor ? base.startAfter(cursor) : base).limit(pageSize));
-        // Wrap around when the cursor reaches the end. This rotates the bounded batch across all
-        // pending docs instead of retrying the same first page forever.
         if (!snap.docs.length && cursor) snap = await tx.get(base.limit(pageSize));
-        if (snap.docs.length) {
-          tx.set(cursorRef, { lastDocumentId: snap.docs[snap.docs.length - 1].id, updatedAt: Date.now() }, { merge: true });
-        } else if (cursor) {
-          tx.set(cursorRef, { lastDocumentId: null, updatedAt: Date.now() }, { merge: true });
-        }
-        return snap.docs;
+        // Never retain a legacy plaintext provider ID in the sweep cursor.
+        const last = snap.docs.at(-1)?.id;
+        tx.set(cursorRef, { lastDocumentId: last && /^[a-f0-9]{64}$/.test(last) ? last : null, updatedAt: Date.now() });
+        return snap.docs.map(doc => doc.data());
       });
-      return docs.map((doc) => doc.data()).filter((row) =>
-        row && typeof row.workspaceId === 'string' && typeof row.sandboxId === 'string' && row.sandboxId.length > 0,
-      ).map((row) => ({
-        workspaceId: row.workspaceId as string,
-        sandboxId: row.sandboxId as string,
-        reason: typeof row.reason === 'string' ? row.reason : 'allocation-cas-loser',
-        attempts: Number.isFinite(Number(row.attempts)) ? Number(row.attempts) : 0,
-      }));
+      const pending: Array<{ sandboxId: string; reason: string; attempts: number }> = [];
+      for (const row of rows) {
+        if (typeof row.sandboxId !== 'string' || !row.sandboxId) continue;
+        const current = await this._updateOrphan(row.sandboxId, live =>
+          live?.status === 'pending' && live.sandboxId === row.sandboxId ? orphanPendingFields(row.sandboxId, live) : null);
+        if (current?.status === 'pending') pending.push({ sandboxId: current.sandboxId, reason: current.reason, attempts: current.attempts });
+      }
+      return pending;
     } catch { return []; }
   }
 
-  /** Mark an orphan resolved only while it is still pending. */
+  /** Terminal digest-only fences survive stale retries without retaining plaintext identity. */
   async markOrphanAllocationHandled(sandboxId: string, action: 'paused' | 'killed'): Promise<boolean> {
-    const db = this.getDb();
-    if (!db || !sandboxId) return false;
     try {
-      const ref = db.collection('agentv3_sandbox_orphans').doc(encodeURIComponent(sandboxId));
-      return await db.runTransaction(async (tx) => {
-        const snap = await tx.get(ref);
-        if (!snap.exists || snap.data()?.sandboxId !== sandboxId) return false;
-        if (snap.data()?.status !== 'pending') return true;
-        tx.update(ref, { status: action, resolvedAt: Date.now(), updatedAt: Date.now() });
-        return true;
-      });
+      return !!await this._updateOrphan(sandboxId, row =>
+        row?.status === 'pending' && row.sandboxId === sandboxId ? { status: action, resolvedAt: Date.now() } : null);
     } catch { return false; }
   }
 
-  /** Retain failed cleanup attempts for the next durable sweep; never store provider error text. */
+  /** Keep failed cleanup retryable, stripping any old user linkage in the same transaction. */
   async noteOrphanAllocationAttempt(sandboxId: string): Promise<void> {
-    const db = this.getDb();
-    if (!db || !sandboxId) return;
     try {
-      const ref = db.collection('agentv3_sandbox_orphans').doc(encodeURIComponent(sandboxId));
-      await db.runTransaction(async (tx) => {
-        const snap = await tx.get(ref);
-        if (!snap.exists || snap.data()?.sandboxId !== sandboxId || snap.data()?.status !== 'pending') return;
-        const attempts = Number(snap.data()?.attempts);
-        tx.update(ref, { attempts: (Number.isFinite(attempts) ? attempts : 0) + 1, lastAttemptAt: Date.now(), updatedAt: Date.now() });
+      await this._updateOrphan(sandboxId, row => {
+        if (row?.status !== 'pending' || row.sandboxId !== sandboxId) return null;
+        const pending = orphanPendingFields(sandboxId, row);
+        return { ...pending, attempts: pending.attempts + 1, lastAttemptAt: Date.now() };
       });
     } catch { /* retry on the next durable sweep */ }
   }

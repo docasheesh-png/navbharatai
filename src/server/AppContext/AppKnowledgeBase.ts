@@ -41,6 +41,15 @@ export interface AppFeature {
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
+    id: 'pro_private_binary_originals',
+    name: 'Private original-file storage (when enabled)',
+    path: 'NavBharatAI Pro → Choose file; Private attached files',
+    description: 'When private attachment storage is enabled and configured, unsupported binary formats can be saved as original bytes in signed-in account storage. A successful ready receipt confirms saving; pending, failed or unavailable status does not. These files are not executed, read by the AI, copied into the app workspace or published. Supported document/text/image processing and project ZIP import remain separate. Upload and account-capacity limits are enforced by the service; do not promise an unconfigured allowance or automatic retention period.',
+    howToUse: 'Select the file and send. Read the actual save result. Open Private attached files to refresh, download a ready original or explicitly delete a file. Pending or deleting entries are not downloadable. Downloads are not malware scans; open only files you trust. If storage is disabled or unavailable, no saving is promised. Deleting or unsending its associated chat/message also removes saved originals when the server confirms deletion.',
+    relatedFeatures: ['pro_attachment_picker', 'agentv3_builder'],
+    keywords: ['binary', 'original file', 'private attachment', 'saved files', 'download attachment'],
+  },
+  {
     id: 'pro_attachment_picker',
     name: 'Pro file attachments and project import',
     path: 'NavBharatAI Pro → paperclip → Choose file',

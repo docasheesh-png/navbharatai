@@ -1,9 +1,6 @@
 {
   "schema": "navbharatai.v3.build-report-autopsy/1",
   "report": "BR2295",
-  "buildId": "8f0da6e8-1549-4d1a-92a4-017875bd01d0",
-  "createdAt": "2026-11-10T16:01:18.420Z",
-  "prompt": "src/game/fx/synth.ts",
   "manifestModel": "glm-5.3-flash",
   "deliveredProvider": "SURPLUS",
   "deliveredModels": [
@@ -84,5 +81,7 @@
     "Release gate RED on an unbuilt app",
     "No user charge for the empty failed build",
     "No fabricated provider token or cost estimate"
-  ]
+  ],
+  "promptShape": "A bare source-file path containing a game directory, without a build request.",
+  "privacy": "Build identifiers, exact timestamps and raw customer prompt omitted; only anonymous technical behavior retained."
 }

@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { AIRouterManager } from '../src/server/AI/AIRouterManager';
 import { AIRouter } from '../src/server/AI/Router/AIRouter';
 import type { AIProvider, AIProviderResponse } from '../src/server/AI/Router/ProviderTypes';
 
-// Minimal fake provider for behavioral race tests.
+// Minimal fake provider for routing behavior tests.
 function fakeProvider(
   name: AIProvider['name'],
   priority: number,
@@ -31,12 +33,12 @@ function fakeProvider(
  * Teacher, Lawyer, CA, Astrologer, Kisan, … — which all share one isolated
  * 'professional' router namespace.
  *
- * Routing shape: RACE Grok × Gemini × Vertex concurrently; Claude Haiku is a
- * LAST-RESORT provider, reached only if the whole race fails.
+ * Routing shape: Grok → Gemini → Vertex → Claude Haiku, sequentially.
+ * A provider is called only after the preceding provider fails, so one successful answer incurs one provider call.
  *
  * Proves the core-law guarantees:
  *   1. PROFESSIONAL is its own router instance, isolated from FREE and PRO.
- *   2. The race participants are Grok / Gemini / Vertex (no Claude in the race).
+ *   2. The ordered paid fallback rungs are Grok / Gemini / Vertex (no Claude before them).
  *   3. Claude is the ONLY last-resort provider.
  *   4. FREE never reaches Claude/Anthropic.
  *
@@ -70,15 +72,12 @@ describe('Professional universe isolated router (P0.1)', () => {
     expect(a).toBe(b);
   });
 
-  it('PROFESSIONAL races Grok × Gemini × Vertex; Claude is the ONLY last resort', () => {
+  it('PROFESSIONAL orders Grok → Gemini → Vertex; Claude is the ONLY last resort', () => {
     const chain = AIRouterManager.getRouter('professional').getProviderChain();
 
-    // Race participants = everything that is NOT last-resort. Claude must not race.
-    const racers = chain.filter(p => !p.lastResort).map(p => p.name);
-    expect(racers).toContain('GROK');
-    expect(racers).not.toContain('ANTHROPIC');
-    // Grok leads the race (highest priority among racers).
-    expect(chain.filter(p => !p.lastResort)[0].name).toBe('GROK');
+    // The paid fallback ladder is ordered; Claude remains isolated at the end.
+    const rungs = chain.filter(p => !p.lastResort).map(p => p.name);
+    expect(rungs).toEqual(['GROK', 'GEMINI', 'VERTEX']);
 
     // Claude (ANTHROPIC) is present and is the ONLY last-resort provider.
     const lastResorts = chain.filter(p => p.lastResort).map(p => p.name);
@@ -94,6 +93,41 @@ describe('Professional universe isolated router (P0.1)', () => {
   it('PRO chain still leads with Claude (regression — PRO is Claude-first)', () => {
     const chain = AIRouterManager.getRouter('pro').getProviderChain();
     expect(chain[0].name).toBe('ANTHROPIC');
+  });
+});
+
+describe('paid professional routing avoids speculative duplicate provider spend', () => {
+  it('production callers use the sequential route for paid professional fallback', () => {
+    const routing = readFileSync(join(process.cwd(), 'src/server/lib/professionalRouting.ts'), 'utf8');
+    const sda = readFileSync(join(process.cwd(), 'src/server/routes/sda.ts'), 'utf8');
+    expect(routing).toContain('router.route(prompt, systemPrompt, undefined, undefined, opts.signal)');
+    expect(routing).not.toContain('router.routeRaced(prompt, systemPrompt, undefined, opts.signal)');
+    expect(sda).toContain('professionalRouter.route(fallbackPrompt, SDA_SYSTEM_FINAL, undefined, undefined, requestSignal)');
+    expect(sda).not.toContain('professionalRouter.routeRaced(');
+    expect(sda).toContain('runSequentialProviderFallback(sdaRacers');
+    expect(sda).toContain('const requestSignal = currentFreeAnswerSignal();');
+    expect(sda).toContain('}, requestSignal);');
+    expect(sda).not.toContain('Promise.any(sdaRacers');
+    // Paid text is handled once by the shared chain; direct races and direct Vertex/Claude retries are multimodal-only.
+    expect(sda).toContain('if (sdaGrokKey && isImage && sdaTier === \'paid\')');
+    expect(sda).toContain('if (sdaGeminiKey && (isImage || isPDF))');
+    expect(sda).toContain('if (!reply && (isImage || isPDF || sdaTier === \'free\'))');
+    expect(sda).toContain('if (!reply && sdaTier === \'paid\' && (isImage || isPDF))');
+  });
+
+  it('a successful first rung does not call later providers', async () => {
+    const grok = vi.fn(); const gemini = vi.fn(); const vertex = vi.fn(); const claude = vi.fn();
+    const router = new AIRouter('professional');
+    router.registerProvider(fakeProvider('GROK', 1, 'ok', { spy: grok }));
+    router.registerProvider(fakeProvider('GEMINI', 2, 'ok', { spy: gemini }));
+    router.registerProvider(fakeProvider('VERTEX', 3, 'ok', { spy: vertex }));
+    router.registerProvider(fakeProvider('ANTHROPIC', 99, 'ok', { lastResort: true, spy: claude }));
+    const { telemetry } = await router.route('hi', 'sys');
+    expect(telemetry.success).toBe(true);
+    expect(grok).toHaveBeenCalledTimes(1);
+    expect(gemini).not.toHaveBeenCalled();
+    expect(vertex).not.toHaveBeenCalled();
+    expect(claude).not.toHaveBeenCalled();
   });
 });
 

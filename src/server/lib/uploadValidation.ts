@@ -7,8 +7,8 @@
 // instead of trying to read them. Pure → unit-tested. (Malware scanning needs an external service
 // (ClamAV/VirusTotal) and is intentionally out of scope here — noted in the roadmap.)
 
-/** Max DECODED attachment size we will process (15 MB). Bigger files are rejected, not truncated. */
-export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+import { MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
+export { MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
 
 /** Supported extensions (documents + code/text + archives + images/pdf handled by the vision path). */
 const ALLOWED_EXT =
@@ -29,6 +29,24 @@ export function isSupportedAttachment(name: string, type: string): boolean {
   return ALLOWED_MIME.test(String(type || '')) || ALLOWED_EXT.test(String(name || ''));
 }
 
+/** Unknown extensions are acceptable only when their bounded bytes are actual UTF-8 text.
+ * This never evaluates code or renders HTML. Binary formats remain unsupported.
+ */
+export function decodeAttachmentText(base64: string): string | null {
+  if (base64DecodedBytes(base64) > MAX_ATTACHMENT_BYTES) return null;
+  const encoded = base64.replace(/\s+/g, '');
+  if (!encoded || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) return null;
+  try {
+    const bytes = Buffer.from(encoded, 'base64');
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    // Permit ordinary whitespace, not NUL/binary control bytes.
+    if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text)) return null;
+    return text;
+  } catch { return null; }
+}
+
+const BINARY_EXECUTABLE_EXT = /\.(exe|dll|so|dylib|com|msi|apk|ipa|wasm)$/i;
+
 export interface UploadValidationResult {
   ok: boolean;
   reason?: string;
@@ -42,12 +60,15 @@ export function validateAttachment(att: { name?: string; type?: string; base64?:
   const name = att?.name || '';
   const type = att?.type || '';
   if (!att?.base64) return { ok: false, reason: 'empty file' };
+  if (/[\/\\\x00-\x1f\x7f]/.test(name) || name === '.' || name === '..') return { ok: false, reason: 'invalid attachment filename' };
+  if (BINARY_EXECUTABLE_EXT.test(name)) return { ok: false, reason: 'unsupported binary executable; attach source code instead' };
   const bytes = base64DecodedBytes(att.base64);
   if (bytes > MAX_ATTACHMENT_BYTES) {
     return { ok: false, reason: `too large (${Math.round(bytes / (1024 * 1024))} MB > ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB limit)` };
   }
-  if (!isSupportedAttachment(name, type)) {
+  if (!isSupportedAttachment(name, type) && decodeAttachmentText(att.base64) === null) {
     return { ok: false, reason: 'unsupported file type' };
   }
   return { ok: true };
 }
+

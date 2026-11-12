@@ -1,13 +1,14 @@
 # BR2295 — Build report forensic autopsy
 
-**Build:** `8f0da6e8-1549-4d1a-92a4-017875bd01d0`  
-**Prompt:** `src/game/fx/synth.ts`  
+**Input shape:** a bare source-file path containing a game directory, not a build request.
 **Result:** failed, zero application files produced  
 **Fix branch:** `fix/br2295-path-only-and-answer-preservation`
 
+Privacy: build identifiers and raw customer text are omitted. Source-path examples below are synthetic.
+
 ## Executive finding
 
-This was not a model that was required to implement a game and refused to work. The user supplied only a source-file path. The path segment `game` was mistaken for a product-domain requirement, so the build pipeline admitted a game build, seeded a 12-file game kit, and spent a large model context. The model then read `src/game/fx/synth.ts`, explained it, and asked what the user wanted next.
+This was not a model that was required to implement a game and refused to work. The user supplied only a source-file path. The path segment `game` was mistaken for a product-domain requirement, so the build pipeline admitted a game build, seeded a 12-file game kit, and spent a large model context. The model then read `src/game/audio/example.ts`, explained it, and asked what the user wanted next.
 
 The build engine lost the model's full final turn because an earlier read-only `read_file` made the old `builtNothing` condition false. The starter-page summary then shortened the response and removed the trailing question from the text consumed by the outcome recorder. The result was a generic `OUTCOME_UNEXPLAINED` instead of the correct asked-user outcome.
 
@@ -15,7 +16,7 @@ A second outcome gap existed: when readiness had already set `result.ok = false`
 
 ## Causal chain
 
-1. **False domain admission:** `RequirementGapAnalyzer` matched `game` inside `src/game/fx/synth.ts`. The same bare path was admitted by intent/build-confirmation routing.
+1. **False domain admission:** `RequirementGapAnalyzer` matched `game` inside `src/game/audio/example.ts`. The same bare path was admitted by intent/build-confirmation routing.
 2. **Unnecessary game setup:** `GAME_KIT_SEEDED` wrote 12 platform kit files; these were not application files. The game fast lane was skipped and the request received a game ETA based on 82 prior game builds.
 3. **Read-only model turn:** the model called `read_file` and returned an explanation plus a question. It made no implementation writes.
 4. **Answer loss:** `AgentRunner` did not preserve the full answer after the read-only tool call. `starterSummary` retained only the short status.
@@ -30,7 +31,7 @@ A second outcome gap existed: when readiness had already set `result.ok = false`
 - Strip source-path tokens before shared domain keyword analysis, so path directory names do not become product requirements.
 - Route a message consisting only of a source path to chat, not `new_build`.
 - Add a second guard in `buildConfirmation`, including when the confirmation feature flag is disabled.
-- Preserve explicit game intent outside the path. A real request such as “Build a game starting from src/game/fx/synth.ts” still classifies as a game and still seeds the game kit.
+- Preserve explicit game intent outside the path. A real request such as “Build a game starting from src/game/audio/example.ts” still classifies as a game and still seeds the game kit.
 
 ### Q-2651 — preserve the turn and name the outcome
 

@@ -53,6 +53,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Private Pro originals/quotas/deletion fences: authenticated server routes only.
+    match /pro_attachment_owners_v1/{document=**} {
+      allow read, write: if false;
+    }
+
     // Users
     match /users/{userId} {
       // Q-142 (2026-10-01): owner-only. It was `isSignedIn()`, so any signed-in user could read — and LIST —
@@ -246,3 +251,4 @@ service cloud.firestore {
     }
   }
 }
+

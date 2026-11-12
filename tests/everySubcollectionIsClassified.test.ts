@@ -32,6 +32,10 @@ type Kind =
   | { kind: 'workspace'; parent: string }
   /** Under a document whose id is the uid. MUST be in USER_SCOPED_SUBCOLLECTIONS (erased with the account). */
   | { kind: 'user'; parent: string }
+  /** Encoded owner IDs/object-first cleanup cannot use the generic UID registry. A dedicated eraser
+   * must prove its paginated deletion and the complete account-route call chain below. */
+  | { kind: 'dedicated-user'; parent: string; erasedBy: string; calledAs: string; why: string;
+      deletionProof: RegExp; invocationProof: RegExp }
   /**
    * Capped per parent by the store itself, so it cannot grow with time.
    *
@@ -58,6 +62,13 @@ type Kind =
 
 /** "file › sub" → what it is. `clock` adds the second obligation: a SUBCOLLECTION_RETENTION_POLICIES entry. */
 const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string; foreignParent?: true }> = {
+  'src/server/lib/proAttachmentStore.ts › deleted_scopes': {
+    kind: 'dedicated-user', parent: 'pro_attachment_owners_v1',
+    erasedBy: 'src/server/lib/proAttachmentStore.ts', calledAs: 'proAttachmentStore\\.erase\\(',
+    why: 'hashed message/chat/file cancellation fences under the verified-owner encoded UID; account erasure blocks new writes, deletes originals, then pages and deletes these children. No automatic retention deletion.',
+    deletionProof: /async eraseScopes\(uid\)[\s\S]*?for \(;;\)[\s\S]*?ref\.collection\('deleted_scopes'\)\.limit\(200\)\.get\(\)[\s\S]*?if \(page\.empty\) break[\s\S]*?batch\.delete\(doc\.ref\)[\s\S]*?await batch\.commit\(\)/,
+    invocationProof: /if \(!scope\) owner\.blocked = true[\s\S]*?for \(const id of ids\) await this\.remove\(uid, id\)[\s\S]*?if \(!scope\) await this\.backend\.eraseScopes\?\.\(uid\)/,
+  },
   'src/server/AI/FreeChain/cache.ts › cache': { kind: 'retained', parent: 'free_chat_chain', clock: true, why: 'allowlisted public FAQ responses, expiry at most 24 hours; fixed state parent is swept even when virtual' },
   'src/server/AI/FreeChain/masterPlan.ts › paid_month': { kind: 'retained', parent: 'free_chat_chain', clock: true, why: 'one aggregate monthly paid-spend total per IST month (no uid, no prompt); 400-day retention for spend review' },
   'src/server/AI/FreeChain/control.ts › actions': { kind: 'retained', parent: 'free_chat_chain', clock: true, why: 'administrator control-change evidence with verified actor and reason, same 180-day retention as admin_audit_log' },
@@ -205,6 +216,19 @@ describe('every subcollection is classified', () => {
     }
   });
 
+  it('dedicated owner subcollections prove deletion and account-route reachability', () => {
+    for (const [key, entry] of Object.entries(CLASSIFICATION)) {
+      if (entry.kind !== 'dedicated-user') continue;
+      const source = readFileSync(join(root, entry.erasedBy), 'utf8');
+      const route = readFileSync(join(root, 'src/server/routes/profile.ts'), 'utf8');
+      expect(entry.why.length, key).toBeGreaterThan(40);
+      expect(source, key).toContain(entry.parent);
+      expect(source, key).toMatch(entry.deletionProof);
+      expect(source, key).toMatch(entry.invocationProof);
+      expect(route, key).toMatch(new RegExp(entry.calledAs));
+    }
+  });
+
   it('keeps no stale entry', () => {
     expect(Object.keys(CLASSIFICATION).filter((k) => !all.includes(k))).toEqual([]);
   });
@@ -285,4 +309,5 @@ describe('the published window matches the purge (Q-134)', () => {
     expect(policy).toContain('the reports of your past builds (what you asked for, what the build engine did, and what failed) are kept for **180 days**');
   });
 });
+
 

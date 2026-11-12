@@ -9,7 +9,7 @@ import { existsSync } from 'node:fs';
  *
  * Root cause fixed: the KB still described the RETIRED Pro Chat v2.0 surface and pointed Free Chat at a
  * "Reports" tab that no longer exists. The real surfaces today are:
- *   • Free Chat  → menu "NavBharatAI FREE"  /  Home "Start Free Chat"  (App.tsx menuItems + HomeView).
+ *   • Free Chat  → menu "AI chat"  /  Home "AI chat"  (App.tsx menuItems + HomeView).
  *   • NavBharatAI Pro → Home "NavBharatAI Pro" card ("Open Pro Builder") / menu "NavBharatAI Pro"
  *     (the v2.0 ProChatPanel is retired — App.tsx: "The old ProChatPanel (v2.0) is retired").
  * This suite pins the corrected navigation so no NavBharatAI AI sends a user to a control that is gone.
@@ -73,12 +73,12 @@ describe('Core AI Chat — no KB entry points at a retired control', () => {
     }
   });
 
-  it('Free Chat routes to the real "NavBharatAI FREE" surface', () => {
+  it('Free Chat routes to the renamed "AI chat" surface', () => {
     const fc = kb('free_chat')!;
-    expect(fc.path).toMatch(/NavBharatAI FREE/);
+    expect(fc.path).toMatch(/Home → AI chat/);
     expect(fc.howToUse).not.toMatch(/Reports/);
     const fa = kb('free_chat_file_analysis')!;
-    expect(fa.path).toMatch(/NavBharatAI FREE/);
+    expect(fa.path).toMatch(/Sidebar menu → "AI chat"/);
   });
 
   it('Pro entry routes to the real "NavBharatAI Pro" gate', () => {

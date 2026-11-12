@@ -29,7 +29,10 @@ describe('the standing note', () => {
     expect(freeProgramNoteFor('make me a todo app', true)).toBe('');
   });
   it('tells the truth without naming a date, a refund or what was removed', () => {
-    expect(FREE_PROGRAM_PAUSED_NOTE).toContain('Only Free Chat is free');
+    expect(FREE_PROGRAM_PAUSED_NOTE).toContain('AI chat has a daily allowance');
+    expect(FREE_PROGRAM_PAUSED_NOTE).toContain('additional use is charged from the wallet');
+    expect(FREE_PROGRAM_PAUSED_NOTE).not.toContain('Only Free Chat is free');
+    expect(FREE_PROGRAM_PAUSED_NOTE).not.toContain('Free Chat needs none');
     expect(FREE_PROGRAM_PAUSED_NOTE).toMatch(/do not promise any refund, restoration or date/);
   });
 });
@@ -48,3 +51,4 @@ describe('what the AIs are actually handed', () => {
     expect(ctx).toContain('Refer a Friend');
   });
 });
+

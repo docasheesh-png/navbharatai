@@ -9,7 +9,7 @@
 // plain-text/code formats. Each extractor is wrapped so a single bad file never
 // throws — it degrades to a short honest note instead, so the app never breaks.
 
-import { validateAttachment } from './uploadValidation';
+import { validateAttachment, decodeAttachmentText } from './uploadValidation';
 
 export interface RawAttachment {
   name: string;
@@ -196,7 +196,8 @@ export async function extractDocumentText(att: RawAttachment): Promise<string | 
 
   try {
     if (isTextual(att.name, att.type)) {
-      return clamp(buf.toString('utf-8')).text;
+      const text = decodeAttachmentText(att.base64);
+      return text === null ? null : clamp(text).text;
     }
     if (e === 'docx' || att.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       return clamp(await extractDocx(buf)).text;
@@ -213,7 +214,9 @@ export async function extractDocumentText(att: RawAttachment): Promise<string | 
   } catch (err: any) {
     return `[Could not extract "${att.name}": ${err?.message || 'unreadable file'}]`;
   }
-  return null; // unknown binary type — not a document we can read as text
+  // A missing/unknown extension is not a reason to discard valid text (Dockerfile, Vue, etc.).
+  const text = decodeAttachmentText(att.base64);
+  return text === null ? null : clamp(text).text;
 }
 
 /**
@@ -235,3 +238,4 @@ export async function buildDocumentContext(atts: RawAttachment[]): Promise<strin
   }
   return blocks.join('\n\n');
 }
+

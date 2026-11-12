@@ -198,7 +198,7 @@ describe('wiring — measurement is recorded where the facts are, and changes no
     const after = actuator.slice(at, at + 900);
     expect(after).toContain('reason: currentSandboxReason()');
     expect(after).toContain('observationId: randomUUID()');
-    expect(after).toContain('sandboxStore.recordSessionStart(workspaceId, startSnapshot, identityTouch)');
+    expect(after).toContain('sandboxStore.recordSessionStart(workspaceId, startSnapshot)');
   });
 
   it('busy time is the UNION of overlapping operations — clocked on the 0→1 and 1→0 edges only', () => {

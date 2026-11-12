@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   documents: new Map<string, Record<string, unknown>>(),
   deletes: [] as Array<{ bucket: string; prefix: string }>,
   failDelete: false,
+  eraseOriginals: vi.fn(),
   uid: 'abc' as string | null,
   retentionAvailable: true,
   deleteAccount: vi.fn(),
@@ -70,6 +71,9 @@ const database = {
   },
 };
 
+// The real attachment backend has separate transactional deletion coverage.
+// This fixture owns workspace erasure; model its new mandatory prerequisite explicitly.
+vi.mock('./proAttachmentStore', () => ({ proAttachmentStore: { erase: state.eraseOriginals } }));
 vi.mock('firebase-admin', async (original) => ({
   ...await original<typeof import('firebase-admin')>(), storage: () => ({ bucket }),
 }));
@@ -129,6 +133,7 @@ const verifiedKey = (uid: string, workspace: string, path: string) =>
   workspaceAssetVerifiedOwnerObjectKey(uid, workspace, assetId(path))!;
 
 beforeEach(() => {
+  state.eraseOriginals.mockReset().mockResolvedValue(undefined);
   state.objects.clear(); state.documents.clear(); state.deletes.length = 0;
   state.failDelete = false; state.uid = 'abc'; state.retentionAvailable = true;
   state.deleteAccount.mockReset().mockResolvedValue('deleted');
@@ -160,6 +165,7 @@ describe('completed private asset spills leave with their verified owner', () =>
     const res = mockRes();
     await deleteProfile(mockReq({ body: { confirm: 'DELETE' } }), res);
 
+    expect(state.eraseOriginals).toHaveBeenCalledWith(state.uid);
     expect(res.statusCode).toBe(200);
     expect(res.body.accountDeleted).toBe(true);
     expect(objects.has(workspaceAssetObjectKey('agentv3-abc-d-legacy', assetId('legacy.png')))).toBe(true);
@@ -231,6 +237,7 @@ describe('completed private asset spills leave with their verified owner', () =>
     } finally {
       prefix.mockRestore();
     }
+    expect(state.eraseOriginals).toHaveBeenCalledWith(state.uid);
     expect(res.statusCode).toBe(200);
     expect(res.body.accountDeleted).toBe(true);
     expect(res.body.workspaceAssetObjects).toEqual({
@@ -325,5 +332,18 @@ describe('verified owner object identity', () => {
     expect(workspaceAssetVerifiedOwnerPrefix('abc')).toBe(`workspace-assets-v2/${shortOwner}/`);
     expect(workspaceAssetVerifiedOwnerPrefix('anon')).toBeNull();
     expect(workspaceAssetVerifiedOwnerPrefix('bad/owner')).toBeNull();
+  });
+});
+
+
+describe('private originals are a mandatory account-erasure prerequisite', () => {
+  it('does not delete the account when original-file deletion cannot be confirmed', async () => {
+    state.eraseOriginals.mockRejectedValueOnce(new Error('private backend unavailable'));
+    const res = mockRes();
+    await deleteProfile(mockReq({ body: { confirm: 'DELETE' } }), res);
+    expect(state.eraseOriginals).toHaveBeenCalledWith('abc');
+    expect(res.statusCode).toBe(503);
+    expect(res.body.accountDeleted).toBe(false);
+    expect(state.deleteAccount).not.toHaveBeenCalled();
   });
 });

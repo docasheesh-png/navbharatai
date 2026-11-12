@@ -204,12 +204,13 @@ describe('known recovery behavior remains available', () => {
     f.allocation.mockResolvedValueOnce(false);
     const winner = machine('winning-machine');
     f.connect.mockResolvedValueOnce(winner as unknown as Sandbox);
-    const kill = vi.spyOn(Sandbox, 'kill').mockResolvedValue(true);
+    const kill = vi.spyOn(Sandbox, 'kill').mockResolvedValue(false);
 
     await expect(f.act.readFile(WS, 'data.db')).resolves.toBe('existing data');
 
     expect(f.create).toHaveBeenCalledTimes(1);
     expect(kill).toHaveBeenCalledWith('new-machine');
+    expect(f.fresh.setTimeout).toHaveBeenCalledWith(60_000);
     expect(f.connect).toHaveBeenCalledWith('winning-machine', expect.any(Object));
     expect(f.restore).not.toHaveBeenCalled();
     expect(f.act.sandboxOrigin(WS)).toBe('resumed');

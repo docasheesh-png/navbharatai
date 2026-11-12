@@ -209,7 +209,8 @@ export class SandboxStore {
       const pageSize = Math.max(1, Math.min(200, limit));
       const cursorRef = collection.doc('__navbharatai_orphan_sweep_cursor__');
       const cursorSnap = await cursorRef.get();
-      const cursor = typeof cursorSnap.data()?.lastDocumentId === 'string' ? cursorSnap.data()!.lastDocumentId as string : null;
+      const cursorData = cursorSnap.data();
+      const cursor = typeof cursorData?.lastDocumentId === 'string' ? cursorData.lastDocumentId : null;
       const base = collection.where('status', '==', 'pending').orderBy(admin.firestore.FieldPath.documentId());
       let query = cursor ? base.startAfter(cursor) : base;
       let snap = await query.limit(pageSize).get();

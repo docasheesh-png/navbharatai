@@ -1676,9 +1676,12 @@ export class E2BActuator implements IEngineerActuator {
    * refuses without creating or restoring a replacement.
    */
   /** Kill a newly-created machine that lost the durable allocation CAS. */
-  private async _killUnrecordedSandbox(sandboxId: string, reason: string): Promise<void> {
-    const killed = await withTimeout(Sandbox.kill(sandboxId), 10_000, reason).catch(() => false);
-    if (!killed) console.warn(`[SANDBOX] Could not confirm kill of unrecorded allocation ${sandboxId.slice(0, 12)} (${reason})`);
+  private async _killUnrecordedSandbox(sandbox: Sandbox, reason: string): Promise<void> {
+    const killed = await withTimeout(Sandbox.kill(sandbox.sandboxId), 10_000, reason).catch(() => false);
+    if (!killed) {
+      console.warn(`[SANDBOX] Could not confirm kill of unrecorded allocation ${sandbox.sandboxId.slice(0, 12)} (${reason}); bounding its remaining lifetime`);
+      await sandbox.setTimeout(60_000).catch(() => {});
+    }
   }
 
   private async _createSandbox(workspaceId: string, resumeSandboxId?: string, framework?: string): Promise<Sandbox> {
@@ -1747,7 +1750,7 @@ export class E2BActuator implements IEngineerActuator {
       if (!recorded) {
         const winner = await sandboxStore.lookupRecoveryIdentity(workspaceId).catch(() => ({ state: 'unavailable' as const }));
         if (winner.state !== 'found') {
-          if (freshCreate) await this._killUnrecordedSandbox(sandbox.sandboxId, 'unrecorded-allocation');
+          if (freshCreate) await this._killUnrecordedSandbox(sandbox, 'unrecorded-allocation');
           this._sandboxOrigin.delete(workspaceId);
           this._lastLifetimeExtend.delete(workspaceId);
           throw new SandboxRecoveryUnavailableError();
@@ -1760,7 +1763,7 @@ export class E2BActuator implements IEngineerActuator {
             this._lastLifetimeExtend.delete(workspaceId);
             throw new SandboxRecoveryUnavailableError();
           }
-          await this._killUnrecordedSandbox(sandbox.sandboxId, 'losing-allocation');
+          await this._killUnrecordedSandbox(sandbox, 'losing-allocation');
           try {
             sandbox = await withTimeout(Sandbox.connect(winner.sandboxId, this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.connect(winning-allocation)');
             await sandbox.setTimeout(sandboxLifetimeMs()).catch(() => {});

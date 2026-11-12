@@ -134,6 +134,8 @@ import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
 import { GitHubService } from './lib/githubService';
 import { AgentMode } from './components/ide/ModeSelector';
+import { GameTemplateCatalog } from './components/GameTemplateCatalog';
+import { EndlessRacingGame } from './components/EndlessRacingGame';
 
 export default function App() {
   const [deviceMode, setDeviceMode] = useState<'auto' | 'mobile' | 'tablet' | 'desktop'>('auto');
@@ -5724,6 +5726,11 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     </motion.button>
                   ))}
                 </div>
+                <EndlessRacingGame />
+                <GameTemplateCatalog onUse={(prompt) => {
+                  setInput(prompt);
+                  setActiveView('chat');
+                }} />
               </div>
             </div>
           )}

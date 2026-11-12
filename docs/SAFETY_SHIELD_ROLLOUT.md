@@ -57,3 +57,18 @@ until route/integration tests and the complete CI workflow pass on the full curr
 - Live rollback must preserve the new authorization boundary. Do not restore password-only token
   signing as emergency recovery. Trusted operator recovery is separately controlled and audited.
 - User chat/provider calls, paid image generation and project builds remain unchanged throughout.
+
+## Verification checkpoint (2026-11-12)
+
+- Recovered full source baseline afdd9610def879cc1b4ff0ec84d4d6a134e09277 and exact lockfile dependencies.
+- Node 22.23.4, npm 11.18.0, locked Vitest 5.1.0: ten focused files, 159 tests pass.
+- Server TypeScript check passed. Frontend typecheck fails in unchanged baseline files:
+  `EndlessRacingGame.tsx` unused setTrackIndex; `GameTemplateCatalog.tsx` unused React and
+  absent lucide-react Grid2X2/Swords exports. This is not a passing release gate.
+- Real Firestore 1.22.0 emulator (locked checksum/length verified), Java 21: actual MFA handlers
+  passed active-factor containment, concurrent-confirmation single winner, expiry, stale-disable
+  race and current-factor disable. The drill captures business handlers; middleware authority is
+  covered separately by adminAuth and authenticated route tests. CI now invokes this drill.
+- Password rotation still invalidates sessions: the effective signing key binds the independent
+  random master key to the current password using HMAC. The password alone cannot calculate it.
+- Full coverage, complete CI, deployment and owner recovery/configuration preflight remain pending.

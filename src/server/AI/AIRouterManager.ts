@@ -202,14 +202,13 @@ export class AIRouterManager {
 
   // PROFESSIONAL universe (Doctor AI / SDA + every config-driven professional:
   // Teacher, Lawyer, CA, Astrologer, Kisan, …). Fully isolated from FREE and PRO.
-  // Routing shape (via AIRouter.routeRaced): RACE Grok × Gemini × Vertex
-  // concurrently — first non-empty success wins; ONLY if all three fail, fall back
-  // to Claude Haiku (last resort). Honors the "Grok primary, Claude last" core law.
+  // Routing shape (via AIRouter.route): Grok → Gemini → Vertex → Claude Haiku.
+  // Sequential fallback means only the first successful provider is billed; Claude remains last resort.
   private static buildProfessional(): AIRouter {
     const router = new AIRouter("professional");
-    console.log('[ROUTER_MGR] Building PROFESSIONAL chain: RACE(Grok × Gemini × Vertex) → Claude Haiku(last resort)');
+    console.log('[ROUTER_MGR] Building PROFESSIONAL chain: Grok → Gemini → Vertex → Claude Haiku (sequential fallback)');
 
-    // ── Race participants (fired concurrently) ──
+    // ── Fallback rungs (called sequentially only when the prior rung fails) ──
     try {
       const grok = new GrokProvider();
       router.registerProvider(slot(grok, 1, 'grok-3'));

@@ -35,7 +35,7 @@ describe('admin MFA enrolment transition guards', () => {
     expect(() => requireMfaEnrollmentAllowed({ enabled: true, encrypted_secret: 'current' }, x => x)).toThrow('active authenticator');
   });
   it('rejects expired, unbounded and legacy pending values', () => {
-    for (const expiry of [undefined, 999, 1000, 601001, Infinity, '2000']) {
+    for (const expiry of [undefined, 999, 1000, 601001, Infinity, NaN, '2000']) {
       expect(() => pendingAdminMfaSecret({ enabled: false, encrypted_pending: 'new', pending_expires_at_ms: expiry }, 1000, x => x)).toThrow();
     }
   });

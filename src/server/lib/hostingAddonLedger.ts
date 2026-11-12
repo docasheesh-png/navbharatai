@@ -21,7 +21,7 @@ import { computeDebitedWallet } from './walletDebit';
 import { ledgerPatch } from './walletStatement';
 import { checkPlanPayable } from './giftSpend';
 import { inrToDebitTokens, inrToWalletTokens, TOKENS_PER_RUPEE } from './payments';
-import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
+import { resolveCanonicalWalletIdStrict, walletMergeResolveEnabled } from './walletResolve';
 import { hostingPlansEnabled } from './hostingPlan';
 import { RESELL_GRACE_DAYS, RESELL_RENEW_LEAD_MS } from './resellLifecycle';
 import {
@@ -254,7 +254,7 @@ async function canonicalId(db: any, uid: string): Promise<string> {
   return resolveCanonicalWalletId(async (u) => {
     const s = await getDoc(doc(db, 'user_token_wallets', u));
     return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
-  }, uid).catch(() => uid);
+  }, uid);
 }
 
 export interface AddonMenu {

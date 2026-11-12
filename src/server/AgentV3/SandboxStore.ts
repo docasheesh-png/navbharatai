@@ -146,8 +146,10 @@ export class SandboxStore {
 
   /**
    * Persist a newly created or resumed allocation without allowing a stale creator to replace
-   * a newer sandbox. expectedSandboxId is the identity observed before connect/create: null means
-   * the record had no allocation; a string means a failed-resume replacement or same-id resume.
+   * a newer sandbox. Returns false on a compare-and-set conflict or unavailable storage; callers
+   * must not publish an allocation unless it was persisted or the same identity is still current.
+   * expectedSandboxId is the identity observed before connect/create: null means no allocation;
+   * a string means a failed-resume replacement or same-id resume.
    */
   async recordAllocation(
     workspaceId: string,
@@ -178,7 +180,7 @@ export class SandboxStore {
    * Best-effort local observation, NOT a provider start or billing event. The counter is independent
    * and can differ from accepted observations. Neither write is awaited by app work.
    *
-   * Wait only for the EXISTING initial identity-touch attempt; do not establish/repair identity here.
+   * Wait only for an optional initial identity write; do not establish/repair allocation identity here.
    * Replace the whole nested map so a new start cannot inherit an old end. The reported-start high
    * water mark rejects delayed smaller timestamps and ties, but clock skew can suppress observations
    * or invert physical order. This is not allocation authority or a cross-instance lifecycle fence.

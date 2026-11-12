@@ -25,6 +25,25 @@ describe('creditWalletId', () => {
   });
 });
 
+describe('financial wallet paths fail closed on canonical-owner uncertainty', () => {
+  const files = [
+    'src/server/lib/walletCreditTarget.ts', 'src/server/lib/walletDebit.ts',
+    'src/server/lib/paymentReversalStore.ts', 'src/server/lib/hostingPlan.ts',
+    'src/server/lib/hostingAddonLedger.ts', 'src/server/lib/voiceAiStore.ts',
+    'src/server/AgentV3/WalletBalance.ts', 'src/server/routes/wallet.ts',
+  ];
+  for (const file of files) {
+    it(file, () => {
+      const source = readFileSync(file, 'utf8');
+      expect(source).toContain('resolveCanonicalWalletIdStrict');
+      expect(source).not.toMatch(/resolveCanonicalWalletId\\(/);
+      expect(source).not.toContain('.catch(() => uid)');
+      expect(source).not.toContain('.catch(() => userId)');
+      expect(source).not.toContain('.catch(() => buyerUid)');
+    });
+  }
+});
+
 describe('no credit path writes to the raw uid wallet', () => {
   const files = [
     'src/server/lib/payments.ts', 'src/server/routes/payment.ts', 'src/server/lib/adminPromoStore.ts',

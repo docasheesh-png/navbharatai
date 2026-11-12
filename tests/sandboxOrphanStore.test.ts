@@ -22,10 +22,11 @@ function orphanFixture() {
         let max = 50;
         let after: string | null = null;
         const query = {
+          __isQuery: true,
           orderBy: () => query,
           startAfter: (id: string) => { after = id; return query; },
           limit: (n: number) => { max = n; return query; },
-          get: async () => ({
+          run: async () => ({
             docs: [...rows.entries()]
               .filter(([id, row]) => row.status === 'pending' && (!after || id > after))
               .sort(([a], [b]) => a.localeCompare(b))
@@ -37,8 +38,9 @@ function orphanFixture() {
       },
     }),
     runTransaction: vi.fn(async (run: (tx: object) => Promise<unknown>) => run({
-      get: async (ref: { id: string }) => {
-        const row = rows.get(ref.id);
+      get: async (ref: { id?: string; __isQuery?: boolean; run?: () => Promise<unknown> }) => {
+        if (ref.__isQuery && ref.run) return ref.run();
+        const row = ref.id ? rows.get(ref.id) : undefined;
         return { exists: !!row, data: () => row ? { ...row } : undefined };
       },
       set: (ref: { id: string }, fields: Record<string, unknown>, options?: { merge?: boolean }) => {

@@ -45,7 +45,7 @@ describe('adminRequestOk', () => {
   it('accepts a freshly minted token in the x-admin-token header', () => {
     process.env.ADMIN_PASSWORD = PASS;
     process.env.ADMIN_USERNAME = USER;
-    const token = mintAdminToken(KEY, USER, Date.now());
+    const token = mintAdminToken(adminSessionSigningKey(), USER, Date.now());
     expect(adminRequestOk(reqWith({ 'x-admin-token': token }))).toBe(true);
   });
 
@@ -54,7 +54,7 @@ describe('adminRequestOk', () => {
     process.env.ADMIN_PASSWORD = PASS;
     process.env.ADMIN_USERNAME = USER;
     expect(adminRequestOk(reqWith({}, { admin: PASS }))).toBe(false);
-    expect(adminRequestOk(reqWith({}, { 'x-admin-token': mintAdminToken(KEY, USER, Date.now()) }))).toBe(false);
+    expect(adminRequestOk(reqWith({}, { 'x-admin-token': mintAdminToken(adminSessionSigningKey(), USER, Date.now()) }))).toBe(false);
   });
 
   it('never accepts the raw password as the token either', () => {
@@ -85,7 +85,7 @@ describe('adminRequestOk', () => {
     process.env.ADMIN_PASSWORD = PASS;
     process.env.ADMIN_USERNAME = USER;
     process.env.ADMIN_TOKEN_TTL_HOURS = '1';
-    const old = mintAdminToken(KEY, USER, Date.now() - 2 * 60 * 60 * 1000);
+    const old = mintAdminToken(adminSessionSigningKey(), USER, Date.now() - 2 * 60 * 60 * 1000);
     expect(adminRequestOk(reqWith({ 'x-admin-token': old }))).toBe(false);
   });
 
@@ -93,7 +93,7 @@ describe('adminRequestOk', () => {
     // Without adminCredential() normalisation the panel works while these routes 403 forever.
     process.env.ADMIN_PASSWORD = `"${PASS}"\n`;
     process.env.ADMIN_USERNAME = ` ${USER} `;
-    expect(adminRequestOk(reqWith({ 'x-admin-token': mintAdminToken(KEY, USER, Date.now()) }))).toBe(true);
+    expect(adminRequestOk(reqWith({ 'x-admin-token': mintAdminToken(adminSessionSigningKey(), USER, Date.now()) }))).toBe(true);
   });
 });
 
@@ -197,6 +197,18 @@ describe('password-independent admin signing', () => {
   it('normalizes independent key but never derives it from password', () => {
     process.env.ADMIN_PASSWORD = PASS;
     process.env.ADMIN_SESSION_SIGNING_KEY = ` "${KEY.toUpperCase()}"\n`;
-    expect(adminSessionSigningKey()).toBe(KEY);
+    expect(adminSessionSigningKey()).toMatch(/^[a-f0-9]{64}$/);
+    expect(adminSessionSigningKey()).not.toBe(KEY);
+  });
+});
+
+describe('password rotation still revokes signed admin sessions', () => {
+  it('changes the effective signing key without accepting password-only forgeries', () => {
+    process.env.ADMIN_USERNAME = USER;
+    process.env.ADMIN_PASSWORD = PASS;
+    const token = mintAdminToken(adminSessionSigningKey(), USER, Date.now());
+    expect(adminRequestOk(reqWith({ 'x-admin-token': token }))).toBe(true);
+    process.env.ADMIN_PASSWORD = 'changed-owner-password';
+    expect(adminRequestOk(reqWith({ 'x-admin-token': token }))).toBe(false);
   });
 });

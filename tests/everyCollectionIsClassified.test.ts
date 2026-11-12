@@ -71,6 +71,11 @@ type Kind = 'user' | 'workspace' | 'platform' | 'retained' | 'forever' | 'de-ide
 const DERIVED_ERASER = 'src/server/lib/derivedIdErase.ts';
 const DERIVED_CALL = 'deleteUserDerivedIdData\\(';
 const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; why: string }> = {
+  pro_attachment_owners_v1: {
+    file: 'src/server/lib/proAttachmentStore.ts',
+    calledAs: 'proAttachmentStore\\.erase\\(',
+    why: 'verified-owner private originals require object-first erasure; generic metadata deletion would orphan bytes. Empty upload-blocking fence remains to prevent concurrent resurrection.',
+  },
   user_workspaces: {
     file: 'src/server/lib/syncWorkspaceErase.ts',
     calledAs: 'eraseSyncedWorkspace\\(',
@@ -109,6 +114,7 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
 };
 
 const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
+  pro_attachment_owners_v1: { kind: 'user', why: 'verified-owner original files and bounded private metadata; dedicated object-first explicit account deletion, with empty blocked owner fence retained to prevent resurrection' },
   voice_ai_operations: { kind: 'forever', why: 'uid/canonical-owner financial holds, refunds and terminal request replay tombstones, not anonymous platform data. Retained across account deletion like hosting_billing and nav_store_pending_credits; deletion could erase refundable money or re-arm an old charge. No text, audio or credentials.' },
   voice_ai_control: { kind: 'platform', why: 'one server-owned minute document replaced in place with only numeric bucket and count; no uid, owner, request identity, prompt or audio. Global admission throttling, not user-owned content or a growing request history.' },
   session_revocations: { kind: 'forever', why: 'Minimal server-only monotonic security tombstone; deletion could revive revoked sign-in origins. Explicitly retained without tokens/contact details, not ordinary user content.' },
@@ -745,3 +751,4 @@ describe('every declared collection is classified', () => {
     expect(policied.filter((c) => forever.includes(c))).toEqual([]);
   });
 });
+

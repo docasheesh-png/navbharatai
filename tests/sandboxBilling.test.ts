@@ -187,12 +187,21 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
     expect(fn).toContain('catch {\n    return none;');
     // …and `none` is genuinely nothing on the BILLED fields — otherwise every guard above would be
     // pointing at a value that could quietly become non-zero.
-    expect(fn).toContain('const none = { seconds: 0, usd: 0, measuredSeconds: 0 };');
+    expect(fn).toContain('const none = { seconds: 0, usd: 0, measuredSeconds: 0, expenseMeasured: false };');
     // Seconds are reported only when they were CHARGED, so the user can never see a duration next to
     // a ₹0 they cannot reconcile. `measuredSeconds` is the ADMIN's infrastructure figure and travels
     // either way — which is exactly why the unbilled branch must still zero `seconds` and `usd`.
-    expect(fn).toContain('{ seconds: billable, usd, measuredSeconds: billable }');
+    expect(fn).toContain('{ seconds: billable, usd, measuredSeconds: billable, expenseMeasured: true }');
     expect(fn).toContain('{ ...none, measuredSeconds: billable }');
+  });
+
+  it('unknown E2B rate stays unmeasured in build cost telemetry instead of becoming $0', () => {
+    const at = route.indexOf('function billableSandboxDetail');
+    const fn = route.slice(at, at + 2600);
+    expect(fn).toContain('expenseMeasured: false');
+    expect(fn).toContain('expenseMeasured: true');
+    // Keep the numeric zero for the billing decision, but omit it from telemetry when its rate is unknown.
+    expect(route).toContain('sandboxUsd: livePreviewCharge.expenseMeasured ? decidedSandboxUsd : undefined,');
   });
 
   it('the admin cost figure can NEVER become a user charge', () => {

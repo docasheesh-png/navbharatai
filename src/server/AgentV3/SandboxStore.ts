@@ -176,6 +176,81 @@ export class SandboxStore {
     } catch { return false; /* the caller must not use an allocation it could not persist */ }
   }
 
+  /** Persist an allocation that lost CAS and could not be killed, capped, or paused immediately. */
+  async recordOrphanAllocation(workspaceId: string, sandboxId: string, reason: string): Promise<boolean> {
+    const db = this.getDb();
+    if (!db || !sandboxId) return false;
+    try {
+      const ref = db.collection('agentv3_sandbox_orphans').doc(encodeURIComponent(sandboxId));
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const row = snap.exists ? snap.data() : undefined;
+        if (row?.status === 'paused' || row?.status === 'killed') return;
+        tx.set(ref, {
+          workspaceId,
+          sandboxId,
+          reason,
+          status: 'pending',
+          createdAt: Number.isFinite(Number(row?.createdAt)) ? Number(row?.createdAt) : Date.now(),
+          updatedAt: Date.now(),
+          attempts: Number.isFinite(Number(row?.attempts)) ? Number(row?.attempts) : 0,
+        }, { merge: true });
+      });
+      return true;
+    } catch { return false; }
+  }
+
+  /** Pending untracked allocations; bounded so a failed cleanup cannot grow a hot-path query forever. */
+  async listPendingOrphanAllocations(limit = 50): Promise<Array<{ workspaceId: string; sandboxId: string; reason: string; attempts: number }>> {
+    const db = this.getDb();
+    if (!db) return [];
+    try {
+      const snap = await db.collection('agentv3_sandbox_orphans')
+        .where('status', '==', 'pending')
+        .limit(Math.max(1, Math.min(200, limit)))
+        .get();
+      return snap.docs.map((doc) => doc.data()).filter((row) =>
+        row && typeof row.workspaceId === 'string' && typeof row.sandboxId === 'string' && row.sandboxId.length > 0,
+      ).map((row) => ({
+        workspaceId: row.workspaceId as string,
+        sandboxId: row.sandboxId as string,
+        reason: typeof row.reason === 'string' ? row.reason : 'allocation-cas-loser',
+        attempts: Number.isFinite(Number(row.attempts)) ? Number(row.attempts) : 0,
+      }));
+    } catch { return []; }
+  }
+
+  /** Mark an orphan resolved only while it is still pending. */
+  async markOrphanAllocationHandled(sandboxId: string, action: 'paused' | 'killed'): Promise<boolean> {
+    const db = this.getDb();
+    if (!db || !sandboxId) return false;
+    try {
+      const ref = db.collection('agentv3_sandbox_orphans').doc(encodeURIComponent(sandboxId));
+      return await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists || snap.data()?.sandboxId !== sandboxId) return false;
+        if (snap.data()?.status !== 'pending') return true;
+        tx.update(ref, { status: action, resolvedAt: Date.now(), updatedAt: Date.now() });
+        return true;
+      });
+    } catch { return false; }
+  }
+
+  /** Retain failed cleanup attempts for the next durable sweep; never store provider error text. */
+  async noteOrphanAllocationAttempt(sandboxId: string): Promise<void> {
+    const db = this.getDb();
+    if (!db || !sandboxId) return;
+    try {
+      const ref = db.collection('agentv3_sandbox_orphans').doc(encodeURIComponent(sandboxId));
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists || snap.data()?.sandboxId !== sandboxId || snap.data()?.status !== 'pending') return;
+        const attempts = Number(snap.data()?.attempts);
+        tx.update(ref, { attempts: (Number.isFinite(attempts) ? attempts : 0) + 1, lastAttemptAt: Date.now(), updatedAt: Date.now() });
+      });
+    } catch { /* retry on the next durable sweep */ }
+  }
+
   /**
    * Best-effort local observation, NOT a provider start or billing event. The counter is independent
    * and can differ from accepted observations. Neither write is awaited by app work.

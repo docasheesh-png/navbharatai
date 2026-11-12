@@ -36,7 +36,7 @@ describe('financial wallet paths fail closed on canonical-owner uncertainty', ()
     it(file, () => {
       const source = readFileSync(file, 'utf8');
       expect(source).toContain('resolveCanonicalWalletIdStrict');
-      expect(source).not.toMatch(/resolveCanonicalWalletId\\(/);
+      expect(source).not.toMatch(/resolveCanonicalWalletId\(/);
       expect(source).not.toContain('.catch(() => uid)');
       expect(source).not.toContain('.catch(() => userId)');
       expect(source).not.toContain('.catch(() => buyerUid)');

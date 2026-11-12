@@ -19,13 +19,11 @@ function orphanFixture() {
       }),
       where: (field: string, op: string, value: string) => {
         expect([name, field, op, value]).toEqual(['agentv3_sandbox_orphans', 'status', '==', 'pending']);
-        let max = 50;
-        let after: string | null = null;
-        const query = {
+        const makeQuery = (after: string | null = null, max = 50): any => ({
           __isQuery: true,
-          orderBy: () => query,
-          startAfter: (id: string) => { after = id; return query; },
-          limit: (n: number) => { max = n; return query; },
+          orderBy: () => makeQuery(after, max),
+          startAfter: (id: string) => makeQuery(id, max),
+          limit: (n: number) => makeQuery(after, n),
           run: async () => ({
             docs: [...rows.entries()]
               .filter(([id, row]) => row.status === 'pending' && (!after || id > after))
@@ -33,8 +31,8 @@ function orphanFixture() {
               .slice(0, max)
               .map(([id, row]) => ({ id, data: () => ({ ...row }) })),
           }),
-        };
-        return query;
+        });
+        return makeQuery();
       },
     }),
     runTransaction: vi.fn(async (run: (tx: object) => Promise<unknown>) => run({

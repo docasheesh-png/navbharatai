@@ -224,7 +224,7 @@ export class AIRouterManager {
       router.registerProvider(slot(vertex, 3, 'gemini-2.5-flash'));
     } catch {}
 
-    // ── Last resort ONLY: Claude Haiku (cheap, reached only if the race fails) ──
+    // ── Last resort ONLY: Claude Haiku (cheap, reached only if all earlier rungs fail) ──
     try {
       const claude = new AnthropicProvider('claude-haiku-4-5-20251001');
       claude.priority = 99;
@@ -238,9 +238,8 @@ export class AIRouterManager {
   // PROFESSIONAL-FREE universe (admin 2026-07-09): the free first-attempt tier for the
   // config-driven professionals. It contains ONLY GLM-4.7-Flash ($0 in/out on Z.AI) — the
   // caller (professionals/engine.ts) tries this universe first and, on any failure or
-  // rate-limit, falls back to the full PAID professional universe above, which stays
-  // byte-for-byte unchanged (RACE Grok × Gemini × Vertex → Claude Haiku). Keeping the free
-  // tier as its own single-provider universe (instead of mixing GLM into the paid race)
+  // rate-limit, falls back to the full PAID professional universe above (sequential Grok → Gemini → Vertex → Claude Haiku). Keeping the free
+  // tier as its own single-provider universe (instead of mixing GLM into the paid fallback chain)
   // means a successful free answer fires ZERO paid provider calls, and a missing
   // GLM_API_KEY makes this universe inert (healthCheck false) so behaviour degrades to
   // exactly today's paid path.

@@ -37,7 +37,6 @@ export class AnthropicProvider implements AIProvider {
   constructor(modelId = 'claude-sonnet-4-6') {
     this.modelId = modelId;
     const apiKey = resolveAnthropicApiKey();
-    if (!apiKey) throw new Error('Anthropic API key is not configured (ANTHROPIC_API_KEY / CLAUDE_API_KEY)');
     console.log("[ANTHROPIC] API key present:", !!apiKey);
     // Native Anthropic endpoint only — the aicredits proxy has been removed.
     this.client = new Anthropic({ apiKey });

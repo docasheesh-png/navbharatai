@@ -203,7 +203,7 @@ describe('🔒 every path that takes money now names itself', () => {
     expect(at).toBeGreaterThan(-1);
     expect(transaction).toBeGreaterThan(-1);
     expect(metric).toBeGreaterThan(transaction);
-    expect(settle).not.toContain('recordFeatureSpend(tx, userId);\\n  if (!db)');
+    expect(settle.indexOf('recordFeatureSpend(tx, userId);')).toBe(metric);
   });
 
   it('the admin route stops discarding the ledger it already had', () => {

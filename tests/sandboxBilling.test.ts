@@ -191,8 +191,8 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
     // Seconds are reported only when they were CHARGED, so the user can never see a duration next to
     // a ₹0 they cannot reconcile. `measuredSeconds` is the ADMIN's infrastructure figure and travels
     // either way — which is exactly why the unbilled branch must still zero `seconds` and `usd`.
-    expect(fn).toContain('{ seconds: billable, usd, measuredSeconds: billable, expenseMeasured: true }');
-    expect(fn).toContain('{ ...none, measuredSeconds: billable }');
+    expect(fn).toContain('{ seconds: billable, usd, measuredSeconds: billable, expenseMeasured }');
+    expect(fn).toContain('{ ...none, measuredSeconds: billable, expenseMeasured }');
   });
 
   it('unknown E2B rate stays unmeasured in build cost telemetry instead of becoming $0', () => {
@@ -214,7 +214,7 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
     const at = route.indexOf('function billableSandboxDetail');
     const fn = route.slice(at, at + 2600);
     // The unbilled branch spreads `none`, so both money fields come from the zero object.
-    expect(fn).toContain('{ ...none, measuredSeconds: billable }');
+    expect(fn).toContain('{ ...none, measuredSeconds: billable, expenseMeasured }');
     // And the billing decision is fed by `.usd`, never by `.measuredSeconds`.
     expect(route).not.toContain('measuredSeconds,\n        powerLevelReqEffective');
     expect(route).not.toContain('livePreviewCharge.measuredSeconds)');

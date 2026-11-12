@@ -145,6 +145,36 @@ export class SandboxStore {
   }
 
   /**
+   * Persist a newly created or resumed allocation without allowing a stale creator to replace
+   * a newer sandbox. expectedSandboxId is the identity observed before connect/create: null means
+   * the record had no allocation; a string means a failed-resume replacement or same-id resume.
+   */
+  async recordAllocation(
+    workspaceId: string,
+    userId: string | null,
+    sandboxId: string,
+    expectedSandboxId: string | null,
+  ): Promise<void> {
+    const db = this.getDb();
+    if (!db || !workspaceId || !sandboxId) return;
+    try {
+      const ref = db.collection('agentv3_sandboxes').doc(workspaceId);
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const rawCurrent = snap.exists ? snap.data()?.sandboxId : undefined;
+        const current = typeof rawCurrent === 'string' && rawCurrent.trim() ? rawCurrent.trim() : null;
+        if (current !== expectedSandboxId) return;
+        tx.set(ref, {
+          workspaceId,
+          userId: userId ?? 'anon',
+          sandboxId,
+          updatedAt: Date.now(),
+        }, { merge: true });
+      });
+    } catch { /* best-effort — never block a build; a newer identity always wins */ }
+  }
+
+  /**
    * Best-effort local observation, NOT a provider start or billing event. The counter is independent
    * and can differ from accepted observations. Neither write is awaited by app work.
    *

@@ -17,14 +17,16 @@ function deferred() {
 function fixture(initial: Record<string, unknown> | undefined = { ...unrelated }) {
   let row = initial;
   const counter = vi.fn().mockResolvedValue(undefined);
+  const beforeRead = vi.fn().mockResolvedValue(undefined);
+  const set = vi.fn((_ref: unknown, fields: object, options?: { merge?: boolean }) => { row = { ...(options?.merge ? row : {}), ...structuredClone(fields) }; });
   const update = vi.fn((_ref: unknown, fields: object) => { row = { ...row, ...structuredClone(fields) }; });
   const db = {
     collection: (name: string) => ({ doc: () => ({ set: name === 'agentv3_sandbox_starts' ? counter : vi.fn(() => { throw Error('No session set allowed'); }) }) }),
     runTransaction: vi.fn(async (cb: (tx: object) => Promise<void>) => cb({
-      get: async () => { const copy = row && structuredClone(row); return { exists: copy !== undefined, data: () => copy }; }, update,
+      get: async () => { await beforeRead(); const copy = row && structuredClone(row); return { exists: copy !== undefined, data: () => copy }; }, update, set,
     })),
   };
-  return { store: new SandboxStore(() => db as unknown as admin.firestore.Firestore), db, update, counter, row: () => row, setRow: (next: typeof row) => { row = next; } };
+  return { store: new SandboxStore(() => db as unknown as admin.firestore.Firestore), db, update, set, beforeRead, counter, row: () => row, setRow: (next: typeof row) => { row = next; } };
 }
 afterEach(() => vi.restoreAllMocks());
 
@@ -91,21 +93,24 @@ describe('local observation persistence, not provider lifetime accounting', () =
     await f.store.recordSessionStart('ws', start());
     expect(f.row()?.session).toEqual(start());
   });
-  it('waits for original touch but counts independently and captures immutable start data', async () => {
-    const f = fixture(); f.setRow(undefined);
-    const touch = deferred(); const session = start();
-    const writing = f.store.recordSessionStart('ws', session, touch.promise);
+  it('counts independently and captures immutable start data while the admitted identity read is pending', async () => {
+    const f = fixture(); const read = deferred(); const session = start();
+    f.beforeRead.mockReturnValueOnce(read.promise);
+    const writing = f.store.recordSessionStart('ws', session);
     session.ops = 99; session.busyMs = 99;
-    expect(f.counter).toHaveBeenCalledOnce(); expect(f.db.runTransaction).not.toHaveBeenCalled();
-    f.setRow({ ...unrelated }); touch.resolve(); await writing;
+    expect(f.counter).toHaveBeenCalledOnce(); expect(f.db.runTransaction).toHaveBeenCalledOnce();
+    expect(f.update).not.toHaveBeenCalled();
+    read.resolve(); await writing;
     expect(f.row()?.session).toEqual(start());
   });
-  it('counter rejection cannot settle start before pending identity/transaction, releasing end early', async () => {
-    const f = fixture(); const touch = deferred(); f.counter.mockRejectedValue(Error('counter unavailable'));
+  it('counter rejection cannot settle start before its pending transaction, releasing end early', async () => {
+    const f = fixture(); const read = deferred(); f.counter.mockRejectedValue(Error('counter unavailable'));
+    f.beforeRead.mockReturnValueOnce(read.promise);
     let settled = false;
-    const writing = f.store.recordSessionStart('ws', start(), touch.promise).then(() => { settled = true; });
+    const writing = f.store.recordSessionStart('ws', start()).then(() => { settled = true; });
     await Promise.resolve(); await Promise.resolve(); expect(settled).toBe(false);
-    touch.resolve(); await writing; expect(f.row()?.session).toEqual(start());
+    expect(f.beforeRead).toHaveBeenCalledOnce(); expect(f.update).not.toHaveBeenCalled();
+    read.resolve(); await writing; expect(f.row()?.session).toEqual(start());
   });
   it('a stuck independent counter does not delay a committed observation or its end', async () => {
     const f = fixture(); const counter = deferred(); f.counter.mockReturnValue(counter.promise);
@@ -115,12 +120,17 @@ describe('local observation persistence, not provider lifetime accounting', () =
     expect(f.row()?.session).toEqual(ended());
     counter.resolve();
   });
-  it('touch failure with no record stays unknown; lost ACK with committed identity permits CAS', async () => {
+  it('failed allocation stays unknown; lost ACK with committed allocation permits telemetry', async () => {
     const f = fixture(); f.setRow(undefined);
-    await f.store.recordSessionStart('ws', start(), Promise.reject(Error('touch failed')));
+    f.db.runTransaction.mockRejectedValueOnce(Error('allocation failed'));
+    expect(await f.store.recordAllocation('ws', 'owner', 'vm', null)).toBe(false);
+    await f.store.recordSessionStart('ws', start());
     expect(f.row()).toBeUndefined();
-    f.setRow({ ...unrelated });
-    await f.store.recordSessionStart('ws', start(), Promise.reject(Error('touch ACK lost')));
+    const original = f.db.runTransaction.getMockImplementation()!;
+    f.db.runTransaction.mockImplementationOnce(async (cb) => { await original(cb); throw Error('allocation ACK lost'); });
+    expect(await f.store.recordAllocation('ws', 'owner', 'vm', null)).toBe(false);
+    expect(f.row()?.sandboxId).toBe('vm');
+    await f.store.recordSessionStart('ws', start());
     expect(f.row()?.session).toEqual(start());
   });
   it('database failure is swallowed and a later exact end can settle a committed lost-ACK start', async () => {
@@ -134,20 +144,26 @@ describe('local observation persistence, not provider lifetime accounting', () =
     await f.store.recordSessionEnd('ws', ended());
     expect(f.row()?.session).toEqual(ended());
   });
-  it('deletion after initial touch cannot be resurrected by telemetry', async () => {
-    const f = fixture(); const touch = deferred();
-    const writing = f.store.recordSessionStart('ws', start(), touch.promise);
-    f.setRow(undefined); touch.resolve(); await writing;
-    await f.store.recordSessionEnd('ws', ended()); expect(f.row()).toBeUndefined();
+  it('deletion before the observation transaction reads cannot be resurrected by telemetry or touch', async () => {
+    const f = fixture(); const read = deferred();
+    f.beforeRead.mockReturnValueOnce(read.promise);
+    const writing = f.store.recordSessionStart('ws', start());
+    f.setRow(undefined); read.resolve(); await writing;
+    await f.store.recordSessionEnd('ws', ended());
+    await f.store.touch('ws', 'vm');
+    expect(f.row()).toBeUndefined(); expect(f.update).not.toHaveBeenCalled(); expect(f.set).not.toHaveBeenCalled();
   });
-  it('explicitly retains the old-touch allocation race but does not compound it with stale telemetry', async () => {
-    const newer = start(B, 200); const f = fixture({ ...unrelated, sandboxId: 'new-vm', session: { ...newer, sandboxId: 'new-vm' } });
-    // This is the pre-existing unconditional touch, NOT a telemetry write or newly authorized repair.
-    f.setRow({ ...f.row(), sandboxId: 'vm', updatedAt: 300 });
+  it('stale touch and allocation CAS preserve the newer identity and its telemetry', async () => {
+    const newer = { ...start(B, 200), sandboxId: 'new-vm' };
+    const f = fixture({ ...unrelated, sandboxId: 'new-vm', session: newer });
+    await f.store.touch('ws', 'vm');
+    expect(await f.store.recordAllocation('ws', 'owner', 'vm', 'vm')).toBe(false);
     await f.store.recordSessionStart('ws', start());
-    await f.store.recordSessionEnd('ws', ended({ ...newer, sandboxId: 'new-vm' }));
-    expect(f.row()?.sandboxId).toBe('vm');
-    expect(f.row()?.session).toEqual({ ...newer, sandboxId: 'new-vm' });
-    expect(f.update).not.toHaveBeenCalled();
+    expect(f.row()?.sandboxId).toBe('new-vm');
+    expect(f.row()?.session).toEqual(newer);
+    expect(f.update).not.toHaveBeenCalled(); expect(f.set).not.toHaveBeenCalled();
+    await f.store.recordSessionEnd('ws', ended(newer));
+    expect(f.row()?.sandboxId).toBe('new-vm');
+    expect(f.row()?.session).toEqual(ended(newer));
   });
 });

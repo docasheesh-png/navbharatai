@@ -247,12 +247,23 @@ describe('wiring — the actuator applies the decisions and nothing else decides
   const store = codeOnly(read('../src/server/AgentV3/SandboxStore.ts'));
   const admin = codeOnly(read('../src/server/routes/admin.ts'));
 
-  it('🔒 the hour-long constant is gone; every lifetime comes from the module', () => {
+  it('🔒 the hour-long constant is gone; active lifetimes use the module and only rejected allocations get a short cleanup cap', () => {
     expect(actuator).not.toMatch(/const SANDBOX_TIMEOUT_MS/);
     expect(actuator).not.toMatch(/SANDBOX_TIMEOUT_MS/);
     expect(actuator).toContain('timeoutMs: sandboxLifetimeMs()');
-    // No raw setTimeout with a literal — every extension carries the module's number.
-    expect(actuator).not.toMatch(/\.setTimeout\(\s*\d/);
+    // CAS losers are never admitted to traffic. Their one-minute emergency cleanup cap
+    // is deliberately shorter than even the minimum ACTIVE lifetime, not an extension.
+    const start = actuator.indexOf('private async _killUnrecordedSandbox(');
+    const end = actuator.indexOf('private async _createSandbox(', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const cleanup = actuator.slice(start, end);
+    expect(cleanup.match(/\.setTimeout\([^)]*\)/g)).toEqual(['.setTimeout(60_000)']);
+    expect(60_000).toBeLessThan(LIFETIME_MIN_MINUTES * MIN);
+    expect(cleanup.indexOf('if (killed) return')).toBeLessThan(cleanup.indexOf('.setTimeout('));
+    expect(cleanup.indexOf('if (paused)')).toBeLessThan(cleanup.indexOf('.setTimeout('));
+    // No other provider timeout may use a literal, including future activity paths.
+    expect(actuator.slice(0, start) + actuator.slice(end)).not.toMatch(/\.setTimeout\(\s*\d/);
   });
 
   it('🔒 the heartbeat is a TIMER, unref’d, driven by the pure decision', () => {

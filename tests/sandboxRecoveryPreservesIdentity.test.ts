@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Sandbox, SandboxNotFoundError, FileNotFoundError, AuthenticationError, RateLimitError } from 'e2b';
 import { E2BActuator } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
+import { sandboxLifetimeMs } from '../src/server/AgentV3/sandboxLifetime';
 import { sandboxStore } from '../src/server/AgentV3/SandboxStore';
 import { SandboxRecoveryUnavailableError, isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable } from '../src/server/AgentV3/SandboxRecoveryError';
 
@@ -26,6 +27,7 @@ function fixture() {
   const connect = vi.spyOn(Sandbox, 'connect').mockResolvedValue(old as unknown as Sandbox);
   const create = vi.spyOn(Sandbox, 'create').mockResolvedValue(fresh as unknown as Sandbox);
   const session = vi.spyOn(sandboxStore, 'recordSessionStart').mockResolvedValue(undefined);
+  const allocation = vi.spyOn(sandboxStore, 'recordAllocation').mockResolvedValue(true);
   const touch = vi.spyOn(sandboxStore, 'touch').mockResolvedValue(undefined);
   const act = new E2BActuator('unit-test-key');
   const internal = act as unknown as {
@@ -36,7 +38,7 @@ function fixture() {
   };
   const restore = vi.spyOn(internal, '_restoreFreshSandbox').mockResolvedValue(undefined);
   vi.spyOn(internal, '_kickoffPlaywright').mockImplementation(() => {});
-  return { act, internal, lookup, connect, create, session, touch, restore, old, fresh };
+  return { act, internal, lookup, connect, create, session, allocation, touch, restore, old, fresh };
 }
 
 beforeEach(() => { vi.useFakeTimers(); vi.stubEnv('AGENTV3_SANDBOX_RESUME', 'on'); });
@@ -197,6 +199,89 @@ describe('known recovery behavior remains available', () => {
     expect(f.lookup).toHaveBeenCalledTimes(mode === 'disabled' ? 0 : 1);
   });
 
+  it.each([false, true])('a fresh CAS loser keeps durable cleanup after emergency cap failure=%s and reconnects to the winner', async (capFails) => {
+    const f = fixture();
+    f.lookup.mockResolvedValueOnce({ state: 'missing' }).mockResolvedValueOnce({ state: 'found', sandboxId: 'winning-machine' });
+    f.allocation.mockResolvedValueOnce(false);
+    const winner = machine('winning-machine');
+    f.connect.mockResolvedValueOnce(winner as unknown as Sandbox);
+    const kill = vi.spyOn(Sandbox, 'kill').mockResolvedValue(false);
+    if (capFails) f.fresh.setTimeout.mockRejectedValueOnce(new Error('timeout cap unavailable'));
+    const pause = vi.spyOn(f.act, 'pauseSandbox').mockResolvedValue(false);
+    const orphan = vi.spyOn(sandboxStore, 'recordOrphanAllocation').mockResolvedValue(true);
+
+    await expect(f.act.readFile(WS, 'data.db')).resolves.toBe('existing data');
+
+    expect(f.create).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith('new-machine');
+    expect(pause).toHaveBeenCalledWith('new-machine');
+    expect(f.fresh.setTimeout).toHaveBeenCalledExactlyOnceWith(60_000);
+    expect(winner.setTimeout).toHaveBeenCalledWith(sandboxLifetimeMs());
+    expect(winner.setTimeout).not.toHaveBeenCalledWith(60_000);
+    expect(orphan).toHaveBeenCalledWith('new-machine', 'losing-allocation');
+    expect(f.connect).toHaveBeenCalledWith('winning-machine', expect.any(Object));
+    expect(f.restore).not.toHaveBeenCalled();
+    expect(f.act.sandboxOrigin(WS)).toBe('resumed');
+  });
+
+  it('failed pause of an allocated workspace never kills it or marks it settled', async () => {
+    const f = fixture();
+    const row = { workspaceId: WS, userId: 'owner', sandboxId: OLD, updatedAt: Date.now() - 60 * 60_000 };
+    vi.spyOn(sandboxStore, 'listStale').mockResolvedValue([row]);
+    vi.spyOn(sandboxStore, 'getRecord').mockResolvedValue(row);
+    vi.spyOn(sandboxStore, 'listPendingOrphanAllocations').mockResolvedValue([]);
+    const pause = vi.spyOn(f.act, 'pauseSandbox').mockResolvedValue(false);
+    const kill = vi.spyOn(Sandbox, 'kill').mockResolvedValue(true);
+    const settled = vi.spyOn(sandboxStore, 'markPausedIfUnchanged').mockResolvedValue(true);
+    await (f.act as any)._sweepOrphanSandboxes();
+    expect(pause).toHaveBeenCalledWith(OLD);
+    expect(kill).not.toHaveBeenCalled(); expect(settled).not.toHaveBeenCalled();
+  });
+
+  it('the durable orphan sweep pauses a retained CAS loser and marks it handled', async () => {
+    const f = fixture();
+    const list = vi.spyOn(sandboxStore, 'listPendingOrphanAllocations').mockResolvedValue([{
+      workspaceId: WS, sandboxId: 'orphan-machine', reason: 'losing-allocation', attempts: 0,
+    }]);
+    const pause = vi.spyOn(f.act, 'pauseSandbox').mockResolvedValue(true);
+    const handled = vi.spyOn(sandboxStore, 'markOrphanAllocationHandled').mockResolvedValue(true);
+
+    await (f.act as any)._sweepOrphanSandboxes();
+
+    expect(list).toHaveBeenCalledWith(50);
+    expect(pause).toHaveBeenCalledWith('orphan-machine');
+    expect(handled).toHaveBeenCalledWith('orphan-machine', 'paused');
+  });
+
+  it('failed orphan sweep attempts stay pending and increment durable retry metadata', async () => {
+    const f = fixture();
+    const list = vi.spyOn(sandboxStore, 'listPendingOrphanAllocations').mockResolvedValue([{
+      workspaceId: WS, sandboxId: 'orphan-machine', reason: 'losing-allocation', attempts: 2,
+    }]);
+    vi.spyOn(f.act, 'pauseSandbox').mockResolvedValue(false);
+    vi.spyOn(Sandbox, 'kill').mockResolvedValue(false);
+    const note = vi.spyOn(sandboxStore, 'noteOrphanAllocationAttempt').mockResolvedValue(undefined);
+
+    await (f.act as any)._sweepOrphanSandboxes();
+
+    expect(list).toHaveBeenCalledWith(50);
+    expect(note).toHaveBeenCalledWith('orphan-machine');
+  });
+
+  it('a fresh allocation that loses CAS without a durable winner is discarded and refused', async () => {
+    const f = fixture();
+    f.lookup.mockResolvedValueOnce({ state: 'missing' }).mockResolvedValueOnce({ state: 'unavailable' });
+    f.allocation.mockResolvedValueOnce(false);
+    const kill = vi.spyOn(Sandbox, 'kill').mockResolvedValue(true);
+
+    await expect(f.act.readFile(WS, 'data.db')).rejects.toBeInstanceOf(SandboxRecoveryUnavailableError);
+
+    expect(kill).toHaveBeenCalledWith('new-machine');
+    expect(f.internal.sandboxes.size).toBe(0);
+    expect(f.session).not.toHaveBeenCalled();
+    expect(f.restore).not.toHaveBeenCalled();
+  });
+
   it('a typed connect-not-found retains the established days-later source restore', async () => {
     const f = fixture();
     f.connect.mockRejectedValue(new SandboxNotFoundError('Paused sandbox not found'));
@@ -204,9 +289,9 @@ describe('known recovery behavior remains available', () => {
     expect(f.create).toHaveBeenCalledTimes(1);
     expect(f.restore).toHaveBeenCalledExactlyOnceWith(WS);
     expect(f.act.sandboxOrigin(WS)).toBe('created-after-failed-resume');
-    expect(f.touch).toHaveBeenCalledExactlyOnceWith(WS, 'new-machine');
-    expect(f.session).toHaveBeenCalledWith(WS, expect.objectContaining({ sandboxId: 'new-machine', origin: 'created-after-failed-resume' }), expect.any(Promise));
-    await expect(f.session.mock.calls[0]![2]).resolves.toBeUndefined();
+    expect(f.allocation).toHaveBeenCalledExactlyOnceWith(WS, null, 'new-machine', OLD);
+    expect(f.touch).not.toHaveBeenCalled();
+    expect(f.session).toHaveBeenCalledWith(WS, expect.objectContaining({ sandboxId: 'new-machine', origin: 'created-after-failed-resume' }));
   });
 });
 

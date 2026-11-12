@@ -7,7 +7,7 @@
 //
 // So, while paused: (1) the referral entry is not shown to any AI or on the /guide site, and (2) a message that is
 // about free things carries a standing note telling the model the truth in one breath, without ever describing what
-// was removed. Free Chat itself is untouched and may still be called free. PURE.
+// was removed. Chat entitlements are untouched; describe the allowance and paid continuation honestly. PURE.
 
 import type { AppFeature } from './AppKnowledgeBase';
 
@@ -22,9 +22,9 @@ export function visibleKnowledgeBase(all: readonly AppFeature[], paused: boolean
 const FREE_TOPIC = /(free|reward|referr|refer\b|invite|bonus|trial|earn|gift|promo|coupon|welcome|muft|मुफ़्त|मुफ्त|free\s*token|credit|token)/i;
 
 export const FREE_PROGRAM_PAUSED_NOTE = [
-  'CURRENT FACT (do not contradict): NavBharatAI has NO free tokens, rewards, referral program, sign-up bonus or free daily allowance right now.',
-  'Only Free Chat is free. Everything else is pay-and-use from the wallet ("Wallet & Billing" → Buy Tokens).',
-  'Never say that such free programs existed, were paused or will return. If the user asks how to get free tokens, say plainly that tokens are bought in Wallet & Billing and Free Chat needs none.',
+  'CURRENT FACT (do not contradict): New promotional token and referral awards are unavailable while this setting is paused. This does not remove the separate daily chat allowance or an eligible administrator-issued build grant.',
+  'AI chat has a daily allowance; eligible additional use is charged from the wallet at the displayed rate. App building and other paid features require spendable credit.',
+  'Do not promise a free welcome credit or a programme restart. If asked how to get credits, explain the offers actually available to that account and Wallet & Billing; never claim all chat or app building is free.',
   'If a user says their free tokens are gone or the wallet shows 0 with "Free trial ended", say their free trial has ended and adding credits lets them keep building — do not promise any refund, restoration or date.',
 ].join(' ');
 
@@ -32,3 +32,4 @@ export const FREE_PROGRAM_PAUSED_NOTE = [
 export function freeProgramNoteFor(message: string, paused: boolean): string {
   return paused && FREE_TOPIC.test(message) ? FREE_PROGRAM_PAUSED_NOTE : '';
 }
+

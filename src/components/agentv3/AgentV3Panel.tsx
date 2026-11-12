@@ -17,6 +17,8 @@ import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
 import { AttachMenu } from '../AttachMenu';
+import { StoredAttachments } from './StoredAttachments';
+import { needsOpaqueStorage, originalFileBase64, opaqueAttachmentNotice, attachmentResponse, validStoredAttachment, type StoredProAttachment } from '../../lib/proAttachmentClient';
 import { SecretRequestCard } from './SecretRequestCard';
 import { HeaderBadges } from './HeaderBadges';
 import { UserActionTray } from './UserActionTray';
@@ -82,7 +84,7 @@ import { liveCostLabel } from './liveCostLabel';
 import { MessageActions } from './MessageActions';
 import { partitionStarters, pickerSections } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
-import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
+import { checkAttachmentSizes, stageAttachmentFiles } from '../../lib/attachmentLimits';
 import { deployBlockedReason } from '../../lib/deployGuard';
 import { simplifyHealthLines } from '../../lib/buildHealthDisplay';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
@@ -1126,6 +1128,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // panel adopts and the confirmation the user sees.
   const remixHandoffRef = useRef<ReturnType<typeof takeRemixHandoff>>(null);
   const sessionIdRef = useRef<string>('');
+  const [storedAttachmentsRevision, setStoredAttachmentsRevision] = useState(0);
+  const originalUploadAttemptsRef = useRef(new Set<string>());
   const queueScopeRef = useRef(new QueueSessionScope());
   const activeQueuedItemRef = useRef<{ id: string; claimToken?: string; scope: QueueSessionSnapshot } | null>(null);
   const queueContinuationAbortRef = useRef<AbortController | null>(null);
@@ -1305,9 +1309,27 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const lastUserTs = chatMode === 'build'
     ? (() => { for (let i = convo.length - 1; i >= 0; i--) if (convo[i].role === 'user') return convo[i].ts; return null; })()
     : null;
+  const removeLocalOriginals = async (sessionId: string, ts: number, verifyServer = false): Promise<boolean> => {
+    const key = `${sessionId}:${ts}`;
+    if (!verifyServer && !originalUploadAttemptsRef.current.has(key)) return true;
+    try {
+      // This fence also cancels a still-finishing upload. Never drop the local message
+      // until deletion was acknowledged, even if the upload receipt was lost.
+      await attachmentResponse(await fetch(`/api/agentv3/attachments?sessionId=${encodeURIComponent(sessionId)}&messageId=${ts}`, {
+        method: 'DELETE', headers: await authJsonHeaders(),
+      }));
+      originalUploadAttemptsRef.current.delete(key);
+      setStoredAttachmentsRevision((revision) => revision + 1);
+      return true;
+    } catch {
+      setUserMsgs((messages) => [...messages, { role: 'agent', text: 'The original file could not be confirmed deleted. Your message is still here. Retry removal before taking it back.', ts: Date.now() }]);
+      return false;
+    }
+  };
   const handleUnsend = async (ts: number) => {
     if (unsending) return;
     const localOnly = localSubmissionMessagesRef.current.has(ts);
+    const attachmentSessionId = sessionIdRef.current;
     cancelSubmission();
     invalidateQueuedContinuation();
     setUnsending(true);
@@ -1316,9 +1338,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       // (no workspaceId yet — it never persisted) is just halted locally. Either way the reply lives in
       // `narration`, which unsend()/stop() clears.
       let purged = true;
+      if (localOnly && !await removeLocalOriginals(attachmentSessionId, ts)) return;
       if (!localOnly) {
-        if (state.workspaceId) purged = await unsend();
-        else stop();
+        if (state.workspaceId) purged = await unsend({ attachmentSessionId, attachmentMessageId: String(ts) });
+        else {
+          if (firebaseAuth.currentUser) purged = await removeLocalOriginals(attachmentSessionId, ts, true);
+          stop();
+        }
       }
       // On failure the message is NOT removed (it stays visible — honest, no fake "unsent"); the user
       // can simply try again. Never claim a purge that didn't happen.
@@ -1336,14 +1362,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const handleEdit = async (ts: number, text: string) => {
     if (unsending) return;
     const localOnly = localSubmissionMessagesRef.current.has(ts);
+    const attachmentSessionId = sessionIdRef.current;
     cancelSubmission();
     invalidateQueuedContinuation();
     setUnsending(true);
     try {
       let purged = true;
+      if (localOnly && !await removeLocalOriginals(attachmentSessionId, ts)) return;
       if (!localOnly) {
-        if (state.workspaceId) purged = await unsend();
-        else stop();
+        if (state.workspaceId) purged = await unsend({ attachmentSessionId, attachmentMessageId: String(ts) });
+        else {
+          if (firebaseAuth.currentUser) purged = await removeLocalOriginals(attachmentSessionId, ts, true);
+          stop();
+        }
       }
       if (!purged) return; // keep the message; never a fake "edited"
       localSubmissionMessagesRef.current.delete(ts);
@@ -1677,12 +1708,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // Read a File as base64 (no data: prefix); downscale large images to keep the
   // payload small and vision-optimal, exactly like the other chat surfaces.
   const fileToAttachment = (file: File): Promise<{ name: string; type: string; base64: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       const isImage = file.type.startsWith('image/') && file.type !== 'image/svg+xml';
       const raw = () => {
         const reader = new FileReader();
         reader.onload = () => resolve({ name: file.name, type: file.type || 'application/octet-stream', base64: (reader.result as string).split(',')[1] || '' });
-        reader.onerror = () => resolve({ name: file.name, type: file.type, base64: '' });
+        reader.onerror = () => reject(new Error(`Could not read \"${file.name}\". Choose the file again; it has not been uploaded.`));
+        reader.onabort = () => reject(new Error(`Reading \"${file.name}\" was cancelled. Choose the file again.`));
         reader.readAsDataURL(file);
       };
       if (!isImage) return raw();
@@ -1707,24 +1739,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       img.src = url;
     });
 
-  // ROOT-CAUSE FIX (admin 2026-07-26: "zip upload complete ho jaata hai lekin files v5 me nahi
-  // aati") — this used to filter out any file over a hardcoded 15 MB with NO feedback at all, so a
-  // large zip silently vanished from the attachment list right here, before it ever reached the
-  // send-time size guard (Fix 36a / checkAttachmentSizes) whose entire job is to explain WHY an
-  // oversized upload can't go through. Two size limits had drifted apart — a silent one (15 MB, here)
-  // and an honest one (MAX_ATTACHMENT_BYTES, attachmentLimits.ts) — and the silent one always won.
-  // Now there is ONE limit, and a rejected file gets the same honest, actionable message as a
-  // rejected send, immediately, so the user knows their upload never happened and why.
+  // Picker filters are convenience only: accept all names, then enforce shared size/count
+  // limits and explain every rejected item instead of silently slicing at eight.
   const addFiles = (list: FileList | null) => {
     if (!list) return;
-    const incoming = Array.from(list);
-    const tooBig = incoming.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
-    const picked = incoming.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
-    if (tooBig.length > 0) {
-      const verdict = checkAttachmentSizes(tooBig);
-      setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${verdict.reason || 'One or more files are too large to attach.'}`, ts: Date.now() }]);
+    const staged = stageAttachmentFiles(files, Array.from(list));
+    if (staged.rejected.length > 0) {
+      setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${staged.rejected.map((r) => r.reason).join('\n')}`, ts: Date.now() }]);
     }
-    if (picked.length > 0) setFiles((prev) => [...prev, ...picked].slice(0, 8));
+    if (staged.accepted.length > 0) setFiles([...files, ...staged.accepted]);
   };
 
   // `override` — programmatic sends (the GitHub repo picker's 1-click import): supplies its own
@@ -1772,7 +1795,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     };
     setSubmissionPhase(sendFiles.length > 0 ? 'attachments' : onBeforeBuild ? 'saving' : 'starting');
     // A file with no text gets a sensible default prompt (the server requires one).
-    const msgText = text || (sendFiles.length > 0 ? `Please read and analyze the attached file(s): ${sendFiles.map((f) => f.name).join(', ')}` : '');
+    let msgText = text || (sendFiles.length > 0 ? `Please read and analyze the attached file(s): ${sendFiles.map((f) => f.name).join(', ')}` : '');
     const displayText = text || `📎 ${sendFiles.map((f) => f.name).join(', ')}`;
     const userMessageTs = nextUserMessageTs(Date.now(), [userMsgs, agentHistory, state.narration, state.activity, state.activityLog]);
     localSubmissionMessagesRef.current.add(userMessageTs);
@@ -1783,8 +1806,37 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     }
     const pendingImportUrl = (override?.importUrl ?? importUrl).trim();
     if (!override) setImportUrl(''); // consume the set-by-hand import URL on first send
+    const savedOriginals = new Set<File>();
     try {
-      const attachments = sendFiles.length > 0 ? await Promise.all(sendFiles.map(fileToAttachment)) : undefined;
+      // Keep text-only sends synchronous through preflight; classification is I/O only for files.
+      const classified = sendFiles.length > 0
+        ? await Promise.all(sendFiles.map(async (file) => ({ file, opaque: await needsOpaqueStorage(file) })))
+        : [];
+      if (!isCurrent()) return;
+      const opaqueFiles = classified.filter((item) => item.opaque).map((item) => item.file);
+      const readableFiles = classified.filter((item) => !item.opaque).map((item) => item.file);
+      const stored: StoredProAttachment[] = [];
+      if (opaqueFiles.length && !firebaseAuth.currentUser) throw new Error('Sign in to save this binary file privately. It has not been uploaded.');
+      for (const file of opaqueFiles) {
+        const base64 = await originalFileBase64(file);
+        if (!isCurrent()) return;
+        originalUploadAttemptsRef.current.add(`${ticket.sessionId}:${userMessageTs}`);
+        const body = await attachmentResponse(await fetch('/api/agentv3/attachments', {
+          method: 'POST', headers: await authJsonHeaders(), signal: ticket.abort.signal,
+          body: JSON.stringify({ name: file.name, base64, sessionId: ticket.sessionId, messageId: String(userMessageTs) }),
+        }));
+        if (!validStoredAttachment(body.attachment) || body.attachment.state !== 'ready' || body.attachment.sessionId !== ticket.sessionId || body.attachment.size !== file.size || body.attachment.name !== file.name) throw new Error('The upload receipt could not be verified. Refresh Private attached files before retrying.');
+        savedOriginals.add(file);
+        stored.push(body.attachment);
+        if (!isCurrent()) return;
+        setStoredAttachmentsRevision((revision) => revision + 1);
+      }
+      if (stored.length) {
+        setUserMsgs((messages) => [...messages, { role: 'agent', text: `Saved privately: ${stored.map((file) => file.name).join(', ')}. Original bytes are available under Private attached files. These binary files were not read by the AI and are not part of your app.`, ts: Math.max(Date.now(), userMessageTs + 1) }]);
+        if (!text && !readableFiles.length) { finishSubmission(); return; }
+        msgText = (text || `Please read the supported attachments: ${readableFiles.map((file) => file.name).join(', ')}`) + opaqueAttachmentNotice(stored);
+      }
+      const attachments = readableFiles.length > 0 ? await Promise.all(readableFiles.map(fileToAttachment)) : undefined;
       if (!isCurrent()) return;
       // Phase S3 conflict guard: flush any pending IDE edits to v5.0's durable store BEFORE the build
       // starts, so the build reads the user's latest hand edits — never a stale file set. Best-effort:
@@ -1912,7 +1964,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
         return;
       }
       await launch(sel.framework, false);
-    } catch { failSubmission(); }
+    } catch (error) {
+      if (isCurrent()) {
+        setStoredAttachmentsRevision((revision) => revision + 1);
+        if (!override) {
+          setFiles((current) => current.length ? current : sendFiles.filter((file) => !savedOriginals.has(file)));
+          setPrompt((current) => current || text);
+        }
+        setUserMsgs((messages) => [...messages, { role: 'agent', text: (error instanceof Error ? error.message : 'The files could not be prepared.') + ' Check Private attached files before retrying. Any new draft was kept; reselect unsaved files if they are no longer in the composer.', ts: Math.max(Date.now(), userMessageTs + 1) }]);
+      }
+      failSubmission();
+    }
   };
 
   // ── INLINE VOICE DICTATION (admin 2026-07-22) ────────────────────────────────────────────────
@@ -5721,6 +5783,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             {showTeamHq(running, powerLevel) && (
               <TeamHqCard agents={state.agents} todos={state.todos} elapsedMs={teamElapsedMs} />
             )}
+            <StoredAttachments key={`${userId || 'guest'}:${sessionIdRef.current}`} sessionId={sessionIdRef.current} userId={userId} refresh={storedAttachmentsRevision} headers={authJsonHeaders} />
             {files.length > 0 && (
               <div className="px-3 pt-2 flex flex-wrap gap-1.5">
                 {pagedFiles.visible.map((f, i) => (
@@ -5974,7 +6037,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   (the SAME flow as the glowing template button — 2 entries, one system). */}
               <AttachMenu
                 onFiles={(fl) => addFiles(fl)}
-                fileAccept="image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.js,.ts,.tsx,.jsx,.py,.css"
+                fileAccept=""
                 disabled={running}
                 badge={files.length}
                 title="Attach (photo, gallery, file, or a website screenshot → app)"
@@ -7645,3 +7708,4 @@ function colorizeDiff(patch: string): React.ReactNode {
     return <div key={i} className={cls}>{line}</div>;
   });
 }
+

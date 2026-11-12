@@ -5,7 +5,7 @@ import { AIRouterManager } from '../src/server/AI/AIRouterManager';
 import { AIRouter } from '../src/server/AI/Router/AIRouter';
 import type { AIProvider, AIProviderResponse } from '../src/server/AI/Router/ProviderTypes';
 
-// Minimal fake provider for behavioral race tests.
+// Minimal fake provider for routing behavior tests.
 function fakeProvider(
   name: AIProvider['name'],
   priority: number,
@@ -38,7 +38,7 @@ function fakeProvider(
  *
  * Proves the core-law guarantees:
  *   1. PROFESSIONAL is its own router instance, isolated from FREE and PRO.
- *   2. The race participants are Grok / Gemini / Vertex (no Claude in the race).
+ *   2. The ordered paid fallback rungs are Grok / Gemini / Vertex (no Claude before them).
  *   3. Claude is the ONLY last-resort provider.
  *   4. FREE never reaches Claude/Anthropic.
  *

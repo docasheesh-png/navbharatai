@@ -91,7 +91,7 @@ export interface UseAgentV3Build {
   /** UNSEND — take back the last message: stop any in-flight build AND purge it from the server
    *  transcript + workspace memory so it never resurfaces. Resolves true when the server confirmed the
    *  purge (the caller then removes the message from the visible thread). Never throws. */
-  unsend: () => Promise<boolean>;
+  unsend: (attachmentScope?: { attachmentSessionId: string; attachmentMessageId: string }) => Promise<boolean>;
   reset: () => void;
   /** True when a build is running server-side but this UI is NOT attached to it
    *  (e.g. the original connection was lost) — the panel offers "Resume". */

@@ -70,6 +70,7 @@ export function walletMergeResolveEnabled(env: NodeJS.ProcessEnv = process.env):
 }
 
 /**
+ * @deprecated Non-financial compatibility only. Money paths must use resolveCanonicalWalletIdStrict().
  * Follow the `mergedInto` chain from `uid` to the canonical wallet id. `readMergedInto(uid)` returns the
  * `mergedInto` field of that wallet doc (or null/undefined when the doc is missing or not merged). Bounded
  * to `maxHops` and cycle-guarded, so a bad chain can never loop or hang. Returns the last resolved id on any

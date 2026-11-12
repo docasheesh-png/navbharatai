@@ -51,7 +51,9 @@ APPS_PROJECT=navbharatai-user-apps REGION=asia-south1 \
   bash scripts/auditNavBharatCloudCosts.sh
 ```
 
-The script is read-only. It does not change project configuration or delete resources.
+The script is read-only and uses noninteractive `--quiet` Cloud CLI reads. It does not change project configuration or delete resources. Failed reads remain visible; it continues independent sections and exits nonzero with an incomplete-inventory warning. A failed listing is not evidence that no resources exist.
+
+Budget objects are billing-account-wide, not filtered to the apps project. Review each `budgetFilter` before attributing a budget to this project.
 
 ## Rollout gates
 

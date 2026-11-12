@@ -20,7 +20,7 @@ import { cashfreePaymentsAvailability } from './cashfreeCredentials';
 import { orderCreditedTokens, type WalletCreditTx } from './orderCredit';
 import { rupeesToTokens } from './walletMirror';
 import { GIFT_CODE_COLLECTION } from './giftCodes';
-import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
+import { resolveCanonicalWalletIdStrict, walletMergeResolveEnabled } from './walletResolve';
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
 import {
   REVERSAL_FIELDS, recordedReversedInr, reversalPaidBasisInr, clawbackTargetTokens, clawbackDeltaTokens,
@@ -151,14 +151,14 @@ export async function applyOrderReversal(
   if (!pre.exists()) return { status: 'unknown-order' };
 
   // Resolve the wallet OUTSIDE the transaction, exactly as `walletDebit` does: the merge pointer is a
-  // stable fact, and a resolver failure falls back to the raw uid rather than to nothing.
+  // stable fact, and a resolver failure aborts the reversal so the provider webhook can retry.
   const buyerUid = String((pre.data() as { userId?: unknown })?.userId ?? '');
   let walletOwner = buyerUid;
   if (walletOwner && walletMergeResolveEnabled()) {
     walletOwner = await resolveCanonicalWalletId(async (u) => {
       const s = await getDoc(doc(db, 'user_token_wallets', u));
       return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
-    }, walletOwner).catch(() => buyerUid);
+    }, walletOwner);
   }
   const walletRef = walletOwner ? doc(db, 'user_token_wallets', walletOwner) : null;
 

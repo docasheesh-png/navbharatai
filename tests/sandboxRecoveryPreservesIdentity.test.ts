@@ -205,15 +205,50 @@ describe('known recovery behavior remains available', () => {
     const winner = machine('winning-machine');
     f.connect.mockResolvedValueOnce(winner as unknown as Sandbox);
     const kill = vi.spyOn(Sandbox, 'kill').mockResolvedValue(false);
+    f.fresh.setTimeout.mockRejectedValueOnce(new Error('timeout cap unavailable'));
+    const pause = vi.spyOn(f.act, 'pauseSandbox').mockResolvedValue(false);
+    const orphan = vi.spyOn(sandboxStore, 'recordOrphanAllocation').mockResolvedValue(true);
 
     await expect(f.act.readFile(WS, 'data.db')).resolves.toBe('existing data');
 
     expect(f.create).toHaveBeenCalledTimes(1);
     expect(kill).toHaveBeenCalledWith('new-machine');
+    expect(pause).toHaveBeenCalledWith('new-machine');
     expect(f.fresh.setTimeout).toHaveBeenCalledWith(60_000);
+    expect(orphan).toHaveBeenCalledWith(WS, 'new-machine', 'losing-allocation');
     expect(f.connect).toHaveBeenCalledWith('winning-machine', expect.any(Object));
     expect(f.restore).not.toHaveBeenCalled();
     expect(f.act.sandboxOrigin(WS)).toBe('resumed');
+  });
+
+  it('the durable orphan sweep pauses a retained CAS loser and marks it handled', async () => {
+    const f = fixture();
+    const list = vi.spyOn(sandboxStore, 'listPendingOrphanAllocations').mockResolvedValue([{
+      workspaceId: WS, sandboxId: 'orphan-machine', reason: 'losing-allocation', attempts: 0,
+    }]);
+    const pause = vi.spyOn(f.act, 'pauseSandbox').mockResolvedValue(true);
+    const handled = vi.spyOn(sandboxStore, 'markOrphanAllocationHandled').mockResolvedValue(true);
+
+    await (f.act as any)._sweepOrphanSandboxes();
+
+    expect(list).toHaveBeenCalledWith(50);
+    expect(pause).toHaveBeenCalledWith('orphan-machine');
+    expect(handled).toHaveBeenCalledWith('orphan-machine', 'paused');
+  });
+
+  it('failed orphan sweep attempts stay pending and increment durable retry metadata', async () => {
+    const f = fixture();
+    const list = vi.spyOn(sandboxStore, 'listPendingOrphanAllocations').mockResolvedValue([{
+      workspaceId: WS, sandboxId: 'orphan-machine', reason: 'losing-allocation', attempts: 2,
+    }]);
+    vi.spyOn(f.act, 'pauseSandbox').mockResolvedValue(false);
+    vi.spyOn(Sandbox, 'kill').mockResolvedValue(false);
+    const note = vi.spyOn(sandboxStore, 'noteOrphanAllocationAttempt').mockResolvedValue(undefined);
+
+    await (f.act as any)._sweepOrphanSandboxes();
+
+    expect(list).toHaveBeenCalledWith(50);
+    expect(note).toHaveBeenCalledWith('orphan-machine');
   });
 
   it('a fresh allocation that loses CAS without a durable winner is discarded and refused', async () => {

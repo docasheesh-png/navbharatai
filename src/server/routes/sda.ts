@@ -621,7 +621,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       if (sdaRacers.length > 0) {
         const sdaWinner = await runSequentialProviderFallback(sdaRacers, (error, index) => {
           console.warn(`[SDA] ${index === 0 ? 'Grok' : 'Gemini'} failed; trying the next multimodal provider:`, String(error));
-        });
+        }, inherited.signal);
         if (sdaWinner?.text?.trim()) {
           console.log(`[SDA] Sequential multimodal fallback answered via ${sdaWinner.spend.provider}`);
           reply = sdaWinner.text;
@@ -645,7 +645,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           // professional; if GLM is empty the Vertex fallback below finishes the free chain (GLM → Vertex).
           // Paid → the full sequential fallback (Grok → Gemini → Vertex → Claude). Never Grok/Claude on the free tier.
           const professionalRouter = AIRouterManager.getRouter(sdaTier === 'free' ? 'professional-free' : 'professional');
-          const { response, telemetry } = await professionalRouter.route(fallbackPrompt, SDA_SYSTEM_FINAL);
+          const { response, telemetry } = await professionalRouter.route(fallbackPrompt, SDA_SYSTEM_FINAL, undefined, undefined, inherited.signal);
           if (telemetry.success && response.content?.trim()) {
             reply = response.content;
             // ONE WALLET: keep what this answer cost so the turn can be charged like any other AI.

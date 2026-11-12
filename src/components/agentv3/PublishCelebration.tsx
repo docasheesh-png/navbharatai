@@ -22,8 +22,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ExternalLink, Copy, Check, X, Share2 } from 'lucide-react';
-import { FIREWORK_MS, prettyUrl, whatsappShareUrl, type CelebrationKind } from '../../lib/firstPublish';
+import { ExternalLink, Copy, Check, X } from 'lucide-react';
+import { FIREWORK_MS, prettyUrl, type CelebrationKind } from '../../lib/firstPublish';
+import { WhatsAppShareLink } from '../share/WhatsAppShareLink';
 import { useDialogOpen } from '../../hooks/useDialogOpen';
 import { SponsoredBanner } from '../ads/SponsoredAd';
 
@@ -167,31 +168,24 @@ export function PublishCelebration({ kind, url, appName, firstPublish = false, o
         {/* Open · Copy · Share. SHARE IS NOT AN AFTERTHOUGHT: the first thing a person does with their
             first link is send it to someone, and on a phone a URL in a card cannot be selected by
             hand. WhatsApp is first among the share targets because that is where this actually goes. */}
-        <div className="mt-4 grid grid-cols-3 gap-2">
+        <div className="mt-4 grid grid-cols-2 gap-2">
           <a
             href={url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-on-accent hover:bg-emerald-500"
+            className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-on-accent hover:bg-emerald-500"
           >
             <ExternalLink className="h-3.5 w-3.5" /> Open
           </a>
           <button
             onClick={copy}
-            className="flex items-center justify-center gap-1.5 rounded-xl border border-line bg-raised py-2.5 text-xs font-bold text-body hover:bg-raised-hover"
+            className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-line bg-raised py-2.5 text-xs font-bold text-body hover:bg-raised-hover"
           >
             {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
             {copied ? 'Copied' : 'Copy'}
           </button>
-          <a
-            href={whatsappShareUrl(url, appName)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center justify-center gap-1.5 rounded-xl border border-line bg-raised py-2.5 text-xs font-bold text-body hover:bg-raised-hover"
-          >
-            <Share2 className="h-3.5 w-3.5" /> Share
-          </a>
         </div>
+        <WhatsAppShareLink appUrl={url} appName={appName} className="mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-bold text-on-accent hover:bg-emerald-500 touch-manipulation" />
 
         {/* A small banner BELOW the link and the buttons — inside the card, in the flow, never an overlay. It is
             drawn only for someone who has not paid, and not at all when there is no ad. The celebration is

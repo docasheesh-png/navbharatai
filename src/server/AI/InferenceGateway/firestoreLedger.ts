@@ -301,7 +301,9 @@ export class FirestoreInferenceLedger implements LedgerPort {
       const catalog = await tx.get(this.db.doc('free_chat_chain/gateway_catalog')).then(readData);
       demand(catalog !== undefined && evidenceBinding(catalog) === authority.configurationBinding);
       for (const source of authority.sourceBindings) {
-        demand(/^free_chat_chain\/gateway_(?:account_owner|quota_rule|model_slot_policy)_[a-f0-9]{64}$/.test(source.path) && typeof source.binding === 'string');
+        demand((/^free_chat_chain\/gateway_(?:account_owner|quota_rule|model_slot_policy)_[a-f0-9]{64}$/.test(source.path)
+          || (source.path === 'qubax_catalog/active' && authority.snapshot.request.surface === 'chat' && authority.snapshot.request.fixedTextChain === 'v1'
+            && authority.snapshot.candidates.some(c => c.profile.providerId === 'QUBAX'))) && typeof source.binding === 'string');
         const record = await tx.get(this.db.doc(source.path)).then(readData);
         demand(record !== undefined && evidenceBinding(record) === source.binding);
       }

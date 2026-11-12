@@ -20,7 +20,7 @@
 // unit-testable with the real QuizArena error text. The dispatcher/runner supply sandbox I/O and
 // the single LLM call. Kill switch: AGENTV3_ENDGAME_REPAIR=off.
 
-import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports as fixProvenTypeOnlyValueImports } from './ImportExportReconcile';
+import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports as fixProvenTypeOnlyValueImports, fixSelfShadowedImports } from './ImportExportReconcile';
 import { compilerNeedsPackageSetup, PACKAGE_SETUP_REQUIRED } from './compilerSetupBoundary';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import { countTscErrors, tscVerdict } from './TscGate';
@@ -314,11 +314,26 @@ export function unresolvedNames(errors: TscError[]): string[] {
 
 export async function endgameDeterministicPass(
   files: Record<string, string>,
-  errors: TscError[],
+  compilerErrors: TscError[],
   installedExports?: Record<string, readonly string[]>,
 ): Promise<EndgameDeterministicResult> {
+  let errors = compilerErrors;
   const fixes: string[] = [];
   let cur = files;
+  // 🔁 FIRST: a nested wrapper that shadows the import it wraps and calls itself (autopsy BR1959). It must
+  // run before `removeUnusedImports` — the shadowed import is exactly what the compiler calls unused, and
+  // deleting it would leave the endless recursion in place with nothing left to point the call back at.
+  // The "unused" findings for an import it re-binds are dropped, because that import is now used. Every
+  // edit stays on its own line, so every other finding's line number still holds.
+  try {
+    const shadow = await fixSelfShadowedImports(cur);
+    if (shadow.fixes.length > 0) {
+      cur = shadow.files;
+      fixes.push(...shadow.fixes.map((f) => `${f.file}: '${f.name}' called itself instead of the import from '${f.from}' — the import is now '${f.alias}'`));
+      const rebound = new Set(shadow.fixes.map((f) => `${f.file}\u0000${f.name}`));
+      errors = errors.filter((e) => !(UNUSED_CODES.has(e.code) && rebound.has(`${e.file}\u0000${/'([^']+)'/.exec(e.message)?.[1] ?? ''}`)));
+    }
+  } catch { /* best-effort */ }
   const typeOnly = fixTypeOnlyValueImports(cur, errors);
   cur = typeOnly.files;
   fixes.push(...typeOnly.fixed);

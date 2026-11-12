@@ -1,3 +1,5 @@
+import { whatsappShareHref, whatsappShareMessage } from './whatsappShare';
+
 // The first time a user's app goes live — the rules of that moment.
 //
 // ADMIN 2026-08-21: "jab user ke pahli baar mitrify link milta hai, 2-3 second ke liye firework, aur
@@ -75,19 +77,16 @@ export const FIREWORK_MS = 3000;
  * The share text for the one thing a user actually does with their first link: send it to someone.
  *
  * WHATSAPP IS FIRST ON PURPOSE. This is India's share button, and the moment a person's first app
- * reaches their family chat is the moment the product spreads without us paying for it. Competitors
- * hand over a URL and stop there.
+ * reaches their family chat is the moment the product spreads without us paying for it.
+ * The wording lives in src/lib/whatsappShare.ts so every share button sends the same Hindi message.
  */
 export function shareText(url: string, appName?: string): string {
-  const name = (appName || '').trim();
-  return name
-    ? `I made an app — ${name} 🎉\n${url}\n\nBuilt with NavBharatAI`
-    : `I made my first app 🎉\n${url}\n\nBuilt with NavBharatAI`;
+  return whatsappShareMessage({ appUrl: url, appName });
 }
 
 /** The WhatsApp share link for that text. Encoded once, here, so no call site has to remember to. */
 export function whatsappShareUrl(url: string, appName?: string): string {
-  return `https://wa.me/?text=${encodeURIComponent(shareText(url, appName))}`;
+  return whatsappShareHref({ appUrl: url, appName });
 }
 
 /** The host shown on the card — a full URL with its scheme is noise in a headline. */

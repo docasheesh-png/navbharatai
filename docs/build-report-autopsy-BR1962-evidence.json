@@ -1,0 +1,728 @@
+{
+ "reportNumber": 1962,
+ "buildId": "ad20309a-06c7-48c1-9249-6f2bae0dacf7",
+ "workspaceId": "agentv3-mxn412CI1VMdkgcPqGUyQY6beNx2-7e11df5d-5fbd-4c58-be4f-8de4bb7f4526",
+ "historyId": "1794109214932",
+ "reportDigest": "be761ff8df441e62a271cee0657b80ef9af6a9730142aae2b7546c3c4d3b15af",
+ "outcome": "stopped",
+ "ok": false,
+ "prompt": "Now I want to make NOVA AI a real AI assistant.\n\nYour review identified that src/lib/aiService.ts currently returns demo results instead of real AI responses.\n\nPlease fix this.\n\nRequirements:\n\n1. Inspect src/lib/aiService.ts.\n2. Identify the existing connected AI service or available platform integration.\n3. Replace all hardcoded and randomly generated demo responses with genuine AI-generated responses.\n4. Connect the chat interface to the real AI service.\n5. Support Hindi and English conversations.\n6. Maintain chat history and conversation context.\n7. Handle loading, timeout and API errors properly.\n8. Never display fake AI responses.\n9. Keep the existing NOVA AI design and all working features unchanged.\n\nIMPORTANT:\nDo not invent an API key or pretend an AI service is connected.\n\nIf an external API key or paid service is required, explain exactly what is needed before proceeding.\n\nTest the chatbot with:\n\"Who is the President of India?\"\nand\n\"भारत की राजधानी क्या है?\"\n\nConfirm whether the responses come from a real AI model.",
+ "model": "qwen3-coder",
+ "framework": "vite-react",
+ "startedIST": "2026-11-08T09:10:14.932+05:30",
+ "endedIST": "2026-11-08T09:10:27.407+05:30",
+ "counts": {
+  "total": 45,
+  "errors": 0,
+  "warnings": 0,
+  "autoResolved": 0,
+  "workarounds": 0,
+  "leftOpen": 0,
+  "healRule": 3,
+  "unresolved": 0
+ },
+ "remoteAutopsy": "none written; outcome is user-stopped, not a failed-build autopsy target",
+ "evidenceLimits": "No generatedFiles or file hashes (nothing written). No stored transcript beyond this prompt. The only model call is admission classification (empty response preview, 2 output tokens). I423-style CLI details are not present.",
+ "etaAccuracy": {
+  "promisedMs": 432504,
+  "lowMs": 343841,
+  "highMs": 1182522,
+  "actualMs": 12475,
+  "ratio": 0.028843663873628914,
+  "withinBand": false,
+  "evidenced": false,
+  "untested": true,
+  "line": "The user was shown a ROUGH ESTIMATE, labelled a guess (unevidenced): 5.7 min–19.7 min (midpoint 7.2 min); the build was cut short (OUTCOME_USER_STOPPED) at 0.2 min, without completing, so it does not test completion time.",
+  "key": "edit_unsized",
+  "source": "workspace"
+ },
+ "billing": {
+  "userTier": "weak (free tier — cheap engines) · not charged",
+  "charged": false,
+  "billedInr": 0,
+  "billedUsd": 0,
+  "walletDebited": false,
+  "zeroBillReason": "stopped by the user before any file was written — never charged"
+ },
+ "issues": [
+  {
+   "ref": "I0",
+   "code": "FREE_BUILD_TIME_CAP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:14.932+05:30",
+   "tPlusS": 0.0,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Free build window: 25 min (a paid build would get 29 min)."
+  },
+  {
+   "ref": "I1",
+   "code": "APP_SCOPE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:14.952+05:30",
+   "tPlusS": 0.0,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D01"
+   ],
+   "message": "Scope: LARGE — a big-app planner runs next: Software Project Mode when the request is a project spec and the mode is on for this account, otherwise the mega-app roadmap (outcomes: PROJECT_MODE, MEGA_ROADMAP_*). Signals: ~10 distinct features requested."
+  },
+  {
+   "ref": "I2",
+   "code": "TIER_LADDER",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:14.953+05:30",
+   "tPlusS": 0.0,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Weak ladder (default): GLM(glm-4.7-flashx) → KIMI(kimi-k2.7-code) → GLM(glm-4.7-flash)"
+  },
+  {
+   "ref": "I3",
+   "code": "COMPLEXITY_ROUTING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:14.953+05:30",
+   "tPlusS": 0.0,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D08"
+   ],
+   "message": "Complexity: COMPLEX (score 27, model) — the build opens on the ladder's second rung, past the cheap flash opener."
+  },
+  {
+   "ref": "I4",
+   "code": "SURPLUS_ADMITTED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:14.953+05:30",
+   "tPlusS": 0.0,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D06"
+   ],
+   "message": "Surplus admitted for Weak build (model=qwen3-coder)."
+  },
+  {
+   "ref": "I5",
+   "code": "TIME_TO_FIRST_CALL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:14.953+05:30",
+   "tPlusS": 0.0,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D06"
+   ],
+   "message": "0s of preparation before the build's first model call began — sandbox setup, project restore and secrets loading all happen in it, and the user waits through every second. (Dependency install is NOT part of this wait: it runs in the background boot, concurrent with the build.) The first call itself "
+  },
+  {
+   "ref": "I6",
+   "code": "ETA_BASIS",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:15.250+05:30",
+   "tPlusS": 0.3,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D03"
+   ],
+   "message": "ETA ~6–20 min (midpoint ~7 min) · basis blended · confidence 0.59"
+  },
+  {
+   "ref": "I7",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:15.250+05:30",
+   "tPlusS": 0.3,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D03"
+   ],
+   "message": "⏱️ Rough estimate: ~6–20 min — a guess from the size of your request, not a measurement. I'll replace it with a real figure — and keep it updated — as soon as I can measure how big your app is."
+  },
+  {
+   "ref": "I8",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:15.251+05:30",
+   "tPlusS": 0.3,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Setting up your workspace…"
+  },
+  {
+   "ref": "I9",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:15.251+05:30",
+   "tPlusS": 0.3,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Routing and ETA in 298ms"
+  },
+  {
+   "ref": "I10",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:15.800+05:30",
+   "tPlusS": 0.9,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D07"
+   ],
+   "message": "Workspace ready in 1s"
+  },
+  {
+   "ref": "I11",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:16.029+05:30",
+   "tPlusS": 1.1,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "GitHub storage ready in 0s"
+  },
+  {
+   "ref": "I12",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:16.702+05:30",
+   "tPlusS": 1.8,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Project checked in 1s — nothing needed restoring"
+  },
+  {
+   "ref": "I13",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:17.760+05:30",
+   "tPlusS": 2.8,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Build wiring ready in 1.1s"
+  },
+  {
+   "ref": "I14",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:17.889+05:30",
+   "tPlusS": 3.0,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Personal context loaded in 129ms"
+  },
+  {
+   "ref": "I15",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:17.903+05:30",
+   "tPlusS": 3.0,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D04"
+   ],
+   "message": "✏️ Editing your existing app (25 source files) — I'll make targeted changes, not rebuild it."
+  },
+  {
+   "ref": "I16",
+   "code": "GROUNDING_COST",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:22.050+05:30",
+   "tPlusS": 7.1,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "grounding: 3 files, ~199 tokens (budget 4000)"
+  },
+  {
+   "ref": "I17",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:22.282+05:30",
+   "tPlusS": 7.3,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Project context prepared in 0.2s"
+  },
+  {
+   "ref": "I18",
+   "code": "CHANGE_CLASSIFIED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:22.287+05:30",
+   "tPlusS": 7.4,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D04"
+   ],
+   "message": "Change classified as large (risk high, depth deep); also security, bug, feature · 2 requirement(s) on record · 0 re-probed for regression · 0 open issue(s) handed to the builder · impact 2 file(s) + 2 dependent(s)"
+  },
+  {
+   "ref": "I19",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:23.246+05:30",
+   "tPlusS": 8.3,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Prompt context gathered in 964ms"
+  },
+  {
+   "ref": "I20",
+   "code": "PROJECT_MODE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:23.247+05:30",
+   "tPlusS": 8.3,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D04",
+    "D09"
+   ],
+   "message": "Software Project Mode is ON for this account; this turn is not a fresh build, so no plan was created."
+  },
+  {
+   "ref": "I21",
+   "code": "SETUP_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:23.470+05:30",
+   "tPlusS": 8.5,
+   "classification": "trace",
+   "ledgerRows": [],
+   "message": "Final preparation in 224ms"
+  },
+  {
+   "ref": "I22",
+   "code": "USER_STOPPED_BUILD",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:23.722+05:30",
+   "tPlusS": 8.8,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D02"
+   ],
+   "message": "The user asked for this build to stop, and it was stopped."
+  },
+  {
+   "ref": "I23",
+   "code": "OUTCOME_USER_STOPPED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:23.722+05:30",
+   "tPlusS": 8.8,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D02"
+   ],
+   "message": "Build outcome: STOPPED BY THE USER — that is why it ended. No failure of the app or the engine is implied."
+  },
+  {
+   "ref": "I24",
+   "code": "READY_BEFORE_END",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:23.723+05:30",
+   "tPlusS": 8.8,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Not measured: this turn ran as an edit of the files already in the project, so the project score cannot say when the request was done."
+  },
+  {
+   "ref": "I25",
+   "code": "WRITE_TIME_TYPECHECK",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:23.723+05:30",
+   "tPlusS": 8.8,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Write-time typecheck: no TypeScript source was written this build."
+  },
+  {
+   "ref": "I26",
+   "code": "SERVICE_GRAPH_SINGLE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:25.272+05:30",
+   "tPlusS": 10.3,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Single service: app (frontend on port 5173)."
+  },
+  {
+   "ref": "I27",
+   "code": "ARCHITECTURE_INVARIANTS_HELD",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:25.275+05:30",
+   "tPlusS": 10.3,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "This edit kept every one of the project's 1 observed architecture rule(s) (1 of them machine-checked)."
+  },
+  {
+   "ref": "I28",
+   "code": "DESIGN_CONSISTENCY",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:25.285+05:30",
+   "tPlusS": 10.4,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Design consistency 100/100 (A) across 17 file(s). Design consistency: ✓ A (100/100) — cohesive palette, typography and spacing."
+  },
+  {
+   "ref": "I29",
+   "code": "ACCESSIBILITY",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:25.285+05:30",
+   "tPlusS": 10.4,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Accessibility 100/100 (A) — no common WCAG failures found across 17 file(s)."
+  },
+  {
+   "ref": "I30",
+   "code": "SCRIPT_INTEGRITY",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:25.285+05:30",
+   "tPlusS": 10.4,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Text integrity: every label reads in one script."
+  },
+  {
+   "ref": "I31",
+   "code": "POST_ANSWER_TIMING",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:25.285+05:30",
+   "tPlusS": 10.4,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Post-answer integrity pass took 2s, of which loading the durable project was 0s (27 files)."
+  },
+  {
+   "ref": "I32",
+   "code": "FINISHING_PASSES_HELD_AT_CAP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:25.285+05:30",
+   "tPlusS": 10.4,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "The e2e-scaffold pass deferred its remaining writes because the build has been stopped. Completed writes are kept; deferred work can run on the next turn with time to verify."
+  },
+  {
+   "ref": "I33",
+   "code": "CORRECTION_BUDGET",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:25.286+05:30",
+   "tPlusS": 10.4,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Correction reserve: 150s held back from generation"
+  },
+  {
+   "ref": "I34",
+   "code": "SANDBOX_SESSION",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:25.286+05:30",
+   "tPlusS": 10.4,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D07"
+   ],
+   "message": "Sandbox session: 1.4 min up · 0.1 min running our operations (7) · 1.3 min idle (93%) · started by other · came up resumed"
+  },
+  {
+   "ref": "I35",
+   "code": "SANDBOX_PEAK_MEMORY",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:25.567+05:30",
+   "tPlusS": 10.6,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D07"
+   ],
+   "message": "Peak memory: this build stayed under the machine's earlier high-water mark of 1.14 GB of 3.71 GB (the cgroup's own limit; template 4 GB) (31%, cgroup-v2 /user; set before this build began — this kernel cannot reset the counter, so the build's own peak is at most that; 0 out-of-memory kills, 0 reclai"
+  },
+  {
+   "ref": "I36",
+   "code": "RELEASE_GATE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:25.568+05:30",
+   "tPlusS": 10.6,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D02"
+   ],
+   "message": "Release gate: RED — Not shippable yet — you stopped this build before it could be finished or checked.\n  NOT established: no live preview was ever available, so nothing here was proven to RUN; the page-render check needs a running app and was skipped; no user journey could be derived or run; the typ"
+  },
+  {
+   "ref": "I37",
+   "code": "GREEN_GUARD_NONE",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:26.489+05:30",
+   "tPlusS": 11.6,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D02"
+   ],
+   "message": "Nothing was written this turn, so there was nothing to keep or undo. The last known good version is still saved and untouched."
+  },
+  {
+   "ref": "I38",
+   "code": "AGENT_STEP",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:26.952+05:30",
+   "tPlusS": 12.0,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D05"
+   ],
+   "message": "♻️ Incremental: 26/27 file(s) unchanged since the last build (1 changed, 0 new) · ~1 file(s) impacted by the change · dependencies unchanged."
+  },
+  {
+   "ref": "I39",
+   "code": "UPSELL_SUPPRESSED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:26.956+05:30",
+   "tPlusS": 12.0,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D02"
+   ],
+   "message": "Did not ask this user to add credits: the build was STOPPED. A stopped build does not establish a capability limit; it is not evidence that adding credits would help."
+  },
+  {
+   "ref": "I40",
+   "code": "MARKUP_WAIVED_NO_PREVIEW",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:26.956+05:30",
+   "tPlusS": 12.0,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D02"
+   ],
+   "message": "The app was never confirmed running here, so the service margin was waived: AI subtotal billed at real cost only ($0.0000 instead of $0.0000). The separately itemized sandbox service fee is 2.5% of the settled AI subtotal. Superseded: the final bill is ₹0 (stopped by the user before any file was wri"
+  },
+  {
+   "ref": "I41",
+   "code": "CHANGE_RECORDED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:27.180+05:30",
+   "tPlusS": 12.2,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D04"
+   ],
+   "message": "CHG-0002 large/deep · 0 file(s) · status stopped · gate RED · requirements REQ-001, REQ-003"
+  },
+  {
+   "ref": "I42",
+   "code": "LADDER_DEPTH",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:27.181+05:30",
+   "tPlusS": 12.2,
+   "classification": "ledger",
+   "ledgerRows": [
+    "D06"
+   ],
+   "message": "The ladder was not used — every delivered slice came from an engine outside it by design: SURPLUS (1)."
+  },
+  {
+   "ref": "I43",
+   "code": "PROVIDER_TIME_WASTED",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:27.181+05:30",
+   "tPlusS": 12.2,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "Provider time: no engine wasted any time this build (a call stopped by our own clock is not counted here, nor one the user stopped — see PROVIDER_FALLBACK / LLM_CALL_BUDGET_ENDED / LLM_CALL_STOPPED)."
+  },
+  {
+   "ref": "I44",
+   "code": "STRICT_TRIAL",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:27.405+05:30",
+   "tPlusS": 12.5,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "TypeScript mode: loose-existing"
+  },
+  {
+   "ref": "I45",
+   "code": "TODO_ONLY_TURNS",
+   "severity": "info",
+   "autoResolved": true,
+   "atIST": "2026-11-08T09:10:27.407+05:30",
+   "tPlusS": 12.5,
+   "classification": "context-info",
+   "ledgerRows": [],
+   "message": "No model turn while the app was generated was spent only on updating the plan (update_todo with no other tool call)."
+  }
+ ],
+ "selectedProblems": [],
+ "commands": [],
+ "llmCalls": [
+  {
+   "ref": "L00",
+   "atIST": "2026-11-08T09:10:14.953+05:30",
+   "tPlusS": 0.0,
+   "provider": "SURPLUS",
+   "model": "qwen3-coder",
+   "latencyMs": 2155,
+   "ok": true,
+   "finishReason": "end_turn",
+   "inputTokens": 591,
+   "outputTokens": 2
+  }
+ ],
+ "fileHashes": {},
+ "ledger": [
+  {
+   "id": "D01",
+   "queue": "Q-2624",
+   "bucket": "broken (scope)",
+   "state": "IMPLEMENTED - merge pending",
+   "issues": [
+    "I1"
+   ],
+   "summary": "APP_SCOPE LARGE from ~10 numbered Requirements checklist items; shared enumerator saw 3."
+  },
+  {
+   "id": "R1",
+   "queue": "Q-2623",
+   "bucket": "broken (likeness residual)",
+   "state": "IMPLEMENTED - merge pending",
+   "issues": [],
+   "summary": "#4146 reviewer residual: ke/ka tarah-tarah (various kinds) was not neighbour-locked."
+  },
+  {
+   "id": "D02",
+   "queue": null,
+   "bucket": "self-heal",
+   "state": "Not a defect",
+   "issues": [
+    "I22",
+    "I23",
+    "I37",
+    "I39",
+    "I40",
+    "I36"
+   ],
+   "summary": "User stop honored; nothing written; not charged; upsell suppressed; gate RED honest."
+  },
+  {
+   "id": "D03",
+   "queue": null,
+   "bucket": "struggle (consequence)",
+   "state": "Not independently fixable",
+   "issues": [
+    "I6",
+    "I7"
+   ],
+   "summary": "ETA 6–20 min (edit_unsized, 1 past build); stop at 0.2 min does not test completion time."
+  },
+  {
+   "id": "D04",
+   "queue": null,
+   "bucket": "context",
+   "state": "Not a defect",
+   "issues": [
+    "I15",
+    "I18",
+    "I20",
+    "I41"
+   ],
+   "summary": "Existing-app edit of 25 source files; change classified large/deep; project mode correctly created no plan."
+  },
+  {
+   "id": "D05",
+   "queue": null,
+   "bucket": "context",
+   "state": "Not a defect",
+   "issues": [
+    "I38"
+   ],
+   "summary": "Incremental 26/27 unchanged (1 changed) is vs last build, not a write this turn (GREEN_GUARD_NONE)."
+  },
+  {
+   "id": "D06",
+   "queue": null,
+   "bucket": "context",
+   "state": "Not a defect",
+   "issues": [
+    "I4",
+    "I5",
+    "I42"
+   ],
+   "summary": "Surplus admission classification call (2 output tokens); builder never ran because the user stopped."
+  },
+  {
+   "id": "D07",
+   "queue": null,
+   "bucket": "context",
+   "state": "Not a defect",
+   "issues": [
+    "I10",
+    "I34",
+    "I35"
+   ],
+   "summary": "Warm sandbox started-by-other, resumed 76s earlier; not an availability failure."
+  },
+  {
+   "id": "D08",
+   "queue": null,
+   "bucket": "skip",
+   "state": "Not a defect",
+   "issues": [
+    "I3"
+   ],
+   "summary": "Complexity COMPLEX 27 from bounded preflight + existing app; not independently proven wrong."
+  },
+  {
+   "id": "D09",
+   "queue": null,
+   "bucket": "skip",
+   "state": "Covered by D01",
+   "issues": [
+    "I20"
+   ],
+   "summary": "I1 said a planner would run next; project mode skipped it because this was not a fresh build."
+  }
+ ]
+}

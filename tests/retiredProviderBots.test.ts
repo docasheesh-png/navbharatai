@@ -16,7 +16,7 @@ describe('retired diagnostic interfaces retain the main-chain provider', () => {
       'src/server/routes/providerLoadBatch.ts', 'src/server/lib/providerDiagnosticRunner.ts']) expect(existsSync(path)).toBe(false);
   });
   it('keeps requested fallback order and shared transport/security/accounting', () => {
-    expect(FIXED_TEXT_CHAIN).toEqual(['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'mitrify', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
+    expect(FIXED_TEXT_CHAIN).toEqual(['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'mitrify', 'qubax', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
     for (const path of ['src/server/lib/mitrify.ts', 'src/server/lib/providerRedaction.ts', 'src/server/AI/FreeChain/store.ts',
       'src/server/AI/InferenceGateway/firestoreLedger.ts']) expect(existsSync(path)).toBe(true);
   });

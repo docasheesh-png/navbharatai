@@ -17,6 +17,16 @@ export type AdapterConfig = {
   /** The variable's name, never its value. Used only for safe operator diagnostics. */
   envName?: string;
   extraBody?: Readonly<Record<string, unknown>>;
+  /** Admin Test Chat Bot only. Never set on the user-chat path. Does not change thrown errors. */
+  adminErrorDetail?: (detail: AdminCapturedProviderError) => void;
+};
+export type AdminCapturedProviderError = {
+  httpStatus?: number;
+  providerCode?: string;
+  providerType?: string;
+  providerMessage?: string;
+  rawErrorBody?: string;
+  requestId?: string;
 };
 
 export type FreeChainErrorCode =
@@ -41,6 +51,8 @@ export interface FreeChainTurnInput {
   signal?: AbortSignal;
   /** Presence selects a streaming request. Usage is still returned after its final chunk. */
   onChunk?: (text: string) => void;
+  /** Admin Test Chat Bot may pass the visible conversation. Omission keeps the original prompt path. */
+  messages?: ReadonlyArray<{ role: 'user' | 'assistant'; content: string }>;
 }
 
 type SafeErrorDetails = {
@@ -195,7 +207,10 @@ function reportedUsage(raw: unknown): Pick<FreeChainProviderResponse, 'usage' | 
   };
 }
 
-function sanitizeError(error: unknown, signal: AbortSignal | undefined, credentialEnv: string, provider: AdapterConfig['provider']): FreeChainProviderError {
+function capturedText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.slice(0, 4000) : undefined;
+}
+function sanitizeError(error: unknown, signal: AbortSignal | undefined, credentialEnv: string, provider: AdapterConfig['provider'], sink?: AdapterConfig['adminErrorDetail']): FreeChainProviderError {
   if (signal?.aborted) return new FreeChainProviderError('ABORTED');
   if (error instanceof FreeChainProviderError) return error;
   if (error instanceof StrictFreeCapabilityError) return new FreeChainProviderError('POLICY_BLOCKED', { status: 503 });
@@ -221,6 +236,22 @@ function sanitizeError(error: unknown, signal: AbortSignal | undefined, credenti
   else if (status !== undefined && status >= 500) code = 'SERVER';
   else if (status !== undefined) code = 'INVALID_REQUEST';
   else code = 'NETWORK';
+  if (sink) {
+    try {
+      sink({
+        httpStatus: status,
+        providerCode: capturedText(nested?.code) ?? capturedText(source?.code),
+        providerType: capturedText(nested?.type) ?? capturedText(source?.type),
+        providerMessage: capturedText(nested?.message) ?? capturedText(source?.message),
+        rawErrorBody: capturedText(typeof source?.error === 'string' ? source.error : undefined)
+          ?? (nested ? capturedText(JSON.stringify(nested)) : undefined),
+        requestId: headerValue(source?.headers, 'x-request-id')
+          ?? headerValue(source?.headers, 'request-id')
+          ?? headerValue(source?.headers, 'cf-ray')
+          ?? headerValue(source?.headers, 'x-groq-id'),
+      });
+    } catch { /* Diagnostics must never replace the sanitized error. */ }
+  }
   return new FreeChainProviderError(code, {
     status, rateLimitHeaders: headers, retryAfterMs: retryAfterMs(headers),
     ...(code === 'AUTH' ? { credentialEnv } : {}),
@@ -277,7 +308,8 @@ export class OpenAiCompatProvider implements AIProvider {
       || !Number.isSafeInteger(config.maxOutputTokens) || config.maxOutputTokens <= 0 || config.maxOutputTokens > 131072
       || !Number.isSafeInteger(config.timeoutMs) || config.timeoutMs <= 0 || config.timeoutMs > 600000
       || typeof config.streamUsage !== 'boolean'
-      || (config.envName !== undefined && !/^[A-Z][A-Z0-9_]{0,79}$/.test(config.envName))) {
+      || (config.envName !== undefined && !/^[A-Z][A-Z0-9_]{0,79}$/.test(config.envName))
+      || (config.adminErrorDetail !== undefined && typeof config.adminErrorDetail !== 'function')) {
       throw new FreeChainProviderError('CONFIGURATION');
     }
     const extraBody = validatedExtraBody(config.extraBody, config.provider);
@@ -292,6 +324,7 @@ export class OpenAiCompatProvider implements AIProvider {
       requestedOutputTokens: Number.isSafeInteger(config.requestedOutputTokens) && config.requestedOutputTokens! > 0 ? config.requestedOutputTokens : undefined,
       streamUsage: config.streamUsage, providerDefaults: config.providerDefaults === true, envName: config.envName ?? DEFAULT_ENV[config.provider],
       extraBody: Object.freeze(extraBody),
+      ...(typeof config.adminErrorDetail === 'function' ? { adminErrorDetail: config.adminErrorDetail } : {}),
     });
     Object.freeze(this);
   }
@@ -333,17 +366,27 @@ export class OpenAiCompatProvider implements AIProvider {
     return (await this.executeTurn({ prompt, systemPrompt, onChunk, signal })).content;
   }
 
-  async executeTurn({ prompt, systemPrompt, signal, onChunk }: FreeChainTurnInput): Promise<FreeChainProviderResponse> {
+  async executeTurn({ prompt, systemPrompt, signal, onChunk, messages: history }: FreeChainTurnInput): Promise<FreeChainProviderResponse> {
     const started = Date.now();
     let supplierChargeUsd: string | undefined;
     let conflictingCharge = false;
     try {
       if (signal?.aborted) throw new FreeChainProviderError('ABORTED');
-      if (typeof prompt !== 'string' || !prompt.trim() || (systemPrompt !== undefined && typeof systemPrompt !== 'string')
+      if ((typeof prompt !== 'string' || !prompt.trim()) && !(Array.isArray(history) && history.length)
+        || (systemPrompt !== undefined && typeof systemPrompt !== 'string')
         || (onChunk !== undefined && typeof onChunk !== 'function')) throw new FreeChainProviderError('INVALID_REQUEST');
       const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
       if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
-      messages.push({ role: 'user', content: prompt });
+      if (Array.isArray(history) && history.length) {
+        for (const item of history) {
+          if (!item || (item.role !== 'user' && item.role !== 'assistant') || typeof item.content !== 'string' || !item.content.trim()) {
+            throw new FreeChainProviderError('INVALID_REQUEST');
+          }
+          messages.push({ role: item.role, content: item.content });
+        }
+      } else {
+        messages.push({ role: 'user', content: prompt });
+      }
       const body = {
         ...this.#config.extraBody,
         ...(['DEEPSEEK', 'GLM'].includes(this.name) ? { thinking: { type: 'disabled' } } : {}),
@@ -364,7 +407,7 @@ export class OpenAiCompatProvider implements AIProvider {
         return next.completeUsage;
       };
       const extensionError = (raw: unknown) => {
-        const error = sanitizeError(raw, signal, this.#config.envName, this.name);
+        const error = sanitizeError(raw, signal, this.#config.envName, this.name, this.#config.adminErrorDetail);
         return error.code === 'NETWORK' ? new FreeChainProviderError('SERVER') : error;
       };
       if (onChunk) {
@@ -449,7 +492,7 @@ export class OpenAiCompatProvider implements AIProvider {
         usage, completeUsage, cachedInputTokens, rateLimitHeaders: headers, finishReason: reason,
       };
     } catch (error) {
-      const safe = sanitizeError(error, signal, this.#config.envName, this.name);
+      const safe = sanitizeError(error, signal, this.#config.envName, this.name, this.#config.adminErrorDetail);
       if (supplierChargeUsd !== undefined) throw new FreeChainProviderError(safe.code, { status: safe.status, rateLimitHeaders: safe.rateLimitHeaders, retryAfterMs: safe.retryAfterMs, credentialEnv: safe.credentialEnv, supplierChargeUsd });
       throw safe;
     }

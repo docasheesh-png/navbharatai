@@ -41,6 +41,7 @@ export const TERMS_UNVERIFIED_IDS = ['bluesminds', 'requesty'] as const;
  * Free-tier Gemini is no longer in the default order (privacy); Nemotron Nano was removed.
  */
 export const DEFAULT_ORDER = ['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid'] as const;
+/** Chat dispatch inserts mitrify and qubax immediately after openrouter. They are not provider-config rungs. */
 /** Default chat routing; explicit OFF remains authoritative at every ingress. */
 export function freeChainEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const value = env.FREE_CHAIN_ENABLED;
@@ -148,7 +149,7 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
     const value = parseEnvFlag(env[name]); if (value === null) { errors.push(name); return fallback; } return value;
   }
   const fixedOrder = fixedTextChainEnabled(env);
-  const rawOrder = list(env.FREE_CHAIN_ORDER); const order: string[] = fixedOrder ? FIXED_TEXT_CHAIN.filter(id => id !== 'mitrify') : rawOrder.length ? rawOrder : [...DEFAULT_ORDER];
+  const rawOrder = list(env.FREE_CHAIN_ORDER); const order: string[] = fixedOrder ? FIXED_TEXT_CHAIN.filter(id => id !== 'mitrify' && id !== 'qubax') : rawOrder.length ? rawOrder : [...DEFAULT_ORDER];
   if (order.some(p => !PROVIDER_IDS.includes(p as ProviderId)) || new Set(order).size !== order.length) errors.push('FREE_CHAIN_ORDER');
   // The paid rung can be disabled, never promoted above a free rung by configuration.
   // No paid rung may ever sit above a free rung, whatever the order says.

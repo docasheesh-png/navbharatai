@@ -1,0 +1,112 @@
+{
+  "gate": "0 LARGE→smaller",
+  "passed": true,
+  "oppositeCount": 360,
+  "before": {
+    "large": 345,
+    "small": 15,
+    "qualityTrue": 0
+  },
+  "after": {
+    "large": 345,
+    "small": 15,
+    "qualityTrue": 0
+  },
+  "largeToSmaller": [],
+  "smallerToLarge": [],
+  "oppositeNewlyQuality": [],
+  "alreadySmallOnMain": {
+    "count": 15,
+    "class": "Q-2629-class CLEARLY_SMALL invoice word on restaurant/factory/exam templates without a big-software noun",
+    "phrases": [
+      "Handling loading of customer invoices after GST e-way generation",
+      "Handling loading of GST e-invoice QR codes on each bill",
+      "Handling loading of ग्राहक invoices after delivery",
+      "Handling timeout retries on vendor invoice sync",
+      "Handling timeout alerts for overdue wholesale invoices"
+    ],
+    "templates": [
+      "en-restaurant",
+      "en-factory",
+      "en-exam"
+    ],
+    "note": "featsSignal was still true; smallHint vetoed mega. Shop ERP and hospital-system templates with the same phrases stayed LARGE."
+  },
+  "sameClassAfterQuality": [
+    {
+      "id": "same-001",
+      "phrase": "Handling loading, timeout and API errors",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    },
+    {
+      "id": "same-002",
+      "phrase": "Handling loading, timeout and API errors.",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    },
+    {
+      "id": "same-003",
+      "phrase": "Handling loading, timeout and API errors properly",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    },
+    {
+      "id": "same-004",
+      "phrase": "Handling loading, timeouts and API errors gracefully",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    },
+    {
+      "id": "same-005",
+      "phrase": "Handling loading, timeout and errors correctly",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    },
+    {
+      "id": "same-006",
+      "phrase": "Handling loading, timeouts and errors",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    },
+    {
+      "id": "same-007",
+      "phrase": "Handling loading timeout and API errors properly",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    },
+    {
+      "id": "same-008",
+      "phrase": "Handling loading, timeout and API errors properly.",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    },
+    {
+      "id": "same-009",
+      "phrase": "Handles loading, timeout and API errors properly",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": true
+    },
+    {
+      "id": "same-010",
+      "phrase": "Handle loading, timeout and API errors properly",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": true
+    }
+  ],
+  "hashes": {
+    "corpus": "21813d94f143d8e0a5c6db67adceaa29f9c7ecb0932254a4b20485caa94e40f2",
+    "before": "b823f7e8c4b99ddc2343e15284d9f290f219694b003231d63b7717218879848a",
+    "after": "b48f9c2c879a523f629c5e40ebe2af1df799cf61945da738adb4af4816d2d1b2"
+  }
+}

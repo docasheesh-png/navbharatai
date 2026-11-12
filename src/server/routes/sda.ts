@@ -13,6 +13,8 @@ import { extractDocumentText } from '../lib/attachmentText';
 import { claudeVisionAnswerModel, grokVisionModels, geminiVisionModels, vertexVisionModels } from '../lib/visionModels';
 import { estimateTextTokens, geminiUsage, reserveFreeTierPaid, settleFreeTierPaid, FREE_TIER_PAID_OUTPUT_QUOTE, type FreeTierPaidHold } from '../lib/freeTierPaidCap';
 import { freeBusyMessage } from '../lib/freeBusyMessage';
+import { currentFreeAnswerSignal } from '../lib/freeAnswerQuotaContext';
+import { runSequentialProviderFallback } from '../lib/sequentialProviderFallback';
 import { vertexGenAI } from '../lib/vertexGenAI';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { computeClinicalTool, AVAILABLE_CLINICAL_TOOLS } from '../lib/clinical/calculators';
@@ -521,6 +523,9 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         });
       } else {
 
+      // Legacy requests inherit quota cancellation when present, not the unrelated fixed-gateway audit context.
+      const requestSignal = currentFreeAnswerSignal();
+
       // ── Shared helpers ───────────────────────────────────────────────────────
       // Build OpenAI-format message list (used by Claude proxy and Grok)
       const buildOpenAIMsgs = (userContent: any) => [
@@ -549,7 +554,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         ];
       };
 
-      // ── Race: Grok + Gemini simultaneously (SDA primary pair) ──────────────
+      // ── Multimodal race: Grok + Gemini (text-only goes through the sequential router) ──
       const sdaGrokKey   = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
 
       // Each racer returns what it answered AND what it cost (forensic audit 2026-10-04, P1): a paid turn
@@ -572,13 +577,12 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // Grok supports images via vision models but NOT PDFs — skip Grok for PDF files.
       // TIER: Grok is a premium provider — PAID tier only. A free-tier turn uses the cheap providers
       // (Gemini/Vertex) just like every other professional's free tier (admin 2026-07-15).
-      if (sdaGrokKey && !isPDF && sdaTier === 'paid') sdaRacers.push(async (signal) => {
+      if (sdaGrokKey && isImage && sdaTier === 'paid') sdaRacers.push(async (signal) => {
         const { default: OpenAI } = await import('openai');
         const c = new OpenAI({ apiKey: sdaGrokKey, baseURL: 'https://api.x.ai/v1' });
 
-        // For images: use current Grok vision-capable models (shared list, env-overridable)
-        // For text: use standard Grok-3 models
-        const models = isImage ? grokVisionModels(sdaVisionTier) : ['grok-3', 'grok-3-fast'];
+        // This direct Grok path is multimodal-only; use the shared, env-overridable vision model list.
+        const models = grokVisionModels(sdaVisionTier);
         const grokImages = reportFiles.filter((f) => f.fileType.startsWith('image/'));
         const userContent: any = grokImages.length > 0
           ? [
@@ -597,10 +601,9 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         throw new Error('Grok SDA: empty');
       });
 
-      // TIER: for a FREE text turn, GLM leads (via the professional-free universe below), exactly like
-      // every other professional — so the Gemini-direct racer is PAID-only for text. Vision (image/PDF)
-      // still needs Gemini/Vertex on any tier (GLM can't read attachments), so keep it there.
-      if (sdaGeminiKey && (sdaTier === 'paid' || isImage || isPDF)) sdaRacers.push(async (signal) => {
+      // Text-only turns use the shared sequential router (GLM for free; Grok → Gemini → Vertex → Claude for paid).
+      // Direct Gemini is reserved for attachments, which need a multimodal request body.
+      if (sdaGeminiKey && (isImage || isPDF)) sdaRacers.push(async (signal) => {
         const { GoogleGenAI } = await import('@google/genai');
         const contents = buildGeminiContents();
         for (const m of geminiVisionModels(sdaVisionTier)) {
@@ -620,25 +623,22 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       });
 
       if (sdaRacers.length > 0) {
-        const sdaAcs = sdaRacers.map(() => new AbortController());
-        try {
-          const sdaWinner = await Promise.any(
-            sdaRacers.map((fn, i) => fn(sdaAcs[i].signal).then(won => {
-              sdaAcs.forEach((ac, j) => { if (j !== i && !ac.signal.aborted) ac.abort(); });
-              console.log(`[SDA] Race won by ${i === 0 ? 'Grok' : 'Gemini'}`);
-              return won;
-            }))
-          );
-          if (sdaWinner?.text?.trim()) { reply = sdaWinner.text; sdaSpend = sdaWinner.spend; }
-        } catch { console.warn('[SDA] Race (Grok+Gemini) both failed → Vertex/Claude'); }
+        const sdaWinner = await runSequentialProviderFallback(sdaRacers, (error, index) => {
+          console.warn(`[SDA] ${index === 0 ? 'Grok' : 'Gemini'} failed; trying the next multimodal provider:`, String(error));
+        }, requestSignal);
+        if (sdaWinner?.text?.trim()) {
+          console.log(`[SDA] Sequential multimodal fallback answered via ${sdaWinner.spend.provider}`);
+          reply = sdaWinner.text;
+          sdaSpend = sdaWinner.spend;
+        } else {
+          console.warn('[SDA] Sequential multimodal providers exhausted → Vertex/Claude');
+        }
       }
 
       // ── Isolated PROFESSIONAL namespace router (text-only) ────────────────
-      // SDA is part of the PROFESSIONAL universe — one isolated, provably-separate
-      // universe defined once in AIRouterManager (P0.1). routeRaced fires
-      // Grok × Gemini × Vertex concurrently and uses Claude Haiku ONLY if all
-      // three fail. Multimodal (image/PDF) requests keep the inline Vertex/Claude
-      // path below, which handles attachments.
+      // Text-only requests use the shared sequential chain: GLM for free, or
+      // Grok → Gemini → Vertex → Claude Haiku for paid. The next provider is called
+      // only when the previous one fails, so discarded speculative answers are not billed.
       if (!reply && !isImage && !isPDF) {
         try {
           const histText = historyForAI
@@ -647,13 +647,13 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           const fallbackPrompt = histText ? `${histText}\nDr: ${message}` : message;
           // TIER: free → GLM-flash (the professional-free universe) leads, EXACTLY like every other
           // professional; if GLM is empty the Vertex fallback below finishes the free chain (GLM → Vertex).
-          // Paid → the full race (Grok × Gemini × Vertex → Claude). Never Grok/Claude on the free tier.
+          // Paid → the full sequential fallback (Grok → Gemini → Vertex → Claude). Never Grok/Claude on the free tier.
           const professionalRouter = AIRouterManager.getRouter(sdaTier === 'free' ? 'professional-free' : 'professional');
-          const { response, telemetry } = await professionalRouter.routeRaced(fallbackPrompt, SDA_SYSTEM_FINAL);
+          const { response, telemetry } = await professionalRouter.route(fallbackPrompt, SDA_SYSTEM_FINAL, undefined, undefined, requestSignal);
           if (telemetry.success && response.content?.trim()) {
             reply = response.content;
             // ONE WALLET: keep what this answer cost so the turn can be charged like any other AI.
-            // SDA's other branches (the Grok/Gemini race above, the Vertex/Claude multimodal fallback
+            // SDA's other branches (the multimodal Grok/Gemini race above, the Vertex/Claude multimodal fallback
             // below) do not report usage, so a turn answered by one of those stays UNMEASURED and is
             // therefore not charged — we never invent a number to bill (see chatSpend.ts).
             sdaSpend = {
@@ -667,8 +667,9 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         } catch (e: any) { console.warn('[SDA] professional-universe router err:', e.message); }
       }
 
-      // ── Sequential fallback: Vertex → Claude (multimodal-capable safety net) ──
-      if (!reply) {
+      // ── Sequential fallback: Vertex → Claude (multimodal safety net, plus free text recovery) ──
+      // Paid text has already exhausted this exact chain through AIRouter; do not call it a second time.
+      if (!reply && (isImage || isPDF || sdaTier === 'free')) {
         try {
           // The one Vertex client (lib/vertexGenAI.ts, Q-769) — the old SDK is past its end-of-life date.
           const vertexAI = vertexGenAI();
@@ -721,7 +722,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
 
       // TIER: Claude is the premium last resort — PAID tier only. A free-tier turn that got no reply
       // from the cheap providers (Gemini/Vertex) fails honestly rather than escalating to a paid model.
-      if (!reply && sdaTier === 'paid') {
+      if (!reply && sdaTier === 'paid' && (isImage || isPDF)) {
         const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
         if (anthropicKey) {
           try {

@@ -71,6 +71,11 @@ type Kind = 'user' | 'workspace' | 'platform' | 'retained' | 'forever' | 'de-ide
 const DERIVED_ERASER = 'src/server/lib/derivedIdErase.ts';
 const DERIVED_CALL = 'deleteUserDerivedIdData\\(';
 const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; why: string }> = {
+  pro_attachment_owners_v1: {
+    file: 'src/server/lib/proAttachmentStore.ts',
+    calledAs: 'proAttachmentStore\\.erase\\(',
+    why: 'verified-owner private originals require object-first erasure; generic metadata deletion would orphan bytes. Empty upload-blocking fence remains to prevent concurrent resurrection.',
+  },
   user_workspaces: {
     file: 'src/server/lib/syncWorkspaceErase.ts',
     calledAs: 'eraseSyncedWorkspace\\(',
@@ -109,6 +114,10 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
 };
 
 const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
+  agentv3_sandbox_orphans: { kind: 'forever', why: 'Minimal resource cleanup authority, not anonymous platform data or app content: unresolved provider identity survives account deletion until cleanup succeeds; handled records become digest-keyed status/time-only replay fences. Workspace/user identity is never stored; explicit retention registry owns the exception.' },
+  pro_attachment_owners_v1: { kind: 'user', why: 'verified-owner original files and bounded private metadata; dedicated object-first explicit account deletion, with empty blocked owner fence retained to prevent resurrection' },
+  voice_ai_operations: { kind: 'forever', why: 'uid/canonical-owner financial holds, refunds and terminal request replay tombstones, not anonymous platform data. Retained across account deletion like hosting_billing and nav_store_pending_credits; deletion could erase refundable money or re-arm an old charge. No text, audio or credentials.' },
+  voice_ai_control: { kind: 'platform', why: 'one server-owned minute document replaced in place with only numeric bucket and count; no uid, owner, request identity, prompt or audio. Global admission throttling, not user-owned content or a growing request history.' },
   session_revocations: { kind: 'forever', why: 'Minimal server-only monotonic security tombstone; deletion could revive revoked sign-in origins. Explicitly retained without tokens/contact details, not ordinary user content.' },
   free_answer_quota: { kind: 'user', why: 'hash-keyed user/guest answer counters and replay receipts expire after eight days; reusable principals refresh expiry on admission and scheduled deletion transactionally rechecks their live lease. Verified account erasure selects exact user principalHash; shared guest IP attempts have no account owner' },
   free_chat_chain: { kind: 'retained', why: 'mixed server-owned safety records: only immutable date-scoped counters and fully settled days expire by their explicit deadline. Pending paid holds and request replay tombstones never expire; reused quota/cooldown authorities are bounded live-window documents. State cache/sticky expire separately and administrator actions retain 180 days; no prompts or raw customer uid are stored in quota/spend records' },
@@ -398,6 +407,12 @@ const UNREADABLE_RECEIVERS: Record<string, string> = {
 
 /** A new document-ref alias is excused only in its verified file, never everywhere named `ref`. */
 const SCOPED_DOCUMENT_RECEIVERS: Record<string, Record<string, { why: string; assignment: RegExp }>> = {
+  'src/server/lib/proAttachmentStore.ts': {
+    ref: {
+      why: 'verified-owner encoded UID document under pro_attachment_owners_v1; deleted_scopes children are explicitly swept by eraseScopes after the account upload fence and original-byte deletion',
+      assignment: /const ref = db\(\)\.collection\(PRO_ATTACHMENT_COLLECTION\)\.doc\(Buffer\.from\(uid\)\.toString\('base64url'\)\)/,
+    },
+  },
   'src/server/AI/FreeChain/control.ts': {
     ref: { why: 'controlRef returns the fixed free_chat_chain/state document; its actions child has an explicit 180-day subcollection retention policy',
       assignment: /const ref = controlRef\(db\)/ },
@@ -743,3 +758,4 @@ describe('every declared collection is classified', () => {
     expect(policied.filter((c) => forever.includes(c))).toEqual([]);
   });
 });
+

@@ -1,3 +1,6 @@
+import { qubaxChatBinding, qubaxConfig, qubaxReviewedApprovalCeiling, qubaxWorkload } from '../../lib/qubax';
+import { QUBAX_CATALOG_PATH, selectQubaxCandidate } from '../../lib/qubaxSelector';
+import { gatewayQubaxBody, readGatewayQubaxCompletion, readGatewayQubaxConservativeUsage } from './qubaxTransport';
 import { mitrifyChainBinding, mitrifyChainEnabled, mitrifyConfig, mitrifyReviewedApprovalCeiling } from '../../lib/mitrify';
 import { gatewayMitrifyBody } from './mitrifyTransport';
 import { readGatewayMitrifyCompletion, readGatewayMitrifyConservativeUsage } from './mitrifyTransport';
@@ -143,7 +146,7 @@ function maximumFor(t: GatewayRuntimeTransport, p: GatewaySurfacePolicy, payload
     return t.rateCard.requestNanoUsd;
   }
   requireValue(t.rateCard);
-  if (t.provider === 'MITRIFY') { requireValue(positive(t.rateCard.supplierPerHttpRequestCeilingNanoUsd)); return t.rateCard.supplierPerHttpRequestCeilingNanoUsd; }
+  if (t.provider === 'MITRIFY' || t.provider === 'QUBAX') { requireValue(positive(t.rateCard.supplierPerHttpRequestCeilingNanoUsd)); return t.rateCard.supplierPerHttpRequestCeilingNanoUsd; }
   return maximumCostNanoUsd(t.kind === 'vision-pdf' && t.provider === 'GEMINI' ? 1048576 : p.maxInputTokens, p.maxOutputTokens, t.rateCard.inputNanoUsdPerMillion, t.rateCard.outputNanoUsdPerMillion);
 }
 function operationUsage(meter: string, capability: CapabilityRequest, transport: GatewayRuntimeTransport): number {
@@ -294,10 +297,10 @@ export class GatewayAuthorityStore {
             && current(entry.reviewedAtMs, entry.expiresAtMs, now) && entry.expiresAtMs - entry.reviewedAtMs <= 86_400_000
             && entry.review && ['account', 'terms', 'quality', 'privacy', 'capability', 'pricing'].every(k => isIdentifier(entry.review[k as keyof typeof entry.review]))
             && (entry.transport.kind ?? 'text') === capability.kind
-            && entry.legacyProvider === ({ GLM: 'glm', GEMINI: 'gemini', GROQ: 'groq', CLOUDFLARE: 'cloudflare', DEEPSEEK: 'deepseek', OPENROUTER: 'openrouter', VERTEX: 'vertex', BRAVE: 'brave', OPENAI: 'openai', DEEPINFRA: 'deepinfra', CHEAPERINFERENCE: 'cheapinf', MITRIFY: 'mitrify' } as const)[entry.transport.provider]
+            && entry.legacyProvider === ({ GLM: 'glm', GEMINI: 'gemini', GROQ: 'groq', CLOUDFLARE: 'cloudflare', DEEPSEEK: 'deepseek', OPENROUTER: 'openrouter', VERTEX: 'vertex', BRAVE: 'brave', OPENAI: 'openai', DEEPINFRA: 'deepinfra', CHEAPERINFERENCE: 'cheapinf', MITRIFY: 'mitrify', QUBAX: 'qubax' } as const)[entry.transport.provider]
             && entry.profile.adapterId === (entry.transport.kind === 'embedding' ? 'gateway-vertex-embedding-v1'
               : entry.transport.kind === 'grounding-search' ? 'gateway-brave-search-v1' : entry.transport.kind === 'vision-pdf' ? 'gateway-vision-v1'
-              : entry.transport.provider === 'OPENROUTER' ? 'gateway-openrouter-text-v1' : entry.transport.provider === 'MITRIFY' ? 'gateway-mitrify-text-v1' : 'gateway-openai-text-v1') && entry.profile.modelId === entry.transport.model
+              : entry.transport.provider === 'OPENROUTER' ? 'gateway-openrouter-text-v1' : entry.transport.provider === 'QUBAX' ? 'gateway-qubax-text-v1' : entry.transport.provider === 'MITRIFY' ? 'gateway-mitrify-text-v1' : 'gateway-openai-text-v1') && entry.profile.modelId === entry.transport.model
             && (entry.transport.kind === 'embedding' || entry.transport.kind === 'grounding-search' || entry.transport.maxOutputTokens === p.maxOutputTokens)
             && entry.accountCredentialBinding === transportCredentialBinding(entry.transport)
             && (entry.profile.charging === 'metered' || (entry.freeBillingSafety
@@ -306,6 +309,21 @@ export class GatewayAuthorityStore {
               && current(entry.freeBillingSafety.reviewedAtMs, entry.freeBillingSafety.expiresAtMs, now)
               && entry.freeBillingSafety.expiresAtMs - entry.freeBillingSafety.reviewedAtMs <= 86_400_000))
             && Array.isArray(entry.profile.quotaDimensions) && entry.profile.quotaDimensions.length > 0 && entry.profile.quotaDimensions.length <= 32);
+          if (entry.transport.provider === 'QUBAX') {
+            requireValue(r.surface === 'chat' && r.fixedTextChain === 'v1' && this.payload.kind === 'text');
+            const cfg = qubaxConfig(); requireValue(cfg.enabled && !!cfg.apiKey && entry.transport.baseURL === cfg.baseURL);
+            const body = gatewayQubaxBody(this.payload as Extract<GatewayPayload, { kind: 'text' }>, p.maxOutputTokens);
+            const catalog = await this.get(tx, QUBAX_CATALOG_PATH);
+            const selection = selectQubaxCandidate(catalog, qubaxWorkload(body), now);
+            requireValue(selection && selection.modelId === entry.transport.model && selection.modelRevision === entry.profile.modelRevision
+              && entry.transport.rateCard && entry.transport.rateCard.expiresAtMs <= selection.expiresAtMs);
+            const binding = qubaxChatBinding(r.principalId, body, selection);
+            const ceiling = qubaxReviewedApprovalCeiling(await this.get(tx, `qubax_chat_approvals/${binding.id}`), {
+              uid: r.principalId, binding, selection, privateTurn: r.privacy.dataClass !== 'public', healthTurn: r.privacy.dataClass === 'health', now,
+            });
+            requireValue(ceiling !== undefined && ceiling === entry.transport.rateCard.supplierPerHttpRequestCeilingNanoUsd);
+            sourceBindings.push({ path: QUBAX_CATALOG_PATH, binding: evidenceBinding(catalog) });
+          }
           if (entry.transport.provider === 'MITRIFY') {
             requireValue(mitrifyChainEnabled() && this.payload.kind === 'text');
             const cfg = mitrifyConfig(); requireValue(!!cfg.apiKey && entry.transport.baseURL === cfg.baseURL && entry.transport.model === cfg.model);
@@ -704,7 +722,7 @@ export class GatewayAuthorityStore {
   async releaseTrustedModelSlot(value: unknown, claim: DispatchClaim): Promise<void> {
     const entry = this.entries.get(claim.binding.profileId); requireValue(entry && same(claim.binding.key, this.key));
     const identity = modelSlotIdentity(entry.profile); if (!identity) return;
-    const terminal = readGatewayMitrifyCompletion(value, claim) ?? readGatewayTextCompletion(value, claim) ?? readGatewayVisionCompletion(value, claim);
+    const terminal = readGatewayQubaxCompletion(value, claim) ?? readGatewayMitrifyCompletion(value, claim) ?? readGatewayTextCompletion(value, claim) ?? readGatewayVisionCompletion(value, claim);
     const rejection = readGatewayTextRejection(value, claim) ?? readGatewayVisionRejection(value, claim);
     const proof = terminal ?? rejection; if (!proof) return;
     const kind = terminal ? 'provider-terminal' : 'no-generation-rejection';
@@ -727,7 +745,7 @@ export class GatewayAuthorityStore {
   }
   async recordTrustedUsage(result: unknown, claim: DispatchClaim): Promise<string | undefined> {
     const measured = readGatewayTextUsage(result, claim) ?? readGatewayOpenRouterUsage(result, claim)
-      ?? readGatewayMitrifyConservativeUsage(result, claim) ?? readGatewayTextConservativeUsage(result, claim) ?? readGatewayEmbeddingUsage(result, claim)
+      ?? readGatewayQubaxConservativeUsage(result, claim) ?? readGatewayMitrifyConservativeUsage(result, claim) ?? readGatewayTextConservativeUsage(result, claim) ?? readGatewayEmbeddingUsage(result, claim)
       ?? readGatewayGroundingUsage(result, claim) ?? readGatewayVisionUsage(result, claim) ?? readGatewayVisionConservativeUsage(result, claim); if (!measured) return undefined;
     const entry = this.entries.get(claim.binding.profileId); requireValue(entry);
     const reference = randomUUID();

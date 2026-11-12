@@ -31,7 +31,8 @@ describe('modePickerEntries — what the Mode button offers', () => {
     expect(entries[0]).toMatchObject({ id: recentModeId('teacher_ai', 'c1'), name: 'Teacher AI', kind: 'recent', view: 'teacher_ai', conversationId: 'c1' });
     expect(entries[1]).toMatchObject({ id: FREE_MODE_ID, kind: 'free' });
     expect(entries[2]).toMatchObject({ id: IMAGE_MODE_ID, name: 'Image Generator AI', kind: 'image' });
-    expect(entries[3]).toMatchObject({ id: 'sda_chat', name: 'Doctor AI' });
+    expect(entries[3]).toMatchObject({ id: 'voice_ai', name: 'Voice AI' });
+    expect(entries[4]).toMatchObject({ id: 'sda_chat', name: 'Doctor AI' });
     // Every configured professional is in the list — none silently dropped.
     for (const id of Object.keys(PROFESSIONAL_CHATS)) {
       expect(entries.some((e) => e.id === id), `missing ${id}`).toBe(true);
@@ -179,7 +180,7 @@ describe('filterModeEntries — search never hides the way back', () => {
   it('the fixed rows survive every search — every recent row, FREE and the image studio', () => {
     const win = { id: 'c1', professionalId: 'teacher_ai' };
     const out = filterModeEntries(modePickerEntries({ hideMedical: false, activeView: 'teacher_ai', openViews: ['nbi_chat', 'teacher_ai'], openChats: [win] }), 'zzzz-no-match');
-    expect(out.map((e) => e.id)).toEqual([recentModeId('nbi_chat'), recentModeId('teacher_ai', 'c1'), FREE_MODE_ID, IMAGE_MODE_ID]);
+    expect(out.map((e) => e.id)).toEqual([recentModeId('nbi_chat'), recentModeId('teacher_ai', 'c1'), FREE_MODE_ID, IMAGE_MODE_ID, 'voice_ai']);
   });
 });
 

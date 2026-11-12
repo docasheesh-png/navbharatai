@@ -36,12 +36,9 @@ describe('D6 — the admin screens read only the wallet fields they use', () => 
     expect(ADMIN).toMatch(/collection\('user_token_wallets'\)\.select\(\.\.\.WALLET_SUMMARY_FIELDS\)\.get\(\)/);
     expect(ADMIN).toMatch(/collection\('user_token_wallets'\)\.count\(\)\.get\(\)/);
     expect(ADMIN).toMatch(/aggregate\(\{ total: AggregateField\.sum\('amountPaid'\) \}\)/);
-    // Exactly one whole-wallet read remains, on purpose: the bulk welcome gift decides a PAYMENT from many
-    // fields, and a projection that missed one would decide it on `undefined`.
+    // The one-press ₹150 bulk welcome gift (and its deliberate whole-wallet read) has been removed.
     const whole = ADMIN.match(/getDocs\(collection\([^)]*'user_token_wallets'\)\)/g) ?? [];
-    expect(whole).toHaveLength(1);
-    const at = ADMIN.indexOf(whole[0]);
-    expect(ADMIN.slice(at - 400, at)).toMatch(/The WHOLE wallet, deliberately/);
+    expect(whole).toHaveLength(0);
   });
 });
 

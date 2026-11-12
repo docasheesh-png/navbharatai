@@ -30,6 +30,11 @@ describe('the reported turn', () => {
   it('🔒 so "Banao" on that workspace, with nothing said before, is ASKED about — not built', () => {
     expect(shouldAskWhatToBuild(base)).toBe(true);
   });
+
+  it('🔒 BR1976: "App" on that same workspace is also asked about — it names a category, not a product', () => {
+    expect(assessBuildInput('App')).toMatchObject({ buildable: false, reason: 'no-object' });
+    expect(shouldAskWhatToBuild(base)).toBe(true);
+  });
 });
 
 describe('it still asks only when nothing can say what to build', () => {

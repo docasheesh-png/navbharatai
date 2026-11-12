@@ -84,7 +84,7 @@ describe('chatSlotsUsed — Doctor AI and the image studio take a slot each', ()
     expect(chatSlotsUsed([win('a'), win('b')], ['nbi_chat', 'settings', 'home'])).toBe(2);
     expect(chatSlotsUsed([win('a')], ['nbi_chat', 'sda_chat'])).toBe(2);
     expect(chatSlotsUsed([win('a')], ['nbi_chat', 'sda_chat', 'imagegen'])).toBe(3);
-    expect(SLOT_VIEWS).toEqual(['sda_chat', 'imagegen']);
+    expect(SLOT_VIEWS).toEqual(['sda_chat', 'imagegen', 'voice_ai']);
   });
 
   it('the admin\'s own example: Doctor AI plus four professional chats fills the five', () => {

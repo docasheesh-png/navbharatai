@@ -35,6 +35,11 @@ export interface BuildBillingLabelInput {
   /** The same bill in rupees, rounded exactly as the record's `billedInr` is. */
   billedInr: number;
   /**
+   * OWNER 2026-11-11 (BR2279 token floor): this charge was estimated from recorded token counts
+   * because Surplus receipts could not be settled. Only meaningful when `charged` is true.
+   */
+  estimated?: boolean;
+  /**
    * DID THE WALLET ACTUALLY MOVE? (Q-1036.)
    *
    * `true` the debit succeeded · `false` a debit was attempted for this bill and did NOT happen ·
@@ -93,9 +98,14 @@ export function buildBillingLabel(input: BuildBillingLabelInput): BuildBillingLa
 
   if (input.freeListed) return { userTier: 'free-list (admin/tester)', charged: false, billedButNotDebited: false, ...debited };
   if (input.cheapEnginesOnly) {
-    const money = charged ? `charged ₹${(Number.isFinite(inr) ? inr : 0).toFixed(2)}` : 'not charged';
+    const money = charged
+      ? `charged ₹${(Number.isFinite(inr) ? inr : 0).toFixed(2)}${input.estimated ? ' · estimated' : ''}`
+      : 'not charged';
     return { userTier: withNote(`${CHEAP_TIER_LABEL} · ${money}`), charged, billedButNotDebited, ...debited };
   }
-  if (input.billingActive) return { userTier: withNote('paid'), charged, billedButNotDebited, ...debited };
+  if (input.billingActive) {
+    const paid = input.estimated && charged ? 'paid · estimated' : 'paid';
+    return { userTier: withNote(paid), charged, billedButNotDebited, ...debited };
+  }
   return { userTier: 'billing-off (no charge)', charged: false, billedButNotDebited: false, ...debited };
 }

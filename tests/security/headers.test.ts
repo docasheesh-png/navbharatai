@@ -71,6 +71,9 @@ describe('P-TQA.10 — production security headers', () => {
     // form-action 'self' silently blocked it → browser Apple login failed (native/Google were unaffected).
     // Guard the Apple auth host stays in form-action so a CSP tighten can't re-break browser Apple login.
     expect(csp).toContain('https://appleid.apple.com');
+    // Voice playback uses a blob: URL. media-src does not inherit img-src's blob allowance, so
+    // an omitted media-src falls back to default-src 'self' and iPhone Safari refuses the file.
+    expect(csp).toContain("media-src 'self' blob:");
   });
 
   it('sets X-Content-Type-Options: nosniff (blocks MIME sniffing)', async () => {

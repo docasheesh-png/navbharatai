@@ -52,6 +52,7 @@ const hostOf = (url: string | undefined): string[] => {
 };
 
 export const PROVIDER_FAMILIES: readonly ProviderFamily[] = [
+  { id: 'sarvam', name: 'Sarvam AI', keys: ['SARVAM_API_KEY'], hosts: () => ['api.sarvam.ai'] },
   { id: 'surplus', name: 'Surplus', keys: ['SURPLUS_API_KEY'], hosts: (e) => ['api.surplusintelligence.ai', ...hostOf(e.SURPLUS_BASE_URL)] },
   { id: 'router-one', name: 'Router One', keys: ['ROUTER_ONE_API_KEY'], hosts: (e) => ['api.router.one', 'router.one', ...hostOf(e.ROUTER_ONE_BASE_URL)] },
   { id: 'glm', name: 'Z.ai / GLM', keys: [/^GLM_API_KEY/, 'FREE_CHAIN_GLM_API_KEY', 'FREE_CHAIN_GLMX_API_KEY'], hosts: (e) => ['api.z.ai', 'open.bigmodel.cn', ...hostOf(e.GLM_BASE_URL)] },
@@ -65,6 +66,7 @@ export const PROVIDER_FAMILIES: readonly ProviderFamily[] = [
   { id: 'xai', name: 'xAI / Grok', keys: ['XAI_API_KEY', 'GROK_API_KEY'], hosts: () => ['api.x.ai'] },
   { id: 'openrouter', name: 'OpenRouter (Nemotron)', keys: ['OPENROUTER_API_KEY', 'NEMOTRON_API_KEY', 'FREE_CHAIN_OPENROUTER_API_KEY'], hosts: (e) => ['openrouter.ai', ...hostOf(e.NEMOTRON_BASE_URL)] },
   { id: 'deepinfra', name: 'DeepInfra', keys: ['DEEPINFRA_API_KEY', 'DEEPINFRA_TOKEN', 'FREE_CHAIN_DEEPINFRA_API_KEY'], hosts: () => ['api.deepinfra.com'] },
+  { id: 'qubax', name: 'Qubax', keys: ['QUBAX_API_KEY'], hosts: () => ['api.qubax.ai'] },
   { id: 'mitrify', name: 'Mitrify', keys: ['MITRIFY_API_KEY'], hosts: (e) => ['mitrify.com', ...hostOf(e.MITRIFY_BASE_URL)] },
   { id: 'cheaperinference', name: 'CheaperInference', keys: ['CHEAPERINFERENCE_API_KEY', 'FREE_CHAIN_CHEAPINF_API_KEY'], hosts: () => ['api.cheaperinference.com'] },
   { id: 'groq', name: 'Groq', keys: ['GROQ_API_KEY', 'FREE_CHAIN_GROQ_API_KEY'], hosts: () => ['api.groq.com'] },

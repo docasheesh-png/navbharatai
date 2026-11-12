@@ -1,7 +1,30 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 /** Requested order is preference only: never authority for privacy, capability or spend. */
-export const FIXED_TEXT_CHAIN = ['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'mitrify', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid'] as const;
+export const FIXED_TEXT_CHAIN = ['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'mitrify', 'qubax', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid'] as const;
+/** Reorder existing Chat rungs only; never enroll absent suppliers or change other surfaces. */
+export function prioritizeChatSuppliers<T extends string>(order: readonly T[], surface: string | undefined): T[] {
+  if (surface !== undefined && surface !== 'chat') return [...order];
+  return [
+    ...order.filter(id => id === 'mitrify'),
+    ...order.filter(id => id === 'qubax'),
+    ...order.filter(id => id !== 'mitrify' && id !== 'qubax'),
+  ];
+}
+/** Gateway retains identical eligibility; only eligible Chat candidate preference changes. */
+export function chatTextChainRank(profile: { providerId: string; modelId: string; charging: string }, surface: string): number | undefined {
+  const rank = fixedTextChainRank(profile);
+  if (surface !== 'chat' || rank === undefined) return rank;
+  return rank === 5 ? 0 : rank === 6 ? 1 : rank < 5 ? rank + 2 : rank;
+}
 export const FIXED_TEXT_CHAIN_MAX_ATTEMPTS = 12;
+/** Requested Chat ceilings, not dispatch authority or permission to replay.
+ * Single-use supplier approvals still authorize only one physical call. Enabling
+ * another call requires independently authenticated zero-liability/no-generation
+ * evidence and a separately scoped approval; neither exists in the current adapter.
+ * These are application HTTP calls, never unobservable supplier seller retries.
+ */
+export const FIXED_CHAT_SUPPLIER_HTTP_ATTEMPT_CEILINGS = Object.freeze({ MITRIFY: 3, QUBAX: 3 } as const);
+export const SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS = 1;
 export function fixedTextChainEnabled(env: Record<string, string | undefined> = process.env): boolean {
   const policy = env.TEXT_CHAIN_POLICY?.trim() || 'legacy';
   if (policy !== 'legacy' && policy !== 'fixed-v1') throw new Error('TEXT_CHAIN_POLICY configuration is invalid.');
@@ -23,20 +46,23 @@ export function fixedTextChainRank(profile: { providerId: string; modelId: strin
   // Opaque Mitrify alias is bound by its reviewed dedicated transport, never inferred free.
   if (profile.charging !== 'metered') return undefined;
   if (provider === 'MITRIFY') return 5;
-  if (provider === 'CHEAPERINFERENCE' && ['beam', 'beam-1.0-501b-a23b'].includes(model)) return 6;
-  if (provider === 'DEEPINFRA' && model === 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo') return 7;
-  if (provider === 'DEEPINFRA' && model === 'deepseek-ai/DeepSeek-V4-Flash-0731') return 8;
-  if (provider === 'OPENAI' && model === 'gpt-5-nano') return 9;
-  if (provider === 'GLM' && model === 'glm-4.7-flashx') return 10;
-  if (provider === 'GEMINI' && model === 'gemini-2.5-flash-lite') return 11;
+  if (provider === 'QUBAX') return 6;
+  if (provider === 'CHEAPERINFERENCE' && ['beam', 'beam-1.0-501b-a23b'].includes(model)) return 7;
+  if (provider === 'DEEPINFRA' && model === 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo') return 8;
+  if (provider === 'DEEPINFRA' && model === 'deepseek-ai/DeepSeek-V4-Flash-0731') return 9;
+  if (provider === 'OPENAI' && model === 'gpt-5-nano') return 10;
+  if (provider === 'GLM' && model === 'glm-4.7-flashx') return 11;
+  if (provider === 'GEMINI' && model === 'gemini-2.5-flash-lite') return 12;
   return undefined;
 }
 
 const scopes = new AsyncLocalStorage<boolean>();
+const surfaces = new AsyncLocalStorage<string>();
+export function fixedTextChainSurface(): string | undefined { return surfaces.getStore(); }
 /** Only explicit server-owned ingress may select this policy; exclusions cannot be relaxed by descendants. */
 export function withFixedTextChainScope<T>(surface: string, capability: string, run: () => T): T {
   const selected = scopes.getStore() !== false && fixedTextChainEnabled() && fixedTextChainScope(surface, capability);
-  return scopes.run(selected, run);
+  return scopes.run(selected, () => surfaces.run(surface, run));
 }
 export function fixedTextChainSelected(): boolean { return scopes.getStore() === true; }
 

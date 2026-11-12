@@ -108,13 +108,15 @@ describe('2 · the margin and the losses describe ONE set of builds', () => {
   });
 
   it('an OLD day (no measuredBilledUsd) is matched only when every build on it was measured', () => {
-    const full: DailyCostTelemetryDoc = { ...fold([{ ...BASE, billedUsd: 3, realCostUsd: 1 }]) };
+    const full: DailyCostTelemetryDoc = { ...fold([{ ...BASE, billedUsd: 3, realCostUsd: 1, sandboxUsd: 0 }]) };
     delete (full as any).measuredBilledUsd;
     expect(matchedMarginSlice(full)).toEqual({ builds: 1, billedUsd: 3, spendUsd: 1 });
 
-    const partial: DailyCostTelemetryDoc = { ...fold([{ ...BASE, billedUsd: 3, realCostUsd: 1 }, { ...BASE, billedUsd: 5 }]) };
+    const partial: DailyCostTelemetryDoc = { ...fold([{ ...BASE, billedUsd: 3, realCostUsd: 1, sandboxUsd: 0 }, { ...BASE, billedUsd: 5 }]) };
     delete (partial as any).measuredBilledUsd;
     expect(matchedMarginSlice(partial)).toBeNull();
+    const unknownSandbox = fold([{ ...BASE, billedUsd: 3, realCostUsd: 1 }]);
+    expect(matchedMarginSlice(unknownSandbox)).toBeNull(); // Missing VM cost is not measured zero.
     // …and a window of only such days shows NO margin, rather than an invented one.
     expect(buildUsageReport([partial], sonnetEquivalentUsd).realMarginUsd).toBeNull();
   });

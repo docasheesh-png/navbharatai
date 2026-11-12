@@ -93,7 +93,7 @@ export type ProfessionalTier = 'free' | 'paid';
  *
  *   • FREE tier  → PROFESSIONAL-FREE-FALLBACK = Vertex only (cheap Gemini). NEVER Grok / direct Gemini
  *     / Claude — a free user must never trigger the pricier paid providers (cost policy).
- *   • PAID tier  → PROFESSIONAL = RACE(Grok × Gemini × Vertex) → Claude Haiku last resort. The ₹99/mo
+ *   • PAID tier  → PROFESSIONAL = Grok → Gemini → Vertex → Claude Haiku, sequential fallback. The ₹99/mo
  *     Pass buys the full-quality, never-fail chain.
  *
  * Every config-driven professional shares these isolated universes, never mixing routing state with

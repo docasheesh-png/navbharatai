@@ -38,6 +38,18 @@ describe('the guide describes the Mode sheet the user actually sees', () => {
     for (const e of modeExperts()) expect(shown.has(e.name), `"${e.name}" is not in the Mode sheet`).toBe(true);
   });
 
+  it('places the paid Voice studio after Image, separately from experts, with honest admission guidance', () => {
+    const voice = newModeEntries({ hideMedical: false }).find(row => row.id === 'voice_ai');
+    expect(voice?.kind).toBe('voice');
+    const line = guide.split('\n').find(row => row.includes(`**${voice!.name}**`))!;
+    expect(line).toContain('3. **Voice AI**');
+    for (const fact of ['downloadable speech', 'not live voice chat', 'Sign in', 'wallet price', 'Generate', 'server configuration']) expect(line).toContain(fact);
+    expect(guide.indexOf(`**${IMAGE_MODE_NAME}**`)).toBeLessThan(guide.indexOf(line));
+    expect(guide.indexOf(line)).toBeLessThan(guide.indexOf('4. **Expert AIs**'));
+    expect(modeExperts().some(expert => expert.id === 'voice_ai')).toBe(false);
+    expect(line).not.toMatch(/free audio|voice cloning|unlimited/i);
+  });
+
   it('says which experts the phone app hides, from the same rule the phone app uses', () => {
     const hiddenOnPhone = newModeEntries({ hideMedical: false })
       .filter((r) => r.kind === 'professional' && isMedicalProfessionalId(r.id))

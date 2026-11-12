@@ -1,0 +1,86 @@
+{
+  "gate": "0 LARGE\u2192smaller",
+  "oppositeN": 360,
+  "beforeOppositeLarge": 351,
+  "afterOppositeLarge": 351,
+  "largeToSmaller": 0,
+  "smallerToLarge": 0,
+  "decisionChanged": 0,
+  "oppositeNewlyQuality": 0,
+  "alreadySmallOnMain": 9,
+  "alreadySmallReason": "CLEARLY_SMALL invoice word on restaurant/factory/exam templates without a big-software noun (pre-existing Q-2629-class; not LARGE on main)",
+  "sameClassNowQuality": [
+    {
+      "id": "same-001",
+      "phrase": "Handling errors",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    },
+    {
+      "id": "same-002",
+      "phrase": "Handling errors.",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    },
+    {
+      "id": "same-003",
+      "phrase": "Handling errors properly",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    },
+    {
+      "id": "same-004",
+      "phrase": "Handling errors gracefully",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    },
+    {
+      "id": "same-005",
+      "phrase": "Handling errors correctly",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    },
+    {
+      "id": "same-006",
+      "phrase": "Handles errors",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": true
+    },
+    {
+      "id": "same-007",
+      "phrase": "Handle errors",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": true
+    },
+    {
+      "id": "same-008",
+      "phrase": "Handle errors properly",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": true
+    },
+    {
+      "id": "same-009",
+      "phrase": "Handles errors gracefully",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": true
+    },
+    {
+      "id": "same-010",
+      "phrase": "Handling errors properly.",
+      "qualityLine": true,
+      "proposedWouldMatchLine": true,
+      "currentWouldMatchLine": false
+    }
+  ],
+  "sameClassStillNotQuality": [],
+  "pass": true
+}

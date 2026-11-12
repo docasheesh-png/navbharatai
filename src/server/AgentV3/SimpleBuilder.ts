@@ -33,7 +33,7 @@ import { readInitialLaneDecline, InitialLaneDeclinedError, initialLaneDeclineRes
 import { isProjectConfigPath, existingFileBlock } from './existingConfig';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
-import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports } from './ImportExportReconcile';
+import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports, fixSelfShadowedImports } from './ImportExportReconcile';
 import { parseTscErrors, endgameDeterministicPass, endgameRepairEnabled, ensureReactValueImport } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import type { FastLanePhases } from './fastLanePhases';
@@ -808,6 +808,14 @@ export function contractUserPrompt(prompt: string, manifest: SimpleFileSpec[]): 
 export const ENUM_IMPORT_RULE = 'An ENUM (or a const, function or class) is a VALUE: import it with a plain `import { Name }`, never `import type` — a type-only import of an enum fails to compile the moment a member is read.';
 
 /**
+ * 🔁 Never shadow an import (autopsy BR1959). The contract gave a hook's return interface the same names as
+ * the api helpers (`fetchCourses`), so six hooks declared `const fetchCourses = async () => { await
+ * fetchCourses() }` — a wrapper calling itself, not the api. `fixSelfShadowedImports` repairs the shape it
+ * can prove; this keeps the model from writing it.
+ */
+export const NO_SHADOWED_IMPORT_RULE = 'Never declare a variable or function with the SAME name as something this file imports — a hook\'s own `fetchCourses` wrapping the api\'s `fetchCourses` calls ITSELF forever. Import it under an alias instead: `import { fetchCourses as apiFetchCourses } from \'../utils/api\'`, then call `apiFetchCourses()`.';
+
+/**
  * The fast lane's deterministic import fixes, in one place (autopsy 6cd698cc): (1) a named/default import of
  * the wrong kind, (2) a shared symbol used but never imported, (3) a named import pointed at the wrong module
  * when the symbol lives in exactly one other, (4) an enum/const imported with `import type` and read as a value
@@ -818,11 +826,13 @@ export const ENUM_IMPORT_RULE = 'An ENUM (or a const, function or class) is a VA
 export async function deterministicImportFixes(files: ReadonlyArray<{ path: string; content: string }>): Promise<{ files: Record<string, string>; changes: number }> {
   const before = Object.fromEntries(files.map((f) => [f.path, f.content]));
   try {
-    const recd = await reconcileImportExports(before);
+    // (0) a nested wrapper that shadows the import it wraps and calls itself (autopsy BR1959).
+    const shadow = await fixSelfShadowedImports(before);
+    const recd = await reconcileImportExports(shadow.files);
     const addd = await addMissingProjectImports(recd.files);
     const wrong = await fixWrongSourceImports(addd.files);
     const typeOnly = await fixTypeOnlyValueImports(wrong.files);
-    return { files: typeOnly.files, changes: recd.fixes.length + addd.added.length + wrong.fixes.length + typeOnly.fixes.length };
+    return { files: typeOnly.files, changes: shadow.fixes.length + recd.fixes.length + addd.added.length + wrong.fixes.length + typeOnly.fixes.length };
   } catch {
     return { files: before, changes: 0 };
   }
@@ -845,6 +855,7 @@ export function contractBlock(contract: string | undefined, at?: { path: string;
       'enum members, types, util signatures, and component prop interfaces. Do NOT rename, re-case,',
       'or invent variants; do NOT import a symbol that is not declared here:',
       ENUM_IMPORT_RULE,
+      NO_SHADOWED_IMPORT_RULE,
       '```ts',
       trimmed.slice(0, 12_000),
       '```',
@@ -856,6 +867,7 @@ export function contractBlock(contract: string | undefined, at?: { path: string;
     'enum members, types, util signatures, and component prop interfaces. Do NOT rename, re-case,',
     'or invent variants; do NOT import a symbol that is not declared here:',
     ENUM_IMPORT_RULE,
+    NO_SHADOWED_IMPORT_RULE,
     '```ts',
     trimmed.slice(0, 12_000),
     '```',

@@ -808,6 +808,8 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
 import { buildActuator } from './actuatorFactory';
 import { bindSessionReconnectForTests } from '../AgentV3/WorkspaceRegistry';
 import { envFlag } from '../lib/envFlag';
+import { proAttachmentStore } from '../lib/proAttachmentStore';
+import { attachmentSessionForConversation, eraseConversationOriginals } from '../lib/proAttachmentLifecycle';
 import {
   workspaceOwnershipOk as sharedWorkspaceOwnershipOk,
   verifiedWorkspaceReadOk as sharedVerifiedWorkspaceReadOk,
@@ -4452,6 +4454,15 @@ export function registerAgentV3Routes(app: Express): void {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access === 'ok') {
+          // Remove original bytes first. On failure leave the transcript available for retry.
+          if (userId && rec?.userId === userId) {
+            try {
+              await eraseConversationOriginals(proAttachmentStore, userId,
+                attachmentSessionForConversation(userId, cid, rec));
+            } catch {
+              return res.status(503).json({ error: 'Private file removal could not complete. The chat was kept so you can retry.', retryable: true });
+            }
+          }
           // GA-1 — cascade purge: delete the conversation AND every per-workspace store it owned
           // (files/plan/memory/diagnostics/deployment). conversationId === workspaceId (#837), so the
           // shallow store.remove used to orphan all of that data forever. Best-effort; never throws.
@@ -6932,6 +6943,20 @@ async function noteBuildOutcome(
         if (access === 'forbidden') { forbidden = true; continue; }
         if (access !== 'ok' || !rec) continue;
 
+        // Originals use the stable client message timestamp, not a guessed server turn time.
+        // Scope fences revoke pending uploads before the transcript can disappear.
+        if (verifiedUid && rec.userId === verifiedUid) {
+          const attachmentSession = attachmentSessionForConversation(verifiedUid, cid, rec);
+          if (req.body?.attachmentSessionId !== undefined && req.body.attachmentSessionId !== attachmentSession) {
+            return res.status(409).json({ error: 'The attachment chat does not match this message. Reopen the chat and retry.' });
+          }
+          try {
+            await eraseConversationOriginals(proAttachmentStore, verifiedUid, attachmentSession,
+              req.body?.attachmentMessageId, true);
+          } catch {
+            return res.status(503).json({ error: 'Private file removal could not complete. The message was kept so you can retry Unsend.', retryable: true });
+          }
+        }
         // 2) Truncate the durable transcript to just before the last real user prompt.
         const keep = unsendKeepCount(rec.messages);
         if (keep < rec.messages.length) {
@@ -28628,3 +28653,4 @@ async function noteBuildOutcome(
 
   }));
 }
+

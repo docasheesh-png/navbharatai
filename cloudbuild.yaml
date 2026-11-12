@@ -123,7 +123,7 @@ steps:
       - '-c'
       - |
         set -euo pipefail
-        npx --yes firebase-tools@15.18.0 deploy --only firestore:rules --project gen-lang-client-0866594388 --non-interactive
+        npx --yes firebase-tools@15.35.0 deploy --only firestore:rules --project gen-lang-client-0866594388 --non-interactive
         echo "Firestore rules deployed to gen-lang-client-0866594388 for $COMMIT_SHA."
 
   - name: 'node:22.23.4-slim'
@@ -134,7 +134,7 @@ steps:
       - '-c'
       - |
         set -euo pipefail
-        npx --yes firebase-tools@15.18.0 deploy --only storage --project gen-lang-client-0866594388 --non-interactive
+        npx --yes firebase-tools@15.35.0 deploy --only storage --project gen-lang-client-0866594388 --non-interactive
         echo "Storage rules deployed to gen-lang-client-0866594388 for $COMMIT_SHA."
 
   # Step 4: Deploy the immutable image revision to Cloud Run

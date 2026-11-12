@@ -158,7 +158,8 @@ describe('CI guard: Free paths never name gemini-2.5-pro / grok', () => {
   });
   it('the Free professional fallback is walked sequentially, never raced', () => {
     const pr = code(src('src/server/lib/professionalRouting.ts'));
-    expect(pr).toMatch(/tier === 'free'\s*\?\s*await \(opts\?\.signal \? router\.route\(/);
+    expect(pr).toMatch(/await \(opts\?\.signal\s*\? router\.route\(/);
+    expect(pr).not.toMatch(/router\.routeRaced\(/);
   });
   it('resolved Free model lists contain no pro/grok under hostile env overrides', () => {
     vi.stubEnv('VISION_VERTEX_MODELS', 'gemini-2.5-pro'); vi.stubEnv('VISION_GEMINI_MODELS', 'gemini-3-pro,grok-4');

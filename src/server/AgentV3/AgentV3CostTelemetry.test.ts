@@ -250,3 +250,40 @@ describe('buildUsageReport — the admin usage-report shape (per-provider tokens
     expect(report.perProvider).toEqual([]);
   });
 });
+
+describe('complete real-spend measurement requires provider and sandbox costs', () => {
+  it('does not treat a missing sandbox cost as a measured zero', () => {
+    const doc = foldCostTelemetry(null, DATE, entry({ realCostUsd: 0.12, wasLoss: true }), 1);
+    expect(doc.realCostBuilds).toBe(0);
+    expect(doc.totalRealCostUsd).toBe(0);
+    expect(doc.totalSandboxUsd).toBe(0);
+    expect(doc.lossMeasuredBuilds).toBe(0);
+    expect(doc.lossSpendUsd).toBe(0);
+  });
+
+  it('counts explicit zero provider and sandbox costs as measured', () => {
+    const doc = foldCostTelemetry(null, DATE, entry({
+      realCostUsd: 0,
+      sandboxUsd: 0,
+      wasLoss: true,
+    }), 1);
+    expect(doc.realCostBuilds).toBe(1);
+    expect(doc.totalRealCostUsd).toBe(0);
+    expect(doc.totalSandboxUsd).toBe(0);
+    expect(doc.lossMeasuredBuilds).toBe(1);
+    expect(doc.lossSpendUsd).toBe(0);
+  });
+
+  it('counts and sums both measured cost components', () => {
+    const doc = foldCostTelemetry(null, DATE, entry({
+      realCostUsd: 0.12,
+      sandboxUsd: 0.03,
+      wasLoss: true,
+    }), 1);
+    expect(doc.realCostBuilds).toBe(1);
+    expect(doc.totalRealCostUsd).toBe(0.12);
+    expect(doc.totalSandboxUsd).toBe(0.03);
+    expect(doc.lossMeasuredBuilds).toBe(1);
+    expect(doc.lossSpendUsd).toBe(0.15);
+  });
+});

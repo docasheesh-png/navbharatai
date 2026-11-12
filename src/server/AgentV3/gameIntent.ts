@@ -113,7 +113,8 @@ const VEHICLES: ReadonlyArray<[GameVehicle, RegExp]> = [
   ['motorcycle', /\b(motor ?(cycle|bike)s?|bike game|scooter)\b/i],
   ['bicycle', /\b(bicycles?|cycling)\b/i],
   ['boat', /\b(boats?|ships?|sailing)\b/i],
-  ['car', /\b(cars?|gaadi|taxi|jeep|drive|driving)\b/i],
+  // BR1977: Hinglish spellings of gaadi (gadi, gadiyan) are the same vehicle.
+  ['car', /\b(cars?|gaadiyaan|gaadiyan|gadiyaan|gadiyan|gadiya|gaadi|gadi|taxi|jeep|drive|driving)\b/i],
 ];
 
 /** Named world subjects → the catalogue's own words (assetPlan aliases). Order is the order they are listed. */

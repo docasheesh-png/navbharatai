@@ -1135,6 +1135,24 @@ export class BuildDiagnostics {
    * repeat into the PREVIOUS entry's `repeatCount` instead of pushing a new one.
    */
   record(issue: Omit<BuildIssue, 'ts'> & { ts?: number }): void {
+    // Outcomes are facts, not narration. The route's generic onNote adapter labels notes as
+    // info/auto-resolved; restore the canonical severity so the final outcome cannot be hidden.
+    if (issue.code === 'OUTCOME_ASKED_USER') {
+      issue = { ...issue, phase: 'build', severity: 'info', autoResolved: false };
+    } else if (issue.code === 'OUTCOME_EMPTY_BUILD' || issue.code === 'OUTCOME_SANDBOX_UNAVAILABLE') {
+      issue = { ...issue, phase: 'build', severity: 'error', autoResolved: false };
+    }
+
+    // SURPLUS uses its dedicated non-streaming runner (stream: false). A missing SURPLUS usage
+    // receipt is not caused by AGENTV3_STREAM_BUILD_CALLS; keep the cost unmeasured and point to
+    // provider receipt reconciliation rather than recommending a global streaming change.
+    const usageContext = String(issue.message || '') + ' ' + String(issue.detail || '');
+    if (issue.code === 'USAGE_NOT_REPORTED' && /\bSURPLUS\b/i.test(usageContext)) {
+      issue = {
+        ...issue,
+        detail: 'SURPLUS uses the dedicated non-streaming runner (stream: false), so streaming configuration and streamed-usage options do not apply to this call. This turn did not produce a usable provider usage/receipt mapping. Keep the provider cost unmeasured and reconcile against the provider receipt or invoice; do not infer zero cost or change the global streaming flag for this warning.',
+      };
+    }
     if (issue.code === 'SANDBOX_CMD' && typeof issue.message === 'string' && /\btypecheck\b/i.test(issue.message)) {
       const n = /→\s*(\d+)\s+type errors?/.exec(issue.message);
       this.openTypeErrors = n ? Number(n[1]) : /→\s*clean\b/.test(issue.message) ? 0 : this.openTypeErrors;

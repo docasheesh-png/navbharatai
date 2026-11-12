@@ -40,7 +40,7 @@ import { abortCauseOf, abortSummary, timedOutSummary, stalledModelSummary, stopp
 import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, buildBudgetNarration, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
-import { decideBuildNudge, standDownNote } from './nudgeToBuild';
+import { decideBuildNudge, standDownNote, turnAskedTheUser, turnDeclined } from './nudgeToBuild';
 import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResumeNote } from './unfinishedResume';
 import { decideStyleResume, doneStyleNote, styleResumeEnabled, styleResumeNote } from './stylePolishResume';
 import { handBackNotice } from './handBackNotice';
@@ -1415,6 +1415,7 @@ export class AgentRunner {
                 // AND ANOTHER TURN (autopsy 121c2431 — the build ended FAILED with 1,418 s of budget
                 // unspent). Never after a refusal or a question to the user; at most twice. See
                 // unfinishedResume.ts.
+                const starterBlocker = readiness.blockers.some(isStarterBlocker);
                 const resume = decideUnfinishedResume({ text: turn.text, blockers: readiness.blockers, resumesUsed: unfinishedResumes, producedFiles: producingToolUses > 0 });
                 const standDownNote = resume.resume ? null : unfinishedResumeStandDownNote(resume.standDown, readiness.blockers.length);
                 if (standDownNote) { try { this.opts.onNote?.({ code: 'UNFINISHED_RESUME_STOOD_DOWN', message: standDownNote, detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ } }
@@ -1426,6 +1427,38 @@ export class AgentRunner {
                   pushPlatformTurn(resume.message);
                   markHandBack('unfinished');
                   continue;
+                }
+                if (resume.standDown && starterBlocker) {
+                  // Preserve the complete turn before starterSummary shortens the user-facing status.
+                  // A preceding read_file is not implementation work and must not erase the model's question.
+                  if (!starvedTurn && turn.text.trim()) modelAnswer = turn.text.trim();
+
+                  // Platform seed files are not builder output. hasExistingFiles() is the route's
+                  // live count of model-authored files, including work from lanes before this runner.
+                  let noBuilderOutput = false;
+                  if (expectsArtifacts && producingToolUses === 0) {
+                    try { noBuilderOutput = this.opts.hasExistingFiles?.() === false; } catch { /* unknown is not empty */ }
+                  }
+                  if (noBuilderOutput && !starvedTurn && !turnDeclined(turn.text)) {
+                    const detail = readiness.blockers.slice(0, 5).join(' | ');
+                    if (turnAskedTheUser(turn.text)) {
+                      try {
+                        this.opts.onNote?.({
+                          code: 'OUTCOME_ASKED_USER',
+                          message: 'Build outcome: ASKED_USER — the model asked the user for clarification before creating application files.',
+                          detail,
+                        });
+                      } catch { /* outcome recording must never fail the build */ }
+                    } else {
+                      try {
+                        this.opts.onNote?.({
+                          code: 'OUTCOME_EMPTY_BUILD',
+                          message: 'Build outcome: EMPTY — the build expected to produce files and wrote none, and the app was not seen rendering. Nothing to run, nothing to verify.',
+                          detail,
+                        });
+                      } catch { /* outcome recording must never fail the build */ }
+                    }
+                  }
                 }
                 ok = false;
                 // USER-FACING SUMMARY = SHORT + PLAIN (admin 2026-08-02: "isko simple short karo"). The raw
@@ -1446,7 +1479,7 @@ export class AgentRunner {
                     ? `\n\n———\nWhat the agent reported (may overstate — the readiness verdict above is the real status):\n\n${claim}`
                     : '';
                   summary = `⚠️ Readiness gate: NOT READY — score ${readiness.score}/100. This build is not production-ready yet.${blockers}${claimBlock}`;
-                } else if (readiness.blockers.some(isStarterBlocker)) {
+                } else if (starterBlocker) {
                   // Nothing was built — "a couple of things still need fixing" would invent a small fix
                   // list for an app that does not exist, and discard the model's own finding of WHY
                   // (autopsy 0d297b25: it had correctly found the project was never in the workspace).

@@ -1,4 +1,4 @@
-import { FIXED_TEXT_CHAIN_MAX_ATTEMPTS, fixedTextChainRank, fixedTextChainScope } from '../fixedTextChain';
+import { chatTextChainRank, FIXED_TEXT_CHAIN_MAX_ATTEMPTS, fixedTextChainRank, fixedTextChainScope } from '../fixedTextChain';
 /**
  * Pure planner: returns one proposed physical attempt, never a dispatch permit.
  * No network, env lookup, billing write, credential resolution or caller integration.
@@ -83,6 +83,7 @@ function evaluate(c: Candidate, input: PlanningInput, requestBinding: string): E
   const { request: r, nowMs: now, authority, budget } = input;
   const { profile: p, quota: q, availability: a, price } = c;
   if (!p || !q || !a) return 'malformed';
+  if (p.providerId === 'QUBAX' && (r.surface !== 'chat' || r.fixedTextChain !== 'v1')) return 'fixed-chain';
   if (r.fixedTextChain === 'v1' && (fixedTextChainRank(p) === undefined || r.attempts.some(attempt => attempt.profileId === p.id))) return 'fixed-chain';
   if (!hasCurrentEvidence(authority, p.evidenceRef, 'profile', withoutEvidence(p), now)) return 'evidence';
   const profileReason = profileRejection(p, r);
@@ -158,7 +159,7 @@ export function planInference(input: PlanningInput): PlanningResult {
     }
     eligible.sort((a, b) => {
       if (r.fixedTextChain === 'v1') {
-        const order = fixedTextChainRank(a.candidate.profile)! - fixedTextChainRank(b.candidate.profile)!;
+        const order = chatTextChainRank(a.candidate.profile, r.surface)! - chatTextChainRank(b.candidate.profile, r.surface)!;
         if (order) return order;
       }
       const paid = Number(!!a.paidHold) - Number(!!b.paidHold);

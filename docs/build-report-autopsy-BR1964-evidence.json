@@ -1,0 +1,633 @@
+{
+  "identity": {
+    "reportNumber": 1964,
+    "ok": false,
+    "outcome": "failed",
+    "prompt": "Mujhe higher exam hard exam analyse app banana hai",
+    "promptHash": "3ab683b7",
+    "reportDigest": "1041906b9d7ddbe47e7939b2ac6deeeb58cee5eb13553dcb7d59c950dfc4f9a6",
+    "buildId": "6d70928a-947d-48fd-8a16-102bd4429fcf",
+    "workspaceId": "agentv3-L3u4gnvvkTV45lz4nIDWeWwqVoo1-445e9eda-dc59-4985-9963-a34f04215689",
+    "historyId": "1794109267249",
+    "sessionId": "445e9eda-dc59-4985-9963-a34f04215689",
+    "startedAt": 1794109267249,
+    "endedAt": 1794110770214,
+    "startedAtIST": "2026-11-08 09:11:07.249 IST",
+    "endedAtIST": "2026-11-08 09:36:10.214 IST",
+    "durationMs": 1502965,
+    "model": "qwen3-coder",
+    "builtBy": "SURPLUS",
+    "framework": "vite-react",
+    "rootCause": "Build outcome: STOPPED — the wall-clock cap (25 min) was reached before the build converged. NOT stopped by the user.",
+    "summary": "Time limit reached — 37 files changed so far. The previous work is still stopping. Please retry after it finishes.",
+    "schema": "navbharatai.v3.build-diagnostics/1"
+  },
+  "billing": {
+    "liveTokens": {
+      "SURPLUS": {
+        "inputTokens": 4612856,
+        "outputTokens": 46776,
+        "cacheReadInputTokens": 3815568
+      }
+    },
+    "liveCacheReadInputTokens": 3930432,
+    "providerDelivery": {
+      "SURPLUS": 87
+    },
+    "chargedFieldPresent": false,
+    "sandboxCostUsdFieldPresent": false,
+    "note": "Weak / SURPLUS / qwen3-coder. No charged or sandboxCostUsd field on this report. USAGE_NOT_REPORTED: streamed surplus turns contribute 0 tokens so the shown cost is an under-estimate."
+  },
+  "requestAnalysis": {
+    "taskType": "complex_app",
+    "complexityScore": 58,
+    "startTier": "sonnet",
+    "startBand": "standard band"
+  },
+  "etaAccuracy": {
+    "promisedMs": 602478,
+    "lowMs": 506082,
+    "highMs": 925969,
+    "actualMs": 1502965,
+    "ratio": 2.494638808388024,
+    "withinBand": false,
+    "evidenced": false,
+    "line": "The user was shown a ROUGH ESTIMATE, labelled a guess (unevidenced): 8.4 min–15.4 min (midpoint 10.0 min); the build was cut short (OUTCOME_STOPPED) at 25.0 min — already OVER the band before completion (2.5× the midpoint).",
+    "key": "complex_app",
+    "source": "platform"
+  },
+  "counts": {
+    "total": 392,
+    "errors": 2,
+    "warnings": 3,
+    "autoResolved": 0,
+    "workarounds": 0,
+    "leftOpen": 1,
+    "healRule": 3,
+    "unresolved": 4
+  },
+  "problems": [
+    {
+      "ts": 1794110166951,
+      "phase": "tool",
+      "severity": "warning",
+      "code": "TOOL_ERROR",
+      "message": "Tool call failed: edit_file: old_string not found in src/main.tsx. The string you supplied does not appear verbatim (or close enough) in the current file. Current file content around your closest match (lines 1-18, nearest at line 11):\n```\nimport './nb-autostyle.css';\n// ENTRY POINT — provided and correct. Put routing, context providers and global wrappers inside\n// src/App.tsx, NOT here. Keep the ErrorBoundary import and the <ErrorBoundary> wrapper below: the app\n// root is already protected, a",
+      "autoResolved": false,
+      "detail": "agent=architect callId=call_fc7e33f397f145da840319e1 1s"
+    },
+    {
+      "ts": 1794110323228,
+      "phase": "build",
+      "severity": "warning",
+      "code": "USAGE_NOT_REPORTED",
+      "autoResolved": true,
+      "message": "A provider returned no token usage — this build's cost is an under-estimate",
+      "detail": "SURPLUS (qwen3-coder) answered without reporting token counts, so its turns contribute 0 to this report's token and cost figures. Nothing was over-charged — we never invent tokens — but OUR OWN cost for this build is higher than the number shown. Most likely cause: the streamed path (AGENTV3_STREAM_BUILD_CALLS) asks for usage via stream_options.include_usage and this provider does not send it. If this appears on every build, unset that flag to return to the non-streamed path, which does report usage."
+    },
+    {
+      "ts": 1794110381060,
+      "phase": "tool",
+      "severity": "warning",
+      "code": "TOOL_ERROR",
+      "message": "Tool call failed: WRITE REJECTED — your change introduces a SYNTAX ERROR in src/App.tsx (line 214:8): Unexpected closing \"main\" tag does not match opening \"div\" tag It was NOT saved (the app would not compile). An edit…",
+      "autoResolved": false,
+      "detail": "agent=architect callId=call_7ccb417a719343cfb9b0ab6d 1s"
+    },
+    {
+      "ts": 1794110767421,
+      "phase": "build",
+      "severity": "error",
+      "code": "OUTCOME_STOPPED",
+      "message": "Build outcome: STOPPED — the wall-clock cap (25 min) was reached before the build converged. NOT stopped by the user.",
+      "autoResolved": false
+    },
+    {
+      "ts": 1794110770214,
+      "phase": "build",
+      "severity": "error",
+      "code": "BUILD_TIMEOUT",
+      "message": "Build exceeded the 1500s wall-clock cap and was stopped.",
+      "autoResolved": false
+    }
+  ],
+  "commands": [
+    {
+      "i": 0,
+      "exit": 0,
+      "command": "npm install chart.js react-chartjs-2 react-icons lucide-react",
+      "stdoutHead": "\nadded 5 packages, and audited 78 packages in 16s\n\n12 packages are looking for funding\n  run `npm fund` for details\n\n1 high severity vulnerability\n\nTo address all issues, run:\n  npm audit fix\n\nRun `npm audit` for details.\n"
+    },
+    {
+      "i": 1,
+      "exit": 0,
+      "command": "npm audit fix",
+      "stdoutHead": "\nchanged 5 packages, and audited 78 packages in 14s\n\n12 packages are looking for funding\n  run `npm fund` for details\n\nfound 0 vulnerabilities\n"
+    },
+    {
+      "i": 2,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": "src/App.tsx(52,25): error TS2322: Type '{ exams: ExamData[]; onClose: () => void; }' is not assignable to type 'IntrinsicAttributes & PrintReportProps'.\n  Property 'exams' does not exist on type 'IntrinsicAttributes & PrintReportProps'. Did you mean 'exam'?\nsrc/App.tsx(112,32): error TS2322: Type '{ data: ExamData[]; }' is not assignable to type 'IntrinsicAttributes & ComparisonChartProps'.\n  Prop"
+    },
+    {
+      "i": 3,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": "src/App.tsx(52,25): error TS2322: Type '{ exams: ExamData[]; onClose: () => void; }' is not assignable to type 'IntrinsicAttributes & PrintReportProps'.\n  Property 'exams' does not exist on type 'IntrinsicAttributes & PrintReportProps'. Did you mean 'exam'?\nsrc/App.tsx(112,32): error TS2322: Type '{ data: ExamData[]; }' is not assignable to type 'IntrinsicAttributes & ComparisonChartProps'.\n  Prop"
+    },
+    {
+      "i": 4,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": "src/App.tsx(52,25): error TS2322: Type '{ exams: ExamData[]; onClose: () => void; }' is not assignable to type 'IntrinsicAttributes & PrintReportProps'.\n  Property 'exams' does not exist on type 'IntrinsicAttributes & PrintReportProps'. Did you mean 'exam'?\nsrc/App.tsx(112,32): error TS2322: Type '{ data: ExamData[]; }' is not assignable to type 'IntrinsicAttributes & ComparisonChartProps'.\n  Prop"
+    },
+    {
+      "i": 5,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": "src/components/PrintReport.tsx(15,39): error TS2552: Cannot find name 'PerformanceCategory'. Did you mean 'PerformanceEntry'?\nsrc/utils/calculations.ts(29,84): error TS2304: Cannot find name 'SubjectName'.\n"
+    },
+    {
+      "i": 6,
+      "exit": null,
+      "command": "_nbw=0; while [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ] && [ $_nbw -lt 20 ]; do sleep 1; _nbw=$((_nbw+1)); done; if [ -f /tm … -x node_modules/.bin/tsc ]; then echo \"NBAI_TSC_UNAVAILABLE: the TypeScript compiler could not be",
+      "stdoutHead": "src/components/PrintReport.tsx(15,39): error TS2552: Cannot find name 'PerformanceCategory'. Did you mean 'PerformanceEntry'?\nsrc/utils/calculations.ts(29,84): error TS2304: Cannot find name 'SubjectName'.\n"
+    },
+    {
+      "i": 7,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": "src/components/PrintReport.tsx(15,39): error TS2552: Cannot find name 'PerformanceCategory'. Did you mean 'PerformanceEntry'?\n"
+    },
+    {
+      "i": 8,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    },
+    {
+      "i": 9,
+      "exit": null,
+      "command": "_nbw=0; while [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ] && [ $_nbw -lt 20 ]; do sleep 1; _nbw=$((_nbw+1)); done; if [ -f /tm … -x node_modules/.bin/tsc ]; then echo \"NBAI_TSC_UNAVAILABLE: the TypeScript compiler could not be",
+      "stdoutHead": ""
+    },
+    {
+      "i": 10,
+      "exit": 0,
+      "command": "npm run dev",
+      "stdoutHead": "[health-check] dev server already healthy on port 5173 — reused it (no relaunch; edits apply via HMR).\n[health-check] dev server is UP on port 5173. Call update_preview with port=5173."
+    },
+    {
+      "i": 11,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    },
+    {
+      "i": 12,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    },
+    {
+      "i": 13,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    },
+    {
+      "i": 14,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    },
+    {
+      "i": 15,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    },
+    {
+      "i": 16,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    },
+    {
+      "i": 17,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    },
+    {
+      "i": 18,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    },
+    {
+      "i": 19,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    },
+    {
+      "i": 20,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    },
+    {
+      "i": 21,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": "src/hooks/usePrintMode.ts(19,3): error TS2304: Cannot find name 'gdh'.\n"
+    },
+    {
+      "i": 22,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    },
+    {
+      "i": 23,
+      "exit": 0,
+      "command": "npm run build",
+      "stdoutHead": "\n> project@0.1.0 build\n> tsc -p tsconfig.build.json && vite build\n\nvite v8.3.6 building client environment for production...\ntransforming...\n✓ 1527 modules transformed.\nrendering chunks...\ncomputing gzip size...\ndist/index.html                  27.18 kB │ gzip:   9.50 kB\ndist/assets/index-BpBXCrHi.css   42.49 kB │ gzip:   8.68 kB\ndist/assets/index-BbFjgpxW.js   370.07 kB │ gzip: 120.28 kB\n\n✓ built"
+    },
+    {
+      "i": 24,
+      "exit": 0,
+      "command": "npm run dev -- --host 0.0.0.0 --port 5173",
+      "stdoutHead": "[health-check] dev server already healthy on port 5173 — reused it (no relaunch; edits apply via HMR).\n[health-check] dev server is UP on port 5173. Call update_preview with port=5173."
+    },
+    {
+      "i": 25,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    },
+    {
+      "i": 26,
+      "exit": null,
+      "command": "if [ -f /tmp/nbai-npm-install.lock ] && [ -n \"$(find /tmp/nbai-npm-install.lock -mmin -6 2>>/tmp/nbai-tsc-ensure.log)\" ]; then echo NBAI_WRITE_TSC_NOT_READY:install-running; elif [ ! -x node_modules/. … n'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)\" 2>>/tmp/nb",
+      "stdoutHead": ""
+    }
+  ],
+  "issueHistogram": {
+    "FREE_BUILD_TIME_CAP": 1,
+    "REQUIREMENT_GAPS": 1,
+    "APP_SCOPE": 1,
+    "TIER_LADDER": 1,
+    "COMPLEXITY_ROUTING": 1,
+    "SURPLUS_ADMITTED": 1,
+    "TIME_TO_FIRST_CALL": 1,
+    "ETA_BASIS": 1,
+    "AGENT_STEP": 93,
+    "SETUP_TIMING": 9,
+    "CHANGE_CLASSIFIED": 1,
+    "PROJECT_MODE": 1,
+    "HEARTBEAT": 26,
+    "TOOL_CALL": 78,
+    "TOOL_DONE": 77,
+    "EVENT": 53,
+    "SIMPLE_BUILD_FALLBACK": 1,
+    "FAST_LANE_PHASES": 1,
+    "SIMPLE_BUILD_OUTCOME": 1,
+    "SIMPLE_BUILD_SALVAGE": 1,
+    "SIMPLE_BUILD_SALVAGE_TYPECHECK": 1,
+    "EXPLORATION_WITHOUT_CHANGE": 1,
+    "SANDBOX_CMD": 27,
+    "DEPENDENCY_VULNERABILITIES_FIXED": 1,
+    "PREVIEW_PUBLISHED": 2,
+    "TIME_TO_FIRST_RENDER": 1,
+    "IN_BUILD_GREEN": 1,
+    "TOOL_ERROR": 2,
+    "USAGE_NOT_REPORTED": 1,
+    "STYLE_RULES_RESUMED": 1,
+    "OUTCOME_STOPPED": 1,
+    "READY_BEFORE_END": 1,
+    "WRITE_TIME_TYPECHECK": 1,
+    "BUILD_TIMEOUT": 1,
+    "TODO_ONLY_TURNS": 1
+  },
+  "nIssues": 393,
+  "nLlmCalls": 88,
+  "selectedIssues": [
+    {
+      "i": 0,
+      "ts": 1794109267249,
+      "tsIST": "2026-11-08 09:11:07.249 IST",
+      "code": "FREE_BUILD_TIME_CAP",
+      "severity": "info",
+      "message": "Free build window: 25 min (a paid build would get 58 min).",
+      "detail": "",
+      "autoResolved": true
+    },
+    {
+      "i": 1,
+      "ts": 1794109267253,
+      "tsIST": "2026-11-08 09:11:07.253 IST",
+      "code": "REQUIREMENT_GAPS",
+      "severity": "info",
+      "message": "Requirement analysis: domain=education, 5 likely-missing feature(s), 6 clarifying question(s) the engine assumed sensible defaults for.",
+      "detail": "Likely domain: education.\nCommonly needed but NOT stated — confirm or assume sensible defaults: roles (student / teacher / admin); courses & lessons / content; enrolment & attendance; progress tracking; fees / payments.\nNo explicit non-functional requirements (scale/offline/security/i18n) — assume sensible defaults.\nQuestions to confirm before building:\n- Does it need roles (student / teacher / admin)?\n- Does it need courses & lessons / content?\n- Does it need enrolment & attendance?\n- Does it need progress tracking?\n- Who are the user roles, and does it need login / access control?\n- Roughly how many users / how much data should it handle?",
+      "autoResolved": true
+    },
+    {
+      "i": 2,
+      "ts": 1794109267259,
+      "tsIST": "2026-11-08 09:11:07.259 IST",
+      "code": "APP_SCOPE",
+      "severity": "info",
+      "message": "Scope: ordinary one-shot app — built directly (today's behaviour). no mega-signal — treated as an ordinary one-shot app (today's behaviour).",
+      "detail": "",
+      "autoResolved": true
+    },
+    {
+      "i": 3,
+      "ts": 1794109267261,
+      "tsIST": "2026-11-08 09:11:07.261 IST",
+      "code": "TIER_LADDER",
+      "severity": "info",
+      "message": "Weak ladder (default): GLM(glm-4.7-flashx) → KIMI(kimi-k2.7-code) → GLM(glm-4.7-flash)",
+      "detail": "Every rung has a key.",
+      "autoResolved": true
+    },
+    {
+      "i": 4,
+      "ts": 1794109267261,
+      "tsIST": "2026-11-08 09:11:07.261 IST",
+      "code": "COMPLEXITY_ROUTING",
+      "severity": "info",
+      "message": "Complexity: COMPLEX (score 58, model) — the build opens on the ladder's second rung, past the cheap flash opener.",
+      "detail": "one bounded preflight classified the requested implementation scope",
+      "autoResolved": true
+    },
+    {
+      "i": 5,
+      "ts": 1794109267261,
+      "tsIST": "2026-11-08 09:11:07.261 IST",
+      "code": "SURPLUS_ADMITTED",
+      "severity": "info",
+      "message": "Surplus admitted for Weak build (model=qwen3-coder).",
+      "detail": "",
+      "autoResolved": true
+    },
+    {
+      "i": 7,
+      "ts": 1794109267530,
+      "tsIST": "2026-11-08 09:11:07.530 IST",
+      "code": "ETA_BASIS",
+      "severity": "info",
+      "message": "ETA ~8–15 min (midpoint ~10 min) · basis blended · confidence 0.68",
+      "detail": "No past builds of this app — using NavBharatAI's recent average for complex app builds (11 builds over 3 days). Shown as a ROUGH ESTIMATE (~8–15 min), labelled a guess: only 40% of the estimate comes from real past builds, so the prompt-word heuristic still dominates it. The measured builds it learned from averaged 14 min; the band shown reaches them. Shown to the user: \"Rough estimate: ~8–15 min — a guess from the size of your request, not a measurement. I'll replace it with a real figure — and keep it updated — as soon as I can measure how big your app is.\"",
+      "autoResolved": true
+    },
+    {
+      "i": 17,
+      "ts": 1794109276215,
+      "tsIST": "2026-11-08 09:11:16.215 IST",
+      "code": "CHANGE_CLASSIFIED",
+      "severity": "info",
+      "message": "New app (0 part(s) named) — no earlier app on record to preserve · 0 requirement(s) on record · 0 re-probed for regression · 0 open issue(s) handed to the builder · impact 0 file(s) + 0 dependent(s)",
+      "detail": "",
+      "autoResolved": true
+    },
+    {
+      "i": 19,
+      "ts": 1794109277504,
+      "tsIST": "2026-11-08 09:11:17.504 IST",
+      "code": "PROJECT_MODE",
+      "severity": "info",
+      "message": "Software Project Mode is ON for this account, but this prompt is not a mega-project — normal path.",
+      "detail": "Signals: 0 enumerated feature parts, big-software noun: no, largest stated scale: none. It fires at >= 6 lines WITH such a noun, >= 14 without, or >= 100 stated files/pages/screens/modules. The threshold is deliberately high: a false positive costs an ordinary app an extra planner call and slower rounds, while a false negative simply builds exactly as it does today.",
+      "autoResolved": true
+    },
+    {
+      "i": 84,
+      "ts": 1794109537639,
+      "tsIST": "2026-11-08 09:15:37.639 IST",
+      "code": "SIMPLE_BUILD_FALLBACK",
+      "severity": "info",
+      "message": "Simple build stopped early after generating 20 file(s): the stages left could not finish inside its time budget — the full builder continues from them.",
+      "detail": "simple-build fast lane stopped early — 2 stage(s) left would need about 634s against a 480s budget",
+      "autoResolved": true
+    },
+    {
+      "i": 85,
+      "ts": 1794109537639,
+      "tsIST": "2026-11-08 09:15:37.639 IST",
+      "code": "FAST_LANE_PHASES",
+      "severity": "info",
+      "message": "Fast lane took 259.2s: plan 6.2s (2%), contract 9.1s (4%), generate 240.5s (93%), hand-off saves 3.4s (1%), verify 0s (0%) over 0 run(s), repair 0s (0%) over 0 round(s), everything else 0s (0%).",
+      "detail": "generate 240.5s of 259.2s",
+      "autoResolved": true
+    },
+    {
+      "i": 86,
+      "ts": 1794109537639,
+      "tsIST": "2026-11-08 09:15:37.639 IST",
+      "code": "SIMPLE_BUILD_OUTCOME",
+      "severity": "info",
+      "message": "Fast-lane outcome (handed off to the full builder): BUILD_FAILED",
+      "detail": "",
+      "autoResolved": true
+    },
+    {
+      "i": 87,
+      "ts": 1794109537639,
+      "tsIST": "2026-11-08 09:15:37.639 IST",
+      "code": "SIMPLE_BUILD_SALVAGE",
+      "severity": "info",
+      "message": "Fast lane salvaged 20 finished file(s) into the workspace for the full builder to continue from.",
+      "detail": "src/types.ts, src/hooks/useExamData.ts, src/utils/calculations.ts, src/types/exam.ts, src/utils/chartHelpers.ts, src/hooks/usePrintMode.ts, src/utils/dataValidation.ts, src/utils.ts, src/components/ExamForm.tsx, src/components/ResultCard.tsx, src/components/AnalysisChart.tsx, src/components/SubjectBreakdown.tsx, src/components/Footer.tsx, src/assets/exam-icons.tsx, src/components/PerformanceSummary.tsx, src/components/ComparisonChart.tsx, src/components/StudyRecommendations.tsx, src/components/PrintReport.tsx, src/components/SettingsPanel.tsx, src/components/LoadingSpinner.tsx",
+      "autoResolved": true
+    },
+    {
+      "i": 89,
+      "ts": 1794109543026,
+      "tsIST": "2026-11-08 09:15:43.026 IST",
+      "code": "SIMPLE_BUILD_SALVAGE_TYPECHECK",
+      "severity": "info",
+      "message": "The salvaged files were typechecked before the hand-off: 8 error(s) handed to the full builder with them.",
+      "detail": "",
+      "autoResolved": true
+    },
+    {
+      "i": 109,
+      "ts": 1794109579537,
+      "tsIST": "2026-11-08 09:16:19.537 IST",
+      "code": "EXPLORATION_WITHOUT_CHANGE",
+      "severity": "info",
+      "message": "Since the last recorded project change, 8 model turn(s) made 8 file/search calls without changing the project.",
+      "detail": "hand-back 1; all reads remain available",
+      "autoResolved": true
+    },
+    {
+      "i": 114,
+      "ts": 1794109614640,
+      "tsIST": "2026-11-08 09:16:54.640 IST",
+      "code": "DEPENDENCY_VULNERABILITIES_FIXED",
+      "severity": "info",
+      "message": "The known vulnerabilities reported earlier in this build are gone — the latest install reports 0.",
+      "detail": "",
+      "autoResolved": true
+    },
+    {
+      "i": 221,
+      "ts": 1794110103977,
+      "tsIST": "2026-11-08 09:25:03.977 IST",
+      "code": "PREVIEW_PUBLISHED",
+      "severity": "info",
+      "message": "Preview address is live at https://5173-itf43m6a0ltqj7ojf6awe.e2b.app — the server is listening. Whether the app itself renders is checked next.",
+      "detail": "",
+      "autoResolved": true
+    },
+    {
+      "i": 225,
+      "ts": 1794110109583,
+      "tsIST": "2026-11-08 09:25:09.583 IST",
+      "code": "TIME_TO_FIRST_RENDER",
+      "severity": "info",
+      "message": "842s from build start to the first real-browser render of the app.",
+      "detail": "",
+      "autoResolved": true
+    },
+    {
+      "i": 228,
+      "ts": 1794110110074,
+      "tsIST": "2026-11-08 09:25:10.074 IST",
+      "code": "IN_BUILD_GREEN",
+      "severity": "info",
+      "message": "The app rendered in a real browser 842s into this build — 35 file(s) recorded as the last known good. If a later step breaks the app, this version is what comes back.",
+      "detail": "",
+      "autoResolved": true
+    },
+    {
+      "i": 247,
+      "ts": 1794110166951,
+      "tsIST": "2026-11-08 09:26:06.951 IST",
+      "code": "TOOL_ERROR",
+      "severity": "warning",
+      "message": "Tool call failed: edit_file: old_string not found in src/main.tsx. The string you supplied does not appear verbatim (or close enough) in the current file. Current file content around your closest match (lines 1-18, nearest at line 11):\n```\nimport './nb-autostyle.css';\n// ENTRY POINT — provided and correct. Put routing, context providers and global wrappers inside\n// src/App.tsx, NOT here. Keep the ErrorBoundary import and the <ErrorBoundary> wrapper below: the app\n// root is already protected, a",
+      "detail": "agent=architect callId=call_fc7e33f397f145da840319e1 1s",
+      "autoResolved": false
+    },
+    {
+      "i": 272,
+      "ts": 1794110323228,
+      "tsIST": "2026-11-08 09:28:43.228 IST",
+      "code": "USAGE_NOT_REPORTED",
+      "severity": "warning",
+      "message": "A provider returned no token usage — this build's cost is an under-estimate",
+      "detail": "SURPLUS (qwen3-coder) answered without reporting token counts, so its turns contribute 0 to this report's token and cost figures. Nothing was over-charged — we never invent tokens — but OUR OWN cost for this build is higher than the number shown. Most likely cause: the streamed path (AGENTV3_STREAM_BUILD_CALLS) asks for usage via stream_options.include_usage and this provider does not send it. If this appears on every build, unset that flag to return to the non-streamed path, which does report usage.",
+      "autoResolved": true
+    },
+    {
+      "i": 286,
+      "ts": 1794110381060,
+      "tsIST": "2026-11-08 09:29:41.060 IST",
+      "code": "TOOL_ERROR",
+      "severity": "warning",
+      "message": "Tool call failed: WRITE REJECTED — your change introduces a SYNTAX ERROR in src/App.tsx (line 214:8): Unexpected closing \"main\" tag does not match opening \"div\" tag It was NOT saved (the app would not compile). An edit…",
+      "detail": "agent=architect callId=call_7ccb417a719343cfb9b0ab6d 1s",
+      "autoResolved": false
+    },
+    {
+      "i": 350,
+      "ts": 1794110652879,
+      "tsIST": "2026-11-08 09:34:12.879 IST",
+      "code": "PREVIEW_PUBLISHED",
+      "severity": "info",
+      "message": "Preview address is live at https://5173-itf43m6a0ltqj7ojf6awe.e2b.app — the server is listening. Whether the app itself renders is checked next.",
+      "detail": "",
+      "autoResolved": true
+    },
+    {
+      "i": 356,
+      "ts": 1794110690663,
+      "tsIST": "2026-11-08 09:34:50.663 IST",
+      "code": "STYLE_RULES_RESUMED",
+      "severity": "info",
+      "message": "The model ended its turn while 30 class name(s) had no style rule, 1 file(s) had controls a keyboard or screen reader cannot use, so it was handed them and told to fix them before finishing (once). Before 2026-10-01 the turn ended here and a separate end-of-build repair pass, in a fresh context, fixed them. Spacing off the 4px grid is NOT handed back (autopsy 536c8189) — it is snapped deterministically instead.",
+      "detail": ".bg-gray-50 .bg-white .border-l-4 .border-yellow-400 .divide-gray-200 .divide-y .flex-shrink-0 .h-16 .h-5 .leading-5 .line-clamp-2 .min-w-full .ml-3 .mr-3 .overflow-x-auto .px-6 .py-12 .rounded .text-gray-400 .text-gray-900 src/components/ExamForm.tsx:a11y",
+      "autoResolved": true
+    },
+    {
+      "i": 385,
+      "ts": 1794110767421,
+      "tsIST": "2026-11-08 09:36:07.421 IST",
+      "code": "OUTCOME_STOPPED",
+      "severity": "error",
+      "message": "Build outcome: STOPPED — the wall-clock cap (25 min) was reached before the build converged. NOT stopped by the user.",
+      "detail": "",
+      "autoResolved": false
+    },
+    {
+      "i": 389,
+      "ts": 1794110769784,
+      "tsIST": "2026-11-08 09:36:09.784 IST",
+      "code": "READY_BEFORE_END",
+      "severity": "info",
+      "message": "The app was never judged finished during the build.",
+      "detail": "",
+      "autoResolved": true
+    },
+    {
+      "i": 390,
+      "ts": 1794110769787,
+      "tsIST": "2026-11-08 09:36:09.787 IST",
+      "code": "WRITE_TIME_TYPECHECK",
+      "severity": "info",
+      "message": "Write-time typecheck: 20 run(s), 14 clean, 4 error(s) quoted back in the file just written, 93s total (~4.6s each); the cache was warmed at build start in 8s, before the first write.",
+      "detail": "",
+      "autoResolved": true
+    },
+    {
+      "i": 391,
+      "ts": 1794110770214,
+      "tsIST": "2026-11-08 09:36:10.214 IST",
+      "code": "BUILD_TIMEOUT",
+      "severity": "error",
+      "message": "Build exceeded the 1500s wall-clock cap and was stopped.",
+      "detail": "",
+      "autoResolved": false
+    },
+    {
+      "i": 392,
+      "ts": 1794110770214,
+      "tsIST": "2026-11-08 09:36:10.214 IST",
+      "code": "TODO_ONLY_TURNS",
+      "severity": "info",
+      "message": "1 model turn(s) while the app was generated did nothing but update the plan (update_todo with no other tool call) — 7.8s of model time that built nothing. The first one in each run was handed back with the rule to send update_todo together with the next step's tool calls (autopsy 9c612cdb). 1 of them were the first in a run (handed back); 0 came after a hand-back in the same run.",
+      "detail": "",
+      "autoResolved": true
+    }
+  ],
+  "q2626": {
+    "included": true,
+    "proposedPattern": "Handl(?:es?|ing)\\s+errors(?:\\s+(?:properly|gracefully|correctly))?\\.?$",
+    "oppositeN": 360,
+    "uniqueHandlingPhrases": 56,
+    "beforeOppositeLarge": 351,
+    "afterOppositeLarge": 351,
+    "largeToSmaller": 0,
+    "smallerToLarge": 0,
+    "oppositeNewlyQuality": 0,
+    "alreadySmallOnMain": 9,
+    "alreadySmallReason": "CLEARLY_SMALL invoice word on restaurant/factory/exam templates without a big-software noun (pre-existing Q-2629-class)",
+    "hashes": {
+      "corpus": "e2acd070d23f722fb930f499f2608ce1813b695c3fc3893c1e4faec983eeb7bc",
+      "measureBefore": "e686c6eaf2ab857bb8a04538a8a2e03dddd8fd48487206824a513be65f24780e",
+      "measureAfter": "163c04b55357175d5ee698f44b0fdde97e785a1e0fcf33f1f4c88f9060cf366e",
+      "advDelta": "6da9ef4a840115b16ba0e5a0aeb77ad464c3d0ddd6b1f9a41766c149a161eb8e"
+    }
+  },
+  "originalReportSha256": "012fb9d38cbccf2b2a452bd95a2c90fa463240bc2998db8b0cdaa4f8dc189236",
+  "prettyReportSha256": "76108fa584fdd3042c731656209da4f60f5b48bc15ef292c4170f6cce4e3ed74",
+  "autopsyServerWrite": false,
+  "historicalAppReplayed": false,
+  "productionDeployedOrChanged": false
+}

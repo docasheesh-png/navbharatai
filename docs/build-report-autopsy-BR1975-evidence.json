@@ -1,0 +1,96 @@
+{
+  "identity": {
+    "reportNumber": 1975,
+    "outcome": "succeeded",
+    "ok": true,
+    "prompt": "Give me one one website code for name satyam engineering works",
+    "promptLength": 62,
+    "promptWords": 11,
+    "promptHash": "bfddc296",
+    "reportDigest": "73de62fcf7e24319cd4f3fde4a74256baa2af0350ae228105ea27090f70c2746",
+    "buildId": "6e1d025c-af45-496e-ae4a-c9cbe93ece07",
+    "workspaceId": "agentv3-JhJBVKmrXyPxm2Pxr69lDF4Eco43-58312807-b27d-4d4f-ab38-0d2a13e81657",
+    "historyId": "1794111117203",
+    "sessionId": "58312807-b27d-4d4f-ab38-0d2a13e81657",
+    "model": "qwen3-coder",
+    "framework": "vite-react",
+    "builtBy": "SURPLUS",
+    "startedAt": 1794111117203,
+    "endedAt": 1794111593384,
+    "startedAtIST": "2026-11-08 09:41:57.203 IST",
+    "endedAtIST": "2026-11-08 09:49:53.384 IST",
+    "durationMs": 476181,
+    "userWaitMs": 30000
+  },
+  "reportBytes": 111754,
+  "truncation": {
+    "complete": true
+  },
+  "billing": {
+    "charged": false,
+    "billedUsd": 0,
+    "sandboxCostUsd": 0.021844,
+    "powerLevel": "weak",
+    "userTier": "weak (free tier — cheap engines) · not charged"
+  },
+  "etaAccuracy": {
+    "promisedMs": 353661,
+    "lowMs": 237555,
+    "highMs": 596917,
+    "actualMs": 446181,
+    "ratio": 1.2616064536378058,
+    "withinBand": true,
+    "evidenced": true,
+    "key": "app_unsized",
+    "source": "platform"
+  },
+  "requestAnalysis": {
+    "taskType": "app_unsized",
+    "complexityScore": 15,
+    "startTier": "gemini",
+    "startBand": "cheapest band"
+  },
+  "nativeCapabilityObserved": false,
+  "complexityRouting": "simple (score 15, model)",
+  "changeClassified": "New app (0 parts named)",
+  "firstRenderSec": 229,
+  "postGreenWrites": 10,
+  "readyBeforeEnd": "step 20 (92/100); then 6 more steps / 101s",
+  "manifestFileCount": 22,
+  "mobileLayout": {
+    "viewport": "390×844",
+    "sidewaysPx": 260,
+    "stickingOut": "<nav> Home Services About Contact (296px wide, reaching 650px)",
+    "smallControls": [
+      "Services 67×24",
+      "About 47×24",
+      "Contact 62×24"
+    ]
+  },
+  "unresolvedCodes": [
+    "PLATFORM_WRITE_REFUSED",
+    "MOBILE_LAYOUT_ISSUES",
+    "RELEASE_GATE"
+  ],
+  "oppositeClassAssembledBeforeEdit": true,
+  "shipped": [
+    "F1_nb_header_inner_row_wraps_on_a_phone"
+  ],
+  "notShipped": [
+    "fast-lane retry of a syntax-refused Footer write",
+    "DESIGN_KIT_VOCABULARY company-header line",
+    "release-gate or bug-hunt policy changes",
+    "display changes or 32px min-height on header nav links",
+    "Q-2649",
+    "Q-2650",
+    "Q-2651",
+    "Q-2652"
+  ],
+  "newQueueRows": [],
+  "reviewFollowUp": {
+    "failedHead": "c201c6e6bd0b82820206c0978fdaf74ca2c28622",
+    "pr": 4168,
+    "cause": "Wrapped header/nav instead of the inner nowrap .row / ul.row; :where(header) nav was (0,0,1); display:flex on every header nav; all header elements affected; model assumed brand and nav were direct header children; comment said nav reached 650px.",
+    "fix": "@media (max-width: 640px) { :where(.nb-header .row), :where(.nb-header nav ul) { flex-wrap: wrap; min-width: 0; max-width: 100%; } }"
+  }
+}

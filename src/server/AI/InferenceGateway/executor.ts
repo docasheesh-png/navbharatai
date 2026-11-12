@@ -1,4 +1,5 @@
 import { OWNER_PAID_DAILY_CEILING_NANO_USD } from '../FreeChain/spendCap';
+import { FIXED_TEXT_CHAIN_MAX_ATTEMPTS } from '../fixedTextChain';
 /**
  * Trusted orchestration used by the default-off server gateway composition.
  * Matching JSON never authenticates evidence, receipts or usage. All ports must
@@ -393,8 +394,9 @@ export function createInferenceExecutor(ports: ExecutionPorts) {
     let stable: string | undefined;
     let history: readonly AttemptRecord[] | undefined;
     let queueFloor = 0;
+    let executionCeiling = 4;
     // A second guard independent of mutable snapshot counts. No unbounded retry loop.
-    for (let dispatches = 0; dispatches < 4; dispatches++) {
+    for (let dispatches = 0; dispatches < executionCeiling; dispatches++) {
       if (signal?.aborted) return stopped('cancelled');
       let snapshot: ExecutionSnapshot;
       let plan: SelectionPlan;
@@ -408,6 +410,13 @@ export function createInferenceExecutor(ports: ExecutionPorts) {
         stable = currentStable;
         const decision = policy(snapshot);
         if (decision.kind !== 'plan') return stopped(decision.reason, decision);
+        // Only fixed ordinary Chat may use its already-declared twelve-call cap.
+        // Snapshot validation, durable history and the stable logical binding still
+        // enforce the tighter request limit. Nonfixed/Pro/Builder behavior is unchanged.
+        if (dispatches === 0 && snapshot.request.fixedTextChain === 'v1'
+          && snapshot.request.surface === 'chat' && snapshot.request.capability.kind === 'text') {
+          executionCeiling = FIXED_TEXT_CHAIN_MAX_ATTEMPTS;
+        }
         plan = decision;
         intent = admissionIntentFor(key, snapshot, plan);
       } catch { return stopped(signal?.aborted ? 'cancelled' : 'trusted-snapshot-unavailable'); }

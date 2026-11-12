@@ -10,6 +10,7 @@ import { authedHeaders } from '../../lib/authHeaders';
 import { SHIP_WORKFLOWS, needsUserSecrets, type ShipWorkflowFile } from '../../lib/shipWorkflows';
 import { signingNotReadyMessageFor, signingPlatformOf } from '../../lib/signingReadiness';
 import { deliverFile, deliveryMessage } from '../../lib/downloadFile';
+import { WhatsAppShareLink } from '../share/WhatsAppShareLink';
 
 // "Build my app and give me the file" — the real pipeline, end to end, inside NavBharatAI.
 //
@@ -1181,6 +1182,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                   defaultAppName={setup.repo}
                 />
               ))}
+              {artifacts.some((a) => /apk/i.test(a.name)) && (
+                <WhatsAppShareLink appName={setup?.repo} />
+              )}
               <p className="text-[11px] text-faint leading-relaxed">
                 {buildKind === 'apk'
                   ? 'Copy this .apk to an Android phone and open it — allow "install from unknown sources" when asked. It is for installing and sharing; Google Play needs the signed bundle instead.'

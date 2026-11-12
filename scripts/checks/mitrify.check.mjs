@@ -429,6 +429,29 @@ test('exact reviewed main-chain payload dispatches once with a four-attempt mone
   assert.ok(!JSON.stringify(f.logs).includes(f.key)); assert.ok(!JSON.stringify(f.logs).includes('Be brief.'));
 });
 
+for (const status of [429, 503]) test(`single-use Chat call records possible dispatch on HTTP${status} without retry or refund`, async t => {
+  const f = await fixture(t, (_req, res) => { res.writeHead(status); res.end('untrusted upstream error'); }); const a = approvedChain(f);
+  await assert.rejects(a.run({ maxHttpAttempts: 1 }), { code: `MITRIFY_HTTP_${status}`, status, dispatched: true, partial: false });
+  assert.equal(f.requests.length, 1); assert.equal(a.docs.get(a.path).attemptsStarted, 1);
+  assert.equal(a.held, 100); assert.equal(a.released, 0);
+});
+
+test('low-level Mitrify errors do not falsely claim a reviewed undispatched boundary', async t => {
+  const f = await fixture(t, (_req, res) => { res.writeHead(503); res.end(); });
+  await assert.rejects(f.client.chat(input, { signal: f.signal, maxAttempts: 1 }), error => {
+    assert.equal(error.code, 'MITRIFY_HTTP_503'); assert.equal(error.dispatched, undefined); return true;
+  });
+  assert.equal(f.requests.length, 1);
+});
+
+test('single-use Chat call records an undispatched revocation without inventing a billing receipt', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const a = approvedChain(f);
+  await assert.rejects(a.run({ maxHttpAttempts: 1, revalidate: async () => { throw new MitrifyError('MITRIFY_APPROVAL_REVOKED'); } }),
+    { code: 'MITRIFY_APPROVAL_REVOKED', dispatched: false, partial: false });
+  assert.equal(f.requests.length, 0); assert.equal(a.docs.get(a.path).attemptsStarted, 0);
+  assert.equal(a.held, 100); assert.equal(a.released, 1);
+});
+
 test('two competing claims cannot spend the same public approval twice', async t => {
   const f = await fixture(t, (_req, res) => reply(res)); const a = approvedChain(f);
   const results = await Promise.all([a.run({ requestId: 'one' }), a.run({ requestId: 'two' })]);

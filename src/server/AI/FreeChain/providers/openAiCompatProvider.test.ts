@@ -583,3 +583,53 @@ it('does not settle contradictory streamed supplier receipts', async () => {
  const result=await new OpenAiCompatProvider(config({provider:'CHEAPERINFERENCE',baseURL:'https://api.cheaperinference.com/v1'})).executeTurn({prompt:'test',onChunk:vi.fn()});
  expect(result.supplierChargeUsd).toBeUndefined();
 });
+
+
+describe('admin test chat optional diagnostics do not change the default path', () => {
+  it('keeps the original system-plus-user body when messages are omitted', async () => {
+    reply(completion('hi'));
+    await new OpenAiCompatProvider(config()).executeTurn({ prompt: 'hello', systemPrompt: 'system' });
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      messages: [{ role: 'system', content: 'system' }, { role: 'user', content: 'hello' }],
+    }), expect.anything());
+  });
+
+  it('sends the provided conversation when messages are present', async () => {
+    reply(completion('hi'));
+    const messages = [
+      { role: 'user' as const, content: 'First question' },
+      { role: 'assistant' as const, content: 'First answer' },
+      { role: 'user' as const, content: 'Follow up?' },
+    ];
+    await new OpenAiCompatProvider(config()).executeTurn({ prompt: 'ignored-if-history', messages });
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ messages }), expect.anything());
+  });
+
+  it('does not attach the raw provider body to the thrown error when no sink is set', async () => {
+    withResponse.mockRejectedValue(Object.assign(new Error(KEY), { status: 401, error: { message: KEY, type: 'authentication_error', code: 'invalid_api_key' } }));
+    const error = await failure(new OpenAiCompatProvider(config()).executeTurn({ prompt: 'hello' }));
+    expect(error.code).toBe('AUTH');
+    expect(JSON.stringify(error)).not.toContain(KEY);
+    expect(inspect(error, { depth: 10, showHidden: true })).not.toContain(KEY);
+  });
+
+  it('notifies the admin sink without changing the sanitized thrown error', async () => {
+    const sink = vi.fn();
+    withResponse.mockRejectedValue(Object.assign(new Error(KEY), {
+      status: 401,
+      error: { message: KEY, type: 'authentication_error', code: 'invalid_api_key' },
+      headers: new Headers({ 'x-request-id': 'req-admin-1' }),
+    }));
+    const error = await failure(new OpenAiCompatProvider(config({ adminErrorDetail: sink })).executeTurn({ prompt: 'hello' }));
+    expect(error.code).toBe('AUTH');
+    expect(JSON.stringify(error)).not.toContain(KEY);
+    expect(sink).toHaveBeenCalledOnce();
+    expect(sink).toHaveBeenCalledWith(expect.objectContaining({
+      httpStatus: 401,
+      providerCode: 'invalid_api_key',
+      providerType: 'authentication_error',
+      providerMessage: KEY,
+      requestId: 'req-admin-1',
+    }));
+  });
+});

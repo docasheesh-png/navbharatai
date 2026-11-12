@@ -40,6 +40,13 @@ describe('getFeatureById', () => {
     expect(feature).not.toBeNull();
     expect(feature?.id).toBe('engineer_ai');
   });
+
+  it('Voice links to the real Wallet & Billing feature rather than an invented wallet id', () => {
+    const voice = getFeatureById('voice_ai');
+    expect(voice?.relatedFeatures).toEqual(['billing']);
+    for (const id of voice!.relatedFeatures ?? []) expect(getFeatureById(id)).not.toBeNull();
+    expect(getFeatureById('billing')?.path).toContain('Wallet & Billing');
+  });
 });
 
 /**

@@ -30,6 +30,15 @@ describe('the "Best job" bug', () => {
   it('does not pull the app-navigation block', () => {
     expect(isAboutNavBharatAI(msg)).toBe(false);
   });
+  it('does not treat an ordinary question as a question about this app', () => {
+    for (const q of ['History of the Mughal empire', 'My study plan for Monday', 'Pros and cons of solar power', 'There is a syntax error in this Python loop', 'What is the mode of these numbers?']) {
+      expect(isAboutNavBharatAI(q), q).toBe(false);
+    }
+  });
+  it('still recognises a question about this product', () => {
+    expect(isAboutNavBharatAI('NavBharatAI me wallet kaise recharge karu')).toBe(true);
+    expect(isAboutNavBharatAI('Where is Image Generator?')).toBe(true);
+  });
   it('other non-app questions are not app requests either', () => {
     for (const q of ['Which app is best for UPI?', 'Tell me about the best jobs in India', 'chai kaise banate hain',
       'मुझे सरकारी नौकरी के बारे में बताओ', 'WhatsApp kaise install kare', 'photo banao']) {

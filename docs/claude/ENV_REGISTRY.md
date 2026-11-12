@@ -1651,7 +1651,7 @@ the code (it is actually read somewhere) on 2026-07-11.
   Referral is **split from the Free Program pause**: it follows `REFERRAL_REWARDS=on` only. New key
   **`REFERRAL_FOLLOWS_FREE_PAUSE`** (NOT set; default OFF): `on` restores pause ⇒ referral off. Gift ₹ is
   spendable on chat + coding only — hosting traffic (`feature: hosting*`) can no longer use gift; plans,
-  add-ons, remix, APK were already paid-only. The admin one-press ₹150 welcome gift is retired.
+  add-ons, remix, APK were already paid-only. The admin one-press ₹150 welcome gift has been removed.
   ⚠️ While the Free Program pause is ON, existing gift-spend rules still make ALL gift unspendable.
 - **🎁 THE FREE-CREDIT STEPS, FINAL PLAN (admin 2026-09-27, verbatim: *"sabhi pahle 50₹ do! (mobile +
   website) · fir refral code ke 100₹ (only mobile') · fir login par 50₹ (dono par) · fir mobile otp
@@ -4805,6 +4805,21 @@ not been independently verified. This note is not runtime authority — Admin/se
   retired — z routes like any same-tier user; only this billing waiver remains.) Remove the
   whole thing later by deleting `zTestAccount.ts` call sites.
 
+- **`AGENTV3_BILL_SURPLUS_STOP_TOKEN_FLOOR`** (⚠️ NOT set in Cloud Run; **default ON**; `off` is the
+  kill switch — added 2026-11-11, owner-approved BR2279 exception). When a Weak/Surplus build is
+  stopped by the user after their own files were written, Surplus receipts could not be settled
+  (#4026 still absorbs at ₹0 inside `decideBuildBilledUsd`), the preview was never proven running,
+  and the report has real token counts, both settlement points call the same helper
+  (`decideSurplusStopTokenFloor`) and bill a FLOOR estimate at real cost (no markup, no sandbox
+  fee), labelled estimated. That helper applies the same empty-build and unrendered / server-down
+  preview zeroing and the same own-file count (builder writes minus unchanged starter) at both
+  points, so the deadline finalizer cannot invent a charge the normal settle would have zeroed.
+  Unset, empty, or an unrecognised typo means ON; only an explicit `off` / `false` / `0` disables
+  it and restores the ₹0 absorb. Never invents a cost from missing or zero tokens. Does not change
+  empty-build, seed-only, verified-receipt, seen-running, non-stop failure, admin/tester-free, or
+  non-Weak paths. Code: `surplusStopTokenFloor.ts`. This entry is documentation only — this change
+  does not write the flag on Cloud Run.
+
 ### 2026-11-01 owner pricing/routing revision
 
 The earlier sandbox-time billing entry is superseded for Pro builds. Customer
@@ -4911,3 +4926,31 @@ secret control token distinct from the gateway credential) gate an isolated
 synthetic guest endpoint. `MITRIFY_GUEST_TEST_TARGET` is an operator-runner origin,
 not an app setting. No values are configured by this change. See docs/mitrify.md
 for expiring shared admission, inclusive spend prerequisite and rollback.
+
+### Voice AI text-to-speech (2026-11-09)
+
+Separate from real-time voice conversations. Server-only configuration; never expose credentials to Vite/client bundles.
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `VOICE_AI_ENABLED` | `1` enables configured text-to-speech; other values leave it unavailable | disabled |
+| `SARVAM_API_KEY` | Existing owner's Sarvam API subscription credential | missing |
+| `SARVAM_TTS_INR_PER_1000_CHARS` | Reviewed supplier INR cost per 1,000 Unicode codepoints for the pinned model (0.001–1,000; outside this precision range stays disabled) | required |
+| `SARVAM_TTS_COST_TAX_PERCENT` | Explicit effective supplier tax percentage, including 0 if applicable | required |
+
+Retail quote is 2 × configured tax-inclusive supplier cost, expressed to six decimal places. A temporary hold rounds up to one paise only for reversible authorization; settlement releases that hold and debits the exact quoted fee with the shared fractional-token carry. This is not a tax invoice and does not establish the user's applicable output GST. Review the configured rate against the supplier account before enabling. Provider invoices remain authoritative; no actual savings or measured cost claim is made. Provider master switch and maintenance remain effective. The paid-voice dispatch scope is entered only after the wallet hold; other free-module policy is unchanged. No deployment/secret/paid account setup is performed merely by adding this code.
+
+### Qubax owner enable (2026-11-09)
+
+Public chat and the admin Test Chat Bot call Qubax when `QUBAX_ENABLED=1` and `QUBAX_API_KEY` are set. No new Cloud Run variable is required. The price feed is on unless set to `0` and is fresh when the Qubax market fetch succeeds. A model is eligible when its own `discount_pct` is at least 90, it is text or multimodal, and one try fits the cap. Official price pages are not used. The server probes Hindi and English, rejects the wrong script, and picks the best probe, then the cheaper price. A timeout, a bad reply, or no eligible model falls through to the next chat provider. One turn tries at most three models.
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `QUBAX_ENABLED` | `1` allows calls | disabled |
+| `QUBAX_API_KEY` | Server-only Qubax credential | missing |
+| `QUBAX_PRICE_FEED_ENABLED` | `0` turns the public price feed off | on |
+| `QUBAX_MODEL` | Backup model id, used only when no model clears a 90% Qubax discount | automatic |
+| `QUBAX_MAX_USD_PER_REQUEST` | Hard USD ceiling reserved for one try. `0.000001` to `1` | `0.02` |
+| `QUBAX_PROBE_DAILY_CAP_USD` | Most the health probes may reserve in one IST day | `0.10` |
+
+Guest 10/day and signed-in shared 50/day stay on the free-answer quota. The shared paid daily and monthly budgets still have to admit the ceiling. No secret is stored in this file.

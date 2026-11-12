@@ -1,0 +1,3268 @@
+{
+  "phase": "after",
+  "measuredAt": "2026-11-10T07:48:19.653Z",
+  "oppositeCount": 167,
+  "sameCount": 23,
+  "opposite": [
+    {
+      "prompt": "Build a calculator",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "A todo list app",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "Make a timer",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "stopwatch app please",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "weather app for Delhi",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "notes app with folders",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "invoice generator for my shop",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "quiz app for students",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "flashcard app",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "habit tracker",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "pomodoro timer",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "unit converter",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "password generator",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "QR code generator",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "landing page for my bakery",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "portfolio website",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "business card site",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "recipe book",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "menu card for a cafe",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "countdown clock",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "expense tracker",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "budget app",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "offline dictionary",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "survey form for feedback",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "poll app for a classroom",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "Make a notepad",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "counter app",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "tip calculator",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "age calculator",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "BMI calculator",
+      "tag": "ordinary-en",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "calculator banao",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "mujhe timer chahiye",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "ek todo list banao",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "weather app banao",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "notes app chahiye",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "invoice banana hai",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "quiz banao",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "flashcard app banao",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "habit tracker banao",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "pomodoro timer chahiye",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "ek calculator app banana hai",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "mujhe notes likhne wali app chahiye",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "simple weather dekho",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "kharcha tracker banao",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "bill invoice generator",
+      "tag": "ordinary-hi",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "Build a game with indian map",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "Mujhe higher exam hard exam analyse app banana hai",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "Continue from where you left off and finish/fix the build so the app works end-to-end.",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "html code of youtube seo generator",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "I want to make a game like gta 5",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "Mujhe youtube ki tarah ek app Banakar do",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "YouTube",
+        "signal0": "asks to clone YouTube",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "school ERP with students, teachers, attendance, fees, exams, timetable, library, transport",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": null,
+        "signal0": "~8 distinct features requested",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "youtube seo generator",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "YouTube tag generator",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "Pura gta wala game banaa do",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "Pura gta 5 wala game banaa do",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "gta wala game banao",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "gta jaisa game banao",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "GTA jaisa game banao",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "grand theft auto wala game",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "gta v wala game",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "gta 5 jaisa game",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "I want to make a game like GTA V",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "make a game like gta",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "Build me an Instagram",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "Instagram",
+        "signal0": "asks to clone Instagram",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "make a WhatsApp clone",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "WhatsApp",
+        "signal0": "asks to clone WhatsApp",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "zomato jaisa app",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "Swiggy / Zomato",
+        "signal0": "asks to clone Swiggy / Zomato",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "make it like Forza",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "PUBG style graphics",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "PUBG",
+        "signal0": "asks to clone PUBG",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "Ab main us app par khud kuch ficar cenj kar sakta hu aur Koi nahin",
+      "tag": "neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "gta50 wala game",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "gta500 wala game",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "gta51 high score board",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "gta5cheats website",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "download gta5cheats",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "gta5guide download page",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "mygta5game",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "thegta5experience",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "a data aggregator",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "digital clock",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "digital portfolio",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "gtable reservation app",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "metadata viewer",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "navigate to settings",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "aggregate sales dashboard",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "gta6 wala game",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "gta4 wala game",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "gtavc wala game",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "gta10 leaderboard",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "gta55 tournament",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "install gtable",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "digital art gallery",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "aggregation pipeline viewer",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "instagram table booking",
+      "tag": "lookalike",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "Instagram",
+        "signal0": "asks to clone Instagram",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "Build a racing game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "driving game banao",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "open world village game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "first person maze",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "fps game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "minecraft style game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "Minecraft",
+        "signal0": "asks to clone Minecraft",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "battle royale game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": null,
+        "signal0": "needs multiplayer / online play",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "flight simulator",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "card game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "board game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "puzzle game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "ludo game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "chess game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "snake game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "tic tac toe",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "Build a 2d platformer",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "typing race game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "Build a quiz about cars",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "memory card game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "ek 3d game banao",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "make a 3d game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "three dimensional maze",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": true,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "a village farming game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "gaon wala game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "Build a quiz",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "uno card game",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_vfx",
+          "generate_melody"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "sudoku puzzle",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "wordle clone",
+      "tag": "game-neighbour",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "YouTube SEO generator for my channel",
+      "tag": "tool-mention",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "instagram hashtag tool",
+      "tag": "tool-mention",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "WhatsApp click-to-chat widget",
+      "tag": "tool-mention",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "WhatsApp",
+        "signal0": "asks to clone WhatsApp",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "using YouTube urls in a playlist picker",
+      "tag": "tool-mention",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "GTA wiki",
+      "tag": "tool-mention",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "GTA tips and tricks",
+      "tag": "tool-mention",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "using GTA",
+      "tag": "tool-mention",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "Open GTA",
+      "tag": "tool-mention",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "youtube login page tutorial",
+      "tag": "tool-mention",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "via Instagram API",
+      "tag": "tool-mention",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "a real-time multiplayer 3d game",
+      "tag": "realism-fp",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": null,
+        "signal0": "needs multiplayer / online play",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "realtime chat in the game",
+      "tag": "realism-fp",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": null,
+        "signal0": "needs real-time messaging between users",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "let players pay with real money",
+      "tag": "realism-fp",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "test it with real users",
+      "tag": "realism-fp",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "connect real data from an API",
+      "tag": "realism-fp",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "a 3d game with real-time multiplayer",
+      "tag": "realism-fp",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": null,
+        "signal0": "needs multiplayer / online play",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "ek 3d racing game banao",
+      "tag": "realism-fp",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "build me a car racing game",
+      "tag": "realism-fp",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "real time leaderboard",
+      "tag": "realism-fp",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "Build a shop ERP with:\n1. Responsive POS screen for tablets\n2. Keep existing order history after migration\n3. Inventory sync across warehouses\n4. GST invoice export\n5. Supplier payments and COD refunds\n6. Staff attendance and payroll\n7. Customer loyalty points\n8. Delivery partner assignment",
+      "tag": "shop-erp",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": null,
+        "signal0": "~9 distinct features requested",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "School app with:\n1. Student roster\n2. Teacher timetable\n3. Attendance register\n4. Fees collection\n5. Exam marks\n6. Library catalogue\n7. Transport routes\n8. Handling customer refunds for COD orders",
+      "tag": "eight-item",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": null,
+        "signal0": "~8 distinct features requested",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "School app with:\n1. Student roster\n2. Teacher timetable\n3. Attendance register\n4. Fees collection\n5. Exam marks\n6. Library catalogue\n7. Transport routes\n8. Handling loading screens for the exam evaluator",
+      "tag": "eight-item",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": null,
+        "signal0": "~8 distinct features requested",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "School app with:\n1. Student roster\n2. Teacher timetable\n3. Attendance register\n4. Fees collection\n5. Exam marks\n6. Library catalogue\n7. Transport routes\n8. Handling timeouts from the payment gateway webhook",
+      "tag": "eight-item",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": null,
+        "signal0": "~8 distinct features requested",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "School app with:\n1. Student roster\n2. Teacher timetable\n3. Attendance register\n4. Fees collection\n5. Exam marks\n6. Library catalogue\n7. Transport routes\n8. Handle errors.",
+      "tag": "eight-item",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": null,
+        "signal0": "~8 distinct features requested",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "School app with:\n1. Student roster\n2. Teacher timetable\n3. Attendance register\n4. Fees collection\n5. Exam marks\n6. Library catalogue\n7. Transport routes\n8. Handling errors properly",
+      "tag": "eight-item",
+      "class": "opposite",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": null,
+        "signal0": "~8 distinct features requested",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "bmi calculator with history",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "water reminder app",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "color picker tool",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "markdown previewer",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "json formatter",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "regex tester",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "lorem ipsum generator",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "random name picker",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "dice roller",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "coin flip app",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "yes no spinner",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "attendance tally counter",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "simple blog",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "guestbook",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "contact form",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "single-purpose app — buildable in one shot",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "rsvp page",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "wedding invitation site",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "pet names list",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "grocery list",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    },
+    {
+      "prompt": "shopping checklist",
+      "tag": "ordinary-extra",
+      "class": "opposite",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "lite"
+      }
+    }
+  ],
+  "same": [
+    {
+      "prompt": "Pura gta5 wala game banaa do",
+      "twin": "Pura gta 5 wala game banaa do",
+      "tag": "report",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "Pura GTA5 wala game banaa do",
+      "twin": "Pura GTA 5 wala game banaa do",
+      "tag": "case",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "I want to make a game like gta5",
+      "twin": "I want to make a game like gta 5",
+      "tag": "br1955-glued",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "gta5 jaisa game banao",
+      "twin": "gta 5 jaisa game banao",
+      "tag": "jaisa",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "gta5 wala game",
+      "twin": "gta 5 wala game",
+      "tag": "wala",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "make gta5",
+      "twin": "make gta 5",
+      "tag": "make",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "Build me a GTA5",
+      "twin": "Build me a GTA 5",
+      "tag": "build-me",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "gtav wala game",
+      "twin": "gta v wala game",
+      "tag": "gtav",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "GTA-5 wala game",
+      "twin": "GTA 5 wala game",
+      "tag": "hyphen",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "gta_5 wala game",
+      "twin": "gta 5 wala game",
+      "tag": "underscore",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "gta-5 open world",
+      "twin": "gta 5 open world",
+      "tag": "hyphen-open",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "Mujhe gta5 jaisa game chahiye",
+      "twin": "Mujhe gta 5 jaisa game chahiye",
+      "tag": "mujhe",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "ek gta5 game banao",
+      "twin": "ek gta 5 game banao",
+      "tag": "ek",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "gta5 clone",
+      "twin": "gta 5 clone",
+      "tag": "clone",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "similar to gta5",
+      "twin": "similar to gta 5",
+      "tag": "similar",
+      "class": "same",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "game like GTA5",
+      "twin": "game like GTA 5",
+      "tag": "like",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "Pura gta5 wala game banaa do.",
+      "twin": "Pura gta 5 wala game banaa do.",
+      "tag": "period",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "gta5 quiz banao",
+      "twin": "gta quiz banao",
+      "tag": "quiz-sibling",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "GTAV jaisa game",
+      "twin": "GTA V jaisa game",
+      "tag": "gtav-jaisa",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": true,
+        "plan": [
+          "generate_game_runtime",
+          "generate_game_3d",
+          "generate_game_vfx",
+          "generate_melody",
+          "generate_game_shell"
+        ],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "make GTA_5",
+      "twin": "make GTA 5",
+      "tag": "make-us",
+      "class": "same",
+      "snap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "analyze",
+        "size": "large",
+        "famousApp": "GTA",
+        "signal0": "asks to clone GTA",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "using GTA5",
+      "twin": "using GTA",
+      "tag": "tool-using",
+      "class": "same",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "GTA5 wiki",
+      "twin": "GTA wiki",
+      "tag": "tool-wiki",
+      "class": "same",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    },
+    {
+      "prompt": "GTA5 tips and tricks",
+      "twin": "GTA tips and tricks",
+      "tag": "tool-tips",
+      "class": "same",
+      "snap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      },
+      "twinSnap": {
+        "decision": "direct",
+        "size": "small",
+        "famousApp": null,
+        "signal0": "no mega-signal — treated as an ordinary one-shot app (today's behaviour)",
+        "wants3D": false,
+        "plan": [],
+        "realismTier": "real"
+      }
+    }
+  ]
+}

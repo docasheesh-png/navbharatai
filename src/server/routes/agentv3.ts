@@ -15,6 +15,12 @@ import { isRouterOneAccountingProvider, routerOneAccountingFetch } from '../AI/R
 import { createSurplusScopeAsk, SURPLUS_SCOPE_TIMEOUT_MS } from '../AI/SurplusRegistry/scopeAdmission';
 import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibility';
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
+import {
+  decideSurplusStopTokenFloor,
+  surplusTokenUsageFromLedger,
+  surplusStopTokenFloorAdminMessage,
+  SURPLUS_STOP_COST_ESTIMATED,
+} from '../AgentV3/surplusStopTokenFloor';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
 import { surplusFallbackDisabledFor, surplusFallbackDisabledForTier, surplusRawErrorReporter } from '../AI/SurplusRegistry/surplusNoFallback';
@@ -437,7 +443,7 @@ import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
 import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets } from '../AgentV3/gameAssets/assetSeed';
-import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -632,7 +638,8 @@ import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } f
 import { userStorageContext } from '../AgentV3/userStorageContext';
 import { userAuthContext } from '../AgentV3/userAuthContext';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
-import { findMissingDependencies, phantomAliasDependencies, removeDependenciesFromPackageJson } from '../AgentV3/DependencyReconciler';
+import { phantomAliasDependencies, removeDependenciesFromPackageJson } from '../AgentV3/DependencyReconciler';
+import { fastLaneDependencyPlan, fastLaneDependencyInstallCommand, fastLaneDependencyNote } from '../AgentV3/fastLaneDependencies';
 import { foundationFilesStillAbsent, ensureViteReactFoundation, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
@@ -734,6 +741,7 @@ import {
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, fleetEmptyBasisNote, etaTaskKey, etaBuildKind, type EtaBuildKind } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxExpenseUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
+import { rateIsConfigured } from '../AgentV3/sandboxRate';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { scopeCallAudit, recordScopeFailure } from '../lib/scopeFailureReports';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
@@ -801,6 +809,8 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
 import { buildActuator } from './actuatorFactory';
 import { bindSessionReconnectForTests } from '../AgentV3/WorkspaceRegistry';
 import { envFlag } from '../lib/envFlag';
+import { proAttachmentStore } from '../lib/proAttachmentStore';
+import { attachmentSessionForConversation, eraseConversationOriginals } from '../lib/proAttachmentLifecycle';
 import {
   workspaceOwnershipOk as sharedWorkspaceOwnershipOk,
   verifiedWorkspaceReadOk as sharedVerifiedWorkspaceReadOk,
@@ -1814,8 +1824,8 @@ function billableSandboxDetail(
   actuator: unknown,
   workspaceId: string | null | undefined,
   buildStartedAtMs?: number,
-): { seconds: number; usd: number; measuredSeconds: number } {
-  const none = { seconds: 0, usd: 0, measuredSeconds: 0 };
+): { seconds: number; usd: number; measuredSeconds: number; expenseMeasured: boolean } {
+  const none = { seconds: 0, usd: 0, measuredSeconds: 0, expenseMeasured: false };
   try {
     const fn = (actuator as any)?.sandboxHeldSeconds;
     if (typeof fn !== 'function' || !workspaceId) return none;
@@ -1840,12 +1850,13 @@ function billableSandboxDetail(
     if (!Number.isFinite(started) || started <= 0) return none;
     const buildSeconds = Math.max(0, (Date.now() - started) / 1000);
     const billable = Math.min(seconds, buildSeconds);
+    const expenseMeasured = rateIsConfigured();
     const usd = sandboxExpenseUsd(sandboxCost(billable));
-    // Expense telemetry only. The user fee is derived separately from the settled subtotal.
-    // measuredSeconds retains measured time even when the verified hourly rate is unavailable.
+    // Availability comes from the verified rate, NOT the rounded USD amount: a real short run may
+    // legitimately round below $0.000001. Keep billing seconds zero when no positive fee is shown.
     return usd > 0
-      ? { seconds: billable, usd, measuredSeconds: billable }
-      : { ...none, measuredSeconds: billable };
+      ? { seconds: billable, usd, measuredSeconds: billable, expenseMeasured }
+      : { ...none, measuredSeconds: billable, expenseMeasured };
   } catch {
     return none;
   }
@@ -1891,6 +1902,12 @@ export function decideBuildBilledUsd(
    * build where no turn starved — i.e. on the normal path this whole change is a no-op.
    */
   absorbedUnbilledUsd: number;
+  /**
+   * Set only when Surplus receipts could not be settled and this path absorbed that spend at ₹0
+   * (#4026). Absent on every other return, so existing equality tests stay unchanged. The
+   * 2026-11-11 Weak/Surplus stop token floor reads this later; it does not change this function's bill.
+   */
+  surplusUnsettledAbsorbed?: true;
 } {
   const routerOneEntries = providerLedger.entries().filter(e => isRouterOneAccountingProvider(e.provider));
   if (routerOneEntries.length) {
@@ -1925,11 +1942,13 @@ export function decideBuildBilledUsd(
     // "unavailable". Billing never decides a build's outcome: unverifiable Surplus spend is absorbed (₹0 to
     // the user, never an estimate), loudly logged for reconciliation, and the result stays what it was.
     let surplus: { chargeUsd: string; actualUsd: string; absorbedUsd: string };
+    let surplusUnsettledAbsorbed = false;
     try { surplus = surplusBuildCharges(surplusEntries, barrenPhases); }
     catch (error) {
       if (!(error instanceof SurplusAccountingUnavailableError)) throw error;
       console.error(`[AGENTV3 BILLING] Surplus receipts unsettled for user ${userId} — ${surplusEntries.length} Surplus call(s) absorbed at ₹0; reconcile from the Surplus audit store.`);
       surplus = { chargeUsd: '0', actualUsd: '0', absorbedUsd: '0' };
+      surplusUnsettledAbsorbed = true;
     }
     const legacyEntries = providerLedger.entries().filter(e => e.provider.toUpperCase() !== 'SURPLUS');
     const surplusTokens = surplusEntries.reduce((sum, e) => ({ inputTokens: sum.inputTokens + e.usage.inputTokens, outputTokens: sum.outputTokens + e.usage.outputTokens }), { inputTokens: 0, outputTokens: 0 });
@@ -1939,7 +1958,8 @@ export function decideBuildBilledUsd(
     const legacy = decideBuildBilledUsd(legacyView, { inputTokens: Math.max(0, sinkTotal.inputTokens - surplusTokens.inputTokens), outputTokens: Math.max(0, sinkTotal.outputTokens - surplusTokens.outputTokens) }, powerLevel, userId, email, sandboxUsd, barrenPhases);
     return { ...legacy, effectiveBilledUsd: legacy.effectiveBilledUsd + Number(surplus.chargeUsd),
       reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal),
-      realCostUsd: legacy.realCostUsd + Number(surplus.actualUsd), absorbedUnbilledUsd: legacy.absorbedUnbilledUsd + Number(surplus.absorbedUsd) };
+      realCostUsd: legacy.realCostUsd + Number(surplus.actualUsd), absorbedUnbilledUsd: legacy.absorbedUnbilledUsd + Number(surplus.absorbedUsd),
+      ...(surplusUnsettledAbsorbed ? { surplusUnsettledAbsorbed: true as const } : {}) };
   }
   const reconciledProviderUsage = reconcileWithSink(providerLedger.byProvider(), sinkTotal);
   const flatBilledUsd = billedAmountUsd(sinkTotal, powerLevel);
@@ -3787,7 +3807,11 @@ export function isReportAdmin(email: GrantEmail | null | undefined): boolean {
  *  raw provider text — an end user can't act on an infra/billing issue and must not see one. The real
  *  reason is recorded in the build report (buildDiag detail) for the admin. Pure + exported. */
 export function sandboxUnavailableNotice(): string {
-  return "Note: the build engine is temporarily unavailable, so I can't create files right now. I can still chat and plan with you — please try building again in a little while.";
+  // BR1961 (report cd970693): setup failed (E2B cap of 20 concurrent sandboxes), this line told the
+  // user they could not create files and should "try building again", and the build then continued for
+  // 20 minutes and delivered an app. A second Start from that goodbye consumes another sandbox slot
+  // and makes the cap worse. The tool-capable builder keeps trying (FAST_LANE_SKIPPED_SANDBOX); say so.
+  return "Note: the build engine is temporarily unavailable — I'm still trying to start it and will write your files as soon as I can. You don't need to start the build again.";
 }
 
 /**
@@ -4432,6 +4456,15 @@ export function registerAgentV3Routes(app: Express): void {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access === 'ok') {
+          // Remove original bytes first. On failure leave the transcript available for retry.
+          if (userId && rec?.userId === userId) {
+            try {
+              await eraseConversationOriginals(proAttachmentStore, userId,
+                attachmentSessionForConversation(userId, cid, rec));
+            } catch {
+              return res.status(503).json({ error: 'Private file removal could not complete. The chat was kept so you can retry.', retryable: true });
+            }
+          }
           // GA-1 — cascade purge: delete the conversation AND every per-workspace store it owned
           // (files/plan/memory/diagnostics/deployment). conversationId === workspaceId (#837), so the
           // shallow store.remove used to orphan all of that data forever. Best-effort; never throws.
@@ -6912,6 +6945,20 @@ async function noteBuildOutcome(
         if (access === 'forbidden') { forbidden = true; continue; }
         if (access !== 'ok' || !rec) continue;
 
+        // Originals use the stable client message timestamp, not a guessed server turn time.
+        // Scope fences revoke pending uploads before the transcript can disappear.
+        if (verifiedUid && rec.userId === verifiedUid) {
+          const attachmentSession = attachmentSessionForConversation(verifiedUid, cid, rec);
+          if (req.body?.attachmentSessionId !== undefined && req.body.attachmentSessionId !== attachmentSession) {
+            return res.status(409).json({ error: 'The attachment chat does not match this message. Reopen the chat and retry.' });
+          }
+          try {
+            await eraseConversationOriginals(proAttachmentStore, verifiedUid, attachmentSession,
+              req.body?.attachmentMessageId, true);
+          } catch {
+            return res.status(503).json({ error: 'Private file removal could not complete. The message was kept so you can retry Unsend.', retryable: true });
+          }
+        }
         // 2) Truncate the durable transcript to just before the last real user prompt.
         const keep = unsendKeepCount(rec.messages);
         if (keep < rec.messages.length) {
@@ -13126,7 +13173,7 @@ async function noteBuildOutcome(
     // `expectsArtifacts` rides here for the same reason the ledger does: it is computed deep inside
     // the build block, and the deadline finalizer — defined above it, called after it — needs the
     // same fact the settle path uses, or the two would price one build by different rules.
-    const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number; cacheReadInputTokens?: number; expectsArtifacts?: boolean; preseededGolden?: Map<string, string>; appFirstRenderedAt?: number | null } = {};
+    const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number; cacheReadInputTokens?: number; expectsArtifacts?: boolean; preseededGolden?: Map<string, string>; appFirstRenderedAt?: number | null; kitSeededFiles?: Map<string, string>; previewVerifiedFailed?: boolean } = {};
     /**
      * Phases this build has POSITIVELY ESTABLISHED delivered nothing a caller could use, so their
      * spend is ours and not the user's (see `billingPhase.ts`).
@@ -13298,6 +13345,40 @@ async function noteBuildOutcome(
             awaitingShell: awaitsShellNow(),
           });
           watchdogBilledUsd = wdMarkup.billedUsd;
+          // OWNER 2026-11-11 (BR2279): same token-floor estimate as the normal settle, applied before
+          // the Stop rules and after the markup waiver, so both billing points decide alike.
+          // Kill switch: AGENTV3_BILL_SURPLUS_STOP_TOKEN_FLOOR=off (unset/empty means ON).
+          // Mutates the decided real-cost figure so the extracted Stop/discount/setBilling slices
+          // (which still read `decided.realCostUsd`) cannot drift from this path.
+          // ONE helper with the normal settle (`decideSurplusStopTokenFloor`): same own-file count
+          // (builderWrittenCount minus unchanged starter) and the same already-zeroed facts (empty
+          // build + unrendered / server-down preview). Own-file / zeroing math lives in the helper,
+          // not as extra `preseededUnchangedCount(` calls in this file, so the route-wide pin stays
+          // honest and this path cannot invent a charge the settle would have zeroed.
+          const watchdogSurplusStopFloor = decideSurplusStopTokenFloor({
+            powerLevel: String(powerLevelReqEffective ?? ''),
+            surplusUnsettledAbsorbed: decided.surplusUnsettledAbsorbed === true,
+            abortCause: abortCauseOf(abort.signal),
+            writtenFiles,
+            kitSeededFiles: billingCtx.kitSeededFiles,
+            preseededGolden: billingCtx.preseededGolden,
+            previewProven: wdPreviewProven,
+            freeListed: isAgentV3FreeUser(userId, email),
+            usage: surplusTokenUsageFromLedger(billingCtx.providerLedger.entries()),
+            editingExistingApp: isEditMode,
+            expectsArtifacts: billingCtx.expectsArtifacts === true,
+            previewVerifiedFailed: billingCtx.previewVerifiedFailed === true,
+            emptyBuildOk: ok,
+            stoppedByUser: abortCauseOf(abort.signal) === 'user-stop',
+          });
+          if (watchdogSurplusStopFloor) {
+            watchdogBilledUsd += watchdogSurplusStopFloor.usd;
+            decided.realCostUsd += watchdogSurplusStopFloor.usd;
+            buildDiagRef?.record({
+              phase: 'build', severity: 'info', code: SURPLUS_STOP_COST_ESTIMATED, autoResolved: true,
+              message: surplusStopTokenFloorAdminMessage(watchdogSurplusStopFloor),
+            });
+          }
           // 🔴 A USER STOP IS BILLED BY THE STOP RULES ON THIS PATH TOO (pre-deploy review round 4). This
           // finalizer used to bill every `ok` build in full. A typed "stop" or a Stop pressed on another
           // instance aborts the build without ending its stream, so this cap could settle that build first
@@ -13368,8 +13449,9 @@ async function noteBuildOutcome(
               });
             }
           }
-          watchdogSandboxFee = proSandboxFee(watchdogBilledUsd);
-          watchdogBilledUsd = watchdogSandboxFee.totalUsd;
+          // The token-floor estimate is billed at cost: no 2.5% sandbox service fee.
+          watchdogSandboxFee = watchdogSurplusStopFloor ? proSandboxFee(0) : proSandboxFee(watchdogBilledUsd);
+          if (!watchdogSurplusStopFloor) watchdogBilledUsd = watchdogSandboxFee.totalUsd;
           recordBuildTelemetryOnce({
             ok,
             previewAllowed: buildObs.previewRendered,
@@ -13393,10 +13475,12 @@ async function noteBuildOutcome(
               billingActive: billingAppliesTo(userId, email),
               billedUsd: watchdogBilledUsd,
               billedInr: watchdogBilledInr,
+              estimated: !!watchdogSurplusStopFloor && watchdogBilledUsd > 0,
             }),
             billedUsd: Math.round(watchdogBilledUsd * 1_000_000) / 1_000_000,
             billedInr: watchdogBilledInr,
             realCostUsd: Math.round(decided.realCostUsd * 1_000_000) / 1_000_000,
+            ...(watchdogSurplusStopFloor ? { realCostEstimated: true as const } : {}),
             sandboxCostUsd: Math.round(decided.sandboxUsd * 1_000_000) / 1_000_000,
             ...proSandboxFeeFields(watchdogSandboxFee),
             powerMode: onlyOpus,
@@ -18751,6 +18835,7 @@ async function noteBuildOutcome(
       let gameContract: GameScopeContract | null = null;
       /** Path → the exact content the game-kit seed wrote (the kit, its layers, package.json). See `builderWroteCount`. */
       const kitSeededFiles = new Map<string, string>();
+      billingCtx.kitSeededFiles = kitSeededFiles;
       /**
        * HOW MANY FILES THE BUILDER PRODUCED — `writtenFiles` minus every game-kit file it never touched.
        *
@@ -18850,6 +18935,13 @@ async function noteBuildOutcome(
                   kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? '') });
                 }
                 kitRecipesMs = Date.now() - kitStartedAt;
+                // BR1977: recipes report ok (`!r.is_error`) even when they wrote nothing —
+                // this build claimed five recipes and 3 files after SANDBOX_UNAVAILABLE.
+                // Count only files that landed during the recipe loop (not later L3 assets)
+                // and refuse to claim a seed — or to prepare 3D assets on a missing 3D layer —
+                // unless at least as many files landed as recipes that said they succeeded.
+                const recipeFiles = [...writtenFiles].filter(([p, c]) => writtenBeforeKit.get(p) !== c).length;
+                downgradeEmptyKitSeedSuccesses(kitResults, recipeFiles);
                 if (gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted) {
                   // Default-off L3; all bytes and manifests are acknowledged durably before handoff.
                   // Source/provider failures leave the successful L1/L2 kit intact.
@@ -19205,6 +19297,50 @@ async function noteBuildOutcome(
         // Kept for the route's OWN in-lane writes (the deterministic mispath auto-fix inside fastVerify,
         // and the one-shot's post-success repair). Both run while their lane still owns the workspace.
         const fastWrite = (files: { path: string; content: string }[]): Promise<WriteOutcome[]> => fastWriteRaw(files);
+        // 📦 THE FAST LANE'S DEPENDENCY RECONCILE, ONE CLOSURE FOR BOTH STAGES (autopsy BR1959; the plan and
+        // its reasons live in fastLaneDependencies.ts). Verify runs it before `tsc` — a package the code
+        // imports and nobody declared is not a compile error a repair round can fix — and preview runs it
+        // before the dev server. Idempotent: once declared and installed, the plan is empty. Best-effort —
+        // a failure here leaves the compile check to report exactly what it always reported.
+        const fastReconcileDependencies = async (stage: 'verify' | 'preview'): Promise<void> => {
+          try {
+            const written = Object.fromEntries(writtenFiles);
+            const disk = typeof written['package.json'] === 'string' ? null : await actuator.readFile(workspaceId, 'package.json').catch(() => null);
+            const plan = fastLaneDependencyPlan(written, disk);
+            // ONE writer site for the lane's package.json copy (census in agentv3.test.ts): the pinned manifest
+            // that landed, then — after an install — the bytes npm left on disk, so the lane's copy equals the disk.
+            // Only when the lane OWNS the manifest (it wrote package.json): a scaffold manifest read from disk is
+            // updated on disk only, and never becomes a file this build is credited with writing (side-effect review).
+            let laneManifest: string | null = null;
+            let pinnedWritten = plan.packageJson === null;
+            if (plan.packageJson !== null) {
+              const pkgWrite = [{ path: 'package.json', content: plan.packageJson }];
+              if (readWriteOutcomes(pkgWrite, await fastWrite(pkgWrite)).landed.length > 0) {
+                laneManifest = plan.packageJson;
+                pinnedWritten = true;
+              }
+            }
+            const command = fastLaneDependencyInstallCommand(plan, pinnedWritten);
+            let res: { is_error?: boolean } | null = null;
+            if (command) {
+              const names = [...plan.pinned.map((p) => p.package), ...plan.unpinned];
+              fastLog(`📦 Installing ${names.length} package(s) the code imports but package.json omitted: ${names.join(', ')}`);
+              res = await dispatcher.dispatch({ id: `fast-deps-${stage}`, name: 'bash', input: { command } }, 'frontend');
+              // `npm install <name>` records the name in package.json on disk; keep the lane's copy equal to it.
+              if (laneManifest !== null || writtenFiles.has('package.json')) {
+                const after = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
+                if (typeof after === 'string' && after.trim()) laneManifest = after;
+              }
+            }
+            if (plan.manifest === 'written' && laneManifest !== null) writtenFiles.set('package.json', laneManifest);
+            if (!command || !res) return;
+            buildDiag.record({
+              phase: 'build', severity: res.is_error ? 'warning' : 'info', code: 'FASTLANE_DEPS_RECONCILED', autoResolved: !res.is_error,
+              message: fastLaneDependencyNote(plan, stage, !res.is_error),
+              detail: `manifest=${plan.manifest} · stage=${stage}`,
+            });
+          } catch { /* best-effort — the compile check / dev server below report what is still missing */ }
+        };
         const fastPreview = async (): Promise<void> => {
           // FOUNDATION GUARANTEE (deep-test Level-1, build 7c56b35a): the file-list planner can OMIT the
           // foundational files a vite-react app needs to install & boot — most damagingly `package.json`.
@@ -19277,17 +19413,9 @@ async function noteBuildOutcome(
           // dev server's port is up but the app can't load. Scan the generated files for imported-but-
           // undeclared packages and install exactly those BEFORE starting the dev server. Bounded + safe:
           // each name is shell-quote-validated, capped, and this only ADDS missing deps (never removes).
-          try {
-            const missing = findMissingDependencies(Object.fromEntries(writtenFiles))
-              .filter((p) => /^(?:@[\w.-]+\/)?[\w.-]+$/.test(p)) // shell-safe package names only
-              .slice(0, 20);
-            if (missing.length > 0) {
-              fastLog(`📦 Installing ${missing.length} missing dependenc${missing.length === 1 ? 'y' : 'ies'} the code imports but package.json omitted: ${missing.join(', ')}`);
-              // `|| … --legacy-peer-deps` retries only if the strict install hits an ERESOLVE peer
-              // conflict (EventHive autopsy) — the automated install is then as forgiving as the agent's.
-              await dispatcher.dispatch({ id: 'fast-reconcile', name: 'bash', input: { command: `npm install --no-audit --no-fund ${missing.join(' ')} || npm install --no-audit --no-fund --legacy-peer-deps ${missing.join(' ')}` } }, 'frontend');
-            }
-          } catch { /* reconcile is best-effort — a failure just falls back to the plain install above */ }
+          // The manifest is the one the lane wrote, else the one ON DISK (autopsy BR1959: read from the lane's
+          // writes alone, a lane that never wrote package.json counted `react` itself as undeclared).
+          await fastReconcileDependencies('preview');
           await dispatcher.dispatch({ id: 'fast-dev', name: 'bash', input: { command: 'npm run dev' } }, 'frontend');
           await dispatcher.dispatch({ id: 'fast-preview', name: 'update_preview', input: { port: oneShotDevPort(framework) } }, 'frontend');
         };
@@ -19378,6 +19506,9 @@ async function noteBuildOutcome(
             // Fix 38b — zero diagnostics alone is not verification. The marker records executable
             // exit zero, not compiler identity; require both canonical output evidence and the marker.
             // A missing marker remains unverified even when no diagnostic was printed.
+            // 📦 Declared-and-installed BEFORE the compile check (autopsy BR1959): TS2307 for a package nobody
+            // declared is not a code error, and a repair round cannot install a package.
+            await fastReconcileDependencies('verify');
             const r = await actuator.runCommand(workspaceId, `${TSC_ENSURE}; if ${TSC_BIN} --noEmit > /tmp/nb_tsc.log 2>&1; then echo __TSC_CLEAN__; fi; tail -200 /tmp/nb_tsc.log 2>/dev/null || true`);
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
             // Preserve the torn-install short circuit. Other unverified outputs must still reach
@@ -22234,6 +22365,7 @@ async function noteBuildOutcome(
         } catch { /* diagnostics are best-effort — never blocks a build */ }
       }
       let previewVerifiedFailed = false;
+      billingCtx.previewVerifiedFailed = false;
       // GT-11. Billing still reads previewVerifiedFailed. The gate does not:
       // a server that will not stay up is not "the app did not render".
       let previewRenderFailed = false;
@@ -23453,7 +23585,7 @@ async function noteBuildOutcome(
                 detail: devServerLastWordsDetail(lastWords),
                 autoResolved: false,
               });
-              previewVerifiedFailed = true;
+              previewVerifiedFailed = true; billingCtx.previewVerifiedFailed = previewVerifiedFailed;
               previewServerDown = true;
               break;
             }
@@ -23497,7 +23629,7 @@ async function noteBuildOutcome(
           buildDiag.record({ phase: 'preview', severity: 'warning', code: 'PREVIEW_NOT_RENDERED', message: problems.slice(0, 4).join(' | ').slice(0, 500), autoResolved: false });
           // Out of repair budget OR the wall-clock cap is near → stop and report honestly.
           if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
-            previewVerifiedFailed = true; // the eyes saw it NOT render, and the heal budget is spent — billing zeroes below
+            previewVerifiedFailed = true; billingCtx.previewVerifiedFailed = previewVerifiedFailed; // the eyes saw it NOT render, and the heal budget is spent — billing zeroes below
             previewRenderFailed = true;
             // RUNTIME HONESTY (deep-test 2026-07-18 — "onLinkClick is not a function"): the live preview
             // genuinely did NOT render / crashed at RUNTIME and the heal budget is spent. Record it as an
@@ -26978,12 +27110,14 @@ async function noteBuildOutcome(
         realCostRemainder: realCostRemainderForFailure,
         // The platform's OWN cost, recorded beside the bill on every settle (success or failure) —
         // the admin cost card's source of truth. Priced by the same call that priced the bill.
-        realCostUsd: decidedRealCostUsd, sandboxUsd: decidedSandboxUsd,
+        realCostUsd: decidedRealCostUsdIn, sandboxUsd: decidedSandboxUsd,
         // What we spent on turns that produced nothing and did NOT pass on to the user. Recorded
         // so the gap between real cost and bill is EXPLAINED rather than merely visible — a number
         // the admin cannot account for is the same problem as a number that is wrong.
         absorbedUnbilledUsd: decidedAbsorbedUsd,
+        surplusUnsettledAbsorbed,
       } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd, barrenPhases);
+      let decidedRealCostUsd = decidedRealCostUsdIn;
       // A VERSION THE USER CAN GO BACK TO (2026-09-20). The Time Machine reads `build_history`, which
       // until today only the LEGACY builder ever wrote — so it showed "No saved versions yet" for every
       // app this engine has ever made. Written here AND in the deadline finalizer, keyed by the same
@@ -27325,6 +27459,37 @@ async function noteBuildOutcome(
       // and `finalizeOnDeadline` calls the SAME function, so a Stop is billed by the same rules whichever
       // settle runs first. The kill switches (AGENTV3_BILL_CANCELLED, AGENTV3_BILL_LATE_STOP_RULES) are read
       // in `stopBillingSwitches` and nowhere else.
+      // OWNER 2026-11-11 (BR2279): a Weak/Surplus user-stop whose receipts were absorbed at ₹0
+      // still has recorded tokens. The stop rules can only REDUCE a bill, so they cannot invent a
+      // charge from $0. This narrow floor estimates the Surplus share at the cheapest published
+      // real rate, at cost, no markup, no sandbox fee. Kill switch: AGENTV3_BILL_SURPLUS_STOP_TOKEN_FLOOR=off
+      // (unset/empty means ON). Both billing points call `decideSurplusStopTokenFloor` with the same
+      // already-zeroed facts (empty build + unrendered / server-down preview) and the same own-file
+      // count, so a finalizer that settles first cannot invent a charge the normal settle would zero.
+      const surplusStopFloor = decideSurplusStopTokenFloor({
+        powerLevel: String(powerLevelReqEffective ?? ''),
+        surplusUnsettledAbsorbed: surplusUnsettledAbsorbed === true,
+        abortCause: abortCauseOf(abort.signal),
+        writtenFiles,
+        kitSeededFiles,
+        preseededGolden,
+        previewProven: appSeenRunningForBill,
+        freeListed: isAgentV3FreeUser(userId, email),
+        usage: surplusTokenUsageFromLedger(providerLedger.entries()),
+        editingExistingApp: isEditMode,
+        expectsArtifacts,
+        previewVerifiedFailed,
+        emptyBuildOk: result.ok === true,
+        stoppedByUser: stoppedByUser(buildDiag.report().issues),
+      });
+      if (surplusStopFloor) {
+        effectiveBilledUsd += surplusStopFloor.usd;
+        decidedRealCostUsd += surplusStopFloor.usd;
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: SURPLUS_STOP_COST_ESTIMATED, autoResolved: true,
+          message: surplusStopTokenFloorAdminMessage(surplusStopFloor),
+        });
+      }
       const stopSettlement = settleStopOrFailure({
         failed: zeroBillForFailedBuild(result.ok),
         switches: stopBillingSwitches(process.env),
@@ -27445,8 +27610,9 @@ async function noteBuildOutcome(
         } catch { /* a discount that cannot be decided is no discount — the ordinary price stands */ }
       }
 
-      const settledSandboxFee = proSandboxFee(effectiveBilledUsd);
-      effectiveBilledUsd = settledSandboxFee.totalUsd;
+      // The token-floor estimate is billed at cost: no measured sandbox and no 2.5% service fee.
+      const settledSandboxFee = surplusStopFloor ? proSandboxFee(0) : proSandboxFee(effectiveBilledUsd);
+      if (!surplusStopFloor) effectiveBilledUsd = settledSandboxFee.totalUsd;
 
       // THE BILL IS NOW SETTLED — every zeroing rule above has had its say. Only here can the
       // waiver's explanation be true, and only if the waived amount is still what the user pays:
@@ -27676,7 +27842,8 @@ async function noteBuildOutcome(
           // Sonnet's price read as a $1,257 loss. These two lines are the whole fix for that, and
           // they cost nothing — both numbers were already in scope, one variable away.
           realCostUsd: decidedRealCostUsd,
-          sandboxUsd: decidedSandboxUsd,
+          // An unset/invalid E2B rate makes VM expense UNKNOWN, not a measured $0.
+          sandboxUsd: livePreviewCharge.expenseMeasured ? decidedSandboxUsd : undefined,
           // Per-RUNG tokens. `reconciledProviderUsage` above names only the vendor, and one vendor
           // holds rungs 20x apart in price, so no downstream reader could price it.
           modelUsage: modelUsageFromEntries(providerLedger.entries()),
@@ -27764,10 +27931,12 @@ async function noteBuildOutcome(
               // here means money owed and not taken. The watchdog label is built BEFORE its debit
               // and therefore passes nothing, which is the truthful answer there.
               walletDebited: !!walletDebit && walletDebit.tokensDebited > 0,
+              estimated: !!surplusStopFloor && effectiveBilledUsd > 0,
             }),
             billedUsd: Math.round(effectiveBilledUsd * 1_000_000) / 1_000_000,
             billedInr: settledBilledInr,
             realCostUsd: Math.round(decidedRealCostUsd * 1_000_000) / 1_000_000,
+            ...(surplusStopFloor ? { realCostEstimated: true as const } : {}),
             sandboxCostUsd: Math.round(decidedSandboxUsd * 1_000_000) / 1_000_000,
             ...proSandboxFeeFields(settledSandboxFee),
             ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited } : {}),
@@ -28494,3 +28663,4 @@ async function noteBuildOutcome(
 
   }));
 }
+

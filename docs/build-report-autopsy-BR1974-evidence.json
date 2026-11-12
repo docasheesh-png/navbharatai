@@ -1,0 +1,108 @@
+{
+  "identity": {
+    "reportNumber": 1974,
+    "outcome": "succeeded",
+    "ok": true,
+    "prompt": "IMPORTANT: FIX THE APP STARTING SCREEN AND LOGIN FLOW\n\nThe current app has a problem: whenever I open CHESS SQUAD, it directly displays my personal dashboard. I do not want this behaviour.\n\nPlease completely fix the app's starting flow.\n\n1. First Screen – Welcome Page\n\nEvery time a new visitor opens the app, show the CHESS SQUAD welcome screen first.\n\nDisplay these fields:\n\n- CHESS SQUAD logo\n- Welcome to CHESS SQUAD\n- Enter Your Nickname\n- Enter Your WhatsApp Mobile Number\n- NEXT button\n\n2. My Personal Entry\n\nMy details are:\n\n- Nickname: INDRA_NEXUS\n- WhatsApp number: 7093492611\n- Points: Unlimited (∞)\n\nOnly after I enter BOTH my nickname and mobile number and press NEXT should my personal dashboard open.\n\n3. Other Members\n\n- Other members must enter their own nicknames and WhatsApp mobile numbers.\n- After pressing NEXT, they should enter their own personal dashboards.\n- Every new member starts with 5 points.\n- Allow unlimited members.\n- If two members have the same nickname, distinguish them using their mobile numbers.\n\n4. Mandatory Navigation Rules\n\n- The welcome screen must be the default starting page.\n- Never automatically open my personal dashboard when the app launches.\n- Do not automatically select my nickname.\n- Do not redirect visitors directly to the dashboard.\n- The dashboard must open only after the visitor enters their details and presses NEXT.\n- Provide a way to return to the welcome screen and switch members.\n- Keep each member's dashboard and points separate.\n- On reopening the app, show the welcome screen as requested.",
+    "promptLength": 1563,
+    "promptWords": 261,
+    "promptHash": "320531a0",
+    "reportDigest": "a33c9a72f357ecd5b6b41086dab3273fd9a1a7f556f286eb3d4790f8586452fc",
+    "buildId": "a5fbbb91-803e-467b-83f0-276489fd95f5",
+    "workspaceId": "agentv3-2HxdpJPQ4MhD6YarvA1wHyRmwAy2-bf02dc3d-3964-4a85-8f58-2e5a9ea3a04d",
+    "sessionId": "bf02dc3d-3964-4a85-8f58-2e5a9ea3a04d",
+    "listHistoryId": "1794110819264",
+    "startedAt": 1794110819264,
+    "endedAt": 1794111395927,
+    "startedAtIST": "2026-11-08 09:36:59.264 IST",
+    "endedAtIST": "2026-11-08 09:46:35.927 IST",
+    "durationMs": 576663,
+    "model": "qwen3-coder",
+    "framework": "vite-react",
+    "builtBy": "SURPLUS",
+    "rootCause": "Build completed successfully with no problems recorded."
+  },
+  "reportBytes": {
+    "minSha256": "ae280685e3aad7b0949fbc1940f30744807b2df76de056fc719e92aa98b3119f",
+    "prettySha256": "aba5bcc3a02b307700ebb7474cfc69639dabc6fe9a29ed3b7453d0544de69103",
+    "digestMatchesList": true
+  },
+  "truncation": {
+    "complete": true
+  },
+  "billing": {
+    "userTier": "weak (free tier — cheap engines) · not charged",
+    "charged": false,
+    "billedButNotDebited": false,
+    "walletDebited": false,
+    "billedUsd": 0,
+    "billedInr": 0,
+    "realCostUsd": 0,
+    "sandboxCostUsd": 0.026471,
+    "preSandboxSubtotalUsd": 0,
+    "sandboxFeeUsd": 0,
+    "sandboxFeePct": 2.5,
+    "powerMode": false,
+    "powerLevel": "weak",
+    "noClaude": true
+  },
+  "etaAccuracy": {
+    "promisedMs": 969576,
+    "lowMs": 772422,
+    "highMs": 1217787,
+    "actualMs": 576663,
+    "ratio": 0.5947579147998713,
+    "withinBand": false,
+    "evidenced": false,
+    "line": "The user was shown a ROUGH ESTIMATE, labelled a guess (unevidenced): 12.9 min–20.3 min (midpoint 16.2 min); the build took 9.6 min — 0.6× the midpoint and UNDER the band.",
+    "key": "complex_app",
+    "source": "platform"
+  },
+  "requestAnalysis": {
+    "taskType": "complex_app",
+    "complexityScore": 68,
+    "startTier": "sonnet",
+    "startBand": "standard band"
+  },
+  "nativeCapabilityObserved": {
+    "brief": "open-apps",
+    "cause": "bare whats\\s*app matched 'WhatsApp Mobile Number' / 'WhatsApp number'",
+    "sibling": "open\\s+(?:the\\s+)?(?:app|apps) would also match 'when I open the app'",
+    "summaryClaimed": "Installed @capacitor/app-launcher and added WhatsApp and SMS contact-support"
+  },
+  "complexityRouting": {
+    "report": "COMPLEX (score 68, model)",
+    "deterministicNote": "COMPLEX_APP_SIGNAL matches dashboard (personal dashboard). login system / bare auth do not match. Queued as Q-2647."
+  },
+  "changeClassified": "large (risk high, depth deep); also cross-cutting, bug, feature — 261 words > LARGE_WORDS 120",
+  "firstRenderSec": 285,
+  "postGreenWrites": 14,
+  "readyBeforeEnd": "Not measured (edit of existing files)",
+  "manifestFileCount": 22,
+  "oppositeClassAssembledBeforeEdit": true,
+  "shipped": [
+    "F1 WhatsApp-number / open-the-app is not open-apps",
+    "F1 #4165 restore plural open-apps and store/drawer compounds",
+    "F1 #4165 verb-gate store/drawer so publish-only mentions do not get open-apps",
+    "F1 #4165 launch-to/on/in and listing tails are not open-apps; post-nominal khol and go-to match",
+    "F1 #4165 clause-level store/link rules: deep-prefix, own-listing, khol+daal, khol-do+listing",
+    "F1 #4165 store-publish idioms not bare tokens; origin/main genuine-open regression gate",
+    "F1 #4165 close publish FPs: ko/se particles, Hinglish karna, English tense/object-gap",
+    "F1 #4165 Rule A explicit-open always wins; Rule B keeps idiom-wins; origin/main corpus gate",
+    "F1 #4165 cut store matching back to origin/main plus App Store presence tails; queue Q-2649; two-sided corpus gate",
+    "F1 #4165 restore named-app launches after open the app (called/named or capitalized token; newline/punctuation breaks)",
+    "F1 #4165 invert after-app rule: keep main capture minus EOS/punct/newline and a reviewed denylist",
+    "F2 en/em dash in case-study lookbehind"
+  ],
+  "notShipped": [
+    "Q-2647 dashboard→complex_app",
+    "Q-2648 bare sms",
+    "Q-2649 Play Store / go-to / link / redirect / kholo / launch store opens",
+    "TODO_ONLY_TURNS already Q-2375/Q-1068"
+  ],
+  "newQueueRows": [
+    "Q-2647",
+    "Q-2648",
+    "Q-2649"
+  ]
+}

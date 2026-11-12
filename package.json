@@ -115,7 +115,7 @@
     "@csstools/postcss-color-mix-function": "^4.0.14",
     "@csstools/postcss-oklab-function": "^5.0.16",
     "@csstools/postcss-progressive-custom-properties": "^5.1.2",
-    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite": "^0.5.11",
     "@firebase/eslint-plugin-security-rules": "^0.0.2",
     "@tailwindcss/vite": "^4.3.3",
     "@types/compression": "^1.8.1",

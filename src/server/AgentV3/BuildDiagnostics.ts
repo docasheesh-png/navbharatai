@@ -119,6 +119,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // All WARNING/INFO, so the error count a RED gate reads cannot change and no bill moves.
   'FASTLANE_CONTINUATION_FAILED',    // our generation's continuation call failed; the complete files were kept
   'FASTLANE_TRUNCATED_FILE_DROPPED', // our output limit cut a file mid-write; we discarded it and rebuild it
+  'FASTLANE_DEPS_RECONCILED',        // our lane declared/installed packages the code imports (autopsy BR1959); a package still missing surfaces as the app's own TS2307/boot finding
   'IMPORT_DIAGNOSTIC',               // how our server-side GitHub import ran
   'IMPORT_DB_PROVISION_FAILED',      // the PostgreSQL WE set up in the sandbox failed its connection test
   'IMPORT_DB_MIGRATIONS_SKIPPED',    // our sandbox could not install the deps, so we skipped the migration
@@ -688,8 +689,10 @@ export interface PreviewErrorRecord {
 /**
  * Billing & tier facts for THIS build (admin 2026-07-11: "free user / paid user, app kisne banaya,
  * kaun se providers fail hue" — the 2-day billing/provider system must show up in the report).
- * Written at settle time from the REAL charge (never an estimate); absent on a build that never
- * reached settle (e.g. a pre-stream refusal).
+ * Written at settle time from the settled charge. Ordinary builds record a verified figure, never
+ * an estimate. The owner-approved 2026-11-11 exception (BR2279 Weak/Surplus user-stop token floor)
+ * may record an estimated real cost; those rows set `realCostEstimated: true`.
+ * Absent on a build that never reached settle (e.g. a pre-stream refusal).
  */
 export interface BuildBillingRecord {
   /** Who the build ran for, from `buildBillingLabel` (one rule at both settle paths): 'free-list (admin/tester)' |
@@ -719,6 +722,8 @@ export interface BuildBillingRecord {
    * stored call log and says so.
    */
   realCostUsd?: number;
+  /** True when `realCostUsd` is the 2026-11-11 Weak/Surplus stop token-floor estimate, not a settled receipt. */
+  realCostEstimated?: true;
   /** Internal VM expense at the configured hourly rate (USD); 0 is unavailable if no rate exists. Not the customer service fee. */
   sandboxCostUsd?: number;
   preSandboxSubtotalUsd?: number;
@@ -1130,6 +1135,24 @@ export class BuildDiagnostics {
    * repeat into the PREVIOUS entry's `repeatCount` instead of pushing a new one.
    */
   record(issue: Omit<BuildIssue, 'ts'> & { ts?: number }): void {
+    // Outcomes are facts, not narration. The route's generic onNote adapter labels notes as
+    // info/auto-resolved; restore the canonical severity so the final outcome cannot be hidden.
+    if (issue.code === 'OUTCOME_ASKED_USER') {
+      issue = { ...issue, phase: 'build', severity: 'info', autoResolved: false };
+    } else if (issue.code === 'OUTCOME_EMPTY_BUILD' || issue.code === 'OUTCOME_SANDBOX_UNAVAILABLE') {
+      issue = { ...issue, phase: 'build', severity: 'error', autoResolved: false };
+    }
+
+    // SURPLUS uses its dedicated non-streaming runner (stream: false). A missing SURPLUS usage
+    // receipt is not caused by AGENTV3_STREAM_BUILD_CALLS; keep the cost unmeasured and point to
+    // provider receipt reconciliation rather than recommending a global streaming change.
+    const usageContext = String(issue.message || '') + ' ' + String(issue.detail || '');
+    if (issue.code === 'USAGE_NOT_REPORTED' && /\bSURPLUS\b/i.test(usageContext)) {
+      issue = {
+        ...issue,
+        detail: 'SURPLUS uses the dedicated non-streaming runner (stream: false), so streaming configuration and streamed-usage options do not apply to this call. This turn did not produce a usable provider usage/receipt mapping. Keep the provider cost unmeasured and reconcile against the provider receipt or invoice; do not infer zero cost or change the global streaming flag for this warning.',
+      };
+    }
     if (issue.code === 'SANDBOX_CMD' && typeof issue.message === 'string' && /\btypecheck\b/i.test(issue.message)) {
       const n = /→\s*(\d+)\s+type errors?/.exec(issue.message);
       this.openTypeErrors = n ? Number(n[1]) : /→\s*clean\b/.test(issue.message) ? 0 : this.openTypeErrors;

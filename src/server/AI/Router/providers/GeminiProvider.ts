@@ -2,6 +2,13 @@ import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
 import { GoogleGenAI } from "@google/genai";
 
+/** Resolve the same Gemini key aliases accepted by SDA's direct multimodal path. */
+export function resolveGeminiApiKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return [env.GEMINI_API_KEY, env.GOOGLE_API_KEY, env.GOOGLE_GENERATIVE_AI_API_KEY]
+    .map((value) => value?.trim())
+    .find((value): value is string => !!value);
+}
+
 export class GeminiProvider implements AIProvider {
   name: 'GEMINI' = 'GEMINI';
   priority = 2;
@@ -9,8 +16,10 @@ export class GeminiProvider implements AIProvider {
   async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, _images?: string[], signal?: AbortSignal): Promise<AIProviderResponse> {
     assertLegacyInferenceAllowed('direct-text-provider');
     signal?.throwIfAborted();
-    console.log(`[GeminiProvider] Entry. Key present: ${!!process.env.GEMINI_API_KEY}, Length: ${process.env.GEMINI_API_KEY?.length}`);
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+    const apiKey = resolveGeminiApiKey();
+    if (!apiKey) throw new Error('Gemini API key is not configured (GEMINI_API_KEY / GOOGLE_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY)');
+    console.log(`[GeminiProvider] Entry. Key present: ${!!apiKey}, Length: ${apiKey.length}`);
+    const ai = new GoogleGenAI({ apiKey });
     const startTime = Date.now();
     const model = modelOverride || 'gemini-2.5-flash';
     console.log(`[GeminiProvider] Entry. Model: ${model}. Prompt Length: ${prompt.length} chars.`);
@@ -40,7 +49,9 @@ export class GeminiProvider implements AIProvider {
 
   async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string> {
     assertLegacyInferenceAllowed('direct-text-provider');
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+    const apiKey = resolveGeminiApiKey();
+    if (!apiKey) throw new Error('Gemini API key is not configured (GEMINI_API_KEY / GOOGLE_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY)');
+    const ai = new GoogleGenAI({ apiKey });
     const streamModel = model || 'gemini-2.5-flash';
     const config: any = {};
     if (systemPrompt) config.systemInstruction = systemPrompt;
@@ -68,6 +79,6 @@ export class GeminiProvider implements AIProvider {
   }
 
   async healthCheck(): Promise<boolean> {
-    return !!process.env.GEMINI_API_KEY;
+    return !!resolveGeminiApiKey();
   }
 }

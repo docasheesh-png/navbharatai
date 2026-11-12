@@ -1,3 +1,5 @@
+import { executeGatewayQubax } from './qubaxTransport';
+import { qubaxConfig } from '../../lib/qubax';
 import { executeGatewayMitrify } from './mitrifyTransport';
 import { mitrifyConfig } from '../../lib/mitrify';
 import { cheaperInferenceMode, cheaperInferenceSharedAccessPermitted } from '../../lib/cheaperInferencePolicy';
@@ -24,7 +26,7 @@ export function gatewayTextCredentialBinding(credential: string): string {
   return createHash('sha256').update('navbharatai-inference-gateway-text-credential-v1\0').update(credential).digest('hex');
 }
 
-export type GatewayTextProvider = 'GLM' | 'GEMINI' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'OPENAI' | 'DEEPINFRA' | 'CHEAPERINFERENCE' | 'MITRIFY';
+export type GatewayTextProvider = 'GLM' | 'GEMINI' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'OPENAI' | 'DEEPINFRA' | 'CHEAPERINFERENCE' | 'MITRIFY' | 'QUBAX';
 export interface GatewayTextRateCard {
   readonly version: string;
   /** Only a reviewed exact all-token tariff, never a reservation ceiling or variable supplier discount. */
@@ -56,7 +58,7 @@ export interface GatewayTextTransportConfig {
 /** Reuse existing official server configuration; no secret alias is required. */
 export function gatewayCredentialEnvAllowed(transport: { provider: string; credentialEnv: string }): boolean {
   if (/^INFERENCE_GATEWAY_[A-Z0-9_]+$/.test(transport.credentialEnv)) return true;
-  const official: Record<string, readonly string[]> = { MITRIFY: ['MITRIFY_API_KEY'], CHEAPERINFERENCE: ['CHEAPERINFERENCE_API_KEY'],
+  const official: Record<string, readonly string[]> = { QUBAX: ['QUBAX_API_KEY'], MITRIFY: ['MITRIFY_API_KEY'], CHEAPERINFERENCE: ['CHEAPERINFERENCE_API_KEY'],
     GLM: ['FREE_CHAIN_GLM_API_KEY', 'FREE_CHAIN_GLMX_API_KEY'], GROQ: ['FREE_CHAIN_GROQ_API_KEY'],
     CLOUDFLARE: ['FREE_CHAIN_CF_API_TOKEN'], DEEPINFRA: ['FREE_CHAIN_DEEPINFRA_API_KEY'], OPENAI: ['FREE_CHAIN_OPENAI_API_KEY'],
     GEMINI: ['FREE_CHAIN_GEMINIPAID_API_KEY'], OPENROUTER: ['OPENROUTER_API_KEY'] };
@@ -151,6 +153,7 @@ const ENDPOINTS: Record<GatewayTextProvider, RegExp> = {
   OPENAI: /^https:\/\/api\.openai\.com\/v1\/?$/,
   DEEPINFRA: /^https:\/\/api\.deepinfra\.com\/v1\/openai\/?$/,
   CHEAPERINFERENCE: /^https:\/\/api\.cheaperinference\.com\/v1\/?$/,
+  QUBAX: /^https:\/\/api\.qubax\.ai\/v1$/ ,
   MITRIFY: /^https:\/\//,
   DEEPSEEK: /^https:\/\/api\.deepseek\.com\/v1\/?$/,
 };
@@ -238,10 +241,10 @@ function validRates(transport: GatewayTextTransportConfig, profile: ProviderProf
     || !rate || (rate.billingBasis !== undefined && rate.billingBasis !== 'exact-token-tariff') || Object.keys(rate).some(key => !RATE_KEYS.includes(key)) || !isIdentifier(rate.version)
     || !isCount(rate.verifiedAtMs) || !isCount(rate.expiresAtMs) || rate.verifiedAtMs > now || rate.expiresAtMs <= now) return false;
   try {
-    if ((transport.provider === 'MITRIFY' || transport.provider === 'CHEAPERINFERENCE') && rate.billingBasis !== undefined) return false;
-    if (transport.provider === 'MITRIFY') {
-      const cfg = mitrifyConfig();
-      return transport.baseURL === cfg.baseURL && transport.model === cfg.model
+    if ((transport.provider === 'MITRIFY' || transport.provider === 'QUBAX' || transport.provider === 'CHEAPERINFERENCE') && rate.billingBasis !== undefined) return false;
+    if (transport.provider === 'MITRIFY' || transport.provider === 'QUBAX') {
+      const cfg = transport.provider === 'QUBAX' ? qubaxConfig() : mitrifyConfig();
+      return transport.baseURL === cfg.baseURL && (transport.provider === 'QUBAX' ? rate.expiresAtMs - rate.verifiedAtMs <= 300_000 : transport.model === mitrifyConfig().model)
         && typeof rate.supplierPerHttpRequestCeilingNanoUsd === 'number' && isPositiveCount(rate.supplierPerHttpRequestCeilingNanoUsd)
         && rate.minimumDiscountBasisPoints === undefined && rate.supplierListInputNanoUsdPerMillion === undefined && rate.supplierListOutputNanoUsdPerMillion === undefined
         && rate.inputNanoUsdPerMillion === 0 && rate.outputNanoUsdPerMillion === 0 && rate.cachedInputNanoUsdPerMillion === undefined;
@@ -297,6 +300,7 @@ function validate(authorization: GatewayTextAuthorization, payload: GatewayTextP
     || profileRejection(p, r) || r.surface === 'image-generation' || r.surface === 'image-enhancement'
     || r.outputVisible || r.cancellation?.cancelled !== false || !isCount(r.deadlineAtMs) || now >= r.deadlineAtMs
     || !isPositiveCount(r.attemptTimeoutMs) || !validRates(t, p, now)) fail('POLICY_BLOCKED');
+  if (t.provider === 'QUBAX' && r.surface !== 'chat') fail('POLICY_BLOCKED');
   const b = c.binding;
   if (b.profileId !== p.id || b.profileVersion !== p.version || b.providerId !== p.providerId
     || b.modelId !== p.modelId || b.modelRevision !== p.modelRevision || b.adapterId !== p.adapterId
@@ -321,7 +325,7 @@ function validate(authorization: GatewayTextAuthorization, payload: GatewayTextP
     const rate = t.rateCard!;
     if (r.mode !== 'free-first-authorized-paid' || !b.budget || b.budget.rateCardVersion !== rate.version
       || !b.priceBinding || !b.budgetAuthorizationBinding
-      || b.budget.amountNanoUsd < (t.provider === 'MITRIFY' ? rate.supplierPerHttpRequestCeilingNanoUsd! : maximumCostNanoUsd(capability.inputTokens, capability.outputTokens,
+      || b.budget.amountNanoUsd < ((t.provider === 'MITRIFY' || t.provider === 'QUBAX') ? rate.supplierPerHttpRequestCeilingNanoUsd! : maximumCostNanoUsd(capability.inputTokens, capability.outputTokens,
         rate.inputNanoUsdPerMillion, rate.outputNanoUsdPerMillion))) fail('POLICY_BLOCKED');
   } else if (b.budget || b.priceBinding) fail('POLICY_BLOCKED');
 }
@@ -436,6 +440,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
     const payload = { prompt: input.prompt, systemPrompt: input.systemPrompt, schema: input.schema,
       images: input.images === undefined ? undefined : [...input.images], modelOverride: input.modelOverride, streaming: !!input.onChunk };
     validate(a, payload, Date.now());
+    if (a.transport.provider === 'QUBAX') return await executeGatewayQubax({ ...input, ...a, prompt: payload.prompt, systemPrompt: payload.systemPrompt }, () => { dispatchedClaim = a.claim; });
     if (a.transport.provider === 'MITRIFY') return await executeGatewayMitrify({ ...input, ...a, prompt: payload.prompt, systemPrompt: payload.systemPrompt }, () => { dispatchedClaim = a.claim; });
     const { transport: t, request } = a;
     controller = new AbortController();

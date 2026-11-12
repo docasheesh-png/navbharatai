@@ -101,8 +101,10 @@ const SAYS_3D = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional)\b/i;
  * 2026-09-14 bike-racing report and build 46e2d74b are this kind. Precision-first on purpose: a game this
  * misses keeps the 2D-safe layers and its builder may still run the 3D recipes, exactly as before the seed
  * existed; a game this wrongly matches gets three.js laid down under it.
+ * BR1966: glued GTA titles (gta5 / gtav / gta-5) match the same 3D kit as spaced "gta 5"; a bare
+ * "gta" word-boundary misses them.
  */
-const DRAWN_IN_3D = /\b(?:(?<!typing\s{1,3})rac(?:e|es|er|ers|ing)|driv(?:e|es|er|ers|ing)|gaa?di|open\s*-?\s*world|first\s*-?\s*person|third\s*-?\s*person|fps|gta|minecraft|pubg|free\s*-?\s*fire|battle\s*-?\s*royale|flight\s*-?\s*sim\w*|village|gaon|gaanv)\b/i;
+const DRAWN_IN_3D = /\b(?:(?<!typing\s{1,3})rac(?:e|es|er|ers|ing)|driv(?:e|es|er|ers|ing)|gaa?di|open\s*-?\s*world|first\s*-?\s*person|third\s*-?\s*person|fps|gta(?:\s*[-_]?\s*[5v])?|minecraft|pubg|free\s*-?\s*fire|battle\s*-?\s*royale|flight\s*-?\s*sim\w*|village|gaon|gaanv)\b/i;
 
 /**
  * Does the REQUEST say this game is drawn in 3D? PURE.
@@ -252,6 +254,32 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
   // Game Engine Ultra Phase 1: the request's scope contract (gameIntent.ts), when the route supplies one.
   const contract = (opts.contract ?? '').trim();
   return `${head}\n\n${contract ? `${contract}\n\n` : ''}${sections.join('\n\n')}`;
+}
+
+/**
+ * BR1977: `run_recipe` reports ok as `!r.is_error` even when it wrote nothing
+ * (sandbox unavailable, a silent no-op). The route then recorded GAME_KIT_SEEDED
+ * listing five recipes and 3 files, and told the builder the kit was on disk.
+ * Six seconds later `src/game/core/events.ts` was missing. A claim is honest
+ * only when at least as many files landed as recipes that said they succeeded
+ * (a healthy 3D seed writes ~30). PURE.
+ */
+export function kitSeedClaimIsHonest(okRecipes: number, filesWritten: number): boolean {
+  if (!Number.isFinite(okRecipes) || !Number.isFinite(filesWritten)) return false;
+  if (okRecipes <= 0) return false;
+  return filesWritten >= okRecipes;
+}
+
+/** Downgrade empty recipe "successes" in place so the handoff cannot say the kit is on disk. */
+export function downgradeEmptyKitSeedSuccesses(results: GameKitSeedResult[], filesWritten: number): void {
+  const reportedOk = results.filter((r) => r.ok).length;
+  if (kitSeedClaimIsHonest(reportedOk, filesWritten)) return;
+  for (const r of results) {
+    if (r.ok) {
+      r.ok = false;
+      r.content = `reported success but only ${filesWritten} file(s) landed for ${reportedOk} recipe(s)`;
+    }
+  }
 }
 
 /** The admin line for GAME_KIT_SEEDED. PURE. */

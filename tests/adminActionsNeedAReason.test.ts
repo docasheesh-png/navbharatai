@@ -123,7 +123,11 @@ describe('🔒 the server refuses on its own — the screen is not the boundary'
   it('tokens: refused without a reason BEFORE the wallet is touched; before/after balances audited', () => {
     const b = routeBody(ADMIN, "app.post('/api/admin/users/:userId/tokens'");
     expect(b.indexOf('readAdminReason(')).toBeGreaterThan(-1);
-    expect(b.indexOf('readAdminReason(')).toBeLessThan(b.indexOf('runTransaction('));
+    // The wallet write lives in `adjustAdminBuildTokens` (its own transaction). This used to look
+    // for `runTransaction(` in this route body, which only existed because the retired bulk
+    // welcome-gift grant sat between this handler and the next route.
+    expect(b.indexOf('adjustAdminBuildTokens(')).toBeGreaterThan(-1);
+    expect(b.indexOf('readAdminReason(')).toBeLessThan(b.indexOf('adjustAdminBuildTokens('));
     for (const f of ['previousBalance', 'newBalance', 'admin: adminUsername()', "result: 'ok'"]) expect(b).toContain(f);
     expect(b).not.toContain("'Admin adjustment'");
   });

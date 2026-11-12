@@ -393,7 +393,16 @@ small, .muted, .text-muted { color: var(--muted); }
 .nb-sidebar a.active, .nb-nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .nb-nav { display: flex; flex-direction: column; gap: 4px; }
 .nb-brand-icon { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 8px; object-fit: contain; }
-.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); }
+/* A dashboard topbar holds the page title (autopsy BR1972: "EDU AI – EXAMINATION ASSISTANT"
+   made this header 508px wide on a 390px phone, because a flex item's min-width is its
+   content size). It may shrink and wrap. overflow-x is left visible: setting it to auto
+   would compute overflow-y as auto and clip absolute dropdowns and popovers inside the bar.
+   overflow-wrap is not set here: anywhere is inherited and shrinks min-content, so a title
+   squeezed beside the action buttons can break mid-word. The title (an h1; the kit does
+   not define .nb-page-title) gets min-width: 0 and overflow-wrap: break-word instead.
+   Existing apps that already copied a previous rule are not rewritten. */
+.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap; min-width: 0; max-width: 100%; box-sizing: border-box; }
+.nb-topbar h1 { min-width: 0; overflow-wrap: break-word; }
 .nb-main { padding: 24px 20px; min-width: 0; }
 @media (max-width: 820px) {
   .nb-shell { grid-template-columns: 1fr; }
@@ -484,12 +493,33 @@ small, .muted, .text-muted { color: var(--muted); }
    stacked, products in one long column, and an MRP that was not struck through. These are the shapes
    every Indian shopping app shares — Blinkit, Zepto, BigBasket — so they are drawn here once. */
 .nb-header { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 16px; background: color-mix(in srgb, var(--card) 90%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+/* A site header (.nb-header) often sits a long company name and a
+   section-link list inside an inner nowrap .row (autopsy BR1975:
+   Header.tsx put .nb-brand and <nav><ul class="row gap-24"> in
+   <div class="container row ...">, so the <nav> was 296px wide and
+   reached x=650 on a 390px phone — 260px of sideways scroll).
+   Wrapping the <header> or the <nav> does not help: they are not
+   the nowrap flex boxes. On phone widths only, those inner .row
+   boxes and the header's nav list may wrap and shrink. :where()
+   keeps specificity at zero. display is unchanged (.row is already
+   flex; a block nav ul ignores flex-wrap). overflow is left
+   visible (BR1972). Game HUDs (.nb-game-hud) and card/article
+   headers do not use .nb-header, so they are untouched. Desktop
+   is unchanged (the query does not apply). Existing apps that
+   already copied a previous rule are not rewritten. */
+@media (max-width: 640px) {
+  :where(.nb-header .row),
+  :where(.nb-header nav ul) { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+}
 .nb-brand { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 1.2rem; font-weight: 800; letter-spacing: -0.01em; color: var(--fg); text-decoration: none; }
 .nb-brand:hover { text-decoration: none; }
-.nb-header-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+/* A header action row may hold a whole nav of chips (autopsy BR1959: ten nav chips made this row 1364px wide
+   on a 390px phone, because an inline-flex box takes its content's full width). It may shrink and wrap;
+   the chip row inside it scrolls sideways within the screen instead of widening the page. */
+.nb-header-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; min-width: 0; max-width: 100%; }
 .nb-search { flex: 1 1 220px; min-width: 0; border-radius: 999px; padding-left: 16px; background: color-mix(in srgb, var(--fg) 5%, var(--card)); }
 /* Horizontal category chips — they scroll sideways on a phone instead of wrapping into a wall. */
-.nb-chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0; scrollbar-width: none; }
+.nb-chips { display: flex; gap: 8px; overflow-x: auto; min-width: 0; max-width: 100%; padding: 4px 0; scrollbar-width: none; }
 .nb-chips::-webkit-scrollbar { display: none; }
 .nb-chip { flex: none; min-height: 36px; padding: 4px 16px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--fg); font-weight: 600; white-space: nowrap; }
 .nb-chip:hover { background: var(--accent-soft); color: var(--accent-ink); }

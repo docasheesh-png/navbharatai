@@ -76,7 +76,7 @@ export type ViewType =
   | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot'
   | 'multipages' | 'analytics' | 'debugger' | 'checkup' | 'performance' | 'components'
   | 'seo' | 'apk' | 'figma' | 'domain' | 'team' | 'pwa' | 'minifier' | 'sharereview'
-  | 'darkmode' | 'monetize' | 'imagegen' | 'versioning' | 'apimarket'
+  | 'darkmode' | 'monetize' | 'voice_ai' | 'imagegen' | 'versioning' | 'apimarket'
   | 'appstore' | 'collab' | 'aitesting' | 'localization' | 'codereview'
   | 'dbstudio' | 'cicd' | 'plugins' | 'whitelabel'
   | 'designsys' | 'healthmon' | 'engine_builder' | 'professionals'

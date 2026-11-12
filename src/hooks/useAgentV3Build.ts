@@ -91,7 +91,7 @@ export interface UseAgentV3Build {
   /** UNSEND — take back the last message: stop any in-flight build AND purge it from the server
    *  transcript + workspace memory so it never resurfaces. Resolves true when the server confirmed the
    *  purge (the caller then removes the message from the visible thread). Never throws. */
-  unsend: () => Promise<boolean>;
+  unsend: (attachmentScope?: { attachmentSessionId: string; attachmentMessageId: string }) => Promise<boolean>;
   reset: () => void;
   /** True when a build is running server-side but this UI is NOT attached to it
    *  (e.g. the original connection was lost) — the panel offers "Resume". */
@@ -479,7 +479,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   // UNSEND — take back the last message. Stops any in-flight build (same abort + generation-bump as
   // stop(), so this UI detaches cleanly) then asks the server to purge the message from the durable
   // transcript AND workspace memory. The panel removes it from the visible thread on a truthy result.
-  const unsend = useCallback(async (): Promise<boolean> => {
+  const unsend = useCallback(async (attachmentScope?: { attachmentSessionId: string; attachmentMessageId: string }): Promise<boolean> => {
     generationRef.current += 1; // invalidate any in-flight resume()/subscribeLive()
     abortRef.current?.abort();
     abortRef.current = null;
@@ -494,7 +494,7 @@ export function useAgentV3Build(): UseAgentV3Build {
       const res = await fetch('/api/agentv3/unsend', {
         method: 'POST',
         headers: await authJsonHeaders(),
-        body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current, workspaceId }),
+        body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current, workspaceId, ...attachmentScope }),
       });
       if (!res.ok) return false;
       const j = await res.json().catch(() => null);
@@ -1787,3 +1787,4 @@ export function useAgentV3Build(): UseAgentV3Build {
   return {
     isBusy, markUserMessage, state, running, error, errorBeforeBuildStarted, start, respond, restore, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueState, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }
+

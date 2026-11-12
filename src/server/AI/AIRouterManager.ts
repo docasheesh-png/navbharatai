@@ -66,7 +66,7 @@ export class AIRouterManager {
 
   static reset() { this.instanceFree = null; this.instancePro = null; this.instanceProfessional = null; this.instanceProfessionalFree = null; this.instanceProfessionalFreeFallback = null; }
 
-  // FREE: GLM-flash (free leader) → Gemini flash-lite/flash on both Google doors → GLM-4.7.
+  // FREE: GLM-flash (free leader) → OpenAI Nano → Vertex Flash-Lite → Vertex Flash.
   // Claude NEVER used in free. Nothing dearer than `kimi-k2.7` — see the ceiling below.
   //
   // 🔴 THE ADMIN DREW THE LINE (2026-09-12). Shown the whole rate card, they marked it up to
@@ -92,7 +92,7 @@ export class AIRouterManager {
   // PROFESSIONAL keep every rung they had; this ceiling is the FREE ladder's alone.
   private static buildFree(): AIRouter {
     const router = new AIRouter("free");
-    console.log('[ROUTER_MGR] Building FREE chain: GLM-flash(free) → flash-lite → flash (Vertex, then Gemini) → GLM-4.7 — capped at the kimi-k2.7 price line');
+    console.log('[ROUTER_MGR] Building FREE chain: GLM-flash(free) → OpenAI Nano → Vertex Flash-Lite → Vertex Flash — capped at the kimi-k2.7 price line');
 
     // Free, fast leader: GLM-4.7-Flash ($0 in/out on Z.AI). Self-gates on GLM_API_KEY
     // (healthCheck) so this is inert until the key is set; on failure/rate-limit the
@@ -106,9 +106,8 @@ export class AIRouterManager {
 
     // Current Gemini models only — gemini-2.0-flash / gemini-1.5-* are RETIRED and 404
     // at the provider, making those fallback slots dead weight that only added latency.
-    // ONE ladder across both Google doors, ordered by the CHAT cost index (input-weighted — a chat
-    // turn is input-heavy, so the output column alone orders them wrongly). Vertex leads among equals
-    // because it is the free universe's service-account auth and needs no extra key.
+    // The approved legacy order keeps both metered Vertex models at the end. The cost ceiling
+    // still applies to every paid rung, independently of its routing priority.
     //
     // 🔒 THE CEILING IS ENFORCED HERE, AT REGISTRATION — not only in CI. A test that fails on a dear
     // rung protects the repo; this protects the BILL, including on a branch nobody ran the suite on.
@@ -127,10 +126,10 @@ export class AIRouterManager {
       try { router.registerProvider(cappedFreeTierRung(slot(prov, priority, model), 'free-chat')); } catch {}
     };
 
-    // ── THE LADDER (admin-decided 2026-09-15) ────────────────────────────────────────────────────
+    // ── THE LADDER (admin-decided 2026-11-09) ────────────────────────────────────────────────────
     //   0. GLM glm-4.7-flash             index 0.00   ₹0 leader (registered above)
-    //   1. Vertex gemini-2.5-flash-lite  index 1.20
-    //   2. OpenAI gpt-5-nano             index 2.85   the THIRD VENDOR
+    //   1. OpenAI gpt-5-nano             index 2.85
+    //   2. Vertex gemini-2.5-flash-lite  index 1.20   directly before Vertex Flash
     //   3. Vertex gemini-2.5-flash       index 4.90
     //
     // WHAT CHANGED. The Gemini-DIRECT door and the glm-4.7 last rung are gone, and OpenAI is new.
@@ -139,14 +138,11 @@ export class AIRouterManager {
     // its one non-Google rung was glm-4.7, which shares a KEY with the free leader and therefore dies
     // in the same 429 storm that killed it. Three genuinely independent vendors answer now.
     //
-    // ⚠️ THE ADMIN APPROVED Nano AT POSITION 1, AND THIS SHIPS IT AT 2. Said out loud because it is a
-    // change to a stated decision, not a detail: they chose Nano-before-lite while our own rate card
-    // still mis-priced flash-lite at the FLASH line (index 4.90). The invoice-verified fix in THIS
-    // SAME change drops flash-lite to 1.20 — cheaper than Nano — so the order they approved was
-    // built on a number this commit proves wrong. Their standing instruction is "kharcha kam se kam";
-    // cheapest-first serves it, and `freeChainCost.test.ts` enforces it as an invariant, so shipping
-    // the approved order would ALSO have meant weakening a guard that exists to protect the bill.
-    // Swapping priorities 1 and 2 is the whole edit if they want it back.
+    // Vertex Flash-Lite is metered, not the Gemini Developer API free tier. The admin asked for
+    // paid Flash-Lite immediately before the final Vertex Flash rung. This explicit order takes
+    // precedence over the old cheapest-first order: Nano is also paid and has a higher modeled
+    // chat cost than Lite. The model allowlist, shared daily cap and price ceiling are unchanged.
+    // Official Vertex pricing: https://cloud.google.com/vertex-ai/generative-ai/pricing
     //
     // 🔒 EVERY RUNG IS A LITERAL, ON PURPOSE. `freeChainCost.test.ts` reads these registrations out of
     // the source to price them, and its own comment warns that a shape it cannot parse is "silently
@@ -156,11 +152,11 @@ export class AIRouterManager {
     const openai = new OpenAiChatProvider();
     const vertex = new VertexProvider();
     ([
-      [vertex, 'gemini-2.5-flash-lite', 1],
+      [vertex, 'gemini-2.5-flash-lite', 2],
       [vertex, 'gemini-2.5-flash',      3],
     ] as const).forEach(([prov, m, p]) => registerFree(prov, p, m, 'VERTEX'));
     ([
-      [openai, 'gpt-5-nano', 2],
+      [openai, 'gpt-5-nano', 1],
     ] as const).forEach(([prov, m, p]) => registerFree(prov, p, m, 'OPENAI'));
 
     return router;
@@ -206,14 +202,13 @@ export class AIRouterManager {
 
   // PROFESSIONAL universe (Doctor AI / SDA + every config-driven professional:
   // Teacher, Lawyer, CA, Astrologer, Kisan, …). Fully isolated from FREE and PRO.
-  // Routing shape (via AIRouter.routeRaced): RACE Grok × Gemini × Vertex
-  // concurrently — first non-empty success wins; ONLY if all three fail, fall back
-  // to Claude Haiku (last resort). Honors the "Grok primary, Claude last" core law.
+  // Routing shape (via AIRouter.route): Grok → Gemini → Vertex → Claude Haiku.
+  // Sequential fallback means only the first successful provider is billed; Claude remains last resort.
   private static buildProfessional(): AIRouter {
     const router = new AIRouter("professional");
-    console.log('[ROUTER_MGR] Building PROFESSIONAL chain: RACE(Grok × Gemini × Vertex) → Claude Haiku(last resort)');
+    console.log('[ROUTER_MGR] Building PROFESSIONAL chain: Grok → Gemini → Vertex → Claude Haiku (sequential fallback)');
 
-    // ── Race participants (fired concurrently) ──
+    // ── Fallback rungs (called sequentially only when the prior rung fails) ──
     try {
       const grok = new GrokProvider();
       router.registerProvider(slot(grok, 1, 'grok-3'));
@@ -229,7 +224,7 @@ export class AIRouterManager {
       router.registerProvider(slot(vertex, 3, 'gemini-2.5-flash'));
     } catch {}
 
-    // ── Last resort ONLY: Claude Haiku (cheap, reached only if the race fails) ──
+    // ── Last resort ONLY: Claude Haiku (cheap, reached only if all earlier rungs fail) ──
     try {
       const claude = new AnthropicProvider('claude-haiku-4-5-20251001');
       claude.priority = 99;
@@ -243,9 +238,8 @@ export class AIRouterManager {
   // PROFESSIONAL-FREE universe (admin 2026-07-09): the free first-attempt tier for the
   // config-driven professionals. It contains ONLY GLM-4.7-Flash ($0 in/out on Z.AI) — the
   // caller (professionals/engine.ts) tries this universe first and, on any failure or
-  // rate-limit, falls back to the full PAID professional universe above, which stays
-  // byte-for-byte unchanged (RACE Grok × Gemini × Vertex → Claude Haiku). Keeping the free
-  // tier as its own single-provider universe (instead of mixing GLM into the paid race)
+  // rate-limit, falls back to the full PAID professional universe above (sequential Grok → Gemini → Vertex → Claude Haiku). Keeping the free
+  // tier as its own single-provider universe (instead of mixing GLM into the paid fallback chain)
   // means a successful free answer fires ZERO paid provider calls, and a missing
   // GLM_API_KEY makes this universe inert (healthCheck false) so behaviour degrades to
   // exactly today's paid path.

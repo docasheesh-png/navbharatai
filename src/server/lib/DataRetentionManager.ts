@@ -836,6 +836,7 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
  * a warning nobody can ever clear is a warning nobody reads.
  */
 export const RETAINED_INDEFINITELY: readonly { collection: string; reason: string }[] = [
+  { collection: 'agentv3_sandbox_orphans', reason: 'Cleanup authority retained across account deletion: pending records contain only provider sandbox ID, fixed cleanup reason and retry timestamps, never workspace/user identity or content. Do not expire unresolved resources that may still incur cost. Successful cleanup replaces the row with status/resolvedAt only under a SHA-256 identity digest; this minimal terminal fence prevents stale creators reopening cleanup. No raw provider ID survives in terminal records or cursor keys.' },
   { collection: 'session_revocations', reason: 'Minimal security tombstone: UID-keyed monotonic sign-in cutoff and bounded rate counter only, no tokens or contact details. Removing it can reauthorize revoked custom-token origins or direct-database sessions, including after partial account deletion. Retain until credential expiry/erasure can be proven safely; never purge merely by elapsed time.' },
   { collection: 'surplus_build_receipts', reason: 'server-only supplier expense and uncertain-dispatch audit evidence for explicitly authorized capped pilots. Contains opaque build/account/call identities, normalized usage and exact money, never prompts, source code, raw responses or credentials. Deleting pending or final evidence can erase liability or permit replay; no clock-based deletion is authorized. Bounded by each pilot maxCalls.' },
   { collection: 'surplus_connection_tests', reason: 'server-only fixed one-shot synthetic connection-test attempt and unknown-liability fence. Retained across credential/review rotation so deletion cannot re-arm the owner-authorized test. Stores only safe status, timing, credential digest and exact reported money; no prompt content, provider output, keys or raw account/balance responses. No automatic deletion or reset; independent reconciliation authorization required.' },
@@ -869,6 +870,7 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
    * whose retention is a legal duty rather than a choice. Saying so out loud is the point.
    */
   { collection: 'payment_transactions', reason: 'a record of money received; tax and accounting law requires it, and Privacy §9 names it as an exception to erasure' },
+  { collection: 'voice_ai_operations', reason: 'financial reservation, refund and request-idempotency records containing uid, canonical ownerId, exact fee, reserved amount and timestamps, never text, audio or credentials. Pending rows preserve money owed; completed/refunded rows prevent the same request from charging again. Like hosting_billing and nav_store_pending_credits, retain across account deletion and without TTL until independently reviewed financial reconciliation/archive can preserve both obligations.' },
   /**
    * THE BILL OF SUPPLY IS A STATUTORY DOCUMENT, NOT A CONVENIENCE COPY (#3734, classified by the
    * Q-701 census, which refused the PR until this was decided).
@@ -1148,7 +1150,27 @@ export async function deleteUserData(db: RetentionFirestore, uid: string): Promi
           }
         }
         const snap = await ref.get();
-        if (snap.exists) { await ref.delete(); deleted++; }
+        if (snap.exists && entry.collection === 'user_token_wallets') {
+          // A pending hold is refundable money, not ordinary profile data. The operation record
+          // alone cannot recover a refund after its wallet is erased. Recheck and delete in one
+          // transaction: a racing reservation either observes a missing wallet or makes this
+          // deletion retry and retain it. Other account data and Auth follow their existing flow.
+          if (!db.runTransaction) throw new Error('Wallet erasure requires transactional reservation checks; wallet retained for review.');
+          deleted += await db.runTransaction(async tx => {
+            const current = await tx.get(ref);
+            if (!current.exists) return 0;
+            const wallet = current.data();
+            if (!wallet || (wallet.walletLedger !== undefined && !Array.isArray(wallet.walletLedger))) {
+              throw new Error('Wallet reservation state could not be verified; wallet retained for financial review.');
+            }
+            if (Array.isArray(wallet.walletLedger) && wallet.walletLedger.some(row => row?.openHolds !== undefined
+              && (!Array.isArray(row.openHolds) || row.openHolds.length > 0))) {
+              throw new Error('Wallet retained for pending payment reservations or refunds. Complete wallet erasure after financial reconciliation.');
+            }
+            tx.delete(ref);
+            return 1;
+          });
+        } else if (snap.exists) { await ref.delete(); deleted++; }
       } else if (entry.key.transform === 'free-answer-principal-hash') {
         const owner = createHash('sha256').update(`user:${uid}`).digest('hex');
         let drained = false;

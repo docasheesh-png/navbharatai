@@ -65,6 +65,7 @@ import { registerExplainCodeRoutes } from './src/server/routes/explainCode';
 import { registerDebugRoutes } from './src/server/routes/debug';
 import { registerWebsiteCheckupRoutes } from './src/server/routes/websiteCheckup';
 import { registerAppDebugRoutes } from './src/server/routes/appDebug';
+import { registerVoiceAiRoutes } from './src/server/routes/voiceAi';
 import { registerImageGenRoutes } from './src/server/routes/imageGen';
 import { registerDevtoolsProxyRoutes } from './src/server/routes/devtoolsProxy';
 import { registerScreenshotToPromptRoutes } from './src/server/routes/screenshotToPrompt';
@@ -130,6 +131,7 @@ import { serverLoad } from './src/server/lib/serverLoad';
 import { registerSyncRoutes } from './src/server/routes/sync';
 import { registerProfileRoutes } from './src/server/routes/profile';
 import { registerExportRoutes } from './src/server/routes/export';
+import { registerProAttachmentRoutes } from './src/server/routes/proAttachments';
 import { registerSpreadsheetFileRoutes } from './src/server/routes/spreadsheetFiles';
 import { registerApiContractRoutes } from './src/server/lib/apiContract';
 import { registerKnowledgeDocsRoutes } from './src/server/lib/KnowledgeDocs';
@@ -827,6 +829,7 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   registerDebugRoutes(app); // AI Debugger — real free-tier AI error analysis (POST /api/debug)
   registerWebsiteCheckupRoutes(app); // Website Checkup — passive health check of the USER'S OWN published site (GET /api/website-checkup/sites, POST /api/website-checkup)
   registerAppDebugRoutes(app); // Full-App Debugger — whole-codebase scan (GET /api/app-debug/sources, POST /api/app-debug/run)
+  registerVoiceAiRoutes(app);
   registerImageGenRoutes(app); // AI Image Gen — real image generation on our own key (POST /api/image/generate)
   registerDevtoolsProxyRoutes(app); // API Tester — SSRF-guarded server proxy (POST /api/devtools/proxy)
   registerScreenshotToPromptRoutes(app); // Screenshot→Code — vision → build prompt (POST /api/screenshot/to-prompt)
@@ -848,6 +851,8 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   // User profile (My Profile page: display name, photo, build history, budget).
   registerProfileRoutes(app);
   registerExportRoutes(app); // P-DATA.7 — user data export (build history + usage as CSV/JSON/Excel)
+  // Upload rollout is gated inside the route; existing owners can still retrieve/delete originals.
+  registerProAttachmentRoutes(app, chatLimiter);
   registerSpreadsheetFileRoutes(app); // NavBharatAI Pro's engine-made Excel/CSV files (spreadsheetRequest.ts)
   registerApiContractRoutes(app); // P-DATA.5 — OpenAPI 3.0.3 contract at /api/openapi.json + /api/docs viewer
   registerKnowledgeDocsRoutes(app); // U-9 — docs site at /guide + machine-readable /api/knowledge-base
@@ -1203,6 +1208,8 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
           // AND ONCE AT BOOT. Without this the first six hours of a fresh instance — which includes
           // every build right after a deploy — would still bill at the fallback.
           void refreshFx();
+          scheduler.register({ id: 'voice-ai-refund-recovery', schedule: { kind: 'everyMs', ms: 60_000 }, exclusive: true,
+            handler: async () => { await import('./src/server/lib/voiceAiStore').then(m => m.reconcileVoiceHolds()); } });
           scheduler.register({
             id: 'monitor-alerts',
             schedule: { kind: 'everyMs', ms: 15 * 60_000 },
@@ -1224,12 +1231,18 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
             .then(({ claimJobRun }) => import('./src/server/lib/serverDb').then(({ getServerDb }) => {
               // Resolved per CALL, not at wiring time: the db may not be set yet at boot, and a null
               // store means the job runs — never that it is silently cancelled.
-              scheduler.setClaim((jobId) => ['live-model-registry', 'live-image-model-registry', 'surplus-metadata-registry'].includes(jobId) ? Promise.resolve(true) : claimJobRun(getServerDb() as any, { jobId }));
+              scheduler.setClaim((jobId) => ['live-model-registry', 'live-image-model-registry', 'surplus-metadata-registry', 'qubax-public-price-feed'].includes(jobId) ? Promise.resolve(true) : claimJobRun(getServerDb() as any, { jobId }));
             }))
             .catch(() => { /* no claim wired ⇒ every job runs, exactly as before */ })
             // Either way the boot run happens — a claim that could not be wired must delay the purge,
             // never cancel it.
             .finally(() => { bootRun?.(); });
+          // Public GET-only prices, opt-in and isolated from dispatch approvals. Uses its own short,
+          // fail-closed fence instead of the generic fail-open ten-minute lease above.
+          try {
+            const prices = await import('./src/server/lib/qubaxPriceFeedRuntime');
+            prices.registerQubaxPriceFeed(scheduler);
+          } catch { console.warn('[QUBAX_PRICE_FEED] Public observations unavailable; dispatch authority is unchanged.'); }
           // Optional public metadata only. Its own durable fenced lease fails closed; no inference or key required.
           try {
             const surplus = await import('./src/server/AI/SurplusRegistry/runtime');
@@ -1366,4 +1379,5 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
     process.exit(1);
   }
 })();
+
 

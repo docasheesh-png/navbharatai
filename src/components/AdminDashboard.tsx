@@ -1,5 +1,6 @@
 import { InferenceGatewaySetupPanel } from './admin/InferenceGatewaySetupPanel';
 import { FreeChatChainPanel } from './admin/FreeChatChainPanel';
+import { TestChatBotPanel } from './admin/TestChatBotPanel';
 import { DeepinfraComparisonPanel } from './admin/DeepinfraComparisonPanel';
 import { LiveModelRegistryPanel } from './admin/LiveModelRegistryPanel';
 import { useBuildReportNumbers } from '../hooks/useBuildReportNumbers';
@@ -234,6 +235,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [analytics, setAnalytics] = useState<any>(null);
   // Q-680: a refused analytics read is said, never drawn as a platform with 0 users and ₹0 revenue.
   const [analyticsError, setAnalyticsError] = useState('');
+  const [analyticsRefreshedAt, setAnalyticsRefreshedAt] = useState<number | null>(null);
   /**
    * Who came to NavBharatAI itself — website visits, app opens and the people who signed in.
    *
@@ -293,9 +295,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => { setUserLimit(USER_PAGE); setUserTotal(null); }, [userSearch, userSort, userPaid, userDir]);
   const [toastMsg, setToastMsg] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  // How new a user must be for the ₹150 welcome credit: joined within this many days.
-  const [giftDays, setGiftDays] = useState(7);
-
   // Settings state
 
   // Promo form
@@ -1062,6 +1061,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    */
   const [handover, setHandover] = useState<{
     headline: string;
+    observationNote?: string;
     tally: { examined: number; measured: number; buildHours: number; heldAfterHours: number; frontendOnlyCount: number; recoverableHours: number; unknown: Record<string, number> };
     projection: { spanDays: number; recoverableHoursPerDay: number; monthlyUsdEstimate: number };
     sample: Array<{ workspaceId: string; prompt: string; known: boolean; why?: string; buildMinutes?: number; heldAfterMinutes?: number; frontendOnly?: boolean }>;
@@ -1351,7 +1351,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       const r = await fetch('/api/admin/analytics', { headers });
       const a = await readAnswer(r, (b): b is Record<string, unknown> =>
         isRecord(b) && typeof b.totalUsers === 'number' && typeof b.totalRevenue === 'number');
-      if (a.ok) { setAnalytics(a.value); setAnalyticsError(''); }
+      if (a.ok) { setAnalytics(a.value); setAnalyticsError(''); setAnalyticsRefreshedAt(Date.now()); }
       else setAnalyticsError(a.sentence);
     } catch (e) { console.error(e); setAnalyticsError(e instanceof Error ? e.message : 'Could not reach the server.'); }
     finally { setLoading(false); }
@@ -1871,43 +1871,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } finally {
       if (generation === adminActionGeneration.current) { pendingFlight.current = false; setPendingBusy(false); setActionLoading(null); }
     }
-  };
-
-  // ₹150 TO NEW USERS IN ONE PRESS (admin 2026-09-27). The server applies the three rules — joined
-  // within `giftDays`, ₹0 gift balance, never given before — and says who is skipped and why. The count
-  // the admin confirms is sent back, and the server refuses a press that would pay more than that.
-  const handleBulkWelcomeGift = async () => {
-    setActionLoading('bulk_gift');
-    try {
-      const check = await adminPost('/api/admin/welcome-gift/bulk', { dryRun: true, days: giftDays });
-      if (!check.ok) { toast('Could not check: ' + (check.error || 'unknown error')); return; }
-      const s = check.skipped || {};
-      const skippedLines =
-        `Not paid:\n` +
-        `  • ${s.alreadyGiven ?? 0} already received this credit\n` +
-        `  • ${s.hasGiftBalance ?? 0} still have gift balance\n` +
-        `  • ${s.notNew ?? 0} joined more than ${check.days} day(s) ago\n` +
-        (s.other ? `  • ${s.other} banned, merged or at the gift limit\n` : '');
-      if (!check.eligible) {
-        window.alert(`No new user needs the ₹${check.rupeesEach} credit right now.\n\n${skippedLines}`);
-        return;
-      }
-      const now = Math.min(check.eligible, check.maxPerPress);
-      const more = check.eligible > now ? `\n${check.eligible - now} more will remain for the next press.` : '';
-      if (!window.confirm(
-        `Give ₹${check.rupeesEach} to ${now.toLocaleString()} new user(s)?\n` +
-        `Total: ₹${(now * check.rupeesEach).toLocaleString()}\n\n` +
-        `Who gets it: joined in the last ${check.days} day(s), ₹0 gift balance, never received it before.\n\n` +
-        skippedLines +
-        `\nPressing again later never pays anyone twice.${more}`,
-      )) return;
-      const r = await adminPost('/api/admin/welcome-gift/bulk', { dryRun: false, days: check.days, expectedCount: check.eligible });
-      if (!r.ok) { toast('Not given: ' + (r.error || 'unknown error')); return; }
-      toast(`₹${r.totalRupees.toLocaleString()} given to ${r.paid} new user(s)` +
-        (r.skipped ? ` · ${r.skipped} skipped` : '') + (r.failed ? ` · ${r.failed} failed — press again` : '') +
-        (r.remaining ? ` · ${r.remaining} remaining` : ''));
-      fetchUsers();
-    } finally { setActionLoading(null); }
   };
 
   // Merge a duplicate account's wallet INTO this user (one person = one wallet). The admin PROVES the
@@ -2491,26 +2454,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   {effectiveUserDir === 'desc' ? <ArrowDown className="w-3.5 h-3.5" /> : <ArrowUp className="w-3.5 h-3.5" />}
                   {effectiveUserDir === 'desc' ? 'Desc' : 'Asc'}
                 </button>
-                <div className="flex items-center gap-1 bg-card p-1 rounded-xl border border-line">
-                  <label htmlFor="gift-days" className="pl-2 text-[10px] font-black uppercase tracking-wider text-muted">Joined in last</label>
-                  <select
-                    id="gift-days"
-                    value={giftDays}
-                    onChange={(e) => setGiftDays(Number(e.target.value))}
-                    className="bg-transparent text-[10px] font-black uppercase text-ink outline-none px-1 py-1.5"
-                  >
-                    {[1, 3, 7, 15, 30].map((d) => <option key={d} value={d}>{d} day{d > 1 ? 's' : ''}</option>)}
-                  </select>
-                  <button
-                    onClick={handleBulkWelcomeGift}
-                    disabled={actionLoading === 'bulk_gift'}
-                    title="Give ₹150 to users who joined recently, have ₹0 gift balance and never received it before"
-                    className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 text-on-accent rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-emerald-500 transition-all active:scale-95 disabled:opacity-50"
-                  >
-                    {actionLoading === 'bulk_gift' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
-                    Gift ₹150 to new users
-                  </button>
-                </div>
                 <button onClick={fetchUsers} className="flex items-center gap-2 px-4 py-2.5 bg-raised border border-line rounded-xl text-[10px] font-black uppercase tracking-wider text-ink hover:border-indigo-500 transition-all active:scale-95">
                   <RefreshCw className={`w-3.5 h-3.5 ${usersLoading ? 'animate-spin' : ''}`} /> Load
                 </button>
@@ -2668,6 +2611,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
           {activeTab === 'livemodels' && (
             <LiveModelRegistryPanel adminToken={adminToken} />
+          )}
+
+          {activeTab === 'test-chat-bot' && (
+            <TestChatBotPanel adminToken={adminToken} />
           )}
 
           {/* ── AI ENGINES TAB ── */}
@@ -2907,9 +2854,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </div>
 
               <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
-                <div>
-                  <h3 className="text-sm font-black text-ink uppercase tracking-tight">API Usage Ranking</h3>
-                  <p className="text-[10px] text-muted font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Most to least used chat providers' : 'Most to least used providers'}</p>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">API Usage Ranking</h3>
+                    <p className="text-[10px] text-muted font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Most to least used chat providers' : 'Most to least used providers'}</p>
+                    <p className="text-xs text-muted mt-1">All retained chat usage records, not the current routing priority. Admin provider test-bot calls are separate. Changing the chain does not reset this history.</p>
+                    <p className="text-xs text-muted mt-1">{analyticsRefreshedAt === null ? 'Not refreshed yet' : `Last refreshed: ${new Date(analyticsRefreshedAt).toLocaleString()}`}</p>
+                    {analyticsError && <p role="alert" className="text-xs text-danger mt-1">Refresh failed. Previously loaded figures may be stale.</p>}
+                  </div>
+                  <button type="button" onClick={fetchAnalytics} disabled={loading} aria-label="Refresh API usage ranking" className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs font-bold text-ink disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button>
                 </div>
                 <div className="space-y-3">
                   {(analytics?.providerRanking || []).length === 0 && (
@@ -5540,18 +5493,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <div className="bg-card border border-violet-500/25 rounded-[1.25rem] p-4 space-y-3">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Clock className="w-4 h-4 text-accent-text" />
-                    <h4 className="text-sm font-black text-ink tracking-tight">Where does a sandbox's billed time go?</h4>
+                    <h4 className="text-sm font-black text-ink tracking-tight">Sandbox timing observations</h4>
                       <span className="ml-auto">
-                        <ReportExportButtons label="Where does a sandbox's billed time go?" data={handover} tab="Build Reports" source="/api/admin/sandbox-handover" onStatus={toast} />
+                        <ReportExportButtons label="Sandbox timing observations" data={handover} tab="Build Reports" source="/api/admin/sandbox-handover" onStatus={toast} />
                       </span>
                   </div>
                   <p className="text-[12px] text-accent-text font-bold leading-relaxed">{handover.headline}</p>
+                  <p className="text-[11px] text-muted leading-relaxed" aria-label="Sandbox observation limits">
+                    Sampled observations, not verified billing or savings.
+                  </p>
+                  <details className="text-[11px] text-muted leading-relaxed">
+                    <summary className="cursor-pointer font-bold">Observation quality and limitations</summary>
+                    <p className="mt-2">{handover.observationNote ?? 'Observation quality unavailable. These records are not a complete billing history or measured savings.'}</p>
+                  </details>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     {([
-                      ['Real build work', `${handover.tally.buildHours}h`, 'text-info', 'a browser can never absorb this'],
-                      ['Held after the build', `${handover.tally.heldAfterHours}h`, 'text-warn', 'the only window Phase 3 targets'],
-                      ['Reclaimable', `${handover.tally.recoverableHours}h`, 'text-success', `frontend-only — ${handover.tally.frontendOnlyCount} builds`],
-                      ['Could not measure', `${handover.tally.examined - handover.tally.measured}`, 'text-muted', 'excluded, never counted as zero'],
+                      ['Reported build duration', `${handover.tally.buildHours}h`, 'text-info', 'wall time, not CPU work'],
+                      ['Recorded build-to-pause gap', `${handover.tally.heldAfterHours}h`, 'text-warn', 'workspace-only timing join'],
+                      ['Frontend-only recorded gap', `${handover.tally.recoverableHours}h`, 'text-success', `not savings; ${handover.tally.frontendOnlyCount} builds`],
+                      ['Could not pair', `${handover.tally.examined - handover.tally.measured}`, 'text-muted', 'excluded, never counted as zero'],
                     ] as const).map(([label, n, cls, hint]) => (
                       <div key={label} className="bg-surface border border-line rounded-xl p-3">
                         <div className={`text-2xl font-black tabular-nums ${cls}`}>{n}</div>
@@ -5561,54 +5521,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     ))}
                   </div>
                   {handover.minutes && handover.minutes.sessions > 0 && (
-                    // WHERE DO THE MINUTES GO. The bill said ~29 min a session; a build is ~5-7 of work.
-                    // "Idle" is the machine up with none of our operations running — a sweep/window
-                    // problem. "Running" is our commands — a machine or workload problem. Different fixes.
+                    // Legacy numeric fields stay compatible; the operation remainder is not waste.
                     <p className="text-[11px] text-muted leading-relaxed">
-                      <span className="font-black text-ink">Where the minutes go</span> (last {handover.minutes.sessions} ended sessions):{' '}
-                      up <span className="tabular-nums font-black text-ink">{handover.minutes.avgWallMin} min</span> ·{' '}
+                      <span className="font-black text-ink">Where the minutes go</span> (sample of {handover.minutes.sessions} observations with recorded end metadata):{' '}
+                      observed span <span className="tabular-nums font-black text-ink">{handover.minutes.avgWallMin} min</span> ·{' '}
                       running our operations <span className="tabular-nums font-black text-info">{handover.minutes.avgBusyMin} min</span> ·{' '}
-                      idle <span className="tabular-nums font-black text-warn">{handover.minutes.avgIdleMin} min</span>{' '}
-                      <span className="text-faint">({Math.round(handover.minutes.idleShare * 100)}% of billed time was nobody's work)</span>
+                      outside measured operations <span className="tabular-nums font-black text-warn">{handover.minutes.avgIdleMin} min</span>{' '}
+                      <span className="text-faint">({Math.round(handover.minutes.idleShare * 100)}% of observed span; may include model waits and active previews)</span>
                     </p>
                   )}
                   {handover.starts && handover.starts.total > 0 && (
-                    // WHY MACHINES START. 1,110 starts a month for one tester was the mystery; this is
-                    // the table that ends it. A large "preview-door" share means the live frame is
-                    // resuming paused machines; a large "files" share means reads are.
+                    // Daily counters record local create/connect observations, not provider starts.
                     <p className="text-[11px] text-muted leading-relaxed">
-                      <span className="font-black text-ink">Why machines started</span> (last {handover.starts.days} days, {handover.starts.total} starts):{' '}
+                      <span className="font-black text-ink">Recorded create/connect reasons</span> ({handover.starts.days} daily counter records, {handover.starts.total} observations):{' '}
                       {Object.entries(handover.starts.byReason).sort((a, b) => b[1] - a[1]).map(([reason, n], i) => (
                         <span key={reason}>{i > 0 ? ' · ' : ''}{reason} <span className="tabular-nums font-black text-ink">{n}</span></span>
                       ))}
                     </p>
                   )}
                   {handover.pauseCauses && handover.pauseCauses.total > 0 && (
-                    // WHO STOPS THE MACHINES. Before the lifetime heartbeat, most sandboxes were expected to
-                    // fall to the 20-minute orphan sweep — that expectation was arithmetic, not evidence.
-                    // This row is the evidence. "Provider / unknown" is a machine we never stamped: E2B's
-                    // own timer, a kill, or one still running — reported as unknown rather than guessed.
+                    // Missing pause metadata cannot identify the provider action or current state.
                     <p className="text-[11px] text-muted leading-relaxed">
-                      <span className="font-black text-ink">Who stopped them:</span>{' '}
+                      <span className="font-black text-ink">Recorded pause causes:</span>{' '}
                       idle sweep <span className="tabular-nums font-black text-info">{handover.pauseCauses.idleSweep}</span> ·{' '}
                       orphan sweep <span className="tabular-nums font-black text-warn">{handover.pauseCauses.orphanSweep}</span> ·{' '}
                       sweep (cause not recorded) <span className="tabular-nums font-black text-body">{handover.pauseCauses.sweepUnattributed}</span> ·{' '}
-                      provider / unknown <span className="tabular-nums font-black text-accent-text">{handover.pauseCauses.providerOrUnknown}</span>{' '}
-                      <span className="text-faint">of {handover.pauseCauses.total} recent sandboxes. A rising "provider" share after 2026-09-11 is the six-minute lifetime doing the reaping.</span>
+                      no recorded pause / unknown <span className="tabular-nums font-black text-accent-text">{handover.pauseCauses.providerOrUnknown}</span>{' '}
+                      <span className="text-faint">of {handover.pauseCauses.total} recent workspace records. Missing pause records do not identify provider action or current running state.</span>
                     </p>
-                  )}
-                  {/* The extrapolation is kept visually APART from the measured numbers above, and says
-                      what it is. The two must never be read as one row of equally solid figures. */}
-                  {handover.projection.monthlyUsdEstimate > 0 && (
-                    <div className="bg-surface border border-line rounded-xl p-3">
-                      <div className="text-[10px] font-black uppercase tracking-wider text-muted">Extrapolation, not a bill</div>
-                      <div className="text-[12px] text-body mt-1 leading-snug">
-                        Over the sample's <span className="tabular-nums font-black text-ink">{handover.projection.spanDays}</span> days that is{' '}
-                        <span className="tabular-nums font-black text-success">{handover.projection.recoverableHoursPerDay}h/day</span> reclaimable ≈{' '}
-                        <span className="tabular-nums font-black text-success">${handover.projection.monthlyUsdEstimate}/month</span>. Scaled from this
-                        window at the measured sandbox rate — the real bill moves with usage.
-                      </div>
-                    </div>
                   )}
                   {Object.entries(handover.tally.unknown).some(([, n]) => n > 0) && (
                     <div>
@@ -5620,7 +5560,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             <span className="leading-snug">{({
                               'no-build-window': 'the report never recorded a start and end (unsettled or legacy build)',
                               'no-sandbox-record': 'no durable sandbox record for that workspace',
-                              'never-paused': 'nothing ever stamped a pause — the hold is real but unmeasurable',
+                              'never-paused': 'no pause time was recorded; provider stop time is unknown',
                               'stale-pairing': 'the pause predates the build, so the record is about an earlier sandbox',
                             } as Record<string, string>)[why] ?? why}</span>
                           </div>
@@ -5637,11 +5577,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             {s.known ? (
                               <>
                                 <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-sky-500/40 text-info">{s.buildMinutes}m build</span>
-                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-warn">{s.heldAfterMinutes}m held</span>
-                                {s.frontendOnly && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-emerald-500/40 text-success">reclaimable</span>}
+                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-warn">{s.heldAfterMinutes}m recorded build-to-pause gap</span>
+                                {s.frontendOnly && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-emerald-500/40 text-success">frontend-only manifest</span>}
                               </>
                             ) : (
-                              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-line text-muted">not measurable · {s.why}</span>
+                              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-line text-muted">not paired · {s.why}</span>
                             )}
                           </div>
                           <div className="text-[11px] text-body mt-1 leading-snug">{s.prompt || <span className="text-faint">(no prompt recorded)</span>}</div>

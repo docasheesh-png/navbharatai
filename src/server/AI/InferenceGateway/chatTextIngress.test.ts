@@ -73,6 +73,17 @@ describe('ordinary chat reaches the real gateway ingress context', () => {
     const res = mockRes(); await route()(mockReq({ body: { message: 'hello', uid: 'victim' } }), res);
     expect(res.statusCode).toBe(503); expect(m.detailed).not.toHaveBeenCalled(); expect(m.legacy).not.toHaveBeenCalled(); expect(m.live).not.toHaveBeenCalled();
   });
+  it('fixed-v1 without a gateway catalog still answers on the free chain', async () => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'off');
+    const res = mockRes(); await route()(mockReq({ body: { message: 'hello' } }), res);
+    expect(res.body).toEqual({ reply: 'answer' }); expect(m.legacy).toHaveBeenCalled();
+  });
+  it('a missing gateway catalog falls through to the free chain', async () => {
+    m.detailed.mockRejectedValueOnce(new InferenceGatewayTerminalError('trusted-runtime-unavailable'))
+      .mockResolvedValueOnce({ ok: true, content: 'free answer', model: 'glm-4.5-flash', provider: 'GLM', latencyMs: 1 });
+    const res = mockRes(); await route()(mockReq({ body: { message: 'hello' } }), res);
+    expect(res.body).toEqual({ reply: 'free answer' }); expect(m.legacy).toHaveBeenCalled(); expect(m.detailed).toHaveBeenCalledTimes(2);
+  });
   it('ends a selected streaming refusal, without a second answer or misleading DONE', async () => {
     m.stream.mockRejectedValue(new InferenceGatewayTerminalError('policy-denied'));
     const res: any = mockRes(); const chunks: string[] = [];

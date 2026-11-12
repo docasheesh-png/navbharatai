@@ -66,7 +66,7 @@ export const MAX_OPEN_CHATS = 5;
  * studio is one view. Each is one row of the Mode list's Recent group while its view is open, so each
  * is one of the five. A view here must also be a mode surface (`isModeSurface`) — the test locks that.
  */
-export const SLOT_VIEWS: readonly string[] = ['sda_chat', 'imagegen'];
+export const SLOT_VIEWS: readonly string[] = ['sda_chat', 'imagegen', 'voice_ai'];
 
 /**
  * EVERY CHAT CAN HOLD SEVERAL WINDOWS (admin 2026-09-28: *"navbharatai free aur image generate ai free,
@@ -81,7 +81,7 @@ export const SLOT_VIEWS: readonly string[] = ['sda_chat', 'imagegen'];
  * A view whose tab is open and whose list is empty has ONE implicit window, `DEFAULT_VIEW_WINDOW` —
  * exactly the single chat it always had — so nothing changes until a second window is opened.
  */
-export const VIEW_WINDOW_VIEWS: readonly string[] = ['nbi_chat', 'imagegen', 'sda_chat'];
+export const VIEW_WINDOW_VIEWS: readonly string[] = ['nbi_chat', 'imagegen', 'voice_ai', 'sda_chat'];
 
 /** The implicit first window of a single-chat view: the chat it always had. */
 export const DEFAULT_VIEW_WINDOW = 'main';

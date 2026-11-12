@@ -68,11 +68,19 @@ function resolveSpecifier(fromFile: string, spec: string): string | null {
   return base.replace(/\.(ts|tsx|js|mjs|cjs)$/, '');
 }
 
-/** Every specifier in `source` (as written) that resolves to `target`. PURE apart from path maths. */
+// The engine-import census and registry-writer census read the same production tree. Cache only
+// TypeScript's source-dependent preprocessing, never the path-dependent resolution or file reads.
+// Exact source text is the key, so an edited module or a different fixture is always rescanned.
+const importSpecifiersBySource = new Map<string, string[]>();
+
+/** Every specifier in `source` (as written) that resolves to `target`. */
 function importsOf(source: string, fromFile: string, target: string): string[] {
-  return ts.preProcessFile(source, true, true).importedFiles
-    .map((f) => f.fileName)
-    .filter((spec) => resolveSpecifier(fromFile, spec) === target);
+  let specifiers = importSpecifiersBySource.get(source);
+  if (!specifiers) {
+    specifiers = ts.preProcessFile(source, true, true).importedFiles.map((f) => f.fileName);
+    importSpecifiersBySource.set(source, specifiers);
+  }
+  return specifiers.filter((spec) => resolveSpecifier(fromFile, spec) === target);
 }
 
 describe('🔒 the census sees every import form, and nothing that is not one', () => {
@@ -92,6 +100,35 @@ describe('🔒 the census sees every import form, and nothing that is not one', 
     ["import { getConversationStore } from '@/src/server/routes/agentv3';", inLib],
   ])('counts %s', (source, from) => {
     expect(importsOf(source, from, ENGINE_ROUTE)).toHaveLength(1);
+  });
+
+  it('cached preprocessing preserves raw results when source, importer or target changes', () => {
+    const sources = [
+      "import { runningBuildCount } from './agentv3';",
+      "import type { RunningBuild } from './agentv3'; export { runningBuildCount } from './agentv3';",
+      "async function f() { await import('./agentv3'); await import(`./agentv3`); }",
+      "const engine = require('./agentv3');",
+      String.raw`import { runningBuildCount } from './agentv\u0033';`,
+      "import { runningBuilds } from '../AgentV3/runningBuildRegistry';",
+      "// import { runningBuildCount } from './agentv3';",
+      "const note = \"import { runningBuilds } from '../AgentV3/runningBuildRegistry'\";",
+      '',
+    ];
+    // Repeat the first source after edits and across different importers/targets. A cache keyed by
+    // filename, or caching resolved paths/results instead of raw specifiers, would fail this matrix.
+    for (const source of [...sources, sources[0]]) {
+      for (const from of [inRoutes, inLib, join(ROOT, 'src/components/Shell.tsx')]) {
+        for (const target of [ENGINE_ROUTE, REGISTRY]) {
+          const expected = ts.preProcessFile(source, true, true).importedFiles
+            .map((f) => f.fileName)
+            .filter((spec) => resolveSpecifier(from, spec) === target);
+          expect(importsOf(source, from, target)).toEqual(expected);
+          // A caller mutating its returned list must not poison later results.
+          importsOf(source, from, target).push('not-an-import');
+          expect(importsOf(source, from, target)).toEqual(expected);
+        }
+      }
+    }
   });
 
   it.each([

@@ -114,9 +114,17 @@ describe('localized busy line (silent fallback)', () => {
   });
 });
 
-describe('Free routers are capped, ordered cheapest-first and allowlisted', () => {
+describe('Free routers keep approved order, caps and allowlists', () => {
   beforeEach(() => AIRouterManager.reset());
   const rungs = (ns: 'free' | 'professional-free-fallback') => ((AIRouterManager.getRouter(ns) as any).providers as AIProvider[]);
+  it('legacy Free runtime puts paid Vertex Lite directly before the final Vertex Flash', () => {
+    expect(rungs('free').map(p => [p.name, p.pinnedModel ?? null, p.priority])).toEqual([
+      ['GLM', null, 0],
+      ['OPENAI', 'gpt-5-nano', 1],
+      ['VERTEX', 'gemini-2.5-flash-lite', 2],
+      ['VERTEX', 'gemini-2.5-flash', 3],
+    ]);
+  });
   it('professional-free-fallback is flash-lite → flash', () => {
     expect(rungs('professional-free-fallback').map(p => p.pinnedModel)).toEqual(['gemini-2.5-flash-lite', 'gemini-2.5-flash']);
   });
@@ -150,7 +158,8 @@ describe('CI guard: Free paths never name gemini-2.5-pro / grok', () => {
   });
   it('the Free professional fallback is walked sequentially, never raced', () => {
     const pr = code(src('src/server/lib/professionalRouting.ts'));
-    expect(pr).toMatch(/tier === 'free'\s*\?\s*await \(opts\?\.signal \? router\.route\(/);
+    expect(pr).toMatch(/await \(opts\?\.signal\s*\? router\.route\(/);
+    expect(pr).not.toMatch(/router\.routeRaced\(/);
   });
   it('resolved Free model lists contain no pro/grok under hostile env overrides', () => {
     vi.stubEnv('VISION_VERTEX_MODELS', 'gemini-2.5-pro'); vi.stubEnv('VISION_GEMINI_MODELS', 'gemini-3-pro,grok-4');

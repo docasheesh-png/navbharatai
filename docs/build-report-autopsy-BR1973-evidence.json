@@ -1,0 +1,154 @@
+{
+  "identity": {
+    "reportNumber": 1973,
+    "outcome": "failed",
+    "ok": false,
+    "prompt": "Make study app for Maharashtra board students",
+    "promptLength": 45,
+    "promptHash": "72b621ae",
+    "reportDigest": "b8fd856fce51e672ce36492bf8c83992457d8fab30a0d030c319853c199236cd",
+    "buildId": "dadf9a68-4a0c-428d-96c8-79b309d3599a",
+    "workspaceId": "agentv3-Dooi5MJ7fHXGflo98pKE4Yjp5gg2-640de504-8928-41a0-a87c-23c960dacc97",
+    "sessionId": "640de504-8928-41a0-a87c-23c960dacc97",
+    "listHistoryId": "1794110208982",
+    "startedAt": 1794110208982,
+    "endedAt": 1794111715064,
+    "startedAtIST": "2026-11-08 09:26:48.982 IST",
+    "endedAtIST": "2026-11-08 09:51:55.064 IST",
+    "durationMs": 1506082,
+    "model": "qwen3-coder",
+    "framework": "vite-react",
+    "builtBy": "SURPLUS",
+    "rootCause": "STOPPED \u2014 the wall-clock cap (25 min) was reached before the build converged. NOT stopped by the user."
+  },
+  "reportBytes": {
+    "originalSha256": "441252817229ff4e4da91f2b30122381258e272c46b473df84289b9cbb934add",
+    "originalBytes": 316608,
+    "prettySha256": "c80ff681dfba076fed29d5ce3b447c8c51ef268b5a218044d48c040d472d172f",
+    "prettyBytes": 365193,
+    "digestMatchesList": true
+  },
+  "truncation": {
+    "complete": false,
+    "issuesKept": 500,
+    "issuesTotal": 625,
+    "commandsKept": 40,
+    "commandsTotal": 51,
+    "note": "First 250 + last 250 issues kept (125 middle gone). First 20 + last 20 commands kept (11 middle gone; repeated npm-install.lock wait x8). Causes that could live only in the missing middle are not guessed."
+  },
+  "billing": {
+    "userTier": "weak (free tier \u2014 cheap engines) \u00b7 not charged",
+    "charged": false,
+    "walletDebited": false,
+    "billedUsd": 0,
+    "sandboxCostUsd": 0.069259,
+    "powerLevel": "weak",
+    "noClaude": true
+  },
+  "etaAccuracy": {
+    "key": "complex_app",
+    "promisedMs": 611376,
+    "lowMs": 513556,
+    "highMs": 970457,
+    "actualMs": 1506082,
+    "ratio": 2.4634300332365027,
+    "withinBand": false,
+    "evidenced": false,
+    "shown": "8.6\u201316.2 min (midpoint 10.2)"
+  },
+  "requestAnalysis": {
+    "taskType": "complex_app",
+    "complexityScore": 58,
+    "startTier": "sonnet",
+    "startBand": "standard band"
+  },
+  "requirementGapsObserved": {
+    "domain": "education",
+    "likelyMissingCount": 6,
+    "likelyMissing": [
+      "roles (student / teacher / admin)",
+      "courses & lessons / content",
+      "enrolment & attendance",
+      "assignments & grading",
+      "progress tracking",
+      "fees / payments"
+    ],
+    "clarifyingQuestionsCount": 6
+  },
+  "complexityRouting": {
+    "message": "Complexity: COMPLEX (score 58, model) \u2014 the build opens on the ladder's second rung, past the cheap flash opener.",
+    "detail": "one bounded preflight classified the requested implementation scope"
+  },
+  "fastLane": {
+    "durationSec": 287,
+    "generateSec": 232.9,
+    "outcome": "TYPECHECK_FAILED",
+    "verifyError": "TS2307 react-router-dom (App.tsx, Footer.tsx, SubjectDetailPage.tsx) plus BoardStandard TS2322/TS2345",
+    "salvagedFiles": 26,
+    "salvageHadAuthAdminEnrollment": false
+  },
+  "laterManifestLmsFiles": [
+    "src/components/AdminDashboard.tsx",
+    "src/components/EnrollmentWidget.tsx",
+    "src/components/UserRoleDemo.tsx",
+    "src/components/auth/LoginPage.tsx",
+    "src/components/auth/ProtectedRoute.tsx",
+    "src/components/auth/RegisterPage.tsx",
+    "src/components/auth/RoleBasedComponent.tsx",
+    "src/context/AuthContext.tsx",
+    "src/types/enrollment.ts",
+    "src/utils/enrollment.ts",
+    "src/utils/roleUtils.ts"
+  ],
+  "manifestFileCount": 41,
+  "firstRenderSec": 735,
+  "postGreenWrites": 21,
+  "readyBeforeEnd": false,
+  "measurementsBeforeEditOn721c62849": {
+    "note": "Regex copies of PRACTICE_TOOL_SOURCE and INSTITUTION_SCOPE_RE evaluated independently before the source edit.",
+    "practiceToolMatched": false,
+    "institutionScopeMatched": false,
+    "namesASingleLearnerToolWouldBe": false,
+    "educationDomainViaStudentInStudents": true
+  },
+  "oppositeClassAssembledBeforeEdit": {
+    "institution": [
+      "Make a study app for my school with teachers, admin and student logins",
+      "Build a study app for my coaching institute with student logins and fees",
+      "Study portal for our college with enrolment and fees",
+      "Make an LMS for Maharashtra board students with courses and attendance",
+      "Build a mock test platform for my coaching institute with student logins and fees",
+      "school management system",
+      "make a study app for class 10 with lessons, quizzes and a progress page"
+    ],
+    "notAStudyApp": [
+      "I want to study app development",
+      "Help me study app security",
+      "A course to study app architecture",
+      "Build an exam app"
+    ],
+    "neighboursLocked": [
+      "Make an education app stays general (Q-2644)",
+      "education loan app stays fintech",
+      "exam-analyse stays education and not a single-learner tool",
+      "BR1972 education-app prompt stays general",
+      "Make a bike racing game stays game"
+    ]
+  },
+  "shipped": {
+    "F1": "PRACTICE_TOOL_SOURCE includes study[\\s-]?apps? with a negative lookahead for development/dev/design/security/architecture/engineering/building. namesASingleLearnerTool is otherwise unchanged (still requires no INSTITUTION_SCOPE_RE match)."
+  },
+  "notShipped": [
+    "free 25-min cap (Q-2631)",
+    "react-router-dom in the vite-react starter (Q-2645)",
+    "WEAK_SCOPE_INSTRUCTIONS / Weak preflight (Q-2646)",
+    "adding \\beducation\\b (Q-2644)",
+    "Q-2611 claim-audit widening",
+    ".nb-topbar :is(h1,h2,h3)",
+    ".nb-page-title kit class"
+  ],
+  "newQueueRows": [
+    "Q-2645",
+    "Q-2646"
+  ]
+}

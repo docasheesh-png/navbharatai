@@ -22,8 +22,16 @@ describe('appSignatureHtml — the badge markup', () => {
   it('is fixed to the bottom-right corner with fully inline styles (no external deps)', () => {
     const b = appSignatureHtml();
     expect(b).toContain('position:fixed');
-    expect(b).toContain('right:12px');
-    expect(b).toContain('bottom:12px');
+    expect(b).toContain('left:auto');
+    expect(b).toContain('right:max(12px, env(safe-area-inset-right, 0px), calc(12px + 100% - 100vw))');
+    expect(b).toContain('bottom:max(12px, env(safe-area-inset-bottom, 0px))');
+    expect(b).toContain('box-sizing:border-box');
+    expect(b).toContain('width:max-content');
+    expect(b).toContain('max-width:calc(100vw - 24px)');
+    expect(b).toContain('min-width:0');
+    expect(b).toContain('text-overflow:ellipsis');
+    expect(b).toContain('white-space:nowrap');
+    expect(b).toContain('width:32px;height:32px;flex:none');
     expect(b).not.toMatch(/<link|<script|src=(?!"https:\/\/navbharatai)/); // no external resources
   });
 });

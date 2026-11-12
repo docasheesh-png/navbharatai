@@ -280,11 +280,26 @@ export function kitVersionNote(refreshed: readonly string[], kept: KitPlan['kept
  * at a version the recipe already declares has one right answer, so it is not a model's decision.
  */
 
+// These generators declare fixed dependencies in their default output. Rebuilding their files and
+// type-contract instructions on EVERY source write just to read that metadata repeatedly parses the
+// same kit. Cache only copied declarations, by generator identity: replacements get their own entry,
+// registry order remains live, and callers never receive the cached arrays or records.
+const dependencyMetadata = new WeakMap<
+  (include?: string[]) => RecipeOutput,
+  ReadonlyArray<Readonly<{ name: string; version: string }>>
+>();
+
 /** The versions game recipes declare, plus the type package `three` needs. */
 export function recipeDependencyVersions(): Map<string, { version: string; dev: boolean }> {
   const out = new Map<string, { version: string; dev: boolean }>();
   for (const gen of Object.values(GAME_RECIPES)) {
-    for (const d of gen().dependencies ?? []) if (!out.has(d.name)) out.set(d.name, { version: d.version, dev: false });
+    let declared = dependencyMetadata.get(gen);
+    if (!declared) {
+      declared = Object.freeze((gen().dependencies ?? []).map((d) => Object.freeze({ name: d.name, version: d.version })));
+      // A throwing generator is never cached, so the next lookup can retry it.
+      dependencyMetadata.set(gen, declared);
+    }
+    for (const d of declared) if (!out.has(d.name)) out.set(d.name, { version: d.version, dev: false });
   }
   const three = out.get('three');
   if (three && !out.has('@types/three')) out.set('@types/three', { version: three.version, dev: true });

@@ -5,20 +5,10 @@ import { realRateFor } from '../src/server/AgentV3/providerRates';
 import { chatCostIndex, freeTierCeiling, allowedOnFreeTier } from '../src/server/AI/freeTierCostCeiling';
 
 /**
- * A FREE USER'S FALLBACK MUST CLIMB CHEAPEST-FIRST — because nobody is billed for it.
- *
- * Free chat is not wallet-charged: every rupee it spends is NavBharatAI's. The paid rungs used to be
- * registered dearest-first — `gemini-2.5-pro` ($10/MTok out) above `gemini-2.5-flash` ($2.50) — so the
- * moment the free GLM leader rate-limited, every free turn cost 4× what the rung beneath it would have.
- *
- * The policy was already written down in this very file, for the professional free tier:
- *   "Vertex (cheap Gemini on Google), NEVER Grok / direct Gemini / Claude … so a free user can never
- *    trigger the pricier paid providers. gemini-2.5-flash primary → -flash-lite (cheaper) fallback."
- * The bug was that the twin universe every ordinary user hits did not follow it.
- *
- * These tests read the ORDER out of the source and price it with the platform's OWN rate card, so they
- * fail if either the order or a price changes in a way that puts an expensive model in front of a cheap
- * one. Nothing here asserts a hardcoded position — only the money relationship.
+ * Every legacy Free paid rung stays below the owner's price ceiling and daily cap.
+ * The 2026-11-09 order is explicit: GLM → Nano → Vertex Lite → Vertex Flash. Nano is also paid
+ * and costs more than Lite on this rate card, so a global cheapest-first assertion would undo
+ * the requested order. The two Vertex rungs still run cheaper-first; no price gate is relaxed.
  */
 
 const src = readFileSync(join(process.cwd(), 'src/server/AI/AIRouterManager.ts'), 'utf8');
@@ -62,7 +52,7 @@ describe("the admin's ceiling — nothing dearer than kimi-k2.7 on the FREE ladd
   it('registers a real ladder', () => {
     // 2026-09-15: was >= 4. The ladder DELIBERATELY got shorter — the Gemini-direct door and the
     // glm-4.7 last rung went, OpenAI arrived — so the paid rungs this parser can see are now three
-    // (lite, nano, flash) plus the ₹0 GLM leader, which is registered directly and has never been
+    // (nano, lite, flash) plus the ₹0 GLM leader, which is registered directly and has never been
     // parseable here. The floor exists to catch a ladder that silently became EMPTY, so it tracks
     // the real count rather than a number left over from a longer chain.
     expect(rungs.length).toBeGreaterThanOrEqual(3);
@@ -81,7 +71,7 @@ describe("the admin's ceiling — nothing dearer than kimi-k2.7 on the FREE ladd
     expect(src).toContain('if (!allowedOnFreeTier(label, model))');
     expect(src).toContain('REFUSED ${model}');
     // 2026-09-15: the third line used to pin the glm-4.7 LAST RUNG by name. That rung is gone (the
-    // ladder is now GLM-flash → Vertex lite → OpenAI nano → Vertex flash), and pinning one rung's
+    // ladder is now GLM-flash → OpenAI nano → Vertex lite → Vertex flash), and pinning one rung's
     // literal was never what this test is for — it asserts that the RUNTIME gate exists. What it
     // must actually prove is that no rung bypasses it, which is a property of all of them.
     const body = src.slice(src.indexOf('private static buildFree('), src.indexOf('private static buildPro('));
@@ -96,12 +86,21 @@ describe("the admin's ceiling — nothing dearer than kimi-k2.7 on the FREE ladd
     expect(src2).not.toContain('AnthropicProvider');
   });
 
-  it('🔒 no rung is dearer than the one AFTER it, by the CHAT index', () => {
-    const priced = rungs.map((r) => ({ ...r, c: chatCostIndex(provFor(r.model), r.model) }));
-    for (let i = 1; i < priced.length; i++) {
-      expect(priced[i].c, `${priced[i - 1].model}(p${priced[i - 1].priority}) → ${priced[i].model}(p${priced[i].priority})`)
-        .toBeGreaterThanOrEqual(priced[i - 1].c);
-    }
+  it('keeps the exact requested paid order, with both Vertex rungs last', () => {
+    expect(rungs.map(({ model, priority }) => [model, priority])).toEqual([
+      ['gpt-5-nano', 1],
+      ['gemini-2.5-flash-lite', 2],
+      ['gemini-2.5-flash', 3],
+    ]);
+  });
+
+  it('keeps the Vertex pair cheaper-first without mislabeling Nano as free', () => {
+    const nano = chatCostIndex('OPENAI', 'gpt-5-nano');
+    const lite = chatCostIndex('VERTEX', 'gemini-2.5-flash-lite');
+    const flash = chatCostIndex('VERTEX', 'gemini-2.5-flash');
+    expect(nano).toBeGreaterThan(lite);
+    expect(lite).toBeGreaterThan(0);
+    expect(flash).toBeGreaterThan(lite);
   });
 
   it('the PAID universes keep every rung they had — this ceiling is the free ladder\'s alone', () => {

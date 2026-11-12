@@ -14,6 +14,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { headerTabFor, hiddenHeaderTabs, insideChatTab } from '../src/lib/headerTab';
+import { parentForOpen } from '../src/lib/tabParenting';
+import { computeTabClose } from '../src/lib/tabClose';
 
 const root = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -23,7 +25,7 @@ const nav = codeOnly(read('src/components/panels/TopNav.tsx'));
 const sheet = codeOnly(read('src/components/chat/ModePickerSheet.tsx'));
 
 // The header's registered chips, as the real menu has them: the FREE chat, the hub, the studio, Settings.
-const hasChip = (id: string) => ['nbi_chat', 'professionals', 'imagegen', 'settings', 'other_ai', 'home'].includes(id);
+const hasChip = (id: string) => ['nbi_chat', 'professionals', 'imagegen', 'voice_ai', 'settings', 'other_ai', 'home'].includes(id);
 
 describe('headerTabFor — the tab a chat was entered through stays lit', () => {
   it('a professional opened from FREE lights FREE; from the hub, the hub', () => {
@@ -47,6 +49,39 @@ describe('headerTabFor — the tab a chat was entered through stays lit', () => 
   it('a view with no chip and no door lights nothing — the same as before, never a wrong tab', () => {
     expect(headerTabFor('sda_chat', {}, hasChip)).toBe('sda_chat');
     expect(headerTabFor('settings', { settings: 'nbi_chat' }, hasChip)).toBe('nbi_chat');
+  });
+
+  it('a registered Voice window opened through Mode stays inside the actual parent chat tab', () => {
+    const parent = parentForOpen('voice_ai', 'teacher_ai', { teacher_ai: 'nbi_chat' });
+    expect(parent).toBe('nbi_chat');
+    const openers = { teacher_ai: 'nbi_chat', voice_ai: parent };
+    expect(insideChatTab('voice_ai', openers)).toBe(true);
+    expect(headerTabFor('voice_ai', openers, hasChip)).toBe('nbi_chat');
+    expect(hiddenHeaderTabs(['home', 'nbi_chat', 'teacher_ai', 'voice_ai'], openers)).toEqual(['teacher_ai', 'voice_ai']);
+  });
+
+  it('a standalone Voice view has its own lit, closable chip rather than an invisible orphan', () => {
+    for (const openers of [{}, { voice_ai: 'other_ai' }]) {
+      expect(insideChatTab('voice_ai', openers)).toBe(false);
+      expect(headerTabFor('voice_ai', openers, hasChip)).toBe('voice_ai');
+      expect(hiddenHeaderTabs(['home', 'voice_ai'], openers)).toEqual([]);
+    }
+    expect(computeTabClose('voice_ai', ['home', 'settings', 'voice_ai'], 'voice_ai')).toEqual({
+      closing: ['voice_ai'], nextTabs: ['home', 'settings'], nextActiveView: 'settings',
+    });
+  });
+
+  it('closing the parent takes Voice with it; closing Voice alone leaves its parent and sibling intact', () => {
+    const parent = parentForOpen('voice_ai', 'teacher_ai', { teacher_ai: 'nbi_chat' });
+    expect(parent).toBe('nbi_chat');
+    const openers = { teacher_ai: 'nbi_chat', voice_ai: parent! };
+    const tabs = ['home', 'nbi_chat', 'teacher_ai', 'voice_ai'];
+    expect(computeTabClose('nbi_chat', tabs, 'voice_ai', openers)).toEqual({
+      closing: ['nbi_chat', 'teacher_ai', 'voice_ai'], nextTabs: ['home'], nextActiveView: 'home',
+    });
+    expect(computeTabClose('voice_ai', tabs, 'voice_ai', openers)).toEqual({
+      closing: ['voice_ai'], nextTabs: ['home', 'nbi_chat', 'teacher_ai'], nextActiveView: 'teacher_ai',
+    });
   });
 
   it('a corrupted opener cycle terminates', () => {
@@ -88,7 +123,8 @@ describe('the wiring: no chip on a mode switch, one switch path, one cap', () =>
     expect(body).toContain('const target = recentTargetFromId(recentId);');
     expect(body).toContain('} else if (target.conversationId) closeChatWindow(undefined, target.conversationId);');
     expect(body).toContain('closeFreeWindow(viewWindowId);');
-    expect(body).toContain("closeSlotViewWindow(target.view as 'imagegen' | 'sda_chat', viewWindowId);");
+    expect(body).toContain("target.view === IMAGE_MODE_ID || target.view === VOICE_MODE_ID || target.view === 'sda_chat'");
+    expect(body).toContain("closeSlotViewWindow(target.view as 'imagegen' | 'voice_ai' | 'sda_chat', viewWindowId);");
     expect(body).toContain('else closeTab(undefined, target.view as ViewType);');
     expect(body).not.toContain("closeTab(undefined, 'nbi_chat'");
     expect(app).not.toContain('freeChatClosed');
@@ -128,6 +164,16 @@ describe('the wiring: no chip on a mode switch, one switch path, one cap', () =>
   it('Doctor AI picked from Mode: already open ⇒ a new window with its own case; closed ⇒ capped, then a fresh case', () => {
     expect(app).toContain("if (openTabs.includes('sda_chat')) { newSlotViewWindow('sda_chat'); return; }");
     expect(app).toContain("if (!chatSlotFree(openChats, openTabs, viewWindows)) { addToast(capMessage(), 'warning'); return; }");
+  });
+
+  it('Voice picked from Mode is capped, parented to the current chat, and reopens as a distinct window', () => {
+    const at = app.indexOf('if (id === VOICE_MODE_ID) {');
+    const body = app.slice(at, app.indexOf('if (id === IMAGE_MODE_ID) {', at));
+    expect(body).toContain("if (openTabs.includes('voice_ai')) { newSlotViewWindow('voice_ai'); return; }");
+    expect(body).toContain("if (!chatSlotFree(openChats, openTabs, viewWindows)) { addToast(capMessage(), 'warning'); return; }");
+    expect(body).toContain('const host = headerTabFor(activeView, tabOpeners, hasHeaderChip);');
+    expect(body).toContain("if (toggleTab('voice_ai') && isModeSurface(host)) {");
+    expect(body).toContain('setTabOpeners(prev => ({ ...prev, voice_ai: host as ViewType }));');
   });
 
   it('the sheet receives the open tabs, the open windows and the window on screen', () => {

@@ -5,13 +5,25 @@ import {
   retentionBound, isRetainedIndefinitely, collectionsNeedingRetention, DEFAULT_MAX_PER_RUN,
   USER_SCOPED_SUBCOLLECTIONS, purgeExpiredSubcollections, SUBCOLLECTION_RETENTION_POLICIES,
   OWNERSHIP_UNVERIFIED_COLLECTIONS,
-  type RetentionFirestore, type RetentionPolicy, type SubcollectionSource,
+  type RetentionFirestore, type RetentionPolicy, type SubcollectionSource, type RetentionFenceTransaction,
 } from './DataRetentionManager';
 
 // ── Minimal in-memory Firestore satisfying RetentionFirestore ──────────────────────────────────────
 type Row = Record<string, unknown>;
 class MockFirestore implements RetentionFirestore {
   data = new Map<string, Map<string, Row>>();
+  beforeTransaction?: () => void;
+  async runTransaction<T>(operation: (tx: RetentionFenceTransaction) => Promise<T>): Promise<T> {
+    this.beforeTransaction?.();
+    const deletions: Array<{ delete(): Promise<unknown> }> = [];
+    const result = await operation({
+      get: async ref => (ref as unknown as { get(): Promise<{ exists: boolean; data(): Row | undefined }> }).get(),
+      delete: ref => { deletions.push(ref); },
+      update: () => { throw new Error('This fixture has no transactional update implementation'); },
+    });
+    for (const ref of deletions) await ref.delete();
+    return result;
+  }
   seed(collection: string, id: string, row: Row) {
     if (!this.data.has(collection)) this.data.set(collection, new Map());
     this.data.get(collection)!.set(id, row);
@@ -22,7 +34,7 @@ class MockFirestore implements RetentionFirestore {
     return {
       doc(id: string) {
         return {
-          async get() { return { exists: store.col(name).has(id) }; },
+          async get() { return { exists: store.col(name).has(id), data: () => store.col(name).get(id) }; },
           async delete() { store.col(name).delete(id); },
           // A subcollection is stored as its own path, `parent/{id}/sub` — and, as in Firestore,
           // deleting the parent above leaves it untouched.
@@ -331,6 +343,29 @@ describe('🔒 purgeExpired actually deletes for EVERY stored type', () => {
 });
 
 describe('🔒 what is deliberately kept forever, and what is merely undecided', () => {
+  it('voice operation identities and refund liabilities have an explicit financial retention policy', () => {
+    const policy = RETAINED_INDEFINITELY.find(entry => entry.collection === 'voice_ai_operations');
+    expect(policy?.reason).toMatch(/uid.*ownerId/);
+    expect(policy?.reason).toMatch(/Pending.*money owed/);
+    expect(policy?.reason).toMatch(/completed\/refunded.*charging again/);
+    expect(USER_SCOPED_COLLECTIONS.some(entry => entry.collection === 'voice_ai_operations')).toBe(false);
+    expect(RETENTION_POLICIES.some(entry => entry.collection === 'voice_ai_operations')).toBe(false);
+  });
+
+  it('account erasure and scheduled retention leave pending and terminal financial voice records intact', async () => {
+    const db = new MockFirestore();
+    const now = Date.parse('2026-11-09T12:00:00Z');
+    for (const state of ['pending', 'completed', 'refunded']) {
+      db.seed('voice_ai_operations', state, { uid: 'u1', ownerId: 'u1', state, feeInr: 0.00236,
+        reservedInr: 0.01, expiresAt: 1, createdAt: 1, finishedAt: state === 'pending' ? undefined : 2 });
+    }
+    db.seed('voice_ai_control', 'minute', { bucket: 1, count: 5 });
+    await deleteUserData(db, 'u1');
+    await purgeExpired(db, now);
+    expect(db.count('voice_ai_operations')).toBe(3);
+    expect(db.count('voice_ai_control')).toBe(1);
+  });
+
   it("the user's own property is never on a clock", () => {
     for (const c of ['workspace_files_v3', 'user_costs', 'app_builds', 'workspace_checkpoints_v3']) {
       expect(isRetainedIndefinitely(c)).toBe(true);
@@ -370,6 +405,65 @@ describe('🔒 what is deliberately kept forever, and what is merely undecided',
         }
       } else expect(p.ttlDays).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('account erasure preserves refundable wallet reservations', () => {
+  const pending = { tokenBalance: 99, remaining_balance: 0.99, walletLedger: [
+    { feature: 'voice-generation', openHolds: [{ id: 'synthetic-hold', owed: 1, gift: 0 }] },
+  ] };
+
+  it('retains the pending financial wallet and reports why while ordinary profile data is erased', async () => {
+    const db = new MockFirestore();
+    db.seed('user_token_wallets', 'u1', pending);
+    db.seed('user_profiles', 'u1', { name: 'Synthetic name' });
+    const report = await deleteUserData(db, 'u1');
+    expect(db.has('user_token_wallets', 'u1')).toBe(true);
+    expect(db.has('user_profiles', 'u1')).toBe(false);
+    expect(report.collections.find(row => row.collection === 'user_token_wallets'))
+      .toMatchObject({ deleted: 0, error: expect.stringMatching(/pending payment reservations or refunds/) });
+  });
+
+  it('protects every refund-bearing feature, not only voice holds', async () => {
+    const db = new MockFirestore();
+    db.seed('user_token_wallets', 'u1', { ...pending, walletLedger: [{ feature: 'image', openHolds: [{ id: 'image-hold', owed: 1 }] }] });
+    await deleteUserData(db, 'u1');
+    expect(db.has('user_token_wallets', 'u1')).toBe(true);
+  });
+
+  it('transactionally rechecks reservations that appear after the initial wallet read', async () => {
+    const db = new MockFirestore();
+    db.seed('user_token_wallets', 'u1', { tokenBalance: 100, walletLedger: [] });
+    db.beforeTransaction = () => { db.seed('user_token_wallets', 'u1', pending); };
+    const report = await deleteUserData(db, 'u1');
+    expect(db.has('user_token_wallets', 'u1')).toBe(true);
+    expect(report.collections.find(row => row.collection === 'user_token_wallets')?.deleted).toBe(0);
+  });
+
+  it('permits an explicit erasure retry once reservations have settled or refunded', async () => {
+    const db = new MockFirestore();
+    db.seed('user_token_wallets', 'u1', pending);
+    await deleteUserData(db, 'u1');
+    db.seed('user_token_wallets', 'u1', { tokenBalance: 100, walletLedger: [{ openHolds: [] }] });
+    const report = await deleteUserData(db, 'u1');
+    expect(db.has('user_token_wallets', 'u1')).toBe(false);
+    expect(report.collections.find(row => row.collection === 'user_token_wallets')).toEqual({ collection: 'user_token_wallets', deleted: 1 });
+  });
+
+  it.each([{ walletLedger: 'unverified' }, { walletLedger: [{ openHolds: 'unverified' }] }])('retains a wallet whose reservation state cannot be verified: %j', async wallet => {
+    const db = new MockFirestore(); db.seed('user_token_wallets', 'u1', wallet);
+    const report = await deleteUserData(db, 'u1');
+    expect(db.has('user_token_wallets', 'u1')).toBe(true);
+    expect(report.collections.find(row => row.collection === 'user_token_wallets')?.error).toBeTruthy();
+  });
+
+  it('fails closed rather than performing a nontransactional wallet deletion', async () => {
+    const db = new MockFirestore();
+    db.seed('user_token_wallets', 'u1', { tokenBalance: 100, walletLedger: [] });
+    const unsupported: RetentionFirestore = { collection: name => db.collection(name) };
+    const report = await deleteUserData(unsupported, 'u1');
+    expect(db.has('user_token_wallets', 'u1')).toBe(true);
+    expect(report.collections.find(row => row.collection === 'user_token_wallets')?.error).toContain('transactional reservation checks');
   });
 });
 

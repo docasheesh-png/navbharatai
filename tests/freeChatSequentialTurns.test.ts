@@ -169,6 +169,27 @@ describe('registered Free Chat routes with real user quota, admission queue and 
     expect(await status()).toMatchObject({ used: 50, remaining: 0 });
     expect(await status('another-ordinary-user')).toMatchObject({ used: 0, remaining: 50 });
   });
+  it('a fallback keeps the opening fact and the latest question, and still charges once', async () => {
+    const history = [
+      { sender: 'user', text: 'My name is Meera and I live in Budaun.' },
+      { sender: 'ai', text: 'Noted.' },
+      ...Array.from({ length: 6 }, (_, i) => ({ sender: i % 2 === 0 ? 'user' : 'ai', text: `Filler turn ${i} about the weather.` })),
+    ];
+    m.execute.mockRejectedValueOnce(new FreeChainProviderError('TIMEOUT'));
+    const res = new ResponseFixture();
+    await route()(request(1, { message: 'What is my name?', history, stream: true }), res);
+    expect(res.chunks.join('')).toContain('A synthetic useful answer.');
+    expect(res.chunks.join('')).toContain('[DONE]');
+    expect(m.execute.mock.calls.length).toBeGreaterThan(1);
+    for (const [input] of m.execute.mock.calls) {
+      expect(input.prompt).toContain('My name is Meera and I live in Budaun.');
+      expect(input.prompt.trimEnd().endsWith('User: What is my name?')).toBe(true);
+      expect(input.systemPrompt).toContain('Dr Asheesh and his team');
+      expect(input.systemPrompt).toContain('Do not invent age');
+      expect(input.systemPrompt).toContain('Roman Hinglish stays Roman Hinglish');
+    }
+    expect(await status()).toMatchObject({ used: 1, reserved: 0, remaining: 49, inProgress: false });
+  });
   it('a provider fallback still charges the logical answer once', async () => {
     m.execute.mockRejectedValueOnce(new FreeChainProviderError('TIMEOUT'));
     const res = new ResponseFixture();

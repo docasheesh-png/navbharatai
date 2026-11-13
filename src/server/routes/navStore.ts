@@ -1,3 +1,4 @@
+import { explicitStoreAdmin } from '../lib/storeAdminPermission';
 // Nav App Store — a place where a NavBharatAI user can publish their Android app, and anyone can
 // install it.
 //
@@ -141,10 +142,7 @@ export async function listedWebAppMeta(id: string): Promise<AppMeta | undefined>
 const publicApprovedApps = new SharedReadCache<StoreApp[]>({ maxEntries: 4, ttlMs: 60_000 });
 
 export function isStoreAdmin(email: GrantEmail | null): boolean { // a verified email only (Q-624)
-  if (!email) return false;
-  const list = (process.env.NAV_STORE_ADMINS || process.env.AGENTV3_FREE_LIST || '')
-    .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
-  return list.includes(email.toLowerCase());
+  return explicitStoreAdmin(email, process.env.NAV_STORE_ADMINS);
 }
 
 export interface SubmissionForm {
@@ -1536,3 +1534,4 @@ export function registerNavStoreRoutes(app: Express): void {
     }
   });
 }
+

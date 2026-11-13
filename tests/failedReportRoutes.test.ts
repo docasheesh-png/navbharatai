@@ -17,7 +17,7 @@ vi.mock('../src/server/lib/failedReportAutopsy', async original => ({ ...await o
 import { registerFailedReportRoutes } from '../src/server/routes/failedReports';
 import { apiVersionMiddleware } from '../src/server/routes/apiVersion';
 import { formBodyParser, jsonBodyParser } from '../src/server/lib/requestBodyLimits';
-import { mintAdminToken } from '../src/server/lib/adminAuth';
+import { mintAdminToken, adminSessionSigningKey } from '../src/server/lib/adminAuth';
 import { failedReportDigest } from '../src/server/lib/failedBuildReports';
 
 let server: Server; let port: number; let adminToken: string;
@@ -30,8 +30,8 @@ function request(path: string, opts: { method?: string; headers?: Record<string,
   });
 }
 beforeAll(async () => {
-  vi.stubEnv('ADMIN_USERNAME', 'owner'); vi.stubEnv('ADMIN_PASSWORD', 'test-private-password');
-  adminToken = mintAdminToken('test-private-password', 'owner', Date.now());
+  vi.stubEnv('ADMIN_USERNAME', 'owner'); vi.stubEnv('ADMIN_PASSWORD', 'test-private-password'); vi.stubEnv('ADMIN_SESSION_SIGNING_KEY', 'a1'.repeat(32));
+  adminToken = mintAdminToken(adminSessionSigningKey(), 'owner', Date.now());
   // The same body parsers, in the same order, as server.ts — the OAuth form bodies are parsed there, not by the route.
   const app = express(); app.use(jsonBodyParser()); app.use(formBodyParser()); app.use(apiVersionMiddleware); registerFailedReportRoutes(app);
   server = await new Promise<Server>((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });

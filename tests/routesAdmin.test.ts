@@ -8,6 +8,7 @@
  * Separate test cases explicitly cover the login endpoint end-to-end.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { generateTotp } from '../src/server/lib/totp';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 
 // Suppress audit + serverStats side-effects that would fire in the login handler.
@@ -25,10 +26,15 @@ const fakeLimiter = (_req: any, _res: any, next: any) => next?.();
 describe('Admin routes — login endpoint', () => {
   const origPass = process.env.ADMIN_PASSWORD;
   const origUser = process.env.ADMIN_USERNAME;
+  const origKey = process.env.ADMIN_SESSION_SIGNING_KEY;
+  const origTotp = process.env.ADMIN_TOTP_SECRET;
+  beforeEach(() => { process.env.ADMIN_SESSION_SIGNING_KEY = 'a1'.repeat(32); });
 
   afterEach(() => {
     process.env.ADMIN_PASSWORD = origPass;
     process.env.ADMIN_USERNAME = origUser;
+    if (origKey === undefined) delete process.env.ADMIN_SESSION_SIGNING_KEY; else process.env.ADMIN_SESSION_SIGNING_KEY = origKey;
+    if (origTotp === undefined) delete process.env.ADMIN_TOTP_SECRET; else process.env.ADMIN_TOTP_SECRET = origTotp;
   });
 
   it('returns 503 when ADMIN_PASSWORD env var is not set', async () => {
@@ -59,14 +65,27 @@ describe('Admin routes — login endpoint', () => {
     expect(res.body?.error).toMatch(/invalid credentials/i);
   });
 
-  it('returns a token on correct credentials', async () => {
+  it('does not issue a token when the MFA datastore is unavailable', async () => {
+    process.env.ADMIN_PASSWORD = 'correctpass';
+    process.env.ADMIN_USERNAME = 'aashishcpmt09';
+    delete process.env.ADMIN_TOTP_SECRET;
+    const register = await importAdminRoutes();
+    const handler = captureRoutes(register, fakeLimiter).get('POST /api/admin/login');
+    const res = mockRes();
+    await handler!(mockReq({ body: { username: 'aashishcpmt09', password: 'correctpass' } }), res);
+    expect(res.statusCode).toBe(503);
+    expect(res.body?.token).toBeUndefined();
+  });
+
+  it('returns a token on correct credentials and verified configured MFA', async () => {
     process.env.ADMIN_PASSWORD = 'correctpass';
     process.env.ADMIN_USERNAME = 'aashishcpmt09';
     const register = await importAdminRoutes();
     const routes = captureRoutes(register, fakeLimiter);
     const handler = routes.get('POST /api/admin/login');
 
-    const req = mockReq({ body: { username: 'aashishcpmt09', password: 'correctpass' } });
+    process.env.ADMIN_TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
+    const req = mockReq({ body: { username: 'aashishcpmt09', password: 'correctpass', totp: generateTotp(process.env.ADMIN_TOTP_SECRET) } });
     const res = mockRes();
     await handler!(req, res);
     expect(res.statusCode).toBe(200);

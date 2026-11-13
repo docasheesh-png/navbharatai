@@ -79,7 +79,7 @@ vi.mock('../src/server/bots/BotStore', async (orig) => {
 });
 
 import { registerBotRoutes } from '../src/server/routes/bots';
-import { mintAdminToken } from '../src/server/lib/adminAuth';
+import { mintAdminToken, adminSessionSigningKey } from '../src/server/lib/adminAuth';
 import { verifyMetaSignature, whatsappSignatureCutoverMs, whatsappWebhookVerdict, WHATSAPP_SIGNATURE_DEFAULT_CUTOVER } from '../src/server/bots/whatsappSignature';
 
 // ── A route capture that runs the WHOLE chain (middleware included), unlike the shared helper ────────────
@@ -123,7 +123,7 @@ function delivery(botId: string, headers: Record<string, string> = {}, raw = MET
 
 const SIGNED = 'a'.repeat(24);
 const LEGACY = 'b'.repeat(24);
-const prevEnv = { cut: process.env.WHATSAPP_SIGNATURE_REQUIRED_AFTER, pass: process.env.ADMIN_PASSWORD, user: process.env.ADMIN_USERNAME };
+const prevEnv = { cut: process.env.WHATSAPP_SIGNATURE_REQUIRED_AFTER, pass: process.env.ADMIN_PASSWORD, user: process.env.ADMIN_USERNAME, key: process.env.ADMIN_SESSION_SIGNING_KEY };
 
 beforeEach(() => {
   store.bots.clear(); store.stamps.length = 0; sent.wa.length = 0; sent.turns = 0; authUid.uid = 'owner-1';
@@ -131,7 +131,7 @@ beforeEach(() => {
   seedWhatsApp(LEGACY, { signed: false });
 });
 afterEach(() => {
-  for (const [k, v] of [['WHATSAPP_SIGNATURE_REQUIRED_AFTER', prevEnv.cut], ['ADMIN_PASSWORD', prevEnv.pass], ['ADMIN_USERNAME', prevEnv.user]] as const) {
+  for (const [k, v] of [['WHATSAPP_SIGNATURE_REQUIRED_AFTER', prevEnv.cut], ['ADMIN_PASSWORD', prevEnv.pass], ['ADMIN_USERNAME', prevEnv.user], ['ADMIN_SESSION_SIGNING_KEY', prevEnv.key]] as const) {
     if (v === undefined) delete process.env[k]; else process.env[k] = v;
   }
 });
@@ -247,8 +247,8 @@ describe('🔒 the App Secret never appears in any API response', () => {
   it('the owner\'s list and the admin ledger carry signed status but no secret, ciphertext or token', async () => {
     const list = await call('GET /api/bots', mockReq());
     const listJson = JSON.stringify(list.body);
-    process.env.ADMIN_PASSWORD = 'p'; process.env.ADMIN_USERNAME = 'u';
-    const ledger = await call('GET /api/admin/bots', mockReq({ headers: { 'x-admin-token': mintAdminToken('p', 'u', Date.now()) } }));
+    process.env.ADMIN_SESSION_SIGNING_KEY = 'a1'.repeat(32); process.env.ADMIN_PASSWORD = 'p'; process.env.ADMIN_USERNAME = 'u';
+    const ledger = await call('GET /api/admin/bots', mockReq({ headers: { 'x-admin-token': mintAdminToken(adminSessionSigningKey(), 'u', Date.now()) } }));
     const ledgerJson = JSON.stringify(ledger.body);
     for (const json of [listJson, ledgerJson]) {
       expect(json).not.toContain(APP_SECRET);
@@ -266,7 +266,7 @@ describe('🔒 the App Secret never appears in any API response', () => {
 // ── 4. The admin ledger ───────────────────────────────────────────────────────────────────────────────
 describe('🔒 the bot ledger is admin-only and says who built which bot and whether it is signed', () => {
   it('refuses a request with no admin token, and one with a forged token', async () => {
-    process.env.ADMIN_PASSWORD = 'p'; process.env.ADMIN_USERNAME = 'u';
+    process.env.ADMIN_SESSION_SIGNING_KEY = 'a1'.repeat(32); process.env.ADMIN_PASSWORD = 'p'; process.env.ADMIN_USERNAME = 'u';
     expect((await call('GET /api/admin/bots', mockReq())).statusCode).toBe(401);
     expect((await call('GET /api/admin/bots', mockReq({ headers: { 'x-admin-token': mintAdminToken('wrong', 'u', Date.now()) } }))).statusCode).toBe(401);
     // A signed-in USER is not an admin.
@@ -274,8 +274,8 @@ describe('🔒 the bot ledger is admin-only and says who built which bot and whe
   });
 
   it('returns each bot with its owner identity, platform and signed status', async () => {
-    process.env.ADMIN_PASSWORD = 'p'; process.env.ADMIN_USERNAME = 'u';
-    const res = await call('GET /api/admin/bots', mockReq({ headers: { 'x-admin-token': mintAdminToken('p', 'u', Date.now()) } }));
+    process.env.ADMIN_SESSION_SIGNING_KEY = 'a1'.repeat(32); process.env.ADMIN_PASSWORD = 'p'; process.env.ADMIN_USERNAME = 'u';
+    const res = await call('GET /api/admin/bots', mockReq({ headers: { 'x-admin-token': mintAdminToken(adminSessionSigningKey(), 'u', Date.now()) } }));
     expect(res.statusCode).toBe(200);
     expect(res.body.ok).toBe(true);
     const byId = new Map<string, Rec>(res.body.rows.map((r: Rec) => [r.botId, r]));
@@ -286,8 +286,8 @@ describe('🔒 the bot ledger is admin-only and says who built which bot and whe
   });
 
   it('a malformed cursor is refused rather than read', async () => {
-    process.env.ADMIN_PASSWORD = 'p'; process.env.ADMIN_USERNAME = 'u';
-    const res = await call('GET /api/admin/bots', mockReq({ query: { cursor: '../users/x' }, headers: { 'x-admin-token': mintAdminToken('p', 'u', Date.now()) } }));
+    process.env.ADMIN_SESSION_SIGNING_KEY = 'a1'.repeat(32); process.env.ADMIN_PASSWORD = 'p'; process.env.ADMIN_USERNAME = 'u';
+    const res = await call('GET /api/admin/bots', mockReq({ query: { cursor: '../users/x' }, headers: { 'x-admin-token': mintAdminToken(adminSessionSigningKey(), 'u', Date.now()) } }));
     expect(res.statusCode).toBe(400);
   });
 });

@@ -1,0 +1,333 @@
+[
+  {
+    "name": "Barbarian",
+    "sourceSha256": "cefc311a0e10c7858b6141f5ada7e33268727564fb8ac1347aab97d000669cc6",
+    "sha256": "acd89c53337498d5e7183a3fd87fc90a0486467e45b34e5f50eeeffd64566e2c",
+    "sourceBytes": 3613268,
+    "bytes": 445300,
+    "triangles": 6543,
+    "animations": [
+      "Idle",
+      "Walking_A",
+      "Running_A"
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Barbarian.glb",
+    "sourceRevision": "672074b73ba276876a19e8816ecdc5241817ab47",
+    "license": "CC0-1.0",
+    "licenseEvidence": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/LICENSE.txt",
+    "licenseFileSha256": "ae322141814056dda0deea7540d74c41d87aee1da319977cd1bd84ee5a923629",
+    "author": "Kay Lousberg",
+    "attribution": "KayKit by Kay Lousberg. CC0 1.0 Universal.",
+    "commercial": true,
+    "redistributeInGame": true,
+    "redistributeSource": true,
+    "renderProof": "blocked-environment-unix-socket-EPERM",
+    "activation": "quarantined-not-in-runtime-catalogue"
+  },
+  {
+    "name": "Mage",
+    "sourceSha256": "cf898585da33fab50c724d31605fb931eb2912e6d2280092141e98ca81ad507d",
+    "sha256": "7914f14f46a490cb77dcde290d460dd0220592815e8cd14d2941e4ecfda9ac16",
+    "sourceBytes": 3589240,
+    "bytes": 432608,
+    "triangles": 5683,
+    "animations": [
+      "Idle",
+      "Walking_A",
+      "Running_A"
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Mage.glb",
+    "sourceRevision": "672074b73ba276876a19e8816ecdc5241817ab47",
+    "license": "CC0-1.0",
+    "licenseEvidence": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/LICENSE.txt",
+    "licenseFileSha256": "ae322141814056dda0deea7540d74c41d87aee1da319977cd1bd84ee5a923629",
+    "author": "Kay Lousberg",
+    "attribution": "KayKit by Kay Lousberg. CC0 1.0 Universal.",
+    "commercial": true,
+    "redistributeInGame": true,
+    "redistributeSource": true,
+    "renderProof": "blocked-environment-unix-socket-EPERM",
+    "activation": "quarantined-not-in-runtime-catalogue"
+  },
+  {
+    "name": "Rogue",
+    "sourceSha256": "e825437cd4d2ee9c1960b517a74a69101e33eb409ae7fa8cedc7134a998fbb7d",
+    "sha256": "8d7b7c9b0631f698f6be1d6234900952afb0218c7ad79eea9c77d20859e66890",
+    "sourceBytes": 3616284,
+    "bytes": 452492,
+    "triangles": 6377,
+    "animations": [
+      "Idle",
+      "Walking_A",
+      "Running_A"
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Rogue.glb",
+    "sourceRevision": "672074b73ba276876a19e8816ecdc5241817ab47",
+    "license": "CC0-1.0",
+    "licenseEvidence": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/LICENSE.txt",
+    "licenseFileSha256": "ae322141814056dda0deea7540d74c41d87aee1da319977cd1bd84ee5a923629",
+    "author": "Kay Lousberg",
+    "attribution": "KayKit by Kay Lousberg. CC0 1.0 Universal.",
+    "commercial": true,
+    "redistributeInGame": true,
+    "redistributeSource": true,
+    "renderProof": "blocked-environment-unix-socket-EPERM",
+    "activation": "quarantined-not-in-runtime-catalogue"
+  },
+  {
+    "name": "Rogue_Hooded",
+    "sourceSha256": "93e6e25213009952276d9cf34f5d96a243767334c66f280db0433ddfabb91545",
+    "sha256": "a129802cf7b8e1f38b34073406d9328cddc9289a1af70897906c995bcb99488b",
+    "sourceBytes": 3597652,
+    "bytes": 434068,
+    "triangles": 6035,
+    "animations": [
+      "Idle",
+      "Walking_A",
+      "Running_A"
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Rogue_Hooded.glb",
+    "sourceRevision": "672074b73ba276876a19e8816ecdc5241817ab47",
+    "license": "CC0-1.0",
+    "licenseEvidence": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/LICENSE.txt",
+    "licenseFileSha256": "ae322141814056dda0deea7540d74c41d87aee1da319977cd1bd84ee5a923629",
+    "author": "Kay Lousberg",
+    "attribution": "KayKit by Kay Lousberg. CC0 1.0 Universal.",
+    "commercial": true,
+    "redistributeInGame": true,
+    "redistributeSource": true,
+    "renderProof": "blocked-environment-unix-socket-EPERM",
+    "activation": "quarantined-not-in-runtime-catalogue"
+  },
+  {
+    "name": "car_hatchback",
+    "sourceSha256": "e38be3dbdfbc95b0e794fc5c8164b2ff658b2dc5049b51d38179d16a9432b4f3",
+    "sha256": "9597f183dd72e9a0694527a36c311d1110555dfcea49a1f53a3cf2eedb0262c6",
+    "sourceBytes": 10952,
+    "bytes": 67736,
+    "triangles": 1194,
+    "animations": [],
+    "resources": [
+      {
+        "path": "car_hatchback.bin",
+        "sha256": "e7756d8a44553ef75091bb4baa41388bcb1a1b44388008a3e670d05cb12f4c5f",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_hatchback.bin"
+      },
+      {
+        "path": "citybits_texture.png",
+        "sha256": "6d2d9a5a13bce32209cd8c04572ab170504d68f34b1519165c9b0c41871e235b",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/citybits_texture.png"
+      }
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_hatchback.gltf",
+    "sourceRevision": "63976910ca04d16f0fc531b9c614244be8128713",
+    "license": "CC0-1.0",
+    "licenseEvidence": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/LICENSE.txt",
+    "licenseFileSha256": "b076d86beec660e1550e00796ca24a8b70d7b2187d79954b2e29722b666dce93",
+    "author": "Kay Lousberg",
+    "attribution": "KayKit by Kay Lousberg. CC0 1.0 Universal.",
+    "commercial": true,
+    "redistributeInGame": true,
+    "redistributeSource": true,
+    "renderProof": "blocked-environment-unix-socket-EPERM",
+    "activation": "quarantined-not-in-runtime-catalogue"
+  },
+  {
+    "name": "car_stationwagon",
+    "sourceSha256": "49f7e2bdb70183214a3e8d8576e420ebb69520b21db81dddfc6a04e1ed8994fd",
+    "sha256": "077866d11f4a52b67b859b219958d92f0768f31f8f23fdb939e17931828d9b98",
+    "sourceBytes": 10970,
+    "bytes": 70360,
+    "triangles": 1234,
+    "animations": [],
+    "resources": [
+      {
+        "path": "car_stationwagon.bin",
+        "sha256": "46d28202e738f62ba6aae5caae5d56852334ca53ac0628d88d03a5e5e3042c4b",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_stationwagon.bin"
+      },
+      {
+        "path": "citybits_texture.png",
+        "sha256": "6d2d9a5a13bce32209cd8c04572ab170504d68f34b1519165c9b0c41871e235b",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/citybits_texture.png"
+      }
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_stationwagon.gltf",
+    "sourceRevision": "63976910ca04d16f0fc531b9c614244be8128713",
+    "license": "CC0-1.0",
+    "licenseEvidence": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/LICENSE.txt",
+    "licenseFileSha256": "b076d86beec660e1550e00796ca24a8b70d7b2187d79954b2e29722b666dce93",
+    "author": "Kay Lousberg",
+    "attribution": "KayKit by Kay Lousberg. CC0 1.0 Universal.",
+    "commercial": true,
+    "redistributeInGame": true,
+    "redistributeSource": true,
+    "renderProof": "blocked-environment-unix-socket-EPERM",
+    "activation": "quarantined-not-in-runtime-catalogue"
+  },
+  {
+    "name": "road_straight",
+    "sourceSha256": "35c74b311a04e5682dfc7fc823867aa53de1cc19b86fa801730496ee69b52e68",
+    "sha256": "1deb113375de9adf980bda69e7c946ad1811ff4f694d6e0069be5e29b2463835",
+    "sourceBytes": 2974,
+    "bytes": 24876,
+    "triangles": 58,
+    "animations": [],
+    "resources": [
+      {
+        "path": "road_straight.bin",
+        "sha256": "6509b3509565e250de74a19728b9dd1e1351d40c8a50f4d18a1c6b3edb0bd068",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/road_straight.bin"
+      },
+      {
+        "path": "citybits_texture.png",
+        "sha256": "6d2d9a5a13bce32209cd8c04572ab170504d68f34b1519165c9b0c41871e235b",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/citybits_texture.png"
+      }
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/road_straight.gltf",
+    "sourceRevision": "63976910ca04d16f0fc531b9c614244be8128713",
+    "license": "CC0-1.0",
+    "licenseEvidence": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/LICENSE.txt",
+    "licenseFileSha256": "b076d86beec660e1550e00796ca24a8b70d7b2187d79954b2e29722b666dce93",
+    "author": "Kay Lousberg",
+    "attribution": "KayKit by Kay Lousberg. CC0 1.0 Universal.",
+    "commercial": true,
+    "redistributeInGame": true,
+    "redistributeSource": true,
+    "renderProof": "blocked-environment-unix-socket-EPERM",
+    "activation": "quarantined-not-in-runtime-catalogue"
+  },
+  {
+    "name": "road_corner",
+    "sourceSha256": "592dadb7a6e81e2c5c2415d5e3872eaccece0c71ff1e34bb3ced06ceed4ce149",
+    "sha256": "2e2c711d1eb171bc18f6337712d70222751c34295fe61ae7ece6776b854629a1",
+    "sourceBytes": 2971,
+    "bytes": 28608,
+    "triangles": 152,
+    "animations": [],
+    "resources": [
+      {
+        "path": "road_corner.bin",
+        "sha256": "357bfda56820b66292a6fa53e3bb506625da604c2ada9667971f045f563cc015",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/road_corner.bin"
+      },
+      {
+        "path": "citybits_texture.png",
+        "sha256": "6d2d9a5a13bce32209cd8c04572ab170504d68f34b1519165c9b0c41871e235b",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/citybits_texture.png"
+      }
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/road_corner.gltf",
+    "sourceRevision": "63976910ca04d16f0fc531b9c614244be8128713",
+    "license": "CC0-1.0",
+    "licenseEvidence": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/LICENSE.txt",
+    "licenseFileSha256": "b076d86beec660e1550e00796ca24a8b70d7b2187d79954b2e29722b666dce93",
+    "author": "Kay Lousberg",
+    "attribution": "KayKit by Kay Lousberg. CC0 1.0 Universal.",
+    "commercial": true,
+    "redistributeInGame": true,
+    "redistributeSource": true,
+    "renderProof": "blocked-environment-unix-socket-EPERM",
+    "activation": "quarantined-not-in-runtime-catalogue"
+  },
+  {
+    "name": "box_A",
+    "sourceSha256": "fe1fa867aa6aa2933bbe3d232c8dcedffc68d484019f71544ce191e2c8ddc16c",
+    "sha256": "2acbf90a6615ad0694d08f7b739164b20ccf13a56747fd2aaca07931944718a6",
+    "sourceBytes": 3044,
+    "bytes": 23516,
+    "triangles": 32,
+    "animations": [],
+    "resources": [
+      {
+        "path": "box_A.bin",
+        "sha256": "7d73d90c735ad860f176cc55607e20ca4939c7c9de059b7db127c980f3b5bcec",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/box_A.bin"
+      },
+      {
+        "path": "citybits_texture.png",
+        "sha256": "6d2d9a5a13bce32209cd8c04572ab170504d68f34b1519165c9b0c41871e235b",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/citybits_texture.png"
+      }
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/box_A.gltf",
+    "sourceRevision": "63976910ca04d16f0fc531b9c614244be8128713",
+    "license": "CC0-1.0",
+    "licenseEvidence": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/LICENSE.txt",
+    "licenseFileSha256": "b076d86beec660e1550e00796ca24a8b70d7b2187d79954b2e29722b666dce93",
+    "author": "Kay Lousberg",
+    "attribution": "KayKit by Kay Lousberg. CC0 1.0 Universal.",
+    "commercial": true,
+    "redistributeInGame": true,
+    "redistributeSource": true,
+    "renderProof": "blocked-environment-unix-socket-EPERM",
+    "activation": "quarantined-not-in-runtime-catalogue"
+  },
+  {
+    "name": "firehydrant",
+    "sourceSha256": "0a3f9fb95e8b4805602ad26050ee552408553682b41f3e54981a69dfa92a7f3b",
+    "sha256": "0f01e076f4289fbd87e7cbffc5ec4c729573024c9d2d17592f10d65243075af1",
+    "sourceBytes": 3067,
+    "bytes": 29352,
+    "triangles": 180,
+    "animations": [],
+    "resources": [
+      {
+        "path": "firehydrant.bin",
+        "sha256": "02cab93bf6af8c16da083c6ac92dcc5997bed24dabc1e746ee780e623b07b3de",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/firehydrant.bin"
+      },
+      {
+        "path": "citybits_texture.png",
+        "sha256": "6d2d9a5a13bce32209cd8c04572ab170504d68f34b1519165c9b0c41871e235b",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/citybits_texture.png"
+      }
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/firehydrant.gltf",
+    "sourceRevision": "63976910ca04d16f0fc531b9c614244be8128713",
+    "license": "CC0-1.0",
+    "licenseEvidence": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/LICENSE.txt",
+    "licenseFileSha256": "b076d86beec660e1550e00796ca24a8b70d7b2187d79954b2e29722b666dce93",
+    "author": "Kay Lousberg",
+    "attribution": "KayKit by Kay Lousberg. CC0 1.0 Universal.",
+    "commercial": true,
+    "redistributeInGame": true,
+    "redistributeSource": true,
+    "renderProof": "blocked-environment-unix-socket-EPERM",
+    "activation": "quarantined-not-in-runtime-catalogue"
+  },
+  {
+    "name": "dumpster",
+    "sourceSha256": "56353a02aa70f61ea0f94f5806c66f489b2949b64db0611b5ccf2b500c815cb9",
+    "sha256": "8770653d31dd61a41a40bd8d2c30e1b41fd2c1a3d88f364b83ba782f4aea07f9",
+    "sourceBytes": 3033,
+    "bytes": 29444,
+    "triangles": 126,
+    "animations": [],
+    "resources": [
+      {
+        "path": "dumpster.bin",
+        "sha256": "389a04cddf27b9514226597627fb0f217499432be1a26c6b43e6f2bfdb652fd2",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/dumpster.bin"
+      },
+      {
+        "path": "citybits_texture.png",
+        "sha256": "6d2d9a5a13bce32209cd8c04572ab170504d68f34b1519165c9b0c41871e235b",
+        "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/citybits_texture.png"
+      }
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/dumpster.gltf",
+    "sourceRevision": "63976910ca04d16f0fc531b9c614244be8128713",
+    "license": "CC0-1.0",
+    "licenseEvidence": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/LICENSE.txt",
+    "licenseFileSha256": "b076d86beec660e1550e00796ca24a8b70d7b2187d79954b2e29722b666dce93",
+    "author": "Kay Lousberg",
+    "attribution": "KayKit by Kay Lousberg. CC0 1.0 Universal.",
+    "commercial": true,
+    "redistributeInGame": true,
+    "redistributeSource": true,
+    "renderProof": "blocked-environment-unix-socket-EPERM",
+    "activation": "quarantined-not-in-runtime-catalogue"
+  }
+]

@@ -69,6 +69,8 @@ import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome, withSandboxBrowsers, withTestFilter } from './testRunner';
 import { findInCatalog } from '../lib/heroObjectSpec';
 import { PLACEMENT } from '../lib/objectCatalogTypes';
+import { planGameLibrary, type LibraryRequest } from './gameAssets/gameLibrarySelection';
+import { searchGameLibrary, gameLibraryObjectNote } from './gameAssets/gameLibrary';
 import { resolveObjectSpec, renderSpec, memoryCache } from '../lib/objectSpecProvider';
 import { aiRouter } from '../lib/aiRouter';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
@@ -2614,6 +2616,7 @@ export class ToolDispatcher {
     } catch { /* no local models: the spec stands as it is */ }
     const body = [
       readyModel ? localModelLead(readyModel) : '',
+      gameLibraryObjectNote(wanted),
       renderSpec(spec, { builder: known?.builder }),
       placement
         ? '\n  HOW TO PLACE IT — ' + placement.headline + '\n'
@@ -9636,6 +9639,12 @@ export class ToolDispatcher {
         // the spec-first PROTOCOL, which costs nothing and can never fail a build. That last rung is
         // why this tool is safe to put in front of every hand-modelled object.
         const osRec = (input as Record<string, unknown>) || {};
+        if (typeof osRec.library_plan === 'string') return JSON.stringify(planGameLibrary({ prompt: osRec.library_plan, requirements: Array.isArray(osRec.requirements) ? osRec.requirements.filter(v => v && typeof v === 'object') as LibraryRequest['requirements'] : undefined, device: { profile: osRec.device_profile === 'standard-web' ? 'standard-web' : 'conservative-mobile', webgl2: typeof osRec.webgl2 === 'boolean' ? osRec.webgl2 : undefined } }));
+        if (typeof osRec.library_query === 'string' || typeof osRec.category === 'string') {
+          return JSON.stringify(searchGameLibrary({ query: typeof osRec.library_query === 'string' ? osRec.library_query : typeof osRec.object === 'string' ? osRec.object : '',
+            category: typeof osRec.category === 'string' ? osRec.category : undefined,
+            animation: typeof osRec.animation === 'string' ? osRec.animation : undefined }));
+        }
         // ONE CALL FOR EVERY OBJECT (autopsy 61279465, Q-2335): a list is answered in one result, so the model does
         // not spend a whole turn per object. `object` alone still works.
         const asked = [

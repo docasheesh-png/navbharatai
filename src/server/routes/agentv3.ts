@@ -443,6 +443,8 @@ import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
 import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets } from '../AgentV3/gameAssets/assetSeed';
+import { gameLibraryPlanningHandoff } from '../AgentV3/gameAssets/gameLibrarySelection';
+import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
@@ -18951,7 +18953,7 @@ async function noteBuildOutcome(
                     kitAssetsMs = Date.now() - assetsStartedAt;
                     kitAssetsStatus = String(assets.status);
                     for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content);
-                    localGameAssetHandoff = assets.handoff;
+                    localGameAssetHandoff = [assets.handoff, gameLibraryBuildReport(prompt, assets), gameLibraryPlanningHandoff(prompt)].filter(Boolean).join('\n');
                   } catch { /* The procedural kit remains the floor. */ }
                 }
               } finally {

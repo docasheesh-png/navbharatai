@@ -289,7 +289,10 @@ describe('BR1954/Q-2311 — a platform kit palette is not user design debt', () 
     expect(lintBuiltApp({ [path]: files[path], 'src/app.css': `.authored{color:${matching}}` })!.design.stats.colors).toBe(1);
     const colors = Array.from({ length: 14 }, (_, i) => `#${(0x112233 + i * 12345).toString(16).padStart(6, '0')}`);
     const css = colors.map((c, i) => `.c${i}{color:${c}}`).join('\n');
-    const result = lintBuiltApp({ ...files, 'src/app.css': css })!;
+    // The user's stylesheet goes FIRST: the whole kit pool (~560 KB) is larger than the 400 KB lint budget, and a
+    // file that comes after the budget is spent is skipped. What this asserts is the colour rule, not who wins
+    // the budget — see Q-2660 for the budget itself.
+    const result = lintBuiltApp({ 'src/app.css': css, ...files })!;
     expect(result.design.violations.some((v) => v.type === 'color-count')).toBe(true);
     expect(result.offenders['color-count']).toContainEqual({ path: 'src/app.css', count: 14 });
     expect(lintBuiltApp({ 'src/not-the-kit.tsx': files[path] })!.design.stats.colors).toBeGreaterThan(0);

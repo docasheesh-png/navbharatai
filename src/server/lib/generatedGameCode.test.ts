@@ -9,6 +9,7 @@ import { generateGameSystems } from './GameSystemsGenerator';
 import { generateGameEconomy } from './GameEconomyGenerator';
 import { generateGameShopSim } from './GameShopSimGenerator';
 import { generateGameManager } from './GameManagerGenerator';
+import { generateGameRoyale } from './GameRoyaleGenerator';
 import { generateMotion } from './MotionGenerator';
 
 /**
@@ -36,6 +37,7 @@ const PACKS: Array<{ name: string; files: Record<string, string> }> = [
   { name: 'tycoon economy', files: generateGameEconomy().files },
   { name: 'tycoon shop people', files: generateGameShopSim().files },
   { name: 'tycoon management screen', files: generateGameManager().files },
+  { name: 'battle royale match', files: generateGameRoyale().files },
   { name: 'motion pack', files: generateMotion().files },
 ];
 
@@ -106,7 +108,7 @@ describe('every file a game generator writes into a user app is parseable TypeSc
 
   it('covers every game generator we ship — a new phase must be added here too', () => {
     // If a phase 5 lands without a line above, this fails and says why.
-    expect(PACKS).toHaveLength(10);
+    expect(PACKS).toHaveLength(11);
     expect(PACKS.flatMap((p) => Object.keys(p.files)).length).toBeGreaterThanOrEqual(23);
   });
 });

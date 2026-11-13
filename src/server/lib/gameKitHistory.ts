@@ -124,6 +124,24 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "5da3856c53d7f23b4bf2b4458c90b60c2c8c679853131823ff324de1ef8c80f2",
     "f1ff14f4eab4da545f34a66b0f8b53dae34bb8e7425fd62235074c50b0eddf4c"
   ],
+  "src/game/royale/bots.ts": [
+    "d2591b4b3e9086c72530b78df1394112a974e329c26cb36693f812fef56b7588"
+  ],
+  "src/game/royale/index.ts": [
+    "23c1585781474154b9935209cc23295fc7ca4589d0c4b9117e31d6c741118979"
+  ],
+  "src/game/royale/loot.ts": [
+    "e04a49b62bf40375ec200795c6ee95996e0d38d2e20dd5ee4e784dde0f532642"
+  ],
+  "src/game/royale/match.ts": [
+    "2f2f21c2208410114aef9f0bc0039f9682a3fdba1cc0d4cb3d4f951a5fa5e089"
+  ],
+  "src/game/royale/rng.ts": [
+    "9484de797ab78297b14cd8f0b5de7625e9dee460764187f1dde988f9fbe9d49a"
+  ],
+  "src/game/royale/zone.ts": [
+    "9022134dc149a168a39e5149ec7a6cdd942b1a4a7320a19d9fedd360e95920e5"
+  ],
   "src/game/shop/grid.ts": [
     "c6cf814119d675a4ad587d57bf90f49540217a56a6bac597b2e679b070c38bb3"
   ],

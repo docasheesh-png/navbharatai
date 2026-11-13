@@ -1027,6 +1027,10 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       (src/game/manager/): <ManagerPanel economy shop onClose /> with Overview, Stock, Staff and Upgrades.',
     '       Open it from a HUD button. Every button is one real action and every disabled one says why;',
     '       never hand-roll the order / price / hire buttons, and do not add a Missions tab it does not have.',
+    '    4e. run_recipe({ name: "generate_game_royale" }) — ONLY for a battle-royale / last-one-standing game',
+    '       (single-player vs bots): the match (src/game/royale/) — a shrinking safe circle that always closes, atomic loot,',
+    '       bots, unique ranks. You draw it from snapshot() and report the player\'s shots with match.hitBot(); the weapons',
+    '       are step 4. Never write a zone that stops at its last circle, and say honestly that it is not online multiplayer.',
     '    5. run_recipe({ name: "generate_game_vfx" }) — particles, audio and the ONE table that fires',
     '       effect + sound + shake together (src/game/fx/), which is what makes a hit feel like force.',
     // The audio manager used to play only a LOADED file, and a generated app has none — so every game

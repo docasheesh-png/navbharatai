@@ -101447,3 +101447,34 @@ browser by calling the component against a tiny React stand-in and pressing the 
 **Still NOT done:** missions and rewards (the screen says so and has no tab for them), a minimap, a playtest dimension for "does the till ring", and the first real
 "village super mart" build — the evidence that decides whether the seed's default should be on. Nothing here has been seen in a browser (no jsdom/browser run of the
 panel). The panel's text is English only.
+
+---
+
+## 2026-11-13 — BATTLE-ROYALE CORE (`generate_game_royale`): single-player vs bots
+
+**Order the admin approved:** tycoon kit first, then a single-player battle-royale-style mode, then Rapier physics (optional, default OFF, in stages).
+This is that second item. It is NOT online multiplayer (PUBG / Free Fire scale needs live game servers, anti-cheat and matchmaking — an
+infrastructure and cost decision that is the admin's), and it uses none of those games' names, logos or characters.
+
+**What shipped.** A new recipe writing `src/game/royale/*` (rng, zone, loot, bots, match, index; pure, no dependency, no import from another game
+layer): a safe circle that shrinks on a schedule and hurts anyone outside it; loot scattered over the map; bots that loot, run for the circle and
+shoot each other and the player; unique ranks; kills; armor; a match that always ends. The game moves the player, calls `update(dt)`, draws from
+`snapshot()` and reports the player's shots through `hitBot()`; weapons, aim and camera stay the shooter kit (`generate_game_systems`). Wired like the
+tycoon recipes (recipe map, catalog + both lists, dispatcher, architect prompt step 4e, AppKnowledgeBase, kit history, census tests). NOT auto-seeded.
+
+**Bug classes encoded** (each proven by reversion — bug put back, tests watched failing; 8 of 8 caught, one only after a test was added): a match that
+never ends (the zone closes to nothing after its last circle; a test plays 20 matches to the end, a 99-bot one included); a zone that jumps or strands
+you (every new circle lies entirely inside the last — checked over 40 seeds); loot lost or duplicated (pickup is atomic, and a conservation test over
+1,500 random pickups by three players); ranks that do not add up (unique 1..N, 1 = last one standing); armor that soaks wrongly; a death recorded
+twice (this reversion was NOT caught at first — every public route already blocks a hit on a dead fighter — so a test now calls the damage step
+directly); and a bot weapon table that drifts from the shooter kit (a test compares both tables from the real emitted code).
+
+**Two real bugs the tests found in the generator itself before it shipped:** an out-of-range zone radius (2) was CLAMPED to 0.99 and silently
+accepted as a phase nobody asked for (now rejected); and `hitChance` returned NaN for a non-numeric distance (now treated as out of range).
+
+**Proof.** 44 tests in `GameRoyaleGenerator.test.ts` (a strict + `noUnusedLocals` type-check of the emitted files included).
+
+**Still NOT done / honest limits:** the bots are simple (no cover, vehicles or building interiors) and fight by chance, not by aim; no airdrops or
+vehicles; nothing here has been seen in a browser or used by a real build; the game layer must draw the zone, people and HUD itself. A seed that lays this
+down for a "battle royale" request is not built (the existing 3D kit already matches "battle royale"/"pubg"/"free fire" as a 3D game) — decide it with
+evidence from a real build, as with the tycoon seed.

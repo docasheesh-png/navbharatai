@@ -2330,6 +2330,32 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_game_royale',
+      description:
+        'Add the MATCH of a battle-royale / last-one-standing game — SINGLE-PLAYER against bots (there is no online multiplayer): a '
+        + 'safe circle that SHRINKS on a schedule and hurts anyone outside it, loot scattered over the map, bots that loot, run for '
+        + 'the circle and shoot each other and the player, unique ranks, kills and a match that always ENDS. Emits src/game/royale as '
+        + 'a pure simulation (no drawing, no three.js, no import from another game layer): the game moves the player, steps the '
+        + 'match with update(dt), DRAWS from snapshot() and reports the player\'s shots with hitBot(botId, damage); weapons, aim and '
+        + 'camera are the shooter kit (generate_game_systems). IT ENCODES THE RULES A HAND-WRITTEN ROYALE GETS WRONG — do not '
+        + 'reimplement them: the zone only shrinks, each new circle lies inside the last and is announced before it closes, and after '
+        + 'its last circle it holds and then closes to nothing, so a match cannot stall for ever; loot pickup is atomic (the inventory '
+        + 'is asked first; a full one leaves the item on the ground and says why), so an item is never lost or duplicated; a rank is '
+        + 'the number alive at the moment of death — unique, 1 = last one standing; armor soaks 60% of a hit; death is recorded once; '
+        + 'the bots use the shooter kit\'s weapon numbers and hit less the farther they are. Be honest in the summary: the bots are '
+        + 'simple (no cover, vehicles or building interiors) and it is not PUBG or Free Fire — no name, logo or character of those games.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: rng, zone, loot, bots, match, index. Default = all. A module always brings the modules it imports.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_game_systems',
       description:
         'Add the gameplay systems that make it a GAME rather than a walkable scene: combat (health, '
@@ -3683,6 +3709,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_game_economy',
   'generate_game_shopsim',
   'generate_game_manager',
+  'generate_game_royale',
   'generate_game_shell',
   'generate_game_vfx',
   'generate_melody',
@@ -3905,6 +3932,7 @@ export const RECIPE_TOOLS = [
   'generate_game_controller',
   'generate_game_economy',
   'generate_game_manager',
+  'generate_game_royale',
   'generate_game_runtime',
   'generate_game_shell',
   'generate_game_shopsim',

@@ -6,6 +6,7 @@ import { generateGameSystems } from '../src/server/lib/GameSystemsGenerator';
 import { generateGameEconomy } from '../src/server/lib/GameEconomyGenerator';
 import { generateGameShopSim } from '../src/server/lib/GameShopSimGenerator';
 import { generateGameManager } from '../src/server/lib/GameManagerGenerator';
+import { generateGameRoyale } from '../src/server/lib/GameRoyaleGenerator';
 import { generateGameVfxAudio } from '../src/server/lib/GameVfxAudioGenerator';
 import { generateGameShell } from '../src/server/lib/GameShellGenerator';
 import { defaultToolCatalog } from '../src/server/AgentV3/ToolCatalog';
@@ -66,6 +67,7 @@ const SUBSET_TOOLS: Array<[string, () => { files: Record<string, string> }]> = [
   ['generate_game_economy', generateGameEconomy],
   ['generate_game_shopsim', generateGameShopSim],
   ['generate_game_manager', generateGameManager],
+  ['generate_game_royale', generateGameRoyale],
   ['generate_game_vfx', generateGameVfxAudio],
   ['generate_game_shell', generateGameShell],
   ['generate_game_3d', generateGame3D],

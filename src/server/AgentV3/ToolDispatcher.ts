@@ -364,6 +364,7 @@ import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateGameEconomy } from '../lib/GameEconomyGenerator';
 import { generateGameShopSim } from '../lib/GameShopSimGenerator';
 import { generateGameManager } from '../lib/GameManagerGenerator';
+import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
@@ -9608,6 +9609,21 @@ export class ToolDispatcher {
         const gmgLayers = await this.addMissingRecipeLayers(gmg.files, agent);
         this.scheduleCheckpoint('management screen');
         return `Added the management screen:\n${gmgWritten.join('\n')}\n\n${gmg.instructions}${gmgLayers}`;
+      }
+
+      case 'generate_game_royale': {
+        // THE MATCH OF A BATTLE-ROYALE GAME (single-player vs bots): a safe circle that only shrinks and always closes, atomic
+        // loot, bots that loot / run for the circle / fight, unique ranks, a match that always ends. No drawing and no
+        // networking — the game draws from snapshot() and reports the player's shots through hitBot().
+        const grlRec = (input as Record<string, unknown>) || {};
+        const grlInclude = Array.isArray(grlRec.include)
+          ? grlRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const grl = generateGameRoyale(grlInclude);
+        const grlWritten = await this.writeRecipeFiles(grl.files, agent);
+        const grlLayers = await this.addMissingRecipeLayers(grl.files, agent);
+        this.scheduleCheckpoint('battle royale match');
+        return `Added the battle-royale core:\n${grlWritten.join('\n')}\n\n${grl.instructions}${grlLayers}`;
       }
 
       case 'generate_game_shell': {

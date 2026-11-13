@@ -105,55 +105,23 @@ describe('BR1955 F3: gameplay methods are not persistence', () => {
   });
 });
 
-describe('BR1955 F4: opt-in repair requires measured replay and continuing build ownership', () => {
-  it('a successful repair returns the exact measured proof for every final consumer', async () => {
-    const o = await repair(repairIo());
-    expect(o.kept).toBe(true);
-    expect(o.proof).toEqual({ outcome: 'passed', score: 100 });
-  });
-  it('NOT_RUN with empty defects is undone, not magically cured', async () => {
-    const io = repairIo({ replay: vi.fn(async () => ({ defects: [], scopeMissing: [], proof: null })) });
+describe('BR1955 F4: unsafe automatic repair is suspended without inventing gameplay proof', () => {
+  it.each([null, { outcome: 'passed' as const, score: 100 }, { outcome: 'failed' as const, score: 57 }])('does not invoke replay or claim its hypothetical proof %j', async proof => {
+    const io = repairIo({ replay: vi.fn(async () => ({ defects: [], scopeMissing: [], proof })) });
     const o = await repair(io);
-    expect(o.kept).toBe(false);
-    expect(o.proof).toBeNull();
-    expect(o.reason).toContain('did not produce a measured score');
-    expect(io.revert).toHaveBeenCalledWith(snap);
+    expect(o).toMatchObject({ attempted: false, kept: false, proof: null });
+    for (const callback of Object.values(io)) expect(callback).not.toHaveBeenCalled();
   });
   it('an already stopped build never begins repair or rewrites the saved app', async () => {
     const stop = new AbortController(); stop.abort();
     const io = repairIo(); const o = await repair(io, stop.signal);
     expect(o.attempted).toBe(false);
-    expect(io.repair).not.toHaveBeenCalled(); expect(io.replay).not.toHaveBeenCalled(); expect(io.revert).not.toHaveBeenCalled();
+    for (const callback of Object.values(io)) expect(callback).not.toHaveBeenCalled();
   });
-  it.each(['changedSince', 'replay'] as const)('a Stop during %s cannot be accepted as improvement', async (phase) => {
-    const stop = new AbortController();
-    const io = repairIo({ [phase]: phase === 'changedSince'
-      ? vi.fn(async () => { stop.abort(); return 1; })
-      : vi.fn(async () => { stop.abort(); return { defects: [], scopeMissing: [], proof: { outcome: 'passed' as const, score: 100 } }; }) } as Partial<GameRepairIO>);
-    const o = await repair(io, stop.signal);
-    expect(o.kept).toBe(false); expect(io.revert).toHaveBeenCalledWith(snap);
-    if (phase === 'changedSince') expect(io.replay).not.toHaveBeenCalled();
-  });
-  it('an expired repair budget cannot accept a late replay result', async () => {
-    vi.useFakeTimers();
-    try {
-      const io = repairIo({ replay: vi.fn(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 1100));
-        return { defects: [], scopeMissing: [], proof: { outcome: 'passed' as const, score: 100 } };
-      }) });
-      const pending = repair(io);
-      await vi.advanceTimersByTimeAsync(1101);
-      const o = await pending;
-      expect(o.kept).toBe(false); expect(io.revert).toHaveBeenCalledWith(snap);
-    } finally { vi.useRealTimers(); }
-  });
-  it('a real partial improvement keeps failed proof instead of fabricating a gameplay pass', async () => {
-    const io = repairIo({ replay: vi.fn(async () => ({ defects: [], scopeMissing: [], proof: { outcome: 'failed' as const, score: 57 } })) });
-    const o = await repair(io);
-    expect(o.kept).toBe(true); expect(o.proof).toEqual({ outcome: 'failed', score: 57 });
-  });
-  it('neither paid repair nor the stricter release policy is activated', () => {
-    expect(gameAutoRepairEnabled({})).toBe(false); expect(gameCompleteGateEnabled({})).toBe(false);
+  it('repair cannot be re-enabled by environment; measured completion gate stays unchanged', () => {
+    for (const value of [undefined, 'on', 'true', '1', 'off']) expect(gameAutoRepairEnabled({ AGENTV3_GAME_AUTO_REPAIR: value })).toBe(false);
+    expect(gameCompleteGateEnabled({})).toBe(true);
+    expect(gameCompleteGateEnabled({ AGENTV3_GAME_COMPLETE_GATE: 'off' })).toBe(false);
   });
   it('the production route supplies real replay proof and binds kept proof to both final consumers', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');

@@ -1,12 +1,16 @@
+import type { ObjectCategory } from '../../lib/objectCatalogTypes';
 import { candidateMatches, type AssetCandidate, type AssetRequirement } from './assetPolicy';
 import type { AssetProvider } from './assetEngine';
 import { assetDownloadUrl } from './assetDownload';
 import { safeGltfResourcePath } from './gltfBundle';
 import { reviewedCatalogue } from './reviewedCatalogue';
+import { REVIEWED_LIBRARY_EXPANSION } from './reviewedExpansion';
 
 export const GAME_ASSET_PROVIDERS = ['polyhaven', 'kenney', 'quaternius', 'kaykit', 'github', 'sketchfab'] as const;
 export type GameAssetProviderId = typeof GAME_ASSET_PROVIDERS[number];
 export interface ReviewedAsset extends AssetCandidate {
+  /** Curated library classification; no gameplay or device certification. */
+  libraryCategory?: ObjectCategory;
   provider: GameAssetProviderId;
   /** Exact origins approved with the pack, never derived from a user prompt or provider response. */
   downloadOrigins: readonly string[];
@@ -27,7 +31,7 @@ export interface ReviewedAsset extends AssetCandidate {
 }
 
 /** Exact asset revisions verified locally; feature activation remains independently default OFF. */
-export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = reviewedCatalogue;
+export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalogue, ...REVIEWED_LIBRARY_EXPANSION];
 
 export function validateCatalogue(assets: readonly ReviewedAsset[]): void {
   if (assets.length > 64) throw new Error('Catalogue exceeds the initial 320 MiB cache/storage budget');

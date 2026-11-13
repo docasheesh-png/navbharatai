@@ -1,12 +1,13 @@
 /**
  * Game Engine Ultra Phase 3 (2026-10-30): a game the playtest proved broken gets one verified repair (kept only
  * if strictly better when played again, else undone; platform pays), and with the gate on it is never reported
- * shippable while still unplayable or missing a named feature. Both switches default OFF.
+ * shippable while still unplayable or missing a named feature. Both switches default ON and have an explicit
+ * `=off` escape hatch.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  gameAutoRepairEnabled, gameCompleteGateEnabled, runGameRepair, repairImproved, gameRepairRecord,
+  HARD_DEFECTS, gameAutoRepairEnabled, gameCompleteGateEnabled, runGameRepair, repairImproved, gameRepairRecord,
   gameIncompleteReason, gameRepairPrompt, type GameRepairIO,
 } from '../src/server/AgentV3/gameRepair';
 import type { GameDefect } from '../src/server/AgentV3/gamePlaytest';
@@ -28,12 +29,14 @@ function io(over: Partial<GameRepairIO> = {}): GameRepairIO {
 const run = (i: GameRepairIO, defects = [D('GAME_DEFECT_INPUT_IGNORED')], missing: string[] = []) =>
   runGameRepair(defects, missing, 'racing game with score', { repairMs: 60_000, snapshot: snap, buildSignal: new AbortController().signal, io: i });
 
-describe('switches default OFF', () => {
-  it('repair and gate are off unless =on', () => {
-    expect(gameAutoRepairEnabled(env({}))).toBe(false);
-    expect(gameCompleteGateEnabled(env({}))).toBe(false);
+describe('safe game repair defaults', () => {
+  it('repair and gate are on by default and can each be explicitly disabled', () => {
+    expect(gameAutoRepairEnabled(env({}))).toBe(true);
+    expect(gameCompleteGateEnabled(env({}))).toBe(true);
     expect(gameAutoRepairEnabled(env({ AGENTV3_GAME_AUTO_REPAIR: 'on' }))).toBe(true);
     expect(gameCompleteGateEnabled(env({ AGENTV3_GAME_COMPLETE_GATE: 'on' }))).toBe(true);
+    expect(gameAutoRepairEnabled(env({ AGENTV3_GAME_AUTO_REPAIR: 'off' }))).toBe(false);
+    expect(gameCompleteGateEnabled(env({ AGENTV3_GAME_COMPLETE_GATE: 'off' }))).toBe(false);
   });
 });
 
@@ -84,10 +87,14 @@ describe('the repair is kept only when the game, played again, is better', () =>
 });
 
 describe('incomplete delivery gate', () => {
-  it('hard defects or named missing features block; soft defects alone do not', () => {
-    expect(gameIncompleteReason([D('GAME_DEFECT_BLANK')], [])).toContain('blank');
+  it('all measured playability defects and named missing features block completion', () => {
+    const measuredDefects: GameDefect['code'][] = [
+      'GAME_DEFECT_START_STUCK', 'GAME_DEFECT_BLANK', 'GAME_DEFECT_INPUT_IGNORED', 'GAME_DEFECT_NO_TOUCH',
+      'GAME_DEFECT_RUNTIME_ERROR', 'GAME_DEFECT_CAMERA_WRONG', 'GAME_DEFECT_VEHICLE_STALLED', 'GAME_DEFECT_MISSING_LAYER',
+    ];
+    expect(new Set(measuredDefects)).toEqual(HARD_DEFECTS);
+    for (const defect of measuredDefects) expect(gameIncompleteReason([D(defect)], [])).not.toBeNull();
     expect(gameIncompleteReason([], ['levels'])).toContain('levels');
-    expect(gameIncompleteReason([D('GAME_DEFECT_NO_TOUCH')], [])).toBeNull();
   });
   it('makes the release gate RED, and leaves it alone when unset', () => {
     const ev = { buildOk: true, preview: 'passed', pages: 'passed', journeys: 'passed', typecheck: 'passed', tests: 'passed' } as const;

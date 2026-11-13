@@ -24,8 +24,8 @@ export const SHELL_MARK = '/tmp/.nbai-shell-mark';
 /** At most this many changed files are read back after one command. */
 export const MAX_RECONCILED = 80;
 
-/** A file larger than this is not read back (lockfiles, bundles): it is never hand-edited source. */
-export const MAX_RECONCILED_BYTES = 400_000;
+/** Maximum source size eligible for reconciliation. Large generated source is still source: BR #2342 changed a 646 KB game file. */
+export const MAX_RECONCILED_BYTES = 2_000_000;
 
 // Syntax that can change files by a path the static parser cannot see: an inline script that writes, an in-place
 // edit (often looped over `$f`), `tee`, `xargs`/`find -exec` fan-out, or a redirect to a variable.
@@ -46,7 +46,7 @@ export function markCommand(): string {
 export function changedFilesCommand(): string {
   return `find . -type f -newer ${SHELL_MARK} -not -path '*/node_modules/*' -not -path '*/.*' -not -path './dist/*' `
     + `-not -path './build/*' -not -path './coverage/*' -not -name 'package-lock.json' -not -name '*.log' `
-    + `-size -${Math.floor(MAX_RECONCILED_BYTES / 1000)}k 2>/dev/null | head -${MAX_RECONCILED}`;
+    + `-size -${MAX_RECONCILED_BYTES}c 2>/dev/null | head -${MAX_RECONCILED}`;
 }
 
 /** Text a build writes by hand. A binary the command produced is never read back as a string. */

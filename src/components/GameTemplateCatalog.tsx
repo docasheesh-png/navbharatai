@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Car, ChevronRight, CircleDot, Crown, Gamepad2, Grid2X2, Search, Sparkles, Swords } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Car, ChevronRight, CircleDot, Crown, Gamepad2, LayoutGrid, Search, Shield, Sparkles } from 'lucide-react';
 
 type GameTemplate = { name: string; category: string; description: string; mechanics: string };
 
@@ -35,13 +35,43 @@ const games: GameTemplate[] = [
   { name: 'Bubble Shooter', category: 'Arcade', description: 'Aim-and-match casual game', mechanics: 'projectile aiming, grid attachment, color clusters, chain clearing and level objectives' },
 ];
 
+export function matchGameTemplate(request: string): GameTemplate | undefined {
+  const text = request.trim().toLowerCase();
+  if (!text) return undefined;
+  const aliases: Record<string, string[]> = {
+    'Grand Prix Circuit': ['grand prix', 'formula', 'car game', 'gaadi', 'gadi', 'track'],
+    'Snow & Ice': ['snow', 'ice', 'icy', 'baraf', 'frozen'], 'Desert Rally': ['desert', 'dune', 'sand', 'registan'],
+    'Mountain Pass': ['mountain', 'hill', 'pahad'], 'Street Circuit': ['street', 'city', 'urban road'],
+    'Coastal Highway': ['coastal', 'coast', 'sea', 'samundar'], 'Forest Run': ['forest', 'jungle road'],
+    'Volcano Ring': ['volcano', 'lava'], 'Airport Sprint': ['airport', 'runway'], 'Neon Night City': ['neon', 'night race'],
+    'Oval Speedway': ['oval', 'speedway'], 'Figure-Eight': ['figure eight', '8 shape'], 'Kart Park': ['kart'],
+    'Canyon Run': ['canyon'], 'Jungle Rally': ['jungle'], 'Riverside GP': ['river', 'riverside'],
+    'Industrial Zone': ['industrial', 'factory'], 'Countryside': ['countryside', 'village'], 'Beach Sprint': ['beach'],
+    'Space Station': ['space station'], 'Autumn Park': ['autumn'], 'Urban Rooftop': ['rooftop'],
+    'Temple Trail': ['temple'], 'Endurance 24H': ['endurance', '24 hour'],
+    'Carrom Board': ['carrom', 'caram'], 'Ludo': ['ludo'], 'Snake': ['snake', 'saap'], 'Chess': ['chess', 'shatranj'],
+    'Tic-Tac-Toe': ['tic tac toe', 'noughts'], 'Sudoku': ['sudoku'], 'Breakout': ['breakout', 'brick breaker'],
+    'Space Shooter': ['space shooter', 'spaceship', 'shooter'], 'Platformer': ['platformer', 'platform game'],
+    'Tower Defense': ['tower defense', 'tower defence'], 'Memory Match': ['memory match', 'matching cards'],
+    'Mahjong Solitaire': ['mahjong'], 'Bubble Shooter': ['bubble shooter'],
+  };
+  const candidates = games.map(game => {
+    const words = game.name.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2);
+    let score = words.reduce((total, word) => total + (text.includes(word) ? 3 : 0), 0);
+    if (aliases[game.name]?.some(alias => text.includes(alias))) score += 5;
+    if (game.category === 'Racing' && /race|racing|racer|car game|gaadi|gadi/.test(text)) score += 2;
+    return { game, score };
+  }).sort((left, right) => right.score - left.score);
+  return candidates[0]?.score ? candidates[0].game : undefined;
+}
+
 const sources = [
   { name: 'Phaser game framework', href: 'https://github.com/phaserjs/phaser', license: 'MIT' },
   { name: 'Phaser examples', href: 'https://github.com/phaserjs/examples', license: 'MIT (review individual assets)' },
   { name: 'Three.js racing starter', href: 'https://github.com/mrdoob/Starter-Kit-Racing', license: 'MIT' },
 ];
 
-export function GameTemplateCatalog({ onUse }: { onUse: (prompt: string) => void }) {
+export function GameTemplateCatalog({ onUse }: { onUse: (prompt: string, gameName?: string) => void }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
   const [gameRequest, setGameRequest] = useState('');
@@ -51,41 +81,17 @@ export function GameTemplateCatalog({ onUse }: { onUse: (prompt: string) => void
     `${game.name} ${game.description} ${game.mechanics}`.toLowerCase().includes(query.toLowerCase())
   ), [query, category]);
 
-  const makePrompt = (game: GameTemplate) => `Build a complete, playable ${game.name} game for navBharat using a modular, browser-first architecture. Category: ${game.category}. Core mechanics: ${game.mechanics}. Use Phaser 3 with TypeScript and React integration where it fits the existing project; keep game logic separate from rendering, define typed game state and input adapters, and support responsive desktop/mobile controls, pause/restart, clear loading/error states, accessible UI, and persistent best score/settings where appropriate. Include all essential files with working code, no placeholders, and document how to run and extend it. Start with a small polished playable version and keep the architecture ready for additional levels, multiplayer/network adapters, telemetry, and localization. Use original/basic shapes or clearly licensed assets only; do not copy proprietary game art.${game.category === 'Racing' ? '\n\nRACING TRACK LIFECYCLE — ROOT-CAUSE REQUIREMENTS:\n- Track geometry must never run out: use a closed loop or recycle an endless segment ring behind the player while appending segments ahead and preserving cumulative world distance.\n- Never advance into a missing segment or extrapolate road height/curve out of bounds; clamp/interpolate lookups and ground the car against the active road surface on every simulation step.\n- Guarantee a continuous seam: end/start position, heading, elevation, width, and curvature must match; validate final-to-first joins before closed circuits start.\n- Separate world progress from screen projection; prevent empty lookups, undefined values, NaN/Infinity, and stale projections from causing vertical impulses.\n- On invalid track data, pause and report the failing segment and invariant instead of continuing with an airborne car.\n- Add deterministic regression coverage for runs beyond the failing distance, many laps, seam continuity, finite coordinates, and the grounded-car invariant.' : ''}`;
+  const makePrompt = (game: GameTemplate) => `Build a complete, playable ${game.name} game for navBharat. Category: ${game.category}. Core mechanics: ${game.mechanics}. Use the existing AgentV3 game starter kit and current project framework; do not add an unrelated engine or replace the scaffold. Keep game rules/state separate from rendering, provide responsive desktop/mobile controls, pause/restart, accessible UI, and persistent best score/settings where appropriate. Include working code without placeholders. Start with a polished playable scope and leave clean extension points for levels, multiplayer adapters, telemetry, and localization. Use original/basic shapes or clearly licensed assets only; do not copy proprietary game art.${game.category === 'Racing' ? '\n\nRACING TRACK LIFECYCLE — ROOT-CAUSE REQUIREMENTS:\n- Use a continuous closed loop or recycled segment ring with monotonic world distance; never run out of road.\n- Bound and validate every road/height lookup; keep the vehicle attached to the active road surface each fixed simulation step, with no extrapolation beyond available segments.\n- Validate final-to-first seam continuity for position, heading, elevation, width, and curvature before driving.\n- Keep world progress separate from camera projection; reject NaN/Infinity and pause with a useful diagnostic if track data is invalid.\n- Add deterministic coverage beyond the previous failure distance, across many laps, including seam continuity, finite coordinates, and grounded-car invariants.' : ''}`;
 
-  const matchedGame = useMemo(() => {
-    const text = gameRequest.trim().toLowerCase();
-    if (!text) return undefined;
-    const aliases: Record<string, string[]> = {
-      'Grand Prix Circuit': ['grand prix', 'formula', 'car game', 'gaadi', 'gadi', 'track'],
-      'Snow & Ice': ['snow', 'ice', 'icy', 'baraf', 'frozen'], 'Desert Rally': ['desert', 'dune', 'sand', 'registan'],
-      'Mountain Pass': ['mountain', 'hill', 'pahad'], 'Street Circuit': ['street', 'city', 'urban road'],
-      'Coastal Highway': ['coastal', 'coast', 'sea', 'samundar'], 'Forest Run': ['forest', 'jungle road'],
-      'Volcano Ring': ['volcano', 'lava'], 'Airport Sprint': ['airport', 'runway'], 'Neon Night City': ['neon', 'night race'],
-      'Oval Speedway': ['oval', 'speedway'], 'Figure-Eight': ['figure eight', '8 shape'], 'Kart Park': ['kart'],
-      'Canyon Run': ['canyon'], 'Jungle Rally': ['jungle'], 'Riverside GP': ['river', 'riverside'],
-      'Industrial Zone': ['industrial', 'factory'], 'Countryside': ['countryside', 'village'], 'Beach Sprint': ['beach'],
-      'Space Station': ['space', 'space station'], 'Autumn Park': ['autumn'], 'Urban Rooftop': ['rooftop'],
-      'Temple Trail': ['temple'], 'Endurance 24H': ['endurance', '24 hour'],
-      'Carrom Board': ['carrom', 'caram'], 'Ludo': ['ludo'], 'Snake': ['snake', 'saap'], 'Chess': ['chess', 'shatranj'],
-      'Tic-Tac-Toe': ['tic tac toe', 'noughts'], 'Sudoku': ['sudoku'], 'Breakout': ['breakout', 'brick breaker'],
-      'Space Shooter': ['space shooter', 'spaceship', 'shooter'], 'Platformer': ['platformer', 'platform game'],
-      'Tower Defense': ['tower defense', 'tower defence'], 'Memory Match': ['memory match', 'matching cards'],
-      'Mahjong Solitaire': ['mahjong'], 'Bubble Shooter': ['bubble shooter'],
-    };
-    const candidates = games.map(game => {
-      const words = game.name.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2);
-      let score = words.reduce((total, word) => total + (text.includes(word) ? 3 : 0), 0);
-      if (aliases[game.name]?.some(alias => text.includes(alias))) score += 5;
-      if (game.category === 'Racing' && /race|racing|racer|car game|gaadi|gadi/.test(text)) score += 2;
-      return { game, score };
-    }).sort((left, right) => right.score - left.score);
-    return candidates[0]?.score ? candidates[0].game : games.find(game => game.name === 'Grand Prix Circuit');
-  }, [gameRequest]);
+  const matchedGame = useMemo(() => matchGameTemplate(gameRequest), [gameRequest]);
 
-  const autoBuild = () => { if (matchedGame) onUse(makePrompt(matchedGame)); };
+  const autoBuild = () => {
+    if (!matchedGame) return;
+    const originalRequest = gameRequest.trim();
+    onUse(`${makePrompt(matchedGame)}\n\nUSER'S ORIGINAL REQUEST (preserve these details in the finished game):\n${originalRequest}`, matchedGame.name);
+  };
 
-  const iconFor = (game: GameTemplate) => game.category === 'Racing' ? Car : game.name === 'Chess' ? Crown : game.category === 'Board & Classics' ? Grid2X2 : game.category === 'Strategy' ? Swords : CircleDot;
+  const iconFor = (game: GameTemplate) => game.category === 'Racing' ? Car : game.name === 'Chess' ? Crown : game.category === 'Board & Classics' ? LayoutGrid : game.category === 'Strategy' ? Shield : CircleDot;
 
   return <section className="mt-12">
     <div className="flex items-end justify-between gap-4 mb-5 flex-wrap">
@@ -97,8 +103,9 @@ export function GameTemplateCatalog({ onUse }: { onUse: (prompt: string) => void
     <div className="mb-6 rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-4 sm:p-5">
       <label htmlFor="game-auto-request" className="mb-2 block text-xs font-bold text-white">Aap kaunsi game banwana chahte hain?</label>
       <div className="flex flex-col gap-3 sm:flex-row"><input id="game-auto-request" value={gameRequest} onChange={event => setGameRequest(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') autoBuild(); }} placeholder="Jaise: baraf wali racing game, ludo, chess..." className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#0d1117] px-4 py-3 text-sm text-white outline-none focus:border-indigo-500" />
-        <button onClick={autoBuild} disabled={!matchedGame} className="rounded-xl bg-indigo-600 px-5 py-3 text-xs font-black text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">Auto-select & build</button></div>
+        <button onClick={autoBuild} disabled={!matchedGame} className="rounded-xl bg-indigo-600 px-5 py-3 text-xs font-black text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">Build in NavBharatAI Pro</button></div>
       {matchedGame && <p aria-live="polite" className="mt-2 text-xs text-emerald-300">Auto-selected: <strong>{matchedGame.name}</strong> · {matchedGame.description}</p>}
+      {!matchedGame && gameRequest.trim() && <p aria-live="polite" className="mt-2 text-xs text-amber-300">Could not confidently match a starter. Add a game type or mechanic (for example, “racing”, “ludo”, “chess”) so the right architecture is selected.</p>}
     </div>
     <div className="flex gap-2 overflow-x-auto pb-4">{categories.map(item => <button key={item} onClick={() => setCategory(item)} className={`rounded-full px-3 py-1.5 text-xs font-bold whitespace-nowrap ${category === item ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:text-white'}`}>{item}</button>)}</div>
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

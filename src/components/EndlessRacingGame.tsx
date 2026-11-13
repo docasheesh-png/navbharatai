@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Flag, Gauge, RotateCcw, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react';
 
-const TRACKS = [
+export const RACING_TRACKS = [
   'Grand Prix Circuit', 'Street Circuit', 'Desert Rally', 'Mountain Pass', 'Coastal Highway', 'Forest Run',
   'Snow & Ice', 'Volcano Ring', 'Airport Sprint', 'Neon Night City', 'Oval Speedway', 'Figure-Eight',
   'Kart Park', 'Canyon Run', 'Jungle Rally', 'Riverside GP', 'Industrial Zone', 'Countryside',
@@ -13,15 +13,36 @@ type InputState = { up: boolean; down: boolean; left: boolean; right: boolean };
 const SAMPLE_COUNT = 1400;
 const ROAD_HALF_WIDTH = 54;
 
-function createTrack(variant: number): Point[] {
-  const phase = variant * 0.37;
+const TRACK_SHAPES: ReadonlyArray<{ lobes: number; amplitude: number; second: number; aspect: number; rotation: number }> = [
+  { lobes: 4, amplitude: .08, second: .03, aspect: .66, rotation: 0 }, { lobes: 6, amplitude: .19, second: .06, aspect: .82, rotation: .16 },
+  { lobes: 3, amplitude: .24, second: .1, aspect: .58, rotation: .3 }, { lobes: 5, amplitude: .3, second: .08, aspect: .72, rotation: .1 },
+  { lobes: 2, amplitude: .12, second: .03, aspect: .48, rotation: -.18 }, { lobes: 7, amplitude: .16, second: .12, aspect: .8, rotation: .22 },
+  { lobes: 4, amplitude: .28, second: .04, aspect: .64, rotation: -.12 }, { lobes: 8, amplitude: .2, second: .1, aspect: .7, rotation: .08 },
+  { lobes: 2, amplitude: .06, second: .02, aspect: .46, rotation: 0 }, { lobes: 5, amplitude: .22, second: .14, aspect: .75, rotation: .24 },
+  { lobes: 2, amplitude: .02, second: .01, aspect: .55, rotation: 0 }, { lobes: 3, amplitude: .18, second: .16, aspect: .72, rotation: .3 },
+  { lobes: 6, amplitude: .12, second: .18, aspect: .86, rotation: -.1 }, { lobes: 4, amplitude: .32, second: .08, aspect: .6, rotation: .14 },
+  { lobes: 9, amplitude: .2, second: .1, aspect: .68, rotation: -.2 }, { lobes: 3, amplitude: .14, second: .2, aspect: .78, rotation: .1 },
+  { lobes: 7, amplitude: .24, second: .05, aspect: .57, rotation: .2 }, { lobes: 5, amplitude: .1, second: .16, aspect: .9, rotation: -.15 },
+  { lobes: 4, amplitude: .26, second: .14, aspect: .52, rotation: .08 }, { lobes: 8, amplitude: .08, second: .22, aspect: .7, rotation: -.22 },
+  { lobes: 6, amplitude: .18, second: .08, aspect: .84, rotation: .18 }, { lobes: 10, amplitude: .16, second: .12, aspect: .62, rotation: -.1 },
+  { lobes: 5, amplitude: .3, second: .06, aspect: .74, rotation: .27 }, { lobes: 3, amplitude: .08, second: .24, aspect: .5, rotation: -.08 },
+];
+
+export function racingTrackIndex(name?: string): number {
+  const index = RACING_TRACKS.indexOf(name ?? '');
+  return index < 0 ? 0 : index;
+}
+
+export function createTrack(variant: number): Point[] {
+  const shape = TRACK_SHAPES[variant] ?? TRACK_SHAPES[0];
   const points: Point[] = [];
   let distance = 0;
   for (let i = 0; i <= SAMPLE_COUNT; i += 1) {
     const angle = (i / SAMPLE_COUNT) * Math.PI * 2;
-    const harmonic = 1 + 0.11 * Math.sin(3 * angle + phase) + 0.055 * Math.sin(5 * angle - phase * 0.7);
-    const x = Math.cos(angle) * 390 * harmonic;
-    const y = Math.sin(angle) * 255 * (1 + 0.08 * Math.cos(2 * angle + phase));
+    const a = angle + shape.rotation;
+    const harmonic = 1 + shape.amplitude * Math.sin(shape.lobes * a) + shape.second * Math.sin((shape.lobes + 2) * a + .7);
+    const x = Math.cos(a) * 390 * harmonic;
+    const y = Math.sin(a) * 390 * shape.aspect * (1 + shape.amplitude * .35 * Math.cos(2 * a));
     if (i > 0) distance += Math.hypot(x - points[i - 1].x, y - points[i - 1].y);
     points.push({ x, y, distance });
   }
@@ -48,10 +69,10 @@ function pointAtDistance(points: Point[], distance: number) {
   return { x, y, heading, length };
 }
 
-export function EndlessRacingGame() {
+export function EndlessRacingGame({ trackName }: { trackName?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<InputState>({ up: false, down: false, left: false, right: false });
-  const [trackIndex, setTrackIndex] = useState(0);
+  const trackIndex = racingTrackIndex(trackName);
   const [speed, setSpeed] = useState(0);
   const [lap, setLap] = useState(1);
   const [isRunning, setIsRunning] = useState(false);
@@ -93,12 +114,21 @@ export function EndlessRacingGame() {
       previousTime = time;
       const { up, down, left, right } = inputRef.current;
       if (isRunningRef.current) {
-        const targetSpeed = up ? 310 : down ? 45 : 190;
-        velocity += (targetSpeed - velocity) * Math.min(1, dt * (up ? 1.25 : 2.3));
+        const targetSpeed = up ? 310 : down ? 35 : 190;
+        const lookAhead = pointAtDistance(track, progress + Math.max(30, velocity * .45));
+        const current = pointAtDistance(track, progress);
+        const turn = Math.abs(Math.atan2(Math.sin(lookAhead.heading - current.heading), Math.cos(lookAhead.heading - current.heading)));
+        const cornerSpeed = Math.max(95, 300 - turn * 260);
+        const gripSpeed = trackIndex === 6 || trackIndex === 18 ? 220 : 310;
+        const safeSpeed = Math.min(targetSpeed, cornerSpeed, gripSpeed);
+        velocity += (safeSpeed - velocity) * Math.min(1, dt * (up ? 1.6 : 2.5));
         const steering = Number(right) - Number(left);
-        lateralVelocity += steering * dt * (0.9 + velocity / 270);
-        lateralVelocity *= Math.exp(-dt * (steering ? 0.6 : 3.2));
-        lateral = Math.max(-0.83, Math.min(0.83, lateral + lateralVelocity * dt));
+        lateralVelocity += steering * dt * (0.8 + velocity / 210);
+        lateralVelocity *= Math.exp(-dt * (steering ? 1 : 3.5));
+        lateral += lateralVelocity * dt;
+        const edge = Math.max(-0.96, Math.min(0.96, lateral));
+        if (edge !== lateral) { lateral = edge; lateralVelocity *= -.2; velocity = Math.max(70, velocity - 90 * dt); }
+        if (Math.abs(lateral) > .74) velocity = Math.max(70, velocity - 35 * dt);
         progress += velocity * dt;
         if (progress >= track[track.length - 1].distance) {
           progress %= track[track.length - 1].distance;
@@ -184,12 +214,12 @@ export function EndlessRacingGame() {
       <div className="flex items-center gap-3 text-xs text-slate-300"><span className="flex items-center gap-1.5"><Gauge className="h-4 w-4 text-amber-300" />{speed} km/h</span><span className="flex items-center gap-1.5"><Flag className="h-4 w-4 text-emerald-300" />Lap {lap}</span></div>
     </div>
     <div className="mb-3 flex flex-wrap items-center gap-2">
-      <span className="rounded-lg border border-white/10 bg-[#182221] px-3 py-2 text-xs font-bold text-emerald-200">Auto track: {TRACKS[trackIndex]}</span>
+      <span className="rounded-lg border border-white/10 bg-[#182221] px-3 py-2 text-xs font-bold text-emerald-200">Auto track: {RACING_TRACKS[trackIndex]}</span>
       <button onClick={() => setIsRunning(!isRunning)} className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white">{isRunning ? 'Pause' : speed > 0 ? 'Resume' : 'Start race'}</button>
       <button onClick={restart} className="flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-xs font-bold text-white"><RotateCcw className="h-3.5 w-3.5" />Restart</button>
       <span className="text-[11px] text-slate-500">Keyboard: WASD / arrows · Mobile: hold buttons below</span>
     </div>
-    <canvas ref={canvasRef} aria-label={`${TRACKS[trackIndex]} top-down racing game`} className="block h-[340px] w-full rounded-xl border border-white/10 sm:h-[460px]" />
+    <canvas ref={canvasRef} aria-label={`${RACING_TRACKS[trackIndex]} top-down racing game`} className="block h-[340px] w-full rounded-xl border border-white/10 sm:h-[460px]" />
     <div className="mt-3 flex items-center justify-between gap-3"><span className="text-[10px] text-slate-500">Track is a closed loop; progress wraps at the seam. Road position is clamped, with no vertical flight state.</span><div className="flex gap-2">{button('left', ArrowLeft, 'Steer left')}{button('down', ArrowDown, 'Brake')}{button('up', ArrowUp, 'Accelerate')}{button('right', ArrowRight, 'Steer right')}</div></div>
   </section>;
 }

@@ -95,27 +95,27 @@ export function GameTemplateCatalog({ onUse }: { onUse: (prompt: string, gameNam
 
   return <section className="mt-12">
     <div className="flex items-end justify-between gap-4 mb-5 flex-wrap">
-      <div><div className="flex items-center gap-2 text-indigo-300 text-xs font-black uppercase tracking-[.2em]"><Sparkles className="w-4 h-4" /> Game Architect</div>
-        <h3 className="text-2xl font-black text-white mt-2">Ready-to-build game templates</h3>
-        <p className="text-sm text-[#8b949e] mt-1">{games.length} starter architectures. Apni game describe karein; navBharat matching template khud choose karega.</p></div>
-      <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#161b22] px-3 py-2"><Search className="w-4 h-4 text-slate-400" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search games or mechanics" className="bg-transparent outline-none text-sm text-white w-52" /></label>
+      <div><div className="flex items-center gap-2 text-accent-text text-xs font-black uppercase tracking-[.2em]"><Sparkles className="w-4 h-4" /> Game Architect</div>
+        <h3 className="text-2xl font-black text-ink mt-2">Ready-to-build game templates</h3>
+        <p className="text-sm text-muted mt-1">{games.length} starter architectures. Apni game describe karein; navBharat matching template khud choose karega.</p></div>
+      <label className="flex items-center gap-2 rounded-xl border border-line bg-card px-3 py-2"><Search className="w-4 h-4 text-muted" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search games or mechanics" className="bg-transparent outline-none text-sm text-ink w-52" /></label>
     </div>
     <div className="mb-6 rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-4 sm:p-5">
-      <label htmlFor="game-auto-request" className="mb-2 block text-xs font-bold text-white">Aap kaunsi game banwana chahte hain?</label>
-      <div className="flex flex-col gap-3 sm:flex-row"><input id="game-auto-request" value={gameRequest} onChange={event => setGameRequest(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') autoBuild(); }} placeholder="Jaise: baraf wali racing game, ludo, chess..." className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#0d1117] px-4 py-3 text-sm text-white outline-none focus:border-indigo-500" />
-        <button onClick={autoBuild} disabled={!matchedGame} className="rounded-xl bg-indigo-600 px-5 py-3 text-xs font-black text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">Build in NavBharatAI Pro</button></div>
-      {matchedGame && <p aria-live="polite" className="mt-2 text-xs text-emerald-300">Auto-selected: <strong>{matchedGame.name}</strong> · {matchedGame.description}</p>}
-      {!matchedGame && gameRequest.trim() && <p aria-live="polite" className="mt-2 text-xs text-amber-300">Could not confidently match a starter. Add a game type or mechanic (for example, “racing”, “ludo”, “chess”) so the right architecture is selected.</p>}
+      <label htmlFor="game-auto-request" className="mb-2 block text-xs font-bold text-ink">Aap kaunsi game banwana chahte hain?</label>
+      <div className="flex flex-col gap-3 sm:flex-row"><input id="game-auto-request" value={gameRequest} onChange={event => setGameRequest(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') autoBuild(); }} placeholder="Jaise: baraf wali racing game, ludo, chess..." className="min-w-0 flex-1 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink outline-none focus:border-indigo-500" />
+        <button onClick={autoBuild} disabled={!matchedGame} className="rounded-xl bg-indigo-600 px-5 py-3 text-xs font-black text-on-accent hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">Build in NavBharatAI Pro</button></div>
+      {matchedGame && <p aria-live="polite" className="mt-2 text-xs text-success">Auto-selected: <strong>{matchedGame.name}</strong> · {matchedGame.description}</p>}
+      {!matchedGame && gameRequest.trim() && <p aria-live="polite" className="mt-2 text-xs text-warn">Could not confidently match a starter. Add a game type or mechanic (for example, “racing”, “ludo”, “chess”) so the right architecture is selected.</p>}
     </div>
-    <div className="flex gap-2 overflow-x-auto pb-4">{categories.map(item => <button key={item} onClick={() => setCategory(item)} className={`rounded-full px-3 py-1.5 text-xs font-bold whitespace-nowrap ${category === item ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:text-white'}`}>{item}</button>)}</div>
+    <div className="flex gap-2 overflow-x-auto pb-4">{categories.map(item => <button key={item} onClick={() => setCategory(item)} className={`rounded-full px-3 py-1.5 text-xs font-bold whitespace-nowrap ${category === item ? 'bg-indigo-600 text-on-accent' : 'bg-raised text-muted hover:text-ink'}`}>{item}</button>)}</div>
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-      {filtered.map(game => { const Icon = iconFor(game); return <article key={game.name} className="rounded-2xl border border-white/10 bg-[#161b22] p-5 hover:border-indigo-500/40 transition-colors">
-        <div className="flex justify-between gap-3"><div className="w-10 h-10 rounded-xl bg-indigo-500/10 grid place-items-center text-indigo-300"><Icon className="w-5 h-5" /></div><span className="text-[10px] uppercase tracking-wider text-slate-500">{game.category}</span></div>
-        <h4 className="font-bold text-white mt-4">{game.name}</h4><p className="text-xs text-slate-400 mt-1">{game.description}</p><p className="text-xs leading-relaxed text-slate-500 mt-3 min-h-10">{game.mechanics}</p>
-        <div className="mt-4 flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Auto-matched from your request <ChevronRight className="h-4 w-4" /></div>
+      {filtered.map(game => { const Icon = iconFor(game); return <article key={game.name} className="rounded-2xl border border-line bg-card p-5 hover:border-indigo-500/40 transition-colors">
+        <div className="flex justify-between gap-3"><div className="w-10 h-10 rounded-xl bg-indigo-500/10 grid place-items-center text-accent-text"><Icon className="w-5 h-5" /></div><span className="text-[10px] uppercase tracking-wider text-faint">{game.category}</span></div>
+        <h4 className="font-bold text-ink mt-4">{game.name}</h4><p className="text-xs text-muted mt-1">{game.description}</p><p className="text-xs leading-relaxed text-faint mt-3 min-h-10">{game.mechanics}</p>
+        <div className="mt-4 flex items-center justify-between rounded-lg bg-raised px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-muted">Auto-matched from your request <ChevronRight className="h-4 w-4" /></div>
       </article>; })}
     </div>
-    {filtered.length === 0 && <p className="py-10 text-center text-sm text-slate-500">No templates match that search.</p>}
-    <div className="mt-8 rounded-2xl border border-white/10 bg-black/20 p-5"><div className="flex items-center gap-2 text-sm font-bold text-white"><Gamepad2 className="w-4 h-4 text-emerald-400" /> Free source references</div><p className="text-xs text-slate-500 mt-1 mb-3">Frameworks and examples only; each source’s code/assets retain their own terms.</p><div className="flex flex-wrap gap-3">{sources.map(source => <a key={source.name} href={source.href} target="_blank" rel="noreferrer" className="text-xs text-indigo-300 hover:text-white underline underline-offset-2">{source.name} · {source.license}</a>)}</div></div>
+    {filtered.length === 0 && <p className="py-10 text-center text-sm text-faint">No templates match that search.</p>}
+    <div className="mt-8 rounded-2xl border border-line bg-well p-5"><div className="flex items-center gap-2 text-sm font-bold text-ink"><Gamepad2 className="w-4 h-4 text-success" /> Free source references</div><p className="text-xs text-faint mt-1 mb-3">Frameworks and examples only; each source’s code/assets retain their own terms.</p><div className="flex flex-wrap gap-3">{sources.map(source => <a key={source.name} href={source.href} target="_blank" rel="noreferrer" className="text-xs text-accent-text hover:text-ink underline underline-offset-2">{source.name} · {source.license}</a>)}</div></div>
   </section>;
 }

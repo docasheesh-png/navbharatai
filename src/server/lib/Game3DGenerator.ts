@@ -28,9 +28,11 @@
 //
 // PURE builder → the caller writes the files. The generated code imports three; the generator does not.
 
+import { GAME_BUILDINGS } from './GameBuildingGenerator';
 import { kitTypeContract } from './kitTypeContract';
+import { GAME_WORLD_COLLIDER_KEY } from './GameAssetRuntimeGenerator';
 // L3 is emitted only by acknowledged build-time acquisition, never by the default procedural kit.
-export { generateGameAssetRuntime } from './GameAssetRuntimeGenerator';
+export { GAME_ASSET_MODELS_PATH, generateGameAssetRuntime, upgradeAssetModelLoader } from './GameAssetRuntimeGenerator';
 
 export interface Game3DResult {
   files: Record<string, string>;
@@ -325,6 +327,7 @@ const CAMERA = `import * as THREE from 'three';
 import { damp } from '../core/feel';
 import { vehicleAt, isVehicle } from './objects';
 import { groundHeightAt } from './surfaces';
+import { worldColliders } from './collision';
 
 /**
  * Camera rigs.
@@ -375,6 +378,7 @@ export class CameraRig {
   private readonly height: number;
   private readonly stiffness: number;
   private collidables: THREE.Object3D[];
+  private collisionScene: THREE.Object3D | null = null;
   private readonly ray = new THREE.Raycaster();
   private yawAngle = 0;
   private pitch = -0.2;
@@ -424,6 +428,8 @@ export class CameraRig {
     // built before the first render. Same class as CharacterController.setColliders.
     for (const c of list) c.updateMatrixWorld(true);
   }
+
+  setCollisionScene(scene: THREE.Object3D): void { this.collisionScene = scene; }
 
   /** Switch view at run time (a "camera" button: 'chase' ↔ 'first-person' ↔ 'cinematic'). */
   setKind(kind: CameraKind): void { this.kind = kind; }
@@ -494,17 +500,26 @@ export class CameraRig {
     const focus = target.clone().add(new THREE.Vector3(0, this.height, 0));
     let wanted = focus.clone().add(offset);
 
-    if (this.collidables.length > 0) {
+    const collidables = this.collisionScene ? worldColliders(this.collisionScene, this.collidables, object ?? undefined) : this.collidables;
+    if (collidables.length > 0) {
       const dir = wanted.clone().sub(focus);
       const dist = dir.length();
       this.ray.set(focus, dir.normalize());
       this.ray.far = dist;
-      const hit = this.ray.intersectObjects(this.collidables, true)[0];
+      const hit = this.ray.intersectObjects(collidables, !this.collisionScene)[0];
       // Pull in slightly PAST the hit so the near plane does not clip into the wall.
-      if (hit) wanted = focus.clone().add(dir.multiplyScalar(Math.max(0.6, hit.distance - 0.3)));
+      if (hit) wanted = focus.clone().add(dir.multiplyScalar(Math.max(0, hit.distance - 0.3)));
     }
 
     this.dampTo(wanted, delta);
+    // Damping from an old exterior pose must not leave the camera behind a wall.
+    const actualDirection = this.camera.position.clone().sub(focus);
+    const actualDistance = actualDirection.length();
+    if (collidables.length && actualDistance > 0) {
+      this.ray.set(focus, actualDirection.normalize()); this.ray.far = actualDistance;
+      const hit = this.ray.intersectObjects(collidables, !this.collisionScene)[0];
+      if (hit) this.camera.position.copy(focus).addScaledVector(actualDirection, Math.max(0, hit.distance - 0.3));
+    }
     this.camera.lookAt(focus);
   }
 
@@ -695,14 +710,15 @@ export class CameraRig {
     let wanted = pos.clone().addScaledVector(fwd, -dist);
     wanted.y += height;
 
-    if (this.collidables.length > 0) {
+    const collidables = this.collisionScene ? worldColliders(this.collisionScene, this.collidables, object ?? undefined) : this.collidables;
+    if (collidables.length > 0) {
       const dir = wanted.clone().sub(focus);
       const span = dir.length();
       this.ray.set(focus, dir.normalize());
       this.ray.far = span;
       // 🔴 ITS OWN BODY IS NOT AN OBSTACLE. A game that lists the train among its colliders made the ray
       // hit the inside of the locomotive at once — and pulled the camera INTO it, the reported defect.
-      const hit = this.ray.intersectObjects(this.collidables, true).find((h) => !object || !this.isPartOf(h.object, object));
+      const hit = this.ray.intersectObjects(collidables, !this.collisionScene).find((h) => !object || !this.isPartOf(h.object, object));
       if (hit) wanted = focus.clone().add(dir.multiplyScalar(Math.max(0.6, hit.distance - 0.3)));
     }
     this.keepClear(object, wanted);
@@ -747,6 +763,7 @@ export class CameraRig {
 const WORLD = `import * as THREE from 'three';
 import { sharedMaterial, paletteColor, type PaletteName } from './materials';
 import { surfaceMaterial, enableAO, getDetailLevel, resolveDetail, mergeGeometries, registerTerrain, shapedHeight, type Detail, type SurfaceKind } from './surfaces';
+import { markWorldCollider } from './collision';
 export { groundHeightAt, syncGround } from './surfaces';
 
 /**
@@ -868,7 +885,7 @@ export function createTerrain(options: TerrainOptions = {}): THREE.Mesh {
       geo.computeBoundingBox();
     },
   });
-  return mesh;
+  return markWorldCollider(mesh, 'ground');
 }
 
 /**
@@ -916,6 +933,8 @@ export interface ScatterOptions {
   heightAt?: (x: number, z: number) => number;
 }
 
+const scatterColliders = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
+
 /**
  * Scatter one geometry many times as a SINGLE draw call.
  *
@@ -956,6 +975,14 @@ export function scatterInstances(
   mesh.instanceMatrix.needsUpdate = true;
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  const collider = scatterColliders.get(geometry);
+  if (collider === geometry) markWorldCollider(mesh);
+  else if (collider) {
+    const trunks = new THREE.InstancedMesh(collider, new THREE.MeshBasicMaterial(), placed);
+    trunks.instanceMatrix = mesh.instanceMatrix;
+    trunks.visible = false;
+    mesh.add(markWorldCollider(trunks));
+  }
   return mesh;
 }
 
@@ -965,7 +992,9 @@ export function treeGeometry(): THREE.BufferGeometry {
   trunk.translate(0, 0.8, 0);
   const crown = new THREE.ConeGeometry(1.1, 2.6, 7);
   crown.translate(0, 2.6, 0);
-  return mergeGeometries([trunk, crown]);
+  const geometry = mergeGeometries([trunk, crown]);
+  scatterColliders.set(geometry, trunk);
+  return geometry;
 }
 
 /** A simple building block — the unit an Indian village or a town street is composed from. */
@@ -975,7 +1004,9 @@ export function buildingGeometry(width = 4, height = 3, depth = 4): THREE.Buffer
   const roof = new THREE.ConeGeometry(Math.max(width, depth) * 0.78, height * 0.5, 4);
   roof.rotateY(Math.PI / 4);
   roof.translate(0, height + height * 0.25, 0);
-  return mergeGeometries([base, roof]);
+  const geometry = mergeGeometries([base, roof]);
+  scatterColliders.set(geometry, geometry);
+  return geometry;
 }
 `;
 
@@ -2163,8 +2194,315 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
 // photograph. A scanned-quality asset comes from a scanner, and inventing one here would be the fake
 // feature this codebase forbids. Say "real-looking", never "photorealistic".
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
+const COLLISION = `import * as THREE from 'three';
+import { Capsule } from 'three/addons/math/Capsule.js';
+import { Octree } from 'three/addons/math/Octree.js';
+
+export type WorldColliderKind = 'solid' | 'ground' | 'none';
+const COLLIDER = ${JSON.stringify(GAME_WORLD_COLLIDER_KEY)};
+
+/** A mesh or group that belongs to the physical world. The mark survives Object3D.clone(). */
+export function markWorldCollider<T extends THREE.Object3D>(object: T, kind: WorldColliderKind = 'solid'): T {
+  object.userData[COLLIDER] = kind;
+  return object;
+}
+
+type SceneRegistration = { objects: readonly THREE.Object3D[]; attached: WeakSet<THREE.Object3D> };
+const manual = new WeakMap<THREE.Object3D, SceneRegistration>();
+
+/** Register custom geometry returned by the shell's setup() for all the game's movers. */
+export function setSceneColliders(scene: THREE.Object3D, objects: readonly THREE.Object3D[]): void {
+  const attached = new WeakSet(objects.filter((object) => collisionRoot(object) === scene));
+  manual.set(scene, { objects, attached });
+}
+
+export function collisionRoot(object: THREE.Object3D): THREE.Object3D | null {
+  let root = object.parent;
+  while (root?.parent) root = root.parent;
+  return root;
+}
+
+/** Collect current scene geometry, including nested, streamed and asynchronously loaded objects. */
+export function worldColliders(
+  root: THREE.Object3D | null,
+  explicit: readonly THREE.Object3D[] = [],
+  exclude?: THREE.Object3D,
+  includeGround = true,
+): THREE.Mesh[] {
+  const meshes = new Set<THREE.Mesh>();
+  const visit = (object: THREE.Object3D, inherited?: WorldColliderKind): void => {
+    if (object === exclude) return;
+    const kind = (object.userData[COLLIDER] as WorldColliderKind | undefined) ?? inherited;
+    if (kind === 'none') return;
+    const mesh = object as THREE.Mesh;
+    if (mesh.isMesh && (kind === 'solid' || (includeGround && kind === 'ground'))) meshes.add(mesh);
+    for (const child of object.children) visit(child, kind);
+  };
+  if (root) {
+    visit(root);
+    const registered = manual.get(root);
+    if (registered) for (const object of registered.objects) {
+      if (collisionRoot(object) === root) registered.attached.add(object);
+      else if (registered.attached.has(object)) continue;
+      visit(object, 'solid');
+    }
+  }
+  for (const object of explicit) visit(object, 'solid');
+  for (const mesh of meshes) mesh.updateWorldMatrix(true, false);
+  return Array.from(meshes);
+}
+
+export function hasWorldGround(colliders: readonly THREE.Mesh[], root: THREE.Object3D | null): boolean {
+  return !!(root && manual.get(root)?.objects.length) || colliders.some((mesh) => mesh.userData[COLLIDER] === 'ground');
+}
+
+export function uprightCapsule(feet: THREE.Vector3, radius: number, height: number): Capsule {
+  const r = Math.max(0.01, Math.min(radius, height / 2));
+  return new Capsule(
+    feet.clone().add(new THREE.Vector3(0, r, 0)),
+    feet.clone().add(new THREE.Vector3(0, height - r, 0)),
+    r,
+  );
+}
+
+/** Bounds in the model's own frame, independent of its scene placement and heading. */
+export function colliderLocalBounds(root: THREE.Object3D): THREE.Box3 {
+  root.updateWorldMatrix(true, true);
+  const inverse = root.matrixWorld.clone().invert();
+  const bounds = new THREE.Box3();
+  root.traverseVisible((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const shape = geometryShape(mesh.geometry);
+    if (shape) bounds.union(shape.bounds.clone().applyMatrix4(inverse.clone().multiply(mesh.matrixWorld)));
+  });
+  return bounds;
+}
+
+type GeometryShape = {
+  version: number;
+  positions: THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+  index: THREE.BufferAttribute | null;
+  indexVersion: number;
+  bounds: THREE.Box3;
+};
+const geometryShapes = new WeakMap<THREE.BufferGeometry, GeometryShape>();
+type ColliderShape = { mesh: THREE.Mesh; geometry: GeometryShape; pose: THREE.Matrix4; bounds: THREE.Box3; tree?: Octree };
+const colliderShapes = new WeakMap<THREE.Mesh, Map<number, ColliderShape>>();
+type InstanceShapes = { geometry: GeometryShape; pose: THREE.Matrix4; version: number; shapes: ColliderShape[] };
+const instanceShapes = new WeakMap<THREE.InstancedMesh, InstanceShapes>();
+
+function geometryShape(geometry: THREE.BufferGeometry): GeometryShape | null {
+  const positions = geometry.getAttribute('position');
+  if (!positions?.count) return null;
+  const version = 'data' in positions ? positions.data.version : positions.version;
+  const index = geometry.getIndex();
+  const indexVersion = index?.version ?? 0;
+  let shape = geometryShapes.get(geometry);
+  if (!shape || shape.positions !== positions || shape.version !== version || shape.index !== index || shape.indexVersion !== indexVersion) {
+    geometry.computeBoundingBox();
+    shape = { version, positions, index, indexVersion, bounds: geometry.boundingBox!.clone() };
+    geometryShapes.set(geometry, shape);
+  }
+  return shape;
+}
+
+function shapeAt(mesh: THREE.Mesh, geometry: GeometryShape, pose: THREE.Matrix4, index: number): ColliderShape {
+  let entries = colliderShapes.get(mesh);
+  if (!entries) { entries = new Map(); colliderShapes.set(mesh, entries); }
+  let shape = entries.get(index);
+  if (!shape || shape.geometry !== geometry || !shape.pose.equals(pose)) {
+    shape = { mesh, geometry, pose: pose.clone(), bounds: geometry.bounds.clone().applyMatrix4(pose) };
+    entries.set(index, shape);
+  }
+  return shape;
+}
+
+function shapesFor(mesh: THREE.Mesh, geometry: GeometryShape): readonly ColliderShape[] {
+  const batch = mesh as THREE.InstancedMesh;
+  if (!batch.isInstancedMesh) return [shapeAt(mesh, geometry, mesh.matrixWorld, 0)];
+  const version = batch.instanceMatrix.version;
+  const cached = instanceShapes.get(batch);
+  if (cached && cached.geometry === geometry && cached.version === version
+    && cached.shapes.length === batch.count && cached.pose.equals(mesh.matrixWorld)) return cached.shapes;
+  const shapes: ColliderShape[] = [];
+  const pose = new THREE.Matrix4();
+  for (let i = 0; i < batch.count; i++) {
+    batch.getMatrixAt(i, pose);
+    shapes.push(shapeAt(mesh, geometry, pose.premultiply(mesh.matrixWorld), i));
+  }
+  instanceShapes.set(batch, { geometry, pose: mesh.matrixWorld.clone(), version, shapes });
+  return shapes;
+}
+
+function nearbyShapes(colliders: readonly THREE.Mesh[], swept: THREE.Box3): ColliderShape[] {
+  const shapes: ColliderShape[] = [];
+  for (const mesh of colliders) {
+    const geometry = geometryShape(mesh.geometry);
+    if (!geometry) continue;
+    for (const shape of shapesFor(mesh, geometry)) {
+      if (shape.bounds.intersectsBox(swept)) shapes.push(shape);
+    }
+  }
+  return shapes;
+}
+
+function shapeTree(shape: ColliderShape): Octree {
+  if (!shape.tree) {
+    const proxy = new THREE.Mesh(shape.mesh.geometry, shape.mesh.material);
+    proxy.matrixAutoUpdate = false;
+    proxy.matrix.copy(shape.pose);
+    const tree = new Octree();
+    // Fractional maxima can round below a top triangle when Octree subdivides.
+    // Pad broadphase only; exact narrowphase geometry remains unchanged.
+    const magnitude = Math.max(1, ...shape.bounds.min.toArray().map(Math.abs), ...shape.bounds.max.toArray().map(Math.abs));
+    tree.bounds.copy(shape.bounds).expandByScalar(magnitude * 1e-7);
+    shape.tree = tree.fromGraphNode(proxy);
+  }
+  return shape.tree;
+}
+
+export interface WorldFloorContact { y: number; normal: THREE.Vector3; mesh: THREE.Mesh }
+
+/** Ground probes share the sweep's spatial index, so a step does not scan an entire terrain mesh. */
+export function worldFloorAt(origin: THREE.Vector3, reach: number, colliders: readonly THREE.Mesh[]): WorldFloorContact | null {
+  const ray = new THREE.Ray(origin, new THREE.Vector3(0, -1, 0));
+  const bounds = new THREE.Box3().setFromPoints([origin, ray.at(reach, new THREE.Vector3())]);
+  const triangles: THREE.Triangle[] = [];
+  const point = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  let floor: WorldFloorContact | null = null;
+  let distance = reach;
+  for (const shape of nearbyShapes(colliders, bounds)) {
+    triangles.length = 0;
+    shapeTree(shape).getRayTriangles(ray, triangles);
+    const mirrored = shape.pose.determinant() < 0;
+    for (const { a, b, c } of triangles) {
+      if (!ray.intersectTriangle(a, mirrored ? c : b, mirrored ? b : c, true, point)) continue;
+      const drop = origin.y - point.y;
+      if (drop > distance || (floor && drop === distance)) continue;
+      THREE.Triangle.getNormal(a, mirrored ? c : b, mirrored ? b : c, normal);
+      if (normal.y <= 1e-4) continue;
+      distance = drop;
+      floor = { y: point.y, normal: normal.clone(), mesh: shape.mesh };
+    }
+  }
+  return floor;
+}
+
+/** Closest segment-to-triangle contact. Checking the edges catches tapered trunks and thin corners. */
+function triangleContact(direction: THREE.Vector3): (body: Capsule, triangle: THREE.Triangle) => boolean {
+  const axis = new THREE.Vector3();
+  const edge = new THREE.Vector3();
+  const offset = new THREE.Vector3();
+  const difference = new THREE.Vector3();
+  const closest = new THREE.Vector3();
+  const point = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const ray = new THREE.Ray();
+  const clamp = (t: number) => THREE.MathUtils.clamp(t, 0, 1);
+  return (body, triangle) => {
+    axis.subVectors(body.end, body.start);
+    const axisLengthSq = axis.lengthSq();
+    if (axisLengthSq > 1e-12) {
+      ray.set(body.start, normal.copy(axis).normalize());
+      const hit = ray.intersectTriangle(triangle.a, triangle.b, triangle.c, false, point);
+      if (hit && point.distanceToSquared(body.start) <= axisLengthSq) {
+        triangle.getNormal(normal);
+        const side = difference.copy(body.start).addScaledVector(axis, 0.5).sub(triangle.a).dot(normal);
+        const toward = normal.dot(direction);
+        return Math.abs(side) < 1e-8 ? Math.abs(toward) > 1e-5 : toward * Math.sign(side) < -1e-5;
+      }
+    }
+
+    triangle.closestPointToPoint(body.start, point);
+    closest.subVectors(body.start, point);
+    triangle.closestPointToPoint(body.end, point);
+    difference.subVectors(body.end, point);
+    if (difference.lengthSq() < closest.lengthSq()) closest.copy(difference);
+
+    const checkEdge = (a: THREE.Vector3, b: THREE.Vector3) => {
+      edge.subVectors(b, a);
+      const edgeLengthSq = edge.lengthSq();
+      if (edgeLengthSq <= 1e-12) return;
+      offset.subVectors(body.start, a);
+      const axisEdge = axis.dot(edge), alongAxis = axis.dot(offset), alongEdge = edge.dot(offset);
+      const denominator = axisLengthSq * edgeLengthSq - axisEdge * axisEdge;
+      let s = denominator > 1e-12 ? clamp((axisEdge * alongEdge - alongAxis * edgeLengthSq) / denominator) : 0;
+      const t = clamp((axisEdge * s + alongEdge) / edgeLengthSq);
+      if (axisLengthSq > 1e-12) s = clamp((axisEdge * t - alongAxis) / axisLengthSq);
+      difference.copy(offset).addScaledVector(axis, s).addScaledVector(edge, -t);
+      if (difference.lengthSq() < closest.lengthSq()) closest.copy(difference);
+    };
+    checkEdge(triangle.a, triangle.b);
+    checkEdge(triangle.b, triangle.c);
+    checkEdge(triangle.c, triangle.a);
+    return closest.lengthSq() < body.radius * body.radius - 1e-8 && closest.dot(direction) < -1e-5;
+  };
+}
+
+/** Return the safe fraction of a translation. Substeps stay smaller than the smallest body radius. */
+export function sweepWorldCapsules(
+  bodies: readonly Capsule[],
+  delta: THREE.Vector3,
+  colliders: readonly THREE.Mesh[],
+  support?: { mesh: THREE.Object3D; slopeLimit: number },
+): number {
+  const distance = delta.length();
+  if (!distance || !bodies.length || !colliders.length) return 1;
+  const bounds = new THREE.Box3();
+  let radius = Infinity;
+  for (const body of bodies) {
+    bounds.expandByPoint(body.start).expandByPoint(body.end);
+    bounds.expandByPoint(body.start.clone().add(delta)).expandByPoint(body.end.clone().add(delta));
+    radius = Math.min(radius, body.radius);
+  }
+  const shapes = nearbyShapes(colliders, bounds.expandByScalar(Math.max(...bodies.map((body) => body.radius))));
+  if (!shapes.length) return 1;
+  const movement = new THREE.Vector3();
+  const probe = new Capsule();
+  const blocks = triangleContact(delta.clone().divideScalar(distance));
+  const triangles: THREE.Triangle[] = [];
+  const normal = new THREE.Vector3();
+  const blocked = (fraction: number): boolean => {
+    movement.copy(delta).multiplyScalar(fraction);
+    for (const body of bodies) {
+      probe.copy(body).translate(movement);
+      for (const shape of shapes) {
+        if (!probe.intersectsBox(shape.bounds)) continue;
+        triangles.length = 0;
+        shapeTree(shape).getCapsuleTriangles(probe, triangles);
+        for (const triangle of triangles) {
+          if (support && support.mesh === shape.mesh && triangle.getNormal(normal).y >= support.slopeLimit) continue;
+          if (blocks(probe, triangle)) return true;
+        }
+      }
+    }
+    return false;
+  };
+  const stride = Math.min(1, Math.max(0.005, radius * 0.4) / distance);
+  const steps = Math.min(128, Math.ceil(1 / stride));
+  let safe = 0;
+  for (let i = 1; i <= steps; i++) {
+    const next = Math.min(1, i * stride);
+    if (!blocked(next)) { safe = next; continue; }
+    let hit = next;
+    for (let j = 0; j < 8; j++) {
+      const mid = (safe + hit) / 2;
+      if (blocked(mid)) hit = mid; else safe = mid;
+    }
+    return safe;
+  }
+  return safe;
+}
+`;
+
 const OBJECTS = `import * as THREE from 'three';
+import { createEnterableHouse } from './buildings';
+export { createEnterableHouse, houseDoor } from './buildings';
 import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, resolveDetail, mergeGeometries, getGround, addWater, declareCorridor, removeCorridor, corridorProfile, crossingLift, corridorPath, pathPose, registerTerrain, shapedHeight, syncGround, groundHeightAt, type Corridor, type CorridorPath, type SurfaceKind, type Detail } from './surfaces';
+import { colliderLocalBounds, collisionRoot, markWorldCollider, sweepWorldCapsules, worldColliders } from './collision';
+import { Capsule } from 'three/addons/math/Capsule.js';
 
 // The detail tier lives in surfaces.ts so the ground reads the same setting as the objects; it is
 // re-exported here so \`import { setDetailLevel } from './objects'\` keeps working everywhere.
@@ -3366,6 +3704,43 @@ function resolveState(vehicle: THREE.Object3D, state: VehicleState | null | unde
   return state;
 }
 
+const vehicleBounds = new WeakMap<THREE.Object3D, THREE.Box3>();
+
+/** Sweep the whole vehicle, including its nose and tail, against scenery in its own scene. */
+function vehicleTravel(vehicle: THREE.Object3D, movement: THREE.Vector3, tuning: VehicleTuning): number {
+  if (movement.lengthSq() === 0) return 1;
+  const colliders = worldColliders(collisionRoot(vehicle), [], vehicle, false);
+  if (!colliders.length) return 1;
+  let bounds = vehicleBounds.get(vehicle);
+  if (!bounds) {
+    bounds = colliderLocalBounds(vehicle);
+    if (!bounds.isEmpty()) vehicleBounds.set(vehicle, bounds);
+  }
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+  if (bounds.isEmpty()) {
+    size.set(tuning.width ?? 1.6, 1.4, tuning.length ?? 2.6);
+    center.y = size.y / 2;
+  }
+  const scale = vehicle.getWorldScale(new THREE.Vector3());
+  const sx = Math.max(0.001, Math.abs(scale.x));
+  const sz = Math.max(0.001, Math.abs(scale.z));
+  const radius = Math.max(0.05, Math.min(size.x * sx / 3, size.y * Math.abs(scale.y) / 2));
+  const side = Math.max(0, size.x / 2 - radius / sx);
+  const end = Math.max(0, size.z / 2 - radius / sz);
+  const bodies = [-side, 0, side].map((x) => new Capsule(
+    new THREE.Vector3(center.x + x, center.y, center.z - end).applyMatrix4(vehicle.matrixWorld),
+    new THREE.Vector3(center.x + x, center.y, center.z + end).applyMatrix4(vehicle.matrixWorld),
+    radius,
+  ));
+  const worldMovement = movement.clone();
+  if (vehicle.parent) {
+    const parent = vehicle.parent.matrixWorld;
+    worldMovement.applyMatrix4(parent).sub(new THREE.Vector3().setFromMatrixPosition(parent));
+  }
+  return sweepWorldCapsules(bodies, worldMovement, colliders);
+}
+
 /**
  * Drive a vehicle from the RAW input axis — \`input.axis()\` exactly as the runtime gives it — so the
  * signs are decided here, once, and cannot be got wrong in a game:
@@ -3412,15 +3787,17 @@ export function driveVehicle(
   const heading = state.heading - axis.x * steerRate * grip * Math.sign(speed) * dt;
 
   vehicle.rotation.y = heading;
-  vehicle.position.x += Math.sin(heading) * speed * dt;
-  vehicle.position.z += Math.cos(heading) * speed * dt;
+  const movement = new THREE.Vector3(Math.sin(heading) * speed * dt, 0, Math.cos(heading) * speed * dt);
+  const travel = vehicleTravel(vehicle, movement, tuning);
+  vehicle.position.x += movement.x * travel;
+  vehicle.position.z += movement.z * travel;
   // 🔴 FOLLOW THE GROUND. This used to stop at x/z, so y stayed wherever the car was born and every
   // racing game drove into its first hill. settleOnGround reads the same heights the terrain is drawn from.
   const slope = settleOnGround(vehicle, heading, dt, tuning, state);
-  rollWheels(vehicle, speed, dt);   // every wheel of a car, a bike or a cycle — a no-op for a horse
+  rollWheels(vehicle, speed * travel, dt);   // every wheel of a car, a bike or a cycle — a no-op for a horse
   noteVehicle(vehicle, axis);
   // IN PLACE: the game's own state object now holds the new values, whether or not it keeps the return.
-  state.speed = speed;
+  state.speed = travel < 1 ? 0 : speed;
   state.heading = heading;
   if (slope) { state.pitch = slope.pitch; state.roll = slope.roll; }
   return state;
@@ -3450,11 +3827,11 @@ export function createTree(options: TreeOptions = {}): THREE.Group {
   // Taper: the top radius is a third of the base. Root flare is the wider disc at the ground.
   const trunk = mesh(new THREE.CylinderGeometry(H * 0.026, H * 0.075, trunkH, d === 'real' ? 12 : 6), barkMat, d);
   trunk.position.y = trunkH / 2;
-  group.add(trunk);
+  group.add(markWorldCollider(trunk));
   if (d === 'real') {
     const flare = mesh(new THREE.CylinderGeometry(H * 0.075, H * 0.11, H * 0.06, 12), barkMat, d);
     flare.position.y = H * 0.03;
-    group.add(flare);
+    group.add(markWorldCollider(flare));
   }
 
   const branches = d === 'real' ? 6 : 3;
@@ -3546,7 +3923,7 @@ export function createMountain(options: MountainOptions = {}): THREE.Mesh {
   mat.vertexColors = true;
   const m = mesh(geo, mat, d);
   m.castShadow = false; // A whole mountain casting into the shadow map eats the resolution.
-  return m;
+  return markWorldCollider(m);
 }
 
 // ── RIVER ────────────────────────────────────────────────────────────────────────────────────────
@@ -3643,7 +4020,7 @@ export function createDesert(options: DesertOptions = {}): THREE.Mesh {
     : new THREE.MeshStandardMaterial({ color: 0xd9b877, roughness: 0.95, metalness: 0 });
   const m = mesh(geo, mat, d);
   m.castShadow = false;
-  return m;
+  return markWorldCollider(m, 'ground');
 }
 
 // ── ROAD ─────────────────────────────────────────────────────────────────────────────────────────
@@ -3691,7 +4068,7 @@ export function createRoad(options: RoadOptions = {}): THREE.Group {
   const surface = mesh(strip(W, L, seg, 0, 0), shared('asphalt', d, 0x3a3c40, d === 'real' ? 40 : 1), d);
   surface.userData.drape = ROAD_SURFACE_Y;
   surface.castShadow = false;
-  group.add(surface);
+  group.add(markWorldCollider(surface, 'ground'));
 
   // polygonOffset pulls the paint toward the camera in DEPTH as well as lifting it, so a mark never
   // fights the asphalt under it even at a grazing angle far down the road.
@@ -3714,7 +4091,7 @@ export function createRoad(options: RoadOptions = {}): THREE.Group {
       kg.translate(side * (W / 2 + 0.15), 0, 0);
       const kerb = mesh(kg, shared('stone', d, 0xb9b3a6, 20), d);
       kerb.userData.drape = 0.08;
-      group.add(kerb);
+      group.add(markWorldCollider(kerb));
     }
   }
   if (d === 'real') {
@@ -3789,7 +4166,7 @@ function createCurvedRoad(options: RoadOptions): THREE.Group {
   const surface = mesh(ribbonGeometry(path, 0, W, [[0, L]]), shared('asphalt', d, 0x3a3c40, d === 'real' ? 40 : 1), d);
   surface.userData.drape = ROAD_SURFACE_Y;
   surface.castShadow = false;
-  group.add(surface);
+  group.add(markWorldCollider(surface, 'ground'));
   const paint = new THREE.MeshStandardMaterial({ color: 0xe8e4d8, roughness: 0.75, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   const spans: Array<[number, number]> = [];
   for (let s0 = 3; s0 + 3 <= L; s0 += 9) spans.push([s0, s0 + 3]);
@@ -4069,7 +4446,7 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
     m.receiveShadow = true;
     m.userData.ground = false;
     rebuildGround(m);
-    return m;
+    return markWorldCollider(m, 'ground');
   }
 
   let pose: TrackPose = { x: 0, z: 0, heading: 0, y: 0 };
@@ -4275,6 +4652,8 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
 
 // ── HOUSE ────────────────────────────────────────────────────────────────────────────────────────
 export interface HouseOptions extends BaseOpts {
+  /** Opt-in explorable floor plan and operable door. Flat roof only. */
+  enterable?: boolean;
   width?: number;
   depth?: number;
   /** 1 or 2. Each storey is 3 m. */
@@ -4299,6 +4678,7 @@ export const HOUSE_WASHES: readonly number[] = [0xe9c46a, 0xf4a6a6, 0x9ec9e6, 0x
  * builds the texture ONCE). Returns a Group whose origin is the centre of the footprint at ground level.
  */
 export function createHouse(options: HouseOptions = {}): THREE.Group {
+  if (options.enterable) return createEnterableHouse({ width: options.width, depth: options.depth, storeys: options.storeys });
   const d = tier(options);
   const r = rng(options.seed ?? 11);
   const W = options.width ?? 6 + r() * 3;
@@ -4321,10 +4701,10 @@ export function createHouse(options: HouseOptions = {}): THREE.Group {
 
   const body = mesh(new THREE.BoxGeometry(W, H, D), wall, d);
   body.position.y = H / 2;
-  group.add(body);
+  group.add(markWorldCollider(body));
   const plinth = mesh(new THREE.BoxGeometry(W + 0.12, 0.45, D + 0.12), plinthMat, d);
   plinth.position.y = 0.225;
-  group.add(plinth);
+  group.add(markWorldCollider(plinth));
 
   // Door — centred on the front, 2.1 m, with a frame so it is a door and not a brown rectangle.
   const doorW = 1.0;
@@ -4336,7 +4716,7 @@ export function createHouse(options: HouseOptions = {}): THREE.Group {
   group.add(doorFrame);
   const step = mesh(new THREE.BoxGeometry(doorW + 0.6, 0.18, 0.5), plinthMat, d);
   step.position.set(0, 0.09, D / 2 + 0.3);
-  group.add(step);
+  group.add(markWorldCollider(step));
 
   // Windows: front (either side of the door, each storey) and both sides. Frame + glass + chhajja.
   const addWindow = (x: number, y: number, z: number, rotY: number) => {
@@ -4370,12 +4750,12 @@ export function createHouse(options: HouseOptions = {}): THREE.Group {
     // RCC slab overhang, a parapet you can see over the edge of, and the black Sintex-style tank.
     const slab = mesh(new THREE.BoxGeometry(W + 0.5, 0.18, D + 0.5), concreteMat, d);
     slab.position.y = H + 0.09;
-    group.add(slab);
+    group.add(markWorldCollider(slab));
     const t = 0.15;
     for (const [w2, d2, x, z] of [[W, t, 0, D / 2 - t / 2], [W, t, 0, -D / 2 + t / 2], [t, D, W / 2 - t / 2, 0], [t, D, -W / 2 + t / 2, 0]] as const) {
       const parapet = mesh(new THREE.BoxGeometry(w2, 0.9, d2), wall, d);
       parapet.position.set(x, H + 0.18 + 0.45, z);
-      group.add(parapet);
+      group.add(markWorldCollider(parapet));
     }
     const tank = mesh(new THREE.CylinderGeometry(0.55, 0.6, 1.1, d === 'real' ? 20 : 10), new THREE.MeshStandardMaterial({ color: 0x1b1c1e, roughness: 0.55, metalness: 0 }), d);
     tank.position.set(W / 2 - 1.1, H + 0.18 + 0.55, -D / 2 + 1.1);
@@ -4392,7 +4772,7 @@ export function createHouse(options: HouseOptions = {}): THREE.Group {
       // the gable apex — the overhang then dips below the wall top instead of leaving a gap above it.
       plane.position.set(0, H + Math.tan(pitch) * (run / 2 - 0.5), side * run / 2);
       plane.rotation.x = side * pitch;
-      group.add(plane);
+      group.add(markWorldCollider(plane));
     }
     // Gable ends so the roof is closed, not two boards balanced on a box.
     const gableShape = new THREE.Shape();
@@ -4401,7 +4781,7 @@ export function createHouse(options: HouseOptions = {}): THREE.Group {
       const gable = mesh(new THREE.ShapeGeometry(gableShape), wall, d);
       gable.position.set(side * (W / 2), H, 0);
       gable.rotation.y = side * Math.PI / 2;
-      group.add(gable);
+      group.add(markWorldCollider(gable));
     }
   }
   return group;
@@ -5632,11 +6012,13 @@ export function createAtmosphere(options: AtmosphereOptions): Atmosphere {
 `;
 
 const FILES: Record<string, string> = {
+  'src/game/three/buildings.ts': GAME_BUILDINGS,
   'src/game/three/renderer.ts': RENDERER,
   'src/game/three/lighting.ts': LIGHTING,
   'src/game/three/materials.ts': MATERIALS,
   'src/game/three/camera.ts': CAMERA,
   'src/game/three/world.ts': WORLD,
+  'src/game/three/collision.ts': COLLISION,
   // The three modules added 2026-08-26, each closing one reason a "realistic" scene came out flat:
   // nothing to reflect (environment), no surface detail (surfaces), and a capsule for a body (humanoid).
   'src/game/three/environment.ts': ENVIRONMENT,
@@ -5650,7 +6032,7 @@ const FILES: Record<string, string> = {
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'renderer', 'lighting', 'materials', 'camera', 'world', 'environment', 'surfaces', 'humanoid', 'objects', 'atmosphere',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'objects', 'atmosphere',
 ];
 
 /**
@@ -5691,6 +6073,11 @@ export function generateGame3D(include?: string[]): Game3DResult {
       files['src/game/three/surfaces.ts'] = FILES['src/game/three/surfaces.ts'];
       files['src/game/three/environment.ts'] = FILES['src/game/three/environment.ts'];
     }
+    if (files['src/game/three/objects.ts']) files['src/game/three/buildings.ts'] = FILES['src/game/three/buildings.ts'];
+    if (files['src/game/three/buildings.ts']) files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
+    if (files['src/game/three/buildings.ts'] || files['src/game/three/world.ts'] || files['src/game/three/objects.ts'] || files['src/game/three/camera.ts']) {
+      files['src/game/three/collision.ts'] = FILES['src/game/three/collision.ts'];
+    }
     // atmosphere.ts drives the lights lighting.ts makes (it imports AppliedLighting).
     if (files['src/game/three/atmosphere.ts']) files['src/game/three/lighting.ts'] = FILES['src/game/three/lighting.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
@@ -5708,6 +6095,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
     // chal rahi hai" — the headlights faced the player and LEFT turned the car RIGHT.
     instructions:
       `Added the 3D layer (${Object.keys(files).length} files under src/game/three). Install: three (+ @types/three).\n` +
+      'Explorable houses: createHouse({ enterable: true }) or createEnterableHouse(). Flat roof, one/two storeys, real doorway and stairs. Legacy createHouse() is solid scenery. Game shell wires E/mobile Use; custom loops must call interactHouseDoor and updateHouseDoors. Supply all NPC occupants. Do not replace interiors with decorative assets.\n' +
       `${kitTypeContract(files)}\n` +
       '```ts\n' +
       "import * as THREE from 'three';\n" +
@@ -5731,7 +6119,9 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "applyEnvironment(scene, renderer, 'sunset');            // reflections — do NOT skip this\n" +
       "setDetailLevel('real');   // 'real' when the user asked for real/asli; 'lite' for plain 3D\n" +
       "const terrain = createTerrain({ palette: 'indianVillage' });\n" +
-      'scene.add(terrain, createTree({ height: 7 }), createMountain({ size: 140, height: 50 }), createRoad({ length: 400 }));   // the road drapes over the hills; the ground is cut to it\n' +
+      'const tree = createTree({ height: 7 }); tree.position.set(12, groundHeightAt(12, 15), 15);\n' +
+      'const mountain = createMountain({ size: 140, height: 50 }); mountain.position.set(95, 0, -80);\n' +
+      'scene.add(terrain, tree, mountain, createRoad({ length: 400 }));   // clear road and spawn\n' +
       "const rail = createRailTrack({ length: 400 }); rail.position.x = 30; scene.add(rail);   // a train rides at groundHeightAt(x, z) on it\n" +
       "scene.add(scatterInstances(treeGeometry(), sharedMaterial('foliage', paletteColor('forest', 1)), { count: 400 }));\n" +
       "scene.add(new THREE.Mesh(enableAO(new THREE.BoxGeometry(6, 3, 0.3)), surfaceMaterial('brick', { repeat: 6 })));\n" +
@@ -5788,6 +6178,9 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '  fire from weapon.muzzle, and bow.setDraw(held ? 1 : 0). Call setDetailLevel()\n' +
       "  ONCE at start-up — 'real' when the user asked for real/realistic/asli/100%, 'lite' when they\n" +
       '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
+      '- PHYSICAL WORLD: the kit registers buildings, terrain and tree trunks automatically. Register custom\n' +
+      '  solids with markWorldCollider(mesh) from collision.ts. For custom movers, apply the fraction from\n' +
+      '  sweepWorldCapsules(bodies, movement, worldColliders(scene)) before updating their positions.\n' +
       '- 🔴 ANYTHING DRIVEN OR RIDDEN: move it with driveVehicle(vehicle, state, input.axis(), dt) — the raw\n' +
       "  axis, never a sign you worked out — and frame it with a 'chase' rig (rig.update(vehicle, dt)) or\n" +
       '  rig.follow(vehicle, dt). driveVehicle also keeps it ON the hills of createTerrain() (height, pitch,\n' +

@@ -1,3 +1,4 @@
+import { GameBuildInbox, gameBuildTargetReady, type GameBuildRequest } from '../../lib/gameBuildInbox';
 import { COMPOSER_BOX_CLASS, COMPOSER_TEXTAREA_CLASS, MobileComposerTools, resizeMobileComposer } from '../chat/ComposerShell';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ServiceRecommendationCard } from './ServiceRecommendationCard';
@@ -158,8 +159,8 @@ interface ChatMsg {
 // stale (never-cleared) `resume` prop re-apply an old chat on each reopen. See the resume effect below.
 let lastAppliedResumeNonce = 0;
 
-export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>, opts?: { live?: boolean }) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, isBusy, error, errorBeforeBuildStarted, start, markUserMessage, respond, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop: stopBuild, unsend, reset: resetBuild, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueState, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, gameBuildInbox, gameBuildRequest, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>, opts?: { live?: boolean }) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; gameBuildInbox?: GameBuildInbox; gameBuildRequest?: GameBuildRequest | null; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
+  const { state, running, isBusy, error, errorBeforeBuildStarted, start, markUserMessage, respond, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop: stopBuild, unsend, reset: resetBuild, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueState, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build(userId);
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -2584,7 +2585,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     setPreviewPrewarm(false); // a brand-new chat has no files yet — re-warm when its first build lands
   };
 
+  const openConversationGenRef = useRef(0);
+  const panelOwnerRef = useRef(userId);
+  if (panelOwnerRef.current !== userId) {
+    panelOwnerRef.current = userId;
+    openConversationGenRef.current += 1;
+  }
+  const [stagedGameBuild, setStagedGameBuild] = useState<(GameBuildRequest & { session: string }) | null>(null);
+  const stagedGameConsumedRef = useRef<number | null>(null);
   const startNewSession = () => {
+    openConversationGenRef.current += 1;
+    sessionSwitchRef.current = false;
+    setStagedGameBuild(null);
     selectSessionId(newSessionId());
     persistSessionId(sessionIdRef.current); // the new project is now the sticky one across reloads
     autoRestoredSessionRef.current = sessionIdRef.current; // mark handled → auto-restore won't load the old chat over this blank one
@@ -2856,6 +2868,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // underlying server build, if any, keeps running in the background and stays resumable from History)
   // instead of silently no-op'ing until the current build finishes.
   const openConversation = async (id: string, opts?: { silent?: boolean }) => {
+    const openGeneration = ++openConversationGenRef.current;
+    const isCurrentOpen = () => openGeneration === openConversationGenRef.current && panelOwnerRef.current === userId;
     // `silent` = the sticky-session AUTO-restore on open (not a user click): every "could not open"
     // outcome stays quiet (the panel simply remains a blank new chat) and NOTHING is ever branded —
     // but a genuinely-restored thread paints, and a still-running build still re-attaches live.
@@ -2896,6 +2910,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       clearProjectSurfaces();
       setFramework('vite-react');
       const restored = await loadConversation({ userId, email, id });
+      if (!isCurrentOpen()) return;
       if (restored) {
         if (restored.workspaceId) {
           // The server may resolve a v3_ entry to its ANON-degraded workspace (agentv3-anon-<sid>) —
@@ -2983,6 +2998,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           const j = await probe.json().catch(() => ({} as Record<string, unknown>));
           buildRunning = row?.workspaceId ? (j as { buildRunningHere?: unknown })?.buildRunningHere === true : (j as { buildRunning?: unknown })?.buildRunning === true;
         } catch { /* probe unreachable — the age gate below still protects young chats from branding */ }
+        if (!isCurrentOpen()) return;
         const rowTs = row?.updatedAt ?? row?.createdAt;
         const action = historyOpen404Action({ ageMs: rowTs ? Date.now() - rowTs : Number.POSITIVE_INFINITY, buildRunning });
         if (action === 'resume-live') {
@@ -3042,7 +3058,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       setUserMsgs(saved.filter(isUser).map((m) => ({ role: 'user' as const, text: m.text, ts: toTs(m) })));
       setAgentHistory(saved.filter((m) => !isUser(m)).map((m) => ({ role: 'agent' as const, text: m.text, ts: toTs(m) })));
     } finally {
-      sessionSwitchRef.current = false;
+      if (isCurrentOpen()) sessionSwitchRef.current = false;
     }
   };
   const newChatFromHistory = () => { setHistoryOpen(false); setMobileSheet(null); startNewSession(); };
@@ -4140,6 +4156,33 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     if (pendingFix.autoSend) void send({ text: pendingFix.text, importUrl: '' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingFix?.nonce]);
+
+  // Claim before resetting: remount/StrictMode can never replay a paid request.
+  useEffect(() => {
+    if (!gameBuildRequest || !gameBuildInbox) return;
+    const request = gameBuildInbox.claim(userId ?? '', gameBuildRequest.id);
+    if (!request) return;
+    setPendingRepoImport(null);
+    startNewSession();
+    setShowWorkspace(false);
+    setStagedGameBuild({ ...request, session: sessionIdRef.current });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameBuildRequest?.id, gameBuildInbox, userId]);
+  // Wait for reset's next render: send must close over the EMPTY target workspace.
+  useEffect(() => {
+    if (!stagedGameBuild || stagedGameConsumedRef.current === stagedGameBuild.id) return;
+    if (stagedGameBuild.owner !== (userId ?? '') || stagedGameBuild.session !== sessionIdRef.current) {
+      stagedGameConsumedRef.current = stagedGameBuild.id;
+      setStagedGameBuild(null);
+      return;
+    }
+    if (!gameBuildTargetReady(stagedGameBuild, { owner: userId ?? '', session: sessionIdRef.current,
+      workspace: state.workspaceId, running, switching: sessionSwitchRef.current })) return;
+    stagedGameConsumedRef.current = stagedGameBuild.id;
+    setStagedGameBuild(null);
+    void send({ text: stagedGameBuild.text, importUrl: '' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stagedGameBuild, userId, state.workspaceId, running]);
 
   // The repository import that opened a new chat (Q-733 — see importRepo) is sent once that chat has
   // rendered: this render's `send` belongs to the new session, which has no workspace yet, so the

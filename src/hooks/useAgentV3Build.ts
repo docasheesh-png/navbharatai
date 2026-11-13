@@ -333,7 +333,7 @@ export function stallWatchdogAction(opts: { alive: boolean; sawResult: boolean }
   return 'error';
 }
 
-export function useAgentV3Build(): UseAgentV3Build {
+export function useAgentV3Build(owner?: string): UseAgentV3Build {
   const [state, setState] = useState<AgentV3ClientState>(initialAgentV3State);
   const [running, setRunningState] = useState(false);
   const runningRef = useRef(false);
@@ -397,6 +397,13 @@ export function useAgentV3Build(): UseAgentV3Build {
   // it; every async apply path re-checks it before calling setState and stops cold if it no longer
   // matches — so a stale resume/mirror can never silently repopulate a session the user has since left.
   const generationRef = useRef(0);
+  const conversationLoadOrdinalRef = useRef(0);
+  const conversationOwnerRef = useRef(owner);
+  if (conversationOwnerRef.current !== owner) {
+    conversationOwnerRef.current = owner;
+    generationRef.current += 1;
+    conversationLoadOrdinalRef.current += 1;
+  }
   // B6 — last live-poll seq seen per workspace, so a tab-focus re-arm of subscribeLive resumes from it
   // instead of re-downloading the whole event history from seq 0.
   const liveSeqRef = useRef<Record<string, number>>({});
@@ -713,6 +720,9 @@ export function useAgentV3Build(): UseAgentV3Build {
   // navigation, same as "+ New chat" — see reset()/start()'s generation-guard comments). Detaches from
   // whatever's currently attached; the underlying server build, if any, keeps running in the background.
   const loadConversation = useCallback(async (opts?: { userId?: string; email?: string; id?: string }): Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string; unfinished?: boolean } | null> => {
+    const loadGeneration = generationRef.current;
+    const loadOrdinal = ++conversationLoadOrdinalRef.current;
+    const currentLoad = () => loadGeneration === generationRef.current && loadOrdinal === conversationLoadOrdinalRef.current;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     lastLoadDiagRef.current = null;
     try {
@@ -724,30 +734,37 @@ export function useAgentV3Build(): UseAgentV3Build {
       // old chat never opens (the exact "clicking an old chat does nothing" bug). forceRefresh so a
       // stale/expired cached token self-heals (the token flakiness behind the earlier access issues).
       const authHeaders = await authJsonHeaders(true);
+      if (!currentLoad()) return null;
       // Load a SPECIFIC conversation when an id is given (history menu); otherwise the most recent.
       let convoId = opts?.id;
       if (!convoId) {
         const listRes = await fetch(`/api/agentv3/conversations?${params.toString()}`, { headers: authHeaders });
+      if (!currentLoad()) return null;
         if (!listRes.ok) { lastLoadDiagRef.current = `history list failed (HTTP ${listRes.status})`; return null; }
         const listJson = await listRes.json().catch(() => ({}));
+      if (!currentLoad()) return null;
         const recent = Array.isArray(listJson?.conversations) ? listJson.conversations[0] : undefined;
         convoId = recent?.id ? String(recent.id) : undefined;
       }
       if (!convoId) { lastLoadDiagRef.current = 'no conversation id to load (history was empty)'; return null; }
       let oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(convoId)}?${params.toString()}`, { headers: authHeaders });
+      if (!currentLoad()) return null;
       // BLD-2: a flaky token used to be papered over by trusting ?userId=. Retry once with a forced refresh.
       if (oneRes.status === 401 || oneRes.status === 403) {
         try { await auth.currentUser?.getIdToken(true); } catch { /* rebuild headers with whatever token is cached */ }
         oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(convoId)}?${params.toString()}`, { headers: await authedHeaders() });
+      if (!currentLoad()) return null;
       }
       if (!oneRes.ok) {
         // THE key signal: 404 = no server transcript stored for this session's candidate ids;
         // 403 = the record exists but the verified/claimed identity does not own it; 400 = missing id.
         const body = await oneRes.json().catch(() => ({} as { error?: string }));
+      if (!currentLoad()) return null;
         lastLoadDiagRef.current = `server refused the transcript (HTTP ${oneRes.status}${body?.error ? `: ${body.error}` : ''}) for id ${convoId}`;
         return null;
       }
       const oneJson = await oneRes.json().catch(() => ({}));
+      if (!currentLoad()) return null;
       const conv = oneJson?.conversation as PersistedConversation | undefined;
       if (!conv || !Array.isArray(conv.messages)) { lastLoadDiagRef.current = 'server returned no conversation record (or a malformed one)'; return null; }
       if (conv.messages.length === 0) lastLoadDiagRef.current = `transcript loaded but has 0 turns (id ${convoId})`;
@@ -764,7 +781,9 @@ export function useAgentV3Build(): UseAgentV3Build {
       // its stale, still-in-flight setState can land moments later and overwrite the conversation just
       // loaded. Also detach the actual stream connection (if any); the underlying server build, if any,
       // keeps running in the background and stays resumable from History.
+      if (!currentLoad()) return null;
       generationRef.current += 1;
+      const committedGeneration = generationRef.current;
       abortRef.current?.abort();
       abortRef.current = null;
       setRunning(false);
@@ -789,7 +808,7 @@ export function useAgentV3Build(): UseAgentV3Build {
             if (!fr.ok) return;
             const fj = await fr.json().catch(() => ({} as { files?: Record<string, string> }));
             const paths = fj?.files && typeof fj.files === 'object' ? Object.keys(fj.files) : [];
-            if (paths.length > 0 && workspaceIdRef.current === wsForFiles) {
+            if (paths.length > 0 && generationRef.current === committedGeneration && loadOrdinal === conversationLoadOrdinalRef.current && workspaceIdRef.current === wsForFiles) {
               setState((prev) => agentV3Reducer(prev, { type: 'files_restored', files: paths.map((path) => ({ path, kind: 'create' as const })), ts: Date.now() }));
             }
           } catch { /* best-effort — the viewer cache still loads files independently */ }
@@ -811,6 +830,7 @@ export function useAgentV3Build(): UseAgentV3Build {
       eventClockRef.current = createConversationEventClock(unfinished ? messages.at(-1)?.ts : undefined);
       return { messages, workspaceId: conv.workspaceId, framework: conv.framework, unfinished };
     } catch (e) {
+      if (!currentLoad()) return null;
       lastLoadDiagRef.current = `network/exception while loading (${e instanceof Error ? e.message : String(e)})`;
       return null; // best-effort — never disrupt the panel on a load failure
     }

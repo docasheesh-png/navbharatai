@@ -45,6 +45,8 @@ import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
 import { groundScene } from './three/surfaces';
+import { interactHouseDoor, updateHouseDoors, type DoorOccupant } from './three/buildings';
+import { setSceneColliders } from './three/collision';
 import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle } from './three/objects';
 import { CharacterController } from './play/character';
@@ -67,6 +69,8 @@ import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions } from 
  * and neither is.
  */
 export interface GameOptions {
+  /** Additional world-space NPC/remote bodies that must block door swings. */
+  doorOccupants?: (ctx: GameContext) => readonly DoorOccupant[];
   container: HTMLElement;
   lighting?: LightingPresetName;
   /**
@@ -78,7 +82,7 @@ export interface GameOptions {
    */
   camera?: CameraKind;
   shadows?: boolean;
-  /** Build the world here: add meshes, return the ones the player collides with. */
+  /** Add the world here. Return any extra custom colliders for the player, vehicles and camera. */
   setup?: (ctx: GameContext) => THREE.Object3D[] | void;
   /** Your gameplay. Runs at a FIXED 60Hz. */
   update?: (ctx: GameContext, delta: number) => void;
@@ -287,10 +291,8 @@ export class Game {
     const colliders = this.asGame(() => options.setup?.(this.context)) || [];
     this.setupDone = true;
     this.syncTouchLayout();
-    if (Array.isArray(colliders)) {
-      this.player.setColliders(colliders);
-      this.rig.setCollidables(colliders);
-    }
+    if (Array.isArray(colliders)) setSceneColliders(this.scene, colliders);
+    this.rig.setCollisionScene(this.scene);
 
     this.loop = new GameLoop(
       (delta) => this.fixedUpdate(delta),
@@ -400,6 +402,9 @@ export class Game {
     // Hit-stop: the simulation freezes for a few frames so a hit lands. Input still ticks, or the
     // press that happened during the freeze is swallowed.
     if (!this.feel.frozen) {
+      const doorActor = { feet: this.player.object.getWorldPosition(new THREE.Vector3()), radius: 0.4, height: 1.8 };
+      if (!this.chased && this.input.wasPressed('interact')) interactHouseDoor(this.scene, doorActor);
+      updateHouseDoors(this.scene, delta, [doorActor, ...(this.options.doorOccupants?.(this.context) ?? [])]);
       const axis = this.input.axis();
       this.player.update(
         delta,
@@ -1172,7 +1177,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       '    setup: (ctx) => {\n' +
       '      const ground = createTerrain({ size: 120 });\n' +
       '      ctx.scene.add(ground);\n' +
-      '      return [ground];            // what the player collides with\n' +
+      '      return [ground];            // extra colliders share the same scene physics\n' +
       '    },\n' +
       '    update: (ctx, dt) => {\n' +
       '      // YOUR GAMEPLAY. Fixed 60Hz. Emit events; never call particles or audio directly.\n' +

@@ -1,3 +1,4 @@
+import type { GameBuildInbox, GameBuildRequest } from '../../lib/gameBuildInbox';
 import { useEffect, useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
@@ -16,7 +17,7 @@ type V3Resume = { sessionId: string; messages: Array<{ role: 'user' | 'agent'; t
  *  • not yet  → an honest "rolling out" message (NEVER a broken/empty builder, so the app never
  *    looks broken for a user who isn't on the v5.0 batch yet).
  */
-export function ProV3Surface({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: V3Resume; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>, opts?: { live?: boolean }) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
+export function ProV3Surface({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, gameBuildInbox, gameBuildRequest, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: V3Resume; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>, opts?: { live?: boolean }) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; gameBuildInbox?: GameBuildInbox; gameBuildRequest?: GameBuildRequest | null; pendingFix?: { text: string; nonce: number } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
   const [state, setState] = useState<'loading' | 'enabled' | 'disabled'>('loading');
 
   useEffect(() => {
@@ -41,7 +42,7 @@ export function ProV3Surface({ userId, email, resume, freshOpenNonce, openPrevie
   }
 
   if (state === 'enabled') {
-    return <AgentV3Panel userId={userId} email={email} resume={resume} freshOpenNonce={freshOpenNonce} openPreviewNonce={openPreviewNonce} onFilesSync={onFilesSync} onBeforeBuild={onBeforeBuild} onOpenInIDE={onOpenInIDE} onPreviewState={onPreviewState} pendingFix={pendingFix} pendingDeploy={pendingDeploy} filesPanel={filesPanel} focusMode={focusMode} mobileFooter={mobileFooter} onFooterApi={onFooterApi} />;
+    return <AgentV3Panel userId={userId} email={email} resume={resume} freshOpenNonce={freshOpenNonce} openPreviewNonce={openPreviewNonce} onFilesSync={onFilesSync} onBeforeBuild={onBeforeBuild} onOpenInIDE={onOpenInIDE} onPreviewState={onPreviewState} gameBuildInbox={gameBuildInbox} gameBuildRequest={gameBuildRequest} pendingFix={pendingFix} pendingDeploy={pendingDeploy} filesPanel={filesPanel} focusMode={focusMode} mobileFooter={mobileFooter} onFooterApi={onFooterApi} />;
   }
 
   return (

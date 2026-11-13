@@ -47,7 +47,7 @@ describe('the import path adopts the workspace it landed in', () => {
 
   it('the hook exposes it, and the panel takes it from the hook', () => {
     expect(read('src/hooks/useAgentV3Build.ts')).toMatch(/adoptWorkspace: \(workspaceId: string\) => void;/);
-    expect(panel).toMatch(/const \{ state,[^}]*\badoptWorkspace\b[^}]*\} = useAgentV3Build\(\);/);
+    expect(panel).toMatch(/const \{ state,[^}]*\badoptWorkspace\b[^}]*\} = useAgentV3Build\(userId\);/);
   });
 
   it('Publish and Report are still gated on the session HAVING a workspace — adoption is what opens them', () => {

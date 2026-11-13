@@ -140,10 +140,9 @@ describe('the browser realities a hand-written shell forgets', () => {
     expect(game).toContain('this.particles.addTo(this.scene)');
   });
 
-  it('colliders reach BOTH the player and the camera', () => {
-    // Given to the player only, the camera clips through every wall.
-    expect(game).toContain('this.player.setColliders(colliders)');
-    expect(game).toContain('this.rig.setCollidables(colliders)');
+  it('registers setup colliders in the same scene used by the player, vehicles and camera', () => {
+    expect(game).toContain('setSceneColliders(this.scene, colliders)');
+    expect(game).toContain('this.rig.setCollisionScene(this.scene)');
   });
 });
 

@@ -1,0 +1,8 @@
+# App-lock atomicity repair
+The database being unavailable is not an acknowledged missing record. loadLockRecord now throws in that state, allowing the existing protected-route failure policy to refuse the operation.
+
+All app-lock record mutations use a Firestore transaction: read the current document, make a pure decision and persist the resulting state in the same transaction. PIN attempts and current-PIN changes share the same counter; OTP sending reserves its cooldown atomically; OTP checking and setting the replacement PIN happen in one commit, including consumption of a successful code. Area changes cannot overwrite concurrent counter, PIN or OTP updates from a stale snapshot.
+
+Transaction callbacks perform no email, audit, response or ticket issuance. Those happen only after a successful commit. Retries therefore re-evaluate the latest state without duplicate external side effects. Existing document fields, PIN hash scheme, lockout policy and area choices are retained; no account migration or unlock is performed.
+
+Offline tests exercise optimistic retries, parallel wrong PIN and OTP requests, replayed OTP, simultaneous send reservation, database-null failure and failed commit. A separate real loopback Firestore drill with two independent Admin clients passed shared unlock/change lockout, single OTP consumption, send cooldown reservation and area/counter preservation. It uses only synthetic records in a demo project, cleans them up and is wired into the existing emulator CI job. These checks are not a live deployment. The complete final integration CI remains required. Existing tickets are not retrospectively invalidated by this scoped repair; ticket revocation/credential-version policy is a separate change.

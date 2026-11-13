@@ -27,7 +27,7 @@ const OUT = join(ROOT, 'src/server/lib/gameKitHistory.ts');
 // Every module GAME_RECIPES (gameRecipeLayers.ts) draws on. The census test checks this list against it.
 const GENERATORS = [
   'GameRuntimeGenerator', 'Game3DGenerator', 'GameControllerGenerator', 'GameSystemsGenerator',
-  'GameVfxAudioGenerator', 'MelodyGenerator', 'GameShellGenerator',
+  'GameVfxAudioGenerator', 'MelodyGenerator', 'GameShellGenerator', 'GameEconomyGenerator',
 ].map((n) => `src/server/lib/${n}.ts`);
 
 const sha = (s) => createHash('sha256').update(s, 'utf8').digest('hex');

@@ -3,6 +3,7 @@ import { GAME_3D_MODULES, generateGame3D } from '../src/server/lib/Game3DGenerat
 import { generateGameRuntime } from '../src/server/lib/GameRuntimeGenerator';
 import { generateGameController } from '../src/server/lib/GameControllerGenerator';
 import { generateGameSystems } from '../src/server/lib/GameSystemsGenerator';
+import { generateGameEconomy } from '../src/server/lib/GameEconomyGenerator';
 import { generateGameVfxAudio } from '../src/server/lib/GameVfxAudioGenerator';
 import { generateGameShell } from '../src/server/lib/GameShellGenerator';
 import { defaultToolCatalog } from '../src/server/AgentV3/ToolCatalog';
@@ -60,6 +61,7 @@ const SUBSET_TOOLS: Array<[string, () => { files: Record<string, string> }]> = [
   ['generate_game_runtime', generateGameRuntime],
   ['generate_game_controller', generateGameController],
   ['generate_game_systems', generateGameSystems],
+  ['generate_game_economy', generateGameEconomy],
   ['generate_game_vfx', generateGameVfxAudio],
   ['generate_game_shell', generateGameShell],
   ['generate_game_3d', generateGame3D],

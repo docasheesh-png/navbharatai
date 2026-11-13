@@ -101308,3 +101308,44 @@ Queue: this commit closes no earlier row. New rows Q-2653 (bare `game` still con
 
 ## 2026-11-13 — App-lock fail-closed storage and atomic attempts
 Unavailable database now throws instead of looking like an account without a PIN. Replaced read/compute/set mutations with retry-safe Firestore transitions for PIN attempts, PIN changes, OTP reservation and atomic consumption/reset, plus area changes. No external side effects inside transaction callbacks; no ticket before commit. Offline concurrency regressions cover lost updates, replay and commit failures. Existing account state/schema is preserved. Final integration CI and deployment are separate; see docs/APP_LOCK_ATOMICITY.md.
+
+---
+
+## 2026-11-13 — TYCOON KIT, PART 1: the economy core (`generate_game_economy`)
+
+**Origin.** The admin shared their own hand-built game (`RISEUP_VILLAGE_SUPER_MART_TYCOON`, a single 5.4 MB HTML: about
+760 KB of code and 4.6 MB of embedded video, audio and photo textures) and a ChatGPT/Codex master prompt for a separate
+"3D Game Studio", and asked that NavBharatAI be able to build games like it. Per the external-suggestion rule the prompt was
+treated as raw material, not a spec. Honest disagreements given to the admin first, and accepted ("haan, economy core shuru karo"):
+no second engine (Babylon doubles testing for no user gain), no parallel Studio with its own wallet/DB/hosting (it would break
+the ONE-WALLET LAW and duplicate the Pro v3 pipeline), no 15-phase single change (second absolute rule), and no AI-generated
+3D models until licensed assets exist (open PR #4196). The same ChatGPT plan had already been seen on 2026-08-10 and became
+the seven game recipes above; this adds the missing business half. Single-player only: PUBG/Free Fire-style multiplayer and
+Vice City-scale worlds are NOT claimed (no game servers; `NavData` quotas must not be widened without sign-off).
+
+**What shipped (this PR only).** A new recipe, `generate_game_economy`, writing `src/game/economy/*` (8 files, pure TypeScript,
+no dependency, no import from any other game layer — it works in a 2D game and the 3D shell alike):
+integer-minor-unit money, an atomic `Ledger`, shelf + stock-room `Inventory`, `demandFactor` pricing, an idempotent `OrderBook`
+with bulk tiers, `Upgrades`, and an `Economy` that ties them together (seeded customers, reputation, daily rent/wages with
+debt, capped offline earnings, a versioned, validated save). Wired in the five places a recipe lives: `GAME_RECIPES`,
+`ToolCatalog` (definition + both lists), `ToolDispatcher`, the architect prompt (step 4b, "only when the game is about running
+a business"), and `AppKnowledgeBase`; `gameKitHistory` regenerated (and `scripts/gameKitHistory.mjs` taught the new generator,
+which its census test would otherwise have caught).
+
+**The bug classes it encodes** (each locked by a test that EXECUTES the emitted code, and each proven by reversion — the bug
+put back, the tests watched failing): money as floats; a spend that is not one atomic check-and-debit; an order paid before it
+is known to fit the stock room; a retried tap buying twice; a price that does not move demand; stock that goes negative or is
+sold without being on the shelf; uncapped / free offline earnings; a corrupt or hostile save. Reversions run: non-atomic spend
+(5 tests failed), order paid before the space check (2), no idempotency (2), price ignored (2), uncapped offline (1).
+
+**Proof.** 70 tests in `GameEconomyGenerator.test.ts` including a strict + `noUnusedLocals` type-check of the emitted files and
+a whole-module compile of the instructions example (`aRecipeExampleCompiles`). Sibling census tests updated:
+`game3dToolModules`, `generatedGameCode` (7 → 8 packs).
+
+**NOT done — stated plainly, nothing here is auto-seeded.** The economy is a tool the builder may call; `gameKitPlan` does not
+yet lay it down for a tycoon request, so whether a given tycoon prompt uses it still depends on the builder reading step 4b.
+Next parts, in order, each its own PR: (2) customer/staff simulation (pathfinding, shopping, billing, roles) as a reusable
+module the 3D shell can drive; (3) the management UI (tabbed panel, missions/rewards, minimap) and gameKitPlan auto-seeding
+with its own playtest dimension for "does the till work"; (4) licensed assets once #4196 lands. Untested on a real build until
+part 3 — the first real "village super mart" build is the evidence to wait for. The admin's file could not be rendered here
+(its three.js CDN is blocked from this sandbox), so its UI was read from code, not seen.

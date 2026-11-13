@@ -1012,6 +1012,13 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '    4. run_recipe({ name: "generate_game_systems" }) — enemies, health/damage, shooting, waves',
     '       (src/game/systems/). It already handles i-frames and fast-bullet collision, which a fresh',
     '       implementation reliably gets wrong.',
+    '    4b. run_recipe({ name: "generate_game_economy" }) — ONLY when the game is about running a business',
+    '       (a shop, supermarket, restaurant, farm, factory or any tycoon / management / idle game):',
+    '       the money half (src/game/economy/) — integer money, an atomic till, shelf + stock room,',
+    '       orders that cannot double-charge, a price that really moves demand, upgrades, daily rent and',
+    '       wages, capped offline earnings and a validated save. Pure maths, no three.js, so it suits a 2D',
+    '       game as well as the 3D shell. Draw the customers yourself and call economy.sell /',
+    '       serveCustomer at the till; never keep money in a float or let cash go below zero by hand.',
     '    5. run_recipe({ name: "generate_game_vfx" }) — particles, audio and the ONE table that fires',
     '       effect + sound + shake together (src/game/fx/), which is what makes a hit feel like force.',
     // The audio manager used to play only a LOADED file, and a generated app has none — so every game

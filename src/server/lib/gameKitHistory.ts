@@ -62,6 +62,30 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "a89b35a839d47bfddf76d72d89f25ad6085c5dc66edfb5c9cd8983898b88fcba",
     "dfc9f2a2a953a287b80e12e6c1d06f3e54a61535e12eee60a37c5834976df54b"
   ],
+  "src/game/economy/economy.ts": [
+    "9359e94db30ac5fca7fe547a1ccb75d805e94d83c37d9417b6742379fcb44fdb"
+  ],
+  "src/game/economy/index.ts": [
+    "fa078dc3d260f65d9cc1d204729a239454858265ba10e480bbd48d486f727696"
+  ],
+  "src/game/economy/inventory.ts": [
+    "2be4de3e0c5128b7fe9b15bd1e159ba4bf867bfd3aeb397fc34b24988d75cf0f"
+  ],
+  "src/game/economy/ledger.ts": [
+    "1c39287d5b2a155dbf2491e129ffc7bd9f5a5d1e7bbf6fafa653709b89063ca3"
+  ],
+  "src/game/economy/money.ts": [
+    "50eccb87a06c4444edcc6f76972b98dd1f9842bb3deb92746b7639b83fbc6ff8"
+  ],
+  "src/game/economy/orders.ts": [
+    "c8e4fb606571d6d573ee54ca2465c60d93e14bf8ffbd40ceb256979302a141a8"
+  ],
+  "src/game/economy/pricing.ts": [
+    "15bf0ea31691aa104ddf1d7d58c871cbccfa32b9fe5c1724df68291ea3ccb748"
+  ],
+  "src/game/economy/upgrades.ts": [
+    "23f15c3237ef3c1a1c1d0d7d245dc48cc794038ad45ca3573aa540b7da4dc56b"
+  ],
   "src/game/fx/audio.ts": [
     "c9b08a58e84a865c0d58353f6ebd7af60211622cb95639ac6f4c56d20ad82c7d",
     "7fd1dc2470cf216b39346c5034710fd1688b27d636bcfa42157d54afc118ced3"

@@ -361,6 +361,7 @@ import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
+import { generateGameEconomy } from '../lib/GameEconomyGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
@@ -9560,6 +9561,21 @@ export class ToolDispatcher {
         const gsyLayers = await this.addMissingRecipeLayers(gsy.files, agent);
         this.scheduleCheckpoint('gameplay systems');
         return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}${gsyLayers}`;
+      }
+
+      case 'generate_game_economy': {
+        // THE MONEY HALF OF A TYCOON / SHOP / BUSINESS GAME. Integer money, an atomic till, idempotent orders,
+        // a price that really moves demand, capped offline earnings and a validated save — pure arithmetic with
+        // no three.js and no import from another game layer, so it works in a 2D game and in the 3D shell.
+        const gecRec = (input as Record<string, unknown>) || {};
+        const gecInclude = Array.isArray(gecRec.include)
+          ? gecRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gec = generateGameEconomy(gecInclude);
+        const gecWritten = await this.writeRecipeFiles(gec.files, agent);
+        const gecLayers = await this.addMissingRecipeLayers(gec.files, agent);
+        this.scheduleCheckpoint('tycoon economy');
+        return `Added the tycoon economy core:\n${gecWritten.join('\n')}\n\n${gec.instructions}${gecLayers}`;
       }
 
       case 'generate_game_shell': {

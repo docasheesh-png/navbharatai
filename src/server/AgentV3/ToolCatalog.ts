@@ -2247,6 +2247,33 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_game_economy',
+      description:
+        'Add the MONEY half of a tycoon / shop / restaurant / farm / business game: a till, a stock room, '
+        + 'shelves, wholesale orders, prices, upgrades, daily rent and wages, customers who decide, earnings '
+        + 'while away, and a validated save. Emits src/game/economy as PURE arithmetic (no three.js, no import '
+        + 'from another game layer), so it works in a 2D game and in the 3D shell alike; the game layer only '
+        + 'DRAWS customers and shelves and calls sell / serveCustomer. IT ENCODES THE RULES A HAND-WRITTEN '
+        + 'VERSION GETS WRONG — do not reimplement them: money is an INTEGER number of minor units (floats '
+        + 'drift); a spend is one atomic check-and-debit so cash never goes negative; an order the stock room '
+        + 'cannot hold is refused BEFORE it is paid, and carries a request id so a double tap cannot buy twice; '
+        + 'customers buy only what is ON THE SHELF; demand falls as the price rises and is zero at 3x the fair '
+        + 'price, so the pricing screen is a real decision; unpaid expenses become debt; offline earnings are '
+        + 'capped, halved and charged rent so being away is never free money; a corrupt save is a new game, '
+        + 'never NaN. Use it for any game whose heart is running a business. Be honest in the summary that the '
+        + 'save lives on the player\'s device.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: money, ledger, inventory, pricing, orders, upgrades, economy, index. Default = all. economy always brings every module it imports.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_game_systems',
       description:
         'Add the gameplay systems that make it a GAME rather than a walkable scene: combat (health, '
@@ -3597,6 +3624,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_i18n',
   'request_secrets',
   'generate_game_systems',
+  'generate_game_economy',
   'generate_game_shell',
   'generate_game_vfx',
   'generate_melody',
@@ -3817,6 +3845,7 @@ export const RECIPE_TOOLS = [
   // The census that guards this read tool names as `[a-z]+(?:_[a-z]+)+`, so the digit in `3d` hid it.
   'generate_game_3d',
   'generate_game_controller',
+  'generate_game_economy',
   'generate_game_runtime',
   'generate_game_shell',
   'generate_game_systems',

@@ -2488,7 +2488,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'object_spec',
       description:
-        'BEFORE hand-modelling ANY 3D object, call this ONCE with ALL their names (objects: [...]). Returns the object\u2019s REAL '
+        'Search the categorized game library without model calls using library_query and optional category/animation; an empty query lists indexed entries. Results distinguish reviewed models needing admission, code recipes, and specifications only. No result proves placement or gameplay. '
+        + 'BEFORE hand-modelling ANY 3D object, call this ONCE with ALL their names (objects: [...]). Returns the object\u2019s REAL '
         + 'dimensions in metres, the parts it cannot read as itself without, the ONE proportion that '
         + 'carries its silhouette, and HOW that kind of thing is placed in a scene (grounded, '
         + 'instanced, animated, shadowed). It answers for 100 built-in objects instantly and free '
@@ -2506,6 +2507,13 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: {
         type: 'object',
         properties: {
+          library_plan: { type: 'string', maxLength: 4000, description: 'Game prompt for genre-aware requirements and optional scenery, with conservative unmeasured device-fit planning.' },
+          device_profile: { type: 'string', enum: ['conservative-mobile', 'standard-web'], description: 'Planning profile only, never a measured target-device certification.' },
+          webgl2: { type: 'boolean', description: 'Only supply if actually known from a target capability check; never guess from the device name.' },
+          requirements: { type: 'array', maxItems: 16, items: { type: 'object', properties: { subject: { type: 'string' }, role: { type: 'string', enum: ['player', 'opponent', 'environment', 'prop'] }, animation: { type: 'string' } }, required: ['subject'] } },
+          library_query: { type: 'string', maxLength: 512, description: 'Metadata search, such as car, house, tree, or a model name. Empty string browses the library.' },
+          category: { type: 'string', description: 'Optional exact category from the returned categories list.' },
+          animation: { type: 'string', maxLength: 64, description: 'Optional required animation role; excludes incompatible models and unverified recipe animation claims.' },
           object: {
             type: 'string',
             description:

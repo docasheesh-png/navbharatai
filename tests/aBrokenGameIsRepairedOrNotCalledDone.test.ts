@@ -1,9 +1,4 @@
-/**
- * Game Engine Ultra Phase 3 (2026-10-30): a game the playtest proved broken gets one verified repair (kept only
- * if strictly better when played again, else undone; platform pays), and with the gate on it is never reported
- * shippable while still unplayable or missing a named feature. Both switches default ON and have an explicit
- * `=off` escape hatch.
- */
+/** Automatic repair is suspended; measured completion checks remain active. */
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
@@ -30,49 +25,23 @@ const run = (i: GameRepairIO, defects = [D('GAME_DEFECT_INPUT_IGNORED')], missin
   runGameRepair(defects, missing, 'racing game with score', { repairMs: 60_000, snapshot: snap, buildSignal: new AbortController().signal, io: i });
 
 describe('safe game repair defaults', () => {
-  it('repair and gate are on by default and can each be explicitly disabled', () => {
-    expect(gameAutoRepairEnabled(env({}))).toBe(true);
+  it('repair is unconditionally suspended while the existing gate default remains on', () => {
+    expect(gameAutoRepairEnabled(env({}))).toBe(false);
     expect(gameCompleteGateEnabled(env({}))).toBe(true);
-    expect(gameAutoRepairEnabled(env({ AGENTV3_GAME_AUTO_REPAIR: 'on' }))).toBe(true);
+    expect(gameAutoRepairEnabled(env({ AGENTV3_GAME_AUTO_REPAIR: 'on' }))).toBe(false);
     expect(gameCompleteGateEnabled(env({ AGENTV3_GAME_COMPLETE_GATE: 'on' }))).toBe(true);
     expect(gameAutoRepairEnabled(env({ AGENTV3_GAME_AUTO_REPAIR: 'off' }))).toBe(false);
     expect(gameCompleteGateEnabled(env({ AGENTV3_GAME_COMPLETE_GATE: 'off' }))).toBe(false);
   });
 });
 
-describe('the repair is kept only when the game, played again, is better', () => {
-  it('kept when the defect is gone', async () => {
-    const i = io();
+describe('suspension cannot start automatic model or rollback work', () => {
+  it.each(['success', 'failure', 'empty-proof', 'late', 'unchanged'])('never invokes %s callback scenarios', async scenario => {
+    const i = io({ repair: vi.fn(async () => scenario === 'success') });
     const o = await run(i);
-    expect(o.kept).toBe(true);
-    expect(i.revert).not.toHaveBeenCalled();
-    expect(gameRepairRecord(o).code).toBe('GAME_REPAIRED');
-  });
-  it('undone when nothing improved', async () => {
-    const i = io({ replay: vi.fn(async () => ({ defects: [D('GAME_DEFECT_INPUT_IGNORED')], scopeMissing: [], proof: { outcome: 'passed' as const, score: 100 } })) });
-    const o = await run(i);
-    expect(o.kept).toBe(false);
-    expect(i.revert).toHaveBeenCalledWith(snap);
-    expect(gameRepairRecord(o).code).toBe('GAME_REPAIR_UNREPAIRED');
-  });
-  it('undone when something new broke', async () => {
-    const i = io({ replay: vi.fn(async () => ({ defects: [D('GAME_DEFECT_RUNTIME_ERROR')], scopeMissing: [], proof: { outcome: 'passed' as const, score: 100 } })) });
-    expect((await run(i)).kept).toBe(false);
-    expect(i.revert).toHaveBeenCalled();
-  });
-  it('undone when the runner did not finish', async () => {
-    const i = io({ repair: vi.fn(async () => false) });
-    expect((await run(i)).kept).toBe(false);
-    expect(i.replay).not.toHaveBeenCalled();
-    expect(i.revert).toHaveBeenCalled();
-  });
-  it('scope gap: kept when the named feature now exists', async () => {
-    const o = await run(io(), [], ['levels']);
-    expect(o.kept).toBe(true);
-  });
-  it('skipped with nothing to fix, no time, or no snapshot', async () => {
-    expect((await run(io(), [], [])).attempted).toBe(false);
-    const o = await runGameRepair([D('GAME_DEFECT_BLANK')], [], 'p', { repairMs: 0, snapshot: snap, buildSignal: new AbortController().signal, io: io() });
+    expect(o).toMatchObject({ attempted: false, kept: false, proof: null, after: null });
+    expect(o.reason).toContain('suspended');
+    for (const callback of Object.values(i)) expect(callback).not.toHaveBeenCalled();
     expect(gameRepairRecord(o).code).toBe('GAME_REPAIR_SKIPPED');
   });
   it('repairImproved is strict', () => {

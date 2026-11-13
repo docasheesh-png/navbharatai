@@ -429,14 +429,12 @@ the code (it is actually read somewhere) on 2026-07-11.
   `AGENTV3_GAME_SCOPE_CONTRACT` (Phase 1, PR #4036 — game scope contract in the kit handoff + GAME_SCOPE_OK/GAP evidence),
   `AGENTV3_GAME_PLAYTEST_SEED` (Phase 2 — the playtest seeds `Math.random` with a fixed seed so runs are repeatable).
   Existing siblings: `AGENTV3_GAME_PLAYTEST`, `AGENTV3_GAME_KIT_SEED`.
-  **Phase 3 — default ON, `=off` disables (code default; no Cloud Run value required):**
-  `AGENTV3_GAME_AUTO_REPAIR` — one bounded, focused model repair when a browser playtest measures a defect.
-  It is replayed and kept only when measured better with no new defects; otherwise the original snapshot is
-  restored. It spends a model call, but billing phase `game-repair` is always barren, so the platform absorbs
-  the cost and the user is never charged. `AGENTV3_GAME_COMPLETE_GATE` — a game still unplayable (blank /
-  ignored input / no touch / stuck start / runtime error / wrong camera / stalled vehicle / missing kit layer)
-  or missing a feature the user named is reported RED, not shippable. Never flips `ok`, never changes a bill.
-  Both switches can be disabled independently with the exact value `off`.
+  **Phase 3 — automatic repair suspended; completion gate unchanged:**
+  `AGENTV3_GAME_AUTO_REPAIR` is currently ignored. No value enables automatic mutation or rollback,
+  because the existing best-effort text snapshot cannot prove complete byte-preserving recovery.
+  Normal building and playtesting remain available. `AGENTV3_GAME_COMPLETE_GATE` still defaults ON
+  and can be disabled with `off`; unplayable games or missing named features are reported RED,
+  not shippable. It does not flip `ok` or change billing. See `docs/security/game-auto-repair-suspension.md`.
   **Phase 4 — bench-runner env only (local script, never Cloud Run):** `BENCH_FIXTURE` (`reliability` default | `game`)
   for `scripts/agentv3-reliability-bench.ts`; spends real money only with `BENCH_CONFIRM=yes`.
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,

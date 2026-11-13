@@ -50,6 +50,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['enterable house', 'door', 'interior', 'stairs', 'game house'],
   },
   {
+    id: 'game_asset_librarian',
+    name: 'Game asset library and compatibility search',
+    path: 'NavBharatAI Pro → describe a game or ask about available game objects',
+    description: 'The builder searches one categorized index of existing object recipes, specifications and reviewed 3D model metadata. The reviewed catalogue candidate includes additional fantasy characters with selected locomotion clips, hatchback and station-wagon cars, road tiles and city props. Road tiles are not complete maps; catalogue inclusion does not prove live availability or full gameplay. Results distinguish a recipe from a specification and from a model requiring download admission. Model results include license evidence, animation compatibility, scale and placement checks. The librarian can plan explicit subject, role and animation requirements ahead of optional genre scenery. Unknown target devices use conservative planning ceilings, not measured FPS; a known missing WebGL2 capability is reported as unsupported for this 3D path. The actual seed handoff reports which requested models were prepared and which were not. Placement and gameplay still require finished-game checks; metadata is not proof of a working scene. No ready-made map pack or universal photorealistic game support is promised.',
+    howToUse: 'Describe the required objects, style and interaction. Ask which compatible assets exist and which are missing. A decorative house does not guarantee working doors or interiors. Existing download, license, content validation and playtest gates remain required.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['game library', 'asset library', 'librarian', 'game assets', 'maps', 'compatible models'],
+  },
+  {
     id: 'pro_private_binary_originals',
     name: 'Private original-file storage (when enabled)',
     path: 'NavBharatAI Pro → Choose file; Private attached files',

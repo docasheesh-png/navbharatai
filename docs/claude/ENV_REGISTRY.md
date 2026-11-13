@@ -4955,3 +4955,17 @@ Public chat and the admin Test Chat Bot call Qubax when `QUBAX_ENABLED=1` and `Q
 | `QUBAX_PROBE_DAILY_CAP_USD` | Most the health probes may reserve in one IST day | `0.10` |
 
 Guest 10/day and signed-in shared 50/day stay on the free-answer quota. The shared paid daily and monthly budgets still have to admit the ceiling. No secret is stored in this file.
+
+### `AGENTV3_TYCOON_KIT_SEED` — default OFF, only an exact `on` enables it (added 2026-11-13)
+
+When `on`, a new build whose request is a game about RUNNING a business (a shop, supermarket, restaurant, kirana store,
+tycoon or "run a shop" game — `gameKitWantsTycoon`, precision-first) has the platform lay down three more kit layers before the
+builder's first turn, after the usual runtime / effects / melody layers and before the 3D shell: `generate_game_economy`
+(`src/game/economy`: integer money, atomic till, stock, orders, prices, upgrades, daily bills, capped offline earnings, a
+validated save), `generate_game_shopsim` (`src/game/shop`: customers and staff on a grid) and `generate_game_manager`
+(`src/game/manager`: the management screen). Off, the plan is exactly what it was before — the builder may still call the three
+tools itself (architect prompt steps 4b–4d). **Why it is OFF:** the layers are proven by tests that execute them, but nothing has
+been measured on a real build yet; the seed adds roughly 15 KB of handoff text and ~110 KB of files to a build, and a builder that
+ignores them is carrying dead weight. **To decide the default:** switch it on in Cloud Run, run the same "village super mart" prompt
+with and without it, and compare the build report (struggles, heals, whether the economy was really used). Kill switch for the whole
+kit seed is still `AGENTV3_GAME_KIT_SEED=off`. Owner: the admin. No secret.

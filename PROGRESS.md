@@ -101411,3 +101411,39 @@ steps, an unattended queue, a full queue and a last-unit race.
 minimap), a playtest dimension for "does the till ring" and a first real "village super mart" build are part 3 — until that build
 exists none of this is proven on a real run. People are not saved (the floor starts empty on load). Pathing is 4-direction on a
 grid of at most 64 x 64; there is no crowd avoidance beyond the queue and no animation — those belong to the game layer.
+
+---
+
+## 2026-11-13 — TYCOON KIT, PART 3: the management screen (`generate_game_manager`) and a flag-gated seed
+
+*(Housekeeping: the "PART 2" entry above appears twice because a background step committed it before a second one did; the second copy has the corrected wording. Append-only, so both stay.)*
+
+**Order the admin approved** ("approved"): tycoon part 3 → a battle-royale-style single-player mode → Rapier physics (optional, default OFF, in
+stages). An external "Codex" prompt for a GameProject/Studio architecture and a Rapier physics engine was reviewed the same day; #4064 (the L3 asset
+pipeline) is already merged, so Phase 1 of that prompt was not rebuilt, and the parallel GameProject/versions/builds/publication collections were
+declined for the same reason as the earlier "separate Studio" (a second source of truth beside the existing workspace, versions and publishing).
+
+**What shipped.** A new recipe writing `src/game/manager/*`: a pure view-model (`view.ts`) and a React panel (`ManagerPanel.tsx`) with Overview
+(cash, day, reputation, debt, the last days' revenue / costs / profit), Stock (shelf and stock-room counts, order sizes at their real bulk price, fill
+shelf, price up/down with how customers feel about it and whether each sale loses money), Staff (hire / let go; shown only when the game passes the shop
+simulation) and Upgrades. The economy gained `rentPerDay`, `wagePerDay`, a bounded 14-day `history()` that is saved and validated on load. Wired like
+parts 1 and 2 (recipe map, catalog + both lists, dispatcher, architect prompt step 4d, AppKnowledgeBase, kit history, census tests).
+
+**Auto-seeding is built and OFF.** `AGENTV3_TYCOON_KIT_SEED=on` makes `gameKitPlan` add economy + shopsim + manager (before the 3D shell, which stays
+last) for a request that is a game about RUNNING a business (`gameKitWantsTycoon`: the word tycoon, a "run a shop" phrase, or a business word AND a
+management reading — a game merely set in a supermarket is not matched). Default OFF because nothing has been measured on a real build; with it off every
+plan is byte-identical to before (locked by tests, including BR1968's two prompts). The handoff block tells the builder what the layers are and what not to
+do by hand. Registered in `docs/claude/ENV_REGISTRY.md`.
+
+**Bug classes encoded** (each proven by reversion — bug put back, tests watched failing): a button that does nothing (every onClick must call an action, a tab
+switch or close — a source guard fails on console.log wiring); a button that lies (enabled when the economy would refuse — a sweep over cash, stock and quantity
+asserts the button's answer equals the real outcome); a refresh timer never cleaned up; a tab for something that is not there (Staff without a shop); a "Fill
+shelf" that says yes on a full shelf (this one was NOT caught at first — the test lacked a full-shelf case; added, then proven). The panel is exercised without a
+browser by calling the component against a tiny React stand-in and pressing the real buttons on the resulting tree.
+
+**Proof.** 33 tests in `GameManagerGenerator.test.ts` (including a strict + `noUnusedLocals` type-check against the real React types), 24 in
+`aTycoonRequestGetsTheTycoonKitWhenSwitchedOn.test.ts`.
+
+**Still NOT done:** missions and rewards (the screen says so and has no tab for them), a minimap, a playtest dimension for "does the till ring", and the first real
+"village super mart" build — the evidence that decides whether the seed's default should be on. Nothing here has been seen in a browser (no jsdom/browser run of the
+panel). The panel's text is English only.

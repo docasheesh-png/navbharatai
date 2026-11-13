@@ -64,7 +64,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/economy/economy.ts": [
     "9359e94db30ac5fca7fe547a1ccb75d805e94d83c37d9417b6742379fcb44fdb",
-    "411300856eb8748e4a182ef5614082c012fd2413963bfb35cd061496e6584882"
+    "411300856eb8748e4a182ef5614082c012fd2413963bfb35cd061496e6584882",
+    "7c7da7fa93a52889548d92d24fb75c41945bb60dd9524b121f8d22d6a08e2e3c"
   ],
   "src/game/economy/index.ts": [
     "fa078dc3d260f65d9cc1d204729a239454858265ba10e480bbd48d486f727696"
@@ -101,6 +102,15 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/fx/synth.ts": [
     "f6ac6662b6e06e8616fa599b7aef37ccf0d6835e230f181efd8282b32633cf76"
+  ],
+  "src/game/manager/ManagerPanel.tsx": [
+    "3aa4184841f16702daa3ae863554de053a891aa0fd1c6d1bf4a071795d6e5d5d"
+  ],
+  "src/game/manager/index.ts": [
+    "87152c0958bdba1e410726369c14cd13ea575420fbea05bd690ef0a19f6e95c8"
+  ],
+  "src/game/manager/view.ts": [
+    "e1bc574b5db5d1540671210751a3c47e5ac6d581ca20ec697573a273c4b436a4"
   ],
   "src/game/play/character.ts": [
     "12479394af24b858d409c9a24bc4cd4ffbb34655ed27f08fb46f58f2629c4b17",

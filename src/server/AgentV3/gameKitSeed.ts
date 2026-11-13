@@ -57,7 +57,7 @@ import { analyzeRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { wantsSceneObjects, heroObjectContract } from '../lib/heroObjectSpec';
 
 /** The recipes the seed may run, in the order the architect prompt lists them (runtime first, shell last). */
-export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell';
+export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_economy' | 'generate_game_shopsim' | 'generate_game_manager' | 'generate_game_shell';
 
 /** `AGENTV3_GAME_KIT_SEED=off` restores the pre-2026-10-11 behaviour exactly (the model decides). */
 export function gameKitSeedEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -83,15 +83,46 @@ export function gameKitFrameworkSupported(framework: string | null | undefined):
  * The domain is read here as well as at the route's gate, from the same classifier, so the plan can never
  * seed a to-do app even if a caller forgets the gate.
  */
-export function gameKitPlan(prompt: string | null | undefined, framework?: string | null): GameKitRecipe[] {
+export function gameKitPlan(prompt: string | null | undefined, framework?: string | null, env: NodeJS.ProcessEnv = process.env): GameKitRecipe[] {
   const text = String(prompt ?? '');
   if (!text.trim() || !gameKitFrameworkSupported(framework)) return [];
   let domain = '';
   try { domain = analyzeRequirementGaps(text).domain; } catch { return []; }
   if (domain !== 'game') return [];
+  // The tycoon layers (money, people, management screen) are pure 2D-safe TypeScript, so they go in before the shell
+  // whether the game is drawn in 3D or not. OFF unless the admin switches it on (see tycoonKitSeedEnabled).
+  const tycoon: GameKitRecipe[] = tycoonKitSeedEnabled(env) && gameKitWantsTycoon(text)
+    ? ['generate_game_economy', 'generate_game_shopsim', 'generate_game_manager']
+    : [];
   return gameKitWants3D(text)
-    ? ['generate_game_runtime', 'generate_game_3d', 'generate_game_vfx', 'generate_melody', 'generate_game_shell']
-    : ['generate_game_runtime', 'generate_game_vfx', 'generate_melody'];
+    ? ['generate_game_runtime', 'generate_game_3d', 'generate_game_vfx', 'generate_melody', ...tycoon, 'generate_game_shell']
+    : ['generate_game_runtime', 'generate_game_vfx', 'generate_melody', ...tycoon];
+}
+
+/**
+ * `AGENTV3_TYCOON_KIT_SEED=on` lets the platform lay down the tycoon layers for a shop / business game. It is OFF
+ * by default and only an exact 'on' turns it on, because nothing here has been measured on a real build yet: the
+ * layers are proven by tests that run them, not by a model using them. Switch it on for the first real
+ * "village super mart" build, compare it with an unseeded one, then decide the default.
+ */
+export function tycoonKitSeedEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_TYCOON_KIT_SEED ?? '').trim().toLowerCase() === 'on';
+}
+
+/**
+ * Is this request a game about RUNNING a business — a shop, supermarket, restaurant or the like? PURE.
+ * Precision-first on purpose: it needs a business word AND a management/tycoon/simulator reading, or the word tycoon,
+ * or a "run a shop" phrase. A game this misses keeps the ordinary kit; a game it wrongly matches gets three more
+ * layers laid down under it. "supermarket billing POS app" is not a game at all (the domain gate runs first).
+ */
+const SHOP_NOUN = /\b(?:super\s*-?\s*mart|super\s*-?\s*market|mini\s*-?\s*mart|mart|kirana|dukaan|dukan|grocery|general\s+store|store|shop|restaurant|cafe|caf[eé]|hotel|retail)\b/i;
+const MANAGE_WORD = /\b(?:tycoon|simulator|simulation|sim|manager|management|empire|idle|business)\b/i;
+const RUN_PHRASE = /\b(?:run|running|manage|managing)\s+(?:a|my|the|your)\s+(?:small\s+)?(?:shop|store|supermarket|restaurant|cafe|business)\b/i;
+export function gameKitWantsTycoon(prompt: string | null | undefined): boolean {
+  const text = String(prompt ?? '');
+  // "tycoon" alone is enough; "run a shop" is a phrase; otherwise it takes a business word AND a management reading,
+  // so a game merely SET in a supermarket ("run through a supermarket shooting zombies") is not a shop game.
+  return /\btycoon\b/i.test(text) || RUN_PHRASE.test(text) || (SHOP_NOUN.test(text) && MANAGE_WORD.test(text));
 }
 
 /** Says 3D in so many words — the same reading `wantsSceneObjects` gives "3d". */
@@ -233,6 +264,12 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
       : 'them again, and NEVER write a second game loop, input system, meta/best-score store or audio engine —'
         + '\nimport the ones in src/game (and src/audio). Build ONLY the game itself: its',
     'rules, levels, content and screens, in your own files under src/game/<your-game>/, wired into src/App.tsx.',
+    has('generate_game_economy')
+      ? 'This is a BUSINESS game: its money, stock, orders, prices, upgrades, daily bills and save live in src/game/economy,'
+        + ' its customers and staff in src/game/shop, and its management screen in src/game/manager. Use them — never keep cash'
+        + ' as a float, never change a stock count or a balance by hand, and open <ManagerPanel> from a HUD button instead of'
+        + ' writing your own order / price / hire buttons. Build the economy with autoCustomers: false and draw people from shop.snapshot().'
+      : '',
     threeD
       ? 'This is a 3D game.'
         + (has('generate_game_shell')

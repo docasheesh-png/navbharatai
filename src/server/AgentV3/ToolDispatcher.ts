@@ -363,6 +363,7 @@ import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateGameEconomy } from '../lib/GameEconomyGenerator';
 import { generateGameShopSim } from '../lib/GameShopSimGenerator';
+import { generateGameManager } from '../lib/GameManagerGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
@@ -9592,6 +9593,21 @@ export class ToolDispatcher {
         const gssLayers = await this.addMissingRecipeLayers(gss.files, agent);
         this.scheduleCheckpoint('shop people');
         return `Added the shop people simulation:\n${gssWritten.join('\n')}\n\n${gss.instructions}${gssLayers}`;
+      }
+
+      case 'generate_game_manager': {
+        // THE MANAGEMENT SCREEN (tycoon part 3): a React panel over a pure view-model, every button one real action on
+        // the economy or the shop, every disabled state carrying its reason. It imports the economy and shop layers,
+        // which addMissingRecipeLayers brings when those recipes were not run.
+        const gmgRec = (input as Record<string, unknown>) || {};
+        const gmgInclude = Array.isArray(gmgRec.include)
+          ? gmgRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gmg = generateGameManager(gmgInclude);
+        const gmgWritten = await this.writeRecipeFiles(gmg.files, agent);
+        const gmgLayers = await this.addMissingRecipeLayers(gmg.files, agent);
+        this.scheduleCheckpoint('management screen');
+        return `Added the management screen:\n${gmgWritten.join('\n')}\n\n${gmg.instructions}${gmgLayers}`;
       }
 
       case 'generate_game_shell': {

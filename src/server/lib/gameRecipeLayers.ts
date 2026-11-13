@@ -39,6 +39,7 @@ import { generateGameController } from './GameControllerGenerator';
 import { generateGameSystems } from './GameSystemsGenerator';
 import { generateGameEconomy } from './GameEconomyGenerator';
 import { generateGameShopSim } from './GameShopSimGenerator';
+import { generateGameManager } from './GameManagerGenerator';
 import { generateGameVfxAudio } from './GameVfxAudioGenerator';
 import { generateMelody } from './MelodyGenerator';
 import { generateGameShell } from './GameShellGenerator';
@@ -62,6 +63,7 @@ export const GAME_RECIPES: Readonly<Record<string, (include?: string[]) => Recip
   generate_game_systems: generateGameSystems,
   generate_game_economy: generateGameEconomy,
   generate_game_shopsim: generateGameShopSim,
+  generate_game_manager: generateGameManager,
   generate_game_vfx: generateGameVfxAudio,
   generate_melody: generateMelody,
   generate_game_shell: generateGameShell,

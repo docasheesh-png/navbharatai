@@ -548,6 +548,8 @@ export interface OfflineReport { awaySeconds: number; simulatedSeconds: number; 
 const SAVE_VERSION = 1;
 const MAX_CUSTOMERS_PER_TICK = 50;
 const MAX_TICK = 5;
+const MAX_HISTORY = 14;
+const MAX_HISTORY_MONEY = 9_000_000_000_000;
 export const OFFLINE_CAP_SECONDS = 8 * 3600;
 export const OFFLINE_EFFICIENCY = 0.5;
 
@@ -573,6 +575,7 @@ export class Economy {
   private _debt = 0;
   private _reputation = 0.5;
   private today = { revenue: 0, cogs: 0, customers: 0, lost: 0 };
+  private days: DaySummary[] = [];
   private readonly cfg: Required<Omit<EconomyConfig, 'products' | 'upgrades' | 'onEvent'>> & { onEvent?: EconomyConfig['onEvent'] };
 
   constructor(config: EconomyConfig) {
@@ -598,6 +601,12 @@ export class Economy {
     }
     this.applyUpgrades();
   }
+
+  get rentPerDay(): number { return this.cfg.rentPerDay; }
+  get wagePerDay(): number { return this.cfg.wagePerDay; }
+
+  /** The last 14 finished days, oldest first (copies). The management screen shows them. */
+  history(): DaySummary[] { return this.days.map((d) => ({ ...d })); }
 
   get day(): number { return this._day; }
   get staff(): number { return this._staff; }
@@ -773,6 +782,8 @@ export class Economy {
     }
     this.today = { revenue: 0, cogs: 0, customers: 0, lost: 0 };
     this._day++;
+    this.days.push(summary);
+    if (this.days.length > MAX_HISTORY) this.days.splice(0, this.days.length - MAX_HISTORY);
     this.emit('DAY_ENDED', { ...summary });
   }
 
@@ -818,6 +829,7 @@ export class Economy {
       upgrades: this.upgrades.snapshot(),
       prices: Object.fromEntries(this.prices),
       rate: Object.fromEntries(this.soldRate),
+      days: this.days.map((d) => ({ ...d })),
     };
   }
 
@@ -848,6 +860,18 @@ export class Economy {
       if (typeof prices[id] === 'number') economy.setPrice(id, prices[id] as number);
       const r = rate[id];
       economy.soldRate.set(id, typeof r === 'number' && Number.isFinite(r) && r >= 0 ? Math.min(r, 100) : 0);
+    }
+    economy.days = [];
+    if (Array.isArray(s.days)) {
+      for (const raw of s.days.slice(-MAX_HISTORY)) {
+        const d = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+        const money = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? Math.max(-MAX_HISTORY_MONEY, Math.min(MAX_HISTORY_MONEY, Math.trunc(v))) : 0);
+        economy.days.push({
+          day: clampInt(d.day, 1, 1_000_000, 1), revenue: money(d.revenue), cogs: money(d.cogs), expenses: money(d.expenses),
+          unpaid: money(d.unpaid), profit: money(d.profit), customers: clampInt(d.customers, 0, 1_000_000_000, 0),
+          lostCustomers: clampInt(d.lostCustomers, 0, 1_000_000_000, 0),
+        });
+      }
     }
     let offline: OfflineReport | null = null;
     const savedAt = typeof s.savedAt === 'number' ? s.savedAt : 0;

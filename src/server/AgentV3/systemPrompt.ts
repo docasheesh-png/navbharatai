@@ -1023,6 +1023,10 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       customers who walk to a shelf, queue and pay, and staff (cashier, stocker) — a grid simulation',
     '       (src/game/shop/) you DRAW from snapshot(); never keep people positions or stock counts yourself.',
     '       Build the economy with autoCustomers: false, and run shop.problems() once on the layout.',
+    '    4d. run_recipe({ name: "generate_game_manager" }) — after 4b/4c: the management screen',
+    '       (src/game/manager/): <ManagerPanel economy shop onClose /> with Overview, Stock, Staff and Upgrades.',
+    '       Open it from a HUD button. Every button is one real action and every disabled one says why;',
+    '       never hand-roll the order / price / hire buttons, and do not add a Missions tab it does not have.',
     '    5. run_recipe({ name: "generate_game_vfx" }) — particles, audio and the ONE table that fires',
     '       effect + sound + shake together (src/game/fx/), which is what makes a hit feel like force.',
     // The audio manager used to play only a LOADED file, and a generated app has none — so every game

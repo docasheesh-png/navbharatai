@@ -2303,6 +2303,33 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_game_manager',
+      description:
+        'Add the MANAGEMENT SCREEN of a shop / tycoon game: the React panel where the player runs the business — '
+        + 'Overview (cash, day, reputation, debt, recent days with profit), Stock (shelf and stock-room counts, order '
+        + 'sizes with their real bulk price, fill shelf, raise or lower each price with what customers think of it), '
+        + 'Staff (hire a cashier or stocker, let them go) and Upgrades. Call generate_game_economy first (and '
+        + 'generate_game_shopsim for the Staff tab); this brings what it imports. Emits src/game/manager: a pure '
+        + 'view-model plus <ManagerPanel economy shop onClose />. IT ENCODES THE RULES A HAND-WRITTEN SCREEN GETS '
+        + 'WRONG — do not reimplement them: every button calls ONE action on the economy or the shop (createActions) — '
+        + 'never console.log or state the economy does not own; a button is disabled with a REASON that names the '
+        + 'number ("Not enough cash — this costs ₹3,600 and you have ₹1,200"), computed by the same check the action '
+        + 'runs, so a button never says yes to something that then fails; the numbers refresh on a timer that is '
+        + 'cleaned up on unmount; the Staff tab appears only when the game has the shop simulation to hire into. '
+        + 'Missions and rewards are NOT part of it — do not add a tab for something that does not exist. Style it with '
+        + 'the --mgr-* CSS variables.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: view, managerpanel, index. Default = all. managerpanel always brings view.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_game_systems',
       description:
         'Add the gameplay systems that make it a GAME rather than a walkable scene: combat (health, '
@@ -3655,6 +3682,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_game_systems',
   'generate_game_economy',
   'generate_game_shopsim',
+  'generate_game_manager',
   'generate_game_shell',
   'generate_game_vfx',
   'generate_melody',
@@ -3876,6 +3904,7 @@ export const RECIPE_TOOLS = [
   'generate_game_3d',
   'generate_game_controller',
   'generate_game_economy',
+  'generate_game_manager',
   'generate_game_runtime',
   'generate_game_shell',
   'generate_game_shopsim',

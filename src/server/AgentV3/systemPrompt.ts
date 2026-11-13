@@ -1031,6 +1031,11 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       (single-player vs bots): the match (src/game/royale/) — a shrinking safe circle that always closes, atomic loot,',
     '       bots, unique ranks. You draw it from snapshot() and report the player\'s shots with match.hitBot(); the weapons',
     '       are step 4. Never write a zone that stops at its last circle, and say honestly that it is not online multiplayer.',
+    '    4f. run_recipe({ name: "generate_game_physics" }) — ONLY when the game needs real rigid-body physics (crates',
+    '       that topple, objects that fall, stack and bounce, trigger zones, physical props) — never "just in case", and',
+    '       not for a tycoon, card, puzzle or ordinary arcade game. Rapier, loaded lazily (src/game/physics/). Step it once',
+    '       per frame, draw through PhysicsBinding, and check physics.available (fall back to the procedural movement when',
+    '       false). It has NO character or vehicle controller yet: do not call a walking player or a car "physical".',
     '    5. run_recipe({ name: "generate_game_vfx" }) — particles, audio and the ONE table that fires',
     '       effect + sound + shake together (src/game/fx/), which is what makes a hit feel like force.',
     // The audio manager used to play only a LOADED file, and a generated app has none — so every game

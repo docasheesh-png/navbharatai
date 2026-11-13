@@ -2356,6 +2356,36 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_game_physics',
+      description:
+        'Add REAL RIGID-BODY PHYSICS to a game, on Rapier 3D (@dimforge/rapier3d-compat, loaded lazily): dynamic, static and '
+        + 'kinematic bodies; box, sphere, capsule, cylinder, convex and (static-only) triangle-mesh colliders; mass, friction, '
+        + 'restitution, damping; collision groups and masks; collision events; trigger volumes; raycasts; pause, reset and '
+        + 'snapshots; a development-only debug view. Emits src/game/physics. Three.js still draws; Rapier simulates; '
+        + 'PhysicsBinding copies interpolated transforms across. Use it ONLY when the request needs real physics (objects that '
+        + 'fall, topple, stack and bounce, triggers, physical props) — not for a tycoon, card, puzzle or ordinary arcade game, '
+        + 'and never "just in case". THIS STAGE HAS NO CHARACTER CONTROLLER AND NO VEHICLE CONTROLLER: do not describe a walking '
+        + 'player or a car as physical because of it — the kit\'s own controller and driveVehicle stay as they are. IT ENCODES THE '
+        + 'RULES A HAND-WRITTEN INTEGRATION GETS WRONG — do not reimplement them: the world steps in FIXED slices from the frame '
+        + 'time with a bounded catch-up and a clamped frame (dropped time is counted and announced as lagging), so it behaves the '
+        + 'same at 30, 60 and 144 fps; draw through the binding (interpolated), never by setting a dynamic body\'s mesh position; '
+        + 'create() never throws — if the WASM cannot load, physics.available is false with a reason and every call is a safe '
+        + 'no-op, so keep the procedural movement as the fallback; addBody validates every number and refuses with a reason '
+        + '(NaN, negative or huge sizes, a duplicate id, the body and collider limits, a triangle mesh on a moving body); '
+        + 'events are delivered after the step; removeBody, reset and dispose free native memory. Be honest in the summary: '
+        + 'determinism holds on one device, not across all of them, and it has not been measured on a physical phone yet.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: config, world, sync, index. Default = all. A module always brings the modules it imports.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_game_systems',
       description:
         'Add the gameplay systems that make it a GAME rather than a walkable scene: combat (health, '
@@ -3710,6 +3740,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_game_shopsim',
   'generate_game_manager',
   'generate_game_royale',
+  'generate_game_physics',
   'generate_game_shell',
   'generate_game_vfx',
   'generate_melody',
@@ -3932,6 +3963,7 @@ export const RECIPE_TOOLS = [
   'generate_game_controller',
   'generate_game_economy',
   'generate_game_manager',
+  'generate_game_physics',
   'generate_game_royale',
   'generate_game_runtime',
   'generate_game_shell',

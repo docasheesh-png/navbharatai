@@ -101478,3 +101478,38 @@ accepted as a phase nobody asked for (now rejected); and `hitChance` returned Na
 vehicles; nothing here has been seen in a browser or used by a real build; the game layer must draw the zone, people and HUD itself. A seed that lays this
 down for a "battle royale" request is not built (the existing 3D kit already matches "battle royale"/"pubg"/"free fire" as a 3D game) — decide it with
 evidence from a real build, as with the tycoon seed.
+
+---
+
+## 2026-11-13 — PHYSICS, STAGE A (`generate_game_physics`): the Rapier world
+
+**Order the admin approved:** tycoon kit → battle-royale core → Rapier physics in stages, default OFF. This is stage A of the third. An external "Codex"
+prompt asked for a full physics engine plus a GameProject architecture; the physics part was adapted (staged, optional, honest about what is not there)
+and the GameProject part was declined for the reason already recorded above (a second source of truth beside the workspace, versions and publishing).
+
+**What shipped.** A new recipe writing `src/game/physics/*` (config, world, sync, index) on the official Rapier 3D package,
+`@dimforge/rapier3d-compat@0.21.0` (Apache-2.0, exact pin; API names were checked against the package's own typings and the engine was run under Node before
+anything was written). Three.js draws, Rapier simulates, `PhysicsBinding` writes interpolated transforms. Bodies (dynamic / static / kinematic), box, sphere,
+capsule, cylinder, convex and static-only triangle-mesh colliders, mass / friction / restitution, groups and masks, collision events, trigger volumes,
+raycasts, pause / reset, versioned snapshots, debug lines (OFF unless `config.debug`). The WASM is loaded lazily, so a game that never calls
+`PhysicsWorld.create()` never downloads it (a test fails on a static value import). `create()` never throws: on a load failure the world is unavailable with a
+reason and every call is a safe no-op. Wired like the other recipes (recipe map, catalog + both lists, dispatcher, architect prompt step 4f, AppKnowledgeBase,
+kit history, census tests). The package is a `devDependency` of THIS repo only so the tests can run the real engine; a generated game gets it as a normal
+dependency through the existing recipe-install machinery. Status table and measurements: `docs/game-engine/physics-engine-architecture.md`.
+
+**Bug classes encoded, each proven by reversion (10 of 10 caught — two only after tests were added/fixed):** physics tied to the frame rate (30 / 60 / 144 fps
+land within one step; uneven frame times equal the same number of even steps exactly); the spiral of death (catch-up bounded, long frame clamped — the clamp test
+was missing at first because the step cap hid it); jerky motion (interpolation); a WASM failure taking the game down; unbounded input reaching native code (every
+number validated; a dynamic triangle mesh refused); leaked native memory and bookkeeping (add / remove 1,000 bodies); events delivered mid-step; a save that cannot be
+loaded back (versioned, all-or-nothing, an exact round trip); Rapier imported eagerly (lazy-load guard).
+
+**Real findings along the way:** three of my own first tests were wrong (bodies placed on the same spot pushed each other; a state compared at unequal simulated times;
+a wrong expectation about Infinity) — corrected, not worked around. The package is big: `dist/rapier.mjs` is 4.3 MB (about 1.65 MB gzip, WASM inline) — the lazy load
+is what keeps simple games light.
+
+**Proof.** 48 tests in `GamePhysicsGenerator.test.ts` on the real engine, including a strict + `noUnusedLocals` type-check against Rapier's real typings.
+`license:gate` and `audit:gate` pass with the new package. `npm audit signatures` could NOT run here (its sigstore root fetch gets a 403 from the sandbox proxy); it runs in CI.
+
+**NOT done — stated plainly:** no joints; **no character controller (stage B) and no vehicle controller (stage C)** — a walking player or a car is not physical
+because of this; no buoyancy; nothing seen in a browser; **no mobile Chromium, Capacitor WebView or iOS evidence at all** — no mobile claim is made; determinism is
+not claimed across devices; the measurements are from Node on a busy machine (docs table), not a phone; nothing auto-seeds the recipe.

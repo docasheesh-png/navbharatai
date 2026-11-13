@@ -365,6 +365,7 @@ import { generateGameEconomy } from '../lib/GameEconomyGenerator';
 import { generateGameShopSim } from '../lib/GameShopSimGenerator';
 import { generateGameManager } from '../lib/GameManagerGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
+import { generateGamePhysics } from '../lib/GamePhysicsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
@@ -9624,6 +9625,22 @@ export class ToolDispatcher {
         const grlLayers = await this.addMissingRecipeLayers(grl.files, agent);
         this.scheduleCheckpoint('battle royale match');
         return `Added the battle-royale core:\n${grlWritten.join('\n')}\n\n${grl.instructions}${grlLayers}`;
+      }
+
+      case 'generate_game_physics': {
+        // REAL RIGID-BODY PHYSICS on Rapier 3D (stage A: world, bodies, colliders, events, triggers, raycasts, snapshots —
+        // no character or vehicle controller yet). OPTIONAL: only for a game that needs real physics; the WASM is loaded
+        // lazily, so a game that never calls PhysicsWorld.create() never downloads it. The package is declared by the
+        // recipe, and recipeDependenciesNeeded installs it from the files' imports like every other kit dependency.
+        const gphRec = (input as Record<string, unknown>) || {};
+        const gphInclude = Array.isArray(gphRec.include)
+          ? gphRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gph = generateGamePhysics(gphInclude);
+        const gphWritten = await this.writeRecipeFiles(gph.files, agent);
+        const gphLayers = await this.addMissingRecipeLayers(gph.files, agent);
+        this.scheduleCheckpoint('physics engine');
+        return `Added the physics core:\n${gphWritten.join('\n')}\n\n${gph.instructions}${gphLayers}`;
       }
 
       case 'generate_game_shell': {

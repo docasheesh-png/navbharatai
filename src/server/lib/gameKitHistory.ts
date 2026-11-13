@@ -112,6 +112,18 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/manager/view.ts": [
     "e1bc574b5db5d1540671210751a3c47e5ac6d581ca20ec697573a273c4b436a4"
   ],
+  "src/game/physics/config.ts": [
+    "c3836ea0be2374fb1fa0a86d33398b5d4ca726f3c0c99ce1c798720d011083d8"
+  ],
+  "src/game/physics/index.ts": [
+    "79abc682575b952feddb8403d8ecb75288793b389dcb3aa6471be9df4a8fd6bc"
+  ],
+  "src/game/physics/sync.ts": [
+    "a05f369f1e4e2ef376cb10d1994a422ead3db181808d4a0772ec9d778eef7b49"
+  ],
+  "src/game/physics/world.ts": [
+    "7e484a62a10ff926473547444d543b7bde985cb1597b06b6f3ba9935d8f92d75"
+  ],
   "src/game/play/character.ts": [
     "12479394af24b858d409c9a24bc4cd4ffbb34655ed27f08fb46f58f2629c4b17",
     "fbf37fe667ffa7c7db096e15a90610d2b0f2ad1ea4589fedae3c139e37cdb636",

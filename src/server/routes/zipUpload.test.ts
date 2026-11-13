@@ -243,6 +243,17 @@ describe('zip commit takes the build lease', () => {
       ? { ...leaseDb(), runTransaction: async () => { throw new Error('UNAVAILABLE'); } }
       : leaseDb(docs));
 
+    // Internal targets must be refused without consuming this valid owned upload.
+    for (const suffix of ['::green', '::attempt', '/files/private']) {
+      const rejected = await fetch(`${base}/api/zip-upload/commit`, {
+        method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer test' },
+        body: JSON.stringify({ uploadId, workspaceId: workspaceId + suffix }),
+      });
+      expect(rejected.status).toBe(403);
+      expect(existsSync(archive)).toBe(true);
+      expect(zipWrites.actuators).toBe(0);
+      expect(zipWrites.durable).toBe(0);
+    }
     const commit = await fetch(`${base}/api/zip-upload/commit`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: 'Bearer test' },

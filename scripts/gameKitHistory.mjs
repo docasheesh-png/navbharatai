@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, posix, relative, resolve } from 'node:path';
+import { dirname, join, posix, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -50,11 +50,11 @@ async function filesOf(entry, rev) {
             // repository-relative paths in BOTH working-tree and historical-revision mode.
             // esbuild can return a native Windows path for stdin's importer. Convert it to
             // slash-separated repository-relative form before using the git-style resolver below.
-            const importerPosix = importer.replaceAll('\\\\', '/');
-            const rootPosix = ROOT.replaceAll('\\\\', '/');
-            const importerIsAbsolute = posix.isAbsolute(importerPosix) || /^[A-Za-z]:\\//.test(importerPosix);
+            const importerPosix = importer.replaceAll('\\', '/');
+            const rootPosix = ROOT.replaceAll('\\', '/');
+            const importerIsAbsolute = posix.isAbsolute(importerPosix) || /^[A-Za-z]:\//.test(importerPosix);
             const from = posix.dirname(importerIsAbsolute
-              ? relative(rootPosix, importerPosix).replaceAll('\\\\', '/')
+              ? posix.relative(rootPosix, importerPosix).replaceAll('\\', '/')
               : importerPosix);
             const base = posix.normalize(posix.join(from, a.path));
             for (const ext of ['', '.ts', '.tsx', '/index.ts']) {

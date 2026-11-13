@@ -13,6 +13,7 @@
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseToken, rateLimiter } from '../lib/authMiddleware';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
+import { isPublicAppWorkspaceId } from '../lib/publicAppWorkspace';
 import { appAiGatewayEnabled, readGatewayRequest, ownerFacingMessage } from '../lib/appAiGateway';
 import { answerForApp, type AppAiRefusal } from '../lib/appAiAnswer';
 import { getAppAiSettings, setAppAiDisabled } from '../lib/AppAiSettingsStore';
@@ -64,7 +65,7 @@ export async function appUsesAssistant(workspaceId: string): Promise<boolean> {
 
 async function ownerOf(req: Request, workspaceId: unknown): Promise<string | null> {
   const uid = await verifyFirebaseToken(req);
-  return uid && ownedByVerifiedUid(uid, workspaceId) ? uid : null;
+  return uid && isPublicAppWorkspaceId(workspaceId) && ownedByVerifiedUid(uid, workspaceId) ? uid : null;
 }
 
 export function registerAppAiOwnerRoutes(app: Express): void {

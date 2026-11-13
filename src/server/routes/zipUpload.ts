@@ -47,6 +47,7 @@ import {
   noteSharedProgress, assembleSharedUpload, deleteSharedUpload,
 } from '../lib/zipUploadStore';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
+import { isPublicAppWorkspaceId } from '../lib/publicAppWorkspace';
 
 /** One chunk stays far under Cloud Run's ~32 MB request cap even with protocol overhead. */
 export const ZIP_CHUNK_BYTES = 8 * 1024 * 1024;
@@ -382,6 +383,11 @@ export function registerZipUploadRoutes(app: Express): void {
     const uid = await verifyFirebaseToken(req);
     const uploadId = typeof req.body?.uploadId === 'string' ? req.body.uploadId : '';
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    // Reject internal snapshots/path-shaped targets before reading, assembling or discarding uploads.
+    if (!isPublicAppWorkspaceId(workspaceId)) {
+      res.status(403).json({ error: 'Choose an app workspace, not an internal storage record. Nothing was imported.' });
+      return;
+    }
     // Resolve the upload from whichever store owns it. In shared mode the record is durable, so this
     // works on any instance; otherwise it is the original in-memory map.
     const shared = sharedUploadsEnabled() ? await getSharedUpload(uploadId) : null;

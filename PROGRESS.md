@@ -101381,3 +101381,33 @@ steps, an unattended queue, a full queue and a last-unit race.
 minimap), a playtest dimension for "does the till ring" and a first real "village super mart" build are part 3 — until that build
 exists none of this is proven on a real run. People are not saved (the floor starts empty on load). Pathing is 4-direction on a
 grid of at most 64 x 64; there is no crowd avoidance beyond the queue and no animation — those belong to the game layer.
+
+---
+
+## 2026-11-13 — TYCOON KIT, PART 2: the people (`generate_game_shopsim`)
+
+**Order the admin set** ("aapki salah ke anusar banao"): finish the tycoon kit first, then a single-player battle-royale-style
+mode as a separate kit. Multiplayer (PUBG/Free Fire scale) is NOT claimed — it needs live game servers, an infrastructure and
+cost decision that is the admin's.
+
+**What shipped.** A new recipe writing `src/game/shop/*` (grid, shopsim, index; pure, no dependency): a grid simulation of
+customers who enter, walk to the shelf of the product they chose, take it, join the shortest queue, wait (and leave when
+their patience runs out) and pay at a counter, plus staff — cashiers who serve a counter and stockers who carry units from the
+stock room to the shelves. No drawing: the game reads `snapshot()`. Wired like part 1 (recipe map, catalog + both lists,
+dispatcher, architect prompt step 4c, AppKnowledgeBase, kit history, census tests). The economy core gained the small API the
+people need: `chooseProduct()` (decide without taking), `settle()` (pay for units already taken), `lose()`, and
+`Inventory.putBack()`; `serveCustomer()` is now `chooseProduct()` + `sell()` and consumes the random generator exactly as before.
+
+**Bug classes encoded** (each proven by reversion — bug put back, tests watched failing; 7 of 7 caught): units vanishing
+(an abandoned queue, or a refused cart, not putting the item back); two customers taking the last unit (a pick must take off the
+shelf at that moment); paying with nobody serving; an unbounded crowd (floor cap); two stockers fetching the same shelf;
+corner-cutting paths; stuck customers (no route = they leave and are counted; `problems()` NAMES the bad cell up front).
+The headline invariant is conservation: shelf + stock room + in hand + sold equals what the shop started with, across 20,000
+steps, an unattended queue, a full queue and a last-unit race.
+
+**Proof.** 43 tests in `GameShopSimGenerator.test.ts` (a strict + `noUnusedLocals` type-check of both layers together included).
+
+**Still NOT done:** nothing auto-seeds these recipes for a tycoon request; the management UI (tabbed panel, missions/rewards,
+minimap), a playtest dimension for "does the till ring" and a first real "village super mart" build are part 3 — until that build
+exists none of this is proven on a real run. People are not saved (the floor starts empty on load). Pathing is 4-direction on a
+grid of at most 64 x 64; there is no crowd avoidance beyond the queue and no animation — those belong to the game layer.

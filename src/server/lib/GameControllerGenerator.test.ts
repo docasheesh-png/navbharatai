@@ -105,30 +105,30 @@ describe('the motor is genuinely pure — that is what makes the above testable'
   });
 });
 
-describe('the three.js side — raycasts only', () => {
+describe('the three.js side — scene contact', () => {
   it('the ground ray has SKIN WIDTH, or grounded flickers and the jump breaks', () => {
     // A ray starting exactly at the feet intermittently misses through float error; the character then
     // flickers between grounded and airborne, which also destroys coyote time.
     expect(character).toContain('const skin = 0.1');
-    expect(character).toContain('add(new THREE.Vector3(0, skin, 0))');
+    expect(character).toContain('this.floorAt(position, skin, fall)');
   });
 
   it('X and Z are resolved SEPARATELY, so the player slides along a wall', () => {
     // Blocking both because one is obstructed is what makes a character stick to walls at an angle.
-    expect(character).toContain('tryAxis(this.state.vx * delta, 0)');
-    expect(character).toContain('tryAxis(0, this.state.vz * delta)');
+    expect(character).toContain('tryAxis(dx / segments, 0)');
+    expect(character).toContain('tryAxis(0, dz / segments)');
   });
 
-  it('the wall ray starts at MID-BODY — a foot-height ray walks through a table top', () => {
-    expect(character).toContain('this.height * 0.5');
+  it('sweeps the full body against the scene', () => {
+    expect(character).toContain('uprightCapsule(from, this.radius, this.height)');
   });
 
   it('STEP OFFSET climbs small ledges instead of snagging on every kerb', () => {
-    expect(character).toContain('stepTop <= this.stepOffset');
+    expect(character).toContain('hit.y - p.y <= this.stepOffset');
   });
 
   it('still plays with no colliders yet — a scene under construction is not a crash', () => {
-    expect(character).toContain('if (this.colliders.length === 0)');
+    expect(character).toContain('if (this.implicitGround && p.y < 0) p.y = 0');
   });
 
   it('EMITS rather than calling VFX directly', () => {

@@ -13,7 +13,7 @@ import { persistProjectAsset, type GameAssetWorkspace, type GameAssetPersistence
 import { proveAssetInSandbox } from './assetBrowserProof';
 import { saveWorkspaceAssets, readWorkspaceAssetBytes } from '../WorkspaceAssetStore';
 import { mergeWorkspaceFiles } from '../WorkspaceFileStore';
-import { generateGameAssetRuntime } from '../../lib/Game3DGenerator';
+import { GAME_ASSET_MODELS_PATH, generateAssetModelLoader, generateGameAssetRuntime } from '../../lib/GameAssetRuntimeGenerator';
 import { sceneryFor, generateWorldDressingModule } from './worldDressing';
 
 const discover = createPolyHavenDiscovery(polyHavenTransport, (url, signal) => downloadGameAsset({ downloadUrl: url }, new Set(['https://dl.polyhaven.org']), signal));
@@ -151,7 +151,7 @@ export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<
     'public/game-assets/manifest.json': JSON.stringify(manifest, null, 2),
     'public/game-assets/ATTRIBUTION.txt': credits,
     'src/game/three/externalAssets.ts': generateGameAssetRuntime(),
-    'src/game/three/assetModels.ts': `import { loadGameAsset, type GameAssetHandle, type LocalGameAsset } from './externalAssets';\nconst assets: Record<string, LocalGameAsset> = ${JSON.stringify(local)};\nexport function loadRequestedAsset(subject: string, fallback: () => GameAssetHandle, signal?: AbortSignal): Promise<GameAssetHandle> {\n  return assets[subject] ? loadGameAsset(assets[subject], fallback, signal) : Promise.resolve(fallback());\n}\n`,
+    [GAME_ASSET_MODELS_PATH]: generateAssetModelLoader(local),
   };
   const dressed = scenery ? scenery.subjects.filter((subject) => ready.some((r) => r.subject === subject)) : [];
   if (scenery && dressed.length) files['src/game/three/worldDressing.ts'] = generateWorldDressingModule(dressed, scenery.layout);
@@ -165,7 +165,7 @@ export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<
     out.files = files;
     out.status = 'prepared';
     out.handoff = `${localModelsOverride(ready.map(r => r.subject))} LOCAL 3D MODELS PREPARED: ${ready.map(r => r.subject).join(', ')}. Import loadRequestedAsset from src/game/three/assetModels.ts. Await loadRequestedAsset(subject, proceduralFallback); add handle.root to the scene; call handle.update(dt) each frame and handle.dispose() on teardown. The fallback must return { root, source: 'procedural', update, dispose } using the existing appropriate real/lite builder. Use these matching local models for those subjects, preserve gameplay physics and controls, and do not fetch provider URLs. Keep manifest.json and ATTRIBUTION.txt in the published bundle. A model passed an isolated render check; the finished game's normal playtest still must verify its integration.`
-      + (dressed.length ? ` WORLD DRESSING READY (${dressed.join(', ')}; ${scenery!.layout} layout): import { dressWorld } from src/game/three/worldDressing.ts and call await dressWorld(scene, { heightAt, accept }) ONCE after the terrain/road exists — pass the kit's ground-height function as heightAt and an accept(x, z) that returns false on the road, track and play space. Do not also scatter procedural copies of these subjects.` : '');
+      + (dressed.length ? ` WORLD DRESSING READY (${dressed.join(', ')}; ${scenery!.layout} layout): import { dressWorld } from src/game/three/worldDressing.ts and call await dressWorld(scene, { heightAt, accept }) ONCE after the terrain/road exists — pass the kit's ground-height function as heightAt and an accept(x, z) that returns false on the road, track and play space. Solid scenery carries collision geometry into the scene with each clone. Do not also scatter procedural copies of these subjects.` : '');
     return out;
   } catch {
     return { ...out, files: {}, handoff: '', status: 'procedural' };

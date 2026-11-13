@@ -6,14 +6,14 @@
  * collection name, the coercion and the failure behaviour to drift — and the failure behaviour here is
  * security-relevant, so that drift would be the dangerous kind.
  */
-import { doc, getDoc, setDoc, getServerDb as getDb } from './serverDb';
+import { doc, getDoc, runTransaction, getServerDb as getDb } from './serverDb';
 import { readPinRecord, writePinRecord, emptyPinRecord, type VaultPinRecord } from './vaultPin';
 
 /** Where each user's PIN hash, lock-out state, pending code and locked-area list live. One doc per user. */
 export const VAULT_PIN_COLLECTION = 'user_vault_pin';
 
 /**
- * Load one user's lock record, or a safe empty one.
+ * Load one user's lock record; only an acknowledged missing document gives an empty one.
  *
  * A MISSING document is the default state (no PIN, only the mandatory area locked) — that is what every
  * account that has never opened this feature looks like, so it must be the quiet, ordinary answer.
@@ -25,25 +25,21 @@ export const VAULT_PIN_COLLECTION = 'user_vault_pin';
  */
 export async function loadLockRecord(userId: string): Promise<VaultPinRecord> {
   const db = getDb() as any;
-  if (!db) return emptyPinRecord();
+  if (!db) throw new Error('app lock store unavailable');
   const snap = await getDoc(doc(db, VAULT_PIN_COLLECTION, userId));
   return snap.exists() ? readPinRecord(snap.data()) : emptyPinRecord();
 }
 
-/**
- * Persist a lock record.
- *
- * 🔒 A FAILED WRITE MUST FAIL THE REQUEST, which is the opposite of how the audit log behaves, and the
- * difference is deliberate: this record holds the lock-out counter. If a wrong-PIN attempt could be
- * swallowed, an attacker whose writes always failed would get unlimited guesses — the lock-out would
- * silently stop existing. So every caller awaits this and answers an error if it throws.
- */
-export async function saveLockRecord(userId: string, record: VaultPinRecord): Promise<void> {
+/** Pure retryable transition. Responses, emails, audit and tickets must happen only after commit. */
+export async function updateLockRecord<T>(userId: string, change: (record: VaultPinRecord) => { next?: VaultPinRecord; result: T }): Promise<T> {
   const db = getDb() as any;
   if (!db) throw new Error('app lock store unavailable');
-  await setDoc(
-    doc(db, VAULT_PIN_COLLECTION, userId),
-    { user_id: userId, ...writePinRecord(record), updated_at: new Date() },
-    { merge: true },
-  );
+  const ref = doc(db, VAULT_PIN_COLLECTION, userId);
+  return runTransaction(db, async tx => {
+    const snap = await tx.get(ref);
+    const current = snap.exists() ? readPinRecord(snap.data()) : emptyPinRecord();
+    const { next, result } = change(current);
+    if (next) tx.set(ref, { user_id: userId, ...writePinRecord(next), updated_at: new Date() }, { merge: true });
+    return result;
+  });
 }

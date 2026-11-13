@@ -41,6 +41,15 @@ export interface AppFeature {
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
+    id: 'game_enterable_house_kit',
+    name: 'Explorable house game kit',
+    path: 'NavBharatAI Pro → describe a game with enterable houses',
+    description: 'New generated games can opt into procedural one/two-storey houses with actual doorway openings, stairs, floors, hinged doors and collision. The default game shell connects E and mobile Use to nearby visible doors; configured occupants block a door swing. This does not make every legacy scenery house enterable or promise photorealistic assets, multiplayer or a commercial-scale open world. Existing edited projects are preserved.',
+    howToUse: 'Ask for an enterable house and test walking in/out, stairs and doors on desktop and mobile. NPC and remote-player bodies require the doorOccupants callback. Cloned or serialized buildings do not retain runtime door controls; rebuild with the factory. Static props must stay clear of door swing space.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['enterable house', 'door', 'interior', 'stairs', 'game house'],
+  },
+  {
     id: 'game_asset_librarian',
     name: 'Game asset library and compatibility search',
     path: 'NavBharatAI Pro → describe a game or ask about available game objects',

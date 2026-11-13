@@ -12,19 +12,45 @@
 
 import { describe, it, expect } from 'vitest';
 import ts from 'typescript';
+import * as THREE from 'three';
+import { Octree } from 'three/addons/math/Octree.js';
+import { Capsule } from 'three/addons/math/Capsule.js';
 import { generateGame3D } from '../src/server/lib/Game3DGenerator';
 import { THREE_STUB, SURFACES_STUB, walk, worldPos, type Obj3D } from './helpers/threeStub';
 
 /** Transpile the GENERATED objects.ts and run it against the stubs. This is the point of the file. */
 function loadObjects(): Record<string, (o?: Record<string, unknown>) => unknown> {
-  const src = generateGame3D(['objects']).files['src/game/three/objects.ts'];
+  const files = generateGame3D(['objects']).files;
+  const src = files['src/game/three/objects.ts'];
+  // The new opt-in dependency executes its real generated source and Three geometry.
+  // Legacy object geometry assertions retain their existing deterministic stubs.
+  const modules = new Map<string, Record<string, unknown>>();
+  const loadBuildingDependency = (id: string): unknown => {
+    if (id === 'three') return THREE;
+    if (id === 'three/addons/math/Capsule.js') return { Capsule };
+    if (id === 'three/addons/math/Octree.js') return { Octree };
+    if (!['./buildings', './materials', './collision'].includes(id)) throw new Error('unexpected building dependency ' + id);
+    const cached = modules.get(id);
+    if (cached) return cached;
+    const source = files['src/game/three/' + id.slice(2) + '.ts'];
+    if (!source) throw new Error('missing generated building dependency ' + id);
+    const result: Record<string, unknown> = {};
+    modules.set(id, result);
+    const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+    // eslint-disable-next-line no-new-func
+    new Function('require', 'exports', 'module', compiled)(loadBuildingDependency, result, { exports: result });
+    return result;
+  };
   const js = ts.transpileModule(src, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText;
   const exports: Record<string, unknown> = {};
   const req = (id: string): unknown => {
     if (id === 'three') return THREE_STUB;
+    if (id === './buildings') return loadBuildingDependency(id);
     if (id.endsWith('surfaces')) return SURFACES_STUB;
+    if (id === './collision') return { markWorldCollider: (object: Obj3D) => object };
+    if (id === 'three/addons/math/Capsule.js') return { Capsule };
     throw new Error('the generated objects.ts should not import ' + id);
   };
   // eslint-disable-next-line no-new-func
@@ -36,6 +62,18 @@ interface Bike { root: Obj3D; seat: Obj3D; lean: (r: number) => void; steer: (r:
 
 describe('🔴 the library now HAS a bike — the gap that produced the screenshot', () => {
   const objects = loadObjects();
+
+  it('loads the actual opt-in building dependency while preserving legacy object execution', () => {
+    const house = objects.createHouse({ enterable: true, width: 8, depth: 10, storeys: 2 }) as THREE.Group;
+    expect(house.isGroup).toBe(true);
+    expect(house.userData.enterableHouse).toMatchObject({ width: 8, depth: 10, storeys: 2 });
+    const getDoor = objects.houseDoor as unknown as (root: THREE.Object3D) => { isOpen: boolean; setOpen(open: boolean): void; update(dt: number): void };
+    const door = getDoor(house);
+    expect(door.isOpen).toBe(false);
+    door.setOpen(true);
+    for (let frame = 0; frame < 60; frame++) door.update(1 / 60);
+    expect(door.isOpen).toBe(true);
+  });
 
   it('createMotorcycle and createBicycle exist and build a scene graph', () => {
     expect(typeof objects.createMotorcycle).toBe('function');

@@ -59,8 +59,9 @@ export const PHASE_POST_BUILD_REVIEW = 'post-build-review';
 export const PHASE_EXPLORER_REPAIR = 'explorer-repair';
 
 /**
- * Game Engine Ultra Phase 3 (gameRepair.ts). Behind AGENTV3_GAME_AUTO_REPAIR (default off). Until the admin
- * decides otherwise, this phase is ALWAYS barren — kept or undone, the platform absorbs the repair.
+ * Game Engine Ultra Phase 3 (gameRepair.ts). Automatic repair is default on for one measured, replay-verified
+ * attempt; set AGENTV3_GAME_AUTO_REPAIR=off to disable. This phase is ALWAYS barren — kept or undone, the
+ * platform absorbs the repair and the user is never charged.
  */
 export const PHASE_GAME_REPAIR = 'game-repair';
 

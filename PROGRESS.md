@@ -101306,6 +101306,9 @@ Owner-requested sequential audit, BR1977 only (boundary 1951..2105 frozen). Bran
 
 Queue: this commit closes no earlier row. New rows Q-2653 (bare `game` still confirms a stub — #4169 reviewer residual) and Q-2654 (high-confidence objectless orders such as `app banao` / `Banao` still confirm when the ask-gate misses — #4169 reviewer residual). Q-2649, Q-2650, Q-2651, Q-2652 and earlier blockers stay open (none of them appear as this report's DNA). Q-2270 stays the residual `DEFAULT_TOUCH_BUTTONS` repair. Q-2621 stays the E2B cap.
 
+## 2026-11-13 — App-lock fail-closed storage and atomic attempts
+Unavailable database now throws instead of looking like an account without a PIN. Replaced read/compute/set mutations with retry-safe Firestore transitions for PIN attempts, PIN changes, OTP reservation and atomic consumption/reset, plus area changes. No external side effects inside transaction callbacks; no ticket before commit. Offline concurrency regressions cover lost updates, replay and commit failures. Existing account state/schema is preserved. Final integration CI and deployment are separate; see docs/APP_LOCK_ATOMICITY.md.
+
 ## 2026-11-13 — Categorized game librarian, bounded implementation
 Reused the existing object specifications/builders and reviewed model metadata through object_spec. Added category indexing, compatibility/license/animation metadata, explicit empty map/audio and missing results, bounded search, and immutable returned metadata. The actual game seed handoff now separates prepared models from unprepared alternatives and pending scene/gameplay verification. Existing external-asset defaults, provider calls and admission gates are unchanged. No new content was purchased or acquired; no device performance or production rollout is claimed. See docs/GAME_LIBRARY_LIBRARIAN.md for remaining gaps and validation evidence from the final combined commit.
 

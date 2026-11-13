@@ -680,6 +680,10 @@ export const GAME_KIT_RULE = [
   'or meta. Otherwise call run_recipe({ name: "generate_game_runtime" }) first, and the other',
   'run_recipe({ name: "generate_game_…" }) recipes the game needs. A player\'s vehicle has a NON-ZERO',
   'starting speed unless the user asked for a standing start.',
+  '3D WORLD CONTACT: the kit already makes its buildings, terrain and trunks physical. Put custom solid',
+  'walls, stairs and platforms in the same world with markWorldCollider from src/game/three/collision.ts.',
+  'Use the kit character controller and driveVehicle for movement. For custom movers, apply the result',
+  'of sweepWorldCapsules before changing position. Play against a wall and up a stair or slope where present.',
   ...VEHICLE_CAMERA_RULE_LINES,
   ...FORWARD_DIRECTION_RULE_LINES,
 ].join('\n');

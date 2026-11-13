@@ -128,7 +128,8 @@ export const ALLOWED_PASSES: ReadonlySet<string> = new Set([
   // — "fix the source, do not weaken the test" is enforced here rather than merely asked for.
   'vaccine-repair',
   // Game Engine Ultra Phase 3 (gameRepair.ts): a game the playtest PROVED broken, repaired once and kept only
-  // if the game, played again, is strictly better — otherwise undone. Off unless AGENTV3_GAME_AUTO_REPAIR=on.
+  // if the game, played again, is strictly better — otherwise undone. One bounded pass; disabled only when
+  // AGENTV3_GAME_AUTO_REPAIR=off.
   'game-repair',
 ]);
 

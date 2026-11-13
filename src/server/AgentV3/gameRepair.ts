@@ -5,32 +5,34 @@
 // and has strictly fewer hard defects and no new ones; otherwise it is undone (the explorer repair's rule,
 // explorerRepair.ts). The orchestration is pure over injected I/O, so every branch is unit-tested.
 //
-// 💰 WHO PAYS (admin decision pending — see docs/claude/ENV_REGISTRY.md). Both switches default OFF, so
-// production is unchanged. When AGENTV3_GAME_AUTO_REPAIR=on, the route marks the repair's billing phase
-// barren whatever the outcome — the PLATFORM absorbs the repair, the user is never charged for it. Billing it
-// to the user, even when kept, needs an explicit admin decision and a separate change.
+// 💰 BOUNDED DEFAULT: a measured broken game gets at most one focused repair and browser replay. The repair
+// is kept only when replay proves improvement; otherwise the original snapshot is restored. The dedicated
+// billing phase is barren, so the platform absorbs this bounded repair cost and the user is never charged.
+// Set AGENTV3_GAME_AUTO_REPAIR=off to disable automatic repair.
 //
-// 🚦 THE GATE. AGENTV3_GAME_COMPLETE_GATE=on: a game whose final play still shows a HARD defect (blank,
-// input ignored, start stuck, runtime error) or lacks a feature the user named is not reported shippable —
-// the release gate goes RED with the reason. It never flips result.ok and never touches a bill.
+// 🚦 THE GATE defaults on: a game whose final play still shows a HARD defect (blank, ignored input, no touch,
+// stuck start, runtime error, wrong camera, stalled vehicle, or missing game-kit layer) or lacks a feature
+// the user named is not reported shippable — the release gate goes RED with the reason. It never flips
+// result.ok and never touches a bill. Set AGENTV3_GAME_COMPLETE_GATE=off to disable.
 
 import type { GameDefect, GameDefectCode } from './gamePlaytest';
 
 export const GAME_REPAIR_PASS = 'game-repair';
 
 export function gameAutoRepairEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return String(env.AGENTV3_GAME_AUTO_REPAIR ?? '').trim().toLowerCase() === 'on';
+  return String(env.AGENTV3_GAME_AUTO_REPAIR ?? '').trim().toLowerCase() !== 'off';
 }
 export function gameCompleteGateEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return String(env.AGENTV3_GAME_COMPLETE_GATE ?? '').trim().toLowerCase() === 'on';
+  return String(env.AGENTV3_GAME_COMPLETE_GATE ?? '').trim().toLowerCase() !== 'off';
 }
 
 /** Defects that mean the game cannot be played — what the gate holds on and what a repair must reduce. */
 export const HARD_DEFECTS: ReadonlySet<GameDefectCode> = new Set([
-  'GAME_DEFECT_BLANK', 'GAME_DEFECT_INPUT_IGNORED', 'GAME_DEFECT_START_STUCK', 'GAME_DEFECT_RUNTIME_ERROR', 'GAME_DEFECT_MISSING_LAYER',
+  'GAME_DEFECT_BLANK', 'GAME_DEFECT_INPUT_IGNORED', 'GAME_DEFECT_NO_TOUCH', 'GAME_DEFECT_START_STUCK',
+  'GAME_DEFECT_RUNTIME_ERROR', 'GAME_DEFECT_CAMERA_WRONG', 'GAME_DEFECT_VEHICLE_STALLED', 'GAME_DEFECT_MISSING_LAYER',
 ]);
 
-/** Every defect a repair is asked to fix (soft ones too: touch, camera, stalled vehicle). */
+/** Every measured defect the repair can address. */
 const FIX_HINT: Readonly<Record<GameDefectCode, string>> = {
   GAME_DEFECT_START_STUCK: 'Pressing the start control shows no game surface — make the start control mount and start the game.',
   GAME_DEFECT_BLANK: 'The game surface is blank or one colour — draw the world and the player.',

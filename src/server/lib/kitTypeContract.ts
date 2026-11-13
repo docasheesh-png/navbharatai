@@ -190,6 +190,7 @@ interface ContractEntry {
  * from a kit function (a mesh, a vehicle state) is deliberately out — it does not have to spell those.
  */
 const CONTRACT: readonly ContractEntry[] = [
+  { file: 'src/game/three/buildings.ts', names: ['DoorOccupant', 'HouseDoor', 'EnterableHouseOptions', 'createEnterableHouse', 'houseDoor', 'interactHouseDoor', 'updateHouseDoors'] },
   // What `setup(ctx)` and `update(ctx, dt)` are handed. The reported build guessed three members of it.
   { file: 'src/game/Game.ts', names: ['GameContext', 'GameOptions'] },
   // What `touchControls: { buttons: [...] }` takes. The reported build passed strings.

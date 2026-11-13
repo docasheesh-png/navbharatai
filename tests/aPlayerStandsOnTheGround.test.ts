@@ -13,7 +13,7 @@
 //      rig's collision raycasts had the same class.
 // And the player had no body at all: the controller is an empty Object3D, so a third-person hero was
 // invisible. These tests drive the GENERATED modules with real three.js.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import * as THREE from 'three';
@@ -62,7 +62,9 @@ describe('the character controller keeps its feet on the ground', () => {
 
   it('walking and jumping keep it on the ground between hops', () => {
     const pc = new C.CharacterController();
-    pc.setColliders([W.createTerrain({ size: 200, flat: true })]);
+    const terrain = W.createTerrain({ size: 200, flat: true });
+    const scanMesh = vi.spyOn(terrain, 'raycast');
+    pc.setColliders([terrain]);
     run(pc, 2, { ...still, moveZ: -1 });
     expect(Math.abs(pc.object.position.z)).toBeGreaterThan(3);
     expect(pc.object.position.y).toBeCloseTo(0, 3);
@@ -71,6 +73,7 @@ describe('the character controller keeps its feet on the ground', () => {
     expect(pc.object.position.y).toBeGreaterThan(0.3);
     run(pc, 3);
     expect(pc.object.position.y).toBeCloseTo(0, 3);
+    expect(scanMesh).not.toHaveBeenCalled();
   });
 
   it('a collider that was MOVED (and never rendered) is stood on where it is, not where it was built', () => {

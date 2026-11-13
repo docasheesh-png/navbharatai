@@ -136,7 +136,8 @@ describe('camera rigs', () => {
   });
 
   it('third-person casts a ray so the camera cannot end up inside a wall', () => {
-    expect(camera).toContain('this.ray.intersectObjects(this.collidables, true)');
+    expect(camera).toContain('worldColliders(this.collisionScene, this.collidables');
+    expect(camera).toContain('this.ray.intersectObjects(collidables, !this.collisionScene)');
     expect(camera).toContain('Math.max(0.6, hit.distance - 0.3)');
   });
 

@@ -34,7 +34,7 @@
 // PURE — no I/O. The dispatcher supplies the workspace listing and contents, and does the writing.
 
 import { generateGameRuntime } from './GameRuntimeGenerator';
-import { generateGame3D } from './Game3DGenerator';
+import { GAME_ASSET_MODELS_PATH, generateGame3D, upgradeAssetModelLoader } from './Game3DGenerator';
 import { generateGameController } from './GameControllerGenerator';
 import { generateGameSystems } from './GameSystemsGenerator';
 import { generateGameVfxAudio } from './GameVfxAudioGenerator';
@@ -369,7 +369,11 @@ export function planKitRefresh(
     const cur = files[path];
     if (typeof cur === 'string' && cur !== kit.content && reasonOf(path, cur, kit.content) === null) stale[path] = kit.content;
   }
-  if (Object.keys(stale).length === 0) return none;
+  const collisionPath = 'src/game/three/collision.ts';
+  const collisionKit = pool.get(collisionPath)?.content;
+  const hasCollision = !!collisionKit && files[collisionPath] === collisionKit;
+  const assetLoader = upgradeAssetModelLoader(files[GAME_ASSET_MODELS_PATH]);
+  if (Object.keys(stale).length === 0 && !(hasCollision && assetLoader)) return none;
   const has = new Set(Object.keys(files));
   const existing = new Map<string, string | null>(Object.entries(files));
   const plan = planKitLayers(stale, has, existing, pool, reasonOf);
@@ -380,5 +384,8 @@ export function planKitRefresh(
   const write: Record<string, string> = { ...stale };
   for (const [p, l] of plan.refresh) write[p] = l.content;
   for (const [p, l] of plan.add) write[p] = l.content;
+  if (assetLoader && collisionKit && (hasCollision || write[collisionPath] === collisionKit)) {
+    write[GAME_ASSET_MODELS_PATH] = assetLoader;
+  }
   return { write, refreshed: Object.keys(write).filter((p) => p in files).sort(), added: [...plan.add.keys()].sort(), blocked: null };
 }

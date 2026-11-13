@@ -121,10 +121,10 @@ describe('admin-only explicit reclassification of existing gifts', () => {
     const registered=new Map<string,Array<(...args:any[])=>any>>();
     const register=(path:string,...handlers:Array<(...args:any[])=>any>)=>registered.set(path,handlers);
     const app={post:register,get:register}; // The adjacent read-only receipt route registers a GET too.
-    const pass='synthetic-admin-test-only';const username='synthetic-admin';let accesses=0;
-    const install=new Function('app','adminPassword','adminUsername','verifyAdminTokenValue','adminTokenTtlMs','audit','routeParams','getDb','previewAdminGiftReclassification','confirmAdminGiftReclassification','AdminGiftReclassificationError',code);
+    const pass='synthetic-admin-test-only';let signingKey='synthetic-independent-signing-key-only';const username='synthetic-admin';let accesses=0;
+    const install=new Function('app','adminPassword','adminSessionSigningKey','adminUsername','verifyAdminTokenValue','adminTokenTtlMs','audit','routeParams','getDb','previewAdminGiftReclassification','confirmAdminGiftReclassification','AdminGiftReclassificationError',code);
     const {AdminGiftReclassificationError}=await import('../src/server/lib/adminGiftReclassification');
-    install(app,()=>pass,()=>username,verifyAdminTokenValue,adminTokenTtlMs,()=>{},(p:any)=>p,()=>({}),
+    install(app,()=>pass,()=>signingKey,()=>username,verifyAdminTokenValue,adminTokenTtlMs,()=>{},(p:any)=>p,()=>({}),
       (...args:Parameters<typeof previewAdminGiftReclassification>)=>{accesses++;return previewAdminGiftReclassification(...args);},
       (...args:Parameters<typeof confirmAdminGiftReclassification>)=>{accesses++;return confirmAdminGiftReclassification(...args);},AdminGiftReclassificationError);
     const dispatch=async(action:string,token:string|undefined,body:any)=>{
@@ -135,11 +135,14 @@ describe('admin-only explicit reclassification of existing gifts', () => {
       for(const handler of registered.get(path)!){let next=false;await handler(req,res,()=>{next=true;});if(!next)break;}
       return {status,payload};
     };
-    for(const action of ['preview','confirm'])for(const token of [undefined,'ordinary-user-token',mintAdminToken(pass,username,Date.now()-200*86400000)]) {
+    for(const action of ['preview','confirm'])for(const token of [undefined,'ordinary-user-token',mintAdminToken(signingKey,username,Date.now()-200*86400000),mintAdminToken(pass,username,Date.now())]) {
       expect((await dispatch(action,token,{amount:500})).status).toBe(401);
     }
     expect(accesses).toBe(0);expect(state.writes).toEqual([]);
-    const token=mintAdminToken(pass,username,Date.now());
+    const token=mintAdminToken(signingKey,username,Date.now());
+    const configuredKey=signingKey; signingKey='';
+    for(const action of ['preview','confirm'])expect((await dispatch(action,token,{amount:500})).status).toBe(401);
+    expect(accesses).toBe(0);expect(state.writes).toEqual([]); signingKey=configuredKey;
     const preview=await dispatch('preview',token,{amount:500});expect(preview.status).toBe(200);expect(state.writes).toEqual([]);
     const done=await dispatch('confirm',token,{amount:500,fingerprint:preview.payload.preview.fingerprint,requestId:'route-test-0001',reason:'Explicit existing gift decision'});
     expect(done.status).toBe(200);expect(done.payload.ok).toBe(true);expect(state.docs.get(PATH).tokenBalance).toBe(1200);

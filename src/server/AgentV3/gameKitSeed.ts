@@ -241,7 +241,12 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
           : ' For a car, bike or ridden animal, keep the camera BEHIND it, opposite its nose.')
         + (has('generate_game_3d')
           ? ' Move a vehicle with driveVehicle(...) and createVehicleState(...) from src/game/three/objects.ts (they'
-            + ' own the steering signs and the starting speed), and build every object with the builders in that file.'
+            + ' own steering, starting speed and contact with the world), and build objects with the kit factories.'
+            + ' For explorable interiors use createHouse({ enterable: true }) or createEnterableHouse(): open doorway, one/two storeys, stairs and hinged door. The shell wires E/mobile Use. Legacy createHouse() is solid scenery, not enterable. Supply NPC doorOccupants; custom loops must wire interactHouseDoor/updateHouseDoors. Do not swap this for a decorative downloaded mesh.'
+            + ' Kit buildings, tree trunks and terrain are collidable automatically. Mark custom walls, stairs and'
+            + ' platforms with markWorldCollider(mesh) from src/game/three/collision.ts. For custom movers,'
+            + ' use sweepWorldCapsules with worldColliders before applying movement. Verify that walls and'
+            + ' trunks block, low steps climb and roofs stop jumps.'
           : '')
       : twoD,
     failed.length > 0

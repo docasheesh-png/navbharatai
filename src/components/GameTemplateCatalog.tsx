@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Car, ChevronRight, CircleDot, Crown, Gamepad2, Grid2X2, Search, Sparkles, Swords } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Car, ChevronRight, CircleDot, Crown, Gamepad2, LayoutGrid, Search, Sparkles } from 'lucide-react';
 
 type GameTemplate = { name: string; category: string; description: string; mechanics: string };
 
@@ -85,7 +85,7 @@ export function GameTemplateCatalog({ onUse }: { onUse: (prompt: string) => void
 
   const autoBuild = () => { if (matchedGame) onUse(makePrompt(matchedGame)); };
 
-  const iconFor = (game: GameTemplate) => game.category === 'Racing' ? Car : game.name === 'Chess' ? Crown : game.category === 'Board & Classics' ? Grid2X2 : game.category === 'Strategy' ? Swords : CircleDot;
+  const iconFor = (game: GameTemplate) => game.category === 'Racing' ? Car : game.name === 'Chess' ? Crown : game.category === 'Board & Classics' ? LayoutGrid : CircleDot;
 
   return <section className="mt-12">
     <div className="flex items-end justify-between gap-4 mb-5 flex-wrap">

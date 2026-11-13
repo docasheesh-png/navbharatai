@@ -51,7 +51,9 @@ function pointAtDistance(points: Point[], distance: number) {
 export function EndlessRacingGame() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<InputState>({ up: false, down: false, left: false, right: false });
-  const [trackIndex, setTrackIndex] = useState(0);
+  // The racer currently exposes one deterministic circuit; keep the selected
+  // track as a constant until a real track-selection control is introduced.
+  const trackIndex = 0;
   const [speed, setSpeed] = useState(0);
   const [lap, setLap] = useState(1);
   const [isRunning, setIsRunning] = useState(false);

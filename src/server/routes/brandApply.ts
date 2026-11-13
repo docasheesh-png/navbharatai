@@ -6,6 +6,7 @@
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
+import { isPublicAppWorkspaceId } from '../lib/publicAppWorkspace';
 import { mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { brandKitFiles } from '../../lib/brandKit';
 
@@ -17,7 +18,7 @@ export function registerBrandApplyRoutes(app: Express): void {
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!ownedByVerifiedUid(identity.uid, workspaceId)) {
+    if (!isPublicAppWorkspaceId(workspaceId) || !ownedByVerifiedUid(identity.uid, workspaceId)) {
       res.status(403).json({ ok: false, charged: false, error: 'This app is not on your account. Nothing was written.' });
       return;
     }

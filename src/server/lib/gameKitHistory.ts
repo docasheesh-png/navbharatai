@@ -63,13 +63,15 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "dfc9f2a2a953a287b80e12e6c1d06f3e54a61535e12eee60a37c5834976df54b"
   ],
   "src/game/economy/economy.ts": [
-    "9359e94db30ac5fca7fe547a1ccb75d805e94d83c37d9417b6742379fcb44fdb"
+    "9359e94db30ac5fca7fe547a1ccb75d805e94d83c37d9417b6742379fcb44fdb",
+    "411300856eb8748e4a182ef5614082c012fd2413963bfb35cd061496e6584882"
   ],
   "src/game/economy/index.ts": [
     "fa078dc3d260f65d9cc1d204729a239454858265ba10e480bbd48d486f727696"
   ],
   "src/game/economy/inventory.ts": [
-    "2be4de3e0c5128b7fe9b15bd1e159ba4bf867bfd3aeb397fc34b24988d75cf0f"
+    "2be4de3e0c5128b7fe9b15bd1e159ba4bf867bfd3aeb397fc34b24988d75cf0f",
+    "70bcf88af0615a562e8ab9de140e3374f5d58bfd5aeba2c52f2ff9aa1258bc2a"
   ],
   "src/game/economy/ledger.ts": [
     "1c39287d5b2a155dbf2491e129ffc7bd9f5a5d1e7bbf6fafa653709b89063ca3"
@@ -111,6 +113,15 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/play/motor.ts": [
     "5da3856c53d7f23b4bf2b4458c90b60c2c8c679853131823ff324de1ef8c80f2",
     "f1ff14f4eab4da545f34a66b0f8b53dae34bb8e7425fd62235074c50b0eddf4c"
+  ],
+  "src/game/shop/grid.ts": [
+    "c6cf814119d675a4ad587d57bf90f49540217a56a6bac597b2e679b070c38bb3"
+  ],
+  "src/game/shop/index.ts": [
+    "692ba391743a33a3bf982dd84eb2408d3584024c9ad037591c877cd5bb13119b"
+  ],
+  "src/game/shop/shopsim.ts": [
+    "406cea86aea6267f3cd53234aab84667d34d5302de476237afc44362f85b4cd5"
   ],
   "src/game/systems/ai.ts": [
     "c4dbc016db9a13e81cad5847399bd37d21cc2fc248941739958c6f00bbe22db6",

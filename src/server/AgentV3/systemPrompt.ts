@@ -1019,6 +1019,10 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       wages, capped offline earnings and a validated save. Pure maths, no three.js, so it suits a 2D',
     '       game as well as the 3D shell. Draw the customers yourself and call economy.sell /',
     '       serveCustomer at the till; never keep money in a float or let cash go below zero by hand.',
+    '    4c. run_recipe({ name: "generate_game_shopsim" }) — after 4b, when the shop has VISIBLE people:',
+    '       customers who walk to a shelf, queue and pay, and staff (cashier, stocker) — a grid simulation',
+    '       (src/game/shop/) you DRAW from snapshot(); never keep people positions or stock counts yourself.',
+    '       Build the economy with autoCustomers: false, and run shop.problems() once on the layout.',
     '    5. run_recipe({ name: "generate_game_vfx" }) — particles, audio and the ONE table that fires',
     '       effect + sound + shake together (src/game/fx/), which is what makes a hit feel like force.',
     // The audio manager used to play only a LOADED file, and a generated app has none — so every game

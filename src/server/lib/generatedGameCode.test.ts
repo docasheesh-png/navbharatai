@@ -7,6 +7,7 @@ import { generateGameVfxAudio } from './GameVfxAudioGenerator';
 import { generateGameShell } from './GameShellGenerator';
 import { generateGameSystems } from './GameSystemsGenerator';
 import { generateGameEconomy } from './GameEconomyGenerator';
+import { generateGameShopSim } from './GameShopSimGenerator';
 import { generateMotion } from './MotionGenerator';
 
 /**
@@ -32,6 +33,7 @@ const PACKS: Array<{ name: string; files: Record<string, string> }> = [
   { name: 'shell (phase 5)', files: generateGameShell().files },
   { name: 'systems (phase 6)', files: generateGameSystems().files },
   { name: 'tycoon economy', files: generateGameEconomy().files },
+  { name: 'tycoon shop people', files: generateGameShopSim().files },
   { name: 'motion pack', files: generateMotion().files },
 ];
 
@@ -102,7 +104,7 @@ describe('every file a game generator writes into a user app is parseable TypeSc
 
   it('covers every game generator we ship — a new phase must be added here too', () => {
     // If a phase 5 lands without a line above, this fails and says why.
-    expect(PACKS).toHaveLength(8);
+    expect(PACKS).toHaveLength(9);
     expect(PACKS.flatMap((p) => Object.keys(p.files)).length).toBeGreaterThanOrEqual(23);
   });
 });

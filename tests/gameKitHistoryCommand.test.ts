@@ -11,7 +11,7 @@ it('the real history command resolves imported contracts and registers the curre
     mkdirSync(join(root, 'scripts'), { recursive: true });
     mkdirSync(join(root, 'src/server/lib'), { recursive: true });
     copyFileSync('scripts/gameKitHistory.mjs', join(root, 'scripts/gameKitHistory.mjs'));
-    for (const name of ['GameBuildingGenerator', 'GameAssetLodGenerator', 'GameAssetTextureVerifier', 'GameAssetRuntimeGenerator', 'GameRuntimeGenerator', 'Game3DGenerator', 'GameControllerGenerator', 'GameSystemsGenerator', 'GameVfxAudioGenerator', 'MelodyGenerator', 'GameShellGenerator', 'GameEconomyGenerator', 'kitTypeContract', 'gameKitHistory']) {
+    for (const name of ['GameBuildingGenerator', 'GameAssetLodGenerator', 'GameAssetTextureVerifier', 'GameAssetRuntimeGenerator', 'GameRuntimeGenerator', 'Game3DGenerator', 'GameControllerGenerator', 'GameSystemsGenerator', 'GameVfxAudioGenerator', 'MelodyGenerator', 'GameShellGenerator', 'GameEconomyGenerator', 'GameShopSimGenerator', 'kitTypeContract', 'gameKitHistory']) {
       copyFileSync(`src/server/lib/${name}.ts`, join(root, `src/server/lib/${name}.ts`));
     }
     const historyPath = join(root, 'src/server/lib/gameKitHistory.ts');

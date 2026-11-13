@@ -2274,6 +2274,35 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_game_shopsim',
+      description:
+        'Add the PEOPLE of a shop / supermarket / restaurant game: customers who walk in, go to the shelf of what '
+        + 'they chose, take it, join the shortest queue, wait (and leave if it takes too long) and pay at a counter, '
+        + 'plus staff — cashiers who serve and stockers who carry units from the stock room to the shelves. Call '
+        + 'generate_game_economy first (this brings it if missing). Emits src/game/shop as a grid SIMULATION with no '
+        + 'drawing in it: the game calls update(dt) from the fixed step and DRAWS each person from snapshot() — three.js, '
+        + 'canvas or DOM, it does not matter — and never keeps positions of its own. IT ENCODES THE RULES A '
+        + 'HAND-WRITTEN VERSION GETS WRONG — do not reimplement them: every unit has exactly ONE place (shelf, stock '
+        + 'room, a customer\'s hand, or sold) — picking takes it off the shelf at that moment so two customers cannot '
+        + 'take the last one, and an abandoned or refused cart is put back, so stock never vanishes or appears; money '
+        + 'moves only at a counter while a cashier or the player (setPlayerAt) is serving it, so with nobody serving the '
+        + 'queue builds, customers give up and reputation falls; the crowd, queue, grid and every path search are '
+        + 'capped; two stockers never fetch the same shelf; and problems() NAMES a layout fault (a product with no '
+        + 'shelf, a shelf behind a wall, a counter with no route to the exit) instead of leaving a customer frozen in '
+        + 'a doorway. Build the economy with autoCustomers: false — this brings the customers. People are not saved: '
+        + 'the floor starts empty on load.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: grid, shopsim, index. Default = all. shopsim always brings grid.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_game_systems',
       description:
         'Add the gameplay systems that make it a GAME rather than a walkable scene: combat (health, '
@@ -3625,6 +3654,7 @@ export const CATALOG_TOOL_NAMES = [
   'request_secrets',
   'generate_game_systems',
   'generate_game_economy',
+  'generate_game_shopsim',
   'generate_game_shell',
   'generate_game_vfx',
   'generate_melody',
@@ -3848,6 +3878,7 @@ export const RECIPE_TOOLS = [
   'generate_game_economy',
   'generate_game_runtime',
   'generate_game_shell',
+  'generate_game_shopsim',
   'generate_game_systems',
   'generate_game_vfx',
   'generate_geocoding',

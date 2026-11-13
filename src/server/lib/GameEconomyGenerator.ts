@@ -256,6 +256,20 @@ export class Inventory {
     return n;
   }
 
+  /**
+   * A customer puts an item back (they left the queue, or the till was full). It goes to the shelf if there is
+   * room, otherwise to the stock room — EVEN PAST ITS CAPACITY, because a returned unit must never vanish. (An
+   * over-full stock room just refuses deliveries until it is below capacity again.) Returns units put back.
+   */
+  putBack(id: string, qty: number): number {
+    if (!this.defs.has(id)) return 0;
+    const n = clampInt(qty, 0, 1_000_000, 0);
+    const onShelf = Math.min(n, this.shelfSpace(id));
+    this.shelf.set(id, this.onShelf(id) + onShelf);
+    this.back.set(id, this.inBackroom(id) + (n - onShelf));
+    return n;
+  }
+
   /** Units on shelves across all products. */
   shelfTotal(): number { let t = 0; for (const v of this.shelf.values()) t += v; return t; }
 
@@ -627,10 +641,21 @@ export class Economy {
 
   /** A customer pays for qty units of a product at the CURRENT price. Sells only what is on the shelf. */
   sell(productId: string, qty: number = 1): SaleResult {
-    const def = this.inventory.def(productId);
-    if (!def) return { sold: 0, revenue: 0, productId };
+    if (!this.inventory.has(productId)) return { sold: 0, revenue: 0, productId };
     const sold = this.inventory.take(productId, qty);
     if (sold <= 0) return { sold: 0, revenue: 0, productId };
+    return this.settle(productId, sold);
+  }
+
+  /**
+   * Take the money for units that are ALREADY off the shelf (a customer picked them earlier and has now reached
+   * the counter). Does not touch stock: whoever calls this took the units with inventory.take. sell() is
+   * take + settle.
+   */
+  settle(productId: string, qty: number = 1): SaleResult {
+    const def = this.inventory.def(productId);
+    const sold = clampInt(qty, 0, 1_000_000, 0);
+    if (!def || sold <= 0) return { sold: 0, revenue: 0, productId };
     const revenue = this.ledger.earn(this.priceOf(productId) * sold, 'sale');
     this.today.revenue += revenue;
     this.today.cogs += def.cost * sold;
@@ -646,6 +671,16 @@ export class Economy {
    * they left empty-handed (and says why in the event). Seeded: the same seed replays the same customers.
    */
   serveCustomer(): SaleResult | null {
+    const id = this.chooseProduct();
+    return id === null ? null : this.sell(id, 1);
+  }
+
+  /**
+   * A customer walks in and DECIDES — which product, and whether the price is acceptable — without taking
+   * anything. Returns the product id they want, or null when they leave (the reason is recorded). The people
+   * simulation walks them to that shelf; serveCustomer() is this plus an immediate sale. Same seed, same choices.
+   */
+  chooseProduct(): string | null {
     this.today.customers++;
     const options: Array<{ id: string; w: number; chance: number }> = [];
     let total = 0;
@@ -664,12 +699,15 @@ export class Economy {
     let pick = options[options.length - 1];
     for (const o of options) { roll -= o.w; if (roll <= 0) { pick = o; break; } }
     if (this.rng.next() > Math.min(1, pick.chance)) return this.walkOut('price');
-    return this.sell(pick.id, 1);
+    return pick.id;
   }
 
-  private walkOut(why: 'price' | 'empty'): null {
+  /** A customer who was already counted is lost: they found the shelf empty, or gave up in the queue. */
+  lose(why: 'price' | 'empty' | 'queue'): void { this.walkOut(why); }
+
+  private walkOut(why: 'price' | 'empty' | 'queue'): null {
     this.today.lost++;
-    this._reputation = Math.max(0, this._reputation - (why === 'empty' ? 0.01 : 0.003));
+    this._reputation = Math.max(0, this._reputation - (why === 'empty' ? 0.01 : why === 'queue' ? 0.005 : 0.003));
     this.emit('CUSTOMER_LEFT', { why });
     return null;
   }

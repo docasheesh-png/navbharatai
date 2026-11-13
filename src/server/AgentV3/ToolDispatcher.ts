@@ -362,6 +362,7 @@ import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateGameEconomy } from '../lib/GameEconomyGenerator';
+import { generateGameShopSim } from '../lib/GameShopSimGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
@@ -9576,6 +9577,21 @@ export class ToolDispatcher {
         const gecLayers = await this.addMissingRecipeLayers(gec.files, agent);
         this.scheduleCheckpoint('tycoon economy');
         return `Added the tycoon economy core:\n${gecWritten.join('\n')}\n\n${gec.instructions}${gecLayers}`;
+      }
+
+      case 'generate_game_shopsim': {
+        // THE PEOPLE OF A SHOP (tycoon part 2): customers who walk, pick, queue and pay, staff who serve and restock.
+        // A grid simulation with no drawing in it; the game draws from snapshot(). It imports the economy core,
+        // which addMissingRecipeLayers brings when the economy recipe was never run.
+        const gssRec = (input as Record<string, unknown>) || {};
+        const gssInclude = Array.isArray(gssRec.include)
+          ? gssRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gss = generateGameShopSim(gssInclude);
+        const gssWritten = await this.writeRecipeFiles(gss.files, agent);
+        const gssLayers = await this.addMissingRecipeLayers(gss.files, agent);
+        this.scheduleCheckpoint('shop people');
+        return `Added the shop people simulation:\n${gssWritten.join('\n')}\n\n${gss.instructions}${gssLayers}`;
       }
 
       case 'generate_game_shell': {

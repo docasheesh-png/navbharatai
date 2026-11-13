@@ -211,8 +211,17 @@ export async function verifyFirebaseIdentityDiag(req: Request): Promise<Identity
 export async function verifyFreshAuth(req: Request): Promise<{ uid: string; authTimeSec: number | null } | null> {
   const { token: decoded } = await verifyFirebaseSession(req);
   if (!decoded) return null;
-  const t = Number(decoded.auth_time);
-  return { uid: decoded.uid, authTimeSec: Number.isFinite(t) && t > 0 ? t : null };
+  // Redeeming an outstanding phone-exchange custom token stamps a new auth_time,
+  // but does not repeat the phone OTP. Step-up proof must retain the original event.
+  const t = decoded.auth_time;
+  let authTimeSec = typeof t === 'number' && Number.isSafeInteger(t) && t > 0 ? t : null;
+  if (decoded.firebase?.sign_in_provider === 'custom') {
+    const original = decoded.session_auth_time;
+    authTimeSec = authTimeSec !== null && typeof original === 'number'
+      && Number.isSafeInteger(original) && original > 0 && original <= authTimeSec
+      ? original : null;
+  }
+  return { uid: decoded.uid, authTimeSec };
 }
 
 export async function verifyFirebaseToken(req: Request): Promise<string | null> {

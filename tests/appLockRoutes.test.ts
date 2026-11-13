@@ -31,6 +31,10 @@ vi.mock('../src/server/lib/serverDb', () => ({
     exists: () => ref.col === 'user_vault_pin' && STORE !== null,
     data: () => STORE,
   }),
+  runTransaction: async (_db: any, fn: any) => fn({
+    get: async () => ({ exists: () => STORE !== null, data: () => STORE }),
+    set: (_ref: any, data: any) => { WRITES.push(data); STORE = { ...(STORE ?? {}), ...data }; },
+  }),
   setDoc: async (ref: any, data: any) => {
     if (ref.col !== 'user_vault_pin') return;
     WRITES.push(data);
@@ -47,11 +51,12 @@ vi.mock('../src/server/lib/serverDb', () => ({
 }));
 
 /** The account's contact, which decides whether a code can be emailed at all. */
+let FRESH_AUTH: { uid: string; authTimeSec: number | null } | null | undefined;
 let CONTACT = { email: 'owner@example.com', emailVerified: true, phone: null as string | null };
 vi.mock('../src/server/lib/authMiddleware', () => ({
   requireUserMatch: () => (_req: any, _res: any, next: any) => next(),
   trackDevice: () => (_req: any, _res: any, next: any) => next(),
-  verifyFreshAuth: async () => ({ uid: UID, authTimeSec: Math.floor(Date.now() / 1000) }),
+  verifyFreshAuth: async () => FRESH_AUTH === undefined ? ({ uid: UID, authTimeSec: Math.floor(Date.now() / 1000) }) : FRESH_AUTH,
   resolveAccountContact: async () => CONTACT,
 }));
 
@@ -92,6 +97,7 @@ beforeEach(() => {
   EMAIL_CONFIGURED = true;
   EMAIL_SENDS = 0;
   LAST_EMAIL = null;
+  FRESH_AUTH = undefined;
   CONTACT = { email: 'owner@example.com', emailVerified: true, phone: null };
 });
 
@@ -184,6 +190,26 @@ describe('POST /otp — sending the code', () => {
 
 describe('POST /pin — setting the PIN', () => {
   const setPin = () => handler('POST /api/app-lock/:userId/pin');
+
+  it.each(['stale', 'missing-proof', 'missing-session', 'foreign-proof'])('does not reset a phone-only PIN with %s', async kind => {
+    CONTACT = { email: null, emailVerified: false, phone: '+919876543210' };
+    seedPin(); const before = structuredClone(STORE);
+    FRESH_AUTH = kind === 'missing-session' ? null : {
+      uid: kind === 'foreign-proof' ? 'other-user' : UID,
+      authTimeSec: kind === 'missing-proof' ? null : Math.floor(Date.now() / 1000) - (kind === 'stale' ? 1800 : 0),
+    };
+    const res = mockRes();
+    await (await setPin())(mockReq({ params: { userId: UID }, body: { pin: '7392' } }), res);
+    expect(res.statusCode).toBe(401); expect(res.body.needsFreshSignIn).toBe(true);
+    expect(res.body.ticket).toBeUndefined(); expect(STORE).toEqual(before); expect(WRITES).toHaveLength(0);
+  });
+  it('allows a genuine recent phone sign-in to reset the PIN', async () => {
+    CONTACT = { email: null, emailVerified: false, phone: '+919876543210' };
+    seedPin(); FRESH_AUTH = { uid: UID, authTimeSec: Math.floor(Date.now() / 1000) };
+    const res = mockRes();
+    await (await setPin())(mockReq({ params: { userId: UID }, body: { pin: '7392' } }), res);
+    expect(res.statusCode).toBe(200); expect(res.body.ticket).toBeTruthy(); expect(WRITES).toHaveLength(1);
+  });
 
   it('refuses a weak PIN before anything else happens', async () => {
     const res = mockRes();

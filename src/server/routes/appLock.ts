@@ -23,20 +23,27 @@
  */
 import type { Express, Request, Response } from 'express';
 import { requireUserMatch, verifyFreshAuth, resolveAccountContact } from '../lib/authMiddleware';
-import { loadLockRecord, saveLockRecord } from '../lib/appLockStore';
+import { loadLockRecord, updateLockRecord } from '../lib/appLockStore';
+import { attemptPin, setPin, reserveOtp, type LockDecision } from '../lib/appLockTransitions';
 import { unlockSecret, mintUnlockTicket, UNLOCK_REFUSED_MESSAGE, TICKET_TTL_MS } from '../lib/vaultTicket';
 import { ticketFor } from '../lib/vaultTicketHttp';
 import { auditVault } from '../lib/vaultAudit';
 import {
-  hasPin, pinGate, afterWrongPin, afterCorrectPin,
-  pinRejectReason, newSalt, hashPin, matchesPin, newOtpCode, otpSendGate, afterOtpSent, otpCheck,
+  hasPin, pinGate,
+  pinRejectReason, newSalt, newOtpCode,
   otpDelivery, otpEmailMessage, otpEmailSubject, isFreshSignIn, OTP_RESEND_COOLDOWN_MS,
-  MAX_PIN_ATTEMPTS, type OtpPurpose, type VaultPinRecord,
+  MAX_PIN_ATTEMPTS, type OtpPurpose,
 } from '../lib/vaultPin';
 import { normaliseLockedAreas, effectiveLockedAreas, ticketAreaFrom } from '../../lib/appLockAreas';
 import { resolveEmailConfig, sendAlertEmail } from '../lib/alertEmail';
 import { routeParam, routeParams } from '../lib/expressCompat';
 
+function replyDecision(req: Request, res: Response, userId: string, now: number, decision: LockDecision): void {
+  if (decision.audit) auditVault(userId, decision.audit.action, decision.audit.details);
+  res.status(decision.status).json({ ...decision.body, ...(decision.grant ? {
+    ticket: mintUnlockTicket(userId, now, unlockSecret(), 'pin', ticketAreaFrom(req.body?.area)), method: 'pin', expiresInMs: TICKET_TTL_MS,
+  } : {}) });
+}
 export function registerAppLockRoutes(app: Express): void {
   /** The shape every screen reads. Never reveals the PIN, its hash, or a pending code. */
   app.get('/api/app-lock/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
@@ -99,13 +106,6 @@ export function registerAppLockRoutes(app: Express): void {
         return;
       }
 
-      const record = await loadLockRecord(userId);
-      const gate = otpSendGate(record, now);
-      if (!gate.allowed) {
-        res.status(429).json({ error: gate.reason, waitMs: gate.waitMs });
-        return;
-      }
-
       const cfg = resolveEmailConfig();
       if (!cfg.configured) {
         // NOT a silent failure and NOT a pretend send: the admin-facing reason is logged and the user is
@@ -118,7 +118,8 @@ export function registerAppLockRoutes(app: Express): void {
       const code = newOtpCode();
       // Stored BEFORE the send, so a code that does reach the inbox always has a hash to check it
       // against. The reverse order produces codes that are genuinely delivered and genuinely unusable.
-      await saveLockRecord(userId, afterOtpSent(record, code, purpose, now));
+      const reservation = await updateLockRecord(userId, record => reserveOtp(record, code, purpose, now));
+      if (reservation.status !== 200) { replyDecision(req, res, userId, now, reservation); return; }
 
       const sent = await sendAlertEmail({ ...cfg, to: [String(contact.email)] }, otpEmailMessage(code, purpose), {
         subject: otpEmailSubject(),
@@ -158,34 +159,17 @@ export function registerAppLockRoutes(app: Express): void {
 
       const contact = await resolveAccountContact(userId);
       const delivery = otpDelivery(contact);
-      let record = await loadLockRecord(userId);
-
-      if (delivery.channel === 'fresh-sign-in') {
-        // An account with no email proves itself by the mobile OTP it signs in with; `auth_time` in the
-        // SIGNED token is what we read, so this is not a claim the client can make on its own.
-        const fresh = process.env.VITEST ? { uid: userId, authTimeSec: Math.floor(now / 1000) } : await verifyFreshAuth(req);
-        if (!fresh || !isFreshSignIn(fresh.authTimeSec, now)) {
+      const freshChannel = delivery.channel === 'fresh-sign-in';
+      if (freshChannel) {
+        const fresh = await verifyFreshAuth(req);
+        if (!fresh || fresh.uid !== userId || !isFreshSignIn(fresh.authTimeSec, now)) {
           res.status(401).json({ error: 'Sign in again with your mobile number, then set your PIN.', needsFreshSignIn: true });
           return;
         }
-      } else {
-        const check = otpCheck(record, String(req.body?.otp ?? ''), now);
-        // The attempt is recorded either way — a wrong code that cost nothing to try is unlimited tries.
-        await saveLockRecord(userId, check.next);
-        record = check.next;
-        if (!check.ok) {
-          res.status(400).json({ error: check.reason });
-          return;
-        }
       }
-
       const salt = newSalt();
-      // A new PIN clears the lock-out too: the owner has just proved themselves through the account's own
-      // contact, which is strictly stronger proof than the PIN the counter was protecting.
-      const next = afterCorrectPin({ ...record, pinHash: hashPin(pin, salt), pinSalt: salt });
-      await saveLockRecord(userId, next);
-      auditVault(userId, hasPin(record) ? 'pin-reset' : 'pin-created', {});
-      res.json({ success: true, ticket: mintUnlockTicket(userId, now, unlockSecret(), 'pin', ticketAreaFrom(req.body?.area)), method: 'pin', expiresInMs: TICKET_TTL_MS });
+      const decision = await updateLockRecord(userId, record => setPin(record, { pin, salt, otp: String(req.body?.otp ?? ''), fresh: freshChannel, now }));
+      replyDecision(req, res, userId, now, decision);
     } catch (err) {
       console.error('[app-lock] set failed', err instanceof Error ? err.message : err);
       res.status(500).json({ error: 'Could not save your PIN just now. Please try again.' });
@@ -197,45 +181,9 @@ export function registerAppLockRoutes(app: Express): void {
     try {
       const { userId } = routeParams(req.params);
       const now = Date.now();
-      const record = await loadLockRecord(userId);
-      if (!hasPin(record)) {
-        res.status(409).json({ error: 'Set up your PIN first.', needsSetup: true });
-        return;
-      }
-
-      const gate = pinGate(record, now);
-      if (gate.locked) {
-        const mins = Math.ceil(gate.lockedForMs / 60_000);
-        res.status(429).json({
-          error: `Too many wrong PINs. Try again in ${mins} minute${mins === 1 ? '' : 's'}, or use "Forgot PIN".`,
-          lockedForMs: gate.lockedForMs,
-        });
-        return;
-      }
-
       const pin = String(req.body?.pin ?? '').trim();
-      if (!matchesPin(pin, record.pinSalt, record.pinHash)) {
-        const next = afterWrongPin(record, now);
-        // Awaited, and a write failure refuses the request: a lock-out counter that can be dropped is not
-        // a lock-out. See `saveRecord`.
-        await saveLockRecord(userId, next);
-        const after = pinGate(next, now);
-        auditVault(userId, 'pin-refused', { attempts_left: after.attemptsLeft });
-        if (after.locked) {
-          const mins = Math.ceil(after.lockedForMs / 60_000);
-          res.status(429).json({ error: `Too many wrong PINs. Your app lock is held for ${mins} minute${mins === 1 ? '' : 's'}.`, lockedForMs: after.lockedForMs });
-          return;
-        }
-        res.status(401).json({
-          error: `That PIN is not right. ${after.attemptsLeft} ${after.attemptsLeft === 1 ? 'try' : 'tries'} left before it locks for a while.`,
-          attemptsLeft: after.attemptsLeft,
-        });
-        return;
-      }
-
-      await saveLockRecord(userId, afterCorrectPin(record));
-      auditVault(userId, 'unlock', { unlock_method: 'pin' });
-      res.json({ ticket: mintUnlockTicket(userId, now, unlockSecret(), 'pin', ticketAreaFrom(req.body?.area)), method: 'pin', expiresInMs: TICKET_TTL_MS });
+      const decision = await updateLockRecord(userId, record => attemptPin(record, pin, now));
+      replyDecision(req, res, userId, now, decision);
     } catch (err) {
       console.error('[app-lock] unlock failed', err instanceof Error ? err.message : err);
       res.status(500).json({ error: UNLOCK_REFUSED_MESSAGE });
@@ -261,58 +209,15 @@ export function registerAppLockRoutes(app: Express): void {
     try {
       const { userId } = routeParams(req.params);
       const now = Date.now();
-      const record = await loadLockRecord(userId);
-      if (!hasPin(record)) {
-        res.status(409).json({ error: 'Set up your PIN first.', needsSetup: true });
-        return;
-      }
       const unlock = ticketFor(req, userId);
-      if (!unlock) {
-        res.status(401).json({ error: 'Enter your PIN to open App Lock before changing it.', needsUnlock: true });
-        return;
-      }
-      const gate = pinGate(record, now);
-      if (gate.locked) {
-        const mins = Math.ceil(gate.lockedForMs / 60_000);
-        res.status(429).json({ error: `Too many wrong PINs. Try again in ${mins} minute${mins === 1 ? '' : 's'}, or use "Forgot PIN".`, lockedForMs: gate.lockedForMs });
-        return;
-      }
-
+      if (!unlock) { res.status(401).json({ error: 'Enter your PIN to open App Lock before changing it.', needsUnlock: true }); return; }
       const currentPin = String(req.body?.currentPin ?? '').trim();
       const newPin = String(req.body?.newPin ?? '').trim();
-      // The NEW PIN is checked before the current one is compared, so a weak choice costs no attempt:
-      // the user is told "too easy" and keeps all five tries.
       const reject = pinRejectReason(newPin);
-      if (reject) {
-        res.status(400).json({ error: reject });
-        return;
-      }
-      if (!matchesPin(currentPin, record.pinSalt, record.pinHash)) {
-        const next = afterWrongPin(record, now);
-        await saveLockRecord(userId, next);
-        const after = pinGate(next, now);
-        auditVault(userId, 'pin-refused', { attempts_left: after.attemptsLeft, during: 'change' });
-        if (after.locked) {
-          const mins = Math.ceil(after.lockedForMs / 60_000);
-          res.status(429).json({ error: `Too many wrong PINs. Your app lock is held for ${mins} minute${mins === 1 ? '' : 's'}.`, lockedForMs: after.lockedForMs });
-          return;
-        }
-        res.status(401).json({
-          error: `Your current PIN is not right. ${after.attemptsLeft} ${after.attemptsLeft === 1 ? 'try' : 'tries'} left before it locks for a while.`,
-          attemptsLeft: after.attemptsLeft,
-        });
-        return;
-      }
-      if (newPin === currentPin) {
-        res.status(400).json({ error: 'Your new PIN is the same as the current one. Choose a different PIN.' });
-        return;
-      }
-
+      if (reject) { res.status(400).json({ error: reject }); return; }
       const salt = newSalt();
-      await saveLockRecord(userId, afterCorrectPin({ ...record, pinHash: hashPin(newPin, salt), pinSalt: salt }));
-      auditVault(userId, 'pin-changed', { unlock_method: unlock.method });
-      // A fresh ticket, so the screen the user is standing on stays open on the PIN they just chose.
-      res.json({ success: true, ticket: mintUnlockTicket(userId, now, unlockSecret(), 'pin', ticketAreaFrom(req.body?.area)), method: 'pin', expiresInMs: TICKET_TTL_MS });
+      const decision = await updateLockRecord(userId, record => attemptPin(record, currentPin, now, { pin: newPin, salt }));
+      replyDecision(req, res, userId, now, decision);
     } catch (err) {
       console.error('[app-lock] change failed', err instanceof Error ? err.message : err);
       res.status(500).json({ error: 'Could not change your PIN just now. Please try again.' });
@@ -338,21 +243,13 @@ export function registerAppLockRoutes(app: Express): void {
   app.put('/api/app-lock/:userId/areas', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
       const { userId } = routeParams(req.params);
-      const record = await loadLockRecord(userId);
-      if (!hasPin(record)) {
-        res.status(409).json({ error: 'Set up your PIN before choosing what to lock.', needsSetup: true });
-        return;
-      }
       const unlock = ticketFor(req, userId);
-      if (!unlock) {
-        res.status(401).json({ error: 'Enter your PIN to change what is locked.', needsUnlock: true });
-        return;
-      }
-
+      if (!unlock) { res.status(401).json({ error: 'Enter your PIN to change what is locked.', needsUnlock: true }); return; }
       const areas = normaliseLockedAreas(req.body?.areas);
-      await saveLockRecord(userId, { ...record, lockedAreas: areas });
-      auditVault(userId, 'lock-areas-changed', { areas, unlock_method: unlock.method });
-      res.json({ areas, effectiveAreas: effectiveLockedAreas(areas) });
+      const decision = await updateLockRecord<LockDecision>(userId, record => !hasPin(record)
+        ? { result: { status: 409, body: { error: 'Set up your PIN before choosing what to lock.', needsSetup: true } } }
+        : { next: { ...record, lockedAreas: areas }, result: { status: 200, body: { areas, effectiveAreas: effectiveLockedAreas(areas) }, audit: { action: 'lock-areas-changed', details: { areas, unlock_method: unlock.method } } } });
+      replyDecision(req, res, userId, Date.now(), decision);
     } catch (err) {
       console.error('[app-lock] areas update failed', err instanceof Error ? err.message : err);
       res.status(500).json({ error: 'Could not save your app lock settings just now. Please try again.' });

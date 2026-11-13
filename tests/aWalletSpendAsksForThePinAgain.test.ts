@@ -5,11 +5,30 @@
 // carries the area it was opened at, SIGNED, and a money area opens only for a ticket opened at it (or at the
 // Wallet & Billing screen that contains it). Every other area keeps the one-PIN behaviour. An older app,
 // which names no area, gets an unscoped ticket and keeps working — nobody is stranded before the new bundle.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
-import { mintUnlockTicket, verifyUnlockTicket } from '../src/server/lib/vaultTicket';
+import { mintUnlockTicket, verifyUnlockTicket, unlockSecret } from '../src/server/lib/vaultTicket';
 import { ticketOpensArea, ticketAreaFrom, MONEY_AREAS } from '../src/lib/appLockAreas';
+
+import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
+import { emptyPinRecord, writePinRecord, afterOtpSent, hashPin } from '../src/server/lib/vaultPin';
+import { UNLOCK_TICKET_HEADER } from '../src/server/lib/vaultTicketHttp';
+const lockState = vi.hoisted(() => ({ record: null as Record<string, unknown> | null }));
+vi.mock('../src/server/lib/serverDb', () => ({
+  getServerDb: () => ({}), doc: () => ({}),
+  getDoc: async () => ({ exists: () => lockState.record !== null, data: () => lockState.record }),
+  runTransaction: async (_db: unknown, run: any) => run({
+    get: async () => ({ exists: () => lockState.record !== null, data: () => lockState.record }),
+    set: (_ref: unknown, record: Record<string, unknown>) => { lockState.record = record; },
+  }),
+}));
+vi.mock('../src/server/lib/authMiddleware', () => ({
+  requireUserMatch: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  resolveAccountContact: async () => ({ email: 'synthetic@example.invalid', emailVerified: true, phone: null }),
+  verifyFreshAuth: async () => null,
+}));
+vi.mock('../src/server/lib/vaultAudit', () => ({ auditVault: vi.fn() }));
 
 const SECRET = 'test-secret';
 const NOW = 1_800_000_000_000;
@@ -62,11 +81,35 @@ describe('the ticket carries the area, signed', () => {
 });
 
 describe('the wiring', () => {
-  it('🔒 the money routes ask the same rule, and the unlock routes sign the area they were sent', () => {
-    const enforce = readFileSync('src/server/lib/appLockEnforce.ts', 'utf8');
-    expect(enforce).toContain('return ticket && ticketOpensArea(ticket.area, area) ? null : lockedRefusal(action);');
-    const routes = readFileSync('src/server/routes/appLock.ts', 'utf8');
-    expect(routes.match(/mintUnlockTicket\(userId, now, unlockSecret\(\), 'pin', ticketAreaFrom\(req\.body\?\.area\)\)/g)?.length).toBe(3);
+  it('all three successful handlers sign the requested area and a Settings ticket cannot spend wallet funds', async () => {
+    const { registerAppLockRoutes } = await import('../src/server/routes/appLock');
+    const { appLockBlocks } = await import('../src/server/lib/appLockEnforce');
+    const handlers = captureRoutes(registerAppLockRoutes as any);
+    const uid = 'synthetic-ticket-owner', pin = '8274', newPin = '3682', otp = '738194';
+    for (const action of ['pin', 'unlock', 'pin/change']) {
+      for (const area of ['settings', 'wallet_recharge']) {
+        const now = Date.now();
+        const base = { ...emptyPinRecord(), pinSalt: 'synthetic-salt', pinHash: hashPin(pin, 'synthetic-salt'), lockedAreas: ['api_keys', 'wallet_recharge'] };
+        lockState.record = writePinRecord(action === 'pin' ? afterOtpSent(base, otp, 'reset', now) : base);
+        const req = mockReq({ params: { userId: uid }, body: { pin, otp, currentPin: pin, newPin, area },
+          headers: { [UNLOCK_TICKET_HEADER]: mintUnlockTicket(uid, now, unlockSecret(), 'pin', 'settings') } });
+        const res = mockRes();
+        await handlers.get('POST /api/app-lock/:userId/' + action)!(req, res);
+        expect(res.statusCode, action + ':' + area).toBe(200);
+        const ticket = res.body?.ticket;
+        expect(typeof ticket).toBe('string');
+        expect(verifyUnlockTicket(ticket, uid, Date.now(), unlockSecret())).toEqual({ method: 'pin', area });
+        const spend = mockReq({ headers: { [UNLOCK_TICKET_HEADER]: ticket } });
+        const refusal = await appLockBlocks(spend as any, uid, 'wallet-recharge');
+        if (area === 'settings') expect(refusal?.status, action).toBe(401);
+        else expect(refusal, action).toBeNull();
+        // A successful handler's signed scope cannot be relabelled to bypass the money gate.
+        if (area === 'settings') {
+          const forged = ticket.replace('.settings.', '.wallet_recharge.');
+          expect(verifyUnlockTicket(forged, uid, Date.now(), unlockSecret())).toBeNull();
+        }
+      }
+    }
   });
 
   it('🔒 the gates ask it too, so a wallet gate after a Settings PIN shows the keypad instead of an open door', () => {

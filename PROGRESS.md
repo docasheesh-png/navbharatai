@@ -101513,3 +101513,13 @@ is what keeps simple games light.
 **NOT done — stated plainly:** no joints; **no character controller (stage B) and no vehicle controller (stage C)** — a walking player or a car is not physical
 because of this; no buoyancy; nothing seen in a browser; **no mobile Chromium, Capacitor WebView or iOS evidence at all** — no mobile claim is made; determinism is
 not claimed across devices; the measurements are from Node on a busy machine (docs table), not a phone; nothing auto-seeds the recipe.
+
+**Gate note, physics change (2026-11-13).** The first full `test:coverage` run on it had 5 failures: `br1955Prevention` (the known one that also fails on a clean
+`origin/main`); `recipeDependencyMetadata` (mine — its expected list of declared package versions did not know the physics recipe declares
+`@dimforge/rapier3d-compat@0.21.0`; updated, with a comment saying why); and `builderLoop.test.ts` x3 (ALSO mine, and a real find): that test sends the whole
+218-tool catalog with a tiny system prompt and requires the conservative byte estimate (not tokens) to fit under 200,000 minus 8,192; it passes on clean `main`
+with about 9 KB to spare and my five recipes' tool descriptions (8.7 KB) used it all, so every turn failed with "The build engine is temporarily unavailable".
+Production sends a slimmer list, so no real build was affected — but the budget is real. Fixed at its root on my side by shortening the five descriptions to what the
+model needs (each recipe's own instructions carry the detail), without touching the test; headroom is now 3,193 bytes. The brittleness itself (any new tool
+burns it) is OPEN as **Q-2661**. While measuring I also ran a careless `git stash` / `git checkout` sequence that detached the checkout for a moment; it was restored
+immediately (branch, HEAD and an empty stash verified) and nothing was lost.

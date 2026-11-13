@@ -33,6 +33,8 @@ describe('recipe dependency metadata, without regenerating unused kit instructio
     const expected = declaredVersions(before);
     expect([...expected]).toEqual([
       ['three', { version: '^0.180.0', dev: false }],
+      // generate_game_physics (2026-11-13): the Rapier physics engine, pinned exactly because its WASM API is not caret-stable
+      ['@dimforge/rapier3d-compat', { version: '0.21.0', dev: false }],
       ['@types/three', { version: '^0.180.0', dev: true }],
     ]);
     expect(recipeDependencyVersions()).toEqual(expected);

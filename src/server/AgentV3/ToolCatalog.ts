@@ -2249,19 +2249,12 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'generate_game_economy',
       description:
-        'Add the MONEY half of a tycoon / shop / restaurant / farm / business game: a till, a stock room, '
-        + 'shelves, wholesale orders, prices, upgrades, daily rent and wages, customers who decide, earnings '
-        + 'while away, and a validated save. Emits src/game/economy as PURE arithmetic (no three.js, no import '
-        + 'from another game layer), so it works in a 2D game and in the 3D shell alike; the game layer only '
-        + 'DRAWS customers and shelves and calls sell / serveCustomer. IT ENCODES THE RULES A HAND-WRITTEN '
-        + 'VERSION GETS WRONG — do not reimplement them: money is an INTEGER number of minor units (floats '
-        + 'drift); a spend is one atomic check-and-debit so cash never goes negative; an order the stock room '
-        + 'cannot hold is refused BEFORE it is paid, and carries a request id so a double tap cannot buy twice; '
-        + 'customers buy only what is ON THE SHELF; demand falls as the price rises and is zero at 3x the fair '
-        + 'price, so the pricing screen is a real decision; unpaid expenses become debt; offline earnings are '
-        + 'capped, halved and charged rent so being away is never free money; a corrupt save is a new game, '
-        + 'never NaN. Use it for any game whose heart is running a business. Be honest in the summary that the '
-        + 'save lives on the player\'s device.',
+        'Add the MONEY half of a tycoon / shop / business game: till, stock room, shelves, wholesale orders, prices, upgrades, daily rent and wages, customers who decide, earnings while away, a validated save. '
+        + 'Emits src/game/economy as PURE arithmetic (no three.js), usable in 2D and 3D; the game draws and calls sell / serveCustomer. '
+        + 'Rules it encodes — do not reimplement: money is an INTEGER number of minor units; a spend is one atomic check-and-debit (cash never negative); '
+        + 'an order the stock room cannot hold is refused BEFORE it is paid and carries a request id (no double buy); customers buy only what is ON THE SHELF; '
+        + 'demand falls as price rises (zero at 3x); unpaid expenses become debt; offline earnings are capped, halved and charged rent; a corrupt save is a new game. '
+        + 'Say honestly that the save lives on the player\'s device.',
       input_schema: {
         type: 'object',
         properties: {
@@ -2276,21 +2269,11 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'generate_game_shopsim',
       description:
-        'Add the PEOPLE of a shop / supermarket / restaurant game: customers who walk in, go to the shelf of what '
-        + 'they chose, take it, join the shortest queue, wait (and leave if it takes too long) and pay at a counter, '
-        + 'plus staff — cashiers who serve and stockers who carry units from the stock room to the shelves. Call '
-        + 'generate_game_economy first (this brings it if missing). Emits src/game/shop as a grid SIMULATION with no '
-        + 'drawing in it: the game calls update(dt) from the fixed step and DRAWS each person from snapshot() — three.js, '
-        + 'canvas or DOM, it does not matter — and never keeps positions of its own. IT ENCODES THE RULES A '
-        + 'HAND-WRITTEN VERSION GETS WRONG — do not reimplement them: every unit has exactly ONE place (shelf, stock '
-        + 'room, a customer\'s hand, or sold) — picking takes it off the shelf at that moment so two customers cannot '
-        + 'take the last one, and an abandoned or refused cart is put back, so stock never vanishes or appears; money '
-        + 'moves only at a counter while a cashier or the player (setPlayerAt) is serving it, so with nobody serving the '
-        + 'queue builds, customers give up and reputation falls; the crowd, queue, grid and every path search are '
-        + 'capped; two stockers never fetch the same shelf; and problems() NAMES a layout fault (a product with no '
-        + 'shelf, a shelf behind a wall, a counter with no route to the exit) instead of leaving a customer frozen in '
-        + 'a doorway. Build the economy with autoCustomers: false — this brings the customers. People are not saved: '
-        + 'the floor starts empty on load.',
+        'Add the PEOPLE of a shop game: customers who walk to a shelf, pick, queue and pay, plus cashiers and stockers. Call generate_game_economy first (this brings it). '
+        + 'Emits src/game/shop as a grid SIMULATION with no drawing: call update(dt) from the fixed step and DRAW each person from snapshot(); never keep positions of your own. '
+        + 'Rules it encodes — do not reimplement: every unit has exactly ONE place (shelf, stock room, a customer\'s hand, or sold), so stock never vanishes or appears and two customers cannot take the last one; '
+        + 'money moves only at a counter while a cashier or the player (setPlayerAt) serves it; crowd, queue, grid and path searches are capped; problems() NAMES a layout fault '
+        + '(no shelf, a shelf behind a wall, no route to the exit). Build the economy with autoCustomers: false. People are not saved.',
       input_schema: {
         type: 'object',
         properties: {
@@ -2305,19 +2288,10 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'generate_game_manager',
       description:
-        'Add the MANAGEMENT SCREEN of a shop / tycoon game: the React panel where the player runs the business — '
-        + 'Overview (cash, day, reputation, debt, recent days with profit), Stock (shelf and stock-room counts, order '
-        + 'sizes with their real bulk price, fill shelf, raise or lower each price with what customers think of it), '
-        + 'Staff (hire a cashier or stocker, let them go) and Upgrades. Call generate_game_economy first (and '
-        + 'generate_game_shopsim for the Staff tab); this brings what it imports. Emits src/game/manager: a pure '
-        + 'view-model plus <ManagerPanel economy shop onClose />. IT ENCODES THE RULES A HAND-WRITTEN SCREEN GETS '
-        + 'WRONG — do not reimplement them: every button calls ONE action on the economy or the shop (createActions) — '
-        + 'never console.log or state the economy does not own; a button is disabled with a REASON that names the '
-        + 'number ("Not enough cash — this costs ₹3,600 and you have ₹1,200"), computed by the same check the action '
-        + 'runs, so a button never says yes to something that then fails; the numbers refresh on a timer that is '
-        + 'cleaned up on unmount; the Staff tab appears only when the game has the shop simulation to hire into. '
-        + 'Missions and rewards are NOT part of it — do not add a tab for something that does not exist. Style it with '
-        + 'the --mgr-* CSS variables.',
+        'Add the MANAGEMENT SCREEN of a shop game: <ManagerPanel economy shop onClose /> with Overview, Stock, Staff and Upgrades. Call generate_game_economy first (and generate_game_shopsim for Staff). '
+        + 'Emits src/game/manager: a pure view-model plus the React panel, styled with --mgr-* CSS variables. Rules it encodes — do not reimplement: every button calls ONE action '
+        + 'on the economy or the shop (createActions), never console.log; a disabled button carries a REASON that names the numbers, computed by the same check the action runs, so a button never says yes to what then fails; '
+        + 'numbers refresh on a timer cleaned up on unmount; the Staff tab appears only when the game has the shop simulation. Missions and rewards are NOT part of it — do not add a tab for them.',
       input_schema: {
         type: 'object',
         properties: {
@@ -2332,18 +2306,11 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'generate_game_royale',
       description:
-        'Add the MATCH of a battle-royale / last-one-standing game — SINGLE-PLAYER against bots (there is no online multiplayer): a '
-        + 'safe circle that SHRINKS on a schedule and hurts anyone outside it, loot scattered over the map, bots that loot, run for '
-        + 'the circle and shoot each other and the player, unique ranks, kills and a match that always ENDS. Emits src/game/royale as '
-        + 'a pure simulation (no drawing, no three.js, no import from another game layer): the game moves the player, steps the '
-        + 'match with update(dt), DRAWS from snapshot() and reports the player\'s shots with hitBot(botId, damage); weapons, aim and '
-        + 'camera are the shooter kit (generate_game_systems). IT ENCODES THE RULES A HAND-WRITTEN ROYALE GETS WRONG — do not '
-        + 'reimplement them: the zone only shrinks, each new circle lies inside the last and is announced before it closes, and after '
-        + 'its last circle it holds and then closes to nothing, so a match cannot stall for ever; loot pickup is atomic (the inventory '
-        + 'is asked first; a full one leaves the item on the ground and says why), so an item is never lost or duplicated; a rank is '
-        + 'the number alive at the moment of death — unique, 1 = last one standing; armor soaks 60% of a hit; death is recorded once; '
-        + 'the bots use the shooter kit\'s weapon numbers and hit less the farther they are. Be honest in the summary: the bots are '
-        + 'simple (no cover, vehicles or building interiors) and it is not PUBG or Free Fire — no name, logo or character of those games.',
+        'Add the MATCH of a battle-royale game — SINGLE-PLAYER against bots (no online multiplayer): a safe circle that SHRINKS and hurts anyone outside it, loot, bots that loot / run for the circle / fight, ranks and kills. '
+        + 'Emits src/game/royale as a pure simulation: the game moves the player, calls update(dt), DRAWS from snapshot() and reports the player\'s shots with hitBot(botId, damage); weapons are generate_game_systems. '
+        + 'Rules it encodes — do not reimplement: the zone only shrinks, each circle lies inside the last and is announced first, and it closes to nothing so a match always ENDS; '
+        + 'loot pickup is atomic (a full inventory leaves the item and says why); a rank is the number alive at death — unique, 1 = last standing; armor soaks 60%; death is recorded once. '
+        + 'Be honest: the bots are simple, and it is not PUBG or Free Fire — use none of their names, logos or characters.',
       input_schema: {
         type: 'object',
         properties: {
@@ -2358,22 +2325,12 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'generate_game_physics',
       description:
-        'Add REAL RIGID-BODY PHYSICS to a game, on Rapier 3D (@dimforge/rapier3d-compat, loaded lazily): dynamic, static and '
-        + 'kinematic bodies; box, sphere, capsule, cylinder, convex and (static-only) triangle-mesh colliders; mass, friction, '
-        + 'restitution, damping; collision groups and masks; collision events; trigger volumes; raycasts; pause, reset and '
-        + 'snapshots; a development-only debug view. Emits src/game/physics. Three.js still draws; Rapier simulates; '
-        + 'PhysicsBinding copies interpolated transforms across. Use it ONLY when the request needs real physics (objects that '
-        + 'fall, topple, stack and bounce, triggers, physical props) — not for a tycoon, card, puzzle or ordinary arcade game, '
-        + 'and never "just in case". THIS STAGE HAS NO CHARACTER CONTROLLER AND NO VEHICLE CONTROLLER: do not describe a walking '
-        + 'player or a car as physical because of it — the kit\'s own controller and driveVehicle stay as they are. IT ENCODES THE '
-        + 'RULES A HAND-WRITTEN INTEGRATION GETS WRONG — do not reimplement them: the world steps in FIXED slices from the frame '
-        + 'time with a bounded catch-up and a clamped frame (dropped time is counted and announced as lagging), so it behaves the '
-        + 'same at 30, 60 and 144 fps; draw through the binding (interpolated), never by setting a dynamic body\'s mesh position; '
-        + 'create() never throws — if the WASM cannot load, physics.available is false with a reason and every call is a safe '
-        + 'no-op, so keep the procedural movement as the fallback; addBody validates every number and refuses with a reason '
-        + '(NaN, negative or huge sizes, a duplicate id, the body and collider limits, a triangle mesh on a moving body); '
-        + 'events are delivered after the step; removeBody, reset and dispose free native memory. Be honest in the summary: '
-        + 'determinism holds on one device, not across all of them, and it has not been measured on a physical phone yet.',
+        'Add REAL RIGID-BODY PHYSICS on Rapier 3D (@dimforge/rapier3d-compat, loaded lazily): bodies, box / sphere / capsule / cylinder / convex / static-mesh colliders, collision groups, events, trigger volumes, raycasts, snapshots, a dev-only debug view. Emits src/game/physics; '
+        + 'Three.js draws, Rapier simulates. Use it ONLY when the request needs real physics (things that fall, topple, stack, bounce) — not for a tycoon, card, puzzle or ordinary arcade game, never just in case. '
+        + 'THIS STAGE HAS NO CHARACTER CONTROLLER AND NO VEHICLE CONTROLLER: do not call a walking player or a car physical because of it. '
+        + 'Rules it encodes — do not reimplement: the world steps in FIXED slices with bounded catch-up and a clamped frame, so it behaves the same at 30, 60 and 144 fps; draw through PhysicsBinding (interpolated); '
+        + 'create() never throws — if the WASM cannot load, physics.available is false and every call is a safe no-op, so keep the procedural movement as the fallback; addBody validates and refuses with a reason; '
+        + 'removeBody, reset and dispose free native memory. Be honest: determinism holds on one device only, and nothing has been measured on a phone.',
       input_schema: {
         type: 'object',
         properties: {

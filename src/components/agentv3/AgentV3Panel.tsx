@@ -53,7 +53,7 @@ import { rememberPublishIntent, takePublishIntent, browserIntentStore } from '..
 import { getStoredMotionMode, resolveReduceMotion, systemPrefersReducedMotion } from '../../lib/a11y';
 import { authedFetch } from '../../lib/authedFetch';
 const ConnectedServices = lazy(() => import('./ConnectedServices').then((m) => ({ default: m.ConnectedServices })));
-import { importProjectArchive, importProjectFolder, importSingleHtml, pickProjectFolder, type MasterImportResult } from '../../lib/masterZipImport';
+import { importProjectArchive, importProjectFolder, importSingleHtml, importLanded, pickProjectFolder, type MasterImportResult } from '../../lib/masterZipImport';
 import { resolveImportWorkspaceId, importTargetUnavailableMessage } from './zipImportTarget';
 import { chatHoldsAnApp, appFileCount, importOpenedNewChatNote } from '../../lib/projectImportTarget';
 import { combineScreenshotPrompt } from '../../lib/screenshotPrompt';
@@ -2079,6 +2079,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     try {
       const result = await run(landIn, (p) => setZipProgress(p.label));
       if (!result) return; // the user cancelled the picker — a normal outcome, not a failure
+      // NOTHING SAVED IS NOT "IMPORTED" (single-file game autopsy, 2026-11-14): with every upload batch failed the old code still
+      // wrote "✅ Imported", painted the files into Files and booted a preview over an empty workspace. Say what happened, stop.
+      if (!importLanded(result)) {
+        setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ “${result.fileName}” was NOT imported — nothing was saved to your workspace.${result.dropSummary ? `\n\n${result.dropSummary}` : ''}`, ts: Date.now() }]);
+        return;
+      }
       // The session now HAS a workspace, even though no build ran — without this, Publish and Report stay
       // disabled on a fresh chat over an app that is right there in the preview (agentV3Reducer.adoptWorkspace).
       adoptWorkspace(targetWorkspaceId);

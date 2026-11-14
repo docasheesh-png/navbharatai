@@ -1464,6 +1464,39 @@ export function stateDoorControls(source: string): string[] {
   return out;
 }
 
+/**
+ * 🔴 AUTOPSY e41fdb21: a form is judged as ONE unit (its fields AND its submit), but two components can
+ * share field ids (`note-title`). `NoteEditor` (rendered only after a note is selected) came first in the
+ * page's imports, so its "Save Changes" was paired with the fields of the always-visible `NewNoteForm`;
+ * the fields were found, the button never was, and the journey ended UNREACHABLE — the app's real
+ * create-and-persist journey was never run. A component the page renders only behind a condition
+ * (`x && <Tag/>`, `x ? <Tag/> : …`) is tried AFTER the ones it always renders. Never dropped: a form
+ * opened by a control is real, and `openControls` reaches it. Pure.
+ */
+export function renderedOnlyBehindACondition(pageSource: string, componentPath: string, page: string, files: Record<string, string>): boolean {
+  const names = new Set<string>();
+  for (const m of pageSource.matchAll(/\bimport\s+([A-Za-z_$][\w$]*)\s*(?:,\s*\{[^}]*\})?\s*from\s*["']([^"']+)["']/g)) {
+    if (resolveLocalImport(page, m[2], files) === componentPath) names.add(m[1]);
+  }
+  for (const m of pageSource.matchAll(/\bimport\s*(?:[A-Za-z_$][\w$]*\s*,\s*)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
+    if (resolveLocalImport(page, m[2], files) !== componentPath) continue;
+    for (const part of m[1].split(',')) {
+      const alias = /^\s*[\w$]+\s+as\s+([\w$]+)\s*$/.exec(part)?.[1] ?? /^\s*([\w$]+)\s*$/.exec(part)?.[1];
+      if (alias) names.add(alias);
+    }
+  }
+  let used = 0;
+  let guarded = 0;
+  for (const name of names) {
+    for (const m of pageSource.matchAll(new RegExp(`<${name}\\b`, 'g'))) {
+      used++;
+      const before = pageSource.slice(Math.max(0, (m.index ?? 0) - 80), m.index ?? 0);
+      if (/(?:&&|\?|:)\s*\(?\s*$/.test(before)) guarded++;
+    }
+  }
+  return used > 0 && guarded === used;
+}
+
 export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
   const files = appOwnFiles(input?.files ?? {});
   const routes = input?.routes ?? [];
@@ -1491,7 +1524,9 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     let submit: Target | null = null;
     let formPath = '';
     let credential = false;
-    for (const candidate of formSourcesFor(path, files)) {
+    const sources = formSourcesFor(path, files);
+    const behind = (c: { path: string; source: string }): number => (c.path !== path && renderedOnlyBehindACondition(files[path] ?? '', c.path, path, files) ? 1 : 0);
+    for (const candidate of [...sources].sort((a, b) => behind(a) - behind(b))) {
       if (usedForms.has(candidate.path)) continue;
       const tags = formFields(candidate.source).filter(({ tag }) => !(game && isGameSettingField(tag)));
       if (tags.length === 0) continue;

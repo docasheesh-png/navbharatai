@@ -101531,3 +101531,12 @@ Added explicit game subject/role/animation planning with existing genre scenery 
 
 ## 2026-11-13 — Eleven CC0 models, local browser admission
 Resolved the environment renderer blocker using official Chrome-for-Testing headless shell. All11candidate source/resource/license and derived hashes checked; actual render/texture proof passed, walking/running motion for4characters. Added47-model reviewed catalogue candidate, exact-subject locomotion selection, library categories, reproducible source derivation and normal seed/cache/local production-artifact acceptance. Original all11scene exceeded draw-call ceiling; bounded1character+7static fixture kept the original ceiling. No user-device FPS, completed-map, cloud transport, rollout or production deployment claim. See library-admission evidence; final CI/review still required.
+
+## 2026-11-14 — SEO and Google Play ASO baseline
+
+Created a clean worktree from `origin/main` for the requested SEO/ASO audit because the original checkout was dirty and behind the production branch. Source and public-page inspection confirmed that server-rendered marketing pages, canonical metadata, social cards, JSON-LD, robots, sitemap and crawler regressions already exist on current `main`; this work deliberately does not duplicate them. A factual Android `MobileApplication` JSON-LD node now links the existing Organization/WebSite graph to the published package and Play listing without ratings, price, or feature claims. `docs/SEO_ASO_BASELINE_2026-11-14.md` records evidence, severity-ranked findings, account-dependent blockers, keyword measurement plan, 90-day roadmap, and ready-to-upload English (India) and Hindi (India) Play listing copy. No Search Console, GA4, Play Console, production runtime, listing upload, app bundle, PR, merge or deployment is claimed; those require external authorization or an explicit release request.
+
+
+## 2026-11-14 — PR 4200 reconciliation with current main
+
+Preserved main’s game template imports and actual racingTrackIndex(trackName) selection instead of restoring the stale single-track constant. Preserved the stacked SEO/ASO work from PR 4201. Corrected applicationSuite to the Schema.org Text value in both static and server JSON-LD and locked parity/type in regression tests. Corrected the ASO draft length labels and shortened its English short description; no Play Console upload was performed. Full local CI on this final reconciled tree remains required; previous interrupted tests are not a passing gate, and merge or deployment is not claimed.

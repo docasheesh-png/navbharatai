@@ -51,6 +51,8 @@ export const OFFICIAL_LOGO_URL = 'https://navbharatai.com/logo.png';
 
 /** The public Google Play listing (src/lib/appDownload.ts PUBLIC_LISTING_URL — same value). */
 export const PLAY_LISTING_URL = 'https://play.google.com/store/apps/details?id=com.navbharat.ai';
+/** Android package published on the Google Play listing above. */
+export const ANDROID_APPLICATION_ID = 'com.navbharat.ai';
 
 /**
  * OFFICIAL SOCIAL PROFILES. ⚠️ TODO(owner): EMPTY ON PURPOSE — no official profile URL exists anywhere

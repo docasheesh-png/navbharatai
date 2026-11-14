@@ -363,6 +363,9 @@ import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
+import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
+import { athreeMapIntent } from '../lib/athreeMap/athreeMapIntent';
+import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
@@ -9617,6 +9620,20 @@ export class ToolDispatcher {
         const gsyLayers = await this.addMissingRecipeLayers(gsy.files, agent);
         this.scheduleCheckpoint('gameplay systems');
         return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}${gsyLayers}`;
+      }
+
+      case 'generate_athree_map': {
+        // THE ATHREE MAP (docs/game-engine/athree-map-plan.md). The recipe decides from the REQUEST, so the builder cannot put a world
+        // under an app that has none, cannot override a user's "not Athree", and cannot swap a project's map on an edit.
+        if (!athreeMapEnabled()) refuse('The Athree map is not switched on for this build, so it cannot be added. Build the world without it and say so plainly in the summary.');
+        const athreeStored = await this.actuator.readFile(this.workspaceId, 'src/game/athree/index.ts').then(() => ({ mapId: 'athree' }), () => null);
+        const athreeDecision = athreeMapIntent({ prompt: this.coverageRequest ?? this.userRequest ?? '', stored: athreeStored, seedKey: this.workspaceId });
+        if (!athreeDecision.use) refuse(`The Athree map is not used here: ${athreeDecision.reason} Build without it.`);
+        const ath = generateAthreeMap();
+        const athWritten = await this.writeRecipeFiles(ath.files, agent);
+        const athLayers = await this.addMissingRecipeLayers(ath.files, agent);
+        this.scheduleCheckpoint('athree map');
+        return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${ath.instructions}${athLayers}`;
       }
 
       case 'generate_game_shell': {

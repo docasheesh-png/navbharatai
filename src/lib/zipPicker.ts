@@ -134,6 +134,19 @@ export function isHtmlPagePick(file: { name?: string; type?: string } | null | u
   return /\.html?$/i.test(String(file.name ?? '')) || String(file.type ?? '').toLowerCase() === 'text/html';
 }
 
+/** A page this big, picked through "Choose file", is a PROJECT, not a question about a file. */
+export const ATTACHED_PAGE_IMPORT_BYTES = 200 * 1024;
+
+/**
+ * Should a whole HTML page picked as an ATTACHMENT be imported instead? (single-file game autopsy, 2026-11-14.) A user who chose a 5 MB
+ * game through "Choose file" got a code review of it back — the attachment path reads the file and answers about it, and never opens
+ * it in Files, the IDE or the preview. A page this size is an app the user brought, so it goes the way an import goes. A small page
+ * stays an ordinary attachment (a snippet to ask about). PURE.
+ */
+export function shouldImportAttachedPage(file: { name?: string; type?: string; size?: number } | null | undefined): boolean {
+  return isHtmlPagePick(file) && Number(file?.size ?? 0) >= ATTACHED_PAGE_IMPORT_BYTES;
+}
+
 /** The `accept` for the project-import input: archives as before, plus a single HTML page. */
 export function projectAccept(userAgent?: string): string {
   if (pickerIgnoresExtensions(userAgent)) return '*/*';

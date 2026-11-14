@@ -91,7 +91,7 @@ import { deployBlockedReason } from '../../lib/deployGuard';
 import { simplifyHealthLines } from '../../lib/buildHealthDisplay';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
-import { acceptZipPick, notZipMessage, isHtmlPagePick } from '../../lib/zipPicker';
+import { acceptZipPick, notZipMessage, isHtmlPagePick, shouldImportAttachedPage } from '../../lib/zipPicker';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId, takeRemixHandoff } from './v3SessionContinuity';
 import { showColdStart } from './coldStartPolicy';
@@ -1719,7 +1719,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // limits and explain every rejected item instead of silently slicing at eight.
   const addFiles = (list: FileList | null) => {
     if (!list) return;
-    const staged = stageAttachmentFiles(files, Array.from(list));
+    // A whole HTML page of app size is a project the user brought, not a file to ask about: import it (Files, IDE, Preview) instead of
+    // staging it as an attachment the model would read and review (single-file game autopsy, 2026-11-14).
+    const picked = Array.from(list);
+    const pages = picked.filter((f) => shouldImportAttachedPage(f));
+    if (pages.length > 0) {
+      setUserMsgs((c) => [...c, { role: 'agent', text: `📄 "${pages[0].name}" is a whole page, so I am opening it as a project (Files, IDE and Preview) instead of reading it as an attachment. Your message stays in the box — send it once the import finishes.`, ts: Date.now() }]);
+      void handleZipProject(pages[0]);
+    }
+    const staged = stageAttachmentFiles(files, picked.filter((f) => !pages.includes(f)));
     if (staged.rejected.length > 0) {
       setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${staged.rejected.map((r) => r.reason).join('\n')}`, ts: Date.now() }]);
     }

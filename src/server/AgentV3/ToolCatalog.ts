@@ -2327,7 +2327,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       description:
         'Add REAL RIGID-BODY PHYSICS on Rapier 3D (@dimforge/rapier3d-compat, loaded lazily): bodies, box / sphere / capsule / cylinder / convex / static-mesh colliders, collision groups, events, trigger volumes, raycasts, snapshots, a dev-only debug view. Emits src/game/physics; '
         + 'Three.js draws, Rapier simulates. Use it ONLY when the request needs real physics (things that fall, topple, stack, bounce) — not for a tycoon, card, puzzle or ordinary arcade game, never just in case. '
-        + 'THIS STAGE HAS NO CHARACTER CONTROLLER AND NO VEHICLE CONTROLLER: do not call a walking player or a car physical because of it. '
+        + 'It includes a walking, jumping CHARACTER (addCharacter: slopes, steps, walls, snap-to-ground, coyote time, jump buffer, moving platforms) but NO VEHICLE CONTROLLER yet: do not call a car physical because of it. '
         + 'Rules it encodes — do not reimplement: the world steps in FIXED slices with bounded catch-up and a clamped frame, so it behaves the same at 30, 60 and 144 fps; draw through PhysicsBinding (interpolated); '
         + 'create() never throws — if the WASM cannot load, physics.available is false and every call is a safe no-op, so keep the procedural movement as the fallback; addBody validates and refuses with a reason; '
         + 'removeBody, reset and dispose free native memory. Be honest: determinism holds on one device only, and nothing has been measured on a phone.',
@@ -2337,7 +2337,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: config, world, sync, index. Default = all. A module always brings the modules it imports.',
+            description: 'Optional subset: config, character, world, sync, index. Default = all. A module always brings the modules it imports.',
           },
         },
       },

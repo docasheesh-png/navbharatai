@@ -101540,3 +101540,38 @@ Created a clean worktree from `origin/main` for the requested SEO/ASO audit beca
 ## 2026-11-14 — PR 4200 reconciliation with current main
 
 Preserved main’s game template imports and actual racingTrackIndex(trackName) selection instead of restoring the stale single-track constant. Preserved the stacked SEO/ASO work from PR 4201. Corrected applicationSuite to the Schema.org Text value in both static and server JSON-LD and locked parity/type in regression tests. Corrected the ASO draft length labels and shortened its English short description; no Play Console upload was performed. Full local CI on this final reconciled tree remains required; previous interrupted tests are not a passing gate, and merge or deployment is not claimed.
+
+---
+
+## 2026-11-14 — PHYSICS, STAGE B: the character controller (`generate_game_physics`, `physics.addCharacter`)
+
+**Order the admin gave** ("physics character controller shuru karo"): stage B of the Rapier work. Stage C (the vehicle controller) is NOT started.
+
+**What shipped.** `src/game/physics/character.ts` (`PhysicsCharacter`) and `PhysicsWorld.addCharacter / character(id)`: a capsule on a kinematic body moved by
+Rapier's own `KinematicCharacterController` (API names verified against the package's typings). The game calls `setMove(vx, vz)` (world-space m/s — it owns the
+camera and input), `jump()`, `teleport()` and reads `state()`; the world steps characters inside the fixed timestep, so behaviour is frame-rate independent and the
+drawn position is interpolated like any body. It slides along walls, climbs slopes up to `maxSlopeClimbDeg`, steps over ledges up to `autostepHeight`, follows the ground
+down small drops (`snapToGround`), jumps with coyote time and a jump buffer, steers in the air by `airControl`, rides kinematic platforms and lifts, pushes dynamic bodies,
+respects collision groups, and walks INTO trigger volumes. It is validated like any body (19 kinds of bad spec refused), counts toward the body and collider limits, is
+saved in snapshots (snapshot format is now version 2; input included), and is freed on remove / reset / dispose. Events: `character_jumped`, `character_landed { id, speed }`.
+The kit's own `generate_game_controller` is unchanged and remains the right choice for a game WITHOUT a physics world.
+
+**Root causes found by running it against the real engine — three real bugs of mine, none visible to a read-through:**
+1. A constant small downward request (gravity every step while standing) makes Rapier's controller return ZERO horizontal movement for one step about every half second —
+   a flat walk lost ~3% of its distance and, with my first "reduce velocity to the movement achieved" logic, stopped dead and re-accelerated. Fixed at the root: gravity only in the
+   air; the controller's own snap holds the character down. The walk test now asserts the exact distance (5.8875 m for 3 m/s over 2 s) so it cannot return.
+2. My wall logic compared the movement achieved with the movement asked for, so a climbable steep slope (65 degrees, allowed up to 75) looked like a wall and the character
+   crawled at ~0.5 m/s. Fixed: only the velocity component pushing into a surface STEEPER than the character's own climb limit is removed (by contact normal).
+3. A sensor volume was a solid wall to the controller, so a character could never walk into a trigger; and a static sensor only sees a kinematic body if BOTH colliders allow it.
+   Fixed: sensors are excluded from the character's movement and ground query and carry `ActiveCollisionTypes.ALL`.
+Also: a character's own contacts flicker on and off as it walks, which would flood a game with `collision_started` / `collision_stopped`; they are no longer reported (sensors still are).
+
+**Proof.** 86 tests in `GamePhysicsGenerator.test.ts` on the real Rapier engine (38 new for the character), including a strict `noUnusedLocals` type-check against Rapier's typings.
+Fourteen character bugs were put back one at a time; 14 of 14 are caught — **five only after I tightened or added a test** (gravity-while-grounded needed the exact walk distance;
+the ceiling clamp needed an airtime check; the downhill "snap" test was wrong — the engine keeps a smooth 30 degree descent grounded anyway — and became a step-down test; an
+air-control test compared at the wrong time; a collision-filter test forgot the floor is group 0). One piece of code (a per-step snap toggle while rising) could not be shown to
+matter by any test, so it was REMOVED rather than kept unproven.
+
+**NOT done — stated plainly:** no vehicle controller (stage C); no joints; nothing seen in a browser; **no mobile Chromium, Capacitor WebView or iOS evidence — no mobile claim**;
+determinism is not claimed across devices; no character animation or camera (the game draws and follows it); no crouching or swimming; a character cannot yet be a different shape than a
+capsule. `docs/game-engine/physics-engine-architecture.md` has the status table and the two engine quirks above.

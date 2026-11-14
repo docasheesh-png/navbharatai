@@ -6,9 +6,11 @@
 // interpolation. It is OPTIONAL: nothing in the kit imports it unless the game asks for physics, and the WASM is loaded
 // lazily the first time `PhysicsWorld.create()` runs, so a simple game never downloads it.
 //
-// WHAT IS NOT HERE YET (stages B and C, each its own change, each with its own tests): the character controller and the
-// vehicle controller. Rapier ships both; this stage does not wrap them, and nothing in this file claims a character or a
-// car is physical. Stated plainly so a builder does not assume it.
+// STAGE B (this change) adds a walking, jumping CHARACTER on Rapier's own KinematicCharacterController: slopes, steps,
+// walls, snap-to-ground, jump with coyote time and a jump buffer, air control, moving platforms. NOT HERE YET (stage C, its
+// own change with its own tests): the VEHICLE controller. Nothing in this file claims a car is physical. The kit's
+// own generate_game_controller (a pure-arithmetic motor with no physics world) is unchanged and is still the right choice
+// for a game that does not use this module; use this character only when the game has a physics world to collide with.
 //
 // WHY THIS IS A RECIPE AND NOT LEFT TO THE MODEL. A physics world goes wrong in specific ways:
 //
@@ -207,6 +209,87 @@ export function validateBodySpec(spec: unknown, cfg: PhysicsConfig): string | nu
   return null;
 }
 
+/**
+ * A walking, jumping character: a capsule on a KINEMATIC body moved by Rapier's own KinematicCharacterController, so it
+ * slides along walls, climbs slopes up to a limit, steps over small ledges, snaps down gentle slopes and is carried by
+ * moving platforms. Everything has a default; give only what the game needs to change. Total height is
+ * 2 * (halfHeight + radius): the defaults are 1.8 m.
+ */
+export interface CharacterSpec {
+  id: string;
+  /** The centre of the capsule. */
+  position: Vec3;
+  radius?: number;
+  halfHeight?: number;
+  /** The small gap kept between the capsule and what it touches (metres). */
+  offset?: number;
+  /** Steepest slope it can walk UP, in degrees. */
+  maxSlopeClimbDeg?: number;
+  /** Slopes steeper than this make it slide down, in degrees. */
+  minSlopeSlideDeg?: number;
+  /** The tallest ledge it steps over without jumping (metres); 0 turns stepping off. */
+  autostepHeight?: number;
+  autostepMinWidth?: number;
+  /** How far down it follows the ground so walking downhill does not become a series of hops (metres); 0 turns it off. */
+  snapToGround?: number;
+  jumpSpeed?: number;
+  gravityScale?: number;
+  maxFallSpeed?: number;
+  /** Seconds after leaving a ledge during which a jump still works. */
+  coyoteTime?: number;
+  /** Seconds a jump pressed just before landing is remembered. */
+  jumpBuffer?: number;
+  /** 0 = no steering in the air, 1 = as much as on the ground. */
+  airControl?: number;
+  /** Horizontal acceleration on the ground (m/s squared). */
+  acceleration?: number;
+  /** Whether walking into a dynamic body pushes it. */
+  pushDynamic?: boolean;
+  mass?: number;
+  collisionGroup?: number;
+  collisionMask?: number;
+}
+
+export interface ResolvedCharacter {
+  radius: number; halfHeight: number; offset: number; maxSlopeClimbDeg: number; minSlopeSlideDeg: number;
+  autostepHeight: number; autostepMinWidth: number; snapToGround: number; jumpSpeed: number; gravityScale: number;
+  maxFallSpeed: number; coyoteTime: number; jumpBuffer: number; airControl: number; acceleration: number;
+  pushDynamic: boolean; mass: number;
+}
+
+/** The numbers a character really runs with: the spec's own where it gave one, the default otherwise. */
+export function resolveCharacter(spec: CharacterSpec): ResolvedCharacter {
+  return {
+    radius: spec.radius ?? 0.35, halfHeight: spec.halfHeight ?? 0.55, offset: spec.offset ?? 0.02,
+    maxSlopeClimbDeg: spec.maxSlopeClimbDeg ?? 50, minSlopeSlideDeg: spec.minSlopeSlideDeg ?? 55,
+    autostepHeight: spec.autostepHeight ?? 0.3, autostepMinWidth: spec.autostepMinWidth ?? 0.2, snapToGround: spec.snapToGround ?? 0.3,
+    jumpSpeed: spec.jumpSpeed ?? 6.5, gravityScale: spec.gravityScale ?? 1, maxFallSpeed: spec.maxFallSpeed ?? 40,
+    coyoteTime: spec.coyoteTime ?? 0.1, jumpBuffer: spec.jumpBuffer ?? 0.12, airControl: spec.airControl ?? 0.3,
+    acceleration: spec.acceleration ?? 40, pushDynamic: spec.pushDynamic ?? true, mass: spec.mass ?? 70,
+  };
+}
+
+/** Why this character cannot be added, or null when it can. The same discipline as validateBodySpec: nothing odd reaches native code. */
+export function validateCharacterSpec(spec: unknown, cfg: PhysicsConfig): string | null {
+  if (!spec || typeof spec !== 'object') return 'the character is not an object';
+  const s = spec as CharacterSpec;
+  if (typeof s.id !== 'string' || s.id.length === 0 || s.id.length > 120) return 'a character needs a text id of 1 to 120 characters';
+  if (!vec(s.position, cfg.worldBounds)) return 'position must be finite and within ' + cfg.worldBounds + ' m of the origin';
+  const ranges: Array<[string, unknown, number, number]> = [
+    ['radius', s.radius, 0.05, 5], ['halfHeight', s.halfHeight, 0.05, 10], ['offset', s.offset, 0.001, 0.5],
+    ['maxSlopeClimbDeg', s.maxSlopeClimbDeg, 0, 89], ['minSlopeSlideDeg', s.minSlopeSlideDeg, 0, 89],
+    ['autostepHeight', s.autostepHeight, 0, 2], ['autostepMinWidth', s.autostepMinWidth, 0.01, 2], ['snapToGround', s.snapToGround, 0, 2],
+    ['jumpSpeed', s.jumpSpeed, 0, 30], ['gravityScale', s.gravityScale, 0, 10], ['maxFallSpeed', s.maxFallSpeed, 1, 200],
+    ['coyoteTime', s.coyoteTime, 0, 0.5], ['jumpBuffer', s.jumpBuffer, 0, 0.5], ['airControl', s.airControl, 0, 1],
+    ['acceleration', s.acceleration, 1, 500], ['mass', s.mass, 1, 100000],
+  ];
+  for (const [name, value, lo, hi] of ranges) if (value !== undefined && !inRange(value, lo, hi)) return name + ' must be between ' + lo + ' and ' + hi;
+  if (s.pushDynamic !== undefined && typeof s.pushDynamic !== 'boolean') return 'pushDynamic must be true or false';
+  if (s.collisionGroup !== undefined && !(Number.isInteger(s.collisionGroup) && s.collisionGroup >= 0 && s.collisionGroup <= 15)) return 'collisionGroup must be a whole number from 0 to 15';
+  if (s.collisionMask !== undefined && !(Number.isInteger(s.collisionMask) && s.collisionMask >= 0 && s.collisionMask <= 0xffff)) return 'collisionMask must be a whole number from 0 to 65535';
+  return null;
+}
+
 /** Rapier packs "I am in group g" (high 16 bits) and "I collide with mask m" (low 16 bits) into one number. */
 export function interactionGroups(group: number | undefined, mask: number | undefined): number {
   const membership = 1 << (group ?? 0);
@@ -215,7 +298,8 @@ export function interactionGroups(group: number | undefined, mask: number | unde
 `;
 
 const WORLD = String.raw`import type { World as RWorld, RigidBody, Collider, EventQueue as REventQueue } from '@dimforge/rapier3d-compat';
-import { sanitizePhysicsConfig, validateBodySpec, interactionGroups, MAX_TRIANGLES, type BodySpec, type PhysicsConfig, type Quat, type Vec3 } from './config';
+import { sanitizePhysicsConfig, validateBodySpec, validateCharacterSpec, interactionGroups, MAX_TRIANGLES, type BodySpec, type CharacterSpec, type PhysicsConfig, type Quat, type Vec3 } from './config';
+import { PhysicsCharacter, type CharacterEvent, type CharacterHost, type CharacterSaved } from './character';
 
 /** The Rapier module: what the default import of the package gives after init(). */
 type Rapier = typeof import('@dimforge/rapier3d-compat').default;
@@ -232,14 +316,14 @@ export const defaultRapierLoader: RapierLoader = async () => {
   return R;
 };
 
-export type PhysicsEventName = 'collision_started' | 'collision_stopped' | 'sensor_entered' | 'sensor_exited' | 'lagging' | 'unavailable';
+export type PhysicsEventName = 'collision_started' | 'collision_stopped' | 'sensor_entered' | 'sensor_exited' | 'character_jumped' | 'character_landed' | 'lagging' | 'unavailable';
 export type PhysicsListener = (name: PhysicsEventName, payload: Record<string, unknown>) => void;
 
 export type AddResult = { ok: true; id: string } | { ok: false; reason: string };
 
 export interface RayHit { id: string; distance: number; point: Vec3; normal: Vec3 }
 export interface PhysicsStats {
-  available: boolean; bodies: number; colliders: number;
+  available: boolean; bodies: number; colliders: number; characters: number;
   /** Fixed steps run since the start (or the last reset). */
   steps: number;
   /** Smoothed milliseconds one fixed step takes. */
@@ -251,13 +335,15 @@ export interface PhysicsStats {
   paused: boolean;
 }
 
-export const SNAPSHOT_VERSION = 1;
+export const SNAPSHOT_VERSION = 2;
 export interface PhysicsSnapshot {
   v: number;
   state: Uint8Array;
   specs: BodySpec[];
   /** id -> [body handle, collider handles] — rebuilt on restore so ids keep pointing at the same bodies. */
   handles: Array<[string, number, number[]]>;
+  /** The characters (their specs and where they were), rebuilt on restore on top of their kinematic bodies. */
+  characters: Array<{ spec: CharacterSpec; saved: CharacterSaved }>;
   accumulator: number;
   steps: number;
   simSeconds: number;
@@ -287,6 +373,7 @@ export class PhysicsWorld {
   private entries = new Map<string, Entry>();
   private colliderOwner = new Map<number, string>();
   private sensorColliders = new Set<number>();
+  private characters = new Map<string, PhysicsCharacter>();
   private acc = 0;
   private _alpha = 0;
   private _paused = false;
@@ -376,7 +463,7 @@ export class PhysicsWorld {
     if (spec.mass !== undefined) cd.setMass(spec.mass); else cd.setDensity(spec.density ?? 1);
     if (spec.friction !== undefined) cd.setFriction(spec.friction);
     if (spec.restitution !== undefined) cd.setRestitution(spec.restitution);
-    if (spec.sensor) cd.setSensor(true);
+    if (spec.sensor) { cd.setSensor(true); cd.setActiveCollisionTypes(R.ActiveCollisionTypes.ALL); } // so a kinematic body (a character) walking into a static trigger is seen by it
     cd.setCollisionGroups(interactionGroups(spec.collisionGroup, spec.collisionMask));
     cd.setActiveEvents(R.ActiveEvents.COLLISION_EVENTS);
 
@@ -394,11 +481,47 @@ export class PhysicsWorld {
   removeBody(id: string): boolean {
     const e = this.entries.get(id);
     if (!e || !this.world) return false;
+    const ch = this.characters.get(id);
+    if (ch) { ch.dispose(); this.characters.delete(id); }
     for (const c of e.colliders) { this.colliderOwner.delete(c.handle); this.sensorColliders.delete(c.handle); }
     this.world.removeRigidBody(e.body);
     this.entries.delete(id);
     return true;
   }
+
+  // ---- characters -------------------------------------------------------------------------------------------------
+
+  private host(): CharacterHost {
+    const self = this;
+    return { R: this.R!, get world() { return self.world!; }, config: this.config, ownerOf: (h: number) => self.colliderOwner.get(h) };
+  }
+
+  /**
+   * Add a walking, jumping character (a capsule on a kinematic body, moved by Rapier's character controller). Validated like
+   * any body; counts toward the body and collider limits. Drive it with world.character(id).setMove / jump.
+   */
+  addCharacter(spec: CharacterSpec): AddResult {
+    if (!this.available || !this.world || !this.R) return { ok: false, reason: this.reason || 'physics is not available' };
+    const bad = validateCharacterSpec(spec, this.config);
+    if (bad) return { ok: false, reason: bad };
+    const r = this.addBody({
+      id: spec.id, type: 'kinematic', position: spec.position, canSleep: false,
+      shape: { type: 'capsule', halfHeight: spec.halfHeight ?? 0.55, radius: spec.radius ?? 0.35 },
+      collisionGroup: spec.collisionGroup, collisionMask: spec.collisionMask,
+    });
+    if (!r.ok) return r;
+    const e = this.entries.get(spec.id)!;
+    try {
+      this.characters.set(spec.id, new PhysicsCharacter(this.host(), e.body, e.colliders[0], spec));
+    } catch (err) {
+      this.removeBody(spec.id);
+      return { ok: false, reason: 'the character could not be created: ' + (err instanceof Error ? err.message : String(err)) };
+    }
+    return { ok: true, id: spec.id };
+  }
+
+  /** The character with this id, or null. */
+  character(id: string): PhysicsCharacter | null { return this.characters.get(id) ?? null; }
 
   has(id: string): boolean { return this.entries.has(id); }
   ids(): string[] { return Array.from(this.entries.keys()); }
@@ -471,7 +594,7 @@ export class PhysicsWorld {
   /** Move a KINEMATIC body to where the game wants it (a moving platform, a door); things on it are carried. */
   moveKinematic(id: string, position: Vec3, rotation?: Quat): boolean {
     const e = this.entries.get(id);
-    if (!e || e.spec.type !== 'kinematic' || !this.finiteVec(position)) return false;
+    if (!e || e.spec.type !== 'kinematic' || this.characters.has(id) || !this.finiteVec(position)) return false; // a character is moved by its own controller
     if (Math.hypot(position.x, position.y, position.z) > this.config.worldBounds) return false;
     e.body.setNextKinematicTranslation(position);
     if (rotation) e.body.setNextKinematicRotation(rotation);
@@ -500,6 +623,9 @@ export class PhysicsWorld {
         const t = e.body.translation(); const q = e.body.rotation();
         e.prevP.x = t.x; e.prevP.y = t.y; e.prevP.z = t.z; e.prevQ.x = q.x; e.prevQ.y = q.y; e.prevQ.z = q.z; e.prevQ.w = q.w;
       }
+      const charEvents: CharacterEvent[] = [];
+      for (const c of this.characters.values()) c.update(dt, charEvents);
+      for (const ce of charEvents) events.push(ce);
       const t0 = now();
       this.world.step(this.queue);
       const took = now() - t0;
@@ -511,6 +637,7 @@ export class PhysicsWorld {
         const sensorA = this.sensorColliders.has(h1);
         const sensorB = this.sensorColliders.has(h2);
         if (sensorA || sensorB) events.push({ name: started ? 'sensor_entered' : 'sensor_exited', payload: { sensor: sensorA ? a : b, other: sensorA ? b : a } });
+        else if (this.characters.has(a) || this.characters.has(b)) return; // a character's own contacts flicker as it walks; use its state, and sensors
         else events.push({ name: started ? 'collision_started' : 'collision_stopped', payload: { a, b } });
       });
       this.acc -= dt;
@@ -543,6 +670,8 @@ export class PhysicsWorld {
   }
 
   private freeNative(): void {
+    for (const c of this.characters.values()) c.dispose();
+    this.characters.clear();
     try { this.queue?.free(); } catch { /* already freed */ }
     try { this.world?.free(); } catch { /* already freed */ }
     this.queue = null; this.world = null;
@@ -583,6 +712,7 @@ export class PhysicsWorld {
       state: this.world.takeSnapshot(),
       specs: Array.from(this.entries.values()).map((e) => ({ ...e.spec })),
       handles: Array.from(this.entries, ([id, e]) => [id, e.body.handle, e.colliders.map((c) => c.handle)] as [string, number, number[]]),
+      characters: Array.from(this.characters.values(), (c) => ({ spec: { ...c.spec, position: { ...c.spec.position } }, saved: c.saved() })),
       accumulator: this.acc, steps: this.stepCount, simSeconds: this.sim,
     };
   }
@@ -591,13 +721,14 @@ export class PhysicsWorld {
   restore(snap: PhysicsSnapshot): { ok: true } | { ok: false; reason: string } {
     if (!this.available || !this.R) return { ok: false, reason: this.reason || 'physics is not available' };
     if (!snap || typeof snap !== 'object' || snap.v !== SNAPSHOT_VERSION) return { ok: false, reason: 'this snapshot is from a different version' };
-    if (!(snap.state instanceof Uint8Array) || !Array.isArray(snap.specs) || !Array.isArray(snap.handles)) return { ok: false, reason: 'the snapshot is malformed' };
+    if (!(snap.state instanceof Uint8Array) || !Array.isArray(snap.specs) || !Array.isArray(snap.handles) || !Array.isArray(snap.characters)) return { ok: false, reason: 'the snapshot is malformed' };
     if (snap.specs.length > this.config.maxBodies) return { ok: false, reason: 'the snapshot has more bodies than the limit of ' + this.config.maxBodies };
     let next: RWorld;
     try { next = this.R.World.restoreSnapshot(snap.state); } catch (err) { return { ok: false, reason: 'the snapshot could not be read: ' + (err instanceof Error ? err.message : String(err)) }; }
     const entries = new Map<string, Entry>();
     const owner = new Map<number, string>();
     const sensors = new Set<number>();
+    const chars = new Map<string, PhysicsCharacter>();
     try {
       for (const spec of snap.specs) {
         const row = snap.handles.find((h) => h[0] === spec.id);
@@ -610,17 +741,29 @@ export class PhysicsWorld {
         const t = body.translation(); const q = body.rotation();
         entries.set(spec.id, { spec: { ...spec }, body, colliders, prevP: { x: t.x, y: t.y, z: t.z }, prevQ: { x: q.x, y: q.y, z: q.z, w: q.w } });
       }
+      const host: CharacterHost = { R: this.R, world: next, config: this.config, ownerOf: (h: number) => owner.get(h) };
+      for (const row of snap.characters) {
+        const bad = validateCharacterSpec(row?.spec, this.config);
+        if (bad) throw new Error('a saved character is invalid: ' + bad);
+        const e = entries.get(row.spec.id);
+        if (!e) throw new Error('the character "' + row.spec.id + '" has no body in the snapshot');
+        const ch = new PhysicsCharacter(host, e.body, e.colliders[0], row.spec);
+        ch.restoreSaved(row.saved);
+        chars.set(row.spec.id, ch);
+      }
     } catch (err) {
+      for (const c of chars.values()) c.dispose();
       try { next.free(); } catch { /* nothing to free */ }
       return { ok: false, reason: 'the snapshot does not match its bodies: ' + (err instanceof Error ? err.message : String(err)) };
     }
     next.timestep = this.config.timestep;
     next.numSolverIterations = this.config.solverIterations;
+    for (const c of this.characters.values()) c.dispose();
     try { this.queue?.free(); } catch { /* already freed */ }
     try { this.world?.free(); } catch { /* already freed */ }
     this.world = next;
     this.queue = new this.R.EventQueue(true);
-    this.entries = entries; this.colliderOwner = owner; this.sensorColliders = sensors;
+    this.entries = entries; this.colliderOwner = owner; this.sensorColliders = sensors; this.characters = chars;
     this.acc = Number.isFinite(snap.accumulator) ? Math.max(0, Math.min(snap.accumulator, this.config.timestep)) : 0;
     this.stepCount = Number.isFinite(snap.steps) ? Math.max(0, Math.floor(snap.steps)) : 0;
     this.sim = Number.isFinite(snap.simSeconds) ? Math.max(0, snap.simSeconds) : 0;
@@ -632,7 +775,7 @@ export class PhysicsWorld {
 
   stats(): PhysicsStats {
     return {
-      available: this.available, bodies: this.entries.size, colliders: this.world?.colliders.len() ?? 0, steps: this.stepCount,
+      available: this.available, bodies: this.entries.size, colliders: this.world?.colliders.len() ?? 0, characters: this.characters.size, steps: this.stepCount,
       stepMs: this.ms, droppedSeconds: this.dropped, simSeconds: this.sim, paused: this._paused,
     };
   }
@@ -645,6 +788,220 @@ export class PhysicsWorld {
     if (!this.config.debug || !this.available || !this.world) return null;
     const b = this.world.debugRender();
     return { vertices: new Float32Array(b.vertices), colors: new Float32Array(b.colors) };
+  }
+}
+`;
+
+const CHARACTER = String.raw`import type { World as RWorld, RigidBody, Collider, KinematicCharacterController } from '@dimforge/rapier3d-compat';
+import { interactionGroups, resolveCharacter, type CharacterSpec, type PhysicsConfig, type ResolvedCharacter, type Vec3 } from './config';
+
+type Rapier = typeof import('@dimforge/rapier3d-compat').default;
+
+/** What a character needs from the world it lives in. The world implements this; the character never imports the world. */
+export interface CharacterHost {
+  readonly R: Rapier;
+  readonly world: RWorld;
+  readonly config: PhysicsConfig;
+  ownerOf(colliderHandle: number): string | undefined;
+}
+
+export interface CharacterState {
+  position: Vec3;
+  velocity: Vec3;
+  grounded: boolean;
+  /** The id of the body it is standing on, or null in the air. */
+  groundId: string | null;
+  /** Horizontal speed, m/s. */
+  speed: number;
+}
+
+/** What a snapshot keeps so a restored character carries on exactly where it was. */
+export interface CharacterSaved { vx: number; vy: number; vz: number; mx: number; mz: number; grounded: boolean; coyote: number; buffer: number; jumping: boolean }
+export interface CharacterEvent { name: 'character_jumped' | 'character_landed'; payload: Record<string, unknown> }
+
+const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const DEG = Math.PI / 180;
+
+/**
+ * A walking, jumping, capsule-shaped character on a kinematic body, moved by Rapier's own KinematicCharacterController.
+ * The GAME says where it wants to go (setMove, a world-space velocity — it owns the camera and the input) and when to jump;
+ * this works out what is actually possible: it slides along walls, climbs slopes up to a limit, steps over small ledges,
+ * stays on the ground going downhill, falls, lands, and rides moving platforms. It is stepped by the world, inside the fixed
+ * timestep, so it behaves the same at any frame rate and its drawn position is interpolated like every other body.
+ */
+export class PhysicsCharacter {
+  readonly id: string;
+  readonly spec: CharacterSpec;
+  private readonly p: ResolvedCharacter;
+  private readonly ctrl: KinematicCharacterController;
+  private readonly groups: number;
+  private mx = 0;
+  private mz = 0;
+  private vx = 0;
+  private vy = 0;
+  private vz = 0;
+  private _grounded = false;
+  private coyote = 0;
+  private buffer = 0;
+  private jumping = false;
+  private jumpRequested = false;
+  private groundId: string | null = null;
+  private groundHandle: number | null = null;
+
+  constructor(private readonly host: CharacterHost, readonly body: RigidBody, readonly collider: Collider, spec: CharacterSpec) {
+    this.id = spec.id;
+    this.spec = { ...spec, position: { ...spec.position } };
+    const p = resolveCharacter(spec);
+    this.p = p;
+    this.groups = interactionGroups(spec.collisionGroup, spec.collisionMask);
+    const c = host.world.createCharacterController(p.offset);
+    c.setUp({ x: 0, y: 1, z: 0 });
+    c.setMaxSlopeClimbAngle(p.maxSlopeClimbDeg * DEG);
+    c.setMinSlopeSlideAngle(p.minSlopeSlideDeg * DEG);
+    if (p.autostepHeight > 0) c.enableAutostep(p.autostepHeight, p.autostepMinWidth, false);
+    if (p.snapToGround > 0) c.enableSnapToGround(p.snapToGround);
+    c.setApplyImpulsesToDynamicBodies(p.pushDynamic);
+    c.setCharacterMass(p.mass);
+    this.ctrl = c;
+    // a character walking into a static trigger volume must be seen by it (kinematic-versus-fixed is off by default)
+    collider.setActiveCollisionTypes(host.R.ActiveCollisionTypes.ALL);
+  }
+
+  /** The velocity the game wants, in the world's axes (m/s). false for a non-finite value. Clamped to 100 m/s. */
+  setMove(x: number, z: number): boolean {
+    if (!finite(x) || !finite(z)) return false;
+    const len = Math.hypot(x, z);
+    const k = len > 100 ? 100 / len : 1;
+    this.mx = x * k;
+    this.mz = z * k;
+    return true;
+  }
+
+  /** Ask for a jump. It happens now if it can, or within jumpBuffer seconds if the character is about to land. */
+  jump(): void { this.jumpRequested = true; }
+
+  /** Put it somewhere else and stop it. false for a non-finite or out-of-bounds position. */
+  teleport(position: Vec3): boolean {
+    if (!position || !finite(position.x) || !finite(position.y) || !finite(position.z)) return false;
+    if (Math.hypot(position.x, position.y, position.z) > this.host.config.worldBounds) return false;
+    this.body.setTranslation(position, true);
+    this.body.setNextKinematicTranslation(position);
+    this.vx = 0; this.vy = 0; this.vz = 0;
+    this._grounded = false; this.coyote = 0; this.buffer = 0; this.jumping = false; this.jumpRequested = false;
+    this.groundId = null; this.groundHandle = null;
+    return true;
+  }
+
+  state(): CharacterState {
+    const t = this.body.translation();
+    return {
+      position: { x: t.x, y: t.y, z: t.z }, velocity: { x: this.vx, y: this.vy, z: this.vz },
+      grounded: this._grounded, groundId: this.groundId, speed: Math.hypot(this.vx, this.vz),
+    };
+  }
+
+  get grounded(): boolean { return this._grounded; }
+
+  saved(): CharacterSaved {
+    return { vx: this.vx, vy: this.vy, vz: this.vz, mx: this.mx, mz: this.mz, grounded: this._grounded, coyote: this.coyote, buffer: this.buffer, jumping: this.jumping };
+  }
+  restoreSaved(s: CharacterSaved): void {
+    if (!s || typeof s !== 'object') return;
+    const n = (v: unknown): number => (finite(v) ? v : 0);
+    this.vx = clamp(n(s.vx), -200, 200); this.vy = clamp(n(s.vy), -200, 200); this.vz = clamp(n(s.vz), -200, 200);
+    this.mx = clamp(n(s.mx), -100, 100); this.mz = clamp(n(s.mz), -100, 100);
+    this._grounded = s.grounded === true; this.coyote = clamp(n(s.coyote), 0, 1); this.buffer = clamp(n(s.buffer), 0, 1); this.jumping = s.jumping === true;
+  }
+
+  /** How far the body it stands on will move in the coming step (a lift, a moving platform), so the character rides it. */
+  private platformCarry(): Vec3 {
+    if (this.groundHandle === null) return { x: 0, y: 0, z: 0 };
+    try {
+      const b = this.host.world.getRigidBody(this.groundHandle);
+      if (!b || !b.isKinematic()) return { x: 0, y: 0, z: 0 };
+      const next = b.nextTranslation();
+      const cur = b.translation();
+      return { x: next.x - cur.x, y: next.y - cur.y, z: next.z - cur.z };
+    } catch {
+      this.groundHandle = null; // the body it stood on is gone
+      return { x: 0, y: 0, z: 0 };
+    }
+  }
+
+  /** One FIXED step. Called by the world before the physics step; appends what happened to out. */
+  update(dt: number, out: CharacterEvent[]): void {
+    if (!(dt > 0)) return;
+    const p = this.p;
+    const gravity = this.host.config.gravity.y * p.gravityScale;
+    if (this.jumpRequested) { this.buffer = Math.max(p.jumpBuffer, dt); this.jumpRequested = false; }
+    const wasGrounded = this._grounded;
+
+    // steer toward what the game asked for: on the ground fully, in the air by airControl (0 keeps the momentum)
+    if (this._grounded || p.airControl > 0) {
+      const a = p.acceleration * (this._grounded ? 1 : p.airControl) * dt;
+      this.vx += clamp(this.mx - this.vx, -a, a);
+      this.vz += clamp(this.mz - this.vz, -a, a);
+    }
+
+    // a jump works on the ground, or for coyoteTime after leaving it; a press just before landing is remembered
+    this.coyote = this._grounded ? p.coyoteTime : Math.max(0, this.coyote - dt);
+    if (this.buffer > 0 && (this._grounded || this.coyote > 0)) {
+      this.vy = p.jumpSpeed;
+      this.buffer = 0; this.coyote = 0; this.jumping = true; this._grounded = false;
+      out.push({ name: 'character_jumped', payload: { id: this.id } });
+    }
+    this.buffer = Math.max(0, this.buffer - dt);
+
+    const fallSpeed = Math.max(0, -this.vy);
+    // Gravity only acts in the AIR. On the ground the controller's own snap-to-ground holds the character down: a small
+    // constant downward request makes Rapier's controller drop a whole step of horizontal movement every half second or so.
+    if (this._grounded && this.vy <= 0) this.vy = 0;
+    else this.vy = Math.max(-p.maxFallSpeed, this.vy + gravity * dt);
+
+    const carry = this.platformCarry();
+    const t = this.body.translation();
+    const dx = this.vx * dt + carry.x;
+    const dy = this.vy * dt + carry.y;
+    const dz = this.vz * dt + carry.z;
+    // trigger volumes are not obstacles: the character walks INTO them (and they report it)
+    this.ctrl.computeColliderMovement(this.collider, { x: dx, y: dy, z: dz }, this.host.R.QueryFilterFlags.EXCLUDE_SENSORS, this.groups);
+    const m = this.ctrl.computedMovement();
+    this._grounded = this.ctrl.computedGrounded();
+
+    if (this.vy > 0 && m.y < dy - 1e-4) this.vy = 0; // hit a ceiling
+    if (this._grounded && this.vy <= 0) { this.vy = 0; this.jumping = false; }
+    // Walking INTO a wall removes the velocity that pushes into it (and only that: sliding along it, and the way a slope
+    // turns horizontal movement into climbing, are left alone — comparing the movement achieved with the movement asked for
+    // would confuse a steep slope with a wall and slow the character to a crawl).
+    const walkable = Math.cos(p.maxSlopeClimbDeg * DEG); // a surface at least this flat is ground it can climb, not a wall
+    for (let i = 0, n = this.ctrl.numComputedCollisions(); i < n; i++) {
+      const hit = this.ctrl.computedCollision(i);
+      if (!hit || hit.normal1.y >= walkable || hit.normal1.y < -0.7) continue; // ground it can walk on, or a ceiling: not a wall
+      const into = this.vx * hit.normal1.x + this.vz * hit.normal1.z;
+      if (into < 0) { this.vx -= into * hit.normal1.x; this.vz -= into * hit.normal1.z; }
+    }
+
+    const to = { x: t.x + m.x, y: t.y + m.y, z: t.z + m.z };
+    this.body.setNextKinematicTranslation(to);
+    if (!wasGrounded && this._grounded) out.push({ name: 'character_landed', payload: { id: this.id, speed: fallSpeed } });
+
+    // what is it standing on (for the platform carry and for the game)
+    this.groundId = null; this.groundHandle = null;
+    if (this._grounded) {
+      const R = this.host.R;
+      const reach = p.halfHeight + p.radius + p.offset + 0.3;
+      const hit = this.host.world.castRay(new R.Ray(to, { x: 0, y: -1, z: 0 }), reach, true, R.QueryFilterFlags.EXCLUDE_SENSORS, this.groups, this.collider);
+      if (hit) {
+        this.groundId = this.host.ownerOf(hit.collider.handle) ?? null;
+        this.groundHandle = hit.collider.parent()?.handle ?? null;
+      }
+    }
+  }
+
+  /** Free the native controller. */
+  dispose(): void {
+    try { this.host.world.removeCharacterController(this.ctrl); } catch { /* already freed with its world */ }
   }
 }
 `;
@@ -686,20 +1043,22 @@ export class PhysicsBinding {
 `;
 
 const INDEX = String.raw`export { PhysicsWorld, defaultRapierLoader, SNAPSHOT_VERSION, type RapierLoader, type PhysicsListener, type PhysicsEventName, type AddResult, type RayHit, type PhysicsStats, type PhysicsSnapshot } from './world';
+export { PhysicsCharacter, type CharacterState, type CharacterSaved, type CharacterEvent } from './character';
 export { PhysicsBinding, type Transformable } from './sync';
-export { DEFAULT_PHYSICS, sanitizePhysicsConfig, validateBodySpec, interactionGroups, MAX_EXTENT, MAX_CONVEX_POINTS, MAX_TRIANGLES, type PhysicsConfig, type BodySpec, type BodyType, type ShapeSpec, type Vec3, type Quat } from './config';
+export { DEFAULT_PHYSICS, sanitizePhysicsConfig, validateBodySpec, validateCharacterSpec, resolveCharacter, interactionGroups, MAX_EXTENT, MAX_CONVEX_POINTS, MAX_TRIANGLES, type PhysicsConfig, type BodySpec, type BodyType, type ShapeSpec, type CharacterSpec, type ResolvedCharacter, type Vec3, type Quat } from './config';
 `;
 
 const FILES: Record<string, string> = {
   'src/game/physics/config.ts': CONFIG,
+  'src/game/physics/character.ts': CHARACTER,
   'src/game/physics/world.ts': WORLD,
   'src/game/physics/sync.ts': SYNC,
   'src/game/physics/index.ts': INDEX,
 };
 
-export const GAME_PHYSICS_MODULES: readonly string[] = ['config', 'world', 'sync', 'index'];
+export const GAME_PHYSICS_MODULES: readonly string[] = ['config', 'character', 'world', 'sync', 'index'];
 
-const NEEDS: Record<string, string[]> = { config: [], world: ['config'], sync: ['world'], index: ['config', 'world', 'sync'] };
+const NEEDS: Record<string, string[]> = { config: [], character: ['config'], world: ['config', 'character'], sync: ['world'], index: ['config', 'character', 'world', 'sync'] };
 
 /** Generate the physics core. Pure; never throws. */
 export function generateGamePhysics(include?: string[]): GamePhysicsResult {
@@ -720,7 +1079,7 @@ export function generateGamePhysics(include?: string[]): GamePhysicsResult {
     files,
     dependencies: [{ name: RAPIER_PACKAGE, version: RAPIER_VERSION }],
     instructions:
-      `Added the physics core (${Object.keys(files).length} files under src/game/physics) on Rapier 3D (${RAPIER_PACKAGE}@${RAPIER_VERSION}, loaded lazily). Three.js still draws; Rapier simulates. This stage has rigid bodies, colliders, events, triggers, raycasts, snapshots and a debug view — NOT a character controller or a vehicle yet, so do not call a walking player or a car "physical" on the strength of this.\n` +
+      `Added the physics core (${Object.keys(files).length} files under src/game/physics) on Rapier 3D (${RAPIER_PACKAGE}@${RAPIER_VERSION}, loaded lazily). Three.js still draws; Rapier simulates. It has rigid bodies, colliders, events, triggers, raycasts, snapshots, a debug view and a walking, jumping CHARACTER (physics.addCharacter) — but NO vehicle controller yet, so do not call a car "physical" on the strength of this.\n` +
       '```ts\n' +
       "import { PhysicsWorld, PhysicsBinding } from './game/physics';\n" +
       '\n' +
@@ -734,6 +1093,12 @@ export function generateGamePhysics(include?: string[]): GamePhysicsResult {
       "physics.addBody({ id: 'ground', type: 'static', shape: { type: 'box', hx: 50, hy: 0.5, hz: 50 }, position: { x: 0, y: -0.5, z: 0 } });\n" +
       "physics.addBody({ id: 'crate', type: 'dynamic', shape: { type: 'box', hx: 0.5, hy: 0.5, hz: 0.5 }, position: { x: 0, y: 8, z: 0 }, mass: 20, friction: 0.8, restitution: 0.1 });\n" +
       "physics.addBody({ id: 'door-zone', type: 'static', sensor: true, shape: { type: 'box', hx: 1, hy: 1, hz: 1 }, position: { x: 5, y: 1, z: 0 } });\n" +
+      '\n' +
+      '// A walking, jumping character (a capsule on a kinematic body). YOU read the input and the camera; it works out what is possible.\n' +
+      "physics.addCharacter({ id: 'hero', position: { x: 0, y: 2, z: 0 } });   // defaults: 1.8 m tall, climbs 50 degrees, steps 0.3 m, jumps 6.5 m/s\n" +
+      "const hero = physics.character('hero');                                    // null if the world is not available\n" +
+      '// each frame:  hero?.setMove(vx, vz)  (world-space m/s, e.g. camera-relative);  if (jumpPressed) hero?.jump();\n' +
+      '// hero?.state() -> { position, velocity, grounded, groundId, speed };  events: character_jumped, character_landed { id, speed }\n' +
       '\n' +
       '// One three.js mesh per body; the binding copies the INTERPOLATED transform across each frame.\n' +
       'export const binding = new PhysicsBinding();\n' +
@@ -758,6 +1123,9 @@ export function generateGamePhysics(include?: string[]): GamePhysicsResult {
       '- Choose colliders by cost: a box, sphere or capsule for anything that moves; convex only when needed; trimesh only for static scenery. Do not give every object a mesh collider.\n' +
       '- Collision groups: collisionGroup 0..15 says what a body IS, collisionMask (16-bit) says what it hits. A sensor reports overlaps and blocks nothing.\n' +
       '- Do not enable physics for every game: use it when the request needs real rigid bodies (crates that topple, objects that fall and bounce, a ragdoll, realistic stacking), not for a tycoon or a card game.\n' +
-      '- Honest limits to tell the user: determinism holds on one device, not across all of them; it has not been measured on a physical phone or in a WebView yet; the debug view (config.debug) is for development and is off by default.',
+      '- A character is moved ONLY by setMove / jump / teleport (never by setting its mesh or calling moveKinematic). It slides along walls, climbs slopes up to maxSlopeClimbDeg, steps over ledges up to autostepHeight, follows the ground down small drops (snapToGround) and rides kinematic platforms; a jump works for coyoteTime after leaving a ledge and a press just before landing is remembered (jumpBuffer). Do not rebuild any of that by hand.\n' +
+      '- Trigger volumes are NOT obstacles to a character (it walks into them and they report sensor_entered); a character\'s own contacts are not reported as collision events (they flicker as it walks) — use its state and sensors.\n' +
+      '- Use the kit\'s generate_game_controller for a game WITHOUT a physics world; use this character only when the game has one (it collides with the physics bodies, pushes crates, rides lifts).\n' +
+      '- Honest limits to tell the user: determinism holds on one device, not across all of them; it has not been measured on a physical phone or in a WebView yet; there is NO vehicle controller yet; the debug view (config.debug) is for development and is off by default.',
   };
 }

@@ -112,17 +112,23 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/manager/view.ts": [
     "e1bc574b5db5d1540671210751a3c47e5ac6d581ca20ec697573a273c4b436a4"
   ],
+  "src/game/physics/character.ts": [
+    "207a3d58937a8db2edce04e47792d30fa5fd1709c4205f06bceb0769b29e6f52"
+  ],
   "src/game/physics/config.ts": [
-    "c3836ea0be2374fb1fa0a86d33398b5d4ca726f3c0c99ce1c798720d011083d8"
+    "c3836ea0be2374fb1fa0a86d33398b5d4ca726f3c0c99ce1c798720d011083d8",
+    "8b42c9883b990b52168a4410b799f2cd558ca29b06b88171e23792dcc028ea0d"
   ],
   "src/game/physics/index.ts": [
-    "79abc682575b952feddb8403d8ecb75288793b389dcb3aa6471be9df4a8fd6bc"
+    "79abc682575b952feddb8403d8ecb75288793b389dcb3aa6471be9df4a8fd6bc",
+    "cb3810912889a60e762db6baa6e73c557c89e9be5355ab828a8f7d9b3805678a"
   ],
   "src/game/physics/sync.ts": [
     "a05f369f1e4e2ef376cb10d1994a422ead3db181808d4a0772ec9d778eef7b49"
   ],
   "src/game/physics/world.ts": [
-    "7e484a62a10ff926473547444d543b7bde985cb1597b06b6f3ba9935d8f92d75"
+    "7e484a62a10ff926473547444d543b7bde985cb1597b06b6f3ba9935d8f92d75",
+    "74b9ce4c4a7bb5f84cb53ff75fae3ca50d715c436a30b71bc196e1801d36c1b2"
   ],
   "src/game/play/character.ts": [
     "12479394af24b858d409c9a24bc4cd4ffbb34655ed27f08fb46f58f2629c4b17",

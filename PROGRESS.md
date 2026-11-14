@@ -101583,3 +101583,7 @@ Admin order (verbatim in CLAUDE.md): run GitHub's CI locally, fix any problem, a
 ## 2026-11-14 — "Athree map": plan written, NOTHING built (admin: plan first, build on command)
 
 `docs/game-engine/athree-map-plan.md`: one 100%-ours, realistic, seeded, streaming (loop/bounded) world named "Athree map"; a two-condition "real need" test (named AND needed) in one pure `athreeMapIntent`; a small stable `AthreeMap` API (heightAt/biomeAt/roads/spawnPoints/windAt/update) shared with the existing physics, battle-royale and library modules; 8 phases (0 ledger, 1 world core, 2 water, 3 grass & trees, 4 desert/sky/weather, 5 roads & racing, 6 aircraft & life, 7 auto-selection), each default OFF with measured exit criteria; honest ceilings (humans weakest; phone FPS not measurable here). Awaiting the admin's "build" order.
+
+## 2026-11-14 — Athree map trigger updated (still plan only)
+
+Admin: Athree is used when ANY ONE of (1) the user names Athree AND the game really needs a map, (2) a big map is really needed, (3) the librarian picks any map/asset at random. Recorded in `docs/game-engine/athree-map-plan.md` §3 with the precedence the three need to not contradict each other: a user-named other map or an explicit refusal wins; named+needed → Athree; otherwise the librarian picks at random **among maps that fit the profile**, Athree always in the pool; the random pick is **made once per project and stored**, so edits never change the map. Nothing built.

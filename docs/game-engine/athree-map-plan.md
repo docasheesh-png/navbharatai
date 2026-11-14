@@ -18,14 +18,23 @@ Status: **PLAN, awaiting the admin's "build" order.** Written 2026-11-14 at the 
 - **Honest ceilings** (section 8) are part of the plan, not a footnote.
 - Every phase ships through the normal gate: tests with reversion proof, `scripts/localCi.sh` ALL GREEN, PR, merge.
 
-## 3. The "real need" test (so Athree is never forced onto an app that has no map)
+## 3. When Athree is used — the trigger (UPDATED 2026-11-14 at the admin's order)
 
-Two conditions, both required:
-1. **Named**: the request mentions Athree (case-insensitive; "athree", "a-three", "a three map", plus common Hindi/Hinglish spellings — input parsing is exempt from the English-only UI rule, like the existing greeting detectors).
-2. **Needed**: the app is a game or experience with a world to move through (racing, open world, battle royale, flight, driving, exploring, survival, sandbox). Not needed for a calculator, a form, a dashboard, a 2D puzzle.
-   - Named but not needed → the answer says plainly that this app has no map to put it on, and offers what Athree would be used for. Never a fake map.
-   - Needed but not named → the existing library selection decides; Athree is offered when its profile fits better than the other maps.
-Implementation: one pure function `athreeMapIntent(prompt, genre)` → `{ use: boolean, reason }`, in the same style as `buildConfirmation.ts`; the architect prompt and the tool dispatcher both read it (one source of truth).
+Athree is used when **any ONE** of these three is true:
+
+1. **Named + needed.** The user names Athree in any way ("athree map use karo", "athree map par game banao", "a3", "a-three", Hindi/Hinglish spellings — input parsing is exempt from the English-only UI rule, like the greeting detectors) **and** the game really needs a map. → Athree, deterministically.
+2. **A big map is really needed.** The app is a game or world that needs a large map — racing, open world, battle royale, flight, explore, survival, driving. Athree is then **eligible** (see the precedence rule below). It is not eligible for a calculator, a form, a dashboard, a 2D puzzle or a small single-screen level: nothing to put a map on.
+3. **The librarian chooses.** The game/asset library's librarian may pick **any** suitable map or asset **at random**, Athree included. Whatever it picks is used.
+
+**Named but not needed** (condition 1's second half fails): the answer says plainly that this app has no map to put Athree on, and what Athree would be for. Never a fake map.
+
+### Precedence and two safety rules (written down so the three conditions cannot contradict each other)
+
+- **Order of evaluation:** (1) a user who NAMES a different map, or says they do not want Athree, wins over everything; (2) condition 1 → Athree; (3) otherwise, if a big map is needed, the librarian picks **at random from every map that fits the request** (conditions 2 and 3 together: Athree is always in that pool, never excluded, never forced).
+- **"Random" is random once, then stable.** The pick is made at the project's first build from a seed derived from the request, **stored in the project's workspace memory, and reused on every later edit.** A map that changed on every rebuild would break the user's game (spawn points, roads, saved progress). An explicit user request to change the map re-rolls it. Tests: the same project gets the same map on 10 consecutive rebuilds; two different requests can get different maps.
+- **Random only among maps that fit.** A racing game is never given a flight-only airfield map; the librarian filters by profile (racing / battle-royale / open-world / flight / explore) first, then picks.
+
+Implementation: one pure function `athreeMapIntent(prompt, genre, stored)` → `{ use, reason, via: 'named' | 'needed' | 'librarian' | 'none' }` in the style of `buildConfirmation.ts`, plus the library's existing selection for the random pick; the architect prompt and the tool dispatcher both read the same result.
 
 ## 4. Architecture
 
@@ -61,7 +70,7 @@ AthreeMap.create({ seed, profile, quality })
 | 4 | **Desert, sky, weather** | Dunes (ridged noise + wind direction), sand shader, heat haze; physically-based sky, clouds, day/night, rain, fog; ambient sound hooks (wind, waves) | Time-of-day lighting continuity, weather toggles, screenshots |
 | 5 | **Roads & racing** | Spline circuits on terrain (banking, closure), road network between settlements, bridges over rivers, road surface for the physics friction table; sport car and sport bike generators (PBR paint, glass, tyres) wired to the Rapier vehicle controller (stage C, not built yet) | Lap closes exactly, bridge clears water, vehicle stays on collider, screenshots |
 | 6 | **Aircraft & life** | Plane generator + simple flight model; bird flocks (boids, flapping rig); animals (parametric quadruped rig + procedural gait); humans (parametric body + IK walking) | Rig + gait tests, flock bounds, screenshots (see ceilings) |
-| 7 | **Auto-selection + library** | `athreeMapIntent` live in the architect prompt and the dispatcher; map profiles listed in the library; `AppKnowledgeBase` entries; admin report row | Named+needed → used; named+not needed → honest refusal; needed+not named → library decides |
+| 7 | **Auto-selection + library** | `athreeMapIntent` live in the architect prompt and the dispatcher; map profiles listed in the library; the librarian's random pick (stable per project, filtered by profile); `AppKnowledgeBase` entries; admin report row | Named+needed → Athree; named+not needed → honest refusal; needed+not named → random among fitting maps, Athree always in the pool; the same project keeps the same map across rebuilds; a user who names another map or refuses Athree is obeyed |
 
 Existing modules (Game3D, Building, Controller, Systems, VFX/Audio, Shell, Economy, ShopSim, Manager, Royale, Physics A/B) are **kept and reused**: Athree supplies the world; they keep supplying gameplay. Phase 1 includes a compatibility test that an existing recipe still generates and compiles next to the map.
 

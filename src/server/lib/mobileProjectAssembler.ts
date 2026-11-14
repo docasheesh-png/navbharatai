@@ -224,6 +224,24 @@ export function isAssembledStaticApp(files: Record<string, string>): boolean {
  * `tests/theStaticAppStaysStatic.test.ts` asserts the round trip, so the sentinel and its writer can
  * never drift apart.
  */
+/**
+ * A build script that only PRINTS is not a build — it produces no output folder, so `built` (and its `dist/`) can never be the right
+ * answer for it (single-file game autopsy, 2026-11-14: "The build stopped without leaving a reason").
+ *
+ * 🔴 THE SAME CLASS AS 2026-09-22, ONE SIBLING LATER. That fix recognised the ONE no-op string `buildPackageJson` writes. But two other
+ * places of ours write a static `package.json` with their own `echo` build — the static template (`StaticProvider`) and the static-site
+ * foundation (`FrameworkFoundation.ensureStaticSiteFoundation`, which the preview boot now writes for a one-page project) — and the
+ * detector, comparing against one exact string, called both of them `built`. The admin's imported game then shipped as "your app builds
+ * itself with npm run build, so the build output in dist/ is what gets packaged": no dist/, no reason, no APK.
+ * Recognising "only echoes" instead of "echoes exactly THIS sentence" closes the class: a new writer cannot drift from the detector.
+ */
+export function isNoOpBuildScript(build: string): boolean {
+  const b = String(build ?? '').trim();
+  if (!/^echo(\s|$)/.test(b)) return false;
+  // Anything that chains a real command after the echo is a build (`echo start && vite build`).
+  return !/(&&|\|\||;|\||`|\$\()/.test(b);
+}
+
 export function detectProjectKind(files: Record<string, string>): 'built' | 'static' {
   const pkg = files['package.json'];
   if (!pkg) return 'static';
@@ -231,7 +249,7 @@ export function detectProjectKind(files: Record<string, string>): 'built' | 'sta
     const parsed = JSON.parse(pkg) as { scripts?: Record<string, string> };
     const build = typeof parsed.scripts?.build === 'string' ? parsed.scripts.build.trim() : '';
     if (!build) return 'static';
-    return build === STATIC_NO_OP_BUILD ? 'static' : 'built';
+    return build === STATIC_NO_OP_BUILD || isNoOpBuildScript(build) ? 'static' : 'built';
   } catch {
     // A package.json we cannot parse is worse than none — treating it as buildable would fail on the
     // runner with a confusing error. Static is the outcome that still produces a working app.

@@ -11,6 +11,7 @@
 
 import { buildTarGz, shouldBulkLand, bulkLandEnabled } from './BulkLanding';
 import { isBinaryAsset } from './fileClassification';
+import { IMPORT_LIMITS } from '../../lib/importRules';
 
 /** The minimal slice of the sandbox actuator this collector needs. */
 export interface WorkspaceFileSource {
@@ -67,6 +68,9 @@ export interface ImportedFiles {
 // Raised 4000 → 16000 so a Mitrify-scale (and up to ~50×) imported/collected app is not truncated
 // (the "handle a huge app" goal). The 120 MB total-bytes ceiling is the real memory guard and
 // usually binds first; the file count is the hard backstop.
+// These three are the COLLECTORS' ceilings — what an export, a deploy or a push reads OUT of the sandbox. They are not the
+// import's: a file arriving through the import selection below is held to IMPORT_LIMITS (the durable store's real cap), so a
+// file is never accepted into the sandbox that the durable store would silently drop.
 const MAX_FILES = 16000;
 const MAX_TOTAL_BYTES = 120 * 1024 * 1024; // 120 MB — same ceiling as the ZIP export.
 const MAX_FILE_BYTES = 5 * 1024 * 1024;     // 5 MB per text file — larger is almost certainly an asset.
@@ -351,10 +355,10 @@ export function selectImportableFiles(files: Record<string, string>): { accepted
   const skipped: string[] = [];
   let totalBytes = 0;
   for (const [path, content] of Object.entries(files)) {
-    if (accepted.length >= MAX_FILES) { skipped.push(path); continue; }
+    if (accepted.length >= IMPORT_LIMITS.maxFiles) { skipped.push(path); continue; }
     if (!isSafeImportPath(path) || typeof content !== 'string') { skipped.push(path); continue; }
     const bytes = Buffer.byteLength(content, 'utf8');
-    if (bytes > MAX_FILE_BYTES || totalBytes + bytes > MAX_TOTAL_BYTES) { skipped.push(path); continue; }
+    if (bytes > IMPORT_LIMITS.maxTextFileBytes || totalBytes + bytes > IMPORT_LIMITS.maxTotalTextBytes) { skipped.push(path); continue; }
     accepted.push([path, content]);
     totalBytes += bytes;
   }

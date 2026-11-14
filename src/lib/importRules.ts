@@ -80,3 +80,44 @@ export function importDropReason(rawPath: string): { reason: ImportDropReason; p
   if (BINARY_EXT_RE.test(safe) && !assetMimeFor(safe)) return { reason: 'binary', path: safe };
   return null;
 }
+
+/**
+ * THE SIZE LIMITS OF AN IMPORT — one definition (single-file game autopsy, 2026-11-14).
+ *
+ * 🔴 WHAT WAS WRONG. The same idea — "the largest text file we keep" — was written down five times, and the copies
+ * disagreed: the browser filter and the server's zip extractor said 900 KB, the `/api/agentv3/import-files` route said
+ * 5 MiB, and the durable store silently dropped anything over 900 KB whatever either of them had accepted. A 5.4 MB
+ * single-file game was therefore refused by one door, accepted by another, and — had it got through — would have sat in
+ * the live sandbox and vanished on the first recycle, with every layer reporting success. A limit that is not one number
+ * is not a limit; it is a place where files disappear.
+ *
+ * Every importer, the write route, the durable stores and the AI edit tool take their numbers from here. The census in
+ * `tests/theImportLimitsAreOneNumber.test.ts` fails if a second literal appears.
+ */
+export const IMPORT_LIMITS = Object.freeze({
+  /** The largest TEXT file kept. The durable store holds one file per Firestore document (1 MB), so this is the true ceiling. */
+  maxTextFileBytes: 900 * 1024,
+  /** Text kept across one import. */
+  maxTotalTextBytes: 80 * 1024 * 1024,
+  maxFiles: 16_000,
+  /** A small asset kept INLINE in a store document (a logo, an icon, a font): 640 KB raw is ~853 KB as base64, under the document cap. */
+  maxInlineAssetBytes: 640 * 1024,
+  maxInlineAssets: 200,
+  maxInlineAssetTotalBytes: 30 * 1024 * 1024,
+  /** Larger images that are shown in the LIVE sandbox only (not persisted). */
+  maxSandboxAssetBytes: 5 * 1024 * 1024,
+  maxSandboxAssetTotalBytes: 50 * 1024 * 1024,
+  /** One media file taken out of an HTML page. The workspace asset store keeps files over the document cap in Cloud Storage up to this size. */
+  maxEmbeddedMediaBytes: 12 * 1024 * 1024,
+  /** All media taken out of one import. */
+  maxEmbeddedMediaTotalBytes: 60 * 1024 * 1024,
+  /** The largest HTML page we will READ in order to move its embedded media out (the code that remains must still fit maxTextFileBytes). */
+  maxHtmlSourceBytes: 24 * 1024 * 1024,
+  /** A lockfile is written to the sandbox even when over the durable cap. */
+  maxLockfileBytes: 3 * 1024 * 1024,
+  /** Zip-bomb guards. */
+  maxZipEntries: 60_000,
+  maxDecompressedBytes: 300 * 1024 * 1024,
+  /** A Firestore document is 1 MB; the store refuses anything near it. */
+  maxStoreDocBytes: 900 * 1024,
+});

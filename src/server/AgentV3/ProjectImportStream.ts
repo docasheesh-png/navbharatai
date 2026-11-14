@@ -36,6 +36,8 @@ import {
   assetMimeFor, safeImportPath, chooseMonorepoAppRoot,
   type ExtractedProject,
 } from './ProjectImport';
+import { IMPORT_LIMITS } from '../../lib/importRules';
+import { allowedBeforeLifting, isHtmlPagePath } from '../../lib/liftEmbeddedMedia';
 
 /**
  * Entry-count ceiling for the STREAMING path. Far above the buffer path's 60k because a real 5 GB app
@@ -247,8 +249,8 @@ export async function extractZipProjectFromDisk(filePath: string, opts?: { maxFi
       }
       continue;
     }
-    if (c.declaredBytes > IMPORT_MAX_LOCKFILE_BYTES && !LOCKFILE_RE.test(c.path)) { dropped.tooLarge += 1; continue; }
-    plans.set(c.rawName, { path: c.path, kind: 'text', cap: IMPORT_MAX_LOCKFILE_BYTES + 1024 });
+    if (c.declaredBytes > IMPORT_MAX_LOCKFILE_BYTES && !LOCKFILE_RE.test(c.path) && !allowedBeforeLifting(c.path, c.declaredBytes)) { dropped.tooLarge += 1; continue; }
+    plans.set(c.rawName, { path: c.path, kind: 'text', cap: (isHtmlPagePath(c.path) ? IMPORT_LIMITS.maxHtmlSourceBytes : IMPORT_MAX_LOCKFILE_BYTES) + 1024 });
   }
 
   // ── Pass 3: CONTENT — read exactly the planned entries, applying the runtime budgets ──
@@ -278,7 +280,7 @@ export async function extractZipProjectFromDisk(filePath: string, opts?: { maxFi
     if (Object.keys(files).length >= maxFiles) { dropped.overCap += 1; return; }
     const content = buf.toString('utf8');
     const bytes = Buffer.byteLength(content, 'utf8');
-    if (bytes > IMPORT_MAX_FILE_BYTES) {
+    if (bytes > IMPORT_MAX_FILE_BYTES && !allowedBeforeLifting(plan.path, bytes)) {
       if (LOCKFILE_RE.test(plan.path) && bytes <= IMPORT_MAX_LOCKFILE_BYTES) { sandboxOnly[plan.path] = content; return; }
       dropped.tooLarge += 1;
       return;

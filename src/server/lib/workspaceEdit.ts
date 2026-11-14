@@ -28,9 +28,10 @@
 import { loadWorkspaceFiles, mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
 import { workspaceIdFor } from './workspaceIdentity';
+import { IMPORT_LIMITS } from '../../lib/importRules';
 
 /** The store silently drops anything larger, so we check first and say so instead. */
-export const MAX_WRITE_FILE_BYTES = 900 * 1024;
+export const MAX_WRITE_FILE_BYTES = IMPORT_LIMITS.maxTextFileBytes;
 
 /** How many recent restore points to search when confirming ours actually landed. */
 const RESTORE_POINT_SEARCH_DEPTH = 5;

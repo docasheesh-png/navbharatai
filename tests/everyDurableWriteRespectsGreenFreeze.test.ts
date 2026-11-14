@@ -24,7 +24,7 @@ const VERDICT: Record<string, [Verdict, number]> = {
   'mergeWorkspaceFiles | workspaceId, files': ['landed', 1],
   // ×4 since 2026-10-30: the kept game repair (gameRepair.ts) persists what landed through the freeze, as the explorer repair does.
   'mergeWorkspaceFiles | workspaceId, Object.fromEntries(writtenFiles)': ['landed', 4],
-  'mergeWorkspaceFiles | workspaceId, files as Record<string, string>': ['user-asked', 1],
+  'mergeWorkspaceFiles | workspaceId, textFiles': ['user-asked', 1], // import-files: the user's own import, text part of the sorted body
   'mergeWorkspaceFiles | workspaceId, foundation.files': ['pre-latch', 1],
   'mergeWorkspaceFiles | workspaceId, importedFiles': ['pre-latch', 1],
   'mergeWorkspaceFiles | workspaceId, seededScaffold': ['pre-latch', 1],

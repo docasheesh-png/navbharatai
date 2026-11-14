@@ -25,8 +25,9 @@
 // a second definition would drift, and the drift would be silent (the browser keeping a file the server
 // refuses, or dropping one it would keep).
 import {
-  SKIP_DIR_RE, JUNK_FILE_RE, SECRET_FILE_RE, BINARY_EXT_RE, assetMimeFor, safeImportPath,
+  SKIP_DIR_RE, JUNK_FILE_RE, SECRET_FILE_RE, BINARY_EXT_RE, assetMimeFor, safeImportPath, IMPORT_LIMITS,
 } from '../../lib/importRules';
+import { allowedBeforeLifting } from '../../lib/liftEmbeddedMedia';
 export {
   SKIP_DIR_RE, JUNK_FILE_RE, SECRET_FILE_RE, BINARY_EXT_RE, assetMimeFor, safeImportPath,
   importDropReason, type ImportDropReason,
@@ -39,34 +40,34 @@ const LOCKFILE_RE = /^(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/;
 
 // Raised 2000 → 16000 so a large real app (Mitrify-scale and up to ~50×) imports without being
 // truncated. The 80 MB total-bytes ceiling below is the real memory guard and usually binds first.
-export const IMPORT_MAX_FILES = 16_000;
-export const IMPORT_MAX_FILE_BYTES = 900 * 1024; // durable store cap (Firestore 1MB/doc)
-export const IMPORT_MAX_TOTAL_BYTES = 80 * 1024 * 1024;
+export const IMPORT_MAX_FILES = IMPORT_LIMITS.maxFiles;
+export const IMPORT_MAX_FILE_BYTES = IMPORT_LIMITS.maxTextFileBytes; // durable store cap (Firestore 1MB/doc)
+export const IMPORT_MAX_TOTAL_BYTES = IMPORT_LIMITS.maxTotalTextBytes;
 /** SECURITY (zip-bomb DoS guard): a hard ceiling on how many ENTRIES a zip may declare, checked
  *  BEFORE anything is decompressed — stops a "millions of tiny entries" archive from OOM-ing the
  *  Node process. Well above any real app (IMPORT_MAX_FILES = 16k), so a legitimate import is never
  *  affected. */
-export const IMPORT_MAX_ZIP_ENTRIES = 60_000;
+export const IMPORT_MAX_ZIP_ENTRIES = IMPORT_LIMITS.maxZipEntries;
 /** SECURITY (zip-bomb DoS guard): the total UNCOMPRESSED bytes we will decompress across the whole
  *  archive. A few-KB "zip bomb" that inflates 1000:1 is refused once its declared uncompressed sizes
  *  cross this ceiling — BEFORE the runaway entry is expanded into memory. Generous headroom over the
  *  80 MB kept-text budget so a real import never trips it. */
-export const IMPORT_MAX_DECOMPRESSED_BYTES = 300 * 1024 * 1024;
+export const IMPORT_MAX_DECOMPRESSED_BYTES = IMPORT_LIMITS.maxDecompressedBytes;
 /** A lockfile larger than the durable cap is still written to the SANDBOX (npm install needs it);
  *  only truly enormous ones are dropped. */
-export const IMPORT_MAX_LOCKFILE_BYTES = 3 * 1024 * 1024;
+export const IMPORT_MAX_LOCKFILE_BYTES = IMPORT_LIMITS.maxLockfileBytes;
 /** Per-asset RAW-byte cap — a small logo/favicon/icon/font, not a hero video. */
-export const IMPORT_MAX_ASSET_BYTES = 640 * 1024; // raised 200KB → 640KB (base64 ~853KB < the 900KB Firestore-doc cap)
+export const IMPORT_MAX_ASSET_BYTES = IMPORT_LIMITS.maxInlineAssetBytes; // 640KB raw (base64 ~853KB < the 900KB Firestore-doc cap)
 /** Bounds on the kept-asset set so a media-heavy zip can't blow the budget. */
-export const IMPORT_MAX_ASSETS = 200;
-export const IMPORT_MAX_ASSET_TOTAL_BYTES = 30 * 1024 * 1024;
+export const IMPORT_MAX_ASSETS = IMPORT_LIMITS.maxInlineAssets;
+export const IMPORT_MAX_ASSET_TOTAL_BYTES = IMPORT_LIMITS.maxInlineAssetTotalBytes;
 /** SANDBOX-ONLY image tier (admin 2026-08-03: "88 large images not imported — will the app break?"):
  *  images too big for the durable store (>640KB) are still materialized in the LIVE sandbox so the
  *  preview isn't full of broken pictures — NOT persisted (a cold restart re-imports, exactly like the
  *  big-lockfile tier). Bounded so a photo/video-heavy repo can't exhaust memory. Non-image binaries
  *  (video/audio/archives — no image MIME) are never kept either way. */
-export const IMPORT_MAX_SANDBOX_ASSET_BYTES = 5 * 1024 * 1024;
-export const IMPORT_MAX_SANDBOX_ASSET_TOTAL_BYTES = 50 * 1024 * 1024;
+export const IMPORT_MAX_SANDBOX_ASSET_BYTES = IMPORT_LIMITS.maxSandboxAssetBytes;
+export const IMPORT_MAX_SANDBOX_ASSET_TOTAL_BYTES = IMPORT_LIMITS.maxSandboxAssetTotalBytes;
 
 export interface ExtractedProject {
   files: Record<string, string>;
@@ -229,10 +230,11 @@ export async function extractZipProject(buf: Buffer, opts?: { maxFiles?: number 
     // hostile inflate-in-one-entry payload (0 when the size is unknowable → falls through to the
     // post-decompress byte cap below).
     const declared = zipEntryDeclaredBytes(entry);
-    if (declared > IMPORT_MAX_LOCKFILE_BYTES && !LOCKFILE_RE.test(path)) { dropped.tooLarge++; continue; }
+    if (declared > IMPORT_MAX_LOCKFILE_BYTES && !LOCKFILE_RE.test(path) && !allowedBeforeLifting(path, declared)) { dropped.tooLarge++; continue; }
     const content = await entry.async('string');
     const bytes = Buffer.byteLength(content, 'utf8');
-    if (bytes > IMPORT_MAX_FILE_BYTES) {
+    // A one-file page whose bulk is embedded media is read in full and has its media lifted into assets/ at landing.
+    if (bytes > IMPORT_MAX_FILE_BYTES && !allowedBeforeLifting(path, bytes)) {
       // A big text lockfile still goes to the live sandbox so `npm install` reproduces the
       // exact dependency tree; anything else oversized is dropped with an honest count.
       if (LOCKFILE_RE.test(path) && bytes <= IMPORT_MAX_LOCKFILE_BYTES) { sandboxOnly[path] = content; continue; }

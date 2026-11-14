@@ -123,3 +123,19 @@ export function notZipMessage(fileName?: string): string {
   const named = fileName ? `"${fileName}"` : 'That file';
   return `${named} is not a .zip archive. Pick the zipped project folder — on a phone your archives are usually under Downloads or Files.`;
 }
+
+/**
+ * A SINGLE HTML PAGE IS A PROJECT TOO (single-file game autopsy, 2026-11-14). The import option used to accept only archives, so a
+ * one-file game — the commonest thing a hobbyist has — could only go in as a chat attachment: base64-encoded into the request,
+ * read by the model, capped, and never landing in Files. This is the one check that says "this pick is a page".
+ */
+export function isHtmlPagePick(file: { name?: string; type?: string } | null | undefined): boolean {
+  if (!file) return false;
+  return /\.html?$/i.test(String(file.name ?? '')) || String(file.type ?? '').toLowerCase() === 'text/html';
+}
+
+/** The `accept` for the project-import input: archives as before, plus a single HTML page. */
+export function projectAccept(userAgent?: string): string {
+  if (pickerIgnoresExtensions(userAgent)) return '*/*';
+  return [zipAccept(userAgent), '.html', '.htm', 'text/html'].join(',');
+}

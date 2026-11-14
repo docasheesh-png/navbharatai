@@ -52,7 +52,7 @@ import { rememberPublishIntent, takePublishIntent, browserIntentStore } from '..
 import { getStoredMotionMode, resolveReduceMotion, systemPrefersReducedMotion } from '../../lib/a11y';
 import { authedFetch } from '../../lib/authedFetch';
 const ConnectedServices = lazy(() => import('./ConnectedServices').then((m) => ({ default: m.ConnectedServices })));
-import { importProjectArchive, importProjectFolder, pickProjectFolder, type MasterImportResult } from '../../lib/masterZipImport';
+import { importProjectArchive, importProjectFolder, importSingleHtml, pickProjectFolder, type MasterImportResult } from '../../lib/masterZipImport';
 import { resolveImportWorkspaceId, importTargetUnavailableMessage } from './zipImportTarget';
 import { chatHoldsAnApp, appFileCount, importOpenedNewChatNote } from '../../lib/projectImportTarget';
 import { combineScreenshotPrompt } from '../../lib/screenshotPrompt';
@@ -90,7 +90,7 @@ import { deployBlockedReason } from '../../lib/deployGuard';
 import { simplifyHealthLines } from '../../lib/buildHealthDisplay';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
-import { acceptZipPick, notZipMessage } from '../../lib/zipPicker';
+import { acceptZipPick, notZipMessage, isHtmlPagePick } from '../../lib/zipPicker';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId, takeRemixHandoff } from './v3SessionContinuity';
 import { showColdStart } from './coldStartPolicy';
@@ -2181,6 +2181,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     // 2026-08-13). So the real check is here and reads the file's MAGIC BYTES: a photo picked by
     // mistake is refused before a multi-minute upload starts, while a genuine archive whose bytes
     // cannot be read still gets in on its name. See lib/zipPicker.ts.
+    // A single HTML page (a one-file game or app) is a project too: its media is moved out in the browser and it opens in
+    // Files / the IDE / the preview like any import (single-file game autopsy, 2026-11-14).
+    if (isHtmlPagePick(file)) {
+      await runProjectImport(
+        `📄 Importing “${file.name}” (${(file.size / 1024 / 1024).toFixed(1)} MB)…`,
+        (landIn, onProgress) => importSingleHtml(file, landIn(file.name), userId, email, onProgress),
+      );
+      return;
+    }
     const pick = await acceptZipPick(file);
     if (!pick.ok) { setZipProgress(notZipMessage(file.name)); return; }
     await runProjectImport(

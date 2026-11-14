@@ -32,10 +32,11 @@ const ASSET_WRITE_CONCURRENCY = Math.max(1, Math.min(32, Number(process.env.AGEN
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 import { parseDataUri } from './ProjectImport';
 import { runInPass } from './greenFreeze';
+import { IMPORT_LIMITS } from '../../lib/importRules';
 
 const COLLECTION = 'workspace_assets_v3';
 /** Firestore's hard per-document limit is 1 MB; a base64 data URI for a ≤200KB asset is ~270KB. */
-const MAX_ASSET_BYTES = 900 * 1024;
+const MAX_ASSET_BYTES = IMPORT_LIMITS.maxStoreDocBytes;
 const BATCH = 400;
 
 let _db: admin.firestore.Firestore | null = null;
@@ -84,7 +85,7 @@ function metaOversized(meta: admin.firestore.DocumentSnapshot): string[] {
  */
 const MAX_SPILLED_ASSET_BYTES = Math.max(
   MAX_ASSET_BYTES,
-  Number(process.env.WORKSPACE_ASSET_MAX_BYTES) || 12 * 1024 * 1024,
+  Number(process.env.WORKSPACE_ASSET_MAX_BYTES) || IMPORT_LIMITS.maxEmbeddedMediaBytes,
 );
 
 function assetObjectPath(workspaceId: string, path: string, verifiedOwnerUid?: string | null): string {

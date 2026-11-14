@@ -22,7 +22,7 @@
 // — never re-stated here. A second copy would drift, and the drift would be silent.
 
 import {
-  importDropReason, assetMimeFor, BINARY_EXT_RE, type ImportDropReason,
+  importDropReason, assetMimeFor, BINARY_EXT_RE, IMPORT_LIMITS, type ImportDropReason,
 } from './importRules';
 import type { DropCounts } from './importDropReport';
 // Type-only: erased at compile time, so naming these costs the bundle nothing and the reader still
@@ -43,14 +43,14 @@ function isFileEntry(e: Entry): e is FileEntry {
 }
 
 /** Per-file text ceiling. Matches the durable store's cap so nothing is kept that cannot be saved. */
-export const BROWSER_MAX_FILE_BYTES = 900 * 1024;
+export const BROWSER_MAX_FILE_BYTES = IMPORT_LIMITS.maxTextFileBytes;
 /** Total text budget for one import. */
-export const BROWSER_MAX_TOTAL_BYTES = 80 * 1024 * 1024;
+export const BROWSER_MAX_TOTAL_BYTES = IMPORT_LIMITS.maxTotalTextBytes;
 /** Hard file-count ceiling, mirroring the server's IMPORT_MAX_FILES. */
-export const BROWSER_MAX_FILES = 16_000;
+export const BROWSER_MAX_FILES = IMPORT_LIMITS.maxFiles;
 /** Small images/fonts kept so the preview is not full of broken pictures. */
-export const BROWSER_MAX_ASSET_BYTES = 640 * 1024;
-export const BROWSER_MAX_ASSETS = 200;
+export const BROWSER_MAX_ASSET_BYTES = IMPORT_LIMITS.maxInlineAssetBytes;
+export const BROWSER_MAX_ASSETS = IMPORT_LIMITS.maxInlineAssets;
 
 export interface BrowserZipProgress {
   phase: 'scanning' | 'reading';

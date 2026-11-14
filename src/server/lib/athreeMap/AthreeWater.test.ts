@@ -219,11 +219,11 @@ describe('the shore-depth texture', () => {
 
 describe('the API: one update() moves terrain and sea together', () => {
   it('createAthreeMap gives the ocean, replaces the placeholder sea, and update() returns the origin shift', () => {
-    const map = A.createAthreeMap({ seed: 1, three: THREE, quality: 'phone' });
+    const map = A.createAthreeMap({ seed: 1, three: THREE, quality: 'phone', vegetation: false });
     expect(map.ocean).not.toBeNull();
     const meshes: any[] = [];
     map.chunks.group.traverse((o: any) => { if (o.isMesh) meshes.push(o); });
-    expect(meshes.filter((m) => m.material.isShaderMaterial)).toHaveLength(1); // the ocean
+    expect(meshes.filter((m) => m.material.isShaderMaterial)).toHaveLength(1); // the ocean (the plants are switched off here)
     expect(meshes.some((m) => m.material.transparent && !m.material.isShaderMaterial)).toBe(false); // the flat placeholder is gone
     for (let i = 0; i < 60; i++) map.update(0, 0, i * 0.1);
     const shift = map.update(4500, 0, 7);

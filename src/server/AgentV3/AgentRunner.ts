@@ -1,4 +1,5 @@
 import { bindReplyLanguage } from './replyLanguageBinding';
+import { elideEmbeddedMedia } from '../../lib/embeddedMedia';
 import type { PlatformVoice } from './platformVoice';
 import { createSandboxAdmissionBudget, SANDBOX_ADMISSION_BLOCKED, type SandboxAdmissionBudget } from './sandboxAdmissionBudget';
 import { NOT_READY_HEADLINE, NOT_READY_HEADLINE_CONTINUE } from './notReadyHeadline';
@@ -689,7 +690,10 @@ export class AgentRunner {
     const previewLiveNow = (): boolean => { try { return typeof (dispatcher as any).hasPublishedPreview === 'function' && (dispatcher as any).hasPublishedPreview() === true; } catch { return false; } };
     const MAX_BUILD_NUDGES = 2;
 
-    const messages: unknown[] = [{ role: 'user', content: this.opts.platformRequest ? asPlatformRequest(userPrompt) : userPrompt }];
+    // The first thing the model reads is the user's request — and a pasted or attached one-file game IS a request that can
+    // carry megabytes of base64 media. It is hidden here, once, exactly as the tool results are in `toBlock` (autopsy: single-file game).
+    const promptForModel = elideEmbeddedMedia(userPrompt).text;
+    const messages: unknown[] = [{ role: 'user', content: this.opts.platformRequest ? asPlatformRequest(promptForModel) : promptForModel }];
     // This conversation holds one message, so no file is in its context yet (autopsy de3bb2bb) — see
     // `ToolDispatcher.beginConversation`. A repair pass on the architect's dispatcher starts fresh too.
     if (typeof dispatcher.beginConversation === 'function') dispatcher.beginConversation();
@@ -897,7 +901,7 @@ export class AgentRunner {
       signal?: AbortSignal,
     ) => {
       const startedAt = Date.now();
-      const prompt = repairUserPrompt(userPrompt, errorText, files);
+      const prompt = elideEmbeddedMedia(repairUserPrompt(userPrompt, errorText, files)).text;
       try {
         const turn = await client.runTurn({
           model,
@@ -1593,19 +1597,26 @@ export class AgentRunner {
         // concurrency-capped PARALLEL group — so the review/test phase finishes far faster
         // ("find in parallel, fix serially"). Each is dispatched once; order is preserved.
         const resultBlocks: ToolResultBlock[] = new Array(turn.toolUses.length);
-        const toBlock = (r: { tool_use_id: string; content: string; is_error: boolean; image?: { base64: string; mimeType: string } }): ToolResultBlock => ({
-          type: 'tool_result',
-          tool_use_id: r.tool_use_id,
-          // When a browser tool returns a screenshot, feed it back as an image block so the
-          // model can SEE the result (vision), alongside the text summary.
-          content: r.image
-            ? [
-                { type: 'text', text: r.content },
-                { type: 'image', source: { type: 'base64', media_type: r.image.mimeType, data: r.image.base64 } },
-              ]
-            : r.content,
-          is_error: r.is_error,
-        });
+        const toBlock = (r: { tool_use_id: string; content: string; is_error: boolean; image?: { base64: string; mimeType: string } }): ToolResultBlock => {
+          // THE BUILDER IS NEVER SENT BASE64 MEDIA (single-file game autopsy, 2026-11-14). Every tool result — read_file, bash
+          // `cat`/`grep`, a diff, a diagnostic — reaches the model through this one function, so the elision lives here: a game
+          // page that still holds a 4 MB video as a string costs the model a placeholder, not the video, and it can see THAT
+          // media is there and leave it alone. `elideEmbeddedMedia` returns the same string when there is nothing to hide.
+          const shown = typeof r.content === 'string' ? elideEmbeddedMedia(r.content).text : r.content;
+          return {
+            type: 'tool_result',
+            tool_use_id: r.tool_use_id,
+            // When a browser tool returns a screenshot, feed it back as an image block so the
+            // model can SEE the result (vision), alongside the text summary.
+            content: r.image
+              ? [
+                  { type: 'text', text: shown },
+                  { type: 'image', source: { type: 'base64', media_type: r.image.mimeType, data: r.image.base64 } },
+                ]
+              : shown,
+            is_error: r.is_error,
+          };
+        };
         // E4 — dispatch every tool under a hard timeout so one stuck call can't block the turn forever.
         // The `task` sub-agent tool is EXEMPT: it runs a whole nested build bounded by its OWN runner
         // watchdog/budget, so a cap here would wrongly kill a legitimate long sub-agent. On timeout the

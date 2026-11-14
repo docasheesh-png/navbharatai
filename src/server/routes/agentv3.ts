@@ -624,6 +624,7 @@ import {
   type DesignContract,
 } from '../AgentV3/designContract';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
+import { prepareImportBody, preparePastedPage, landPageAssets, liftForLanding } from '../AgentV3/importLanding';
 import { collectWorkspaceFiles, collectNamedWorkspaceFiles, listWorkspaceFiles, collectWorkspaceConfigFiles, writeWorkspaceFiles, pool } from '../AgentV3/WorkspaceFiles';
 import { liveFileSyncEnabled, requestedSyncPaths } from '../AgentV3/liveFileSync';
 import { isBudgetEndedError } from '../AgentV3/turnDeadline';
@@ -10035,20 +10036,32 @@ async function noteBuildOutcome(
       // Best-effort: make sure the sandbox exists (an unknown type starts empty, so an
       // imported repo lands cleanly without scaffolded template files mixed in).
       try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
-      const { written, skipped } = await writeWorkspaceFiles(actuator, workspaceId, files as Record<string, string>);
+      // Sort the body BEFORE writing anything (single-file game autopsy, 2026-11-14): data: URIs at binary paths are ASSETS
+      // (real bytes, own store), and an HTML page that carries its media inline is reduced to code. This route used to write
+      // every value as text — a logo became a text file of base64, and a 5 MB game page was dropped by the durable store.
+      const prepared = prepareImportBody(files as Record<string, string>);
+      const textFiles = prepared.text;
+      const assetFiles = prepared.assets;
+      const { written, skipped } = await writeWorkspaceFiles(actuator, workspaceId, textFiles);
+      if (Object.keys(assetFiles).length > 0) {
+        try { await materializeAssets(actuator, workspaceId, assetFiles); } catch { /* an asset failing never blocks the import */ }
+        // Awaited, like the text merge below: the durable copy must exist before the client is told the import landed.
+        const owner = await verifiedIdentity(req).catch(() => null);
+        await saveWorkspaceAssets(workspaceId, assetFiles, owner?.uid).catch(() => {});
+      }
       // DURABLE PERSIST (the keystone fix): also merge the imported/edited files into the durable
       // WorkspaceFileStore — NOT just the ephemeral sandbox. Without this, an IDE edit lands only in a
       // volatile sandbox and the File Guardian later restores the stale durable copy, silently
       // destroying the edit. mergeWorkspaceFiles UNIONS paths so a partial set never drops other files.
       // Awaited so a subsequent build reads the fresh truth. Best-effort — never blocks the import.
       // The durable outcome travels in the response (Q-735) — a save that did not happen is not reported as one.
-      const durable = await mergeWorkspaceFiles(workspaceId, files as Record<string, string>).catch(() => null);
+      const durable = await mergeWorkspaceFiles(workspaceId, textFiles).catch(() => null);
       // Phase S2 — when this import is a MANUAL IDE EDIT (source: 'ide-edit', sent by the editor's
       // debounced syncer), record the paths so the NEXT v5.0 build acknowledges them ("I noticed you
       // edited N files…") and builds on top of them. Bulk repo imports / uploads do NOT set this flag,
       // so they don't spam the next turn with "you edited 500 files". Best-effort — never blocks.
       if (req.body?.source === 'ide-edit') {
-        try { await recordManualEdits(workspaceId, written.length ? written : Object.keys(files as Record<string, string>), Date.now()); } catch { /* edit tracking is best-effort */ }
+        try { await recordManualEdits(workspaceId, written.length ? written : Object.keys(textFiles), Date.now()); } catch { /* edit tracking is best-effort */ }
       }
       // GITHUB BACKSTOP FOR LARGE IMPORTS (report 2026-07-27 — "1gb zip firbase me nahi to github
       // login karwao"). Firestore's WorkspaceFileStore caps a single file doc at ~900KB, so a
@@ -10114,7 +10127,7 @@ async function noteBuildOutcome(
           needsGithub = true; // large import, no GitHub connected — let the client offer to connect
         }
       }
-      res.json({ imported: written.length, skipped: skipped.length, ...(durable ? { durable: { status: durable.status, saved: durable.indexed, unconfirmed: durable.unconfirmed.length } } : {}), ...(github ? { github } : {}), ...(needsGithub ? { needsGithub: true } : {}) });
+      res.json({ imported: written.length, skipped: skipped.length, ...(Object.keys(assetFiles).length ? { assets: Object.keys(assetFiles).length } : {}), ...(prepared.summary ? { mediaNote: prepared.summary } : {}), ...(prepared.unlifted.length ? { mediaNotLifted: prepared.unlifted.length } : {}), ...(durable ? { durable: { status: durable.status, saved: durable.indexed, unconfirmed: durable.unconfirmed.length } } : {}), ...(github ? { github } : {}), ...(needsGithub ? { needsGithub: true } : {}) });
     } catch (err: any) {
       res.status(500).json({ error: toSafeClientMessage(err, 'Failed to import the files.') });
     }
@@ -12170,6 +12183,12 @@ async function noteBuildOutcome(
           exitPhase?: () => void;
         } },
     ): Promise<boolean> => {
+      // A page that carries its media inline lands as CODE plus real files (single-file game autopsy, 2026-11-14): the
+      // media becomes assets/media/ files, so no size cap drops the page and no model is ever sent megabytes of base64.
+      // Only when WE write the files — a git clone is already in the sandbox exactly as the user committed it.
+      const landing = liftForLanding(importedFiles, opts.assets, opts.writeToSandbox);
+      importedFiles = landing.files;
+      opts = { ...opts, assets: landing.assets };
       const validation = validateImportedProject(importedFiles);
       if (!validation.ok) {
         emit({ type: 'narration', agent: 'architect', text: `⚠️ ${validation.issues.join(' ')}`, ts: Date.now() });
@@ -12304,6 +12323,7 @@ async function noteBuildOutcome(
         type: 'narration', agent: 'architect', ts: Date.now(),
         text: `📦 Imported ${written.length} file${written.length === 1 ? '' : 's'} from ${opts.source} (framework: ${framework})`
           + (opts.droppedNote ? ` ${opts.droppedNote}` : '')
+          + landing.noteLine
           + (validation.issues.length > 0 ? `\n⚠️ ${validation.issues.join(' ')}` : ''),
       });
       // Surface the env-variable names the app expects (from its committed .env template) — the
@@ -18380,12 +18400,17 @@ async function noteBuildOutcome(
       }
       if (pastedFormat.keep && framework === 'static' && intent === 'new_build' && !isImportTurn && !abort.signal.aborted) {
         try {
-          const doc = pastedHtmlDocument(prompt);
+          // The pasted page is reduced to CODE before it is seeded (single-file game autopsy, 2026-11-14): its embedded media
+          // becomes assets/media/ files, so index.html is the user's code, the media is never in the builder's reach, and the
+          // durable text store (900 KB per file) can hold the page at all.
+          const pasted = preparePastedPage(pastedHtmlDocument(prompt));
+          const doc = pasted.doc;
           const current = await actuator.readFile(workspaceId, 'index.html').catch(() => null);
           const starter = new StaticProvider().getFiles([])['index.html'];
           const untouched = current == null || withoutPreviewBridge('index.html', current).trim() === starter.trim();
           if (doc && untouched) {
             await actuator.writeFile(workspaceId, 'index.html', doc);
+            await landPageAssets(actuator, workspaceId, pasted.assets, verified?.uid);
             writtenFiles.set('index.html', doc);
             pastedSeed.set('index.html', doc);
             try { getWorkspaceMemory(workspaceId).indexFile('index.html', doc); } catch { /* index best-effort */ }

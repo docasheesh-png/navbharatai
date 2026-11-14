@@ -19,10 +19,11 @@ import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 import { workspacePrefixFor, isAppWorkspaceKey } from '../lib/workspaceIdentity';
 import { toDurableFileKey, normalizeFileMapKeys } from '../lib/workspacePath';
+import { IMPORT_LIMITS } from '../../lib/importRules';
 
 const COLLECTION = 'workspace_files_v3';
 /** Firestore's hard per-document limit is 1 MB; skip a single file larger than this. */
-const MAX_FILE_BYTES = 900 * 1024;
+const MAX_FILE_BYTES = IMPORT_LIMITS.maxTextFileBytes;
 /** Firestore batches allow up to 500 writes; stay under it. */
 const BATCH = 400;
 /** How many Firestore batch commits may be in flight at once during a merge (see mergeWorkspaceFiles). */

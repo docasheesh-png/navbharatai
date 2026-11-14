@@ -157,7 +157,7 @@ import react from '@vitejs/plugin-react';
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  server: { host: true },
+  server: { host: true, allowedHosts: true },
 });
 `;
 
@@ -397,4 +397,73 @@ export async function foundationFilesStillAbsent(
   }
   const added = foundation.added.filter((label) => !keptExisting.includes(label));
   return { files, added, keptExisting };
+}
+
+// ── A ONE-FILE PAGE IS NOT A REACT APP (single-file game autopsy, 2026-11-14) ──────────────────────────────────
+//
+// 🔴 WHAT SHIPPED. The admin imported their one-file game (index.html + media files, no package.json). The import was perfect —
+// and the preview showed "Blocked request. This host (5173-….e2b.app) is not allowed". The Pro panel's default framework label is
+// `vite-react`, so the preview boot ran `ensureViteReactFoundation` over a project that has not one line of React: it
+// synthesized a React + Vite package.json and a `vite.config.ts` and started Vite on 5173 to serve a canvas game. Two defects, one
+// chain:
+//   1. a LABEL decided what the project IS, with no look at the files — the opposite of what `pastedAppFormat.ts` already
+//      says for pasted pages ("the format that was pasted is the format that comes back");
+//   2. the synthesized config was a drifted copy of the template's: `host: true` with no `allowedHosts`, so the E2B preview host
+//      was refused by the very server the platform had just configured.
+//
+// 🔑 THE RULE: a project whose files are plain pages (html/css/classic scripts, no module imports, no JSX/TS, no package.json)
+// is a STATIC SITE. It gets the static runner the static template already uses (`http-server`, port 3000), never Vite.
+const STATIC_SITE_PACKAGE = JSON.stringify({
+  name: 'static-site',
+  version: '1.0.0',
+  scripts: {
+    dev: 'npx http-server . -p 3000 -c-1 --cors',
+    start: 'npx http-server . -p 3000 -c-1 --cors',
+    build: 'echo "Static site — no build step needed"',
+  },
+  devDependencies: {},
+}, null, 2);
+
+/** The static runner marks itself: a package.json whose dev script is `npx http-server …` is our static-site package. */
+function isStaticSitePackage(raw: string | undefined): boolean {
+  if (!raw) return false;
+  try {
+    const dev = String(JSON.parse(raw)?.scripts?.dev ?? '');
+    return /^npx\s+http-server\b/.test(dev);
+  } catch { return false; }
+}
+
+/**
+ * Is this file set a static site — pages, styles, classic scripts and media, with nothing that needs a bundler? PURE.
+ * Either no package.json at all, or the static-site package.json this module writes (so a second boot is judged the same way).
+ */
+export function isStaticSiteProject(files: Record<string, string>): boolean {
+  const paths = Object.keys(files);
+  if (!paths.some((p) => /\.html?$/i.test(p))) return false;
+  const pkgPath = paths.find((p) => p === 'package.json');
+  if (paths.some((p) => /(^|\/)package\.json$/.test(p) && p !== 'package.json')) return false; // a nested package: not ours to judge
+  if (pkgPath && !isStaticSitePackage(files[pkgPath])) return false;
+  // Anything that needs compiling or bundling makes it a framework project.
+  if (paths.some((p) => /\.(tsx|jsx|ts|vue|svelte|astro)$/i.test(p) && !/\.d\.ts$/i.test(p))) return false;
+  if (paths.some((p) => /(^|\/)(vite|next|nuxt|astro|svelte|webpack|rollup)\.config\.[cm]?[jt]s$/i.test(p))) return false;
+  // A script file that imports a module, or an inline module script, is a bundled app.
+  const esImport = /(^|\n)\s*import\s[^\n]*\sfrom\s*['"]|(^|\n)\s*import\s*['"]|\brequire\(\s*['"]/;
+  for (const [p, c] of Object.entries(files)) {
+    if (/\.(m?js|cjs)$/i.test(p) && esImport.test(c ?? '')) return false;
+    if (/\.html?$/i.test(p) && /<script[^>]*type\s*=\s*["']module["'][^>]*>[\s\S]*?\bimport\b/i.test(c ?? '')) return false;
+  }
+  return true;
+}
+
+/**
+ * The foundation a static site needs to boot a live preview: ONE file, its static-server package.json, when it has none.
+ * Empty `added` when the project is not a static site or already has it. Never overwrites. PURE.
+ */
+export function ensureStaticSiteFoundation(files: Record<string, string>): FoundationResult {
+  const result: FoundationResult = { files: {}, added: [] };
+  if (!isStaticSiteProject(files)) return result;
+  if (Object.prototype.hasOwnProperty.call(files, 'package.json')) return result;
+  result.files['package.json'] = STATIC_SITE_PACKAGE;
+  result.added.push('package.json');
+  return result;
 }

@@ -15,6 +15,7 @@
 // PURE builder → the caller writes the files.
 
 import { WATER, OCEAN } from './athreeWaterSource';
+import { VEGETATION, PLANTS } from './athreeVegetationSource';
 
 export interface AthreeMapResult {
   files: Record<string, string>;
@@ -224,6 +225,9 @@ export interface AthreeWorld {
   spawnPoints(kind: SpawnKind, count?: number): Spawn[];
 }
 
+const ISLAND_BASE = 0.45;
+const ISLAND_SWING = 0.3;
+
 function smoothstep(a: number, b: number, v: number): number {
   const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
   return t * t * (3 - 2 * t);
@@ -257,7 +261,9 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       // An island: land inside, a smooth shore, open sea outside the circle.
       const r = Math.hypot(x, z) / radius;
       const m = smoothstep(1, 0.55, r);
-      e = (e * 0.5 + 0.35) * m - (1 - m) * 0.9;
+      // The island's core must ALWAYS be land: the noise swing (at most 1.2 either way) times ISLAND_SWING stays under ISLAND_BASE, so
+      // no seed can drown its own centre (seeds 4, 8, 11 and 14 used to be open sea with the old 0.5 swing over a 0.35 base).
+      e = (e * ISLAND_SWING + ISLAND_BASE) * m - (1 - m) * 0.9;
     }
     if (e < 0) return e * 110;
     const ridge = 1 - Math.abs(2 * fieldNoise(x, z, seed + 2, 5, 5000, period) - 1);
@@ -578,6 +584,7 @@ import { createAthreeWorld, type AthreeWorld, type AthreeWorldOptions } from './
 import { createChunkManager, type ChunkManager } from './chunks';
 import { heightfieldFor, type HeightfieldData } from './collider';
 import { createOcean, type Ocean } from './ocean';
+import { createVegetation, type Vegetation } from './plants';
 import { type AthreeQuality } from './config';
 
 export * from './world';
@@ -587,6 +594,8 @@ export { heightfieldFor, type HeightfieldData } from './collider';
 export { buildChunkGeometry, createChunkManager, type ChunkManager } from './chunks';
 export * from './water';
 export { createOcean, oceanVertexShader, oceanFragmentShader, type Ocean } from './ocean';
+export * from './vegetation';
+export { createVegetation, plantVertexShader, plantFragmentShader, type Vegetation, type VegetationStats } from './plants';
 
 export interface AthreeMap {
   readonly world: AthreeWorld;
@@ -594,6 +603,8 @@ export interface AthreeMap {
   readonly chunks: ChunkManager | null;
   /** The sea: waves, shore foam, and what a boat floats on. Present when three.js was given. */
   readonly ocean: Ocean | null;
+  /** Grass and trees: wind-bent, streamed in tiles. Present when three.js was given (and vegetation was not switched off). */
+  readonly vegetation: Vegetation | null;
   /** Call every frame with the camera in WORLD metres and the time in seconds: streams terrain, moves the sea. Returns the origin shift when it re-based. */
   update(cameraX: number, cameraZ: number, time: number): { dx: number; dz: number } | null;
   /** Heightfield data for a physics collider over [x0, x0 + size] x [z0, z0 + size]. */
@@ -603,6 +614,8 @@ export interface AthreeMap {
 
 export interface AthreeMapOptions extends AthreeWorldOptions {
   quality?: AthreeQuality;
+  /** Set false to leave grass and trees out (a flat racing circuit that wants every triangle for the road). Default true. */
+  vegetation?: boolean;
   // import * as THREE from 'three' — omit it to use the world (height, biome, wind, spawn) without drawing.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   three?: any;
@@ -613,17 +626,21 @@ export function createAthreeMap(options: AthreeMapOptions = {}): AthreeMap {
   const chunks = options.three ? createChunkManager(options.three, world, options.quality ?? 'mid', 3000, false) : null;
   const ocean = options.three ? createOcean(options.three, world, options.quality ?? 'mid') : null;
   if (chunks && ocean) chunks.group.add(ocean.mesh);
+  const vegetation = options.three && options.vegetation !== false ? createVegetation(options.three, world, options.quality ?? 'mid') : null;
+  if (chunks && vegetation) chunks.group.add(vegetation.group);
   return {
     world,
     chunks,
     ocean,
+    vegetation,
     update: (cameraX, cameraZ, time) => {
       const shift = chunks ? chunks.update(cameraX, cameraZ) : null;
       if (ocean && chunks) ocean.update(cameraX, cameraZ, time, chunks.origin);
+      if (vegetation && chunks) vegetation.update(cameraX, cameraZ, time, chunks.origin);
       return shift;
     },
     colliderFor: (x0, z0, size, cells) => heightfieldFor(world, x0, z0, size, cells),
-    dispose: () => { chunks?.dispose(); ocean?.dispose(); },
+    dispose: () => { chunks?.dispose(); ocean?.dispose(); vegetation?.dispose(); },
   };
 }
 `;
@@ -636,18 +653,20 @@ const FILES: Record<string, string> = {
   [`${DIR}/chunks.ts`]: CHUNKS,
   [`${DIR}/water.ts`]: WATER,
   [`${DIR}/ocean.ts`]: OCEAN,
+  [`${DIR}/vegetation.ts`]: VEGETATION,
+  [`${DIR}/plants.ts`]: PLANTS,
   [`${DIR}/index.ts`]: INDEX,
 };
 
 /** Every module this recipe can write. */
-export const ATHREE_MAP_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'water', 'ocean', 'index'];
+export const ATHREE_MAP_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'water', 'ocean', 'vegetation', 'plants', 'index'];
 
 export function generateAthreeMap(_include?: string[]): AthreeMapResult {
   return {
     files: { ...FILES },
     dependencies: [{ name: 'three', version: '0.180.0' }],
     instructions:
-      `Added the Athree map (${Object.keys(FILES).length} files under ${DIR}). It is the world to stand on: seeded terrain that streams in around the camera, a 100 km seamless loop or a bounded island, a real wave ocean, shared height/biome/wind/spawn functions, and heightfield data for physics.\n` +
+      `Added the Athree map (${Object.keys(FILES).length} files under ${DIR}). It is the world to stand on: seeded terrain that streams in around the camera, a 100 km seamless loop or a bounded island, a real wave ocean, grass and trees that sway in the wind, shared height/biome/wind/spawn functions, and heightfield data for physics.\n` +
       '```ts\n' +
       "import * as THREE from 'three';\n" +
       "import { createAthreeMap } from './game/athree';\n" +
@@ -664,13 +683,14 @@ export function generateAthreeMap(_include?: string[]): AthreeMapResult {
       '  const shift = map.update(spawn.x, spawn.z, time); // every frame: streams terrain, moves the sea; builds a few chunks per call\n' +
       '  // When `shift` is not null the render origin moved: subtract it from your own objects\' positions.\n' +
       '  const y = map.world.heightAt(spawn.x, spawn.z); // the same height the terrain is drawn at\n' +
-      '  const wind = map.world.windAt(spawn.x, spawn.z, time); // one wind field: it already sets the sea state; grass, trees and clouds will read it too\n' +
+      '  const wind = map.world.windAt(spawn.x, spawn.z, time); // one wind field: it sets the sea state AND bends the grass and shakes the leaves; clouds will read it too\n' +
       "  const boat = map.ocean!.floatAt(spawn.x, spawn.z, time); // the sea surface a boat floats on: y and a unit normal\n" +
+      "  const plants = map.vegetation!.stats(); // trees, tufts, triangles and draw calls drawn right now\n" +
       '  const hf = map.colliderFor(0, 0, 256, 64); // heights for a physics heightfield collider\n' +
       '  camera.position.set(spawn.x - map.chunks!.origin.x, y + 6, spawn.z - map.chunks!.origin.z);\n' +
-      '  void shift; void wind; void hf; void boat;\n' +
+      '  void shift; void wind; void hf; void boat; void plants;\n' +
       '}\n' +
       '```\n' +
-      'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. Phases built so far: the world (terrain, biomes, wind, spawns, colliders) and the OCEAN (Gerstner waves shaded and displaced on the GPU, shore foam, depth colour, and map.ocean.floatAt for boats). NOT built yet — do not draw them by hand: rivers and lakes, grass, trees, desert dunes, sky and weather, roads and vehicles, aircraft, animals and people. Do not add your own water plane: the ocean is already in map.chunks.group.',
+      'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. Phases built so far: the world (terrain, biomes, wind, spawns, colliders), the OCEAN (Gerstner waves shaded and displaced on the GPU, shore foam, depth colour, and map.ocean.floatAt for boats) and GRASS AND TREES (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, placed by biome and slope, streamed in tiles, three levels of budget per quality tier). Trees are visual only: they have no collider yet, so a car drives through them (treesInRect(world, x0, z0, x1, z1) gives the trunk positions if you need to keep clear of them); pass vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. NOT built yet — do not draw them by hand: rivers and lakes, desert dunes, sky and weather, roads and vehicles, aircraft, animals and people. Do not add your own water plane: the ocean is already in map.chunks.group. Do not scatter your own grass or trees over the map: the vegetation is already placed.',
   };
 }

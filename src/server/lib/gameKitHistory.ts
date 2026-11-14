@@ -44,7 +44,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/athree/index.ts": [
     "8b2009db2ca5de148cb40686da71b407c82bccdda21bd578e574911c108f4ec3",
-    "017614bbeb64e46cbb545bc46e689c8264267c6578cd3f92868f02e27739ea6c"
+    "017614bbeb64e46cbb545bc46e689c8264267c6578cd3f92868f02e27739ea6c",
+    "f65600598f6222546cf5a5736280d9f64625fd96c390d736786cc23bb0b81cf5"
   ],
   "src/game/athree/noise.ts": [
     "f0a7c7eaf4622707b7788540fc373e0b3d2e06687a2c5e2362aab39924371b98"
@@ -52,11 +53,18 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/athree/ocean.ts": [
     "b30d24fcf9d1fc581798e8a30eff71daacad22f08cc6d9ab886822d70e726b77"
   ],
+  "src/game/athree/plants.ts": [
+    "58c460d350d3fcd90a8839b56b32d523a130e0c295eef892844eea8ac2e69f14"
+  ],
+  "src/game/athree/vegetation.ts": [
+    "71c7521d01db7f34b81a475b05071360015946eb6e5e43e3171e5471f14ac115"
+  ],
   "src/game/athree/water.ts": [
     "b9856b2f69d98be359bb564a8c0a119cf2e2ce5579f18839027a4c795eaea461"
   ],
   "src/game/athree/world.ts": [
-    "d09b678e278ecb28e031c1f26ab476ee946fef562d0e4eb4ddd12bf8704c0805"
+    "d09b678e278ecb28e031c1f26ab476ee946fef562d0e4eb4ddd12bf8704c0805",
+    "504042a941aa174e5d7d84873165b4b28fa6d9fd1a314f35130872dedd3259d1"
   ],
   "src/game/controls.test.ts": [
     "2df3798b667fc3fe66d971a938e25286bdf3066b668eed9527c6200d4c26f03c",

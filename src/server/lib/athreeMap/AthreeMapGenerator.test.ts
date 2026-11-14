@@ -95,6 +95,15 @@ describe('the LOOP world is exactly seamless', () => {
 });
 
 describe('the BOUNDED island', () => {
+  it('EVERY seed makes an island with land at its core (seeds 4, 8, 11 and 14 used to be open sea)', () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      const w = A.createAthreeWorld({ seed, profile: 'battle-royale' });
+      let land = 0; let n = 0;
+      for (let x = -3800; x <= 3800; x += 200) for (let z = -3800; z <= 3800; z += 200) { n++; if (w.heightAt(x, z) > 2) land++; }
+      expect(land / n, 'seed ' + seed).toBeGreaterThan(0.25);
+      expect(w.heightAt(0, 0), 'seed ' + seed + ' centre').toBeGreaterThan(2);
+    }
+  });
   const w = A.createAthreeWorld({ profile: 'battle-royale', seed: 1 });
   it('is 8 km, mostly land inside and open sea outside', () => {
     expect(w.mode).toBe('bounded');

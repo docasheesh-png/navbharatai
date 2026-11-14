@@ -40,6 +40,7 @@ import { generateGameSystems } from './GameSystemsGenerator';
 import { generateGameVfxAudio } from './GameVfxAudioGenerator';
 import { generateMelody } from './MelodyGenerator';
 import { generateGameShell } from './GameShellGenerator';
+import { generateAthreeMap } from './athreeMap/AthreeMapGenerator';
 import { createHash } from 'node:crypto';
 import { GAME_KIT_HISTORY } from './gameKitHistory';
 
@@ -61,6 +62,7 @@ export const GAME_RECIPES: Readonly<Record<string, (include?: string[]) => Recip
   generate_game_vfx: generateGameVfxAudio,
   generate_melody: generateMelody,
   generate_game_shell: generateGameShell,
+  generate_athree_map: generateAthreeMap,
 };
 
 export interface LayerFile { recipe: string; content: string }

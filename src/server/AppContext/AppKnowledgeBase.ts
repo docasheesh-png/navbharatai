@@ -702,6 +702,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['download', 'download kahan gaya', 'file kahan gayi', 'save nahi hua', 'download nahi hua', 'downloaded file', 'where is my file', 'save to files', 'iphone download', 'android download', 'documents folder', 'export', 'csv', 'zip download', 'report download', 'share sheet', 'file save'],
   },
   {
+    id: 'athree_map',
+    name: 'Athree map — a big ready-made world for 3D games',
+    path: 'NavBharatAI Pro → chat → ask for a 3D game that needs a large world (racing, open world, battle royale, flight, exploring), or say "athree map use karo / athree map par game banao"',
+    description: 'The Athree map is NavBharatAI\'s own large game world (100% our own code, no third-party assets). PHASE 1 (2026-11-14), OFF until the owner switches it on: seeded terrain that streams in around the player, a 100 km seamless loop or an 8 km island for battle royale, sea level and biomes (ocean, beach, desert, grassland, forest, mountain, snow), one shared wind field, safe spawn points for the player, vehicles, planes, boats and animals, heightfield data for physics, and three quality levels (phone, mid, desktop) with a computed triangle budget. NOT BUILT YET (later phases, say so honestly): ocean waves and rivers, moving grass and trees, desert dunes, sky and weather, race tracks and vehicles, aircraft, animals, birds and people. WHEN IT IS USED: when the user names Athree AND the game really needs a world; or when a big map is really needed and the library offers it; or when the library\'s random pick lands on it. The pick is made once per project and then kept, so edits never change the map. If the user names Athree for an app with no world (a calculator, a form, a 2D puzzle) it says so plainly and adds no map; if the user says not to use it, it is not used.',
+    howToUse: 'Ask for the game you want and name the map if you like: "athree map par 3D racing game banao", "pubg jaisa battle royale game, athree map use karo", "open world exploring game". The builder adds the map files (src/game/athree/) and builds the game on it. To change the map later, say so ("map badlo"). While the Athree map is switched off, the builder tells you it is not available and builds without it.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['athree', 'athree map', 'a three map', 'a-three', 'a3 map', 'athree map use karo', 'athree map par game banao', 'big map', 'bada map', 'open world', 'open world game', 'racing map', 'battle royale map', 'pubg map', 'flight map', 'game map', 'game ka map', 'duniya', 'infinite map', '100 km map', 'terrain', 'world map game'],
+    aiSurface: 'pro_chat',
+  },
+  {
     id: 'agentv3_zip_import',
     name: 'Import an existing app (.zip) into NavBharatAI Pro',
     path: 'NavBharatAI Pro → chat composer → 📎 attach menu → "Import project (.zip)" → pick your app\'s .zip, or a single .html page (it imports immediately — no send needed)',

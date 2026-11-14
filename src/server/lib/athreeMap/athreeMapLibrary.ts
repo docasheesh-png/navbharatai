@@ -32,3 +32,11 @@ export const ATHREE_MAP: LibraryMap = {
 };
 
 export const LIBRARY_MAPS: readonly LibraryMap[] = [ATHREE_MAP];
+
+/**
+ * Is the Athree map switched on? Default OFF (AGENTV3_ATHREE_MAP=on). OFF means the map is neither offered by the library nor written by
+ * the recipe: a map that cannot be used is not listed (real features only).
+ */
+export function athreeMapEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return ['on', '1', 'true', 'yes'].includes(String(env.AGENTV3_ATHREE_MAP ?? '').trim().toLowerCase());
+}

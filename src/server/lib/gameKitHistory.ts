@@ -31,6 +31,24 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
     "6d19d3faa0b46f00871a82026740716b96dd3ad44aae87185b94ecc852bf36ff"
   ],
+  "src/game/athree/chunks.ts": [
+    "7c44401394f5df9672beabf3d534e840283607d72d362909317d4bc5fd2e8745"
+  ],
+  "src/game/athree/collider.ts": [
+    "0c1bd77b86a85155ce889d4c87367b305f46e2dbbe4de704c0cc603076788b08"
+  ],
+  "src/game/athree/config.ts": [
+    "0daa780af7666b5884ab80dc784accc7928edd551c23a01a108e54a78da53202"
+  ],
+  "src/game/athree/index.ts": [
+    "8b2009db2ca5de148cb40686da71b407c82bccdda21bd578e574911c108f4ec3"
+  ],
+  "src/game/athree/noise.ts": [
+    "f0a7c7eaf4622707b7788540fc373e0b3d2e06687a2c5e2362aab39924371b98"
+  ],
+  "src/game/athree/world.ts": [
+    "d09b678e278ecb28e031c1f26ab476ee946fef562d0e4eb4ddd12bf8704c0805"
+  ],
   "src/game/controls.test.ts": [
     "2df3798b667fc3fe66d971a938e25286bdf3066b668eed9527c6200d4c26f03c",
     "5feb01be9c62f7c6d61cc049d80e25535804f446fee7b5fabc578c539381f8a4"

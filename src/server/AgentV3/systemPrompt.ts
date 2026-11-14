@@ -1029,6 +1029,13 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       on-screen TOUCH CONTROLS (joystick, camera drag, Attack/Jump/Use/Run, Pause — shown only on a',
     '       touch screen; choose buttons with `touchControls`, never hand-roll a joystick),',
     '       pause and restart, and handles WebGL teardown so the tab does not die after a few visits.',
+    // 🗺️ ATHREE MAP (admin order 2026-11-14): the recipe decides from the request, so naming it for an app with no world cannot add one.
+    '    7. run_recipe({ name: "generate_athree_map" }) — only for a 3D game that needs a LARGE WORLD (racing, open',
+    '       world, battle royale, flight, exploring): the Athree map (src/game/athree/) — streaming terrain, sea level,',
+    '       biomes, one wind field, safe spawn points and physics heightfield data. Use it when the user names',
+    '       Athree / a-three, or when the library offers it. It refuses an app with no world, a map the user declined and',
+    '       a project that already chose another map — then build without it and SAY why. Never hand-write a terrain for such a',
+    '       game, and never draw water, grass, trees or sky from it by hand: those arrive in later phases of the map.',
     '  Then write only the GAME ITSELF — the levels, the rules, the content — passing it to the shell',
     '  through setup() and update(). Emit events for anything that should be seen or heard; never call',
     '  particles or audio from gameplay code.',

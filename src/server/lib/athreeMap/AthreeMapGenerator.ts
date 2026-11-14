@@ -607,13 +607,24 @@ export function generateAthreeMap(_include?: string[]): AthreeMapResult {
       '```ts\n' +
       "import * as THREE from 'three';\n" +
       "import { createAthreeMap } from './game/athree';\n" +
+      '\n' +
+      'const scene = new THREE.Scene();\n' +
+      'const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.5, 6000);\n' +
       "const map = createAthreeMap({ seed: 7, profile: 'racing', quality: 'mid', three: THREE });\n" +
       'scene.add(map.chunks!.group);\n' +
-      "const spawn = map.world.spawnPoints('vehicle')[0];      // a flat, dry, safe place\n" +
-      'map.chunks!.update(camera.x, camera.z);                 // every frame (cheap; builds a few chunks per call)\n' +
-      'const y = map.world.heightAt(x, z);                      // same height the terrain is drawn at\n' +
-      'const wind = map.world.windAt(x, z, time);               // one wind field for grass, trees, water and clouds later\n' +
-      'const hf = map.colliderFor(x0, z0, 256, 64);             // heights for a physics heightfield collider\n' +
+      "const spawn = map.world.spawnPoints('vehicle')[0]; // a flat, dry, safe place\n" +
+      'let time = 0;\n' +
+      '\n' +
+      'export function frame(dt: number): void {\n' +
+      '  time += dt;\n' +
+      '  const shift = map.chunks!.update(spawn.x, spawn.z); // every frame: cheap, builds a few chunks per call\n' +
+      '  // When `shift` is not null the render origin moved: subtract it from your own objects\' positions.\n' +
+      '  const y = map.world.heightAt(spawn.x, spawn.z); // the same height the terrain is drawn at\n' +
+      '  const wind = map.world.windAt(spawn.x, spawn.z, time); // one wind field for grass, trees, water and clouds later\n' +
+      '  const hf = map.colliderFor(0, 0, 256, 64); // heights for a physics heightfield collider\n' +
+      '  camera.position.set(spawn.x - map.chunks!.origin.x, y + 6, spawn.z - map.chunks!.origin.z);\n' +
+      '  void shift; void wind; void hf;\n' +
+      '}\n' +
       '```\n' +
       'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. This is phase 1: water waves, grass, trees, desert dunes, sky and weather, roads and vehicles come in later phases — do not draw them by hand.',
   };

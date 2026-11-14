@@ -716,76 +716,64 @@ Do NOT sit and watch any single CI run. The rule, every time you push:
 This applies to the deep-test autopsy loop too: after pushing a root-cause fix, don't watch its CI —
 start the next autopsy / next fix, and let the background timer bring you back to merge when it's green.
 
-⚠️ Every "merge it" / "merge when green" instruction above is superseded by the 2026-09-13 correction
-after the cycle below: the background timer still brings you back on green, but what it does on
-arrival is now tell the admin and wait, not merge — see that correction for the exact rule.
-
-**The cycle (repeat for every phase):**
-
-1. **Complete the next phase** — real, fully-wired work (the two absolute rules apply:
-   never break the app; real features only). No half-done work.
-2. **Run the full verification gate** (safeguard #5, non-negotiable):
-   `npx tsc --noEmit` (frontend) + `npx tsc -p tsconfig.server.json` (if server touched)
-   + `npm run test:coverage` — CI's own step (read the real pass/fail line) + a boot/smoke check for server
-   changes. Green or it does not leave your machine.
-3. **Branch → commit → push** the work to the feature branch.
-4. **Open a PR** to `main`.
-5. **Wait for CI to go green** on that PR — actually wait, poll the checks; never merge
-   while CI is pending or red.
-6. **On green, MERGE it yourself** (CI green BEFORE merge is the hard gate — merging red
-   breaks the live app for every user; merge = auto production deploy via Cloud Run).
-7. **Immediately start the next phase** → go back to step 1. Same cycle, next phase.
-
-**You do steps 4, 5, AND 6 yourself.** "Open a PR" is not the finish line — a green merge
-is. The admin should not have to merge anything for the cycle to keep moving; you complete
-each phase, you make the PR, you wait for green, you merge, you move on — over and over.
+⚠️ The merge step of the cycle above is governed by **"GitHub CI is down: LOCAL CI IS THE GATE, AND A
+GREEN LOCAL CI MAY BE FORCE-MERGED"** below. The old "never merge until the admin says so" rule was deleted on
+2026-11-14 at the admin's order; do not restore it from history.
 
 **Only stop the cycle when:** the admin explicitly says stop/pause, there is no next phase
 left, or you hit real doubt/ambiguity/breakage risk (safeguard #3 — then ask the admin).
 A transient CI failure is NOT a stop: diagnose, fix, re-push, wait for green, merge, continue.
 
-🔴 **CORRECTION 2026-09-13 (admin-mandated, verbatim: "jab tak kaha na jaye, CI merge na ki
-jaye") — THIS SUPERSEDES STEP 6 ABOVE, UNTIL THE ADMIN SAYS OTHERWISE.** After any edit, the
-cycle still runs through branch → commit → push → open the PR → wait for CI to go green
-(steps 1–5 are unchanged). But the merge itself is no longer Claude's to decide on green: once
-CI is green, STOP at that PR, tell the admin it is open and green, and wait — do not merge
-until the admin explicitly says to merge THAT PR. This applies to every PR, including small or
-documentation-only ones, and holds until the admin lifts it. Nothing else about the gate
-changes: CI still must be green before a merge ever happens, and a red or pending PR is still
-worked to green in the background exactly as before — only the final "merge it" decision moved
-from Claude to the admin.
+### 🔴 GITHUB CI IS DOWN: LOCAL CI IS THE GATE, AND A GREEN LOCAL CI MAY BE FORCE-MERGED (admin-mandated 2026-11-14)
 
-🔴 **AND THE MERGE IS ONE SESSION'S JOB, NOT EVERY SESSION'S (admin-mandated 2026-09-13, verbatim:
-"ab se PR merge sirf aap karoge! mai bolunga apko tab. woh session bas bana bana kar CI check laga
-denge").** This is the second half of the correction above, and without it that one is unenforceable:
-a rule that says "wait for the admin" still lets five sessions each decide, independently, that their
-own PR is the one that may go.
+Admin, verbatim: *"github kaam nahi kar raha hai, hame github wali same CI locally run karni hai, koi problem aye to fix
+karna hai, agar sab clear ho to PR force merge karni hai!"* — and, in the same message, the admin **deleted the old rule**
+*"jab tak kaha na jaye tab tak merge na kare"* (the 2026-09-13 "stop at green and wait" correction and its
+"only one session merges" table). **They no longer exist. Every session may merge its own PR under this rule, and
+only under this rule.** This is a standing order, valid until the admin lifts it.
 
-**So there are now exactly two roles, and every session is in one of them.**
+**1. Run the SAME CI, locally, on the FINAL state.** One command: `scripts/localCi.sh [report-file]`. It runs every step
+`.github/workflows/ci.yml` runs, in its order (`audit:gate`, `license:gate`, `typecheck`, `noUnusedImports`, `native:guard`,
+`typecheck:server`, `typecheck:benchmark`, the OAuth and answer-quality checks, `test:mitrify`, **`test:coverage`**, `build`,
+`test:bundle`, `boot:check`, `deps:server-gate`), keeps going after a failure so one run shows ALL the problems, reads the
+real `Tests` line (a suite can exit 0 and still print failures), and **fails by itself when `ci.yml` gains a step it does
+not cover** (the 2026-09-10 / 2026-10-20 incidents were exactly a gate list gone stale). The four `ci.yml` steps that
+check nothing (`npm install -g npm`, `npm ci`, `npm audit signatures`, `npm run sbom`) are printed as SKIPPED with the
+reason, never dropped silently. Run it AFTER the last edit and AFTER merging `main` in; a run before the last file was
+written proves nothing (safeguard #5).
 
-| | What it does | Where it STOPS |
-|---|---|---|
-| **The merging session** — the ONE the admin is talking to | merges, and only when the admin names the PR | — |
-| **Every other session** | branch → commit → push → open the PR → drive CI to GREEN → say so | **at green. It does not merge, ever.** |
+**2. A problem is a task, not a verdict.** Red local CI ⇒ diagnose from the real log, fix the ROOT cause (fourth rule: never
+a surface patch, never a skipped or weakened test), re-run the WHOLE thing. Repeat until green. A failure on a branch whose
+diff did not touch it (a new advisory in `audit:gate`) is still red: say what it is, fix it or pin it honestly in the same
+PR — never merge around it.
 
-⚠️ **"I am the session the admin is talking to" is not something to assume — it is something the
-admin SAYS.** If you have not been told in your own conversation that merging is yours, you are in
-the second row, whatever your PR's state. A session that reasons "the admin clearly wants this
-merged" has just made itself the merger, which is the exact thing this rule removes.
+**3. When EVERYTHING is clear, merge the PR yourself — force-merge is allowed.** "Clear" means all of these, with evidence:
+   - `scripts/localCi.sh` ended `LOCAL CI: ALL GREEN` on the commit being merged, after `main` was merged into the branch
+     and re-fetched immediately before (concurrent sessions move `main`; a gate on a stale base proves nothing);
+   - the PR is open with the mandatory title `[#<n>] <title> [<sha>]` and its body carries the local-CI report (pass/fail
+     per step, the real `Tests` line, the SKIPPED list and why GitHub CI did not run);
+   - no other session's open PR names the same root cause as its next step (the "taken work" rule below).
+   **Force-merge means: merge through the GitHub merge tool even though GitHub's own checks did not run, are pending forever,
+   or are unavailable — squash merge, admin-bypass of the required check where branch protection insists.** It does NOT mean
+   merging over a red local CI, over a GitHub check that DID run and failed for a real reason (that is a red CI: fix it), over
+   an unresolved merge conflict, or over a step you skipped. If GitHub CI is actually working and green, it counts too, but a
+   green local CI is sufficient.
 
-🔴 **WHY, AND IT IS NOT HOUSEKEEPING.** On the day this was written, **eight PRs merged into `main`
-inside two hours from four different sessions**, and two of them (#2892, #2896) were merged by a
-session that did not open them, while the session that did was still working on the branch. Nothing
-broke — by luck and a green CI, not by design. With concurrent sessions the merge is the ONE step
-where an independent decision compounds: a conflict-resolution another session has not seen, a
-half-landed pair, a `main` that moves under three branches at once. One merger makes the order
-deliberate instead of incidental.
+**4. Merge is deploy — so watch the deploy and keep the exit open.** A merge to `main` auto-deploys production (Cloud Build →
+Cloud Run). One PR at a time: merge, then confirm the Cloud Build run for that commit starts and finishes (1–2 min to start,
+3–5 to finish) before merging the next. If the deploy or the live app misbehaves, the fix is a **revert PR through this same
+local-CI gate** — do not pile fixes on a broken `main`. Say plainly in the reply what was merged, the commit on `main`, and
+what you are watching.
 
-⚠️ **NOTHING ELSE CHANGES, and a session in the second row must not go quiet.** CI must still be
-green before any merge, a red or conflicted PR is still driven to green in the background, and a
-merge conflict is still merged in and re-gated by whoever owns the branch. **Reaching green is the
-deliverable — report it plainly** ("#NNNN is open and green") so the admin knows there is something
-to name. Going idle on a green PR is not obedience to this rule; it is half the job.
+**5. Be honest about what was and was not proven (third rule).** Report "merged on local CI", never "CI green" without
+saying which CI. If a step of `localCi.sh` could not run (no network for `audit:gate`, a missing tool), that step is NOT
+green: fix the environment, or stop and tell the admin — an unrun gate is never a passed gate. If a real doubt remains about
+breakage (safeguard #3), stop and ask before merging; force-merge is permission to bypass an UNAVAILABLE check, not to bypass
+judgement.
+
+**6. Everything else in this file still holds:** the four other absolute rules, the verification gate, small commits,
+`PROGRESS.md` appended, `BUILD_REPORT_QUEUE.md` read before self-started work, the AppKnowledgeBase rule. The one thing that
+changed is who decides the merge: once the gate above is green, **you do**.
 
 ### The 60-second auto-answer rule (admin-mandated, 2026-07-06 — keeps the cycle from stalling)
 
@@ -974,7 +962,8 @@ break):
   it — and shrinking the baseline. Never a mass deletion: an old bundled phone app may still call a route.
 - **Every change goes branch → commit → push → CI green → merge.** Merge
   is what deploys (see Deployment above), so never merge red or unverified.
-  **CRITICAL — CI must be green BEFORE merging, no exceptions:**
+  **CRITICAL — CI must be green BEFORE merging, no exceptions** ("CI" = GitHub's, or — while GitHub CI is down,
+  per the 2026-11-14 order above — `scripts/localCi.sh`, the same steps run locally):
   Even when `git push origin main` direct-merge permission is granted, the
   correct flow is ALWAYS: push the feature branch → wait for CI to pass on
   that branch → THEN merge to main. "Direct push permission" means you may

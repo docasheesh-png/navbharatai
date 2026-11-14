@@ -1,6 +1,7 @@
+import { ComposerPopover } from '../chat/ComposerPopover';
 import { GameBuildInbox, gameBuildTargetReady, type GameBuildRequest } from '../../lib/gameBuildInbox';
 import { COMPOSER_BOX_CLASS, COMPOSER_TEXTAREA_CLASS, MobileComposerTools, resizeMobileComposer } from '../chat/ComposerShell';
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ServiceRecommendationCard } from './ServiceRecommendationCard';
 import { offerWatchLive } from './earlyPreviewCue';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
@@ -90,7 +91,7 @@ import { deployBlockedReason } from '../../lib/deployGuard';
 import { simplifyHealthLines } from '../../lib/buildHealthDisplay';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
-import { acceptZipPick, notZipMessage, isHtmlPagePick } from '../../lib/zipPicker';
+import { acceptZipPick, notZipMessage, isHtmlPagePick, shouldImportAttachedPage } from '../../lib/zipPicker';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId, takeRemixHandoff } from './v3SessionContinuity';
 import { showColdStart } from './coldStartPolicy';
@@ -218,34 +219,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [adviseIdeasOpen, setAdviseIdeasOpen] = useState(false);
   const [adviseCount, setAdviseCount] = useState(0);
-  const modeMenuRef = useRef<HTMLDivElement | null>(null);
-  // The shared menu pin is 72px, which is the tab bar, so a tall menu lands on the input and
-  // drags Plan down onto it. Measure the composer and stop the menu at its top edge.
-  useLayoutEffect(() => {
-    if (!modeMenuOpen) return;
-    const place = () => {
-      const menu = modeMenuRef.current;
-      const box = menu?.closest('.nb-composer-box') as HTMLElement | null;
-      if (!menu || !box) return;
-      const top = box.getBoundingClientRect().top;
-      const vv = window.visualViewport;
-      const fromLayoutTop = (vv?.offsetTop ?? 0) + top;
-      const maxPx = Math.max(200, Math.round(top - 12));
-      menu.style.setProperty('--nb-mode-bottom', `${Math.max(0, Math.round(window.innerHeight - fromLayoutTop + 8))}px`);
-      menu.style.setProperty('--nb-mode-max', `${maxPx}px`);
-      // Only take the full gap when the list is actually taller than the room above the input.
-      // Plan stays the footer either way, so it cannot fall onto the box.
-      menu.style.setProperty('--nb-mode-height', menu.scrollHeight > maxPx ? `${maxPx}px` : 'auto');
-    };
-    place();
-    const vv = window.visualViewport;
-    vv?.addEventListener('resize', place);
-    window.addEventListener('resize', place);
-    return () => {
-      vv?.removeEventListener('resize', place);
-      window.removeEventListener('resize', place);
-    };
-  }, [modeMenuOpen, adviseIdeasOpen]);
+  const modeTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const settingsTriggerRef = useRef<HTMLButtonElement | null>(null);
   // Plan/Advise (read-only lanes) run on their OWN request, fully DECOUPLED from the build stream, so
   // they can be sent ANYTIME — even WHILE a build is running (the whole point of the model) — and can
   // never clobber the live build's state. `roleBusy` is their own in-flight flag (independent of the
@@ -1744,7 +1719,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // limits and explain every rejected item instead of silently slicing at eight.
   const addFiles = (list: FileList | null) => {
     if (!list) return;
-    const staged = stageAttachmentFiles(files, Array.from(list));
+    // A whole HTML page of app size is a project the user brought, not a file to ask about: import it (Files, IDE, Preview) instead of
+    // staging it as an attachment the model would read and review (single-file game autopsy, 2026-11-14).
+    const picked = Array.from(list);
+    const pages = picked.filter((f) => shouldImportAttachedPage(f));
+    if (pages.length > 0) {
+      setUserMsgs((c) => [...c, { role: 'agent', text: `📄 "${pages[0].name}" is a whole page, so I am opening it as a project (Files, IDE and Preview) instead of reading it as an attachment. Your message stays in the box — send it once the import finishes.`, ts: Date.now() }]);
+      void handleZipProject(pages[0]);
+    }
+    const staged = stageAttachmentFiles(files, picked.filter((f) => !pages.includes(f)));
     if (staged.rejected.length > 0) {
       setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${staged.rejected.map((r) => r.reason).join('\n')}`, ts: Date.now() }]);
     }
@@ -5885,14 +5868,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               <div className="nb-pro-controls flex min-h-11 items-center gap-1 order-2 flex-nowrap overflow-x-auto px-2 pb-2">
               <div className="relative">
                 {modeMenuOpen && (
-                  <>
-                    {/* outside-click catcher */}
-                    <div className="fixed inset-0 z-10" onClick={() => setModeMenuOpen(false)} />
-                    <div
-                      ref={modeMenuRef}
-                      data-advise-open={adviseIdeasOpen ? 'true' : 'false'}
-                      className="nb-mode-menu absolute bottom-full left-0 mb-2 z-20 w-60 bg-card border border-line rounded-lg shadow-xl"
-                    >
+                  <ComposerPopover anchorRef={modeTriggerRef} label="Chat mode"
+                    width={adviseIdeasOpen ? 300 : 240}
+                    onClose={() => { setAdviseIdeasOpen(false); setModeMenuOpen(false); }}>
                       <div className="flex items-center justify-end px-1.5 pt-1">
                         <button
                           type="button"
@@ -5957,8 +5935,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                           />
                         </div>
                       )}
-                    </div>
-                  </>
+                  </ComposerPopover>
                 )}
                 {!modeMenuOpen && (
                   <NextSuggestionsBulb
@@ -5973,6 +5950,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 <button
                   type="button"
                   onClick={() => setModeMenuOpen((v) => !v)}
+                  ref={modeTriggerRef}
+                  aria-haspopup="dialog"
+                  aria-expanded={modeMenuOpen}
                   title="Chat mode — Build / Plan / Advise"
                   className={`h-8 min-w-[84px] flex items-center justify-between gap-1 px-2.5 py-1 rounded border text-xs font-semibold leading-none overflow-visible ${modeMenuOpen ? 'border-indigo-500 text-accent-text' : 'border-line text-muted hover:text-ink'}`}
                 >
@@ -5988,10 +5968,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               {/* Build-options popover (Planning / Thinking / Power) — anchored above the input */}
               <div className="relative shrink-0">
                 {settingsOpen && (
-                  <>
-                    {/* outside-click catcher */}
-                    <div className="fixed inset-0 z-10" onClick={() => { setSettingsOpen(false); setHighlightPowerPicker(false); }} />
-                    <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-card border border-line rounded-lg shadow-xl p-1.5 space-y-0.5">
+                  <ComposerPopover anchorRef={settingsTriggerRef} label="Build options"
+                    onClose={() => { setSettingsOpen(false); setHighlightPowerPicker(false); }}>
                       {/* Planning + Thinking toggles removed (admin 2026-08-14: "no need now"). Plan is
                           still available as its own chat mode; thinking is automatic for complex builds. */}
                       {/* KEEP SCREEN ON (admin 2026-08-14): stop the phone auto-locking mid-build and cutting
@@ -6070,11 +6048,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                         <span className="text-xs text-muted">Import Repo</span>
                         {importUrl ? <span className="text-[10px] text-success truncate max-w-[100px]">✓ set</span> : <span className="text-[10px] text-faint">GitHub / URL</span>}
                       </button>
-                    </div>
-                  </>
+                  </ComposerPopover>
                 )}
                 <button
                   type="button"
+                  ref={settingsTriggerRef}
+                  aria-haspopup="dialog"
+                  aria-expanded={settingsOpen}
                   data-build-options-trigger
                   onClick={() => { setSettingsOpen((v) => { const next = !v; if (!next) setHighlightPowerPicker(false); return next; }); }}
                   title="Build options"
@@ -7760,4 +7740,5 @@ function colorizeDiff(patch: string): React.ReactNode {
     return <div key={i} className={cls}>{line}</div>;
   });
 }
+
 

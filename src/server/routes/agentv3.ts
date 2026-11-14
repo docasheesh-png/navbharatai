@@ -655,6 +655,13 @@ import { placePlatformContext } from '../lib/platformContext';
 import { previewAutoRepairEnabled, autoRepairPrecheck, autoRepairDecision, autoRepairPrompt, claimAutoRepair } from '../AgentV3/previewAutoRepair';
 import { clearPreviewGaveUp } from '../AgentV3/previewGiveUp';
 import { buildConfirmation, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
+import { loadProjectMemoryForTurn, memoryStopMessage, recordUserMessage } from '../AgentV3/projectMemoryTurn';
+import { assessEditCandidate, rejectionMessage, type GateVerdict as EditGateVerdict } from '../AgentV3/editPromotionGate';
+import { decideRelease, candidateReplacesBase, editPromotionEnabled } from '../AgentV3/editRelease';
+import { checkEditBaseForTurn, editIdFor } from '../AgentV3/editBase';
+import { settleEditRevision, holdReplacementIfAny, billAfterHold, summaryAfterHold, recordRestoreRevision } from '../AgentV3/editPromotion';
+import { messageIdFor } from '../AgentV3/projectRequirements';
+import { getRevisionStore, buildRevision, verifyBase, promoteWithRebase, type BaseVerification, type RevisionRecord } from '../AgentV3/projectRevisions';
 import { frameworkMismatchFromListing, shouldCheckFrameworkQuestion, answersFrameworkQuestion, frameworkQuestionMarker, frameworkQuestionSteer, frameworkAnswerNote } from '../AgentV3/frameworkQuestion';
 import type { FrameworkCoherence } from '../AgentV3/ProjectImport';
 import { attachmentMemoryEnabled, rememberableUid, saveAttachmentMemory, loadAttachmentMemory, deleteAttachmentMemory, shouldRecallAttachment, refersToEarlierAttachment } from '../lib/attachmentMemory';
@@ -10281,6 +10288,9 @@ async function noteBuildOutcome(
         }
         sandbox = skipped.length === 0 && removed && removable.length === sb.remove.length ? 'updated' : 'not-updated';
       } catch { sandbox = 'not-updated'; }
+      // 🧬 THE RESTORE IS A NEW HISTORY EVENT (editPromotion.ts): the verified head moves to a `restore` revision that
+      // points at the version it restored, so the next edit starts from exactly these files. No model is involved.
+      await recordRestoreRevision({ store: getRevisionStore(), projectId: workspaceId, restored: plan.target, versionName: version.commitMessage, editId: `${workspaceId}:restore:${versionId}:${Date.now()}`, now: Date.now() });
       res.json({
         ok: true,
         files: plan.target,
@@ -11850,6 +11860,8 @@ async function noteBuildOutcome(
           // Our own notice is not one of the user's requests, and must never become "earlier context".
           if (clarifyChips) { if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, 'clarify'); }
           else if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, askFramework ? 'framework' : answerThenOffer ? 'offer' : 'chat');
+          // A lasting instruction said in CHAT ("always keep first-person controls") is the project's too.
+          await recordUserMessage(chatWsId, typedPrompt || prompt, false, echoesPlatformNotice);
           // Hydration at intent-time is a 3-second RACE, so it can be marked done while the read never
           // landed — `saveWorkspaceMemoryFor` checks the read itself, not the re-entrancy flag.
           void saveWorkspaceMemoryFor(chatWsId, chatMem).catch(() => {});
@@ -13061,6 +13073,12 @@ async function noteBuildOutcome(
         emitFrameworkCorrection(framework, 'detected');
       }
     }
+    /**
+     * 🔴 THE ONLY TWO WAYS A TURN MAY REPLACE A PROJECT THAT HAS A VERIFIED BASE: the user asked to start fresh,
+     * or approved the rebuild below. Everything else is an edit, and an edit is compared with its base before it
+     * can replace anything (`editPromotionGate.ts`). Set here, read by the in-build proof and the turn-end settle.
+     */
+    let userApprovedReplace = wantsFreshStart(prompt);
     // REBUILD CONFIRMATION GATE (Fix 28): a turn that is STILL rebuild-shaped over a non-empty
     // workspace (explicit fresh-start / complete-app ask — or a wrong call the guard couldn't
     // catch) is about to REPLACE the user's existing app. Never silently: pause and ask. Approve
@@ -13085,6 +13103,7 @@ async function noteBuildOutcome(
         ts: Date.now(),
       });
       const rebuildApproved = (await waitForUser(confirmId)) === 'approved';
+      if (rebuildApproved) userApprovedReplace = true;
       if (!rebuildApproved) {
         intent = 'edit_existing';
         isEditMode = true;
@@ -13136,7 +13155,25 @@ async function noteBuildOutcome(
         .then((rec) => lastAssistantText((rec as { messages?: unknown[] } | null)?.messages ?? [], CONVERSATION_REPLY_MAX))
         .catch(() => '')
       : '';
-    const planning = planningRequest({ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, conversationReply, userAppExists, appStillUnbuilt });
+    /**
+     * 🧠 THE PROJECT'S OWN MEMORY (projectRequirements.ts). The brief and the user's standing requirements live in
+     * their own durable document and are rebuilt from the canonical conversation when it is missing — not in the
+     * 500-episode buffer that evicts them, nor the 100 that survive a restart. An import turn is exempt (it brings
+     * its own project). When neither can be read, an EDIT stops before it mutates anything (see below).
+     */
+    const projectMemory = await loadProjectMemoryForTurn({
+      skip: hasImportIntent,
+      projectId: workspaceId,
+      message: typedPrompt || prompt,
+      isBuildRequest: intent === 'new_build' || offerAccepted,
+      replace: userApprovedReplace,
+      readTranscript: async () => {
+        const rec = await getConversationStore().get(conversationIdForWorkspace(workspaceId));
+        return rec ? ((rec as { messages?: unknown[] }).messages ?? []) : null;
+      },
+      isBuildText: (text) => buildConfirmation(text).confirmed,
+    });
+    const planning = planningRequest({ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, conversationReply, userAppExists, appStillUnbuilt, projectMemory: projectMemory.text });
     // What the end-of-build checks grade the app against: the message, or — when it names nothing to
     // check ("Continue from where you left off…") — the earlier request it continues (autopsy 241215d1).
     const checksRequest = requestForChecks(prompt, planning, requestedFeatureLabels(prompt).length);
@@ -13798,6 +13835,8 @@ async function noteBuildOutcome(
      * different blocks of this handler.
      */
     let snapshotTaken: SnapshotTaken | null = null;
+    /** The hash of the files the preview copy was built from — the digest of the artifact that was validated, when there is one. */
+    const snapshotDigest = (): string | undefined => snapshotTaken?.filesHash ?? undefined;
     /**
      * Take the preview copy again from the workspace as it is NOW — rebuild, then copy. Set by the
      * production-build step when this app can have a copy at all; null otherwise. Used after a kept
@@ -13823,6 +13862,25 @@ async function noteBuildOutcome(
      * exactly as it behaves today.
      */
     let projectFilesAtTurnStart: Record<string, string> | null = null;
+    /**
+     * 🧬 THE VERIFIED BASE OF THIS EDIT (editPromotionGate.ts, projectRevisions.ts). The head revision says what the
+     * project IS; the hydrated workspace is only what was read back. `editBaseCheck` records whether the second is
+     * the first, complete. When it is not (an incomplete hydration), the last browser-verified copy that DOES match
+     * the head is the base, so an edit is never compared with — or restored to — a fragment.
+     */
+    let editBaseCheck: BaseVerification = { state: 'no-head', missing: [], extra: [], differing: [] };
+    let editHeadAtStart: RevisionRecord | null = null;
+    let editVerifiedBase: Record<string, string> | null = null;
+    /** What an edit is compared with; null when this turn may replace the project (fresh start, approved rebuild, import). */
+    const editGateBase = (): Record<string, string> | null => {
+      if (!editPromotionEnabled() || userApprovedReplace || isImportTurn || hasImportIntent) return null;
+      const base = editVerifiedBase ?? projectFilesAtTurnStart;
+      return base && Object.keys(base).length > 0 ? base : null;
+    };
+    /** The one id this edit carries through retries, reconnects and fallbacks: it promotes at most once. */
+    const editId = editIdFor(workspaceId, req.body?.requestId, randomUUID());
+    /** Set when the settle held an edit that would have replaced the project: the summary the user reads, and the bill (zero). */
+    let editHeldSummary: string | null = null;
 
     // P-PME.4 — LIVE, ADAPTIVE ETA state. The up-front estimate (set below at build start) is a
     // realistic total; the heartbeat below recomputes the REMAINING time every 2 min and emits it,
@@ -14360,6 +14418,23 @@ async function noteBuildOutcome(
       // The import that was not merged (Q-733, above) ends its turn here: nothing was imported, so there is
       // nothing to build on, and building the user's message onto the OTHER app is the one thing they did
       // not ask for. Same honest early end as the refusal below — no model call, nothing billed.
+      // 🧠 NO INSTRUCTIONS, NO EDIT. An edit of an existing app made without its brief and standing requirements is a
+      // guess — the shape of the incident where a built 3D game was replaced by a different one. When neither the
+      // stored requirements nor the saved conversation could be read, the turn ends BEFORE anything is written, in
+      // seconds, free, with the app exactly as it was (projectMemoryTurn.ts).
+      const memoryStop = memoryStopMessage(projectMemory, userAppExists, hasImportIntent, isImportTurn, editPromotionEnabled());
+      if (memoryStop) {
+        buildDiag.record({
+          phase: 'build', severity: 'warning', code: 'PROJECT_MEMORY_UNRECOVERABLE',
+          message: 'The edit was stopped before any file was written: the project\'s requirements could not be recovered from the stored ledger or from the saved conversation.',
+          detail: projectMemory.note, autoResolved: false,
+        });
+        buildDiag.finish(false, memoryStop);
+        events.emit({ type: 'done', ok: false, summary: memoryStop, ts: Date.now() });
+        emit({ type: 'result', ok: false, summary: memoryStop, steps: 0, billedUsd: 0, billedInr: 0 });
+        return;
+      }
+      buildDiag.record({ phase: 'build', severity: 'info', code: 'PROJECT_MEMORY', message: projectMemory.note, autoResolved: true });
       if (projectImportNotMerged) {
         buildDiag.record({
           phase: 'build', severity: 'warning', code: 'IMPORT_NOT_MERGED',
@@ -15911,6 +15986,13 @@ async function noteBuildOutcome(
           // Reused far below by the journey check (see projectFilesAtTurnStart) — the whole project,
           // read once, rather than a second store round-trip on the critical path.
           projectFilesAtTurnStart = saved;
+          // 🧬 IS WHAT WAS READ BACK THE PROJECT'S VERIFIED HEAD, COMPLETE? (projectRevisions.ts) A partial
+          // hydration is the one case where an edit would be built over — and compared with — a fragment.
+          const baseResult = await checkEditBaseForTurn({ workspaceId, hydrated: saved, store: getRevisionStore(), loadVerifiedCopy: () => loadWorkspaceFiles(greenWorkspaceKey(workspaceId)), withTimeout, isImportTurn, hasImportIntent, durableUnreadable: durable.status === 'unreadable' });
+          editHeadAtStart = baseResult.head;
+          editBaseCheck = baseResult.check;
+          editVerifiedBase = baseResult.verifiedBase;
+          if (baseResult.finding) buildDiag.record({ phase: 'build', ...baseResult.finding });
           const scanT0 = Date.now();
           // ⚠️ A SCAN THAT FAILED IS NOT AN EMPTY SANDBOX — and this line used to say it was.
           //
@@ -16514,6 +16596,10 @@ async function noteBuildOutcome(
           if (outcome.kind === 'proven' || (outcome.kind === 'raced' && !starterIsWhatRendered(starterEntryIn(files), shot.html))) {
             try { buildDiag.recordTimeToFirstRender(elapsedMs); } catch { /* best-effort */ }
           }
+          // 🛡️ THE SECOND PLACE A CANDIDATE USED TO BECOME THE "LAST KNOWN GOOD": this proof saves whatever just
+          // rendered as the copy every later restore reads. An edit that rendered a DIFFERENT app must not
+          // overwrite the version it was an edit of — it is held, and the turn-end settle decides what to do.
+          const heldReplacement = candidateReplacesBase(outcome.kind === 'proven' && scanOk ? editGateBase() : null, files, typedPrompt || prompt);
           if (outcome.kind === 'proven') {
             if (!scanOk) {
               try {
@@ -16521,6 +16607,14 @@ async function noteBuildOutcome(
                   phase: 'preview', severity: 'warning', code: 'IN_BUILD_GREEN_SKIPPED_PARTIAL_SCAN',
                   message: 'The working version was not saved as a restore point because the project could not be fully read.',
                   autoResolved: false,
+                });
+              } catch { /* best-effort */ }
+            } else if (heldReplacement) {
+              try {
+                buildDiag.record({
+                  phase: 'preview', severity: 'warning', code: 'IN_BUILD_GREEN_HELD',
+                  message: 'The app rendered, but it is a different app from the one this edit started from, so it was NOT saved as the last known good version. The earlier verified version is untouched.',
+                  detail: heldReplacement.reasons.map((r) => r.detail).join(' ').slice(0, 400), autoResolved: true,
                 });
               } catch { /* best-effort */ }
             } else {
@@ -26807,7 +26901,24 @@ async function noteBuildOutcome(
               buildDiag.record({ phase: 'build', ...postGreenWritesNote({ writes: postGreenWrites, firstRenderAt: inBuildGreenAt, buildStartedAt, end: endVerdictFrom(previewGreen, previewProvenBroken) }) });
             } catch { /* measurement is best-effort */ }
           }
-          if (greenGuardEnabled()) {
+          // 🛡️ THE EDIT GATE (editPromotionGate.ts): "does it render?" is not "is it still this app?". A candidate
+          // that replaces the project it was an edit of is held HERE, whatever the preview says — the base is put
+          // back, the candidate is kept under the attempt key, and the Green Guard below stands down because the
+          // version it protects is the one this just restored.
+          const hold = await holdReplacementIfAny({
+            base: editGateBase(), candidate: toSave, userMessage: typedPrompt || prompt,
+            protectPaths: Object.keys(projectFilesAtTurnStart || {}),
+            keepCandidate: () => saveWorkspaceFiles(attemptWorkspaceKey(workspaceId), toSave),
+            applyRestore: (plan) => applyGreenSnapshotRestore(plan),
+            restored: (plan, outcome) => snapshotRestoredFiles(toSave, plan, outcome),
+            restoreComplete: (plan, outcome) => snapshotRestoreComplete(plan, outcome),
+          });
+          persisted = hold.persisted || persisted;
+          deletedThisBuild.push(...hold.removed);
+          editHeldSummary = hold.summary;
+          if (hold.finding) buildDiag.record(hold.finding);
+          if (hold.narration) events.emit({ type: 'narration', agent: 'architect', text: hold.narration, ts: Date.now() });
+          if (greenGuardEnabled() && !hold.held) {
             try {
               const greenKey = greenWorkspaceKey(workspaceId);
               const greenFiles = await loadWorkspaceFiles(greenKey).catch(() => ({} as Record<string, string>));
@@ -27021,6 +27132,19 @@ async function noteBuildOutcome(
             if (line) events.emit({ type: 'narration', agent: 'architect', text: line, ts: Date.now() });
             incrementalBuildCache.setHashes(workspaceId, hashFiles(toSave), new Date().toISOString()).catch(() => {});
           } catch { /* incremental signal is best-effort */ }
+          // 🧬 RECORD WHICH VERSION THIS IS. The release rule (editRelease.ts) moves the project's VERIFIED head only
+          // for a candidate that passed the gate, rendered in the server's own browser, and was built on the
+          // project's instructions; every other outcome leaves the head where it was. Idempotent per edit id.
+          if (!isImportTurn && !hold.held) {
+            await finalSave;
+            const settled = await settleEditRevision({
+              store: getRevisionStore(), projectId: workspaceId, editId, headAtStart: editHeadAtStart, startFiles: projectFilesAtTurnStart,
+              persisted, base: editGateBase(), previewGreen, provenBroken: previewProvenBroken, baseCheck: editBaseCheck,
+              requirementsOk: projectMemory.status !== 'unrecoverable', userMessage: typedPrompt || prompt,
+              messageId: messageIdFor(0, typedPrompt || prompt), messageText: typedPrompt || prompt, artifactDigest: snapshotDigest(), now: Date.now(),
+            });
+            buildDiag.record(settled.finding);
+          }
         }
       } catch { /* file persist is best-effort */ }
 
@@ -27445,6 +27569,8 @@ async function noteBuildOutcome(
         zeroBillReason = 'preview did not render on verification — "preview is EARNED", so free';
         events.emit({ type: 'narration', agent: 'architect', text: '🛡️ Because the preview did not fully render on my verification, this build is FREE — no charge. Send a follow-up and I will fix it.', ts: Date.now() });
       }
+      // A held edit delivered nothing: the project is exactly as it was. Working app or free, same law.
+      effectiveBilledUsd = billAfterHold(effectiveBilledUsd, editHeldSummary);
       // FAILED-BUILD GUARD (admin 2026-07-14): a build that was expected to produce an app but did NOT
       // succeed must never be charged in full. Real case that triggered this: a weak-tier build failed
       // (readiness 0/100, 7 unresolved imports) yet was still billed ₹811. Same "working app or free"
@@ -28213,6 +28339,7 @@ async function noteBuildOutcome(
       // note under a green tick reads as a footnote to success. Applied here because this is the last
       // point the summary still reaches the user, and idempotent because both the normal settle and
       // the watchdog finalizer can arrive here.
+      result = summaryAfterHold(result, editHeldSummary);
       if (greenGuardUndidWork(greenGuardRestoreFacts) && typeof result.summary === 'string') {
         result = { ...result, summary: withGreenGuardCorrection(result.summary, greenGuardRestoreFacts!) };
       }

@@ -68,7 +68,7 @@ export const PLANNING_EARLIER_REQUEST_MAX = 4_000;
 /** How many earlier requests are carried — the most recent ones. */
 export const PLANNING_EARLIER_REQUESTS = 3;
 
-export type PlanningSource = 'attachment' | 'earlier-requests' | 'conversation';
+export type PlanningSource = 'attachment' | 'earlier-requests' | 'conversation' | 'project-memory';
 
 export interface PlanningRequestInput {
   /** The user's message for this turn. */
@@ -94,6 +94,12 @@ export interface PlanningRequestInput {
   conversationReply?: string | null;
   /** Does the workspace already hold a user app? Earlier requests are added only when it does not. */
   userAppExists: boolean;
+  /**
+   * The project's durable requirements block (`renderRequirements`): the original brief and the user's standing
+   * requirements, each traced to its message. Appended for the builders and planners, never read by the sizers
+   * (a label written for a model is not a feature list). Empty/absent changes nothing.
+   */
+  projectMemory?: string | null;
   /**
    * The workspace holds files of the user's, but the app's entry point is still OUR starter — an earlier
    * build was stopped or failed before the app was assembled (autopsy 2f723acb). The earlier requests are
@@ -289,6 +295,12 @@ export function planningRequest(input: PlanningRequestInput): PlanningRequest {
     sources.push('conversation');
   }
 
+  const memory = typeof input.projectMemory === 'string' ? input.projectMemory.trim() : '';
+  if (memory) {
+    parts.push(memory);
+    sources.push('project-memory');
+  }
+
   return { text: parts.join('\n\n'), sizing: sizingParts.join('\n\n'), sources, picturesSetAside };
 }
 
@@ -302,6 +314,8 @@ export function planningContextNote(req: PlanningRequest, promptChars: number): 
     ? 'the attached file(s)'
     : s === 'conversation'
       ? 'the conversation\'s last answer (the message points at it)'
-      : 'the earlier requests in this conversation')).join(' and ');
+      : s === 'project-memory'
+        ? 'the project\'s saved brief and standing requirements'
+        : 'the earlier requests in this conversation')).join(' and ');
   return `Sized and planned from the message plus ${what} (${req.text.length} characters read, the message itself is ${promptChars}) — the same request the builder receives, so the complexity score, the ETA and the fast lane's file plan describe the app actually being built.${aside}`;
 }

@@ -22,6 +22,25 @@ const COLLECTION = 'workspace_memory_v3';
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 /** Cap episodes stored in Firestore to stay within the 1 MB document limit. */
 const MAX_EPISODES = 100;
+/** How many OLDER user requests ride along outside the recent window (the first one is always kept). */
+const OLDER_REQUESTS_KEPT = 30;
+
+/**
+ * The last `cap` episodes, plus the user's older requests. 🔴 `slice(-100)` meant that after a worker restart
+ * the project's first request was simply not in what came back (incident: an edit built a different game).
+ * The very first request and the most recent older ones are kept; errors, fixes and notes stay recency-bound.
+ * Chronological order is preserved. PURE.
+ */
+export function episodesToPersist<T extends { kind: string }>(episodes: readonly T[], cap: number): T[] {
+  if (episodes.length <= cap) return episodes.slice();
+  const cut = episodes.length - cap;
+  const older = episodes.slice(0, cut);
+  const requestIdx: number[] = [];
+  older.forEach((e, i) => { if (e.kind === 'request') requestIdx.push(i); });
+  const keep = new Set<number>(requestIdx.slice(-OLDER_REQUESTS_KEPT));
+  if (requestIdx.length > 0) keep.add(requestIdx[0]);
+  return [...older.filter((_, i) => keep.has(i)), ...episodes.slice(cut)];
+}
 
 let _db: admin.firestore.Firestore | null = null;
 
@@ -69,8 +88,9 @@ export async function saveWorkspaceMemory(
   const payload = {
     workspaceId,
     graph: snapshot.graph,
-    // Only persist the most recent episodes to stay within document size limits.
-    episodes: snapshot.episodes.slice(-MAX_EPISODES),
+    // Only persist the most recent episodes to stay within document size limits — plus the user's own
+    // requests from before that window, which are what an edit has to stay faithful to.
+    episodes: episodesToPersist(snapshot.episodes, MAX_EPISODES),
     savedAt: Date.now(),
     version: 1,
   };

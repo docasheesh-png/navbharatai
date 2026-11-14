@@ -342,6 +342,8 @@ vertContinued': async () => { await io.writeFile('a', 'green'); } };`, 'revertCo
       'src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts#_restoreEmptyManifest': ['pickManifestRestore', 'if (restore) await sandbox.files.write'],
       'src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts#_restoreFreshSandbox': ['outcome.restored = landed.written.length', 'restoreFailed(outcome)'],
       'src/server/routes/agentv3.ts#restoreKitRules': ['finishingGuard.writeOrThrow', 'if (!wrote) return'],
+      // A shell command broke a page: the page is put back, and the note the model reads is appended only AFTER that write returned (a failed write throws into the catch, so no note claims a restore that did not happen).
+      'src/server/AgentV3/ToolDispatcher.ts#restoreBrokenPages': ['await this.actuator.writeFile(this.workspaceId, path, was);', "note += `\\n[BLOCKED-PAGE-EDIT]"],
       'src/server/project/VersionStore.ts#restore': ['const vfs = new VirtualFileSystem()', 'return vfs'],
     };
     const found = new Set<string>();

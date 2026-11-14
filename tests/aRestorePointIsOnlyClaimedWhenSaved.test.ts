@@ -7,7 +7,8 @@ import { readFileSync } from 'node:fs';
 describe('in-build green does not claim a snapshot it did not save', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
   const start = route.indexOf('if (outcome.kind === \'proven\')');
-  const block = route.slice(start, start + 1800);
+  // 2800: the edit gate's `else if (heldReplacement)` branch (2026-11-14) sits between the scan check and the save.
+  const block = route.slice(start, start + 2800);
 
   it('sets inBuildGreenAt only inside if (st === \'saved\')', () => {
     const saved = block.indexOf("if (st === 'saved')");

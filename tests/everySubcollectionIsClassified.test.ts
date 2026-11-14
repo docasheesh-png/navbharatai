@@ -78,6 +78,8 @@ const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string; f
   'src/server/AgentV3/WorkspaceAssetStore.ts › assets': { kind: 'workspace', parent: 'workspace_assets_v3' },
   'src/server/AgentV3/CheckpointStore.ts › items': { kind: 'workspace', parent: 'workspace_checkpoints_v3' },
   'src/server/AgentV3/EmbeddingStore.ts › files': { kind: 'workspace', parent: 'workspace_embeddings_v3' },
+  'src/server/AgentV3/projectRevisions.ts › revs': { kind: 'workspace', parent: 'project_revisions_v3' },
+  'src/server/AgentV3/projectRevisions.ts › byEdit': { kind: 'workspace', parent: 'project_revisions_v3' },
   'src/server/AgentV3/DiagnosticsStore.ts › history': { kind: 'workspace', parent: 'workspace_diagnostics_v3', clock: true },
   // Atomic writer extracted from DiagnosticsStore; same history, workspace erasure and retention clock.
   'src/server/AgentV3/diagnosticsHistoryPersistence.ts › history': { kind: 'workspace', parent: 'workspace_diagnostics_v3', clock: true },

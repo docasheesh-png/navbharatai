@@ -91,3 +91,10 @@ export function memoryStopMessage(turn: ProjectMemoryTurn, projectExists: boolea
   if (!enabled || turn.status !== 'unrecoverable' || !projectExists || hasImportIntent || isImportTurn) return null;
   return 'I could not load this project\'s saved instructions (your original request and your standing requirements), so I did not change anything — editing without them could replace what you built. Your app is exactly as it was. Please send your message again in a moment.';
 }
+
+/** The messages of a stored conversation record, or null when there is no record. PURE. */
+export function transcriptOf(rec: unknown): readonly unknown[] | null {
+  if (!rec) return null;
+  const m = (rec as { messages?: unknown }).messages;
+  return Array.isArray(m) ? m : [];
+}

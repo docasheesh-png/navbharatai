@@ -32,7 +32,9 @@ const VERDICT: Record<string, [Verdict, number]> = {
   "mergeWorkspaceFiles | workspaceId, { 'package.json': finalPkg }": ['pre-latch', 1],
   'mergeWorkspaceFiles | workspaceId, { [filePath]: newSource }': ['user-asked', 1],
   'mergeWorkspaceFiles | workspaceId, { [patch.path]: patch.content }': ['gated', 2],
-  'saveWorkspaceFiles | attemptWorkspaceKey(workspaceId), toSave': ['other-key', 1],
+  // ×2 since 2026-11-14: the Green Guard's restore keeps the attempt it undoes, and so does the edit gate when it holds
+  // a replacement (editPromotion.ts `holdReplacementIfAny`) — both write the ATTEMPT key, never the project's own files.
+  'saveWorkspaceFiles | attemptWorkspaceKey(workspaceId), toSave': ['other-key', 2],
   'saveWorkspaceFiles | fpKey, encodeFingerprint(buildFingerprint(routeChecks, Date.now()))': ['other-key', 1],
   'saveWorkspaceFiles | greenKey, toSave, { mode: \'replace\' }': ['other-key', 1],
   'saveWorkspaceFiles | greenWorkspaceKey(workspaceId), files, { mode: \'replace\' }': ['other-key', 1],

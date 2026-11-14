@@ -655,11 +655,11 @@ import { placePlatformContext } from '../lib/platformContext';
 import { previewAutoRepairEnabled, autoRepairPrecheck, autoRepairDecision, autoRepairPrompt, claimAutoRepair } from '../AgentV3/previewAutoRepair';
 import { clearPreviewGaveUp } from '../AgentV3/previewGiveUp';
 import { buildConfirmation, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
-import { loadProjectMemoryForTurn, memoryStopMessage, recordUserMessage } from '../AgentV3/projectMemoryTurn';
+import { loadProjectMemoryForTurn, memoryStopMessage, recordUserMessage, transcriptOf } from '../AgentV3/projectMemoryTurn';
 import { assessEditCandidate, rejectionMessage, type GateVerdict as EditGateVerdict } from '../AgentV3/editPromotionGate';
 import { decideRelease, candidateReplacesBase, editPromotionEnabled } from '../AgentV3/editRelease';
 import { checkEditBaseForTurn, editIdFor } from '../AgentV3/editBase';
-import { settleEditRevision, holdReplacementIfAny, billAfterHold, summaryAfterHold, recordRestoreRevision } from '../AgentV3/editPromotion';
+import { settleEditRevision, holdReplacementIfAny, billAfterHold, summaryAfterHold, recordRestoreRevision, pathsOf, persistedAfterHold } from '../AgentV3/editPromotion';
 import { messageIdFor } from '../AgentV3/projectRequirements';
 import { getRevisionStore, buildRevision, verifyBase, promoteWithRebase, type BaseVerification, type RevisionRecord } from '../AgentV3/projectRevisions';
 import { frameworkMismatchFromListing, shouldCheckFrameworkQuestion, answersFrameworkQuestion, frameworkQuestionMarker, frameworkQuestionSteer, frameworkAnswerNote } from '../AgentV3/frameworkQuestion';
@@ -11861,7 +11861,7 @@ async function noteBuildOutcome(
           if (clarifyChips) { if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, 'clarify'); }
           else if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, askFramework ? 'framework' : answerThenOffer ? 'offer' : 'chat');
           // A lasting instruction said in CHAT ("always keep first-person controls") is the project's too.
-          await recordUserMessage(chatWsId, typedPrompt || prompt, false, echoesPlatformNotice);
+          await recordUserMessage(chatWsId, typedPrompt, false, echoesPlatformNotice);
           // Hydration at intent-time is a 3-second RACE, so it can be marked done while the read never
           // landed — `saveWorkspaceMemoryFor` checks the read itself, not the re-entrancy flag.
           void saveWorkspaceMemoryFor(chatWsId, chatMem).catch(() => {});
@@ -13161,15 +13161,16 @@ async function noteBuildOutcome(
      * 500-episode buffer that evicts them, nor the 100 that survive a restart. An import turn is exempt (it brings
      * its own project). When neither can be read, an EDIT stops before it mutates anything (see below).
      */
+    /** What the user said this turn — the text the project's memory, the edit gate and the revision record all use. */
+    const turnMessage = typedPrompt || prompt;
     const projectMemory = await loadProjectMemoryForTurn({
       skip: hasImportIntent,
       projectId: workspaceId,
-      message: typedPrompt || prompt,
+      message: turnMessage,
       isBuildRequest: intent === 'new_build' || offerAccepted,
       replace: userApprovedReplace,
       readTranscript: async () => {
-        const rec = await getConversationStore().get(conversationIdForWorkspace(workspaceId));
-        return rec ? ((rec as { messages?: unknown[] }).messages ?? []) : null;
+        return transcriptOf(await getConversationStore().get(conversationIdForWorkspace(workspaceId)));
       },
       isBuildText: (text) => buildConfirmation(text).confirmed,
     });
@@ -16599,7 +16600,7 @@ async function noteBuildOutcome(
           // 🛡️ THE SECOND PLACE A CANDIDATE USED TO BECOME THE "LAST KNOWN GOOD": this proof saves whatever just
           // rendered as the copy every later restore reads. An edit that rendered a DIFFERENT app must not
           // overwrite the version it was an edit of — it is held, and the turn-end settle decides what to do.
-          const heldReplacement = candidateReplacesBase(outcome.kind === 'proven' && scanOk ? editGateBase() : null, files, typedPrompt || prompt);
+          const heldReplacement = candidateReplacesBase(outcome.kind === 'proven' && scanOk ? editGateBase() : null, files, turnMessage);
           if (outcome.kind === 'proven') {
             if (!scanOk) {
               try {
@@ -26906,14 +26907,14 @@ async function noteBuildOutcome(
           // back, the candidate is kept under the attempt key, and the Green Guard below stands down because the
           // version it protects is the one this just restored.
           const hold = await holdReplacementIfAny({
-            base: editGateBase(), candidate: toSave, userMessage: typedPrompt || prompt,
-            protectPaths: Object.keys(projectFilesAtTurnStart || {}),
+            base: editGateBase(), candidate: toSave, userMessage: turnMessage,
+            protectPaths: pathsOf(projectFilesAtTurnStart),
             keepCandidate: () => saveWorkspaceFiles(attemptWorkspaceKey(workspaceId), toSave),
-            applyRestore: (plan) => applyGreenSnapshotRestore(plan),
-            restored: (plan, outcome) => snapshotRestoredFiles(toSave, plan, outcome),
-            restoreComplete: (plan, outcome) => snapshotRestoreComplete(plan, outcome),
+            putBaseBack: (plan) => applyGreenSnapshotRestore(plan),
+            treeAfter: (plan, outcome) => snapshotRestoredFiles(toSave, plan, outcome),
+            wasComplete: (plan, outcome) => snapshotRestoreComplete(plan, outcome),
           });
-          persisted = hold.persisted || persisted;
+          persisted = persistedAfterHold(hold, persisted);
           deletedThisBuild.push(...hold.removed);
           editHeldSummary = hold.summary;
           if (hold.finding) buildDiag.record(hold.finding);
@@ -27140,8 +27141,8 @@ async function noteBuildOutcome(
             const settled = await settleEditRevision({
               store: getRevisionStore(), projectId: workspaceId, editId, headAtStart: editHeadAtStart, startFiles: projectFilesAtTurnStart,
               persisted, base: editGateBase(), previewGreen, provenBroken: previewProvenBroken, baseCheck: editBaseCheck,
-              requirementsOk: projectMemory.status !== 'unrecoverable', userMessage: typedPrompt || prompt,
-              messageId: messageIdFor(0, typedPrompt || prompt), messageText: typedPrompt || prompt, artifactDigest: snapshotDigest(), now: Date.now(),
+              requirementsOk: projectMemory.status !== 'unrecoverable', userMessage: turnMessage,
+              messageId: messageIdFor(0, turnMessage), messageText: turnMessage, artifactDigest: snapshotDigest(), now: Date.now(),
             });
             buildDiag.record(settled.finding);
           }

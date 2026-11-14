@@ -148,18 +148,18 @@ export async function holdReplacementIfAny<O extends { removed: string[] }>(i: {
   userMessage: string;
   protectPaths: Iterable<string>;
   keepCandidate: () => Promise<unknown>;
-  applyRestore: (plan: ReturnType<typeof restorePlan>) => Promise<O>;
-  restored: (plan: ReturnType<typeof restorePlan>, outcome: O) => Record<string, string>;
-  restoreComplete: (plan: ReturnType<typeof restorePlan>, outcome: O) => boolean;
+  putBaseBack: (plan: ReturnType<typeof restorePlan>) => Promise<O>;
+  treeAfter: (plan: ReturnType<typeof restorePlan>, outcome: O) => Record<string, string>;
+  wasComplete: (plan: ReturnType<typeof restorePlan>, outcome: O) => boolean;
 }): Promise<HoldResult> {
   const gate = candidateReplacesBase(i.base, i.candidate, i.userMessage);
   if (!gate || !i.base) return NOT_HELD;
   try {
     const plan = restorePlan(i.base as Record<string, string>, i.candidate as Record<string, string>, new Set(i.protectPaths));
     await i.keepCandidate().catch(() => {});
-    const outcome = await i.applyRestore(plan);
-    const report = heldEditReport(gate, i.restoreComplete(plan, outcome));
-    return { held: true, persisted: i.restored(plan, outcome), removed: outcome.removed, summary: report.summary, narration: report.narration, finding: report.finding };
+    const outcome = await i.putBaseBack(plan);
+    const report = heldEditReport(gate, i.wasComplete(plan, outcome));
+    return { held: true, persisted: i.treeAfter(plan, outcome), removed: outcome.removed, summary: report.summary, narration: report.narration, finding: report.finding };
   } catch (err) {
     const report = heldEditReport(gate, false);
     return { held: true, persisted: null, removed: [], summary: report.summary, narration: report.narration, finding: { ...report.finding, detail: `${report.finding.detail} · restore failed: ${String((err as Error)?.message ?? err).slice(0, 120)}`, autoResolved: false } };
@@ -210,4 +210,13 @@ export async function recordRestoreRevision(i: {
   } catch (e) {
     return { recorded: false, restoredFrom: null, why: String((e as Error)?.message ?? e).slice(0, 120) };
   }
+}
+
+/** The paths of a file map, or none when there is no map. */
+export function pathsOf(files: Readonly<Record<string, string>> | null): string[] {
+  return files ? Object.keys(files) : [];
+}
+/** What is durable after a hold: the restored tree if one was made, else what it was. */
+export function persistedAfterHold(hold: Pick<HoldResult, 'persisted'>, persisted: Record<string, string>): Record<string, string> {
+  return hold.persisted ?? persisted;
 }

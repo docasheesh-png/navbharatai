@@ -230,5 +230,5 @@ export function assessEditCandidate(input: GateInput): GateVerdict {
 /** One honest sentence for the user, in plain words. PURE. */
 export function rejectionMessage(v: GateVerdict): string {
   const why = v.reasons.map((r) => r.detail).join(' ');
-  return `I did not apply this change, because it would have replaced your existing app instead of editing it. ${why} Your app is exactly as it was before this request. If you really want to start over, say "start fresh" and I will ask you to confirm.`;
+  return `I did not apply this change, because it would have replaced your existing app instead of editing it. ${why} Your app is exactly as it was before this request. If you want me to replace your app instead, tell me to start over and I will ask you to confirm first.`;
 }

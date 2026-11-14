@@ -17,7 +17,7 @@ describe('the builder\'s entry point uses the edit-promotion system', () => {
     expect(hold).toBeLessThan(at('if (greenGuardEnabled() && !hold.held)'));
     expect(hold).toBeLessThan(at('await settleEditRevision({'));
     expect(src).toContain('if (!isImportTurn && !hold.held) {');
-    expect(src).toContain('persisted = hold.persisted || persisted;');
+    expect(src).toContain('persisted = persistedAfterHold(hold, persisted);');
   });
   it('a held edit is free and tells the user their change was not applied', () => {
     expect(src).toContain('effectiveBilledUsd = billAfterHold(effectiveBilledUsd, editHeldSummary);');
@@ -41,6 +41,8 @@ describe('the builder\'s entry point uses the edit-promotion system', () => {
   it('a constraint said in chat is recorded too, and the edit id comes from the client request id', () => {
     expect(src).toContain('await recordUserMessage(chatWsId,');
     expect(src).toContain('const editId = editIdFor(workspaceId, req.body?.requestId, randomUUID());');
+    // every edit-gate / revision call reads the ONE turn message, not a re-derived one
+    expect(src).toContain('const turnMessage = typedPrompt || prompt;');
   });
   it('the existing history restore records a restore revision (and calls no model)', () => {
     const i = at("app.post('/api/agentv3/restore-version'");

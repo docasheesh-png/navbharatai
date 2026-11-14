@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -13,6 +13,11 @@ it('the real history command resolves imported contracts and registers the curre
     copyFileSync('scripts/gameKitHistory.mjs', join(root, 'scripts/gameKitHistory.mjs'));
     for (const name of ['GameBuildingGenerator', 'GameAssetLodGenerator', 'GameAssetTextureVerifier', 'GameAssetRuntimeGenerator', 'GameRuntimeGenerator', 'Game3DGenerator', 'GameControllerGenerator', 'GameSystemsGenerator', 'GameVfxAudioGenerator', 'MelodyGenerator', 'GameShellGenerator', 'kitTypeContract', 'gameKitHistory']) {
       copyFileSync(`src/server/lib/${name}.ts`, join(root, `src/server/lib/${name}.ts`));
+    }
+    // Generators that live in their own folder (the Athree map and its source modules) travel with the command.
+    mkdirSync(join(root, 'src/server/lib/athreeMap'), { recursive: true });
+    for (const name of readdirSync('src/server/lib/athreeMap')) {
+      if (/\.ts$/.test(name) && !/\.test\.ts$/.test(name)) copyFileSync(`src/server/lib/athreeMap/${name}`, join(root, `src/server/lib/athreeMap/${name}`));
     }
     const historyPath = join(root, 'src/server/lib/gameKitHistory.ts');
     const original = readFileSync(historyPath, 'utf8');

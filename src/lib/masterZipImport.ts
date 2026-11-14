@@ -71,35 +71,79 @@ export async function uploadExtractedFiles(
   userId: string | null | undefined,
   email: string | null | undefined,
   onProgress?: (p: MasterImportProgress) => void,
-): Promise<{ imported: number; failedBatches: number }> {
-  const batches = chunkFilesForSync(files);
+): Promise<{ imported: number; failedBatches: number; reasons: string[] }> {
+  // Text rides in the usual 8 MB batches; media files (data: URIs) go in SMALLER ones, so one request never carries a
+  // multi-megabyte video the server must also write into the sandbox and the durable store before it can answer
+  // (single-file game autopsy, 2026-11-14: "0 file(s) were saved, but 1 batch(es) failed" on a 5 MB page of media).
+  const isAsset = (v: string): boolean => /^data:[a-z]+\/[a-z0-9.+-]+(?:;[a-z0-9=._-]+)*;base64,/i.test(v);
+  const text: Record<string, string> = {};
+  const media: Record<string, string> = {};
+  for (const [path, value] of Object.entries(files)) (typeof value === 'string' && isAsset(value) ? media : text)[path] = value;
+  const batches = [...chunkFilesForSync(text), ...chunkFilesForSync(media, ASSET_BATCH_BYTES)];
   const headers = await authJsonHeaders();
   let imported = 0;
   let failedBatches = 0;
+  const reasons: string[] = [];
   for (let i = 0; i < batches.length; i++) {
     onProgress?.({
       label: batches.length > 1 ? `Saving your project… part ${i + 1} of ${batches.length}` : 'Saving your project…',
       fraction: batches.length > 0 ? (i + 1) / batches.length : null,
     });
+    const outcome = await sendBatch(batches[i], { workspaceId, userId, email }, headers);
+    if (outcome.ok) imported += Object.keys(batches[i]).length;
+    else { failedBatches += 1; if (!reasons.includes(outcome.reason)) reasons.push(outcome.reason); }
+  }
+  return { imported, failedBatches, reasons };
+}
+
+/**
+ * Did ANYTHING land? An import that saved zero files is a failed import — it must not be announced as imported, painted into Files as
+ * if it were saved, or followed by a preview boot over an empty workspace ("Installing dependencies and starting your app…"). PURE.
+ */
+export function importLanded(result: { imported: number } | null | undefined): boolean {
+  return !!result && Number(result.imported) > 0;
+}
+
+/** A media batch stays under this, so a request is one or two files, not the whole game. */
+export const ASSET_BATCH_BYTES = 3 * 1024 * 1024;
+const RETRY_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+const ATTEMPTS = 3;
+
+/**
+ * One batch, with the failure kept: a transient answer (rate limit, a gateway timeout, a dropped connection) is retried
+ * with a growing pause, and when it still fails the REASON is returned — the status and the server's own sentence — so the user
+ * and the build report are told WHY, not just that "1 batch failed" (the old code threw the status away).
+ */
+async function sendBatch(
+  batch: Record<string, string>,
+  who: { workspaceId: string; userId: string | null | undefined; email: string | null | undefined },
+  headers: Record<string, string>,
+): Promise<{ ok: boolean; reason: string }> {
+  let reason = 'no answer from the server';
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     try {
       const res = await fetch('/api/agentv3/import-files', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ workspaceId, userId, email, files: batches[i] }),
+        body: JSON.stringify({ ...who, files: batch }),
       });
-      if (!res.ok) { failedBatches += 1; continue; }
-      imported += Object.keys(batches[i]).length;
-    } catch {
-      failedBatches += 1;
+      if (res.ok) return { ok: true, reason: '' };
+      const said = await res.json().then((j: { error?: unknown }) => (typeof j?.error === 'string' ? j.error : ''), () => '');
+      reason = `${res.status}${said ? ` — ${said.slice(0, 160)}` : ''}`;
+      if (!RETRY_STATUSES.has(res.status)) break; // 400/403/404/413: asking again cannot change the answer
+    } catch (err) {
+      reason = `the connection dropped (${err instanceof Error ? err.message.slice(0, 80) : 'network error'})`;
     }
+    if (attempt < ATTEMPTS) await new Promise((r) => setTimeout(r, 800 * attempt));
   }
-  return { imported, failedBatches };
+  return { ok: false, reason };
 }
 
 /** The honest line for a partly-failed save — the user must never think a partial import was whole. */
-export function partialSaveWarning(failedBatches: number, imported: number): string {
+export function partialSaveWarning(failedBatches: number, imported: number, reasons: readonly string[] = []): string {
   if (failedBatches <= 0) return '';
-  return `⚠️ ${imported.toLocaleString()} file(s) were saved, but ${failedBatches} batch(es) failed to upload. Send your next message and I will retry the rest — do not assume the whole project is in yet.`;
+  const why = reasons.length > 0 ? ` Why: ${reasons.join('; ')}.` : '';
+  return `⚠️ ${imported.toLocaleString()} file(s) were saved, but ${failedBatches} batch(es) failed to upload.${why} Import it again to retry — files already saved are merged, not duplicated — and do not assume the whole project is in yet.`;
 }
 
 /**
@@ -129,11 +173,11 @@ export async function importProjectArchive(
     // Assets ride along as data: URIs in the same map — the server's import path already understands
     // that shape, so nothing new is needed to land an imported app's logo.
     const payload: Record<string, string> = { ...read.files, ...read.assets };
-    const { imported, failedBatches } = await uploadExtractedFiles(payload, workspaceId, userId, email, onProgress);
+    const { imported, failedBatches, reasons } = await uploadExtractedFiles(payload, workspaceId, userId, email, onProgress);
 
     const dropped: DropCounts = read.dropped;
     const summary = importDropSummary({ kept: imported, totalEntries: read.totalEntries, dropped });
-    const warn = partialSaveWarning(failedBatches, imported);
+    const warn = partialSaveWarning(failedBatches, imported, reasons);
     return {
       via: 'browser',
       files: read.files,
@@ -183,9 +227,9 @@ export async function importProjectFolder(
   }
 
   const payload: Record<string, string> = { ...read.files, ...read.assets };
-  const { imported, failedBatches } = await uploadExtractedFiles(payload, workspaceId, userId, email, onProgress);
+  const { imported, failedBatches, reasons } = await uploadExtractedFiles(payload, workspaceId, userId, email, onProgress);
   const summary = importDropSummary({ kept: imported, totalEntries: read.totalEntries, dropped: read.dropped });
-  const warn = partialSaveWarning(failedBatches, imported);
+  const warn = partialSaveWarning(failedBatches, imported, reasons);
   // Remember the folder so "Save to folder" (Q-160) can write changes back — on a press, never on its own.
   linkFolder({ handle: root, name: folderName, original: { ...read.files }, stamps: { ...read.stamps } });
   return {
@@ -223,11 +267,11 @@ export async function importSingleHtml(
   onProgress?.({ label: 'Moving the media out of your page…', fraction: null });
   const lifted = liftEmbeddedMedia({ 'index.html': text });
   const payload: Record<string, string> = { ...lifted.files, ...lifted.assets };
-  const { imported, failedBatches } = await uploadExtractedFiles(payload, workspaceId, userId, email, onProgress);
+  const { imported, failedBatches, reasons } = await uploadExtractedFiles(payload, workspaceId, userId, email, onProgress);
   const lines = [liftSummary(lifted)];
   const unlifted = lifted.unlifted.length;
   if (unlifted > 0) lines.push(`⚠️ ${unlifted} media item(s) were too large to move out and stay inside the page.`);
-  const warn = partialSaveWarning(failedBatches, imported);
+  const warn = partialSaveWarning(failedBatches, imported, reasons);
   if (warn) lines.push(warn);
   return {
     via: 'browser',

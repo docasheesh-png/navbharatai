@@ -4964,3 +4964,65 @@ either way. See `src/server/AgentV3/editPromotionGate.ts`, `editRelease.ts`, `pr
 `projectRequirements.ts`.
 
 - **`AGENTV3_EDIT_INTEGRITY`** (NOT set; default ON; `off` disables). The page guard in `editIntegrity.ts`, run by both model write doors (`write_file` via `guardedWrite`, and `edit_file`) on every `.html` page: refuses an edit that drops or invents embedded media, writes back the `<<media omitted…>>` placeholders, breaks an inline `<script>` that parsed before, unbalances `<script>`/`<style>` or removes `</body></html>`, or points at an `assets/media/` file that does not exist. Only a REGRESSION is refused (an already-broken page may be repaired). Added with the single-file game import (2026-11-14). The import limits themselves are not env keys: they live in `IMPORT_LIMITS` (`src/lib/importRules.ts`), one object for the browser, the server and the stores.
+
+
+## 2026-11-13 — Owner screenshot inventory and admin-session recovery
+
+The owner asked to append the environment variable names shown in two Cloud Run screenshots. The following is the **38-name, deduplicated screenshot inventory**, not a new configuration prescription. Earlier registry entries may already describe these names. No values, secret contents, account addresses or verification tokens are transcribed. A screenshot proves only that the name was displayed, not that its value is valid, that a serving revision has it, or that the corresponding feature is active.
+
+```text
+FREE_CHAIN_ENABLED
+FREE_CHAIN_ROLLOUT_PERCENT
+FREE_CHAIN_ALLOW_UIDS
+AGENTV3_SURPLUS_BUILDER
+SURPLUS_REGISTRY_ENABLED
+CHEAPERINFERENCE_API_KEY
+CHEAPERINFERENCE
+SURPLUS_API_KEY
+CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION
+ROUTER_ONE_API_KEY
+AGENTV3_EXTERNAL_GAME_ASSETS
+MITRIFY_API_KEY
+AI_BACKEND
+MITRIFY_CHAT_ACCOUNT_EMAIL
+QUBAX_API_KEY
+SARVAM_API_KEY
+QUBAX_ENABLED
+VOICE_AI_ENABLED
+SARVAM_TTS_INR_PER_1000_CHARS
+SARVAM_TTS_COST_TAX_PERCENT
+ADMIN_SESSION_SIGNING_KEY
+FREE_CHAIN_DEEPINFRA_API_KEY
+OPENROUTER_API_KEY
+FREE_CHAIN_GLM_API_KEY
+FREE_CHAIN_GROQ_API_KEY
+FREE_CHAIN_CF_API_TOKEN
+FREE_CHAIN_PAID_DAILY_CAP_USD
+FREE_CHAIN_MONTHLY_CAP_USD
+FREE_CHAIN_DI_LLAMA8B_RATE_VERIFIED_UNTIL
+FREE_CHAIN_DI_DSV4_RATE_VERIFIED_UNTIL
+FREE_CHAIN_GLM_FREE_VERIFIED_UNTIL
+FREE_CHAIN_GROQ_FREE_VERIFIED_UNTIL
+FREE_CHAIN_CF_FREE_VERIFIED_UNTIL
+FREE_CHAIN_GLM45_MAX_CONCURRENT
+FREE_CHAIN_GLM47_MAX_CONCURRENT
+FREE_CHAIN_SKIP_GEMINI
+FREE_CHAIN_MAX_ATTEMPTS
+FREE_TIER_PAID_DAILY_CAP_USD
+```
+
+The spelling `CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION` is copied exactly from the screenshot. Recording a visible name does not assert that current code consumes it. Do not rename or enable a key from this inventory without inspecting its actual reader and the applicable owner decision.
+
+### Independent admin-session signing key
+
+Code reference: `src/server/lib/adminAuth.ts` (`adminSessionSigningKey`) and `src/server/routes/admin.ts` (`/api/admin/login`). `ADMIN_SESSION_SIGNING_KEY` is a **server-only, independently generated secret of exactly 64 hexadecimal characters** (`0-9`, `a-f`, case-insensitive), representing 32 random bytes. A 64-character arbitrary alphanumeric string, punctuation, or a personally constructed number is not an equivalent valid random secret. Generate it locally with `openssl rand -hex 32`; keep its output out of chat, source control, screenshots, build logs and this registry. It must differ from the admin password, including case-insensitive equality. The existing admin password is also required. No password-only or legacy signing-key fallback exists.
+
+The key belongs in the Cloud Run service's server environment or an authorized secret reference, never in a browser setting or a `VITE_` variable. In the console, enter the variable name separately from its value; do not paste `ADMIN_SESSION_SIGNING_KEY=` into the value field. Saving a draft is not proof of activation: deploy the intended revision and verify which revision(s) receive traffic. Do not print the configured value while checking. All serving instances must have the intended configuration to avoid intermittent login/session failures.
+
+After the rate/lockout gates, missing or invalid password/signing configuration fails closed with HTTP 503, `Admin access not configured on server.`, before password comparison and MFA verification. A valid signing configuration does not bypass password or enrolled MFA checks. The distinct `Admin verification temporarily unavailable. Please try again later.` response requires investigating the verification dependency rather than weakening authentication.
+
+Rotating either this key or the admin password invalidates existing sessions because session signing is bound to both. Arrange access to the authorized Cloud Run configuration and working MFA/recovery path before rotation, then sign in again. Do not disable MFA or revert to password-only signing as a recovery shortcut. The owner subsequently reported that manual configuration restored admin login and that the replacement key was random; that is an owner-reported recovery, not an independently verified production test.
+
+### Correction to the historical Store administrator entry
+
+The earlier July entry says `NAV_STORE_ADMINS` falls back to `AGENTV3_FREE_LIST`. That description is historical and **not current behavior**: `src/server/routes/navStore.ts` calls `explicitStoreAdmin` with only `NAV_STORE_ADMINS`, and `src/server/lib/storeAdminPermission.ts` requires a verified email explicitly present in that allowlist. Free-build/credit grants are not administrator authority. This documentation correction does not change any permission or deployed configuration.

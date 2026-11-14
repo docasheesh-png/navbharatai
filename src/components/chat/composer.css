@@ -121,34 +121,8 @@
   z-index: 80 !important;
 }
 
-@media (max-width: 639px) {
-  [data-attach-menu] {
-    position: fixed !important;
-    left: 12px !important;
-    right: 12px !important;
-    bottom: var(--nb-composer-menu-bottom, 72px) !important;
-    width: auto !important;
-    min-width: min(18rem, calc(100vw - 24px)) !important;
-    max-width: calc(100vw - 24px) !important;
-    max-height: var(--nb-composer-menu-max-height, 50dvh) !important;
-    overflow-y: auto !important;
-    z-index: 80 !important;
-  }
-}
-
-/* —— Pro surface: Type first (with Send on its right), tools below, no divider —— */
-.nb-composer-box .nb-mode-menu.absolute.bottom-full {
-  display: flex !important;
-  flex-direction: column !important;
-  overflow: hidden !important;
-  /* Measured from the composer. The shared 72px pin lands on the input. */
-  bottom: var(--nb-mode-bottom, calc(var(--nb-composer-menu-bottom, 72px) + 8px)) !important;
-  max-height: var(--nb-mode-max, min(42dvh, 380px)) !important;
-}
-
-.nb-composer-box .nb-mode-menu.absolute.bottom-full[data-advise-open="true"] {
-  height: var(--nb-mode-height, auto) !important;
-}
+/* Portal menus own their measured geometry; never override their top/width/bottom. */
+[data-composer-popover] button { min-height: 44px; }
 
 .nb-composer-box[data-composer-surface="pro"] {
   margin-top: 4px;
@@ -295,3 +269,4 @@
 .nb-composer-box[data-composer-send-position="bottom-right"] .nb-composer-text {
   padding-right: 14px !important;
 }
+

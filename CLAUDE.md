@@ -1022,3 +1022,8 @@ The `AppFeature` interface requires: `id`, `name`, `path`, `description`,
   (include English AND common Hindi/Hinglish forms)
 - `aiSurface` must be set for entries owned by a specific AI
   ('engineer_ai', 'sda_chat', 'pro_chat', 'nbi_chat')
+
+
+## Admin-session configuration reference (2026-11-13)
+
+Before diagnosing admin sign-in configuration, read `docs/claude/ENV_REGISTRY.md` → **2026-11-13 — Owner screenshot inventory and admin-session recovery**. It records the owner-supplied variable names only, the independent signing-key format, active-revision checks and rotation/recovery constraints. Never put secret values in this file or the registry. The owner's successful manual login is reported evidence, not proof that a local documentation change deployed or changed authentication.

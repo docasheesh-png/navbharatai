@@ -643,7 +643,7 @@ import { userAuthContext } from '../AgentV3/userAuthContext';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { phantomAliasDependencies, removeDependenciesFromPackageJson } from '../AgentV3/DependencyReconciler';
 import { fastLaneDependencyPlan, fastLaneDependencyInstallCommand, fastLaneDependencyNote } from '../AgentV3/fastLaneDependencies';
-import { foundationFilesStillAbsent, ensureViteReactFoundation, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
+import { foundationFilesStillAbsent, ensureViteReactFoundation, ensureStaticSiteFoundation, isStaticSiteProject, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
 import { wakePublicState, sanitizeWakeError, type TerminalWakeState } from '../AgentV3/terminalWake';
@@ -6109,7 +6109,10 @@ async function noteBuildOutcome(
             // No disk check here, unlike the fast lane (foundationFilesStillAbsent): `saved` is the WHOLE
             // project, and the sandbox at this point holds only the template's generic files, which a
             // package.json derived from the app's real imports is better than.
-            const foundation = ensureViteReactFoundation(saved, { framework });
+            // A one-file page is a static site, whatever the framework LABEL says (single-file game autopsy, 2026-11-14): it gets the
+            // static runner, and is never turned into a React + Vite project (whose host check then blocked the preview).
+            const staticFoundation = ensureStaticSiteFoundation(saved);
+            const foundation = isStaticSiteProject(saved) ? staticFoundation : ensureViteReactFoundation(saved, { framework });
             if (foundation.added.length > 0) {
               Object.assign(saved, foundation.files);
               await mergeWorkspaceFiles(workspaceId, foundation.files).catch(() => {});

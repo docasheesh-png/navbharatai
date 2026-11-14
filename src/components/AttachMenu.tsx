@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { attachMenuPosition } from '../lib/attachMenuPosition';
 import { Camera, Image as ImageIcon, FileText, Paperclip, Folder, FolderOpen } from 'lucide-react';
 import { isFolderImportSupported } from '../lib/folderImport';
-import { zipAccept } from '../lib/zipPicker';
+import { projectAccept } from '../lib/zipPicker';
 
 // Shared attach menu (admin 2026-07-12): tapping the 📎 attach button opens a 3-option sheet —
 // Take Photo (camera) / Choose photo or video (gallery) / Choose file — the SAME everywhere
@@ -188,7 +188,7 @@ export function AttachMenu({
               className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-body hover:bg-raised transition-colors border-t border-line"
             >
               <span className="text-success"><Folder className="w-4 h-4" /></span>
-              <span>Import project (.zip)<span className="block text-[11px] text-faint">Opens your app in Files — any size</span></span>
+              <span>Import project (.zip or .html)<span className="block text-[11px] text-faint">Opens your app in Files — a zip of any size, or a single HTML page</span></span>
             </button>
           )}
           {/* OPEN FOLDER — no zip at all. Gated on real capability rather than a browser sniff: the
@@ -214,7 +214,7 @@ export function AttachMenu({
       <input
         ref={zipRef}
         type="file"
-        accept={zipAccept()}
+        accept={projectAccept()}
         className={ATTACH_FILE_INPUT_CLASS}
         tabIndex={-1}
         aria-hidden="true"

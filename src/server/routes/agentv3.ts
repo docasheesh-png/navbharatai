@@ -18309,12 +18309,21 @@ async function noteBuildOutcome(
       }
       if (pastedFormat.keep && framework === 'static' && intent === 'new_build' && !isImportTurn && !abort.signal.aborted) {
         try {
-          const doc = pastedHtmlDocument(prompt);
+          // The pasted page is reduced to CODE before it is seeded (single-file game autopsy, 2026-11-14): its embedded media
+          // becomes assets/media/ files, so index.html is the user's code, the media is never in the builder's reach, and the
+          // durable text store (900 KB per file) can hold the page at all.
+          const pastedFull = pastedHtmlDocument(prompt);
+          const pastedPrepared = pastedFull ? prepareImportBody({ 'index.html': pastedFull }) : null;
+          const doc = pastedPrepared ? pastedPrepared.text['index.html'] ?? pastedFull : pastedFull;
           const current = await actuator.readFile(workspaceId, 'index.html').catch(() => null);
           const starter = new StaticProvider().getFiles([])['index.html'];
           const untouched = current == null || withoutPreviewBridge('index.html', current).trim() === starter.trim();
           if (doc && untouched) {
             await actuator.writeFile(workspaceId, 'index.html', doc);
+            if (pastedPrepared && Object.keys(pastedPrepared.assets).length > 0) {
+              try { await materializeAssets(actuator, workspaceId, pastedPrepared.assets); } catch { /* an asset failing never blocks the seed */ }
+              await saveWorkspaceAssets(workspaceId, pastedPrepared.assets, verified?.uid).catch(() => {});
+            }
             writtenFiles.set('index.html', doc);
             pastedSeed.set('index.html', doc);
             try { getWorkspaceMemory(workspaceId).indexFile('index.html', doc); } catch { /* index best-effort */ }

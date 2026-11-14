@@ -24,6 +24,8 @@ import { importDropSummary, type DropCounts } from './importDropReport';
 import { authJsonHeaders } from './authHeaders';
 import { readFolderInBrowser, isFolderImportSupported, pickProjectFolder } from './folderImport';
 import { linkFolder } from './folderWriteBack';
+import { liftEmbeddedMedia, liftSummary } from './liftEmbeddedMedia';
+import { IMPORT_LIMITS } from './importRules';
 
 export interface MasterImportProgress {
   /** What the user should be told is happening right now. */
@@ -193,6 +195,47 @@ export async function importProjectFolder(
     fileCount: keptCount,
     imported,
     dropSummary: [summary, warn].filter(Boolean).join('\n\n'),
+  };
+}
+
+
+/**
+ * Import ONE HTML page — a one-file game or app — as a project (single-file game autopsy, 2026-11-14).
+ *
+ * The page is read here, in the browser, and every embedded video / sound / image is moved out into `assets/media/` BEFORE
+ * anything is sent: a 5.4 MB page becomes about 0.8 MB of code plus real files, so no size cap drops it and no model is ever
+ * handed megabytes of base64. The page is saved as `index.html` (the name the preview and the builder look for); its own
+ * localStorage keys are untouched, so the player's saved games still load.
+ */
+export async function importSingleHtml(
+  file: File,
+  workspaceId: string,
+  userId: string | null | undefined,
+  email: string | null | undefined,
+  onProgress?: (p: MasterImportProgress) => void,
+): Promise<MasterImportResult> {
+  if (file.size > IMPORT_LIMITS.maxHtmlSourceBytes) {
+    throw new Error(`That page is ${(file.size / 1024 / 1024).toFixed(1)} MB — over the ${(IMPORT_LIMITS.maxHtmlSourceBytes / 1024 / 1024).toFixed(0)} MB limit for one page. Zip it with its media files and use Import project (.zip) instead.`);
+  }
+  onProgress?.({ label: 'Reading your page…', fraction: null });
+  const text = await file.text();
+  if (!text.trim()) throw new Error('That file is empty, so there is nothing to import.');
+  onProgress?.({ label: 'Moving the media out of your page…', fraction: null });
+  const lifted = liftEmbeddedMedia({ 'index.html': text });
+  const payload: Record<string, string> = { ...lifted.files, ...lifted.assets };
+  const { imported, failedBatches } = await uploadExtractedFiles(payload, workspaceId, userId, email, onProgress);
+  const lines = [liftSummary(lifted)];
+  const unlifted = lifted.unlifted.length;
+  if (unlifted > 0) lines.push(`⚠️ ${unlifted} media item(s) were too large to move out and stay inside the page.`);
+  const warn = partialSaveWarning(failedBatches, imported);
+  if (warn) lines.push(warn);
+  return {
+    via: 'browser',
+    files: lifted.files,
+    fileName: file.name,
+    fileCount: Object.keys(payload).length,
+    imported,
+    dropSummary: lines.filter(Boolean).join('\n\n'),
   };
 }
 

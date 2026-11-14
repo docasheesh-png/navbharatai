@@ -624,7 +624,7 @@ import {
   type DesignContract,
 } from '../AgentV3/designContract';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
-import { prepareImportBody } from '../AgentV3/importLanding';
+import { prepareImportBody, preparePastedPage, landPageAssets, liftForLanding } from '../AgentV3/importLanding';
 import { collectWorkspaceFiles, collectNamedWorkspaceFiles, listWorkspaceFiles, collectWorkspaceConfigFiles, writeWorkspaceFiles, pool } from '../AgentV3/WorkspaceFiles';
 import { liveFileSyncEnabled, requestedSyncPaths } from '../AgentV3/liveFileSync';
 import { isBudgetEndedError } from '../AgentV3/turnDeadline';
@@ -12174,13 +12174,9 @@ async function noteBuildOutcome(
       // A page that carries its media inline lands as CODE plus real files (single-file game autopsy, 2026-11-14): the
       // media becomes assets/media/ files, so no size cap drops the page and no model is ever sent megabytes of base64.
       // Only when WE write the files — a git clone is already in the sandbox exactly as the user committed it.
-      let mediaNote = '';
-      if (opts.writeToSandbox) {
-        const prepared = prepareImportBody(importedFiles);
-        importedFiles = prepared.text;
-        if (Object.keys(prepared.assets).length > 0) opts = { ...opts, assets: { ...(opts.assets ?? {}), ...prepared.assets } };
-        mediaNote = prepared.summary;
-      }
+      const landing = liftForLanding(importedFiles, opts.assets, opts.writeToSandbox);
+      importedFiles = landing.files;
+      opts = { ...opts, assets: landing.assets };
       const validation = validateImportedProject(importedFiles);
       if (!validation.ok) {
         emit({ type: 'narration', agent: 'architect', text: `⚠️ ${validation.issues.join(' ')}`, ts: Date.now() });
@@ -12315,7 +12311,7 @@ async function noteBuildOutcome(
         type: 'narration', agent: 'architect', ts: Date.now(),
         text: `📦 Imported ${written.length} file${written.length === 1 ? '' : 's'} from ${opts.source} (framework: ${framework})`
           + (opts.droppedNote ? ` ${opts.droppedNote}` : '')
-          + (mediaNote ? `\n🎞️ ${mediaNote}` : '')
+          + landing.noteLine
           + (validation.issues.length > 0 ? `\n⚠️ ${validation.issues.join(' ')}` : ''),
       });
       // Surface the env-variable names the app expects (from its committed .env template) — the
@@ -18312,18 +18308,14 @@ async function noteBuildOutcome(
           // The pasted page is reduced to CODE before it is seeded (single-file game autopsy, 2026-11-14): its embedded media
           // becomes assets/media/ files, so index.html is the user's code, the media is never in the builder's reach, and the
           // durable text store (900 KB per file) can hold the page at all.
-          const pastedFull = pastedHtmlDocument(prompt);
-          const pastedPrepared = pastedFull ? prepareImportBody({ 'index.html': pastedFull }) : null;
-          const doc = pastedPrepared ? pastedPrepared.text['index.html'] ?? pastedFull : pastedFull;
+          const pasted = preparePastedPage(pastedHtmlDocument(prompt));
+          const doc = pasted.doc;
           const current = await actuator.readFile(workspaceId, 'index.html').catch(() => null);
           const starter = new StaticProvider().getFiles([])['index.html'];
           const untouched = current == null || withoutPreviewBridge('index.html', current).trim() === starter.trim();
           if (doc && untouched) {
             await actuator.writeFile(workspaceId, 'index.html', doc);
-            if (pastedPrepared && Object.keys(pastedPrepared.assets).length > 0) {
-              try { await materializeAssets(actuator, workspaceId, pastedPrepared.assets); } catch { /* an asset failing never blocks the seed */ }
-              await saveWorkspaceAssets(workspaceId, pastedPrepared.assets, verified?.uid).catch(() => {});
-            }
+            await landPageAssets(actuator, workspaceId, pasted.assets, verified?.uid);
             writtenFiles.set('index.html', doc);
             pastedSeed.set('index.html', doc);
             try { getWorkspaceMemory(workspaceId).indexFile('index.html', doc); } catch { /* index best-effort */ }

@@ -141,7 +141,7 @@ describe('4 · a repair the platform asked for is not a request the user made', 
 
   it('AgentRunner puts the prefix on the run\'s first message', () => {
     const src = readFileSync('src/server/AgentV3/AgentRunner.ts', 'utf8');
-    expect(src).toContain("content: this.opts.platformRequest ? asPlatformRequest(userPrompt) : userPrompt");
+    expect(src).toContain("content: this.opts.platformRequest ? asPlatformRequest(promptForModel) : promptForModel");
   });
 });
 

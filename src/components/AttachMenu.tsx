@@ -188,7 +188,7 @@ export function AttachMenu({
               className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-body hover:bg-raised transition-colors border-t border-line"
             >
               <span className="text-success"><Folder className="w-4 h-4" /></span>
-              <span>Import project (.zip or .html)<span className="block text-[11px] text-faint">Opens your app in Files — a zip of any size, or a single HTML page</span></span>
+              <span>Import project (.zip)<span className="block text-[11px] text-faint">Opens your app in Files — any size; a single .html page works too</span></span>
             </button>
           )}
           {/* OPEN FOLDER — no zip at all. Gated on real capability rather than a browser sniff: the

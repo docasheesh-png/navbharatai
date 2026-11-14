@@ -28,14 +28,16 @@ describe('the doors', () => {
 
   it('the zip / GitHub landing lifts media before it validates and writes', () => {
     const body = around('const landImportedProject = async', 6000);
-    expect(body).toContain('prepareImportBody(importedFiles)');
-    expect(body.indexOf('prepareImportBody(importedFiles)')).toBeLessThan(body.indexOf('validateImportedProject(importedFiles)'));
+    expect(body).toContain('liftForLanding(importedFiles, opts.assets, opts.writeToSandbox)');
+    expect(body.indexOf('liftForLanding(importedFiles')).toBeLessThan(body.indexOf('validateImportedProject(importedFiles)'));
   });
 
   it('a pasted one-file page is seeded as code, with its media written as assets', () => {
-    const body = around('const pastedFull = pastedHtmlDocument(prompt)', 3500);
-    expect(body).toContain("prepareImportBody({ 'index.html': pastedFull })");
-    expect(body).toMatch(/materializeAssets\(actuator, workspaceId, pastedPrepared\.assets\)/);
+    const body = around('const pasted = preparePastedPage(pastedHtmlDocument(prompt))', 3500);
+    expect(body).toMatch(/landPageAssets\(actuator, workspaceId, pasted\.assets/);
+    const helper = readFileSync(join(__dirname, '..', 'src/server/AgentV3/importLanding.ts'), 'utf8');
+    expect(helper).toContain("prepareImportBody({ 'index.html': pastedFull })");
+    expect(helper).toMatch(/materializeAssets\(sink, workspaceId, assets\)/);
   });
 
   it('the model-facing door: every tool result and the request pass through elideEmbeddedMedia', () => {

@@ -1,0 +1,119 @@
+// WHEN THE ATHREE MAP IS USED (admin order 2026-11-14; docs/game-engine/athree-map-plan.md §3).
+//
+// Athree is used when ANY ONE of three is true:
+//   1. the user NAMES it ("athree map use karo", "a-three", Hindi/Hinglish spellings) AND the game really needs a map;
+//   2. a BIG MAP is really needed (racing, open world, battle royale, flight, explore) — Athree is then eligible;
+//   3. the LIBRARIAN picks a map at random — Athree included.
+//
+// The three cannot contradict each other because of the order this evaluates them in (a user-named OTHER map or an explicit
+// refusal wins; then 1; then 2/3 together as a random pick among the maps that FIT the request, Athree always in that pool) and because
+// the random pick is made ONCE per project and stored: `stored` is read first, so an edit never changes the map under a game.
+//
+// Named but not needed → the answer says so; there is never a fake map. PURE: no I/O, no clock, no env. Never throws.
+
+import { buildGameContract } from '../../AgentV3/gameIntent';
+import { ATHREE_MAP, LIBRARY_MAPS, type LibraryMap, type MapProfile } from './athreeMapLibrary';
+
+export type AthreeVia = 'stored' | 'named' | 'needed' | 'librarian' | 'declined' | 'other-map' | 'named-not-needed' | 'none';
+
+export interface AthreeIntent {
+  /** Use the Athree map for this game. */
+  use: boolean;
+  via: AthreeVia;
+  /** The map to use ('athree' or another library map's id), or null when no map is used. */
+  mapId: string | null;
+  /** The game shape the request needs, or null when it needs no map. */
+  profile: MapProfile | null;
+  /** One sentence for the build report, and for the user when Athree was named but cannot be used. */
+  reason: string;
+}
+
+export interface AthreeIntentInput {
+  prompt: string;
+  /** The map this project already got (from workspace memory). It wins until the user asks for a different map. */
+  stored?: { mapId: string | null } | null;
+  /** The maps the library knows; defaults to LIBRARY_MAPS. */
+  maps?: readonly LibraryMap[];
+  /** What the random pick is seeded from; defaults to the prompt. */
+  seedKey?: string;
+}
+
+const norm = (s: string): string => String(s ?? '').normalize('NFKC').toLowerCase();
+
+// "athree" / "a-three" / "a three"; "a3" only next to map/world (otherwise it is a paper size). Hindi spellings too.
+const NAMED = /\bathree\b|\ba[\s._-]three\b|\ba[\s._-]?3\s+(?:map|world|duniya|nakshe|nakshā)\b|\b(?:map|world)\s+a[\s._-]?3\b|(?:अथ्री|एथ्री|आथ्री|अथरी|एथरी)/;
+const DECLINED = /\b(?:no|not|don'?t|dont|without|nahi|nahin|mat|naa)\b[^.!?\n]{0,24}\b(?:athree|a[\s._-]three)\b|\b(?:athree|a[\s._-]three)\b[^.!?\n]{0,24}\b(?:nahi|nahin|mat|not|no|nahi\s+chahiye)\b/;
+const CHANGE_MAP = /\b(?:change|switch|different|another|new|badlo|badal|naya|doosra|dusra)\b[^.!?\n]{0,16}\bmap\b|\bmap\b[^.!?\n]{0,16}\b(?:change|badlo|badal|different)\b/;
+
+// Devanagari spellings are input parsing (this module is server code, outside the English-only UI rule).
+const BATTLE_ROYALE = /बैटल\s*रॉयल|पबजी|फ्री\s*फायर|battle\s*royale|\bpubg\b|\bbgmi\b|free\s*fire|fortnite|last\s+man\s+standing|\bbr\s+game\b/;
+const FLIGHT = /फ्लाइट|हवाई\s*जहाज|विमान|प्लेन|flight|\bplane\b|aeroplane|aircraft|\bjet\b|helicopter|\bfly(?:ing)?\b|\bpilot\b/;
+const RACING = /रेसिंग|रेस\s*गेम|गाड़ी|गाडी|\brac(?:e|ing|er)\b|drift|gadi|gaadi|rally|sport\s*car|supercar|bike\s+race|car\s+game|driving/;
+const OPEN_WORLD = /ओपन\s*वर्ल्ड|खुली\s*दुनिया|open[\s-]?world|\bgta\b|sandbox|\bworld\b.*\b(?:explore|big|huge|large)\b|\b(?:big|huge|large|massive|infinite)\s+(?:map|world)\b|survival|\bexplor(?:e|ing|ation)\b|\bisland\b|\bterrain\b/;
+
+/** The game shape a request needs a map for, or null when it needs none (a calculator, a form, a 2D puzzle). */
+export function mapProfileFor(prompt: string): MapProfile | null {
+  const t = norm(prompt);
+  const c = buildGameContract(prompt);
+  if (c.dimension === '2d') return null;
+  if (BATTLE_ROYALE.test(t)) return 'battle-royale';
+  if (FLIGHT.test(t) || c.vehicle === 'aircraft') return 'flight';
+  if (c.genre === 'racing' || RACING.test(t) || (c.vehicle && ['car', 'motorcycle', 'truck', 'bus', 'tractor'].includes(c.vehicle) && /\bgame\b|\bsim/.test(t))) return 'racing';
+  if (OPEN_WORLD.test(t)) return /\bexplor|\bwalk|survival|adventure/.test(t) ? 'explore' : 'open-world';
+  return null;
+}
+
+function hashString(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+/** The librarian's pick: deterministic for a seed (so a project keeps it), random across seeds, only among maps that fit. */
+export function pickLibraryMap(pool: readonly LibraryMap[], seedKey: string): LibraryMap | null {
+  if (pool.length === 0) return null;
+  return pool[hashString(seedKey) % pool.length];
+}
+
+export function athreeMapIntent(input: AthreeIntentInput): AthreeIntent {
+  const prompt = String(input.prompt ?? '');
+  const t = norm(prompt);
+  const maps = input.maps ?? LIBRARY_MAPS;
+  const profile = mapProfileFor(prompt);
+  const none = (via: AthreeVia, reason: string, mapId: string | null = null): AthreeIntent => ({ use: false, via, mapId, profile, reason });
+
+  // The project already has a map: it keeps it, unless the user asks for a different one.
+  if (input.stored && input.stored.mapId && !CHANGE_MAP.test(t)) {
+    const use = input.stored.mapId === ATHREE_MAP.id;
+    return { use, via: 'stored', mapId: input.stored.mapId, profile, reason: `This project already uses the ${input.stored.mapId} map; edits keep it.` };
+  }
+
+  // A different map named by the user wins over everything else.
+  for (const m of maps) {
+    if (m.id === ATHREE_MAP.id) continue;
+    if ([m.name, ...m.aliases].some((a) => a && t.includes(norm(a)))) {
+      return none('other-map', `The request names the ${m.name}, so that map is used.`, m.id);
+    }
+  }
+  const named = NAMED.test(t) || NAMED.test(prompt);
+  if (DECLINED.test(t) && named) return none('declined', 'The request says not to use the Athree map.');
+
+  if (named) {
+    if (profile) return { use: true, via: 'named', mapId: ATHREE_MAP.id, profile, reason: `The request names the Athree map and a ${profile} game needs a map.` };
+    return none('named-not-needed', 'The Athree map is a large world for games (racing, open world, battle royale, flight, exploring). This app has no world to put it on, so no map is added.');
+  }
+
+  if (profile) {
+    const pool = maps.filter((m) => m.profiles.includes(profile));
+    const pick = pickLibraryMap(pool, input.seedKey ?? prompt);
+    if (!pick) return none('none', 'No library map fits this game.');
+    return {
+      use: pick.id === ATHREE_MAP.id,
+      via: pool.length > 1 ? 'librarian' : 'needed',
+      mapId: pick.id,
+      profile,
+      reason: pool.length > 1 ? `A ${profile} game needs a map; the librarian picked ${pick.name} from ${pool.length} that fit.` : `A ${profile} game needs a map; ${pick.name} is the one the library has.`,
+    };
+  }
+  return none('none', 'This app does not need a map.');
+}

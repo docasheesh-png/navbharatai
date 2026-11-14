@@ -1,10 +1,10 @@
 /**
  * Route handler validation tests — Payment and Preview routes.
  *
- * Tests early-return 400 branches that fire before any Firestore or AI call.
+ * Tests early-return validation after an acknowledged unlocked-account read, before payment writes or AI calls.
  * No server boot required; uses captureRoutes() + direct handler invocation.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // A request with a Bearer header is a signed-in caller; without one it is not. Everything else in the
 // module is real. (POST /api/preview requires an account since the forensic audit of 2026-10-04.)
@@ -13,6 +13,19 @@ vi.mock('../src/server/lib/authMiddleware', async (orig) => ({
   verifyFirebaseToken: vi.fn(async (req: { headers?: Record<string, string> }) =>
     (req.headers?.authorization ?? '').startsWith('Bearer ') ? 'u1' : null),
 }));
+// A reachable store with an acknowledged missing lock document is an unlocked account.
+// Database absence is a different security condition, tested explicitly below.
+const lockStore = vi.hoisted(() => ({ available: true, reads: 0 }));
+vi.mock('../src/server/lib/serverDb', async (orig) => ({
+  ...(await orig<typeof import('../src/server/lib/serverDb')>()),
+  getServerDb: () => lockStore.available ? {
+    doc: (path: string) => {
+      if (!path.startsWith('user_vault_pin/')) throw Error('Unexpected database access in validation fixture');
+      return { get: async () => { lockStore.reads += 1; return { exists: false, data: () => undefined, id: path.split('/')[1], get: () => undefined }; } };
+    },
+  } : null,
+}));
+beforeEach(() => { lockStore.available = true; lockStore.reads = 0; });
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 
 process.env.VITEST = 'true';
@@ -25,6 +38,16 @@ async function importPaymentRoutes() {
 }
 
 describe('Payment routes — /api/payment/create-order', () => {
+  it('refuses an unavailable lock database before validating an otherwise invalid amount', async () => {
+    lockStore.available = false;
+    const routes = captureRoutes(await importPaymentRoutes(), () => {});
+    const res = mockRes();
+    await routes.get('POST /api/payment/create-order')!(mockReq({ body: { userId: 'user123', amount: 'abc' } }), res);
+    expect(res.statusCode).toBe(503);
+    expect(res.body?.error).toMatch(/could not check your app lock/i);
+    expect(res.body?.paymentSessionId).toBeUndefined();
+    expect(lockStore.reads).toBe(0);
+  });
   it('registers payment endpoints', async () => {
     const register = await importPaymentRoutes();
     const routes = captureRoutes(register, () => {});
@@ -85,6 +108,7 @@ describe('Payment routes — /api/payment/create-order', () => {
     await handler(req, res);
     expect(res.statusCode).toBe(400);
     expect(res.body?.error).toMatch(/invalid order amount/i);
+    expect(lockStore.reads).toBe(1);
   });
 
   it('returns 400 when order amount is zero or negative', async () => {
@@ -97,6 +121,7 @@ describe('Payment routes — /api/payment/create-order', () => {
     await handler(req, res);
     expect(res.statusCode).toBe(400);
     expect(res.body?.error).toMatch(/invalid order amount/i);
+    expect(lockStore.reads).toBe(1);
   });
 });
 

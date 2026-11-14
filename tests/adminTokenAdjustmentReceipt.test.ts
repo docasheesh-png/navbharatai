@@ -132,13 +132,18 @@ describe('the existing Admin authentication boundary guards receipt reads', () =
     };
     visit(ast); expect(initializer).toBeDefined();
     const js = ts.transpileModule(`const middleware = ${initializer!.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-    const middleware = new Function('adminPassword', 'adminUsername', 'verifyAdminTokenValue', 'adminTokenTtlMs', 'audit', `${js};return middleware;`)(
-      () => 'synthetic-test-password', () => 'synthetic-admin', verifyAdminTokenValue, adminTokenTtlMs, vi.fn());
+    const middleware = new Function('adminPassword', 'adminSessionSigningKey', 'adminUsername', 'verifyAdminTokenValue', 'adminTokenTtlMs', 'audit', `${js};return middleware;`)(
+      () => 'synthetic-test-password', () => 'synthetic-independent-signing-key-only', () => 'synthetic-admin', verifyAdminTokenValue, adminTokenTtlMs, vi.fn());
     const next = vi.fn(); const res = { status: vi.fn(), json: vi.fn() }; res.status.mockReturnValue(res);
-    for (const token of ['ordinary-user-token', mintAdminToken('synthetic-test-password', 'synthetic-admin', Date.now() - 400 * 24 * 60 * 60 * 1000)]) {
+    for (const token of ['ordinary-user-token', mintAdminToken('synthetic-test-password', 'synthetic-admin', Date.now()), mintAdminToken('synthetic-independent-signing-key-only', 'synthetic-admin', Date.now() - 400 * 24 * 60 * 60 * 1000)]) {
+      res.status.mockClear();
       middleware({ headers: { 'x-admin-token': token }, ip: '127.0.0.1', path: '/api/admin/token-adjustments/synthetic/receipt' }, res, next);
+      expect(res.status).toHaveBeenCalledWith(401); expect(next).not.toHaveBeenCalled();
     }
     expect(res.status).toHaveBeenCalledWith(401); expect(next).not.toHaveBeenCalled();
+    res.status.mockClear();
+    middleware({ headers: { 'x-admin-token': mintAdminToken('synthetic-independent-signing-key-only', 'synthetic-admin', Date.now()) }, ip: '127.0.0.1', path: '/api/admin/token-adjustments/synthetic/receipt' }, res, next);
+    expect(res.status).not.toHaveBeenCalled(); expect(next).toHaveBeenCalledTimes(1);
     const route = source.slice(source.indexOf("app.get('/api/admin/token-adjustments/:requestId/receipt'"), source.indexOf('// ── User token adjustment'));
     expect(route).toContain("audit('ADMIN_TOKEN_ADJUSTMENT_RECEIPT_VIEW'");
     expect(route).toContain("'Cache-Control', 'no-store'");

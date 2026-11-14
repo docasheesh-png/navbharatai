@@ -41,7 +41,7 @@ const FORBIDDEN = [
 describe('index.html — one identity, stated as structured data', () => {
   const html = read('index.html');
 
-  it('carries exactly the WebSite + Organization graph the server builds', () => {
+  it('carries exactly the WebSite + Organization + MobileApplication graph the server builds', () => {
     const blocks = ldBlocks(html);
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toEqual(homeJsonLd());
@@ -64,6 +64,7 @@ describe('index.html — one identity, stated as structured data', () => {
       '@type': 'MobileApplication',
       operatingSystem: 'Android',
       applicationCategory: 'ProductivityApplication',
+      applicationSuite: 'NavBharatAI',
       downloadUrl: PLAY_LISTING_URL,
       identifier: { propertyID: 'Google Play package', value: 'com.navbharat.ai' },
     });

@@ -443,6 +443,8 @@ import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
 import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets } from '../AgentV3/gameAssets/assetSeed';
+import { gameLibraryPlanningHandoff } from '../AgentV3/gameAssets/gameLibrarySelection';
+import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
@@ -721,7 +723,7 @@ import { isAnswerOnlyTurn, answeredInsteadOfBuilding, previewFailedSeverity, pre
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
-import { gameAutoRepairEnabled, gameCompleteGateEnabled, runGameRepair, gameRepairRecord, gameIncompleteReason, GAME_REPAIR_PASS } from '../AgentV3/gameRepair';
+import { gameAutoRepairEnabled, gameCompleteGateEnabled, runGameRepair, gameRepairRecord, gameIncompleteReason, GAME_REPAIR_PASS, GAME_AUTO_REPAIR_SUSPENSION_REASON } from '../AgentV3/gameRepair';
 import { scopeMatch } from '../AgentV3/gameIntent';
 import { gameScopeVerdict, domGameKind, domGameNotPlayedVerdict, playtestDefects, gameDefectsMessage, missingKitLayerPaths, gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
 import { recordManualEdits, consumeManualEditsWithOwned, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
@@ -18951,7 +18953,7 @@ async function noteBuildOutcome(
                     kitAssetsMs = Date.now() - assetsStartedAt;
                     kitAssetsStatus = String(assets.status);
                     for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content);
-                    localGameAssetHandoff = assets.handoff;
+                    localGameAssetHandoff = [assets.handoff, gameLibraryBuildReport(prompt, assets), gameLibraryPlanningHandoff(prompt)].filter(Boolean).join('\n');
                   } catch { /* The procedural kit remains the floor. */ }
                 }
               } finally {
@@ -24222,7 +24224,8 @@ async function noteBuildOutcome(
       // The explorer did not run (switched off, no time, or it failed before its presses were in): the game
       // is still played. A no-op when it already ran above.
       await runGamePlaytest();
-      // 🎮 GAME ENGINE ULTRA PHASE 3 (gameRepair.ts) — both switches default OFF. Repair: one focused pass on the
+      // 🎮 GAME ENGINE ULTRA PHASE 3 (gameRepair.ts) — automatic repair is suspended. Legacy repair wiring below is unreachable.
+      // Previously: one focused pass on the
       // measured defects, replayed, kept only if strictly better, else undone; the platform absorbs its cost
       // (PHASE_GAME_REPAIR is always barren). Gate: a game still unplayable or missing named features is RED.
       let gamePlayed = gamePlayedRef.cur;
@@ -24272,6 +24275,9 @@ async function noteBuildOutcome(
           } catch (e) {
             try { buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_REPAIR_SKIPPED', autoResolved: true, message: `Game repair could not run: ${e instanceof Error ? e.message : String(e)}` }); } catch { /* best-effort */ }
           }
+        }
+        if (!gameAutoRepairEnabled()) {
+          try { buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_REPAIR_SKIPPED', autoResolved: true, message: GAME_AUTO_REPAIR_SUSPENSION_REASON }); } catch { /* diagnostic only */ }
         }
         if (gameCompleteGateEnabled()) {
           try {

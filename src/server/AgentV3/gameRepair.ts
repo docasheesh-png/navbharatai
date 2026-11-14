@@ -5,32 +5,35 @@
 // and has strictly fewer hard defects and no new ones; otherwise it is undone (the explorer repair's rule,
 // explorerRepair.ts). The orchestration is pure over injected I/O, so every branch is unit-tested.
 //
-// 💰 WHO PAYS (admin decision pending — see docs/claude/ENV_REGISTRY.md). Both switches default OFF, so
-// production is unchanged. When AGENTV3_GAME_AUTO_REPAIR=on, the route marks the repair's billing phase
-// barren whatever the outcome — the PLATFORM absorbs the repair, the user is never charged for it. Billing it
-// to the user, even when kept, needs an explicit admin decision and a separate change.
+// Automatic repair is suspended: the current text-only, best-effort snapshot cannot
+// prove rollback preserves binary, excluded, oversized, unreadable or unlisted files.
+// No environment value re-enables it. Normal building/playtesting and the completion
+// gate remain unchanged. See docs/security/game-auto-repair-suspension.md.
 //
-// 🚦 THE GATE. AGENTV3_GAME_COMPLETE_GATE=on: a game whose final play still shows a HARD defect (blank,
-// input ignored, start stuck, runtime error) or lacks a feature the user named is not reported shippable —
-// the release gate goes RED with the reason. It never flips result.ok and never touches a bill.
+// 🚦 THE GATE defaults on: a game whose final play still shows a HARD defect (blank, ignored input, no touch,
+// stuck start, runtime error, wrong camera, stalled vehicle, or missing game-kit layer) or lacks a feature
+// the user named is not reported shippable — the release gate goes RED with the reason. It never flips
+// result.ok and never touches a bill. Set AGENTV3_GAME_COMPLETE_GATE=off to disable.
 
 import type { GameDefect, GameDefectCode } from './gamePlaytest';
 
 export const GAME_REPAIR_PASS = 'game-repair';
 
-export function gameAutoRepairEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return String(env.AGENTV3_GAME_AUTO_REPAIR ?? '').trim().toLowerCase() === 'on';
+export const GAME_AUTO_REPAIR_SUSPENSION_REASON = 'Automatic game repair is suspended until complete byte-preserving backup and verified rollback are available; no repair or rollback was started';
+export function gameAutoRepairEnabled(_env: NodeJS.ProcessEnv = process.env): boolean {
+  return false;
 }
 export function gameCompleteGateEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return String(env.AGENTV3_GAME_COMPLETE_GATE ?? '').trim().toLowerCase() === 'on';
+  return String(env.AGENTV3_GAME_COMPLETE_GATE ?? '').trim().toLowerCase() !== 'off';
 }
 
 /** Defects that mean the game cannot be played — what the gate holds on and what a repair must reduce. */
 export const HARD_DEFECTS: ReadonlySet<GameDefectCode> = new Set([
-  'GAME_DEFECT_BLANK', 'GAME_DEFECT_INPUT_IGNORED', 'GAME_DEFECT_START_STUCK', 'GAME_DEFECT_RUNTIME_ERROR', 'GAME_DEFECT_MISSING_LAYER',
+  'GAME_DEFECT_BLANK', 'GAME_DEFECT_INPUT_IGNORED', 'GAME_DEFECT_NO_TOUCH', 'GAME_DEFECT_START_STUCK',
+  'GAME_DEFECT_RUNTIME_ERROR', 'GAME_DEFECT_CAMERA_WRONG', 'GAME_DEFECT_VEHICLE_STALLED', 'GAME_DEFECT_MISSING_LAYER',
 ]);
 
-/** Every defect a repair is asked to fix (soft ones too: touch, camera, stalled vehicle). */
+/** Every measured defect the repair can address. */
 const FIX_HINT: Readonly<Record<GameDefectCode, string>> = {
   GAME_DEFECT_START_STUCK: 'Pressing the start control shows no game surface — make the start control mount and start the game.',
   GAME_DEFECT_BLANK: 'The game surface is blank or one colour — draw the world and the player.',
@@ -94,42 +97,12 @@ export async function runGameRepair(
   defects: readonly GameDefect[], scopeMissing: readonly string[], userPrompt: string,
   opts: { repairMs: number; snapshot: Record<string, string>; buildSignal: AbortSignal; io: GameRepairIO },
 ): Promise<GameRepairOutcome> {
-  const base: GameRepairOutcome = { attempted: false, kept: false, reason: '', before: defects.map((d) => d.code), after: null, scopeBefore: [...scopeMissing], scopeAfter: null, proof: null };
-  if (opts.buildSignal.aborted) return { ...base, reason: 'the build was stopped before repair' };
-  if (defects.length === 0 && scopeMissing.length === 0) return { ...base, reason: 'nothing to repair' };
-  if (opts.repairMs <= 0) return { ...base, reason: 'not enough build time left for a repair and its replay' };
-  if (Object.keys(opts.snapshot).length === 0) return { ...base, reason: 'no snapshot of the game could be taken' };
-  const ctl = new AbortController();
-  const onAbort = (): void => ctl.abort();
-  opts.buildSignal.addEventListener('abort', onAbort);
-  const timer = setTimeout(() => ctl.abort(), opts.repairMs);
-  const undo = async (reason: string, after: GameRepairOutcome['after'] = null, scopeAfter: GameRepairOutcome['scopeAfter'] = null): Promise<GameRepairOutcome> => {
-    try { await opts.io.revert(opts.snapshot); } catch (e) { reason += `; the undo failed (${e instanceof Error ? e.message : String(e)})`; }
-    return { ...base, attempted: true, reason, after, scopeAfter };
-  };
-  try {
-    let finished = false;
-    try { finished = await opts.io.repair(gameRepairPrompt(userPrompt, defects, scopeMissing), ctl.signal); } catch { finished = false; }
-    if (!finished || ctl.signal.aborted) return await undo('the repair did not finish in time');
-    const changed = await opts.io.changedSince(opts.snapshot);
-    if (ctl.signal.aborted) return await undo('the build stopped or the repair budget ended during verification');
-    if (changed === 0) return { ...base, attempted: true, reason: 'the repair changed no file', after: base.before, scopeAfter: [...scopeMissing] };
-    const again = await opts.io.replay();
-    // Empty defects from a browser that never played are absence of evidence, not improvement.
-    if (ctl.signal.aborted) return await undo('the build stopped or the repair budget ended during replay');
-    if (!again.proof || !['passed', 'failed'].includes(again.proof.outcome)
-      || !Number.isFinite(again.proof.score) || again.proof.score < 0 || again.proof.score > 100) {
-      return await undo('the gameplay replay did not produce a measured score');
-    }
-    const after = again.defects.map((d) => d.code);
-    if (!repairImproved(defects, again.defects, scopeMissing, again.scopeMissing)) return await undo('played again, the game was not better (or something new broke) — undone', after, again.scopeMissing);
-    return { ...base, attempted: true, kept: true, reason: 'played again: fewer defects, nothing new broke', after, scopeAfter: again.scopeMissing, proof: { ...again.proof } };
-  } catch (e) {
-    return await undo(`the repair could not be checked (${e instanceof Error ? e.message : String(e)})`);
-  } finally {
-    clearTimeout(timer);
-    opts.buildSignal.removeEventListener('abort', onAbort);
-  }
+  // Defense in depth: even a direct caller cannot reach model, command, replay or
+  // rollback callbacks. Do not mistake an empty `skipped` list for complete inventory.
+  void userPrompt; void opts;
+  return { attempted: false, kept: false, reason: GAME_AUTO_REPAIR_SUSPENSION_REASON,
+    before: defects.map(d => d.code), after: null, scopeBefore: [...scopeMissing],
+    scopeAfter: null, proof: null };
 }
 
 /** The diag record for the outcome. PURE. */

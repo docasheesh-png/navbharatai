@@ -221,23 +221,17 @@ export function cameraRelative(moveX: number, moveZ: number, cameraYaw: number):
 const CONTROLLER = `import * as THREE from 'three';
 import { stepMotor, initialMotorState, cameraRelative, DEFAULT_MOTOR, type MotorConfig, type MotorState } from './motor';
 import { events } from '../core/events';
+import { collisionRoot, hasWorldGround, sweepWorldCapsules, uprightCapsule, worldColliders, worldFloorAt } from '../three/collision';
 
-/**
- * The three.js side of the character — raycasts and movement. All the FEEL lives in motor.ts; this
- * only answers "what am I standing on" and "did I hit a wall".
- *
- * SKIN WIDTH is why the ground ray starts slightly ABOVE the feet and reaches slightly BELOW them.
- * A ray starting exactly at the feet intermittently misses the floor through floating-point error, and
- * the character flickers between grounded and airborne — which looks like stuttering and breaks both
- * coyote time and the jump.
- */
 export interface CharacterOptions {
   radius?: number;
   height?: number;
   config?: Partial<MotorConfig>;
-  /** Small ledges up to this height are stepped onto instead of blocking. */
+  /** Small ledges up to this height can be stepped onto. */
   stepOffset?: number;
 }
+
+interface GroundContact { y: number; normal: THREE.Vector3; mesh?: THREE.Object3D }
 
 export class CharacterController {
   readonly object = new THREE.Object3D();
@@ -246,10 +240,12 @@ export class CharacterController {
   private readonly radius: number;
   private readonly height: number;
   private readonly stepOffset: number;
-  private readonly down = new THREE.Raycaster();
-  private readonly side = new THREE.Raycaster();
+  private readonly slopeLimit: number;
   private colliders: THREE.Object3D[] = [];
-  /** Where the feet last stood on real ground — where a fall out of the world puts them back. */
+  private world: THREE.Mesh[] = [];
+  private implicitGround = true;
+  /** Leading edge support while the feet move onto the centre of a stair tread. */
+  private readonly stepSupport = new THREE.Vector3();
   private readonly lastSafe = new THREE.Vector3();
 
   constructor(options: CharacterOptions = {}) {
@@ -257,140 +253,160 @@ export class CharacterController {
     this.height = options.height ?? 1.8;
     this.stepOffset = options.stepOffset ?? 0.35;
     this.config = { ...DEFAULT_MOTOR, ...(options.config || {}) };
+    this.slopeLimit = Math.cos(this.config.maxSlopeDegrees * Math.PI / 180);
   }
 
-  /**
-   * 🔴 Raycasts read each collider's WORLD matrix, and three.js only refreshes those when it renders.
-   * setup() builds the world and the first fixed step runs BEFORE the first render — so a collider that
-   * was positioned, rotated or scaled was hit-tested at its un-transformed pose, and the player stood on
-   * (or fell through) ground that was not where it was drawn. Refreshed here, once, for the whole list.
-   */
+  /** Add explicit colliders when using the controller outside the game shell. */
   setColliders(list: THREE.Object3D[]): void {
     this.colliders = list;
-    for (const c of list) c.updateMatrixWorld(true);
+    for (const c of list) c.updateWorldMatrix(true, true);
   }
 
-  /**
-   * Put the character back at a spawn point. Restart MUST clear the motor state, not just the position:
-   * a player who died mid-fall would otherwise respawn still carrying that downward velocity — and with
-   * jumping still true, so their first jump does nothing.
-   */
   reset(x = 0, y = 0, z = 0): void {
     this.state = initialMotorState();
     this.object.position.set(x, y, z);
     this.lastSafe.set(x, y, z);
+    this.stepSupport.set(0, 0, 0);
   }
 
   get velocity(): { x: number; y: number; z: number } { return { x: this.state.vx, y: this.state.vy, z: this.state.vz }; }
   get isGrounded(): boolean { return this.state.grounded; }
   get speed(): number { return Math.hypot(this.state.vx, this.state.vz); }
 
-  /** Call from the FIXED update. \`cameraYaw\` makes movement camera-relative. */
+  /** Call at a fixed timestep. Camera yaw makes the controls view-relative. */
   update(
     delta: number,
     input: { moveX: number; moveZ: number; sprint: boolean; jumpPressed: boolean; jumpHeld: boolean },
     cameraYaw = 0,
   ): void {
     const dir = cameraRelative(input.moveX, input.moveZ, cameraYaw);
+    const root = collisionRoot(this.object);
+    this.world = worldColliders(root, this.colliders, this.object);
+    this.implicitGround = this.colliders.length === 0 && !hasWorldGround(this.world, root);
     const ground = this.probeGround(delta);
-
+    const grounded = this.state.vy <= 0 && ground !== null && this.object.position.y - ground.y <= 0.15;
+    const normalY = ground?.normal.y ?? 1;
+    const impact = Math.max(0, -this.state.vy);
     const { state, jumped, landed } = stepMotor(
-      this.state,
-      { ...input, moveX: dir.x, moveZ: dir.z },
-      ground.grounded,
-      delta,
-      this.config,
-      ground.normalY,
+      this.state, { ...input, moveX: dir.x, moveZ: dir.z }, grounded, delta, this.config, normalY,
     );
     this.state = state;
+    if (grounded && ground && normalY < this.slopeLimit) {
+      const downhill = -this.config.gravity * normalY * delta;
+      this.state.vx += ground.normal.x * downhill;
+      this.state.vz += ground.normal.z * downhill;
+    }
 
-    // Events, not direct calls: VFX, audio and the camera react without this class importing them.
     if (jumped) events.emit('PLAYER_JUMPED');
-    if (landed) events.emit('PLAYER_LANDED', { impact: Math.abs(this.state.vy) });
-
-    this.move(delta, ground.floorY);
-    if (this.state.grounded) this.lastSafe.copy(this.object.position);
-    // THE LAST LINE OF DEFENCE: a player who still drops out of the world (a gap in the level, a
-    // collider the game forgot) is put back where they last stood — never left falling under the map
-    // with the camera following them into the void.
-    if (this.colliders.length > 0 && this.object.position.y < this.lastSafe.y - 60) {
+    if (landed) events.emit('PLAYER_LANDED', { impact });
+    this.move(delta, grounded && normalY >= this.slopeLimit && !jumped);
+    if (this.state.grounded && normalY >= this.slopeLimit) this.lastSafe.copy(this.object.position);
+    if (!this.implicitGround && this.object.position.y < this.lastSafe.y - 60) {
       this.object.position.copy(this.lastSafe);
       this.state = initialMotorState();
+      this.stepSupport.set(0, 0, 0);
       events.emit('PLAYER_FELL', { at: this.lastSafe.clone() });
     }
   }
 
-  /**
-   * Ground probe with skin width — see the note above on why it starts above the feet.
-   *
-   * 🔴 IT ALSO REACHES AS FAR AS THIS STEP WILL FALL. It used to reach a fixed 0.15 m below the feet:
-   * any fall faster than ~9 m/s crossed the floor between two probes and never landed (tunnelling).
-   * \`floorY\` is the surface the feet would reach this step, so move() can stop them ON it.
-   */
-  private probeGround(delta = 0): { grounded: boolean; normalY: number; floorY: number | null } {
-    if (this.colliders.length === 0) {
-      // No collision geometry yet: treat y<=0 as the floor so a scene under construction still plays.
-      return { grounded: this.object.position.y <= 0.001, normalY: 1, floorY: null };
-    }
-    const skin = 0.1;
-    const snap = 0.15;
-    const fall = Math.max(0, -this.state.vy * delta);
-    const origin = this.object.position.clone().add(new THREE.Vector3(0, skin, 0));
-    this.down.set(origin, new THREE.Vector3(0, -1, 0));
-    this.down.far = skin + Math.max(snap, fall) + 0.05;
-    const hit = this.down.intersectObjects(this.colliders, true)[0];
-    if (!hit) return { grounded: false, normalY: 1, floorY: null };
-    const n = hit.face?.normal ?? new THREE.Vector3(0, 1, 0);
-    return { grounded: hit.distance <= skin + snap, normalY: Math.abs(n.y), floorY: hit.point.y };
+  private floorAt(position: THREE.Vector3, rise: number, fall: number): GroundContact | null {
+    const origin = position.clone().add(new THREE.Vector3(0, rise, 0));
+    const floor = worldFloorAt(origin, rise + fall, this.world);
+    if (floor) return floor;
+    return this.implicitGround && position.y >= -rise && position.y <= fall
+      ? { y: 0, normal: new THREE.Vector3(0, 1, 0) } : null;
   }
 
-  /**
-   * Apply velocity, refusing moves that would enter a wall.
-   *
-   * X and Z are resolved SEPARATELY so that sliding along a wall still works: blocking both because one
-   * is obstructed is what makes a character stick to walls at an angle instead of sliding along them.
-   */
-  private move(delta: number, floorY: number | null = null): void {
+  /** Reach through this frame's entire fall, including a fast drop onto a thin platform. */
+  private probeGround(delta: number): GroundContact | null {
+    const position = this.object.position;
+    const skin = 0.1;
+    const fall = Math.max(0.15, -this.state.vy * delta) + 0.05;
+    const centre = this.floorAt(position, skin, fall);
+    if (this.stepSupport.lengthSq() && (!centre || centre.y < position.y - 0.01)) {
+      // The leading point may already be over the NEXT riser while the current
+      // tread still supports the rounded foot. Keep checking the supported span.
+      for (const fraction of [1, 0.75, 0.5, 0.25]) {
+        const edge = this.floorAt(position.clone().addScaledVector(this.stepSupport, fraction), 0.015, 0.035);
+        if (edge && edge.normal.y >= this.slopeLimit) return edge;
+      }
+    }
+    this.stepSupport.set(0, 0, 0);
+    return centre;
+  }
+
+  private sweep(from: THREE.Vector3, motion: THREE.Vector3, support?: GroundContact | null): number {
+    const walkable = support?.mesh && support.normal.y >= this.slopeLimit
+      ? { mesh: support.mesh, slopeLimit: this.slopeLimit } : undefined;
+    return sweepWorldCapsules([uprightCapsule(from, this.radius, this.height)], motion, this.world, walkable);
+  }
+
+  private move(delta: number, canClimb: boolean): void {
     const p = this.object.position;
+    const startX = p.x, startZ = p.z;
+    const dx = this.state.vx * delta, dz = this.state.vz * delta;
+    const segments = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dz)) / Math.max(0.04, this.radius * 0.5)));
     const tryAxis = (dx: number, dz: number) => {
       if (dx === 0 && dz === 0) return;
-      if (this.colliders.length === 0) { p.x += dx; p.z += dz; return; }
-      const dir = new THREE.Vector3(dx, 0, dz);
-      const dist = dir.length();
-      dir.normalize();
-      // Cast from mid-body, not the feet — a foot-height ray walks straight through a table top.
-      const origin = p.clone().add(new THREE.Vector3(0, this.height * 0.5, 0));
-      this.side.set(origin, dir);
-      this.side.far = dist + this.radius;
-      const hit = this.side.intersectObjects(this.colliders, true)[0];
-      if (hit) {
-        // A low obstacle within the step offset is climbed instead of blocking — no snagging on kerbs.
-        const stepTop = hit.point.y - p.y;
-        if (stepTop > 0 && stepTop <= this.stepOffset) { p.y += stepTop + 0.01; p.x += dx; p.z += dz; }
-        return;
+      const motion = new THREE.Vector3(dx, 0, dz);
+      let travel = this.sweep(p, motion);
+      if (canClimb && this.stepOffset > 0) {
+        const target = p.clone().add(motion);
+        const lead = motion.clone().normalize().multiplyScalar(this.radius * 0.99);
+        const rise = this.stepOffset + 0.002;
+        const rising = (hit: GroundContact | null): hit is GroundContact => !!hit
+          && hit.normal.y >= this.slopeLimit && hit.y - p.y > 1e-4 && hit.y - p.y <= this.stepOffset;
+        const centre = this.floorAt(target, rise, 0);
+        const edge = travel < 1 && !rising(centre) ? this.floorAt(target.clone().add(lead), rise, 0) : null;
+        const support = rising(centre) ? centre : rising(edge) ? edge : null;
+        const stepTop = (support?.y ?? p.y) - p.y;
+        if (support && support === edge && support.normal.y < 0.999) {
+          // Let the capsule's rounded foot reach a ramp before its centre is above the surface.
+          travel = this.sweep(p, motion, support);
+        } else if (support) {
+          const lift = new THREE.Vector3(0, stepTop, 0);
+          // Both sweeps are required. A low ceiling or the next riser can veto a step-up.
+          if (this.sweep(p, lift) === 1) {
+            const raised = p.clone().add(lift);
+            const elevatedTravel = this.sweep(raised, motion, support);
+            if (elevatedTravel === 1 || elevatedTravel > travel + 1e-4) {
+              p.y = raised.y;
+              travel = elevatedTravel;
+              if (support === edge) this.stepSupport.copy(lead);
+            }
+          }
+        }
       }
-      p.x += dx; p.z += dz;
+      p.addScaledVector(motion, travel);
     };
 
-    tryAxis(this.state.vx * delta, 0);
-    tryAxis(0, this.state.vz * delta);
-    // 🔴 THE FEET STOP ON THE GROUND. Standing applies a small downward velocity (the motor's ground
-    // snap, which keeps the character glued to slopes) — and nothing ever put the feet back on the
-    // surface, so a player standing still sank 3 cm a frame, lost the ground ray within five frames and
-    // fell through the world. Every game built on the shell lost its player through the floor.
-    const nextY = p.y + this.state.vy * delta;
-    if (floorY !== null && this.state.vy <= 0 && nextY <= floorY + 0.001) {
-      p.y = floorY;
-      if (this.state.vy < 0) this.state = { ...this.state, vy: 0 };
-    } else {
-      p.y = nextY;
+    // Separate axes preserve tangential movement when the body meets a wall.
+    for (let i = 0; i < Math.min(128, segments); i++) {
+      tryAxis(dx / segments, 0);
+      tryAxis(0, dz / segments);
     }
-    if (this.colliders.length === 0 && p.y < 0) { p.y = 0; }
+    if (delta > 0) {
+      this.state.vx = (p.x - startX) / delta;
+      this.state.vz = (p.z - startZ) / delta;
+    }
+
+    const dy = this.state.vy * delta;
+    const floor = dy <= 0 ? this.probeGround(delta) : null;
+    if (floor && p.y + dy <= floor.y + 0.001) {
+      p.y = floor.y;
+      this.state.vy = 0;
+      return;
+    }
+    const travel = this.sweep(p, new THREE.Vector3(0, dy, 0), floor);
+    p.y += dy * travel;
+    if (travel < 1) this.state.vy = 0;
+    if (this.implicitGround && p.y < 0) p.y = 0;
   }
 
   teleport(x: number, y: number, z: number): void {
     this.object.position.set(x, y, z);
     this.state = initialMotorState();
+    this.stepSupport.set(0, 0, 0);
   }
 }
 `;

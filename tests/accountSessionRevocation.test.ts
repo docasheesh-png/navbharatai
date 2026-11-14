@@ -102,6 +102,24 @@ describe('session authority: old ID tokens, refreshed tokens, other accounts and
     expect(await verifyFirebaseToken(req)).toBe('bob');
     expect(h.verify).toHaveBeenCalledTimes(3);
   });
+  it('does not treat delayed custom-token redemption as a new phone authentication', async () => {
+    vi.stubEnv('VITEST', ''); const fixture = database(); setServerDb(fixture.db as never);
+    h.verify.mockResolvedValue({ uid: 'alice', auth_time: 4000, session_auth_time: 1000, firebase: { sign_in_provider: 'custom' } });
+    const fresh = await verifyFreshAuth({ headers: { authorization: 'Bearer synthetic-delayed-custom' } } as Request);
+    expect(fresh?.authTimeSec).toBe(1000);
+  });
+  it.each([undefined, null, 0, -1, NaN, 1000.5, '1000', 5000])('refuses unproven custom step-up epoch %s without revoking ordinary access', async original => {
+    vi.stubEnv('VITEST', ''); const fixture = database(); setServerDb(fixture.db as never);
+    h.verify.mockResolvedValue({ uid: 'alice', auth_time: 4000, session_auth_time: original, firebase: { sign_in_provider: 'custom' } });
+    const req = { headers: { authorization: 'Bearer synthetic-custom' } } as Request;
+    expect(await verifyFreshAuth(req)).toEqual({ uid: 'alice', authTimeSec: null });
+    expect(await verifyFirebaseToken(req)).toBe('alice');
+  });
+  it('accepts a genuine recent native phone reauthentication rather than an older exchange claim', async () => {
+    vi.stubEnv('VITEST', ''); const fixture = database(); setServerDb(fixture.db as never);
+    h.verify.mockResolvedValue({ uid: 'alice', auth_time: 4000, session_auth_time: 1000, firebase: { sign_in_provider: 'phone' } });
+    expect(await verifyFreshAuth({ headers: { authorization: 'Bearer reauthenticated-phone' } } as Request)).toEqual({ uid: 'alice', authTimeSec: 4000 });
+  });
   it('first tokenless request never dereferences an absent cache entry', async () => {
     expect(await verifyFirebaseToken({ headers: {} } as Request)).toBeNull();
     expect(h.verify).not.toHaveBeenCalled();

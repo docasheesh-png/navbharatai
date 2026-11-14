@@ -63,13 +63,13 @@ export function mobileApplicationJsonLd(): Record<string, unknown> {
     operatingSystem: 'Android',
     applicationCategory: 'ProductivityApplication',
     downloadUrl: PLAY_LISTING_URL,
-    applicationSuite: { '@id': WEBSITE_ID },
+    applicationSuite: OFFICIAL_NAME,
     publisher: { '@id': ORGANIZATION_ID },
     identifier: { '@type': 'PropertyValue', propertyID: 'Google Play package', value: ANDROID_APPLICATION_ID },
   };
 }
 
-/** The homepage graph: the WebSite and the Organization behind it. */
+/** The homepage graph: the WebSite, Organization and published Android application. */
 export function homeJsonLd(): Record<string, unknown> {
   return { '@context': 'https://schema.org', '@graph': [websiteJsonLd(), organizationJsonLd(), mobileApplicationJsonLd()] };
 }

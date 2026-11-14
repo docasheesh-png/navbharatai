@@ -1,5 +1,73 @@
 import { gameAssetLodSource } from './GameAssetLodGenerator.ts';
 import { gameAssetTextureVerifier } from './GameAssetTextureVerifier.ts';
+
+export const GAME_ASSET_MODELS_PATH = 'src/game/three/assetModels.ts';
+
+/** Shared metadata read by the 3D kit. Object3D clones retain this key. */
+export const GAME_WORLD_COLLIDER_KEY = 'navbharatWorldCollider';
+
+const legacyModelPrefix = `import { loadGameAsset, type GameAssetHandle, type LocalGameAsset } from './externalAssets';
+const assets: Record<string, LocalGameAsset> = `;
+const legacyModelSuffix = `;
+export function loadRequestedAsset(subject: string, fallback: () => GameAssetHandle, signal?: AbortSignal): Promise<GameAssetHandle> {
+  return assets[subject] ? loadGameAsset(assets[subject], fallback, signal) : Promise.resolve(fallback());
+}
+`;
+
+/** Upgrade the original generated loader and keep its per-game asset manifest. */
+export function upgradeAssetModelLoader(source: string | undefined): string | null {
+  if (!source?.startsWith(legacyModelPrefix) || !source.endsWith(legacyModelSuffix)) return null;
+  const manifest = source.slice(legacyModelPrefix.length, -legacyModelSuffix.length);
+  try {
+    const models: unknown = JSON.parse(manifest);
+    if (!models || typeof models !== 'object' || Array.isArray(models) || JSON.stringify(models) !== manifest) return null;
+    return generateAssetModelLoader(models as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+}
+
+/** Loader used by individually placed models and world dressing. */
+export function generateAssetModelLoader(models: Readonly<Record<string, unknown>>): string {
+  return `import * as THREE from 'three';
+import { loadGameAsset, type GameAssetHandle, type LocalGameAsset } from './externalAssets';
+
+const assets: Record<string, LocalGameAsset> = ${JSON.stringify(models)};
+const solidScenery = new Set(['building', 'house', 'wall', 'rock', 'hill', 'mountain', 'well', 'barrel', 'streetlight', 'windmill']);
+const markSolid = (object: THREE.Object3D) => { object.userData[${JSON.stringify(GAME_WORLD_COLLIDER_KEY)}] = 'solid'; };
+
+function markSceneryCollider(subject: string, root: THREE.Object3D): void {
+  if (subject === 'tree') {
+    // The loader returns a centred, grounded model. A trunk proxy keeps space under the canopy open.
+    const bounds = new THREE.Box3().setFromObject(root);
+    const size = bounds.getSize(new THREE.Vector3());
+    const center = bounds.getCenter(new THREE.Vector3());
+    const radius = Math.min(size.x, size.z) * 0.1;
+    const height = size.y * 0.48;
+    if (!Number.isFinite(radius + height) || radius <= 0 || height <= 0) return;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.7, radius, height, 8), new THREE.MeshBasicMaterial());
+    trunk.position.set(center.x, bounds.min.y + height / 2, center.z);
+    trunk.visible = false;
+    markSolid(trunk);
+    root.add(trunk);
+  } else if (solidScenery.has(subject)) {
+    root.traverseVisible((object) => {
+      const lod = object.parent as THREE.LOD | null;
+      if ((object as THREE.Mesh).isMesh && (!lod?.isLOD || lod.levels[0]?.object === object)) markSolid(object);
+    });
+  }
+}
+
+export async function loadRequestedAsset(subject: string, fallback: () => GameAssetHandle, signal?: AbortSignal): Promise<GameAssetHandle> {
+  const asset = assets[subject];
+  if (!asset) return fallback();
+  const handle = await loadGameAsset(asset, fallback, signal);
+  if (handle.source === 'model') markSceneryCollider(subject, handle.root);
+  return handle;
+}
+`;
+}
+
 /** Optional L3 runtime. Kept separate from the L1/L2 kit until build-time acquisition is enabled. */
 export function generateGameAssetRuntime(): string {
   return `import * as THREE from 'three';

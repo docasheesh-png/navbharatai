@@ -45,6 +45,7 @@ export interface TemplatesPanelProps {
   savedTemplates: SavedTemplate[];
   hasGeneratedCode: boolean;
   onSelectTemplate: (prompt: string) => void;
+  onSelectGameTemplate?: (prompt: string) => void;
   onRequireAuth: () => void;
   onSaveCurrentTemplate: () => void;
   onDeleteSavedTemplate: (id: string) => void;
@@ -349,12 +350,14 @@ export function TemplatesPanel({
   savedTemplates,
   hasGeneratedCode,
   onSelectTemplate,
+  onSelectGameTemplate = onSelectTemplate,
   onRequireAuth,
   onSaveCurrentTemplate,
   onDeleteSavedTemplate,
   onLoadSavedTemplate,
 }: TemplatesPanelProps) {
   const [activeCategory, setActiveCategory] = React.useState<'All' | TemplateCategory>('All');
+  const [autoSelectedTrack, setAutoSelectedTrack] = React.useState<string | undefined>();
 
   // Only show filter tabs for categories that actually have templates (never an empty tab).
   const presentCategories = CATEGORY_ORDER.filter((c) => templates.some((t) => templateMeta(t.id).category === c));
@@ -425,8 +428,12 @@ export function TemplatesPanel({
           })}
         </div>
 
-        <EndlessRacingGame />
-        <GameTemplateCatalog onUse={onSelectTemplate} />
+        <EndlessRacingGame trackName={autoSelectedTrack} />
+        <GameTemplateCatalog onUse={(prompt, gameName) => {
+          const racingTracks = ['Grand Prix Circuit', 'Street Circuit', 'Desert Rally', 'Mountain Pass', 'Coastal Highway', 'Forest Run', 'Snow & Ice', 'Volcano Ring', 'Airport Sprint', 'Neon Night City', 'Oval Speedway', 'Figure-Eight', 'Kart Park', 'Canyon Run', 'Jungle Rally', 'Riverside GP', 'Industrial Zone', 'Countryside', 'Beach Sprint', 'Space Station', 'Autumn Park', 'Urban Rooftop', 'Temple Trail', 'Endurance 24H'];
+          setAutoSelectedTrack(gameName && racingTracks.includes(gameName) ? gameName : undefined);
+          onSelectGameTemplate(prompt);
+        }} />
 
         {/* My Saved Templates */}
         <div className="mt-12">

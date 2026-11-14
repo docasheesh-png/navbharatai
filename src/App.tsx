@@ -1,3 +1,4 @@
+import { GameBuildInbox, type GameBuildRequest } from './lib/gameBuildInbox';
 import { COPY } from './lib/copy';
 import UpdateBanner from './components/UpdateBanner';
 import { usePublicFlags } from './lib/publicFlags';
@@ -2694,6 +2695,9 @@ export default function App() {
   // "Fix with AI" clicked from the SIDEBAR preview (outside the v5.0 panel's own UI) — prefills the
   // v5.0 chat input with the error and switches to it. Nonce so the SAME text re-triggers the effect
   // even if the previous fix request is still sitting in the input unsent.
+  const [gameBuildInbox] = useState(() => new GameBuildInbox());
+  gameBuildInbox.bind(user?.uid ?? '');
+  const [gameBuildRequest, setGameBuildRequest] = useState<GameBuildRequest | null>(null);
   const [v3PendingFix, setV3PendingFix] = useState<{ text: string; nonce: number; autoSend?: boolean } | null>(null);
   // A deploy requested from the Git panel for a specific real provider → v5.0 runs its real
   // build+deploy pipeline for it (see AgentV3Panel pendingDeploy).
@@ -3683,6 +3687,8 @@ export default function App() {
               onBeforeBuild={() => { setPreviousFiles({ ...files }); return workspaceSyncerRef.current?.flush() ?? Promise.resolve(); }}
               onOpenInIDE={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
               onPreviewState={setV3Preview}
+              gameBuildInbox={gameBuildInbox}
+              gameBuildRequest={gameBuildRequest}
               pendingFix={v3PendingFix}
               pendingDeploy={v3DeployRequest}
               /* Same FilesPanel bundle the sidebar "Files" menu uses (see ViewPanels), so the v5.0
@@ -4024,6 +4030,7 @@ export default function App() {
               savedTemplates={savedTemplates}
               hasGeneratedCode={hasGeneratedCode}
               onSelectTemplate={(prompt) => { setInput(prompt); toggleTab('nbi_chat'); }}
+              onSelectGameTemplate={(prompt) => { setV3Resume(null); setV3PendingFix(null); setV3DeployRequest(null); setGameBuildRequest(gameBuildInbox.put(user?.uid ?? '', prompt)); toggleTab('nbi_pro_chat'); }}
               onRequireAuth={() => { setShowAuth(true); addToast('Sign in to use Pro templates', 'warning'); }}
               onSaveCurrentTemplate={saveCurrentAsTemplate}
               onDeleteSavedTemplate={(id) => setSavedTemplates(prev => prev.filter(x => x.id !== id))}

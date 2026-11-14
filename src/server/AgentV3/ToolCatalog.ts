@@ -2370,7 +2370,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       description:
         'Add the character controller for a game. Call generate_game_runtime (and generate_game_3d for '
         + '3D) first. Emits src/game/play: a PURE motor holding all the "feel" arithmetic, plus a thin '
-        + 'three.js controller that does the raycasts. '
+        + 'three.js controller that sweeps the character body against the world and probes floor height. '
         + 'IT INCLUDES THE THINGS THAT MAKE MOVEMENT FEEL GOOD, and they look like bugs on paper so do NOT '
         + 'strip them: coyote time (jump still works ~100ms after walking off a ledge — without it a '
         + 'player who presses a frame late gets nothing and the game feels unresponsive), jump buffering '
@@ -2392,7 +2392,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'object_spec',
       description:
-        'BEFORE hand-modelling ANY 3D object, call this ONCE with ALL their names (objects: [...]). Returns the object\u2019s REAL '
+        'Search the categorized game library without model calls using library_query and optional category/animation; an empty query lists indexed entries. Results distinguish reviewed models needing admission, code recipes, and specifications only. No result proves placement or gameplay. '
+        + 'BEFORE hand-modelling ANY 3D object, call this ONCE with ALL their names (objects: [...]). Returns the object\u2019s REAL '
         + 'dimensions in metres, the parts it cannot read as itself without, the ONE proportion that '
         + 'carries its silhouette, and HOW that kind of thing is placed in a scene (grounded, '
         + 'instanced, animated, shadowed). It answers for 100 built-in objects instantly and free '
@@ -2410,6 +2411,13 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: {
         type: 'object',
         properties: {
+          library_plan: { type: 'string', maxLength: 4000, description: 'Game prompt for genre-aware requirements and optional scenery, with conservative unmeasured device-fit planning.' },
+          device_profile: { type: 'string', enum: ['conservative-mobile', 'standard-web'], description: 'Planning profile only, never a measured target-device certification.' },
+          webgl2: { type: 'boolean', description: 'Only supply if actually known from a target capability check; never guess from the device name.' },
+          requirements: { type: 'array', maxItems: 16, items: { type: 'object', properties: { subject: { type: 'string' }, role: { type: 'string', enum: ['player', 'opponent', 'environment', 'prop'] }, animation: { type: 'string' } }, required: ['subject'] } },
+          library_query: { type: 'string', maxLength: 512, description: 'Metadata search, such as car, house, tree, or a model name. Empty string browses the library.' },
+          category: { type: 'string', description: 'Optional exact category from the returned categories list.' },
+          animation: { type: 'string', maxLength: 64, description: 'Optional required animation role; excludes incompatible models and unverified recipe animation claims.' },
           object: {
             type: 'string',
             description:
@@ -2439,7 +2447,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'underwater/neon) each with hemisphere + key + ambient, fitted shadow camera and matched fog, '
         + 'material presets with believable roughness/metalness plus shared PALETTES, camera rigs '
         + '(third-person with wall collision, first-person, top-down, side-scroller) and procedural world '
-        + 'building — seeded value-noise terrain and InstancedMesh scatter. '
+        + 'building — seeded value-noise terrain and InstancedMesh scatter. Shared collision geometry '
+        + 'for terrain, building walls, tree trunks and custom solid meshes. '
         + 'It ALSO emits the three things that decide whether a scene reads as real rather than as '
         + 'coloured cardboard: environment.ts (a real sky + image-based reflections — without it a '
         + 'PBR metal has nothing to reflect and renders near-black), surfaces.ts (brick, wood, bark, '
@@ -2457,8 +2466,9 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             type: 'array',
             items: { type: 'string' },
             description:
-              'Optional subset: renderer, lighting, materials, camera, world, environment, surfaces, '
-              + 'humanoid, objects, atmosphere. Default = all; imports are pulled in automatically. '
+              'Optional subset: renderer, lighting, materials, camera, world, collision, environment, surfaces, '
+              + 'humanoid, objects, buildings, atmosphere. Default = all; imports are pulled in automatically. '
+              + 'buildings = createEnterableHouse(): opt-in interiors, stairs and hinged doors; legacy createHouse() stays scenery. '
               + 'atmosphere = createAtmosphere(): a running day-night clock (sun, moon, stars, street lamps '
               + 'on at dusk) and weather (clear, cloudy, rain, storm with lightning, snow, fog, dust); '
               + 'environment = sky + image-based reflections; surfaces = brick/wood/bark/stone/road/soil/'

@@ -8,7 +8,7 @@ vi.mock('../src/server/lib/audit', () => ({ audit: vi.fn() }));
 import { registerFailedReportOAuthRoutes } from '../src/server/routes/failedReportOAuth';
 import { ReportOAuthError, REPORT_SCOPE, REPORT_AUTOPSY_SCOPE } from '../src/server/lib/failedReportOAuth';
 import { apiVersionMiddleware } from '../src/server/routes/apiVersion';
-import { mintAdminToken } from '../src/server/lib/adminAuth';
+import { mintAdminToken, adminSessionSigningKey } from '../src/server/lib/adminAuth';
 import { audit } from '../src/server/lib/audit';
 
 let server: Server; let port: number; let adminToken: string;
@@ -29,8 +29,8 @@ function request(path: string, body?: unknown, authenticated = false): Promise<{
   });
 }
 beforeAll(async () => {
-  vi.stubEnv('ADMIN_USERNAME', 'owner'); vi.stubEnv('ADMIN_PASSWORD', 'test-private-password');
-  adminToken = mintAdminToken('test-private-password', 'owner', Date.now());
+  vi.stubEnv('ADMIN_USERNAME', 'owner'); vi.stubEnv('ADMIN_PASSWORD', 'test-private-password'); vi.stubEnv('ADMIN_SESSION_SIGNING_KEY', 'a1'.repeat(32));
+  adminToken = mintAdminToken(adminSessionSigningKey(), 'owner', Date.now());
   const app = express(); app.use(express.json()); app.use(apiVersionMiddleware); registerFailedReportOAuthRoutes(app);
   server = await new Promise<Server>(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   port = (server.address() as { port: number }).port;

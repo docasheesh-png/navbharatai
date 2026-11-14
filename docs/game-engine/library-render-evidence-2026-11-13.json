@@ -1,0 +1,83 @@
+{
+  "renderer": "Official Chrome for Testing Headless Shell 145.0.7632.6, SwiftShader; not physical mobile hardware",
+  "proof": "unchanged assetBrowserProofModule: texture decode, nonempty bounds, rendered pixels and requested Running_A observable motion",
+  "models": [
+    {
+      "hash": "acd89c53337498d5e7183a3fd87fc90a0486467e45b34e5f50eeeffd64566e2c",
+      "rendered": true,
+      "animated": true,
+      "triangles": 6543,
+      "changedPixels": 1268
+    },
+    {
+      "hash": "7914f14f46a490cb77dcde290d460dd0220592815e8cd14d2941e4ecfda9ac16",
+      "rendered": true,
+      "animated": true,
+      "triangles": 5683,
+      "changedPixels": 1159
+    },
+    {
+      "hash": "8d7b7c9b0631f698f6be1d6234900952afb0218c7ad79eea9c77d20859e66890",
+      "rendered": true,
+      "animated": true,
+      "triangles": 6377,
+      "changedPixels": 1182
+    },
+    {
+      "hash": "a129802cf7b8e1f38b34073406d9328cddc9289a1af70897906c995bcb99488b",
+      "rendered": true,
+      "animated": true,
+      "triangles": 6035,
+      "changedPixels": 1196
+    },
+    {
+      "hash": "9597f183dd72e9a0694527a36c311d1110555dfcea49a1f53a3cf2eedb0262c6",
+      "rendered": true,
+      "animated": false,
+      "triangles": 1194,
+      "changedPixels": 2607
+    },
+    {
+      "hash": "077866d11f4a52b67b859b219958d92f0768f31f8f23fdb939e17931828d9b98",
+      "rendered": true,
+      "animated": false,
+      "triangles": 1234,
+      "changedPixels": 2355
+    },
+    {
+      "hash": "1deb113375de9adf980bda69e7c946ad1811ff4f694d6e0069be5e29b2463835",
+      "rendered": true,
+      "animated": false,
+      "triangles": 58,
+      "changedPixels": 1913
+    },
+    {
+      "hash": "2e2c711d1eb171bc18f6337712d70222751c34295fe61ae7ece6776b854629a1",
+      "rendered": true,
+      "animated": false,
+      "triangles": 152,
+      "changedPixels": 1954
+    },
+    {
+      "hash": "2acbf90a6615ad0694d08f7b739164b20ccf13a56747fd2aaca07931944718a6",
+      "rendered": true,
+      "animated": false,
+      "triangles": 32,
+      "changedPixels": 4504
+    },
+    {
+      "hash": "0f01e076f4289fbd87e7cbffc5ec4c729573024c9d2d17592f10d65243075af1",
+      "rendered": true,
+      "animated": false,
+      "triangles": 180,
+      "changedPixels": 2518
+    },
+    {
+      "hash": "8770653d31dd61a41a40bd8d2c30e1b41fd2c1a3d88f364b83ba782f4aea07f9",
+      "rendered": true,
+      "animated": false,
+      "triangles": 126,
+      "changedPixels": 3207
+    }
+  ]
+}

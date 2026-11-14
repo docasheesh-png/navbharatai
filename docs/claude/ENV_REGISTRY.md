@@ -429,13 +429,12 @@ the code (it is actually read somewhere) on 2026-07-11.
   `AGENTV3_GAME_SCOPE_CONTRACT` (Phase 1, PR #4036 — game scope contract in the kit handoff + GAME_SCOPE_OK/GAP evidence),
   `AGENTV3_GAME_PLAYTEST_SEED` (Phase 2 — the playtest seeds `Math.random` with a fixed seed so runs are repeatable).
   Existing siblings: `AGENTV3_GAME_PLAYTEST`, `AGENTV3_GAME_KIT_SEED`.
-  **Phase 3 — default OFF, `=on` enables (NOT set in Cloud Run; admin decision required before setting):**
-  `AGENTV3_GAME_AUTO_REPAIR` — one verified model repair of a game the playtest measured broken. ⚠️ It SPENDS
-  model calls; as built, the platform absorbs that spend (billing phase `game-repair` is always barren), so the
-  user is never charged. Charging the user for a kept repair needs an explicit admin decision and a separate PR.
-  `AGENTV3_GAME_COMPLETE_GATE` — a game still unplayable (blank / input ignored / start stuck / runtime error /
-  missing kit layer) or missing a feature the user named is reported RED, not shippable. Never flips `ok`, never
-  changes a bill.
+  **Phase 3 — automatic repair suspended; completion gate unchanged:**
+  `AGENTV3_GAME_AUTO_REPAIR` is currently ignored. No value enables automatic mutation or rollback,
+  because the existing best-effort text snapshot cannot prove complete byte-preserving recovery.
+  Normal building and playtesting remain available. `AGENTV3_GAME_COMPLETE_GATE` still defaults ON
+  and can be disabled with `off`; unplayable games or missing named features are reported RED,
+  not shippable. It does not flip `ok` or change billing. See `docs/security/game-auto-repair-suspension.md`.
   **Phase 4 — bench-runner env only (local script, never Cloud Run):** `BENCH_FIXTURE` (`reliability` default | `game`)
   for `scripts/agentv3-reliability-bench.ts`; spends real money only with `BENCH_CONFIRM=yes`.
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,

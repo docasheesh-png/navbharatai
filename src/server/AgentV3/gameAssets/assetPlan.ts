@@ -22,6 +22,9 @@ export function externalGameAssetsEnabled(env: NodeJS.ProcessEnv = process.env, 
   return parseEnvFlag(env.AGENTV3_EXTERNAL_GAME_ASSETS) ?? false;
 }
 const ALIASES: Readonly<Record<string, readonly string[]>> = {
+  mage: ['mage', 'mages', 'जादूगर'], wizard: ['wizard', 'wizards'], barbarian: ['barbarian', 'barbarians'], rogue: ['rogue', 'rogues'],
+  'hooded rogue': ['hooded rogue', 'hooded rogues'], hatchback: ['hatchback'], 'station wagon': ['station wagon'],
+  'straight road tile': ['straight road tile'], 'road corner tile': ['road corner tile'], 'fire hydrant': ['fire hydrant'], dumpster: ['dumpster'], crate: ['crate', 'crates'],
   car: ['car', 'cars', 'कार', 'कारें', 'coche', 'coches', 'auto'],
   train: ['train', 'trains', 'locomotive', 'ट्रेन', 'रेलगाड़ी', 'tren', 'trenes'],
   'railway station': ['railway station', 'train station', 'रेलवे स्टेशन', 'ट्रेन स्टेशन', 'estación de tren'],
@@ -73,7 +76,8 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       rock: ['rock music', 'rock band'], tree: ['tree diagram', 'decision tree'],
       stool: ['stool sample', 'stool test'], cabinet: ['cabinet minister', 'cabinet meeting'],
       lamp: ['street lamp', 'traffic lamp'],
-      car: ['formula one car', 'formula 1 car', 'f1 car'], building: ['building a', 'building the'],
+      rogue: ['hooded rogue', 'hooded rogues'],
+      car: ['formula one car', 'formula 1 car', 'f1 car', 'hatchback car', 'station wagon car'], building: ['building a', 'building the'],
     };
     if ((excludedPhrases[subject] ?? []).some(p => mentioned(clause, p))) return false;
 
@@ -85,7 +89,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
     const local = clauses.filter(c => matching(subject, c)).join(' ');
     const motion = (role: string) => MOTIONS[role].some(word => mentioned(local, word));
     const animation = ['bird', 'eagle', 'parrot'].includes(subject) && motion('fly') ? 'fly'
-      : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox'].includes(subject)
+      : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue'].includes(subject)
         ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
     return { subject, ...(animation ? { animation } : {}) };
   });

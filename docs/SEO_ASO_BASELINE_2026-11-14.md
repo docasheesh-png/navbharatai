@@ -1,7 +1,7 @@
 # NavBharatAI SEO and Google Play ASO baseline
 
-**Measured:** 2026-11-14 (Asia/Kolkata)  
-**Scope:** public website `https://navbharatai.com`, Android package `com.navbharat.ai`, and the Google Play listing.  
+**Measured:** 2026-11-14 (Asia/Kolkata)
+**Scope:** public website `https://navbharatai.com`, Android package `com.navbharat.ai`, and the Google Play listing.
 **Status labels:** Verified = observed in source or public page; Implemented = landed in this branch; Pending external access = requires an account we cannot access.
 
 ## Architecture and deployment baseline
@@ -34,8 +34,8 @@
 
 ### English (India)
 
-**App title (30 characters):** `NavBharatAI: Indian AI`  
-**Short description (79 characters):** `Indian AI chatbot and app builder. Chat, code and build apps in Hindi or English.`
+**App title (22 characters):** `NavBharatAI: Indian AI`
+**Short description (78 characters):** `Indian AI chat and app builder. Chat, code and build apps in Hindi or English.`
 
 **Full description (ready for Play Console):**
 
@@ -58,7 +58,7 @@ Some features need sign-in, available wallet credit or supported account setting
 
 ### Hindi (India)
 
-**App title:** `NavBharatAI: Indian AI`  
+**App title:** `NavBharatAI: Indian AI`
 **Short description:** `Hindi, English और Hinglish में AI चैट, कोडिंग मदद और AI app building.`
 
 **Full description:**

@@ -56,7 +56,6 @@ describe('liftEmbeddedMedia over an import', () => {
     expect(liftEmbeddedMedia(plain).files).toBe(plain);
   });
 });
-});
 
 describe('prepareImportBody — the import-files route sorts before it writes', () => {
   const logo = 'data:image/png;base64,' + Buffer.from(new Uint8Array(3000).fill(7)).toString('base64');

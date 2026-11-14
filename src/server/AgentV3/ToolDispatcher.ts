@@ -76,6 +76,7 @@ import { aiRouter } from '../lib/aiRouter';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
 import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, writeParseGuardEnabled, parseGuardDecision } from './SyntaxCheck';
+import { htmlEditVerdict, isHtmlPage } from './editIntegrity';
 import { checkPreviewCompiles, previewDivergenceBlocksDelivery } from '../runtime/PreviewCompileCheck';
 import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
 import { lintGateVerdict, type LintGateVerdict } from './LintGate';
@@ -1339,6 +1340,7 @@ export class ToolDispatcher {
     }
     const writeParseReject = await this.parseGuardRejection(rel, existingContent, content);
     if (writeParseReject) refuse(writeParseReject);
+    await this.refuseBrokenPageEdit(rel, existingContent, content);
     await this.actuator.writeFile(this.workspaceId, rel, content);
     this.onFileWrite?.(rel, content);
     if (kind === 'modify') this.noteDroppedImports(rel, existingContent, content);
@@ -2479,6 +2481,20 @@ export class ToolDispatcher {
    * or the file was ALREADY broken (so a repair-in-progress is never blocked). Best-effort: if the parse
    * itself throws, allow the write (never block on the guard's own failure). Records a blocked-write audit.
    */
+  /**
+   * A ONE-FILE GAME IS CHECKED BEFORE THE EDIT IS KEPT (editIntegrity.ts): media byte-for-byte, inline scripts still parse,
+   * the page still whole, and every new assets/media/ reference resolves. A refusal keeps the previous version on disk.
+   * ONE method for both write doors (`write_file` via guardedWrite, and `edit_file`) — the edit door is the one a model
+   * uses for a small change, so a guard on only one of them would have guarded the rare path and missed the common one.
+   */
+  private async refuseBrokenPageEdit(rel: string, before: string, after: string): Promise<void> {
+    if (!isHtmlPage(rel)) return;
+    const verdict = await htmlEditVerdict(rel, before, after, async () => new Set(await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[])));
+    if (verdict.ok) return;
+    try { getWorkspaceMemory(this.workspaceId).recordAudit(`[BLOCKED-PAGE-EDIT] refused write to ${rel}: ${verdict.message.slice(0, 120)}`); } catch { /* audit best-effort */ }
+    refuse(verdict.message);
+  }
+
   private async parseGuardRejection(path: string, oldContent: string, newContent: string): Promise<string | null> {
     if (!writeParseGuardEnabled()) return null;
     try {
@@ -5742,6 +5758,7 @@ export class ToolDispatcher {
         // so a syntactically-broken version is never saved — the model gets the exact spot + a fix hint.
         const editParseReject = await this.parseGuardRejection(path, existing, updated);
         if (editParseReject) refuse(editParseReject);
+        await this.refuseBrokenPageEdit(path, existing, updated);
         await this.actuator.writeFile(this.workspaceId, path, updated);
         this.onFileWrite?.(path, updated);
         this.noteDroppedImports(path, existing, updated);

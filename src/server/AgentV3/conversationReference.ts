@@ -21,6 +21,8 @@
 // and the caller adds the conversation only while no finished app exists (an edit's "this app" is the app
 // on disk, which the edit path already reads). PURE.
 
+import { namesNoObject } from './buildableInput';
+
 /** A message longer than this carries its own spec, whatever pointer it also contains. */
 export const POINTER_MESSAGE_MAX_WORDS = 14;
 /** Longest slice of the conversation's last answer a sizer or planner is given. */
@@ -62,5 +64,12 @@ function wordCount(s: string): number {
 export function refersToConversation(prompt: string): boolean {
   const text = typeof prompt === 'string' ? prompt.trim() : '';
   if (!text || wordCount(text) > POINTER_MESSAGE_MAX_WORDS) return false;
+  // 🔴 AUTOPSY e41fdb21 (2026-11-14): the chat said "mujhe ek 3d realistic city game bana lar do", and the
+  // next message was the single word "banao". The ask-what-to-build gate let it through because an earlier
+  // buildable request existed — but THIS function said "banao" points at nothing, so the planner's earlier
+  // turns (a chat/offer turn is not a spec) were dropped and a Notes app was built, billed and shown as the
+  // city game. Two judges answered the same question differently. A message that names NO object ("banao",
+  // "make it", "app banao") has exactly one possible subject: the conversation. One predicate, both gates.
+  if (namesNoObject(text)) return true;
   return POINTERS.some((re) => re.test(text));
 }

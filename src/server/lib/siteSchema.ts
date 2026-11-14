@@ -9,12 +9,13 @@
 // treats invented structured data as spam, and it would be a false public claim besides.
 
 import {
-  OFFICIAL_NAME, OFFICIAL_ALT_NAMES, OFFICIAL_SITE_URL, OFFICIAL_LOGO_URL, OFFICIAL_CONTACT_EMAIL,
-  officialSameAs,
+  ANDROID_APPLICATION_ID, OFFICIAL_NAME, OFFICIAL_ALT_NAMES, OFFICIAL_SITE_URL, OFFICIAL_LOGO_URL,
+  OFFICIAL_CONTACT_EMAIL, PLAY_LISTING_URL, officialSameAs,
 } from '../../content/marketing';
 
 export const ORGANIZATION_ID = `${OFFICIAL_SITE_URL}#organization`;
 export const WEBSITE_ID = `${OFFICIAL_SITE_URL}#website`;
+export const MOBILE_APPLICATION_ID = `${OFFICIAL_SITE_URL}#android-app`;
 
 export function organizationJsonLd(): Record<string, unknown> {
   return {
@@ -49,9 +50,28 @@ export function websiteJsonLd(): Record<string, unknown> {
   };
 }
 
-/** The homepage graph: the WebSite and the Organization behind it. */
+/**
+ * Facts about the Android app are separate from the Organization profile: this
+ * avoids implying ratings, price, or features that the public listing cannot
+ * substantiate. The package and download URL share the marketing constants.
+ */
+export function mobileApplicationJsonLd(): Record<string, unknown> {
+  return {
+    '@type': 'MobileApplication',
+    '@id': MOBILE_APPLICATION_ID,
+    name: OFFICIAL_NAME,
+    operatingSystem: 'Android',
+    applicationCategory: 'ProductivityApplication',
+    downloadUrl: PLAY_LISTING_URL,
+    applicationSuite: OFFICIAL_NAME,
+    publisher: { '@id': ORGANIZATION_ID },
+    identifier: { '@type': 'PropertyValue', propertyID: 'Google Play package', value: ANDROID_APPLICATION_ID },
+  };
+}
+
+/** The homepage graph: the WebSite, Organization and published Android application. */
 export function homeJsonLd(): Record<string, unknown> {
-  return { '@context': 'https://schema.org', '@graph': [websiteJsonLd(), organizationJsonLd()] };
+  return { '@context': 'https://schema.org', '@graph': [websiteJsonLd(), organizationJsonLd(), mobileApplicationJsonLd()] };
 }
 
 /** A public sub-page: its WebPage (or AboutPage), tied to the same WebSite and Organization. */

@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { homeJsonLd, jsonLdScript, organizationJsonLd } from '../src/server/lib/siteSchema';
+import { homeJsonLd, jsonLdScript, mobileApplicationJsonLd, organizationJsonLd } from '../src/server/lib/siteSchema';
 import { renderMarketingPage, renderAboutPage } from '../src/server/lib/marketingPages';
 import {
   MARKETING_PAGES, MARKETING_PATHS, OFFICIAL_SOCIAL_PROFILES, PLAY_LISTING_URL, OFFICIAL_SITE_URL,
@@ -41,7 +41,7 @@ const FORBIDDEN = [
 describe('index.html — one identity, stated as structured data', () => {
   const html = read('index.html');
 
-  it('carries exactly the WebSite + Organization graph the server builds', () => {
+  it('carries exactly the WebSite + Organization + MobileApplication graph the server builds', () => {
     const blocks = ldBlocks(html);
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toEqual(homeJsonLd());
@@ -57,6 +57,19 @@ describe('index.html — one identity, stated as structured data', () => {
   it('sameAs lists only official profiles that exist — the Play listing, plus any the owner adds', () => {
     expect(PLAY_LISTING_URL).toBe(PUBLIC_LISTING_URL);
     expect(organizationJsonLd().sameAs).toEqual([PLAY_LISTING_URL, ...OFFICIAL_SOCIAL_PROFILES.map((p) => p.url)]);
+  });
+
+  it('describes the published Android application without ratings, prices, or invented claims', () => {
+    expect(mobileApplicationJsonLd()).toMatchObject({
+      '@type': 'MobileApplication',
+      operatingSystem: 'Android',
+      applicationCategory: 'ProductivityApplication',
+      applicationSuite: 'NavBharatAI',
+      downloadUrl: PLAY_LISTING_URL,
+      identifier: { propertyID: 'Google Play package', value: 'com.navbharat.ai' },
+    });
+    expect(mobileApplicationJsonLd()).not.toHaveProperty('aggregateRating');
+    expect(mobileApplicationJsonLd()).not.toHaveProperty('offers');
   });
 
   it('a non-JavaScript reader gets words and links, outside the boot frame', () => {

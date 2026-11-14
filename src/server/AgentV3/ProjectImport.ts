@@ -27,6 +27,7 @@
 import {
   SKIP_DIR_RE, JUNK_FILE_RE, SECRET_FILE_RE, BINARY_EXT_RE, assetMimeFor, safeImportPath, IMPORT_LIMITS,
 } from '../../lib/importRules';
+import { allowedBeforeLifting } from '../../lib/liftEmbeddedMedia';
 export {
   SKIP_DIR_RE, JUNK_FILE_RE, SECRET_FILE_RE, BINARY_EXT_RE, assetMimeFor, safeImportPath,
   importDropReason, type ImportDropReason,
@@ -229,10 +230,11 @@ export async function extractZipProject(buf: Buffer, opts?: { maxFiles?: number 
     // hostile inflate-in-one-entry payload (0 when the size is unknowable → falls through to the
     // post-decompress byte cap below).
     const declared = zipEntryDeclaredBytes(entry);
-    if (declared > IMPORT_MAX_LOCKFILE_BYTES && !LOCKFILE_RE.test(path)) { dropped.tooLarge++; continue; }
+    if (declared > IMPORT_MAX_LOCKFILE_BYTES && !LOCKFILE_RE.test(path) && !allowedBeforeLifting(path, declared)) { dropped.tooLarge++; continue; }
     const content = await entry.async('string');
     const bytes = Buffer.byteLength(content, 'utf8');
-    if (bytes > IMPORT_MAX_FILE_BYTES) {
+    // A one-file page whose bulk is embedded media is read in full and has its media lifted into assets/ at landing.
+    if (bytes > IMPORT_MAX_FILE_BYTES && !allowedBeforeLifting(path, bytes)) {
       // A big text lockfile still goes to the live sandbox so `npm install` reproduces the
       // exact dependency tree; anything else oversized is dropped with an honest count.
       if (LOCKFILE_RE.test(path) && bytes <= IMPORT_MAX_LOCKFILE_BYTES) { sandboxOnly[path] = content; continue; }

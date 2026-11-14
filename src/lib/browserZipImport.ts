@@ -25,6 +25,7 @@ import {
   importDropReason, assetMimeFor, BINARY_EXT_RE, IMPORT_LIMITS, type ImportDropReason,
 } from './importRules';
 import type { DropCounts } from './importDropReport';
+import { allowedBeforeLifting, liftEmbeddedMedia } from './liftEmbeddedMedia';
 // Type-only: erased at compile time, so naming these costs the bundle nothing and the reader still
 // loads lazily via the dynamic import below.
 import type { Entry, FileEntry } from '@zip.js/zip.js';
@@ -108,7 +109,7 @@ export function keepVerdict(
     if (state.assets >= BROWSER_MAX_ASSETS) return { keep: false, reason: 'overCap' };
     return { keep: 'asset', mime };
   }
-  if (entry.bytes > BROWSER_MAX_FILE_BYTES) return { keep: false, reason: 'tooLarge' };
+  if (entry.bytes > BROWSER_MAX_FILE_BYTES && !allowedBeforeLifting(entry.path, entry.bytes)) return { keep: false, reason: 'tooLarge' };
   if (state.bytes + entry.bytes > BROWSER_MAX_TOTAL_BYTES) return { keep: false, reason: 'overCap' };
   return { keep: 'text' };
 }
@@ -241,7 +242,11 @@ export async function readZipInBrowser(
     if (attempted > 0 && readFailures === attempted) {
       throw new Error('This file could not be read as a zip archive.');
     }
-    return { files, assets, dropped, totalEntries, keptBytes };
+    // A one-file page that carries its media inline is reduced to code here, so what is uploaded is the page's code plus
+    // real files — never megabytes of base64 text that a size cap drops and a model then reads (single-file game autopsy).
+    const lifted = liftEmbeddedMedia(files);
+    Object.assign(assets, lifted.assets);
+    return { files: lifted.files, assets, dropped, totalEntries, keptBytes };
   } catch (err) {
     throw new Error(
       err instanceof Error && /encrypt|password/i.test(err.message)

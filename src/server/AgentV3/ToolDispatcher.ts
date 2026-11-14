@@ -899,6 +899,40 @@ export class ToolDispatcher {
     } catch { /* reconciliation is best-effort — the parser's own read-back already ran */ }
   }
 
+  /**
+   * THE THIRD WRITE DOOR (closes Q-2663). `write_file` and `edit_file` refuse a page edit that drops media or breaks the page
+   * (`refuseBrokenPageEdit`); a shell command — `sed -i … index.html`, `cat > index.html` — wrote past both. So a command's HTML
+   * targets (as the shell's own syntax names them) are read BEFORE it runs, compared AFTER with the same verdict, and a regression is
+   * put back, with a note the model reads. Limit, stated: only files the command names — a script that opens the page by a path built
+   * at run time is not seen (Q-2663 stays open for that remainder).
+   */
+  private async snapshotPagesNamedBy(command: string): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    try {
+      for (const path of shellWriteTargets(command)) {
+        if (out.size >= 4 || !isHtmlPage(path)) continue;
+        try { out.set(path, await this.actuator.readFile(this.workspaceId, path)); } catch { /* a page that does not exist yet has nothing to protect */ }
+      }
+    } catch { /* a guard that cannot read the command never blocks it */ }
+    return out;
+  }
+
+  private async restoreBrokenPages(before: Map<string, string>): Promise<string> {
+    let note = '';
+    for (const [path, was] of before) {
+      try {
+        const now = await this.actuator.readFile(this.workspaceId, path);
+        if (now === was) continue;
+        const verdict = await htmlEditVerdict(path, was, now, async () => new Set(await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[])));
+        if (verdict.ok) continue;
+        await this.actuator.writeFile(this.workspaceId, path, was);
+        try { getWorkspaceMemory(this.workspaceId).recordAudit(`[BLOCKED-PAGE-EDIT] shell command broke ${path}; restored: ${verdict.message.slice(0, 120)}`); } catch { /* audit best-effort */ }
+        note += `\n[BLOCKED-PAGE-EDIT] ${path} was put back as it was before this command. ${verdict.message}`;
+      } catch { /* unreadable now: nothing to compare */ }
+    }
+    return note;
+  }
+
   private async recordShellWrites(command: string, skip: string | null): Promise<void> {
     let targets: string[];
     try { targets = shellReadBackTargets(command, skip); } catch { return; }
@@ -6031,6 +6065,7 @@ export class ToolDispatcher {
           : false;
         // TD-12 — pin, quote, detach, vault .env and Postgres live in runShellLikeBash (also used by
         // run_migrations, TD-15). Every retry below runs `prepared`, the same string as this first run.
+        const pageSnaps = await this.snapshotPagesNamedBy(command);
         const shell = await this.runShellLikeBash(command, agent, { record: false });
         const effectiveCommand = shell.effectiveCommand;
         const prepared = shell.prepared;
@@ -6058,6 +6093,8 @@ export class ToolDispatcher {
         // saved project, the preview copy and any publish got the old ones (SAVED_SOURCE_DIVERGES,
         // PREVIEW_SNAPSHOT_STALE). Read back what the shell's own syntax says it wrote — whatever the exit
         // code, because a failed command may still have changed a file — and record it through the one door.
+        const pageNote = await this.restoreBrokenPages(pageSnaps); // a shell rewrite of a page gets the same verdict as write_file
+        if (pageNote) stdout = `${stdout ?? ''}${pageNote}`;
         await this.recordShellWrites(effectiveCommand, manifestRewrittenBy(effectiveCommand));
         if (reconcileMarked) await this.reconcileShellWrites(effectiveCommand);
         // PRISMA RELATION SELF-HEAL (ShopKhata autopsy 2026-07-17): an LLM-written schema routinely

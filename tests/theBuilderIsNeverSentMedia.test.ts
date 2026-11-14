@@ -184,3 +184,41 @@ describe('an AI edit to a game page is checked before it is kept', () => {
     } finally { delete process.env.AGENTV3_EDIT_INTEGRITY; }
   });
 });
+
+describe('a SHELL rewrite of a page gets the same verdict as write_file (closes Q-2663)', () => {
+  let act: FakeActuator;
+  let d: ToolDispatcher;
+  // A fake shell: `breakpage` rewrites index.html through the fake actuator the way `sed -i` / `cat >` would.
+  beforeEach(() => {
+    act = new FakeActuator();
+    act.files.set('index.html', GAME);
+    const stream = new AgentEventStream();
+    clearPreviewGaveUp('ws-1');
+    d = new ToolDispatcher(act, 'ws-1', new WorkspaceState(stream), stream);
+  });
+  const shell = (command: string, effect: (files: Map<string, string>) => void) => {
+    // The dispatcher also runs its own bookkeeping commands (a `touch` marker, a `find`); only the model's command rewrites the page.
+    (act as unknown as { runCommand: (w: string, c: string) => Promise<unknown> }).runCommand = async (_w: string, c: string) => { if (c.includes(command.slice(0, 20))) effect(act.files); return { exitCode: 0, stdout: 'ok', stderr: '' }; };
+    return d.dispatch({ id: 'b', name: 'bash', input: { command } }, 'architect');
+  };
+
+  it('a sed that DROPS the media is put back', async () => {
+    const res = await shell("sed -i 's/window.__introB64=\"[^\"]*\"/window.__introB64=\"\"/' index.html", (f) => f.set('index.html', GAME.replace(/window\.__introB64="[A-Za-z0-9+/=]+"/, 'window.__introB64=""')));
+    expect(res.content).toMatch(/BLOCKED-PAGE-EDIT/);
+    expect(act.files.get('index.html')).toBe(GAME);
+  });
+  it('a redirect that breaks the inline script is put back', async () => {
+    const res = await shell("cat > index.html <<'EOF'\nbroken\nEOF", (f) => f.set('index.html', GAME.replace('function addShelfItem(name, price) {', 'function addShelfItem(name, price) { if (')));
+    expect(res.content).toMatch(/BLOCKED-PAGE-EDIT/);
+    expect(act.files.get('index.html')).toBe(GAME);
+  });
+  it('a harmless sed on the page is KEPT', async () => {
+    const res = await shell("sed -i 's/Atta/Dal/' index.html", (f) => f.set('index.html', GAME.replace('"Atta"', '"Dal"')));
+    expect(res.content).not.toMatch(/BLOCKED-PAGE-EDIT/);
+    expect(act.files.get('index.html')).toContain('"Dal"');
+  });
+  it('a command that names no page is not slowed down or judged', async () => {
+    const res = await shell('echo hi > notes.txt', (f) => f.set('notes.txt', 'hi'));
+    expect(res.content).not.toMatch(/BLOCKED-PAGE-EDIT/);
+  });
+});

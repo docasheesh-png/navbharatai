@@ -67,16 +67,30 @@ export async function landPageAssets(
   await saveWorkspaceAssets(workspaceId, assets, ownerUid).catch(() => {});
 }
 
+/** What the sandbox needs when a page was lifted AFTER its files were already there (a git clone). */
+export interface CloneSink extends BinaryFileSink { writeFile(workspaceId: string, filePath: string, content: string): Promise<void> }
+
 /**
- * The zip / GitHub landing's step: lift media out of the pages ONLY when we write the files ourselves (a git clone is already in
- * the sandbox exactly as committed). One call so the landing function carries no new branches (the chat handler has a budget).
+ * The zip / GitHub landing's step: lift media out of the pages. A zip is written by US (`writeToSandbox`), so the lifted pages simply
+ * land. A git clone is ALREADY in the sandbox exactly as committed, so the lifted page and its media files are written over it
+ * through `landClone` (closes Q-2665: a cloned one-page game used to keep its 5 MB of inline media, which the 900 KB text store
+ * then dropped). One call, no new branches in the landing function (the chat handler has a branch budget).
  */
 export function liftForLanding(
   files: Record<string, string>,
   assets: Record<string, string> | undefined,
   writeToSandbox: boolean,
-): { files: Record<string, string>; assets: Record<string, string>; noteLine: string } {
-  if (!writeToSandbox) return { files, assets: assets ?? {}, noteLine: '' };
+): { files: Record<string, string>; assets: Record<string, string>; noteLine: string; landClone: (sink: CloneSink, workspaceId: string) => Promise<void> } {
   const prepared = prepareImportBody(files);
-  return { files: prepared.text, assets: { ...(assets ?? {}), ...prepared.assets }, noteLine: prepared.summary ? `\n🎞️ ${prepared.summary}` : '' };
+  const merged = { ...(assets ?? {}), ...prepared.assets };
+  const noteLine = prepared.summary ? `\n🎞️ ${prepared.summary}` : '';
+  const lifted = Object.keys(prepared.assets).length > 0;
+  const landClone = async (sink: CloneSink, workspaceId: string): Promise<void> => {
+    if (writeToSandbox || !lifted) return; // we wrote these files ourselves, or nothing was lifted
+    for (const [path, text] of Object.entries(prepared.text)) {
+      if (text !== files[path]) { try { await sink.writeFile(workspaceId, path, text); } catch { /* the page stays as cloned; reported by the import's own summary */ } }
+    }
+    try { await materializeAssets(sink, workspaceId, prepared.assets); } catch { /* an asset failing never blocks the import */ }
+  };
+  return { files: prepared.text, assets: merged, noteLine, landClone };
 }

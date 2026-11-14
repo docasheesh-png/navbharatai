@@ -1,4 +1,5 @@
 import type { SurplusReceiptDecision } from '../AI/SurplusRegistry/receiptPolicy';
+import { elideTurnParams } from './elideTurnMedia';
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import type { VerifiedFreeProof } from '../AI/LiveRegistry/proof';
 import { assertAiAvailable } from '../lib/aiMaintenance';
@@ -447,6 +448,7 @@ export class ClaudeClient implements TurnRunner {
 
   /** Run one assistant turn with optional native tools. */
   async runTurn(params: RunTurnParams): Promise<TurnResult> {
+    params = elideTurnParams(params); // embedded media never reaches a model (elideTurnMedia.ts)
     assertLegacyInferenceAllowed('builder-claude');
     await assertAiAvailable();
     // UNBREAKABLE WEAK-MODULE GUARD (admin absolute rule, 2026-07-13). This is the ONE chokepoint where

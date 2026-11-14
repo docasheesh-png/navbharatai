@@ -1,4 +1,5 @@
 import { assertLegacyInferenceAllowed } from '../../AI/inferencePolicy';
+import { elideTurnParams } from '../elideTurnMedia';
 import { assertAiAvailable, aiMaintenanceStore } from '../../lib/aiMaintenance';
 // AgentV3 — OpenAI-compatible tool-use TurnRunner (multi-provider cost routing, phase 2).
 //
@@ -365,6 +366,7 @@ export class OpenAiToolRunner implements TurnRunner {
   ) {}
 
   async runTurn(params: RunTurnParams): Promise<TurnResult> {
+    params = elideTurnParams(params); // embedded media never reaches a model (elideTurnMedia.ts)
     assertLegacyInferenceAllowed('builder-OpenAiToolRunner');
     await assertAiAvailable();
     try { return await this.runAvailableTurn(params); }

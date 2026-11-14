@@ -79,15 +79,20 @@ export function AttachMenu({
       const menu = menuRef.current;
       if (!trigger || !menu) return;
       const vv = window.visualViewport;
-      setPosition(attachMenuPosition(trigger.getBoundingClientRect(), {
+      const anchor = trigger.getBoundingClientRect();
+      const composer = trigger.closest('.nb-composer-box')?.getBoundingClientRect();
+      setPosition(attachMenuPosition({ top: composer?.top ?? anchor.top,
+        bottom: composer?.bottom ?? anchor.bottom, left: anchor.left }, {
         left: vv?.offsetLeft ?? 0, top: vv?.offsetTop ?? 0,
         width: vv?.width ?? window.innerWidth, height: vv?.height ?? window.innerHeight,
-      }, menu.scrollHeight));
+      }, menu.scrollHeight + menu.offsetHeight - menu.clientHeight));
     };
     place();
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(place);
     if (menuRef.current) observer?.observe(menuRef.current);
     if (triggerRef.current) observer?.observe(triggerRef.current);
+    const composer = triggerRef.current?.closest('.nb-composer-box');
+    if (composer) observer?.observe(composer);
     window.addEventListener('resize', place);
     window.addEventListener('scroll', place, true);
     window.visualViewport?.addEventListener('resize', place);
@@ -227,4 +232,5 @@ export function AttachMenu({
     </div>
   );
 }
+
 

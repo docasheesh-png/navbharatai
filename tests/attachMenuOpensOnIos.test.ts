@@ -51,7 +51,9 @@ describe('Pro native file selection regression', () => {
   it('does not filter Pro HTML or unknown file extensions out of the operating system picker', () => {
     const pro = readFileSync(join(__dirname, '../src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
     expect(pro).toContain('fileAccept=""');
-    expect(pro).toContain('stageAttachmentFiles(files, Array.from(list))');
+    // Every picked file is staged — the only ones that are not are whole HTML pages of app size, which are imported as projects
+    // instead (tests/anAttachedGamePageIsImportedNotReviewed.test.ts); a small .html is still staged like any other file.
+    expect(pro).toContain('stageAttachmentFiles(files, picked.filter((f) => !pages.includes(f)))');
     expect(pro).toContain('reader.onerror = () => reject(');
     expect(pro).toContain('reader.onabort = () => reject(');
   });

@@ -1,6 +1,6 @@
 # BR1979 — "ake app banane jisse free mein I video Bani": a missing tsconfig.node.json sent a finished app to the full builder
 
-Scope: BR1979 only, inside the frozen audit boundary 1951..2105. Branched from origin/main `08a37a81c3fc63ad5bdc07ee349b30f4da2a077e` (#4231, after BR1978 #4230). No PR or autopsy for BR1979 or later existed (gh title search `BR1979` empty; no `docs/build-report-autopsy-BR19{79..}`; `get_failed_build_autopsy` is not used for a succeeded report). Read only via `get_build_report` — no remote autopsy write, no replay, no deploy, no provider call. `src/server/AI/RouterOne/*` was not touched.
+Scope: BR1979 only, inside the frozen audit boundary 1951..2105. Branched from origin/main `08a37a81c3fc63ad5bdc07ee349b30f4da2a077e` (#4231, after BR1978 #4230). Before exact-head CI, origin/main `dafaf4061e1b36563f80dd66ab73559d60abfddd` (#4233) was brought in with an ordinary merge (no rebase, no force). No PR or autopsy for BR1979 or later existed (gh title search `BR1979` empty; no `docs/build-report-autopsy-BR19{79..}`; `get_failed_build_autopsy` is not used for a succeeded report). Read only via `get_build_report` — no remote autopsy write, no replay, no deploy, no provider call. `src/server/AI/RouterOne/*` was not touched.
 
 ## What the user asked
 

@@ -46,6 +46,7 @@ import { classNamesUsedBy } from './CssConsistency';
 import { BUILD_STOPPED_MESSAGE, BuildStoppedError, isBuildStoppedError, throwIfStopped } from './stopSignal';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
+import { sanitizeTsconfigReferences } from './FrameworkFoundation';
 import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport, dedupeStylesheetImports } from './ProjectIntegrityChecks';
 import { frameworkShipsDesignKit } from './designKitReach';
@@ -2724,6 +2725,23 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             deps.log?.('🔧 Re-attached the entry script to index.html so the app actually boots.');
           }
         } catch { /* best-effort — a failure just leaves the HTML as generated */ }
+      }
+      // DETERMINISTIC TSCONFIG REFERENCES SANITIZE before write/verify (BR1979 f6b4a1c4): a generated
+      // tsconfig.json can list `"references": [{ "path": "./tsconfig.node.json" }]` while that sibling
+      // was never written. tsc then fails TS6053 and the lane hands off to the full builder. Strip only
+      // that dangling node reference when the tsconfig already has include/files (so a Vite 5
+      // solution-style config is left alone) and the sibling is not in this batch or the scaffold.
+      // Kill: AGENTV3_TSCONFIG_SANITIZE=off (same switch as the extends sanitizer).
+      if (process.env.AGENTV3_TSCONFIG_SANITIZE !== 'off') {
+        try {
+          const before = Object.fromEntries(written.map((f) => [f.path, f.content]));
+          const refs = sanitizeTsconfigReferences(before, deps.scaffoldPaths ?? []);
+          if (refs.fixes.length > 0) {
+            for (const f of written) { const nc = refs.patch[f.path]; if (typeof nc === 'string') f.content = nc; }
+            const n = refs.fixes.reduce((s, f) => s + f.removed.length, 0);
+            deps.log?.(`🔧 Removed ${n} unresolvable tsconfig project reference(s) so the compiler can run.`);
+          }
+        } catch { /* best-effort — a failure leaves the tsconfig as generated for the honest verify */ }
       }
       // DETERMINISTIC ORPHAN-STYLESHEET GUARD before write/preview (NotesNest autopsy 2026-07-16): a
       // generated global stylesheet that NOTHING imports ships as a raw unstyled app — the compiler,

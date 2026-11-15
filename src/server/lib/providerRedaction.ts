@@ -44,13 +44,19 @@ const PROVIDER_HOST_RE = new RegExp(
     String.raw`openrouter\.ai`,
     String.raw`deepinfra\.com`,
     String.raw`together\.(?:ai|xyz)`,
+    String.raw`groq\.com`,
+    String.raw`qubax\.ai`,
+    String.raw`mitrify\.com`,
+    String.raw`sarvam\.ai`,
+    String.raw`cerebras\.ai`,
+    String.raw`fireworks\.ai`,
   ].join('|') + String.raw`)(?::\d+)?\b`,
   'gi',
 );
 
 // Model ids first (so `glm-5.2` doesn't leave a stray `-5.2`), then vendor names, then the Claude tier words.
-const MODEL_ID_RE = /\b(?:glm|kimi|claude|gemini|grok|gpt|deepseek|mistral|llama|qwen|nova|titan|nvidia|nemotron)[-/][\w.:-]+/gi;
-const AI_VENDOR_RE = /\b(?:surplus\s+intelligence|anthropic|claude|openai|chatgpt|gpt-?\d[\w.-]*|google\s+gemini|gemini|vertex(?:\s*ai)?|xai|grok|moonshot|kimi|z\.?ai|chatglm|glm|deepseek|cohere|mistral|perplexity|bedrock|nvidia|nemotron|openrouter|deepinfra)\b/gi;
+const MODEL_ID_RE = /\b(?:glm|kimi|claude|gemini|grok|groq|gpt|deepseek|mistral|llama|qwen|nova|titan|nvidia|nemotron|mitrify|qubax|sarvam)[-/][\w.:-]+/gi;
+const AI_VENDOR_RE = /\b(?:surplus\s+intelligence|cheaper\s*inference|cheaperinference|anthropic|claude|openai|chatgpt|gpt-?\d[\w.-]*|google\s+gemini|gemini|vertex(?:\s*ai)?|xai|grok|groq|moonshot|kimi|z\.?ai|zhipu|chatglm|glm|deepseek|qwen|cohere|mistral|perplexity|bedrock|nvidia|nemotron|openrouter|deepinfra|sarvam|qubax|mitrify|cerebras|llama)\b/gi;
 const MODEL_TIER_RE = /\b(?:sonnet|opus|haiku)\b/gi; // Claude tier words identify the vendor
 
 /**
@@ -92,5 +98,5 @@ export function hasProviderLeak(s: string): boolean {
   // would have cleaned, which is the worst of both.
   if (PROVIDER_HOST_RE.test(String(s ?? ''))) { PROVIDER_HOST_RE.lastIndex = 0; return true; }
   PROVIDER_HOST_RE.lastIndex = 0;
-  return /\bSURPLUS\b/.test(String(s ?? '')) || /\b(?:surplus\s+intelligence|glm|kimi|claude|anthropic|sonnet|opus|haiku|gemini|vertex|grok|xai|openai|gpt|deepseek|moonshot|z\.?ai|bedrock|cohere|mistral|nvidia|nemotron|openrouter|deepinfra)\b|(?:glm|kimi|claude|gemini|grok|gpt|nvidia|nemotron)[-/][\w.:-]+/i.test(String(s ?? ''));
+  return /\bSURPLUS\b/.test(String(s ?? '')) || /\b(?:surplus\s+intelligence|cheaper\s*inference|cheaperinference|glm|kimi|claude|anthropic|sonnet|opus|haiku|gemini|vertex|grok|groq|xai|openai|gpt|deepseek|qwen|zhipu|moonshot|z\.?ai|bedrock|cohere|mistral|nvidia|nemotron|openrouter|deepinfra|sarvam|qubax|mitrify|cerebras|llama)\b|(?:glm|kimi|claude|gemini|grok|groq|gpt|nvidia|nemotron|mitrify|qubax|sarvam)[-/][\w.:-]+/i.test(String(s ?? ''));
 }

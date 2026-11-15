@@ -13,13 +13,13 @@ const LIMIT = 4_000_000;
 /** No redirects, credentials, scripts or magnitude-based unit guesses. */
 async function page(url: string, transport: typeof fetch): Promise<string> {
   const response = await transport(url, { redirect: 'error', headers: { Accept: 'text/html' }, signal: AbortSignal.timeout(10_000) });
-  if (!response.ok || !/text\/html/i.test(response.headers.get('content-type') ?? '') || !response.body) throw new RouterOneAccountingUnavailableError();
+  if (!response.ok || !/text\/html/i.test(response.headers.get('content-type') ?? '') || !response.body) throw new RouterOneAccountingUnavailableError('price_page');
   const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
   try {
     while (true) {
       const part = await reader.read(); if (part.done) break;
       size += part.value.byteLength;
-      if (size > LIMIT) throw new RouterOneAccountingUnavailableError();
+      if (size > LIMIT) throw new RouterOneAccountingUnavailableError('price_page_size');
       chunks.push(part.value);
     }
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
@@ -47,22 +47,22 @@ export class RouterOnePublicPriceSource {
     this.indexJob = (async () => {
       const html = await page(`${SOURCE}/models`, this.transport);
       const links = [...new Set([...html.matchAll(/\bhref\s*=\s*(["'])(\/models\/[a-z0-9-]+)\1/gi)].map(m => m[2]))];
-      if (!links.length || links.length > 500) throw new RouterOneAccountingUnavailableError();
+      if (!links.length || links.length > 500) throw new RouterOneAccountingUnavailableError('price_index');
       this.index = { at: this.now(), links }; return links;
     })();
     try { return await this.indexJob; } finally { this.indexJob = null; }
   }
   private async load(model: string): Promise<PublicPriceSnapshot> {
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,199}$/.test(model) || model === 'auto') throw new RouterOneAccountingUnavailableError();
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,199}$/.test(model) || model === 'auto') throw new RouterOneAccountingUnavailableError('price_model');
     const links = await this.links();
     const slugHint = model.split('/').at(-1)!.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const path = `/models/${slugHint}`;
-    if (!links.includes(path)) throw new RouterOneAccountingUnavailableError();
+    if (!links.includes(path)) throw new RouterOneAccountingUnavailableError('price_model_unlisted');
     const source = `${SOURCE}${path}`;
     const html = await page(source, this.transport);
     const fetchedAt = this.now();
     const parsed = parsePublicTariffHtml(html, model, source, fetchedAt);
-    if (parsed.kind !== 'parsed-public-tariff') throw new RouterOneAccountingUnavailableError();
+    if (parsed.kind !== 'parsed-public-tariff') throw new RouterOneAccountingUnavailableError('price_parse');
     const snapshot: PublicPriceSnapshot = Object.freeze({ ...parsed.snapshot,
       bands: Object.freeze(parsed.snapshot.bands.map(b => Object.freeze({ ...b }))),
       sourceSha256: createHash('sha256').update(html).digest('hex'), parserVersion: 'router-one-product-jsonld-v1' });

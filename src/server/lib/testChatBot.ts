@@ -21,7 +21,10 @@ import { exactModelId, zero } from '../AI/LiveRegistry/eligibility';
 import { catalogJson, OPENROUTER_MODELS_URL } from '../AI/LiveRegistry/sync';
 import { FreeRoutingError } from '../AI/LiveRegistry/dispatcher';
 import { realRateFor } from '../AgentV3/providerRates';
-import { ROUTER_ONE_DEFAULT_MODEL } from '../AI/RouterOne/routerOne';
+import { ROUTER_ONE_DEFAULT_BASE_URL, ROUTER_ONE_DEFAULT_MODEL, routerOneApiKey, routerOneBaseUrl, routerOneModels } from '../AI/RouterOne/routerOne';
+import { ROUTER_ONE_AUTO_MODEL } from '../AI/RouterOne/routerOneCatalog';
+import { routerOnePublicPrices } from '../AI/RouterOne/publicPriceSource';
+import type { CatalogueRateBand } from '../AI/RouterOne/catalogueMath';
 import { buildTestChatDiagnostic } from './testChatBotDiagnostics';
 import { OfficialTestChatError, runOfficialAnthropicTest, runOfficialOpenAiCompatTest } from './testChatBotOfficial';
 import { testChatRequestId, testChatUid } from './testChatPayload';
@@ -114,6 +117,27 @@ function rungOf(id: ProviderId): RungConfig | undefined {
   return chainConfig()?.rungs?.find(r => r.id === id);
 }
 function present(value: string): boolean { return !!value && !/[\s,]/.test(value); }
+
+// Router One (admin 2026-11-15: "jaise mai other api provider test karta hu ... usi list me, router one bhi test ho
+// jaye"). It was listed but never called because this page had no per-request spending ceiling for it. The ceiling now
+// comes from Router One's own POSTED public tariff on router.one — the same source the builder's catalogue ranks on — so
+// nothing is invented: no posted price for the model means no call.
+export const ROUTER_ONE_TEST_CHAT_URL = `${ROUTER_ONE_DEFAULT_BASE_URL}/chat/completions`;
+export const ROUTER_ONE_PRICE_UNAVAILABLE = 'Router One’s posted price for this model could not be read from router.one, so this page has no spending ceiling for it and did not call it. Choose a model listed on router.one/models, or try again in a few minutes.';
+function routerOneOfficialEndpoint(): boolean {
+  return routerOneBaseUrl().replace(/\/+$/, '') === ROUTER_ONE_DEFAULT_BASE_URL;
+}
+/** The first priced model on the Router One path. Router One's own "auto" router has no posted price, so it is skipped. */
+function routerOneTestModel(): string {
+  return routerOneModels().find(model => model !== ROUTER_ONE_AUTO_MODEL) ?? ROUTER_ONE_DEFAULT_MODEL;
+}
+/** Highest posted band, so a long conversation that lands in a pricier band is still inside the reserve. */
+export function routerOneTariffCeilingNanoUsd(messages: TestChatAction['messages'], bands: readonly CatalogueRateBand[]): number {
+  const priceIn = Math.max(0, ...bands.map(band => Number(band.inputUsdPerMillion)));
+  const priceOut = Math.max(0, ...bands.map(band => Number(band.outputUsdPerMillion)));
+  if (!bands.length || !Number.isFinite(priceIn) || !Number.isFinite(priceOut) || priceIn + priceOut <= 0) return 0;
+  return quoteTokens(messages, priceIn, priceOut);
+}
 function requestedModel(action: TestChatAction): string | null {
   const model = action.model?.trim() ?? '';
   return model && model.length <= 200 && !/[\s,]/.test(model) ? model : null;
@@ -352,12 +376,11 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
         : MISSING_KEY };
   }
   if (meta.kind === 'router-one') {
-    const configured = !!firstPresent(process.env, ['ROUTER_ONE_API_KEY']);
-    const listed = String(process.env.ROUTER_ONE_MODEL ?? '').split(',').map(s => s.trim()).filter(Boolean);
-    return { ...base, configured, enabled: false, model: listed[0] || ROUTER_ONE_DEFAULT_MODEL, billed: true, approvalRequired: false,
-      unavailableReason: configured
-        ? 'Router One has no verified per-request spending ceiling on this test page, so it will not be called (no invented cap).'
-        : MISSING_KEY };
+    const configured = present(routerOneApiKey());
+    const enabled = configured && routerOneOfficialEndpoint();
+    return { ...base, configured, enabled, model: routerOneTestModel(), billed: true, approvalRequired: false,
+      note: 'At send time this page reads Router One’s posted public price for the selected model from router.one (the same tariff the builder ranks on), reserves the highest posted band for this page’s 1,024-token bound against the shared paid budget, then makes one call with no retry. If no posted price can be read, it does not call. A typed model is priced the same way; Router One’s own "auto" router has no posted price and is not called.',
+      ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY : 'This test page only calls the official Router One endpoint.' }) };
   }
   if (meta.kind === 'kimi') {
     const configured = !!firstPresent(process.env, ['KIMI_API_KEY']);
@@ -469,7 +492,7 @@ export function testChatStatus(): TestChatStatus {
 
 function needsSharedPaidConfig(id: TestChatProviderId): boolean {
   const meta = META[id];
-  if (meta.kind === 'qubax' || meta.kind === 'mitrify' || meta.kind === 'kimi' || meta.kind === 'grok' || meta.kind === 'anthropic' || meta.kind === 'gemini-flash') return true;
+  if (meta.kind === 'qubax' || meta.kind === 'mitrify' || meta.kind === 'kimi' || meta.kind === 'grok' || meta.kind === 'anthropic' || meta.kind === 'gemini-flash' || meta.kind === 'router-one') return true;
   return !!(meta.rungId && isPaidRung(meta.rungId));
 }
 
@@ -490,6 +513,7 @@ function secretsFor(id: TestChatProviderId): string[] {
   push(firstPresent(process.env, ['KIMI_API_KEY']));
   push(firstPresent(process.env, ['XAI_API_KEY', 'GROK_API_KEY']));
   push(firstPresent(process.env, ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY']));
+  push(routerOneApiKey());
   return found;
 }
 
@@ -673,7 +697,25 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       });
       return finish(action, content, reported, startedAt, usage);
     }
-    if (meta.kind === 'surplus' || meta.kind === 'router-one') throw new TestChatUnavailable('disabled');
+    if (meta.kind === 'surplus') throw new TestChatUnavailable('disabled');
+
+    if (meta.kind === 'router-one') {
+      const model = requestedModel(action) || status.model || ROUTER_ONE_DEFAULT_MODEL;
+      dispatchedModel = model;
+      let ceiling = 0;
+      try { ceiling = routerOneTariffCeilingNanoUsd(action.messages, (await routerOnePublicPrices.snapshot(model)).bands); }
+      catch { ceiling = 0; }
+      if (ceiling <= 0) {
+        return fail('budget', 409, { model, latencyMs: Math.max(0, Date.now() - startedAt),
+          providerCode: 'ROUTER_ONE_PRICE_UNAVAILABLE', providerMessage: ROUTER_ONE_PRICE_UNAVAILABLE, extraSecrets });
+      }
+      const receipt = await reserveShared(db, requestId, uid, ceiling);
+      if (!receipt) throw new TestChatUnavailable('budget', 409);
+      const result = await releaseIfUnused(receipt, () => runOfficialOpenAiCompatTest({
+        url: ROUTER_ONE_TEST_CHAT_URL, apiKey: routerOneApiKey(), model, messages: action.messages, signal: bounded,
+      }));
+      return finish(action, result.content, result.model || model, startedAt, result.usage);
+    }
 
     if (meta.kind === 'openrouter') {
       const listed = chainConfig()?.openRouterModels ?? [];

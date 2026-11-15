@@ -82,7 +82,7 @@ export function objectFileSource(spec: Record<string, unknown>): string {
     '  return createObject(THREE, SPEC);',
     '}',
     '',
-    '/** Make it move as its spec says (rails, wander, drive, orbit or static). Pass the world heightAt so it stands on the ground; call .update(dt) each frame. */',
+    '/** Make it move as its spec says (rails, wander, drive, orbit or static). Pass the world heightAt so it stands on the ground (heightOffset: 0 if you already set its y to the ground height); call .update(dt) each frame. */',
     'export function behave' + pascal(id) + '(obj: ForgeObject, options?: BehaviourOptions) {',
     '  return behave(obj, SPEC.behaviour, options);',
     '}',

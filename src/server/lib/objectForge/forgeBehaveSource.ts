@@ -16,7 +16,11 @@ import type { ForgeBehaviour, ForgeObject } from './forge';
 export interface BehaviourOptions {
   /** Ground height at (x, z) (a world's heightAt): the object stands on it. Without it the ground is flat at y = 0. */
   heightAt?: (x: number, z: number) => number;
-  /** Offset above ground (or below water). Default: the group's initial y, preserving a boat's draft. Applies only to moving behaviours. */
+  /**
+   * How far above the ground (or below the water) the object sits. Default: the group's own y when behave() is called, so a boat set down at
+   * y = -0.3 keeps its draft. NOTE: if you placed the object ON the ground by setting its y to the ground height, pass heightOffset: 0 (or the
+   * default would add that height a second time). Applies only to moving behaviours.
+   */
   heightOffset?: number;
   /** Where it starts. Default: where its group is now. */
   start?: { x: number; z: number; heading?: number };

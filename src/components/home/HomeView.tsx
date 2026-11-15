@@ -88,6 +88,7 @@ const LINE_SMALL = 'text-[9px] sm:text-[11px]';
 /** The server-rendered public pages (src/content/marketing.ts, src/server/lib/legalPaths.ts). */
 const PUBLIC_PAGE_LINKS: ReadonlyArray<readonly [string, string]> = [
   ['/about', 'About'],
+  ['/how-it-works', 'How it works'],
   ['/pricing', 'Pricing'],
   ['/ai-app-builder', 'AI App Builder'],
   ['/apps', 'App ideas'],

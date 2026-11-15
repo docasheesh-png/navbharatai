@@ -235,6 +235,23 @@ export interface AthreeStyle {
 }
 
 export const NEUTRAL_STYLE: AthreeStyle = { relief: 1, seaShift: 0, aridity: 0, warmth: 0, rivers: 1 };
+/** The range each style number may take (the terrain is tested inside it; anything else is held to the nearest edge). */
+export const STYLE_RANGE: Record<keyof AthreeStyle, [number, number]> = { relief: [0.2, 2], seaShift: [-0.6, 0.6], aridity: [-0.4, 0.5], warmth: [-0.5, 0.4], rivers: [0, 3] };
+export const MIN_WORLD_SIZE = 1000;
+export const MAX_WORLD_SIZE = 1000000;
+
+/**
+ * How much taller (or lower) the ground is on a map stretched by k = reference / size. Lengths stretch by 1 / k and heights by this, so the
+ * SLOPE changes by k * heightStretch(k): at most 1.6 times steeper on the smallest map, and gentler on a bigger one. 1 at k = 1, exactly.
+ */
+export function heightStretch(k: number): number {
+  return k === 1 ? 1 : Math.pow(k, k > 1 ? -0.9 : -0.75);
+}
+
+/** A finite number held inside [lo, hi]; anything else (undefined, NaN, a string, Infinity) is the fallback. */
+function clampTo(v: unknown, lo: number, hi: number, fallback: number): number {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
+}
 
 /** The size the terrain functions are written for (a loop of 100 km, an island 8 km across). Any other size is this world, stretched. */
 export const REFERENCE_SIZE: Record<AthreeWorldMode, number> = { loop: 100000, bounded: 8000 };
@@ -307,17 +324,26 @@ function kindSalt(kind: SpawnKind): number {
 export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld {
   const profile: AthreeProfile = options.profile ?? 'open-world';
   const defaults = PROFILE_DEFAULTS[profile];
-  const mode: AthreeWorldMode = options.mode ?? defaults.mode;
-  const sizeMeters = options.sizeMeters ?? defaults.sizeMeters;
+  const mode: AthreeWorldMode = options.mode === 'loop' || options.mode === 'bounded' ? options.mode : defaults.mode;
+  // NOTHING A GAME PASSES CAN BREAK THE WORLD: a size is a finite number of metres from 1 km to 1000 km, and every style number is held inside
+  // the range the terrain was made and tested for (a relief of 50 would be a wall, a NaN would be a hole). At the defaults these are no-ops.
+  const sizeMeters = clampTo(options.sizeMeters, MIN_WORLD_SIZE, MAX_WORLD_SIZE, defaults.sizeMeters);
   const seed = (options.seed ?? 1) | 0;
   // ANY SIZE (admin 2026-11-15, "1 km se 1000 km"): the terrain, the rivers and the dunes are written for ONE size (REFERENCE_SIZE) and the
   // world is that world stretched: a place at (x, z) metres is the reference world at (x * k, z * k). Heights stretch less than lengths
-  // (a map 10 times wider is 5.6 times taller, not 10; a map 100 times narrower is 31 times lower, which makes its slopes 3 times steeper, not 30), and water widths stretch with the plan, so a river
+  // (a map 10 times wider is 5.6 times taller, not 10; a map 100 times narrower is 63 times lower, which makes its slopes only 1.6 times steeper, so a small map is walkable instead of a wall), and water widths stretch with the plan, so a river
   // on a continent is wide. At the reference size k = 1 and vs = 1, and every number below is exactly what it always was.
-  const style: AthreeStyle = { ...NEUTRAL_STYLE, ...(options.style ?? {}) };
+  const given: Partial<AthreeStyle> = options.style ?? {};
+  const style: AthreeStyle = {
+    relief: clampTo(given.relief, STYLE_RANGE.relief[0], STYLE_RANGE.relief[1], NEUTRAL_STYLE.relief),
+    seaShift: clampTo(given.seaShift, STYLE_RANGE.seaShift[0], STYLE_RANGE.seaShift[1], NEUTRAL_STYLE.seaShift),
+    aridity: clampTo(given.aridity, STYLE_RANGE.aridity[0], STYLE_RANGE.aridity[1], NEUTRAL_STYLE.aridity),
+    warmth: clampTo(given.warmth, STYLE_RANGE.warmth[0], STYLE_RANGE.warmth[1], NEUTRAL_STYLE.warmth),
+    rivers: clampTo(given.rivers, STYLE_RANGE.rivers[0], STYLE_RANGE.rivers[1], NEUTRAL_STYLE.rivers),
+  };
   const refSize = REFERENCE_SIZE[mode];
   const k = refSize / sizeMeters;
-  const vs = k === 1 ? 1 : Math.pow(k, -0.75);
+  const vs = heightStretch(k);
   const stretched = k !== 1;
   const period = mode === 'loop' ? refSize : 0;
   const radius = refSize / 2;

@@ -836,13 +836,6 @@ VM expense stays separate internally and cannot stack into customer markup/floor
 Zero bills stay zero; independent hosting/database subscriptions are excluded.
 See docs/billing/router-one-reconciliation.md for limitations and exact formula.
 
-## Owner revision — 2026-11-15: Pro Chain V2, per-agent (t350u) — FLAGGED, test profile only
+## Pro Chain V2 safety containment
 
-For the test profile `z@gmail.com` only (flag `PRO_CHAIN_V2`; go public with `PRO_CHAIN_V2_PUBLIC=on`),
-the Weak band uses **Surplus → Router One → Qubax → Mitrify ONLY** — no GLM/KIMI/ladder tail — and
-each agent of a build falls back on its own (per-agent Surplus drop, per-agent sticky engine). Everyone
-else keeps the 2026-11-01 Weak order above, byte-for-byte. Surplus (10×) and Router One accounting are
-unchanged. Qubax is billed at its public catalog price, Mitrify at `MITRIFY_BUILDER_RATE_*`, both with
-the normal tiered markup; a missing price or missing token usage is billed as a labelled ESTIMATE,
-never ₹0. Provider names stay admin-only (the user report shows one neutral `ENGINE_ROUTING` line).
-Full detail, env vars and risks: `docs/PRO_CHAIN_V2.md`.
+The experimental chain is unavailable for every production identity, including the test profile. Flags cannot activate it. Existing builder and chat routing remain unchanged. Prior estimated usage/price billing is not approved by this containment. Builder-specific data/spend admission and exact accounting evidence must be implemented and reviewed before a later activation change. See docs/PRO_CHAIN_V2.md.

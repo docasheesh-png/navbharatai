@@ -560,7 +560,7 @@ export function expandNodes(spec: ObjectSpec): ExpandedNode[] {
   // carriage of a train) builds from that earlier node's geometry, so a longer train costs no more shapes.
   const firstWithShape = new Map<string, number>();
   const emit = (node: ForgeNode, parent: number, suffix: string, copyOf: number | null, pos: Vec3, rot: Vec3, scl: Vec3, clips: Record<string, ForgeTrack[]>): number => {
-    if (out.length >= MAX_EXPANDED_NODES) throw new Error('expanded node limit exceeded: ' + MAX_EXPANDED_NODES);
+    if (out.length >= MAX_EXPANDED_NODES) throw new Error('the object expands to ' + (MAX_EXPANDED_NODES + 1) + ' nodes or more; the limit is ' + MAX_EXPANDED_NODES);
     const index = out.length;
     let source = copyOf ?? index;
     if (node.shape) {

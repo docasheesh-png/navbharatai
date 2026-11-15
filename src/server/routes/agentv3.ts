@@ -646,7 +646,7 @@ import { userAuthContext } from '../AgentV3/userAuthContext';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { phantomAliasDependencies, removeDependenciesFromPackageJson } from '../AgentV3/DependencyReconciler';
 import { fastLaneDependencyPlan, fastLaneDependencyInstallCommand, fastLaneDependencyNote } from '../AgentV3/fastLaneDependencies';
-import { foundationFilesStillAbsent, ensureViteReactFoundation, ensureStaticSiteFoundation, isStaticSiteProject, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
+import { foundationFilesStillAbsent, ensureViteReactFoundation, ensureStaticSiteFoundation, isStaticSiteProject, sanitizeTsconfigExtends, sanitizeTsconfigReferences } from '../AgentV3/FrameworkFoundation';
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
 import { wakePublicState, sanitizeWakeError, type TerminalWakeState } from '../AgentV3/terminalWake';
@@ -6221,6 +6221,13 @@ async function noteBuildOutcome(
                 await mergeWorkspaceFiles(workspaceId, ts.patch).catch(() => {});
               }
             } catch { /* best-effort — a bad tsconfig extends just falls through as before */ }
+            try {
+              const refs = sanitizeTsconfigReferences(saved, Object.keys(saved));
+              if (refs.fixes.length > 0) {
+                Object.assign(saved, refs.patch);
+                await mergeWorkspaceFiles(workspaceId, refs.patch).catch(() => {});
+              }
+            } catch { /* best-effort — a dangling tsconfig reference just falls through as before */ }
           }
           // Named as the restore it is (greenFreeze.ts ALLOWED_PASSES): copying the app's OWN saved bytes
           // back alters nothing. Unnamed, a verified-green app refused every file of its own restore, one
@@ -19633,6 +19640,19 @@ async function noteBuildOutcome(
                 }
               }
             } catch { /* best-effort — a bad tsconfig extends just falls through to the install as before */ }
+            try {
+              const refs = sanitizeTsconfigReferences(Object.fromEntries(writtenFiles), scaffold);
+              if (refs.fixes.length > 0) {
+                const patch = Object.entries(refs.patch).map(([path, content]) => ({ path, content }));
+                const { landed } = readWriteOutcomes(patch, await inPlatformPass('fast-lane-foundation', () => writePlatform(patch, 'fast-tsconfig-refs-', 4)));
+                const done = new Set(landed.map((f) => f.path));
+                const repaired = refs.fixes.filter((f) => done.has(f.file));
+                if (repaired.length > 0) {
+                  fastLog(`🩹 Removed an unresolvable tsconfig project reference so the compiler can run: ${repaired.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`);
+                  try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_REFERENCES_REPAIRED', message: `Removed an unresolvable tsconfig reference: ${repaired.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
+                }
+              }
+            } catch { /* best-effort — a dangling tsconfig reference just falls through to the install as before */ }
           }
           // ALWAYS run a real install — a build that just (re)wrote package.json MUST have its FULL
           // dependency tree installed. The old `… else echo "deps present"` skip trusted a pre-baked/
@@ -19742,6 +19762,19 @@ async function noteBuildOutcome(
             // Fix 38b — zero diagnostics alone is not verification. The marker records executable
             // exit zero, not compiler identity; require both canonical output evidence and the marker.
             // A missing marker remains unverified even when no diagnostic was printed.
+            // BR1979: a tsconfig that already includes `src` must not also reference a missing
+            // tsconfig.node.json (TS6053) — heal it here so a repair round that reintroduces the
+            // reference cannot fail the same verify a second time.
+            if (process.env.AGENTV3_TSCONFIG_SANITIZE !== 'off') {
+              try {
+                const refs = sanitizeTsconfigReferences(Object.fromEntries(writtenFiles), scaffold);
+                if (refs.fixes.length > 0) {
+                  const patch = Object.entries(refs.patch).map(([path, content]) => ({ path, content }));
+                  const { landed } = readWriteOutcomes(patch, await fastWrite(patch));
+                  for (const w of landed) writtenFiles.set(w.path, w.content);
+                }
+              } catch { /* best-effort — tsc below still runs and reports TS6053 honestly */ }
+            }
             // 📦 Declared-and-installed BEFORE the compile check (autopsy BR1959): TS2307 for a package nobody
             // declared is not a code error, and a repair round cannot install a package.
             await fastReconcileDependencies('verify');

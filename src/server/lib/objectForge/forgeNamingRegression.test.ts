@@ -43,14 +43,14 @@ describe('bounded expansion and mirror identities', () => {
     let node: any = { name: 'leaf', shape: { type: 'box', size: [1, 1, 1] }, material: 'm' };
     for (let i = 0; i < 6; i++) node = { name: 'group' + i, repeat: { count: 64, step: [1, 0, 0] }, children: [node] };
     const spec = { id: 'bounded-object', name: 'bounded', materials: { m: { color: '#ffffff' } }, nodes: [node] };
-    expect(() => exports.expandNodes(spec)).toThrow('expanded node limit exceeded: 400');
+    expect(() => exports.expandNodes(spec)).toThrow('the object expands to 401 nodes or more; the limit is 400');
     const result = check.validateObjectSpec(spec);
-    expect(result.spec).toBeNull(); expect(result.errors).toContain('expanded node limit exceeded: 400');
+    expect(result.spec).toBeNull(); expect(result.errors).toContain('the object expands to 401 nodes or more; the limit is 400');
   });
   it('allows exactly 400 nodes but rejects the next emit', () => {
     const nodes = Array.from({ length: 400 }, (_, i) => ({ name: 'node' + i }));
     expect(exports.expandNodes({ nodes }).length).toBe(400);
-    expect(() => exports.expandNodes({ nodes: [...nodes, { name: 'extra' }] })).toThrow('expanded node limit exceeded');
+    expect(() => exports.expandNodes({ nodes: [...nodes, { name: 'extra' }] })).toThrow('the object expands to 401 nodes or more');
   });
 });
 

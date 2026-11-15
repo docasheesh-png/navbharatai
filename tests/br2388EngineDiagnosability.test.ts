@@ -302,6 +302,9 @@ describe('fix 3 — estimate settlement, in the owner\'s accuracy order', () => 
       expect(charges.costUsd).toBe(Number(BigInt(receipt.costAttoUsd)) / 1e18);
       expect(charges.billedUsd).toBe(Number(BigInt(receipt.costAttoUsd) * 5n / 2n) / 1e18);
       expect(charges.estimated).toMatchObject({ calls: 1, label: ROUTER_ONE_ESTIMATED_BILL_LABEL });
+      // The estimated share carries the SAME × 5/2 markup as verified billing — not cost, not a different rate.
+      expect(charges.estimated!.costUsd).toBe(charges.costUsd);
+      expect(charges.estimated!.billedUsd).toBe(charges.billedUsd);
     });
   });
   it('verified-only builds return exactly the old billing shape', async () => {
@@ -325,6 +328,23 @@ describe('fix 3 — estimate settlement, in the owner\'s accuracy order', () => 
       expect(currentRouterOneCatalogueReceipts()).toHaveLength(1);
     });
     expect(h.store.finish).toHaveBeenCalledTimes(1);
+  });
+  it('a stream closed AFTER the finalizer already settled it is ignored: no second receipt, no second write, build not stopped', async () => {
+    const stream: OpenAiChatStream = { async *[Symbol.asyncIterator]() { yield { model, choices: [{ delta: { content: 'abcd' } }] }; yield { model, usage }; } };
+    const h = harness({ raw: stream });
+    await runInRouterOneAccountingScope(binding, async () => {
+      let it!: AsyncIterator<unknown>;
+      await cataloguePricedRouterOneText(async () => {
+        const r = await h.client.chat.completions.create({ model, messages: [], max_tokens: 1000, stream: true });
+        it = (r as OpenAiChatStream)[Symbol.asyncIterator]();
+        await it.next();
+      });
+      expect(currentRouterOneCatalogueReceipts()).toHaveLength(1);
+      await it.return?.(undefined); // the late close runs the stream's own settle path
+      expect(currentRouterOneCatalogueReceipts()).toHaveLength(1);
+    });
+    expect(h.store.finish).toHaveBeenCalledTimes(1);
+    expect(h.store.releaseVerified).toHaveBeenCalledTimes(1);
   });
 });
 

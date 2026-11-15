@@ -660,10 +660,11 @@ import { placePlatformContext } from '../lib/platformContext';
 import { previewAutoRepairEnabled, autoRepairPrecheck, autoRepairDecision, autoRepairPrompt, claimAutoRepair } from '../AgentV3/previewAutoRepair';
 import { clearPreviewGaveUp } from '../AgentV3/previewGiveUp';
 import { buildConfirmation, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
-import { loadProjectMemoryForTurn, memoryStopMessage, recordUserMessage, transcriptOf } from '../AgentV3/projectMemoryTurn';
+import { loadProjectMemoryForTurn, memoryStopMessage, recordUserMessage, transcriptOf, asksForTheApp, memoryMessageFor } from '../AgentV3/projectMemoryTurn';
 import { assessEditCandidate, rejectionMessage, type GateVerdict as EditGateVerdict } from '../AgentV3/editPromotionGate';
-import { decideRelease, candidateReplacesBase, editPromotionEnabled } from '../AgentV3/editRelease';
+import { decideRelease, candidateReplacesBase, editPromotionEnabled, renderEvidence, renderedInBuildUnchanged, buildOkOf } from '../AgentV3/editRelease';
 import { checkEditBaseForTurn, editIdFor } from '../AgentV3/editBase';
+import { fallbackDetail } from '../AgentV3/providerErrorClass';
 import { settleEditRevision, holdReplacementIfAny, billAfterHold, summaryAfterHold, recordRestoreRevision, pathsOf, persistedAfterHold } from '../AgentV3/editPromotion';
 import { messageIdFor } from '../AgentV3/projectRequirements';
 import { getRevisionStore, buildRevision, verifyBase, promoteWithRebase, type BaseVerification, type RevisionRecord } from '../AgentV3/projectRevisions';
@@ -11983,7 +11984,7 @@ async function noteBuildOutcome(
           if (clarifyChips) { if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, 'clarify'); }
           else if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, askFramework ? 'framework' : answerThenOffer ? 'offer' : 'chat');
           // A lasting instruction said in CHAT ("always keep first-person controls") is the project's too.
-          await recordUserMessage(chatWsId, typedPrompt, false, echoesPlatformNotice);
+          await recordUserMessage(chatWsId, typedPrompt, asksForTheApp('chat', false, typedPrompt), echoesPlatformNotice);
           // Hydration at intent-time is a 3-second RACE, so it can be marked done while the read never
           // landed — `saveWorkspaceMemoryFor` checks the read itself, not the re-entrancy flag.
           void saveWorkspaceMemoryFor(chatWsId, chatMem).catch(() => {});
@@ -13295,12 +13296,12 @@ async function noteBuildOutcome(
      * its own project). When neither can be read, an EDIT stops before it mutates anything (see below).
      */
     /** What the user said this turn — the text the project's memory, the edit gate and the revision record all use. */
-    const turnMessage = typedPrompt || prompt;
+    const turnMessage = memoryMessageFor(typedPrompt, prompt, offerAccepted);
     const projectMemory = await loadProjectMemoryForTurn({
       skip: hasImportIntent,
       projectId: workspaceId,
       message: turnMessage,
-      isBuildRequest: intent === 'new_build' || offerAccepted,
+      isBuildRequest: asksForTheApp(intent, offerAccepted, turnMessage),
       replace: userApprovedReplace,
       readTranscript: async () => {
         return transcriptOf(await getConversationStore().get(conversationIdForWorkspace(workspaceId)));
@@ -14983,7 +14984,7 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
             message: `A call to the ${name} engine was stopped by one of our own clocks, not by anything the engine did — the step it belonged to had run out of its time`,
-            autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+            autoResolved: true, detail: fallbackDetail(err),
           });
           return;
         }
@@ -27153,7 +27154,7 @@ async function noteBuildOutcome(
                   ? chooseRestoreBase({ snapshot: greenFiles, turnStart: projectFilesAtTurnStart, snapshotFromThisBuild: fromThisBuild })
                   : { base: greenFiles, kind: 'green-snapshot' as const };
                 if (!chosen) {
-                  if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })) {
+                  if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop', renderedInBuild: renderedInBuildUnchanged(inBuildGreenAt, postGreenWrites.length) })) {
                     events.emit({ type: 'narration', agent: 'architect', text: greenGuardUnverifiedMessage(), ts: Date.now() });
                     buildDiag.record({
                       phase: 'build', severity: 'warning', code: 'GREEN_GUARD_UNVERIFIED',
@@ -27193,7 +27194,7 @@ async function noteBuildOutcome(
                   buildDiag.record({ phase: 'build', severity: 'warning', code: 'GREEN_GUARD_RESTORE_INCOMPLETE', autoResolved: false, message: 'The automatic restore could not be fully confirmed in the sandbox and durable store; the final save follows only the changes confirmed in the sandbox.', detail: snapshotRestoreDetail(outcome) });
                 }
                 }
-              } else if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })) {
+              } else if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop', renderedInBuild: renderedInBuildUnchanged(inBuildGreenAt, postGreenWrites.length) })) {
                 // KEPT, BUT UNCHECKED — and the user hears so. This is the branch that used to be a
                 // silent rollback. Saying nothing here would replace one dishonest outcome with a
                 // quieter one; the change is theirs, it stayed, and we could not confirm it.
@@ -27319,8 +27320,8 @@ async function noteBuildOutcome(
             await finalSave;
             const settled = await settleEditRevision({
               store: getRevisionStore(), projectId: workspaceId, editId, headAtStart: editHeadAtStart, startFiles: projectFilesAtTurnStart,
-              persisted, base: editGateBase(), previewGreen, provenBroken: previewProvenBroken, baseCheck: editBaseCheck,
-              requirementsOk: projectMemory.status !== 'unrecoverable', userMessage: turnMessage,
+              persisted, base: editGateBase(), previewGreen: renderEvidence(previewGreen, inBuildGreenAt, postGreenWrites.length), provenBroken: previewProvenBroken, baseCheck: editBaseCheck,
+              requirementsOk: projectMemory.status !== 'unrecoverable', buildOk: buildOkOf(result), userMessage: turnMessage,
               messageId: messageIdFor(0, turnMessage), messageText: turnMessage, artifactDigest: snapshotDigest(), now: Date.now(),
             });
             buildDiag.record(settled.finding);

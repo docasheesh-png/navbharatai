@@ -42,7 +42,7 @@ describe('the builder\'s entry point uses the edit-promotion system', () => {
     expect(src).toContain('await recordUserMessage(chatWsId,');
     expect(src).toContain('const editId = editIdFor(workspaceId, req.body?.requestId, randomUUID());');
     // every edit-gate / revision call reads the ONE turn message, not a re-derived one
-    expect(src).toContain('const turnMessage = typedPrompt || prompt;');
+    expect(src).toContain('const turnMessage = memoryMessageFor(typedPrompt, prompt, offerAccepted);');
   });
   it('the existing history restore records a restore revision (and calls no model)', () => {
     const i = at("app.post('/api/agentv3/restore-version'");

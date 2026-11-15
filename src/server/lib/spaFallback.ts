@@ -26,6 +26,7 @@ import { CHECKOUT_HANDOFF_PATH } from './checkoutHandoff';
 import { ROBOTS_PATH, SITEMAP_PATH } from './siteIndex';
 import { MARKETING_PATHS } from '../../content/marketing';
 import { USE_CASE_INDEX_PATH, useCasePaths } from './useCaseCatalog';
+import { HOW_IT_WORKS_PATH } from './howItWorksPage';
 
 /**
  * Path prefixes owned by real server route handlers registered AFTER the SPA catch-all. A request
@@ -64,6 +65,7 @@ export const SERVER_ROUTE_EXACT: readonly string[] = [
   ...MARKETING_PATHS,
   USE_CASE_INDEX_PATH,
   ...useCasePaths(),
+  HOW_IT_WORKS_PATH,
 ];
 
 /**

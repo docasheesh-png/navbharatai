@@ -37,6 +37,38 @@ describe('admin official OpenAI-compat helper', () => {
     });
   });
 
+  it('calls the official Router One endpoint once, with no OpenRouter price guard and no redirect', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'x-request-id': 'r1-1' }),
+      text: async () => JSON.stringify({
+        model: 'deepseek-v4.1-flash',
+        choices: [{ message: { content: 'Hello from Router One' } }],
+        usage: { prompt_tokens: 2, completion_tokens: 3 },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchImpl);
+    const result = await runOfficialOpenAiCompatTest({
+      url: 'https://api.router.one/v1/chat/completions', apiKey: 'synthetic-key-value', model: 'deepseek-v4.1-flash',
+      messages: [{ role: 'user', content: 'Synthetic test question' }], signal: new AbortController().signal,
+    });
+    expect(result).toMatchObject({ content: 'Hello from Router One', model: 'deepseek-v4.1-flash' });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.router.one/v1/chat/completions');
+    expect(init.redirect).toBe('error');
+    const body = JSON.parse(String(init.body));
+    expect(body).toMatchObject({ model: 'deepseek-v4.1-flash', stream: false, max_tokens: 1024 });
+    expect(body.provider).toBeUndefined();
+  });
+
+  it('never calls a Router One look-alike host', async () => {
+    await expect(runOfficialOpenAiCompatTest({
+      url: 'https://api.router.one.evil.example/v1/chat/completions', apiKey: 'synthetic-key-value', model: 'x',
+      messages: [{ role: 'user', content: 'hi' }], signal: new AbortController().signal,
+    })).rejects.toMatchObject({ providerCode: 'url-not-allowlisted' });
+  });
+
   it('still throws OfficialTestChatError for a non-JSON OpenRouter failure', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false, status: 401, headers: new Headers(), text: async () => 'unauthorized',

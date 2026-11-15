@@ -292,6 +292,7 @@ function applyToPerson(base: Spec, edits: Edit[]): Applied {
   }
   const out = personSpecFor(p) as Record<string, unknown>;
   out.id = base.id; out.name = base.name;
+  if ((base as unknown as { behaviour?: unknown }).behaviour !== undefined) out.behaviour = (base as unknown as { behaviour?: unknown }).behaviour;
   return { spec: out, applied, unsupported };
 }
 

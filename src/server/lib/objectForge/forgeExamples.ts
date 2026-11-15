@@ -25,6 +25,7 @@ const PERSON: ForgeExample = {
   spec: {
     id: 'person',
     name: 'Person',
+    behaviour: { type: 'wander', radius: 10, speed: 1.3, clip: 'walk', idleClip: 'idle', pause: [1, 4] },
     materials: {
       skin: { color: '#d9a273', roughness: 0.8 },
       hair: { color: '#2b1d14', roughness: 0.9 },
@@ -107,6 +108,7 @@ const QUADRUPED: ForgeExample = {
   spec: {
     id: 'quadruped',
     name: 'Four-legged animal',
+    behaviour: { type: 'wander', radius: 25, speed: 1.6, clip: 'walk', idleClip: 'idle', pause: [1, 4] },
     materials: {
       fur: { color: '#b07a3c', roughness: 0.95 },
       belly: { color: '#e3cfa6', roughness: 0.95 },
@@ -297,6 +299,7 @@ const TRAIN: ForgeExample = {
   spec: {
     id: 'train',
     name: 'Steam train',
+    behaviour: { type: 'rails', path: [[0, -60], [40, -40], [60, 0], [40, 40], [0, 60], [-40, 40], [-60, 0], [-40, -40]], loop: true, speed: 10, clip: 'run', wheelRadius: 0.5 },
     materials: {
       engine: { color: '#1f3a5f', roughness: 0.5, metalness: 0.4 },
       dark: { color: '#262626', roughness: 0.7, metalness: 0.5 },
@@ -350,6 +353,7 @@ const CAR: ForgeExample = {
   spec: {
     id: 'car',
     name: 'Car',
+    behaviour: { type: 'drive', maxSpeed: 40, wheelRadius: 0.34, clip: 'drive' },
     materials: {
       paint: { color: '#c0392b', roughness: 0.35, metalness: 0.6 },
       glass: { color: '#9fd3e6', roughness: 0.05, metalness: 0.3, opacity: 0.8 },
@@ -411,6 +415,7 @@ const BIKE: ForgeExample = {
   spec: {
     id: 'bike',
     name: 'Motorbike',
+    behaviour: { type: 'drive', maxSpeed: 45, turnRate: 1.2, wheelRadius: 0.37, clip: 'ride' },
     materials: {
       frame: { color: '#222222', roughness: 0.5, metalness: 0.7 },
       tank: { color: '#c62828', roughness: 0.3, metalness: 0.6 },
@@ -443,6 +448,105 @@ const BIKE: ForgeExample = {
   },
 };
 
+// ---------------------------------------------------------------------------------------------------------------------------------
+// An AEROPLANE 8 m long, 11 m across the wings: a lofted fuselage, swept wings and tail planes from extruded outlines (turned flat with
+// rotation x 90 so the outline's y runs along z), a fin, a propeller that spins, landing gear. It circles overhead (behaviour: orbit).
+const PLANE: ForgeExample = {
+  id: 'plane',
+  what: 'A single-engine propeller plane 8 m long, 11 m wingspan: lofted fuselage, swept wings (extruded outline, mirrored), tail plane and fin, spinning propeller (clip: fly), landing gear on the ground. It circles overhead (behaviour: orbit). For a jet drop the propeller and lengthen the loft; for a helicopter use a rotor of thin boxes spinning about y.',
+  spec: {
+    id: 'plane',
+    name: 'Propeller plane',
+    behaviour: { type: 'orbit', radius: 60, altitude: 40, speed: 25, bank: 20, clip: 'fly' },
+    materials: {
+      body: { color: '#e8e8ea', roughness: 0.35, metalness: 0.5 },
+      stripe: { color: '#c0392b', roughness: 0.4, metalness: 0.3 },
+      glass: { color: '#9fd3e6', roughness: 0.05, metalness: 0.3, opacity: 0.85 },
+      dark: { color: '#262626', roughness: 0.7 },
+      metal: { color: '#9aa0a6', roughness: 0.3, metalness: 0.9 },
+    },
+    nodes: [
+      {
+        name: 'fuselage',
+        shape: {
+          type: 'loft', length: 8, stations: 18, ring: 14,
+          sections: [
+            { t: 0, halfWidth: 0.1, top: 1.55, bottom: 1.25 },
+            { t: 0.25, halfWidth: 0.5, top: 1.95, bottom: 1.0 },
+            { t: 0.6, halfWidth: 0.6, top: 2.0, bottom: 0.95 },
+            { t: 0.9, halfWidth: 0.45, top: 1.85, bottom: 1.0 },
+            { t: 1, halfWidth: 0.1, top: 1.6, bottom: 1.25 },
+          ],
+        },
+        material: 'body',
+      },
+      { name: 'canopy', shape: { type: 'sphere', radius: [0.5, 0.4, 0.9], seg: 12 }, material: 'glass', position: [0, 2.0, 0.6] },
+      { name: 'stripe', shape: { type: 'box', size: [1.22, 0.12, 2.6] }, material: 'stripe', position: [0, 1.5, -1.0] },
+      { name: 'wing', shape: { type: 'extrude', polygon: [[0, 0.8], [5.5, -0.2], [5.5, -0.7], [0, -0.6]], depth: 0.14 }, material: 'body', position: [0, 1.45, 0.5], rotation: [90, 0, 0], mirror: 'x' },
+      { name: 'tailplane', shape: { type: 'extrude', polygon: [[0, 0.5], [1.5, -0.05], [1.5, -0.4], [0, -0.3]], depth: 0.1 }, material: 'body', position: [0, 1.5, -3.3], rotation: [90, 0, 0], mirror: 'x' },
+      { name: 'fin', shape: { type: 'extrude', polygon: [[0, 0], [1.1, 0], [0.9, 1.0], [0.5, 1.15]], depth: 0.1 }, material: 'stripe', position: [0, 1.5, -2.7], rotation: [0, 90, 0] },
+      { name: 'spinner', shape: { type: 'sphere', radius: [0.2, 0.2, 0.28], seg: 10 }, material: 'dark', position: [0, 1.43, 4.1] },
+      {
+        name: 'propeller',
+        position: [0, 1.43, 4.3],
+        clips: { fly: [spin('z', 8)] },
+        children: [{ name: 'blade', shape: { type: 'box', size: [0.14, 1.9, 0.04] }, material: 'dark', repeat: { count: 2, around: { axis: 'z', degrees: 180 } } }],
+      },
+      { name: 'gear_leg', shape: { type: 'tube', path: [[0.45, 1.0, 1.0], [0.6, 0.28, 1.0]], radius: 0.04, seg: 8 }, material: 'metal', mirror: 'x' },
+      { name: 'gear_wheel', shape: { type: 'cylinder', radiusTop: 0.26, radiusBottom: 0.26, height: 0.14, seg: 14 }, material: 'dark', position: [0.6, 0.26, 1.0], rotation: [0, 0, 90], mirror: 'x' },
+      { name: 'tail_leg', shape: { type: 'tube', path: [[0, 1.25, -3.2], [0, 0.14, -3.4]], radius: 0.035, seg: 8 }, material: 'metal' },
+      { name: 'tail_wheel', shape: { type: 'sphere', radius: 0.14, seg: 8 }, material: 'dark', position: [0, 0.14, -3.4] },
+    ],
+  },
+};
+
+// A BOAT 5 m long: a lofted hull with a pointed bow (the keel is y = 0; a game sets the group down at sea level minus its draft), a cabin
+// with windows, a mast and a sail from an extruded triangle. It bobs on the water (clip: bob) and is steered by the player (behaviour: drive).
+const BOAT: ForgeExample = {
+  id: 'boat',
+  what: 'A small sailing boat 5 m long: lofted hull with a pointed bow, cabin with windows, mast and a triangular sail, bobbing on the water (clip: bob), steered by the player (behaviour: drive). The keel is y = 0: set the group at sea level minus about 0.3 m. For a big ship lengthen the hull and stack boxes; for a canoe drop the cabin and the mast.',
+  spec: {
+    id: 'boat',
+    name: 'Sailing boat',
+    behaviour: { type: 'drive', maxSpeed: 12, accel: 3, turnRate: 0.9, clip: 'bob' },
+    materials: {
+      hull: { color: '#f2efe6', roughness: 0.4, metalness: 0.1 },
+      trim: { color: '#1f4e79', roughness: 0.5 },
+      wood: { color: '#8a5a2b', roughness: 0.8 },
+      sail: { color: '#f7f3e8', roughness: 0.9 },
+      glass: { color: '#9fd3e6', roughness: 0.05, metalness: 0.3, opacity: 0.8 },
+    },
+    nodes: [
+      {
+        name: 'boat',
+        clips: { bob: [{ property: 'rotation', axis: 'z', amplitude: 3, speed: 0.3 }, { property: 'position', axis: 'y', amplitude: 0.04, speed: 0.5 }] },
+        children: [
+          {
+            name: 'hull',
+            shape: {
+              type: 'loft', length: 5, stations: 18, ring: 14,
+              sections: [
+                { t: 0, halfWidth: 0.55, top: 0.9, bottom: 0.1, power: 3 },
+                { t: 0.3, halfWidth: 0.8, top: 0.95, bottom: 0, power: 2.5 },
+                { t: 0.7, halfWidth: 0.7, top: 0.95, bottom: 0.05, power: 2.5 },
+                { t: 0.93, halfWidth: 0.3, top: 1.0, bottom: 0.25 },
+                { t: 1, halfWidth: 0.02, top: 1.1, bottom: 0.5 },
+              ],
+            },
+            material: 'hull',
+          },
+          { name: 'stripe', shape: { type: 'box', size: [1.3, 0.08, 3.0] }, material: 'trim', position: [0, 0.9, -0.2] },
+          { name: 'cabin', shape: { type: 'box', size: [1.1, 0.8, 1.4] }, material: 'wood', position: [0, 1.35, -0.7] },
+          { name: 'cabin_roof', shape: { type: 'box', size: [1.3, 0.08, 1.6] }, material: 'trim', position: [0, 1.79, -0.7] },
+          { name: 'window', shape: { type: 'box', size: [0.05, 0.3, 0.5] }, material: 'glass', position: [0.56, 1.45, -0.7], mirror: 'x', repeat: { count: 2, step: [0, 0, 0.6] } },
+          { name: 'mast', shape: { type: 'cylinder', radiusTop: 0.04, radiusBottom: 0.06, height: 3.4, seg: 8 }, material: 'wood', position: [0, 2.6, 0.9] },
+          { name: 'sail', shape: { type: 'extrude', polygon: [[0, 0], [1.6, 0], [0, 2.8]], depth: 0.03 }, material: 'sail', position: [0, 1.2, 0.9], rotation: [0, 90, 0] },
+        ],
+      },
+    ],
+  },
+};
+
 export const FORGE_EXAMPLES: Record<string, ForgeExample> = {
   person: PERSON,
   quadruped: QUADRUPED,
@@ -452,6 +556,8 @@ export const FORGE_EXAMPLES: Record<string, ForgeExample> = {
   train: TRAIN,
   car: CAR,
   bike: BIKE,
+  plane: PLANE,
+  boat: BOAT,
 };
 
 export const FORGE_EXAMPLE_IDS = Object.keys(FORGE_EXAMPLES);

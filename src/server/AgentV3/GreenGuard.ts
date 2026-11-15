@@ -409,9 +409,15 @@ export function greenGuardShouldTellUnverified(input: {
    * check, by the user's own choice; the stop message already says where things stand.
    */
   stoppedByUser?: boolean;
+  /**
+   * The in-build proof rendered this exact tree and nothing was written after it (autopsy 57604006). Then "I could
+   * not open your app" is false — the report itself says it rendered — and is not told.
+   */
+  renderedInBuild?: boolean;
 }): boolean {
   if (!input.hasSnapshot) return false;
   if (input.previewGreen) return false;
+  if (input.renderedInBuild === true) return false;
   if (input.stoppedByUser === true) return false;
   // Same rule as `wroteNothing` above: silence is not a zero. A caller that did not state the count
   // gets the pre-2026-09-20 behaviour, never a new silence justified by an absent measurement.

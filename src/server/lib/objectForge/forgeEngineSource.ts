@@ -92,11 +92,28 @@ export interface ForgeNode {
   children?: ForgeNode[];
 }
 
+/**
+ * HOW THE OBJECT MOVES, as DATA: one of a few fixed behaviours the kit runs (behave.ts) with parameters the spec gives. A model never writes the
+ * movement; it picks one and sets numbers. Paths are [x, z] points in metres on the ground plane; speeds are metres per second.
+ */
+export type ForgeBehaviour =
+  | { type: 'static' }
+  /** Follows a polyline (a train on its track, a guard on a beat). loop closes it; otherwise it stops at the end. */
+  | { type: 'rails'; path: Array<[number, number]>; speed: number; loop?: boolean; clip?: string; wheelRadius?: number }
+  /** Walks between random points within radius of where it starts, pausing between (an animal, a villager). Deterministic for a seed. */
+  | { type: 'wander'; radius: number; speed: number; clip?: string; idleClip?: string; pause?: [number, number]; turnRate?: number; seed?: number }
+  /** Driven by the player's input (throttle, steer): a car, a bike, a boat. Its wheels roll at the true speed when wheelRadius is given. */
+  | { type: 'drive'; maxSpeed: number; accel?: number; brake?: number; turnRate?: number; wheelRadius?: number; clip?: string }
+  /** Circles a point at an altitude, banking into the turn (a plane, a bird, a kite). */
+  | { type: 'orbit'; radius: number; altitude: number; speed: number; bank?: number; clip?: string };
+
 export interface ObjectSpec {
   id: string;
   name: string;
   materials: Record<string, ForgeMaterial>;
   nodes: ForgeNode[];
+  /** How it moves in a game (optional: no behaviour is a static object). */
+  behaviour?: ForgeBehaviour;
 }
 
 export interface MeshArrays {
@@ -552,12 +569,15 @@ function reflectClips(clips: Record<string, ForgeTrack[]>, axis: Axis, phase: nu
   return out;
 }
 
+export const MAX_EXPANDED_NODES = 400;
+
 export function expandNodes(spec: ObjectSpec): ExpandedNode[] {
   const out: ExpandedNode[] = [];
   // One mesh per DISTINCT shape: every node whose shape is the same as an earlier node's (a copy, a mirror, the same wheel under the second
   // carriage of a train) builds from that earlier node's geometry, so a longer train costs no more shapes.
   const firstWithShape = new Map<string, number>();
   const emit = (node: ForgeNode, parent: number, suffix: string, copyOf: number | null, pos: Vec3, rot: Vec3, scl: Vec3, clips: Record<string, ForgeTrack[]>): number => {
+    if (out.length >= MAX_EXPANDED_NODES) throw new Error('the object expands to ' + (MAX_EXPANDED_NODES + 1) + ' nodes or more; the limit is ' + MAX_EXPANDED_NODES);
     const index = out.length;
     let source = copyOf ?? index;
     if (node.shape) {
@@ -568,7 +588,7 @@ export function expandNodes(spec: ObjectSpec): ExpandedNode[] {
     out.push({ name: node.name + suffix, parent, shape: node.shape, material: node.material, position: pos, rotation: rot, scale: scl, clips, source });
     return index;
   };
-  const visit = (node: ForgeNode, parent: number, suffix: string): void => {
+  const visit = (node: ForgeNode, parent: number, suffix: string, contextDepth = 0): void => {
     const basePos = unit(node.position, 0);
     const baseRot = unit(node.rotation, 0);
     const baseScl = unit(node.scale, 1);
@@ -595,18 +615,22 @@ export function expandNodes(spec: ObjectSpec): ExpandedNode[] {
       // What the children inherit: a repeated parent's copy number carries a "p" (for parent), so the second copy of a child under the first
       // copy of its parent (window_1) can never be the same name as the first copy of that child under the second copy of the parent (window_1p).
       // A mirror adds nothing here, so a mirrored limb's parts stay hand_mirror, knee_mirror.
-      const childContext = suffix + (i > 0 ? '_' + i + 'p' : '');
-      for (const child of node.children ?? []) visit(child, idx, childContext);
+      // Include branching-ancestor depth even when earlier ancestors use their zero copy.
+      // Otherwise A0/B1/C and A1/B0/C both become C_1p.
+      const childContext = suffix + (i > 0 ? '_' + i + 'p' + (contextDepth || '') : '');
+      const childContextDepth = contextDepth + (repeats > 1 || node.mirror ? 1 : 0);
+      for (const child of node.children ?? []) visit(child, idx, childContext, childContextDepth);
       if (node.mirror) {
         const ax = axisIndex(node.mirror);
         const mpos: Vec3 = [pos[0], pos[1], pos[2]]; mpos[ax] = -mpos[ax];
         const mrot: Vec3 = [rot[0], rot[1], rot[2]];
         for (let k = 0; k < 3; k++) if (k !== ax) mrot[k] = -mrot[k];
         const mscl: Vec3 = [baseScl[0], baseScl[1], baseScl[2]]; mscl[ax] = -mscl[ax];
-        const msuffix = copySuffix + '_mirror';
+        const mirrorTag = '_mirror' + (contextDepth || '');
+        const msuffix = copySuffix + mirrorTag;
         emit(node, parent, msuffix, first, mpos, mrot, mscl, reflectClips(clips, node.mirror, node.mirrorPhase ?? 0));
         const mIdx = out.length - 1;
-        for (const child of node.children ?? []) visit(child, mIdx, childContext + '_mirror');
+        for (const child of node.children ?? []) visit(child, mIdx, childContext + mirrorTag, childContextDepth);
       }
     }
   };
@@ -688,7 +712,13 @@ export interface ForgeObject {
   nodes: Record<string, ThreeLike>;
   triangles: number;
   clips: string[];
+  /** The clip now playing, or null. */
+  readonly clip: string | null;
   play(clip: string | null, speed?: number): void;
+  /** The fastest spin in a clip, in turns a second (0 if it has none): what a wheel does at clip speed 1. */
+  spinOf(clip: string): number;
+  /** Change how fast the playing clip runs WITHOUT restarting it (a car's wheels follow its speed). 0 freezes it. */
+  setSpeed(speed: number): void;
   update(dt: number): void;
   dispose(): void;
 }
@@ -748,7 +778,14 @@ export function createObject(THREE: ThreeLike, spec: ObjectSpec): ForgeObject {
   };
   return {
     group, nodes, triangles, clips: [...clipNames],
+    get clip(): string | null { return clip; },
     play(name: string | null, speed = 1): void { clip = name; rate = speed; time = 0; apply(); },
+    setSpeed(speed: number): void { rate = Number.isFinite(speed) ? speed : 0; },
+    spinOf(name: string): number {
+      let best = 0;
+      for (const n of expanded) for (const t of n.clips[name] ?? []) if (t.spin) best = Math.max(best, Math.abs(t.speed));
+      return best;
+    },
     update(dt: number): void { if (!clip) return; time += dt * rate; apply(); },
     dispose(): void {
       for (const g of geometries.values()) g.dispose();
@@ -758,3 +795,4 @@ export function createObject(THREE: ThreeLike, spec: ObjectSpec): ForgeObject {
   };
 }
 `;
+

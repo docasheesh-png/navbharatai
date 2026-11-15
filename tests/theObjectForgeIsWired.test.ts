@@ -135,7 +135,7 @@ describe('a spec', () => {
   it('two different objects share one engine file', async () => {
     await forge({ spec: lamp() });
     await forge({ spec: { ...lamp(), id: 'street-lamp-2' } });
-    expect([...act.files.keys()].filter((p) => p.startsWith('src/game/forge/')).sort()).toEqual(['src/game/forge/customise.ts', 'src/game/forge/forge.ts']);
+    expect([...act.files.keys()].filter((p) => p.startsWith('src/game/forge/')).sort()).toEqual(['src/game/forge/behave.ts', 'src/game/forge/customise.ts', 'src/game/forge/forge.ts']);
     expect([...act.files.keys()].filter((p) => p.startsWith('src/game/objects/')).sort()).toEqual(['src/game/objects/street-lamp-2.ts', 'src/game/objects/street-lamp.ts']);
   });
 

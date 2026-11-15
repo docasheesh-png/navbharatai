@@ -60,3 +60,21 @@ export function isModelUnavailableError(reason: unknown): boolean {
   if (!text) return false;
   return /\bmodel[_ ]?not[_ ]?found\b|not found the model|\bno such model\b|does not exist|unknown model|model.{0,20}(?:unavailable|deprecated|retired)|permission denied/.test(text);
 }
+
+import { isRouterOneAccountingRefusal, routerOneRefusalReason } from '../AI/RouterOne/accounting';
+
+/**
+ * ONE detail line for a provider fallback, for the ADMIN report: the message, plus — when our own accounting fence
+ * refused a Router One call — WHICH fence. The public wording alone made a self-inflicted refusal read as an outage.
+ */
+export function fallbackDetail(error: unknown, max = 300): string {
+  const text = error instanceof Error ? error.message : String(error ?? '');
+  const why = routerOneRefusalReason(error);
+  return (why ? `${text} · our-accounting-refused:${why}` : text).slice(0, max);
+}
+
+/** A refusal by OUR accounting fence is deterministic for the run: the same fence refuses the next call too. */
+export function isAccountingRefusalError(error: unknown): boolean {
+  return isRouterOneAccountingRefusal(error);
+}
+

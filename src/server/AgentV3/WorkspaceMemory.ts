@@ -130,6 +130,21 @@ interface FileFacts {
 }
 
 const MAX_EPISODES = 500;
+
+/**
+ * Drop the OLDEST NON-REQUEST episodes first. 🔴 It used to drop the oldest of every kind, and a build records
+ * dozens of error / fix / note / audit episodes, so the user's FIRST request — the project's brief — was the
+ * first thing evicted (incident: an edit built a different game). A request is the user's own words and is
+ * evicted only when requests alone exceed the cap, oldest first. Chronological order is kept. PURE.
+ */
+export function evictEpisodes(episodes: Episode[], cap: number): Episode[] {
+  let excess = episodes.length - cap;
+  if (excess <= 0) return episodes;
+  const drop = new Set<number>();
+  for (let i = 0; i < episodes.length && drop.size < excess; i++) if (episodes[i].kind !== 'request') drop.add(i);
+  for (let i = 0; i < episodes.length && drop.size < excess; i++) if (!drop.has(i)) drop.add(i);
+  return episodes.filter((_, i) => !drop.has(i));
+}
 /**
  * How much of the user's own request is remembered. 🔴 It was 2,000, the cap for every episode, while the
  * planner reads up to 4,000 of an earlier request (`PLANNING_EARLIER_REQUEST_MAX`). Autopsy 241215d1: a
@@ -506,7 +521,7 @@ export class WorkspaceMemory {
     if (typeof resolvedAt === 'number' && resolvedAt > 0) ep.resolvedAt = resolvedAt;
     if (lane === 'chat' || lane === 'build' || lane === 'offer' || lane === 'framework' || lane === 'clarify') ep.lane = lane;
     this.episodes.push(ep);
-    if (this.episodes.length > MAX_EPISODES) this.episodes.splice(0, this.episodes.length - MAX_EPISODES);
+    if (this.episodes.length > MAX_EPISODES) this.episodes.splice(0, this.episodes.length, ...evictEpisodes(this.episodes, MAX_EPISODES));
   }
   /** `lane` says who answered it: the chat reply, or a build. Pass it at every live call site. */
   recordRequest(text: string, ts?: number, lane?: RequestLane): void { this.episode('request', text, undefined, ts, undefined, lane); }

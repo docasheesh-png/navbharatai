@@ -105,6 +105,11 @@ export const PROCESS_ONLY_CODES = new Set([
   'OUTCOME_UNEXPLAINED',      // the run ended not-ok and wrote no outcome — an engine hole, not their app
   'VERIFY_DID_NOT_RUN',       // our fast-lane typecheck could not execute — the class of RUNTIME_UNCHECKED
   'GREEN_GUARD_UNVERIFIED',   // "could not be opened to check this turn" — the class of PREVIEW_UNVERIFIED
+  // The edit-promotion system (editPromotionGate.ts / projectRevisions.ts / projectRequirements.ts). Each says
+  // something about OUR run — a base that was not fully hydrated, an edit held so it would not replace the
+  // project, instructions we could not load, a head another edit advanced. The user's app is unchanged by all of
+  // them, so none is ever a problem WITH their app.
+  'EDIT_BASE_PARTIAL', 'EDIT_BASE_UNCHECKED', 'EDIT_PROMOTION_HELD', 'EDIT_PROMOTION_NOT_RECORDED', 'PROJECT_MEMORY_UNRECOVERABLE', 'IN_BUILD_GREEN_HELD',
   // A restore point OUR save did not keep (GT-6). The app rendered; the miss is the store, not the app.
   'IN_BUILD_GREEN_SKIPPED_PARTIAL_SCAN', 'IN_BUILD_GREEN_NOT_SAVED', 'GREEN_SNAPSHOT_NOT_SAVED',
   'POST_GREEN_RECHECK_OK', 'POST_GREEN_RECHECK_INCONCLUSIVE', 'POST_GREEN_ROLLBACK', 'POST_GREEN_ROLLBACK_SKIPPED',

@@ -34,7 +34,7 @@ describe('the end-of-build refresh', () => {
     expect(route).toContain('runInPass(pass, () => applySnapshotRestore(plan, {');
     const restores = [...route.matchAll(/\bapplyGreenSnapshotRestore\s*\(/g)];
     const verifiedRepairRestores = [...route.matchAll(/revert:\s*revertToGreenSnapshot\b/g)];
-    expect(restores).toHaveLength(4);
+    expect(restores).toHaveLength(5); // +1 2026-11-14: the edit gate's hold puts the verified base back through the same door
     expect(verifiedRepairRestores).toHaveLength(6); // +1 2026-10-30: the game repair (gameRepair.ts)
     for (const call of [...restores, ...verifiedRepairRestores]) expect(call.index).toBeLessThan(refreshAt);
   });

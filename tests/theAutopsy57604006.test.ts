@@ -104,19 +104,19 @@ describe('P2 · a failed build is never a verified version, and the report says 
 
 describe('P3 · a Router One refusal by OUR accounting is named, and the rung is retired for the run', () => {
   it('keeps the public wording and the public shape, and carries the fence as a non-enumerable reason', () => {
-    const e = new RouterOneAccountingUnavailableError('key-fenced-by-earlier-uncertain-attempt');
+    const e = new RouterOneAccountingUnavailableError('uncertain_fence');
     expect(e.message).toBe(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
     expect(Object.keys(e)).toEqual(['name']); // exactly what the public boundary already exposes: no `reason`, no `code`
     expect(JSON.stringify(e)).toBe('{"name":"Error"}');
     expect(isRouterOneAccountingRefusal(e)).toBe(true);
-    expect(routerOneRefusalReason(e)).toBe('key-fenced-by-earlier-uncertain-attempt');
+    expect(routerOneRefusalReason(e)).toBe('uncertain_fence');
     expect(routerOneRefusalReason(new Error('x'))).toBeUndefined();
     expect(routerOneRefusalReason(new RouterOneAccountingUnavailableError())).toBe('unspecified');
   });
   it('🔴 the admin detail says WHICH fence — the report no longer reads as a provider outage', () => {
-    const d = fallbackDetail(new RouterOneAccountingUnavailableError('no-accounting-scope'));
+    const d = fallbackDetail(new RouterOneAccountingUnavailableError('no_scope'));
     expect(d).toContain(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
-    expect(d).toContain('our-accounting-refused:no-accounting-scope');
+    expect(d).toContain('our-accounting-refused:no_scope');
     expect(fallbackDetail(new Error('429 overloaded'))).toBe('429 overloaded');
     expect(fallbackDetail('plain', 3)).toBe('pla');
   });
@@ -125,7 +125,7 @@ describe('P3 · a Router One refusal by OUR accounting is named, and the rung is
   it('🔴 45 identical refusals become ONE: the rung is retired after its first refusal, the next rung answers every turn', async () => {
     let r1 = 0, glm = 0;
     const chain: NamedRunner[] = [
-      { name: 'ENGINE_R1', runner: { runTurn: async () => { r1++; throw new RouterOneAccountingUnavailableError('key-fenced-by-earlier-uncertain-attempt'); } } as never },
+      { name: 'ENGINE_R1', runner: { runTurn: async () => { r1++; throw new RouterOneAccountingUnavailableError('uncertain_fence'); } } as never },
       { name: 'GLM', runner: { runTurn: async () => { glm++; return turn; } } as never },
     ];
     const runner = makeMultiProviderTurnRunner(chain, { deadRungs: new Map<string, string>() });
@@ -158,6 +158,9 @@ describe('the route is wired to all of it', () => {
     expect(route).toContain('previewGreen: renderEvidence(previewGreen, inBuildGreenAt, postGreenWrites.length)');
     expect(route).toContain('buildOk: buildOkOf(result),');
     expect(route.split('renderedInBuild: renderedInBuildUnchanged(inBuildGreenAt, postGreenWrites.length)').length - 1).toBe(2);
-    expect(route.split('detail: fallbackDetail(err),').length - 1).toBe(2);
+    // The clock path names the fence through fallbackDetail; the provider-failure path names it
+    // through the engine-diag marker. Both admin lines must keep a fence, not a bare public sentence.
+    expect(route.split('detail: fallbackDetail(err),').length - 1).toBe(1);
+    expect(route).toContain('detail: withEngineSafeDiag(err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300), err),');
   });
 });

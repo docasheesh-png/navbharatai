@@ -25,7 +25,7 @@ import { plannedModelOf } from '../runnerChainSummary';
 import { modelAlwaysReasons } from './glmThinking';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
-import { isFatalProviderError, isModelUnavailableError, isProviderBalanceError } from '../providerErrorClass';
+import { isFatalProviderError, isModelUnavailableError, isProviderBalanceError, isAccountingRefusalError } from '../providerErrorClass';
 import { isBudgetEndedError, isSlowStreamAbandon, isSilentAbandon, providerNeverAnswered, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
 import type { WasteKind } from '../providerWaste';
 import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
@@ -1148,7 +1148,7 @@ export function makeMultiProviderTurnRunner(
             // in aFailedProbeIsNotAnAnswer.
             throw new Error(`The time allowed for this step ran out before it could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
           }
-          if (isFatalProviderError(err) || isModelUnavailableError(err) || isStarvedBudgetError(err)) {
+          if (isFatalProviderError(err) || isModelUnavailableError(err) || isStarvedBudgetError(err) || isAccountingRefusalError(err)) {
             // 🔴 A STARVED RUNG IS RETIRED ON ITS FIRST OCCURRENCE, AND THE ARGUMENT IS NOT "PROBABLY"
             // (autopsy ee20478d, 2026-09-15). The authorised budget is a CONSTANT for the whole run —
             // 4,833 tokens, derived from a fixed cap and a fixed rate — and an agentic transcript only

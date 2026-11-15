@@ -169,22 +169,28 @@ export function cataloguePricedRouterOneClient(client: OpenAiChatClient, key: st
   deps: RouterOneAccountingDependencies): OpenAiChatClient {
   return { chat: { completions: { create: async (request, options) => {
     const scope = scopes.getStore(), turn = turns.getStore();
-    if (!scope?.binding || scope.stopped || !turn || options?.signal?.aborted) throw new RouterOneAccountingUnavailableError();
-    if (!key.trim() || !Number.isSafeInteger(request.max_tokens) || request.max_tokens! <= 0 || request.max_tokens! > 65536) throw new RouterOneAccountingUnavailableError();
+    if (!scope?.binding) throw new RouterOneAccountingUnavailableError('no-accounting-scope');
+    if (scope.stopped) throw new RouterOneAccountingUnavailableError('scope-stopped-after-pending-attempt');
+    if (!turn) throw new RouterOneAccountingUnavailableError('no-turn-scope');
+    if (options?.signal?.aborted) throw new RouterOneAccountingUnavailableError('aborted');
+    if (!key.trim()) throw new RouterOneAccountingUnavailableError('no-api-key');
+    if (!Number.isSafeInteger(request.max_tokens) || request.max_tokens! <= 0 || request.max_tokens! > 65536) throw new RouterOneAccountingUnavailableError('max-tokens-out-of-range');
     const fetched = await (deps.prices ?? routerOnePublicPrices).snapshot(request.model);
     const snapshot: PublicPriceSnapshot = Object.freeze({ ...fetched, bands: Object.freeze(fetched.bands.map(b => Object.freeze({ ...b }))) });
     if (snapshot.model !== request.model || catalogueSnapshotIssue(snapshot, (deps.now ?? Date.now)(), ROUTER_ONE_PRICE_MAX_AGE_MS)
-      || snapshot.parserVersion !== 'router-one-product-jsonld-v1' || !/^[a-f0-9]{64}$/.test(snapshot.sourceSha256)) throw new RouterOneAccountingUnavailableError();
+      || snapshot.parserVersion !== 'router-one-product-jsonld-v1' || !/^[a-f0-9]{64}$/.test(snapshot.sourceSha256)) throw new RouterOneAccountingUnavailableError('price-snapshot-invalid-or-stale');
     const db = deps.store ? undefined : getServerDb();
     const store = deps.store ?? (db ? new FirestoreCatalogueAttemptStore(db) : undefined);
-    if (!store || scope.stopped || options?.signal?.aborted) throw new RouterOneAccountingUnavailableError();
+    if (!store) throw new RouterOneAccountingUnavailableError('no-attempt-store');
+    if (scope.stopped || options?.signal?.aborted) throw new RouterOneAccountingUnavailableError('stopped-or-aborted');
     const attempt: Attempt = { callId: randomUUID(), key: createHash('sha256').update(key).digest('hex'), snapshot,
       scope, store, requestId: null, done: false };
-    if (uncertainKeys.has(attempt.key) || !Number.isSafeInteger(deps.maxDurationMs) || deps.maxDurationMs <= 0) throw new RouterOneAccountingUnavailableError();
+    if (uncertainKeys.has(attempt.key)) throw new RouterOneAccountingUnavailableError('key-fenced-by-earlier-uncertain-attempt');
+    if (!Number.isSafeInteger(deps.maxDurationMs) || deps.maxDurationMs <= 0) throw new RouterOneAccountingUnavailableError('bad-max-duration');
     await store.reserve(scope.binding, attempt.callId, attempt.key, snapshot, (deps.now ?? Date.now)() + deps.maxDurationMs);
     turn.attempts.push(attempt);
     try {
-      if (scope.stopped || options?.signal?.aborted) throw new RouterOneAccountingUnavailableError();
+      if (scope.stopped || options?.signal?.aborted) throw new RouterOneAccountingUnavailableError('stopped-or-aborted-before-dispatch');
       const raw = await dispatches.run(attempt, () => client.chat.completions.create(request, options));
       if (Symbol.asyncIterator in raw) {
         const stream = raw as OpenAiChatStream;

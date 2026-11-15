@@ -7,10 +7,26 @@ import { PublicBuildEngineError } from '../../lib/buildEngineError';
 export const isRouterOneAccountingProvider = (provider: string): boolean => provider.toUpperCase() === 'ENGINE_R1';
 
 export class RouterOneAccountingUnavailableError extends PublicBuildEngineError {
-  constructor() {
+  /**
+   * `reason` names WHICH of our own pre-flight fences refused the call. Non-enumerable, like `code`: the public
+   * boundary stays supplier-free (message, name, stack only) and the admin report can still say why. 🔴 Autopsy
+   * 57604006: ENGINE_R1 "failed" 45 of 45 and 28 of 28 calls with the public wording alone, so the report blamed the
+   * provider for what may have been our own accounting refusing to dispatch.
+   */
+  constructor(reason: string = 'unspecified') {
     super();
     Object.defineProperty(this, 'code', { value: 'ROUTER_ONE_ACCOUNTING_UNAVAILABLE', enumerable: false });
+    Object.defineProperty(this, 'reason', { value: reason, enumerable: false });
   }
+}
+
+/** Did OUR accounting fence refuse this call (no request was dispatched on its account)? PURE. */
+export function isRouterOneAccountingRefusal(error: unknown): boolean {
+  return error instanceof RouterOneAccountingUnavailableError;
+}
+/** The fence that refused, for the admin report. PURE. */
+export function routerOneRefusalReason(error: unknown): string | undefined {
+  return error instanceof RouterOneAccountingUnavailableError ? String((error as { reason?: unknown }).reason ?? 'unspecified') : undefined;
 }
 
 /** X-Request-ID is the documented settlement correlation key, not the completion id.

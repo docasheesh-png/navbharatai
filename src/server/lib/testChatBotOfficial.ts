@@ -9,6 +9,8 @@ const OPENAI_URLS = new Set([
   'https://api.moonshot.cn/v1/chat/completions',
   'https://api.x.ai/v1/chat/completions',
   'https://openrouter.ai/api/v1/chat/completions',
+  // Router One's official endpoint (ROUTER_ONE_DEFAULT_BASE_URL); a custom ROUTER_ONE_BASE_URL is never called from here.
+  'https://api.router.one/v1/chat/completions',
 ]);
 const OPENROUTER_FREE_GUARD = {
   provider: { allow_fallbacks: false, require_parameters: true, data_collection: 'deny', max_price: { prompt: 0, completion: 0, request: 0, image: 0 } },

@@ -39,6 +39,7 @@ import { generateGameController } from './GameControllerGenerator';
 import { generateGameSystems } from './GameSystemsGenerator';
 import { generateGameVfxAudio } from './GameVfxAudioGenerator';
 import { generateMelody } from './MelodyGenerator';
+import { generateGameRoyale } from './GameRoyaleGenerator';
 import { generateGameShell } from './GameShellGenerator';
 import { generateAthreeMap } from './athreeMap/AthreeMapGenerator';
 import { createHash } from 'node:crypto';
@@ -62,6 +63,7 @@ export const GAME_RECIPES: Readonly<Record<string, (include?: string[]) => Recip
   generate_game_vfx: generateGameVfxAudio,
   generate_melody: generateMelody,
   generate_game_shell: generateGameShell,
+  generate_game_royale: generateGameRoyale,
   generate_athree_map: generateAthreeMap,
 };
 

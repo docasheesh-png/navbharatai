@@ -121,21 +121,20 @@ export function treesInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
       const tint = rng();
       const pick = rng();
       if (px < x0 || px >= x1 || pz < z0 || pz >= z1) continue;
+      // No biome admits more than 85% of candidates. Reject before costly river-carved terrain queries.
+      if (roll >= 0.85) continue;
       const h = world.heightAt(px, pz);
       if (h < 0.8) continue;
-      if (world.waterAt(px, pz) || world.roadAt(px, pz)) continue;
       const biome = world.biomeAt(px, pz);
+      if (biome !== 'forest' && biome !== 'grassland' && biome !== 'mountain' && biome !== 'beach') continue;
       const grove = fieldNoise(px, pz, seed + 11, 3, 140, period);
-      const conif = fieldNoise(px, pz, seed + 12, 2, 420, period);
       let p = 0;
       let species: Species = 'broadleaf';
       let minUp = 0.8;
       if (biome === 'forest') {
         p = 0.85 * smoothstep(0.3, 0.45, grove);
-        species = conif > 0.52 ? 'conifer' : 'broadleaf';
       } else if (biome === 'grassland') {
         p = 0.04 + 0.5 * smoothstep(0.6, 0.78, grove);
-        species = conif > 0.62 ? 'conifer' : 'broadleaf';
       } else if (biome === 'mountain') {
         p = 0.4 * smoothstep(0.35, 0.5, grove) * Math.min(1, Math.max(0, 1.2 - (h - 150) / 450));
         species = 'conifer';
@@ -146,7 +145,13 @@ export function treesInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
         minUp = 0.92;
       }
       if (roll >= p) continue;
+      // These pure queries cannot affect candidate randomness. Water still rejects every admitted tree.
+      if (world.waterAt(px, pz) || world.roadAt(px, pz)) continue;
       if (world.normalAt(px, pz).y < minUp) continue;
+      if (biome === 'forest' || biome === 'grassland') {
+        const conif = fieldNoise(px, pz, seed + 12, 2, 420, period);
+        species = conif > (biome === 'forest' ? 0.52 : 0.62) ? 'conifer' : 'broadleaf';
+      }
       const scale = species === 'palm' ? 0.85 + 0.3 * sizeR : 0.8 + 0.58 * sizeR;
       out.push({ x: px, y: h - 0.15, z: pz, rot, scale, species, variant: Math.floor(pick * VARIANTS[species]), tint });
     }

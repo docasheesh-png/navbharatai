@@ -17,8 +17,9 @@ import { architectSystemPrompt } from '../src/server/AgentV3/systemPrompt';
 
 class Fake implements ActuatorPort {
   files = new Map<string, string>();
+  writes: string[] = [];
   async readFile(_w: string, p: string): Promise<string> { const f = this.files.get(p); if (f === undefined) throw new Error('ENOENT: ' + p); return f; }
-  async writeFile(_w: string, p: string, c: string): Promise<void> { this.files.set(p, c); }
+  async writeFile(_w: string, p: string, c: string): Promise<void> { this.writes.push(p); this.files.set(p, c); }
   async listFiles(): Promise<string[]> { return [...this.files.keys()]; }
   async runCommand() { return { exitCode: 0, stdout: '', stderr: '' }; }
 }
@@ -134,7 +135,7 @@ describe('a spec', () => {
   it('two different objects share one engine file', async () => {
     await forge({ spec: lamp() });
     await forge({ spec: { ...lamp(), id: 'street-lamp-2' } });
-    expect([...act.files.keys()].filter((p) => p.startsWith('src/game/forge/'))).toEqual(['src/game/forge/forge.ts']);
+    expect([...act.files.keys()].filter((p) => p.startsWith('src/game/forge/')).sort()).toEqual(['src/game/forge/customise.ts', 'src/game/forge/forge.ts']);
     expect([...act.files.keys()].filter((p) => p.startsWith('src/game/objects/')).sort()).toEqual(['src/game/objects/street-lamp-2.ts', 'src/game/objects/street-lamp.ts']);
   });
 
@@ -234,5 +235,72 @@ describe('describe: the user\'s words in, an object out (self-authoring)', () =>
     const r = await forge({ describe: 'a street lamp' });
     expect(r.is_error).toBe(true);
     expect(seen.length).toBe(0);
+  });
+});
+
+describe('customise: the user\'s words change an object that exists', () => {
+  const paramsOf = (path: string) => JSON.parse(act.files.get(path)!.split('export const SPEC: ObjectSpec = ')[1].split(';\n\n/**')[0]).params;
+
+  it('starts from a person, applies the wishes, and writes the changed object', async () => {
+    const r = await forge({ customise: 'ladki banao, baal lambe karo, dress ka rang neela karo', target: 'sita', base: 'person' });
+    expect(r.is_error).toBeFalsy();
+    expect(text(r)).toMatch(/Changed: gender → female; hair length → long; dress \(dress\)? ?→|Changed: .*gender → female.*hair length → long/);
+    expect(act.files.has('src/game/objects/sita.ts')).toBe(true);
+    expect(paramsOf('src/game/objects/sita.ts')).toMatchObject({ gender: 'female', hairLength: 2, dress: true });
+    expect(text(r)).toMatch(/FRONT/);
+  });
+
+  it('edits COMPOUND: a second request keeps the first one\'s changes', async () => {
+    await forge({ customise: 'ladki banao, shirt ka rang lal', target: 'sita', base: 'person' });
+    await forge({ customise: 'thoda lamba karo, joote kaale karo', target: 'sita' });
+    const p = paramsOf('src/game/objects/sita.ts');
+    expect(p.gender).toBe('female'); expect(p.colors.top).toBe('#c62828'); expect(p.colors.shoes).toBe('#1a1a1a'); expect(p.height).toBeGreaterThan(1.8);
+  });
+
+  it('changes a part of an ordinary object: the door of a house, and only the door', async () => {
+    await forge({ spec: FORGE_EXAMPLES.house.spec });
+    const r = await forge({ customise: 'door ka rang neela karo', target: 'house' });
+    expect(text(r)).toMatch(/Changed: door → #1e5bb8/);
+    const saved = JSON.parse(act.files.get('src/game/objects/house.ts')!.split('export const SPEC: ObjectSpec = ')[1].split(';\n\n/**')[0]);
+    const door = saved.nodes.find((n: any) => n.name === 'door');
+    expect(saved.materials[door.material].color).toBe('#1e5bb8');
+    expect(saved.materials.wall.color).toBe((FORGE_EXAMPLES.house.spec as any).materials.wall.color);
+  });
+
+  it('a wish the object cannot take changes NOTHING, writes nothing new, and says why', async () => {
+    await forge({ spec: FORGE_EXAMPLES.house.spec });
+    const before = act.files.get('src/game/objects/house.ts');
+    act.writes.length = 0;
+    const r = await forge({ customise: 'ladki banao, baal bade karo', target: 'house' });
+    expect(act.writes).toEqual([]); // nothing was changed, so nothing was written at all (not even an identical file)
+    expect(text(r)).toMatch(/Nothing could be changed/); expect(text(r)).toMatch(/CANNOT be done/);
+    expect(act.files.get('src/game/objects/house.ts')).toBe(before);
+  });
+
+  it('what it did not understand comes back to the builder, with the part that WAS understood applied', async () => {
+    const r = await forge({ customise: 'shirt ka rang lal, kuch jaadu karo', target: 'p1', base: 'person' });
+    expect(text(r)).toMatch(/Changed: clothes/); expect(text(r)).toMatch(/NOT UNDERSTOOD.*jaadu/);
+  });
+
+  it('with no target, or a target that is not here, it lists what is here instead of guessing', async () => {
+    await forge({ spec: lamp() });
+    expect(text(await forge({ customise: 'neela karo' }))).toMatch(/Say which object to change.*street-lamp/);
+    expect(text(await forge({ customise: 'neela karo', target: 'castle' }))).toMatch(/no Forge object called "castle".*street-lamp.*base: "person"/);
+    expect(text(await forge({ customise: 'neela karo', target: '../etc/passwd' }))).toMatch(/Say which object to change/);
+  });
+
+  it('a spec the builder passes still wins over customise, and the kill switch stops customise too', async () => {
+    const seen = await forge({ customise: 'lal', target: 'x', spec: lamp({ id: 'mine' }) });
+    expect(seen.is_error).toBeFalsy(); expect(act.files.has('src/game/objects/mine.ts')).toBe(true);
+    process.env.AGENTV3_OBJECT_FORGE = 'off';
+    expect((await forge({ customise: 'lal', target: 'mine' })).is_error).toBe(true);
+  });
+
+  it('is described to the builder: the tool says it understands English, Hinglish and Hindi, and the prompt says to report exactly what it returns', () => {
+    const tool = defaultToolCatalog().find((t) => t.name === 'author_object')!;
+    const props = (tool.input_schema as any).properties;
+    expect(props.customise.description).toMatch(/Hinglish/); expect(props.target.type).toBe('string'); expect(props.base.enum).toEqual(['person']);
+    const prompt = architectSystemPrompt();
+    expect(prompt).toMatch(/customise: "<their words>"/); expect(prompt).toMatch(/never claim a change it did not make/);
   });
 });

@@ -371,6 +371,7 @@ import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/
 import { authorObject, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
 import { selfAuthorObject, madeCache } from '../lib/objectForge/forgeSelfAuthor';
+import { parseCustomisation, applyEdits, customiseSummary, nodeNamesOf, specFromObjectFile, personSpecFor } from '../lib/objectForge/forgeCustomise';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
@@ -9684,6 +9685,23 @@ export class ToolDispatcher {
         }
         let forgeSpec: unknown = forgeRec.spec;
         let madeNote = '';
+        // CUSTOMISE (admin 2026-11-15, "user ke bolte bhar se jo chahe edit ho jaye"): the user's words change an object that already exists
+        // here. Colours of named parts, size, and — for the Forge person — gender, hair length, a dress, build. What cannot be done is
+        // said, never skipped; what was not understood is returned for the builder to ask.
+        if ((forgeSpec === undefined || forgeSpec === null) && typeof forgeRec.customise === 'string' && forgeRec.customise.trim().length > 0) {
+          const targetId = typeof forgeRec.target === 'string' ? forgeRec.target.trim() : '';
+          const here = (await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[])).map((f) => String(f).replace(/^\.?\//, '')).filter((f) => f.startsWith(OBJECTS_DIR) && f.endsWith('.ts')).map((f) => f.slice(OBJECTS_DIR.length, -3));
+          if (!/^[a-z][a-z0-9-]{1,39}$/.test(targetId)) return `Say which object to change (target). Objects in this project: ${here.join(', ') || 'none yet'}.`;
+          const current = await this.actuator.readFile(this.workspaceId, `${OBJECTS_DIR}${targetId}.ts`).then(specFromObjectFile, () => null)
+            ?? (forgeRec.base === 'person' ? { ...personSpecFor(), id: targetId, name: 'Person' } : null);
+          if (!current) return `There is no Forge object called "${targetId}" here (objects: ${here.join(', ') || 'none yet'}). To start from a person, pass base: "person".`;
+          const wished = parseCustomisation(forgeRec.customise.trim().slice(0, 600), { materialKeys: Object.keys((current.materials as Record<string, unknown>) ?? {}), nodeNames: nodeNamesOf(current.nodes) });
+          const changed = applyEdits(current, wished.edits);
+          const summary = customiseSummary(changed, wished.unparsed);
+          if (changed.applied.length === 0) return summary;
+          forgeSpec = changed.spec;
+          madeNote = summary;
+        }
         // SELF-AUTHORING (admin 2026-11-15, "atma nirbhar"): the user's words in, an object out. The Forge asks a model for a spec, checks it,
         // shows the model its own drawing and has it correct, a few rounds. The FREE router namespace (never Claude, never NavBharatAI money).
         if ((forgeSpec === undefined || forgeSpec === null) && typeof forgeRec.describe === 'string' && forgeRec.describe.trim().length > 0) {

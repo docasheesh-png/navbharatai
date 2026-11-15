@@ -36,6 +36,7 @@ import { registerSbomRoutes } from './src/server/routes/sbom';
 import { registerLegalRoutes } from './src/server/routes/legal';
 import { registerSiteIndexRoutes } from './src/server/routes/siteIndex';
 import { registerMarketingRoutes } from './src/server/routes/marketing';
+import { registerUseCaseRoutes } from './src/server/routes/useCases';
 import { spaHeadFor, readSpaShell } from './src/server/lib/spaHead';
 import { siteOrigin } from './src/server/lib/siteIndex';
 import { registerCheckoutHandoffRoute } from './src/server/routes/checkoutHandoff';
@@ -794,6 +795,8 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   // PUBLIC product pages (/about, /pricing, /ai-app-builder, /indian-ai-assistant, /hindi-ai-assistant)
   // — server-rendered like the legal pages, declared in spaFallback.ts via MARKETING_PATHS.
   registerMarketingRoutes(app);
+  // Curated app ideas (/apps, /app/<slug>) — server HTML, not users' published apps.
+  registerUseCaseRoutes(app);
   // robots.txt + sitemap.xml, derived from the same legal-page list (declared in spaFallback.ts too).
   registerSiteIndexRoutes(app);
   // PUBLIC checkout hand-off (/pay) — the ONE origin the payment gateway has approved. The native

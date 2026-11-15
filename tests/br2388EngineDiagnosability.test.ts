@@ -366,6 +366,30 @@ describe('fix 3 — existing locks self-heal on reserve (no manual Firestore wri
     await new FirestoreCatalogueAttemptStore(db).reserve(binding, 'new', 'key', snapshot(), Date.now() + 60000);
     expect(rows.get('router_one_catalogue_attempts/ghost')).toMatchObject({ status: 'self-healed-estimate', result: { basis: 'self-heal-unrecorded', costAttoUsd: '0' } });
   });
+  // Side-effect guards (owner t311u: a fix must not create a new problem).
+  it('an unresolved entry whose call is ALREADY settled is released only — never priced a second time', async () => {
+    const { db, rows } = database();
+    const settled = { callId: 'done', status: 'catalogue-calculated', result: { kind: 'catalogue-calculated', costAttoUsd: VERIFIED_COST } };
+    rows.set('router_one_catalogue_attempts/done', settled);
+    rows.set('router_one_accounting_keys/key', { version: 2, active: { done: Date.now() + 60000 }, unresolved: { done: true } });
+    await new FirestoreCatalogueAttemptStore(db).reserve(binding, 'new', 'key', snapshot(), Date.now() + 60000);
+    expect(rows.get('router_one_catalogue_attempts/done')).toEqual(settled);
+    expect(rows.get('router_one_accounting_keys/key')).toMatchObject({ unresolved: {} });
+    expect((rows.get('router_one_accounting_keys/key') as { active: Record<string, number> }).active.done).toBeUndefined();
+  });
+  it('a call still in flight (deadline not reached) is never self-healed by another reserve on the same key', async () => {
+    const { db, rows } = database(); const t = now;
+    const store = new FirestoreCatalogueAttemptStore(db, () => t);
+    await store.reserve(binding, 'live', 'key', snapshot(), t + 60000, 500);
+    await store.reserve(binding, 'second', 'key', snapshot(), t + 60000);
+    expect(rows.get('router_one_catalogue_attempts/live')).toMatchObject({ status: 'reserved' });
+    expect(rows.get('router_one_accounting_keys/key')).toMatchObject({ unresolved: {}, active: { live: t + 60000, second: t + 60000 } });
+  });
+  it('a successful (2xx) response without usage is estimated from size, never settled at zero', () => {
+    const e = estimateCatalogueChatCost(snapshot(), undefined, { requestInputTokens: 1000, outputChars: 400, httpStatus: 200 })!;
+    expect(e.basis).toBe('request-heuristic');
+    expect(BigInt(e.costAttoUsd)).toBeGreaterThan(0n);
+  });
   it('the local uncertainty fence is bounded by the call deadline, and still fails closed when saturated', () => {
     const fence = createRouterOneUncertainFence(2);
     fence.add('k', 2000, 1000);

@@ -569,12 +569,15 @@ function reflectClips(clips: Record<string, ForgeTrack[]>, axis: Axis, phase: nu
   return out;
 }
 
+export const MAX_EXPANDED_NODES = 400;
+
 export function expandNodes(spec: ObjectSpec): ExpandedNode[] {
   const out: ExpandedNode[] = [];
   // One mesh per DISTINCT shape: every node whose shape is the same as an earlier node's (a copy, a mirror, the same wheel under the second
   // carriage of a train) builds from that earlier node's geometry, so a longer train costs no more shapes.
   const firstWithShape = new Map<string, number>();
   const emit = (node: ForgeNode, parent: number, suffix: string, copyOf: number | null, pos: Vec3, rot: Vec3, scl: Vec3, clips: Record<string, ForgeTrack[]>): number => {
+    if (out.length >= MAX_EXPANDED_NODES) throw new Error('the object expands to ' + (MAX_EXPANDED_NODES + 1) + ' nodes or more; the limit is ' + MAX_EXPANDED_NODES);
     const index = out.length;
     let source = copyOf ?? index;
     if (node.shape) {
@@ -585,7 +588,7 @@ export function expandNodes(spec: ObjectSpec): ExpandedNode[] {
     out.push({ name: node.name + suffix, parent, shape: node.shape, material: node.material, position: pos, rotation: rot, scale: scl, clips, source });
     return index;
   };
-  const visit = (node: ForgeNode, parent: number, suffix: string): void => {
+  const visit = (node: ForgeNode, parent: number, suffix: string, contextDepth = 0): void => {
     const basePos = unit(node.position, 0);
     const baseRot = unit(node.rotation, 0);
     const baseScl = unit(node.scale, 1);
@@ -612,18 +615,22 @@ export function expandNodes(spec: ObjectSpec): ExpandedNode[] {
       // What the children inherit: a repeated parent's copy number carries a "p" (for parent), so the second copy of a child under the first
       // copy of its parent (window_1) can never be the same name as the first copy of that child under the second copy of the parent (window_1p).
       // A mirror adds nothing here, so a mirrored limb's parts stay hand_mirror, knee_mirror.
-      const childContext = suffix + (i > 0 ? '_' + i + 'p' : '');
-      for (const child of node.children ?? []) visit(child, idx, childContext);
+      // Include branching-ancestor depth even when earlier ancestors use their zero copy.
+      // Otherwise A0/B1/C and A1/B0/C both become C_1p.
+      const childContext = suffix + (i > 0 ? '_' + i + 'p' + (contextDepth || '') : '');
+      const childContextDepth = contextDepth + (repeats > 1 || node.mirror ? 1 : 0);
+      for (const child of node.children ?? []) visit(child, idx, childContext, childContextDepth);
       if (node.mirror) {
         const ax = axisIndex(node.mirror);
         const mpos: Vec3 = [pos[0], pos[1], pos[2]]; mpos[ax] = -mpos[ax];
         const mrot: Vec3 = [rot[0], rot[1], rot[2]];
         for (let k = 0; k < 3; k++) if (k !== ax) mrot[k] = -mrot[k];
         const mscl: Vec3 = [baseScl[0], baseScl[1], baseScl[2]]; mscl[ax] = -mscl[ax];
-        const msuffix = copySuffix + '_mirror';
+        const mirrorTag = '_mirror' + (contextDepth || '');
+        const msuffix = copySuffix + mirrorTag;
         emit(node, parent, msuffix, first, mpos, mrot, mscl, reflectClips(clips, node.mirror, node.mirrorPhase ?? 0));
         const mIdx = out.length - 1;
-        for (const child of node.children ?? []) visit(child, mIdx, childContext + '_mirror');
+        for (const child of node.children ?? []) visit(child, mIdx, childContext + mirrorTag, childContextDepth);
       }
     }
   };
@@ -788,3 +795,4 @@ export function createObject(THREE: ThreeLike, spec: ObjectSpec): ForgeObject {
   };
 }
 `;
+

@@ -198,7 +198,12 @@ export function currentRouterOneCatalogueReceipts(): readonly RouterOneCatalogue
  * narrow: anything not listed is billed by the conservative request estimate.
  */
 const SETUP_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT',
-  'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'ERR_TLS_CERT_ALTNAME_INVALID', 'ERR_SSL_WRONG_VERSION_NUMBER']);
+  'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'ERR_TLS_CERT_ALTNAME_INVALID', 'ERR_SSL_WRONG_VERSION_NUMBER',
+  // Review 3: getaddrinfo (EAI_*) and local-bind (EADDRNOTAVAIL) failures happen before a socket exists, and
+  // these TLS codes only arise in the handshake, before any request byte is sent — never after dispatch.
+  'EAI_NONAME', 'EAI_FAIL', 'EAI_NODATA', 'EAI_ADDRFAMILY', 'EADDRNOTAVAIL',
+  'ERR_TLS_HANDSHAKE_TIMEOUT', 'ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE', 'ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION',
+  'ERR_SSL_UNSUPPORTED_PROTOCOL', 'ERR_SSL_NO_PROTOCOLS_AVAILABLE']);
 const SETUP_CODE_RE = /^(?:CERT_|UNABLE_TO_(?:GET_ISSUER_CERT|VERIFY_LEAF_SIGNATURE|GET_CRL|DECRYPT_CERT))|_CERT_(?:NOT_YET_VALID|HAS_EXPIRED|REVOKED|UNTRUSTED|REJECTED)$/;
 /**
  * After dispatch: timeouts, aborts, and connections dropped once the request may already have been

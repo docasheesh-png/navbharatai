@@ -864,7 +864,8 @@ estimate always uses the parsed, published per-model tariff snapshot bound to th
   connection was provably never set up → `no-response-network`, a labelled zero. "Provably" means one
   of these codes anywhere in the error's `cause` chain (undici puts it on `TypeError('fetch failed')
   .cause`; the SDK wraps that again): `ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`, `EHOSTUNREACH`,
-  `ENETUNREACH`, `UND_ERR_CONNECT_TIMEOUT`, or a TLS certificate/handshake code. A request stopped
+  `ENETUNREACH`, `UND_ERR_CONNECT_TIMEOUT`, the other pre-socket DNS/bind codes (`EAI_NONAME`,
+  `EAI_FAIL`, `EAI_NODATA`, `EAI_ADDRFAMILY`, `EADDRNOTAVAIL`), or a TLS certificate/handshake-only code. A request stopped
   after admission but before the SDK was called → `not-dispatched`, a labelled zero. Both release the
   key.
 - **After dispatch keeps the estimate.** Timeouts and aborts (SDK timeout, `AbortError`, the caller's

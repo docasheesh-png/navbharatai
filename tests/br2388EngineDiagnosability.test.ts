@@ -459,6 +459,15 @@ describe('review 2 — a call that never got any HTTP response is not billed (ne
       expect(routerOneNetworkSetupFailure(Object.assign(new Error('Connection error.'), { cause: fetchFailed(sysErr(code)) })), code).toBe(true);
     }
   });
+  it('review 3: pre-socket DNS/bind and handshake-only TLS codes are setup failures in every wrapping; an after-dispatch code still wins', () => {
+    for (const code of ['EAI_NONAME', 'EAI_FAIL', 'EAI_NODATA', 'EAI_ADDRFAMILY', 'EADDRNOTAVAIL', 'ERR_TLS_HANDSHAKE_TIMEOUT',
+      'ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE', 'ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION', 'ERR_SSL_UNSUPPORTED_PROTOCOL', 'ERR_SSL_NO_PROTOCOLS_AVAILABLE']) {
+      expect(routerOneNetworkSetupFailure(fetchFailed(sysErr(code))), code).toBe(true);
+      expect(routerOneNetworkSetupFailure(Object.assign(new Error('Connection error.'), { name: 'APIConnectionError', cause: fetchFailed(sysErr(code)) })), code).toBe(true);
+      expect(routerOneNetworkSetupFailure(fetchFailed(Object.assign(sysErr('ECONNRESET'), { cause: sysErr(code) }))), code).toBe(false);
+      expect(routerOneNetworkSetupFailure(fetchFailed(sysErr(code)), true), code).toBe(false);
+    }
+  });
   it('classifier: timeouts, aborts, the caller\'s signal and unknown errors are NOT setup failures (supplier may have worked)', () => {
     const timeout = Object.assign(new Error('Request timed out.'), { name: 'APIConnectionTimeoutError' });
     const abort = Object.assign(new Error('aborted'), { name: 'AbortError' });
@@ -484,7 +493,8 @@ describe('review 2 — a call that never got any HTTP response is not billed (ne
   it('classifier: an error with NO code anywhere is decided conservatively (estimated, not zero)', () => {
     expect(routerOneNetworkSetupFailure(new TypeError('fetch failed'))).toBe(false);
     expect(routerOneNetworkSetupFailure(Object.assign(new Error('Connection error.'), { name: 'APIConnectionError', cause: new TypeError('fetch failed') }))).toBe(false);
-    expect(routerOneNetworkSetupFailure(sysErr('EAI_NONAME'))).toBe(false); // unlisted code → conservative
+    expect(routerOneNetworkSetupFailure(sysErr('EHOSTDOWN'))).toBe(false); // unlisted code → conservative
+    expect(routerOneNetworkSetupFailure(fetchFailed(sysErr('ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC')))).toBe(false); // mid-session TLS → estimated
     const loop: { code?: string; cause?: unknown } = {}; loop.cause = loop;
     expect(routerOneNetworkSetupFailure(loop)).toBe(false); // a cyclic chain terminates
   });
@@ -498,7 +508,8 @@ describe('review 2 — a call that never got any HTTP response is not billed (ne
     expect(r.charges).toEqual({ costUsd: 0, billedUsd: 0, absorbedUsd: 0 });
   });
   for (const [label, err] of [['DNS ENOTFOUND', sysErr('ENOTFOUND')], ['DNS EAI_AGAIN', sysErr('EAI_AGAIN')], ['TLS', sysErr('ERR_TLS_CERT_ALTNAME_INVALID')],
-    ['connect timeout', sysErr('UND_ERR_CONNECT_TIMEOUT')], ['unreachable', sysErr('EHOSTUNREACH')]] as const) {
+    ['connect timeout', sysErr('UND_ERR_CONNECT_TIMEOUT')], ['unreachable', sysErr('EHOSTUNREACH')], ['DNS EAI_FAIL', sysErr('EAI_FAIL')], ['local bind', sysErr('EADDRNOTAVAIL')],
+    ['TLS handshake', sysErr('ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE')]] as const) {
     it(`scope-classifier billing path: ${label} before any response → $0`, async () => {
       const r = await scopeAskBilled(async () => { throw fetchFailed(err); });
       expect(r.receipts[0]).toMatchObject({ estimateBasis: 'no-response-network', costAttoUsd: '0' });

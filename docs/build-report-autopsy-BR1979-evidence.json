@@ -1,0 +1,149 @@
+{
+  "identity": {
+    "reportNumber": 1979,
+    "outcome": "succeeded",
+    "ok": true,
+    "prompt": "ake app  banane jisse free mein I video Bani",
+    "promptLength": 44,
+    "promptHash": "13a9d071",
+    "reportDigest": "eceae6baf1900c4a9417d8a2fbca5b336f64f6c9dec495b9990592cce1ad7894",
+    "buildId": "f6b4a1c4-8bf2-4146-862d-9c664eb07f42",
+    "workspaceId": "agentv3-ZrVaqgCcMgV547p4NvcDN7jmleI3-435a37cd-d40d-446f-a73a-c6df8b56dea8",
+    "historyId": "1794111631876",
+    "sessionId": "435a37cd-d40d-446f-a73a-c6df8b56dea8",
+    "model": "qwen3-coder",
+    "framework": "vite-react",
+    "builtBy": "SURPLUS",
+    "startedAt": 1794111631876,
+    "endedAt": 1794112712469,
+    "startedAtIST": "2026-11-08 09:50:31.876 IST",
+    "endedAtIST": "2026-11-08 10:08:32.469 IST",
+    "userWaitMs": 30001
+  },
+  "rawReportSha256": "ab236aead2df8ebba8bb5b5c2cfbfd3efc3b7587cd4ff21024334c490391587d",
+  "truncation": {
+    "complete": true
+  },
+  "counts": {
+    "total": 417,
+    "errors": 1,
+    "warnings": 15,
+    "autoResolved": 11,
+    "workarounds": 1,
+    "leftOpen": 1,
+    "healRule": 3,
+    "unresolved": 6
+  },
+  "billing": {
+    "userTier": "weak (free tier \u2014 cheap engines) \u00b7 charged \u20b95.15",
+    "charged": true,
+    "billedButNotDebited": false,
+    "walletDebited": true,
+    "billedUsd": 0.054686,
+    "billedInr": 5.15,
+    "realCostUsd": 0.005928,
+    "sandboxCostUsd": 0.046046,
+    "preSandboxSubtotalUsd": 0.053352000000000004,
+    "sandboxFeeUsd": 0.0013338,
+    "sandboxFeePct": 2.5,
+    "walletTokensDebited": 514,
+    "walletDebitedInr": 5.14,
+    "powerMode": false,
+    "powerLevel": "weak",
+    "noClaude": true
+  },
+  "etaAccuracy": {
+    "promisedMs": 346606,
+    "lowMs": 237555,
+    "highMs": 561641,
+    "actualMs": 1050592,
+    "ratio": 3.031084285903879,
+    "withinBand": false,
+    "evidenced": true,
+    "line": "The user was shown 4.0 min\u20139.4 min (midpoint 5.8 min); the build took 17.5 min \u2014 3.0\u00d7 the midpoint and OVER the band (not counting 0.5 min spent waiting for the user's answer).",
+    "key": "app_unsized",
+    "source": "platform"
+  },
+  "requestAnalysis": {
+    "taskType": "app_unsized",
+    "complexityScore": 15,
+    "startTier": "gemini",
+    "startBand": "cheapest band"
+  },
+  "providerDelivery": {
+    "SURPLUS": 93
+  },
+  "providerTokens": {
+    "SURPLUS": {
+      "inputTokens": 3993355,
+      "outputTokens": 26780,
+      "cacheReadInputTokens": 3640896
+    }
+  },
+  "providerWaste": {
+    "msByKind": {
+      "timeout": 0,
+      "crawl": 0,
+      "silent": 0,
+      "rate-limit": 0,
+      "error": 0
+    },
+    "callsByKind": {
+      "timeout": 0,
+      "crawl": 0,
+      "silent": 0,
+      "rate-limit": 0,
+      "error": 0
+    },
+    "msByFamily": {},
+    "buildMs": 1080583
+  },
+  "sandboxUnavailable": "E2B concurrent cap of 20 at 09:50:32 IST; SANDBOX_RECOVERED at 10:08:27 IST",
+  "fastLane": {
+    "refusedWrites": [
+      "src/types.ts",
+      "src/hooks/useVideoRecording.ts",
+      "src/utils/videoUtils.ts",
+      "src/utils.ts",
+      "src/components/VideoRecorder.tsx",
+      "index.html"
+    ],
+    "verifyError": "tsconfig.json(33,5): error TS6053: File '/home/user/workspace/tsconfig.node.json' not found",
+    "outcome": "TYPECHECK_FAILED",
+    "salvaged": 11,
+    "phases": "104.6s: plan 3.5s, contract 5.1s, generate 59s, verify 11s over 2 runs, repair 16.6s over 1 round"
+  },
+  "writeTimeTypecheck": "11 run(s), 11 clean, 0 error(s), 19s total",
+  "releaseGate": "YELLOW \u2014 app rendered but its own screen shows a camera/microphone error in a headless preview",
+  "manifestFiles": [
+    ".gitignore",
+    "README.md",
+    "docs/decisions/ADR-001.md",
+    "e2e/smoke.spec.ts",
+    "index.html",
+    "package.json",
+    "playwright.config.ts",
+    "public/icon.svg",
+    "public/manifest.webmanifest",
+    "public/nbai-native.css",
+    "public/robots.txt",
+    "public/sw.js",
+    "src/App.tsx",
+    "src/components/VideoPreview.tsx",
+    "src/components/VideoRecorder.tsx",
+    "src/main.tsx",
+    "src/styles/app.css",
+    "src/types.ts",
+    "src/utils.ts",
+    "tsconfig.json",
+    "vite.config.ts"
+  ],
+  "closedOnMainBy": {
+    "D1_no_goodbye_retry": "BR1961 F2 #4146 sandboxUnavailableNotice",
+    "D2_skip_fast_lane_when_sandbox_unavailable": "BR1952 #4124 FAST_LANE_SKIPPED_SANDBOX"
+  },
+  "shipped": "sanitizeTsconfigReferences (D3) plus tests and ledger; D1/D2 already on main, locked against this report",
+  "queueUpdated": [
+    "Q-2621"
+  ]
+}

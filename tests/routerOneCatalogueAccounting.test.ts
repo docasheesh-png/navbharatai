@@ -58,14 +58,18 @@ describe('catalogue dispatch and pending spend fence', () => {
       expect(h.create).not.toHaveBeenCalled();
     }
   });
-  // Owner 2026-11-15: an unknown cost is absorbed and the build keeps going — it used to block every later call.
-  it('preserves successful output with missing usage, records it pending (absorbed) and keeps dispatching', async () => {
+  // OWNER 2026-11-15 (BR2388): missing usage is settled by a labelled ESTIMATE and the key released; it no
+  // longer leaves a permanent lock that blocks every later call.
+  it('preserves successful output with missing usage, settles it by estimate and keeps the key open', async () => {
     const h = harness({ model, choices: [{ message: { content: 'preserve this' } }] });
     await runInRouterOneAccountingScope(binding, async () => {
       expect(await h.call()).toMatchObject({ choices: [{ message: { content: 'preserve this' } }] });
-      expect(h.store.finish).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({ kind: 'pending', reason: 'incomplete-usage' }));
+      expect(h.store.finish).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({
+        kind: 'catalogue-estimated', estimateBasis: 'request-heuristic', expenseEvidence: 'official-public-tariff-estimate',
+        estimateLabel: expect.stringMatching(/^Estimated/) }));
+      expect(h.store.releaseVerified).toHaveBeenCalledTimes(1);
       await h.call(); expect(h.create).toHaveBeenCalledTimes(2);
-      expect(currentRouterOneCatalogueReceipts()).toEqual([]);
+      expect(currentRouterOneCatalogueReceipts().map(r => r.kind)).toEqual(['catalogue-estimated', 'catalogue-estimated']);
     });
   });
   it('does not replay a response when final persistence fails, and does not fence the key', async () => {
@@ -92,11 +96,12 @@ describe('catalogue dispatch and pending spend fence', () => {
     h.create.mockRejectedValueOnce(new Error('connection lost'));
     await runInRouterOneAccountingScope(binding, async () => {
       await expect(h.call()).rejects.toThrow('connection lost');
-      expect(h.store.finish).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({ kind: 'pending' }));
-      await h.call(); expect(h.create).toHaveBeenCalledTimes(2);
+      // settled by a conservative request-size estimate and released, so the next call may dispatch
+      expect(h.store.finish).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({ kind: 'catalogue-estimated', estimateBasis: 'request-heuristic' }));
+      await expect(h.call()).rejects.toThrow('connection lost'); expect(h.create).toHaveBeenCalledTimes(2);
     });
   });
-  it('observes final streaming usage; incomplete streams remain pending', async () => {
+  it('observes final streaming usage; incomplete streams are settled by estimate', async () => {
     const stream: OpenAiChatStream = { async *[Symbol.asyncIterator]() { yield { model, choices: [{ delta: { content: 'done' } }] }; yield { model, usage }; } };
     const h = harness(stream);
     await runInRouterOneAccountingScope(binding, async () => {
@@ -112,9 +117,10 @@ describe('catalogue dispatch and pending spend fence', () => {
         const r = await partial.client.chat.completions.create({ model, messages: [], max_tokens: 1000, stream: true });
         await (r as OpenAiChatStream)[Symbol.asyncIterator]().next(); // same early-exit shape as runner deadlines
       });
-      // The cut-short stream is absorbed (no receipt), and the next call is still dispatched.
-      await partial.call(); expect(partial.create).toHaveBeenCalledTimes(2);
-      expect(partial.store.finish).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({ kind: 'pending' }));
+      const receipts = currentRouterOneCatalogueReceipts();
+      expect(receipts).toHaveLength(1);
+      expect(receipts[0]).toMatchObject({ kind: 'catalogue-estimated', estimateBasis: 'request-heuristic', outputTokens: 1 });
+      expect(partial.store.releaseVerified).toHaveBeenCalledTimes(1);
     });
   });
   it('attaches issued evidence to runner results without changing output', async () => {

@@ -8,7 +8,7 @@ import type { OpenAiChatClient, OpenAiChatStream } from '../../AgentV3/providers
 import { audit } from '../../lib/audit';
 import { BoundedCache } from '../../lib/boundedCache';
 import { getServerDb } from '../../lib/serverDb';
-import { calculateCatalogueChatCost, catalogueSnapshotIssue, estimateCatalogueChatCost, type CatalogueEstimateBasis } from './catalogueMath';
+import { calculateCatalogueChatCost, catalogueSnapshotIssue, catalogueUsageIntegrityIssue, type CatalogueEstimateBasis } from './catalogueMath';
 import { estimateMessagesTokens, estimateTokens } from '../../AgentV3/TokenEstimator';
 import { RouterOnePublicPriceSource, routerOnePublicPrices, ROUTER_ONE_PRICE_MAX_AGE_MS, type PublicPriceSnapshot } from './publicPriceSource';
 import { isRouterOneAccountingProvider, RouterOneAccountingUnavailableError, routerOneAccountingGate } from './accounting';
@@ -16,8 +16,8 @@ import { markRestOfBuildSkip } from '../../lib/engineSafeDiag';
 
 export interface CatalogueCallBinding { buildId: string; uid: string; workspaceId: string }
 export interface RouterOneCatalogueReceipt extends CatalogueCallBinding {
-  /** `catalogue-calculated`: complete usage priced exactly. `catalogue-estimated` (owner 2026-11-15,
-   * BR2388): no complete receipt, so the same published tariff priced an estimate — see `estimateBasis`. */
+  /** Complete usage is priced exactly. The estimate variant is retained as an inactive
+   * compatibility shape; this conservative adapter does not issue or bill it. */
   kind: 'catalogue-calculated' | 'catalogue-estimated';
   expenseEvidence: 'official-public-tariff' | 'official-public-tariff-estimate'; settledWalletDebit: false;
   callId: string; model: string; credentialSha256: string; requestId: string | null;
@@ -58,36 +58,11 @@ export class FirestoreCatalogueAttemptStore implements CatalogueAttemptStore {
     if (!Number.isSafeInteger(deadlineAt) || deadlineAt <= this.now()) throw new RouterOneAccountingUnavailableError('reserve_deadline');
     const state = this.db.doc(`router_one_accounting_keys/${key}`);
     const attempt = this.db.doc(`router_one_catalogue_attempts/${callId}`);
-    const healed: Array<{ callId: string; basis: string; costAttoUsd: string; previousStatus: string }> = [];
     const admitted = await this.db.runTransaction(async tx => {
-      healed.length = 0; // a retried transaction starts over
       const previous = await tx.get(state), next = keyState(previous.exists ? previous.data() : undefined);
       for (const [id, deadline] of Object.entries(next.active)) if (deadline <= this.now()) next.unresolved[id] = true;
-      // 🔓 SELF-HEAL (owner 2026-11-15, BR2388). An unresolved entry is an EARLIER call whose build is over
-      // (its deadline passed, or it finished without a complete receipt). It used to hold the key's lock
-      // forever. It is now settled here, in the same transaction, by an estimate from the tariff snapshot
-      // bound to it, recorded as estimated and ABSORBED (its build already settled its bill), and released.
-      // At most SELF_HEAL_MAX_PER_RESERVE per transaction; any remainder still refuses, visibly, and the
-      // next build's reserve settles the next batch.
-      const ids = Object.keys(next.unresolved).slice(0, SELF_HEAL_MAX_PER_RESERVE);
-      const rows = await Promise.all(ids.map(async id => ({ id, row: await tx.get(this.db.doc(`router_one_catalogue_attempts/${id}`)) })));
-      const updates: Array<() => void> = [];
-      for (const { id, row } of rows) {
-        const data = row.exists ? row.data() as Record<string, unknown> | undefined : undefined;
-        const status = typeof data?.status === 'string' ? data.status : 'missing';
-        if (status === 'catalogue-calculated' || status === 'catalogue-estimated' || status === 'self-healed-estimate') {
-          // Already settled (e.g. its release acknowledgement was lost): release only, never price twice.
-          delete next.active[id]; delete next.unresolved[id];
-          continue;
-        }
-        const heal = selfHealEstimate(data);
-        healed.push({ callId: id, basis: heal.basis, costAttoUsd: heal.costAttoUsd, previousStatus: status });
-        const ref = this.db.doc(`router_one_catalogue_attempts/${id}`);
-        const record = { status: 'self-healed-estimate', previousStatus: status, absorbed: true, healedAt: this.now(), result: heal };
-        updates.push(row.exists ? () => tx.update(ref, record) : () => tx.set(ref, { callId: id, credentialSha256: key, ...record }));
-        delete next.active[id]; delete next.unresolved[id];
-      }
-      for (const write of updates) write();
+      // Timeout is not evidence of settled supplier expense or terminated execution.
+      // Preserve original rows and correlation IDs; late finish remains possible.
       if (Object.keys(next.unresolved).length) { tx.set(state, next); return false; }
       if (next.active[callId]) throw new RouterOneAccountingUnavailableError('reserve_duplicate');
       next.active[callId] = deadlineAt;
@@ -95,12 +70,6 @@ export class FirestoreCatalogueAttemptStore implements CatalogueAttemptStore {
         ...(Number.isSafeInteger(requestInputTokens) && (requestInputTokens as number) >= 0 ? { requestInputTokens } : {}) });
       tx.set(state, next); return true;
     });
-    for (const h of healed) {
-      try { audit('ROUTER_ONE_LOCK_SELF_HEALED', { callId: h.callId, previousStatus: h.previousStatus, estimateBasis: h.basis,
-        expenseEvidence: 'official-public-tariff-estimate', costAttoUsd: h.costAttoUsd, absorbed: true }); } catch { /* observation only */ }
-    }
-    // Still unresolved after self-heal: an entry that could not be priced. Visible gate; the caller
-    // skips this key for the rest of the build (no repeated refusals or transactions).
     if (!admitted) throw new RouterOneAccountingUnavailableError('reserve_fenced_unresolved');
   }
   async finish(callId: string, key: string, result: RouterOneCatalogueReceipt | { kind: 'pending'; reason: string; requestId: string | null }): Promise<void> {
@@ -108,7 +77,7 @@ export class FirestoreCatalogueAttemptStore implements CatalogueAttemptStore {
     await this.db.runTransaction(async tx => {
       const previous = await tx.get(state), row = await tx.get(attempt);
       const next = keyState(previous.exists ? previous.data() : undefined);
-      if (!next.active[callId] || row.data()?.status !== 'reserved') throw new RouterOneAccountingUnavailableError('finish_state');
+      if (!next.active[callId] || row.data()?.credentialSha256 !== key || row.data()?.status !== 'reserved') throw new RouterOneAccountingUnavailableError('finish_state');
       // Retained until the caller has received the write acknowledgement and issued evidence.
       next.unresolved[callId] = true;
       tx.update(attempt, { status: result.kind, result, completedAt: this.now() });
@@ -120,10 +89,8 @@ export class FirestoreCatalogueAttemptStore implements CatalogueAttemptStore {
     await this.db.runTransaction(async tx => {
       const previous = await tx.get(state), row = await tx.get(attempt);
       const next = keyState(previous.exists ? previous.data() : undefined);
-      const status = row.data()?.status;
-      const settled = status === 'catalogue-calculated' || status === 'catalogue-estimated';
-      // Idempotent: another worker's reserve self-heal may already have released this SETTLED call
-      // (release only, never re-priced). That is success, not an accounting failure.
+      const settled = row.data()?.status === 'catalogue-calculated' && row.data()?.credentialSha256 === key;
+      // Lost release acknowledgements can retry a verified exact release without reopening unknown cost.
       if (settled && !next.active[callId] && !next.unresolved[callId]) return;
       if (!next.active[callId] || !next.unresolved[callId] || !settled) throw new RouterOneAccountingUnavailableError('release_state');
       delete next.active[callId]; delete next.unresolved[callId];
@@ -131,9 +98,8 @@ export class FirestoreCatalogueAttemptStore implements CatalogueAttemptStore {
     });
   }
 }
-/** Never evict an unresolved hold to admit more spending. A hold lasts until the uncertain call's own
- * deadline (owner 2026-11-15): after that the durable store's self-heal settles it, so this worker no
- * longer fences the key until restart. Saturation with live holds still fails closed. */
+/** Bounded worker-local backoff; expiry never authorizes spending because durable unresolved
+ * attempts stay fenced. Saturation with live holds fails closed. */
 export function createRouterOneUncertainFence(maxKeys = 64) {
   const keys = new BoundedCache<string, number>({ maxEntries: maxKeys });
   let saturated = false;
@@ -162,8 +128,8 @@ interface Scope {
 }
 interface Attempt {
   callId: string; key: string; snapshot: PublicPriceSnapshot; scope: Scope; store: CatalogueAttemptStore;
-  requestId: string | null; done: boolean; receipt?: RouterOneCatalogueReceipt;
-  /** Estimate evidence (owner 2026-11-15): request size, output received, last HTTP status, deadline. */
+  requestId: string | null; done: boolean; receipt?: RouterOneCatalogueReceipt; settlement?: Promise<void>;
+  /** Observational request size, received output, HTTP status and deadline; not billing authority. */
   requestInputTokens: number; outputChars: number; httpStatus: number | null; deadlineAt: number;
 }
 const scopes = new AsyncLocalStorage<Scope>();
@@ -190,35 +156,27 @@ export function runInRouterOneAccountingScope<T>(binding: CatalogueCallBinding, 
   return scopes.run({ binding: Object.freeze({ ...binding }), stopped: false, receipts: [] }, fn);
 }
 export function currentRouterOneCatalogueReceipts(): readonly RouterOneCatalogueReceipt[] { return scopes.getStore()?.receipts.slice() ?? []; }
-async function finish(attempt: Attempt, model: string, usage: unknown, complete: boolean): Promise<void> {
-  // Idempotent per call: whichever of the stream end, the runner finalizer or a late response arrives
-  // first settles it — exact receipt OR estimate — and every later arrival is ignored (no double charge).
-  if (attempt.done) return;
-  attempt.done = true;
-  const calculated = calculateCatalogueChatCost(attempt.snapshot, model, usage, complete,
+function finish(attempt: Attempt, model: string, usage: unknown, complete: boolean, conflictingStream = false): Promise<void> {
+  // All finalizers await the same persistence attempt; none observes "done" before acknowledgement.
+  // A failed/uncertain write stops the scope and remains durably fenced, not automatically replayed.
+  if (attempt.settlement) return attempt.settlement;
+  attempt.settlement = settleAttempt(attempt, model, usage, complete, conflictingStream).finally(() => { attempt.done = true; });
+  return attempt.settlement;
+}
+async function settleAttempt(attempt: Attempt, model: string, usage: unknown, complete: boolean, conflictingStream: boolean): Promise<void> {
+  const invalidEvidence = conflictingStream || (!!model && model !== attempt.snapshot.model) || catalogueUsageIntegrityIssue(usage);
+  const calculated = invalidEvidence ? { kind: 'pending' as const, reason: 'invalid-accounting-evidence' } : calculateCatalogueChatCost(attempt.snapshot, model, usage, complete,
     attempt.snapshot.fetchedAt, ROUTER_ONE_PRICE_MAX_AGE_MS);
   // Snapshot freshness is checked at dispatch, not after a long successful response.
-  let receipt: RouterOneCatalogueReceipt | undefined = calculated.kind === 'catalogue-calculated' ? Object.freeze({
+  const receipt: RouterOneCatalogueReceipt | undefined = calculated.kind === 'catalogue-calculated' ? Object.freeze({
     ...attempt.scope.binding!, kind: 'catalogue-calculated', expenseEvidence: 'official-public-tariff', settledWalletDebit: false,
     callId: attempt.callId, credentialSha256: attempt.key, model, requestId: attempt.requestId,
     costAttoUsd: calculated.costAttoUsd, modelSubtotalAttoUsd: calculated.modelSubtotalAttoUsd,
     inputTokens: calculated.inputTokens, outputTokens: calculated.outputTokens, cacheReadTokens: calculated.cacheReadTokens,
     snapshot: attempt.snapshot,
   }) as RouterOneCatalogueReceipt : undefined;
-  if (!receipt) {
-    // 🔓 Owner 2026-11-15 (BR2388): no complete receipt ⇒ settle by ESTIMATE from the same published tariff
-    // bound at dispatch, labelled as estimated, and release the key — never a permanent lock.
-    const estimate = estimateCatalogueChatCost(attempt.snapshot, usage,
-      { requestInputTokens: attempt.requestInputTokens, outputChars: attempt.outputChars, httpStatus: attempt.httpStatus });
-    if (estimate) receipt = Object.freeze({
-      ...attempt.scope.binding!, kind: 'catalogue-estimated', expenseEvidence: 'official-public-tariff-estimate', settledWalletDebit: false,
-      callId: attempt.callId, credentialSha256: attempt.key, model: model || attempt.snapshot.model, requestId: attempt.requestId,
-      costAttoUsd: estimate.costAttoUsd, modelSubtotalAttoUsd: estimate.modelSubtotalAttoUsd,
-      inputTokens: estimate.inputTokens, outputTokens: estimate.outputTokens, cacheReadTokens: estimate.cacheReadTokens,
-      snapshot: attempt.snapshot, estimateBasis: estimate.basis, estimateLabel: estimate.label,
-      pendingReason: calculated.kind === 'pending' ? calculated.reason : 'incomplete-usage',
-    }) as RouterOneCatalogueReceipt;
-  }
+  // Estimated customer billing is not enabled by this repair. Unknown expense stays pending;
+  // integrity failure is not missing evidence, and neither authorizes charging or timed release.
   try {
     await attempt.store.finish(attempt.callId, attempt.key, receipt ?? { kind: 'pending',
       reason: calculated.kind === 'pending' ? calculated.reason : 'incomplete-usage', requestId: attempt.requestId });
@@ -240,27 +198,11 @@ async function finish(attempt: Attempt, model: string, usage: unknown, complete:
     }
   } catch {
     // The write is uncertain: fence this key on this worker until the call's own deadline. After it, the
-    // durable store's self-heal settles the attempt by estimate (owner 2026-11-15) — never until restart.
+    // durable store still requires verified reconciliation; local expiry cannot release its fence.
     uncertainKeys.add(attempt.key, attempt.deadlineAt);
     attempt.scope.stopped = true;
   }
 }
-/** Estimate for an earlier attempt whose build is over, from the tariff snapshot stored with it. */
-function selfHealEstimate(data: Record<string, unknown> | undefined): { kind: 'catalogue-estimated'; expenseEvidence: 'official-public-tariff-estimate';
-  basis: string; label: string; costAttoUsd: string; modelSubtotalAttoUsd: string; inputTokens: number; outputTokens: number } {
-  const tag = { kind: 'catalogue-estimated' as const, expenseEvidence: 'official-public-tariff-estimate' as const };
-  const snapshot = data?.snapshot as PublicPriceSnapshot | undefined;
-  const requestInputTokens = typeof data?.requestInputTokens === 'number' ? data.requestInputTokens : 0;
-  if (snapshot && typeof snapshot === 'object') {
-    const e = estimateCatalogueChatCost(snapshot, undefined, { requestInputTokens, outputChars: 0, selfHeal: true });
-    if (e) return { ...tag, basis: e.basis, label: e.label, costAttoUsd: e.costAttoUsd, modelSubtotalAttoUsd: e.modelSubtotalAttoUsd, inputTokens: e.inputTokens, outputTokens: e.outputTokens };
-  }
-  // No usable snapshot stored with it (legacy or damaged row): settle at an explicit, labelled zero —
-  // absorbed, never charged — rather than hold every future build's key closed.
-  return { ...tag, basis: 'self-heal-unrecorded', label: 'Estimated at zero when an earlier unresolved call was settled: no usable tariff or request size was recorded for it; absorbed, not charged to any user.',
-    costAttoUsd: '0', modelSubtotalAttoUsd: '0', inputTokens: 0, outputTokens: 0 };
-}
-const SELF_HEAL_MAX_PER_RESERVE = 25;
 /** Heuristic input tokens of a chat request (TokenEstimator — dependency-free, never a network count). */
 function requestTokensOf(request: { messages?: unknown; tools?: unknown }): number {
   try {
@@ -358,7 +300,7 @@ export function cataloguePricedRouterOneClient(client: OpenAiChatClient, key: st
               yield chunk;
             }
             complete = true;
-          } finally { await finish(attempt, model, usage, complete && !conflict); }
+          } finally { await finish(attempt, model, usage, complete && !conflict, conflict); }
         } };
         return wrapped;
       }
@@ -413,7 +355,7 @@ export async function cataloguePricedRouterOneText<T>(fn: () => Promise<T>): Pro
 export function routerOneCatalogueEntryCost(entry: { model?: string; routerOneReceipt?: RouterOneCatalogueReceipt;
   routerOneAccountingConflict?: boolean; usage: { inputTokens: number; outputTokens: number } }): number {
   const receipt = entry.routerOneReceipt;
-  if (entry.routerOneAccountingConflict || !isRouterOneCatalogueReceipt(receipt) || receipt.model !== entry.model
+  if (entry.routerOneAccountingConflict || !isRouterOneCatalogueReceipt(receipt) || receipt.kind !== 'catalogue-calculated' || receipt.model !== entry.model
     || receipt.inputTokens !== entry.usage.inputTokens || receipt.outputTokens !== entry.usage.outputTokens) throw new RouterOneAccountingUnavailableError('receipt_mismatch');
   return Number(BigInt(receipt.costAttoUsd)) / 1e18;
 }
@@ -451,7 +393,7 @@ export function routerOneCostUnconfirmed(provider: string, receipt: unknown): bo
   return isRouterOneAccountingProvider(provider) && !isRouterOneCatalogueReceipt(receipt);
 }
 
-/** Owner 2026-11-15 (BR2388): the build report names any Router One share priced by estimate. Our own
+/** Inactive estimate-report compatibility helper, not authorization to charge estimates. Our own
  *  cost rides an `[engine-diag: …]` marker, which the user's report strips (userFacingReport). */
 export function recordRouterOneEstimatedBill(diag: { record(issue: { phase: 'build'; severity: 'info'; code: string; autoResolved: boolean; message: string; detail: string }): unknown },
   estimated: { calls: number; costUsd: number; billedUsd: number; label: string } | undefined): void {
@@ -462,3 +404,4 @@ export function recordRouterOneEstimatedBill(diag: { record(issue: { phase: 'bui
       detail: `[engine-diag: estimated_calls=${estimated.calls} estimated_cost_usd=${estimated.costUsd.toFixed(6)} estimated_bill_usd=${estimated.billedUsd.toFixed(6)}]` });
   } catch { /* diagnostics are best-effort */ }
 }
+

@@ -97,8 +97,9 @@ export function calculateCatalogueChatCost(snapshot: CatalogueSnapshot, response
 }
 
 /**
- * Owner decision 2026-11-15 (BR2388): a call that ends without a complete receipt is settled by an
- * ESTIMATE from the same published tariff, instead of holding the key's spend lock forever.
+ * Offline estimate arithmetic retained for review, not an enabled settlement policy.
+ * The live adapter keeps incomplete usage pending; it neither bills these estimates nor
+ * releases unresolved spend fences. Any future activation needs verified authorization.
  *
  * Accuracy order, best evidence first — every result is labelled "Estimated":
  *   1. the response's reported usage tokens, with its documented cache split;
@@ -107,7 +108,7 @@ export function calculateCatalogueChatCost(snapshot: CatalogueSnapshot, response
  *   4. no usage: input from the request size (TokenEstimator heuristic), output from the streamed
  *      length, all input at the full input rate (conservative);
  *   5. the provider answered with an HTTP error status: no billable response, settled at zero.
- * The markup applied later is the verified path's own (`modelSubtotalAttoUsd = cost × 5/2`).
+ * The hypothetical subtotal uses the verified path's factor (`modelSubtotalAttoUsd = cost × 5/2`).
  */
 export type CatalogueEstimateBasis =
   | 'usage-reported' | 'usage-provider-cache-detail' | 'usage-full-input-rate'
@@ -137,10 +138,36 @@ export interface CatalogueEstimateEvidence {
   /** Self-heal of a stale lock: the build is over, so the basis names that. */
   selfHeal?: boolean;
 }
+/** Missing evidence may be estimated; contradictory or malformed evidence may not.
+ * This does not authorize estimated billing or make unknown supplier expense verified.
+ */
+export function catalogueUsageIntegrityIssue(usage: unknown): boolean {
+  if (usage === undefined || usage === null) return false;
+  if (!rec(usage)) return true;
+  for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens', 'cached_tokens', 'prompt_cache_hit_tokens']) {
+    if (usage[key] !== undefined && !tokens(usage[key])) return true;
+  }
+  const input = usage.prompt_tokens, output = usage.completion_tokens;
+  const total = usage.total_tokens;
+  if (tokens(total) && ((tokens(input) && input > total) || (tokens(output) && output > total))) return true;
+  if (tokens(input) && tokens(output)) {
+    if (!Number.isSafeInteger(input + output)) return true;
+    if (usage.total_tokens !== undefined && usage.total_tokens !== input + output) return true;
+  }
+  const details = usage.prompt_tokens_details;
+  if (details !== undefined && !rec(details)) return true;
+  if (rec(details) && details.cache_write_tokens !== undefined) return true;
+  const nested = rec(details) ? details.cached_tokens : undefined;
+  if (nested !== undefined && !tokens(nested)) return true;
+  const counters = [nested, usage.cached_tokens, usage.prompt_cache_hit_tokens].filter(v => v !== undefined);
+  if (counters.some(v => !tokens(v) || (tokens(input) && v > input) || (tokens(total) && v > total))) return true;
+  if (counters.some(v => v !== counters[0])) return true;
+  return false;
+}
 /** Never re-checks age: the snapshot was verified fresh at dispatch and is bound to this call. */
 export function estimateCatalogueChatCost(snapshot: CatalogueSnapshot, usage: unknown,
   evidence: CatalogueEstimateEvidence): CatalogueEstimate | null {
-  if (!rec(snapshot) || catalogueSnapshotIssue(snapshot, snapshot.fetchedAt, Number.MAX_SAFE_INTEGER)) return null;
+  if (catalogueUsageIntegrityIssue(usage) || !rec(snapshot) || catalogueSnapshotIssue(snapshot, snapshot.fetchedAt, Number.MAX_SAFE_INTEGER)) return null;
   const price = (basis: CatalogueEstimateBasis, input: number, output: number, read: number | null): CatalogueEstimate | null => {
     if (!tokens(input) || !tokens(output) || !Number.isSafeInteger(input + output) || (read !== null && (!tokens(read) || read > input))) return null;
     const band = [...snapshot.bands].reverse().find(b => input > b.aboveInputTokens)!;
@@ -166,3 +193,4 @@ export function estimateCatalogueChatCost(snapshot: CatalogueSnapshot, usage: un
   if (evidence.selfHeal) return input > 0 ? price('self-heal-request-heuristic', input, output, null) : price('self-heal-unrecorded', 0, 0, null);
   return price('request-heuristic', input, output, null);
 }
+

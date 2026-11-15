@@ -29,6 +29,8 @@ const VERDICT: Record<string, [Verdict, number]> = {
   'mergeWorkspaceFiles | workspaceId, importedFiles': ['pre-latch', 1],
   'mergeWorkspaceFiles | workspaceId, seededScaffold': ['pre-latch', 1],
   'mergeWorkspaceFiles | workspaceId, ts.patch': ['pre-latch', 1],
+  // BR1979: Diagnose heals a dangling tsconfig.node.json reference the same way, still before the green latch.
+  'mergeWorkspaceFiles | workspaceId, refs.patch': ['pre-latch', 1],
   "mergeWorkspaceFiles | workspaceId, { 'package.json': finalPkg }": ['pre-latch', 1],
   'mergeWorkspaceFiles | workspaceId, { [filePath]: newSource }': ['user-asked', 1],
   'mergeWorkspaceFiles | workspaceId, { [patch.path]: patch.content }': ['gated', 2],

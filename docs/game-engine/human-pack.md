@@ -1,12 +1,12 @@
-# R2H original pack recovery — draft, disabled
+# Human characters pack — draft, disabled
 
 The three original GLB files were recovered locally from the owner's separate
 “3D चरित्र बनाना” Work conversation. It does **not** recover that Work session's
 unpublished integration, 2D exports, motorcycle poses, or test history.
 
-All three original binary assets are included under `private-game-assets/r2h/`
+All three original binary assets are included under `private-game-assets/humans/`
 (outside `public/`). Names, byte sizes and SHA-256 identities are pinned in
-`r2hPack.ts`; they were not regenerated, substituted or optimized. The originals
+`humanPack.ts`; they were not regenerated, substituted or optimized. The originals
 also remain in the owner's Library. This is a disabled integration draft, not
 a validated or activated feature.
 
@@ -14,14 +14,14 @@ The existing new-3D-game asset seed invokes the pack. It remains unavailable
 unless all of the following are satisfied:
 
 1. A separately reviewed code change records approved image, likeness and
-   commercial game/source redistribution rights in `R2H_RIGHTS_REVIEW`.
+   commercial game/source redistribution rights in `HUMAN_PACK_RIGHTS_REVIEW`.
    It is currently **false** with no evidence. These assets are **not CC0**.
-2. `AGENTV3_R2H_CHARACTERS=on` and the authenticated owner UID appears in the
-   comma-separated `AGENTV3_R2H_OWNER_ALLOWLIST`. Both are unset by default.
+2. `AGENTV3_HUMAN_PACK=on` and the authenticated owner UID appears in the
+   comma-separated `AGENTV3_HUMAN_PACK_OWNER_ALLOWLIST`. Both are unset by default.
 3. A separate engineering review approves an atomic no-overwrite installation
-   and actual runtime acceptance. `R2H_INTEGRATION_REVIEW` is currently **false**.
+   and actual runtime acceptance. `HUMAN_PACK_INTEGRATION_REVIEW` is currently **false**.
    Changing only the rights record or environment cannot activate this scaffold.
-4. The new 3D game's prompt explicitly requests a human/character or R2H.
+4. The new 3D game's prompt explicitly requests a human/character or Human pack.
 
 The selected character is stable per workspace. Existing/imported/reopened
 projects are not migrated. Before any handoff the normal GLB structural and

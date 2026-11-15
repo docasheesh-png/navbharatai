@@ -16,6 +16,7 @@
 
 import { WATER, OCEAN } from './athreeWaterSource';
 import { VEGETATION, PLANTS } from './athreeVegetationSource';
+import { RIVERS, RIVERWATER } from './athreeRiverSource';
 
 export interface AthreeMapResult {
   files: Record<string, string>;
@@ -184,6 +185,7 @@ const WORLD = `// Athree map — the world: height, normal, biome, wind and spaw
 
 import { fieldNoise, mulberry32 } from './noise';
 import { PROFILE_DEFAULTS, type AthreeProfile, type AthreeWorldMode } from './config';
+import { riverNetworkFor, type River, type Lake, type WaterHit } from './rivers';
 
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
 export type SpawnKind = 'player' | 'vehicle' | 'plane' | 'boat' | 'animal';
@@ -195,6 +197,8 @@ export interface AthreeWorldOptions {
   mode?: AthreeWorldMode;
   /** Override the profile's size (loop period, or bounded island diameter), in metres. */
   sizeMeters?: number;
+  /** Set false for a world without rivers and lakes. Default true. */
+  rivers?: boolean;
 }
 
 export interface Spawn {
@@ -218,7 +222,14 @@ export interface AthreeWorld {
   readonly mode: AthreeWorldMode;
   readonly sizeMeters: number;
   readonly seaLevel: number;
+  /** The ground height, with the rivers and lakes carved in (what is drawn, driven and floated on). */
   heightAt(x: number, z: number): number;
+  /** The ground height WITHOUT rivers and lakes. */
+  baseHeightAt(x: number, z: number): number;
+  /** The water at a place (surface height, flow direction), or null on dry ground. The sea is not included: it is every place below seaLevel. */
+  waterAt(x: number, z: number): WaterHit | null;
+  /** Every river (paths, widths, water levels) and lake. Builds the network on first use. */
+  waterBodies(): { rivers: River[]; lakes: Lake[] };
   normalAt(x: number, z: number): { x: number; y: number; z: number };
   biomeAt(x: number, z: number): Biome;
   windAt(x: number, z: number, t: number): Wind;
@@ -254,7 +265,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   const biomeScale = mode === 'bounded' ? 6 : 1;
   const snowLine = mode === 'bounded' ? 400 : 650;
 
-  function heightAt(x: number, z: number): number {
+  function baseHeight(x: number, z: number): number {
     const c = fieldNoise(x, z, seed + 1, 5, 14000, period);
     let e = Math.max(-1.2, Math.min(1.2, (c - 0.5) * 3.4));
     if (mode === 'bounded') {
@@ -270,6 +281,28 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     const mountain = ridge * ridge * smoothstep(0.25, 0.7, e) * peak;
     const detail = (fieldNoise(x, z, seed + 3, 4, 260, period) - 0.5) * 14 * Math.min(1, e * 4);
     return e * 55 + mountain + detail;
+  }
+
+  const withRivers = options.rivers !== false;
+  let network: ReturnType<typeof riverNetworkFor> | null = null;
+  const net = (): ReturnType<typeof riverNetworkFor> => {
+    if (!network) {
+      network = riverNetworkFor(seed + '|' + mode + '|' + sizeMeters, { seed, period, radius: mode === 'bounded' ? radius : 0, baseHeight, minSource: mode === 'bounded' ? 12 : 20 });
+    }
+    return network;
+  };
+
+  function heightAt(x: number, z: number): number {
+    const h = baseHeight(x, z);
+    return withRivers ? net().carve(x, z, h) : h;
+  }
+
+  function waterAt(x: number, z: number): WaterHit | null {
+    return withRivers ? net().waterAt(x, z) : null;
+  }
+
+  function waterBodies(): { rivers: River[]; lakes: Lake[] } {
+    return withRivers ? { rivers: net().rivers, lakes: net().lakes } : { rivers: [], lakes: [] };
   }
 
   function normalAt(x: number, z: number): { x: number; y: number; z: number } {
@@ -318,6 +351,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
         continue;
       }
       if (y < 4 || y > 140) continue;
+      if (waterAt(x, z)) continue; // never spawn in a river or a lake
       if (kind === 'plane') {
         let lo = Infinity;
         let hi = -Infinity;
@@ -349,7 +383,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, normalAt, biomeAt, windAt, spawnPoints };
+  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
 }
 `;
 
@@ -585,6 +619,7 @@ import { createChunkManager, type ChunkManager } from './chunks';
 import { heightfieldFor, type HeightfieldData } from './collider';
 import { createOcean, type Ocean } from './ocean';
 import { createVegetation, type Vegetation } from './plants';
+import { createRiverWater, type RiverWater } from './riverwater';
 import { type AthreeQuality } from './config';
 
 export * from './world';
@@ -595,6 +630,8 @@ export { buildChunkGeometry, createChunkManager, type ChunkManager } from './chu
 export * from './water';
 export { createOcean, oceanVertexShader, oceanFragmentShader, type Ocean } from './ocean';
 export * from './vegetation';
+export * from './rivers';
+export { createRiverWater, riverVertexShader, riverFragmentShader, waterInRect, RIVER_TIERS, riverBudget, type RiverWater, type WaterArrays } from './riverwater';
 export { createVegetation, plantVertexShader, plantFragmentShader, type Vegetation, type VegetationStats } from './plants';
 
 export interface AthreeMap {
@@ -605,6 +642,8 @@ export interface AthreeMap {
   readonly ocean: Ocean | null;
   /** Grass and trees: wind-bent, streamed in tiles. Present when three.js was given (and vegetation was not switched off). */
   readonly vegetation: Vegetation | null;
+  /** Rivers and lakes on screen, and what a boat on them floats on. Present when three.js was given. */
+  readonly riverWater: RiverWater | null;
   /** Call every frame with the camera in WORLD metres and the time in seconds: streams terrain, moves the sea. Returns the origin shift when it re-based. */
   update(cameraX: number, cameraZ: number, time: number): { dx: number; dz: number } | null;
   /** Heightfield data for a physics collider over [x0, x0 + size] x [z0, z0 + size]. */
@@ -628,19 +667,23 @@ export function createAthreeMap(options: AthreeMapOptions = {}): AthreeMap {
   if (chunks && ocean) chunks.group.add(ocean.mesh);
   const vegetation = options.three && options.vegetation !== false ? createVegetation(options.three, world, options.quality ?? 'mid') : null;
   if (chunks && vegetation) chunks.group.add(vegetation.group);
+  const riverWater = options.three ? createRiverWater(options.three, world, options.quality ?? 'mid') : null;
+  if (chunks && riverWater) chunks.group.add(riverWater.group);
   return {
     world,
     chunks,
     ocean,
     vegetation,
+    riverWater,
     update: (cameraX, cameraZ, time) => {
       const shift = chunks ? chunks.update(cameraX, cameraZ) : null;
       if (ocean && chunks) ocean.update(cameraX, cameraZ, time, chunks.origin);
       if (vegetation && chunks) vegetation.update(cameraX, cameraZ, time, chunks.origin);
+      if (riverWater && chunks) riverWater.update(cameraX, cameraZ, time, chunks.origin);
       return shift;
     },
     colliderFor: (x0, z0, size, cells) => heightfieldFor(world, x0, z0, size, cells),
-    dispose: () => { chunks?.dispose(); ocean?.dispose(); vegetation?.dispose(); },
+    dispose: () => { chunks?.dispose(); ocean?.dispose(); vegetation?.dispose(); riverWater?.dispose(); },
   };
 }
 `;
@@ -655,18 +698,20 @@ const FILES: Record<string, string> = {
   [`${DIR}/ocean.ts`]: OCEAN,
   [`${DIR}/vegetation.ts`]: VEGETATION,
   [`${DIR}/plants.ts`]: PLANTS,
+  [`${DIR}/rivers.ts`]: RIVERS,
+  [`${DIR}/riverwater.ts`]: RIVERWATER,
   [`${DIR}/index.ts`]: INDEX,
 };
 
 /** Every module this recipe can write. */
-export const ATHREE_MAP_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'water', 'ocean', 'vegetation', 'plants', 'index'];
+export const ATHREE_MAP_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'water', 'ocean', 'vegetation', 'plants', 'rivers', 'riverwater', 'index'];
 
 export function generateAthreeMap(_include?: string[]): AthreeMapResult {
   return {
     files: { ...FILES },
     dependencies: [{ name: 'three', version: '0.180.0' }],
     instructions:
-      `Added the Athree map (${Object.keys(FILES).length} files under ${DIR}). It is the world to stand on: seeded terrain that streams in around the camera, a 100 km seamless loop or a bounded island, a real wave ocean, grass and trees that sway in the wind, shared height/biome/wind/spawn functions, and heightfield data for physics.\n` +
+      `Added the Athree map (${Object.keys(FILES).length} files under ${DIR}). It is the world to stand on: seeded terrain that streams in around the camera, a 100 km seamless loop or a bounded island, a real wave ocean, rivers and lakes, grass and trees that sway in the wind, shared height/biome/wind/spawn functions, and heightfield data for physics.\n` +
       '```ts\n' +
       "import * as THREE from 'three';\n" +
       "import { createAthreeMap } from './game/athree';\n" +
@@ -686,11 +731,12 @@ export function generateAthreeMap(_include?: string[]): AthreeMapResult {
       '  const wind = map.world.windAt(spawn.x, spawn.z, time); // one wind field: it sets the sea state AND bends the grass and shakes the leaves; clouds will read it too\n' +
       "  const boat = map.ocean!.floatAt(spawn.x, spawn.z, time); // the sea surface a boat floats on: y and a unit normal\n" +
       "  const plants = map.vegetation!.stats(); // trees, tufts, triangles and draw calls drawn right now\n" +
+      "  const river = map.riverWater!.floatAt(spawn.x, spawn.z); // null on dry land; on a river or lake: the water level and flow direction\n" +
       '  const hf = map.colliderFor(0, 0, 256, 64); // heights for a physics heightfield collider\n' +
       '  camera.position.set(spawn.x - map.chunks!.origin.x, y + 6, spawn.z - map.chunks!.origin.z);\n' +
-      '  void shift; void wind; void hf; void boat; void plants;\n' +
+      '  void shift; void wind; void hf; void boat; void plants; void river;\n' +
       '}\n' +
       '```\n' +
-      'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. Phases built so far: the world (terrain, biomes, wind, spawns, colliders), the OCEAN (Gerstner waves shaded and displaced on the GPU, shore foam, depth colour, and map.ocean.floatAt for boats) and GRASS AND TREES (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, placed by biome and slope, streamed in tiles, three levels of budget per quality tier). Trees are visual only: they have no collider yet, so a car drives through them (treesInRect(world, x0, z0, x1, z1) gives the trunk positions if you need to keep clear of them); pass vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. NOT built yet — do not draw them by hand: rivers and lakes, desert dunes, sky and weather, roads and vehicles, aircraft, animals and people. Do not add your own water plane: the ocean is already in map.chunks.group. Do not scatter your own grass or trees over the map: the vegetation is already placed.',
+      'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. Phases built so far: the world (terrain, biomes, wind, spawns, colliders), the OCEAN (Gerstner waves shaded and displaced on the GPU, shore foam, depth colour, and map.ocean.floatAt for boats) RIVERS AND LAKES (map.world.waterBodies() lists every river path with its width and water level and every lake; map.world.waterAt(x, z) tells whether a place is in a river or a lake; the terrain is carved so the bed is real, rivers always end in the sea, a lake or another river, the water level only ever goes down along a river, nothing grows or spawns in the water, and map.riverWater draws it with a flowing-water shader and gives boats floatAt) and GRASS AND TREES (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, placed by biome and slope, streamed in tiles, three levels of budget per quality tier). Trees are visual only: they have no collider yet, so a car drives through them (treesInRect(world, x0, z0, x1, z1) gives the trunk positions if you need to keep clear of them); pass vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. Rivers are visible out to a few hundred metres to about a kilometre depending on the quality tier (beyond that the terrain mesh is too coarse to hold a river bed). Pass rivers: false to createAthreeWorld or createAthreeMap for a world without them. NOT built yet — do not draw them by hand: desert dunes, sky and weather, roads and vehicles, aircraft, animals and people. Do not add your own water plane: the ocean is already in map.chunks.group. Do not scatter your own grass or trees over the map, and do not draw your own rivers or lakes: they are already placed.',
   };
 }

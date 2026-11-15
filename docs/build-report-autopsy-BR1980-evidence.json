@@ -6,12 +6,8 @@
     "model": "qwen3-coder",
     "framework": "vite-react",
     "builtBy": "SURPLUS",
-    "startedAt": 1794111690352,
-    "endedAt": 1794112981971,
-    "startedAtIST": "2026-11-08 09:51:30.352 IST",
-    "endedAtIST": "2026-11-08 10:13:01.971 IST",
     "userWaitMs": 30000,
-    "requestSummary": "House-explorer game with five rooms, a red bathroom on the left, blue walls and players.",
+    "requestSummary": "An indoor exploration game (generic summary; request details omitted).",
     "privacy": "Raw prompt and account/workspace/session/history/build identifiers omitted from public evidence; retained report number is the audit reference."
   },
   "truncation": {
@@ -90,7 +86,7 @@
     "msByFamily": {},
     "buildMs": 1291608
   },
-  "sandboxUnavailable": "E2B concurrent cap of 20 at 09:51:30 IST; SANDBOX_RECOVERED at 10:12:58 IST; sandbox session came up created-fresh after 20.2 min",
+  "sandboxUnavailable": "E2B concurrent cap of 20; sandbox later recovered with a fresh session.",
   "gameKitSeeded": {
     "recipes": [
       "generate_game_runtime",
@@ -114,7 +110,7 @@
     ],
     "externalAssets": false
   },
-  "writeTimeTypecheck": "never ran although 34 TypeScript write(s) happened — no tsconfig.json was found; builder wrote tsconfig.json at 09:55:12 IST",
+  "writeTimeTypecheck": "No write-time checks ran for 34 TypeScript writes despite a later tsconfig.json write.",
   "todoOnlyTurns": "2 plan-only turns, 20.1s; 1 first-in-run (handed back); 1 after a hand-back in the same run",
   "usageNotReported": "SURPLUS (qwen3-coder) streamed without token counts; free tier billed INR 0 — nothing over-charged",
   "releaseGate": "YELLOW — 8 known vulnerabilities in this app's dependencies; app rendered, typechecked, 3 controls held up",

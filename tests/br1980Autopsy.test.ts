@@ -1,12 +1,11 @@
 /**
- * BR1980 (c96f6eb3, house-explorer game, succeeded, free / not charged) —
+ * BR1980 (indoor exploration game, succeeded, free / not charged) —
  * retained evidence, not a replay.
  *
- * The build started under SANDBOX_UNAVAILABLE (E2B cap of 20) at 09:51:30 IST, one minute
- * after BR1978 during the same cap incident. The workspace held nothing, yet GAME_KIT_SEEDED
+ * The build started under SANDBOX_UNAVAILABLE (E2B cap of 20) during the same cap incident as BR1978. The workspace held nothing, yet GAME_KIT_SEEDED
  * said generate_game_runtime, generate_game_vfx and generate_melody were laid down with
  * **0 files in 17.9 s**, and FAST_LANE_SKIPPED_GAME told the builder the kit was already on
- * disk. The builder rebuilt the Vite project by hand (tsconfig.json at 09:55:12 IST). First
+ * disk. The builder rebuilt the Vite project by hand (tsconfig.json written later). First
  * tsc failed with TS17004 ('--jsx' is not set) and TS2307 (Cannot find module '../fx/audio').
  * WRITE_TIME_TYPECHECK later said "never ran although 34 TypeScript write(s) happened — no
  * tsconfig.json was found". The app still shipped READY 84/100 (step limit 80, 21.0 min,
@@ -30,7 +29,7 @@ import {
 import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
 
 // Synthetic equivalent: preserve the house-game classification without publishing a customer's prompt.
-const PROMPT = 'Ek house explorer game banao: paanch kamre, baayi taraf laal bathroom, neeli deewarein aur players.';
+const PROMPT = 'Ek house explorer game banao.';
 const REACT_MANIFEST = JSON.stringify({ name: 'house-explorer', dependencies: { react: '^18.2.0', 'react-dom': '^18.2.0' } });
 const ROUTE = readFileSync('src/server/routes/agentv3.ts', 'utf8');
 
@@ -166,14 +165,14 @@ describe('BR1980 — the write-time compiler wakes up when the builder writes ts
     await call(d, 'write_file', { path: 'src/game/house-explorer/types.ts', content: 'export type RoomType = string;\n' });
     await call(d, 'write_file', { path: 'src/game/house-explorer/state.ts', content: 'export const rooms = 5;\n' });
     await call(d, 'write_file', { path: 'src/game/house-explorer/GameRenderer.tsx', content: 'export default function GameRenderer() { return null; }\n' });
-    expect(compiled(a)).toBe(false); // genuinely no config yet (this report, 09:52 IST)
+    expect(compiled(a)).toBe(false); // genuinely no config yet
     await call(d, 'write_file', { path: 'index.html', content: '<div id="root"></div>\n' });
     await call(d, 'write_file', { path: 'src/main.tsx', content: 'export {};\n' });
     await call(d, 'write_file', { path: 'src/index.css', content: 'body{}\n' });
     await call(d, 'write_file', { path: 'package.json', content: REACT_MANIFEST });
     await call(d, 'write_file', { path: 'tsconfig.json', content: '{"compilerOptions":{"jsx":"react-jsx","strict":true}}' });
     a.commands = [];
-    // 09:55:12 IST tsconfig landed; later writes (audio.ts, storage.ts, GameRenderer rewrite) must compile.
+    // tsconfig landed; later writes (audio.ts, storage.ts, GameRenderer rewrite) must compile.
     await call(d, 'write_file', { path: 'src/game/house-explorer/audio.ts', content: 'export function play() {}\n' });
     expect(compiled(a)).toBe(true);
     a.commands = [];

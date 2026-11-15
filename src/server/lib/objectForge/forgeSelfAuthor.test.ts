@@ -129,7 +129,7 @@ describe('what the model is told', () => {
     const m = scripted([j(good())]);
     await selfAuthorObject('a lighthouse', { ask: m.ask, groundTruth: 'Lighthouse: 20 m tall, tower base 6 m wide.' });
     const p = m.calls[0].prompt;
-    expect(p).toContain('"a lighthouse"'); expect(p).toContain('20 m tall'); expect(p).toContain('"id":"sword"');
+    expect(p).toContain('"a lighthouse"'); expect(p).toContain('20 m tall'); expect(p).toContain('"id":"house"'); expect(p).toContain('WHAT A BUILDING MUST HAVE');
     expect(p).toContain('"id": "a-lighthouse"');
   });
 

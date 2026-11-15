@@ -50,7 +50,7 @@ export interface LadderDepth {
 }
 
 /** Engines that serve a build instead of the ladder, by design. Their slices are named, never "unknown". */
-export const OFF_LADDER_PROVIDERS: readonly string[] = ['SURPLUS', 'ENGINE_R1'];
+export const OFF_LADDER_PROVIDERS: readonly string[] = ['SURPLUS', 'ENGINE_R1', 'ENGINE_QX', 'ENGINE_MF'];
 
 /**
  * The Claude rungs name a FAMILY ('haiku' / 'sonnet' / 'opus'), while the ledger records the real

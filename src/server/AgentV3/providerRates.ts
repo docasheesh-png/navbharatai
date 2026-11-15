@@ -3,6 +3,7 @@ import { PublicBuildEngineError } from '../lib/buildEngineError';
 import { isRouterOneAccountingProvider, RouterOneAccountingUnavailableError } from '../AI/RouterOne/accounting';
 import { isSurplusReceiptDecision, type SurplusReceiptDecision } from '../AI/SurplusRegistry/receiptPolicy';
 import { isVerifiedFreeProof, type VerifiedFreeProof } from '../AI/LiveRegistry/proof';
+import { proChainV2SupplierRate } from './proChainV2/supplierRates';
 // AgentV3 — REAL provider rate cards + tiered-markup billing (admin model, 2026-07-14).
 //
 // WHY THIS EXISTS: the original billing (pricing.ts) prices EVERY non-Opus build against Sonnet
@@ -240,6 +241,10 @@ export function realRateCard(): Record<string, TokenRate> {
 export function realRateFor(provider: string, model?: string): TokenRate {
   if (isRouterOneAccountingProvider(provider ?? '')) throw new RouterOneAccountingUnavailableError();
   if ((provider ?? '').toUpperCase() === 'SURPLUS') throw new SurplusAccountingUnavailableError();
+  // Pro Chain V2 suppliers (ENGINE_QX / ENGINE_MF only): the supplier's own price when known; otherwise
+  // the existing model-first rules below price it as a conservative, report-labelled ESTIMATE.
+  const v2 = proChainV2SupplierRate(provider, model);
+  if (v2?.rate) return v2.rate;
   const card = realRateCard();
   const m = (model ?? '').toLowerCase();
   const p = (provider ?? '').toUpperCase();

@@ -3,14 +3,6 @@
     "reportNumber": 1980,
     "outcome": "succeeded",
     "ok": true,
-    "prompt": ". Suno mujhe aisa game Banakar Jo Jiske andar Ek house banaa kar do Jiske andar Panch Kamre Ho latrin bathroom left side mein hun Achcha aur uska color aur red Uske Uske ghar ka bol ka color aur blue aur uske andar players bhi hone chahie mujhe ai",
-    "promptLength": 247,
-    "promptHash": "d4a2d08f",
-    "reportDigest": "521148a7a5d76b76166fab90e20e60ea1694fefc386a37bd3478d851a02375ee",
-    "buildId": "c96f6eb3-49da-4b05-bc30-be4bf49c4f48",
-    "workspaceId": "agentv3-PaQzgYmHglQNk0ijyH25nfftSeP2-60399296-56fd-4f77-a5bc-e87014a9077b",
-    "historyId": "1794111690352",
-    "sessionId": "60399296-56fd-4f77-a5bc-e87014a9077b",
     "model": "qwen3-coder",
     "framework": "vite-react",
     "builtBy": "SURPLUS",
@@ -18,9 +10,10 @@
     "endedAt": 1794112981971,
     "startedAtIST": "2026-11-08 09:51:30.352 IST",
     "endedAtIST": "2026-11-08 10:13:01.971 IST",
-    "userWaitMs": 30000
+    "userWaitMs": 30000,
+    "requestSummary": "House-explorer game with five rooms, a red bathroom on the left, blue walls and players.",
+    "privacy": "Raw prompt and account/workspace/session/history/build identifiers omitted from public evidence; retained report number is the audit reference."
   },
-  "rawReportSha256": "9d4d35ccb142968205c762a3e1a7639e06edb23bd663c2307b790de18608c003",
   "truncation": {
     "complete": true
   },

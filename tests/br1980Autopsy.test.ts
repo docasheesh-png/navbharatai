@@ -13,7 +13,7 @@
  * OVER the 8.9–17.3 min game band, YELLOW for leftover dependency vulnerabilities).
  *
  * All three holes were closed on main by later merged fixes; this file locks each against
- * BR1980's exact shape so none of them can come back:
+ * BR1980's failure shape so none of them can come back:
  *   • BR1961 F2 (#4146) — sandboxUnavailableNotice does not invite a retry.
  *   • BR1958 (#4132) — no recipe runs without a readable React manifest (`prepareGameSeedWorkspace`).
  *   • BR1977 (#4170) — a recipe "success" with fewer landed files than successes is not a seed,
@@ -29,7 +29,8 @@ import {
 } from '../src/server/AgentV3/gameKitSeed';
 import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
 
-const PROMPT = '. Suno mujhe aisa game Banakar Jo Jiske andar Ek house banaa kar do Jiske andar Panch Kamre Ho latrin bathroom left side mein hun Achcha aur uska color aur red Uske Uske ghar ka bol ka color aur blue aur uske andar players bhi hone chahie mujhe ai';
+// Synthetic equivalent: preserve the house-game classification without publishing a customer's prompt.
+const PROMPT = 'Ek house explorer game banao: paanch kamre, baayi taraf laal bathroom, neeli deewarein aur players.';
 const REACT_MANIFEST = JSON.stringify({ name: 'house-explorer', dependencies: { react: '^18.2.0', 'react-dom': '^18.2.0' } });
 const ROUTE = readFileSync('src/server/routes/agentv3.ts', 'utf8');
 

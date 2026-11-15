@@ -4,7 +4,7 @@ Scope: BR1980 only, inside the frozen audit boundary 1951..2105. Branched from o
 
 ## What the user asked
 
-`. Suno mujhe aisa game Banakar Jo Jiske andar Ek house banaa kar do Jiske andar Panch Kamre Ho latrin bathroom left side mein hun Achcha aur uska color aur red Uske Uske ghar ka bol ka color aur blue aur uske andar players bhi hone chahie mujhe ai` (247 characters, promptHash `d4a2d08f`). A house-explorer game: five rooms, a latrine/bathroom on the left (red), the house "bol"/wall blue, and players. The engine classified it as domain=game and delivered a house-explorer app.
+Privacy-safe summary (the original prompt and account/session identifiers are not reproduced publicly): A house-explorer game: five rooms, a latrine/bathroom on the left (red), the house "bol"/wall blue, and players. The engine classified it as domain=game and delivered a house-explorer app.
 
 ## What happened (IST, 2026-11-08)
 

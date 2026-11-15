@@ -2,9 +2,13 @@
 // stand, the sun's path, the palette over a day and under weather, the weather's easing and schedule, the budget, the shaders, and the sky
 // manager with real three.js (lights, fog, rain, clock, ambience levels, one sun for the whole map).
 // What they cannot prove — how it LOOKS and whether the shaders compile on a GPU — is checked by a headless-Chromium render.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as THREE from 'three';
 import { loadAthree } from '../../../../tests/helpers/loadAthree';
+
+// These tests sample whole worlds (thousands of terrain, river and dune queries). Under the coverage run they are several times
+// slower, so each gets two minutes instead of vitest's default twenty seconds: the assertions are not loosened, only the clock.
+vi.setConfig({ testTimeout: 120000 });
 
 const A = loadAthree();
 const TIERS = ['phone', 'mid', 'desktop'] as const;

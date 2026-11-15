@@ -276,8 +276,6 @@ async function finish(attempt: Attempt, model: string, usage: unknown, complete:
     if (receipt) {
       issued.add(receipt); attempt.receipt = receipt; attempt.scope.receipts.push(receipt);
       // A release failure cannot revoke acknowledged, billable evidence or replay output.
-      // Owner 2026-11-15: a lost release acknowledgement no longer fences the key — the reserve below
-      // drops a stale hold, and the receipt above already carries the known cost.
       try { await attempt.store.releaseVerified(attempt.callId, attempt.key); }
       catch { attempt.scope.stopped = true; uncertainKeys.add(attempt.key, attempt.deadlineAt); }
       try { audit(receipt.kind === 'catalogue-estimated' ? 'ROUTER_ONE_CATALOGUE_ESTIMATED' : 'ROUTER_ONE_CATALOGUE_PRICED', { buildId: receipt.buildId, callId: receipt.callId,
@@ -286,7 +284,11 @@ async function finish(attempt: Attempt, model: string, usage: unknown, complete:
         source: receipt.snapshot.source, sourceSha256: receipt.snapshot.sourceSha256,
         ...(receipt.kind === 'catalogue-estimated' ? { estimated: true, estimateBasis: receipt.estimateBasis, estimateLabel: receipt.estimateLabel, pendingReason: receipt.pendingReason } : {}) }); } catch { /* observation only */ }
     }
-    else absorbed(attempt, calculated.kind === 'pending' ? calculated.reason : 'incomplete-usage');
+    else {
+      attempt.scope.stopped = true;
+      try { audit('ROUTER_ONE_ACCOUNTING_PENDING', { buildId: attempt.scope.binding?.buildId,
+        callId: attempt.callId, reason: calculated.kind === 'pending' ? calculated.reason : 'incomplete-usage', furtherDispatchBlocked: true }); } catch { /* observation only */ }
+    }
   } catch {
     // The write is uncertain: fence this key on this worker until the call's own deadline. After it, the
     // durable store's self-heal settles the attempt by estimate (owner 2026-11-15) — never until restart.

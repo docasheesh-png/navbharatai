@@ -221,6 +221,64 @@ describe('admin official OpenAI-compat helper', () => {
     });
   });
 
+  describe('a reasoning model that thinks but does not answer (admin report 2026-11-15, Router One deepseek-v4.1-flash)', () => {
+    const routerOne = { url: 'https://api.router.one/v1/chat/completions', apiKey: 'synthetic-key-value', model: 'deepseek-v4.1-flash',
+      messages: [{ role: 'user' as const, content: 'bharat me kitni nadiyan hai?' }], signal: new AbortController().signal };
+    const jsonReply = (body: unknown) => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'application/json', 'x-request-id': '6acc8c0bdf6593a255a04fe989c84f45' }),
+      text: async () => JSON.stringify(body) });
+
+    it('names the exact admin reply — empty content, reasoning only, length — instead of a bare "empty"', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonReply({
+        id: 'resp_20094', object: 'chat.completion', model: 'deepseek-v4.1-flash',
+        choices: [{ index: 0, finish_reason: 'length', message: { role: 'assistant', content: '', reasoning_content: 'We need answer in Hindi. Question: how many rivers in India…' } }],
+      })));
+      const error = await runOfficialOpenAiCompatTest({ ...routerOne, maxTokens: 1024 }).catch(value => value) as OfficialTestChatError;
+      expect(error).toMatchObject({ classificationHint: 'empty', providerCode: 'reasoning-only', providerRequestId: '6acc8c0bdf6593a255a04fe989c84f45' });
+      expect(error.providerMessage).toContain('only its reasoning');
+      expect(error.providerMessage).toContain('1024-token limit');
+    });
+
+    it('sends the caller’s larger output bound so the model has room to answer', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonReply({ model: 'deepseek-v4.1-flash', choices: [{ message: { content: 'Lagbhag 400 se zyada nadiyan.' } }] }));
+      vi.stubGlobal('fetch', fetchImpl);
+      const result = await runOfficialOpenAiCompatTest({ ...routerOne, maxTokens: 8192 });
+      expect(result.content).toBe('Lagbhag 400 se zyada nadiyan.');
+      expect(JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body)).max_tokens).toBe(8192);
+    });
+
+    it('keeps the page default and caps an absurd bound', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonReply({ choices: [{ message: { content: 'ok' } }] }));
+      vi.stubGlobal('fetch', fetchImpl);
+      await runOfficialOpenAiCompatTest(routerOne);
+      await runOfficialOpenAiCompatTest({ ...routerOne, maxTokens: 10_000_000 });
+      await runOfficialOpenAiCompatTest({ ...routerOne, maxTokens: -5 });
+      const bounds = fetchImpl.mock.calls.map(call => JSON.parse(String((call[1] as RequestInit).body)).max_tokens);
+      expect(bounds).toEqual([1024, 16384, 1024]);
+    });
+
+    it('no longer cuts a long answer at 4,000 characters', async () => {
+      const long = 'n'.repeat(9000);
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonReply({ choices: [{ message: { content: long } }] })));
+      expect((await runOfficialOpenAiCompatTest(routerOne)).content).toHaveLength(9000);
+    });
+
+    it('names a reasoning-only stream the same way', async () => {
+      const body = new ReadableStream<Uint8Array>({ start(c) {
+        c.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"reasoning_content":"thinking…"}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\ndata: [DONE]\n'));
+        c.close();
+      } });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers: new Headers({ 'content-type': 'text/event-stream' }), body, text: async () => '' }));
+      const error = await runOfficialOpenAiCompatTest({ ...routerOne, stream: true, maxTokens: 8192 }).catch(value => value) as OfficialTestChatError;
+      expect(error).toMatchObject({ providerCode: 'reasoning-only' });
+      expect(error.providerMessage).toContain('8192-token limit');
+    });
+
+    it('a plain empty reply with no reasoning is still just "empty"', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonReply({ choices: [{ finish_reason: 'stop', message: { content: '' } }] })));
+      await expect(runOfficialOpenAiCompatTest(routerOne)).rejects.toMatchObject({ providerCode: 'empty' });
+    });
+  });
+
   it('still throws OfficialTestChatError for a non-JSON OpenRouter failure', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false, status: 401, headers: new Headers(), text: async () => 'unauthorized',

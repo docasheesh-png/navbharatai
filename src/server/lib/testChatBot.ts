@@ -132,6 +132,12 @@ function present(value: string): boolean { return !!value && !/[\s,]/.test(value
 // comes from Router One's own POSTED public tariff on router.one — the same source the builder's catalogue ranks on — so
 // nothing is invented: no posted price for the model means no call.
 export const ROUTER_ONE_TEST_CHAT_URL = `${ROUTER_ONE_DEFAULT_BASE_URL}/chat/completions`;
+/**
+ * Router One's default models are reasoning models: at the page's 1,024-token bound deepseek-v4.1-flash spent
+ * every token thinking and returned an empty answer (admin report 2026-11-15). This call gets room to think and
+ * answer, and the reserve is quoted for exactly this bound.
+ */
+export const ROUTER_ONE_TEST_MAX_TOKENS = 8_192;
 export const ROUTER_ONE_PRICE_UNAVAILABLE = 'Router One’s posted price for this model could not be read from router.one, so this page has no spending ceiling for it and did not call it. Choose a model listed on router.one/models, or try again in a few minutes.';
 function routerOneOfficialEndpoint(): boolean {
   return routerOneBaseUrl().replace(/\/+$/, '') === ROUTER_ONE_DEFAULT_BASE_URL;
@@ -145,7 +151,7 @@ export function routerOneTariffCeilingNanoUsd(messages: TestChatAction['messages
   const priceIn = Math.max(0, ...bands.map(band => Number(band.inputUsdPerMillion)));
   const priceOut = Math.max(0, ...bands.map(band => Number(band.outputUsdPerMillion)));
   if (!bands.length || !Number.isFinite(priceIn) || !Number.isFinite(priceOut) || priceIn + priceOut <= 0) return 0;
-  return quoteTokens(messages, priceIn, priceOut);
+  return quoteTokens(messages, priceIn, priceOut, ROUTER_ONE_TEST_MAX_TOKENS);
 }
 
 // ─── Builder and fallback engines (admin 2026-11-15) ────────────────────────────────────────────────────
@@ -556,9 +562,9 @@ function needsSharedPaidConfig(id: TestChatProviderId): boolean {
   return !!(meta.rungId && isPaidRung(meta.rungId));
 }
 
-function quoteTokens(messages: TestChatAction['messages'], priceIn: number, priceOut: number): number {
+function quoteTokens(messages: TestChatAction['messages'], priceIn: number, priceOut: number, outputTokens = TEST_CHAT_MAX_OUTPUT_TOKENS): number {
   const inputTokens = Buffer.byteLength(JSON.stringify(messages), 'utf8') + 256;
-  return maximumCostNanoUsd(inputTokens, TEST_CHAT_MAX_OUTPUT_TOKENS, usdToNanoUsd(priceIn), usdToNanoUsd(priceOut));
+  return maximumCostNanoUsd(inputTokens, outputTokens, usdToNanoUsd(priceIn), usdToNanoUsd(priceOut));
 }
 
 function secretsFor(id: TestChatProviderId): string[] {
@@ -779,6 +785,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         url: ROUTER_ONE_TEST_CHAT_URL, apiKey: routerOneApiKey(), model, messages: action.messages, signal: bounded,
         // Streamed, as the builder calls it: a non-streamed Router One reply waited past the 90-second bound.
         stream: true,
+        maxTokens: ROUTER_ONE_TEST_MAX_TOKENS,
       }));
       return finish(action, result.content, result.model || model, startedAt, result.usage);
     }

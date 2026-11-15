@@ -72,6 +72,12 @@ export async function runOfficialOpenAiCompatTest(input: {
    * HTTP 200, 90003 ms, empty body). A stream is also parsed when a provider ignores `stream: false`.
    */
   stream?: boolean;
+  /**
+   * Output-token bound for this one call (default: the page's 1,024). A reasoning model spends tokens thinking
+   * before it answers; at 1,024 Router One's deepseek-v4.1-flash returned only its reasoning and an empty
+   * answer (admin report 2026-11-15). The caller reserves for whatever bound it passes.
+   */
+  maxTokens?: number;
   /** Provider-specific request fields from server code only (never from the client), e.g. Surplus routing. */
   extraBody?: Readonly<Record<string, unknown>>;
 }): Promise<{ content: string; model: string; usage?: { inputTokens: number; outputTokens: number } }> {
@@ -85,7 +91,7 @@ export async function runOfficialOpenAiCompatTest(input: {
       headers: { Authorization: `Bearer ${input.apiKey}`, 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
         ...(input.extraBody ?? {}),
-        model: input.model, messages: input.messages, max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS,
+        model: input.model, messages: input.messages, max_tokens: outputBound(input.maxTokens),
         ...(input.stream === true ? { stream: true, stream_options: { include_usage: true } } : { stream: false }),
         ...(openRouterFreeGuard ? OPENROUTER_FREE_GUARD : {}),
       }),
@@ -127,12 +133,37 @@ export async function runOfficialOpenAiCompatTest(input: {
   if (!record(parsed) || !Array.isArray(parsed.choices)) {
     throw new OfficialTestChatError('unknown', response.status, 'invalid-response', null, textField(requestId), null, raw.slice(0, 4000));
   }
-  const content = textField((record(parsed.choices[0]) && record(parsed.choices[0].message)) ? parsed.choices[0].message.content : null);
-  if (!content?.trim()) throw new OfficialTestChatError('empty', response.status, 'empty', null, textField(requestId), null, raw.slice(0, 4000));
+  const choice = record(parsed.choices[0]) ? parsed.choices[0] : null;
+  const message = choice && record(choice.message) ? choice.message : null;
+  // Not textField(): that caps at 4,000 characters, which silently cut every longer answer short.
+  const content = message && typeof message.content === 'string' ? message.content.slice(0, 32_000) : '';
+  if (!content.trim()) {
+    const reasoning = message ? reasoningText(message) : '';
+    throw emptyReply(response.status, textField(requestId), reasoning.length, choice ? textField(choice.finish_reason) : null,
+      outputBound(input.maxTokens), raw.slice(0, 4000));
+  }
   const usage = record(parsed.usage) && Number.isSafeInteger(parsed.usage.prompt_tokens) && Number.isSafeInteger(parsed.usage.completion_tokens)
     ? { inputTokens: parsed.usage.prompt_tokens as number, outputTokens: parsed.usage.completion_tokens as number } : undefined;
   const model = typeof parsed.model === 'string' && parsed.model.trim() ? parsed.model : input.model;
   return { content, model, ...(usage ? { usage } : {}) };
+}
+
+function outputBound(requested: number | undefined): number {
+  return Number.isSafeInteger(requested) && requested! > 0 ? Math.min(requested!, 16_384) : TEST_CHAT_MAX_OUTPUT_TOKENS;
+}
+/** The thinking a reasoning model returns beside its answer (field names differ between providers). */
+function reasoningText(message: Record<string, unknown>): string {
+  for (const key of ['reasoning_content', 'reasoning']) if (typeof message[key] === 'string') return message[key] as string;
+  return '';
+}
+/** An empty answer, said precisely: a reasoning-only reply names the token limit that ran out. */
+function emptyReply(status: number, requestId: string | null, reasoningChars: number, finishReason: string | null, maxTokens: number, raw: string | null): OfficialTestChatError {
+  if (reasoningChars > 0) {
+    const cut = finishReason === 'length' ? ` It stopped at the ${maxTokens}-token limit while still thinking.` : '';
+    return new OfficialTestChatError('empty', status, 'reasoning-only', null, requestId,
+      `The model returned only its reasoning (${reasoningChars} characters) and no answer.${cut}${finishReason ? ` Finish reason: ${finishReason}.` : ''}`, raw);
+  }
+  return new OfficialTestChatError('empty', status, 'empty', null, requestId, finishReason ? `Finish reason: ${finishReason}.` : null, raw);
 }
 
 function bodyNotFinished(status: number, requestId: string | null, signal: AbortSignal, receivedChars: number): OfficialTestChatError {
@@ -145,12 +176,12 @@ function bodyNotFinished(status: number, requestId: string | null, signal: Abort
 }
 
 /** Read an OpenAI-compatible SSE chat stream into one reply. Bounded by the response size limit; no retry. */
-async function readSseReply(response: Response, input: { apiKey: string; model: string; signal: AbortSignal }, requestId: string | null)
+async function readSseReply(response: Response, input: { apiKey: string; model: string; signal: AbortSignal; maxTokens?: number }, requestId: string | null)
   : Promise<{ content: string; model: string; usage?: { inputTokens: number; outputTokens: number } }> {
   const reader = response.body?.getReader();
   if (!reader) throw bodyNotFinished(response.status, requestId, input.signal, 0);
   const decoder = new TextDecoder();
-  let buffer = '', content = '', model = '', done = false, streamError: string | null = null;
+  let buffer = '', content = '', model = '', done = false, streamError: string | null = null, reasoningChars = 0, finishReason: string | null = null;
   let usage: { inputTokens: number; outputTokens: number } | undefined;
   const handle = (line: string) => {
     const trimmed = line.trim();
@@ -165,6 +196,8 @@ async function readSseReply(response: Response, input: { apiKey: string; model: 
     const choice = Array.isArray(event.choices) && record(event.choices[0]) ? event.choices[0] : null;
     const delta = choice && record(choice.delta) ? choice.delta : choice && record(choice.message) ? choice.message : null;
     if (delta && typeof delta.content === 'string') content += delta.content;
+    if (delta) reasoningChars += reasoningText(delta).length;
+    if (choice && typeof choice.finish_reason === 'string' && choice.finish_reason) finishReason = choice.finish_reason;
     if (record(event.usage) && Number.isSafeInteger(event.usage.prompt_tokens) && Number.isSafeInteger(event.usage.completion_tokens)) {
       usage = { inputTokens: event.usage.prompt_tokens as number, outputTokens: event.usage.completion_tokens as number };
     }
@@ -189,7 +222,7 @@ async function readSseReply(response: Response, input: { apiKey: string; model: 
     const message = String(streamError).split(input.apiKey).join('[redacted-secret]');
     throw new OfficialTestChatError('http', response.status, 'stream-error', null, requestId, message, null);
   }
-  if (!content.trim()) throw new OfficialTestChatError('empty', response.status, 'empty', null, requestId, null, null);
+  if (!content.trim()) throw emptyReply(response.status, requestId, reasoningChars, finishReason, outputBound(input.maxTokens), null);
   return { content: content.slice(0, 32_000), model: model || input.model, ...(usage ? { usage } : {}) };
 }
 

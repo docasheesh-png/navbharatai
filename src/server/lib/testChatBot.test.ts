@@ -79,7 +79,7 @@ vi.mock('../AI/FreeChain/providers/openAiCompatProvider', async importOriginal =
   };
 });
 import { isTestChatStatus, readPartialTestChatStatus, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_PROVIDER_IDS, type TestChatAction } from '../../lib/testChatBot';
-import { loadTestChatStatus, ROUTER_ONE_PRICE_UNAVAILABLE, ROUTER_ONE_TEST_CHAT_URL, routerOneTariffCeilingNanoUsd, runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
+import { loadTestChatStatus, ROUTER_ONE_PRICE_UNAVAILABLE, ROUTER_ONE_TEST_CHAT_URL, ROUTER_ONE_TEST_MAX_TOKENS, routerOneTariffCeilingNanoUsd, runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
 import { maximumCostNanoUsd, usdToNanoUsd } from '../AI/FreeChain/spendCap';
 import { QubaxError } from './qubax';
 import { MitrifyError } from './mitrify';
@@ -852,6 +852,10 @@ describe('test chat provider isolation and admission', () => {
 
 
 describe('Router One in the admin Test Chat Bot (admin 2026-11-15)', () => {
+  const routerOneHold = (priceIn: number, priceOut: number) => {
+    const inputTokens = Buffer.byteLength(JSON.stringify(action.messages), 'utf8') + 256;
+    return maximumCostNanoUsd(inputTokens, ROUTER_ONE_TEST_MAX_TOKENS, usdToNanoUsd(priceIn), usdToNanoUsd(priceOut));
+  };
   const band = (above: number, input: string, output: string) => ({
     aboveInputTokens: above, inputUsdPerMillion: input, outputUsdPerMillion: output, cacheReadUsdPerMillion: '0', cacheWriteUsdPerMillion: '0',
   });
@@ -895,11 +899,13 @@ describe('Router One in the admin Test Chat Bot (admin 2026-11-15)', () => {
     expect(result).toMatchObject({ provider: 'router-one', content: 'Hello from Router One', model: 'deepseek-v4.1-flash', noFallback: true, usage: { inputTokens: 5, outputTokens: 6 } });
     expect(fake.routerOnePrice).toHaveBeenCalledWith('deepseek-v4.1-flash');
     expect(fake.reserve).toHaveBeenCalledOnce();
-    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: mitrifyQuotedHold(0.4, 1.6) }));
+    // Reserved for the reasoning-model bound, not the page's 1,024 (deepseek-v4.1-flash answered empty at 1,024).
+    expect(ROUTER_ONE_TEST_MAX_TOKENS).toBeGreaterThan(TEST_CHAT_MAX_OUTPUT_TOKENS);
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: routerOneHold(0.4, 1.6) }));
     expect(fake.officialOpenAi).toHaveBeenCalledOnce();
     expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({
       url: ROUTER_ONE_TEST_CHAT_URL, apiKey: 'synthetic-router-one-key', model: 'deepseek-v4.1-flash', messages: routerOne.messages,
-      stream: true,
+      stream: true, maxTokens: ROUTER_ONE_TEST_MAX_TOKENS,
     }));
     expect(fake.run).not.toHaveBeenCalled();
     expect(fake.compatTurn).not.toHaveBeenCalled();
@@ -946,7 +952,7 @@ describe('Router One in the admin Test Chat Bot (admin 2026-11-15)', () => {
   it('never quotes a zero or missing tariff as a ceiling', () => {
     expect(routerOneTariffCeilingNanoUsd(action.messages, [])).toBe(0);
     expect(routerOneTariffCeilingNanoUsd(action.messages, [band(-1, '0', '0')])).toBe(0);
-    expect(routerOneTariffCeilingNanoUsd(action.messages, [band(-1, '0.2', '0.8')])).toBe(mitrifyQuotedHold(0.2, 0.8));
+    expect(routerOneTariffCeilingNanoUsd(action.messages, [band(-1, '0.2', '0.8')])).toBe(routerOneHold(0.2, 0.8));
   });
 });
 

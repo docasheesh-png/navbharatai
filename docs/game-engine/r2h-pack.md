@@ -4,14 +4,11 @@ The three original GLB files were recovered locally from the owner's separate
 “3D चरित्र बनाना” Work conversation. It does **not** recover that Work session's
 unpublished integration, 2D exports, motorcycle poses, or test history.
 
-**The original binary assets are NOT included in this draft PR.** Binary publication
-through the available connector could not be completed. The required destination
-is `private-game-assets/r2h/` (outside `public/`). The owner's Library retains
-`R2H_01_Cap.glb`, `R2H_02_Leather.glb`, and `R2H_03_Denim.glb` from the
-“3D चरित्र बनाना” Work conversation. Retrieve those originals, not replacements.
-Their exact byte sizes and SHA-256 identities are pinned in `r2hPack.ts`.
-They were not regenerated or optimized. This PR is an incomplete, disabled
-integration scaffold, not a ready-to-use character feature.
+All three original binary assets are included under `private-game-assets/r2h/`
+(outside `public/`). Names, byte sizes and SHA-256 identities are pinned in
+`r2hPack.ts`; they were not regenerated, substituted or optimized. The originals
+also remain in the owner's Library. This is a disabled integration draft, not
+a validated or activated feature.
 
 The existing new-3D-game asset seed invokes the pack. It remains unavailable
 unless all of the following are satisfied:

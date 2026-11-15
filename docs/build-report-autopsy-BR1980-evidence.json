@@ -1,0 +1,165 @@
+{
+  "identity": {
+    "reportNumber": 1980,
+    "outcome": "succeeded",
+    "ok": true,
+    "prompt": ". Suno mujhe aisa game Banakar Jo Jiske andar Ek house banaa kar do Jiske andar Panch Kamre Ho latrin bathroom left side mein hun Achcha aur uska color aur red Uske Uske ghar ka bol ka color aur blue aur uske andar players bhi hone chahie mujhe ai",
+    "promptLength": 247,
+    "promptHash": "d4a2d08f",
+    "reportDigest": "521148a7a5d76b76166fab90e20e60ea1694fefc386a37bd3478d851a02375ee",
+    "buildId": "c96f6eb3-49da-4b05-bc30-be4bf49c4f48",
+    "workspaceId": "agentv3-PaQzgYmHglQNk0ijyH25nfftSeP2-60399296-56fd-4f77-a5bc-e87014a9077b",
+    "historyId": "1794111690352",
+    "sessionId": "60399296-56fd-4f77-a5bc-e87014a9077b",
+    "model": "qwen3-coder",
+    "framework": "vite-react",
+    "builtBy": "SURPLUS",
+    "startedAt": 1794111690352,
+    "endedAt": 1794112981971,
+    "startedAtIST": "2026-11-08 09:51:30.352 IST",
+    "endedAtIST": "2026-11-08 10:13:01.971 IST",
+    "userWaitMs": 30000
+  },
+  "rawReportSha256": "9d4d35ccb142968205c762a3e1a7639e06edb23bd663c2307b790de18608c003",
+  "truncation": {
+    "complete": true
+  },
+  "counts": {
+    "total": 427,
+    "errors": 6,
+    "warnings": 8,
+    "autoResolved": 10,
+    "workarounds": 0,
+    "leftOpen": 2,
+    "healRule": 3,
+    "unresolved": 2
+  },
+  "billing": {
+    "userTier": "weak (free tier — cheap engines) · not charged",
+    "charged": false,
+    "billedButNotDebited": false,
+    "walletDebited": false,
+    "billedUsd": 0,
+    "billedInr": 0,
+    "realCostUsd": 0,
+    "sandboxCostUsd": 0.057454,
+    "preSandboxSubtotalUsd": 0,
+    "sandboxFeeUsd": 0,
+    "sandboxFeePct": 2.5,
+    "powerMode": false,
+    "powerLevel": "weak",
+    "noClaude": true
+  },
+  "etaAccuracy": {
+    "promisedMs": 606153,
+    "lowMs": 536445,
+    "highMs": 1040806,
+    "actualMs": 1261619,
+    "ratio": 2.0813540475754473,
+    "withinBand": false,
+    "evidenced": true,
+    "line": "The user was shown 8.9 min–17.3 min (midpoint 10.1 min); the build took 21.0 min — 2.1× the midpoint and OVER the band (not counting 0.5 min spent waiting for the user's answer).",
+    "key": "game",
+    "source": "platform"
+  },
+  "requestAnalysis": {
+    "taskType": "simple_app",
+    "complexityScore": 15,
+    "startTier": "gemini",
+    "startBand": "cheapest band"
+  },
+  "providerDelivery": {
+    "SURPLUS": 80
+  },
+  "llmCallCount": 81,
+  "providerTokens": {
+    "SURPLUS": {
+      "inputTokens": 4944369,
+      "outputTokens": 26263,
+      "cacheReadInputTokens": 4177952
+    }
+  },
+  "providerWaste": {
+    "msByKind": {
+      "timeout": 0,
+      "crawl": 0,
+      "silent": 0,
+      "rate-limit": 0,
+      "error": 0
+    },
+    "callsByKind": {
+      "timeout": 0,
+      "crawl": 0,
+      "silent": 0,
+      "rate-limit": 0,
+      "error": 0
+    },
+    "msByFamily": {},
+    "buildMs": 1291608
+  },
+  "sandboxUnavailable": "E2B concurrent cap of 20 at 09:51:30 IST; SANDBOX_RECOVERED at 10:12:58 IST; sandbox session came up created-fresh after 20.2 min",
+  "gameKitSeeded": {
+    "recipes": [
+      "generate_game_runtime",
+      "generate_game_vfx",
+      "generate_melody"
+    ],
+    "files": 0,
+    "seconds": 17.9,
+    "fastLaneSkippedGame": "The game kit is already laid down (generate_game_runtime, generate_game_vfx, generate_melody)"
+  },
+  "gameContract": {
+    "genre": "unknown",
+    "dimension": "unspecified",
+    "controls": [],
+    "requiredFeatures": [],
+    "winLoseNamed": false,
+    "vehicle": null,
+    "camera": "unspecified",
+    "subjects": [
+      "house"
+    ],
+    "externalAssets": false
+  },
+  "writeTimeTypecheck": "never ran although 34 TypeScript write(s) happened — no tsconfig.json was found; builder wrote tsconfig.json at 09:55:12 IST",
+  "todoOnlyTurns": "2 plan-only turns, 20.1s; 1 first-in-run (handed back); 1 after a hand-back in the same run",
+  "usageNotReported": "SURPLUS (qwen3-coder) streamed without token counts; free tier billed INR 0 — nothing over-charged",
+  "releaseGate": "YELLOW — 8 known vulnerabilities in this app's dependencies; app rendered, typechecked, 3 controls held up",
+  "readiness": "READY score 84/100 after step limit 80; READY_BEFORE_END: never judged finished during the build; no error boundary",
+  "manifestFiles": [
+    "docs/decisions/ADR-001.md",
+    "e2e/smoke.spec.ts",
+    "index.html",
+    "package.json",
+    "playwright.config.ts",
+    "public/icon.svg",
+    "public/manifest.webmanifest",
+    "public/nbai-native.css",
+    "public/robots.txt",
+    "public/sw.js",
+    "src/App.tsx",
+    "src/game/house-explorer/GameRenderer.tsx",
+    "src/game/house-explorer/audio.ts",
+    "src/game/house-explorer/state.ts",
+    "src/game/house-explorer/storage.ts",
+    "src/game/house-explorer/types.ts",
+    "src/index.css",
+    "src/main.tsx",
+    "src/nb-autostyle.css",
+    "tsconfig.json",
+    "tsconfig.node.json",
+    "vite.config.ts"
+  ],
+  "closedOnMainBy": {
+    "D1_no_recipes_without_manifest_and_no_retry_goodbye": "BR1958 #4132 prepareGameSeedWorkspace; BR1961 F2 #4146 sandboxUnavailableNotice",
+    "D2_empty_seed_success": "BR1977 #4170 downgradeEmptyKitSeedSuccesses (FAST_LANE_SKIPPED_GAME kitFact follows gameKitSeeded after the downgrade)",
+    "D3_tsconfig_rearm": "BR1951 ToolDispatcher.onFileWrite"
+  },
+  "shipped": "tests and ledger only — no production code change",
+  "queueUpdated": [
+    "Q-2621",
+    "Q-1068",
+    "Q-2375",
+    "Q-2414"
+  ]
+}

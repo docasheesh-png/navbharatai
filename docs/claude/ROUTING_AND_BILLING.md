@@ -836,6 +836,105 @@ VM expense stays separate internally and cannot stack into customer markup/floor
 Zero bills stay zero; independent hosting/database subscriptions are excluded.
 See docs/billing/router-one-reconciliation.md for limitations and exact formula.
 
-## Pro Chain V2 safety containment
+### Owner decision — 2026-11-15: Router One lock release and estimate settlement (BR2388, t345u)
 
-The experimental chain is unavailable for every production identity, including the test profile. Flags cannot activate it. Existing builder and chat routing remain unchanged. Prior estimated usage/price billing is not approved by this containment. Builder-specific data/spend admission and exact accounting evidence must be implemented and reviewed before a later activation change. See docs/PRO_CHAIN_V2.md.
+BR2388: Router One refused 28 times in one build with only "The build engine is temporarily
+unavailable". The cause was a permanent spend lock. Any call that ended without a complete usage
+receipt (missing usage, an early stream exit, a transport error, a deadline) was left `unresolved` in
+`router_one_accounting_keys/<sha256(key)>`. After that, every reserve on that key refused forever unless
+someone wrote to Firestore by hand. This supersedes "unknown expense is still absorbed" above, for
+Router One calls only.
+
+**1) A call without a complete receipt is settled by estimate, and its key is released.**
+`finish()` in `catalogueAccounting.ts` settles each physical call exactly once (`attempt.done`). It
+issues the exact `catalogue-calculated` receipt as before, or a `catalogue-estimated` receipt
+(`expenseEvidence: official-public-tariff-estimate`). Either way it calls `releaseVerified`. The
+estimate always uses the parsed, published per-model tariff snapshot bound to that call
+(`estimateCatalogueChatCost` in `catalogueMath.ts`), in this order of accuracy:
+- a. Response usage with `prompt_tokens_details.cached_tokens` → `usage-reported` (the same cost as
+  the verified path).
+- b. Without `cached_tokens`, the provider's own cache detail (`prompt_cache_hit_tokens` /
+  `cached_tokens`) → `usage-provider-cache-detail`. With no cache detail at all, every input token is
+  billed at the full input rate → `usage-full-input-rate`, labelled **conservative**.
+- c. No usage at all: input from the request heuristic (`TokenEstimator`, recorded at reserve as
+  `requestInputTokens`), output from the length of the content received (chars ÷ 4, rounded up) →
+  `request-heuristic`, labelled **conservative**.
+- A non-2xx HTTP status with no usage → `no-billable-response`, at an explicit, labelled zero.
+- **No HTTP response at all (review of PR #4238).** No status, no output and no usage, AND the
+  connection was provably never set up → `no-response-network`, a labelled zero. "Provably" means one
+  of these codes anywhere in the error's `cause` chain (undici puts it on `TypeError('fetch failed')
+  .cause`; the SDK wraps that again): `ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`, `EHOSTUNREACH`,
+  `ENETUNREACH`, `UND_ERR_CONNECT_TIMEOUT`, the other pre-socket DNS/bind codes (`EAI_NONAME`,
+  `EAI_FAIL`, `EAI_NODATA`, `EAI_ADDRFAMILY`, `EADDRNOTAVAIL`), or a TLS certificate/handshake-only code. A request stopped
+  after admission but before the SDK was called → `not-dispatched`, a labelled zero. Both release the
+  key.
+- **After dispatch keeps the estimate.** Timeouts and aborts (SDK timeout, `AbortError`, the caller's
+  signal, `ETIMEDOUT`, header/body timeouts) and connections dropped once the request may have been
+  sent (`ECONNRESET`, `ECONNABORTED`, `EPIPE`, `UND_ERR_SOCKET` "other side closed", `UND_ERR_CLOSED`)
+  keep `request-heuristic`, because the supplier may already have done the work. An after-dispatch
+  code wins over a setup code anywhere in the same chain.
+- **No code at all is decided conservatively.** A bare `fetch failed`, `socket hang up`, or any
+  unlisted code is billed by the labelled request-size estimate, because we cannot prove the request
+  never left. This applies to every Router One entry, including the scope-classifier ask
+  (`routerOneScopeAsk` → `recordRouterOneScopeUsage` → wallet): a refused connection on a 40k-character
+  classifier prompt is billed $0, and a reset after sending is billed by the estimate.
+- A zero estimate is not an "estimated charge": it adds no `estimated` block and no user line.
+
+Every estimate label starts with "Estimated". The markup is the same as verified Router One billing,
+**× 5/2**, with no other multiplier. The user-visible `ENGINE_COST_ESTIMATED` message is neutral —
+"This step's cost was estimated because the engine did not return a full usage receipt." — and the
+pricing/markup details live only in its admin `[engine-diag: … pricing=published_tariff
+markup=same_as_verified_x5_2]` marker, which the user's report strips. Estimates show up as `ROUTER_ONE_CATALOGUE_ESTIMATED` (admin audit,
+`estimated: true`, basis, label), as `estimated` in `routerOneCatalogueBuildCharges` (present only when
+an estimate was used, so verified-only builds return exactly the old shape) and as the build-report
+issue `ENGINE_COST_ESTIMATED`. That issue carries the label, and its admin-only
+`[engine-diag: estimated_cost_usd=…]` marker is stripped from the user's report. Billing counts a call
+once per `callId`, so a late receipt after an estimate can never charge twice. A healed call also can
+no longer be `finish`ed in the store. The existing produced-nothing / barren-phase rules still decide
+whether the user pays for a turn at all.
+
+**2) Existing locks self-heal on reserve.** `FirestoreCatalogueAttemptStore.reserve` settles up to 25
+unresolved entries per transaction (expired actives count as unresolved). Any remainder is persisted in
+the key state, the reserve refuses (`reserve_fenced_unresolved`), and the next reserve continues; a
+retried transaction starts its healed list over, so nothing is audited twice. It writes the attempt row
+as `self-healed-estimate` (`absorbed: true`, never charged to any user; basis
+`self-heal-request-heuristic`, or `self-heal-unrecorded` at a labelled zero when nothing usable was
+recorded), releases each entry, and audits `ROUTER_ONE_LOCK_SELF_HEALED`. Rows that were already
+settled (`catalogue-calculated` / `catalogue-estimated`) are only released and never re-priced, and
+`releaseVerified` is idempotent for them. Production recovers on deploy without a manual Firestore
+write.
+
+**3) The genuine safety gates stay, and each one is visible.** No price, a stale or invalid price, no
+scope or binding, Stop, `max_tokens`, the time-bounded in-flight uncertainty fence (now held until the
+uncertain call's own deadline, still fail-closed when saturated) and every store failure still refuse
+before dispatch. Each throws `RouterOneAccountingUnavailableError(<gate>)`. The gate is an enumerated,
+supplier-free token kept in a WeakMap (`src/server/lib/engineSafeDiag.ts`), never an own property and
+never in the message, so the public error and user copy are unchanged. The server logs
+`[ROUTER_ONE] refused before dispatch: <gate>`. The admin report's `PROVIDER_FALLBACK` detail carries
+`[engine-diag: gate=…]`, and `userFacingReport` strips it.
+
+**4) One refusal per build, not 28.** A reserve refused with `reserve_fenced_unresolved` (entries
+still unresolved after self-heal) adds the key to that build's request scope (`lockedKeys`). Later
+calls on that key in the same build refuse at once with `build_skip_unresolved_lock`, with no price
+fetch and no Firestore transaction. `MultiProviderTurnRunner` retires that rung by its `name` for the
+rest of the build (`deadRungs`). Pro Chain V2 builds (`proChainV2TurnRunner`) pass the same build
+`deadRungs` to their chains, so one lock refusal retires Router One for every v2 agent of that build. Other keys, other providers, other gates and the next build are
+unaffected.
+
+**Surplus visibility (same PR).** A folded Surplus failure carries its scope-failure
+`stage`/`reason`, the public safe reason and the last HTTP status, and nothing else.
+`[SURPLUS_TURN] … (stage=… reason=… safe=… status=…)` goes to the server log, and the marker goes
+into the admin report's `SURPLUS_FALLBACK` detail (stripped for users). Locked by
+`tests/br2388EngineDiagnosability.test.ts`, `tests/routerOnePersistentFence.test.ts` and
+`tests/routerOneCatalogueAccounting.test.ts`.
+
+## Owner revision — 2026-11-15: Pro Chain V2, per-agent (t350u) — FLAGGED, test profile only
+
+For the test profile `z@gmail.com` only (flag `PRO_CHAIN_V2`; go public with `PRO_CHAIN_V2_PUBLIC=on`),
+the Weak band uses **Surplus → Router One → Qubax → Mitrify ONLY** — no GLM/KIMI/ladder tail — and
+each agent of a build falls back on its own (per-agent Surplus drop, per-agent sticky engine). Everyone
+else keeps the 2026-11-01 Weak order above, byte-for-byte. Surplus (10×) and Router One accounting are
+unchanged. Qubax is billed at its public catalog price, Mitrify at `MITRIFY_BUILDER_RATE_*`, both with
+the normal tiered markup; a missing price or missing token usage is billed as a labelled ESTIMATE,
+never ₹0. Provider names stay admin-only (the user report shows one neutral `ENGINE_ROUTING` line).
+Full detail, env vars and risks: `docs/PRO_CHAIN_V2.md`.

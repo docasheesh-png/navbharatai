@@ -1,4 +1,3 @@
-import { ProChainV2Build } from '../src/server/AgentV3/proChainV2/buildContext';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -35,7 +34,7 @@ afterEach(() => {
 });
 
 const hooksFor = (email: string | null, extra: Partial<SurplusPreWriteFailOpenHooks> = {}): SurplusPreWriteFailOpenHooks => ({
-  state: { dropped: false }, userFilesWritten: () => 0, proChainV2: email === 'z@gmail.com' ? new ProChainV2Build('isolated-test-only') : undefined, ...extra,
+  state: { dropped: false }, userFilesWritten: () => 0, proChainV2: proChainV2ForBuild('weak', email, null), ...extra,
 });
 function chainFor(opts: Parameters<typeof buildTurnRunner>[0]): string[] {
   let seen: ChainRung[] = [];
@@ -56,7 +55,7 @@ describe('flag OFF (everyone but z@) — nothing changes', () => {
     expect(proChainV2ForBuild('off', 'z@gmail.com', null)).toBeUndefined();
   });
   it('a v2 context that somehow reaches another band is ignored there — that band keeps its own ladder', () => {
-    const v2Hooks = { state: { dropped: false }, userFilesWritten: () => 0, proChainV2: new ProChainV2Build('isolated-test-only') };
+    const v2Hooks = { state: { dropped: false }, userFilesWritten: () => 0, proChainV2: proChainV2ForBuild('weak', 'z@gmail.com', null) };
     for (const tier of ['off', 'mini'] as const) {
       const names = chainFor({ tier, noClaude: true, surplusPreWriteFailOpen: v2Hooks });
       expect(names, tier).toEqual(chainFor({ tier, noClaude: true }));
@@ -100,7 +99,7 @@ describe('z@ — the new chain ONLY', () => {
     const surplusCalls: number[] = [];
     const surplusSession = { buildId: 'b', model: 'glm-5.3', estimatedMicroUsd: '1',
       runner: () => ({ runTurn: async () => { surplusCalls.push(1); throw new PublicBuildEngineError(); } }) } as never;
-    const v2 = new ProChainV2Build('isolated-test-only');
+    const v2 = proChainV2ForBuild('weak', 'z@gmail.com', null)!;
     const diag = new BuildDiagnostics();
     v2.attachReport((l) => diag.record(l));
     diag.setProChainV2(v2.summary);
@@ -122,7 +121,7 @@ describe('z@ — the new chain ONLY', () => {
     expect(billed).toEqual([['ENGINE_MF', 100, 'glm-5.3']]);
     const report = diag.report();
     const snap = report.proChainV2;
-    expect(snap.reason).toBe('isolated-test-only');
+    expect(snap.reason).toBe('test-profile');
     expect(snap.surplusDrops).toBe(1);
     expect(snap.agents['builder#1']).toEqual({ ENGINE_MF: 1 });
     expect(snap.failedCalls).toEqual({ ENGINE_QX: 1 });
@@ -162,7 +161,7 @@ describe('secrets and brand on the failure path', () => {
       const body = url.includes('qubax') ? { error: { message: 'Qubax rejected key plainkeyqx77' } } : { error: { message: 'Mitrify rejected key plainkeymf88', source: 'mitrify' } };
       return new Response(JSON.stringify(body), { status: url.endsWith('/models') ? 503 : 400, headers: { 'content-type': 'application/json' } });
     }));
-    const v2 = new ProChainV2Build('isolated-test-only');
+    const v2 = proChainV2ForBuild('weak', 'z@gmail.com', null)!;
     const diag = new BuildDiagnostics();
     v2.attachReport((l) => diag.record(l));
     diag.setProChainV2(v2.summary);

@@ -14,10 +14,12 @@ it('the real history command resolves imported contracts and registers the curre
     for (const name of ['GameBuildingGenerator', 'GameAssetLodGenerator', 'GameAssetTextureVerifier', 'GameAssetRuntimeGenerator', 'GameRuntimeGenerator', 'Game3DGenerator', 'GameControllerGenerator', 'GameSystemsGenerator', 'GameVfxAudioGenerator', 'MelodyGenerator', 'GameShellGenerator', 'GameRoyaleGenerator', 'GameRoyaleFoundationGenerator', 'kitTypeContract', 'gameKitHistory']) {
       copyFileSync(`src/server/lib/${name}.ts`, join(root, `src/server/lib/${name}.ts`));
     }
-    // Generators that live in their own folder (the Athree map and its source modules) travel with the command.
-    mkdirSync(join(root, 'src/server/lib/athreeMap'), { recursive: true });
-    for (const name of readdirSync('src/server/lib/athreeMap')) {
-      if (/\.ts$/.test(name) && !/\.test\.ts$/.test(name)) copyFileSync(`src/server/lib/athreeMap/${name}`, join(root, `src/server/lib/athreeMap/${name}`));
+    // Generators that live in their own folder (the Athree map and the Object Forge, with their source modules) travel with the command.
+    for (const folder of ['athreeMap', 'objectForge']) {
+      mkdirSync(join(root, `src/server/lib/${folder}`), { recursive: true });
+      for (const name of readdirSync(`src/server/lib/${folder}`)) {
+        if (/\.ts$/.test(name) && !/\.test\.ts$/.test(name)) copyFileSync(`src/server/lib/${folder}/${name}`, join(root, `src/server/lib/${folder}/${name}`));
+      }
     }
     const historyPath = join(root, 'src/server/lib/gameKitHistory.ts');
     const original = readFileSync(historyPath, 'utf8');

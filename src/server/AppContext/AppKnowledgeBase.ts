@@ -722,6 +722,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'pro_chat',
   },
   {
+    id: 'object_forge',
+    name: 'Object Forge — NavBharatAI makes any object for your game itself',
+    path: 'NavBharatAI Pro → chat → ask for a game that needs something specific (a dragon, a lighthouse, a person, a samosa cart); the builder makes it',
+    description: 'When a game needs an object that no library or ready-made module has, the builder does not give up and does not draw random boxes: it DESCRIBES the object as a small spec (shapes such as box, sphere, cylinder, capsule, torus, lathe, loft, extrude and tube; parts joined at pivots; mirrored left and right; repeated copies; colours and materials; animation clips such as walk and idle). The Forge checks the spec, measures it (triangle count, size in metres, parts that float free, an animation that tears it apart), draws it back as FRONT, SIDE and TOP text pictures, and the builder fixes what it sees before the object reaches your game. The builder can also just describe the thing in words (for example a lighthouse with a spiral stair) and the Forge makes it itself: it asks an AI for the spec, checks it, shows that AI its own drawing and has it correct the mistakes, for up to four rounds, using the free AI route. The object is written as src/game/objects/<name>.ts and the game makes it with one call. Worked examples to adapt: person, quadruped, house, tree, sword. HONEST LIMIT: the results are stylised low-poly figures built from simple shapes, not photoreal faces, clothing, fur or scanned models; the builder says so. Switched on by default; the owner can switch it off with AGENTV3_OBJECT_FORGE=off.',
+    howToUse: 'Just describe the game and the things in it (for example a village game with a lighthouse and fishing boats, or a zoo game with a giraffe). If the game library has a matching ready-made model it is used first; anything else is built by the Forge. Ask for changes in plain words (make the lighthouse taller, give the dog a wagging tail) and the builder edits that object.',
+    relatedFeatures: ['agentv3_builder', 'athree_map'],
+    keywords: ['object forge', 'forge', 'make any object', 'koi bhi object', 'object banao', 'module banao', 'khud banao', 'custom object', 'custom model', '3d model', '3d object', 'model banao', 'character banao', 'insaan', 'human', 'person', 'janwar', 'animal', 'dog', 'kutta', 'giraffe', 'dragon', 'tree', 'ped', 'house', 'ghar', 'building', 'imarat', 'sword', 'talwar', 'weapon', 'prop', 'lighthouse', 'walk animation', 'walking', 'chalna', 'low poly', 'low-poly', 'stylised', 'procedural', 'no library', 'library me nahi'],
+    aiSurface: 'pro_chat',
+  },
+  {
     id: 'agentv3_zip_import',
     name: 'Import an existing app (.zip) into NavBharatAI Pro',
     path: 'NavBharatAI Pro → chat composer → 📎 attach menu → "Import project (.zip)" → pick your app\'s .zip, or a single .html page (it imports immediately — no send needed)',

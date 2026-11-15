@@ -367,6 +367,10 @@ import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
 import { athreeMapIntent, athreeModulesFor } from '../lib/athreeMap/athreeMapIntent';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
+import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
+import { authorObject, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
+import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
+import { selfAuthorObject, madeCache } from '../lib/objectForge/forgeSelfAuthor';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
@@ -9664,6 +9668,61 @@ export class ToolDispatcher {
         const layers = await this.addMissingRecipeLayers(royale.files, agent);
         this.scheduleCheckpoint('original royale practice');
         return `Original offline practice recipe results:\n${written.join('\n')}\n\n${royale.instructions}${layers}`;
+      }
+
+      case 'author_object': {
+        // THE OBJECT FORGE (admin 2026-11-15: "NavBharatAI should make ANY object itself, not depend on the modules somebody built").
+        // The builder writes a SPEC; the Forge validates it, measures it with the same engine the game runs, and draws it back as text.
+        // A spec that fails is feedback, not a crash: the reasons come back as the tool result so the builder fixes and calls again.
+        if (!objectForgeEnabled()) refuse('The Object Forge is switched off for this build, so it cannot be used. Build the object another way and say so plainly in the summary.');
+        const forgeRec = (input as Record<string, unknown>) || {};
+        if (typeof forgeRec.example === 'string' && forgeRec.example.length > 0) {
+          const example = FORGE_EXAMPLES[forgeRec.example];
+          if (!example) return `There is no example called "${forgeRec.example}". Examples: ${FORGE_EXAMPLE_IDS.join(', ')}.`;
+          const shown = authorObject(example.spec);
+          return `${example.what}\n\nThe spec (copy it, change the id and what you need, and pass it as spec):\n${JSON.stringify(example.spec)}\n\nWhat it builds:\n${shown.text}`;
+        }
+        let forgeSpec: unknown = forgeRec.spec;
+        let madeNote = '';
+        // SELF-AUTHORING (admin 2026-11-15, "atma nirbhar"): the user's words in, an object out. The Forge asks a model for a spec, checks it,
+        // shows the model its own drawing and has it correct, a few rounds. The FREE router namespace (never Claude, never NavBharatAI money).
+        if ((forgeSpec === undefined || forgeSpec === null) && typeof forgeRec.describe === 'string' && forgeRec.describe.trim().length > 0) {
+          const wantedObject = forgeRec.describe.trim().slice(0, 300);
+          const hit = madeCache.get(wantedObject);
+          if (hit) { forgeSpec = hit; madeNote = 'Made earlier from the same description (reused, no new model call).'; }
+          else {
+            const known = findInCatalog(wantedObject);
+            const made = await selfAuthorObject(wantedObject, {
+              ask: async (prompt, system) => {
+                try { const r = await aiRouter.routeDetailed(prompt, [], 'navbharat', undefined, system); return r.ok ? r.content : null; }
+                catch { return null; }
+              },
+              groundTruth: known ? `${known.name}: ${known.dims}. Must have: ${known.parts.join('; ')}. The tell: ${known.tell}` : undefined,
+              id: typeof forgeRec.id === 'string' && /^[a-z][a-z0-9-]{1,39}$/.test(forgeRec.id) ? forgeRec.id : undefined,
+            });
+            if (!made.ok || !made.spec) return made.text;
+            forgeSpec = made.spec;
+            madeCache.set(wantedObject, made.spec);
+            madeNote = `Made by the Forge from the description in ${made.attempts.length} round(s)` + (made.remainingWarnings.length ? `, with ${made.remainingWarnings.length} warning(s) it could not clear (below).` : ', clean.');
+          }
+        }
+        if (forgeSpec === undefined || forgeSpec === null) return FORGE_GUIDE;
+        if (typeof forgeSpec === 'string') {
+          if (forgeSpec.length > 400_000) return 'The spec is too large (over 400 KB). An object is a few dozen nodes: simplify it.';
+          try { forgeSpec = JSON.parse(forgeSpec); }
+          catch (err) { return `The spec is not valid JSON (${err instanceof Error ? err.message : String(err)}). Pass it as an object.`; }
+        }
+        const forged = authorObject(forgeSpec);
+        if (!forged.ok || !forged.files || !forged.id) return forged.text;
+        const forgeKit = Object.entries(forged.files).filter(([path]) => !path.startsWith(OBJECTS_DIR));
+        const forgeWritten = await this.writeRecipeFiles(Object.fromEntries(forgeKit), agent);
+        // The object file is REPLACED on purpose when the builder calls again with the same id (that is how it fixes what the drawing showed).
+        const objectPath = `${OBJECTS_DIR}${forged.id}.ts`;
+        const wroteObject = await this.guardedWrite(objectPath, forged.files[objectPath], { agent, source: 'author_object', allowOverwrite: true });
+        this.state?.recordFileChange({ path: objectPath, kind: wroteObject.kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(objectPath, wroteObject.content);
+        this.scheduleCheckpoint('object forge');
+        return `${wroteObject.kind === 'create' ? 'Created' : 'Replaced'} ${objectPath}\n${forgeWritten.join('\n')}\n${madeNote ? madeNote + '\n' : ''}\n${forged.text}\n\n${forgeUsage(forged.id, 'create' + pascal(forged.id))}`;
       }
 
       case 'generate_game_shell': {

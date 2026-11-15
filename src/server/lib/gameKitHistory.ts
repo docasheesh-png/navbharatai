@@ -152,6 +152,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "a89b35a839d47bfddf76d72d89f25ad6085c5dc66edfb5c9cd8983898b88fcba",
     "dfc9f2a2a953a287b80e12e6c1d06f3e54a61535e12eee60a37c5834976df54b"
   ],
+  "src/game/forge/forge.ts": [
+    "6bcf47428e5c609130be1210f22263317e2111f3ab3c7d3f6eed0f9d4694dd66"
+  ],
   "src/game/fx/audio.ts": [
     "c9b08a58e84a865c0d58353f6ebd7af60211622cb95639ac6f4c56d20ad82c7d",
     "7fd1dc2470cf216b39346c5034710fd1688b27d636bcfa42157d54afc118ced3"

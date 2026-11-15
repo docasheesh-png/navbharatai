@@ -35,6 +35,7 @@ import {
 } from './admitOrFallback';
 import { recordSurplusMidBuildDeath, recordSurplusAdmitProbeSuccess } from './surplusAdmitCircuit';
 import { formatEngineSafeDiag } from '../../lib/engineSafeDiag';
+import type { ProChainV2Build } from '../../AgentV3/proChainV2/buildContext';
 
 /** Safe mid-build reasons appended to the admission allowlist. Never secret/URL-bearing. */
 export const SURPLUS_PRE_WRITE_FAIL_OPEN_REASONS = [
@@ -64,6 +65,12 @@ export type SurplusPreWriteFailOpenHooks = {
   onSurplusError?: (error: unknown) => void;
   /** Router One pin (z@gmail.com): every runner of this build is Router One ONLY — no Surplus, no ladder. */
   routerOneOnly?: boolean;
+  /**
+   * Pro Chain V2 (owner t350u): present ONLY for a build that runs Surplus → Router One → Qubax → Mitrify
+   * (z@ by default). Every runner of such a build gets its own per-agent chain instead of this
+   * build-wide fail-open. Absent ⇒ every path below is unchanged.
+   */
+  proChainV2?: ProChainV2Build;
 };
 
 /** True when `reason` is one of the mid-build fail-open tokens (for tests / allowlist checks). */

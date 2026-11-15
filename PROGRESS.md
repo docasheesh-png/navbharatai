@@ -101482,3 +101482,11 @@ Owner t311u sequential audit, BR1978 only (boundary 1951..2105 frozen). Branched
 - "Build one game" is still buildable / explicit-order on main; making it ask is an admin product decision. Q-2653 and Q-2654 gain this evidence and stay open.
 
 Queue: this commit closes no row and opens no row. Q-2649..Q-2654 and earlier blockers stay open.
+
+## 2026-11-15 — BR1979 autopsy ("ake app banane jisse free mein I video Bani", succeeded, charged ₹5.15): strip a dangling tsconfig.node.json reference so the fast lane can finish
+
+Owner t311u sequential audit, BR1979 only (boundary 1951..2105 frozen). Branched from origin/main `08a37a81c` (#4231); BR1978 (#4230) is merged. Under SANDBOX_UNAVAILABLE the workspace was empty; the fast lane still ran, refused 6 of 13 writes, and failed verify with TS6053 because the generated tsconfig.json referenced `./tsconfig.node.json` and that file was never written. The full builder finished a working Free Video Maker (YELLOW gate: the headless preview has no camera). Ledger: [autopsy](docs/build-report-autopsy-BR1979.md), [evidence](docs/build-report-autopsy-BR1979-evidence.json).
+- D1 (retry-goodbye) and D2 (fast lane against a failed setup) are already closed on main (BR1961 F2 #4146, BR1952 #4124). `tests/br1979Autopsy.test.ts` locks each against this report's exact shape.
+- D3 is new: `sanitizeTsconfigReferences` drops only a missing `tsconfig.node.json` project reference when the tsconfig already has `include`/`files`. Wired before the fast lane writes and verifies, again before tsc, and on preview restore. Vite 5 solution-style configs and a present sibling are left alone.
+
+Queue: this commit closes no row and opens no row. Q-2621 gains this report's evidence and stays open. Q-2649..Q-2654 and earlier blockers stay open.

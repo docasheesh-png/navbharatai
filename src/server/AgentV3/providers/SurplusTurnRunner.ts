@@ -2,7 +2,8 @@ import { guardSurplusNarrative, withServiceIdentity } from './surplusNarrativeId
 import { elideTurnParams } from '../elideTurnMedia';
 import { readScopeFailure, tagScopeFailure, type ScopeFailureDiagnostic } from '../scopeFailureDiagnostic';
 import { tagRawErrorDetail } from '../rawErrorDetail';
-import { PublicBuildEngineError, publicBuildEngineError, type PublicBuildEngineSafeReason } from '../../lib/buildEngineError';
+import { engineSafeDiagText, tagEngineSafeDiag } from '../../lib/engineSafeDiag';
+import { PublicBuildEngineError, publicBuildEngineError, publicBuildEngineSafeReason, type PublicBuildEngineSafeReason } from '../../lib/buildEngineError';
 import { assertAiAvailable, aiMaintenanceStore, AiMaintenanceError } from '../../lib/aiMaintenance';
 import type { RunTurnParams, TurnResult, TurnRunner, TurnUsage } from '../ClaudeClient';
 import { BuildStoppedError, onStop, raceStop, throwIfStopped } from '../stopSignal';
@@ -74,6 +75,13 @@ function publicError<T extends Error>(error: T): T {
   return error;
 }
 const unavailable = (reason: PublicBuildEngineSafeReason = 'terminal_fold') => publicBuildEngineError(reason);
+/** The transport's integer HTTP status on its response envelope; nothing else is read. */
+function httpStatusOf(raw: unknown): number | undefined {
+  try {
+    const status = raw !== null && typeof raw === 'object' ? (raw as { status?: unknown }).status : undefined;
+    return typeof status === 'number' && Number.isSafeInteger(status) && status >= 100 && status <= 599 ? status : undefined;
+  } catch { return undefined; }
+}
 const ENDPOINT = 'https://api.surplusintelligence.ai/min90/v1';
 const MAX_TURN_ATTEMPTS = 3;
 const validationReasons = new WeakMap<object, SurplusTurnFailure['reason']>();
@@ -157,6 +165,8 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
     async runTurn(params) {
       params = elideTurnParams(params); // embedded media never reaches a model (elideTurnMedia.ts)
       let diagnostic: ScopeFailureDiagnostic = { stage: 'authorization', reason: 'authorization_failed' };
+      /** BR2388: the last HTTP status this turn's transport returned — an integer only, never a body. */
+      let lastHttpStatus: number | undefined;
       if (params.signal?.aborted) throw publicError(new BuildStoppedError());
       const bound = turnDeadline(configuredMs, params.deadlineAt);
       if (bound.expired) throw publicError(new Error(BUDGET_EXHAUSTED_MESSAGE));
@@ -266,6 +276,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
           try {
             diagnostic = { stage: 'dispatch', reason: 'dispatch_failed' };
             raw = await authority.dispatch(request, controller.signal, permit);
+            lastHttpStatus = httpStatusOf(raw) ?? lastHttpStatus;
           } catch (error) {
             const failure: SurplusTurnFailure = Object.freeze({ stage: 'dispatch', reason: 'dispatch_failed', attempt, hasResponse: false });
             const next = await fallback(await accountFailure(error, failure), failure, error);
@@ -333,9 +344,25 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
         if (policyRefused || failureReason(error) === 'content_filter') throw unavailable('policy_refusal');
         // Never forward an upstream name, stack, cause, body, metadata, or even its error text.
         // Preserve an already-tagged PublicBuildEngineError (timeout / attempts_exhausted); else fold.
-        if (error instanceof PublicBuildEngineError) throw tagRawErrorDetail(tagScopeFailure(publicError(error), readScopeFailure(error) ?? diagnostic), error, JSON.stringify(readScopeFailure(error) ?? diagnostic ?? null));
-        try { console.warn('[SURPLUS_TURN] folded provider/transport failure to public build-engine boundary'); } catch { /* best-effort */ }
-        throw tagRawErrorDetail(tagScopeFailure(unavailable('terminal_fold'), readScopeFailure(error) ?? diagnostic), error, JSON.stringify(readScopeFailure(error) ?? diagnostic ?? null));
+        // BR2388: name the failing stage/reason and HTTP status (supplier-free enums + an integer) in the
+        // server log and, privately, on the public error for the admin report. The public error itself,
+        // its message and its serialization are unchanged.
+        const safeDiag = (folded: PublicBuildEngineError) => {
+          const scope = readScopeFailure(error) ?? diagnostic;
+          const d = { stage: scope.stage, reason: scope.reason, safe: publicBuildEngineSafeReason(folded), status: lastHttpStatus };
+          tagEngineSafeDiag(folded, d);
+          return engineSafeDiagText(d);
+        };
+        if (error instanceof PublicBuildEngineError) {
+          const folded = tagRawErrorDetail(tagScopeFailure(publicError(error), readScopeFailure(error) ?? diagnostic), error, JSON.stringify(readScopeFailure(error) ?? diagnostic ?? null));
+          const text = safeDiag(folded);
+          try { console.warn(`[SURPLUS_TURN] public build-engine failure (${text})`); } catch { /* best-effort */ }
+          throw folded;
+        }
+        const folded = tagRawErrorDetail(tagScopeFailure(unavailable('terminal_fold'), readScopeFailure(error) ?? diagnostic), error, JSON.stringify(readScopeFailure(error) ?? diagnostic ?? null));
+        const text = safeDiag(folded);
+        try { console.warn(`[SURPLUS_TURN] folded provider/transport failure to public build-engine boundary (${text})`); } catch { /* best-effort */ }
+        throw folded;
       } finally {
         active = false;
         controller.abort();

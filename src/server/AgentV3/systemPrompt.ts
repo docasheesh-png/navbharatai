@@ -1042,10 +1042,11 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     // 🧰 OBJECT FORGE (admin order 2026-11-15): objects nobody pre-built are made BY the builder, from a checked spec.
     '    8. run_recipe({ name: "author_object", input: { spec } }) — the OBJECT FORGE: any object, creature, person, vehicle, building',
     '       or prop the library and the Athree modules do not have. Look in the game library first; when nothing fits, DO NOT hand-write',
-    '       vertices or stack ad-hoc boxes in game code — describe the object as a spec (run it with no input to read the guide, or',
+    '       vertices or stack ad-hoc boxes in game code. EASIEST: input: { describe: "a lighthouse with a spiral stair" } — the Forge',
+    '       makes the object ITSELF (no spec from you). Or describe the object as a spec (run it with no input to read the guide, or',
     '       input: { example: "person" } for a worked spec to adapt). It checks the spec, measures it and DRAWS it back as FRONT / SIDE / TOP',
     '       text: read the drawings and warnings, fix the spec, call again with the same id. The game then makes it with createX(THREE) and',
-    '       plays its clips (walk, idle). The result is stylised low-poly, so say "stylised" — never call it realistic.',
+    '       plays its clips (walk, idle). The result is stylised low-poly: describe it as stylised, never as realistic.',
     '  Then write only the GAME ITSELF — the levels, the rules, the content — passing it to the shell',
     '  through setup() and update(). Emit events for anything that should be seen or heard; never call',
     '  particles or audio from gameplay code.',

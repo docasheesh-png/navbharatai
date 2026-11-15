@@ -369,6 +369,7 @@ import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
+import { selfAuthorObject, madeCache } from '../lib/objectForge/forgeSelfAuthor';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
@@ -9657,6 +9658,29 @@ export class ToolDispatcher {
           return `${example.what}\n\nThe spec (copy it, change the id and what you need, and pass it as spec):\n${JSON.stringify(example.spec)}\n\nWhat it builds:\n${shown.text}`;
         }
         let forgeSpec: unknown = forgeRec.spec;
+        let madeNote = '';
+        // SELF-AUTHORING (admin 2026-11-15, "atma nirbhar"): the user's words in, an object out. The Forge asks a model for a spec, checks it,
+        // shows the model its own drawing and has it correct, a few rounds. The FREE router namespace (never Claude, never NavBharatAI money).
+        if ((forgeSpec === undefined || forgeSpec === null) && typeof forgeRec.describe === 'string' && forgeRec.describe.trim().length > 0) {
+          const wantedObject = forgeRec.describe.trim().slice(0, 300);
+          const hit = madeCache.get(wantedObject);
+          if (hit) { forgeSpec = hit; madeNote = 'Made earlier from the same description (reused, no new model call).'; }
+          else {
+            const known = findInCatalog(wantedObject);
+            const made = await selfAuthorObject(wantedObject, {
+              ask: async (prompt, system) => {
+                try { const r = await aiRouter.routeDetailed(prompt, [], 'navbharat', undefined, system); return r.ok ? r.content : null; }
+                catch { return null; }
+              },
+              groundTruth: known ? `${known.name}: ${known.dims}. Must have: ${known.parts.join('; ')}. The tell: ${known.tell}` : undefined,
+              id: typeof forgeRec.id === 'string' && /^[a-z][a-z0-9-]{1,39}$/.test(forgeRec.id) ? forgeRec.id : undefined,
+            });
+            if (!made.ok || !made.spec) return made.text;
+            forgeSpec = made.spec;
+            madeCache.set(wantedObject, made.spec);
+            madeNote = `Made by the Forge from the description in ${made.attempts.length} round(s)` + (made.remainingWarnings.length ? `, with ${made.remainingWarnings.length} warning(s) it could not clear (below).` : ', clean.');
+          }
+        }
         if (forgeSpec === undefined || forgeSpec === null) return FORGE_GUIDE;
         if (typeof forgeSpec === 'string') {
           if (forgeSpec.length > 400_000) return 'The spec is too large (over 400 KB). An object is a few dozen nodes: simplify it.';
@@ -9673,7 +9697,7 @@ export class ToolDispatcher {
         this.state?.recordFileChange({ path: objectPath, kind: wroteObject.kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(objectPath, wroteObject.content);
         this.scheduleCheckpoint('object forge');
-        return `${wroteObject.kind === 'create' ? 'Created' : 'Replaced'} ${objectPath}\n${forgeWritten.join('\n')}\n\n${forged.text}\n\n${forgeUsage(forged.id, 'create' + pascal(forged.id))}`;
+        return `${wroteObject.kind === 'create' ? 'Created' : 'Replaced'} ${objectPath}\n${forgeWritten.join('\n')}\n${madeNote ? madeNote + '\n' : ''}\n${forged.text}\n\n${forgeUsage(forged.id, 'create' + pascal(forged.id))}`;
       }
 
       case 'generate_game_shell': {

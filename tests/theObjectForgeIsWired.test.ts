@@ -2,7 +2,9 @@
 // ToolDispatcher: the tool is registered everywhere a recipe must be; a bad spec writes nothing and says why; a good spec writes the
 // engine once and the object by id; calling again with the same id REPLACES the object (that is how the builder fixes what the drawing
 // showed); the kill switch refuses; and the system prompt tells the builder when to reach for it.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { aiRouter } from '../src/server/lib/aiRouter';
+import { madeCache } from '../src/server/lib/objectForge/forgeSelfAuthor';
 import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
@@ -32,15 +34,15 @@ beforeEach(() => {
   clearPreviewGaveUp('ws-forge');
   d = new ToolDispatcher(act, 'ws-forge', new WorkspaceState(stream), stream);
 });
-afterEach(() => { delete process.env.AGENTV3_OBJECT_FORGE; });
+afterEach(() => { delete process.env.AGENTV3_OBJECT_FORGE; vi.restoreAllMocks(); madeCache.clear(); });
 
 const lamp = (extra: Record<string, unknown> = {}) => ({
   id: 'street-lamp', name: 'Street lamp',
   materials: { iron: { color: '#2d3136', metalness: 0.7 }, glow: { color: '#ffe9a8', emissive: '#ffd45e' } },
   nodes: [
-    { name: 'pole', shape: { type: 'cylinder', radiusTop: 0.05, radiusBottom: 0.08, height: 4, seg: 10 }, material: 'iron', position: [0, 2, 0] },
-    { name: 'arm', shape: { type: 'box', size: [0.08, 0.08, 0.8] }, material: 'iron', position: [0, 3.95, 0.35] },
-    { name: 'bulb', shape: { type: 'sphere', radius: 0.15, seg: 10 }, material: 'glow', position: [0, 3.8, 0.75] },
+    { name: 'pole', shape: { type: 'cylinder', radiusTop: 0.05, radiusBottom: 0.08, height: 4, seg: 10 }, material: 'iron', position: [0, 2, -0.35] },
+    { name: 'arm', shape: { type: 'box', size: [0.08, 0.08, 0.8] }, material: 'iron', position: [0, 3.95, 0.05] },
+    { name: 'bulb', shape: { type: 'sphere', radius: 0.15, seg: 10 }, material: 'glow', position: [0, 3.8, 0.4] },
   ],
   ...extra,
 });
@@ -160,5 +162,77 @@ describe('the kill switch', () => {
     expect(r.is_error).toBe(true);
     expect(text(r)).toMatch(/switched off/);
     expect(act.files.size).toBe(0);
+  });
+});
+
+describe('describe: the user\'s words in, an object out (self-authoring)', () => {
+  const answerWith = (...texts: Array<string | null>) => {
+    const seen: Array<{ prompt: string; system?: string; ns?: string }> = [];
+    vi.spyOn(aiRouter, 'routeDetailed').mockImplementation((async (prompt: string, _h: unknown, ns: string, _x: unknown, system?: string) => {
+      seen.push({ prompt, system, ns });
+      const t = texts[Math.min(seen.length - 1, texts.length - 1)];
+      return t === null ? { ok: false, content: '' } : { ok: true, content: t };
+    }) as never);
+    return seen;
+  };
+
+  it('makes the object from a description alone: asks the FREE router, checks it, writes it, and says how it was made', async () => {
+    const seen = answerWith(JSON.stringify(lamp()));
+    const r = await forge({ describe: 'a street lamp' });
+    expect(r.is_error).toBeFalsy();
+    expect(seen.length).toBe(1);
+    expect(seen[0].ns).toBe('navbharat'); // the free namespace: never a paid model, never NavBharatAI money
+    expect(seen[0].prompt).toContain('"a street lamp"');
+    expect(act.files.has('src/game/objects/a-street-lamp.ts')).toBe(true);
+    expect(act.files.get('src/game/forge/forge.ts')).toBe(FORGE_ENGINE);
+    expect(text(r)).toMatch(/Made by the Forge from the description in 1 round\(s\), clean/);
+  });
+
+  it('corrects itself: a floating part comes back as the Forge\'s drawing and the second answer is what is written', async () => {
+    const bad: any = lamp(); bad.nodes.push({ name: 'balloon', shape: { type: 'sphere', radius: 0.3 }, material: 'glow', position: [0, 9, 0] });
+    const seen = answerWith(JSON.stringify(bad), JSON.stringify(lamp()));
+    const r = await forge({ describe: 'a street lamp' });
+    expect(seen.length).toBe(2);
+    expect(seen[1].prompt).toMatch(/float free of the main body: \[balloon\]/);
+    expect(seen[1].prompt).toContain('FRONT');
+    expect(text(r)).toMatch(/in 2 round\(s\), clean/);
+    expect(act.files.get('src/game/objects/a-street-lamp.ts')).not.toContain('balloon');
+  });
+
+  it('the same description twice costs ONE model call (the second is reused)', async () => {
+    const seen = answerWith(JSON.stringify(lamp()));
+    await forge({ describe: 'a street lamp' });
+    const r = await forge({ describe: 'A Street Lamp' });
+    expect(seen.length).toBe(1);
+    expect(text(r)).toMatch(/reused, no new model call/);
+  });
+
+  it('a model that does not answer writes NOTHING and points the builder at the spec route', async () => {
+    answerWith(null);
+    const r = await forge({ describe: 'a street lamp' });
+    expect(r.is_error).toBeFalsy();
+    expect(text(r)).toMatch(/could not make "a street lamp"/);
+    expect(act.files.size).toBe(0);
+  });
+
+  it('keeps the id the builder asked for', async () => {
+    answerWith(JSON.stringify(lamp()));
+    await forge({ describe: 'a street lamp', id: 'lamp-post' });
+    expect(act.files.has('src/game/objects/lamp-post.ts')).toBe(true);
+  });
+
+  it('a spec the builder passes wins over a description (no model call)', async () => {
+    const seen = answerWith(JSON.stringify(lamp()));
+    await forge({ describe: 'a street lamp', spec: lamp({ id: 'mine' }) });
+    expect(seen.length).toBe(0);
+    expect(act.files.has('src/game/objects/mine.ts')).toBe(true);
+  });
+
+  it('the kill switch stops it before any model call', async () => {
+    process.env.AGENTV3_OBJECT_FORGE = 'off';
+    const seen = answerWith(JSON.stringify(lamp()));
+    const r = await forge({ describe: 'a street lamp' });
+    expect(r.is_error).toBe(true);
+    expect(seen.length).toBe(0);
   });
 });

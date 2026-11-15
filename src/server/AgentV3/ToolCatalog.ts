@@ -2302,7 +2302,9 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'torus, lathe, loft, extrude, tube; a transform tree with pivots, mirror and repeat; materials; animation clips such as walk and idle) and '
         + 'the Forge CHECKS it, MEASURES it (triangles, size in metres, parts that float free, a clip that tears it apart) and DRAWS it back to you '
         + 'as FRONT / SIDE / TOP text silhouettes, so you can see it and fix it before it ships. It writes src/game/forge/forge.ts and '
-        + 'src/game/objects/<id>.ts, and the game makes the object with createX(THREE). Call it with no arguments to read the guide, with '
+        + 'src/game/objects/<id>.ts, and the game makes the object with createX(THREE). EASIEST: call it with { describe: "a lighthouse with a '
+        + 'spiral stair" } and the Forge MAKES IT ITSELF (it asks a model for the spec, checks it, shows the model its own drawing and has it '
+        + 'correct it, a few rounds) — you write no spec. Or call it with no arguments to read the guide, with '
         + '{ example: "person" } for a worked spec to adapt (person, quadruped, house, tree, sword), or with { spec } to build. Use it when the '
         + 'library has no match; never hand-write vertices or stacks of boxes for an object in game code. The result is stylised low-poly '
         + '(not photoreal): say so.',
@@ -2311,6 +2313,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         properties: {
           spec: { type: 'object', description: 'The object: { id, name, materials, nodes }. See the guide (call with no arguments).' },
           example: { type: 'string', description: 'Return a worked example spec and its drawing: person, quadruped, house, tree or sword.' },
+          describe: { type: 'string', description: 'The object in words (what it is, roughly how big, what matters). The Forge makes it itself and writes it.' },
+          id: { type: 'string', description: 'With describe: the id to save it under (lowercase letters, digits, -). Default: made from the description.' },
         },
       },
     },

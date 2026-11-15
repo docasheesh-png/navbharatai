@@ -50,6 +50,8 @@ export const PRODUCES_WORK_TOOLS: ReadonlySet<string> = new Set([
   'write_file', 'edit_file', 'write_files_batch', 'append_file', 'replace_symbol', 'bash', 'run_recipe',
   'manage_dependency', 'run_migrations', 'setup_architecture', 'repair_ci_workflow', 'request_secrets',
   'deploy', 'task',
+  // writes src/game/forge/forge.ts and src/game/objects/<id>.ts (the Object Forge)
+  'author_object',
 ]);
 
 /** Families whose every member writes code into the app (`generate_auth`, `codemod_rename`, …). */

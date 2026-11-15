@@ -15,8 +15,29 @@ export function objectForgeEnabled(env: NodeJS.ProcessEnv = process.env): boolea
   return !['off', '0', 'false', 'no'].includes(String(env.AGENTV3_OBJECT_FORGE ?? '').trim().toLowerCase());
 }
 
-export function generateObjectForge(): RecipeOutput {
-  return { files: { [FORGE_DIR + 'forge.ts']: FORGE_ENGINE } };
+/** The kit file, and a compiled usage example (tests/aRecipeExampleCompiles.test.ts typechecks it against the real forge.ts). */
+export function generateObjectForge(): RecipeOutput & { instructions: string } {
+  const fence = '```';
+  return {
+    files: { [FORGE_DIR + 'forge.ts']: FORGE_ENGINE },
+    instructions: [
+      'The Object Forge engine is src/game/forge/forge.ts. Objects are written to src/game/objects/<id>.ts by author_object; use one like this:',
+      '',
+      fence + 'ts',
+      "import * as THREE from 'three';",
+      "import { createObject, type ObjectSpec } from './game/forge/forge';",
+      '',
+      "const spec: ObjectSpec = { id: 'crate', name: 'Crate', materials: { wood: { color: '#8a5a2b' } }, nodes: [{ name: 'box', shape: { type: 'box', size: [1, 1, 1] }, material: 'wood', position: [0, 0.5, 0], clips: { spin: [{ property: 'rotation', axis: 'y', amplitude: 40, speed: 0.5 }] } }] };",
+      '',
+      'export function addCrate(scene: { add(o: unknown): void }): (dt: number) => void {',
+      '  const crate = createObject(THREE, spec);',
+      '  scene.add(crate.group);',
+      "  crate.play('spin');",
+      '  return (dt: number) => crate.update(dt);',
+      '}',
+      fence,
+    ].join('\n'),
+  };
 }
 
 /** What the builder reads when it calls author_object with no spec. Short enough to keep in mind, complete enough to write a spec from. */
@@ -56,8 +77,9 @@ export const FORGE_GUIDE = [
   '  5. Call author_object, LOOK at the FRONT / SIDE / TOP drawings and the warnings, fix them, call again with the same id.',
   '',
   'HONEST CEILING: this builds stylised, low-poly figures from primitives. It does not make photoreal faces, clothing folds, fur or a',
-  'scanned model — say "stylised" to the user; never call it realistic. A real sculpted model is a library asset, not this.',
+  'scanned model. Describe the result to the user as stylised; never call it realistic. A real sculpted model is a library asset, not this.',
   '',
+  'EASIEST: author_object({ describe: "a lighthouse with a spiral stair" }) — the Forge makes the object itself from your words (no spec needed).',
   'EXAMPLES you can fetch and adapt: ' + FORGE_EXAMPLE_IDS.join(', ') + ' — author_object({ example: "person" }) returns the full spec and its drawing.',
 ].join('\n');
 

@@ -1,0 +1,13 @@
+# Forge preservation hardening — draft, not release-ready
+
+Base reviewed: 70f4b86d0279d737793820418707a407f6fd7bf5. No tests run for this change, as requested by the owner. No merge, configuration change or deployment.
+
+The upstream Forge remains canonical. This draft removes the Dispatcher description-only global cache route, hashes full NFC descriptions for generated IDs, holds all describe-only sidecalls rather than truncating descriptions, and treats unreadable or customized source as a blocker rather than a new person.
+
+Object publication requires atomic exclusive creation or expected-content compare-and-swap. Missing runtime kit files also require exclusive creation; changed runtime files are preserved. Existing authorized edits remain expressible but are refused when the actuator cannot guarantee atomic expected-version replacement. Current main has neither capability; draft #4225 supplies reviewed-but-not-production-accepted exclusive creation only. A real compareAndSwapFile implementation with integration into actuator recording, authorization, cancellation and history is still REQUIRED. A read followed by write is not a valid implementation.
+
+Do not merge this draft as if it restored every edit operation. Its deliberate consequence on an unsupported actuator is an honest refusal, not a risky overwrite. There is no fallback to writeFile. New object generation can operate only after an exclusive-create-capable actuator is available; replacement remains blocked without true CAS.
+
+Source shape comparison is a conservative compatibility check, not proof of ownership against malicious project files. Partial kit additions may remain if a later exclusive write fails; they are recorded/checkpointed, not rolled back over user edits. Supplier API accounting, provider cancellation/response bounds and browser/mobile quality are separate unresolved review areas. Prior isolated tests from other PRs do not certify this final tree.
+
+Independent static review refinement: describe-only extra provider calls are held until a genuine admitted budget/cancellation context is wired. The existing admitted architect can still design and submit a spec; no extra model call is made by this draft path. Existing exact source retries return an honest source-only unchanged receipt. A differing existing object may be replaced only through an explicit customise target and true CAS; plain creation/spec reuse of an ID does not authorize replacement. These restrictions are intentionally visible regressions in unsupported operations, not claims that the full Forge remains available unchanged. Release requires resolving these capabilities and reauthorizing validation.

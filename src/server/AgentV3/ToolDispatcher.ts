@@ -368,9 +368,8 @@ import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
 import { athreeMapIntent, athreeModulesFor } from '../lib/athreeMap/athreeMapIntent';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
-import { authorObject, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
+import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
-import { selfAuthorObject, madeCache } from '../lib/objectForge/forgeSelfAuthor';
 import { parseCustomisation, applyEdits, customiseSummary, nodeNamesOf, specFromObjectFile, personSpecFor } from '../lib/objectForge/forgeCustomise';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
@@ -1333,7 +1332,7 @@ export class ToolDispatcher {
    * then the destructive / parse / duplicate checks. `AGENTV3_GUARDED_WRITE_DOOR=off` does NOT
    * skip these — that flag only disables the actuator `beforeWrite` backstop.
    */
-  private async guardedWrite(path: string, content: string, opts: { agent: AgentRole; source: string; allowOverwrite?: boolean }): Promise<{ kind: 'create' | 'modify'; content: string; existingContent: string; kitNote: string }> {
+  private async guardedWrite(path: string, content: string, opts: { agent: AgentRole; source: string; allowOverwrite?: boolean; expectedSource?: string | null }): Promise<{ kind: 'create' | 'modify'; content: string; existingContent: string; kitNote: string }> {
     const rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT);
     this.assertWritable(rel);
     this.assertTextWritable(rel);
@@ -1389,7 +1388,19 @@ export class ToolDispatcher {
     const writeParseReject = await this.parseGuardRejection(rel, existingContent, content);
     if (writeParseReject) refuse(writeParseReject);
     await this.refuseBrokenPageEdit(rel, existingContent, content);
-    await this.actuator.writeFile(this.workspaceId, rel, content);
+    if (opts.expectedSource !== undefined) {
+      const atomic = this.actuator as ActuatorPort & {
+        createFileExclusive?: (workspaceId: string, path: string, content: string) => Promise<void>;
+        compareAndSwapFile?: (workspaceId: string, path: string, expected: string, content: string) => Promise<void>;
+      };
+      if (opts.expectedSource === null) {
+        if (!atomic.createFileExclusive) refuse('Atomic object creation is unavailable; no unsafe write attempted.');
+        await atomic.createFileExclusive!(this.workspaceId, rel, content);
+      } else {
+        if (!atomic.compareAndSwapFile) refuse('Atomic object replacement is unavailable; existing project source was preserved.');
+        await atomic.compareAndSwapFile!(this.workspaceId, rel, opts.expectedSource, content);
+      }
+    } else await this.actuator.writeFile(this.workspaceId, rel, content);
     this.onFileWrite?.(rel, content);
     if (kind === 'modify') this.noteDroppedImports(rel, existingContent, content);
     return { kind, content, existingContent, kitNote };
@@ -9685,6 +9696,7 @@ export class ToolDispatcher {
         }
         let forgeSpec: unknown = forgeRec.spec;
         let madeNote = '';
+        let editSource: string | undefined;
         // CUSTOMISE (admin 2026-11-15, "user ke bolte bhar se jo chahe edit ho jaye"): the user's words change an object that already exists
         // here. Colours of named parts, size, and — for the Forge person — gender, hair length, a dress, build. What cannot be done is
         // said, never skipped; what was not understood is returned for the builder to ask.
@@ -9692,8 +9704,16 @@ export class ToolDispatcher {
           const targetId = typeof forgeRec.target === 'string' ? forgeRec.target.trim() : '';
           const here = (await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[])).map((f) => String(f).replace(/^\.?\//, '')).filter((f) => f.startsWith(OBJECTS_DIR) && f.endsWith('.ts')).map((f) => f.slice(OBJECTS_DIR.length, -3));
           if (!/^[a-z][a-z0-9-]{1,39}$/.test(targetId)) return `Say which object to change (target). Objects in this project: ${here.join(', ') || 'none yet'}.`;
-          const current = await this.actuator.readFile(this.workspaceId, `${OBJECTS_DIR}${targetId}.ts`).then(specFromObjectFile, () => null)
-            ?? (forgeRec.base === 'person' ? { ...personSpecFor(), id: targetId, name: 'Person' } : null);
+          let current: Record<string, unknown> | null = null;
+          try {
+            editSource = await this.actuator.readFile(this.workspaceId, `${OBJECTS_DIR}${targetId}.ts`);
+            current = specFromObjectFile(editSource);
+            if (current && current.id !== targetId) refuse('Forge object identity does not match the requested target; no edit attempted.');
+            if (!current || objectFileSource(current) !== editSource) refuse('Existing source is customized or not a canonical Forge object; use a reviewed explicit source edit instead.');
+          } catch (err) {
+            if (!isNotFoundError(err)) throw err;
+            if (forgeRec.base === 'person') current = { ...personSpecFor(), id: targetId, name: 'Person' };
+          }
           if (!current) return `There is no Forge object called "${targetId}" here (objects: ${here.join(', ') || 'none yet'}). To start from a person, pass base: "person".`;
           const wished = parseCustomisation(forgeRec.customise.trim().slice(0, 600), { materialKeys: Object.keys((current.materials as Record<string, unknown>) ?? {}), nodeNames: nodeNamesOf(current.nodes) });
           const changed = applyEdits(current, wished.edits);
@@ -9702,27 +9722,9 @@ export class ToolDispatcher {
           forgeSpec = changed.spec;
           madeNote = summary;
         }
-        // SELF-AUTHORING (admin 2026-11-15, "atma nirbhar"): the user's words in, an object out. The Forge asks a model for a spec, checks it,
-        // shows the model its own drawing and has it correct, a few rounds. The FREE router namespace (never Claude, never NavBharatAI money).
+        // Describe-only sidecalls require admitted budget/cancellation context, not merely a tier name.
         if ((forgeSpec === undefined || forgeSpec === null) && typeof forgeRec.describe === 'string' && forgeRec.describe.trim().length > 0) {
-          const wantedObject = forgeRec.describe.trim().slice(0, 300);
-          const hit = madeCache.get(wantedObject);
-          if (hit) { forgeSpec = hit; madeNote = 'Made earlier from the same description (reused, no new model call).'; }
-          else {
-            const known = findInCatalog(wantedObject);
-            const made = await selfAuthorObject(wantedObject, {
-              ask: async (prompt, system) => {
-                try { const r = await aiRouter.routeDetailed(prompt, [], 'navbharat', undefined, system); return r.ok ? r.content : null; }
-                catch { return null; }
-              },
-              groundTruth: known ? `${known.name}: ${known.dims}. Must have: ${known.parts.join('; ')}. The tell: ${known.tell}` : undefined,
-              id: typeof forgeRec.id === 'string' && /^[a-z][a-z0-9-]{1,39}$/.test(forgeRec.id) ? forgeRec.id : undefined,
-            });
-            if (!made.ok || !made.spec) return made.text;
-            forgeSpec = made.spec;
-            madeCache.set(wantedObject, made.spec);
-            madeNote = `Made by the Forge from the description in ${made.attempts.length} round(s)` + (made.remainingWarnings.length ? `, with ${made.remainingWarnings.length} warning(s) it could not clear (below).` : ', clean.');
-          }
+          refuse('Describe-only self-authoring is held pending admitted provider accounting/cancellation. Design the JSON spec in the existing admitted architect turn and call author_object({ spec }); no extra model call was made.');
         }
         if (forgeSpec === undefined || forgeSpec === null) return FORGE_GUIDE;
         if (typeof forgeSpec === 'string') {
@@ -9732,11 +9734,39 @@ export class ToolDispatcher {
         }
         const forged = authorObject(forgeSpec);
         if (!forged.ok || !forged.files || !forged.id) return forged.text;
-        const forgeKit = Object.entries(forged.files).filter(([path]) => !path.startsWith(OBJECTS_DIR));
-        const forgeWritten = await this.writeRecipeFiles(Object.fromEntries(forgeKit), agent);
-        // The object file is REPLACED on purpose when the builder calls again with the same id (that is how it fixes what the drawing showed).
         const objectPath = `${OBJECTS_DIR}${forged.id}.ts`;
-        const wroteObject = await this.guardedWrite(objectPath, forged.files[objectPath], { agent, source: 'author_object', allowOverwrite: true });
+        let expectedSource: string | null = null;
+        try {
+          expectedSource = await this.actuator.readFile(this.workspaceId, objectPath);
+          const prior = specFromObjectFile(expectedSource);
+          if (!prior || objectFileSource(prior) !== expectedSource) refuse('Existing source is not an unchanged Forge object; refusing replacement.');
+          if (expectedSource === forged.files[objectPath]) return `Unchanged ${objectPath}; exact existing source already matches. This receipt does not verify the kit, scene mount or gameplay.\n${forged.text}`;
+          if (editSource === undefined) refuse('This object ID already exists; use an explicit customise target or a new ID. Creation cannot authorize replacement.');
+          if (editSource !== undefined && editSource !== expectedSource) refuse('Object changed while the edit was prepared; retry from its current version.');
+        } catch (err) { if (!isNotFoundError(err)) throw err; }
+        if (editSource !== undefined && expectedSource === null) refuse('Object was removed while editing; no stale recreation attempted.');
+        const atomic = this.actuator as ActuatorPort & { createFileExclusive?: unknown; compareAndSwapFile?: unknown };
+        if (expectedSource === null ? typeof atomic.createFileExclusive !== 'function' : typeof atomic.compareAndSwapFile !== 'function') {
+          refuse('Required atomic object write capability is unavailable; no object or kit writes attempted.');
+        }
+        const forgeKit = Object.entries(forged.files).filter(([path]) => !path.startsWith(OBJECTS_DIR));
+        const missingKit: Array<[string, string]> = [];
+        for (const [path, source] of forgeKit) {
+          try {
+            if (await this.actuator.readFile(this.workspaceId, path) !== source) refuse('Existing Forge kit differs; reconcile it explicitly rather than replacing it.');
+          } catch (err) { if (!isNotFoundError(err)) throw err; missingKit.push([path, source]); }
+        }
+        if (missingKit.length && typeof atomic.createFileExclusive !== 'function') refuse('Atomic kit creation is unavailable; project preserved.');
+        const forgeWritten: string[] = [];
+        for (const [path, source] of missingKit) {
+          const wrote = await this.guardedWrite(path, source, { agent, source: 'author_object kit', expectedSource: null });
+          this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+          this.scheduleCheckpoint('object forge kit');
+          forgeWritten.push(`Created ${path}`);
+        }
+        // The object file is REPLACED on purpose when the builder calls again with the same id (that is how it fixes what the drawing showed).
+        const wroteObject = await this.guardedWrite(objectPath, forged.files[objectPath], { agent, source: 'author_object', allowOverwrite: true, expectedSource });
         this.state?.recordFileChange({ path: objectPath, kind: wroteObject.kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(objectPath, wroteObject.content);
         this.scheduleCheckpoint('object forge');
@@ -12786,3 +12816,4 @@ export function globToRegExp(glob: string): RegExp {
   }
   return new RegExp(`^${re}$`);
 }
+

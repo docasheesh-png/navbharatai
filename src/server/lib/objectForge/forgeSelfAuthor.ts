@@ -16,7 +16,7 @@
 import { FORGE_GUIDE } from './ObjectForgeGenerator';
 import { loadForge, type ObjectReport } from './forgeRuntime';
 import { FORGE_EXAMPLES } from './forgeExamples';
-import { specKey } from '../objectSpecProvider';
+import { createHash } from 'node:crypto';
 import { BoundedCache } from '../boundedCache';
 
 export const SELF_AUTHOR_ROUNDS = 4;
@@ -69,8 +69,8 @@ export function parseSpecText(raw: string | null | undefined): Record<string, un
 
 /** The id an object is saved under, made from what the user asked for ("a lighthouse with a spiral stair" → lighthouse-with-a-spiral-stair). */
 export function objectIdFor(request: string): string {
-  const k = specKey(request).slice(0, 36).replace(/-+$/g, '');
-  return /^[a-z]/.test(k) && k.length >= 2 ? k : 'object-' + (k || 'made');
+  const canonical = request.trim().normalize('NFC');
+  return 'object-' + createHash('sha256').update(canonical).digest('hex').slice(0, 32);
 }
 
 function firstPrompt(request: string, groundTruth: string | undefined, id: string): string {
@@ -152,11 +152,19 @@ export async function selfAuthorObject(request: string, deps: SelfAuthorDeps): P
   return { ok: true, spec: best.spec, report: best.report, remainingWarnings: best.warnings, attempts, text: '' };
 }
 
-/** A bounded cache of finished specs by description, so the same thing asked twice (or by two builds) costs one model call. */
+/** Private scoped cache. Callers without authenticated project scope do not cache. */
 const made = new BoundedCache<string, Record<string, unknown>>({ maxEntries: 200 });
+const cacheKey = (request: string, scope: string, id: string): string =>
+  JSON.stringify([scope, id, request.trim().normalize('NFC'), 'forge-v1']);
 export const madeCache = {
-  get: (request: string): Record<string, unknown> | undefined => made.get(specKey(request)),
-  set: (request: string, spec: Record<string, unknown>): void => { const k = specKey(request); if (k) made.set(k, spec); },
+  get: (request: string, scope?: string, id?: string): Record<string, unknown> | undefined => {
+    if (!scope || !id) return undefined;
+    const hit = made.get(cacheKey(request, scope, id));
+    return hit ? JSON.parse(JSON.stringify(hit)) : undefined;
+  },
+  set: (request: string, spec: Record<string, unknown>, scope?: string, id?: string): void => {
+    if (scope && id) made.set(cacheKey(request, scope, id), JSON.parse(JSON.stringify(spec)));
+  },
   size: (): number => made.size,
-  clear: (): void => made.clear(),
+  clear: (): void => { made.clear(); },
 };

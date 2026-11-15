@@ -21,7 +21,7 @@ describe('isolated test chat contract', () => {
     expect(TEST_CHAT_PROVIDER_IDS).toContain('groq');
     expect(TEST_CHAT_PROVIDER_IDS).toContain('mitrify');
     expect(TEST_CHAT_PROVIDER_IDS).toContain('anthropic-claude');
-    expect(TEST_CHAT_PROVIDER_IDS).toHaveLength(27);
+    expect(TEST_CHAT_PROVIDER_IDS).toHaveLength(33);
   });
   it.each([
     { ...action, provider: 'deepinfra' }, { ...action, provider: 'constructor' }, { ...action, provider: '__proto__' },

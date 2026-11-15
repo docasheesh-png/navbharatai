@@ -4,14 +4,30 @@ import type { TestChatMessage } from '../../lib/testChatBot';
 import { TEST_CHAT_MAX_OUTPUT_TOKENS } from '../../lib/testChatBot';
 import { anthropicTotalInput } from './anthropicUsage';
 
-const OPENAI_URLS = new Set([
-  'https://api.moonshot.ai/v1/chat/completions',
-  'https://api.moonshot.cn/v1/chat/completions',
-  'https://api.x.ai/v1/chat/completions',
-  'https://openrouter.ai/api/v1/chat/completions',
-  // Router One's official endpoint (ROUTER_ONE_DEFAULT_BASE_URL); a custom ROUTER_ONE_BASE_URL is never called from here.
-  'https://api.router.one/v1/chat/completions',
+/**
+ * The official OpenAI-compatible hosts this admin page may call, and nothing else (admin 2026-11-15: every
+ * provider NavBharatAI uses must be testable here). A HOST list, not an exact-URL list, because several
+ * providers legitimately serve chat under more than one official path (Kimi's /v1 and /coding/v1, Z.ai's
+ * paas/v4 and coding/paas/v4). The URL must still be https, carry no port or credentials, and end in
+ * /chat/completions; a look-alike host (api.router.one.evil.example) is refused.
+ */
+export const OFFICIAL_CHAT_HOSTS: ReadonlySet<string> = new Set([
+  'api.moonshot.ai', 'api.moonshot.cn', 'api.kimi.com',
+  'api.x.ai',
+  'openrouter.ai',
+  'api.router.one',
+  'api.z.ai',
+  'integrate.api.nvidia.com',
+  'api.surplusintelligence.ai',
 ]);
+const BEDROCK_RUNTIME_HOST = /^bedrock-runtime\.[a-z]{2}(?:-gov)?-[a-z]+-\d\.amazonaws\.com$/;
+export function isOfficialChatUrl(url: string): boolean {
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return false; }
+  if (parsed.protocol !== 'https:' || parsed.port || parsed.username || parsed.password || parsed.search || parsed.hash) return false;
+  if (!OFFICIAL_CHAT_HOSTS.has(parsed.hostname) && !BEDROCK_RUNTIME_HOST.test(parsed.hostname)) return false;
+  return parsed.pathname.endsWith('/chat/completions');
+}
 const OPENROUTER_FREE_GUARD = {
   provider: { allow_fallbacks: false, require_parameters: true, data_collection: 'deny', max_price: { prompt: 0, completion: 0, request: 0, image: 0 } },
 };
@@ -44,8 +60,23 @@ export async function runOfficialOpenAiCompatTest(input: {
   model: string;
   messages: readonly TestChatMessage[];
   signal: AbortSignal;
+  /**
+   * OpenRouter is called with a zero-price, no-fallback guard unless the caller says the model is a PAID one
+   * it has already reserved for (the Nemotron builder rung). Default false, so the verified-free path can
+   * never lose its guard by omission.
+   */
+  allowPaid?: boolean;
+  /**
+   * Ask for an SSE stream, the way the builder calls the provider. Router One holds a non-streamed reply
+   * until the whole answer is ready, which ran past this page's 90-second bound (admin report 2026-11-15:
+   * HTTP 200, 90003 ms, empty body). A stream is also parsed when a provider ignores `stream: false`.
+   */
+  stream?: boolean;
+  /** Provider-specific request fields from server code only (never from the client), e.g. Surplus routing. */
+  extraBody?: Readonly<Record<string, unknown>>;
 }): Promise<{ content: string; model: string; usage?: { inputTokens: number; outputTokens: number } }> {
-  if (!OPENAI_URLS.has(input.url)) throw new OfficialTestChatError('unknown', null, 'url-not-allowlisted', null, null, null, null);
+  if (!isOfficialChatUrl(input.url)) throw new OfficialTestChatError('unknown', null, 'url-not-allowlisted', null, null, null, null);
+  const openRouterFreeGuard = new URL(input.url).hostname === 'openrouter.ai' && input.allowPaid !== true;
   if (!input.apiKey || input.apiKey.length > 4096 || /[\s,]/.test(input.apiKey)) throw new OfficialTestChatError('auth', null, 'configuration', null, null, null, null);
   let response: Response;
   try {
@@ -53,8 +84,10 @@ export async function runOfficialOpenAiCompatTest(input: {
       method: 'POST', redirect: 'error', signal: input.signal,
       headers: { Authorization: `Bearer ${input.apiKey}`, 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
-        model: input.model, messages: input.messages, max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS, stream: false,
-        ...(input.url === 'https://openrouter.ai/api/v1/chat/completions' ? OPENROUTER_FREE_GUARD : {}),
+        ...(input.extraBody ?? {}),
+        model: input.model, messages: input.messages, max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS,
+        ...(input.stream === true ? { stream: true, stream_options: { include_usage: true } } : { stream: false }),
+        ...(openRouterFreeGuard ? OPENROUTER_FREE_GUARD : {}),
       }),
     });
   } catch (error) {
@@ -63,8 +96,15 @@ export async function runOfficialOpenAiCompatTest(input: {
     throw new OfficialTestChatError(name.includes('Timeout') ? 'timeout' : 'network', null, name || 'network', null, null, null, null);
   }
   const requestId = response.headers.get('x-request-id') || response.headers.get('request-id') || response.headers.get('cf-ray');
+  const isSse = /text\/event-stream/i.test(response.headers.get('content-type') ?? '');
+  if (response.ok && isSse) return readSseReply(response, input, textField(requestId));
   let raw = '';
-  try { raw = await response.text(); } catch { raw = ''; }
+  try { raw = await response.text(); }
+  catch {
+    // The status line and headers arrived, the body did not. Say so — this used to surface as
+    // "invalid-json" with an empty body, which named the wrong problem.
+    throw bodyNotFinished(response.status, textField(requestId), input.signal, 0);
+  }
   if (raw.includes(input.apiKey)) raw = raw.split(input.apiKey).join('[redacted-secret]');
   if (!response.ok) {
     let code: string | null = null, type: string | null = null, message: string | null = null;
@@ -93,6 +133,64 @@ export async function runOfficialOpenAiCompatTest(input: {
     ? { inputTokens: parsed.usage.prompt_tokens as number, outputTokens: parsed.usage.completion_tokens as number } : undefined;
   const model = typeof parsed.model === 'string' && parsed.model.trim() ? parsed.model : input.model;
   return { content, model, ...(usage ? { usage } : {}) };
+}
+
+function bodyNotFinished(status: number, requestId: string | null, signal: AbortSignal, receivedChars: number): OfficialTestChatError {
+  const received = receivedChars > 0 ? ` ${receivedChars} characters of the reply had arrived.` : ' No reply text had arrived.';
+  return signal.aborted
+    ? new OfficialTestChatError('timeout', status, 'body-timeout', null, requestId,
+      `The provider answered HTTP ${status} but the reply did not finish within this page's time limit.${received}`, null)
+    : new OfficialTestChatError('network', status, 'body-read-failed', null, requestId,
+      `The provider answered HTTP ${status} but the connection closed before the reply finished.${received}`, null);
+}
+
+/** Read an OpenAI-compatible SSE chat stream into one reply. Bounded by the response size limit; no retry. */
+async function readSseReply(response: Response, input: { apiKey: string; model: string; signal: AbortSignal }, requestId: string | null)
+  : Promise<{ content: string; model: string; usage?: { inputTokens: number; outputTokens: number } }> {
+  const reader = response.body?.getReader();
+  if (!reader) throw bodyNotFinished(response.status, requestId, input.signal, 0);
+  const decoder = new TextDecoder();
+  let buffer = '', content = '', model = '', done = false, streamError: string | null = null;
+  let usage: { inputTokens: number; outputTokens: number } | undefined;
+  const handle = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) return;
+    const data = trimmed.slice(5).trim();
+    if (data === '[DONE]') { done = true; return; }
+    let event: unknown;
+    try { event = JSON.parse(data); } catch { return; }
+    if (!record(event)) return;
+    if (record(event.error)) { streamError = textField(event.error.message) ?? textField(event.error.code) ?? 'stream error'; return; }
+    if (typeof event.model === 'string' && event.model.trim()) model = event.model;
+    const choice = Array.isArray(event.choices) && record(event.choices[0]) ? event.choices[0] : null;
+    const delta = choice && record(choice.delta) ? choice.delta : choice && record(choice.message) ? choice.message : null;
+    if (delta && typeof delta.content === 'string') content += delta.content;
+    if (record(event.usage) && Number.isSafeInteger(event.usage.prompt_tokens) && Number.isSafeInteger(event.usage.completion_tokens)) {
+      usage = { inputTokens: event.usage.prompt_tokens as number, outputTokens: event.usage.completion_tokens as number };
+    }
+  };
+  try {
+    while (!done) {
+      const part = await reader.read();
+      if (part.done) break;
+      buffer += decoder.decode(part.value, { stream: true });
+      if (buffer.length + content.length > 1_000_000) throw new OfficialTestChatError('unknown', response.status, 'response-too-large', null, requestId, null, null);
+      let newline = buffer.indexOf('\n');
+      while (newline !== -1) { handle(buffer.slice(0, newline)); buffer = buffer.slice(newline + 1); newline = buffer.indexOf('\n'); }
+    }
+    if (buffer) handle(buffer);
+  } catch (error) {
+    if (error instanceof OfficialTestChatError) throw error;
+    throw bodyNotFinished(response.status, requestId, input.signal, content.length);
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  if (streamError) {
+    const message = String(streamError).split(input.apiKey).join('[redacted-secret]');
+    throw new OfficialTestChatError('http', response.status, 'stream-error', null, requestId, message, null);
+  }
+  if (!content.trim()) throw new OfficialTestChatError('empty', response.status, 'empty', null, requestId, null, null);
+  return { content: content.slice(0, 32_000), model: model || input.model, ...(usage ? { usage } : {}) };
 }
 
 export async function runOfficialAnthropicTest(input: {
@@ -137,4 +235,41 @@ export async function runOfficialAnthropicTest(input: {
       textField(JSON.stringify(nested)) ?? textField(src.message),
     );
   }
+}
+
+/**
+ * Google Vertex AI (Gemini) through the server's own Google identity — the same shared client
+ * (`vertexGenAI`) Engineer AI's Vertex fallback and the vision chain use. One call, no retry.
+ * There is no API key: the project comes from GOOGLE_CLOUD_PROJECT and the region from GOOGLE_CLOUD_REGION.
+ */
+export async function runOfficialVertexTest(input: {
+  client: { models: { generateContent: (request: Record<string, unknown>) => Promise<unknown> } } | null;
+  model: string;
+  messages: readonly TestChatMessage[];
+  signal: AbortSignal;
+}): Promise<{ content: string; model: string; usage?: { inputTokens: number; outputTokens: number } }> {
+  if (!input.client) throw new OfficialTestChatError('auth', null, 'configuration', null, null, null, null);
+  let response: unknown;
+  try {
+    response = await input.client.models.generateContent({
+      model: input.model,
+      contents: input.messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+      config: { maxOutputTokens: TEST_CHAT_MAX_OUTPUT_TOKENS, abortSignal: input.signal },
+    });
+  } catch (error) {
+    if (input.signal.aborted) throw new OfficialTestChatError('cancelled', null, 'aborted', null, null, null, null);
+    const src = record(error) ? error : {};
+    const status = typeof src.status === 'number' ? src.status : typeof src.code === 'number' ? src.code : null;
+    const classification = status === 401 || status === 403 ? 'auth' : status === 429 ? 'rate-limit'
+      : status === 408 || status === 504 ? 'timeout' : status ? 'http' : 'unknown';
+    throw new OfficialTestChatError(classification, status, textField(src.name), null, null, textField(src.message), textField(src.message));
+  }
+  const body = record(response) ? response : {};
+  const text = typeof body.text === 'string' ? body.text : '';
+  if (!text.trim()) throw new OfficialTestChatError('empty', 200, 'empty', null, textField(body.responseId), null, null);
+  const meta = record(body.usageMetadata) ? body.usageMetadata : {};
+  const usage = Number.isSafeInteger(meta.promptTokenCount) && Number.isSafeInteger(meta.candidatesTokenCount)
+    ? { inputTokens: meta.promptTokenCount as number, outputTokens: meta.candidatesTokenCount as number } : undefined;
+  const model = typeof body.modelVersion === 'string' && body.modelVersion.trim() ? body.modelVersion : input.model;
+  return { content: text.slice(0, 32_000), model, ...(usage ? { usage } : {}) };
 }

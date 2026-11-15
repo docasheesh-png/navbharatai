@@ -86,7 +86,11 @@ describe('admin test chat does not change user chat', () => {
     expect(impl).toContain("endsWith(':free')");
     expect(impl).not.toMatch(/LIVE_MODEL_REGISTRY_ENABLED\s*=/);
     expect(impl).not.toMatch(/FREE_CHAIN_OPENROUTER_MODELS\s*=/);
-    expect(official).toContain('https://openrouter.ai/api/v1/chat/completions');
+    // The zero-price guard is keyed on the OpenRouter HOST and dropped only by an explicit paid opt-in
+    // (the Nemotron builder rung), so the verified-free path cannot lose it by omission (2026-11-15).
+    expect(official).toContain("'openrouter.ai'");
+    expect(official).toContain('input.allowPaid !== true');
+    expect(impl).toContain("url: 'https://openrouter.ai/api/v1/chat/completions'");
     expect(official).toContain('max_price');
     expect(official).toContain('allow_fallbacks: false');
     expect(runtime).not.toContain('catalogJson');

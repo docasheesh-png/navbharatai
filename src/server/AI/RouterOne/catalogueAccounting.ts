@@ -45,16 +45,24 @@ export class FirestoreCatalogueAttemptStore implements CatalogueAttemptStore {
     if (!Number.isSafeInteger(deadlineAt) || deadlineAt <= this.now()) throw new RouterOneAccountingUnavailableError();
     const state = this.db.doc(`router_one_accounting_keys/${key}`);
     const attempt = this.db.doc(`router_one_catalogue_attempts/${callId}`);
-    const admitted = await this.db.runTransaction(async tx => {
+    const absorbedIds = await this.db.runTransaction(async tx => {
       const previous = await tx.get(state), next = keyState(previous.exists ? previous.data() : undefined);
-      for (const [id, deadline] of Object.entries(next.active)) if (deadline <= this.now()) next.unresolved[id] = true;
-      if (Object.keys(next.unresolved).length) { tx.set(state, next); return false; }
+      // Owner 2026-11-15: an expired hold (the worker died or timed out mid-call) and any legacy `unresolved`
+      // entry are absorbed and dropped here — they used to refuse this and every later call, forever.
+      const dropped: string[] = [];
+      for (const [id, deadline] of Object.entries(next.active)) {
+        if (deadline <= this.now()) { delete next.active[id]; dropped.push(id); tx.set(this.db.doc(`router_one_catalogue_attempts/${id}`), { status: 'absorbed-expired', absorbedAt: this.now() }, { merge: true }); }
+      }
+      for (const id of Object.keys(next.unresolved)) { delete next.unresolved[id]; if (!next.active[id]) dropped.push(id); delete next.active[id]; }
       if (next.active[callId]) throw new RouterOneAccountingUnavailableError();
       next.active[callId] = deadlineAt;
       tx.create(attempt, { ...binding, callId, credentialSha256: key, snapshot, status: 'reserved', createdAt: this.now(), deadlineAt });
-      tx.set(state, next); return true;
+      tx.set(state, next); return dropped;
     });
-    if (!admitted) throw new RouterOneAccountingUnavailableError();
+    if (absorbedIds.length) {
+      try { audit('ROUTER_ONE_COST_ABSORBED', { buildId: binding.buildId, reason: 'expired-or-unresolved-hold-dropped',
+        count: absorbedIds.length, callIds: absorbedIds.slice(0, 20), expenseEvidence: 'unknown', furtherDispatchBlocked: false }); } catch { /* observation only */ }
+    }
   }
   async finish(callId: string, key: string, result: RouterOneCatalogueReceipt | { kind: 'pending'; reason: string; requestId: string | null }): Promise<void> {
     const state = this.db.doc(`router_one_accounting_keys/${key}`), attempt = this.db.doc(`router_one_catalogue_attempts/${callId}`);
@@ -62,6 +70,13 @@ export class FirestoreCatalogueAttemptStore implements CatalogueAttemptStore {
       const previous = await tx.get(state), row = await tx.get(attempt);
       const next = keyState(previous.exists ? previous.data() : undefined);
       if (!next.active[callId] || row.data()?.status !== 'reserved') throw new RouterOneAccountingUnavailableError();
+      if (result.kind === 'pending') {
+        // Unknown cost: recorded on the attempt and absorbed (owner 2026-11-15) — the hold is released, not kept as a fence.
+        delete next.active[callId];
+        tx.update(attempt, { status: 'absorbed-unknown', result, completedAt: this.now() });
+        tx.set(state, next);
+        return;
+      }
       // Retained until the caller has received the write acknowledgement and issued evidence.
       next.unresolved[callId] = true;
       tx.update(attempt, { status: result.kind, result, completedAt: this.now() });
@@ -140,23 +155,31 @@ async function finish(attempt: Attempt, model: string, usage: unknown, complete:
     if (receipt) {
       issued.add(receipt); attempt.receipt = receipt; attempt.scope.receipts.push(receipt);
       // A release failure cannot revoke acknowledged, billable evidence or replay output.
+      // Owner 2026-11-15: a lost release acknowledgement no longer fences the key — the reserve below
+      // drops a stale hold, and the receipt above already carries the known cost.
       try { await attempt.store.releaseVerified(attempt.callId, attempt.key); }
-      catch { attempt.scope.stopped = true; uncertainKeys.add(attempt.key); }
+      catch { absorbed(attempt, 'release-acknowledgement-lost'); }
       try { audit('ROUTER_ONE_CATALOGUE_PRICED', { buildId: receipt.buildId, callId: receipt.callId,
         model: receipt.model, expenseEvidence: receipt.expenseEvidence, settledWalletDebit: false,
         costAttoUsd: receipt.costAttoUsd, modelSubtotalAttoUsd: receipt.modelSubtotalAttoUsd,
         source: receipt.snapshot.source, sourceSha256: receipt.snapshot.sourceSha256 }); } catch { /* observation only */ }
     }
-    else {
-      attempt.scope.stopped = true;
-      try { audit('ROUTER_ONE_ACCOUNTING_PENDING', { buildId: attempt.scope.binding?.buildId,
-        callId: attempt.callId, reason: calculated.kind === 'pending' ? calculated.reason : 'incomplete-usage', furtherDispatchBlocked: true }); } catch { /* observation only */ }
-    }
+    else absorbed(attempt, calculated.kind === 'pending' ? calculated.reason : 'incomplete-usage');
   } catch {
-    uncertainKeys.add(attempt.key);
-    // Stop this worker immediately. Across workers, a failed write remains fenced by its persisted deadline.
-    attempt.scope.stopped = true;
+    absorbed(attempt, 'attempt-write-failed');
   }
+}
+/**
+ * OWNER DECISION 2026-11-15 ("Unknown keemat absorb karo"): a call whose cost cannot be calculated — usage
+ * missing, a stream cut short, a timeout, a lost database write — is ABSORBED by NavBharatAI and recorded,
+ * instead of fencing the key. Before this, one such call left an `unresolved` entry that refused every later
+ * Router One call on every server, forever, with no way to reopen it: builds reported ENGINE_R1 failing 45/45
+ * in under a second because the request never left our server. The user's bill is unchanged — an unknown
+ * cost was never billed (routerOneCostUnconfirmed) — and the audit log names every absorbed call.
+ */
+function absorbed(attempt: Attempt, reason: string): void {
+  try { audit('ROUTER_ONE_COST_ABSORBED', { buildId: attempt.scope.binding?.buildId, callId: attempt.callId,
+    reason, requestId: attempt.requestId, expenseEvidence: 'unknown', furtherDispatchBlocked: false }); } catch { /* observation only */ }
 }
 export interface RouterOneAccountingDependencies {
   prices?: Pick<RouterOnePublicPriceSource, 'snapshot'>;

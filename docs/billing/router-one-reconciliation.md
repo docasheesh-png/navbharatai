@@ -299,3 +299,20 @@ and database subscriptions are separate. No previous wallet is recalculated.
 
 Release still requires final-tree aggregate tests, required remote CI and verified
 deployment. Fixture acceptance is not a live network or paid-inference test.
+
+## 2026-11-15 — Owner decision: an unknown cost is absorbed, never a permanent key fence
+
+Asked directly, the owner chose **"Unknown keemat absorb karo"**. Until then, a single Router One call whose cost
+could not be calculated (usage missing, a stream cut short, a timeout, a lost database write, or a worker that died
+mid-call) left an `unresolved` entry in `router_one_accounting_keys/{keyHash}`, and `FirestoreCatalogueAttemptStore.reserve`
+refused **every** later call on that key, on every server, with no reopen path. Builds reported ENGINE_R1 failing
+45/45 in under a second (autopsy 57604006, build #2394) because no request ever left our server.
+
+Now:
+- A `pending` completion releases its hold; the attempt is recorded `absorbed-unknown` with its reason.
+- An expired hold is dropped at the next reserve and its attempt recorded `absorbed-expired`.
+- A legacy `unresolved` entry is dropped at the next reserve, so keys fenced by the old rule reopen on their own.
+- A known (catalogue-calculated) completion still holds until its verified release; a lost release no longer blocks.
+- Every absorbed call writes `ROUTER_ONE_COST_ABSORBED` to the audit log (Admin → Safety → Audit log).
+- The user's bill is unchanged: an unknown Router One cost was never billed (`routerOneCostUnconfirmed`), and still is not.
+- A malformed key record still fails closed.

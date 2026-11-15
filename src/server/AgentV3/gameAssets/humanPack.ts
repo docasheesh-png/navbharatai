@@ -24,13 +24,21 @@ export const HUMAN_PACK_RIGHTS_REVIEW: { approved: boolean; evidence: string | n
  * until a separately reviewed implementation provides that guarantee and acceptance. */
 export const HUMAN_PACK_INTEGRATION_REVIEW: { approved: boolean; evidence: string | null } = Object.freeze({ approved: false, evidence: null });
 
+/** Bounded intent inference, not a claim to understand every possible game.
+ * A trusted structured builder plan can override both ways. Explicit exclusions win. */
+export function needsHumanCharacter(options: Pick<GameAssetSeedOptions, 'prompt' | 'needsHuman'>): boolean {
+  if (typeof options.needsHuman === 'boolean') return options.needsHuman;
+  const prompt = options.prompt.normalize('NFKC').slice(0, 16000);
+  if (/\b(?:no|without)\s+(?:any\s+)?(?:humans?|people|characters?|persons?)\b|बिना\s*(?:इंसान|मानव)/i.test(prompt)) return false;
+  return /\b(?:humans?|persons?|people|characters?|humanoids?|soldiers?|pedestrians?|npcs?|battle\s*royale|pubg|free\s*fire|battlefield|third[- ]person\s*(?:shooter|adventure)|football|soccer|basketball|boxing)\b|इंसान|मानव|कैरेक्टर/i.test(prompt);
+}
+
 /** Existing new-3D-game seed calls this, never an edit/import/reopen migration. */
 export async function prepareHumanAssets(options: GameAssetSeedOptions): Promise<GameAssetSeedResult | null> {
   const env = options.env ?? process.env;
   if (!HUMAN_PACK_INTEGRATION_REVIEW.approved || !HUMAN_PACK_INTEGRATION_REVIEW.evidence || env.AGENTV3_HUMAN_PACK !== 'on' || !HUMAN_PACK_RIGHTS_REVIEW.approved || !HUMAN_PACK_RIGHTS_REVIEW.evidence
       || !options.verifiedOwnerUid || !env.AGENTV3_HUMAN_PACK_OWNER_ALLOWLIST?.split(',').map(v => v.trim()).includes(options.verifiedOwnerUid)) return null;
-  // Preserve unrelated games. An explicit human request is needed; rollout is operator-allowlisted.
-  if (!/\bhuman\b|\bperson\b|\bcharacter\b|इंसान|मानव|कैरेक्टर/i.test(options.prompt)) return null;
+  if (!needsHumanCharacter(options)) return null;
   options.signal.throwIfAborted();
   const index = createHash('sha256').update(options.workspaceId).digest().readUInt32BE(0) % HUMAN_PACK.length;
   const model = HUMAN_PACK[index];

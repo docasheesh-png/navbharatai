@@ -362,10 +362,16 @@ import { generateGame3D } from '../lib/Game3DGenerator';
 import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
+import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
 import { athreeMapIntent, athreeModulesFor } from '../lib/athreeMap/athreeMapIntent';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
+import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
+import { authorObject, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
+import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
+import { selfAuthorObject, madeCache } from '../lib/objectForge/forgeSelfAuthor';
+import { parseCustomisation, applyEdits, customiseSummary, nodeNamesOf, specFromObjectFile, personSpecFor } from '../lib/objectForge/forgeCustomise';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
@@ -467,7 +473,7 @@ import { isSecretFilePath, maskSecretFile, SECRET_MASK, secretPlaceholderWriteMe
 // primitive; see lib/browseTarget.ts.
 import { classifyBrowseTarget } from '../lib/browseTarget';
 import { formatUiFindings, type ScannedElement } from './UiElementFinder';
-import { envKillSwitch } from '../lib/envFlag';
+import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
 import { isNotFoundError } from './fsErrors';
@@ -1151,8 +1157,13 @@ export class ToolDispatcher {
    * by default, which protects nothing — exactly the behaviour before this existed.
    */
   private userOwned: string[] = [];
+  private userOwnedSnapshotKnown = false;
+  private royaleNewProject = false;
+  /** Only the composition root may grant this after verified lifecycle/source inventory. */
+  setRoyaleNewProjectAllowed(allowed: boolean): void { this.royaleNewProject = allowed === true; }
   private userRequest: string | null = null;
   setUserOwnedFiles(paths: readonly string[], request: string | null): void {
+    this.userOwnedSnapshotKnown = true;
     this.userOwned = (paths ?? []).filter((p): p is string => typeof p === 'string' && p.length > 0);
     this.userRequest = typeof request === 'string' ? request : null;
   }
@@ -9639,6 +9650,97 @@ export class ToolDispatcher {
         const athLayers = await this.addMissingRecipeLayers(ath.files, agent);
         this.scheduleCheckpoint('athree map');
         return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${ath.instructions}${athLayers}`;
+      }
+
+      case 'generate_game_royale': {
+        if (!envFlag('AGENTV3_ORIGINAL_ROYALE')) refuse('The experimental original royale starter is unavailable. Do not promise it is installed or active.');
+        if (!this.royaleNewProject || !this.userOwnedSnapshotKnown || this.userOwned.length > 0) refuse('The royale starter requires a verified new project. Preserve existing or imported source; do not replace it with a template.');
+        const request = this.coverageRequest ?? this.userRequest ?? '';
+        if (!/battle\s*royale|pubg|bgmi|free\s*fire|firefree|battlefield|पबजी|बैटल\s*रॉयल|फ्री\s*फायर/i.test(request)) refuse('The request does not ask for a royale-style game. Do not add this starter.');
+        const requestedMap = athreeMapIntent({ prompt: request, seedKey: this.workspaceId });
+        if (requestedMap.via === 'named' || requestedMap.via === 'other-map') refuse('The request names a different world. The bounded royale starter must not replace that choice.');
+        // A failed workspace read is NOT evidence that no map exists. Preserve existing worlds.
+        let hasAthree = false;
+        try { await this.actuator.readFile(this.workspaceId, 'src/game/athree/index.ts'); hasAthree = true; }
+        catch (error) { if (!isNotFoundError(error)) throw error; }
+        if (hasAthree) refuse('This project already has an Athree map. The bounded royale starter has no Athree adapter; preserve the current world.');
+        const royale = generateGameRoyale();
+        const written = await this.writeRecipeFiles(royale.files, agent);
+        const layers = await this.addMissingRecipeLayers(royale.files, agent);
+        this.scheduleCheckpoint('original royale practice');
+        return `Original offline practice recipe results:\n${written.join('\n')}\n\n${royale.instructions}${layers}`;
+      }
+
+      case 'author_object': {
+        // THE OBJECT FORGE (admin 2026-11-15: "NavBharatAI should make ANY object itself, not depend on the modules somebody built").
+        // The builder writes a SPEC; the Forge validates it, measures it with the same engine the game runs, and draws it back as text.
+        // A spec that fails is feedback, not a crash: the reasons come back as the tool result so the builder fixes and calls again.
+        if (!objectForgeEnabled()) refuse('The Object Forge is switched off for this build, so it cannot be used. Build the object another way and say so plainly in the summary.');
+        const forgeRec = (input as Record<string, unknown>) || {};
+        if (typeof forgeRec.example === 'string' && forgeRec.example.length > 0) {
+          const example = FORGE_EXAMPLES[forgeRec.example];
+          if (!example) return `There is no example called "${forgeRec.example}". Examples: ${FORGE_EXAMPLE_IDS.join(', ')}.`;
+          const shown = authorObject(example.spec);
+          return `${example.what}\n\nThe spec (copy it, change the id and what you need, and pass it as spec):\n${JSON.stringify(example.spec)}\n\nWhat it builds:\n${shown.text}`;
+        }
+        let forgeSpec: unknown = forgeRec.spec;
+        let madeNote = '';
+        // CUSTOMISE (admin 2026-11-15, "user ke bolte bhar se jo chahe edit ho jaye"): the user's words change an object that already exists
+        // here. Colours of named parts, size, and — for the Forge person — gender, hair length, a dress, build. What cannot be done is
+        // said, never skipped; what was not understood is returned for the builder to ask.
+        if ((forgeSpec === undefined || forgeSpec === null) && typeof forgeRec.customise === 'string' && forgeRec.customise.trim().length > 0) {
+          const targetId = typeof forgeRec.target === 'string' ? forgeRec.target.trim() : '';
+          const here = (await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[])).map((f) => String(f).replace(/^\.?\//, '')).filter((f) => f.startsWith(OBJECTS_DIR) && f.endsWith('.ts')).map((f) => f.slice(OBJECTS_DIR.length, -3));
+          if (!/^[a-z][a-z0-9-]{1,39}$/.test(targetId)) return `Say which object to change (target). Objects in this project: ${here.join(', ') || 'none yet'}.`;
+          const current = await this.actuator.readFile(this.workspaceId, `${OBJECTS_DIR}${targetId}.ts`).then(specFromObjectFile, () => null)
+            ?? (forgeRec.base === 'person' ? { ...personSpecFor(), id: targetId, name: 'Person' } : null);
+          if (!current) return `There is no Forge object called "${targetId}" here (objects: ${here.join(', ') || 'none yet'}). To start from a person, pass base: "person".`;
+          const wished = parseCustomisation(forgeRec.customise.trim().slice(0, 600), { materialKeys: Object.keys((current.materials as Record<string, unknown>) ?? {}), nodeNames: nodeNamesOf(current.nodes) });
+          const changed = applyEdits(current, wished.edits);
+          const summary = customiseSummary(changed, wished.unparsed);
+          if (changed.applied.length === 0) return summary;
+          forgeSpec = changed.spec;
+          madeNote = summary;
+        }
+        // SELF-AUTHORING (admin 2026-11-15, "atma nirbhar"): the user's words in, an object out. The Forge asks a model for a spec, checks it,
+        // shows the model its own drawing and has it correct, a few rounds. The FREE router namespace (never Claude, never NavBharatAI money).
+        if ((forgeSpec === undefined || forgeSpec === null) && typeof forgeRec.describe === 'string' && forgeRec.describe.trim().length > 0) {
+          const wantedObject = forgeRec.describe.trim().slice(0, 300);
+          const hit = madeCache.get(wantedObject);
+          if (hit) { forgeSpec = hit; madeNote = 'Made earlier from the same description (reused, no new model call).'; }
+          else {
+            const known = findInCatalog(wantedObject);
+            const made = await selfAuthorObject(wantedObject, {
+              ask: async (prompt, system) => {
+                try { const r = await aiRouter.routeDetailed(prompt, [], 'navbharat', undefined, system); return r.ok ? r.content : null; }
+                catch { return null; }
+              },
+              groundTruth: known ? `${known.name}: ${known.dims}. Must have: ${known.parts.join('; ')}. The tell: ${known.tell}` : undefined,
+              id: typeof forgeRec.id === 'string' && /^[a-z][a-z0-9-]{1,39}$/.test(forgeRec.id) ? forgeRec.id : undefined,
+            });
+            if (!made.ok || !made.spec) return made.text;
+            forgeSpec = made.spec;
+            madeCache.set(wantedObject, made.spec);
+            madeNote = `Made by the Forge from the description in ${made.attempts.length} round(s)` + (made.remainingWarnings.length ? `, with ${made.remainingWarnings.length} warning(s) it could not clear (below).` : ', clean.');
+          }
+        }
+        if (forgeSpec === undefined || forgeSpec === null) return FORGE_GUIDE;
+        if (typeof forgeSpec === 'string') {
+          if (forgeSpec.length > 400_000) return 'The spec is too large (over 400 KB). An object is a few dozen nodes: simplify it.';
+          try { forgeSpec = JSON.parse(forgeSpec); }
+          catch (err) { return `The spec is not valid JSON (${err instanceof Error ? err.message : String(err)}). Pass it as an object.`; }
+        }
+        const forged = authorObject(forgeSpec);
+        if (!forged.ok || !forged.files || !forged.id) return forged.text;
+        const forgeKit = Object.entries(forged.files).filter(([path]) => !path.startsWith(OBJECTS_DIR));
+        const forgeWritten = await this.writeRecipeFiles(Object.fromEntries(forgeKit), agent);
+        // The object file is REPLACED on purpose when the builder calls again with the same id (that is how it fixes what the drawing showed).
+        const objectPath = `${OBJECTS_DIR}${forged.id}.ts`;
+        const wroteObject = await this.guardedWrite(objectPath, forged.files[objectPath], { agent, source: 'author_object', allowOverwrite: true });
+        this.state?.recordFileChange({ path: objectPath, kind: wroteObject.kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(objectPath, wroteObject.content);
+        this.scheduleCheckpoint('object forge');
+        return `${wroteObject.kind === 'create' ? 'Created' : 'Replaced'} ${objectPath}\n${forgeWritten.join('\n')}\n${madeNote ? madeNote + '\n' : ''}\n${forged.text}\n\n${forgeUsage(forged.id, 'create' + pascal(forged.id))}`;
       }
 
       case 'generate_game_shell': {

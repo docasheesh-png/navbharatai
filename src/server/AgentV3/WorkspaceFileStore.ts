@@ -635,6 +635,27 @@ export async function countWorkspaceFiles(workspaceId: string): Promise<number> 
  * durable single source of truth for what a project contains, independent of whether the EPHEMERAL
  * sandbox is currently warm or was recycled/cold. Returns [] when absent / no Firestore. Never throws.
  */
+/** Strict evidence for optional new-project templates. Unknown is never an empty project. */
+export async function inspectWorkspaceFilePaths(workspaceId: string): Promise<string[] | null> {
+  const db = getDb();
+  if (!db) return null;
+  try {
+    const meta = await db.collection(COLLECTION).doc(workspaceId).get();
+    if (!meta.exists) return null;
+    const data = meta.data();
+    if (!Array.isArray(data?.paths)) return null;
+    const paths = new Set<string>();
+    for (const path of data.paths) {
+      if (typeof path !== 'string') return null;
+      const key = toDurableFileKey(path);
+      if (key === null) return null;
+      paths.add(key);
+    }
+    if (typeof data.count !== 'number' || !Number.isSafeInteger(data.count) || data.count !== paths.size) return null;
+    return [...paths];
+  } catch { return null; }
+}
+
 export async function listWorkspaceFilePaths(workspaceId: string): Promise<string[]> {
   const db = getDb();
   if (!db) return [];

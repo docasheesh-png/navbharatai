@@ -21,7 +21,7 @@ unless all of the following are satisfied:
 3. A separate engineering review approves an atomic no-overwrite installation
    and actual runtime acceptance. `HUMAN_PACK_INTEGRATION_REVIEW` is currently **false**.
    Changing only the rights record or environment cannot activate this scaffold.
-4. The new 3D game's prompt explicitly requests a human/character or Human pack.
+4. The new 3D game's plan or bounded prompt inference requires a human/character or Human pack.
 
 The selected character is stable per workspace. Existing/imported/reopened
 projects are not migrated. Before any handoff the normal GLB structural and
@@ -35,9 +35,13 @@ an assurance that final gameplay has already passed.
 
 - Original files contain Idle and Walk only. No riding, combat, jump, facial,
   2D, or photorealistic quality guarantee is made.
-- This optional branch currently selects the approved human pack instead of
-  external scenery acquisition for that seed; do not enable without deciding
-  the combined-catalogue behavior and acceptance contract.
+- Human preparation now follows external scenery preparation and combines results;
+  it no longer replaces scenery/vehicle acquisition or their manifests. Human files
+  use a separate namespace. A human failure does not claim success or discard scenery.
+- Human intent supports explicit terms and bounded implicit genres (battle royale,
+  third-person shooter, team sports), with no-human exclusions and a trusted
+  `needsHuman` plan override. This is not universal semantic intent detection.
+  The optional structured plan field is not yet wired to every caller.
 - A source audit found the persistence adapter has no atomic create-only operation.
   The independent engineering gate remains false until that is resolved.
   Multiple-file persistence is not transactional. Failures can leave partial
@@ -55,3 +59,5 @@ an assurance that final gameplay has already passed.
 Rights evidence is kept in the server review record, never interpolated into a public generated-game notice.
 
 No secret key or private identity data is recorded here.
+
+An already prepared external human is preserved rather than installing a second competing human. The owner-pack precedence policy still needs explicit integration before activation.

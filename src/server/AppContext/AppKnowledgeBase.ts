@@ -50,6 +50,17 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['human', 'humans', 'human character', 'character', 'कैरेक्टर'],
   },
 
+
+  {
+    id: 'original_royale_practice',
+    name: 'Experimental offline royale practice starter',
+    path: 'NavBharatAI Pro → request a new royale-style game',
+    description: 'When explicitly enabled by the operator, the builder has an original bounded offline practice recipe with local bots and a shrinking zone. It is not a licensed branded game, online multiplayer, photorealistic world or a set of five finished templates. Existing/imported source and a named or stored Athree map are preserved. No new charge or artificial waiting is introduced. Availability and visual/mobile acceptance must be verified separately.',
+    howToUse: 'Ask for a new royale-style practice game. Read the build result and test controls, doors, restart and your device. A disabled recipe is unavailable, not a successful build.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['royale', 'practice game', 'offline bots', 'shrinking zone'],
+  },
+
   {
     id: 'game_enterable_house_kit',
     name: 'Explorable house game kit',
@@ -719,6 +730,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     howToUse: 'Describe the game you want and, if you like, name the Athree map in the request (for example a 3D racing game on the Athree map, or a battle royale game on it). The builder adds the map files (src/game/athree/) and builds the game on that world. Once a project has a map, later edits keep it. While the Athree map is switched off, the builder tells you it is not available and builds without it.',
     relatedFeatures: ['agentv3_builder'],
     keywords: ['athree', 'athree map', 'a three map', 'a-three', 'a3 map', 'athree map use karo', 'athree map par game banao', 'big map', 'bada map', 'open world', 'open world game', 'racing map', 'battle royale map', 'pubg map', 'flight map', 'game map', 'game ka map', 'ped', 'ghaas', 'nadi', 'jheel', 'river', 'lake', 'module', 'modules', 'sirf nadi', 'only river', 'gaadi', 'car', 'bike', 'motorcycle', 'drive', 'driving', 'sadak', 'road', 'highway', 'racing track', 'circuit', 'pul', 'bridge', 'runway', 'registan', 'desert', 'dunes', 'sky', 'aasmaan', 'baarish', 'rain', 'mausam', 'weather', 'night', 'raat', 'day night', 'sunset', 'trees', 'grass', 'forest game', 'jungle', 'duniya', 'infinite map', '100 km map', 'terrain', 'world map game'],
+    aiSurface: 'pro_chat',
+  },
+  {
+    id: 'object_forge',
+    name: 'Object Forge — NavBharatAI makes any object for your game itself',
+    path: 'NavBharatAI Pro → chat → ask for a game that needs something specific (a dragon, a lighthouse, a person, a samosa cart); the builder makes it',
+    description: 'When a game needs an object that no library or ready-made module has, the builder does not give up and does not draw random boxes: it DESCRIBES the object as a small spec (shapes such as box, sphere, cylinder, capsule, torus, lathe, loft, extrude and tube; parts joined at pivots; mirrored left and right; repeated copies; colours and materials; animation clips such as walk and idle). The Forge checks the spec, measures it (triangle count, size in metres, parts that float free, an animation that tears it apart), draws it back as FRONT, SIDE and TOP text pictures, and the builder fixes what it sees before the object reaches your game. The builder can also just describe the thing in words (for example a lighthouse with a spiral stair) and the Forge makes it itself: it asks an AI for the spec, checks it, shows that AI its own drawing and has it correct the mistakes, for up to four rounds, using the free AI route. CHANGING an object by words: tell the builder what you want in English, Hinglish or Hindi (dress ka rang neela karo, baal bade karo, thoda lamba, ladki bana do, dress pehna do, door ka rang lal) and it changes the real object: colours of named parts, size, and for the Forge person its gender, hair length, a dress and build. Whatever cannot be done is said plainly (for example a house has no hair), and whatever was not understood is asked back. A downloaded model file keeps its shape: only the colours of its named materials and its size can change; hair length, gender and face need a different model. The object is written as src/game/objects/<name>.ts and the game makes it with one call. Worked examples to adapt: person, quadruped, house, tree, sword. HONEST LIMIT: the results are stylised low-poly figures built from simple shapes, not photoreal faces, clothing, fur or scanned models; the builder says so. Switched on by default; the owner can switch it off with AGENTV3_OBJECT_FORGE=off.',
+    howToUse: 'Just describe the game and the things in it (for example a village game with a lighthouse and fishing boats, or a zoo game with a giraffe). If the game library has a matching ready-made model it is used first; anything else is built by the Forge. Ask for changes in plain words (make the lighthouse taller, give the dog a wagging tail) and the builder edits that object.',
+    relatedFeatures: ['agentv3_builder', 'athree_map'],
+    keywords: ['customise', 'customize', 'edit character', 'character edit', 'rang badlo', 'rang badal', 'dress ka rang', 'baal bade', 'ladki bana', 'ladka bana', 'lamba karo', 'mota karo', 'object forge', 'forge', 'make any object', 'koi bhi object', 'object banao', 'module banao', 'khud banao', 'custom object', 'custom model', '3d model', '3d object', 'model banao', 'character banao', 'insaan', 'human', 'person', 'janwar', 'animal', 'dog', 'kutta', 'giraffe', 'dragon', 'tree', 'ped', 'house', 'ghar', 'building', 'imarat', 'sword', 'talwar', 'weapon', 'prop', 'lighthouse', 'walk animation', 'walking', 'chalna', 'low poly', 'low-poly', 'stylised', 'procedural', 'no library', 'library me nahi'],
     aiSurface: 'pro_chat',
   },
   {
@@ -4026,5 +4047,4 @@ BIDIRECTIONAL SELECTION: (1) pick a framework in the picker (⚙ → Framework o
 export function getFeatureById(id: string): AppFeature | null {
   return APP_KNOWLEDGE_BASE.find(f => f.id === id) ?? null;
 }
-
 

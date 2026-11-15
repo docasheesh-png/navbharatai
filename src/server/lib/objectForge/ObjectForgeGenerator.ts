@@ -7,6 +7,7 @@
 // The same engine then builds it inside the game.
 import type { RecipeOutput } from '../gameRecipeLayers';
 import { FORGE_ENGINE } from './forgeEngineSource';
+import { FORGE_CUSTOMISE } from './forgeCustomiseKitSource';
 import { FORGE_DIR } from './forgePaths';
 import { FORGE_EXAMPLE_IDS } from './forgeExamples';
 
@@ -19,7 +20,7 @@ export function objectForgeEnabled(env: NodeJS.ProcessEnv = process.env): boolea
 export function generateObjectForge(): RecipeOutput & { instructions: string } {
   const fence = '```';
   return {
-    files: { [FORGE_DIR + 'forge.ts']: FORGE_ENGINE },
+    files: { [FORGE_DIR + 'forge.ts']: FORGE_ENGINE, [FORGE_DIR + 'customise.ts']: FORGE_CUSTOMISE },
     instructions: [
       'The Object Forge engine is src/game/forge/forge.ts. Objects are written to src/game/objects/<id>.ts by author_object; use one like this:',
       '',

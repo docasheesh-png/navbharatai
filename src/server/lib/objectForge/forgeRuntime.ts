@@ -4,6 +4,7 @@
 import ts from 'typescript';
 import { FORGE_ENGINE } from './forgeEngineSource';
 import { FORGE_CHECK } from './forgeCheckSource';
+import { FORGE_CUSTOMISE } from './forgeCustomiseKitSource';
 
 import { FORGE_DIR, OBJECTS_DIR } from './forgePaths';
 
@@ -103,6 +104,7 @@ export function authorObject(input: unknown): AuthorResult {
   const id = String(v.spec.id);
   const files: Record<string, string> = {
     [FORGE_DIR + 'forge.ts']: FORGE_ENGINE,
+    [FORGE_DIR + 'customise.ts']: FORGE_CUSTOMISE,
     [OBJECTS_DIR + id + '.ts']: objectFileSource(v.spec),
   };
   return { ok: true, errors: [], report, files, id, text: check.formatReport({ ...report, warnings: [...v.warnings.map((w) => w), ...report.warnings] }) };
@@ -110,5 +112,5 @@ export function authorObject(input: unknown): AuthorResult {
 
 /** The engine file alone (what a game needs once, however many objects it has). */
 export function forgeKitFiles(): Record<string, string> {
-  return { [FORGE_DIR + 'forge.ts']: FORGE_ENGINE };
+  return { [FORGE_DIR + 'forge.ts']: FORGE_ENGINE, [FORGE_DIR + 'customise.ts']: FORGE_CUSTOMISE };
 }

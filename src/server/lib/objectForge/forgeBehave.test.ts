@@ -36,6 +36,36 @@ function stub(spinBase = 1.2) {
 }
 const run = (m: any, seconds: number, dt = 1 / 60, input?: any): void => { for (let t = 0; t < seconds; t += dt) m.update(dt, input); };
 
+describe('behaviour lifecycle preserves deliberate placement', () => {
+  it('orbit stays stopped across later animation frames', () => {
+    const s = stub(); const m = B.behave(s.obj, { type: 'orbit', radius: 60, altitude: 40, speed: 25, clip: 'fly' });
+    m.update(0.1); m.stop();
+    const position = { x: m.x, z: m.z }; const heading = m.heading;
+    run(m, 1);
+    expect({ x: m.x, z: m.z }).toEqual(position); expect(m.heading).toBe(heading);
+    expect(m.speed).toBe(0); expect(m.state).toBe('idle'); expect(s.speed).toBe(0);
+  });
+  it.each([undefined, { type: 'static' }])('a static wrapper preserves the entire authored pose (%s)', (behaviour) => {
+    const s = stub(); s.group.position.set(7, 5, -2); s.group.rotation.set(0.5, 0.7, -0.2);
+    const m = B.behave(s.obj, behaviour); m.update(0.1);
+    expect(s.group.position).toMatchObject({ x: 7, y: 5, z: -2 });
+    expect(s.group.rotation).toMatchObject({ x: 0.5, y: 0.7, z: -0.2, order: 'XYZ' });
+    expect(s.calls.filter(c => c.kind === 'update')).toHaveLength(1);
+  });
+  it('a driven boat retains its draft throughout movement', () => {
+    const s = stub(); s.group.position.y = -0.3;
+    const m = B.behave(s.obj, { type: 'drive', maxSpeed: 12 }, { heightAt: () => 4 });
+    expect(s.group.position.y).toBeCloseTo(3.7, 9);
+    run(m, 1, 0.05, { throttle: 1, steer: 0 });
+    expect(s.group.position.y).toBeCloseTo(3.7, 9);
+  });
+  it('an explicit finite height offset can override the initial elevation', () => {
+    const s = stub(); s.group.position.y = 10;
+    const m = B.behave(s.obj, { type: 'drive', maxSpeed: 12 }, { heightAt: () => 4, heightOffset: -0.2 });
+    m.update(0.1); expect(s.group.position.y).toBeCloseTo(3.8, 9);
+  });
+});
+
 describe('paths', () => {
   const square: Array<[number, number]> = [[0, 0], [0, 10], [10, 10], [10, 0]];
   it('a closed square is 40 m, an open one 30 m', () => { expect(B.pathLength(square, true)).toBeCloseTo(40, 9); expect(B.pathLength(square, false)).toBeCloseTo(30, 9); });

@@ -16,6 +16,8 @@ import type { ForgeBehaviour, ForgeObject } from './forge';
 export interface BehaviourOptions {
   /** Ground height at (x, z) (a world's heightAt): the object stands on it. Without it the ground is flat at y = 0. */
   heightAt?: (x: number, z: number) => number;
+  /** Offset above ground (or below water). Default: the group's initial y, preserving a boat's draft. Applies only to moving behaviours. */
+  heightOffset?: number;
   /** Where it starts. Default: where its group is now. */
   start?: { x: number; z: number; heading?: number };
   /** Overrides the spec's wander seed. */
@@ -97,9 +99,9 @@ export function pathPoint(path: Array<[number, number]>, loop: boolean, d: numbe
 export function behave(obj: ForgeObject, behaviour: ForgeBehaviour | undefined, options: BehaviourOptions = {}): Mover {
   const b: ForgeBehaviour = behaviour ?? { type: 'static' };
   const group = obj.group;
-  // Yaw first, then pitch and roll in the object's own frame: a car on a slope tilts about ITS axes, not the world's.
-  group.rotation.order = 'YXZ';
   const ground = options.heightAt ?? ((): number => 0);
+  const initialY = Number.isFinite(group.position.y) ? group.position.y : 0;
+  const heightOffset = options.heightOffset !== undefined && Number.isFinite(options.heightOffset) ? options.heightOffset : initialY;
   let x: number = options.start?.x ?? group.position.x;
   let z: number = options.start?.z ?? group.position.z;
   let heading: number = options.start?.heading ?? group.rotation.y;
@@ -107,7 +109,7 @@ export function behave(obj: ForgeObject, behaviour: ForgeBehaviour | undefined, 
   let state = 'idle';
 
   const place = (pitch = 0, roll = 0, lift = 0): void => {
-    group.position.set(x, ground(x, z) + lift, z);
+    group.position.set(x, ground(x, z) + heightOffset + lift, z);
     group.rotation.set(pitch, heading, roll);
   };
   /** Pitch and roll that lay the object on the ground under it (flat ground gives zero). */
@@ -141,6 +143,11 @@ export function behave(obj: ForgeObject, behaviour: ForgeBehaviour | undefined, 
     get state(): string { return state; },
     stop(): void { halt(); },
   });
+
+  // A static wrapper advances animation without moving or reorienting an already placed object.
+  if (b.type === 'static') return make(() => { /* preserve authored pose */ }, () => { /* already still */ });
+  // Yaw first, then pitch and roll in the moving object's own frame.
+  group.rotation.order = 'YXZ';
 
   if (b.type === 'rails') {
     const loop = b.loop === true;
@@ -220,6 +227,7 @@ export function behave(obj: ForgeObject, behaviour: ForgeBehaviour | undefined, 
     const cx = x; const cz = z;
     const bank = ((b.bank ?? 15) * Math.PI) / 180;
     let angle = 0;
+    let stopped = false;
     const set = (): void => {
       x = cx + Math.cos(angle) * b.radius; z = cz + Math.sin(angle) * b.radius;
       heading = Math.atan2(-Math.sin(angle), Math.cos(angle));
@@ -227,14 +235,14 @@ export function behave(obj: ForgeObject, behaviour: ForgeBehaviour | undefined, 
     };
     set();
     return make((dt) => {
+      if (stopped) return;
       angle += (b.speed / Math.max(1, b.radius)) * dt;
       speed = b.speed; state = 'moving';
       set(); play(b.clip); obj.setSpeed(1);
-    }, () => { speed = 0; state = 'idle'; stopClip(); });
+    }, () => { stopped = true; speed = 0; state = 'idle'; stopClip(); });
   }
 
   // A static object does not move; its update still advances any animation the game started (a tree swaying).
-  place();
   return make(() => { /* no movement */ }, () => { /* already still */ });
 }
 `;

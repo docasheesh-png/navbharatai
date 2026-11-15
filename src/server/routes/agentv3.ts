@@ -7,7 +7,7 @@ import { prepareGameSeedWorkspace } from '../AgentV3/gameSeedWorkspace';
 import { withReplyLanguage, replyVoiceForRequest } from '../AgentV3/replyLanguageBinding';
 import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
 import { createSandboxAdmissionBudget, sandboxAdmissionActuator } from '../AgentV3/sandboxAdmissionBudget';
-import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges } from '../AI/RouterOne/catalogueAccounting';
+import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges, recordRouterOneEstimatedBill } from '../AI/RouterOne/catalogueAccounting';
 import { planKitRefresh } from '../lib/gameRecipeLayers';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
 import { PRO_SANDBOX_FEE_PCT, proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../AgentV3/proSandboxFee';
@@ -27,6 +27,7 @@ import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, asse
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
 import { surplusFallbackDisabledFor, surplusFallbackDisabledForTier, surplusRawErrorReporter } from '../AI/SurplusRegistry/surplusNoFallback';
 import { rawErrorText } from '../AgentV3/rawErrorDetail';
+import { withEngineSafeDiag, stripEngineSafeDiag } from '../lib/engineSafeDiag';
 import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
 import { wrapSurplusRunnerPreWriteFailOpen, tryConsumeSurplusPreWriteFailOpen, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason, surplusFallbackMessage } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
@@ -517,6 +518,7 @@ import {
 import OpenAI from 'openai';
 import { routerOneCatalogStatus, startRouterOneCatalogSync, syncRouterOneCatalog } from '../AI/RouterOne/routerOneCatalog';
 import { ROUTER_ONE_LABEL, ROUTER_ONE_NOT_CONFIGURED, routerOneApiKey, routerOneBaseUrl, routerOneModels, routerOnePinnedForTier, routerOneWeakFallbackEnabled } from '../AI/RouterOne/routerOne';
+import { ProChainV2Build, proChainV2Decision, proChainV2ScopeAsk, proChainV2RedactSecrets, roleForRunnerOpts } from '../AgentV3/proChainV2';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { withStopSignal } from '../AgentV3/stopSignal';
 import { withAnswerNotDeliberation } from '../AgentV3/answerNotDeliberate';
@@ -645,7 +647,7 @@ import { userAuthContext } from '../AgentV3/userAuthContext';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { phantomAliasDependencies, removeDependenciesFromPackageJson } from '../AgentV3/DependencyReconciler';
 import { fastLaneDependencyPlan, fastLaneDependencyInstallCommand, fastLaneDependencyNote } from '../AgentV3/fastLaneDependencies';
-import { foundationFilesStillAbsent, ensureViteReactFoundation, ensureStaticSiteFoundation, isStaticSiteProject, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
+import { foundationFilesStillAbsent, ensureViteReactFoundation, ensureStaticSiteFoundation, isStaticSiteProject, sanitizeTsconfigExtends, sanitizeTsconfigReferences } from '../AgentV3/FrameworkFoundation';
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
 import { wakePublicState, sanitizeWakeError, type TerminalWakeState } from '../AgentV3/terminalWake';
@@ -1920,6 +1922,9 @@ export function decideBuildBilledUsd(
    * 2026-11-11 Weak/Surplus stop token floor reads this later; it does not change this function's bill.
    */
   surplusUnsettledAbsorbed?: true;
+  /** Owner 2026-11-15 (BR2388): the Router One share priced by ESTIMATE, with its label. Absent unless
+   * an estimated receipt was billed, so every existing equality test stays unchanged. */
+  routerOneEstimated?: { calls: number; costUsd: number; billedUsd: number; label: string };
 } {
   const routerOneEntries = providerLedger.entries().filter(e => isRouterOneAccountingProvider(e.provider));
   if (routerOneEntries.length) {
@@ -1941,7 +1946,8 @@ export function decideBuildBilledUsd(
     const catalogue = routerOneCatalogueBuildCharges(routerOneEntries, barrenPhases);
     return { ...priced, effectiveBilledUsd: priced.effectiveBilledUsd + catalogue.billedUsd,
       realCostUsd: priced.realCostUsd + catalogue.costUsd, absorbedUnbilledUsd: priced.absorbedUnbilledUsd + catalogue.absorbedUsd,
-      reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal) };
+      reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal),
+      ...(catalogue.estimated ? { routerOneEstimated: catalogue.estimated } : {}) };
   }
   const surplusEntries = providerLedger.entries().filter(e => e.provider.toUpperCase() === 'SURPLUS');
   if (surplusEntries.length) {
@@ -2747,7 +2753,7 @@ export function openAiCompatRunners(
         const sdkTimeoutMs = buildStreamingEnabled() ? Math.max(timeoutMs, streamHardCapMs()) : timeoutMs;
         const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0,
           fetch: isRouterOneAccountingProvider(name)
-            ? routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId); audit('ROUTER_ONE_REQUEST', trace); }) : canaryFetch() });
+            ? routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId, trace.status); audit('ROUTER_ONE_REQUEST', trace); }) : canaryFetch() });
         const pricedClient = isRouterOneAccountingProvider(name)
           ? cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, apiKey, { maxDurationMs: sdkTimeoutMs }) : client as unknown as OpenAiChatClient;
         const turnRunner = new OpenAiToolRunner(pricedClient, { model, ...runnerOpts, timeoutMs });
@@ -3577,7 +3583,7 @@ function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSigna
     for (const model of routerOneModels()) {
       try {
         const client = new OpenAI({ apiKey: key, baseURL: routerOneBaseUrl(), timeout: 60_000, maxRetries: 0,
-          fetch: routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId); audit('ROUTER_ONE_REQUEST', trace); }) });
+          fetch: routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId, trace.status); audit('ROUTER_ONE_REQUEST', trace); }) });
         const r = await cataloguePricedRouterOneText(() => cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, key, { maxDurationMs: 60000 }).chat.completions.create({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1024 }, { signal }));
         if (!('choices' in r)) throw new Error(ROUTER_ONE_NOT_CONFIGURED);
         return { text: String(r.choices?.[0]?.message?.content ?? '') };
@@ -3585,6 +3591,93 @@ function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSigna
     }
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   };
+}
+
+/**
+ * PRO CHAIN V2 — one agent's runner: its own Surplus runner (when the build admitted one), then Router One
+ * (its existing builder entry point, same eligibility as the Weak chain), Qubax and Mitrify — NOTHING else.
+ * The tail is the ordinary multi-provider runner with the caller's billing/report callbacks; the agent's
+ * bench is its own (independence), the build's fatal dead-rung memory is shared (a revoked key is revoked
+ * for every agent). See AgentV3/proChainV2/agentRunner.ts.
+ */
+function proChainV2TurnRunner(opts: Parameters<typeof buildTurnRunner>[0], v2: ProChainV2Build): TurnRunner {
+  const surplus = opts.surplusSession?.runner({
+    onProviderUsed: () => opts.onProviderUsed?.('SURPLUS', []),
+    onTurnComplete: (result) => opts.onTurnComplete?.('SURPLUS', result.usage, result.model, result.usage.cacheReadInputTokens),
+  });
+  const r1Key = routerOneApiKey();
+  return v2.agentRunner({
+    role: roleForRunnerOpts(opts),
+    ...(surplus ? { surplus } : {}),
+    routerOne: routerOneWeakFallbackEnabled() ? openAiCompatRunners(ROUTER_ONE_LABEL, r1Key, routerOneBaseUrl(), routerOneModels()) : [],
+    routerOneSecrets: r1Key.split(/[\s,]+/),
+    rungFactory: (label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models),
+    makeChain: (rungs, hooks) => makeMultiProviderTurnRunner(rungs, {
+      onProviderUsed: (used, from) => {
+        hooks.onUsed(used);
+        if (from.length) console.log(`[AGENTV3] v2 build turn via ${used} (after ${from.join(' → ')})`);
+        opts.onProviderUsed?.(used, from);
+      },
+      onProviderError: (name, err) => {
+        hooks.onFailed(name, err);
+        console.log(`[AGENTV3] v2 build ${name} failed: ${proChainV2RedactSecrets(err instanceof Error ? err.message : String(err), [r1Key, process.env.QUBAX_API_KEY ?? '', process.env.MITRIFY_API_KEY ?? ''])}`);
+        opts.onProviderError?.(name, err);
+      },
+      ...(opts.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {}),
+      ...(opts.onProviderBenched ? { onProviderBenched: opts.onProviderBenched } : {}),
+      ...(opts.onAttemptWasted ? { onAttemptWasted: opts.onAttemptWasted } : {}),
+      ...(opts.deadRungs ? { deadRungs: opts.deadRungs } : {}),
+    }),
+    ...(opts.surplusPreWriteFailOpen?.onSurplusError ? { onSurplusError: opts.surplusPreWriteFailOpen.onSurplusError } : {}),
+    ...(opts.onChain ? { onChain: (rungs) => opts.onChain?.(rungs as unknown as ChainRung[]) } : {}),
+  });
+}
+
+/** The v2 context for this build, or undefined (every pre-v2 path). Kept out of the chat handler (Q-979). */
+export function proChainV2ForBuild(tier: unknown, email: string | null | undefined, uid: string | null | undefined): ProChainV2Build | undefined {
+  const d = proChainV2Decision(String(tier ?? ''), email, uid);
+  return d.enabled ? new ProChainV2Build(d.reason) : undefined;
+}
+
+/** v2: the scope classifier's last step is Qubax → Mitrify, never GLM; otherwise the GLM classifier. */
+export function scopeFinalAsk(v2: ProChainV2Build | undefined, glm: typeof weakBuildAdmissionAsk): typeof weakBuildAdmissionAsk {
+  if (!v2) return glm;
+  return proChainV2ScopeAsk({
+    buffer: v2.scopeUsage,
+    onFailure: (provider, detail) => v2.report({ phase: 'provider', severity: 'warning', code: 'PRO_CHAIN_V2_SCOPE_FAILED', autoResolved: true, message: `[v2] scope classifier: ${provider} failed`, detail }),
+  }) as unknown as typeof weakBuildAdmissionAsk;
+}
+
+/** v2: a Surplus scope failure does NOT drop Surplus for the whole build — each agent decides for itself. */
+export function scopeDropSurplus(v2: ProChainV2Build | undefined, drop: () => void): () => void {
+  return v2 ? () => { v2.report({ phase: 'provider', severity: 'info', code: 'PRO_CHAIN_V2_SCOPE_PRIMARY', autoResolved: true, message: '[v2] SURPLUS failed the scope call — agents still start on it and leave it one by one' }); } : drop;
+}
+
+/** The early scope exception drops Surplus build-wide on the pre-v2 path only (v2 agents decide per agent). */
+export function consumeEarlySurplusFailure(hooks: SurplusPreWriteFailOpenHooks, error: unknown): void {
+  if (hooks.proChainV2) return;
+  tryConsumeSurplusPreWriteFailOpen(hooks, error);
+}
+
+/** Does the planner run on the build's own runner factory (Surplus session or the v2 chain)? */
+export function plansOnBuildRunner(surplusSession: unknown, hooks: SurplusPreWriteFailOpenHooks): boolean {
+  return !!surplusSession || !!hooks.proChainV2;
+}
+
+/** v2: attach the report sink, the live tally, the activation line, and the scope classifier's usage. */
+export function attachProChainV2(v2: ProChainV2Build | undefined, diag: BuildDiagnostics, ledger: { add: (provider: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void }): void {
+  if (!v2) return;
+  try {
+    v2.attachReport((line) => diag.record(line));
+    diag.setProChainV2(v2.summary);
+    v2.report({ phase: 'provider', severity: 'info', code: 'PRO_CHAIN_V2_ACTIVE', autoResolved: true,
+      message: `[v2] Pro Chain V2 active (${v2.reason}): SURPLUS → ENGINE_R1 → ENGINE_QX → ENGINE_MF, per agent; no ladder tail` });
+    for (const row of v2.scopeUsage.splice(0)) {
+      ledger.add(row.provider, row.usage, row.model);
+      if (row.estimated) v2.report({ phase: 'provider', severity: 'warning', code: 'PRO_CHAIN_V2_USAGE_ESTIMATED', autoResolved: true,
+        message: `[v2] ${row.provider} (${row.model}) scope call returned no usage — its tokens are ESTIMATED` });
+    }
+  } catch { /* diagnostics are best-effort — never affects a build */ }
 }
 
 function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKeys: string[]): TurnRunner {
@@ -3639,6 +3732,8 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
    */
   surplusPreWriteFailOpen?: SurplusPreWriteFailOpenHooks;
 }): TurnRunner {
+  // Pro Chain V2 (owner t350u): only a build that carries a v2 context (z@ by default) — every agent its own chain.
+  if (opts.surplusPreWriteFailOpen?.proChainV2 && toPowerLevel(opts.tier) === 'weak') return proChainV2TurnRunner(opts, opts.surplusPreWriteFailOpen.proChainV2);
   // The earlier profile pin survives only on other bands; Weak always uses the confirmed order.
   if (toPowerLevel(opts.tier) !== 'weak' && opts.surplusPreWriteFailOpen?.routerOneOnly) return routerOneTurnRunner(opts, { pinned: true });
   if (opts.surplusSession) {
@@ -5168,7 +5263,7 @@ async function noteBuildOutcome(
       // non-admin gets those scrubbed (the full report is anonymized separately when fetched by id).
       const historyOut = showProviderDetail
         ? history
-        : history.map((h) => ({ ...h, summary: h.summary === undefined ? undefined : redactProviderError(h.summary), rootCause: h.rootCause === undefined ? undefined : redactProviderError(h.rootCause) }));
+        : history.map((h) => ({ ...h, summary: h.summary === undefined ? undefined : redactProviderError(stripEngineSafeDiag(h.summary)), rootCause: h.rootCause === undefined ? undefined : redactProviderError(stripEngineSafeDiag(h.rootCause)) }));
       res.json({ history: historyOut });
       return;
     }
@@ -6131,6 +6226,13 @@ async function noteBuildOutcome(
                 await mergeWorkspaceFiles(workspaceId, ts.patch).catch(() => {});
               }
             } catch { /* best-effort — a bad tsconfig extends just falls through as before */ }
+            try {
+              const refs = sanitizeTsconfigReferences(saved, Object.keys(saved));
+              if (refs.fixes.length > 0) {
+                Object.assign(saved, refs.patch);
+                await mergeWorkspaceFiles(workspaceId, refs.patch).catch(() => {});
+              }
+            } catch { /* best-effort — a dangling tsconfig reference just falls through as before */ }
           }
           // Named as the restore it is (greenFreeze.ts ALLOWED_PASSES): copying the app's OWN saved bytes
           // back alters nothing. Unnamed, a verified-green app refused every file of its own restore, one
@@ -11626,6 +11728,8 @@ async function noteBuildOutcome(
     // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders. Branches live in surplusChatAdmission.
     // Weak uses the shared order for every profile; the legacy pin remains only on other bands.
     const routerOnePinned = routerOnePinnedForTier(powerLevelReqEffective, email, userId);
+    // Pro Chain V2 (owner t350u) — undefined for everyone outside its allowlist (z@ by default).
+    const proChainV2 = proChainV2ForBuild(powerLevelReqEffective, email, userId);
     const surplusAdmitGate = await admitWithRouterOnePin(routerOnePinned, () => runWeakSurplusAdmissionForChat({
       powerLevel: powerLevelReqEffective,
       intent,
@@ -11651,10 +11755,10 @@ async function noteBuildOutcome(
     const weakAdmission = await weakAdmissionForTurn({ prompt, intent, importing: hasImportIntent, tier: powerLevelReqEffective },
       scopeAskWithRouterOnePin(routerOnePinned, routerOneScopeAsk, () => weakScopeAsk(createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', scopeCallAudit(scopeRequestId, intentWorkspaceId, row), 'info');
-      }, error => { earlySurplusFailure = error; }), eligibleRouterOneScopeAsk(), weakBuildAdmissionAsk, () => {
+      }, error => { earlySurplusFailure = error; }), eligibleRouterOneScopeAsk(), scopeFinalAsk(proChainV2, weakBuildAdmissionAsk), scopeDropSurplus(proChainV2, () => {
         setAdmittedSurplusScope(surplusSession, false);
         surplusSession = undefined;
-      })),
+      }))),
       surplusScopeTimeoutOpts(surplusSession));
     recordScopeFailure(scopeRequestId, intentWorkspaceId, weakAdmission, audit);
     const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
@@ -14639,6 +14743,7 @@ async function noteBuildOutcome(
        */
       recordWeakAdmissionUsage(weakAdmission, (usage) => providerLedger.add('GLM', usage, WEAK_SCOPE_MODEL));
       recordRouterOneScopeUsage(providerLedger);
+      attachProChainV2(proChainV2, buildDiag, providerLedger);
       const shadowFastLaneLedger = createProviderUsageLedger();
       const captureShadowUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string): void => {
         shadowFastLaneLedger.add(used, usage, model);
@@ -14662,8 +14767,8 @@ async function noteBuildOutcome(
         if (routerOneCostUnconfirmed(used, usage.routerOneReceipt) && !costUnconfirmedNoted) {
           costUnconfirmedNoted = true;
           try { buildDiag.record({ phase: 'build', severity: 'info', code: 'DISCOUNT_COST_UNCONFIRMED', autoResolved: true,
-            message: 'Engine usage accounting is pending; this portion is excluded from the wallet charge and its cost is absorbed by NavBharatAI.',
-            detail: 'ENGINE_R1 catalogue pricing or complete usage could not be verified, so the cost is unknown (not measured zero) and absorbed, recorded as ROUTER_ONE_COST_ABSORBED in the audit log. Further requests on the key are NOT blocked (owner decision 2026-11-15). Verified calls use official posted tariffs, not a supplier-settled wallet debit.' }); } catch { /* observation only */ }
+            message: 'Engine usage for this turn could not be tied to one priced call; this portion is excluded from the wallet charge.',
+            detail: 'ENGINE_R1 usage for this turn had no single issued receipt. Each physical call is still settled in the accounting store (exact from the posted tariff, or by a labelled estimate when its usage was incomplete) and its key released; unknown cost is not measured zero. Verified calls use official posted tariffs, not a supplier-settled wallet debit.' }); } catch { /* observation only */ }
         }
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
@@ -14888,7 +14993,8 @@ async function noteBuildOutcome(
         buildDiag.record({
           phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
           message: `Provider ${name} failed — falling back to the next provider`,
-          autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+          // BR2388: a supplier-free gate/stage marker after the unchanged text (admin report only).
+          autoResolved: true, detail: withEngineSafeDiag(err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300), err),
         });
       };
       // Unified TEXT-generation runner for the FAST lane + up-front aux steps (blueprint / project
@@ -14932,21 +15038,23 @@ async function noteBuildOutcome(
         state: { dropped: false },
         noFallback: surplusFallbackDisabledForTier(powerLevelReqEffective, email, userId),
         routerOneOnly: routerOnePinnedForTier(powerLevelReqEffective, email, userId),
+        proChainV2,
         onSurplusError: surplusRawErrorReporter(email, (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }), userId),
         userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
-        onFailOpen: (reason) => {
+        onFailOpen: (reason, diag) => {
           const dropped = surplusSession;
           surplusSession = undefined;
           if (dropped) setAdmittedSurplusScope(dropped, false);
           const safe = asSafeSurplusAdmissionReason(reason);
           try {
             audit('AGENTV3_SURPLUS_FALLBACK_TO_WEAK', { reason: safe, phase: 'mid_build_pre_write' }, 'warn');
-            console.warn(`[AGENT_STEP] Surplus mid-build unavailable (${safe}); continuing on Weak/CHEAP_FLOOR ladder.`);
+            console.warn(`[AGENT_STEP] Surplus mid-build unavailable (${safe})${diag ? ` ${diag}` : ''}; continuing on Weak/CHEAP_FLOOR ladder.`);
             buildDiag.record({
               phase: 'provider', severity: 'warning', code: 'SURPLUS_FALLBACK', autoResolved: true,
               // #4050 made this fire AFTER writes too; the line said "before any user file" either way (8cdb4817).
               message: surplusFallbackMessage(reason),
-              detail: String(safe),
+              // BR2388: the stage/reason/HTTP status behind the fold, admin report only (stripped for users).
+              detail: diag ? `${String(safe)} ${diag}` : String(safe),
             });
           } catch { /* audit/diagnostics must never block fail-open */ }
         },
@@ -14958,7 +15066,7 @@ async function noteBuildOutcome(
       // eligible exception, never infer availability from a sanitized failed row.
       if (earlySurplusFailure !== undefined) surplusPreWriteFailOpen.onSurplusError?.(earlySurplusFailure);
       if (surplusSession && !abort.signal.aborted) {
-        tryConsumeSurplusPreWriteFailOpen(surplusPreWriteFailOpen, earlySurplusFailure);
+        consumeEarlySurplusFailure(surplusPreWriteFailOpen, earlySurplusFailure);
       }
       const fastLaneDeadRungs = new Map<string, string>();
       // 🔴 THE FLAG THAT WENT NOWHERE (autopsy e706e068, School ERP). `buildIsComplex` was computed,
@@ -18519,7 +18627,7 @@ async function noteBuildOutcome(
         // Opus for a Sonnet-pinned tier would be exactly the cross-tier call the admin forbade.
         // Plan on the tier's plan ladder (admin-approved table 2026-09-14). `planGrok` keeps its name
         // for the lines below; it is no longer Grok — Grok judges.
-        const planGrok = surplusSession ? makePlanTextRunner() : tierPlanRunner(powerLevelReqEffective, noClaudeBuild, buildBench, recordProviderBenched);
+        const planGrok = plansOnBuildRunner(surplusSession, surplusPreWriteFailOpen) ? makePlanTextRunner() : tierPlanRunner(powerLevelReqEffective, noClaudeBuild, buildBench, recordProviderBenched);
         const planRunner = new AgentRunner({
           replyVoice: () => rb.replyVoice ?? voiceOf(originalPrompt),
           client: planGrok ?? client,
@@ -19539,6 +19647,19 @@ async function noteBuildOutcome(
                 }
               }
             } catch { /* best-effort — a bad tsconfig extends just falls through to the install as before */ }
+            try {
+              const refs = sanitizeTsconfigReferences(Object.fromEntries(writtenFiles), scaffold);
+              if (refs.fixes.length > 0) {
+                const patch = Object.entries(refs.patch).map(([path, content]) => ({ path, content }));
+                const { landed } = readWriteOutcomes(patch, await inPlatformPass('fast-lane-foundation', () => writePlatform(patch, 'fast-tsconfig-refs-', 4)));
+                const done = new Set(landed.map((f) => f.path));
+                const repaired = refs.fixes.filter((f) => done.has(f.file));
+                if (repaired.length > 0) {
+                  fastLog(`🩹 Removed an unresolvable tsconfig project reference so the compiler can run: ${repaired.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`);
+                  try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_REFERENCES_REPAIRED', message: `Removed an unresolvable tsconfig reference: ${repaired.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
+                }
+              }
+            } catch { /* best-effort — a dangling tsconfig reference just falls through to the install as before */ }
           }
           // ALWAYS run a real install — a build that just (re)wrote package.json MUST have its FULL
           // dependency tree installed. The old `… else echo "deps present"` skip trusted a pre-baked/
@@ -19648,6 +19769,19 @@ async function noteBuildOutcome(
             // Fix 38b — zero diagnostics alone is not verification. The marker records executable
             // exit zero, not compiler identity; require both canonical output evidence and the marker.
             // A missing marker remains unverified even when no diagnostic was printed.
+            // BR1979: a tsconfig that already includes `src` must not also reference a missing
+            // tsconfig.node.json (TS6053) — heal it here so a repair round that reintroduces the
+            // reference cannot fail the same verify a second time.
+            if (process.env.AGENTV3_TSCONFIG_SANITIZE !== 'off') {
+              try {
+                const refs = sanitizeTsconfigReferences(Object.fromEntries(writtenFiles), scaffold);
+                if (refs.fixes.length > 0) {
+                  const patch = Object.entries(refs.patch).map(([path, content]) => ({ path, content }));
+                  const { landed } = readWriteOutcomes(patch, await fastWrite(patch));
+                  for (const w of landed) writtenFiles.set(w.path, w.content);
+                }
+              } catch { /* best-effort — tsc below still runs and reports TS6053 honestly */ }
+            }
             // 📦 Declared-and-installed BEFORE the compile check (autopsy BR1959): TS2307 for a package nobody
             // declared is not a code error, and a repair round cannot install a package.
             await fastReconcileDependencies('verify');
@@ -27292,7 +27426,9 @@ async function noteBuildOutcome(
         // the admin cannot account for is the same problem as a number that is wrong.
         absorbedUnbilledUsd: decidedAbsorbedUsd,
         surplusUnsettledAbsorbed,
+        routerOneEstimated,
       } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd, barrenPhases);
+      recordRouterOneEstimatedBill(buildDiag, routerOneEstimated);
       let decidedRealCostUsd = decidedRealCostUsdIn;
       // A VERSION THE USER CAN GO BACK TO (2026-09-20). The Time Machine reads `build_history`, which
       // until today only the LEGACY builder ever wrote — so it showed "No saved versions yet" for every

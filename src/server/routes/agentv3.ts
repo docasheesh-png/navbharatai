@@ -3635,7 +3635,7 @@ export function proChainV2ForBuild(tier: unknown, email: string | null | undefin
 }
 
 /** v2: the scope classifier's last step is Qubax → Mitrify, never GLM; otherwise the GLM classifier. */
-function scopeFinalAsk(v2: ProChainV2Build | undefined, glm: typeof weakBuildAdmissionAsk): typeof weakBuildAdmissionAsk {
+export function scopeFinalAsk(v2: ProChainV2Build | undefined, glm: typeof weakBuildAdmissionAsk): typeof weakBuildAdmissionAsk {
   if (!v2) return glm;
   return proChainV2ScopeAsk({
     buffer: v2.scopeUsage,
@@ -3644,23 +3644,23 @@ function scopeFinalAsk(v2: ProChainV2Build | undefined, glm: typeof weakBuildAdm
 }
 
 /** v2: a Surplus scope failure does NOT drop Surplus for the whole build — each agent decides for itself. */
-function scopeDropSurplus(v2: ProChainV2Build | undefined, drop: () => void): () => void {
+export function scopeDropSurplus(v2: ProChainV2Build | undefined, drop: () => void): () => void {
   return v2 ? () => { v2.report({ phase: 'provider', severity: 'info', code: 'PRO_CHAIN_V2_SCOPE_PRIMARY', autoResolved: true, message: '[v2] SURPLUS failed the scope call — agents still start on it and leave it one by one' }); } : drop;
 }
 
 /** The early scope exception drops Surplus build-wide on the pre-v2 path only (v2 agents decide per agent). */
-function consumeEarlySurplusFailure(hooks: SurplusPreWriteFailOpenHooks, error: unknown): void {
+export function consumeEarlySurplusFailure(hooks: SurplusPreWriteFailOpenHooks, error: unknown): void {
   if (hooks.proChainV2) return;
   tryConsumeSurplusPreWriteFailOpen(hooks, error);
 }
 
 /** Does the planner run on the build's own runner factory (Surplus session or the v2 chain)? */
-function plansOnBuildRunner(surplusSession: unknown, hooks: SurplusPreWriteFailOpenHooks): boolean {
+export function plansOnBuildRunner(surplusSession: unknown, hooks: SurplusPreWriteFailOpenHooks): boolean {
   return !!surplusSession || !!hooks.proChainV2;
 }
 
 /** v2: attach the report sink, the live tally, the activation line, and the scope classifier's usage. */
-function attachProChainV2(v2: ProChainV2Build | undefined, diag: BuildDiagnostics, ledger: { add: (provider: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void }): void {
+export function attachProChainV2(v2: ProChainV2Build | undefined, diag: BuildDiagnostics, ledger: { add: (provider: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void }): void {
   if (!v2) return;
   try {
     v2.attachReport((line) => diag.record(line));

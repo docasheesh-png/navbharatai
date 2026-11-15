@@ -3414,7 +3414,12 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
  * Deliberately NARROW: only prefixes whose whole family is advisory BY DEFINITION. `PREVIEW_`, for
  * instance, is NOT here — a preview that did not render genuinely can be why a build failed.
  */
-const NEVER_ROOT_CAUSE_FAMILIES: readonly string[] = ['DESIGN_', 'ACCESSIBILITY_', 'DEPHEALTH_'];
+// `PRO_CHAIN_V2_` (owner t350u) qualifies by the same definition: every line of that family is routing
+// telemetry (which engine served an agent, a fallback, an estimated price) recorded autoResolved, and the
+// build's real ending is recorded by its own error/outcome lines. Without this, a failed or still-running
+// z@ build named "[v2] builder#1: ENGINE_QX failed" as its root cause — in the user's report too.
+// ENGINE_ROUTING is the user-facing fold of the same lines (userFacingReport).
+const NEVER_ROOT_CAUSE_FAMILIES: readonly string[] = ['DESIGN_', 'ACCESSIBILITY_', 'DEPHEALTH_', 'PRO_CHAIN_V2_', 'ENGINE_ROUTING'];
 
 /**
  * Bucket a provider error into something countable.

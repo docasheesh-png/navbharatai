@@ -56,6 +56,9 @@ silent ₹0.
   `proChainV2` block. A supplier's own name inside a thrown error is replaced by its neutral
   label (`ENGINE_QX` / `ENGINE_MF`) before it can reach the build's error copy.
 
+* `PRO_CHAIN_V2_*` / `ENGINE_ROUTING` lines are **never a build's root cause** (`NEVER_ROOT_CAUSE_FAMILIES`):
+  they are routing telemetry, recorded auto-resolved; the build's own error/outcome lines say why it ended.
+
 ## Cloud Run environment variables
 
 Required for the chain to have engines after Surplus (already present if AI chat uses them —

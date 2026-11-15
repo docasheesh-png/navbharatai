@@ -157,6 +157,8 @@ describe('BR1981 — a fast-lane pass that saved no files is not a successful bu
     expect(r.reason).toBe('nothing_landed');
     expect(r.summary).toMatch(/no files could be saved/i);
     expect(r.summary).not.toMatch(/Built your app file-by-file/i);
+    expect(r).not.toHaveProperty('contractRenames');
+    expect(r).not.toHaveProperty('contractEnumsAsConst');
     expect(h.logs.some((l) => /Built your app — 0 file/i.test(l))).toBe(false);
     expect(h.logs.some((l) => /shipping the files unverified/i.test(l))).toBe(false);
     expect(h.counts.verifyCalls()).toBe(0);
@@ -215,6 +217,10 @@ describe('BR1981 — a fast-lane pass that saved no files is not a successful bu
       { path: 'js/app.js', purpose: 'quiz runtime' },
       { path: 'data/catalog.json', purpose: 'catalog' },
     ], [])).toEqual([]);
+  });
+
+  it('neighbour: the two file-carrying hand-offs remain the only contractRenames forwards', () => {
+    expect(SIMPLE.match(/\.\.\.\(contractRenames\.length \? \{ contractRenames \} : \{\}\)/g)).toHaveLength(2);
   });
 
   it('the zero-file failure is decided before the success log or the unverified-shipping note', () => {

@@ -2955,6 +2955,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // already calls 0 files BUILD_FAILED; the boolean must agree. Do not run verify or preview
   // against an empty workspace, and do not say we are "shipping the files unverified".
   if (files.length === 0) {
+    // Not a file-carrying hand-off: do not forward contractRenames / contractEnumsAsConst
+    // (theRenamedTypeWasInvisible census locks those spreads to the two paths that do carry files).
     return {
       ok: false,
       filesWritten: 0,
@@ -2964,8 +2966,6 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       plannedFiles,
       plannedPaths,
       phases: phasesNow(),
-      ...(contractRenames.length ? { contractRenames } : {}),
-      ...(contractEnumsAsConst.length ? { contractEnumsAsConst } : {}),
     };
   }
 

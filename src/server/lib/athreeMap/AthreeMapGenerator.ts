@@ -19,6 +19,7 @@ import { VEGETATION, PLANTS } from './athreeVegetationSource';
 import { RIVERS, RIVERWATER } from './athreeRiverSource';
 import { DUNES, SKY } from './athreeSkySource';
 import { ROADS, ROADMESH } from './athreeRoadSource';
+import { VEHICLES } from './athreeVehicleSource';
 
 export interface AthreeMapResult {
   files: Record<string, string>;
@@ -236,6 +237,8 @@ export interface AthreeWorld {
   roadAt(x: number, z: number): RoadHit | null;
   /** What a vehicle drives on: the bridge deck on a bridge, the ground elsewhere. */
   drivableHeightAt(x: number, z: number): number;
+  /** What a wheel runs on at a place: asphalt on a road, water in a river, lake or the sea, else by biome (grass, sand, snow, rock). */
+  surfaceAt(x: number, z: number): 'asphalt' | 'grass' | 'sand' | 'snow' | 'rock' | 'water';
   /** The home region: the race circuit (racing profile), the runways (flight and open-world) and the villages around the world origin. */
   homeRoads(): Region;
   /** How much of a desert a place is, 0 (not at all) to 1 (the heart of one). A continuous version of the desert biome. */
@@ -358,6 +361,18 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   function heightAt(x: number, z: number): number {
     const t = terrainNoRoads(x, z);
     return withRoads ? roadsOf().carve(x, z, t) : t;
+  }
+
+  function surfaceAt(x: number, z: number): 'asphalt' | 'grass' | 'sand' | 'snow' | 'rock' | 'water' {
+    if (waterAt(x, z) || heightAt(x, z) < 0) return 'water';
+    if (withRoads && roadsOf().roadAt(x, z)) return 'asphalt';
+    switch (biomeAt(x, z)) {
+      case 'ocean': return 'water';
+      case 'beach': case 'desert': return 'sand';
+      case 'snow': return 'snow';
+      case 'mountain': return 'rock';
+      default: return 'grass';
+    }
   }
 
   function drivableHeightAt(x: number, z: number): number {
@@ -492,7 +507,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
+  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, surfaceAt, roadNetwork: roadsOf, roadAt: (x, z) => roadsOf().roadAt(x, z), drivableHeightAt, homeRoads: () => roadsOf().home(), dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
 }
 `;
 
@@ -745,6 +760,7 @@ export * from './rivers';
 export * from './dunes';
 export * from './sky';
 export * from './roads';
+export * from './vehicles';
 export { createRoadMesh, roadsInRect, ROAD_TIERS, ROAD_KIND, roadBudget, roadVertexShader, roadFragmentShader, type RoadMesh, type RoadArrays } from './roadmesh';
 export { createRiverWater, riverVertexShader, riverFragmentShader, waterInRect, RIVER_TIERS, riverBudget, type RiverWater, type WaterArrays } from './riverwater';
 export { createVegetation, plantVertexShader, plantFragmentShader, type Vegetation, type VegetationStats } from './plants';
@@ -844,27 +860,30 @@ const FILES: Record<string, string> = {
   [`${DIR}/sky.ts`]: SKY,
   [`${DIR}/roads.ts`]: ROADS,
   [`${DIR}/roadmesh.ts`]: ROADMESH,
+  [`${DIR}/vehicles.ts`]: VEHICLES,
   [`${DIR}/index.ts`]: INDEX,
 };
 
 /** Every module this recipe can write. */
-export const ATHREE_MAP_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'water', 'ocean', 'vegetation', 'plants', 'rivers', 'riverwater', 'dunes', 'sky', 'roads', 'roadmesh', 'index'];
+export const ATHREE_MAP_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'water', 'ocean', 'vegetation', 'plants', 'rivers', 'riverwater', 'dunes', 'sky', 'roads', 'roadmesh', 'vehicles', 'index'];
 
 export function generateAthreeMap(_include?: string[]): AthreeMapResult {
   return {
     files: { ...FILES },
     dependencies: [{ name: 'three', version: '0.180.0' }],
     instructions:
-      `Added the Athree map (${Object.keys(FILES).length} files under ${DIR}). It is the world to stand on: seeded terrain that streams in around the camera, a 100 km seamless loop or a bounded island, a real wave ocean, rivers and lakes, roads with a race circuit and runways, desert dunes, a sky with day and night and weather, grass and trees that sway in the wind, shared height/biome/wind/spawn functions, and heightfield data for physics.\n` +
+      `Added the Athree map (${Object.keys(FILES).length} files under ${DIR}). It is the world to stand on: seeded terrain that streams in around the camera, a 100 km seamless loop or a bounded island, a real wave ocean, rivers and lakes, roads with a race circuit and runways, a sports car and a sports bike you can drive, desert dunes, a sky with day and night and weather, grass and trees that sway in the wind, shared height/biome/wind/spawn functions, and heightfield data for physics.\n` +
       '```ts\n' +
       "import * as THREE from 'three';\n" +
-      "import { createAthreeMap } from './game/athree';\n" +
+      "import { createAthreeMap, createVehicle } from './game/athree';\n" +
       '\n' +
       'const scene = new THREE.Scene();\n' +
       'const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.5, 6000);\n' +
       "const map = createAthreeMap({ seed: 7, profile: 'racing', quality: 'mid', three: THREE });\n" +
       'scene.add(map.chunks!.group);\n' +
-      "const spawn = map.world.spawnPoints('vehicle')[0]; // a flat, dry, safe place\n" +
+      "const spawn = map.world.spawnPoints('vehicle')[0]; // a flat, dry, safe place (on the circuit grid in a racing world)\n" +
+      "const car = createVehicle(THREE, map.world, { kind: 'car', color: 0xc8102e, quality: 'mid' }); // or kind: 'bike'; starts at the spawn point\n" +
+      "scene.add(car.group);\n" +
       'let time = 0;\n' +
       '\n' +
       'export function frame(dt: number): void {\n' +
@@ -880,11 +899,12 @@ export function generateAthreeMap(_include?: string[]): AthreeMapResult {
       "  const sound = map.sky!.ambience(spawn.x, spawn.z); // levels 0 to 1 (wind, rain, thunder, night, waves, birds) for YOUR audio\n" +
       "  const road = map.world.roadAt(spawn.x, spawn.z); // null off the road; on it: which road, how far along, the surface height, whether on a bridge\n" +
       "  const driveY = map.world.drivableHeightAt(spawn.x, spawn.z); // what a vehicle drives on: the bridge deck on a bridge, the ground elsewhere\n" +
+      "  car.update(dt, { throttle: 1, steer: 0, brake: 0, handbrake: false }, map.chunks!.origin); // YOUR input: a sports car with its own driving physics\n" +
       '  const hf = map.colliderFor(0, 0, 256, 64); // heights for a physics heightfield collider\n' +
       '  camera.position.set(spawn.x - map.chunks!.origin.x, y + 6, spawn.z - map.chunks!.origin.z);\n' +
       '  void shift; void wind; void hf; void boat; void plants; void river; void sound; void road; void driveY;\n' +
       '}\n' +
       '```\n' +
-      'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. Phases built so far: the world (terrain, biomes, wind, spawns, colliders), the OCEAN (Gerstner waves shaded and displaced on the GPU, shore foam, depth colour, and map.ocean.floatAt for boats) RIVERS AND LAKES (map.world.waterBodies() lists every river path with its width and water level and every lake; map.world.waterAt(x, z) tells whether a place is in a river or a lake; the terrain is carved so the bed is real, rivers always end in the sea, a lake or another river, the water level only ever goes down along a river, nothing grows or spawns in the water, and map.riverWater draws it with a flowing-water shader and gives boats floatAt) and ROADS (map.world.homeRoads() gives the villages, highways, and for the racing profile the closed banked RACE CIRCUIT with checkpoints, and runways; spawnPoints with kind vehicle grids the cars behind the circuit start line and with kind plane starts planes on a runway; highways never climb more than 7 percent, cross every river on a bridge deck 3.5 m above the water and never enter a lake or the sea; the ground is cut and filled to the road, so heightAt IS the road surface; a bridge deck is NOT in heightAt: use map.world.drivableHeightAt; map.roadMesh draws asphalt with lane markings, kerbs, a start line, runway markings, plazas, bridge decks, rails and piers; roads are made region by region (12.5 km) as you travel, with no junctions) and DESERT DUNES (heightAt includes them; map.world.dunesAt and desertnessAt say where; about a third of a desert is a flat hardpan; dunes stop 20 m before water), the SKY (map.sky: sun and moon by time of day, stars, clouds carried by the shared wind, day and night, weather clear/cloudy/rain/storm/fog easing from one to the next, rain streaks, lightning, fog, and its own sun and sky lights; map.sky.applyTo(scene) puts the fog and background on your scene; pass skyOptions {hours, weather, dayLength, auto, lights}; sky: false if you bring your own) and GRASS AND TREES (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, placed by biome and slope, streamed in tiles, three levels of budget per quality tier). Trees are visual only: they have no collider yet, so a car drives through them (treesInRect(world, x0, z0, x1, z1) gives the trunk positions if you need to keep clear of them); pass vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. Rivers are visible out to a few hundred metres to about a kilometre depending on the quality tier (beyond that the terrain mesh is too coarse to hold a river bed). Pass rivers: false to createAthreeWorld or createAthreeMap for a world without them. The sky takes over the scene lights: do not add your own sun or hemisphere light unless you pass skyOptions {lights: false}. NOT built yet — do not draw them by hand: cars and bikes, aircraft, animals, birds and people, sand ripple textures and heat haze. Do not add your own water plane: the ocean is already in map.chunks.group. Do not scatter your own grass or trees over the map, and do not draw your own rivers, lakes, roads, dunes or sky: they are already placed. Pass roads: false for a world without roads.',
+      'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. Phases built so far: the world (terrain, biomes, wind, spawns, colliders), the OCEAN (Gerstner waves shaded and displaced on the GPU, shore foam, depth colour, and map.ocean.floatAt for boats) RIVERS AND LAKES (map.world.waterBodies() lists every river path with its width and water level and every lake; map.world.waterAt(x, z) tells whether a place is in a river or a lake; the terrain is carved so the bed is real, rivers always end in the sea, a lake or another river, the water level only ever goes down along a river, nothing grows or spawns in the water, and map.riverWater draws it with a flowing-water shader and gives boats floatAt) and VEHICLES (createVehicle(THREE, map.world, {kind: car or bike, color, quality}) gives a lofted sports car or bike with four or two wheels that spin and steer, brake lights, headlights (setLights) and its own driving physics: engine that fades with speed, braking limited by the surface, steering that narrows with speed, a grip limit, a handbrake slide, pitch and roll from the ground, flight off a crest, water that stops it; you call vehicle.update(dt, {throttle -1..1, steer -1..1, brake 0..1, handbrake}, map.chunks.origin) every frame and read vehicle.state (speed, slip, position); map.world.surfaceAt tells what a wheel runs on) and ROADS (map.world.homeRoads() gives the villages, highways, and for the racing profile the closed banked RACE CIRCUIT with checkpoints, and runways; spawnPoints with kind vehicle grids the cars behind the circuit start line and with kind plane starts planes on a runway; highways never climb more than 7 percent, cross every river on a bridge deck 3.5 m above the water and never enter a lake or the sea; the ground is cut and filled to the road, so heightAt IS the road surface; a bridge deck is NOT in heightAt: use map.world.drivableHeightAt; map.roadMesh draws asphalt with lane markings, kerbs, a start line, runway markings, plazas, bridge decks, rails and piers; roads are made region by region (12.5 km) as you travel, with no junctions) and DESERT DUNES (heightAt includes them; map.world.dunesAt and desertnessAt say where; about a third of a desert is a flat hardpan; dunes stop 20 m before water), the SKY (map.sky: sun and moon by time of day, stars, clouds carried by the shared wind, day and night, weather clear/cloudy/rain/storm/fog easing from one to the next, rain streaks, lightning, fog, and its own sun and sky lights; map.sky.applyTo(scene) puts the fog and background on your scene; pass skyOptions {hours, weather, dayLength, auto, lights}; sky: false if you bring your own) and GRASS AND TREES (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, placed by biome and slope, streamed in tiles, three levels of budget per quality tier). Trees are visual only: they have no collider yet, so a car drives through them (treesInRect(world, x0, z0, x1, z1) gives the trunk positions if you need to keep clear of them); pass vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. Rivers are visible out to a few hundred metres to about a kilometre depending on the quality tier (beyond that the terrain mesh is too coarse to hold a river bed). Pass rivers: false to createAthreeWorld or createAthreeMap for a world without them. The sky takes over the scene lights: do not add your own sun or hemisphere light unless you pass skyOptions {lights: false}. NOT built yet — do not draw them by hand: aircraft, animals, birds and people (and vehicles do not collide with trees or other vehicles yet), sand ripple textures and heat haze. Do not add your own water plane: the ocean is already in map.chunks.group. Do not scatter your own grass or trees over the map, and do not draw your own rivers, lakes, roads, dunes or sky: they are already placed. Pass roads: false for a world without roads.',
   };
 }

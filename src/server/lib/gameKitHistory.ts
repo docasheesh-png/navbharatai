@@ -25,11 +25,17 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "2eee15db3380fdbe89ebfa7e36773179aa27466520f1c6b379df6198e4ee0d56",
     "b359b27179b906887d64ebc73cbf50c6dc072f4c84b17472163dd205eafb822e",
     "b6b8efd7fd54a9922e6fa5db3c00c60ab98118233e2d034289e4f005dd2d49a5",
-    "54151cd273d6b21c0c2fb1f56f435d362499321c648585b95e1c255942be2a65"
+    "54151cd273d6b21c0c2fb1f56f435d362499321c648585b95e1c255942be2a65",
+    "9a4875fa493df5133f278972dca8e813c763b95202b37f794398b2dcdabd5cfe",
+    "7527a2e5ef0ac683fdcf5fa698656303fb57aa26a91255683d265afdcaaac58e"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
     "6d19d3faa0b46f00871a82026740716b96dd3ad44aae87185b94ecc852bf36ff"
+  ],
+  "src/game/RoyalePractice.tsx": [
+    "e4cc8d056f67ca49efa6d0ae8a37a2296d74b8e2c67cb20122dc6b189c5e71c5",
+    "f997b0e9ce8519c7e70278a84002bbb31c335ccb0527e02fc0f179645d6134ce"
   ],
   "src/game/athree/budget.ts": [
     "62862e8c1b57809d1227783b4c773fb0ab0dc15cef41bd5d418f5510b2b345c6"
@@ -94,7 +100,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/athree/vegetation.ts": [
     "71c7521d01db7f34b81a475b05071360015946eb6e5e43e3171e5471f14ac115",
     "0b421f21f864a642a7f3f62e54714e039baca33d39a10e8a00ed6c794eb0ccd8",
-    "b558e1127300beb2e42e0012e804e393b820e0a5fc0b0eece9c3780be97a3abf"
+    "b558e1127300beb2e42e0012e804e393b820e0a5fc0b0eece9c3780be97a3abf",
+    "370fe0b003e88bb5d6bd162ebb4012eac59a7a6091b8e47488350e0fecd79c5c",
+    "632c091bfa90c063cf41676e67b6ee415a72c47a7843b30b58b0e6cccd23ae6a"
   ],
   "src/game/athree/vehicles.ts": [
     "cacc3ff86106db83b4c1c4058b4d7401a39cdfdd748b31fbb24873dccafbaa91",
@@ -109,7 +117,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "5896f77d10955b281ac83725ace0d9833f81ce664545003e2f46252d761d9e8f",
     "80d6d9b2f799fb5001f7f3e0128d39519a8f8bea40b6a421872547032d0b7373",
     "0a39ea816cd1e84a2f2b41fc9b0c8eca1d7d5bf8a35a4c2af125c74c26eb3bcf",
-    "ae21089f0f5f187fbb11a2d69a7bad4c4cdb62f9038e45ef50ca6e25163159dc"
+    "ae21089f0f5f187fbb11a2d69a7bad4c4cdb62f9038e45ef50ca6e25163159dc",
+    "a9460bf0a54b9eff00e5502cfacd42677dfdadceb3f01ccd50c9b6f098f9ab16",
+    "28a01d4fcebcc2b0bc75eb0fb6c63f1144a73cbc0dad0630d4a84f3c69c1abbb"
   ],
   "src/game/controls.test.ts": [
     "2df3798b667fc3fe66d971a938e25286bdf3066b668eed9527c6200d4c26f03c",
@@ -170,6 +180,12 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/play/motor.ts": [
     "5da3856c53d7f23b4bf2b4458c90b60c2c8c679853131823ff324de1ef8c80f2",
     "f1ff14f4eab4da545f34a66b0f8b53dae34bb8e7425fd62235074c50b0eddf4c"
+  ],
+  "src/game/royale/practice.ts": [
+    "c7675aefce1f3829c3e3aea952677e8471dd00deed4bcd2aabe74aee55aeaab9"
+  ],
+  "src/game/royale/rules.ts": [
+    "93a0d5a80c98ba3fb3436e26a16f47054f2397ebb9aec6d806ea1557958d37ce"
   ],
   "src/game/systems/ai.ts": [
     "c4dbc016db9a13e81cad5847399bd37d21cc2fc248941739958c6f00bbe22db6",

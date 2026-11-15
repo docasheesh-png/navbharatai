@@ -328,11 +328,26 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return withRivers ? d * smoothstep(0, 20, net().edgeDistance(x, z)) : d;
   }
 
-  /** The ground with rivers, lakes and dunes but WITHOUT roads: the roads are routed on this and then cut into it. */
+  // Cache only immutable procedural samples, never the public mutable river/lake result.
+  // One exact world-local coordinate: fixed memory, no rounding or cross-world state.
+  let lastHeightX = NaN;
+  let lastHeightZ = NaN;
+  let lastBase = 0;
+  let lastDune = 0;
+  function sampleTerrain(x: number, z: number): void {
+    if (Object.is(x, lastHeightX) && Object.is(z, lastHeightZ) && Number.isFinite(x) && Number.isFinite(z)) return;
+    lastBase = baseHeight(x, z);
+    lastDune = dunes.heightAt(x, z, lastBase);
+    lastHeightX = x;
+    lastHeightZ = z;
+  }
+
+  /** Ground with rivers, lakes and dunes before roads carve it. */
   function terrainNoRoads(x: number, z: number): number {
-    const b = baseHeight(x, z);
+    sampleTerrain(x, z);
+    const b = lastBase;
+    const d = lastDune;
     const c = withRivers ? net().carve(x, z, b) : b;
-    const d = dunes.heightAt(x, z, b);
     if (d <= 0) return c;
     return c + (withRivers ? d * smoothstep(0, 20, net().edgeDistance(x, z)) : d);
   }

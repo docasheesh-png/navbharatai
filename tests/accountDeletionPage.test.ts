@@ -223,6 +223,9 @@ describe('the built-app eraser and the page do not drift apart', () => {
       build_report_numbers: /the reports of past builds and their report numbers/i,
       workspace_manual_edits_v3: /projects and built apps/i,
       project_plans_v3: /projects and built apps/i,
+      // 2026-11-14: a project's verified versions and its saved brief/requirements are part of the project.
+      project_revisions_v3: /projects and built apps/i,
+      project_requirements_v3: /projects and built apps/i,
       app_engineering_memory_v1: /projects and built apps/i,
       app_ai_settings: /projects and built apps/i,
       build_history_v2: /build history and diagnostics/i,

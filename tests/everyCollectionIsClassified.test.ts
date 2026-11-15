@@ -254,6 +254,8 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   workspace_user_actions_v1: { kind: 'workspace', why: 'what the engine asked the user to do — `items` sub' },
   code_reviews:              { kind: 'workspace', why: 'review comments on the app — `comments` sub' },
   project_plans_v3:          { kind: 'workspace', why: "the app's plan — doc id is the workspaceId" },
+  project_revisions_v3:      { kind: 'workspace', why: "the app's verified versions — doc id is the workspaceId; `revs` and `byEdit` children, erased with the app" },
+  project_requirements_v3:   { kind: 'workspace', why: "the user's brief and standing requirements — doc id is the workspaceId, no age limit by design, erased with the app" },
   agentv3_attachment_memory: { kind: 'workspace', why: "the app's attachment memory — doc id is the workspaceId" },
   agentv3_build_outcome:     { kind: 'workspace', why: "whether the app's last build came out green" },
   agentv3_deployments:       { kind: 'workspace', why: "the app's deployment record and URL" },

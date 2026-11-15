@@ -81,6 +81,7 @@ jobs:
           node --import ./node_modules/tsx/dist/loader.mjs scripts/mitrify-guest-emulator.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/mitrify-admission.log"
           node scripts/session-revocation-rules.check.mjs --emulator 127.0.0.1:18781 --project demo-navbharatai-phase2 | tee "$RUNNER_TEMP/phase2-safety/session-rules.log"
           node --import ./node_modules/tsx/dist/loader.mjs scripts/voiceAi.check.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/voice-ai-wallet.log"
+          node --import ./node_modules/tsx/dist/loader.mjs scripts/projectRevisions.check.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/project-revisions.log"
       - name: Upload build safety evidence
         if: always()
         uses: actions/upload-artifact@v7

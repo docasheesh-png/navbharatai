@@ -53,6 +53,12 @@ export const WORKSPACE_SCOPED_COLLECTIONS: readonly WorkspaceScopedCollection[] 
   { collection: 'code_reviews', sub: 'comments' },
   { collection: 'workspace_manual_edits_v3' },
   { collection: 'project_plans_v3' },
+  // Edit promotion + durable project memory (2026-11-14). Both docs are keyed by the workspace id and hold the user's
+  // own words (the requirements ledger) and a manifest of their files with the message that asked for each version
+  // (revisions). `revs` and `byEdit` are children of the revisions document; Firestore does not cascade.
+  { collection: 'project_revisions_v3', sub: 'revs' },
+  { collection: 'project_revisions_v3', sub: 'byEdit' },
+  { collection: 'project_requirements_v3' },
   { collection: 'app_engineering_memory_v1' },
   { collection: 'app_ai_settings' },
   // Fresh collection names avoid old bare-session collisions but full legacy workspace ids

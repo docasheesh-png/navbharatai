@@ -95,6 +95,7 @@ export const WORKAROUND_CODES: ReadonlySet<string> = new Set([
  * answer is "nothing, it was never going to block", it is left open, not a heal.
  */
 export const NOT_A_REPAIR_CODES: ReadonlySet<string> = new Set([
+  'IN_BUILD_GREEN_HELD', // the in-build proof refused to save a REPLACEMENT as the last known good — nothing was repaired, the earlier version is simply untouched
   'READINESS_WARNING',
   'PREVIEW_SNAPSHOT_STALE',
   'USAGE_NOT_REPORTED',

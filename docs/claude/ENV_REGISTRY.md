@@ -4954,6 +4954,15 @@ Public chat and the admin Test Chat Bot call Qubax when `QUBAX_ENABLED=1` and `Q
 
 Guest 10/day and signed-in shared 50/day stay on the free-answer quota. The shared paid daily and monthly budgets still have to admit the ceiling. No secret is stored in this file.
 
+### Edit promotion kill switch (2026-11-14)
+`AGENTV3_EDIT_PROMOTION` — **not set in Cloud Run; default ON.** `off` disables the edit gate (a candidate that replaces
+the project it was an edit of is no longer held, at the in-build proof or at the turn-end settle) and the rule that
+ends an edit before any write when the project's saved instructions cannot be read. It does NOT disable the
+requirements ledger, the revision records or the memory buffers' eviction order. Set it only to roll the gate back
+if it ever holds a legitimate edit; the held edit's candidate is always kept under the attempt key, so nothing is lost
+either way. See `src/server/AgentV3/editPromotionGate.ts`, `editRelease.ts`, `projectRevisions.ts`,
+`projectRequirements.ts`.
+
 - **`AGENTV3_EDIT_INTEGRITY`** (NOT set; default ON; `off` disables). The page guard in `editIntegrity.ts`, run by both model write doors (`write_file` via `guardedWrite`, and `edit_file`) on every `.html` page: refuses an edit that drops or invents embedded media, writes back the `<<media omitted…>>` placeholders, breaks an inline `<script>` that parsed before, unbalances `<script>`/`<style>` or removes `</body></html>`, or points at an `assets/media/` file that does not exist. Only a REGRESSION is refused (an already-broken page may be repaired). Added with the single-file game import (2026-11-14). The import limits themselves are not env keys: they live in `IMPORT_LIMITS` (`src/lib/importRules.ts`), one object for the browser, the server and the stores.
 
 

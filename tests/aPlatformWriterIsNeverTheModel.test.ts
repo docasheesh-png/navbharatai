@@ -464,7 +464,9 @@ describe('🔒 census — every write the route makes after the model answers na
     expect(returned.map((node) => node.expression?.getText(sf))).toEqual(['restoring']);
     expect(restoreSites).toHaveLength(1);
     expect(restoreSites[0].named).toBe(true);
-    expect(restorePasses.sort()).toEqual(['design-heal-revert', 'green-guard-restore', 'green-guard-restore', 'green-guard-restore']);
+    // 4 `green-guard-restore` callers since 2026-11-14: the edit gate's hold (editPromotion.ts) puts the verified base back
+    // through the SAME shared restore and the same allowlisted pass.
+    expect(restorePasses.sort()).toEqual(['design-heal-revert', 'green-guard-restore', 'green-guard-restore', 'green-guard-restore', 'green-guard-restore']);
     for (const pass of restorePasses) expect(ALLOWED_PASSES.has(pass), pass).toBe(true);
     expect(sharedRestore!.parameters[1].initializer?.getText(sf)).toContain('snapshotRestoreStopped(abort.signal)');
   });

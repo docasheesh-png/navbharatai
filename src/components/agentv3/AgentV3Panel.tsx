@@ -96,6 +96,7 @@ import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId, takeRemixHandoff } from './v3SessionContinuity';
 import { showColdStart } from './coldStartPolicy';
 import { loadDraft, saveDraft } from './composerDraft';
+import { USE_CASE_PROMPT_KEY } from '../../lib/useCaseEntry';
 import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
 import { claimCurrentQueueItem, reconcileCurrentQueue, QueueSessionScope, type QueueSessionSnapshot } from './queueSessionScope';
@@ -164,6 +165,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const { state, running, isBusy, error, errorBeforeBuildStarted, start, markUserMessage, respond, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop: stopBuild, unsend, reset: resetBuild, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueState, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build(userId);
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
+  useEffect(() => {
+    try {
+      const text = sessionStorage.getItem(USE_CASE_PROMPT_KEY);
+      if (!text || !text.trim()) return;
+      sessionStorage.removeItem(USE_CASE_PROMPT_KEY);
+      setPrompt(text);
+    } catch { /* private mode: the draft from loadDraft still applies on first mount */ }
+  }, [freshOpenNonce]);
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
   const [shipping, setShipping] = useState(false);
   const [reverting, setReverting] = useState(false);

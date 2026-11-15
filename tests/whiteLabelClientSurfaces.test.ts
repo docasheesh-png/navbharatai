@@ -67,6 +67,12 @@ describe('publicTierLabel — the choke point', () => {
   it('an unknown tier falls back to the brand, never to a vendor', () => {
     expect(publicTierLabel('something-new-in-2027')).toContain(PUBLIC_ENGINE_NAME);
   });
+
+  it('the guard names the suppliers a guest must not read', () => {
+    for (const name of ['Qubax', 'Mitrify', 'Groq', 'OpenRouter', 'Sarvam', 'Qwen', 'Llama', 'Cerebras', 'CheaperInference']) {
+      expect(namesAProvider(name), name).toBe(true);
+    }
+  });
 });
 
 describe('the two surfaces that leaked', () => {
@@ -111,6 +117,7 @@ const ALLOWED: Record<string, string> = {
   'src/components/admin/DeepinfraComparisonPanel.tsx': 'mounted only in the server-authenticated admin dashboard; operators must review exact candidate identities and paid rates before a comparison',
   'src/lib/deepinfraComparison.ts': 'fixed model identities and schema consumed only by that admin comparison panel and server, never public engine labels',
   'src/lib/testChatBot.ts': 'shared schema/validation for the admin-only Test Chat Bot panel and server; provider ids are operator-facing and never ordinary chat labels',
+  'src/lib/liveModelRegistryView.ts': 'schema for the admin-only Live Model Registry; the only client importer is that authenticated panel',
   // The USER'S OWN third-party integrations. Naming them IS the feature.
   'src/components/ide/APIMarketplace.tsx': "catalogue of APIs the USER can add to THEIR app",
   'src/components/ide/AIChat.tsx': "the IDE's bring-your-own-key provider picker",
@@ -334,7 +341,8 @@ describe('🔒 no NEW user-facing surface may name a vendor', () => {
     const offenders: string[] = [];
     for (const full of files) {
       const rel = relative(root, full).replace(/\\/g, '/');
-      if (ALLOWED[rel]) continue;
+      // Every file under the admin UI is exempt. Those screens are mounted only behind server-verified admin auth.
+      if (rel.startsWith('src/components/admin/') || ALLOWED[rel]) continue;
       for (const lit of userFacingStrings(full)) {
         if (namesAProvider(lit)) offenders.push(`${rel}: ${lit.slice(0, 90)}`);
       }

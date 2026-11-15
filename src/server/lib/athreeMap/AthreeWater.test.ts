@@ -219,7 +219,7 @@ describe('the shore-depth texture', () => {
 
 describe('the API: one update() moves terrain and sea together', () => {
   it('createAthreeMap gives the ocean, replaces the placeholder sea, and update() returns the origin shift', () => {
-    const map = A.createAthreeMap({ seed: 1, three: THREE, quality: 'phone', vegetation: false });
+    const map = A.createAthreeMap({ seed: 1, three: THREE, quality: 'phone', vegetation: false, sky: false });
     expect(map.ocean).not.toBeNull();
     const meshes: any[] = [];
     map.chunks.group.traverse((o: any) => { if (o.isMesh) meshes.push(o); });

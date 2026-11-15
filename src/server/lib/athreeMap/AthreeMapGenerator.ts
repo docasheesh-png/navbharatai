@@ -17,6 +17,7 @@
 import { WATER, OCEAN } from './athreeWaterSource';
 import { VEGETATION, PLANTS } from './athreeVegetationSource';
 import { RIVERS, RIVERWATER } from './athreeRiverSource';
+import { DUNES, SKY } from './athreeSkySource';
 
 export interface AthreeMapResult {
   files: Record<string, string>;
@@ -186,6 +187,7 @@ const WORLD = `// Athree map — the world: height, normal, biome, wind and spaw
 import { fieldNoise, mulberry32 } from './noise';
 import { PROFILE_DEFAULTS, type AthreeProfile, type AthreeWorldMode } from './config';
 import { riverNetworkFor, type River, type Lake, type WaterHit } from './rivers';
+import { createDunes } from './dunes';
 
 export type Biome = 'ocean' | 'beach' | 'desert' | 'grassland' | 'forest' | 'mountain' | 'snow';
 export type SpawnKind = 'player' | 'vehicle' | 'plane' | 'boat' | 'animal';
@@ -224,7 +226,11 @@ export interface AthreeWorld {
   readonly seaLevel: number;
   /** The ground height, with the rivers and lakes carved in (what is drawn, driven and floated on). */
   heightAt(x: number, z: number): number;
-  /** The ground height WITHOUT rivers and lakes. */
+  /** How much of a desert a place is, 0 (not at all) to 1 (the heart of one). A continuous version of the desert biome. */
+  desertnessAt(x: number, z: number): number;
+  /** The height the desert dunes add at a place (zero outside deserts, and within 20 m of water). heightAt already includes it. */
+  dunesAt(x: number, z: number): number;
+  /** The ground height WITHOUT rivers, lakes and dunes. */
   baseHeightAt(x: number, z: number): number;
   /** The water at a place (surface height, flow direction), or null on dry ground. The sea is not included: it is every place below seaLevel. */
   waterAt(x: number, z: number): WaterHit | null;
@@ -292,9 +298,26 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return network;
   };
 
+  // Dunes sit on top of the carved ground, and fade out where a river or lake has cut the ground, so a bed is never buried in sand.
+  const dunes = createDunes({ seed, period, biomeScale, mountainLine });
+
+  function desertnessAt(x: number, z: number): number {
+    return dunes.desertness(x, z, baseHeight(x, z));
+  }
+
+  function dunesAt(x: number, z: number): number {
+    const d = dunes.heightAt(x, z, baseHeight(x, z));
+    if (d <= 0) return 0;
+    // Dunes stop 20 m before any water edge (a mask on the DISTANCE, so a bed is never buried and the ground has no step).
+    return withRivers ? d * smoothstep(0, 20, net().edgeDistance(x, z)) : d;
+  }
+
   function heightAt(x: number, z: number): number {
-    const h = baseHeight(x, z);
-    return withRivers ? net().carve(x, z, h) : h;
+    const b = baseHeight(x, z);
+    const c = withRivers ? net().carve(x, z, b) : b;
+    const d = dunes.heightAt(x, z, b);
+    if (d <= 0) return c;
+    return c + (withRivers ? d * smoothstep(0, 20, net().edgeDistance(x, z)) : d);
   }
 
   function waterAt(x: number, z: number): WaterHit | null {
@@ -334,6 +357,21 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     return { x: Math.cos(a) * speed, z: Math.sin(a) * speed, speed };
   }
 
+  /** A 600 m strip, 60 m wide, flat along AND across (a plane neither climbs nor rolls), dry, and above 4 m everywhere. */
+  function stripAt(x: number, z: number): boolean {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i <= 12; i++) {
+      for (const dz of [-30, 0, 30]) {
+        const hh = heightAt(x + i * 50, z + dz);
+        if (waterAt(x + i * 50, z + dz)) return false;
+        lo = Math.min(lo, hh);
+        hi = Math.max(hi, hh);
+      }
+    }
+    return lo > 4 && hi - lo < 4;
+  }
+
   function spawnPoints(kind: SpawnKind, count = 1): Spawn[] {
     const rng = mulberry32(seed ^ kindSalt(kind));
     const searchR = mode === 'bounded' ? radius * 0.9 : 20000;
@@ -353,17 +391,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       if (y < 4 || y > 140) continue;
       if (waterAt(x, z)) continue; // never spawn in a river or a lake
       if (kind === 'plane') {
-        let lo = Infinity;
-        let hi = -Infinity;
-        // The strip is 600 m long and 60 m wide: flat along AND across, so a plane neither climbs nor rolls.
-        for (let i = 0; i <= 12; i++) {
-          for (const dz of [-30, 0, 30]) {
-            const hh = heightAt(x + i * 50, z + dz);
-            lo = Math.min(lo, hh);
-            hi = Math.max(hi, hh);
-          }
-        }
-        if (lo > 4 && hi - lo < 4) out.push({ x, y, z, heading: 0, strip: 600 });
+        if (stripAt(x, z)) out.push({ x, y, z, heading: 0, strip: 600 });
         continue;
       }
       // Ground spawns: the 12 m ring around the point must be within 2 m of it (which also bounds the slope under 10 degrees).
@@ -380,10 +408,22 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
       }
       out.push({ x, y, z, heading });
     }
+    if (kind === 'plane' && out.length < count) {
+      // The random search can miss a strip that exists, and a strip is rare on an island: look at every 100 m before giving up.
+      const R = mode === 'bounded' ? radius * 0.9 : 20000;
+      for (let gx = -R; gx <= R && out.length < count; gx += 100) {
+        for (let gz = -R; gz <= R && out.length < count; gz += 100) {
+          if (out.some((p) => Math.hypot(p.x - gx, p.z - gz) < 150)) continue;
+          const gy = heightAt(gx, gz);
+          if (gy < 4 || gy > 140 || !stripAt(gx, gz)) continue;
+          out.push({ x: gx, y: gy, z: gz, heading: 0, strip: 600 });
+        }
+      }
+    }
     return out;
   }
 
-  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
+  return { seed, profile, mode, sizeMeters, seaLevel: 0, heightAt, dunesAt, desertnessAt, baseHeightAt: baseHeight, waterAt, waterBodies, normalAt, biomeAt, windAt, spawnPoints };
 }
 `;
 
@@ -620,6 +660,7 @@ import { heightfieldFor, type HeightfieldData } from './collider';
 import { createOcean, type Ocean } from './ocean';
 import { createVegetation, type Vegetation } from './plants';
 import { createRiverWater, type RiverWater } from './riverwater';
+import { createSky, type Sky, type SkyOptions } from './sky';
 import { type AthreeQuality } from './config';
 
 export * from './world';
@@ -631,6 +672,8 @@ export * from './water';
 export { createOcean, oceanVertexShader, oceanFragmentShader, type Ocean } from './ocean';
 export * from './vegetation';
 export * from './rivers';
+export * from './dunes';
+export * from './sky';
 export { createRiverWater, riverVertexShader, riverFragmentShader, waterInRect, RIVER_TIERS, riverBudget, type RiverWater, type WaterArrays } from './riverwater';
 export { createVegetation, plantVertexShader, plantFragmentShader, type Vegetation, type VegetationStats } from './plants';
 
@@ -644,8 +687,10 @@ export interface AthreeMap {
   readonly vegetation: Vegetation | null;
   /** Rivers and lakes on screen, and what a boat on them floats on. Present when three.js was given. */
   readonly riverWater: RiverWater | null;
-  /** Call every frame with the camera in WORLD metres and the time in seconds: streams terrain, moves the sea. Returns the origin shift when it re-based. */
-  update(cameraX: number, cameraZ: number, time: number): { dx: number; dz: number } | null;
+  /** The sky: sun and moon, clouds, day and night, weather, rain, fog, lights. Present when three.js was given (and the sky was not switched off). */
+  readonly sky: Sky | null;
+  /** Call every frame with the camera in WORLD metres and the time in seconds: streams terrain, moves the sea and the sky. Returns the origin shift when it re-based. */
+  update(cameraX: number, cameraZ: number, time: number, cameraY?: number): { dx: number; dz: number } | null;
   /** Heightfield data for a physics collider over [x0, x0 + size] x [z0, z0 + size]. */
   colliderFor(x0: number, z0: number, size: number, cells: number): HeightfieldData;
   dispose(): void;
@@ -655,6 +700,10 @@ export interface AthreeMapOptions extends AthreeWorldOptions {
   quality?: AthreeQuality;
   /** Set false to leave grass and trees out (a flat racing circuit that wants every triangle for the road). Default true. */
   vegetation?: boolean;
+  /** Set false to leave the sky out (you bring your own sky and lights). Default true. */
+  sky?: boolean;
+  /** Time of day, weather, day length and lights for the sky. */
+  skyOptions?: SkyOptions;
   // import * as THREE from 'three' — omit it to use the world (height, biome, wind, spawn) without drawing.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   three?: any;
@@ -669,21 +718,33 @@ export function createAthreeMap(options: AthreeMapOptions = {}): AthreeMap {
   if (chunks && vegetation) chunks.group.add(vegetation.group);
   const riverWater = options.three ? createRiverWater(options.three, world, options.quality ?? 'mid') : null;
   if (chunks && riverWater) chunks.group.add(riverWater.group);
+  const sky = options.three && options.sky !== false ? createSky(options.three, world, options.quality ?? 'mid', options.skyOptions) : null;
+  if (chunks && sky) chunks.group.add(sky.group);
+  const hex = (c: [number, number, number]): number => (Math.round(c[0] * 255) << 16) | (Math.round(c[1] * 255) << 8) | Math.round(c[2] * 255);
   return {
     world,
     chunks,
     ocean,
     vegetation,
     riverWater,
-    update: (cameraX, cameraZ, time) => {
+    sky,
+    update: (cameraX, cameraZ, time, cameraY = 0) => {
       const shift = chunks ? chunks.update(cameraX, cameraZ) : null;
+      if (sky && chunks) {
+        sky.update(cameraX, cameraZ, time, chunks.origin, cameraY);
+        // One sun for everything: the plants, the sea and the rivers take their light from the sky.
+        const r = sky.reading();
+        vegetation?.setLight(r.sun, hex(r.colors.sun), hex(r.colors.ambient));
+        ocean?.setLight(r.sun, hex(r.colors.horizon));
+        riverWater?.setLight(r.sun, hex(r.colors.horizon));
+      }
       if (ocean && chunks) ocean.update(cameraX, cameraZ, time, chunks.origin);
       if (vegetation && chunks) vegetation.update(cameraX, cameraZ, time, chunks.origin);
       if (riverWater && chunks) riverWater.update(cameraX, cameraZ, time, chunks.origin);
       return shift;
     },
     colliderFor: (x0, z0, size, cells) => heightfieldFor(world, x0, z0, size, cells),
-    dispose: () => { chunks?.dispose(); ocean?.dispose(); vegetation?.dispose(); riverWater?.dispose(); },
+    dispose: () => { chunks?.dispose(); ocean?.dispose(); vegetation?.dispose(); riverWater?.dispose(); sky?.dispose(); },
   };
 }
 `;
@@ -700,18 +761,20 @@ const FILES: Record<string, string> = {
   [`${DIR}/plants.ts`]: PLANTS,
   [`${DIR}/rivers.ts`]: RIVERS,
   [`${DIR}/riverwater.ts`]: RIVERWATER,
+  [`${DIR}/dunes.ts`]: DUNES,
+  [`${DIR}/sky.ts`]: SKY,
   [`${DIR}/index.ts`]: INDEX,
 };
 
 /** Every module this recipe can write. */
-export const ATHREE_MAP_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'water', 'ocean', 'vegetation', 'plants', 'rivers', 'riverwater', 'index'];
+export const ATHREE_MAP_MODULES: readonly string[] = ['noise', 'config', 'world', 'collider', 'chunks', 'water', 'ocean', 'vegetation', 'plants', 'rivers', 'riverwater', 'dunes', 'sky', 'index'];
 
 export function generateAthreeMap(_include?: string[]): AthreeMapResult {
   return {
     files: { ...FILES },
     dependencies: [{ name: 'three', version: '0.180.0' }],
     instructions:
-      `Added the Athree map (${Object.keys(FILES).length} files under ${DIR}). It is the world to stand on: seeded terrain that streams in around the camera, a 100 km seamless loop or a bounded island, a real wave ocean, rivers and lakes, grass and trees that sway in the wind, shared height/biome/wind/spawn functions, and heightfield data for physics.\n` +
+      `Added the Athree map (${Object.keys(FILES).length} files under ${DIR}). It is the world to stand on: seeded terrain that streams in around the camera, a 100 km seamless loop or a bounded island, a real wave ocean, rivers and lakes, desert dunes, a sky with day and night and weather, grass and trees that sway in the wind, shared height/biome/wind/spawn functions, and heightfield data for physics.\n` +
       '```ts\n' +
       "import * as THREE from 'three';\n" +
       "import { createAthreeMap } from './game/athree';\n" +
@@ -732,11 +795,13 @@ export function generateAthreeMap(_include?: string[]): AthreeMapResult {
       "  const boat = map.ocean!.floatAt(spawn.x, spawn.z, time); // the sea surface a boat floats on: y and a unit normal\n" +
       "  const plants = map.vegetation!.stats(); // trees, tufts, triangles and draw calls drawn right now\n" +
       "  const river = map.riverWater!.floatAt(spawn.x, spawn.z); // null on dry land; on a river or lake: the water level and flow direction\n" +
+      "  map.sky!.setTimeOfDay(17.5); map.sky!.setWeather('rain'); // sun, moon, stars, clouds, fog, rain and the scene lights, all driven by the sky\n" +
+      "  const sound = map.sky!.ambience(spawn.x, spawn.z); // levels 0 to 1 (wind, rain, thunder, night, waves, birds) for YOUR audio\n" +
       '  const hf = map.colliderFor(0, 0, 256, 64); // heights for a physics heightfield collider\n' +
       '  camera.position.set(spawn.x - map.chunks!.origin.x, y + 6, spawn.z - map.chunks!.origin.z);\n' +
-      '  void shift; void wind; void hf; void boat; void plants; void river;\n' +
+      '  void shift; void wind; void hf; void boat; void plants; void river; void sound;\n' +
       '}\n' +
       '```\n' +
-      'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. Phases built so far: the world (terrain, biomes, wind, spawns, colliders), the OCEAN (Gerstner waves shaded and displaced on the GPU, shore foam, depth colour, and map.ocean.floatAt for boats) RIVERS AND LAKES (map.world.waterBodies() lists every river path with its width and water level and every lake; map.world.waterAt(x, z) tells whether a place is in a river or a lake; the terrain is carved so the bed is real, rivers always end in the sea, a lake or another river, the water level only ever goes down along a river, nothing grows or spawns in the water, and map.riverWater draws it with a flowing-water shader and gives boats floatAt) and GRASS AND TREES (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, placed by biome and slope, streamed in tiles, three levels of budget per quality tier). Trees are visual only: they have no collider yet, so a car drives through them (treesInRect(world, x0, z0, x1, z1) gives the trunk positions if you need to keep clear of them); pass vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. Rivers are visible out to a few hundred metres to about a kilometre depending on the quality tier (beyond that the terrain mesh is too coarse to hold a river bed). Pass rivers: false to createAthreeWorld or createAthreeMap for a world without them. NOT built yet — do not draw them by hand: desert dunes, sky and weather, roads and vehicles, aircraft, animals and people. Do not add your own water plane: the ocean is already in map.chunks.group. Do not scatter your own grass or trees over the map, and do not draw your own rivers or lakes: they are already placed.',
+      'Rules: positions you give THREE are WORLD metres minus `map.chunks.origin` (the floating origin re-bases past 3 km; update() returns the shift when it does — move your own objects by it). The terrain is OFF in the build unless the Athree map is switched on. Phases built so far: the world (terrain, biomes, wind, spawns, colliders), the OCEAN (Gerstner waves shaded and displaced on the GPU, shore foam, depth colour, and map.ocean.floatAt for boats) RIVERS AND LAKES (map.world.waterBodies() lists every river path with its width and water level and every lake; map.world.waterAt(x, z) tells whether a place is in a river or a lake; the terrain is carved so the bed is real, rivers always end in the sea, a lake or another river, the water level only ever goes down along a river, nothing grows or spawns in the water, and map.riverWater draws it with a flowing-water shader and gives boats floatAt) and DESERT DUNES (heightAt includes them; map.world.dunesAt and desertnessAt say where; about a third of a desert is a flat hardpan; dunes stop 20 m before water), the SKY (map.sky: sun and moon by time of day, stars, clouds carried by the shared wind, day and night, weather clear/cloudy/rain/storm/fog easing from one to the next, rain streaks, lightning, fog, and its own sun and sky lights; map.sky.applyTo(scene) puts the fog and background on your scene; pass skyOptions {hours, weather, dayLength, auto, lights}; sky: false if you bring your own) and GRASS AND TREES (map.vegetation: broadleaf, conifer and palm trees with leaves that flutter, grass that sways with the shared wind, placed by biome and slope, streamed in tiles, three levels of budget per quality tier). Trees are visual only: they have no collider yet, so a car drives through them (treesInRect(world, x0, z0, x1, z1) gives the trunk positions if you need to keep clear of them); pass vegetation: false to leave plants out; call map.vegetation.setLight(sunDirection, sunColor, ambientColor) to match your scene light. Rivers are visible out to a few hundred metres to about a kilometre depending on the quality tier (beyond that the terrain mesh is too coarse to hold a river bed). Pass rivers: false to createAthreeWorld or createAthreeMap for a world without them. The sky takes over the scene lights: do not add your own sun or hemisphere light unless you pass skyOptions {lights: false}. NOT built yet — do not draw them by hand: sand ripple textures and heat haze, roads and vehicles, aircraft, animals and people. Do not add your own water plane: the ocean is already in map.chunks.group. Do not scatter your own grass or trees over the map, and do not draw your own rivers, lakes, dunes or sky: they are already placed.',
   };
 }

@@ -251,7 +251,7 @@ describe('the carved terrain holds the water it shows', () => {
       const x = (i * 7919) % 90000; const z = (i * 104729) % 90000;
       if (w.waterAt(x, z)) continue;
       n++;
-      if (w.heightAt(x, z) === w.baseHeightAt(x, z)) same++;
+      if (Math.abs(w.heightAt(x, z) - w.baseHeightAt(x, z) - w.dunesAt(x, z)) < 1e-9) same++;
     }
     expect(n).toBeGreaterThan(300);
     expect(same / n).toBeGreaterThan(0.85);
@@ -271,7 +271,9 @@ describe('the carved terrain holds the water it shows', () => {
     for (let i = 0; i < 200; i++) {
       const x = i * 313; const z = i * 977;
       expect(dry.waterAt(x, z)).toBeNull();
-      expect(dry.heightAt(x, z)).toBe(dry.baseHeightAt(x, z));
+      // Without rivers the only difference from the bare ground is the dunes, and they only ever add height.
+      expect(dry.dunesAt(x, z)).toBeGreaterThanOrEqual(0);
+      expect(dry.heightAt(x, z)).toBeCloseTo(dry.baseHeightAt(x, z) + dry.dunesAt(x, z), 6);
     }
   });
 });

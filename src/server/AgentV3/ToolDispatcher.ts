@@ -1,3 +1,4 @@
+import { generateProceduralObject } from '../lib/proceduralObjects/recipe';
 import { splitSeedOrphans, seedOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
@@ -9627,6 +9628,29 @@ export class ToolDispatcher {
         const gsyLayers = await this.addMissingRecipeLayers(gsy.files, agent);
         this.scheduleCheckpoint('gameplay systems');
         return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}${gsyLayers}`;
+      }
+
+      case 'generate_procedural_object': {
+        // No extra inference call: the already admitted architect emits the declarative tool input.
+        if (process.env.AGENTV3_PROCEDURAL_OBJECTS !== 'on') refuse('Procedural object generation is disabled. No files were added.');
+        if (!this.actuator.createFileExclusive) refuse('Atomic file creation is unavailable on this sandbox; no files were added.');
+        const generated = generateProceduralObject(input);
+        const manifest = JSON.parse(await this.actuator.readFile(this.workspaceId, 'package.json'));
+        const three = manifest?.dependencies?.three ?? manifest?.devDependencies?.three;
+        const threeTypes = manifest?.devDependencies?.['@types/three'] ?? manifest?.dependencies?.['@types/three'];
+        if (!['0.180.0', '^0.180.0', '~0.180.0'].includes(threeTypes)) refuse('Reviewed @types/three 0.180.0 is required for generated TypeScript. No dependency or source changes attempted.');
+        if (!['0.180.0', '^0.180.0', '~0.180.0'].includes(three)) refuse('A reviewed Three.js 0.180.0 project is required. No dependency or existing source changes were attempted.');
+        for (const [path, content] of Object.entries(generated.files)) {
+          try { const prior = await this.actuator.readFile(this.workspaceId, path); if (prior !== content) refuse('Generated object conflicts with existing source at ' + path + '. Preserve it.'); }
+          catch (error) { if (!isNotFoundError(error)) throw error; }
+        }
+        const written = await this.writeRecipeFiles(generated.files, agent, true, true);
+        for (const [path, content] of Object.entries(generated.files)) {
+          if (await this.actuator.readFile(this.workspaceId, path) !== content) refuse('Generated object source was not verified at ' + path + '; do not claim installation. Earlier new files may exist.');
+        }
+        this.scheduleCheckpoint('procedural object source');
+        return JSON.stringify({stage:'source_installed', semanticVerification:'unverified', id:generated.id, files:written, triangles:generated.triangles, drawCalls:generated.drawCalls,
+          next:'Import createProceduralObjectAdapter from src/game/generatedObjects/runtime and addGeneratedObject from the generated module into the actual game lifecycle. Use ONE shared adapter with remaining scene budget, call addGeneratedObject(adapter), place relative to world origin, and dispose on teardown. Preview and test the real scene before claiming it is mounted. No physics, animation or photorealism is supplied. Preserve custom entrypoints.'});
       }
 
       case 'generate_athree_map': {

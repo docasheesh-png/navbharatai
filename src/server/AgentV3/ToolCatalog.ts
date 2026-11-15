@@ -2275,6 +2275,14 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_procedural_object',
+      description: 'Optional bounded procedural geometry recipe. The existing admitted architect API turn designs an original declarative JSON plan from the user request; object names are not a preset whitelist. Compose new shapes from semantic parts rather than substituting an unrelated catalog object. No additional provider call. If the bounded geometry vocabulary cannot express the request, disclose the unsupported capability instead of claiming a complete object. Writes trusted geometry runtime and an additive object factory, NOT an automatically mounted game. Requires reviewed Three.js 0.180.0 and AGENTV3_PROCEDURAL_OBJECTS on; otherwise unavailable. Call through run_recipe. Plan version1 fields: label and parts (phone max24/12000 triangles, desktop64/60000). Each part: id, geometry, position xyz, rotation radians xyz, color #RRGGBB, roughness0..1, metalness0..1. Geometry kinds box(size xyz), sphere(radius,segments,rings), cylinder(top,bottom,height,segments), lathe(points radius/y strictly increasing y,segments). No executable code, textures, URLs or hierarchy. No automatic collision, rigging or realism guarantee. Integrate returned factory using existing guarded edits and verify the preview.',
+      input_schema: {type:'object',required:['id','quality','plan_json'],properties:{
+        id:{type:'string',pattern:'^[a-z][a-z0-9-]{0,31}$'},quality:{type:'string',enum:['phone','desktop']},
+        plan_json:{type:'string',maxLength:32768,description:'Strict JSON geometry plan, not code. Version1, label, parts. Numeric limits validated at runtime; rejection is not success.'}
+      }},
+    },
+    {
       name: 'generate_athree_map',
       description:
         'The ATHREE MAP — a big seeded world for a 3D game that needs one (racing, open world, battle royale, flight, exploring): '
@@ -3632,6 +3640,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_i18n',
   'request_secrets',
   'generate_game_systems',
+  'generate_procedural_object',
   'generate_athree_map',
   'generate_game_shell',
   'generate_game_vfx',
@@ -3854,6 +3863,7 @@ export const RECIPE_TOOLS = [
   'generate_game_3d',
   'generate_game_controller',
   'generate_game_runtime',
+  'generate_procedural_object',
   'generate_athree_map',
   'generate_game_shell',
   'generate_game_systems',

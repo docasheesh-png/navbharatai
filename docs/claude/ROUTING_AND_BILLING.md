@@ -835,3 +835,14 @@ discount with the AI-cost floor. Total = discounted subtotal × 1.025. The measu
 VM expense stays separate internally and cannot stack into customer markup/floors.
 Zero bills stay zero; independent hosting/database subscriptions are excluded.
 See docs/billing/router-one-reconciliation.md for limitations and exact formula.
+
+## Owner revision — 2026-11-15: Pro Chain V2, per-agent (t350u) — FLAGGED, test profile only
+
+For the test profile `z@gmail.com` only (flag `PRO_CHAIN_V2`; go public with `PRO_CHAIN_V2_PUBLIC=on`),
+the Weak band uses **Surplus → Router One → Qubax → Mitrify ONLY** — no GLM/KIMI/ladder tail — and
+each agent of a build falls back on its own (per-agent Surplus drop, per-agent sticky engine). Everyone
+else keeps the 2026-11-01 Weak order above, byte-for-byte. Surplus (10×) and Router One accounting are
+unchanged. Qubax is billed at its public catalog price, Mitrify at `MITRIFY_BUILDER_RATE_*`, both with
+the normal tiered markup; a missing price or missing token usage is billed as a labelled ESTIMATE,
+never ₹0. Provider names stay admin-only (the user report shows one neutral `ENGINE_ROUTING` line).
+Full detail, env vars and risks: `docs/PRO_CHAIN_V2.md`.

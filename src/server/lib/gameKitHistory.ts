@@ -45,7 +45,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/athree/index.ts": [
     "8b2009db2ca5de148cb40686da71b407c82bccdda21bd578e574911c108f4ec3",
     "017614bbeb64e46cbb545bc46e689c8264267c6578cd3f92868f02e27739ea6c",
-    "f65600598f6222546cf5a5736280d9f64625fd96c390d736786cc23bb0b81cf5"
+    "f65600598f6222546cf5a5736280d9f64625fd96c390d736786cc23bb0b81cf5",
+    "280390096321c670946eed0fa39573b7866e2ef580bca33c008398efa056aa31"
   ],
   "src/game/athree/noise.ts": [
     "f0a7c7eaf4622707b7788540fc373e0b3d2e06687a2c5e2362aab39924371b98"
@@ -56,15 +57,24 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/athree/plants.ts": [
     "58c460d350d3fcd90a8839b56b32d523a130e0c295eef892844eea8ac2e69f14"
   ],
+  "src/game/athree/rivers.ts": [
+    "8ca7148c58ea6f6bf4cd8b514495a6015bbc60743087abe42e5511e317dbdfb4",
+    "5cdfde7611af7eb2418f657afe3f0d0cad7c4c61d0dd0cf928bf0d873689df27"
+  ],
+  "src/game/athree/riverwater.ts": [
+    "6ee30341e76bfe28e764e70685ee0145dcace6dd6565c067be6afe5f3c393eb7"
+  ],
   "src/game/athree/vegetation.ts": [
-    "71c7521d01db7f34b81a475b05071360015946eb6e5e43e3171e5471f14ac115"
+    "71c7521d01db7f34b81a475b05071360015946eb6e5e43e3171e5471f14ac115",
+    "0b421f21f864a642a7f3f62e54714e039baca33d39a10e8a00ed6c794eb0ccd8"
   ],
   "src/game/athree/water.ts": [
     "b9856b2f69d98be359bb564a8c0a119cf2e2ce5579f18839027a4c795eaea461"
   ],
   "src/game/athree/world.ts": [
     "d09b678e278ecb28e031c1f26ab476ee946fef562d0e4eb4ddd12bf8704c0805",
-    "504042a941aa174e5d7d84873165b4b28fa6d9fd1a314f35130872dedd3259d1"
+    "504042a941aa174e5d7d84873165b4b28fa6d9fd1a314f35130872dedd3259d1",
+    "5896f77d10955b281ac83725ace0d9833f81ce664545003e2f46252d761d9e8f"
   ],
   "src/game/controls.test.ts": [
     "2df3798b667fc3fe66d971a938e25286bdf3066b668eed9527c6200d4c26f03c",

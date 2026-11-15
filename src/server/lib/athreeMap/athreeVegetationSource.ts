@@ -123,6 +123,7 @@ export function treesInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
       if (px < x0 || px >= x1 || pz < z0 || pz >= z1) continue;
       const h = world.heightAt(px, pz);
       if (h < 0.8) continue;
+      if (world.waterAt(px, pz)) continue;
       const biome = world.biomeAt(px, pz);
       const grove = fieldNoise(px, pz, seed + 11, 3, 140, period);
       const conif = fieldNoise(px, pz, seed + 12, 2, 420, period);
@@ -156,6 +157,7 @@ export function treesInRect(world: AthreeWorld, x0: number, z0: number, x1: numb
 /** Grass quality at one lattice node: ground height, how thick the grass is there (0..1), and its colour (0 dark, 0.6 lush, 1 dry). */
 function grassNode(world: AthreeWorld, x: number, z: number, period: number): { h: number; d: number; t: number } {
   const h = world.heightAt(x, z);
+  if (world.waterAt(x, z)) return { h, d: 0, t: 0.5 };
   const biome = world.biomeAt(x, z);
   let base = 0;
   let tint = 0.5;

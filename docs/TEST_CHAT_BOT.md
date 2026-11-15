@@ -35,7 +35,8 @@ Sending still uses the existing guards for that adapter:
 - **Paid Free Chat rungs** with a verified rate card: one reservation against the existing shared daily and monthly budget, using that card and this page’s 1,024 output-token bound.
 - **Free rungs:** no paid reservation. Quota attestation used by user chat may be noted, but this page still calls only the selected provider when its credential is present.
 - **Kimi, Claude and Grok:** reserved from the existing in-repo rate card, then one official HTTP/SDK call with a 1,024 token bound. This page does not use the builder adapters’ larger default output caps.
-- **Surplus and Router One:** listed so the admin can see configuration, but **not dispatched**. They have no verified per-request spending ceiling on this page, and Surplus’s production transport retries. This page will not invent a cap or reuse that retry path.
+- **Router One (admin 2026-11-15):** enabled when `ROUTER_ONE_API_KEY` is set and the base URL is the official `https://api.router.one/v1` (a custom `ROUTER_ONE_BASE_URL` stays disabled here). The default model is the first priced model on the Router One path (`routerOneModels()`, skipping Router One’s own unpriced `auto` router); a typed model is used instead when given. At send time the page reads that model’s **posted public tariff** from router.one through `routerOnePublicPrices` — the same source the builder’s catalogue ranks on — and reserves the highest posted band for this page’s 1,024-token bound against the shared paid budget. Then it makes one official OpenAI-compatible call (`runOfficialOpenAiCompatTest`, no retry, no redirect). If no posted price can be read, it does not call and reports `ROUTER_ONE_PRICE_UNAVAILABLE`. As for Kimi/Claude/Grok, a dispatched hold stays reserved, because token usage is not a verified invoice.
+- **Surplus:** listed so the admin can see configuration, but **not dispatched**. It has no verified per-request spending ceiling on this page, and its production transport retries. This page will not invent a cap or reuse that retry path.
 
 Guest and signed-in daily answer quotas are unchanged. This route exposes no approval writer and does not change provider account settings. Typed content is conservatively treated as private and potentially health-related.
 
@@ -61,7 +62,7 @@ OpenRouter raw error bodies are **not** captured when this page uses the shared 
 
 ## Out of scope
 
-Image-only, voice-only and non-AI service APIs are not chat adapters and are not listed. Vertex AI has no isolated text-test adapter on this page (it uses the server Google identity). Surplus and Router One are listed but not called, for the spending-ceiling reason above.
+Image-only, voice-only and non-AI service APIs are not chat adapters and are not listed. Vertex AI has no isolated text-test adapter on this page (it uses the server Google identity). Surplus is listed but not called, for the spending-ceiling reason above.
 
 ## Offline validation
 

@@ -157,8 +157,10 @@ export function renderLegalMarkdown(markdown: string): string {
 export const PUBLIC_FOOTER_LINKS: ReadonlyArray<readonly [string, string]> = [
   ['/', 'NavBharatAI home'],
   ['/about', 'About'],
+  ['/how-it-works', 'How it works'],
   ['/pricing', 'Pricing'],
   ['/ai-app-builder', 'AI App Builder'],
+  ['/apps', 'App ideas'],
   ['/indian-ai-assistant', 'Indian AI Assistant'],
   ['/hindi-ai-assistant', 'Hindi AI Assistant'],
   ['/contact', 'Contact'],

@@ -39,6 +39,7 @@ import { generateGameController } from './GameControllerGenerator';
 import { generateGameSystems } from './GameSystemsGenerator';
 import { generateGameVfxAudio } from './GameVfxAudioGenerator';
 import { generateMelody } from './MelodyGenerator';
+import { generateGameRoyale } from './GameRoyaleGenerator';
 import { generateGameShell } from './GameShellGenerator';
 import { generateAthreeMap } from './athreeMap/AthreeMapGenerator';
 import { generateObjectForge } from './objectForge/ObjectForgeGenerator';
@@ -63,6 +64,7 @@ export const GAME_RECIPES: Readonly<Record<string, (include?: string[]) => Recip
   generate_game_vfx: generateGameVfxAudio,
   generate_melody: generateMelody,
   generate_game_shell: generateGameShell,
+  generate_game_royale: generateGameRoyale,
   generate_athree_map: generateAthreeMap,
   // The Object Forge kit (src/game/forge/forge.ts). The objects themselves are written per spec by the author_object tool; only the engine is a kit file.
   author_object: generateObjectForge,

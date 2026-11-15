@@ -82,7 +82,7 @@ describe('the emitted engine', () => {
   it('is a single self-contained file that names its technique and imports nothing', () => {
     expect(FORGE_ENGINE).toMatch(/Technique:/);
     expect(FORGE_ENGINE).not.toMatch(/^import /m);
-    expect(Object.keys(generateObjectForge().files)).toEqual([FORGE_DIR + 'forge.ts']);
+    expect(Object.keys(generateObjectForge().files).sort()).toEqual([FORGE_DIR + 'customise.ts', FORGE_DIR + 'forge.ts']);
   });
 
   it('typechecks under strict + noUnusedLocals, as a game would compile it (and so does the object file made from a spec)', () => {

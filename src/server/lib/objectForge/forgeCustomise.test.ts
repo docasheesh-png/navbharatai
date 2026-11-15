@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import ts from 'typescript';
 import { parseCustomisation, applyEdits, personSpecFor, customiseSummary, colorIn, DEFAULT_PERSON, specFromObjectFile, nodeNamesOf, type Edit } from './forgeCustomise';
-import { authorObject, objectFileSource } from './forgeRuntime';
+import { authorObject, objectFileSource, loadForge } from './forgeRuntime';
 import { FORGE_EXAMPLES } from './forgeExamples';
 import { FORGE_CUSTOMISE } from './forgeCustomiseKitSource';
 
@@ -71,15 +71,17 @@ describe('the user\'s sentence becomes edits', () => {
 
   it('a named part of THIS object: the door, the roof', () => {
     expect(E('door ka rang lal karo', house)).toEqual([{ kind: 'recolor', target: 'node:door', color: '#c62828' }]);
-    expect(E('roof neela', house)).toEqual([{ kind: 'recolor', target: 'material:roof', color: '#1e5bb8' }]);
+    // "roof" is both a part and a material; either way the roof changes.
+    const roof: any = applyEdits(house, E('roof neela', house)).spec;
+    expect(roof.materials.roof.color).toBe('#1e5bb8');
   });
 
   it('what it could not read is RETURNED, not guessed', () => {
     const r = parse('neela karo, kuch aur jaadu karo');
-    expect(r.unparsed.length).toBe(2);
-    expect(r.unparsed.join(' ')).toMatch(/which part/);
-    expect(r.unparsed.join(' ')).toMatch(/kuch aur jaadu karo/);
     expect(r.edits).toEqual([]);
+    expect(r.unparsed.join(' | ')).toMatch(/neela karo \(which part\?\)/);
+    expect(r.unparsed.join(' | ')).toMatch(/jaadu karo/); // every clause that was not read is handed back
+    expect(r.unparsed.length).toBeGreaterThanOrEqual(2);
   });
 
   it('empty and rubbish never throw', () => {
@@ -115,9 +117,19 @@ describe('the person is regenerated from parameters', () => {
     expect(f.size[0]).toBeLessThan(m.size[0]);
   });
 
-  it('longer hair is more hair: more triangles in the hair material, and it hangs lower', () => {
-    const tri = (n: 0 | 1 | 2) => authorObject(personSpecFor({ hairLength: n })).report!.perMaterial.hair;
-    expect(tri(1)).toBeGreaterThan(tri(0)); expect(tri(2)).toBeGreaterThan(tri(1));
+  it('longer hair is more hair, and it hangs lower: its lowest point drops with each length', () => {
+    const { engine } = loadForge();
+    const hair = (n: 0 | 1 | 2) => {
+      const spec = personSpecFor({ hairLength: n });
+      const meshes = (engine.worldMeshes(spec) as Array<{ material: string; position: number[] }>).filter((m) => m.material === 'hair');
+      let low = Infinity; let tris = 0;
+      for (const m of meshes) for (let i = 1; i < m.position.length; i += 3) low = Math.min(low, m.position[i]);
+      tris = authorObject(spec).report!.perMaterial.hair;
+      return { low, tris };
+    };
+    expect(hair(1).tris).toBeGreaterThan(hair(0).tris);
+    expect(hair(1).low).toBeLessThan(hair(0).low);
+    expect(hair(2).low).toBeLessThan(hair(1).low - 0.05);
   });
 
   it('a dress adds a skirt and bares the legs (the legs take the skin colour)', () => {
@@ -127,6 +139,14 @@ describe('the person is regenerated from parameters', () => {
     const r = authorObject(spec).report!;
     expect(r.perMaterial.dress).toBeGreaterThan(0);
     expect(authorObject(personSpecFor({ dress: false })).report!.perMaterial.dress).toBeUndefined();
+  });
+
+  it('a dress bares the legs: the thigh and shin take the skin material, not the trousers', () => {
+    const withDress: any = personSpecFor({ dress: true });
+    const walk = (nodes: any[], name: string): any => { for (const n of nodes) { if (n.name === name) return n; const c = n.children ? walk(n.children, name) : null; if (c) return c; } return null; };
+    expect(walk(withDress.nodes, 'thigh').material).toBe('skin'); expect(walk(withDress.nodes, 'shin').material).toBe('skin');
+    const without: any = personSpecFor({ dress: false });
+    expect(walk(without.nodes, 'thigh').material).toBe('pants');
   });
 
   it('is deterministic: the same parameters, the same spec', () => {
@@ -160,6 +180,16 @@ describe('applying edits', () => {
     expect(s.materials[door.material].color).toBe('#1e5bb8');
     expect(s.materials.wall.color).toBe((house as any).materials.wall.color);
     expect(authorObject(s).errors).toEqual([]);
+  });
+
+  it('a part that SHARES its material is split off: the tree\'s branch turns red, the trunk (same bark) does not', () => {
+    const tree: any = FORGE_EXAMPLES.tree.spec;
+    const r: any = applyEdits(tree, parse('branch ka rang lal', tree).edits);
+    const walk = (nodes: any[], name: string): any => { for (const n of nodes) { if (n.name === name) return n; const c = n.children ? walk(n.children, name) : null; if (c) return c; } return null; };
+    const branch = walk(r.spec.nodes, 'branch'); const trunk = walk(r.spec.nodes, 'trunk');
+    expect(r.spec.materials[branch.material].color).toBe('#c62828');
+    expect(trunk.material).toBe('bark'); expect(r.spec.materials.bark.color).toBe(tree.materials.bark.color);
+    expect(authorObject(r.spec).errors).toEqual([]);
   });
 
   it('a role recolours EVERY material that means it (two skin-like materials, both change)', () => {

@@ -28,11 +28,11 @@ export interface Parsed { edits: Edit[]; unparsed: string[] }
 // Words → meaning
 
 const COLORS: Array<[string[], string]> = [
-  [['red', 'lal', 'laal', 'लाल'], '#c62828'], [['blue', 'neela', 'nila', 'नीला', 'नीले'], '#1e5bb8'], [['green', 'hara', 'हरा', 'हरे'], '#2e7d32'],
-  [['yellow', 'peela', 'pila', 'पीला', 'पीले'], '#f2c230'], [['orange', 'narangi', 'नारंगी'], '#ef6c00'], [['pink', 'gulabi', 'गुलाबी'], '#ec6aa5'],
+  [['red', 'lal', 'laal', 'लाल'], '#c62828'], [['blue', 'neela', 'neele', 'neeli', 'nila', 'नीला', 'नीले', 'नीली'], '#1e5bb8'], [['green', 'hara', 'hare', 'hari', 'हरा', 'हरे', 'हरी'], '#2e7d32'],
+  [['yellow', 'peela', 'peele', 'peeli', 'pila', 'पीला', 'पीले', 'पीली'], '#f2c230'], [['orange', 'narangi', 'नारंगी'], '#ef6c00'], [['pink', 'gulabi', 'गुलाबी'], '#ec6aa5'],
   [['purple', 'violet', 'baingani', 'jamuni', 'बैंगनी', 'जामुनी'], '#7b3fa0'], [['white', 'safed', 'safaid', 'सफेद', 'सफ़ेद'], '#f4f4f4'],
-  [['black', 'kala', 'kaala', 'काला', 'काले'], '#1a1a1a'], [['brown', 'bhura', 'भूरा', 'भूरे'], '#6b4423'], [['grey', 'gray', 'dhusar', 'slate', 'सलेटी'], '#808080'],
-  [['golden', 'gold', 'sunehri', 'sunahri', 'blonde', 'सुनहरा', 'सुनहरी'], '#d4a72c'], [['maroon', 'marun'], '#800000'], [['navy'], '#14285a'],
+  [['black', 'kala', 'kaala', 'kaale', 'kaali', 'kali', 'काला', 'काले', 'काली'], '#1a1a1a'], [['brown', 'bhura', 'bhure', 'bhuri', 'भूरा', 'भूरे', 'भूरी'], '#6b4423'], [['grey', 'gray', 'dhusar', 'slate', 'सलेटी'], '#808080'],
+  [['golden', 'gold', 'sunehri', 'sunehre', 'sunahri', 'blonde', 'सुनहरा', 'सुनहरी'], '#d4a72c'], [['maroon', 'marun'], '#800000'], [['navy'], '#14285a'],
   [['cyan', 'firozi', 'turquoise', 'फिरोज़ी'], '#12a4b4'], [['beige', 'cream', 'kreem'], '#e8d9b5'], [['silver', 'chandi', 'चांदी'], '#c0c0c0'],
 ];
 const SKIN_TONES: Array<[string[], string]> = [

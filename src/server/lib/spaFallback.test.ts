@@ -55,6 +55,7 @@ describe('the exclusion list cannot silently drift again (the bug class, not jus
     'src/server/routes/health.ts',
     'src/server/lib/KnowledgeDocs.ts',
     'src/server/routes/useCases.ts',
+    'src/server/routes/howItWorks.ts',
   ];
 
   it('every non-/api GET path in the real route modules is covered by the list', () => {

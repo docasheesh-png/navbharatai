@@ -1,4 +1,5 @@
 import { PublicBuildEngineError } from '../../lib/buildEngineError';
+import { readEngineSafeDiag, tagEngineSafeDiag } from '../../lib/engineSafeDiag';
 
 /** The public completion contract reports tokens, not a settled supplier expense.
  * Dashboard wallet charges cannot be inferred from list prices or balance deltas.
@@ -6,27 +7,40 @@ import { PublicBuildEngineError } from '../../lib/buildEngineError';
  */
 export const isRouterOneAccountingProvider = (provider: string): boolean => provider.toUpperCase() === 'ENGINE_R1';
 
+/**
+ * Which gate refused (BR2388). Supplier-free, enumerated, admin-only: kept in a WeakMap via
+ * engineSafeDiag.ts — never an own property, never in the message, so the public error is unchanged.
+ */
+export type RouterOneAccountingGate =
+  | 'unspecified'
+  | 'no_scope' | 'no_turn' | 'scope_stopped' | 'aborted'
+  | 'no_key' | 'max_tokens'
+  | 'price_page' | 'price_page_size' | 'price_index' | 'price_model' | 'price_model_unlisted' | 'price_parse'
+  | 'snapshot_invalid' | 'no_store' | 'uncertain_fence' | 'duration_invalid'
+  | 'reserve_deadline' | 'reserve_duplicate' | 'reserve_fenced_unresolved' | 'key_state_invalid'
+  | 'build_skip_unresolved_lock'
+  | 'finish_state' | 'release_state' | 'receipt_mismatch' | 'rate_unavailable';
+
 export class RouterOneAccountingUnavailableError extends PublicBuildEngineError {
-  /**
-   * `reason` names WHICH of our own pre-flight fences refused the call. Non-enumerable, like `code`: the public
-   * boundary stays supplier-free (message, name, stack only) and the admin report can still say why. 🔴 Autopsy
-   * 57604006: ENGINE_R1 "failed" 45 of 45 and 28 of 28 calls with the public wording alone, so the report blamed the
-   * provider for what may have been our own accounting refusing to dispatch.
-   */
-  constructor(reason: string = 'unspecified') {
+  constructor(gate: RouterOneAccountingGate = 'unspecified') {
     super();
     Object.defineProperty(this, 'code', { value: 'ROUTER_ONE_ACCOUNTING_UNAVAILABLE', enumerable: false });
-    Object.defineProperty(this, 'reason', { value: reason, enumerable: false });
+    tagEngineSafeDiag(this, { gate });
   }
 }
 
-/** Did OUR accounting fence refuse this call (no request was dispatched on its account)? PURE. */
+/** The refusing gate of a Router One accounting error, or undefined for any other error. */
+export function routerOneAccountingGate(error: unknown): RouterOneAccountingGate | undefined {
+  if (!(error instanceof RouterOneAccountingUnavailableError)) return undefined;
+  return (readEngineSafeDiag(error)?.gate as RouterOneAccountingGate | undefined) ?? 'unspecified';
+}
+/** Did our accounting fence refuse this call before a supplier request? */
 export function isRouterOneAccountingRefusal(error: unknown): boolean {
   return error instanceof RouterOneAccountingUnavailableError;
 }
-/** The fence that refused, for the admin report. PURE. */
+/** The fence name for the admin report. The public error text stays supplier-free. */
 export function routerOneRefusalReason(error: unknown): string | undefined {
-  return error instanceof RouterOneAccountingUnavailableError ? String((error as { reason?: unknown }).reason ?? 'unspecified') : undefined;
+  return routerOneAccountingGate(error);
 }
 
 /** X-Request-ID is the documented settlement correlation key, not the completion id.

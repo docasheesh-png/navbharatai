@@ -26,6 +26,7 @@ import { modelAlwaysReasons } from './glmThinking';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isFatalProviderError, isModelUnavailableError, isProviderBalanceError, isAccountingRefusalError } from '../providerErrorClass';
+import { isRestOfBuildSkip } from '../../lib/engineSafeDiag';
 import { isBudgetEndedError, isSlowStreamAbandon, isSilentAbandon, providerNeverAnswered, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
 import type { WasteKind } from '../providerWaste';
 import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
@@ -1019,6 +1020,16 @@ export function makeMultiProviderTurnRunner(
           lastError = err;
           fellBackFrom.push(reportName);
           opts.onProviderError?.(reportName, err);
+          // BR2388: a rung that says it cannot succeed again in this build (Router One's spend lock held
+          // by an earlier unresolved call) is retired on its FIRST refusal — keyed on this rung's `name`
+          // (one key), never its family, another provider, or another build. The 28 identical refusals
+          // that build logged become one. Every other error keeps exactly the handling below.
+          if (isRestOfBuildSkip(err) && !deadForRun.has(name)) {
+            deadForRun.set(name, err instanceof Error ? err.message : String(err));
+            try {
+              opts.onProviderBenched?.(reportName, `${chain[i].modelId ? `${chain[i].modelId} ` : ''}cannot be used again in this build (an earlier call on this key is still unresolved) — this key is skipped for the rest of this build`);
+            } catch { /* telemetry only */ }
+          }
           // 🔴 A CALL WE THREW AWAY WAS STILL PAID FOR (admin 2026-09-18). A rung that starves its
           // own output budget throws, so `onTurnComplete` above is never reached and its tokens
           // landed in NO ledger and NO sink — real money to a provider, recorded nowhere, and

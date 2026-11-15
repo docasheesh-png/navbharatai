@@ -57,10 +57,12 @@ export type ForgeShape =
 export interface ForgeTrack {
   property: 'rotation' | 'position' | 'scale';
   axis: Axis;
-  /** Degrees for rotation, metres for position, a fraction for scale. */
-  amplitude: number;
-  /** Cycles per second. */
+  /** Degrees for rotation, metres for position, a fraction for scale. Not used by a spin. */
+  amplitude?: number;
+  /** Cycles per second (a spin may be negative: the other way round). */
   speed: number;
+  /** A rotation that turns for ever at speed turns per second (a wheel, a propeller, a fan) instead of swinging to and fro. */
+  spin?: boolean;
   /** In cycles (0.5 is half a cycle). */
   phase?: number;
   offset?: number;
@@ -542,7 +544,9 @@ function reflectClips(clips: Record<string, ForgeTrack[]>, axis: Axis, phase: nu
       let sign = 1;
       if (t.property === 'rotation') sign = t.axis === axis ? 1 : -1;
       else if (t.property === 'position') sign = t.axis === axis ? -1 : 1;
-      return { ...t, amplitude: t.amplitude * sign, offset: (t.offset ?? 0) * sign, phase: (t.phase ?? 0) + phase };
+      // A spin is reflected by turning the other way when the axis is one the mirror reverses; a swing, by negating its amplitude.
+      if (t.spin) return { ...t, speed: t.speed * sign, offset: (t.offset ?? 0) * sign, phase: (t.phase ?? 0) * sign + phase };
+      return { ...t, amplitude: (t.amplitude ?? 0) * sign, offset: (t.offset ?? 0) * sign, phase: (t.phase ?? 0) + phase };
     });
   }
   return out;
@@ -601,7 +605,8 @@ export function expandNodes(spec: ObjectSpec): ExpandedNode[] {
 // Animation
 
 export function trackValue(t: ForgeTrack, time: number): number {
-  return (t.offset ?? 0) + t.amplitude * Math.sin((time * t.speed + (t.phase ?? 0)) * Math.PI * 2);
+  if (t.spin) return (t.offset ?? 0) + ((t.phase ?? 0) + time * t.speed) * 360;
+  return (t.offset ?? 0) + (t.amplitude ?? 0) * Math.sin((time * t.speed + (t.phase ?? 0)) * Math.PI * 2);
 }
 
 /** The local transform of a node at a time within a clip (no clip, or a clip the node lacks, gives its base pose). */

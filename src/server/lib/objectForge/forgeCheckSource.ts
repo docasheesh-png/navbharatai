@@ -8,9 +8,9 @@
 //
 // PURE source string, loaded by forgeRuntime.ts next to the engine. Rule for editing: no backticks and no dollar-brace inside the string.
 export const FORGE_CHECK = `// Object Forge — validation, measurement and a text drawing of an object spec.
-import { expandNodes, shapeMesh, worldMeshes, type ForgeNode, type ObjectSpec, type WorldMesh } from './forge';
+import { MAX_EXPANDED_NODES, expandNodes, shapeMesh, worldMeshes, type ForgeNode, type ObjectSpec, type WorldMesh } from './forge';
 
-export const FORGE_LIMITS = { maxNodes: 400, maxTriangles: 24000, maxDepth: 8, maxDimension: 2000, maxMaterials: 32, maxClips: 12, maxTracks: 12 };
+export const FORGE_LIMITS = { maxNodes: MAX_EXPANDED_NODES, maxTriangles: 24000, maxDepth: 8, maxDimension: 2000, maxMaterials: 32, maxClips: 12, maxTracks: 12 };
 
 const SHAPES = ['box', 'sphere', 'cylinder', 'capsule', 'torus', 'lathe', 'loft', 'extrude', 'tube', 'plane'];
 const NAME = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
@@ -222,7 +222,10 @@ export function validateObjectSpec(input: unknown): Validation {
   if (errors.length > 0) return { errors, warnings, spec: null };
 
   const spec = input as unknown as ObjectSpec;
-  const expanded = expandNodes(spec);
+  let expanded: ReturnType<typeof expandNodes>;
+  try { expanded = expandNodes(spec); } catch (error) {
+    return { errors: [error instanceof Error ? error.message : 'object expansion failed'], warnings, spec: null };
+  }
   if (expanded.length > FORGE_LIMITS.maxNodes) errors.push('the object expands to ' + expanded.length + ' nodes (mirrors and repeats count); the limit is ' + FORGE_LIMITS.maxNodes);
   const seen = new Set<string>();
   for (const n of expanded) { if (seen.has(n.name)) errors.push('two nodes are called ' + n.name + ' (a mirror adds _mirror to the name and a repeat adds _1, _2: pick names that do not collide)'); seen.add(n.name); }
@@ -419,3 +422,4 @@ export function formatReport(r: ObjectReport): string {
   return lines.join(NL);
 }
 `;
+

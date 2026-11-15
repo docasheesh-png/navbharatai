@@ -27,9 +27,17 @@ const tokens = (s: string): string[] => s.toLowerCase().split(/[^\p{L}\p{N}]+/u)
 /** The kind of subject a description is about (the FIRST word in the description that names one wins: "a bike with a dog" is a bike), or 'prop'. */
 export function subjectKindOf(text: string): SubjectKind {
   const t = tokens(text);
-  for (const word of t) for (const [kind, words] of WORDS) if (words.includes(word)) return kind;
-  const joined = t.join(' ');
-  for (const [kind, words] of WORDS) if (words.some((w) => w.includes(' ') && joined.includes(w))) return kind;
+  for (let i = 0; i < t.length; i++) {
+    // Prefer the longest phrase at this position, but keep the first subject rule.
+    let match: SubjectKind | undefined; let length = 0;
+    for (const [kind, words] of WORDS) for (const word of words) {
+      const phrase = word.split(' ');
+      if (phrase.length > length && phrase.every((part, j) => t[i + j] === part)) {
+        match = kind; length = phrase.length;
+      }
+    }
+    if (match) return match;
+  }
   return 'prop';
 }
 
@@ -49,7 +57,7 @@ export function exampleForSubject(text: string): { kind: SubjectKind; id: string
 export const SUBJECT_CHECKLIST: Record<SubjectKind, string[]> = {
   rail: [
     'Real size: a carriage is about 20 m long, 3 m wide, 4 m high; a locomotive 20 m; gauge 1.5 m between the wheels. Scale down for a toy.',
-    'Build ONE carriage as a group and repeat it (repeat: { count, step }): the copies share geometry and cost nothing.',
+    'Build ONE carriage as a group and repeat it (repeat: { count, step }): the copies share geometry, but each still adds a node, transforms, draw work and rendered triangles.',
     'Wheels: cylinders turned on their side (rotation [0,0,90]), pairs mirrored on x, set along the length with repeat, each with a spin clip about x so they roll.',
     'Wheels touch the ground (y = radius). Body sits on a floor box above the wheels. Couplers join the vehicles (a small box overlapping both ends).',
     'A locomotive has a front (nose or boiler, headlamp that emits light) and a cab behind it.',
@@ -116,3 +124,4 @@ export const SUBJECT_CHECKLIST: Record<SubjectKind, string[]> = {
 export function subjectChecklist(kind: SubjectKind): string {
   return 'WHAT A ' + kind.toUpperCase() + ' MUST HAVE:\n' + SUBJECT_CHECKLIST[kind].map((l) => '- ' + l).join('\n');
 }
+

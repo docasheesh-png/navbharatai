@@ -18,7 +18,10 @@ unless all of the following are satisfied:
    It is currently **false** with no evidence. These assets are **not CC0**.
 2. `AGENTV3_R2H_CHARACTERS=on` and the authenticated owner UID appears in the
    comma-separated `AGENTV3_R2H_OWNER_ALLOWLIST`. Both are unset by default.
-3. The new 3D game's prompt explicitly requests a human/character or R2H.
+3. A separate engineering review approves an atomic no-overwrite installation
+   and actual runtime acceptance. `R2H_INTEGRATION_REVIEW` is currently **false**.
+   Changing only the rights record or environment cannot activate this scaffold.
+4. The new 3D game's prompt explicitly requests a human/character or R2H.
 
 The selected character is stable per workspace. Existing/imported/reopened
 projects are not migrated. Before any handoff the normal GLB structural and
@@ -35,7 +38,9 @@ an assurance that final gameplay has already passed.
 - This optional branch currently selects the approved human pack instead of
   external scenery acquisition for that seed; do not enable without deciding
   the combined-catalogue behavior and acceptance contract.
-- Multiple-file persistence is not transactional. Failures can leave partial
+- A source audit found the persistence adapter has no atomic create-only operation.
+  The independent engineering gate remains false until that is resolved.
+  Multiple-file persistence is not transactional. Failures can leave partial
   additive files. The normal new-project guard remains mandatory.
 - No public activation, merge, deployment or billing change is authorized by
   this draft. Env flags alone do not grant rights.
@@ -46,5 +51,7 @@ an assurance that final gameplay has already passed.
   3D browser/mobile rendering, load failure/cancel/retry/teardown and export/
   restore; owner-isolation and existing-project preservation; no double human;
   data/file race review and final integration review.
+
+Rights evidence is kept in the server review record, never interpolated into a public generated-game notice.
 
 No secret key or private identity data is recorded here.

@@ -19,10 +19,15 @@ export const R2H_PACK = Object.freeze([
  * An environment toggle alone cannot grant rights. No approval was supplied with the recovered files. */
 export const R2H_RIGHTS_REVIEW: { approved: boolean; evidence: string | null } = Object.freeze({ approved: false, evidence: null });
 
+/** Rights approval is not engineering approval. Existing persistence adapters do not
+ * guarantee an atomic, no-overwrite multi-file installation. Keep activation blocked
+ * until a separately reviewed implementation provides that guarantee and acceptance. */
+export const R2H_INTEGRATION_REVIEW: { approved: boolean; evidence: string | null } = Object.freeze({ approved: false, evidence: null });
+
 /** Existing new-3D-game seed calls this, never an edit/import/reopen migration. */
 export async function prepareR2hAssets(options: GameAssetSeedOptions): Promise<GameAssetSeedResult | null> {
   const env = options.env ?? process.env;
-  if (env.AGENTV3_R2H_CHARACTERS !== 'on' || !R2H_RIGHTS_REVIEW.approved || !R2H_RIGHTS_REVIEW.evidence
+  if (!R2H_INTEGRATION_REVIEW.approved || !R2H_INTEGRATION_REVIEW.evidence || env.AGENTV3_R2H_CHARACTERS !== 'on' || !R2H_RIGHTS_REVIEW.approved || !R2H_RIGHTS_REVIEW.evidence
       || !options.verifiedOwnerUid || !env.AGENTV3_R2H_OWNER_ALLOWLIST?.split(',').map(v => v.trim()).includes(options.verifiedOwnerUid)) return null;
   // Preserve unrelated games. An explicit human request is needed; rollout is operator-allowlisted.
   if (!/\br2h\b|round\s*2\s*hell|\bhuman\b|\bperson\b|\bcharacter\b|इंसान|मानव|कैरेक्टर/i.test(options.prompt)) return null;
@@ -54,7 +59,7 @@ export async function prepareR2hAssets(options: GameAssetSeedOptions): Promise<G
   const files = {
     'src/game/three/r2hRuntime.ts': generateGameAssetRuntime(),
     'src/game/three/r2hAssets.ts': generateAssetModelLoader({ human: { sha256: model.sha256, height: 1.8, yaw: 0, lod: false, animation: 'Idle', roles: { idle: 'Idle', walk: 'Walk' } } }).replace("from './externalAssets'", "from './r2hRuntime'"),
-    'public/game-assets/R2H_NOTICE.txt': `R2H reference-derived character ${model.id}. Rights review: ${R2H_RIGHTS_REVIEW.evidence}. Original model bytes preserved. This is not a CC0/public-domain asset. Do not imply endorsement. Only Idle/Walk clips are supplied.`,
+    'public/game-assets/R2H_NOTICE.txt': `R2H reference-derived character ${model.id}. Licensed use must follow the separately maintained owner rights record. Original model bytes preserved. This is not a CC0/public-domain asset. Do not imply endorsement. Only Idle/Walk clips are supplied.`,
   };
   options.signal.throwIfAborted();
   await persistence.saveText(options.workspaceId, files);

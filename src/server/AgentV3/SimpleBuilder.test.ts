@@ -1,6 +1,33 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt, generationTier, dependencyContext, blueprintAdvisoryBlock, cssBraceImbalance, repairStrategyForAttempt, REPAIR_LADDER, offendingFiles, exportImportConvention } from './SimpleBuilder';
 import type { OneShotFile } from './OneShotBuilder';
+
+/**
+ * Run a build on a FAKE clock (Date and every timer are driven by vitest, not by the machine). A lane budget is a wall-clock budget, so a test
+ * that asserts on it against the REAL clock is only as steady as the machine: the plan-versus-contract test left 20 ms of slack in a 400 ms
+ * share, and a 30 ms timer delay under a loaded CI run flipped it (CI 2026-11-15: "expected 0 to be greater than 0"). Here the fake clock
+ * advances 10 ms at a time until the build settles, so a plan that "takes 380 ms" takes exactly 380 ms whatever else the machine is doing.
+ */
+async function onFakeClock<T>(start: () => Promise<T>, maxMs = 120_000): Promise<T> {
+  vi.useFakeTimers();
+  try {
+    const p = start();
+    let done = false;
+    p.then(() => { done = true; }, () => { done = true; });
+    for (let t = 0; !done && t < maxMs; t += 10) await vi.advanceTimersByTimeAsync(10);
+    return await p;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+/**
+ * Block the real thread for ms: what a starved CI machine does to every real timer. Atomics.wait reads no clock at all (Date, performance and
+ * process.hrtime are ALL faked by vitest, so a loop that waits on any of them would never end under the fake clock).
+ */
+function stallTheMachine(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 describe('exportImportConvention — framework-aware (ShopSphere/Nuxt autopsy: React rules were fed to Nuxt)', () => {
   const join = (fw: string) => exportImportConvention(fw).join('\n');
@@ -145,19 +172,26 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
   it('bails FAST on a slow PLAN call (bounded plan timeout) instead of running to the overall cap (buildId 9a88c6e7)', async () => {
     // Root cause: a storming provider once ran the manifest call 247 s, blowing the 240 s overall budget so
     // the fast lane always timed out. With planTimeoutMs the plan bails quickly → the full builder recovers.
-    const start = Date.now();
-    const r = await runSimpleBuild(baseDeps({
-      shareContract: false,
-      planTimeoutMs: 40,
-      overallTimeoutMs: 5000,
-      generate: async (_s: string, user: string) => {
-        if (user.includes('Plan the file list')) { await new Promise((res) => setTimeout(res, 400)); return 'src/App.tsx :: root'; }
-        return '<<<FILE src/App.tsx>>>\nexport default function X(){return null}\n<<<ENDFILE>>>';
-      },
-    }));
-    const elapsed = Date.now() - start;
+    // On a FAKE clock (see onFakeClock): the elapsed time is exact, so the assertion is on the real property —
+    // it bailed on the 40 ms plan cap, not the 400 ms plan call and not the 5000 ms overall cap.
+    let r!: Awaited<ReturnType<typeof runSimpleBuild>>;
+    let elapsed = -1;
+    await onFakeClock(async () => {
+      const start = Date.now();
+      r = await runSimpleBuild(baseDeps({
+        shareContract: false,
+        planTimeoutMs: 40,
+        overallTimeoutMs: 5000,
+        generate: async (_s: string, user: string) => {
+          if (user.includes('Plan the file list')) { await new Promise((res) => setTimeout(res, 400)); return 'src/App.tsx :: root'; }
+          return '<<<FILE src/App.tsx>>>\nexport default function X(){return null}\n<<<ENDFILE>>>';
+        },
+      }));
+      elapsed = Date.now() - start;
+    });
     expect(r.ok).toBe(false); // the fast lane bailed → the caller hands off to the full builder
-    expect(elapsed).toBeLessThan(2500); // bailed on the ~40ms plan cap, NOT the 5000ms overall cap
+    expect(elapsed).toBeGreaterThanOrEqual(40); // it did wait for the plan cap...
+    expect(elapsed).toBeLessThan(400); // ...and bailed on it, NOT on the 400 ms plan call, still less the 5000 ms overall cap
   });
 
   it('🔴 THE EXACT REGRESSION (build 782da7b7, 2026-09-16): every per-file generation call carries the lane\'s own absolute deadline', async () => {
@@ -207,9 +241,9 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     // file-generation phase keeps its reserved majority. Under the OLD independent cap (900ms) the contract
     // would have completed comfortably and its text would appear in every per-file prompt.
     //
-    // The assertion is on that OBSERVABLE — whether the contract reached the per-file prompts — deliberately
-    // NOT on wall-clock elapsed time or on r.ok, both of which drift when the whole suite runs in parallel.
-    // A flaky test that reddens CI at random is worse than no test.
+    // The assertion is on that OBSERVABLE — whether the contract reached the per-file prompts. It runs on a FAKE clock
+    // (onFakeClock): with real timers the plan had only 20 ms of slack inside its 400 ms share, and a 30 ms timer delay on a
+    // loaded machine flipped the result (CI 2026-11-15). A flaky test that reddens CI at random is worse than no test.
     //
     // SINGLE-TIER MANIFEST (dukaan report 2026-08-12): all three files are foundation-tier, so this lane
     // runs ONE generation stage. That is not incidental — `canFinishAfterPreamble` now bails a lane whose
@@ -218,7 +252,7 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     // bail, not the contract cap. The property under test is unchanged: a slow plan must starve the
     // contract rather than compound with it.
     const filePrompts: string[] = [];
-    await runSimpleBuild(baseDeps({
+    await onFakeClock(() => runSimpleBuild(baseDeps({
       shareContract: true,
       planTimeoutMs: 900,          // the OLD independent cap — comfortably longer than the contract needs
       overallTimeoutMs: 1000,
@@ -240,9 +274,74 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
         const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
         return `<<<FILE ${path}>>>\n// ${path}\nexport default function X(){return null}\n<<<ENDFILE>>>`;
       },
-    }));
+    })));
     expect(filePrompts.length).toBeGreaterThan(0);   // the assertion below must not be vacuous
     // The contract never made it in — its cap was what the budget could afford, not its own 900ms.
+    for (const p of filePrompts) expect(p).not.toContain('CONTRACT_MARKER');
+  });
+
+  // THE WIRING OF THE SHARED CAP, which the test above never reached (found 2026-11-15 while making these tests deterministic): a contract
+  // runs only if `contractCap > 0` AND `canAffordSharedContract` agrees, and on that scenario the second says no whatever the first says, so
+  // putting the OLD independent 900 ms cap back changed nothing and no test failed. A COMPLEX lane skips the second check (a big app's contract
+  // is not optional), so the cap alone decides, and these two tests pin it from both sides.
+  const complexLane = async (planMs: number): Promise<string[]> => {
+    const filePrompts: string[] = [];
+    await onFakeClock(() => runSimpleBuild(baseDeps({
+      shareContract: true,
+      complex: true,
+      planTimeoutMs: 900,
+      overallTimeoutMs: 1000,
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) {
+          await new Promise((res) => setTimeout(res, planMs));
+          return 'src/types.ts :: shared types\nsrc/utils.ts :: helpers\nsrc/constants.ts :: shared constants';
+        }
+        if (user.includes('Design the shared contract')) {
+          await new Promise((res) => setTimeout(res, 300));
+          return 'export type CONTRACT_MARKER = 1;';
+        }
+        filePrompts.push(user);
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        return `<<<FILE ${path}>>>\n// ${path}\nexport default function X(){return null}\n<<<ENDFILE>>>`;
+      },
+    })));
+    return filePrompts;
+  };
+  it('WIRING (complex lane): a slow plan leaves the contract a sliver of the preamble share, so a 300 ms contract is cut and never reaches the files', async () => {
+    const prompts = await complexLane(380);
+    expect(prompts.length).toBeGreaterThan(0);
+    for (const p of prompts) expect(p).not.toContain('CONTRACT_MARKER');
+  });
+  it('WIRING (complex lane): a fast plan leaves room, so the same 300 ms contract completes and reaches every file prompt', async () => {
+    const prompts = await complexLane(50);
+    expect(prompts.length).toBeGreaterThan(0);
+    for (const p of prompts) expect(p).toContain('CONTRACT_MARKER');
+  });
+
+  it('the budget tests are immune to a starved machine: stalling the REAL event loop for 250 ms inside every call changes nothing (the class: a budget test that reads the wall clock)', async () => {
+    // The regression this locks: the test above used to run on real timers and left 20 ms of slack, so a loaded CI run failed it.
+    // A fake clock must not notice the machine at all, so the same scenario with the real loop blocked gives the same observable.
+    const filePrompts: string[] = [];
+    await onFakeClock(() => runSimpleBuild(baseDeps({
+      shareContract: true,
+      planTimeoutMs: 900,
+      overallTimeoutMs: 1000,
+      generate: async (_s: string, user: string) => {
+        stallTheMachine(250);
+        if (user.includes('Plan the file list')) {
+          await new Promise((res) => setTimeout(res, 380));
+          return 'src/types.ts :: shared types\nsrc/utils.ts :: helpers\nsrc/constants.ts :: shared constants';
+        }
+        if (user.includes('Design the shared contract')) {
+          await new Promise((res) => setTimeout(res, 300));
+          return 'export type CONTRACT_MARKER = 1;';
+        }
+        filePrompts.push(user);
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        return `<<<FILE ${path}>>>\n// ${path}\nexport default function X(){return null}\n<<<ENDFILE>>>`;
+      },
+    })));
+    expect(filePrompts.length).toBeGreaterThan(0);
     for (const p of filePrompts) expect(p).not.toContain('CONTRACT_MARKER');
   });
 

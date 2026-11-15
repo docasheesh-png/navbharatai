@@ -18,6 +18,7 @@ import { WATER, OCEAN } from './athreeWaterSource';
 import { VEGETATION, PLANTS } from './athreeVegetationSource';
 import { RIVERS, RIVERWATER } from './athreeRiverSource';
 import { DUNES, SKY } from './athreeSkySource';
+import { mapOptionsFor, describeMap, type MapChoice } from './athreeMapKinds';
 import { ROADS, ROADMESH } from './athreeRoadSource';
 import { VEHICLES } from './athreeVehicleSource';
 import { BUDGET } from './athreeBudgetSource';
@@ -119,6 +120,14 @@ export const PROFILE_DEFAULTS: Record<AthreeProfile, ProfileDefaults> = {
   explore: { mode: 'loop', sizeMeters: 100000 },
 };
 
+/** The map this project chose (its kind and size), spread into every createAthreeWorld call by the index. Empty is the default world. */
+export interface MapOptions {
+  mode?: AthreeWorldMode;
+  sizeMeters?: number;
+  style?: { relief?: number; seaShift?: number; aridity?: number; warmth?: number; rivers?: number };
+  roads?: boolean;
+}
+
 export interface QualityTier {
   chunkSize: number;
   /** Chunks drawn in each direction from the camera's chunk. */
@@ -205,9 +214,32 @@ export interface AthreeWorldOptions {
   sizeMeters?: number;
   /** Set false for a world without rivers and lakes. Default true. */
   rivers?: boolean;
-  /** Set false for a world without roads, a circuit, runways and village plazas. Default true. */
+  /** Set false for a world without roads, a circuit, runways and village plazas. Default true, except on a map too small to hold one. */
   roads?: boolean;
+  /** The character of the land. Every field is optional; the neutral style is the original world, exactly. */
+  style?: Partial<AthreeStyle>;
 }
+
+/** The knobs that make one map a desert, another a jungle, another an archipelago. All neutral at 0 (relief and rivers at 1). */
+export interface AthreeStyle {
+  /** Height of the mountains and of the hills, as a multiple (0.2 flat plains .. 2 alpine). */
+  relief: number;
+  /** Added to the land/sea field: positive is more land, negative is more sea (an archipelago). Range -0.6 .. 0.6. */
+  seaShift: number;
+  /** Subtracted from moisture: positive dries the land (desert, steppe), negative wets it (jungle, wetland). Range -0.4 .. 0.5. */
+  aridity: number;
+  /** Added to temperature: positive warms (savanna, jungle), negative cools (tundra). Range -0.5 .. 0.4. */
+  warmth: number;
+  /** How many rivers rise, as a multiple (0 none .. 3 many). */
+  rivers: number;
+}
+
+export const NEUTRAL_STYLE: AthreeStyle = { relief: 1, seaShift: 0, aridity: 0, warmth: 0, rivers: 1 };
+
+/** The size the terrain functions are written for (a loop of 100 km, an island 8 km across). Any other size is this world, stretched. */
+export const REFERENCE_SIZE: Record<AthreeWorldMode, number> = { loop: 100000, bounded: 8000 };
+/** Below these a map cannot hold a road network (its regions are 12.5 km and its runways 900 m), so roads default to off. */
+export const MIN_ROAD_SIZE: Record<AthreeWorldMode, number> = { loop: 20000, bounded: 6000 };
 
 export interface Spawn {
   x: number;
@@ -278,8 +310,18 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   const mode: AthreeWorldMode = options.mode ?? defaults.mode;
   const sizeMeters = options.sizeMeters ?? defaults.sizeMeters;
   const seed = (options.seed ?? 1) | 0;
-  const period = mode === 'loop' ? sizeMeters : 0;
-  const radius = sizeMeters / 2;
+  // ANY SIZE (admin 2026-11-15, "1 km se 1000 km"): the terrain, the rivers and the dunes are written for ONE size (REFERENCE_SIZE) and the
+  // world is that world stretched: a place at (x, z) metres is the reference world at (x * k, z * k). Heights stretch less than lengths
+  // (a map 10 times wider is 5.6 times taller, not 10; a map 100 times narrower is 31 times lower, which makes its slopes 3 times steeper, not 30), and water widths stretch with the plan, so a river
+  // on a continent is wide. At the reference size k = 1 and vs = 1, and every number below is exactly what it always was.
+  const style: AthreeStyle = { ...NEUTRAL_STYLE, ...(options.style ?? {}) };
+  const refSize = REFERENCE_SIZE[mode];
+  const k = refSize / sizeMeters;
+  const vs = k === 1 ? 1 : Math.pow(k, -0.75);
+  const stretched = k !== 1;
+  const period = mode === 'loop' ? refSize : 0;
+  const radius = refSize / 2;
+  const gameRadius = sizeMeters / 2;
   // A bounded island is an arena to play on, so its hills are low and snow never settles; a loop world has real mountains.
   const peak = mode === 'bounded' ? 150 : 1100;
   const mountainLine = mode === 'bounded' ? 150 : 300;
@@ -287,9 +329,10 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   const biomeScale = mode === 'bounded' ? 6 : 1;
   const snowLine = mode === 'bounded' ? 400 : 650;
 
-  function baseHeight(x: number, z: number): number {
+  /** The reference world's ground, in the reference world's own metres. */
+  function baseInner(x: number, z: number): number {
     const c = fieldNoise(x, z, seed + 1, 5, 14000, period);
-    let e = Math.max(-1.2, Math.min(1.2, (c - 0.5) * 3.4));
+    let e = Math.max(-1.2, Math.min(1.2, (c - 0.5) * 3.4 + style.seaShift));
     if (mode === 'bounded') {
       // An island: land inside, a smooth shore, open sea outside the circle.
       const r = Math.hypot(x, z) / radius;
@@ -300,22 +343,52 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     }
     if (e < 0) return e * 110;
     const ridge = 1 - Math.abs(2 * fieldNoise(x, z, seed + 2, 5, 5000, period) - 1);
-    const mountain = ridge * ridge * smoothstep(0.25, 0.7, e) * peak;
-    const detail = (fieldNoise(x, z, seed + 3, 4, 260, period) - 0.5) * 14 * Math.min(1, e * 4);
-    return e * 55 + mountain + detail;
+    const mountain = ridge * ridge * smoothstep(0.25, 0.7, e) * peak * style.relief;
+    const detail = (fieldNoise(x, z, seed + 3, 4, 260, period) - 0.5) * 14 * style.relief * Math.min(1, e * 4);
+    return e * 55 * (style.relief >= 1 ? 1 : 0.4 + 0.6 * style.relief) + mountain + detail;
+  }
+
+  /** The ground (without rivers, lakes and dunes) at a place in the game's metres. */
+  function baseHeight(x: number, z: number): number {
+    return stretched ? baseInner(x * k, z * k) * vs : baseInner(x, z);
   }
 
   const withRivers = options.rivers !== false;
   let network: ReturnType<typeof riverNetworkFor> | null = null;
   const net = (): ReturnType<typeof riverNetworkFor> => {
     if (!network) {
-      network = riverNetworkFor(seed + '|' + mode + '|' + sizeMeters, { seed, period, radius: mode === 'bounded' ? radius : 0, baseHeight, minSource: mode === 'bounded' ? 12 : 20 });
+      network = riverNetworkFor(seed + '|' + mode + '|' + refSize + '|' + style.relief + '|' + style.seaShift + '|' + style.rivers, { seed, period, radius: mode === 'bounded' ? radius : 0, baseHeight: baseInner, minSource: mode === 'bounded' ? 12 : 20, density: style.rivers });
     }
     return network;
   };
+  // The rivers are traced in the reference world; this is that network in the game's metres.
+  const rivers = {
+    carve: (x: number, z: number, h: number): number => (stretched ? net().carve(x * k, z * k, h / vs) * vs : net().carve(x, z, h)),
+    waterAt: (x: number, z: number): WaterHit | null => {
+      const w = net().waterAt(stretched ? x * k : x, stretched ? z * k : z);
+      return w && stretched ? { ...w, surface: w.surface * vs, width: w.width / k } : w;
+    },
+    edgeDistance: (x: number, z: number): number => (stretched ? net().edgeDistance(x * k, z * k) / k : net().edgeDistance(x, z)),
+    bodies: (): { rivers: River[]; lakes: Lake[] } => {
+      const n = net();
+      if (!stretched) return { rivers: n.rivers, lakes: n.lakes };
+      if (!scaledBodies) {
+        scaledBodies = {
+          rivers: n.rivers.map((r) => ({ ...r, points: r.points.map((p) => ({ x: p.x / k, z: p.z / k, surface: p.surface * vs, width: p.width / k })) })),
+          lakes: n.lakes.map((l) => ({ ...l, x: l.x / k, z: l.z / k, radius: l.radius / k, level: l.level * vs })),
+        };
+      }
+      return scaledBodies;
+    },
+  };
+  let scaledBodies: { rivers: River[]; lakes: Lake[] } | null = null;
 
   // Dunes sit on top of the carved ground, and fade out where a river or lake has cut the ground, so a bed is never buried in sand.
-  const dunes = createDunes({ seed, period, biomeScale, mountainLine });
+  const duneField = createDunes({ seed, period, biomeScale, mountainLine });
+  const dunes = {
+    desertness: (x: number, z: number, h: number): number => (stretched ? duneField.desertness(x * k, z * k, h / vs) : duneField.desertness(x, z, h)),
+    heightAt: (x: number, z: number, h: number): number => (stretched ? duneField.heightAt(x * k, z * k, h / vs) * vs : duneField.heightAt(x, z, h)),
+  };
 
   function desertnessAt(x: number, z: number): number {
     return dunes.desertness(x, z, baseHeight(x, z));
@@ -325,7 +398,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     const d = dunes.heightAt(x, z, baseHeight(x, z));
     if (d <= 0) return 0;
     // Dunes stop 20 m before any water edge (a mask on the DISTANCE, so a bed is never buried and the ground has no step).
-    return withRivers ? d * smoothstep(0, 20, net().edgeDistance(x, z)) : d;
+    return withRivers ? d * smoothstep(0, 20, rivers.edgeDistance(x, z)) : d;
   }
 
   // Cache only immutable procedural samples, never the public mutable river/lake result.
@@ -347,12 +420,12 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     sampleTerrain(x, z);
     const b = lastBase;
     const d = lastDune;
-    const c = withRivers ? net().carve(x, z, b) : b;
+    const c = withRivers ? rivers.carve(x, z, b) : b;
     if (d <= 0) return c;
-    return c + (withRivers ? d * smoothstep(0, 20, net().edgeDistance(x, z)) : d);
+    return c + (withRivers ? d * smoothstep(0, 20, rivers.edgeDistance(x, z)) : d);
   }
 
-  const withRoads = options.roads !== false;
+  const withRoads = options.roads ?? sizeMeters >= MIN_ROAD_SIZE[mode];
   const noRoads: RoadNetwork = {
     regionAt: () => ({ roads: [], sites: [], circuit: null }),
     carve: (_x, _z, h) => h,
@@ -365,8 +438,8 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   const roadsOf = (): RoadNetwork => {
     if (!withRoads) return noRoads;
     if (!roadNet) {
-      roadNet = roadNetworkFor(seed + '|' + mode + '|' + sizeMeters + '|' + profile + '|' + (withRivers ? 'r' : 'n'), {
-        seed, period, radius: mode === 'bounded' ? radius : 0, profile,
+      roadNet = roadNetworkFor(seed + '|' + mode + '|' + sizeMeters + '|' + profile + '|' + (withRivers ? 'r' : 'n') + '|' + style.relief + '|' + style.seaShift + '|' + style.rivers, {
+        seed, period: mode === 'loop' ? sizeMeters : 0, radius: mode === 'bounded' ? gameRadius : 0, profile,
         terrain: terrainNoRoads,
         water: (x, z) => { const w = waterAt(x, z); return w ? { surface: w.surface, kind: w.kind } : null; },
       });
@@ -396,11 +469,11 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   }
 
   function waterAt(x: number, z: number): WaterHit | null {
-    return withRivers ? net().waterAt(x, z) : null;
+    return withRivers ? rivers.waterAt(x, z) : null;
   }
 
   function waterBodies(): { rivers: River[]; lakes: Lake[] } {
-    return withRivers ? { rivers: net().rivers, lakes: net().lakes } : { rivers: [], lakes: [] };
+    return withRivers ? rivers.bodies() : { rivers: [], lakes: [] };
   }
 
   function normalAt(x: number, z: number): { x: number; y: number; z: number } {
@@ -412,12 +485,15 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
   }
 
   function biomeAt(x: number, z: number): Biome {
-    const h = heightAt(x, z);
+    const h = heightAt(x, z) / vs;
     if (h < -1) return 'ocean';
     if (h < 3) return 'beach';
-    const moisture = fieldNoise(x, z, seed + 4, 4, 9000 / biomeScale, period);
-    const temp = fieldNoise(x, z, seed + 5, 3, 16000 / biomeScale, period) - h / 2000;
+    const ix = stretched ? x * k : x; const iz = stretched ? z * k : z;
+    const moisture = fieldNoise(ix, iz, seed + 4, 4, 9000 / biomeScale, period) - style.aridity;
+    const temp = fieldNoise(ix, iz, seed + 5, 3, 16000 / biomeScale, period) - h / 2000 + style.warmth;
     if (h > snowLine || (temp < 0.22 && h > snowLine * 0.6)) return 'snow';
+    // A COLD map (tundra) is white at sea level too: snow needs no mountain when the whole land is frozen. A neutral or warm map never gets here.
+    if (style.warmth < 0 && temp < 0.2) return 'snow';
     if (h > mountainLine) return 'mountain';
     if (moisture < 0.4 && temp > 0.45) return 'desert';
     if (moisture > 0.55) return 'forest';
@@ -444,12 +520,20 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
         hi = Math.max(hi, hh);
       }
     }
-    return lo > 4 && hi - lo < 4;
+    return lo > minLand && hi - lo < 4;
   }
+
+  // "On land" means above the beach and below the peaks, in the game's metres: on a map stretched flat (vs < 1) the beach is lower, on a
+  // map stretched tall (vs > 1) the peaks are higher. At the reference size these are exactly the 4 m and 140 m they always were.
+  // How far from the origin a spawn may be sought on a loop map: 20 km at the reference size, in proportion on a bigger one (on a continent
+  // 1000 km across the origin can be sea, and the nearest land is a long way off), and never beyond the map itself.
+  const searchReach = Math.min(sizeMeters * 0.45, 20000 * Math.max(1, sizeMeters / 100000));
+  const minLand = 4 * Math.min(1, vs);
+  const maxLand = 140 * Math.max(1, vs);
 
   function spawnPoints(kind: SpawnKind, count = 1): Spawn[] {
     const rng = mulberry32(seed ^ kindSalt(kind));
-    const searchR = mode === 'bounded' ? radius * 0.9 : 20000;
+    const searchR = mode === 'bounded' ? gameRadius * 0.9 : searchReach;
     const out: Spawn[] = [];
     if (withRoads && (kind === 'vehicle' || kind === 'plane')) {
       const home = roadsOf().home();
@@ -488,7 +572,7 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
         if (y < -6 && heightAt(x + 30, z) < -4 && heightAt(x - 30, z) < -4) out.push({ x, y: 0, z, heading });
         continue;
       }
-      if (y < 4 || y > 140) continue;
+      if (y < minLand || y > maxLand) continue;
       if (waterAt(x, z)) continue; // never spawn in a river or a lake
       if (kind === 'plane') {
         if (stripAt(x, z)) out.push({ x, y, z, heading: 0, strip: 600 });
@@ -510,12 +594,12 @@ export function createAthreeWorld(options: AthreeWorldOptions = {}): AthreeWorld
     }
     if (kind === 'plane' && out.length < count) {
       // The random search can miss a strip that exists, and a strip is rare on an island: look at every 100 m before giving up.
-      const R = mode === 'bounded' ? radius * 0.9 : 20000;
+      const R = mode === 'bounded' ? gameRadius * 0.9 : Math.min(searchReach, 20000);
       for (let gx = -R; gx <= R && out.length < count; gx += 100) {
         for (let gz = -R; gz <= R && out.length < count; gz += 100) {
           if (out.some((p) => Math.hypot(p.x - gx, p.z - gz) < 150)) continue;
           const gy = heightAt(gx, gz);
-          if (gy < 4 || gy > 140 || !stripAt(gx, gz)) continue;
+          if (gy < minLand || gy > maxLand || !stripAt(gx, gz)) continue;
           out.push({ x: gx, y: gy, z: gz, heading: 0, strip: 600 });
         }
       }
@@ -796,7 +880,7 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     "import { createAthreeWorld, type AthreeWorld, type AthreeWorldOptions } from './world';",
     "import { createChunkManager, type ChunkManager } from './chunks';",
     "import { heightfieldFor, type HeightfieldData } from './collider';",
-    "import { type AthreeQuality } from './config';",
+    "import { MAP_OPTIONS, type AthreeQuality } from './config';",
   );
   if (has('sea')) add("import { createOcean, type Ocean } from './ocean';");
   if (has('plants')) add("import { createVegetation, type Vegetation } from './plants';");
@@ -848,8 +932,8 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
     '',
     'export function createAthreeMap(options: AthreeMapOptions = {}): AthreeMap {',
     excludedModules.some(m => m === 'roads' || m === 'rivers')
-      ? '  const world = createAthreeWorld({ ...options' + (excludedModules.includes('roads') ? ', roads: false' : '') + (excludedModules.includes('rivers') ? ', rivers: false' : '') + ' });'
-      : '  const world = createAthreeWorld(options);',
+      ? '  const world = createAthreeWorld({ ...MAP_OPTIONS, ...options' + (excludedModules.includes('roads') ? ', roads: false' : '') + (excludedModules.includes('rivers') ? ', rivers: false' : '') + ' });'
+      : '  const world = createAthreeWorld({ ...MAP_OPTIONS, ...options });',
     "  const quality = options.quality ?? 'mid';",
     // Ordinary sea-module omission retains the legacy flat plane; an explicit sea exclusion suppresses it.
     `  const chunks = options.three ? createChunkManager(options.three, world, quality, 3000, ${has('sea') || excludedModules.includes('sea') ? 'false' : 'true'}) : null;`,
@@ -893,12 +977,19 @@ export function athreeIndexSource(chosen: readonly string[], excludedModules: re
 }
 
 /** Every file of a build for the modules chosen. */
-export function athreeFiles(chosen: readonly string[], excludedModules: readonly string[] = []): Record<string, string> {
+export function mapOptionsSource(choice?: MapChoice | null): string {
+  const o = choice ? mapOptionsFor(choice) : null;
+  const body = o ? JSON.stringify({ mode: o.mode, sizeMeters: o.sizeMeters, style: o.style }, null, 2) : '{}';
+  return '\n/** ' + (choice ? describeMap(choice).replace(/\*\//g, '') : 'The default world (a 100 km loop).') + ' */\nexport const MAP_OPTIONS: MapOptions = ' + body + ';\n';
+}
+
+export function athreeFiles(chosen: readonly string[], excludedModules: readonly string[] = [], choice?: MapChoice | null): Record<string, string> {
   const files: Record<string, string> = {};
   const names = new Set<string>(ATHREE_CORE_MODULES.filter((m) => m !== 'index'));
   for (const m of chosen) for (const f of ATHREE_OPTIONAL_MODULES[m].files) names.add(f);
   if (Object.keys(ATHREE_OPTIONAL_MODULES).every((m) => chosen.includes(m))) names.add('budget');
   for (const name of ATHREE_MAP_MODULES) if (names.has(name)) files[`${DIR}/${name}.ts`] = SOURCES[name];
+  files[`${DIR}/config.ts`] = SOURCES.config + mapOptionsSource(choice);
   files[`${DIR}/index.ts`] = athreeIndexSource(chosen, excludedModules);
   return files;
 }
@@ -946,16 +1037,19 @@ function exampleSource(chosen: readonly string[]): string {
   return L.join('\n');
 }
 
-export function generateAthreeMap(include?: string[], excludedModules: readonly string[] = []): AthreeMapResult {
+export function generateAthreeMap(include?: string[], choiceOrExclusions?: MapChoice | null | readonly string[], exclusions: readonly string[] = []): AthreeMapResult {
+  const excludedModules: readonly string[] = Array.isArray(choiceOrExclusions) ? choiceOrExclusions : exclusions;
+  const choice = Array.isArray(choiceOrExclusions) ? null : choiceOrExclusions as MapChoice | null | undefined;
   const { chosen: requested, unknown } = chooseAthreeModules(include);
   const chosen = requested.filter(m => !excludedModules.includes(m));
-  const files = athreeFiles(chosen, excludedModules);
+  const files = athreeFiles(chosen, excludedModules, choice);
   const left = Object.keys(ATHREE_OPTIONAL_MODULES).filter((m) => !chosen.includes(m));
   const what = chosen.map((m) => ATHREE_OPTIONAL_MODULES[m].what);
   return {
     files,
     dependencies: [{ name: 'three', version: '0.180.0' }],
     instructions:
+      (choice ? `THE MAP CHOSEN FOR THIS GAME: ${describeMap(choice)}. Recorded in MAP_OPTIONS; retain it unless explicitly changing the map.\n` : '') +
       `Added the Athree map (${Object.keys(files).length} files under ${DIR}). It is the world to stand on: seeded terrain that streams in around the camera, a 100 km seamless loop or a bounded island, shared height/biome/wind/spawn functions, desert dunes, rivers, roads and heightfield data for physics` + (what.length ? `, and the modules you chose: ${what.join('; ')}` : '') + '.\n' +
       (left.length ? `Modules NOT in this build (ask for them, and add them, if the game needs them): ${left.map((m) => m + ' (' + ATHREE_OPTIONAL_MODULES[m].what + ')').join('; ')}.\n` : '') +
       (unknown.length ? `Unknown module names ignored: ${unknown.join(', ')}. The names are: ${Object.keys(ATHREE_OPTIONAL_MODULES).join(', ')}.\n` : '') +

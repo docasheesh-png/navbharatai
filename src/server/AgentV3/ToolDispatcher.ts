@@ -372,6 +372,7 @@ import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
 import { generateRequestedAthreeWorld } from '../lib/athreeMap/compositionRequest';
 import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from '../lib/athreeMap/athreeMapIntent';
+import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
@@ -9653,7 +9654,19 @@ export class ToolDispatcher {
         const athSelection = athreeModulesFor(this.coverageRequest ?? this.userRequest ?? '');
         const athPick = athModules ? enforceAthreeModuleExclusions(athModules, athSelection) : athSelection.modules;
         const composition = athRec.composition;
-        const ath = composition === undefined ? generateAthreeMap(athPick, athSelection.excluded) : generateRequestedAthreeWorld(composition, athPick, athSelection.excluded);
+        const athArchetype = typeof athRec.archetype === 'string' ? athRec.archetype.trim().toLowerCase() : '';
+        const athSize = typeof athRec.size_km === 'number' && Number.isFinite(athRec.size_km) ? athRec.size_km : null;
+        if (athArchetype && !(athArchetype in ARCHETYPES)) refuse(`Unknown map kind "${athArchetype}". The kinds are: ${ARCHETYPE_IDS.join(', ')}.`);
+        let athChoice = athArchetype || athSize !== null ? { archetype: (athArchetype || 'continental') as Archetype, sizeKm: athSize ?? 100 } : mapChoiceFor(this.coverageRequest ?? this.userRequest ?? '');
+        if (athChoice) athChoice = { archetype: athChoice.archetype, sizeKm: clampSizeKm(athChoice.sizeKm) };
+        if (composition !== undefined) {
+          const promptSize = sizeKmIn(this.coverageRequest ?? this.userRequest ?? '');
+          const requestedSizes = [athSize, promptSize].filter((size): size is number => size !== null);
+          const width = (composition as {widthKm?:unknown})?.widthKm;
+          if (requestedSizes.some(size => width !== size)) refuse('Requested map size and composition widthKm must agree; composition supports only 1–100 km. No map was installed.');
+          if (athChoice && typeof width === 'number') athChoice = {...athChoice,sizeKm:width};
+        }
+        const ath = composition === undefined ? generateAthreeMap(athPick, athChoice, athSelection.excluded) : generateRequestedAthreeWorld(composition, athPick, athSelection.excluded, athChoice);
         // Additive only: a read failure is not a missing file, and custom project source must not be replaced.
         if (composition !== undefined) {
           if (!this.actuator.createFileExclusive) refuse('World composition requires atomic exclusive source creation; this backend is unavailable. No source was installed.');

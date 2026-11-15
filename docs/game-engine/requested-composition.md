@@ -41,3 +41,11 @@ files. Linux O_TMPFILE/procfs support on a real E2B sandbox is unverified; unsup
 Dependency manifest changes and multi-file additions are not transactional. Browser/mobile acceptance
 remains unverified. This is bounded library composition, not arbitrary missing-object generation,
 photorealism certification, or a 1000 km world implementation. Do not merge or enable before acceptance.
+
+### Static reconciliation with map kinds/sizes (#4229)
+The native map path retains upstream archetype selection and 1–1000 km terrain sizing. This is not
+certification of density, realism or device performance at those sizes. Bounded object composition
+retains its 1–100 km contract; its width is authoritative for generated MAP_OPTIONS and an explicit
+conflicting size_km is refused before writes. Requested archetype style remains selected. Explicit
+module exclusions are applied after MAP_OPTIONS and runtime options, so roads/rivers cannot be
+re-enabled by map defaults. This combined draft has static review only; no tests run by owner instruction.

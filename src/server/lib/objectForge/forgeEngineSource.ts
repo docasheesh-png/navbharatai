@@ -92,11 +92,28 @@ export interface ForgeNode {
   children?: ForgeNode[];
 }
 
+/**
+ * HOW THE OBJECT MOVES, as DATA: one of a few fixed behaviours the kit runs (behave.ts) with parameters the spec gives. A model never writes the
+ * movement; it picks one and sets numbers. Paths are [x, z] points in metres on the ground plane; speeds are metres per second.
+ */
+export type ForgeBehaviour =
+  | { type: 'static' }
+  /** Follows a polyline (a train on its track, a guard on a beat). loop closes it; otherwise it stops at the end. */
+  | { type: 'rails'; path: Array<[number, number]>; speed: number; loop?: boolean; clip?: string; wheelRadius?: number }
+  /** Walks between random points within radius of where it starts, pausing between (an animal, a villager). Deterministic for a seed. */
+  | { type: 'wander'; radius: number; speed: number; clip?: string; idleClip?: string; pause?: [number, number]; turnRate?: number; seed?: number }
+  /** Driven by the player's input (throttle, steer): a car, a bike, a boat. Its wheels roll at the true speed when wheelRadius is given. */
+  | { type: 'drive'; maxSpeed: number; accel?: number; brake?: number; turnRate?: number; wheelRadius?: number; clip?: string }
+  /** Circles a point at an altitude, banking into the turn (a plane, a bird, a kite). */
+  | { type: 'orbit'; radius: number; altitude: number; speed: number; bank?: number; clip?: string };
+
 export interface ObjectSpec {
   id: string;
   name: string;
   materials: Record<string, ForgeMaterial>;
   nodes: ForgeNode[];
+  /** How it moves in a game (optional: no behaviour is a static object). */
+  behaviour?: ForgeBehaviour;
 }
 
 export interface MeshArrays {
@@ -688,7 +705,13 @@ export interface ForgeObject {
   nodes: Record<string, ThreeLike>;
   triangles: number;
   clips: string[];
+  /** The clip now playing, or null. */
+  readonly clip: string | null;
   play(clip: string | null, speed?: number): void;
+  /** The fastest spin in a clip, in turns a second (0 if it has none): what a wheel does at clip speed 1. */
+  spinOf(clip: string): number;
+  /** Change how fast the playing clip runs WITHOUT restarting it (a car's wheels follow its speed). 0 freezes it. */
+  setSpeed(speed: number): void;
   update(dt: number): void;
   dispose(): void;
 }
@@ -748,7 +771,14 @@ export function createObject(THREE: ThreeLike, spec: ObjectSpec): ForgeObject {
   };
   return {
     group, nodes, triangles, clips: [...clipNames],
+    get clip(): string | null { return clip; },
     play(name: string | null, speed = 1): void { clip = name; rate = speed; time = 0; apply(); },
+    setSpeed(speed: number): void { rate = Number.isFinite(speed) ? speed : 0; },
+    spinOf(name: string): number {
+      let best = 0;
+      for (const n of expanded) for (const t of n.clips[name] ?? []) if (t.spin) best = Math.max(best, Math.abs(t.speed));
+      return best;
+    },
     update(dt: number): void { if (!clip) return; time += dt * rate; apply(); },
     dispose(): void {
       for (const g of geometries.values()) g.dispose();

@@ -158,13 +158,19 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "a89b35a839d47bfddf76d72d89f25ad6085c5dc66edfb5c9cd8983898b88fcba",
     "dfc9f2a2a953a287b80e12e6c1d06f3e54a61535e12eee60a37c5834976df54b"
   ],
+  "src/game/forge/behave.ts": [
+    "ef706e2fd58806041271a2162e66d6986d1916cb4ee7fd1dbcad15d3f657081f",
+    "ce0247e99450b514cc100e68c229e6d5150ddcdf8e951a9cb387f3eb590417c8",
+    "b576ed33af5b61a7c278f1713762cdde24a5c87db9df939a63f7727442adfce3"
+  ],
   "src/game/forge/customise.ts": [
     "ebbe5dc2ce1c464e7c11c4e0b9de78ebb6bcebc3614a3093211dff8e598fab52"
   ],
   "src/game/forge/forge.ts": [
     "6bcf47428e5c609130be1210f22263317e2111f3ab3c7d3f6eed0f9d4694dd66",
     "46c099d742ae8e833386e8bee441194631533a7cd1be9776a097c4234466c721",
-    "fd5a74f6a7f1f4788ed8ad65cec18c77ffbc9449ba240498e9eaa3b34e3b8e57"
+    "fd5a74f6a7f1f4788ed8ad65cec18c77ffbc9449ba240498e9eaa3b34e3b8e57",
+    "1debda41801cf7c30dce16adebcdb82a6d10e2d1f74c285b5efe203f3d97cc32"
   ],
   "src/game/fx/audio.ts": [
     "c9b08a58e84a865c0d58353f6ebd7af60211622cb95639ac6f4c56d20ad82c7d",

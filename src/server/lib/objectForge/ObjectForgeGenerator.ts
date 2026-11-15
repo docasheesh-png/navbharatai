@@ -8,6 +8,7 @@
 import type { RecipeOutput } from '../gameRecipeLayers';
 import { FORGE_ENGINE } from './forgeEngineSource';
 import { FORGE_CUSTOMISE } from './forgeCustomiseKitSource';
+import { FORGE_BEHAVE } from './forgeBehaveSource';
 import { FORGE_DIR } from './forgePaths';
 import { FORGE_EXAMPLE_IDS } from './forgeExamples';
 
@@ -20,13 +21,14 @@ export function objectForgeEnabled(env: NodeJS.ProcessEnv = process.env): boolea
 export function generateObjectForge(): RecipeOutput & { instructions: string } {
   const fence = '```';
   return {
-    files: { [FORGE_DIR + 'forge.ts']: FORGE_ENGINE, [FORGE_DIR + 'customise.ts']: FORGE_CUSTOMISE },
+    files: { [FORGE_DIR + 'forge.ts']: FORGE_ENGINE, [FORGE_DIR + 'customise.ts']: FORGE_CUSTOMISE, [FORGE_DIR + 'behave.ts']: FORGE_BEHAVE },
     instructions: [
       'The Object Forge engine is src/game/forge/forge.ts. Objects are written to src/game/objects/<id>.ts by author_object; use one like this:',
       '',
       fence + 'ts',
       "import * as THREE from 'three';",
       "import { createObject, type ObjectSpec } from './game/forge/forge';",
+      "import { behave } from './game/forge/behave';",
       '',
       "const spec: ObjectSpec = { id: 'crate', name: 'Crate', materials: { wood: { color: '#8a5a2b' } }, nodes: [{ name: 'box', shape: { type: 'box', size: [1, 1, 1] }, material: 'wood', position: [0, 0.5, 0], clips: { spin: [{ property: 'rotation', axis: 'y', amplitude: 40, speed: 0.5 }] } }] };",
       '',
@@ -34,7 +36,8 @@ export function generateObjectForge(): RecipeOutput & { instructions: string } {
       '  const crate = createObject(THREE, spec);',
       '  scene.add(crate.group);',
       "  crate.play('spin');",
-      '  return (dt: number) => crate.update(dt);',
+      '  const mover = behave(crate, spec.behaviour); // the spec says how it moves (none: it stays put)',
+      '  return (dt: number) => mover.update(dt); // moves it AND advances its animation: one call a frame',
       '}',
       fence,
     ].join('\n'),
@@ -72,6 +75,13 @@ export const FORGE_GUIDE = [
   '  value = offset + amplitude * sin(2*pi*(speed*time + phase)). Rotation is in DEGREES, position in metres. A rotation about x swings a',
   '  hanging limb forward/back (positive = backward, the object faces +z). mirrorPhase 0.5 makes the mirrored limb swing the opposite way.',
   '',
+  'BEHAVIOUR (optional, how it MOVES in a game; you pick one and set numbers, you never write movement): "behaviour": { "type": ... }',
+  '  { "type": "rails", "path": [[x,z],...], "speed": 10, "loop": true, "clip": "run", "wheelRadius": 0.5 }   a train on its track, a guard on a beat',
+  '  { "type": "wander", "radius": 20, "speed": 1.5, "clip": "walk", "idleClip": "idle", "pause": [1,4] }    an animal, a villager (stays inside the circle)',
+  '  { "type": "drive", "maxSpeed": 35, "wheelRadius": 0.34, "clip": "drive" }   a car, a bike, a boat: the player steers it; wheels roll at the true speed',
+  '  { "type": "orbit", "radius": 60, "altitude": 40, "speed": 25, "bank": 20, "clip": "fly" }   a plane or a bird circling; and { "type": "static" }.',
+  '  Every clip a behaviour names must be a clip the object has. Paths are [x, z] in metres. Leave behaviour out for a thing that does not move.',
+  '',
   'HOW TO MAKE IT GOOD:',
   '  1. Block the biggest masses first with the right PROPORTIONS (a head is 1/7 to 1/8 of a person; a dog is longer than it is tall).',
   '  2. Make every part touch its neighbour: a limb ends INSIDE the body, not next to it. The report warns about parts that float free.',
@@ -94,6 +104,8 @@ export function forgeUsage(id: string, create: string): string {
     '  scene.add(obj.group);                       // obj.group.position / rotation.y place and turn it',
     "  obj.play('walk');                           // a clip name from the list above; obj.play(null) stops",
     '  // each frame: obj.update(dt);              // dt in seconds',
+    '  // moves: const mover = behaveX(obj, { heightAt: world.heightAt });  then each frame mover.update(dt, { throttle, steer }) (input only for a drive behaviour).',
+    '  //        mover.update ALSO advances the animation, so with a behaviour call it INSTEAD of obj.update, not as well.',
     '  // obj.nodes.head is the named node (attach a weapon to obj.nodes.hand, turn a head toward a target); obj.dispose() frees it.',
     'To change the object, call author_object again with the same id (the file is replaced). Do not hand-write geometry for it in game code.',
   ].join('\n');

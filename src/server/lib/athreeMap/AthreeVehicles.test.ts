@@ -64,7 +64,7 @@ describe('the car and the bike as shapes', () => {
   });
   it('arrays are consistent: indices in range, unit normals, nothing NaN; and the body normals point OUTWARDS (the winding is right)', () => {
     for (const parts of [A.buildCar(A.VEHICLE_TIERS.mid), A.buildBike(A.VEHICLE_TIERS.mid)]) {
-      for (const part of [parts.body, parts.glass, parts.tyre, parts.rim, parts.lights]) {
+      for (const part of [parts.body, parts.glass, parts.tyre, parts.rim, parts.lights, parts.arches]) {
         if (!part) continue;
         const n = part.position.length / 3;
         expect(part.normal.length).toBe(n * 3); expect(part.index.length).toBe(part.triangles * 3);
@@ -152,6 +152,10 @@ describe('driving physics on flat ground', () => {
     };
     expect(radius(40)).toBeGreaterThan(radius(10) * 3);
   });
+  it('the wheels turn less the faster the car goes: nearly the full lock at a walk, about a quarter of it at 40 m/s', () => {
+    const angle = (v: number): number => { const p = A.createVehiclePhysics(A.CAR_SPEC, flat(), 0, 0, 0); p.state.vx = v; p.state.speed = v; for (let i = 0; i < 120; i++) p.step(1 / 120, { throttle: v > 20 ? 0.4 : 0.05, steer: 1, brake: 0, handbrake: false }); return p.state.steerAngle; };
+    expect(angle(3)).toBeGreaterThan(0.45); expect(angle(40)).toBeLessThan(0.2); expect(angle(40)).toBeGreaterThan(0.05);
+  });
   it('the sideways acceleration never goes beyond what the surface grips: about 1.15 g on asphalt, 0.32 g on snow', () => {
     const peak = (surface: string): number => {
       const p = A.createVehiclePhysics(A.CAR_SPEC, flat(surface), 0, 0, 0);
@@ -171,7 +175,7 @@ describe('driving physics on flat ground', () => {
       for (let i = 0; i < 120 * 3; i++) { p.step(1 / 120, { throttle: 0.2, steer: 1, brake: 0, handbrake: handbrake && i > 60 }); worst = Math.max(worst, Math.abs(p.state.slip)); }
       return worst;
     };
-    expect(slide(true)).toBeGreaterThan(2); expect(slide(false)).toBeLessThan(1);
+    expect(slide(true)).toBeGreaterThan(3); expect(slide(false)).toBeLessThan(2); expect(slide(true)).toBeGreaterThan(slide(false) * 2.5);
   });
   it('reverses slowly: negative speed, never beyond a quarter of the top speed', () => {
     const p = drive(A.CAR_SPEC, flat(), 12, { throttle: -1, steer: 0, brake: 0, handbrake: false });
@@ -351,7 +355,7 @@ describe('the vehicle on screen (real three.js)', () => {
     const sp = w.spawnPoints('vehicle', 1)[0];
     expect(v.state.x).toBeCloseTo(sp.x, 6); expect(v.state.z).toBeCloseTo(sp.z, 6); expect(v.state.y).toBeCloseTo(w.drivableHeightAt(sp.x, sp.z), 6);
     let meshes = 0; v.group.traverse((o: any) => { if (o.isMesh) meshes++; });
-    expect(meshes).toBe(3 + 4 * 2);
+    expect(meshes).toBe(4 + 4 * 2); // body, glass, lights, arches, and a tyre and a rim for each of four wheels
     expect(v.group.children).toHaveLength(1 + 4);
     const b = make('bike').v;
     let bm = 0; b.group.traverse((o: any) => { if (o.isMesh) bm++; });
@@ -390,7 +394,7 @@ describe('the vehicle on screen (real three.js)', () => {
     for (const f of front) expect(f.rotation.y).toBeCloseTo(-v.state.steerAngle, 6);
     for (const r of rear) expect(r.rotation.y).toBe(0);
     expect(Math.abs(v.state.steerAngle)).toBeGreaterThan(0.05);
-    const lights = v.group.children[0].children.find((c: any) => c.material && c.material.emissive);
+    const lights = v.group.children[0].children[2]; // body, glass, then the lights
     expect(lights.material.emissive.getHex()).toBe(0);
     v.update(1 / 60, { throttle: 0, steer: 0, brake: 1, handbrake: false }, origin);
     expect(lights.material.emissive.getHex()).toBe(0xff1010);
@@ -408,10 +412,14 @@ describe('the vehicle on screen (real three.js)', () => {
     v.dispose();
     expect(n).toBeGreaterThanOrEqual(12);
   });
-  it('a long frame is stepped at a fixed rate, so the driving does not depend on the frame rate on screen', () => {
+  it('a long frame is stepped at a fixed rate, so five 200 ms hitches drive the same distance as sixty 60 Hz frames', () => {
     const a = make().v; const b = make().v;
-    for (let i = 0; i < 60; i++) a.update(1 / 60, { throttle: 1, steer: 0, brake: 0, handbrake: false }, origin);
-    for (let i = 0; i < 30; i++) b.update(1 / 30, { throttle: 1, steer: 0, brake: 0, handbrake: false }, origin);
-    expect(Math.abs(a.state.x - b.state.x)).toBeLessThan(0.5);
+    const gas = { throttle: 1, steer: 0, brake: 0, handbrake: false };
+    for (let i = 0; i < 60; i++) a.update(1 / 60, gas, origin);
+    for (let i = 0; i < 5; i++) b.update(0.2, gas, origin);
+    const da = Math.hypot(a.state.x - make().v.state.x, a.state.z - make().v.state.z);
+    const db = Math.hypot(b.state.x - make().v.state.x, b.state.z - make().v.state.z);
+    expect(da).toBeGreaterThan(1);
+    expect(Math.abs(da - db) / da).toBeLessThan(0.05);
   });
 });

@@ -52,7 +52,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "f65600598f6222546cf5a5736280d9f64625fd96c390d736786cc23bb0b81cf5",
     "280390096321c670946eed0fa39573b7866e2ef580bca33c008398efa056aa31",
     "4726a0bef95872bdbdb40397b6f1a75d0d0df01b320557c4006714446e23aa10",
-    "93d2a2400fa8a3d389f9877b8c4e70354c03ad86d91c466ec1d8236041689213"
+    "93d2a2400fa8a3d389f9877b8c4e70354c03ad86d91c466ec1d8236041689213",
+    "0736c95fca90633bc7adca0c0d9235934240b367c82689fc1e83162bb7c0aa96"
   ],
   "src/game/athree/noise.ts": [
     "f0a7c7eaf4622707b7788540fc373e0b3d2e06687a2c5e2362aab39924371b98"
@@ -88,6 +89,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "0b421f21f864a642a7f3f62e54714e039baca33d39a10e8a00ed6c794eb0ccd8",
     "b558e1127300beb2e42e0012e804e393b820e0a5fc0b0eece9c3780be97a3abf"
   ],
+  "src/game/athree/vehicles.ts": [
+    "cacc3ff86106db83b4c1c4058b4d7401a39cdfdd748b31fbb24873dccafbaa91"
+  ],
   "src/game/athree/water.ts": [
     "b9856b2f69d98be359bb564a8c0a119cf2e2ce5579f18839027a4c795eaea461"
   ],
@@ -96,7 +100,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "504042a941aa174e5d7d84873165b4b28fa6d9fd1a314f35130872dedd3259d1",
     "5896f77d10955b281ac83725ace0d9833f81ce664545003e2f46252d761d9e8f",
     "80d6d9b2f799fb5001f7f3e0128d39519a8f8bea40b6a421872547032d0b7373",
-    "0a39ea816cd1e84a2f2b41fc9b0c8eca1d7d5bf8a35a4c2af125c74c26eb3bcf"
+    "0a39ea816cd1e84a2f2b41fc9b0c8eca1d7d5bf8a35a4c2af125c74c26eb3bcf",
+    "ae21089f0f5f187fbb11a2d69a7bad4c4cdb62f9038e45ef50ca6e25163159dc"
   ],
   "src/game/controls.test.ts": [
     "2df3798b667fc3fe66d971a938e25286bdf3066b668eed9527c6200d4c26f03c",

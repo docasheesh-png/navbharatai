@@ -84,7 +84,9 @@ class Part {
       for (const o of [a, b, c]) { n[o] += nx; n[o + 1] += ny; n[o + 2] += nz; }
     }
     for (let i = 0; i < n.length; i += 3) {
-      const l = Math.hypot(n[i], n[i + 1], n[i + 2]) || 1;
+      const l = Math.hypot(n[i], n[i + 1], n[i + 2]);
+      // A vertex no triangle uses has no normal: point it up rather than leave a zero vector in the array.
+      if (l < 1e-12) { n[i + 1] = 1; continue; }
       n[i] /= l; n[i + 1] /= l; n[i + 2] /= l;
     }
     return { position: Float32Array.from(this.pos), normal: n, index: Uint16Array.from(this.idx), triangles: this.idx.length / 3 };
@@ -208,6 +210,8 @@ export interface VehicleParts {
   tyre: PartArrays;
   rim: PartArrays;
   lights: PartArrays;
+  /** The dark wheel arches: a disc a little larger than each tyre on the body side, so a wheel sits IN the body and not on it (cars only). */
+  arches: PartArrays | null;
 }
 
 /** The car's meshes at a detail tier: unit scale, metres, +x forward, +y up, +z to the right, wheels on y = 0. */
@@ -231,7 +235,14 @@ export function buildCar(tier: VehicleTier): VehicleParts {
     box(lights, L / 2 - 0.12, 0.62, side * 0.62, 0.12, 0.08, 0.34);
     box(lights, -L / 2 + 0.06, 0.86, side * 0.66, 0.1, 0.08, 0.36);
   }
-  return { kind: 'car', body: body.finish(), glass: glass.finish(), tyre: tyre.finish(), rim: rimP.finish(), lights: lights.finish() };
+  const arches = new Part();
+  for (const x of [CAR.frontAxle, CAR.rearAxle]) for (const side of [-1, 1]) {
+    const z = side * 0.945; const seg = tier.tyre; const ring: number[] = [];
+    for (let k = 0; k < seg; k++) { const a = (k / seg) * Math.PI * 2; ring.push(arches.vert(x + Math.cos(a) * 0.44, CAR.wheelRadius + Math.sin(a) * 0.44, z)); }
+    const centre = arches.vert(x, CAR.wheelRadius, z);
+    for (let k = 0; k < seg; k++) arches.tri(centre, ring[k], ring[(k + 1) % seg]);
+  }
+  return { kind: 'car', body: body.finish(), glass: glass.finish(), tyre: tyre.finish(), rim: rimP.finish(), lights: lights.finish(), arches: arches.finish() };
 }
 
 /** The bike's meshes: a lofted tank and tail, tubes for the frame, fork and bars, an engine block, two wheels. */
@@ -251,11 +262,11 @@ export function buildBike(tier: VehicleTier): VehicleParts {
   }
   box(lights, 0.5, 0.92, 0, 0.1, 0.1, 0.16);
   box(lights, -0.58, 0.84, 0, 0.08, 0.06, 0.16);
-  return { kind: 'bike', body: body.finish(), glass: null, tyre: tyre.finish(), rim: rimP.finish(), lights: lights.finish() };
+  return { kind: 'bike', body: body.finish(), glass: null, tyre: tyre.finish(), rim: rimP.finish(), lights: lights.finish(), arches: null };
 }
 
 export function vehicleTriangles(parts: VehicleParts): number {
-  return parts.body.triangles + (parts.glass ? parts.glass.triangles : 0) + parts.tyre.triangles + parts.rim.triangles + parts.lights.triangles;
+  return parts.body.triangles + (parts.glass ? parts.glass.triangles : 0) + parts.tyre.triangles + parts.rim.triangles + parts.lights.triangles + (parts.arches ? parts.arches.triangles : 0);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -333,6 +344,8 @@ export interface VehiclePhysics {
 export function createVehiclePhysics(spec: VehicleSpec, env: VehicleEnvironment, x = 0, z = 0, yaw = 0): VehiclePhysics {
   const state: VehicleState = { x, y: env.groundAt(x, z) + spec.rideHeight, z, yaw, pitch: 0, roll: 0, vx: 0, vy: 0, vz: 0, speed: 0, slip: 0, steerAngle: 0, wheelSpin: 0, onGround: true, inWater: false, surface: env.surfaceAt(x, z), odometer: 0 };
 
+  let prevTarget: number | null = null;
+
   function contacts(): Array<{ x: number; z: number; h: number }> {
     const c = Math.cos(state.yaw); const s = Math.sin(state.yaw);
     // The body's right (+z of the car) is the x-z direction (-sin, cos) rotated... a vector (a, b) in the body maps to (a c - b s, a s + b c) in the world.
@@ -356,12 +369,12 @@ export function createVehiclePhysics(spec: VehicleSpec, env: VehicleEnvironment,
     const traction = state.onGround ? 1 : 0;
     // Engine: strong from rest, fading to nothing at the top speed; reverse is slow.
     let a = 0;
-    if (throttle > 0) a = throttle * spec.accel * Math.max(0, 1 - Math.pow(Math.max(0, vf) / spec.topSpeed, 2)) * Math.min(1, 0.35 + mu * 0.65);
+    if (throttle > 0) a = throttle * spec.accel * Math.max(0, 1 - Math.pow(Math.max(0, vf) / spec.topSpeed, 3)) * Math.min(1, 0.35 + mu * 0.65);
     else if (throttle < 0) a = vf > 1 ? throttle * spec.brake * mu * 0.9 : throttle * spec.accel * 0.35 * Math.max(0, 1 - Math.pow(-vf / (spec.topSpeed * 0.25), 2));
     a *= traction;
     // Brakes bite as hard as the surface lets them.
     const brakeA = Math.max(0, Math.min(1, input.brake)) * spec.brake * mu * traction + (input.handbrake ? spec.brake * 0.5 * mu * traction : 0);
-    const drag = 0.0016 * vf * Math.abs(vf) + 0.12 * vf + (wet ? 3.5 * vf : 0);
+    const drag = 0.0004 * vf * Math.abs(vf) + 0.02 * vf + (wet ? 3.5 * vf : 0);
     let dv = (a - drag) * h;
     if (brakeA > 0) { const b = brakeA * h; dv += vf > 0 ? -Math.min(b, vf) : Math.min(b, -vf); }
     // Gravity along the slope the car stands on.
@@ -374,11 +387,16 @@ export function createVehiclePhysics(spec: VehicleSpec, env: VehicleEnvironment,
     let yawRate = (vf * Math.tan(state.steerAngle)) / spec.wheelbase;
     const limit = (mu * GRAVITY) / Math.max(Math.abs(vf), 1);
     yawRate = Math.max(-limit, Math.min(limit, yawRate)) * traction;
+    // The speed changes along the OLD heading; then the car turns while its velocity (in the world) carries on, so a sideways part appears...
+    state.vx = vf * c - vl * s;
+    state.vz = vf * s + vl * c;
     state.yaw += yawRate * h;
-    // Sideways grip: the sideways speed is bled off, slowly on a slippery surface and with the handbrake on (a slide).
+    const c2 = Math.cos(state.yaw); const s2 = Math.sin(state.yaw);
+    vf = state.vx * c2 + state.vz * s2;
+    vl = -state.vx * s2 + state.vz * c2;
+    // ...which the tyres bleed off: quickly on good grip, slowly on a slippery surface, and hardly at all with the handbrake on (a slide).
     const gripRate = spec.grip * mu * (input.handbrake ? 0.12 : 1) * traction;
     vl *= Math.exp(-gripRate * h);
-    const c2 = Math.cos(state.yaw); const s2 = Math.sin(state.yaw);
     state.vx = vf * c2 - vl * s2;
     state.vz = vf * s2 + vl * c2;
     state.x += state.vx * h;
@@ -408,8 +426,11 @@ export function createVehiclePhysics(spec: VehicleSpec, env: VehicleEnvironment,
     state.pitch += (pitchT - state.pitch) * k;
     state.roll += (rollT - state.roll) * k;
     // Vertical: spring and damper while the wheels touch, gravity in the air.
+    // The damper works on the speed RELATIVE to the ground (a car climbing a steady slope is not fighting its own damper).
+    const groundRate = prevTarget === null ? 0 : (target0 - prevTarget) / h;
+    prevTarget = target0;
     if (state.y <= target0 + 0.06) {
-      const spring = 180 * (target0 - state.y) - 26 * state.vy;
+      const spring = 180 * (target0 - state.y) - 26 * (state.vy - Math.max(-8, Math.min(8, groundRate)));
       state.vy += spring * h;
       if (state.y < target0 - 0.5) state.y = target0 - 0.5;
       state.onGround = true;
@@ -425,7 +446,7 @@ export function createVehiclePhysics(spec: VehicleSpec, env: VehicleEnvironment,
     spec, state, step,
     reset(nx: number, nz: number, nyaw: number): void {
       state.x = nx; state.z = nz; state.yaw = nyaw; state.y = env.groundAt(nx, nz) + spec.rideHeight;
-      state.vx = 0; state.vy = 0; state.vz = 0; state.speed = 0; state.slip = 0; state.pitch = 0; state.roll = 0; state.steerAngle = 0; state.onGround = true; state.odometer = 0;
+      state.vx = 0; state.vy = 0; state.vz = 0; state.speed = 0; state.slip = 0; state.pitch = 0; state.roll = 0; state.steerAngle = 0; state.onGround = true; state.odometer = 0; prevTarget = null;
     },
   };
 }
@@ -496,6 +517,7 @@ export function createVehicle(THREE: ThreeLike, world: AthreeWorld, options: Veh
   add(body, parts.body, paint);
   if (parts.glass) add(body, parts.glass, glass);
   add(body, parts.lights, lightMat);
+  if (parts.arches) add(body, parts.arches, rubber);
   group.add(body);
   // Each wheel is its own group at its axle so it can spin and (at the front) steer; the tyre and rim arrays hold all wheels, so
   // they are split here by the axle each vertex sits at.

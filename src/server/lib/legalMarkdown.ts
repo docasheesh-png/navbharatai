@@ -159,6 +159,7 @@ export const PUBLIC_FOOTER_LINKS: ReadonlyArray<readonly [string, string]> = [
   ['/about', 'About'],
   ['/pricing', 'Pricing'],
   ['/ai-app-builder', 'AI App Builder'],
+  ['/apps', 'App ideas'],
   ['/indian-ai-assistant', 'Indian AI Assistant'],
   ['/hindi-ai-assistant', 'Hindi AI Assistant'],
   ['/contact', 'Contact'],

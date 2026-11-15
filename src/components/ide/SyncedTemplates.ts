@@ -245,9 +245,9 @@ export default function App() {
 `
     }
   },
-  'mitrify': {
-    id: 'mitrify',
-    name: 'Mitrify Music Studio',
+  'stream-studio': {
+    id: 'stream-studio',
+    name: 'Stream Studio',
     description: 'A dark-themed premium music player UI with dynamic playlist control and media bar play slider.',
     files: {
       'src/App.tsx': `import React, { useState, useEffect } from 'react';
@@ -309,7 +309,7 @@ export default function App() {
       <header className="border-b border-white/5 bg-black/40 px-6 py-4 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <Disc className="w-5 h-5 text-indigo-500 animate-spin" />
-          <span className="font-sans font-black tracking-widest text-[#efeff1] text-sm uppercase">Mitrify Stream Studio</span>
+          <span className="font-sans font-black tracking-widest text-[#efeff1] text-sm uppercase">Stream Studio</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="px-2.5 py-1 rounded bg-indigo-500/15 border border-indigo-500/25 text-[9px] font-black uppercase text-indigo-400">
@@ -653,7 +653,7 @@ export default function App() {
 
   const projects = [
     { name: "Saffron Craft Gateway", type: "Full stack SaaS", tag: "React, Tailwind, Node.js", desc: "A premium fair-trade merchant loop for organic Kashmiri farmers." },
-    { name: "Mitrify Audio Studio", type: "Visual Widget UI", tag: "Typescript, Audio API, Glass", desc: "Slick immersive retro interface looping local audio loop feeds." },
+    { name: "Stream Audio Studio", type: "Visual Widget UI", tag: "Typescript, Audio API, Glass", desc: "Slick immersive retro interface looping local audio loop feeds." },
     { name: "Cluster Analytics Pod", type: "Fintech Dashboard", tag: "D3, SVG, Docker Core", desc: "Admin portal graphing performance counters directly." }
   ];
 

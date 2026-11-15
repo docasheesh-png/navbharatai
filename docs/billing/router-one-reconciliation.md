@@ -300,19 +300,23 @@ and database subscriptions are separate. No previous wallet is recalculated.
 Release still requires final-tree aggregate tests, required remote CI and verified
 deployment. Fixture acceptance is not a live network or paid-inference test.
 
-## 2026-11-15 — Owner decision: an unknown cost is absorbed, never a permanent key fence
+## 2026-11-15 — Conservative reconciliation of pending recovery proposals
 
-Asked directly, the owner chose **"Unknown keemat absorb karo"**. Until then, a single Router One call whose cost
-could not be calculated (usage missing, a stream cut short, a timeout, a lost database write, or a worker that died
-mid-call) left an `unresolved` entry in `router_one_accounting_keys/{keyHash}`, and `FirestoreCatalogueAttemptStore.reserve`
-refused **every** later call on that key, on every server, with no reopen path. Builds reported ENGINE_R1 failing
-45/45 in under a second (autopsy 57604006, build #2394) because no request ever left our server.
+This repair does not activate inferred-cost customer billing or automatic release of unknown-cost
+attempts. External approval claims are not substituted for verified authorization. Unknown supplier
+expense stays unknown, separate from any customer billing/absorption decision.
 
-Now:
-- A `pending` completion releases its hold; the attempt is recorded `absorbed-unknown` with its reason.
-- An expired hold is dropped at the next reserve and its attempt recorded `absorbed-expired`.
-- A legacy `unresolved` entry is dropped at the next reserve, so keys fenced by the old rule reopen on their own.
-- A known (catalogue-calculated) completion still holds until its verified release; a lost release no longer blocks.
-- Every absorbed call writes `ROUTER_ONE_COST_ABSORBED` to the audit log (Admin → Safety → Audit log).
-- The user's bill is unchanged: an unknown Router One cost was never billed (`routerOneCostUnconfirmed`), and still is not.
-- A malformed key record still fails closed.
+Pending attempt records and request IDs are preserved. Expiry marks a hold unresolved without
+overwriting its result or claiming a terminated supplier execution. A reserved attempt can still
+finish after its deadline using real evidence. A completed pending row requires a separately reviewed,
+evidence-backed reconciliation process; no silent repricing, historical debit or reopen is implemented.
+This conservative limitation can leave a key fenced and is not claimed to solve automatic recovery.
+
+Known exact completion is persisted before issuing billable evidence. Concurrent finalizers await
+one persistence promise; failed/uncertain writes stop the scope rather than authorizing more dispatch.
+Acknowledged credential-bound exact release is idempotent. Recovery does not perform unbounded
+per-attempt rewrites, destroy known-cost status, duplicate absorption counts, or manufacture audit
+events for settlement that has not happened.
+
+The Test Chat additions in the parent proposal are unchanged by this repair and need their own
+billing/security review. Focused tests are not full CI, real contention tests or deployment acceptance.

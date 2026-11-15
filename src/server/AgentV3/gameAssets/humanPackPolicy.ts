@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
 import { validateGlb } from './assetPolicy';
 
-// Not a general extension allowlist. Only these recovered, immutable originals qualify.
+// Not a general extension allowlist. Only pinned supplied originals and reviewed clothing-only derivatives qualify.
 const ORIGINAL_HASHES = new Set([
+  'd67c8ab51a1d482f1ac1f341e0911baed618015bb9f327786bd2be8d03b02e28',
+  'cb61d382726a4fe9506a7ea66e262addc321b79939eb9659b6fc2a61a6155c82',
+  'eb6b890f17af196b4bb04d3d5e8a29cb446bb22d189dafa5da9b1f21689fd357',
   '7dbe7b32310b89398a8e21ebceb9723986f3109e8c358583647303f038548180',
   '72896823eef0c702d4479e02fc9bc2306ddbd4cd4310200422aa58710a42c9c3',
   '86233496f6f4a87cc7e519877002bbf9b33faa1e0295721fdf8089b6d0b86cd1',

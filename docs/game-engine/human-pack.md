@@ -85,3 +85,25 @@ Independent review also found the runtime Docker image does not copy
 `private-game-assets/`; production packaging is therefore an additional activation
 blocker. The directory name is not a confidentiality control: repository readers
 can access committed models. No claim of private GitHub asset storage is made.
+
+## Owner-authorized optimization copies
+
+The owner clarified these supplied characters differ substantially from real people.
+Names alone are not evidence of exact likeness or a legal conclusion. Existing rights
+review gates remain unchanged pending an appropriate recorded review.
+
+Separate copies under `private-game-assets/humans/optimized/` simplify only Textile
+and Leather triangle indices, using meshoptimizer 0.22.0 (MIT), locked boundaries
+and relative-error ceiling 0.0005. The original files are untouched. All face, skin,
+hair, texture image, skeleton, weight and animation buffer data remains byte-identical.
+Triangles: Cap 62,424 → 57,328; Leather 60,650 → 56,496; Denim 59,568 → 55,528.
+File savings are modest, roughly 24–31 KB each, not a large compression claim.
+The runtime still selects originals and all activation gates remain false; these
+copies are review artifacts, not an activated substitution. Their structural budget
+checks do not establish visual/animation/mobile acceptance.
+
+Reproduce from repository root with Node and a separately installed pinned
+`meshoptimizer@0.22.0` tool package:
+`node scripts/optimizeRecoveredHumans.mjs /path/to/meshoptimizer/meshopt_simplifier.module.js`
+No application runtime dependency is added. The generated report records hashes and
+measured geometry error; browser/mobile comparison remains required before selection.

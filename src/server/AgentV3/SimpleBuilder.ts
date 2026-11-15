@@ -2949,6 +2949,26 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   const beforeVerifyYield = steeringHandoff();
   if (beforeVerifyYield) return beforeVerifyYield;
 
+  // BR1981: a plan with no App.tsx / app/page (this report: HTML + JS + data files) can have
+  // every write refused and still leave unwrittenEntries empty, so the lane logged
+  // "Built your app — 0 file(s)" and returned ok:true (SIMPLE_BUILD_SUCCESS). classifyBuildOutcome
+  // already calls 0 files BUILD_FAILED; the boolean must agree. Do not run verify or preview
+  // against an empty workspace, and do not say we are "shipping the files unverified".
+  if (files.length === 0) {
+    return {
+      ok: false,
+      filesWritten: 0,
+      reason: 'nothing_landed',
+      summary: 'No files could be saved to the workspace — the app was not built.',
+      outcome: classifyBuildOutcome({ filesWritten: 0, typecheckOk: null }),
+      plannedFiles,
+      plannedPaths,
+      phases: phasesNow(),
+      ...(contractRenames.length ? { contractRenames } : {}),
+      ...(contractEnumsAsConst.length ? { contractEnumsAsConst } : {}),
+    };
+  }
+
   deps.log?.(`Built your app — ${files.length} file(s), each generated individually.`);
 
   // A — VERIFY GATE + bounded AUTO-REPAIR. "Preview is EARNED": only claim success when the app

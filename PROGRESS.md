@@ -101506,3 +101506,11 @@ Owner t311u sequential audit, BR1980 only (boundary 1951..2105 frozen). Branched
 - Q-1068's "repeat after hand-back" trigger fired on this Weak/Surplus report (1 of 2 plan-only turns). A generation-behavior change is not shipped: Q-2375 still needs a full transcript, and a forced productive write would be a new problem (t311u).
 
 Queue: this commit closes no row and opens no row. Q-2621, Q-1068, Q-2375 and Q-2414 gain this report's evidence and stay open. Q-2649..Q-2654, Q-2662..Q-2672 and earlier blockers stay open.
+
+## 2026-11-16 — BR1981 autopsy (attachment-specified study/quiz app, failed, free / not charged): do not call a zero-file fast-lane pass a success
+
+Owner t311u sequential audit, BR1981 only (boundary 1951..2105 frozen). Branched from origin/main `af1379506` (BR1980 ledger privacy cleanup). Under SANDBOX_UNAVAILABLE (E2B cap of 20) the workspace listed 0 paths, yet the text-only fast lane still planned and generated for about 3 minutes (14 Surplus calls). Progress ticks claimed files were built; every write was then refused ("could not read the existing file safely — not overwriting it"); the lane logged "Built your app — 0 file(s)" and recorded SIMPLE_BUILD_SUCCESS. A type-check note said the files were being shipped unverified. The free-tier path invited credits for a stronger engine. The sandbox never recovered. 0 files landed; the user was not charged. Ledger: [autopsy](docs/build-report-autopsy-BR1981.md), [evidence](docs/build-report-autopsy-BR1981-evidence.json).
+- D1–D4 are already closed on main (BR1952 #4124 fast-lane skip, BR1961 F2 #4146 goodbye, BR1952 upsell gate, "Generated … — not saved yet"). `tests/br1981Autopsy.test.ts` locks each against this report's shape.
+- D5 is new: a plan with no App.tsx / app/page can have every write refused and still return ok:true, because `unwrittenEntries` only watches those roots. `runSimpleBuild` now returns ok:false (`nothing_landed`) when no file landed, before the success log, verify, or preview. A plan that did land files is unchanged. The write-refusal guard itself is not loosened (t311u).
+
+Queue: this commit closes no row and opens no row. Q-2621 gains this report's evidence and stays open. Q-2649..Q-2654, Q-2662..Q-2672 and earlier blockers stay open.

@@ -41,6 +41,16 @@ export interface AppFeature {
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
+    id: 'original_royale_practice',
+    name: 'Experimental offline royale practice starter',
+    path: 'NavBharatAI Pro → request a new royale-style game',
+    description: 'When explicitly enabled by the operator, the builder has an original bounded offline practice recipe with local bots and a shrinking zone. It is not a licensed branded game, online multiplayer, photorealistic world or a set of five finished templates. Existing/imported source and a named or stored Athree map are preserved. No new charge or artificial waiting is introduced. Availability and visual/mobile acceptance must be verified separately.',
+    howToUse: 'Ask for a new royale-style practice game. Read the build result and test controls, doors, restart and your device. A disabled recipe is unavailable, not a successful build.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['royale', 'practice game', 'offline bots', 'shrinking zone'],
+  },
+
+  {
     id: 'game_enterable_house_kit',
     name: 'Explorable house game kit',
     path: 'NavBharatAI Pro → describe a game with enterable houses',

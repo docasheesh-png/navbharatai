@@ -362,6 +362,7 @@ import { generateGame3D } from '../lib/Game3DGenerator';
 import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
+import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
 import { athreeMapIntent, athreeModulesFor } from '../lib/athreeMap/athreeMapIntent';
@@ -471,7 +472,7 @@ import { isSecretFilePath, maskSecretFile, SECRET_MASK, secretPlaceholderWriteMe
 // primitive; see lib/browseTarget.ts.
 import { classifyBrowseTarget } from '../lib/browseTarget';
 import { formatUiFindings, type ScannedElement } from './UiElementFinder';
-import { envKillSwitch } from '../lib/envFlag';
+import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
 import { isNotFoundError } from './fsErrors';
@@ -1155,8 +1156,13 @@ export class ToolDispatcher {
    * by default, which protects nothing — exactly the behaviour before this existed.
    */
   private userOwned: string[] = [];
+  private userOwnedSnapshotKnown = false;
+  private royaleNewProject = false;
+  /** Only the composition root may grant this after verified lifecycle/source inventory. */
+  setRoyaleNewProjectAllowed(allowed: boolean): void { this.royaleNewProject = allowed === true; }
   private userRequest: string | null = null;
   setUserOwnedFiles(paths: readonly string[], request: string | null): void {
+    this.userOwnedSnapshotKnown = true;
     this.userOwned = (paths ?? []).filter((p): p is string => typeof p === 'string' && p.length > 0);
     this.userRequest = typeof request === 'string' ? request : null;
   }
@@ -9643,6 +9649,25 @@ export class ToolDispatcher {
         const athLayers = await this.addMissingRecipeLayers(ath.files, agent);
         this.scheduleCheckpoint('athree map');
         return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${ath.instructions}${athLayers}`;
+      }
+
+      case 'generate_game_royale': {
+        if (!envFlag('AGENTV3_ORIGINAL_ROYALE')) refuse('The experimental original royale starter is unavailable. Do not promise it is installed or active.');
+        if (!this.royaleNewProject || !this.userOwnedSnapshotKnown || this.userOwned.length > 0) refuse('The royale starter requires a verified new project. Preserve existing or imported source; do not replace it with a template.');
+        const request = this.coverageRequest ?? this.userRequest ?? '';
+        if (!/battle\s*royale|pubg|bgmi|free\s*fire|firefree|battlefield|पबजी|बैटल\s*रॉयल|फ्री\s*फायर/i.test(request)) refuse('The request does not ask for a royale-style game. Do not add this starter.');
+        const requestedMap = athreeMapIntent({ prompt: request, seedKey: this.workspaceId });
+        if (requestedMap.via === 'named' || requestedMap.via === 'other-map') refuse('The request names a different world. The bounded royale starter must not replace that choice.');
+        // A failed workspace read is NOT evidence that no map exists. Preserve existing worlds.
+        let hasAthree = false;
+        try { await this.actuator.readFile(this.workspaceId, 'src/game/athree/index.ts'); hasAthree = true; }
+        catch (error) { if (!isNotFoundError(error)) throw error; }
+        if (hasAthree) refuse('This project already has an Athree map. The bounded royale starter has no Athree adapter; preserve the current world.');
+        const royale = generateGameRoyale();
+        const written = await this.writeRecipeFiles(royale.files, agent);
+        const layers = await this.addMissingRecipeLayers(royale.files, agent);
+        this.scheduleCheckpoint('original royale practice');
+        return `Original offline practice recipe results:\n${written.join('\n')}\n\n${royale.instructions}${layers}`;
       }
 
       case 'author_object': {

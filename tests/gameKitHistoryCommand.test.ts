@@ -11,7 +11,7 @@ it('the real history command resolves imported contracts and registers the curre
     mkdirSync(join(root, 'scripts'), { recursive: true });
     mkdirSync(join(root, 'src/server/lib'), { recursive: true });
     copyFileSync('scripts/gameKitHistory.mjs', join(root, 'scripts/gameKitHistory.mjs'));
-    for (const name of ['GameBuildingGenerator', 'GameAssetLodGenerator', 'GameAssetTextureVerifier', 'GameAssetRuntimeGenerator', 'GameRuntimeGenerator', 'Game3DGenerator', 'GameControllerGenerator', 'GameSystemsGenerator', 'GameVfxAudioGenerator', 'MelodyGenerator', 'GameShellGenerator', 'kitTypeContract', 'gameKitHistory']) {
+    for (const name of ['GameBuildingGenerator', 'GameAssetLodGenerator', 'GameAssetTextureVerifier', 'GameAssetRuntimeGenerator', 'GameRuntimeGenerator', 'Game3DGenerator', 'GameControllerGenerator', 'GameSystemsGenerator', 'GameVfxAudioGenerator', 'MelodyGenerator', 'GameShellGenerator', 'GameRoyaleGenerator', 'GameRoyaleFoundationGenerator', 'kitTypeContract', 'gameKitHistory']) {
       copyFileSync(`src/server/lib/${name}.ts`, join(root, `src/server/lib/${name}.ts`));
     }
     // Generators that live in their own folder (the Athree map and the Object Forge, with their source modules) travel with the command.

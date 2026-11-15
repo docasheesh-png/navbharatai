@@ -2295,6 +2295,15 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_game_royale',
+      description: 'Add an ORIGINAL offline 3D royale practice starter when the user requests a battle-royale-style game. '
+        + 'This is a bounded procedural arena with two local bots, a shrinking zone and restart, not PUBG, multiplayer or photorealism. '
+        + 'Requires the operator-enabled experimental flag. Emits RoyalePractice.tsx and its rules; mount it in a NEW project only. '
+        + 'Existing user files are preserved. Never replace an existing game or a selected Athree map with this starter. '
+        + 'No billing or artificial waiting is added. Read the tool result for preserved files and required integration.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'author_object',
       description:
         'THE OBJECT FORGE — make ANY object for a game that the library and the other modules do not have: a creature, a person, a '
@@ -3652,6 +3661,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_athree_map',
   'author_object',
   'generate_game_shell',
+  'generate_game_royale',
   'generate_game_vfx',
   'generate_melody',
   'generate_game_controller',
@@ -3875,6 +3885,7 @@ export const RECIPE_TOOLS = [
   'generate_athree_map',
   'author_object',
   'generate_game_shell',
+  'generate_game_royale',
   'generate_game_systems',
   'generate_game_vfx',
   'generate_geocoding',

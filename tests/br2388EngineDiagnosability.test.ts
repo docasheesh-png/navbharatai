@@ -453,8 +453,8 @@ async function scopeAskBilled(transport: typeof fetch, opts: { timeout?: number;
 }
 
 describe('review 2 — a call that never got any HTTP response is not billed (network setup failure)', () => {
-  it('classifier: DNS, refused, unreachable, TLS and connect-timeout codes, or a marked transport throw → setup failure', () => {
-    for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'UND_ERR_CONNECT_TIMEOUT', 'ERR_TLS_CERT_ALTNAME_INVALID',
+  it('classifier: only DNS, refused, unreachable, TLS/cert and connect-timeout codes (anywhere in the cause chain) → setup failure', () => {
+    for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT', 'ERR_TLS_CERT_ALTNAME_INVALID',
       'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'SELF_SIGNED_CERT_IN_CHAIN', 'ERR_SSL_WRONG_VERSION_NUMBER']) {
       expect(routerOneNetworkSetupFailure(Object.assign(new Error('Connection error.'), { cause: fetchFailed(sysErr(code)) })), code).toBe(true);
     }
@@ -470,6 +470,24 @@ describe('review 2 — a call that never got any HTTP response is not billed (ne
     expect(routerOneNetworkSetupFailure(sysErr('ECONNRESET'))).toBe(false);
     expect(routerOneNetworkSetupFailure(undefined)).toBe(false);
   });
+  it('classifier: connections dropped after the request may have been sent are after-dispatch, in every wrapping', () => {
+    for (const code of ['ECONNRESET', 'ECONNABORTED', 'EPIPE', 'UND_ERR_SOCKET', 'UND_ERR_CLOSED']) {
+      const undici = fetchFailed(sysErr(code, code === 'UND_ERR_SOCKET' ? 'other side closed' : code));
+      expect(routerOneNetworkSetupFailure(undici), code).toBe(false);
+      expect(routerOneNetworkSetupFailure(Object.assign(new Error('Connection error.'), { name: 'APIConnectionError', cause: undici })), code).toBe(false);
+      // after-dispatch wins even if a setup-looking code also appears deeper in the chain
+      expect(routerOneNetworkSetupFailure(fetchFailed(Object.assign(sysErr(code), { cause: sysErr('ECONNREFUSED') }))), code).toBe(false);
+      // …and also when the setup-looking code is the OUTER one and the after-dispatch code is deeper
+      expect(routerOneNetworkSetupFailure(Object.assign(sysErr('ECONNREFUSED'), { cause: sysErr(code) })), code).toBe(false);
+    }
+  });
+  it('classifier: an error with NO code anywhere is decided conservatively (estimated, not zero)', () => {
+    expect(routerOneNetworkSetupFailure(new TypeError('fetch failed'))).toBe(false);
+    expect(routerOneNetworkSetupFailure(Object.assign(new Error('Connection error.'), { name: 'APIConnectionError', cause: new TypeError('fetch failed') }))).toBe(false);
+    expect(routerOneNetworkSetupFailure(sysErr('EAI_NONAME'))).toBe(false); // unlisted code → conservative
+    const loop: { code?: string; cause?: unknown } = {}; loop.cause = loop;
+    expect(routerOneNetworkSetupFailure(loop)).toBe(false); // a cyclic chain terminates
+  });
   it('scope-classifier billing path: connection refused with a 40k-char prompt → labelled zero, lock released, wallet $0, no "estimated" line', async () => {
     const r = await scopeAskBilled(async () => { throw fetchFailed(sysErr('ECONNREFUSED', 'connect ECONNREFUSED')); });
     expect(r.thrown).toBeTruthy();
@@ -480,13 +498,54 @@ describe('review 2 — a call that never got any HTTP response is not billed (ne
     expect(r.charges).toEqual({ costUsd: 0, billedUsd: 0, absorbedUsd: 0 });
   });
   for (const [label, err] of [['DNS ENOTFOUND', sysErr('ENOTFOUND')], ['DNS EAI_AGAIN', sysErr('EAI_AGAIN')], ['TLS', sysErr('ERR_TLS_CERT_ALTNAME_INVALID')],
-    ['a bare transport throw', new TypeError('fetch failed')]] as const) {
+    ['connect timeout', sysErr('UND_ERR_CONNECT_TIMEOUT')], ['unreachable', sysErr('EHOSTUNREACH')]] as const) {
     it(`scope-classifier billing path: ${label} before any response → $0`, async () => {
-      const r = await scopeAskBilled(async () => { throw label.startsWith('a bare') ? err : fetchFailed(err); });
+      const r = await scopeAskBilled(async () => { throw fetchFailed(err); });
       expect(r.receipts[0]).toMatchObject({ estimateBasis: 'no-response-network', costAttoUsd: '0' });
       expect(r.charges.billedUsd).toBe(0);
     });
   }
+  for (const [code, message] of [['ECONNRESET', 'read ECONNRESET'], ['UND_ERR_SOCKET', 'other side closed'], ['EPIPE', 'write EPIPE'],
+    ['UND_ERR_CLOSED', 'The client is destroyed'], ['ECONNABORTED', 'connection aborted']] as const) {
+    it(`other side (SDK-wrapped, real undici shape): ${code} after the request was sent is ESTIMATED from size, never $0`, async () => {
+      const r = await scopeAskBilled(async () => { throw fetchFailed(sysErr(code, message)); });
+      expect(r.thrown).toBeTruthy();
+      expect(r.receipts[0]).toMatchObject({ estimateBasis: 'request-heuristic' });
+      expect(r.receipts[0].inputTokens).toBeGreaterThan(5000);
+      expect(r.charges.billedUsd).toBeGreaterThan(0);
+      expect(r.store.releaseVerified).toHaveBeenCalledTimes(1);
+    });
+  }
+  it('other side (SDK-wrapped): a bare fetch failure with no code at all is estimated (conservative), never $0', async () => {
+    const r = await scopeAskBilled(async () => { throw new TypeError('fetch failed'); });
+    expect(r.receipts[0]).toMatchObject({ estimateBasis: 'request-heuristic' });
+    expect(r.charges.billedUsd).toBeGreaterThan(0);
+  });
+  it('through routerOneAccountingFetch WITHOUT the SDK (raw undici error rethrown): ECONNRESET is estimated, ECONNREFUSED is $0', async () => {
+    const run = async (err: unknown) => {
+      const store: CatalogueAttemptStore = { reserve: vi.fn(async () => {}), finish: vi.fn(async () => {}), releaseVerified: vi.fn(async () => {}) };
+      const wrapped = routerOneAccountingFetch(async () => { throw err; }, model, () => {});
+      const raw = { chat: { completions: { create: async () => { await wrapped('https://engine.invalid/v1/chat/completions', { method: 'POST' }); throw new Error('unreachable'); } } } };
+      const client = cataloguePricedRouterOneClient(raw as unknown as OpenAiChatClient, 'synthetic-k', { store, prices: { snapshot: async () => snapshot() }, maxDurationMs: 60000, now: () => now });
+      let receipt: RouterOneCatalogueReceipt | undefined, thrown: unknown;
+      await runInRouterOneAccountingScope(binding, async () => {
+        try { await cataloguePricedRouterOneText(() => client.chat.completions.create({ model, messages: [{ role: 'user', content: bigPrompt }], max_tokens: 1000 })); }
+        catch (e) { thrown = e; }
+        [receipt] = currentRouterOneCatalogueReceipts();
+      });
+      return { receipt: receipt!, thrown, store };
+    };
+    const reset = fetchFailed(sysErr('ECONNRESET', 'read ECONNRESET'));
+    const r1 = await run(reset);
+    expect(r1.thrown).toBe(reset); // the wrapper rethrows the transport error unchanged
+    expect(r1.receipt).toMatchObject({ estimateBasis: 'request-heuristic' });
+    expect(BigInt(r1.receipt.costAttoUsd)).toBeGreaterThan(0n);
+    const refused = fetchFailed(sysErr('ECONNREFUSED', 'connect ECONNREFUSED 127.0.0.1:443'));
+    const r2 = await run(refused);
+    expect(r2.thrown).toBe(refused);
+    expect(r2.receipt).toMatchObject({ estimateBasis: 'no-response-network', costAttoUsd: '0' });
+    expect(r2.store.releaseVerified).toHaveBeenCalledTimes(1);
+  });
   it('other side: an SDK timeout after dispatch keeps the request-size estimate (charged, labelled conservative)', async () => {
     const r = await scopeAskBilled((_i, init) => new Promise((_res, rej) => {
       init?.signal?.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' })));

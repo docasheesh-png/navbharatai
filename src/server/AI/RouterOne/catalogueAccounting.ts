@@ -12,7 +12,7 @@ import { calculateCatalogueChatCost, catalogueSnapshotIssue, estimateCatalogueCh
 import { estimateMessagesTokens, estimateTokens } from '../../AgentV3/TokenEstimator';
 import { RouterOnePublicPriceSource, routerOnePublicPrices, ROUTER_ONE_PRICE_MAX_AGE_MS, type PublicPriceSnapshot } from './publicPriceSource';
 import { isRouterOneAccountingProvider, RouterOneAccountingUnavailableError, routerOneAccountingGate } from './accounting';
-import { isTransportNoResponse, markRestOfBuildSkip } from '../../lib/engineSafeDiag';
+import { markRestOfBuildSkip } from '../../lib/engineSafeDiag';
 
 export interface CatalogueCallBinding { buildId: string; uid: string; workspaceId: string }
 export interface RouterOneCatalogueReceipt extends CatalogueCallBinding {
@@ -192,33 +192,44 @@ export function runInRouterOneAccountingScope<T>(binding: CatalogueCallBinding, 
   return scopes.run({ binding: Object.freeze({ ...binding }), stopped: false, receipts: [] }, fn);
 }
 export function currentRouterOneCatalogueReceipts(): readonly RouterOneCatalogueReceipt[] { return scopes.getStore()?.receipts.slice() ?? []; }
-/** Error codes that mean the connection was never set up, so the request never reached the engine. */
-const SETUP_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EAI_NONAME', 'EAI_FAIL', 'EAI_NODATA', 'EHOSTUNREACH',
-  'ENETUNREACH', 'EHOSTDOWN', 'ENETDOWN', 'EADDRNOTAVAIL', 'UND_ERR_CONNECT_TIMEOUT', 'ERR_INVALID_URL',
-  'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN']);
-const SETUP_CODE_RE = /^(?:ERR_TLS_|ERR_SSL_|CERT_|UNABLE_TO_)|_CERT_/;
-/** Timeouts and aborts after dispatch: the supplier may already have done the work. */
+/**
+ * Error codes that mean the connection was never set up, so the request never reached the engine
+ * (DNS failure, refused, unreachable, TLS certificate/handshake failure, connect timeout). Deliberately
+ * narrow: anything not listed is billed by the conservative request estimate.
+ */
+const SETUP_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT',
+  'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'ERR_TLS_CERT_ALTNAME_INVALID', 'ERR_SSL_WRONG_VERSION_NUMBER']);
+const SETUP_CODE_RE = /^(?:CERT_|UNABLE_TO_(?:GET_ISSUER_CERT|VERIFY_LEAF_SIGNATURE|GET_CRL|DECRYPT_CERT))|_CERT_(?:NOT_YET_VALID|HAS_EXPIRED|REVOKED|UNTRUSTED|REJECTED)$/;
+/**
+ * After dispatch: timeouts, aborts, and connections dropped once the request may already have been
+ * sent (reset, aborted, broken pipe, socket closed by the other side). The supplier may have done the
+ * work, so these keep the request-size estimate — even if a setup-looking code also appears in the chain.
+ */
 const AFTER_DISPATCH_NAMES = new Set(['AbortError', 'APIUserAbortError', 'APIConnectionTimeoutError', 'TimeoutError']);
-const AFTER_DISPATCH_CODES = new Set(['ABORT_ERR', 'ETIMEDOUT', 'ESOCKETTIMEDOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_ABORTED']);
+const AFTER_DISPATCH_CODES = new Set(['ABORT_ERR', 'ETIMEDOUT', 'ESOCKETTIMEDOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_ABORTED', 'ECONNRESET', 'ECONNABORTED', 'EPIPE', 'UND_ERR_SOCKET', 'UND_ERR_CLOSED']);
 /**
  * BR2388 review: did this call fail with NO HTTP response because the connection was never set up?
- * True only for a known setup failure (DNS / refused / unreachable / TLS / connect timeout) or a
- * transport throw (marked by routerOneAccountingFetch) — and never when any timeout/abort is in the
- * chain or the caller's signal fired. Unknown errors stay on the conservative request estimate.
+ * Walks the whole `cause` chain (undici: TypeError('fetch failed') with the code on `.cause`; the SDK
+ * wraps that again as APIConnectionError). True ONLY when a setup code is found and no after-dispatch
+ * name/code is anywhere in the chain and the caller's signal did not fire. An error with no code at
+ * all (a bare 'fetch failed', 'socket hang up', anything unknown) is decided CONSERVATIVELY: false,
+ * so it is billed by the labelled request-size estimate — we cannot prove the request never left.
  */
 export function routerOneNetworkSetupFailure(error: unknown, signalAborted = false): boolean {
   if (signalAborted) return false;
-  let setup = false, transportThrew = false;
+  let setup = false;
   let node: unknown = error;
-  for (let depth = 0; depth < 6 && node !== null && typeof node === 'object'; depth++) {
-    const e = node as { name?: unknown; code?: unknown; cause?: unknown; errno?: unknown };
+  const seen = new Set<unknown>();
+  for (let depth = 0; depth < 8 && node !== null && typeof node === 'object' && !seen.has(node); depth++) {
+    seen.add(node);
+    const e = node as { name?: unknown; code?: unknown; cause?: unknown };
     const name = typeof e.name === 'string' ? e.name : '', code = typeof e.code === 'string' ? e.code : '';
     if (AFTER_DISPATCH_NAMES.has(name) || AFTER_DISPATCH_CODES.has(code)) return false;
-    if (SETUP_CODES.has(code) || (code && SETUP_CODE_RE.test(code))) setup = true;
-    if (isTransportNoResponse(node)) transportThrew = true;
+    if (SETUP_CODES.has(code) || (code !== '' && SETUP_CODE_RE.test(code))) setup = true;
     node = e.cause;
   }
-  return setup || transportThrew;
+  return setup;
 }
 async function finish(attempt: Attempt, model: string, usage: unknown, complete: boolean,
   failure?: { error: unknown; signalAborted: boolean }): Promise<void> {

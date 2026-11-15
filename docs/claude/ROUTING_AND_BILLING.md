@@ -861,16 +861,22 @@ estimate always uses the parsed, published per-model tariff snapshot bound to th
   `request-heuristic`, labelled **conservative**.
 - A non-2xx HTTP status with no usage → `no-billable-response`, at an explicit, labelled zero.
 - **No HTTP response at all (review of PR #4238).** No status, no output and no usage, AND the
-  connection was never set up → `no-response-network`, a labelled zero. That means a DNS, refused,
-  unreachable, TLS or connect-timeout code anywhere in the error's `cause` chain, or a throw from the
-  transport itself (`routerOneAccountingFetch` marks it). A request stopped after admission but
-  before the SDK was called → `not-dispatched`, a labelled zero. Both release the key. A **timeout or
-  abort after dispatch** (SDK timeout, `AbortError`, the caller's signal, `ETIMEDOUT`, header/body
-  timeouts) keeps `request-heuristic`, because the supplier may already have done the work. Unknown
-  errors with a status-less throw that are not marked transport throws (for example a parse error)
-  also stay on the conservative estimate. This applies to every Router One entry, including the
-  scope-classifier ask (`routerOneScopeAsk` → `recordRouterOneScopeUsage` → wallet), so a refused
-  connection on a 40k-character classifier prompt is billed $0, not the request-size estimate.
+  connection was provably never set up → `no-response-network`, a labelled zero. "Provably" means one
+  of these codes anywhere in the error's `cause` chain (undici puts it on `TypeError('fetch failed')
+  .cause`; the SDK wraps that again): `ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`, `EHOSTUNREACH`,
+  `ENETUNREACH`, `UND_ERR_CONNECT_TIMEOUT`, or a TLS certificate/handshake code. A request stopped
+  after admission but before the SDK was called → `not-dispatched`, a labelled zero. Both release the
+  key.
+- **After dispatch keeps the estimate.** Timeouts and aborts (SDK timeout, `AbortError`, the caller's
+  signal, `ETIMEDOUT`, header/body timeouts) and connections dropped once the request may have been
+  sent (`ECONNRESET`, `ECONNABORTED`, `EPIPE`, `UND_ERR_SOCKET` "other side closed", `UND_ERR_CLOSED`)
+  keep `request-heuristic`, because the supplier may already have done the work. An after-dispatch
+  code wins over a setup code anywhere in the same chain.
+- **No code at all is decided conservatively.** A bare `fetch failed`, `socket hang up`, or any
+  unlisted code is billed by the labelled request-size estimate, because we cannot prove the request
+  never left. This applies to every Router One entry, including the scope-classifier ask
+  (`routerOneScopeAsk` → `recordRouterOneScopeUsage` → wallet): a refused connection on a 40k-character
+  classifier prompt is billed $0, and a reset after sending is billed by the estimate.
 - A zero estimate is not an "estimated charge": it adds no `estimated` block and no user line.
 
 Every estimate label starts with "Estimated". The markup is the same as verified Router One billing,

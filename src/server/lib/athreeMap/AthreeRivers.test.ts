@@ -6,7 +6,7 @@ import { describe, it, expect, vi } from 'vitest';
 import * as THREE from 'three';
 import { loadAthree } from '../../../../tests/helpers/loadAthree';
 
-// These tests sample whole worlds (thousands of terrain, river and dune queries). Under the coverage run they are several times
+// These tests sample whole worlds (thousands of terrain, river, dune and road queries). Under the coverage run they are several times
 // slower, so each gets two minutes instead of vitest's default twenty seconds: the assertions are not loosened, only the clock.
 vi.setConfig({ testTimeout: 120000 });
 
@@ -220,7 +220,7 @@ describe('the carved terrain holds the water it shows', () => {
   it('no cliff ANYWHERE along ANY river, even in a deep gorge: steps under 2.5 m per metre, 100 m either side (the class: a candidate that pops in at a grid edge)', () => {
     let n = 0; let worst = 0;
     for (const seed of [...SEEDS, 15, 17]) {
-      const w2 = loopWorld(seed);
+      const w2 = A.createAthreeWorld({ seed, profile: 'open-world', roads: false });
       for (const r of w2.waterBodies().rivers) {
         for (let i = 1; i < r.points.length; i += 4) {
           const p = r.points[i]; const q = r.points[Math.min(r.points.length - 1, i + 1)]; const o = r.points[i - 1];
@@ -270,7 +270,7 @@ describe('the carved terrain holds the water it shows', () => {
     expect(w.waterAt(lake.x + lake.radius * 1.5, lake.z)).not.toEqual(hit);
   });
   it('dry places have no water, and a world made with rivers: false has none at all', () => {
-    const dry = A.createAthreeWorld({ seed: 7, profile: 'open-world', rivers: false });
+    const dry = A.createAthreeWorld({ seed: 7, profile: 'open-world', rivers: false, roads: false });
     expect(dry.waterBodies()).toEqual({ rivers: [], lakes: [] });
     for (let i = 0; i < 200; i++) {
       const x = i * 313; const z = i * 977;

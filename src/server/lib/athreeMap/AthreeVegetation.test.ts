@@ -6,7 +6,7 @@ import { describe, it, expect, vi } from 'vitest';
 import * as THREE from 'three';
 import { loadAthree } from '../../../../tests/helpers/loadAthree';
 
-// These tests sample whole worlds (thousands of terrain, river and dune queries). Under the coverage run they are several times
+// These tests sample whole worlds (thousands of terrain, river, dune and road queries). Under the coverage run they are several times
 // slower, so each gets two minutes instead of vitest's default twenty seconds: the assertions are not loosened, only the clock.
 vi.setConfig({ testTimeout: 120000 });
 

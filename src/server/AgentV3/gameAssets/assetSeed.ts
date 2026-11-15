@@ -1,3 +1,4 @@
+import { prepareR2hAssets } from './r2hPack';
 import { createPolyHavenDiscovery, withDiscoveredAssetCache, isDiscoveredAsset } from './polyHavenDiscovery';
 import { createHash } from 'node:crypto';
 import { localModelsOverride } from './localModelNote';
@@ -42,6 +43,8 @@ export interface GameAssetSeedOptions {
 export const GAME_ASSET_CONCURRENCY = 3;
 
 export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<GameAssetSeedResult> {
+  const r2h = await prepareR2hAssets(options);
+  if (r2h) return r2h;
   const out: GameAssetSeedResult = { files: {}, handoff: '', outcomes: [], status: 'off' };
   if (!externalGameAssetsEnabled(options.env, options.verifiedOwnerUid)) return out;
   const catalogue = options.catalogue ?? REVIEWED_GAME_ASSETS;

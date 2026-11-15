@@ -41,6 +41,16 @@ export interface AppFeature {
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
+    id: 'r2h_character_pack_pending',
+    name: 'R2H character pack (disabled draft)',
+    path: 'NavBharatAI Pro → new 3D game',
+    description: 'Three original reference-derived R2H character GLBs were recovered locally but binary publication is pending; this disabled draft does not include usable models. Public use also requires separate rights approval and final validation. Do not say these are live, public-domain, universally selected, or verified on phones. Only Idle and Walk are supplied; existing projects are not migrated.',
+    howToUse: 'Unavailable until reviewed activation. Ordinary game generation continues with existing assets. Do not promise the three characters or additional riding, combat, facial or 2D animations.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['r2h', 'round 2 hell', 'character', 'कैरेक्टर'],
+  },
+
+  {
     id: 'game_enterable_house_kit',
     name: 'Explorable house game kit',
     path: 'NavBharatAI Pro → describe a game with enterable houses',
@@ -4016,4 +4026,5 @@ BIDIRECTIONAL SELECTION: (1) pick a framework in the picker (⚙ → Framework o
 export function getFeatureById(id: string): AppFeature | null {
   return APP_KNOWLEDGE_BASE.find(f => f.id === id) ?? null;
 }
+
 

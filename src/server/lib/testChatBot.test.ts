@@ -6,7 +6,12 @@ const fake = vi.hoisted(() => ({ run: vi.fn(), config: vi.fn(), db: vi.fn(), mai
   marketPlan: undefined as undefined | ((...args: unknown[]) => unknown),
   feedSummary: undefined as undefined | ((...args: unknown[]) => unknown),
   catalogJson: undefined as undefined | ((...args: unknown[]) => unknown),
-  mitrifyCatalog: undefined as undefined | ((url: string, init?: RequestInit) => Promise<unknown>) }));
+  mitrifyCatalog: undefined as undefined | ((url: string, init?: RequestInit) => Promise<unknown>),
+  routerOnePrice: vi.fn() }));
+vi.mock('../AI/RouterOne/publicPriceSource', async importOriginal => {
+  const actual = await importOriginal<typeof import('../AI/RouterOne/publicPriceSource')>();
+  return { ...actual, routerOnePublicPrices: { snapshot: (...args: unknown[]) => fake.routerOnePrice(...args) } };
+});
 vi.mock('./qubax', () => ({ runApprovedQubaxChat: fake.run, qubaxConfig: fake.config,
   QubaxError: class extends Error { constructor(readonly code: string, readonly status = 0) { super(code); } } }));
 vi.mock('./qubaxPriceFeedRuntime', () => ({ refreshQubaxPriceFeed: (...args: unknown[]) => fake.refresh(...args) }));
@@ -69,7 +74,7 @@ vi.mock('../AI/FreeChain/providers/openAiCompatProvider', async importOriginal =
   };
 });
 import { isTestChatStatus, readPartialTestChatStatus, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_PROVIDER_IDS, type TestChatAction } from '../../lib/testChatBot';
-import { loadTestChatStatus, runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
+import { loadTestChatStatus, ROUTER_ONE_PRICE_UNAVAILABLE, ROUTER_ONE_TEST_CHAT_URL, routerOneTariffCeilingNanoUsd, runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
 import { maximumCostNanoUsd, usdToNanoUsd } from '../AI/FreeChain/spendCap';
 import { QubaxError } from './qubax';
 import { MitrifyError } from './mitrify';
@@ -248,11 +253,9 @@ describe('test chat provider isolation and admission', () => {
     }));
     expect(fake.compatTurn.mock.calls[0]?.[0]).toMatchObject({ prompt: action.messages[0].content, messages: action.messages });
   });
-  it('does not invent a Surplus or Router One dispatch when those entries are selected', async () => {
+  it('does not invent a Surplus dispatch when that entry is selected', async () => {
     expect(testChatStatus().providers.find(item => item.id === 'surplus')?.enabled).toBe(false);
-    expect(testChatStatus().providers.find(item => item.id === 'router-one')?.enabled).toBe(false);
     await expect(runTestChat({ ...action, provider: 'surplus' }, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'disabled' });
-    await expect(runTestChat({ ...action, provider: 'router-one' }, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'disabled' });
     expect(fake.run).not.toHaveBeenCalled();
     expect(fake.compatTurn).not.toHaveBeenCalled();
   });
@@ -841,3 +844,101 @@ describe('test chat provider isolation and admission', () => {
   });
 });
 
+
+describe('Router One in the admin Test Chat Bot (admin 2026-11-15)', () => {
+  const band = (above: number, input: string, output: string) => ({
+    aboveInputTokens: above, inputUsdPerMillion: input, outputUsdPerMillion: output, cacheReadUsdPerMillion: '0', cacheWriteUsdPerMillion: '0',
+  });
+  const tariff = (bands: ReturnType<typeof band>[]) => ({
+    kind: 'posted-wallet-token-tariff', provider: 'ENGINE_R1', model: 'deepseek-v4.1-flash', currency: 'USD',
+    unit: 'USD/1000000-tokens', source: 'https://router.one/models/deepseek-v4-1-flash', fetchedAt: 1, bands,
+  });
+  const routerOne = { ...action, provider: 'router-one' as const };
+
+  it('is unavailable with an honest reason when the server has no Router One key', () => {
+    const status = testChatStatus().providers.find(item => item.id === 'router-one');
+    expect(status).toMatchObject({ configured: false, enabled: false, billed: true, unavailableReason: 'No API credential is set on the server.' });
+  });
+
+  it('is selectable like the other providers once the key is set, on the first priced model', () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    const status = testChatStatus().providers.find(item => item.id === 'router-one');
+    expect(status).toMatchObject({ configured: true, enabled: true, billed: true, model: 'deepseek-v4.1-flash', internalRouting: true });
+    expect(status?.unavailableReason).toBeUndefined();
+    expect(status?.note).toContain('posted public price');
+  });
+
+  it('never picks Router One’s unpriced "auto" router as the test model', () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    vi.stubEnv('ROUTER_ONE_MODEL_MODE', 'auto');
+    expect(testChatStatus().providers.find(item => item.id === 'router-one')?.model).toBe('deepseek-v4.1-flash');
+  });
+
+  it('only calls the official endpoint — a custom base URL stays disabled', () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    vi.stubEnv('ROUTER_ONE_BASE_URL', 'https://proxy.example.invalid/v1');
+    const status = testChatStatus().providers.find(item => item.id === 'router-one');
+    expect(status).toMatchObject({ configured: true, enabled: false, unavailableReason: 'This test page only calls the official Router One endpoint.' });
+  });
+
+  it('reserves the highest posted band, then makes exactly one official call and returns the real reply', async () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    fake.routerOnePrice.mockResolvedValue(tariff([band(-1, '0.2', '0.8'), band(128_000, '0.4', '1.6')]));
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hello from Router One', model: 'deepseek-v4.1-flash', usage: { inputTokens: 5, outputTokens: 6 } });
+    const result = await runTestChat(routerOne, 'operator@example.invalid', new AbortController().signal);
+    expect(result).toMatchObject({ provider: 'router-one', content: 'Hello from Router One', model: 'deepseek-v4.1-flash', noFallback: true, usage: { inputTokens: 5, outputTokens: 6 } });
+    expect(fake.routerOnePrice).toHaveBeenCalledWith('deepseek-v4.1-flash');
+    expect(fake.reserve).toHaveBeenCalledOnce();
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: mitrifyQuotedHold(0.4, 1.6) }));
+    expect(fake.officialOpenAi).toHaveBeenCalledOnce();
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({
+      url: ROUTER_ONE_TEST_CHAT_URL, apiKey: 'synthetic-router-one-key', model: 'deepseek-v4.1-flash', messages: routerOne.messages,
+    }));
+    expect(fake.run).not.toHaveBeenCalled();
+    expect(fake.compatTurn).not.toHaveBeenCalled();
+  });
+
+  it('prices a typed model on its own posted tariff and calls that model', async () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    fake.routerOnePrice.mockResolvedValue(tariff([band(-1, '1', '2')]));
+    fake.officialOpenAi.mockResolvedValue({ content: 'typed reply', model: 'qwen3-coder' });
+    await runTestChat({ ...routerOne, model: 'qwen3-coder' }, 'actor', new AbortController().signal);
+    expect(fake.routerOnePrice).toHaveBeenCalledWith('qwen3-coder');
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ model: 'qwen3-coder' }));
+  });
+
+  it('does not call Router One, and says why, when no posted price can be read', async () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    fake.routerOnePrice.mockRejectedValue(new Error('router.one unreachable'));
+    const error = await runTestChat(routerOne, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error).toBeInstanceOf(TestChatUnavailable);
+    expect(error.reason).toBe('budget');
+    expect(error.diagnostic).toMatchObject({ providerCode: 'ROUTER_ONE_PRICE_UNAVAILABLE', providerMessage: ROUTER_ONE_PRICE_UNAVAILABLE, model: 'deepseek-v4.1-flash' });
+    expect(fake.reserve).not.toHaveBeenCalled();
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on a budget refusal without calling the provider', async () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    fake.routerOnePrice.mockResolvedValue(tariff([band(-1, '0.2', '0.8')]));
+    fake.reserve.mockResolvedValue(null);
+    await expect(runTestChat(routerOne, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'budget' });
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+  });
+
+  it('shows the provider’s real error, with the key redacted, when the call fails', async () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    fake.routerOnePrice.mockResolvedValue(tariff([band(-1, '0.2', '0.8')]));
+    fake.officialOpenAi.mockRejectedValue(new OfficialTestChatError('auth', 401, 'invalid_api_key', 'auth_error', 'req-r1', 'bad key synthetic-router-one-key', '{"error":"bad key synthetic-router-one-key"}'));
+    const error = await runTestChat(routerOne, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('unconfirmed');
+    expect(error.diagnostic).toMatchObject({ httpStatus: 401, providerCode: 'invalid_api_key', providerRequestId: 'req-r1' });
+    expect(JSON.stringify(error.diagnostic)).not.toContain('synthetic-router-one-key');
+  });
+
+  it('never quotes a zero or missing tariff as a ceiling', () => {
+    expect(routerOneTariffCeilingNanoUsd(action.messages, [])).toBe(0);
+    expect(routerOneTariffCeilingNanoUsd(action.messages, [band(-1, '0', '0')])).toBe(0);
+    expect(routerOneTariffCeilingNanoUsd(action.messages, [band(-1, '0.2', '0.8')])).toBe(mitrifyQuotedHold(0.2, 0.8));
+  });
+});

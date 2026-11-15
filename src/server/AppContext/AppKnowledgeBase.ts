@@ -2367,6 +2367,15 @@ NOTE: Does NOT build apps (use NavBharatAI Pro for that).`,
     keywords: ['kirana app', 'billing app', 'clinic appointment', 'gst invoice', 'app ideas', 'bina coding', 'dukaan app', 'tuition fees'],
   },
   {
+    id: 'how_it_works',
+    name: 'How NavBharatAI works',
+    path: 'Open navbharatai.com/how-it-works, or the How it works link in the footer of the public pages and on Home.',
+    description: 'A public page in Hindi and English. It says the NavBharatAI engine uses several engines and keeps the same conversation if one engine cannot answer. It matches Hindi, Hinglish and English. On one path it prefers a lower-cost engine only after quality checks. It explains build checks, the free-answer counts, and privacy. It does not name outside AI companies, and it does not claim NavBharatAI trained a foundation model or a special router.',
+    howToUse: 'Open How it works from the Home page links, or go to /how-it-works.',
+    relatedFeatures: ['pro_chat'],
+    keywords: ['how it works', 'kaise kaam karta hai', 'language', 'quota', 'privacy', 'engine'],
+  },
+  {
     id: 'nav_app_store',
     name: 'App Mart — play apps others made, install Android apps, and publish your own',
     path: 'Sidebar menu → App Mart, or Home → App Mart (the 5th card on the Home page — it is NO LONGER inside Other AI), or the direct link navbharatai.com/store (same as navbharatai.com/?view=appstore). ADDED 2026-09-21: App Mart is now in the SIDEBAR MENU and, once open, it has its own tab in the header strip beside the other open windows — with an ✕ to close it, exactly like Settings or Code Studio. Before this it opened correctly but showed no header tab at all, so the only way out was to navigate somewhere else and leave it open behind you. If a user asks "app mart band kaise karu": press the ✕ on its tab in the header.',
@@ -3357,6 +3366,20 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Money") stil
     howToUse: 'Sign in as admin, open AI Engines → Free Chat Chain and inspect the displayed limitations. Status refreshes separately; press “Refresh sampled metrics” only when you deliberately want a new historical scan, and check “Metrics snapshot as of” and any stale warning before using its figures. For a control, enter a real reason without credentials or conversation content, then confirm. For a paid-cap change, inspect the configured and shared caps, review the current policy revision and existing held/settled amounts, and retire inconsistent stricter deployments before an intentional raise. When status explicitly confirms the policy is uninitialized, choose “Review budget initialization”, enter the intended cap (including $0) and a real reason, review the consequences and confirm; all normal budget limits, authenticated identity and audit requirements still apply. Do not treat an unavailable or failed read as permission to initialize. If a status read or control response is lost, refresh status to verify the saved cap, policy revision and controls before retrying; a failed metrics refresh needs another deliberate button press and is never retried automatically. Use the existing AI maintenance control if the intent is to pause all AI, not merely this opt-in routing chain.',
     relatedFeatures: ['admin-tab-navigation', 'admin-live-model-registry', 'admin-audit-log'],
     keywords: ['free chat chain', 'chain rollout', 'provider quota', 'daily spend cap', 'chat fallback', 'refresh sampled metrics', 'metrics snapshot', 'stale metrics', 'admin read cost', 'shared paid budget', 'paid budget revision', 'paid cap change', 'budget initialization', 'initialize paid budget', 'held upper bound', 'settled recorded cost', 'chain band karo', 'free chat quota', 'rollout kitna', 'paid budget badhao', 'paid kharcha limit'],
+  },
+  {
+    id: 'admin-test-chat-bot',
+    name: 'Test Chat Bot (admin only)',
+    path: 'Admin Dashboard → AI Engines → Test Chat Bot',
+    description: `An administrator-only chat for testing one AI engine connection at a time, with real text and multi-turn context. It never touches ordinary app conversations and never falls back to another connection.
+• The "Test provider" dropdown lists every wired text-chat connection. An entry without a server key, or one that cannot be called safely, is shown disabled with the reason.
+• Gateway connections that publish a per-model price can be tested here too (admin 2026-11-15). The page reads that posted price, reserves the highest price band for this page's 1,024-token limit against the shared paid budget, and makes one call with no retry. If no posted price can be read, it does not call and says so.
+• An optional model field tries a specific model id; leaving it blank uses the same model selection as main chat.
+• Paid sends use the shared paid cap set under AI Engines → Free Chat Chain. If that cap is $0 or used up, a paid test answers "budget" and does not call the connection.
+• If the connection fails, an admin-only diagnostic shows the HTTP status, error code, request id and a redacted error body. Keys are stripped.`,
+    howToUse: 'Sign in as admin, open AI Engines → Test Chat Bot, choose a connection in "Test provider", optionally type a model id, write a synthetic test message, tick the confirmation box and press Send. Press "New test chat" to clear the conversation.',
+    relatedFeatures: ['admin-free-chat-chain', 'admin-live-model-registry'],
+    keywords: ['test chat bot', 'test provider', 'provider test', 'engine test', 'api test', 'connection test', 'provider error', 'provider check karo', 'api test kaise kare'],
   },
   {
     id: 'admin-bot-ledger',

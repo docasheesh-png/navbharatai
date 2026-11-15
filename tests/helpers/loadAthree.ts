@@ -5,8 +5,8 @@ import { generateAthreeMap } from '../../src/server/lib/athreeMap/AthreeMapGener
 
 const DIR = 'src/game/athree/';
 
-export function loadAthree(include?: string[]): Record<string, any> {
-  const files = generateAthreeMap(include).files;
+export function loadAthree(include?: string[], choice?: { archetype: any; sizeKm: number } | null): Record<string, any> {
+  const files = generateAthreeMap(include, choice).files;
   const cache = new Map<string, Record<string, unknown>>();
   const load = (name: string): Record<string, unknown> => {
     const hit = cache.get(name);

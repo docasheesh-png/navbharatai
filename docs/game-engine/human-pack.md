@@ -5,7 +5,7 @@ The three original GLB files were recovered locally from the owner's separate
 unpublished integration, 2D exports, motorcycle poses, or test history.
 
 All three original binary assets are included under `private-game-assets/humans/`
-(outside `public/`). Names, byte sizes and SHA-256 identities are pinned in
+(outside frontend `public/`, not a repository access-control boundary). Names, byte sizes and SHA-256 identities are pinned in
 `humanPack.ts`; they were not regenerated, substituted or optimized. The originals
 also remain in the owner's Library. This is a disabled integration draft, not
 a validated or activated feature.
@@ -48,9 +48,17 @@ an assurance that final gameplay has already passed.
   additive files. The normal new-project guard remains mandatory.
 - No public activation, merge, deployment or billing change is authorized by
   this draft. Env flags alone do not grant rights.
-- The owner requested **no tests** for this work. No lint/typecheck/unit/full
-  CI/browser/mobile tests were run on this draft. Reading GLB metadata and
-  preserving file hashes is not gameplay validation.
+- The initial draft was published without tests at the owner’s request. The owner
+  subsequently authorized local validation. Focused tests discovered that all three
+  originals use `KHR_materials_specular`, rejected by the existing strict GLB policy.
+  The originals and validator are unchanged. Tests now verify this fail-closed blocker,
+  exact hashes, and disabled gates; they do not assert successful asset acceptance.
+  Full local CI and browser/mobile acceptance remain pending.
+- Provenance: these are AI-assisted files recovered from the owner’s Work conversation,
+  not evidence that the owner personally created or holds redistribution rights.
+- Activation additionally requires separately reviewed extension compatibility and
+  real rendering acceptance. Do not strip extensions from originals or weaken the
+  general untrusted-asset policy to bypass this blocker.
 - Before release: rights review; final-tree static/automated checks; actual
   3D browser/mobile rendering, load failure/cancel/retry/teardown and export/
   restore; owner-isolation and existing-project preservation; no double human;
@@ -61,3 +69,19 @@ Rights evidence is kept in the server review record, never interpolated into a p
 No secret key or private identity data is recorded here.
 
 An already prepared external human is preserved rather than installing a second competing human. The owner-pack precedence policy still needs explicit integration before activation.
+
+## Bounded compatibility review in progress
+
+An exact-SHA-pinned adapter now accounts for the originals’ scalar-only
+`KHR_materials_specular` metadata in a temporary validation projection. It never
+changes persisted/rendered original bytes and does not broaden the global policy.
+Denim passes that structural path; Cap and Leather still fail the unchanged
+geometry-work budget. These failures are explicit compatibility blockers, not
+passing asset acceptance. All activation gates remain false; no automatic
+substitution, geometry-budget increase or model conversion is performed.
+Independent security review and full validation remain outstanding.
+
+Independent review also found the runtime Docker image does not copy
+`private-game-assets/`; production packaging is therefore an additional activation
+blocker. The directory name is not a confidentiality control: repository readers
+can access committed models. No claim of private GitHub asset storage is made.

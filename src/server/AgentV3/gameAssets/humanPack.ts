@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { validateGlb } from './assetPolicy';
+import { validateRecoveredHumanGlb } from './humanPackPolicy';
 import { proveAssetInSandbox } from './assetBrowserProof';
 import type { GameAssetSeedOptions, GameAssetSeedResult } from './assetSeed';
 import { saveWorkspaceAssets, readWorkspaceAssetBytes } from '../WorkspaceAssetStore';
 import { mergeWorkspaceFiles } from '../WorkspaceFileStore';
 import { generateAssetModelLoader, generateGameAssetRuntime } from '../../lib/GameAssetRuntimeGenerator';
 
-/** Original bytes made by the project owner. These are NOT CC0 assets and are never in the public catalogue. */
+/** Original bytes recovered from the owner’s AI-assisted Work conversation. These are NOT CC0 assets and are not in the frontend public catalogue; repository access still applies. */
 export const HUMAN_PACK = Object.freeze([
   { id: 'cap', file: 'human_01_cap.glb', sha256: '7dbe7b32310b89398a8e21ebceb9723986f3109e8c358583647303f038548180', bytes: 2620816 },
   { id: 'leather', file: 'human_02_leather.glb', sha256: '72896823eef0c702d4479e02fc9bc2306ddbd4cd4310200422aa58710a42c9c3', bytes: 2548388 },
@@ -44,10 +44,9 @@ export async function prepareHumanAssets(options: GameAssetSeedOptions): Promise
   const model = HUMAN_PACK[index];
   const bytes = await readFile(resolve('private-game-assets/humans', model.file));
   if (bytes.length !== model.bytes || createHash('sha256').update(bytes).digest('hex') !== model.sha256) throw new Error('Human model integrity mismatch');
-  const validated = validateGlb(bytes);
+  const validated = validateRecoveredHumanGlb(bytes);
   if (!['Idle', 'Walk'].every(name => validated.animations.includes(name))) throw new Error('Human model required animation missing');
-  // Runtime acceptance is retained. The owner's no-test instruction applies to this development run,
-  // not to removing safety gates from future generated builds.
+  // Runtime acceptance remains mandatory for future activation.
   await proveAssetInSandbox(options.workspace, options.workspaceId, bytes, { subject: 'human', animation: 'Idle' });
   options.signal.throwIfAborted();
   const path = `public/game-assets/${model.sha256}.glb`;
@@ -67,7 +66,7 @@ export async function prepareHumanAssets(options: GameAssetSeedOptions): Promise
   const files = {
     'src/game/three/humanRuntime.ts': generateGameAssetRuntime(),
     'src/game/three/humanAssets.ts': generateAssetModelLoader({ human: { sha256: model.sha256, height: 1.8, yaw: 0, lod: false, animation: 'Idle', roles: { idle: 'Idle', walk: 'Walk' } } }).replace("from './externalAssets'", "from './humanRuntime'"),
-    'public/game-assets/HUMANS_NOTICE.txt': `Human character ${model.id}. Original models made by the project owner (owner statement, 2026-11-15); the owner's rights record is kept separately. Original model bytes preserved. This is not a CC0/public-domain asset. Only Idle/Walk clips are supplied.`,
+    'public/game-assets/HUMANS_NOTICE.txt': `Human character ${model.id}. Models recovered from the owner’s AI-assisted Work conversation; the owner's rights record is kept separately. Original model bytes preserved. This is not a CC0/public-domain asset. Only Idle/Walk clips are supplied.`,
   };
   options.signal.throwIfAborted();
   await persistence.saveText(options.workspaceId, files);

@@ -34,6 +34,14 @@ export function routerOneAccountingGate(error: unknown): RouterOneAccountingGate
   if (!(error instanceof RouterOneAccountingUnavailableError)) return undefined;
   return (readEngineSafeDiag(error)?.gate as RouterOneAccountingGate | undefined) ?? 'unspecified';
 }
+/** Did our accounting fence refuse this call before a supplier request? */
+export function isRouterOneAccountingRefusal(error: unknown): boolean {
+  return error instanceof RouterOneAccountingUnavailableError;
+}
+/** The fence name for the admin report. The public error text stays supplier-free. */
+export function routerOneRefusalReason(error: unknown): string | undefined {
+  return routerOneAccountingGate(error);
+}
 
 /** X-Request-ID is the documented settlement correlation key, not the completion id.
  * Preserve metadata only; never read or buffer prompts, answers, or streaming bodies.

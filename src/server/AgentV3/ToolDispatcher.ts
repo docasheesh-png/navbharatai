@@ -364,7 +364,7 @@ import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
-import { athreeMapIntent } from '../lib/athreeMap/athreeMapIntent';
+import { athreeMapIntent, athreeModulesFor } from '../lib/athreeMap/athreeMapIntent';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
@@ -9629,7 +9629,12 @@ export class ToolDispatcher {
         const athreeStored = await this.actuator.readFile(this.workspaceId, 'src/game/athree/index.ts').then(() => ({ mapId: 'athree' }), () => null);
         const athreeDecision = athreeMapIntent({ prompt: this.coverageRequest ?? this.userRequest ?? '', stored: athreeStored, seedKey: this.workspaceId });
         if (!athreeDecision.use) refuse(`The Athree map is not used here: ${athreeDecision.reason} Build without it.`);
-        const ath = generateAthreeMap();
+        // WHICH MODULES (admin 2026-11-15): the builder may pass `include`; otherwise the request decides, so a game that asked for a river and
+        // some trees gets those, and a request that names no feature gets the whole map.
+        const athRec = (input as Record<string, unknown>) || {};
+        const athModules = Array.isArray(athRec.include) ? athRec.include.filter((v): v is string => typeof v === 'string') : undefined;
+        const athPick = athModules ?? athreeModulesFor(this.coverageRequest ?? this.userRequest ?? '').modules;
+        const ath = generateAthreeMap(athPick);
         const athWritten = await this.writeRecipeFiles(ath.files, agent);
         const athLayers = await this.addMissingRecipeLayers(ath.files, agent);
         this.scheduleCheckpoint('athree map');

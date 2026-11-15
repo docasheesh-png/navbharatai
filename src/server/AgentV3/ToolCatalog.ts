@@ -2282,8 +2282,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'safe spawn points and physics heightfield data (src/game/athree/). Use it when the user NAMES Athree (or a-three) for a game '
         + 'that needs a world, or when the library offers it for such a game. It decides from the request: it refuses an app with no '
         + 'world, a map the user declined and a project that chose another map — then build without it, and say why. Not for 2D games. '
-        + 'Hand-writing a terrain for such a game is wrong.',
-      input_schema: { type: 'object', properties: {} },
+        + 'Hand-writing a terrain for such a game is wrong. Pass include to take only some modules of it.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional modules: sea, plants, rivers, sky, roads, vehicles. Default: chosen from the request (none named = all).',
+          },
+        },
+      },
     },
     {
       name: 'generate_game_shell',

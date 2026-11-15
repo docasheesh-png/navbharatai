@@ -17,12 +17,7 @@ export const VEHICLES = `// Athree map — a sports car and a sports bike: lofte
 // Technique: cross-section lofting, cylinders and tubes with computed smooth normals; an arcade physics model with a friction circle,
 // a surface friction table, four sampled wheel contacts and a spring-damper body. Own implementation.
 
-import { QUALITY, OCEAN_TIERS, maxTriangles, oceanTriangles, type AthreeQuality } from './config';
-import { VEGETATION_TIERS, vegetationTriangles } from './vegetation';
-import { RIVER_TIERS } from './riverwater';
-import { SKY_TIERS, domeTriangles } from './sky';
-import { ROAD_TIERS } from './roadmesh';
-import { GRAVITY } from './water';
+import { type AthreeQuality } from './config';
 import type { AthreeWorld } from './world';
 
 // three.js is passed in by the caller (import * as THREE from 'three'); it is typed loosely here on purpose.
@@ -33,6 +28,8 @@ export type VehicleKind = 'car' | 'bike';
 export type Surface = 'asphalt' | 'grass' | 'sand' | 'snow' | 'rock' | 'water';
 
 /** Grip of each surface: the largest sideways acceleration, in g, and how well the brakes bite. */
+const GRAVITY = 9.81;
+
 export const SURFACE_FRICTION: Record<Surface, number> = { asphalt: 1.15, grass: 0.62, sand: 0.5, snow: 0.32, rock: 0.8, water: 0.1 };
 
 export interface VehicleTier {
@@ -51,11 +48,6 @@ export const VEHICLE_TIERS: Record<AthreeQuality, VehicleTier> = {
 /** The most triangles one vehicle may have at a tier (asserted by a test against the real meshes). */
 export const VEHICLE_TRIANGLES_MAX: Record<AthreeQuality, number> = { phone: 900, mid: 1600, desktop: 3200 };
 
-/** How many vehicles of the largest size fit in what is left of the tier's budget after the map has taken its worst case. */
-export function vehicleBudget(q: AthreeQuality): number {
-  const left = QUALITY[q].budgetTriangles - maxTriangles(QUALITY[q]) - oceanTriangles(OCEAN_TIERS[q]) - vegetationTriangles(VEGETATION_TIERS[q]) - RIVER_TIERS[q].maxTriangles - domeTriangles(SKY_TIERS[q]) - ROAD_TIERS[q].maxTriangles;
-  return Math.floor(left / VEHICLE_TRIANGLES_MAX[q]);
-}
 export interface PartArrays {
   position: Float32Array;
   normal: Float32Array;

@@ -117,3 +117,41 @@ export function athreeMapIntent(input: AthreeIntentInput): AthreeIntent {
   }
   return none('none', 'This app does not need a map.');
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// WHICH MODULES of the Athree map a request needs (admin 2026-11-15: "user jo bole woh module user ki need ke anusar run time par bane").
+//
+// The map is built from modules that need nothing from each other, so a game takes only what its user asked for. The words are the ones a
+// user actually types, English and Hinglish (input parsing, like the Athree name detector, is exempt from the English-only UI rule).
+// A request that names none of them ("a big open world") gets everything: the safe default is the whole map, never a bare one.
+// PURE: no I/O, no clock, no env. Never throws.
+
+const MODULE_WORDS: Record<string, string[]> = {
+  sea: ['sea', 'ocean', 'samudra', 'samundar', 'sagar', 'beach', 'coast', 'shore', 'waves', 'lehar', 'boat', 'naav', 'island', 'dweep', 'sea level'],
+  plants: ['tree', 'trees', 'ped', 'jungle', 'forest', 'grass', 'ghaas', 'plants', 'paudhe', 'bagicha', 'garden', 'woods'],
+  rivers: ['river', 'rivers', 'nadi', 'lake', 'talab', 'jheel', 'pond', 'stream', 'waterfall', 'jharna'],
+  sky: ['sky', 'aasmaan', 'asman', 'weather', 'mausam', 'rain', 'baarish', 'barish', 'night', 'raat', 'sunset', 'sunrise', 'cloud', 'clouds', 'baadal', 'fog', 'kohra', 'storm', 'toofan', 'time of day', 'day and night', 'din raat'],
+  roads: ['road', 'roads', 'sadak', 'highway', 'race', 'racing', 'track', 'circuit', 'runway', 'bridge', 'pul', 'city', 'village', 'gaon', 'street', 'town'],
+  vehicles: ['car', 'cars', 'gaadi', 'gadi', 'bike', 'bikes', 'motorcycle', 'drive', 'driving', 'vehicle', 'vehicles', 'racing', 'race', 'truck'],
+};
+const ALL_WORDS = ['everything', 'sab kuch', 'sabkuch', 'poora', 'pura', 'full map', 'all modules', 'sabhi', 'all of it', 'complete map'];
+
+export interface AthreeModules {
+  /** The optional modules this request needs, in the build's own order. */
+  modules: string[];
+  /** One sentence for the build report: which words picked which modules, or why it is everything. */
+  reason: string;
+}
+
+export function athreeModulesFor(prompt: string): AthreeModules {
+  const all = Object.keys(MODULE_WORDS);
+  const text = ' ' + String(prompt ?? '').toLowerCase().replace(/[^a-z0-9\u0900-\u097f]+/g, ' ') + ' ';
+  const has = (w: string): boolean => text.includes(' ' + w + ' ');
+  if (ALL_WORDS.some(has)) return { modules: all, reason: 'The request asks for everything, so every module is included.' };
+  const hit: Record<string, string[]> = {};
+  for (const m of all) { const words = MODULE_WORDS[m].filter(has); if (words.length) hit[m] = words; }
+  const chosen = all.filter((m) => hit[m]);
+  if (chosen.length === 0) return { modules: all, reason: 'The request names no particular feature, so every module is included.' };
+  return { modules: chosen, reason: 'Only what the request asks for: ' + chosen.map((m) => m + ' (' + hit[m].slice(0, 2).join(', ') + ')').join('; ') + '.' };
+}
+

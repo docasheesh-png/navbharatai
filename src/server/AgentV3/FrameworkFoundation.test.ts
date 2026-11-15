@@ -322,4 +322,44 @@ describe('sanitizeTsconfigReferences — strip a dangling tsconfig.node.json ref
     expect(res.fixes).toHaveLength(1);
     expect(sanitizeTsconfigReferences(files, ['packages/web/tsconfig.node.json']).fixes).toHaveLength(0);
   });
+
+  it('mutation: a missing non-node reference is kept (the strip is not widened)', () => {
+    const files = {
+      'tsconfig.json': JSON.stringify({
+        include: ['src'],
+        references: [{ path: './tsconfig.app.json' }, { path: './tsconfig.node.json' }],
+      }),
+    };
+    const res = sanitizeTsconfigReferences(files);
+    expect(res.fixes[0].removed).toEqual(['./tsconfig.node.json']);
+    expect(JSON.parse(res.patch['tsconfig.json']).references).toEqual([{ path: './tsconfig.app.json' }]);
+  });
+
+  it('strips the dangling node reference when sources are listed in files, not include', () => {
+    const files = {
+      'tsconfig.json': JSON.stringify({
+        files: ['src/main.tsx', 'src/App.tsx'],
+        references: [{ path: './tsconfig.node.json' }],
+      }),
+    };
+    const res = sanitizeTsconfigReferences(files);
+    expect(res.fixes[0].removed).toEqual(['./tsconfig.node.json']);
+    const out = JSON.parse(res.patch['tsconfig.json']);
+    expect(out.references).toBeUndefined();
+    expect(out.files).toEqual(['src/main.tsx', 'src/App.tsx']);
+  });
+
+  it('neighbour: a relative extends is left alone', () => {
+    const raw = JSON.stringify({
+      extends: './tsconfig.base.json',
+      include: ['src'],
+      references: [{ path: './tsconfig.node.json' }],
+    });
+    const files = { 'tsconfig.json': raw };
+    const res = sanitizeTsconfigReferences(files);
+    expect(res.fixes[0].removed).toEqual(['./tsconfig.node.json']);
+    const out = JSON.parse(res.patch['tsconfig.json']);
+    expect(out.extends).toBe('./tsconfig.base.json');
+    expect(out.include).toEqual(['src']);
+  });
 });

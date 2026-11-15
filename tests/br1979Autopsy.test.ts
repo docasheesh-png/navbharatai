@@ -104,4 +104,14 @@ describe('BR1979 — a dangling tsconfig.node.json reference is stripped before 
     expect(ROUTE).toContain("code: 'TSCONFIG_REFERENCES_REPAIRED'");
     expect(ROUTE).toContain('sanitizeTsconfigReferences(saved, Object.keys(saved))');
   });
+
+  it('mutation lock: every heal sits behind the same kill switch (drop a call-site guard and this turns red)', () => {
+    const simpleGuards = SIMPLE.split("AGENTV3_TSCONFIG_SANITIZE !== 'off'").length - 1;
+    const routeGuards = ROUTE.split("AGENTV3_TSCONFIG_SANITIZE !== 'off'").length - 1;
+    const routeHeals = ROUTE.split('sanitizeTsconfigReferences(').length - 1;
+    // SimpleBuilder: one pre-write heal. agentv3: preview restore + pre-install heal + pre-tsc heal.
+    expect(simpleGuards).toBeGreaterThanOrEqual(1);
+    expect(routeHeals).toBe(3);
+    expect(routeGuards).toBeGreaterThanOrEqual(3);
+  });
 });

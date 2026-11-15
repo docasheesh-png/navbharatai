@@ -28,6 +28,7 @@ import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
 import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { sandboxCost, describeSandboxCost } from './sandboxCost';
 import { redactProvidersText } from '../lib/providerRedaction';
+import { stripEngineSafeDiag } from '../lib/engineSafeDiag';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError, isProviderBalanceError } from './providerErrorClass';
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
@@ -4687,15 +4688,16 @@ export function renderSessionDiagnosticsText(reports: readonly BuildDiagnosticsR
  * words is not a provider leak, and scrubbing their source would corrupt it).
  */
 export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosticsReport {
-  const scrub = (s: string | undefined): string | undefined => (s === undefined ? undefined : redactProvidersText(s));
+  const scrub = (s: string | undefined): string | undefined => (s === undefined ? undefined : redactProvidersText(stripEngineSafeDiag(s)));
   const scrubIssue = (i: BuildIssue): BuildIssue => ({
     ts: i.ts,
     phase: i.phase,
     severity: i.severity,
     code: /^SURPLUS(?:_|$)/i.test(i.code) ? 'ENGINE_UNAVAILABLE' : i.code, // Supplier-specific codes stay in the admin report.
-    message: redactProvidersText(i.message),
+    message: redactProvidersText(stripEngineSafeDiag(i.message)),
     autoResolved: i.autoResolved,
-    ...(i.detail !== undefined ? { detail: redactProvidersText(i.detail) } : {}),
+    // BR2388: the `[engine-diag: …]` gate/stage/cost marker is for the admin report only.
+    ...(i.detail !== undefined ? { detail: redactProvidersText(stripEngineSafeDiag(i.detail)) } : {}),
     ...(i.repeatCount !== undefined ? { repeatCount: i.repeatCount } : {}),
   });
   const out: BuildDiagnosticsReport = {

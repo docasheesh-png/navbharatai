@@ -238,7 +238,7 @@ export function realRateCard(): Record<string, TokenRate> {
  * 'GEMINI'|'GROK'|'other'); `model` is TurnResult.model (may be undefined for aux calls).
  */
 export function realRateFor(provider: string, model?: string): TokenRate {
-  if (isRouterOneAccountingProvider(provider ?? '')) throw new RouterOneAccountingUnavailableError();
+  if (isRouterOneAccountingProvider(provider ?? '')) throw new RouterOneAccountingUnavailableError('rate_unavailable');
   if ((provider ?? '').toUpperCase() === 'SURPLUS') throw new SurplusAccountingUnavailableError();
   const card = realRateCard();
   const m = (model ?? '').toLowerCase();

@@ -85,6 +85,8 @@ export interface RiverNetwork {
   carve(x: number, z: number, baseH: number): number;
   /** The water at a place, or null on dry ground. */
   waterAt(x: number, z: number): WaterHit | null;
+  /** Metres to the nearest water edge (negative inside water). Infinity when no water is within about a hundred metres. */
+  edgeDistance(x: number, z: number): number;
 }
 
 function smooth(t: number): number {
@@ -464,7 +466,15 @@ export function createRiverNetwork(o: RiverOptions): RiverNetwork {
     return null;
   }
 
-  return { rivers, lakes, carve, waterAt };
+  function edgeDistance(x: number, z: number): number {
+    let best = Infinity;
+    eachSegment(x, z, (m) => { if (m.e < best) best = m.e; });
+    const l = nearestLake(x, z);
+    if (l && l.e < best) best = l.e;
+    return best;
+  }
+
+  return { rivers, lakes, carve, waterAt, edgeDistance };
 }
 
 const cache = new Map<string, RiverNetwork>();
@@ -648,6 +658,8 @@ export interface RiverWater {
   update(cameraX: number, cameraZ: number, time: number, origin: { x: number; z: number }): void;
   /** What a boat on a river or lake floats on: the surface height and the way the water flows (zero on a lake), or null on dry ground. */
   floatAt(x: number, z: number): { y: number; flowX: number; flowZ: number; kind: 'river' | 'lake' } | null;
+  /** Match the light: the direction towards the sun and the sky colour the water reflects. */
+  setLight(sun: { x: number; y: number; z: number }, skyColor: number): void;
   stats(): { tiles: number; triangles: number };
   dispose(): void;
 }
@@ -737,7 +749,12 @@ export function createRiverWater(THREE: ThreeLike, world: AthreeWorld, quality: 
     triangles = 0;
   }
 
-  return { group, update, floatAt, stats: () => ({ tiles: Array.from(tiles.values()).filter((t) => t.mesh).length, triangles }), dispose };
+  function setLight(sun: { x: number; y: number; z: number }, skyColor: number): void {
+    uniforms.uSun.value.set(sun.x, Math.max(sun.y, 0.05), sun.z).normalize();
+    uniforms.uSky.value.set(skyColor);
+  }
+
+  return { group, update, floatAt, setLight, stats: () => ({ tiles: Array.from(tiles.values()).filter((t) => t.mesh).length, triangles }), dispose };
 }
 
 `;

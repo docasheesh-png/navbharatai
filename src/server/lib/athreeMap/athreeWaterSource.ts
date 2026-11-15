@@ -167,6 +167,8 @@ export interface Ocean {
   update(cameraX: number, cameraZ: number, time: number, origin: { x: number; z: number }): void;
   /** What a boat floats on: the surface height and its unit normal, at a place and time (the long waves the mesh draws plus the short ones). */
   floatAt(x: number, z: number, time: number): { y: number; nx: number; ny: number; nz: number };
+  /** Match the light: the direction towards the sun and the sky colour the water reflects. */
+  setLight(sun: { x: number; y: number; z: number }, skyColor: number): void;
   /** The wave-mesh grid spacing in metres. */
   readonly step: number;
   dispose(): void;
@@ -302,6 +304,11 @@ export function createOcean(THREE: ThreeLike, world: AthreeWorld, quality: Athre
     depthTex.dispose();
   }
 
-  return { mesh, waves, update, floatAt, step, dispose };
+  function setLight(sun: { x: number; y: number; z: number }, skyColor: number): void {
+    uniforms.uSun.value.set(sun.x, Math.max(sun.y, 0.05), sun.z).normalize();
+    uniforms.uSky.value.set(skyColor);
+  }
+
+  return { mesh, waves, update, floatAt, setLight, step, dispose };
 }
 `;

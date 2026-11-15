@@ -2,9 +2,13 @@
 // river), that the water only ever goes down, that the carved terrain holds the water it shows, that the network repeats exactly on the
 // 100 km loop, that nothing grows or spawns in the water, the water meshes' counts, and the tile manager with real three.js.
 // What they cannot prove — how it LOOKS and whether the shader compiles on a GPU — is checked by a headless-Chromium render.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as THREE from 'three';
 import { loadAthree } from '../../../../tests/helpers/loadAthree';
+
+// These tests sample whole worlds (thousands of terrain, river and dune queries). Under the coverage run they are several times
+// slower, so each gets two minutes instead of vitest's default twenty seconds: the assertions are not loosened, only the clock.
+vi.setConfig({ testTimeout: 120000 });
 
 const A = loadAthree();
 const SEEDS = [1, 3, 7, 9, 11, 13];
@@ -251,7 +255,7 @@ describe('the carved terrain holds the water it shows', () => {
       const x = (i * 7919) % 90000; const z = (i * 104729) % 90000;
       if (w.waterAt(x, z)) continue;
       n++;
-      if (w.heightAt(x, z) === w.baseHeightAt(x, z)) same++;
+      if (Math.abs(w.heightAt(x, z) - w.baseHeightAt(x, z) - w.dunesAt(x, z)) < 1e-9) same++;
     }
     expect(n).toBeGreaterThan(300);
     expect(same / n).toBeGreaterThan(0.85);
@@ -271,7 +275,9 @@ describe('the carved terrain holds the water it shows', () => {
     for (let i = 0; i < 200; i++) {
       const x = i * 313; const z = i * 977;
       expect(dry.waterAt(x, z)).toBeNull();
-      expect(dry.heightAt(x, z)).toBe(dry.baseHeightAt(x, z));
+      // Without rivers the only difference from the bare ground is the dunes, and they only ever add height.
+      expect(dry.dunesAt(x, z)).toBeGreaterThanOrEqual(0);
+      expect(dry.heightAt(x, z)).toBeCloseTo(dry.baseHeightAt(x, z) + dry.dunesAt(x, z), 6);
     }
   });
 });

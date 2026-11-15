@@ -146,7 +146,13 @@ function checkTracks(clips: unknown, path: string, errors: string[]): void {
       if (t.property !== 'rotation' && t.property !== 'position' && t.property !== 'scale') errors.push(tp + '.property must be rotation, position or scale');
       if (typeof t.axis !== 'string' || !AXES.includes(t.axis)) errors.push(tp + '.axis must be x, y or z');
       const amax = t.property === 'rotation' ? 360 : 1000;
-      checkNumber(t.amplitude, tp + '.amplitude', errors, -amax, amax); checkNumber(t.speed, tp + '.speed', errors, 0.01, 10);
+      if (t.spin !== undefined && typeof t.spin !== 'boolean') errors.push(tp + '.spin must be true or false');
+      if (t.spin === true) {
+        if (t.property !== 'rotation') errors.push(tp + ' is a spin, which only a rotation can be (a wheel turns; a position swings)');
+        if (!finite(t.speed) || Math.abs(t.speed) < 0.01 || Math.abs(t.speed) > 10) errors.push(tp + '.speed is ' + String(t.speed) + ' but a spin turns between 0.01 and 10 times a second (negative is the other way)');
+      } else {
+        checkNumber(t.amplitude, tp + '.amplitude', errors, -amax, amax); checkNumber(t.speed, tp + '.speed', errors, 0.01, 10);
+      }
       checkNumber(t.phase, tp + '.phase', errors, -100, 100, true); checkNumber(t.offset, tp + '.offset', errors, -amax, amax, true);
     });
   }

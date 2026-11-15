@@ -293,7 +293,7 @@ const spin = (axis: 'x' | 'y' | 'z', speed: number): Record<string, unknown> => 
 
 const TRAIN: ForgeExample = {
   id: 'train',
-  what: 'A steam train 30 m long: locomotive (boiler, cab, chimney, headlamp, six big wheels) and two carriages (windows, roof, four wheels each), the carriage built once and repeated. Wheels roll (clip: run). For a metro or a bullet train change the boiler to a loft nose and drop the chimney.',
+  what: 'A steam train 30 m long: locomotive (boiler, cab, chimney, headlamp, six big wheels) and two carriages (windows, roof, couplers, four wheels each), the carriage built once and repeated. Wheels roll (clip: run). For a metro or a bullet train change the boiler to a loft nose and drop the chimney.',
   spec: {
     id: 'train',
     name: 'Steam train',
@@ -320,13 +320,13 @@ const TRAIN: ForgeExample = {
         position: [1.0, 0.55, 6.2], rotation: [0, 0, 90], mirror: 'x', repeat: { count: 3, step: [0, 0, 2.0] },
         clips: { run: [spin('x', 1.2)] },
       },
-      { name: 'coupler', shape: { type: 'box', size: [0.25, 0.25, 1.0] }, material: 'dark', position: [0, 0.85, 3.2] },
       {
         name: 'carriage',
         position: [0, 0, -2],
         repeat: { count: 2, step: [0, 0, -10.5] },
         children: [
           { name: 'floor', shape: { type: 'box', size: [2.4, 0.4, 10] }, material: 'dark', position: [0, 0.75, 0] },
+          { name: 'coupler', shape: { type: 'box', size: [0.25, 0.25, 0.9] }, material: 'dark', position: [0, 0.85, 5.2] },
           { name: 'body', shape: { type: 'box', size: [2.8, 2.7, 10] }, material: 'coach', position: [0, 2.3, 0] },
           { name: 'roof', shape: { type: 'box', size: [3.0, 0.2, 10.2] }, material: 'roof', position: [0, 3.75, 0] },
           { name: 'window', shape: { type: 'box', size: [0.08, 0.8, 1.2] }, material: 'glass', position: [1.42, 2.7, -3.5], mirror: 'x', repeat: { count: 4, step: [0, 0, 2.3] } },
@@ -407,7 +407,7 @@ const CAR: ForgeExample = {
 // A MOTORBIKE: two wheels (a torus tyre and spokes), a tube frame, fork, handlebar, tank, seat, engine, exhaust. Wheels roll (clip: ride).
 const BIKE: ForgeExample = {
   id: 'bike',
-  what: 'A motorbike 1.9 m long: torus tyres with spokes that roll (clip: ride), tube frame, fork and handlebar, red tank, seat, engine, headlight, exhaust. For a bicycle thin the frame and drop the engine and tank; for a scooter lower the seat and fatten the front panel.',
+  what: 'A motorbike 2.2 m long: torus tyres with spokes that roll (clip: ride), tube frame, fork and handlebar, red tank, seat, engine, headlight, exhaust. For a bicycle thin the frame and drop the engine and tank; for a scooter lower the seat and fatten the front panel.',
   spec: {
     id: 'bike',
     name: 'Motorbike',

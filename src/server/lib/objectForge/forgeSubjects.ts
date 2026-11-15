@@ -61,7 +61,7 @@ export const SUBJECT_CHECKLIST: Record<SubjectKind, string[]> = {
     'The body bottom is at about 0.3 m and overlaps the wheels so nothing floats. Headlights emit light (an emissive material); bumpers front and back.',
   ],
   bike: [
-    'Real size: a motorbike 2 m long, 0.8 m wide at the bars, 1.1 m high; a bicycle 1.7 m long; wheels about 0.6 to 0.7 m across.',
+    'Real size: a motorbike 2.1 m long, 0.8 m wide at the bars, 1.1 m high; a bicycle 1.7 m long; wheels about 0.6 to 0.7 m across.',
     'Two wheels (a torus tyre turned on its side, rotation [0,0,90], plus a hub and spokes made with repeat around y), at the front and rear, centre height = wheel radius, each with a spin clip about x.',
     'A frame from tubes joining the steering head, the seat and the rear axle; a fork (two mirrored tubes) from the handlebar to the front hub; the handlebar a tube across x.',
     'Seat, tank (a squashed sphere) and engine sit ON the frame; every part touches its neighbour.',

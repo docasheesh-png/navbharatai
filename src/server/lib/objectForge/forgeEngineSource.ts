@@ -554,9 +554,18 @@ function reflectClips(clips: Record<string, ForgeTrack[]>, axis: Axis, phase: nu
 
 export function expandNodes(spec: ObjectSpec): ExpandedNode[] {
   const out: ExpandedNode[] = [];
+  // One mesh per DISTINCT shape: every node whose shape is the same as an earlier node's (a copy, a mirror, the same wheel under the second
+  // carriage of a train) builds from that earlier node's geometry, so a longer train costs no more shapes.
+  const firstWithShape = new Map<string, number>();
   const emit = (node: ForgeNode, parent: number, suffix: string, copyOf: number | null, pos: Vec3, rot: Vec3, scl: Vec3, clips: Record<string, ForgeTrack[]>): number => {
     const index = out.length;
-    out.push({ name: node.name + suffix, parent, shape: node.shape, material: node.material, position: pos, rotation: rot, scale: scl, clips, source: copyOf ?? index });
+    let source = copyOf ?? index;
+    if (node.shape) {
+      const key = JSON.stringify(node.shape);
+      const hit = firstWithShape.get(key);
+      if (hit === undefined) firstWithShape.set(key, index); else source = hit;
+    }
+    out.push({ name: node.name + suffix, parent, shape: node.shape, material: node.material, position: pos, rotation: rot, scale: scl, clips, source });
     return index;
   };
   const visit = (node: ForgeNode, parent: number, suffix: string): void => {
@@ -583,7 +592,11 @@ export function expandNodes(spec: ObjectSpec): ExpandedNode[] {
       const idx = emit(node, parent, copySuffix, firstCopy < 0 ? null : firstCopy, pos, rot, baseScl, clips);
       if (firstCopy < 0) firstCopy = idx;
       const first = firstCopy;
-      for (const child of node.children ?? []) visit(child, idx, copySuffix);
+      // What the children inherit: a repeated parent's copy number carries a "p" (for parent), so the second copy of a child under the first
+      // copy of its parent (window_1) can never be the same name as the first copy of that child under the second copy of the parent (window_1p).
+      // A mirror adds nothing here, so a mirrored limb's parts stay hand_mirror, knee_mirror.
+      const childContext = suffix + (i > 0 ? '_' + i + 'p' : '');
+      for (const child of node.children ?? []) visit(child, idx, childContext);
       if (node.mirror) {
         const ax = axisIndex(node.mirror);
         const mpos: Vec3 = [pos[0], pos[1], pos[2]]; mpos[ax] = -mpos[ax];
@@ -593,7 +606,7 @@ export function expandNodes(spec: ObjectSpec): ExpandedNode[] {
         const msuffix = copySuffix + '_mirror';
         emit(node, parent, msuffix, first, mpos, mrot, mscl, reflectClips(clips, node.mirror, node.mirrorPhase ?? 0));
         const mIdx = out.length - 1;
-        for (const child of node.children ?? []) visit(child, mIdx, msuffix);
+        for (const child of node.children ?? []) visit(child, mIdx, childContext + '_mirror');
       }
     }
   };

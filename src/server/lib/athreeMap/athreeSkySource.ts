@@ -85,10 +85,8 @@ export const SKY = `// Athree map — sky, clouds, day and night, weather, rain,
 // Technique: hour-angle sun position; palette blend driven by the sun's height; fractal clouds projected on a plane and carried by the
 // wind; weather targets eased towards; a ring of rain streaks falling in the vertex shader. Own implementation.
 
-import { QUALITY, OCEAN_TIERS, maxTriangles, oceanTriangles, type AthreeQuality } from './config';
+import { type AthreeQuality } from './config';
 import { mulberry32 } from './noise';
-import { VEGETATION_TIERS, vegetationTriangles } from './vegetation';
-import { RIVER_TIERS } from './riverwater';
 import type { AthreeWorld } from './world';
 
 // three.js is passed in by the caller (import * as THREE from 'three'); it is typed loosely here on purpose.
@@ -227,11 +225,6 @@ export function domeTriangles(t: SkyTier): number {
   const w = t.domeSegments;
   const h = Math.floor(w / 2);
   return w * h * 2 - 2 * w;
-}
-
-/** What is left of the tier's triangle budget once terrain, sea, plants and water have taken their worst case. */
-export function skyBudget(q: AthreeQuality): number {
-  return QUALITY[q].budgetTriangles - maxTriangles(QUALITY[q]) - oceanTriangles(OCEAN_TIERS[q]) - vegetationTriangles(VEGETATION_TIERS[q]) - RIVER_TIERS[q].maxTriangles;
 }
 
 export function skyVertexShader(): string {

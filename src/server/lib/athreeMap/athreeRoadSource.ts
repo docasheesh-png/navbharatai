@@ -648,10 +648,7 @@ export const ROADMESH = `// Athree map — roads on screen: asphalt ribbons with
 // Technique: ribbons along the road points built per tile and streamed a few per frame; all markings are drawn in the fragment shader from
 // the position across and along the road (no texture); lit by the sky's sun like the plants. Own implementation.
 
-import { QUALITY, OCEAN_TIERS, maxTriangles, oceanTriangles, type AthreeQuality } from './config';
-import { VEGETATION_TIERS, vegetationTriangles } from './vegetation';
-import { RIVER_TIERS } from './riverwater';
-import { SKY_TIERS, domeTriangles } from './sky';
+import { type AthreeQuality } from './config';
 import { ROAD_STEP } from './roads';
 import type { AthreeWorld } from './world';
 
@@ -673,11 +670,6 @@ export const ROAD_TIERS: Record<AthreeQuality, RoadTier> = {
   mid: { radius: 700, tile: 256, maxTriangles: 5000, tilesPerUpdate: 3 },
   desktop: { radius: 1300, tile: 512, maxTriangles: 10000, tilesPerUpdate: 4 },
 };
-
-/** What is left of the tier's triangle budget once terrain, sea, plants, water and sky have taken their worst case. */
-export function roadBudget(q: AthreeQuality): number {
-  return QUALITY[q].budgetTriangles - maxTriangles(QUALITY[q]) - oceanTriangles(OCEAN_TIERS[q]) - vegetationTriangles(VEGETATION_TIERS[q]) - RIVER_TIERS[q].maxTriangles - domeTriangles(SKY_TIERS[q]);
-}
 
 /** What a vertex of the road mesh is: how the shader paints it. */
 export const ROAD_KIND = { highway: 0, deck: 1, concrete: 2, runway: 3, circuit: 4, plaza: 5 } as const;

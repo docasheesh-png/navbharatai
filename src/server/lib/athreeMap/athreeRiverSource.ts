@@ -494,8 +494,7 @@ export const RIVERWATER = `// Athree map — river and lake water on screen.
 // Technique: ribbons along the river paths and discs for lakes, built per tile and streamed a few per frame; a fragment shader scrolls
 // layered noise along the flow direction, shades depth from the middle to the edge, and foams at the banks. Own implementation.
 
-import { QUALITY, OCEAN_TIERS, maxTriangles, oceanTriangles, type AthreeQuality } from './config';
-import { VEGETATION_TIERS, vegetationTriangles } from './vegetation';
+import { type AthreeQuality } from './config';
 import type { AthreeWorld } from './world';
 
 // three.js is passed in by the caller (import * as THREE from 'three'); it is typed loosely here on purpose.
@@ -516,11 +515,6 @@ export const RIVER_TIERS: Record<AthreeQuality, RiverTier> = {
   mid: { radius: 700, tile: 256, maxTriangles: 6000, tilesPerUpdate: 3 },
   desktop: { radius: 1300, tile: 512, maxTriangles: 8000, tilesPerUpdate: 4 },
 };
-
-/** What is left of the tier's triangle budget once terrain, sea and vegetation have taken their worst case. */
-export function riverBudget(quality: AthreeQuality): number {
-  return QUALITY[quality].budgetTriangles - maxTriangles(QUALITY[quality]) - oceanTriangles(OCEAN_TIERS[quality]) - vegetationTriangles(VEGETATION_TIERS[quality]);
-}
 
 export interface WaterArrays {
   /** Vertex positions in WORLD metres, relative to (originX, originZ) in x and z. */

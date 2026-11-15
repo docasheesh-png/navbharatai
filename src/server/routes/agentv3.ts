@@ -7,7 +7,7 @@ import { prepareGameSeedWorkspace } from '../AgentV3/gameSeedWorkspace';
 import { withReplyLanguage, replyVoiceForRequest } from '../AgentV3/replyLanguageBinding';
 import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
 import { createSandboxAdmissionBudget, sandboxAdmissionActuator } from '../AgentV3/sandboxAdmissionBudget';
-import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges } from '../AI/RouterOne/catalogueAccounting';
+import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges, recordRouterOneEstimatedBill } from '../AI/RouterOne/catalogueAccounting';
 import { planKitRefresh } from '../lib/gameRecipeLayers';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
 import { PRO_SANDBOX_FEE_PCT, proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../AgentV3/proSandboxFee';
@@ -27,6 +27,7 @@ import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, asse
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
 import { surplusFallbackDisabledFor, surplusFallbackDisabledForTier, surplusRawErrorReporter } from '../AI/SurplusRegistry/surplusNoFallback';
 import { rawErrorText } from '../AgentV3/rawErrorDetail';
+import { withEngineSafeDiag, stripEngineSafeDiag } from '../lib/engineSafeDiag';
 import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
 import { wrapSurplusRunnerPreWriteFailOpen, tryConsumeSurplusPreWriteFailOpen, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason, surplusFallbackMessage } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
@@ -1921,6 +1922,9 @@ export function decideBuildBilledUsd(
    * 2026-11-11 Weak/Surplus stop token floor reads this later; it does not change this function's bill.
    */
   surplusUnsettledAbsorbed?: true;
+  /** Owner 2026-11-15 (BR2388): the Router One share priced by ESTIMATE, with its label. Absent unless
+   * an estimated receipt was billed, so every existing equality test stays unchanged. */
+  routerOneEstimated?: { calls: number; costUsd: number; billedUsd: number; label: string };
 } {
   const routerOneEntries = providerLedger.entries().filter(e => isRouterOneAccountingProvider(e.provider));
   if (routerOneEntries.length) {
@@ -1942,7 +1946,8 @@ export function decideBuildBilledUsd(
     const catalogue = routerOneCatalogueBuildCharges(routerOneEntries, barrenPhases);
     return { ...priced, effectiveBilledUsd: priced.effectiveBilledUsd + catalogue.billedUsd,
       realCostUsd: priced.realCostUsd + catalogue.costUsd, absorbedUnbilledUsd: priced.absorbedUnbilledUsd + catalogue.absorbedUsd,
-      reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal) };
+      reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal),
+      ...(catalogue.estimated ? { routerOneEstimated: catalogue.estimated } : {}) };
   }
   const surplusEntries = providerLedger.entries().filter(e => e.provider.toUpperCase() === 'SURPLUS');
   if (surplusEntries.length) {
@@ -2748,7 +2753,7 @@ export function openAiCompatRunners(
         const sdkTimeoutMs = buildStreamingEnabled() ? Math.max(timeoutMs, streamHardCapMs()) : timeoutMs;
         const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0,
           fetch: isRouterOneAccountingProvider(name)
-            ? routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId); audit('ROUTER_ONE_REQUEST', trace); }) : canaryFetch() });
+            ? routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId, trace.status); audit('ROUTER_ONE_REQUEST', trace); }) : canaryFetch() });
         const pricedClient = isRouterOneAccountingProvider(name)
           ? cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, apiKey, { maxDurationMs: sdkTimeoutMs }) : client as unknown as OpenAiChatClient;
         const turnRunner = new OpenAiToolRunner(pricedClient, { model, ...runnerOpts, timeoutMs });
@@ -3578,7 +3583,7 @@ function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSigna
     for (const model of routerOneModels()) {
       try {
         const client = new OpenAI({ apiKey: key, baseURL: routerOneBaseUrl(), timeout: 60_000, maxRetries: 0,
-          fetch: routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId); audit('ROUTER_ONE_REQUEST', trace); }) });
+          fetch: routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId, trace.status); audit('ROUTER_ONE_REQUEST', trace); }) });
         const r = await cataloguePricedRouterOneText(() => cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, key, { maxDurationMs: 60000 }).chat.completions.create({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1024 }, { signal }));
         if (!('choices' in r)) throw new Error(ROUTER_ONE_NOT_CONFIGURED);
         return { text: String(r.choices?.[0]?.message?.content ?? '') };
@@ -5258,7 +5263,7 @@ async function noteBuildOutcome(
       // non-admin gets those scrubbed (the full report is anonymized separately when fetched by id).
       const historyOut = showProviderDetail
         ? history
-        : history.map((h) => ({ ...h, summary: h.summary === undefined ? undefined : redactProviderError(h.summary), rootCause: h.rootCause === undefined ? undefined : redactProviderError(h.rootCause) }));
+        : history.map((h) => ({ ...h, summary: h.summary === undefined ? undefined : redactProviderError(stripEngineSafeDiag(h.summary)), rootCause: h.rootCause === undefined ? undefined : redactProviderError(stripEngineSafeDiag(h.rootCause)) }));
       res.json({ history: historyOut });
       return;
     }
@@ -14762,8 +14767,8 @@ async function noteBuildOutcome(
         if (routerOneCostUnconfirmed(used, usage.routerOneReceipt) && !costUnconfirmedNoted) {
           costUnconfirmedNoted = true;
           try { buildDiag.record({ phase: 'build', severity: 'info', code: 'DISCOUNT_COST_UNCONFIRMED', autoResolved: true,
-            message: 'Engine usage accounting is pending; this portion is excluded from the wallet charge and further requests on the key are blocked.',
-            detail: 'ENGINE_R1 catalogue pricing or complete usage could not be verified. The unresolved attempt is retained; unknown cost is not measured zero. Verified calls use official posted tariffs, not a supplier-settled wallet debit. Reconciliation is required before reopening a blocked key.' }); } catch { /* observation only */ }
+            message: 'Engine usage for this turn could not be tied to one priced call; this portion is excluded from the wallet charge.',
+            detail: 'ENGINE_R1 usage for this turn had no single issued receipt. Each physical call is still settled in the accounting store (exact from the posted tariff, or by a labelled estimate when its usage was incomplete) and its key released; unknown cost is not measured zero. Verified calls use official posted tariffs, not a supplier-settled wallet debit.' }); } catch { /* observation only */ }
         }
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
@@ -14988,7 +14993,8 @@ async function noteBuildOutcome(
         buildDiag.record({
           phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
           message: `Provider ${name} failed — falling back to the next provider`,
-          autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+          // BR2388: a supplier-free gate/stage marker after the unchanged text (admin report only).
+          autoResolved: true, detail: withEngineSafeDiag(err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300), err),
         });
       };
       // Unified TEXT-generation runner for the FAST lane + up-front aux steps (blueprint / project
@@ -15035,19 +15041,20 @@ async function noteBuildOutcome(
         proChainV2,
         onSurplusError: surplusRawErrorReporter(email, (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }), userId),
         userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
-        onFailOpen: (reason) => {
+        onFailOpen: (reason, diag) => {
           const dropped = surplusSession;
           surplusSession = undefined;
           if (dropped) setAdmittedSurplusScope(dropped, false);
           const safe = asSafeSurplusAdmissionReason(reason);
           try {
             audit('AGENTV3_SURPLUS_FALLBACK_TO_WEAK', { reason: safe, phase: 'mid_build_pre_write' }, 'warn');
-            console.warn(`[AGENT_STEP] Surplus mid-build unavailable (${safe}); continuing on Weak/CHEAP_FLOOR ladder.`);
+            console.warn(`[AGENT_STEP] Surplus mid-build unavailable (${safe})${diag ? ` ${diag}` : ''}; continuing on Weak/CHEAP_FLOOR ladder.`);
             buildDiag.record({
               phase: 'provider', severity: 'warning', code: 'SURPLUS_FALLBACK', autoResolved: true,
               // #4050 made this fire AFTER writes too; the line said "before any user file" either way (8cdb4817).
               message: surplusFallbackMessage(reason),
-              detail: String(safe),
+              // BR2388: the stage/reason/HTTP status behind the fold, admin report only (stripped for users).
+              detail: diag ? `${String(safe)} ${diag}` : String(safe),
             });
           } catch { /* audit/diagnostics must never block fail-open */ }
         },
@@ -27419,7 +27426,9 @@ async function noteBuildOutcome(
         // the admin cannot account for is the same problem as a number that is wrong.
         absorbedUnbilledUsd: decidedAbsorbedUsd,
         surplusUnsettledAbsorbed,
+        routerOneEstimated,
       } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd, barrenPhases);
+      recordRouterOneEstimatedBill(buildDiag, routerOneEstimated);
       let decidedRealCostUsd = decidedRealCostUsdIn;
       // A VERSION THE USER CAN GO BACK TO (2026-09-20). The Time Machine reads `build_history`, which
       // until today only the LEGACY builder ever wrote — so it showed "No saved versions yet" for every

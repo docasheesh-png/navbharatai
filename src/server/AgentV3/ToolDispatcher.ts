@@ -366,6 +366,9 @@ import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
 import { athreeMapIntent, athreeModulesFor } from '../lib/athreeMap/athreeMapIntent';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
+import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
+import { authorObject, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
+import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
@@ -9639,6 +9642,38 @@ export class ToolDispatcher {
         const athLayers = await this.addMissingRecipeLayers(ath.files, agent);
         this.scheduleCheckpoint('athree map');
         return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${ath.instructions}${athLayers}`;
+      }
+
+      case 'author_object': {
+        // THE OBJECT FORGE (admin 2026-11-15: "NavBharatAI should make ANY object itself, not depend on the modules somebody built").
+        // The builder writes a SPEC; the Forge validates it, measures it with the same engine the game runs, and draws it back as text.
+        // A spec that fails is feedback, not a crash: the reasons come back as the tool result so the builder fixes and calls again.
+        if (!objectForgeEnabled()) refuse('The Object Forge is switched off for this build, so it cannot be used. Build the object another way and say so plainly in the summary.');
+        const forgeRec = (input as Record<string, unknown>) || {};
+        if (typeof forgeRec.example === 'string' && forgeRec.example.length > 0) {
+          const example = FORGE_EXAMPLES[forgeRec.example];
+          if (!example) return `There is no example called "${forgeRec.example}". Examples: ${FORGE_EXAMPLE_IDS.join(', ')}.`;
+          const shown = authorObject(example.spec);
+          return `${example.what}\n\nThe spec (copy it, change the id and what you need, and pass it as spec):\n${JSON.stringify(example.spec)}\n\nWhat it builds:\n${shown.text}`;
+        }
+        let forgeSpec: unknown = forgeRec.spec;
+        if (forgeSpec === undefined || forgeSpec === null) return FORGE_GUIDE;
+        if (typeof forgeSpec === 'string') {
+          if (forgeSpec.length > 400_000) return 'The spec is too large (over 400 KB). An object is a few dozen nodes: simplify it.';
+          try { forgeSpec = JSON.parse(forgeSpec); }
+          catch (err) { return `The spec is not valid JSON (${err instanceof Error ? err.message : String(err)}). Pass it as an object.`; }
+        }
+        const forged = authorObject(forgeSpec);
+        if (!forged.ok || !forged.files || !forged.id) return forged.text;
+        const forgeKit = Object.entries(forged.files).filter(([path]) => !path.startsWith(OBJECTS_DIR));
+        const forgeWritten = await this.writeRecipeFiles(Object.fromEntries(forgeKit), agent);
+        // The object file is REPLACED on purpose when the builder calls again with the same id (that is how it fixes what the drawing showed).
+        const objectPath = `${OBJECTS_DIR}${forged.id}.ts`;
+        const wroteObject = await this.guardedWrite(objectPath, forged.files[objectPath], { agent, source: 'author_object', allowOverwrite: true });
+        this.state?.recordFileChange({ path: objectPath, kind: wroteObject.kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(objectPath, wroteObject.content);
+        this.scheduleCheckpoint('object forge');
+        return `${wroteObject.kind === 'create' ? 'Created' : 'Replaced'} ${objectPath}\n${forgeWritten.join('\n')}\n\n${forged.text}\n\n${forgeUsage(forged.id, 'create' + pascal(forged.id))}`;
       }
 
       case 'generate_game_shell': {

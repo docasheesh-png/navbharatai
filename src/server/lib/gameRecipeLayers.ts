@@ -41,6 +41,7 @@ import { generateGameVfxAudio } from './GameVfxAudioGenerator';
 import { generateMelody } from './MelodyGenerator';
 import { generateGameShell } from './GameShellGenerator';
 import { generateAthreeMap } from './athreeMap/AthreeMapGenerator';
+import { generateObjectForge } from './objectForge/ObjectForgeGenerator';
 import { createHash } from 'node:crypto';
 import { GAME_KIT_HISTORY } from './gameKitHistory';
 
@@ -63,6 +64,8 @@ export const GAME_RECIPES: Readonly<Record<string, (include?: string[]) => Recip
   generate_melody: generateMelody,
   generate_game_shell: generateGameShell,
   generate_athree_map: generateAthreeMap,
+  // The Object Forge kit (src/game/forge/forge.ts). The objects themselves are written per spec by the author_object tool; only the engine is a kit file.
+  author_object: generateObjectForge,
 };
 
 export interface LayerFile { recipe: string; content: string }

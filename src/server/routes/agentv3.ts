@@ -517,6 +517,7 @@ import {
 import OpenAI from 'openai';
 import { routerOneCatalogStatus, startRouterOneCatalogSync, syncRouterOneCatalog } from '../AI/RouterOne/routerOneCatalog';
 import { ROUTER_ONE_LABEL, ROUTER_ONE_NOT_CONFIGURED, routerOneApiKey, routerOneBaseUrl, routerOneModels, routerOnePinnedForTier, routerOneWeakFallbackEnabled } from '../AI/RouterOne/routerOne';
+import { ProChainV2Build, proChainV2Decision, proChainV2ScopeAsk, proChainV2RedactSecrets, roleForRunnerOpts } from '../AgentV3/proChainV2';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { withStopSignal } from '../AgentV3/stopSignal';
 import { withAnswerNotDeliberation } from '../AgentV3/answerNotDeliberate';
@@ -3587,6 +3588,93 @@ function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSigna
   };
 }
 
+/**
+ * PRO CHAIN V2 — one agent's runner: its own Surplus runner (when the build admitted one), then Router One
+ * (its existing builder entry point, same eligibility as the Weak chain), Qubax and Mitrify — NOTHING else.
+ * The tail is the ordinary multi-provider runner with the caller's billing/report callbacks; the agent's
+ * bench is its own (independence), the build's fatal dead-rung memory is shared (a revoked key is revoked
+ * for every agent). See AgentV3/proChainV2/agentRunner.ts.
+ */
+function proChainV2TurnRunner(opts: Parameters<typeof buildTurnRunner>[0], v2: ProChainV2Build): TurnRunner {
+  const surplus = opts.surplusSession?.runner({
+    onProviderUsed: () => opts.onProviderUsed?.('SURPLUS', []),
+    onTurnComplete: (result) => opts.onTurnComplete?.('SURPLUS', result.usage, result.model, result.usage.cacheReadInputTokens),
+  });
+  const r1Key = routerOneApiKey();
+  return v2.agentRunner({
+    role: roleForRunnerOpts(opts),
+    ...(surplus ? { surplus } : {}),
+    routerOne: routerOneWeakFallbackEnabled() ? openAiCompatRunners(ROUTER_ONE_LABEL, r1Key, routerOneBaseUrl(), routerOneModels()) : [],
+    routerOneSecrets: r1Key.split(/[\s,]+/),
+    rungFactory: (label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models),
+    makeChain: (rungs, hooks) => makeMultiProviderTurnRunner(rungs, {
+      onProviderUsed: (used, from) => {
+        hooks.onUsed(used);
+        if (from.length) console.log(`[AGENTV3] v2 build turn via ${used} (after ${from.join(' → ')})`);
+        opts.onProviderUsed?.(used, from);
+      },
+      onProviderError: (name, err) => {
+        hooks.onFailed(name, err);
+        console.log(`[AGENTV3] v2 build ${name} failed: ${proChainV2RedactSecrets(err instanceof Error ? err.message : String(err), [r1Key, process.env.QUBAX_API_KEY ?? '', process.env.MITRIFY_API_KEY ?? ''])}`);
+        opts.onProviderError?.(name, err);
+      },
+      ...(opts.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {}),
+      ...(opts.onProviderBenched ? { onProviderBenched: opts.onProviderBenched } : {}),
+      ...(opts.onAttemptWasted ? { onAttemptWasted: opts.onAttemptWasted } : {}),
+      ...(opts.deadRungs ? { deadRungs: opts.deadRungs } : {}),
+    }),
+    ...(opts.surplusPreWriteFailOpen?.onSurplusError ? { onSurplusError: opts.surplusPreWriteFailOpen.onSurplusError } : {}),
+    ...(opts.onChain ? { onChain: (rungs) => opts.onChain?.(rungs as unknown as ChainRung[]) } : {}),
+  });
+}
+
+/** The v2 context for this build, or undefined (every pre-v2 path). Kept out of the chat handler (Q-979). */
+export function proChainV2ForBuild(tier: unknown, email: string | null | undefined, uid: string | null | undefined): ProChainV2Build | undefined {
+  const d = proChainV2Decision(String(tier ?? ''), email, uid);
+  return d.enabled ? new ProChainV2Build(d.reason) : undefined;
+}
+
+/** v2: the scope classifier's last step is Qubax → Mitrify, never GLM; otherwise the GLM classifier. */
+export function scopeFinalAsk(v2: ProChainV2Build | undefined, glm: typeof weakBuildAdmissionAsk): typeof weakBuildAdmissionAsk {
+  if (!v2) return glm;
+  return proChainV2ScopeAsk({
+    buffer: v2.scopeUsage,
+    onFailure: (provider, detail) => v2.report({ phase: 'provider', severity: 'warning', code: 'PRO_CHAIN_V2_SCOPE_FAILED', autoResolved: true, message: `[v2] scope classifier: ${provider} failed`, detail }),
+  }) as unknown as typeof weakBuildAdmissionAsk;
+}
+
+/** v2: a Surplus scope failure does NOT drop Surplus for the whole build — each agent decides for itself. */
+export function scopeDropSurplus(v2: ProChainV2Build | undefined, drop: () => void): () => void {
+  return v2 ? () => { v2.report({ phase: 'provider', severity: 'info', code: 'PRO_CHAIN_V2_SCOPE_PRIMARY', autoResolved: true, message: '[v2] SURPLUS failed the scope call — agents still start on it and leave it one by one' }); } : drop;
+}
+
+/** The early scope exception drops Surplus build-wide on the pre-v2 path only (v2 agents decide per agent). */
+export function consumeEarlySurplusFailure(hooks: SurplusPreWriteFailOpenHooks, error: unknown): void {
+  if (hooks.proChainV2) return;
+  tryConsumeSurplusPreWriteFailOpen(hooks, error);
+}
+
+/** Does the planner run on the build's own runner factory (Surplus session or the v2 chain)? */
+export function plansOnBuildRunner(surplusSession: unknown, hooks: SurplusPreWriteFailOpenHooks): boolean {
+  return !!surplusSession || !!hooks.proChainV2;
+}
+
+/** v2: attach the report sink, the live tally, the activation line, and the scope classifier's usage. */
+export function attachProChainV2(v2: ProChainV2Build | undefined, diag: BuildDiagnostics, ledger: { add: (provider: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void }): void {
+  if (!v2) return;
+  try {
+    v2.attachReport((line) => diag.record(line));
+    diag.setProChainV2(v2.summary);
+    v2.report({ phase: 'provider', severity: 'info', code: 'PRO_CHAIN_V2_ACTIVE', autoResolved: true,
+      message: `[v2] Pro Chain V2 active (${v2.reason}): SURPLUS → ENGINE_R1 → ENGINE_QX → ENGINE_MF, per agent; no ladder tail` });
+    for (const row of v2.scopeUsage.splice(0)) {
+      ledger.add(row.provider, row.usage, row.model);
+      if (row.estimated) v2.report({ phase: 'provider', severity: 'warning', code: 'PRO_CHAIN_V2_USAGE_ESTIMATED', autoResolved: true,
+        message: `[v2] ${row.provider} (${row.model}) scope call returned no usage — its tokens are ESTIMATED` });
+    }
+  } catch { /* diagnostics are best-effort — never affects a build */ }
+}
+
 function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKeys: string[]): TurnRunner {
   console.warn(`[AGENTV3] ${tierDisplayName(level)} engine unavailable — ladder ${ladderText}; missing keys: ${missingKeys.join(', ') || 'none named'}`);
   return {
@@ -3639,6 +3727,8 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
    */
   surplusPreWriteFailOpen?: SurplusPreWriteFailOpenHooks;
 }): TurnRunner {
+  // Pro Chain V2 (owner t350u): only a build that carries a v2 context (z@ by default) — every agent its own chain.
+  if (opts.surplusPreWriteFailOpen?.proChainV2 && toPowerLevel(opts.tier) === 'weak') return proChainV2TurnRunner(opts, opts.surplusPreWriteFailOpen.proChainV2);
   // The earlier profile pin survives only on other bands; Weak always uses the confirmed order.
   if (toPowerLevel(opts.tier) !== 'weak' && opts.surplusPreWriteFailOpen?.routerOneOnly) return routerOneTurnRunner(opts, { pinned: true });
   if (opts.surplusSession) {
@@ -11626,6 +11716,8 @@ async function noteBuildOutcome(
     // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders. Branches live in surplusChatAdmission.
     // Weak uses the shared order for every profile; the legacy pin remains only on other bands.
     const routerOnePinned = routerOnePinnedForTier(powerLevelReqEffective, email, userId);
+    // Pro Chain V2 (owner t350u) — undefined for everyone outside its allowlist (z@ by default).
+    const proChainV2 = proChainV2ForBuild(powerLevelReqEffective, email, userId);
     const surplusAdmitGate = await admitWithRouterOnePin(routerOnePinned, () => runWeakSurplusAdmissionForChat({
       powerLevel: powerLevelReqEffective,
       intent,
@@ -11651,10 +11743,10 @@ async function noteBuildOutcome(
     const weakAdmission = await weakAdmissionForTurn({ prompt, intent, importing: hasImportIntent, tier: powerLevelReqEffective },
       scopeAskWithRouterOnePin(routerOnePinned, routerOneScopeAsk, () => weakScopeAsk(createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', scopeCallAudit(scopeRequestId, intentWorkspaceId, row), 'info');
-      }, error => { earlySurplusFailure = error; }), eligibleRouterOneScopeAsk(), weakBuildAdmissionAsk, () => {
+      }, error => { earlySurplusFailure = error; }), eligibleRouterOneScopeAsk(), scopeFinalAsk(proChainV2, weakBuildAdmissionAsk), scopeDropSurplus(proChainV2, () => {
         setAdmittedSurplusScope(surplusSession, false);
         surplusSession = undefined;
-      })),
+      }))),
       surplusScopeTimeoutOpts(surplusSession));
     recordScopeFailure(scopeRequestId, intentWorkspaceId, weakAdmission, audit);
     const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
@@ -14639,6 +14731,7 @@ async function noteBuildOutcome(
        */
       recordWeakAdmissionUsage(weakAdmission, (usage) => providerLedger.add('GLM', usage, WEAK_SCOPE_MODEL));
       recordRouterOneScopeUsage(providerLedger);
+      attachProChainV2(proChainV2, buildDiag, providerLedger);
       const shadowFastLaneLedger = createProviderUsageLedger();
       const captureShadowUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string): void => {
         shadowFastLaneLedger.add(used, usage, model);
@@ -14932,6 +15025,7 @@ async function noteBuildOutcome(
         state: { dropped: false },
         noFallback: surplusFallbackDisabledForTier(powerLevelReqEffective, email, userId),
         routerOneOnly: routerOnePinnedForTier(powerLevelReqEffective, email, userId),
+        proChainV2,
         onSurplusError: surplusRawErrorReporter(email, (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }), userId),
         userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
         onFailOpen: (reason) => {
@@ -14958,7 +15052,7 @@ async function noteBuildOutcome(
       // eligible exception, never infer availability from a sanitized failed row.
       if (earlySurplusFailure !== undefined) surplusPreWriteFailOpen.onSurplusError?.(earlySurplusFailure);
       if (surplusSession && !abort.signal.aborted) {
-        tryConsumeSurplusPreWriteFailOpen(surplusPreWriteFailOpen, earlySurplusFailure);
+        consumeEarlySurplusFailure(surplusPreWriteFailOpen, earlySurplusFailure);
       }
       const fastLaneDeadRungs = new Map<string, string>();
       // 🔴 THE FLAG THAT WENT NOWHERE (autopsy e706e068, School ERP). `buildIsComplex` was computed,
@@ -18519,7 +18613,7 @@ async function noteBuildOutcome(
         // Opus for a Sonnet-pinned tier would be exactly the cross-tier call the admin forbade.
         // Plan on the tier's plan ladder (admin-approved table 2026-09-14). `planGrok` keeps its name
         // for the lines below; it is no longer Grok — Grok judges.
-        const planGrok = surplusSession ? makePlanTextRunner() : tierPlanRunner(powerLevelReqEffective, noClaudeBuild, buildBench, recordProviderBenched);
+        const planGrok = plansOnBuildRunner(surplusSession, surplusPreWriteFailOpen) ? makePlanTextRunner() : tierPlanRunner(powerLevelReqEffective, noClaudeBuild, buildBench, recordProviderBenched);
         const planRunner = new AgentRunner({
           replyVoice: () => rb.replyVoice ?? voiceOf(originalPrompt),
           client: planGrok ?? client,

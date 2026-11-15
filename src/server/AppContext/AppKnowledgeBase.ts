@@ -3350,6 +3350,20 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Money") stil
     keywords: ['free chat chain', 'chain rollout', 'provider quota', 'daily spend cap', 'chat fallback', 'refresh sampled metrics', 'metrics snapshot', 'stale metrics', 'admin read cost', 'shared paid budget', 'paid budget revision', 'paid cap change', 'budget initialization', 'initialize paid budget', 'held upper bound', 'settled recorded cost', 'chain band karo', 'free chat quota', 'rollout kitna', 'paid budget badhao', 'paid kharcha limit'],
   },
   {
+    id: 'admin-test-chat-bot',
+    name: 'Test Chat Bot (admin only)',
+    path: 'Admin Dashboard → AI Engines → Test Chat Bot',
+    description: `An administrator-only chat for testing one AI engine connection at a time, with real text and multi-turn context. It never touches ordinary app conversations and never falls back to another connection.
+• The "Test provider" dropdown lists every wired text-chat connection. An entry without a server key, or one that cannot be called safely, is shown disabled with the reason.
+• Gateway connections that publish a per-model price can be tested here too (admin 2026-11-15). The page reads that posted price, reserves the highest price band for this page's 1,024-token limit against the shared paid budget, and makes one call with no retry. If no posted price can be read, it does not call and says so.
+• An optional model field tries a specific model id; leaving it blank uses the same model selection as main chat.
+• Paid sends use the shared paid cap set under AI Engines → Free Chat Chain. If that cap is $0 or used up, a paid test answers "budget" and does not call the connection.
+• If the connection fails, an admin-only diagnostic shows the HTTP status, error code, request id and a redacted error body. Keys are stripped.`,
+    howToUse: 'Sign in as admin, open AI Engines → Test Chat Bot, choose a connection in "Test provider", optionally type a model id, write a synthetic test message, tick the confirmation box and press Send. Press "New test chat" to clear the conversation.',
+    relatedFeatures: ['admin-free-chat-chain', 'admin-live-model-registry'],
+    keywords: ['test chat bot', 'test provider', 'provider test', 'engine test', 'api test', 'connection test', 'provider error', 'provider check karo', 'api test kaise kare'],
+  },
+  {
     id: 'admin-bot-ledger',
     name: 'Bot ledger (who built which bot)',
     path: 'Admin Dashboard → Apps → Bots (admin only)',

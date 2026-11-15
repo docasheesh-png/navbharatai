@@ -76,6 +76,8 @@ export interface RiverOptions {
   baseHeight(x: number, z: number): number;
   /** A source must stand at least this high (metres). */
   minSource: number;
+  /** How many rivers rise, as a multiple of the usual (0 none, 1 the usual, up to 3). */
+  density?: number;
 }
 
 export interface RiverNetwork {
@@ -272,7 +274,7 @@ export function createRiverNetwork(o: RiverOptions): RiverNetwork {
 
   // Sources: one candidate per cell, in the highlands.
   const cell = P > 0 ? 3125 : 1200;
-  const chance = P > 0 ? 0.2 : 0.35;
+  const chance = Math.min(0.95, (P > 0 ? 0.2 : 0.35) * Math.max(0, Math.min(3, o.density ?? 1)));
   const lo = P > 0 ? 0 : -o.radius;
   const n = P > 0 ? Math.round(P / cell) : Math.ceil((2 * o.radius) / cell);
   for (let cz = 0; cz < n; cz++) {

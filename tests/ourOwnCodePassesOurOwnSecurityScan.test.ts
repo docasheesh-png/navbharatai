@@ -94,8 +94,9 @@ function inputCombos(name: string, schema: { properties?: Record<string, Prop>; 
  * REQUEST (it refuses an app with no world), so the census has to switch it on and ask for a world — otherwise the census would
  * never read the map's code, which is exactly the code that must pass the scan.
  */
-const NEEDS_CONTEXT: Record<string, { env: Record<string, string>; request: string }> = {
+const NEEDS_CONTEXT: Record<string, { env: Record<string, string>; request: string; newProject?: boolean }> = {
   generate_athree_map: { env: { AGENTV3_ATHREE_MAP: 'on' }, request: 'athree map par ek 3D racing game banao' },
+  generate_game_royale: { env: { AGENTV3_ORIGINAL_ROYALE: 'on' }, request: 'Build an original battle royale practice game', newProject: true },
 };
 
 async function toolCensus(): Promise<{ hits: string[]; silent: string[]; calls: number; tools: number }> {
@@ -115,6 +116,14 @@ async function toolCensus(): Promise<{ hits: string[]; silent: string[]; calls: 
         const ctx = NEEDS_CONTEXT[t.name];
         const saved: Record<string, string | undefined> = {};
         if (ctx) { for (const [k, v] of Object.entries(ctx.env)) { saved[k] = process.env[k]; process.env[k] = v; } dispatcher.setCoverageRequest(ctx.request); }
+        // These are platform-owned scaffold fixtures, not reopened user projects. Supply the
+        // same positive lifecycle grant as the verified composition root so the scanner actually
+        // sees every emitted royale file. Disabled/unknown/existing-project refusal is covered
+        // separately by originalRoyaleDispatch and royaleProjectEligibility tests.
+        if (ctx?.newProject) {
+          dispatcher.setUserOwnedFiles([], ctx.request);
+          dispatcher.setRoyaleNewProjectAllowed(true);
+        }
         try { await dispatcher.dispatch({ id: 'c', name: t.name, input }, 'architect'); }
         finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
         calls++;

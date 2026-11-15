@@ -1,3 +1,5 @@
+import { inspectWorkspaceFilePaths } from '../AgentV3/WorkspaceFileStore';
+import { royaleNewProjectAllowed } from '../AgentV3/royaleProjectEligibility';
 import { completedAppReviewEligible } from '../AgentV3/optionalBugHunt';
 import { readSummaryManifest } from '../AgentV3/ProjectSummary';
 import { compilerNeedsPackageSetup, compilerRepairProven, PACKAGE_SETUP_REQUIRED } from '../AgentV3/compilerSetupBoundary';
@@ -13042,6 +13044,9 @@ async function noteBuildOutcome(
     // edit-file-tree reconcile further down — one durable read, no duplication.
     let durableFilePaths: string[] = [];
     try { durableFilePaths = await listWorkspaceFilePaths(workspaceId); } catch { durableFilePaths = []; }
+    const royaleStrictPaths = envFlag('AGENTV3_ORIGINAL_ROYALE') ? await inspectWorkspaceFilePaths(workspaceId) : null;
+    const royaleInventoryRead = royaleStrictPaths !== null && royaleStrictPaths.length === durableFilePaths.length
+      && royaleStrictPaths.every((path) => durableFilePaths.includes(path));
     // FAIL-SAFE INTENT RE-CHECK (Fix 27 — report 2026-07-07: "isne pura app wapas banaya"): the intent
     // probe above (countWorkspaceFiles) FAILS OPEN — a transient Firestore timeout/error returns 0, so
     // "add a share button" on a 46-file imported app classified as a FRESH build and the complete-app
@@ -13887,6 +13892,7 @@ async function noteBuildOutcome(
      * exactly as it behaves today.
      */
     let projectFilesAtTurnStart: Record<string, string> | null = null;
+    let royaleHydrationVerified = false;
     /**
      * 🧬 THE VERIFIED BASE OF THIS EDIT (editPromotionGate.ts, projectRevisions.ts). The head revision says what the
      * project IS; the hydrated workspace is only what was read back. `editBaseCheck` records whether the second is
@@ -16014,6 +16020,8 @@ async function noteBuildOutcome(
           // 🧬 IS WHAT WAS READ BACK THE PROJECT'S VERIFIED HEAD, COMPLETE? (projectRevisions.ts) A partial
           // hydration is the one case where an edit would be built over — and compared with — a fragment.
           const baseResult = await checkEditBaseForTurn({ workspaceId, hydrated: saved, store: getRevisionStore(), loadVerifiedCopy: () => loadWorkspaceFiles(greenWorkspaceKey(workspaceId)), withTimeout, isImportTurn, hasImportIntent, durableUnreadable: durable.status === 'unreadable' });
+          royaleHydrationVerified = durable.status !== 'unreadable' && baseResult.finding?.code !== 'EDIT_BASE_UNCHECKED'
+            && (Object.keys(saved).length === 0 || holdsOnlyOurStarter(saved));
           editHeadAtStart = baseResult.head;
           editBaseCheck = baseResult.check;
           editVerifiedBase = baseResult.verifiedBase;
@@ -16708,6 +16716,14 @@ async function noteBuildOutcome(
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
+      dispatcher.setRoyaleNewProjectAllowed(royaleNewProjectAllowed({
+        inventoryRead: royaleInventoryRead, intent, editing: isEditMode,
+        hasVerifiedRevision: editHeadAtStart !== null,
+        hydratedSourceIsNew: royaleHydrationVerified,
+        importing: isImportTurn, importRequested: hasImportIntent,
+        durablePathCount: durableFilePaths.length, durableSourceCount,
+        verifiedStarterSourceCount: durableStarterOnlyCount,
+      }));
       pathsReadNow = () => {
         try { return dispatcher.sharedReadLedger().size; } catch { return 0; }
       };

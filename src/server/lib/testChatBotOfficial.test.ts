@@ -141,6 +141,86 @@ describe('admin official OpenAI-compat helper', () => {
       messages: [{ role: 'user', content: 'a' }], signal: new AbortController().signal })).rejects.toMatchObject({ providerCode: 'configuration' });
   });
 
+  describe('streamed replies and a body that never finishes (admin report 2026-11-15: Router One HTTP 200, 90003 ms, "invalid-json")', () => {
+    const sse = (chunks: string[], { hang = false } = {}) => new ReadableStream<Uint8Array>({
+      async start(controller) {
+        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+        if (!hang) controller.close();
+      },
+    });
+    const sseResponse = (body: ReadableStream<Uint8Array>) => ({
+      ok: true, status: 200, headers: new Headers({ 'content-type': 'text/event-stream; charset=utf-8', 'x-request-id': 'r1-req' }), body,
+      text: async () => { throw new Error('text() must not be used for a stream'); },
+    });
+    const routerOne = { url: 'https://api.router.one/v1/chat/completions', apiKey: 'synthetic-key-value', model: 'deepseek-v4.1-flash',
+      messages: [{ role: 'user' as const, content: 'hi' }] };
+
+    it('asks Router One for a stream and joins the deltas, model and usage into one reply', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(sseResponse(sse([
+        'data: {"model":"deepseek-v4.1-flash","choices":[{"delta":{"content":"Hel"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"lo"}}]}\n',
+        '\ndata: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2}}\n\ndata: [DONE]\n\n',
+      ])));
+      vi.stubGlobal('fetch', fetchImpl);
+      const result = await runOfficialOpenAiCompatTest({ ...routerOne, signal: new AbortController().signal, stream: true });
+      expect(result).toEqual({ content: 'Hello', model: 'deepseek-v4.1-flash', usage: { inputTokens: 7, outputTokens: 2 } });
+      const body = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body));
+      expect(body).toMatchObject({ stream: true, stream_options: { include_usage: true }, max_tokens: 1024 });
+    });
+
+    it('reads a stream even when the provider ignores stream: false', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(sse(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n']))));
+      expect((await runOfficialOpenAiCompatTest({ ...routerOne, signal: new AbortController().signal })).content).toBe('ok');
+    });
+
+    it('reports the exact admin failure — headers 200, body never finished — as a timeout, not invalid-json', async () => {
+      const abort = new AbortController();
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true, status: 200, headers: new Headers({ 'content-type': 'application/json', 'x-request-id': 'b7622d6b7fd547d8c968e9e5740f770b' }),
+        text: () => new Promise((_, reject) => {
+          if (abort.signal.aborted) reject(new Error('aborted'));
+          else abort.signal.addEventListener('abort', () => reject(new Error('aborted')));
+        }),
+      }));
+      const pending = runOfficialOpenAiCompatTest({ ...routerOne, signal: abort.signal });
+      abort.abort();
+      const error = await pending.catch(value => value) as OfficialTestChatError;
+      expect(error).toBeInstanceOf(OfficialTestChatError);
+      expect(error).toMatchObject({ classificationHint: 'timeout', httpStatus: 200, providerCode: 'body-timeout', providerRequestId: 'b7622d6b7fd547d8c968e9e5740f770b' });
+      expect(error.providerCode).not.toBe('invalid-json');
+      expect(error.providerMessage).toContain('did not finish');
+    });
+
+    it('reports a stream cut off by the time limit as a timeout that says how much had arrived', async () => {
+      const abort = new AbortController();
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'));
+          abort.signal.addEventListener('abort', () => controller.error(new Error('aborted')));
+        },
+      });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(body)));
+      const pending = runOfficialOpenAiCompatTest({ ...routerOne, signal: abort.signal, stream: true });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      abort.abort();
+      const error = await pending.catch(value => value) as OfficialTestChatError;
+      expect(error).toMatchObject({ classificationHint: 'timeout', providerCode: 'body-timeout' });
+      expect(error.providerMessage).toContain('7 characters');
+    });
+
+    it('surfaces an error event inside the stream, with the key redacted', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(sse(['data: {"error":{"message":"upstream refused synthetic-key-value"}}\n\n']))));
+      const error = await runOfficialOpenAiCompatTest({ ...routerOne, signal: new AbortController().signal, stream: true }).catch(value => value) as OfficialTestChatError;
+      expect(error).toMatchObject({ providerCode: 'stream-error' });
+      expect(error.providerMessage).not.toContain('synthetic-key-value');
+    });
+
+    it('treats a stream with no text as empty, not as success', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(sse(['data: [DONE]\n']))));
+      await expect(runOfficialOpenAiCompatTest({ ...routerOne, signal: new AbortController().signal, stream: true })).rejects.toMatchObject({ providerCode: 'empty' });
+    });
+  });
+
   it('still throws OfficialTestChatError for a non-JSON OpenRouter failure', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false, status: 401, headers: new Headers(), text: async () => 'unauthorized',

@@ -777,6 +777,8 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       if (!receipt) throw new TestChatUnavailable('budget', 409);
       const result = await releaseIfUnused(receipt, () => runOfficialOpenAiCompatTest({
         url: ROUTER_ONE_TEST_CHAT_URL, apiKey: routerOneApiKey(), model, messages: action.messages, signal: bounded,
+        // Streamed, as the builder calls it: a non-streamed Router One reply waited past the 90-second bound.
+        stream: true,
       }));
       return finish(action, result.content, result.model || model, startedAt, result.usage);
     }

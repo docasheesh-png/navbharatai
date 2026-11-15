@@ -899,6 +899,7 @@ describe('Router One in the admin Test Chat Bot (admin 2026-11-15)', () => {
     expect(fake.officialOpenAi).toHaveBeenCalledOnce();
     expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({
       url: ROUTER_ONE_TEST_CHAT_URL, apiKey: 'synthetic-router-one-key', model: 'deepseek-v4.1-flash', messages: routerOne.messages,
+      stream: true,
     }));
     expect(fake.run).not.toHaveBeenCalled();
     expect(fake.compatTurn).not.toHaveBeenCalled();

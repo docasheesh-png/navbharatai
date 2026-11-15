@@ -101474,3 +101474,11 @@ Admin: *"100+ type ke maps (1 km se 1000 km)"* — as a SPACE, not 100 hand-writ
 **Defects found by those tests and fixed at the root:** the spawn height rule (4 m) rejected ALL land on a map stretched flat; the spawn search (20 km from the origin) found no land on a continent 1000 km wide whose origin was sea; tundra had snow only on mountains (a frozen map must be white at sea level); Devanagari "किमी" and the phrase "bahut bada" were not read; "snowy mountains" was read as tundra. A guard on the water width at a point had no test until the proof loop found it.
 **Honest limits:** 1 to 5 km maps have no roads and no runway (a road region is 12.5 km); a map of 250 km and up is mostly empty land; the kinds differ by numbers, not by a different terrain algorithm (no canyons or volcanoes yet).
 
+
+## 2026-11-15 — BR1978 autopsy ("Build one game", succeeded, charged ₹5.55): lock three closures against an empty-sandbox game build
+
+Owner t311u sequential audit, BR1978 only (boundary 1951..2105 frozen). Branched from origin/main `55dcc3e20` (#4229); BR1977 (#4170) is merged. Under SANDBOX_UNAVAILABLE the workspace was empty, yet GAME_KIT_SEEDED claimed three recipes with 0 files and told the builder the kit was on disk; the builder rebuilt the Vite project by hand and WRITE_TIME_TYPECHECK stayed off for 20 TS writes although it had written tsconfig.json. The result was a real playable "Color Rush" DOM game (explore passed, phone OK, YELLOW gate). Ledger: [autopsy](docs/build-report-autopsy-BR1978.md), [evidence](docs/build-report-autopsy-BR1978-evidence.json).
+- All three defects are already closed on main (BR1958 #4132 seed preflight, BR1977 #4170 empty-seed downgrade, BR1951 tsconfig re-arm). This PR ships no production change; `tests/br1978Autopsy.test.ts` locks each against this report's exact shape with two-sided neighbours.
+- "Build one game" is still buildable / explicit-order on main; making it ask is an admin product decision. Q-2653 and Q-2654 gain this evidence and stay open.
+
+Queue: this commit closes no row and opens no row. Q-2649..Q-2654 and earlier blockers stay open.

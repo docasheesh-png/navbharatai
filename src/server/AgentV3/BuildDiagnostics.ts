@@ -118,6 +118,13 @@ export const PROCESS_ONLY_CODES = new Set([
   'UNUSED_DEPS_RESTORE_INCOMPLETE', 'DEAD_SALVAGE_RESTORE_INCOMPLETE',
   'DESIGN_HEAL_RESTORE_INCOMPLETE',
   'HEAL_NOT_DURABLE',         // our repair wrote twice to one file; the user never sees repair passes
+  // Pro Chain V2 (owner t350u): which engine served a step, a fallback, an estimated price or usage. All of it is
+  // OUR routing, never the user's app; the user report folds every PRO_CHAIN_V2_* line into ENGINE_ROUTING.
+  // Warnings/info only, so no error count and no bill moves.
+  'ENGINE_ROUTING',
+  'PRO_CHAIN_V2_ACTIVE', 'PRO_CHAIN_V2_AGENT', 'PRO_CHAIN_V2_ENGINE', 'PRO_CHAIN_V2_FALLBACK',
+  'PRO_CHAIN_V2_PRIMARY_DROPPED', 'PRO_CHAIN_V2_PRIMARY_SKIP', 'PRO_CHAIN_V2_EXHAUSTED', 'PRO_CHAIN_V2_CALL_FAILED',
+  'PRO_CHAIN_V2_USAGE_ESTIMATED', 'PRO_CHAIN_V2_RATE_ESTIMATED', 'PRO_CHAIN_V2_SCOPE_FAILED', 'PRO_CHAIN_V2_SCOPE_PRIMARY',
   'IMPORT_NOT_DURABLE',       // our store did not confirm saving an import (autopsy d0b2fcd6, Q-735) — their app is unchanged
   'IMPORT_DURABLE_PENDING',   // our background save of an import was still running when the turn ended (build d62bf22d) — their app is unchanged
   // ── Q-381 batch two (2026-10-11): each of these says, at its own recording site, that it is about OUR run.

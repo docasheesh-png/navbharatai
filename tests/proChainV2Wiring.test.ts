@@ -6,7 +6,7 @@ import { TIER_LADDERS } from '../src/server/AgentV3/tierLadder';
 import type { ChainRung } from '../src/server/AgentV3/runnerChainSummary';
 import type { SurplusPreWriteFailOpenHooks } from '../src/server/AI/SurplusRegistry/surplusPreWriteFailOpen';
 import { PublicBuildEngineError } from '../src/server/lib/buildEngineError';
-import { BuildDiagnostics, userFacingReport } from '../src/server/AgentV3/BuildDiagnostics';
+import { BuildDiagnostics, PROCESS_ONLY_CODES, isAppFinding, userFacingReport } from '../src/server/AgentV3/BuildDiagnostics';
 import { PRO_CHAIN_V2_NO_ENGINE } from '../src/server/AgentV3/proChainV2/agentRunner';
 import { neutraliseSupplierNames } from '../src/server/AgentV3/proChainV2/builderAdapters';
 import { runWithSurplusBuild, activateSurplusBuildForCurrentRequest } from '../src/server/AI/inferencePolicy';
@@ -190,5 +190,16 @@ describe('source guards', () => {
     const fn = route.slice(route.indexOf('function proChainV2TurnRunner'), route.indexOf('export function proChainV2ForBuild'));
     expect(fn).toContain('openAiCompatRunners(ROUTER_ONE_LABEL');
     expect(fn).toContain('routerOneWeakFallbackEnabled()');
+  });
+  it('every PRO_CHAIN_V2_* code (and its user-facing ENGINE_ROUTING fold) is our routing, never a finding about the app', () => {
+    const files = [resolve(__dirname, '../src/server/routes/agentv3.ts'),
+      ...readdirSync(resolve(__dirname, '../src/server/AgentV3/proChainV2')).filter((x) => x.endsWith('.ts') && !x.endsWith('.test.ts')).map((x) => resolve(__dirname, '../src/server/AgentV3/proChainV2', x))];
+    const codes = new Set<string>();
+    for (const f of files) for (const m of readFileSync(f, 'utf8').matchAll(/code: '(PRO_CHAIN_V2_[A-Z_]+)'/g)) codes.add(m[1]);
+    expect(codes.size).toBeGreaterThanOrEqual(10);
+    for (const c of [...codes, 'ENGINE_ROUTING']) {
+      expect(PROCESS_ONLY_CODES.has(c), c).toBe(true);
+      expect(isAppFinding({ ts: 0, phase: 'provider', severity: 'warning', code: c, message: 'x', autoResolved: true }), c).toBe(false);
+    }
   });
 });

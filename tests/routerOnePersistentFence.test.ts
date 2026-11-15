@@ -25,56 +25,71 @@ const snapshot = { model: 'synthetic', sourceSha256: 'a'.repeat(64) } as PublicP
 const deadline = () => Date.now() + 60000;
 const pending = { kind: 'pending' as const, reason: 'incomplete-usage', requestId: null };
 const known = { kind: 'catalogue-calculated' } as import('../src/server/AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt;
-describe('persistent Router One unresolved-attempt fence', () => {
+// OWNER DECISION 2026-11-15 ("Unknown keemat absorb karo"): an unknown-cost attempt is absorbed and recorded,
+// never a fence. Before it, a single pending or expired attempt refused every later Router One call on every
+// server, forever — builds showed ENGINE_R1 failing 45/45 in under a second with no request sent.
+describe('Router One attempt store: unknown cost is absorbed, never a permanent fence', () => {
   it('allows normal concurrent requests sharing a key across workers', async () => {
     const { db, rows } = database();
     const outcomes = await Promise.allSettled(['one', 'two'].map(id => new FirestoreCatalogueAttemptStore(db).reserve(binding, id, 'key', snapshot, deadline())));
     expect(outcomes.map(o => o.status)).toEqual(['fulfilled', 'fulfilled']);
     expect(Object.keys(rows.get('router_one_accounting_keys/key')!.active as object)).toEqual(['one', 'two']);
   });
-  it('a known concurrent completion cannot clear another pending call', async () => {
+  it('THE REPORTED BUG: a key left with an unresolved entry by the old rule admits the next call and is cleaned', async () => {
+    const { db, rows } = database();
+    rows.set('router_one_accounting_keys/key', { version: 2, active: { stale: 1 }, unresolved: { old: true, stale: true } });
+    await new FirestoreCatalogueAttemptStore(db).reserve(binding, 'fresh', 'key', snapshot, deadline());
+    expect(rows.get('router_one_accounting_keys/key')).toMatchObject({ unresolved: {} });
+    expect(Object.keys(rows.get('router_one_accounting_keys/key')!.active as object)).toEqual(['fresh']);
+    expect(rows.get('router_one_catalogue_attempts/fresh')).toMatchObject({ status: 'reserved' });
+  });
+  it('a pending (unknown-cost) completion releases its hold and is recorded as absorbed', async () => {
     const { db, rows } = database(); const store = new FirestoreCatalogueAttemptStore(db);
     await store.reserve(binding, 'one', 'key', snapshot, deadline());
-    await store.reserve(binding, 'two', 'key', snapshot, deadline());
     await store.finish('one', 'key', pending);
-    await store.finish('two', 'key', known);
-    await store.releaseVerified('two', 'key');
-    await expect(new FirestoreCatalogueAttemptStore(db).reserve(binding, 'three', 'key', snapshot, deadline())).rejects.toThrow();
-    expect(rows.get('router_one_accounting_keys/key')).toMatchObject({ unresolved: { one: true } });
-    expect([...rows.keys()].every(p => p.startsWith('router_one_'))).toBe(true);
+    expect(rows.get('router_one_catalogue_attempts/one')).toMatchObject({ status: 'absorbed-unknown', result: pending });
+    expect(rows.get('router_one_accounting_keys/key')).toMatchObject({ active: {}, unresolved: {} });
+    await new FirestoreCatalogueAttemptStore(db).reserve(binding, 'two', 'key', snapshot, deadline());
+    expect(Object.keys(rows.get('router_one_accounting_keys/key')!.active as object)).toEqual(['two']);
   });
-  it('completion holds remain until acknowledgement and explicit verified release', async () => {
+  it('a known completion is held until its verified release; a lost release no longer blocks the next call', async () => {
+    const { db, rows } = database(); const store = new FirestoreCatalogueAttemptStore(db);
+    await store.reserve(binding, 'one', 'key', snapshot, deadline());
+    await store.finish('one', 'key', known);
+    expect(rows.get('router_one_accounting_keys/key')).toMatchObject({ unresolved: { one: true } });
+    await new FirestoreCatalogueAttemptStore(db).reserve(binding, 'two', 'key', snapshot, deadline());
+    expect(rows.get('router_one_accounting_keys/key')).toMatchObject({ unresolved: {} });
+    expect(rows.get('router_one_catalogue_attempts/one')).toMatchObject({ status: 'catalogue-calculated' });
+  });
+  it('a verified release still clears the hold exactly once', async () => {
     const { db } = database(); const store = new FirestoreCatalogueAttemptStore(db);
     await store.reserve(binding, 'one', 'key', snapshot, deadline());
     await store.finish('one', 'key', known);
-    await expect(new FirestoreCatalogueAttemptStore(db).reserve(binding, 'two', 'key', snapshot, deadline())).rejects.toThrow();
     await store.releaseVerified('one', 'key');
-    await store.reserve(binding, 'two', 'key', snapshot, deadline());
-    await expect(store.releaseVerified('two', 'key')).rejects.toThrow();
+    await expect(store.releaseVerified('one', 'key')).rejects.toThrow();
   });
-  it('persists an expired attempt fence across restarts without timed release', async () => {
+  it('an expired attempt (a worker died mid-call) is absorbed instead of fencing the key across restarts', async () => {
     const { db, rows } = database(); let now = 1000;
     await new FirestoreCatalogueAttemptStore(db, () => now).reserve(binding, 'one', 'key', snapshot, 1100);
     now = 1101;
-    await expect(new FirestoreCatalogueAttemptStore(db, () => now).reserve(binding, 'two', 'key', snapshot, 1200)).rejects.toThrow();
-    expect(rows.get('router_one_accounting_keys/key')).toMatchObject({ unresolved: { one: true } });
-    now = 2000;
-    await expect(new FirestoreCatalogueAttemptStore(db, () => now).reserve(binding, 'three', 'key', snapshot, 2100)).rejects.toThrow();
+    await new FirestoreCatalogueAttemptStore(db, () => now).reserve(binding, 'two', 'key', snapshot, 1200);
+    expect(rows.get('router_one_catalogue_attempts/one')).toMatchObject({ status: 'absorbed-expired' });
+    expect(Object.keys(rows.get('router_one_accounting_keys/key')!.active as object)).toEqual(['two']);
+    expect([...rows.keys()].every(p => p.startsWith('router_one_'))).toBe(true);
   });
-  it('a committed finish with a lost acknowledgement keeps the cross-worker fence', async () => {
+  it('rejects a duplicate call id, a wrong or repeated completion, and releasing an unknown cost', async () => {
     const { db } = database(); const store = new FirestoreCatalogueAttemptStore(db);
     await store.reserve(binding, 'one', 'key', snapshot, deadline());
-    const uncertainFinish = async () => { await store.finish('one', 'key', known); throw new Error('acknowledgement lost'); };
-    await expect(uncertainFinish()).rejects.toThrow('acknowledgement lost');
-    await expect(new FirestoreCatalogueAttemptStore(db).reserve(binding, 'two', 'key', snapshot, deadline())).rejects.toThrow();
-  });
-  it('rejects wrong or repeated completion and refuses to release pending cost', async () => {
-    const { db } = database(); const store = new FirestoreCatalogueAttemptStore(db);
-    await store.reserve(binding, 'one', 'key', snapshot, deadline());
+    await expect(store.reserve(binding, 'one', 'key', snapshot, deadline())).rejects.toThrow();
     await expect(store.finish('wrong', 'key', pending)).rejects.toThrow();
     await store.finish('one', 'key', pending);
     await expect(store.finish('one', 'key', pending)).rejects.toThrow();
     await expect(store.releaseVerified('one', 'key')).rejects.toThrow();
+  });
+  it('still refuses a malformed key record instead of guessing', async () => {
+    const { db, rows } = database();
+    rows.set('router_one_accounting_keys/key', { version: 1, active: {}, unresolved: {} });
+    await expect(new FirestoreCatalogueAttemptStore(db).reserve(binding, 'one', 'key', snapshot, deadline())).rejects.toThrow();
   });
 });
 

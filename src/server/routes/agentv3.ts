@@ -14662,8 +14662,8 @@ async function noteBuildOutcome(
         if (routerOneCostUnconfirmed(used, usage.routerOneReceipt) && !costUnconfirmedNoted) {
           costUnconfirmedNoted = true;
           try { buildDiag.record({ phase: 'build', severity: 'info', code: 'DISCOUNT_COST_UNCONFIRMED', autoResolved: true,
-            message: 'Engine usage accounting is pending; this portion is excluded from the wallet charge and further requests on the key are blocked.',
-            detail: 'ENGINE_R1 catalogue pricing or complete usage could not be verified. The unresolved attempt is retained; unknown cost is not measured zero. Verified calls use official posted tariffs, not a supplier-settled wallet debit. Reconciliation is required before reopening a blocked key.' }); } catch { /* observation only */ }
+            message: 'Engine usage accounting is pending; this portion is excluded from the wallet charge and its cost is absorbed by NavBharatAI.',
+            detail: 'ENGINE_R1 catalogue pricing or complete usage could not be verified, so the cost is unknown (not measured zero) and absorbed, recorded as ROUTER_ONE_COST_ABSORBED in the audit log. Further requests on the key are NOT blocked (owner decision 2026-11-15). Verified calls use official posted tariffs, not a supplier-settled wallet debit.' }); } catch { /* observation only */ }
         }
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the

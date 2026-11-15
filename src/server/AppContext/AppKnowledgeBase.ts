@@ -3365,7 +3365,8 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Money") stil
     description: `An administrator-only chat for testing one AI engine connection at a time, with real text and multi-turn context. It never touches ordinary app conversations and never falls back to another connection.
 • The "Test provider" dropdown lists every wired text-chat connection. An entry without a server key, or one that cannot be called safely, is shown disabled with the reason.
 • Gateway connections that publish a per-model price can be tested here too (admin 2026-11-15). The page reads that posted price, reserves the highest price band for this page's 1,024-token limit against the shared paid budget, and makes one call with no retry. If no posted price can be read, it does not call and says so.
-• An optional model field tries a specific model id; leaving it blank uses the same model selection as main chat.
+• Every AI engine connection NavBharatAI uses is in the list, including the builder and fallback engines (admin 2026-11-15). A connection that is used only for speech or only for images is shown disabled, because it has no chat to test.
+• An optional model field tries a specific model id (for example a newer or larger model of the same engine); leaving it blank uses the same model the app uses.
 • Paid sends use the shared paid cap set under AI Engines → Free Chat Chain. If that cap is $0 or used up, a paid test answers "budget" and does not call the connection.
 • If the connection fails, an admin-only diagnostic shows the HTTP status, error code, request id and a redacted error body. Keys are stripped.`,
     howToUse: 'Sign in as admin, open AI Engines → Test Chat Bot, choose a connection in "Test provider", optionally type a model id, write a synthetic test message, tick the confirmation box and press Send. Press "New test chat" to clear the conversation.',

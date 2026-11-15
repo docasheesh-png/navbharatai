@@ -27,6 +27,14 @@ export const TEST_CHAT_PROVIDER_IDS = [
   'anthropic-claude',
   'kimi',
   'xai-grok',
+  // Builder and fallback engines (admin 2026-11-15: every AI provider NavBharatAI uses belongs in this list).
+  'glm-builder',
+  'nemotron',
+  'bedrock-glm',
+  'vertex-gemini',
+  // Non-chat services: listed so the census is complete, always disabled with the reason.
+  'sarvam-speech',
+  'pollinations-image',
 ] as const;
 export type TestChatProviderId = typeof TEST_CHAT_PROVIDER_IDS[number];
 export const TEST_CHAT_MAX_MESSAGE_CHARS = 8_000;

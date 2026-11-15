@@ -18,6 +18,7 @@ import { restartScreenEnter, shouldAnimateViewChange } from './lib/screenTransit
 import { routeForPath, deepLinkTarget, type DeepLinkView } from './lib/deepLinkRoute';
 import { readTapFeedbackPrefs, shouldOpenMenuOnSwipe } from './lib/tapFeedbackPrefs';
 import { useUndoRedo } from './hooks/useUndoRedo';
+import { useUseCaseEntry } from './hooks/useUseCaseEntry';
 import { useToast, ToastContainer } from './components/Toast';
 import { resolveGithubConnectionForUser } from './lib/githubConnection';
 import { sanitizeFileMap } from './lib/fileMapSanitize';
@@ -1729,6 +1730,8 @@ export default function App() {
       toggleTab(view);
     }
   }, [user, toggleTab]);
+
+  useUseCaseEntry({ user, loadingUser, toggleTab, setShowAuth });
 
   // P3.1 — preview build / client-side bundler slice extracted into usePreviewBundler (behavior-
   // preserving). Placed here so all its deps (files, setGeneratedCode, activeFile, activeAgent,

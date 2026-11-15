@@ -116,6 +116,7 @@ describe('4 · 🔒 CLASS LOCK: nothing writes a device-following dark look into
     'src/server/AppContext/AppKnowledgeBase.ts': 'search keywords for the Dark Mode Generator tool',
     'src/server/lib/legalMarkdown.ts': 'NavBharatAI\'s own legal pages, not a built app',
     'src/server/lib/marketingPages.ts': 'NavBharatAI\'s own marketing pages, not a built app',
+    'src/server/lib/useCasePages.ts': 'NavBharatAI\'s own curated app-idea pages, not a built app',
     'src/server/lib/checkoutHandoff.ts': 'NavBharatAI\'s own checkout hand-off page, not a built app',
     'src/server/AgentV3/previewDoor.ts': 'NavBharatAI\'s own preview loading screen, not a built app',
   };

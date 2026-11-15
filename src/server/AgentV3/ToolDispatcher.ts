@@ -367,6 +367,7 @@ import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
 import { athreeMapIntent, athreeModulesFor } from '../lib/athreeMap/athreeMapIntent';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
+import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
@@ -9645,7 +9646,14 @@ export class ToolDispatcher {
         const athRec = (input as Record<string, unknown>) || {};
         const athModules = Array.isArray(athRec.include) ? athRec.include.filter((v): v is string => typeof v === 'string') : undefined;
         const athPick = athModules ?? athreeModulesFor(this.coverageRequest ?? this.userRequest ?? '').modules;
-        const ath = generateAthreeMap(athPick);
+        // WHICH MAP (admin 2026-11-15, "100+ type ke maps, 1 km se 1000 km"): the builder may pass archetype and size_km; otherwise the user's
+        // words decide (a size, a kind of land); naming neither gives the default world.
+        const athArchetype = typeof athRec.archetype === 'string' ? athRec.archetype.trim().toLowerCase() : '';
+        const athSize = typeof athRec.size_km === 'number' && Number.isFinite(athRec.size_km) ? athRec.size_km : null;
+        let athChoice = (athArchetype && !(athArchetype in ARCHETYPES)) ? null : (athArchetype || athSize !== null ? { archetype: (athArchetype || 'continental') as Archetype, sizeKm: athSize ?? 100 } : mapChoiceFor(this.coverageRequest ?? this.userRequest ?? ''));
+        if (athArchetype && !(athArchetype in ARCHETYPES)) return `Unknown map kind "${athArchetype}". The kinds are: ${ARCHETYPE_IDS.join(', ')}.`;
+        if (athChoice) athChoice = { archetype: athChoice.archetype, sizeKm: clampSizeKm(athChoice.sizeKm) };
+        const ath = generateAthreeMap(athPick, athChoice);
         const athWritten = await this.writeRecipeFiles(ath.files, agent);
         const athLayers = await this.addMissingRecipeLayers(ath.files, agent);
         this.scheduleCheckpoint('athree map');

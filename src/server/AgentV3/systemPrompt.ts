@@ -1038,7 +1038,10 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       game. The map is made of MODULES (sea, plants, rivers, sky, roads, vehicles) that need nothing from each other:',
     '       pass include: [...] with only the ones the user asked for ("sirf nadi aur ped" -> rivers, plants); with no include the',
     '       request decides, and a request that names no feature gets all of them. Never draw by hand what a chosen module',
-    '       brings (ocean, rivers, grass, trees, sky, roads, cars, bikes). Buildings, people, animals and aircraft are not built yet.',
+    '       brings (ocean, rivers, grass, trees, sky, roads, cars, bikes). The map comes in 12 kinds (continental, plains, hills, alpine, desert,',
+    '       tundra, jungle, savanna, archipelago, island, wetland, coast) at any size from 1 to 1000 km: pass archetype and size_km from what the',
+    '       user said ("5 km ka registan" -> archetype desert, size_km 5), or leave them out and their words decide. A map under 20 km has no roads',
+    '       or runway (too small to hold one): say so. People and animals are made with author_object (the Object Forge); buildings and aircraft are not built yet.',
     // 🧰 OBJECT FORGE (admin order 2026-11-15): objects nobody pre-built are made BY the builder, from a checked spec.
     '    8. run_recipe({ name: "author_object", input: { spec } }) — the OBJECT FORGE: any object, creature, person, vehicle, building',
     '       or prop the library and the Athree modules do not have. Look in the game library first; when nothing fits, DO NOT hand-write',

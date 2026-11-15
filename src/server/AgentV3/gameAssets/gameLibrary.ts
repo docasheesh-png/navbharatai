@@ -4,6 +4,7 @@ import { compileMatch, PLACEMENT, type CatalogEntry, type ObjectCategory } from 
 import { ASSET_LIMITS, candidateMatches } from './assetPolicy';
 import { gameAssetRequirements } from './assetPlan';
 import { REVIEWED_GAME_ASSETS, type ReviewedAsset } from './providers';
+import { LIBRARY_MAPS, athreeMapEnabled, type LibraryMap } from '../../lib/athreeMap/athreeMapLibrary';
 
 export type LibraryCategory = ObjectCategory | 'maps' | 'audio' | 'other';
 export interface GameLibraryEntry {
@@ -44,7 +45,7 @@ const normalize = (s: string) => s.normalize('NFKC').toLowerCase().trim().replac
 const bound = (n: number | undefined) => Number.isFinite(n) ? Math.max(1, Math.min(20, Math.floor(n!))) : 8;
 const categories = Object.keys(PLACEMENT) as ObjectCategory[];
 
-export function createGameLibrary(models: readonly ReviewedAsset[] = REVIEWED_GAME_ASSETS, specs: readonly CatalogEntry[] = OBJECT_CATALOG) {
+export function createGameLibrary(models: readonly ReviewedAsset[] = REVIEWED_GAME_ASSETS, specs: readonly CatalogEntry[] = OBJECT_CATALOG, maps: readonly LibraryMap[] = []) {
   const exact = new Map<string, CatalogEntry>();
   const compiled = specs.map(spec => ({ spec, match: compileMatch(spec) }));
   for (const spec of specs) exact.set(normalize(spec.id), spec);
@@ -73,6 +74,14 @@ export function createGameLibrary(models: readonly ReviewedAsset[] = REVIEWED_GA
         'A decorative building model does not prove enterable rooms, working doors or stairs.'],
     } });
   }
+  // Whole maps are code recipes of our own (category `maps`): the librarian lists them beside models and objects.
+  for (const map of maps) rows.push({ entry: {
+    id: `map:${map.id}`, name: map.name, category: 'maps', kind: 'recipe', subjects: [map.id, map.name.toLowerCase(), 'map', ...map.aliases],
+    builder: map.recipe, animations: [], license: { ...map.license }, availability: 'code-recipe',
+    size: '100 km seamless loop or an 8 km island', quality: { deviceCertification: 'not-measured', runtime: 'Three.js' },
+    placement: ['Stand things on map.world.heightAt(x, z); take spawn positions from map.world.spawnPoints(kind); never place on water or steep ground.'],
+    verification: [...COMMON_CHECKS, map.summary],
+  } });
   const byCategory = new Map<string, typeof rows>();
   for (const row of rows) { const bucket = byCategory.get(row.entry.category) ?? []; bucket.push(row); byCategory.set(row.entry.category, bucket); }
   const summary = [...categories, 'maps', 'audio', 'other']
@@ -106,7 +115,9 @@ export function createGameLibrary(models: readonly ReviewedAsset[] = REVIEWED_GA
   };
 }
 const library = createGameLibrary();
-export const searchGameLibrary = (input: LibrarySearch = {}): LibraryResult => library.search(input);
+const libraryWithMaps = createGameLibrary(REVIEWED_GAME_ASSETS, OBJECT_CATALOG, LIBRARY_MAPS);
+/** The maps appear only while the map is switched on (athreeMapEnabled). */
+export const searchGameLibrary = (input: LibrarySearch = {}): LibraryResult => (athreeMapEnabled() ? libraryWithMaps : library).search(input);
 export function gameLibraryObjectNote(object: string): string {
   const result = searchGameLibrary({ query: object, limit: 3 });
   return '[GAME_LIBRARY]\n' + JSON.stringify({ entries: result.entries.map(({ id, kind, availability, builder, category, license }) => ({ id, kind, availability, builder, category, license })), missing: result.missing,

@@ -2275,6 +2275,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_athree_map',
+      description:
+        'The ATHREE MAP — a big seeded world for a 3D game that needs one (racing, open world, battle royale, flight, exploring): '
+        + 'terrain that streams in around the camera, a 100 km seamless loop or an 8 km island, sea level and biomes, one wind field, '
+        + 'safe spawn points and physics heightfield data (src/game/athree/). Use it when the user NAMES Athree (or a-three) for a game '
+        + 'that needs a world, or when the library offers it for such a game. It decides from the request: it refuses an app with no '
+        + 'world, a map the user declined and a project that chose another map — then build without it, and say why. Not for 2D games. '
+        + 'Hand-writing a terrain for such a game is wrong.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_game_shell',
       description:
         'COMPOSE a runnable 3D game from the other game layers — it renders a three.js scene, so a 2D '
@@ -3605,6 +3616,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_i18n',
   'request_secrets',
   'generate_game_systems',
+  'generate_athree_map',
   'generate_game_shell',
   'generate_game_vfx',
   'generate_melody',
@@ -3826,6 +3838,7 @@ export const RECIPE_TOOLS = [
   'generate_game_3d',
   'generate_game_controller',
   'generate_game_runtime',
+  'generate_athree_map',
   'generate_game_shell',
   'generate_game_systems',
   'generate_game_vfx',

@@ -31,6 +31,41 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
     "6d19d3faa0b46f00871a82026740716b96dd3ad44aae87185b94ecc852bf36ff"
   ],
+  "src/game/athree/chunks.ts": [
+    "7c44401394f5df9672beabf3d534e840283607d72d362909317d4bc5fd2e8745",
+    "7730b00de5d1acb5392129ff245e3f636643d73a6088de5c67bb97feb3c5b8f8"
+  ],
+  "src/game/athree/collider.ts": [
+    "0c1bd77b86a85155ce889d4c87367b305f46e2dbbe4de704c0cc603076788b08"
+  ],
+  "src/game/athree/config.ts": [
+    "0daa780af7666b5884ab80dc784accc7928edd551c23a01a108e54a78da53202",
+    "1a5e74ff45a4d3eb8bd212b4822e888c97ddc98c05d4c60f6d6f768df92a17fb"
+  ],
+  "src/game/athree/index.ts": [
+    "8b2009db2ca5de148cb40686da71b407c82bccdda21bd578e574911c108f4ec3",
+    "017614bbeb64e46cbb545bc46e689c8264267c6578cd3f92868f02e27739ea6c",
+    "f65600598f6222546cf5a5736280d9f64625fd96c390d736786cc23bb0b81cf5"
+  ],
+  "src/game/athree/noise.ts": [
+    "f0a7c7eaf4622707b7788540fc373e0b3d2e06687a2c5e2362aab39924371b98"
+  ],
+  "src/game/athree/ocean.ts": [
+    "b30d24fcf9d1fc581798e8a30eff71daacad22f08cc6d9ab886822d70e726b77"
+  ],
+  "src/game/athree/plants.ts": [
+    "58c460d350d3fcd90a8839b56b32d523a130e0c295eef892844eea8ac2e69f14"
+  ],
+  "src/game/athree/vegetation.ts": [
+    "71c7521d01db7f34b81a475b05071360015946eb6e5e43e3171e5471f14ac115"
+  ],
+  "src/game/athree/water.ts": [
+    "b9856b2f69d98be359bb564a8c0a119cf2e2ce5579f18839027a4c795eaea461"
+  ],
+  "src/game/athree/world.ts": [
+    "d09b678e278ecb28e031c1f26ab476ee946fef562d0e4eb4ddd12bf8704c0805",
+    "504042a941aa174e5d7d84873165b4b28fa6d9fd1a314f35130872dedd3259d1"
+  ],
   "src/game/controls.test.ts": [
     "2df3798b667fc3fe66d971a938e25286bdf3066b668eed9527c6200d4c26f03c",
     "5feb01be9c62f7c6d61cc049d80e25535804f446fee7b5fabc578c539381f8a4"

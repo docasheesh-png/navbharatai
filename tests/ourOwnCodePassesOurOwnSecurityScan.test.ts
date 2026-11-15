@@ -89,6 +89,15 @@ function inputCombos(name: string, schema: { properties?: Record<string, Prop>; 
   return combos;
 }
 
+/**
+ * Tools that only write when the build has asked for what they give. The Athree map is switched off by default and decides from the
+ * REQUEST (it refuses an app with no world), so the census has to switch it on and ask for a world — otherwise the census would
+ * never read the map's code, which is exactly the code that must pass the scan.
+ */
+const NEEDS_CONTEXT: Record<string, { env: Record<string, string>; request: string }> = {
+  generate_athree_map: { env: { AGENTV3_ATHREE_MAP: 'on' }, request: 'athree map par ek 3D racing game banao' },
+};
+
 async function toolCensus(): Promise<{ hits: string[]; silent: string[]; calls: number; tools: number }> {
   const tools = defaultToolCatalog().filter((t) => /^generate_/.test(t.name));
   const hits = new Set<string>();
@@ -102,7 +111,12 @@ async function toolCensus(): Promise<{ hits: string[]; silent: string[]; calls: 
         const seeded = { ...files, ...(PRESENT[t.name] ?? {}) };
         for (const [p, c] of Object.entries(seeded)) act.files.set(p, c);
         const stream = new AgentEventStream();
-        await new ToolDispatcher(act, `ws-census-${t.name}`, new WorkspaceState(stream), stream).dispatch({ id: 'c', name: t.name, input }, 'architect');
+        const dispatcher = new ToolDispatcher(act, `ws-census-${t.name}`, new WorkspaceState(stream), stream);
+        const ctx = NEEDS_CONTEXT[t.name];
+        const saved: Record<string, string | undefined> = {};
+        if (ctx) { for (const [k, v] of Object.entries(ctx.env)) { saved[k] = process.env[k]; process.env[k] = v; } dispatcher.setCoverageRequest(ctx.request); }
+        try { await dispatcher.dispatch({ id: 'c', name: t.name, input }, 'architect'); }
+        finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
         calls++;
         for (const [p, c] of act.files) {
           if (seeded[p] === c) continue;

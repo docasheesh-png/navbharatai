@@ -12192,6 +12192,7 @@ async function noteBuildOutcome(
       const landing = liftForLanding(importedFiles, opts.assets, opts.writeToSandbox);
       importedFiles = landing.files;
       opts = { ...opts, assets: landing.assets };
+      await landing.landClone(actuator, workspaceId); // a cloned page is lifted over what is already in the sandbox (Q-2665)
       const validation = validateImportedProject(importedFiles);
       if (!validation.ok) {
         emit({ type: 'narration', agent: 'architect', text: `⚠️ ${validation.issues.join(' ')}`, ts: Date.now() });

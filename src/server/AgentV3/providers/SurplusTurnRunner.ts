@@ -1,4 +1,5 @@
 import { guardSurplusNarrative, withServiceIdentity } from './surplusNarrativeIdentity';
+import { elideTurnParams } from '../elideTurnMedia';
 import { readScopeFailure, tagScopeFailure, type ScopeFailureDiagnostic } from '../scopeFailureDiagnostic';
 import { tagRawErrorDetail } from '../rawErrorDetail';
 import { PublicBuildEngineError, publicBuildEngineError, type PublicBuildEngineSafeReason } from '../../lib/buildEngineError';
@@ -154,6 +155,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
   if (!Number.isFinite(configuredMs) || configuredMs <= 0) throw unavailable('misconfigured');
   return {
     async runTurn(params) {
+      params = elideTurnParams(params); // embedded media never reaches a model (elideTurnMedia.ts)
       let diagnostic: ScopeFailureDiagnostic = { stage: 'authorization', reason: 'authorization_failed' };
       if (params.signal?.aborted) throw publicError(new BuildStoppedError());
       const bound = turnDeadline(configuredMs, params.deadlineAt);

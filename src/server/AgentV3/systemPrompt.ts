@@ -1030,6 +1030,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       touch screen; choose buttons with `touchControls`, never hand-roll a joystick),',
     '       pause and restart, and handles WebGL teardown so the tab does not die after a few visits.',
     // 🗺️ ATHREE MAP (admin order 2026-11-14): the recipe decides from the request, so naming it for an app with no world cannot add one.
+    '    FIRST for a fresh user-shaped world, BEFORE any standalone 3D/model recipe, run_recipe({ name: "generate_athree_map" }) accepts input.composition and the native input.include selection: explicit seed/profile/widthKm/quality/rivers/vegetation/objects. Derive only supported module kinds and bounded counts from the user request; phone total <=16, mid <=32, desktop <=64. Use phone unless a stronger target is explicit. Do not silently omit unsupported requests, promise 1000km or photorealism, or replace existing project source. The emitted requestedWorld helper constructs terrain and original visual objects at runtime; wire its lifecycle and show placement issues. Include plants/rivers when requesting vegetation/visible rivers. A pre-existing standalone model file may conflict with composition ownership helpers; preserve it and adapt manually, never overwrite it or retry by disabling guards. Driving/NPC AI/combat remain separate gameplay work.',
     '    7. run_recipe({ name: "generate_athree_map" }) — only for a 3D game that needs a LARGE WORLD (racing, open',
     '       world, battle royale, flight, exploring): the Athree map (src/game/athree/) — streaming terrain, sea level,',
     '       biomes, one wind field, safe spawn points and physics heightfield data. Use it when the user names',
@@ -1655,3 +1656,4 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  asked for in chat: the platform adds the exact key list and a secure field after you.',
   ].join('\n') + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + CREATOR_IDENTITY;
 }
+

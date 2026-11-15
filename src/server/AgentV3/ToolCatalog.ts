@@ -2283,16 +2283,23 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'that needs a world, or when the library offers it for such a game. It decides from the request: it refuses an app with no '
         + 'world, a map the user declined and a project that chose another map — then build without it, and say why. Not for 2D games. '
         + 'Hand-writing a terrain for such a game is wrong. Pass include to take only some modules of it.',
-      input_schema: {
-        type: 'object',
-        properties: {
-          include: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Optional modules: sea, plants, rivers, sky, roads, vehicles. Default: chosen from the request (none named = all).',
-          },
-        },
-      },
+      input_schema: { type: 'object', properties: {
+        include: { type: 'array', items: { type: 'string' }, description: 'Optional modules: sea, plants, rivers, sky, roads, vehicles. Default: chosen from the request (none named = all).' },
+        composition: { type: 'object', description: 'Optional explicit user-shaped runtime world. Additive only; refuses replacing existing source. Procedural visual modules, not NPC AI or driving. Width 1–100km, mobile performance unverified.', additionalProperties: false,
+          required: ['seed','profile','widthKm','quality','rivers','vegetation','objects'],
+          properties: {
+            seed: { type:'integer', minimum:-2147483648, maximum:2147483647 },
+            profile: { type:'string', enum:['open-world','racing','battle-royale','flight','explore'] },
+            widthKm: { type:'number', minimum:1, maximum:100 },
+            quality: { type:'string', enum:['phone','mid','desktop'] },
+            rivers: { type:'boolean' }, vegetation: { type:'boolean' },
+            objects: { type:'array', maxItems:9, items:{ type:'object', additionalProperties:false, required:['kind','count'], properties:{
+              kind:{type:'string',enum:['human','dog','cow','horse','deer','goat','tiger','car','motorcycle']},
+              count:{type:'integer',minimum:1,maximum:64}
+            }}}
+          }
+        }
+      } },
     },
     {
       name: 'generate_game_shell',
@@ -3950,3 +3957,4 @@ export function catalogForTools(allowed: ToolName[]): ClaudeToolDef[] {
   if (runCanWrite(allowed as string[])) return defs;
   return defs.map((t) => (t.name === 'update_todo' ? { ...t, description: UPDATE_TODO_CONTRACT } : t));
 }
+

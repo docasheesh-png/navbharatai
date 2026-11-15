@@ -1,3 +1,4 @@
+import { exclusiveCreateCommand } from '../../../../lib/proceduralObjects/exclusiveCreateCommand';
 import { randomUUID } from 'node:crypto';
 import { assertNotCanaryWorkspace } from '../../../reliability/canaryIsolation';
 import { assertCanaryLegacyAllowed } from '../../../reliability/canarySpendGuard';
@@ -2207,6 +2208,16 @@ export class E2BActuator implements IEngineerActuator {
       }
       throw e;
     }
+  }
+
+  /** Atomic create used by additive procedural recipes. No overwrite fallback. */
+  async createFileExclusive(workspaceId:string,filePath:string,content:string):Promise<void> {
+    const rel=safeRelPath(filePath);
+    assertWriteAllowed(workspaceId,rel);
+    this._snapshotCurrent.delete(workspaceId);
+    const result=await this.fileOp(workspaceId,'source.createExclusive',(sb)=>sb.commands.run(exclusiveCreateCommand(WORKSPACE_ROOT,rel,content),{timeoutMs:20000}),25000);
+    if(result.exitCode!==0||!result.stdout.includes('NBI_EXCLUSIVE_CREATED'))throw new Error('Atomic source creation failed; existing or partial source preserved.');
+    this._cacheFileWrite(workspaceId,rel,content);
   }
 
   async writeFile(workspaceId: string, filePath: string, content: string): Promise<void> {

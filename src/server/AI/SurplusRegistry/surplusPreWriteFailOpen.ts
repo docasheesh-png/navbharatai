@@ -34,6 +34,7 @@ import {
   type SafeSurplusAdmissionReason,
 } from './admitOrFallback';
 import { recordSurplusMidBuildDeath, recordSurplusAdmitProbeSuccess } from './surplusAdmitCircuit';
+import { formatEngineSafeDiag } from '../../lib/engineSafeDiag';
 import type { ProChainV2Build } from '../../AgentV3/proChainV2/buildContext';
 
 /** Safe mid-build reasons appended to the admission allowlist. Never secret/URL-bearing. */
@@ -55,7 +56,9 @@ export type SurplusPreWriteFailOpenHooks = {
   state: SurplusPreWriteFailOpenState;
   /** Count of model-authored (non-platform-seed) files written so far. */
   userFilesWritten: () => number;
-  onFailOpen?: (reason: SurplusPreWriteFailOpenReason) => void;
+  /** `diag` (BR2388): the supplier-free `[engine-diag: stage=… reason=… safe=… status=…]` marker, for the
+   *  admin report only; '' when the failure carried none. */
+  onFailOpen?: (reason: SurplusPreWriteFailOpenReason, diag?: string) => void;
   /** Owner per-profile opt-out (surplusNoFallback): never drop Surplus to Weak; error propagates. */
   noFallback?: boolean;
   /** Observe every Surplus turn error (raw-error profiles). Never alters control flow. */
@@ -152,7 +155,8 @@ export function tryConsumeSurplusPreWriteFailOpen(
   const reason: SurplusPreWriteFailOpenReason = files > 0 ? 'mid_build_after_write' : surplusPreWriteFailOpenReason(error);
   // Spike signal for the admit circuit — next builds skip Surplus during cool-down.
   try { recordSurplusMidBuildDeath(reason); } catch { /* never block fail-open */ }
-  try { hooks.onFailOpen?.(reason); } catch { /* audit must never block fail-open */ }
+  // The diag argument is passed only when the failure carried one, so untagged callers see the old call.
+  try { const diag = formatEngineSafeDiag(error); if (diag) hooks.onFailOpen?.(reason, diag); else hooks.onFailOpen?.(reason); } catch { /* audit must never block fail-open */ }
   return reason;
 }
 

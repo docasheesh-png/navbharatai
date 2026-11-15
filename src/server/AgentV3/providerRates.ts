@@ -239,7 +239,7 @@ export function realRateCard(): Record<string, TokenRate> {
  * 'GEMINI'|'GROK'|'other'); `model` is TurnResult.model (may be undefined for aux calls).
  */
 export function realRateFor(provider: string, model?: string): TokenRate {
-  if (isRouterOneAccountingProvider(provider ?? '')) throw new RouterOneAccountingUnavailableError();
+  if (isRouterOneAccountingProvider(provider ?? '')) throw new RouterOneAccountingUnavailableError('rate_unavailable');
   if ((provider ?? '').toUpperCase() === 'SURPLUS') throw new SurplusAccountingUnavailableError();
   // Pro Chain V2 suppliers (ENGINE_QX / ENGINE_MF only): the supplier's own price when known; otherwise
   // the existing model-first rules below price it as a conservative, report-labelled ESTIMATE.

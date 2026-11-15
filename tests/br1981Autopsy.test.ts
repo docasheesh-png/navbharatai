@@ -22,16 +22,20 @@
  *   • A fast-lane pass that saved no files returns ok:false (nothing_landed) and does
  *     not claim "Built your app" or "shipping the files unverified". This report's
  *     HTML/JS plan has no App.tsx, so the existing root-refusal hand-off did not fire.
+ *
+ * Sibling already closed, locked here: OneShot (Q-982) already refuses a write that
+ * landed fewer than minFiles and does not return ok:true for it.
  */
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { sandboxUnavailableNotice } from '../src/server/routes/agentv3';
 import { freeTierUpsellMessage } from '../src/server/AgentV3/FreeTierBuildRouting';
-import { runSimpleBuild } from '../src/server/AgentV3/SimpleBuilder';
+import { runSimpleBuild, unwrittenEntries } from '../src/server/AgentV3/SimpleBuilder';
 import { classifyBuildOutcome } from '../src/server/AgentV3/BuildOutcome';
 
 const ROUTE = readFileSync('src/server/routes/agentv3.ts', 'utf8');
 const SIMPLE = readFileSync('src/server/AgentV3/SimpleBuilder.ts', 'utf8');
+const ONESHOT = readFileSync('src/server/AgentV3/OneShotBuilder.ts', 'utf8');
 
 // Synthetic plan in this report's shape: HTML + JS + data, no App.tsx / app/page.
 // Distinctive attachment paths are not reproduced.
@@ -183,6 +187,55 @@ describe('BR1981 — a fast-lane pass that saved no files is not a successful bu
     const r = await runSimpleBuild(h.deps);
     expect(r.ok).toBe(false);
     expect(r.filesWritten).toBe(0);
-    expect(r.reason).toMatch(/root component|stopped early|nothing_landed/i);
+    expect(r.reason).toMatch(/root component/i);
+    expect(r.reason).toMatch(/stopped early/i);
+    expect(r.reason).not.toBe('nothing_landed');
+    expect(h.logs.some((l) => /Built your app — 0 file/i.test(l))).toBe(false);
+  });
+
+  it('neighbour: the same HTML/JS plan with one landed write is still a successful lane', async () => {
+    const h = lane({
+      writeFiles: async (files) =>
+        files.map((f, i) => (i === 0 ? { path: f.path, ok: true as const } : refuse(f.path))),
+      verify: undefined,
+      startPreview: undefined,
+    });
+    const r = await runSimpleBuild(h.deps);
+    expect(r.ok).toBe(true);
+    expect(r.filesWritten).toBe(1);
+    expect(r.reason).not.toBe('nothing_landed');
+    expect(h.logs.some((l) => /Built your app — 1 file/i.test(l))).toBe(true);
+    expect(h.counts.verifyCalls()).toBe(0);
+    expect(h.counts.previewCalls()).toBe(0);
+  });
+
+  it('neighbour: unwrittenEntries still does not treat index.html as a root', () => {
+    expect(unwrittenEntries([
+      { path: 'index.html', purpose: 'page shell' },
+      { path: 'js/app.js', purpose: 'quiz runtime' },
+      { path: 'data/catalog.json', purpose: 'catalog' },
+    ], [])).toEqual([]);
+  });
+
+  it('the zero-file failure is decided before the success log or the unverified-shipping note', () => {
+    const guard = SIMPLE.indexOf("reason: 'nothing_landed'");
+    const successLog = SIMPLE.indexOf('Built your app — ${files.length} file(s), each generated individually.');
+    const unverified = SIMPLE.indexOf('The type-check could not run in the sandbox — shipping the files unverified');
+    expect(guard).toBeGreaterThan(0);
+    expect(successLog).toBeGreaterThan(guard);
+    expect(unverified).toBeGreaterThan(successLog);
+    expect(SIMPLE).toMatch(/if \(files\.length === 0\)/);
+  });
+});
+
+describe('BR1981 — the sibling one-shot lane already refuses a write that landed nothing', () => {
+  it('OneShot throws on a below-minFiles landing and returns ok:false (Q-982)', () => {
+    expect(ONESHOT).toMatch(/if \(landed\.length < minFiles\) throw new Error\(ONE_SHOT_FILES_REFUSED\)/);
+    const refused = ONESHOT.indexOf('if (landed.length < minFiles) throw new Error(ONE_SHOT_FILES_REFUSED)');
+    const success = ONESHOT.indexOf('Built your app in one shot — ${files.length} file(s).');
+    expect(refused).toBeGreaterThan(0);
+    expect(success).toBeGreaterThan(refused);
+    expect(ONESHOT).toContain("reason === ONE_SHOT_FILES_REFUSED");
+    expect(ONESHOT).toMatch(/return \{ ok: false, filesWritten: 0/);
   });
 });

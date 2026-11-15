@@ -7,6 +7,7 @@
 // The same engine then builds it inside the game.
 import type { RecipeOutput } from '../gameRecipeLayers';
 import { FORGE_ENGINE } from './forgeEngineSource';
+import { FORGE_CUSTOMISE } from './forgeCustomiseKitSource';
 import { FORGE_DIR } from './forgePaths';
 import { FORGE_EXAMPLE_IDS } from './forgeExamples';
 
@@ -19,7 +20,7 @@ export function objectForgeEnabled(env: NodeJS.ProcessEnv = process.env): boolea
 export function generateObjectForge(): RecipeOutput & { instructions: string } {
   const fence = '```';
   return {
-    files: { [FORGE_DIR + 'forge.ts']: FORGE_ENGINE },
+    files: { [FORGE_DIR + 'forge.ts']: FORGE_ENGINE, [FORGE_DIR + 'customise.ts']: FORGE_CUSTOMISE },
     instructions: [
       'The Object Forge engine is src/game/forge/forge.ts. Objects are written to src/game/objects/<id>.ts by author_object; use one like this:',
       '',
@@ -66,6 +67,8 @@ export const FORGE_GUIDE = [
   '  tube { path:[[x,y,z],...], radius: r or [r per point] }  (tail, branch, rope, tentacle, pipe; a radius of 0 at the end makes a point)',
   '  plane { size:[w,d] }',
   'TRACK: { "property": "rotation"|"position"|"scale", "axis": "x"|"y"|"z", "amplitude": 30, "speed": 1, "phase": 0, "offset": 0 }',
+  '  Add "spin": true to a rotation and it TURNS FOR EVER at speed turns per second (a wheel, a propeller, a fan, a windmill; no amplitude);',
+  '  a wheel whose axle runs along x spins about x. A negative speed turns the other way.',
   '  value = offset + amplitude * sin(2*pi*(speed*time + phase)). Rotation is in DEGREES, position in metres. A rotation about x swings a',
   '  hanging limb forward/back (positive = backward, the object faces +z). mirrorPhase 0.5 makes the mirrored limb swing the opposite way.',
   '',

@@ -2291,8 +2291,25 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             items: { type: 'string' },
             description: 'Optional modules: sea, plants, rivers, sky, roads, vehicles. Default: chosen from the request (none named = all).',
           },
+          archetype: {
+            type: 'string',
+            description: 'The kind of land: continental, plains, hills, alpine, desert, tundra, jungle, savanna, archipelago, island, wetland, coast. Default: read from the user\'s words (registan -> desert, pahad -> alpine, dweep -> island).',
+          },
+          size_km: {
+            type: 'number',
+            description: 'How big the map is, 1 to 1000 km (a seamless loop; an island is that many km across). Default: read from the user\'s words ("5 km", "chhota", "huge"); none = 100.',
+          },
         },
       },
+    },
+    {
+      name: 'generate_game_royale',
+      description: 'Add an ORIGINAL offline 3D royale practice starter when the user requests a battle-royale-style game. '
+        + 'This is a bounded procedural arena with two local bots, a shrinking zone and restart, not PUBG, multiplayer or photorealism. '
+        + 'Requires the operator-enabled experimental flag. Emits RoyalePractice.tsx and its rules; mount it in a NEW project only. '
+        + 'Existing user files are preserved. Never replace an existing game or a selected Athree map with this starter. '
+        + 'No billing or artificial waiting is added. Read the tool result for preserved files and required integration.',
+      input_schema: { type: 'object', properties: {} },
     },
     {
       name: 'author_object',
@@ -2305,14 +2322,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'src/game/objects/<id>.ts, and the game makes the object with createX(THREE). EASIEST: call it with { describe: "a lighthouse with a '
         + 'spiral stair" } and the Forge MAKES IT ITSELF (it asks a model for the spec, checks it, shows the model its own drawing and has it '
         + 'correct it, a few rounds) — you write no spec. Or call it with no arguments to read the guide, with '
-        + '{ example: "person" } for a worked spec to adapt (person, quadruped, house, tree, sword), or with { spec } to build. Use it when the '
+        + '{ example: "person" } for a worked spec to adapt (person, quadruped, house, tree, sword, train, car, bike), or with { spec } to build. Use it when the '
         + 'library has no match; never hand-write vertices or stacks of boxes for an object in game code. The result is stylised low-poly '
         + '(not photoreal): say so.',
       input_schema: {
         type: 'object',
         properties: {
           spec: { type: 'object', description: 'The object: { id, name, materials, nodes }. See the guide (call with no arguments).' },
-          example: { type: 'string', description: 'Return a worked example spec and its drawing: person, quadruped, house, tree or sword.' },
+          example: { type: 'string', description: 'Return a worked example spec and its drawing: person, quadruped, house, tree, sword, train, car or bike.' },
+          customise: { type: 'string', description: 'CHANGE an object that exists, in the user\'s own words (English, Hinglish or Hindi): "dress ka rang neela karo, baal bade karo, thoda lamba". Needs target. Colours of named parts, size, and for the Forge person: gender, hair length, a dress, build.' },
+          target: { type: 'string', description: 'With customise: the id of the object to change (see src/game/objects/).' },
+          base: { type: 'string', enum: ['person'], description: 'With customise: when the target does not exist yet, start from the Forge person.' },
           describe: { type: 'string', description: 'The object in words (what it is, roughly how big, what matters). The Forge makes it itself and writes it.' },
           id: { type: 'string', description: 'With describe: the id to save it under (lowercase letters, digits, -). Default: made from the description.' },
         },
@@ -3652,6 +3672,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_athree_map',
   'author_object',
   'generate_game_shell',
+  'generate_game_royale',
   'generate_game_vfx',
   'generate_melody',
   'generate_game_controller',
@@ -3875,6 +3896,7 @@ export const RECIPE_TOOLS = [
   'generate_athree_map',
   'author_object',
   'generate_game_shell',
+  'generate_game_royale',
   'generate_game_systems',
   'generate_game_vfx',
   'generate_geocoding',

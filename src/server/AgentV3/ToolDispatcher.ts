@@ -362,14 +362,17 @@ import { generateGame3D } from '../lib/Game3DGenerator';
 import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
+import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
 import { athreeMapIntent, athreeModulesFor } from '../lib/athreeMap/athreeMapIntent';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
+import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
 import { selfAuthorObject, madeCache } from '../lib/objectForge/forgeSelfAuthor';
+import { parseCustomisation, applyEdits, customiseSummary, nodeNamesOf, specFromObjectFile, personSpecFor } from '../lib/objectForge/forgeCustomise';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
@@ -471,7 +474,7 @@ import { isSecretFilePath, maskSecretFile, SECRET_MASK, secretPlaceholderWriteMe
 // primitive; see lib/browseTarget.ts.
 import { classifyBrowseTarget } from '../lib/browseTarget';
 import { formatUiFindings, type ScannedElement } from './UiElementFinder';
-import { envKillSwitch } from '../lib/envFlag';
+import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
 import { isNotFoundError } from './fsErrors';
@@ -1155,8 +1158,13 @@ export class ToolDispatcher {
    * by default, which protects nothing — exactly the behaviour before this existed.
    */
   private userOwned: string[] = [];
+  private userOwnedSnapshotKnown = false;
+  private royaleNewProject = false;
+  /** Only the composition root may grant this after verified lifecycle/source inventory. */
+  setRoyaleNewProjectAllowed(allowed: boolean): void { this.royaleNewProject = allowed === true; }
   private userRequest: string | null = null;
   setUserOwnedFiles(paths: readonly string[], request: string | null): void {
+    this.userOwnedSnapshotKnown = true;
     this.userOwned = (paths ?? []).filter((p): p is string => typeof p === 'string' && p.length > 0);
     this.userRequest = typeof request === 'string' ? request : null;
   }
@@ -9638,11 +9646,37 @@ export class ToolDispatcher {
         const athRec = (input as Record<string, unknown>) || {};
         const athModules = Array.isArray(athRec.include) ? athRec.include.filter((v): v is string => typeof v === 'string') : undefined;
         const athPick = athModules ?? athreeModulesFor(this.coverageRequest ?? this.userRequest ?? '').modules;
-        const ath = generateAthreeMap(athPick);
+        // WHICH MAP (admin 2026-11-15, "100+ type ke maps, 1 km se 1000 km"): the builder may pass archetype and size_km; otherwise the user's
+        // words decide (a size, a kind of land); naming neither gives the default world.
+        const athArchetype = typeof athRec.archetype === 'string' ? athRec.archetype.trim().toLowerCase() : '';
+        const athSize = typeof athRec.size_km === 'number' && Number.isFinite(athRec.size_km) ? athRec.size_km : null;
+        let athChoice = (athArchetype && !(athArchetype in ARCHETYPES)) ? null : (athArchetype || athSize !== null ? { archetype: (athArchetype || 'continental') as Archetype, sizeKm: athSize ?? 100 } : mapChoiceFor(this.coverageRequest ?? this.userRequest ?? ''));
+        if (athArchetype && !(athArchetype in ARCHETYPES)) return `Unknown map kind "${athArchetype}". The kinds are: ${ARCHETYPE_IDS.join(', ')}.`;
+        if (athChoice) athChoice = { archetype: athChoice.archetype, sizeKm: clampSizeKm(athChoice.sizeKm) };
+        const ath = generateAthreeMap(athPick, athChoice);
         const athWritten = await this.writeRecipeFiles(ath.files, agent);
         const athLayers = await this.addMissingRecipeLayers(ath.files, agent);
         this.scheduleCheckpoint('athree map');
         return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${ath.instructions}${athLayers}`;
+      }
+
+      case 'generate_game_royale': {
+        if (!envFlag('AGENTV3_ORIGINAL_ROYALE')) refuse('The experimental original royale starter is unavailable. Do not promise it is installed or active.');
+        if (!this.royaleNewProject || !this.userOwnedSnapshotKnown || this.userOwned.length > 0) refuse('The royale starter requires a verified new project. Preserve existing or imported source; do not replace it with a template.');
+        const request = this.coverageRequest ?? this.userRequest ?? '';
+        if (!/battle\s*royale|pubg|bgmi|free\s*fire|firefree|battlefield|पबजी|बैटल\s*रॉयल|फ्री\s*फायर/i.test(request)) refuse('The request does not ask for a royale-style game. Do not add this starter.');
+        const requestedMap = athreeMapIntent({ prompt: request, seedKey: this.workspaceId });
+        if (requestedMap.via === 'named' || requestedMap.via === 'other-map') refuse('The request names a different world. The bounded royale starter must not replace that choice.');
+        // A failed workspace read is NOT evidence that no map exists. Preserve existing worlds.
+        let hasAthree = false;
+        try { await this.actuator.readFile(this.workspaceId, 'src/game/athree/index.ts'); hasAthree = true; }
+        catch (error) { if (!isNotFoundError(error)) throw error; }
+        if (hasAthree) refuse('This project already has an Athree map. The bounded royale starter has no Athree adapter; preserve the current world.');
+        const royale = generateGameRoyale();
+        const written = await this.writeRecipeFiles(royale.files, agent);
+        const layers = await this.addMissingRecipeLayers(royale.files, agent);
+        this.scheduleCheckpoint('original royale practice');
+        return `Original offline practice recipe results:\n${written.join('\n')}\n\n${royale.instructions}${layers}`;
       }
 
       case 'author_object': {
@@ -9659,6 +9693,23 @@ export class ToolDispatcher {
         }
         let forgeSpec: unknown = forgeRec.spec;
         let madeNote = '';
+        // CUSTOMISE (admin 2026-11-15, "user ke bolte bhar se jo chahe edit ho jaye"): the user's words change an object that already exists
+        // here. Colours of named parts, size, and — for the Forge person — gender, hair length, a dress, build. What cannot be done is
+        // said, never skipped; what was not understood is returned for the builder to ask.
+        if ((forgeSpec === undefined || forgeSpec === null) && typeof forgeRec.customise === 'string' && forgeRec.customise.trim().length > 0) {
+          const targetId = typeof forgeRec.target === 'string' ? forgeRec.target.trim() : '';
+          const here = (await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[])).map((f) => String(f).replace(/^\.?\//, '')).filter((f) => f.startsWith(OBJECTS_DIR) && f.endsWith('.ts')).map((f) => f.slice(OBJECTS_DIR.length, -3));
+          if (!/^[a-z][a-z0-9-]{1,39}$/.test(targetId)) return `Say which object to change (target). Objects in this project: ${here.join(', ') || 'none yet'}.`;
+          const current = await this.actuator.readFile(this.workspaceId, `${OBJECTS_DIR}${targetId}.ts`).then(specFromObjectFile, () => null)
+            ?? (forgeRec.base === 'person' ? { ...personSpecFor(), id: targetId, name: 'Person' } : null);
+          if (!current) return `There is no Forge object called "${targetId}" here (objects: ${here.join(', ') || 'none yet'}). To start from a person, pass base: "person".`;
+          const wished = parseCustomisation(forgeRec.customise.trim().slice(0, 600), { materialKeys: Object.keys((current.materials as Record<string, unknown>) ?? {}), nodeNames: nodeNamesOf(current.nodes) });
+          const changed = applyEdits(current, wished.edits);
+          const summary = customiseSummary(changed, wished.unparsed);
+          if (changed.applied.length === 0) return summary;
+          forgeSpec = changed.spec;
+          madeNote = summary;
+        }
         // SELF-AUTHORING (admin 2026-11-15, "atma nirbhar"): the user's words in, an object out. The Forge asks a model for a spec, checks it,
         // shows the model its own drawing and has it correct, a few rounds. The FREE router namespace (never Claude, never NavBharatAI money).
         if ((forgeSpec === undefined || forgeSpec === null) && typeof forgeRec.describe === 'string' && forgeRec.describe.trim().length > 0) {

@@ -21,7 +21,7 @@ class Fake implements ActuatorPort {
 
 let act: Fake;
 let d: ToolDispatcher;
-const run = (request: string) => { d.setCoverageRequest(request); return d.dispatch({ id: 't', name: 'generate_athree_map', input: {} }, 'architect'); };
+const run = (request: string, input: Record<string, unknown> = {}) => { d.setCoverageRequest(request); return d.dispatch({ id: 't', name: 'generate_athree_map', input }, 'architect'); };
 
 beforeEach(() => {
   act = new Fake();
@@ -36,6 +36,12 @@ describe('the tool is registered everywhere a recipe must be', () => {
     expect(defaultToolCatalog().some((t) => t.name === 'generate_athree_map')).toBe(true);
     expect(CATALOG_TOOL_NAMES).toContain('generate_athree_map');
     expect(Object.keys(GAME_RECIPES)).toContain('generate_athree_map');
+  });
+  it('lets the builder choose modules: an include list of strings, described with the six names', () => {
+    const tool = defaultToolCatalog().find((x) => x.name === 'generate_athree_map')!;
+    const include = (tool.input_schema as any).properties.include;
+    expect(include.type).toBe('array'); expect(include.items).toEqual({ type: 'string' });
+    for (const m of ['sea', 'plants', 'rivers', 'sky', 'roads', 'vehicles']) expect(include.description).toContain(m);
   });
 });
 
@@ -83,6 +89,40 @@ describe('ON: the request decides', () => {
     const res = await run('make the car faster');
     expect(res.is_error).toBeFalsy();
     expect(res.content).toMatch(/already uses the athree map/i);
+  });
+});
+
+describe('ON: the request also decides WHICH modules (admin 2026-11-15: modules made at run time, by the user\'s need)', () => {
+  beforeEach(() => { process.env.AGENTV3_ATHREE_MAP = 'on'; });
+  const has = (m: string): boolean => act.files.has(`src/game/athree/${m}.ts`);
+
+  it('a racing game with cars gets roads and vehicles and none of the sea, plants, rivers or sky', async () => {
+    const res = await run('ek 3D racing game banao jisme gaadi chale');
+    expect(res.is_error).toBeFalsy();
+    expect(has('roadmesh')).toBe(true); expect(has('vehicles')).toBe(true);
+    for (const m of ['ocean', 'water', 'plants', 'vegetation', 'riverwater', 'sky', 'budget']) expect(has(m), m).toBe(false);
+    expect(has('world')).toBe(true); expect(has('roads')).toBe(true);
+    expect(res.content).toMatch(/Modules NOT in this build/);
+  });
+  it('a request for a river and trees gets those', async () => {
+    await run('3D open world game, sirf nadi aur ped chahiye');
+    expect(has('riverwater')).toBe(true); expect(has('plants')).toBe(true); expect(has('vegetation')).toBe(true);
+    for (const m of ['ocean', 'sky', 'vehicles', 'roadmesh']) expect(has(m), m).toBe(false);
+  });
+  it('a request that names no feature gets the whole map', async () => {
+    await run('ek bada 3D open world game banao');
+    for (const m of ['ocean', 'plants', 'riverwater', 'sky', 'roadmesh', 'vehicles', 'budget']) expect(has(m), m).toBe(true);
+  });
+  it('the builder may pass include, and it wins over the words of the request', async () => {
+    const res = await run('ek bada 3D open world game banao', { include: ['sea'] });
+    expect(res.is_error).toBeFalsy();
+    expect(has('ocean')).toBe(true); expect(has('water')).toBe(true);
+    for (const m of ['plants', 'riverwater', 'sky', 'roadmesh', 'vehicles', 'budget']) expect(has(m), m).toBe(false);
+  });
+  it('an include of nothing is the core only, and an unknown name is reported, not ignored', async () => {
+    const res = await run('ek bada 3D open world game banao', { include: ['volcano'] });
+    expect(res.content).toMatch(/Unknown module names ignored: volcano/);
+    expect(has('index')).toBe(true); expect(has('ocean')).toBe(false);
   });
 });
 

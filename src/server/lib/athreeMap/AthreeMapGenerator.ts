@@ -842,7 +842,8 @@ export function athreeIndexSource(chosen: readonly string[]): string {
   if (has('rivers')) add('  const riverWater = options.three ? createRiverWater(options.three, world, quality) : null;', '  if (chunks && riverWater) chunks.group.add(riverWater.group);');
   if (has('sky')) add('  const sky = options.three && options.sky !== false ? createSky(options.three, world, quality, options.skyOptions) : null;', '  if (chunks && sky) chunks.group.add(sky.group);');
   if (has('roads')) add('  const roadMesh = options.three && options.roads !== false ? createRoadMesh(options.three, world, quality) : null;', '  if (chunks && roadMesh) chunks.group.add(roadMesh.group);');
-  if (has('sky')) add('  const hex = (c: [number, number, number]): number => (Math.round(c[0] * 255) << 16) | (Math.round(c[1] * 255) << 8) | Math.round(c[2] * 255);');
+  const lit = ['sea', 'plants', 'rivers', 'roads'].some(has); // modules that take their light from the sky
+  if (has('sky') && lit) add('  const hex = (c: [number, number, number]): number => (Math.round(c[0] * 255) << 16) | (Math.round(c[1] * 255) << 8) | Math.round(c[2] * 255);');
   add('  return {', '    world,', '    chunks,');
   if (has('sea')) add('    ocean,');
   if (has('plants')) add('    vegetation,');
@@ -851,13 +852,15 @@ export function athreeIndexSource(chosen: readonly string[]): string {
   if (has('roads')) add('    roadMesh,');
   add('    update: (cameraX, cameraZ, time, cameraY = 0) => {', '      const shift = chunks ? chunks.update(cameraX, cameraZ) : null;');
   if (has('sky')) {
-    add('      if (sky && chunks) {', '        sky.update(cameraX, cameraZ, time, chunks.origin, cameraY);', '        // One sun for everything the game chose: they take their light from the sky.', '        const r = sky.reading();');
+    add('      if (sky && chunks) {', '        sky.update(cameraX, cameraZ, time, chunks.origin, cameraY);');
+    if (lit) add('        // One sun for everything the game chose: they take their light from the sky.', '        const r = sky.reading();');
     if (has('plants')) add('        vegetation?.setLight(r.sun, hex(r.colors.sun), hex(r.colors.ambient));');
     if (has('sea')) add('        ocean?.setLight(r.sun, hex(r.colors.horizon));');
     if (has('rivers')) add('        riverWater?.setLight(r.sun, hex(r.colors.horizon));');
     if (has('roads')) add('        roadMesh?.setLight(r.sun, hex(r.colors.sun), hex(r.colors.ambient));');
     add('      }');
   } else add('      void cameraY;');
+  if (!['sea', 'plants', 'rivers', 'sky'].some(has)) add('      void time;');
   if (has('sea')) add('      if (ocean && chunks) ocean.update(cameraX, cameraZ, time, chunks.origin);');
   if (has('plants')) add('      if (vegetation && chunks) vegetation.update(cameraX, cameraZ, time, chunks.origin);');
   if (has('rivers')) add('      if (riverWater && chunks) riverWater.update(cameraX, cameraZ, time, chunks.origin);');

@@ -101,7 +101,8 @@ describe('every subset compiles strictly, with the example that comes with it', 
     it(`[${subset.join(', ') || 'nothing'}]`, () => {
       const r = generateAthreeMap(subset);
       const block = /```ts\n([\s\S]*?)```/.exec(r.instructions)![1];
-      expect(typecheck(r.files, { 'src/example.ts': block })).toEqual([]);
+      // three.js ships no types in this repo: the example is checked against a stub that says it is some module.
+      expect(typecheck(r.files, { 'src/example.ts': block, 'src/three-stub.d.ts': "declare module 'three';" })).toEqual([]);
     });
   }
 });

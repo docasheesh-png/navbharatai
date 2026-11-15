@@ -1,9 +1,13 @@
 // ATHREE MAP phase 2a — the OCEAN. These tests run the emitted code: the wave table's physics, the CPU surface a boat floats on against an
 // independent forward evaluation, the GLSL generated from the SAME table, and the ocean mesh with real three.js (snapping, floating origin,
 // depth baking). What they cannot prove — how it LOOKS and whether the shader compiles on a GPU — is checked by a headless-Chromium render.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as THREE from 'three';
 import { loadAthree } from '../../../../tests/helpers/loadAthree';
+
+// These tests sample whole worlds (thousands of terrain, river, dune and road queries). Under the coverage run they are several times
+// slower, so each gets two minutes instead of vitest's default twenty seconds: the assertions are not loosened, only the clock.
+vi.setConfig({ testTimeout: 120000 });
 
 const A = loadAthree();
 

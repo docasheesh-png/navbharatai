@@ -2,9 +2,13 @@
 // scatter does not depend on which rectangle asks, that every mesh fits its triangle bound and every tier fits what the terrain and the sea
 // leave of the budget, that the wind uniform IS the world's wind, and the manager with real three.js (streaming, caps, floating origin).
 // What they cannot prove — how it LOOKS and whether the shaders compile on a GPU — is checked by a headless-Chromium render.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as THREE from 'three';
 import { loadAthree } from '../../../../tests/helpers/loadAthree';
+
+// These tests sample whole worlds (thousands of terrain, river, dune and road queries). Under the coverage run they are several times
+// slower, so each gets two minutes instead of vitest's default twenty seconds: the assertions are not loosened, only the clock.
+vi.setConfig({ testTimeout: 120000 });
 
 const A = loadAthree();
 const TIERS = ['phone', 'mid', 'desktop'] as const;

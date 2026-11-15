@@ -514,7 +514,7 @@ export interface RiverTier {
 export const RIVER_TIERS: Record<AthreeQuality, RiverTier> = {
   phone: { radius: 400, tile: 256, maxTriangles: 2000, tilesPerUpdate: 2 },
   mid: { radius: 700, tile: 256, maxTriangles: 6000, tilesPerUpdate: 3 },
-  desktop: { radius: 1300, tile: 512, maxTriangles: 20000, tilesPerUpdate: 4 },
+  desktop: { radius: 1300, tile: 512, maxTriangles: 8000, tilesPerUpdate: 4 },
 };
 
 /** What is left of the tier's triangle budget once terrain, sea and vegetation have taken their worst case. */

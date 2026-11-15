@@ -928,6 +928,20 @@ export interface BuildDiagnosticsReport {
    * prose, per build. `buildMs` is the clock the shares are of. Absent on reports written before it.
    */
   providerWaste?: { msByKind: Record<string, number>; callsByKind: Record<string, number>; msByFamily: Record<string, number>; buildMs: number };
+  /**
+   * Pro Chain V2 (owner t350u, z@ test chain Surplus → Router One → Qubax → Mitrify): which engine each
+   * agent used, fallbacks, Surplus drops and how each supplier's price/usage was known. Admin-only like
+   * every provider name here. Absent on every build that does not run the v2 chain.
+   */
+  proChainV2?: {
+    reason: string;
+    agents: Record<string, Record<string, number>>;
+    fallbackTurns: number;
+    surplusDrops: number;
+    failedCalls: Record<string, number>;
+    rateSources: Record<string, string>;
+    usageEstimatedTurns: Record<string, number>;
+  };
   /** Fix 37c — explicit data-loss/recovery events (sandbox recycled, files restored, generation
    *  reset), each with the observed CAUSE, so "data kyu udha" is answered inside the report itself. */
   dataLossEvents?: Array<{ ts: number; cause: string; detail: string }>;
@@ -1093,6 +1107,8 @@ export class BuildDiagnostics {
   private sandboxCostRecord?: { seconds: number; usd: number; estimated: true };
   private cacheReadInputTokens?: number;
   private providerWaste?: BuildDiagnosticsReport['providerWaste'];
+  /** Live Pro Chain V2 tally, read at serialization (same lifetime rule as todoOnlyTally). */
+  private proChainV2Source?: { snapshot(): NonNullable<BuildDiagnosticsReport['proChainV2']> };
   /** When the build waited for the USER ([start, end] ms) — see addUserWait. */
   private userWaitSpans: Array<{ a: number; b: number }> = [];
   /** Timed setup spans before the first model call ([start, end] ms) — see recordSetupTiming. */
@@ -2690,6 +2706,11 @@ export class BuildDiagnostics {
    * only reading that describes the build the user was given. A copy here would re-create the very bug this
    * closes — see todoOnlyTurnsLine.
    */
+  /** Attach the live Pro Chain V2 tally (read at serialization, so heals that run late are counted). */
+  setProChainV2(source: { snapshot(): NonNullable<BuildDiagnosticsReport['proChainV2']> }): void {
+    if (source && typeof source.snapshot === 'function') this.proChainV2Source = source;
+  }
+
   setTodoOnlyTally(tally: { turns: number; latencyMs: number; firstInRun?: number }): void {
     if (tally && typeof tally === 'object') this.todoOnlyTally = tally;
   }
@@ -3097,6 +3118,7 @@ export class BuildDiagnostics {
       priorFailedBuilds: this.priorFailedBuilds,
       session: this.session,
       ...(this.providerWaste ? { providerWaste: this.providerWaste } : {}),
+      ...(this.proChainV2Source ? (() => { try { return { proChainV2: this.proChainV2Source!.snapshot() }; } catch { return {}; } })() : {}),
       dataLossEvents: this.dataLossEvents.length ? [...this.dataLossEvents] : undefined,
       // DERIVED AT SERIALIZATION, like etaAccuracy above, so no ending path can forget it. This is
       // the FIRST of the report's two truncation passes: what the recorder's own caps refused. The
@@ -4688,7 +4710,12 @@ export function renderSessionDiagnosticsText(reports: readonly BuildDiagnosticsR
  */
 export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosticsReport {
   const scrub = (s: string | undefined): string | undefined => (s === undefined ? undefined : redactProvidersText(s));
-  const scrubIssue = (i: BuildIssue): BuildIssue => ({
+  // Pro Chain V2 routing lines name suppliers and models by design (admin autopsy); a user sees one neutral line.
+  const scrubIssue = (i: BuildIssue): BuildIssue => (/^PRO_CHAIN_V2_/.test(i.code) ? {
+    ts: i.ts, phase: i.phase, severity: i.severity, code: 'ENGINE_ROUTING',
+    message: 'NavBharatAI routed this step to another engine.', autoResolved: i.autoResolved,
+    ...(i.repeatCount !== undefined ? { repeatCount: i.repeatCount } : {}),
+  } : {
     ts: i.ts,
     phase: i.phase,
     severity: i.severity,

@@ -17,6 +17,7 @@ import { FORGE_GUIDE } from './ObjectForgeGenerator';
 import { loadForge, type ObjectReport } from './forgeRuntime';
 import { FORGE_EXAMPLES } from './forgeExamples';
 import { specKey } from '../objectSpecProvider';
+import { BoundedCache } from '../boundedCache';
 
 export const SELF_AUTHOR_ROUNDS = 4;
 
@@ -152,16 +153,10 @@ export async function selfAuthorObject(request: string, deps: SelfAuthorDeps): P
 }
 
 /** A bounded cache of finished specs by description, so the same thing asked twice (or by two builds) costs one model call. */
-const MAX_CACHE = 200;
-const made = new Map<string, Record<string, unknown>>();
+const made = new BoundedCache<string, Record<string, unknown>>({ maxEntries: 200 });
 export const madeCache = {
   get: (request: string): Record<string, unknown> | undefined => made.get(specKey(request)),
-  set: (request: string, spec: Record<string, unknown>): void => {
-    const k = specKey(request);
-    if (!k) return;
-    if (made.size >= MAX_CACHE) { const oldest = made.keys().next().value; if (oldest !== undefined) made.delete(oldest); }
-    made.set(k, spec);
-  },
+  set: (request: string, spec: Record<string, unknown>): void => { const k = specKey(request); if (k) made.set(k, spec); },
   size: (): number => made.size,
-  clear: (): void => { made.clear(); },
+  clear: (): void => made.clear(),
 };

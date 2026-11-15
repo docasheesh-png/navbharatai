@@ -860,9 +860,24 @@ estimate always uses the parsed, published per-model tariff snapshot bound to th
   `requestInputTokens`), output from the length of the content received (chars ÷ 4, rounded up) →
   `request-heuristic`, labelled **conservative**.
 - A non-2xx HTTP status with no usage → `no-billable-response`, at an explicit, labelled zero.
+- **No HTTP response at all (review of PR #4238).** No status, no output and no usage, AND the
+  connection was never set up → `no-response-network`, a labelled zero. That means a DNS, refused,
+  unreachable, TLS or connect-timeout code anywhere in the error's `cause` chain, or a throw from the
+  transport itself (`routerOneAccountingFetch` marks it). A request stopped after admission but
+  before the SDK was called → `not-dispatched`, a labelled zero. Both release the key. A **timeout or
+  abort after dispatch** (SDK timeout, `AbortError`, the caller's signal, `ETIMEDOUT`, header/body
+  timeouts) keeps `request-heuristic`, because the supplier may already have done the work. Unknown
+  errors with a status-less throw that are not marked transport throws (for example a parse error)
+  also stay on the conservative estimate. This applies to every Router One entry, including the
+  scope-classifier ask (`routerOneScopeAsk` → `recordRouterOneScopeUsage` → wallet), so a refused
+  connection on a 40k-character classifier prompt is billed $0, not the request-size estimate.
+- A zero estimate is not an "estimated charge": it adds no `estimated` block and no user line.
 
 Every estimate label starts with "Estimated". The markup is the same as verified Router One billing,
-**× 5/2**, with no other multiplier. Estimates show up as `ROUTER_ONE_CATALOGUE_ESTIMATED` (admin audit,
+**× 5/2**, with no other multiplier. The user-visible `ENGINE_COST_ESTIMATED` message is neutral —
+"This step's cost was estimated because the engine did not return a full usage receipt." — and the
+pricing/markup details live only in its admin `[engine-diag: … pricing=published_tariff
+markup=same_as_verified_x5_2]` marker, which the user's report strips. Estimates show up as `ROUTER_ONE_CATALOGUE_ESTIMATED` (admin audit,
 `estimated: true`, basis, label), as `estimated` in `routerOneCatalogueBuildCharges` (present only when
 an estimate was used, so verified-only builds return exactly the old shape) and as the build-report
 issue `ENGINE_COST_ESTIMATED`. That issue carries the label, and its admin-only
@@ -872,7 +887,9 @@ no longer be `finish`ed in the store. The existing produced-nothing / barren-pha
 whether the user pays for a turn at all.
 
 **2) Existing locks self-heal on reserve.** `FirestoreCatalogueAttemptStore.reserve` settles up to 25
-unresolved entries per transaction (expired actives count as unresolved). It writes the attempt row
+unresolved entries per transaction (expired actives count as unresolved). Any remainder is persisted in
+the key state, the reserve refuses (`reserve_fenced_unresolved`), and the next reserve continues; a
+retried transaction starts its healed list over, so nothing is audited twice. It writes the attempt row
 as `self-healed-estimate` (`absorbed: true`, never charged to any user; basis
 `self-heal-request-heuristic`, or `self-heal-unrecorded` at a labelled zero when nothing usable was
 recorded), releases each entry, and audits `ROUTER_ONE_LOCK_SELF_HEALED`. Rows that were already
@@ -893,7 +910,8 @@ never in the message, so the public error and user copy are unchanged. The serve
 still unresolved after self-heal) adds the key to that build's request scope (`lockedKeys`). Later
 calls on that key in the same build refuse at once with `build_skip_unresolved_lock`, with no price
 fetch and no Firestore transaction. `MultiProviderTurnRunner` retires that rung by its `name` for the
-rest of the build (`deadRungs`). Other keys, other providers, other gates and the next build are
+rest of the build (`deadRungs`). Pro Chain V2 builds (`proChainV2TurnRunner`) pass the same build
+`deadRungs` to their chains, so one lock refusal retires Router One for every v2 agent of that build. Other keys, other providers, other gates and the next build are
 unaffected.
 
 **Surplus visibility (same PR).** A folded Surplus failure carries its scope-failure

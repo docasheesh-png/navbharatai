@@ -90,3 +90,17 @@ export function markRestOfBuildSkip<T>(error: T): T {
 export function isRestOfBuildSkip(error: unknown): boolean {
   return error !== null && typeof error === 'object' && restOfBuild.has(error as object);
 }
+
+/**
+ * BR2388 review — the transport (fetch) threw before ANY HTTP response existed. Set by
+ * routerOneAccountingFetch on the error it rethrows (the SDK keeps it as `cause`). Billing reads it,
+ * together with the absence of a status, output and usage, to settle a call that never got a response.
+ */
+const transportNoResponse = new WeakSet<object>();
+export function markTransportNoResponse<T>(error: T): T {
+  if (error !== null && typeof error === 'object') transportNoResponse.add(error as object);
+  return error;
+}
+export function isTransportNoResponse(error: unknown): boolean {
+  return error !== null && typeof error === 'object' && transportNoResponse.has(error as object);
+}

@@ -12,7 +12,7 @@ import { calculateCatalogueChatCost, catalogueSnapshotIssue, estimateCatalogueCh
 import { estimateMessagesTokens, estimateTokens } from '../../AgentV3/TokenEstimator';
 import { RouterOnePublicPriceSource, routerOnePublicPrices, ROUTER_ONE_PRICE_MAX_AGE_MS, type PublicPriceSnapshot } from './publicPriceSource';
 import { isRouterOneAccountingProvider, RouterOneAccountingUnavailableError, routerOneAccountingGate } from './accounting';
-import { markRestOfBuildSkip } from '../../lib/engineSafeDiag';
+import { isTransportNoResponse, markRestOfBuildSkip } from '../../lib/engineSafeDiag';
 
 export interface CatalogueCallBinding { buildId: string; uid: string; workspaceId: string }
 export interface RouterOneCatalogueReceipt extends CatalogueCallBinding {
@@ -165,6 +165,8 @@ interface Attempt {
   requestId: string | null; done: boolean; receipt?: RouterOneCatalogueReceipt;
   /** Estimate evidence (owner 2026-11-15): request size, output received, last HTTP status, deadline. */
   requestInputTokens: number; outputChars: number; httpStatus: number | null; deadlineAt: number;
+  /** BR2388 review: set just before the SDK is called. An attempt that never got here was never sent. */
+  dispatched?: boolean;
 }
 const scopes = new AsyncLocalStorage<Scope>();
 const turns = new AsyncLocalStorage<{ attempts: Attempt[] }>();
@@ -190,7 +192,36 @@ export function runInRouterOneAccountingScope<T>(binding: CatalogueCallBinding, 
   return scopes.run({ binding: Object.freeze({ ...binding }), stopped: false, receipts: [] }, fn);
 }
 export function currentRouterOneCatalogueReceipts(): readonly RouterOneCatalogueReceipt[] { return scopes.getStore()?.receipts.slice() ?? []; }
-async function finish(attempt: Attempt, model: string, usage: unknown, complete: boolean): Promise<void> {
+/** Error codes that mean the connection was never set up, so the request never reached the engine. */
+const SETUP_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EAI_NONAME', 'EAI_FAIL', 'EAI_NODATA', 'EHOSTUNREACH',
+  'ENETUNREACH', 'EHOSTDOWN', 'ENETDOWN', 'EADDRNOTAVAIL', 'UND_ERR_CONNECT_TIMEOUT', 'ERR_INVALID_URL',
+  'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN']);
+const SETUP_CODE_RE = /^(?:ERR_TLS_|ERR_SSL_|CERT_|UNABLE_TO_)|_CERT_/;
+/** Timeouts and aborts after dispatch: the supplier may already have done the work. */
+const AFTER_DISPATCH_NAMES = new Set(['AbortError', 'APIUserAbortError', 'APIConnectionTimeoutError', 'TimeoutError']);
+const AFTER_DISPATCH_CODES = new Set(['ABORT_ERR', 'ETIMEDOUT', 'ESOCKETTIMEDOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_ABORTED']);
+/**
+ * BR2388 review: did this call fail with NO HTTP response because the connection was never set up?
+ * True only for a known setup failure (DNS / refused / unreachable / TLS / connect timeout) or a
+ * transport throw (marked by routerOneAccountingFetch) — and never when any timeout/abort is in the
+ * chain or the caller's signal fired. Unknown errors stay on the conservative request estimate.
+ */
+export function routerOneNetworkSetupFailure(error: unknown, signalAborted = false): boolean {
+  if (signalAborted) return false;
+  let setup = false, transportThrew = false;
+  let node: unknown = error;
+  for (let depth = 0; depth < 6 && node !== null && typeof node === 'object'; depth++) {
+    const e = node as { name?: unknown; code?: unknown; cause?: unknown; errno?: unknown };
+    const name = typeof e.name === 'string' ? e.name : '', code = typeof e.code === 'string' ? e.code : '';
+    if (AFTER_DISPATCH_NAMES.has(name) || AFTER_DISPATCH_CODES.has(code)) return false;
+    if (SETUP_CODES.has(code) || (code && SETUP_CODE_RE.test(code))) setup = true;
+    if (isTransportNoResponse(node)) transportThrew = true;
+    node = e.cause;
+  }
+  return setup || transportThrew;
+}
+async function finish(attempt: Attempt, model: string, usage: unknown, complete: boolean,
+  failure?: { error: unknown; signalAborted: boolean }): Promise<void> {
   // Idempotent per call: whichever of the stream end, the runner finalizer or a late response arrives
   // first settles it — exact receipt OR estimate — and every later arrival is ignored (no double charge).
   if (attempt.done) return;
@@ -208,8 +239,12 @@ async function finish(attempt: Attempt, model: string, usage: unknown, complete:
   if (!receipt) {
     // 🔓 Owner 2026-11-15 (BR2388): no complete receipt ⇒ settle by ESTIMATE from the same published tariff
     // bound at dispatch, labelled as estimated, and release the key — never a permanent lock.
+    // BR2388 review: a call never sent, or one whose connection was never set up, produced nothing billable.
+    const noResponse = !attempt.dispatched ? 'not-dispatched' as const
+      : failure && routerOneNetworkSetupFailure(failure.error, failure.signalAborted) ? 'network' as const : undefined;
     const estimate = estimateCatalogueChatCost(attempt.snapshot, usage,
-      { requestInputTokens: attempt.requestInputTokens, outputChars: attempt.outputChars, httpStatus: attempt.httpStatus });
+      { requestInputTokens: attempt.requestInputTokens, outputChars: attempt.outputChars, httpStatus: attempt.httpStatus,
+        ...(noResponse ? { noResponse } : {}) });
     if (estimate) receipt = Object.freeze({
       ...attempt.scope.binding!, kind: 'catalogue-estimated', expenseEvidence: 'official-public-tariff-estimate', settledWalletDebit: false,
       callId: attempt.callId, credentialSha256: attempt.key, model: model || attempt.snapshot.model, requestId: attempt.requestId,
@@ -345,6 +380,7 @@ export function cataloguePricedRouterOneClient(client: OpenAiChatClient, key: st
     admitted.turn.attempts.push(attempt);
     try {
       if (admitted.scope.stopped || options?.signal?.aborted) throw new RouterOneAccountingUnavailableError(admitted.scope.stopped ? 'scope_stopped' : 'aborted');
+      attempt.dispatched = true;
       const raw = await dispatches.run(attempt, () => client.chat.completions.create(request, options));
       if (Symbol.asyncIterator in raw) {
         const stream = raw as OpenAiChatStream;
@@ -365,7 +401,7 @@ export function cataloguePricedRouterOneClient(client: OpenAiChatClient, key: st
       attempt.outputChars += outputCharsOf((raw as { choices?: unknown }).choices, 'message');
       await finish(attempt, raw.model ?? '', raw.usage, true);
       return raw;
-    } catch (error) { await finish(attempt, '', undefined, false); throw error; }
+    } catch (error) { await finish(attempt, '', undefined, false, { error, signalAborted: !!options?.signal?.aborted }); throw error; }
   } } } };
 }
 /** An exact receipt attaches as before. An ESTIMATED receipt also carries its estimated token counts onto
@@ -429,7 +465,8 @@ export function routerOneCatalogueBuildCharges(entries: Array<{ model?: string; 
     const cost = BigInt(receipt.costAttoUsd); total += cost;
     const billed = !entry.unbilled && !(entry.phase && barren.has(entry.phase));
     if (billed) billable += cost;
-    if (receipt.kind === 'catalogue-estimated') { estCalls++; estTotal += cost; if (billed) estBillable += cost; }
+    // A zero estimate (no billable response) is not an estimated charge: no label for it.
+    if (receipt.kind === 'catalogue-estimated' && cost > 0n) { estCalls++; estTotal += cost; if (billed) estBillable += cost; }
   }
   // Same markup as the verified path (× 5/2). The `estimated` block is present ONLY when an estimate was
   // used, so a build of verified receipts returns exactly the shape it always did.
@@ -438,7 +475,8 @@ export function routerOneCatalogueBuildCharges(entries: Array<{ model?: string; 
       label: ROUTER_ONE_ESTIMATED_BILL_LABEL } } : {}) };
 }
 /** The billing label for any Router One portion priced by estimate. */
-export const ROUTER_ONE_ESTIMATED_BILL_LABEL = 'Estimated: part of this engine usage had no complete usage receipt, so it is priced from the published per-model tariff (see each call\'s estimate basis), with the same markup as verified usage.';
+/** User-visible (report message): neutral, no supplier, no pricing mechanics. Markup stays admin-only. */
+export const ROUTER_ONE_ESTIMATED_BILL_LABEL = 'This step\'s cost was estimated because the engine did not return a full usage receipt.';
 
 /** Keep accounting branches outside the bounded chat handler. */
 export function recordRouterOneScopeUsage(ledger: Pick<import('../../AgentV3/ProviderUsageLedger').ProviderUsageLedger, 'add'>): void {
@@ -459,6 +497,7 @@ export function recordRouterOneEstimatedBill(diag: { record(issue: { phase: 'bui
   try {
     diag.record({ phase: 'build', severity: 'info', code: 'ENGINE_COST_ESTIMATED', autoResolved: true,
       message: estimated.label,
-      detail: `[engine-diag: estimated_calls=${estimated.calls} estimated_cost_usd=${estimated.costUsd.toFixed(6)} estimated_bill_usd=${estimated.billedUsd.toFixed(6)}]` });
+      // Admin-only (stripped from the user's report): published tariff, same × 5/2 markup as verified usage.
+      detail: `[engine-diag: estimated_calls=${estimated.calls} estimated_cost_usd=${estimated.costUsd.toFixed(6)} estimated_bill_usd=${estimated.billedUsd.toFixed(6)} pricing=published_tariff markup=same_as_verified_x5_2]` });
   } catch { /* diagnostics are best-effort */ }
 }

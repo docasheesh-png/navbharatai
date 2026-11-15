@@ -106,18 +106,25 @@ export function calculateCatalogueChatCost(snapshot: CatalogueSnapshot, response
  *   3. usage tokens with ALL input at the full input rate (cache split not reported — conservative);
  *   4. no usage: input from the request size (TokenEstimator heuristic), output from the streamed
  *      length, all input at the full input rate (conservative);
- *   5. the provider answered with an HTTP error status: no billable response, settled at zero.
+ *   5. the provider answered with an HTTP error status: no billable response, settled at zero;
+ *   6. no HTTP response at all because the connection was never set up (DNS, refused, unreachable, TLS,
+ *      connect timeout, or the transport threw without a timeout/abort), or the request was never
+ *      dispatched: no billable response, settled at zero. A timeout or abort AFTER dispatch keeps (4),
+ *      because the supplier may already have done the work.
  * The markup applied later is the verified path's own (`modelSubtotalAttoUsd = cost × 5/2`).
  */
 export type CatalogueEstimateBasis =
   | 'usage-reported' | 'usage-provider-cache-detail' | 'usage-full-input-rate'
-  | 'request-heuristic' | 'no-billable-response' | 'self-heal-request-heuristic' | 'self-heal-unrecorded';
+  | 'request-heuristic' | 'no-billable-response' | 'no-response-network' | 'not-dispatched'
+  | 'self-heal-request-heuristic' | 'self-heal-unrecorded';
 export const CATALOGUE_ESTIMATE_LABELS: Readonly<Record<CatalogueEstimateBasis, string>> = Object.freeze({
   'usage-reported': 'Estimated from the published tariff using the reported usage tokens (the response did not yield a complete receipt).',
   'usage-provider-cache-detail': 'Estimated from the published tariff using the reported usage tokens; the cached share comes from the provider\'s own cache counter.',
   'usage-full-input-rate': 'Estimated from the published tariff using the reported usage tokens; the cached share was not reported, so all input is priced at the full input rate (conservative).',
   'request-heuristic': 'Estimated from the published tariff: no usage was reported, so input is estimated from the request size and output from the streamed length, with all input at the full input rate (conservative).',
   'no-billable-response': 'Estimated at zero: the engine returned an HTTP error, so no billable response was produced.',
+  'no-response-network': 'Estimated at zero: the engine could not be reached (connection, DNS or TLS failure before any response), so no billable response was produced.',
+  'not-dispatched': 'Estimated at zero: the request was stopped before it was sent to the engine, so no billable response was produced.',
   'self-heal-request-heuristic': 'Estimated from the published tariff when an earlier unresolved call was settled: input from the recorded request size at the full input rate, output unknown (counted as zero); absorbed, not charged to any user.',
   'self-heal-unrecorded': 'Estimated at zero when an earlier unresolved call was settled: no request size or usage was recorded for it; absorbed, not charged to any user.',
 });
@@ -134,6 +141,8 @@ export interface CatalogueEstimateEvidence {
   outputChars: number;
   /** Last HTTP status the transport saw for this call, when known. */
   httpStatus?: number | null;
+  /** No response ever existed: `network` = connection never set up; `not-dispatched` = never sent. */
+  noResponse?: 'network' | 'not-dispatched';
   /** Self-heal of a stale lock: the build is over, so the basis names that. */
   selfHeal?: boolean;
 }
@@ -160,6 +169,10 @@ export function estimateCatalogueChatCost(snapshot: CatalogueSnapshot, usage: un
     return price('usage-full-input-rate', input, output, null);
   }
   const status = evidence.httpStatus;
+  if (!evidence.selfHeal && (status === undefined || status === null) && !(evidence.outputChars > 0)) {
+    if (evidence.noResponse === 'not-dispatched') return price('not-dispatched', 0, 0, null);
+    if (evidence.noResponse === 'network') return price('no-response-network', 0, 0, null);
+  }
   if (typeof status === 'number' && Number.isSafeInteger(status) && (status < 200 || status >= 300)) return price('no-billable-response', 0, 0, null);
   const input = Number.isSafeInteger(evidence.requestInputTokens) && evidence.requestInputTokens > 0 ? evidence.requestInputTokens : 0;
   const output = Number.isSafeInteger(evidence.outputChars) && evidence.outputChars > 0 ? Math.ceil(evidence.outputChars / 4) : 0;

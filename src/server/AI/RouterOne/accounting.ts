@@ -1,5 +1,5 @@
 import { PublicBuildEngineError } from '../../lib/buildEngineError';
-import { readEngineSafeDiag, tagEngineSafeDiag } from '../../lib/engineSafeDiag';
+import { markTransportNoResponse, readEngineSafeDiag, tagEngineSafeDiag } from '../../lib/engineSafeDiag';
 
 /** The public completion contract reports tokens, not a settled supplier expense.
  * Dashboard wallet charges cannot be inferred from list prices or balance deltas.
@@ -43,7 +43,10 @@ export function routerOneAccountingFetch(transport: typeof globalThis.fetch, mod
   record: (trace: { requestId: string | null; model: string; status: number; expenseEvidence: 'unknown' }) => void,
 ): typeof globalThis.fetch {
   return async (input, init) => {
-    const response = await transport(input, init);
+    let response: Response;
+    // BR2388 review: a throw here means no HTTP response ever existed (DNS, refused, TLS, abort, timeout).
+    // Marked (WeakSet, the error itself is rethrown unchanged) so billing can tell it from a lost receipt.
+    try { response = await transport(input, init); } catch (error) { throw markTransportNoResponse(error); }
     const rawId = response.headers.get('x-request-id');
     const requestId = rawId && /^[a-zA-Z0-9_.:-]{1,256}$/.test(rawId) ? rawId : null;
     try { record({ requestId, model, status: response.status, expenseEvidence: 'unknown' }); }

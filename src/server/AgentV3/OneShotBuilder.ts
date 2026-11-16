@@ -173,6 +173,33 @@ export function isEchoedFormatExample(path: string, content: string): boolean {
  */
 export const END_FILE_MARKER = '<<<ENDFILE>{1,3}';
 
+/**
+ * A `<<<FILE path>>>` header written one or two brackets short, rewritten to the exact `>>>` spelling so
+ * every reader keeps main's own `>>>` pattern (BR1989). A per-file call answered `<<<FILE src/x.tsx>>`;
+ * the parser only knew `>>>`, returned no block, and the paid-for component was silently dropped until a
+ * repair round wrote it again.
+ *
+ * ⚠️ NARROW ON PURPOSE (BR1989 review FAIL). A first version widened the parser to `>{1,3}` anywhere, and
+ * prose, Markdown and template-literal lines (`<<<FILE src/a.tsx> // the <App />`, `<<<FILE path>`,
+ * `<<<FILE ${p}>`) became phantom files main ignored — files the one-shot lane and the repairs would write.
+ * A short header is accepted ONLY when ALL hold:
+ *   - it starts a line (start of text or right after `\n`), with one space/tab run after `FILE`;
+ *   - one or two `>` close it and nothing but spaces/tabs follow before the line end;
+ *   - the path has no whitespace and none of `<` `>` `$` `{` `}`, and contains a `/` or a file extension.
+ * Anything else is left byte-for-byte as it was, so main skips it exactly as before. A `>>>` header is
+ * never touched (two brackets followed by a third is not "nothing after"). Pure.
+ */
+const SHORT_FILE_HEADER_LINE = /^<<<FILE[ \t]+([^\s<>${}]+)>{1,2}[ \t]*(?=\r?$)/gm;
+export function isPlausibleHeaderPath(path: string): boolean {
+  const p = String(path ?? '').replace(/^["'`]|["'`]$/g, '');
+  return /^[^\s<>${}"'`]+$/.test(p) && (p.includes('/') || /\.[A-Za-z0-9]+$/.test(p));
+}
+export function normalizeShortFileHeaders(text: string): string {
+  const t = String(text ?? '');
+  if (!t.includes('<<<FILE')) return t;
+  return t.replace(SHORT_FILE_HEADER_LINE, (line, raw: string) => (isPlausibleHeaderPath(raw) ? `<<<FILE ${raw}>>>` : line));
+}
+
 /** Does `text` contain an end-of-file marker at or after `from`? Pure. */
 export function hasEndFileMarker(text: string, from = 0): boolean {
   return new RegExp(END_FILE_MARKER).test(String(text ?? '').slice(Math.max(0, from)));
@@ -198,6 +225,10 @@ export function parseFileBlocks(text: string): OneShotFile[] {
   // The terminator also accepts `<<<ENDFILE>>` and `<<<ENDFILE>` (autopsy eed79815, 2026-09-26): a model
   // that dropped one `>` left the marker INSIDE the file, and a stylesheet ending in `<<<ENDFILE>>`
   // broke the production build on the next turn.
+  //
+  // A header one or two brackets short is first rewritten to `>>>`, only under the strict line rule of
+  // normalizeShortFileHeaders (BR1989); every other byte reaches main's pattern unchanged.
+  text = normalizeShortFileHeaders(text);
   const re = new RegExp(String.raw`<<<FILE\s+(.+?)>>>\r?\n([\s\S]*?)(?:\r?\n?${END_FILE_MARKER}|(?=\r?\n?<<<FILE\s)|$)`, 'g');
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {

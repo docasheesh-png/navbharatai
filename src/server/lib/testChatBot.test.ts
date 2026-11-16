@@ -978,6 +978,7 @@ describe('every AI provider NavBharatAI uses is in the Test Chat Bot list (admin
       deepseek: ['deepseek-flash'], cloudflare: ['cloudflare-workers-ai'], pollinations: ['pollinations-image'],
       bedrock: ['bedrock-glm'], nvidia: ['nvidia-nemotron'], modelscope: ['modelscope'], llm7: ['llm7'],
       bluesminds: ['bluesminds'], requesty: ['requesty'],
+      moyi: ['moyi'], discountedtokens: ['discountedtokens'], mirapi: ['mirapi'],
     };
     const families = PROVIDER_FAMILIES.map(f => f.id);
     expect(families.filter(id => !COVERAGE[id])).toEqual([]);
@@ -1288,5 +1289,114 @@ describe('BluesMinds picks models from the key\'s own list and tries the next on
   it('says so on the entry', () => {
     fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
     expect(testChatStatus().providers.find(p => p.id === 'bluesminds')?.note).toContain('tries them in turn');
+  });
+});
+
+describe('discount reseller gateways are testable here and nowhere else (owner 2026-11-16)', () => {
+  const quote = (priceIn: number, priceOut: number) => {
+    const inputTokens = Buffer.byteLength(JSON.stringify(action.messages), 'utf8') + 256;
+    return maximumCostNanoUsd(inputTokens, TEST_CHAT_MAX_OUTPUT_TOKENS, usdToNanoUsd(priceIn), usdToNanoUsd(priceOut));
+  };
+  const row = (id: string) => testChatStatus().providers.find(p => p.id === id);
+  const run = (provider: 'moyi' | 'discountedtokens' | 'mirapi', model?: string) =>
+    runTestChat({ ...action, provider, ...(model ? { model } : {}) }, 'actor', new AbortController().signal);
+  beforeEach(async () => { (await import('./providerModelPicker')).__resetProviderModelCache(); });
+
+  it('all three are listed, and disabled with the missing key named until a key is set', () => {
+    for (const [id, keyEnv] of [['moyi', 'MOYI_API_KEY'], ['discountedtokens', 'DISCOUNTEDTOKENS_API_KEY'], ['mirapi', 'MIRAPI_API_KEY']]) {
+      expect(row(id)).toMatchObject({ configured: false, enabled: false, billed: true });
+      expect(row(id)?.unavailableReason).toContain(keyEnv);
+    }
+  });
+
+  it('DiscountedTokens calls its published endpoint and model, reserving the list-price ceiling, in one streamed call', async () => {
+    vi.stubEnv('DISCOUNTEDTOKENS_API_KEY', 'synthetic-dt-key-value');
+    expect(row('discountedtokens')).toMatchObject({ configured: true, enabled: true, model: 'gpt-6-sol' });
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hello', model: 'gpt-6-sol', usage: { inputTokens: 2, outputTokens: 3 } });
+    await expect(run('discountedtokens')).resolves.toMatchObject({ content: 'Hello', model: 'gpt-6-sol', noFallback: true });
+    expect(fake.officialOpenAi).toHaveBeenCalledTimes(1);
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'https://discountedtokens.com/v1/chat/completions', apiKey: 'synthetic-dt-key-value', model: 'gpt-6-sol', stream: true }));
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(10, 50) }));
+  });
+
+  it('MirAPI has no invented endpoint: a key alone leaves it disabled, asking for the base URL', async () => {
+    vi.stubEnv('MIRAPI_API_KEY', 'synthetic-mir-key-value');
+    expect(row('mirapi')).toMatchObject({ configured: true, enabled: false });
+    expect(row('mirapi')?.unavailableReason).toContain('MIRAPI_BASE_URL');
+    await expect(run('mirapi')).rejects.toMatchObject({ reason: 'disabled' });
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+  });
+
+  it('Moyi with a key alone: an OpenAI model goes to its /v1 endpoint, every other model to its Anthropic-format endpoint', async () => {
+    vi.stubEnv('MOYI_API_KEY', 'synthetic-moyi-key-value');
+    expect(row('moyi')).toMatchObject({ configured: true, enabled: true });
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hi', model: 'gpt-6-sol' });
+    fake.officialAnthropic.mockResolvedValue({ content: 'Hi', model: 'grok-4.7' });
+    for (const model of ['gpt-6-sol', 'openai/gpt-5.6-terra', 'o3-mini']) {
+      await run('moyi', model);
+      expect(fake.officialOpenAi).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'https://api.moyi-api.com/v1/chat/completions', apiKey: 'synthetic-moyi-key-value', model }));
+    }
+    expect(fake.officialAnthropic).not.toHaveBeenCalled();
+    fake.officialOpenAi.mockClear();
+    for (const model of ['grok-4.7', 'claude-haiku-5-5', 'deepseek-v4.1-flash', 'gemini-3.8-flash']) {
+      await run('moyi', model);
+      expect(fake.officialAnthropic).toHaveBeenLastCalledWith(expect.objectContaining({ baseURL: 'https://api.moyi-api.com', apiKey: 'synthetic-moyi-key-value', model }));
+    }
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+    expect(fake.reserve).toHaveBeenCalledTimes(7);
+  });
+
+  it('only Moyi has a second endpoint: DiscountedTokens sends a non-OpenAI model id to its one OpenAI-format endpoint', async () => {
+    vi.stubEnv('DISCOUNTEDTOKENS_API_KEY', 'synthetic-dt-key-value');
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hi', model: 'codex-auto-review' });
+    await run('discountedtokens', 'grok-4.7');
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://discountedtokens.com/v1/chat/completions', model: 'grok-4.7' }));
+    expect(fake.officialAnthropic).not.toHaveBeenCalled();
+  });
+
+  it('Moyi’s Anthropic-format endpoint must also be on its own domain', () => {
+    vi.stubEnv('MOYI_API_KEY', 'synthetic-moyi-key-value');
+    vi.stubEnv('MOYI_ANTHROPIC_BASE_URL', 'https://api.moyi-api.com.evil.example');
+    expect(row('moyi')).toMatchObject({ enabled: false });
+    expect(row('moyi')?.unavailableReason).toContain('MOYI_ANTHROPIC_BASE_URL');
+  });
+
+  it.each([
+    'http://api.moyi-api.com/v1', 'https://moyi-api.com.evil.example/v1', 'https://evilmoyi-api.com/v1',
+    'https://api.moyi-api.com:8443/v1', 'https://user:pw@api.moyi-api.com/v1', 'https://api.moyi-api.com/v1?x=1', 'https://api.mirapi.ai/v1',
+  ])('the key is never sent off the provider’s own domain: %s is refused', async baseUrl => {
+    vi.stubEnv('MOYI_API_KEY', 'synthetic-moyi-key-value');
+    vi.stubEnv('MOYI_BASE_URL', baseUrl);
+    expect(row('moyi')).toMatchObject({ enabled: false });
+    await expect(run('moyi')).rejects.toMatchObject({ reason: 'disabled' });
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('with no model configured it uses a chat model from the key’s own list; a typed model wins without reading the list', async () => {
+    vi.stubEnv('MIRAPI_API_KEY', 'synthetic-mir-key-value');
+    vi.stubEnv('MIRAPI_BASE_URL', 'https://api.mirapi.ai/v1/');
+    const list = vi.fn(async () => new Response(JSON.stringify({ data: [{ id: 'gpt-image-2' }, { id: 'gpt-6-luna' }] }), { status: 200 }));
+    vi.stubGlobal('fetch', list);
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hi', model: 'gpt-6-luna' });
+    await run('mirapi');
+    expect(list).toHaveBeenCalledWith('https://api.mirapi.ai/v1/models', expect.anything());
+    expect(fake.officialOpenAi).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'https://api.mirapi.ai/v1/chat/completions', model: 'gpt-6-luna' }));
+    list.mockClear();
+    await run('mirapi', 'claude-haiku-5-5');
+    expect(list).not.toHaveBeenCalled();
+    expect(fake.officialOpenAi).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'claude-haiku-5-5' }));
+  });
+
+  it('no listed model and none typed means no call and no reserve; a refused budget means no call', async () => {
+    vi.stubEnv('MOYI_API_KEY', 'synthetic-moyi-key-value');
+    vi.stubEnv('MOYI_BASE_URL', 'https://api.moyi-api.com/v1');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"data":[]}', { status: 200 })));
+    await expect(run('moyi')).rejects.toMatchObject({ reason: 'no-model' });
+    expect(fake.reserve).not.toHaveBeenCalled();
+    fake.reserve.mockResolvedValue(null);
+    await expect(run('moyi', 'grok-4.7')).rejects.toMatchObject({ reason: 'budget' });
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
   });
 });

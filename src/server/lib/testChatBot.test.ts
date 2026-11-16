@@ -79,7 +79,7 @@ vi.mock('../AI/FreeChain/providers/openAiCompatProvider', async importOriginal =
   };
 });
 import { isTestChatStatus, readPartialTestChatStatus, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_PROVIDER_IDS, type TestChatAction } from '../../lib/testChatBot';
-import { loadTestChatStatus, ROUTER_ONE_PRICE_UNAVAILABLE, ROUTER_ONE_TEST_CHAT_URL, ROUTER_ONE_TEST_MAX_TOKENS, routerOneTariffCeilingNanoUsd, runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
+import { BUILDER_TEST_MAX_TOKENS, loadTestChatStatus, ROUTER_ONE_PRICE_UNAVAILABLE, ROUTER_ONE_TEST_CHAT_URL, ROUTER_ONE_TEST_MAX_TOKENS, routerOneTariffCeilingNanoUsd, runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
 import { maximumCostNanoUsd, usdToNanoUsd } from '../AI/FreeChain/spendCap';
 import { QubaxError } from './qubax';
 import { MitrifyError } from './mitrify';
@@ -958,9 +958,9 @@ describe('Router One in the admin Test Chat Bot (admin 2026-11-15)', () => {
 
 
 describe('every AI provider NavBharatAI uses is in the Test Chat Bot list (admin 2026-11-15)', () => {
-  const quote = (priceIn: number, priceOut: number, messages = action.messages) => {
-    const inputTokens = Buffer.byteLength(JSON.stringify(messages), 'utf8') + 256;
-    return maximumCostNanoUsd(inputTokens, TEST_CHAT_MAX_OUTPUT_TOKENS, usdToNanoUsd(priceIn), usdToNanoUsd(priceOut));
+  const quote = (priceIn: number, priceOut: number, outputTokens = TEST_CHAT_MAX_OUTPUT_TOKENS) => {
+    const inputTokens = Buffer.byteLength(JSON.stringify(action.messages), 'utf8') + 256;
+    return maximumCostNanoUsd(inputTokens, outputTokens, usdToNanoUsd(priceIn), usdToNanoUsd(priceOut));
   };
   const okReply = (model: string) => ({ content: `Hello from ${model}`, model, usage: { inputTokens: 2, outputTokens: 3 } });
 
@@ -1004,7 +1004,8 @@ describe('every AI provider NavBharatAI uses is in the Test Chat Bot list (admin
     fake.officialOpenAi.mockResolvedValue(okReply('kimi-k3'));
     await runTestChat({ ...action, provider: 'kimi', model: 'kimi-k3' }, 'actor', new AbortController().signal);
     expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://api.kimi.com/coding/v1/chat/completions', model: 'kimi-k3' }));
-    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(3, 15) }));
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(3, 15, BUILDER_TEST_MAX_TOKENS) }));
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ stream: true, maxTokens: BUILDER_TEST_MAX_TOKENS }));
   });
 
   it('keeps Kimi disabled on a non-official proxy URL', () => {
@@ -1028,7 +1029,7 @@ describe('every AI provider NavBharatAI uses is in the Test Chat Bot list (admin
     const result = await runTestChat({ ...action, provider: 'glm-builder' }, 'actor', new AbortController().signal);
     expect(result).toMatchObject({ provider: 'glm-builder', content: 'Hello from glm-5.3', noFallback: true });
     expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://api.z.ai/api/paas/v4/chat/completions', apiKey: 'synthetic-glm-key-value', model: 'glm-5.3' }));
-    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(1.4, 4.4) }));
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(1.4, 4.4, BUILDER_TEST_MAX_TOKENS) }));
   });
 
   it('calls Nemotron on its paid host with the price guard lifted only for that reserved call', async () => {
@@ -1094,5 +1095,85 @@ describe('every AI provider NavBharatAI uses is in the Test Chat Bot list (admin
     const error = await runTestChat({ ...action, provider: 'glm-builder' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
     expect(error.reason).toBe('unconfirmed');
     expect(JSON.stringify(error.diagnostic)).not.toContain('synthetic-glm-secret-value');
+  });
+});
+
+describe('user-chat policy gates do not block an admin test (admin 2026-11-16: BluesMinds "pahle test kar lu, fir fix karna")', () => {
+  const bluesRung = (overrides: Record<string, unknown> = {}) => ({
+    id: 'bluesminds', configured: true, key: 'synthetic-blues-key', keyEnv: 'FREE_CHAIN_BLUESMINDS_API_KEY',
+    model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1', reason: 'terms-unverified',
+    streamUsage: false, priceIn: 0, priceOut: 0, ...overrides,
+  });
+
+  it('the real config keeps BluesMinds OFF for user chat until written approval — that is the gate this page now looks past', async () => {
+    const { freeChainConfig: real } = await vi.importActual<typeof import('../AI/FreeChain/config')>('../AI/FreeChain/config');
+    const rung = real({ FREE_CHAIN_BLUESMINDS_API_KEY: 'synthetic-blues-key' } as NodeJS.ProcessEnv).rungs.find(r => r.id === 'bluesminds');
+    expect(rung).toMatchObject({ configured: true, reason: 'terms-unverified', model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1' });
+  });
+
+  it('lists BluesMinds as testable when its key is set, saying user chat keeps it off, and calls api.bluesminds.com', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung()] }));
+    const status = testChatStatus().providers.find(p => p.id === 'bluesminds');
+    expect(status).toMatchObject({ configured: true, enabled: true, model: 'openai/gpt-oss-20b' });
+    expect(status?.note).toContain('User chat keeps this provider off');
+    fake.compatTurn.mockResolvedValue({ content: 'Hello from BluesMinds', model: 'openai/gpt-oss-20b' });
+    const result = await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal);
+    expect(result).toMatchObject({ provider: 'bluesminds', content: 'Hello from BluesMinds', noFallback: true });
+    expect(fake.compatCtor).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'BLUESMINDS', key: 'synthetic-blues-key', baseURL: 'https://api.bluesminds.com/v1', model: 'openai/gpt-oss-20b',
+    }));
+    expect(fake.compatTurn).toHaveBeenCalledOnce();
+  });
+
+  it.each(['terms-non-production', 'terms-shared-access', 'disabled'])('a %s rung is testable too', reason => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung({ reason })] }));
+    expect(testChatStatus().providers.find(p => p.id === 'bluesminds')?.enabled).toBe(true);
+  });
+
+  it('still refuses a rung whose model is not on the allowlist, naming that — never hidden behind the terms reason', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung({ model: '' })] }));
+    expect(testChatStatus().providers.find(p => p.id === 'bluesminds')).toMatchObject({ enabled: false, unavailableReason: 'The configured model is not on the server allowlist.' });
+    await expect(runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'disabled' });
+    expect(fake.compatTurn).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a missing key, a missing account and an unverified paid rate card', () => {
+    for (const rung of [bluesRung({ configured: false, key: '', reason: 'unconfigured' }), bluesRung({ reason: 'account-unconfigured' }), bluesRung({ reason: 'rate-card-unverified' })]) {
+      fake.budgetConfig.mockReturnValue(budget({ rungs: [rung] }));
+      expect(testChatStatus().providers.find(p => p.id === 'bluesminds')?.enabled).toBe(false);
+    }
+  });
+});
+
+
+describe('the test page streams every provider the builder or user chat streams (admin report 2026-11-16: BluesMinds timed out at 60,142 ms)', () => {
+  const bluesRung = { id: 'bluesminds', configured: true, key: 'synthetic-blues-key', keyEnv: 'FREE_CHAIN_BLUESMINDS_API_KEY',
+    model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1', reason: 'terms-unverified', streamUsage: false, priceIn: 0, priceOut: 0 };
+
+  it('calls a Free Chat rung with onChunk, as user chat does — never a non-streamed wait for the whole answer', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    fake.compatTurn.mockResolvedValue({ content: 'streamed reply', model: 'openai/gpt-oss-20b' });
+    await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal);
+    expect(fake.compatTurn.mock.calls[0]?.[0]).toMatchObject({ onChunk: expect.any(Function) });
+  });
+
+  it.each([
+    ['xai-grok', 'XAI_API_KEY', undefined],
+    ['glm-builder', 'GLM_API_KEY', BUILDER_TEST_MAX_TOKENS],
+    ['nemotron', 'NEMOTRON_API_KEY', BUILDER_TEST_MAX_TOKENS],
+    ['bedrock-glm', 'BEDROCK_API_KEY', BUILDER_TEST_MAX_TOKENS],
+  ] as const)('streams %s', async (provider, keyEnv, maxTokens) => {
+    vi.stubEnv(keyEnv, 'synthetic-key-value');
+    fake.officialOpenAi.mockResolvedValue({ content: 'ok', model: 'm' });
+    await runTestChat({ ...action, provider }, 'actor', new AbortController().signal);
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ stream: true }));
+    if (maxTokens) expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ maxTokens }));
+  });
+
+  it('keeps Surplus non-streamed, as the builder’s dedicated Surplus runner is', async () => {
+    vi.stubEnv('SURPLUS_API_KEY', 'synthetic-surplus-key');
+    fake.officialOpenAi.mockResolvedValue({ content: 'ok', model: 'deepseek-v4.1-flash' });
+    await runTestChat({ ...action, provider: 'surplus' }, 'actor', new AbortController().signal);
+    expect((fake.officialOpenAi.mock.calls[0]?.[0] as { stream?: boolean }).stream).toBeUndefined();
   });
 });

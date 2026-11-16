@@ -154,10 +154,16 @@ describe('Q-284 · every platform start brings the backend up first', () => {
       expect(at, site).toBeGreaterThan(-1);
       expect(ROUTE.slice(at - 250, at), site).toContain('await startPythonBackendFirst(');
     }
-    // Census: every hard-coded platform `npm run dev` start is preceded by the backend boot.
+    // Census: the two in-build revives still hard-code `npm run dev`. The platform
+    // preview start uses the launch plan (Node keeps npm; Spring Boot / Go use the
+    // registry command) and falls back to npm. Every one of those starts is preceded
+    // by the backend boot.
     const starts = [...ROUTE.matchAll(/actuator\.runCommand\(workspaceId, 'npm run dev'\)/g)];
-    expect(starts.length).toBe(3);
+    expect(starts.length).toBe(2);
     for (const m of starts) expect(ROUTE.slice((m.index ?? 0) - 250, m.index)).toContain('startPythonBackendFirst(');
+    const planned = [...ROUTE.matchAll(/actuator\.runCommand\(workspaceId, platformLaunch\.startCommand \?\? 'npm run dev'\)/g)];
+    expect(planned.length).toBe(1);
+    for (const m of planned) expect(ROUTE.slice((m.index ?? 0) - 250, m.index)).toContain('startPythonBackendFirst(');
   });
 
   it('a recipe recorded from the backend launch is never replayed as the preview', () => {

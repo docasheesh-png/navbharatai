@@ -105,6 +105,8 @@ const REASON_TEXT: Record<string, string> = {
   'rate-card-unverified': 'The paid rate card for this provider is not verified, so this test will not invent a price or dispatch.',
 };
 const MISSING_KEY = 'No API credential is set on the server.';
+/** Reasons user chat uses to keep a rung OFF by policy. They are not a reason to refuse an admin test. */
+const USER_POLICY_REASONS = new Set(['disabled', 'terms-non-production', 'terms-unverified', 'terms-shared-access']);
 
 function firstPresent(env: NodeJS.ProcessEnv, names: readonly string[]): string {
   for (const name of names) {
@@ -138,6 +140,9 @@ export const ROUTER_ONE_TEST_CHAT_URL = `${ROUTER_ONE_DEFAULT_BASE_URL}/chat/com
  * answer, and the reserve is quoted for exactly this bound.
  */
 export const ROUTER_ONE_TEST_MAX_TOKENS = 8_192;
+/** Builder engines that reason before answering get the same room on this page (Kimi, GLM builder, Nemotron, Bedrock GLM). */
+export const BUILDER_TEST_MAX_TOKENS = 8_192;
+const BUILDER_REASONING_KINDS: ReadonlySet<string> = new Set(['kimi', 'glm-builder', 'nemotron', 'bedrock-glm']);
 export const ROUTER_ONE_PRICE_UNAVAILABLE = 'Router One’s posted price for this model could not be read from router.one, so this page has no spending ceiling for it and did not call it. Choose a model listed on router.one/models, or try again in a few minutes.';
 function routerOneOfficialEndpoint(): boolean {
   return routerOneBaseUrl().replace(/\/+$/, '') === ROUTER_ONE_DEFAULT_BASE_URL;
@@ -478,9 +483,22 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   const rung = meta.rungId ? rungOf(meta.rungId) : undefined;
   const configured = !!rung?.configured;
   const reason = rung?.reason;
-  const cheapinfUserFlag = meta.rungId === 'cheapinf' && configured && (reason === 'disabled' || reason === 'terms-shared-access');
-  const blocked = !configured || (!!reason && BLOCKING_REASONS.has(reason) && !cheapinfUserFlag);
-  const note = reason === 'privacy'
+  // 🔴 OWNER DECISION — DO NOT RE-BLOCK WITHOUT THE OWNER (2026-11-16). Asked directly with both options laid out
+  // ("let BluesMinds be tested on the admin page" vs "keep it blocked until terms and cost are verified"), the owner
+  // chose testing: "to kro yaar", then "abhi bhi nahi chala" after a re-block. Two commits that hard-blocked BluesMinds
+  // here (019880044, a06a679d9) were reverted on that instruction. Terms still gate USER CHAT, which is unchanged.
+  // tests/theOwnerChoseAdminTestingForBluesMinds.test.ts fails if this page refuses BluesMinds again.
+  // USER-CHAT POLICY IS NOT AN ADMIN-TEST GATE (admin 2026-11-15: "pahle drop down me rakho, test kar lu, fir fix
+  // karna"). A rung that user chat keeps off by policy — rollout off, terms not yet verified, not approved for
+  // production, no shared-access permission — is exactly the one the admin needs to try before deciding. This page
+  // still refuses a missing key, an unlisted model, a missing account and an unverified paid rate card, and
+  // user chat is unchanged. Generalises the earlier CheaperInference-only exception to every rung.
+  const userPolicyOnly = configured && !!reason && USER_POLICY_REASONS.has(reason) && !!rung?.model;
+  const blocked = !configured || (!!reason && BLOCKING_REASONS.has(reason) && !userPolicyOnly)
+    || (configured && !rung?.model && meta.kind !== 'openrouter');
+  const note = userPolicyOnly
+    ? `User chat keeps this provider off (${REASON_TEXT[reason!] ?? reason}). This admin test calls it anyway, from this page only; user chat is unchanged.`
+    : reason === 'privacy'
     ? 'User chat may skip this provider for private turns; this admin test still calls only the selected provider.'
     : reason === 'free-plan-review-required'
       ? 'The free-plan review used by user chat is missing or expired; this admin test still calls only the selected provider.'
@@ -489,6 +507,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
         : meta.rungId === 'cheapinf'
           ? 'This admin test can call CheaperInference when its key is set, using the same model string main chat would use. It does not change the user-chat sharing mode.'
         : undefined;
+  const modelMissing = configured && !rung?.model && meta.kind !== 'openrouter';
   const listed = chainConfig()?.openRouterModels ?? [];
   const model = (meta.kind === 'openrouter' ? (listed[0] ?? rung?.model ?? '') : rung?.model) || null;
   const enabled = !blocked && configured;
@@ -496,6 +515,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
     ...base, configured, enabled, model: model || null, billed: !!(meta.rungId && isPaidRung(meta.rungId)), approvalRequired: false,
     ...(note ? { note } : {}),
     ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY
+      : modelMissing ? REASON_TEXT['model-unverified']
       : REASON_TEXT[reason ?? ''] ?? 'This provider is not available for dispatch.' }),
   };
 }
@@ -817,6 +837,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       const key = firstPresent(process.env, ['OPENROUTER_API_KEY']) || rungOf('openrouter')?.key || '';
       const result = await runOfficialOpenAiCompatTest({
         url: 'https://openrouter.ai/api/v1/chat/completions', apiKey: key, model: picked, messages: action.messages, signal: bounded,
+        stream: true,
       });
       return finish(action, result.content, result.model || picked, startedAt, result.usage);
     }
@@ -835,7 +856,10 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       let rate;
       // Surplus has no rate card (realRateFor refuses it by design); its reserve is the Sonnet card — a ceiling.
       try { rate = meta.kind === 'surplus' ? realRateFor('ANTHROPIC', 'sonnet') : realRateFor(rateProvider, model); } catch { throw new TestChatUnavailable('budget', 409); }
-      const ceiling = quoteTokens(action.messages, rate.inputPerMTok, rate.outputPerMTok);
+      // Builder reasoning engines get room to think and answer (the Router One lesson: at 1,024 a reasoning model
+      // spent every token thinking). The reserve is quoted for exactly the bound the call uses.
+      const outputTokens = BUILDER_REASONING_KINDS.has(meta.kind) ? BUILDER_TEST_MAX_TOKENS : TEST_CHAT_MAX_OUTPUT_TOKENS;
+      const ceiling = quoteTokens(action.messages, rate.inputPerMTok, rate.outputPerMTok, outputTokens);
       if (ceiling > 0) {
         officialReceipt = await reserveShared(db, requestId, uid, ceiling);
         if (!officialReceipt) throw new TestChatUnavailable('budget', 409);
@@ -848,6 +872,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       if (meta.kind === 'kimi') {
         const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
           url: `${kimiBase()}/chat/completions`, apiKey: firstPresent(process.env, ['KIMI_API_KEY']), model, messages: action.messages, signal: bounded,
+          stream: true, maxTokens: outputTokens,
         }));
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
@@ -858,6 +883,8 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
           : { url: SURPLUS_TEST_URL, apiKey: firstPresent(process.env, ['SURPLUS_API_KEY']) };
         const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
           ...target, model, messages: action.messages, signal: bounded,
+          // Streamed like the builder; Surplus stays non-streamed, as the builder's dedicated Surplus runner is.
+          ...(meta.kind === 'surplus' ? {} : { stream: true, maxTokens: outputTokens }),
           ...(meta.kind === 'nemotron' ? { allowPaid: true } : {}),
           ...(meta.kind === 'surplus' ? { extraBody: { si_route: { objective: 'price' } } } : {}),
         }));
@@ -873,6 +900,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
           url: 'https://api.x.ai/v1/chat/completions',
           apiKey: firstPresent(process.env, ['XAI_API_KEY', 'GROK_API_KEY']), model, messages: action.messages, signal: bounded,
+          stream: true,
         }));
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
@@ -894,6 +922,10 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       prompt: action.messages.at(-1)?.content ?? '',
       messages: action.messages,
       signal: bounded,
+      // Streamed, exactly as user chat calls these rungs. Without onChunk the adapter sent stream: false and waited
+      // for the whole answer: BluesMinds (openai/gpt-oss-20b, a reasoning model) timed out at 60,142 ms with no byte
+      // returned (admin report 2026-11-16). The page shows the final reply, so the chunks themselves are not used.
+      onChunk: () => {},
     }));
     return finish(action, result.content, result.model, startedAt, result.usage);
   } catch (error) {

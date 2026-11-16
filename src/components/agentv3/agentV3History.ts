@@ -217,13 +217,9 @@ export function conversationToEvents(conv: PersistedConversation): AgentV3WireEv
     const summary = `Reloaded a previous build (${conv.status}).`;
     const ok = conv.status === 'complete';
     events.push({ type: 'done', ok, summary, ts: lastTs + 1, ...(buildHealth ? { readiness: buildHealth } : {}) });
-    // Synthetic `result` restores the done-footer from durable facts (₹ badge, token badge). The
-    // data always survived on the record — it was simply dropped here before eternal sessions.
-    const billedUsd = typeof final.billedUsd === 'number' ? final.billedUsd : (conv.billedUsd ?? 0);
-    const billedInr = typeof final.billedInr === 'number' ? final.billedInr : undefined;
-    const tokens = typeof final.tokens === 'number'
-      ? final.tokens
-      : (conv.usage ? (conv.usage.inputTokens ?? 0) + (conv.usage.outputTokens ?? 0) : 0);
+    // Synthetic `result` restores the done-footer from durable facts (the ₹ badge). Owner t362u: only the
+    // rupee total — an older record's USD bill or token counts are never restored into the UI.
+    const billedInr = typeof final.billedInr === 'number' && Number.isFinite(final.billedInr) ? final.billedInr : undefined;
     // The compact build report embedded WITH the chat (finalState.report) — rehydrated into the
     // synthetic `result` so `state.diagnostics` is populated on reopen and the "Build report"
     // download/copy works offline (no separate fetch that can 404). Fire the result whenever a report
@@ -232,11 +228,10 @@ export function conversationToEvents(conv: PersistedConversation): AgentV3WireEv
     // Billing Phase 1 — the wallet deduction is a durable fact of the turn; the live BALANCE is
     // deliberately NOT restored (it would be stale the moment another build or recharge happens).
     const walletTokensDebited = typeof final.walletTokensDebited === 'number' ? final.walletTokensDebited : 0;
-    if (billedUsd > 0 || (billedInr ?? 0) > 0 || tokens > 0 || report) {
+    if ((billedInr ?? 0) > 0 || walletTokensDebited > 0 || report) {
       events.push({
-        type: 'result', ok, summary, steps: 0, billedUsd,
+        type: 'result', ok, summary, steps: 0,
         ...(billedInr !== undefined ? { billedInr } : {}),
-        ...(tokens > 0 ? { tokens } : {}),
         ...(walletTokensDebited > 0 ? { walletTokensDebited } : {}),
         ...(report ? { diagnostics: report } : {}),
       });

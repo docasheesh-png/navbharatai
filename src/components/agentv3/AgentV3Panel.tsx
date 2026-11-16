@@ -34,7 +34,7 @@ const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ defaul
 // A2 — the REAL shell. LAZY on purpose: it pulls xterm (~70 KB gz), which must never land on the
 // first-paint path for the many users who never open a terminal.
 const TerminalPanel = lazy(() => import('../ide/TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
-import { Bot, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle, ArrowUp } from 'lucide-react';
+import { Bot, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle, ArrowUp } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
@@ -5499,12 +5499,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 </div>
               </div>
             )}
-            {state.done && (typeof state.billedInr === 'number' || typeof state.billedUsd === 'number') && (
+            {/* Owner t362u: the user sees only the ₹ total — never a USD amount, token counts or the rate. */}
+            {state.done && typeof state.billedInr === 'number' && (
               <div className="flex items-center gap-1 text-[11px] text-faint" title="Customer bill (INR)">
                 <Rocket className="w-3 h-3" />{' '}
-                {typeof state.billedInr === 'number'
-                  ? `₹${state.billedInr.toFixed(2)}`
-                  : `$${(state.billedUsd as number).toFixed(4)}`}
+                {`₹${state.billedInr.toFixed(2)}`}
               </div>
             )}
             {/* THE BUILD DISCOUNT (admin 2026-09-25: "green colour me likh kar aye, discount!!") — shown
@@ -5522,8 +5521,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   Why this cost?
                 </summary>
                 <div className="mt-1 ml-1 flex flex-col gap-0.5 border-l border-line pl-2">
-                  <span>Input: {state.costBreakdown.inputTokens.toLocaleString()} tokens · Output: {state.costBreakdown.outputTokens.toLocaleString()} tokens</span>
-                  <span>Engine: {state.costBreakdown.engine} · {state.costBreakdown.tier} tier</span>
+                  {state.costBreakdown.engine && state.costBreakdown.tier && (
+                    <span>Engine: {state.costBreakdown.engine} · {state.costBreakdown.tier} tier</span>
+                  )}
                   {/* BUILD MACHINE TIME (admin 2026-08-22; renamed 2026-10-04, Q-306) — shown only when it was
                       actually charged. It is the time the BUILD held our machine, capped at the build's own
                       duration, never a live preview the user opened — so it is not called one, and no
@@ -5549,13 +5549,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   <span>Total: ₹{state.costBreakdown.billedInr.toFixed(2)}</span>
                 </div>
               </details>
-            )}
-            {/* P-UX.7 — token usage for this build (input + output), shown alongside the ₹ cost. */}
-            {state.done && typeof state.tokens === 'number' && state.tokens > 0 && (
-              <div className="flex items-center gap-1 text-[11px] text-faint" title="Tokens used by this build (input + output)">
-                <FileCode className="w-3 h-3" />
-                {state.tokens >= 1000 ? `${(state.tokens / 1000).toFixed(1)}k` : state.tokens} tokens
-              </div>
             )}
             {/* Billing Phase 1 — the REAL wallet deduction for this build (tokens out + balance left). */}
             {state.done && typeof state.walletTokensDebited === 'number' && state.walletTokensDebited > 0 && (

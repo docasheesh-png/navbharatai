@@ -127,20 +127,26 @@ describe('conversationToEvents', () => {
     expect(s2.activity.some((a) => a.active)).toBe(true);
   });
 
-  it('synthesizes a result event from durable finalState (restores the ₹/token footer)', () => {
+  // Owner t362u: only the ₹ total is restored — never the USD bill or token counts, even from an old record.
+  it('synthesizes a result event from durable finalState (restores the ₹ footer only)', () => {
     const c = conv({ status: 'complete', finalState: { ok: true, billedUsd: 0.5, billedInr: 42, tokens: 12345 } });
     let state = initialAgentV3State();
     for (const e of conversationToEvents(c)) state = agentV3Reducer(state, e);
     expect(state.billedInr).toBe(42);
-    expect(state.tokens).toBe(12345);
+    expect(state.tokens).toBeUndefined();
+    expect(state.billedUsd).toBeUndefined();
+    const result = conversationToEvents(c).find((e) => e.type === 'result') as Record<string, unknown>;
+    expect(Object.keys(result).sort()).toEqual(['billedInr', 'ok', 'steps', 'summary', 'type']);
   });
 
-  it('falls back to top-level billedUsd/usage when finalState is absent (legacy records)', () => {
+  it('a legacy record with only a USD bill and token usage restores nothing about them, and does not crash', () => {
     const c = conv({ status: 'complete', billedUsd: 0.3, usage: { inputTokens: 100, outputTokens: 50 } });
     let state = initialAgentV3State();
     for (const e of conversationToEvents(c)) state = agentV3Reducer(state, e);
-    expect(state.billedUsd).toBe(0.3);
-    expect(state.tokens).toBe(150);
+    expect(state.done).toBe(true);
+    expect(state.billedUsd).toBeUndefined();
+    expect(state.tokens).toBeUndefined();
+    expect(state.costBreakdown).toBeUndefined();
   });
 
   it('emits no result event when there are no billing/token facts at all', () => {

@@ -5,6 +5,7 @@ import { abortBuild } from './buildAbortCause';
 import { hasBuildBodyExitHold } from './stoppingBuild';
 import { SandboxRecoveryUnavailableError, isSandboxRecoveryUnavailable } from './SandboxRecoveryError';
 import { redactProvidersText } from '../lib/providerRedaction';
+import { userResultEvent } from './userChargeView';
 // Per-accepted-request coordination. This owns queue/receipt identity, not runtime/source fencing.
 import { loadQueue, bindQueuedBuild, settleQueuedBuild, proposeQueuedContinuation, retireQueuedContinuation, cancelQueuedContinuation, QueueClaimConflictError, type QueueBuildBinding } from './BuildQueueStore';
 import type { QueueContinuation } from './BuildQueue';
@@ -268,7 +269,7 @@ export function createBuildPreflightStream(res: PreflightResponse, publish: (eve
   const cancel = () => { if (timer) clearTimeout(timer); timer = undefined; };
   const send = (event: unknown): void => {
     if (!opened) { buffered.push(event); return; }
-    publish(event, (value) => { if (!res.writableEnded) res.write(JSON.stringify(value) + '\n'); });
+    publish(event, (value) => { if (!res.writableEnded) res.write(JSON.stringify(userResultEvent(value)) + '\n'); });
   };
   const open = (): void => {
     cancel();
@@ -288,7 +289,7 @@ export function createBuildPreflightStream(res: PreflightResponse, publish: (eve
       if (!res.headersSent) { res.setHeader('Retry-After', '2'); res.status(status).json(payload); return; }
       if (!res.writableEnded) {
         res.write(JSON.stringify({ type: 'error', message: payload.error, code: payload.code, requestState: payload.requestState, retryable: payload.retryable === true }) + '\n');
-        res.write(JSON.stringify({ type: 'result', ok: false, summary: payload.error, steps: 0, billedUsd: 0, billedInr: 0 }) + '\n');
+        res.write(JSON.stringify({ type: 'result', ok: false, summary: payload.error, steps: 0, billedInr: 0 }) + '\n');
         res.end();
       }
     },

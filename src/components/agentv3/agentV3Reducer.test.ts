@@ -202,7 +202,7 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     });
     expect(done.done).toBe(true);
     expect(done.ok).toBe(true);
-    expect(done.billedUsd).toBe(1.23);
+    expect(done.billedUsd).toBeUndefined(); // owner t362u: an older server's USD amount is never kept
     expect(done.billedInr).toBe(104.55);
 
     const errored = agentV3Reducer(initialAgentV3State(), { type: 'error', message: 'boom', ts: 1 });
@@ -223,13 +223,18 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(noReport.diagnostics).toEqual(report);
   });
 
-  it('carries the token count from a result (P-UX.7 usage badge)', () => {
+  // Owner t362u: token counts are never kept in client state, even when an older server sends them.
+  it('drops the token count and keeps only rupee facts from a result', () => {
     const withTokens = agentV3Reducer(initialAgentV3State(), {
-      type: 'result', ok: true, summary: 'built', steps: 3, billedUsd: 0.2, tokens: 12345,
+      type: 'result', ok: true, summary: 'built', steps: 3, billedUsd: 0.2, billedInr: 17, tokens: 12345,
+      costBreakdown: { inputTokens: 10000, outputTokens: 2345, billedUsd: 0.2, billedInr: 17, usdInrRate: 85, tier: 'Weak', engine: 'NavBharatAI Pro', listInr: 0, discountInr: 0, discountPct: 0 },
     });
-    expect(withTokens.tokens).toBe(12345);
-    const noTokens = agentV3Reducer(initialAgentV3State(), { type: 'result', ok: true, summary: 'built', steps: 1, billedUsd: 0 });
-    expect(noTokens.tokens).toBeUndefined();
+    expect(withTokens.tokens).toBeUndefined();
+    expect(withTokens.costBreakdown).toEqual({ billedInr: 17, tier: 'Weak', engine: 'NavBharatAI Pro', listInr: 0, discountInr: 0, discountPct: 0 });
+    const viaCharge = agentV3Reducer(initialAgentV3State(), { type: 'result', ok: true, summary: 'built', steps: 1, billedInr: 5, charge: { billedInr: 5, tier: 'Normal' } });
+    expect(viaCharge.costBreakdown).toEqual({ billedInr: 5, tier: 'Normal' });
+    const malformed = agentV3Reducer(initialAgentV3State(), { type: 'result', ok: true, summary: 'built', steps: 1, costBreakdown: { inputTokens: 1 } });
+    expect(malformed.costBreakdown).toBeUndefined();
   });
 
   it('carries the resumable flag from a time-limit pause (Layer 3 auto-continue)', () => {

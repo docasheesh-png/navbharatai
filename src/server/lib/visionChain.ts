@@ -24,6 +24,7 @@ import { claudeVisionAnswerModel, glmVisionModels, grokVisionModels, geminiVisio
 import { dispatchWithFreeTierPaidHold, estimateTextTokens, geminiUsage, reserveFreeTierPaid, settleFreeTierPaid, FREE_TIER_PAID_OUTPUT_QUOTE } from './freeTierPaidCap';
 import { nextPoolKey } from './keyPool';
 import { vertexGenAI } from './vertexGenAI';
+import { tryCheaperInferenceVision, tryQubaxVision } from './visionSuppliers';
 
 export interface VisionAttachment {
   name: string;
@@ -33,7 +34,8 @@ export interface VisionAttachment {
 
 export interface VisionResult {
   text: string;
-  provider: 'GLM' | 'VERTEX' | 'GEMINI' | 'GROK' | 'CLAUDE';
+  /** Server-side label for logs only. Never shown to a user (owner t357u: no provider brand visible). */
+  provider: 'QUBAX' | 'CHEAPERINFERENCE' | 'GLM' | 'VERTEX' | 'GEMINI' | 'GROK' | 'CLAUDE';
   model?: string;
   usage?: AIProviderResponse['usage'];
   inferenceGateway?: AIProviderResponse['inferenceGateway'];
@@ -264,9 +266,13 @@ async function tryClaude(atts: VisionAttachment[], o: VisionOptions): Promise<st
  * (an image+PDF batch skips GLM and lands here); then Gemini(key) → Grok. Non-Free adds Claude last.
  */
 export function visionProviderOrder(allowClaude: boolean, tier: VisionTier = allowClaude ? 'paid' : 'free'): VisionResult['provider'][] {
-  // 🔒 FREE (admin 2026-10-23): GLM ($0) → Google flash-lite → flash. Grok-4 and Claude are gone.
-  if (tier === 'free' || !allowClaude) return ['GLM', 'VERTEX', 'GEMINI'];
-  return ['GLM', 'VERTEX', 'GEMINI', 'GROK', 'CLAUDE'];
+  // Owner t357u + t359u (2026-11-16): the always-on suppliers with REAL vision models lead, default on
+  // for every tier — Qubax, then CheaperInference (Mitrify has no image-capable transport, see
+  // visionSuppliers.ts). Each skips itself (returns null) without a key, without a vision model, for a
+  // PDF batch, or when its kill switch is explicitly off, so the existing chain below is unchanged.
+  // 🔒 FREE (admin 2026-10-23): then GLM ($0) → Google flash-lite → flash. Grok-4 and Claude are gone.
+  if (tier === 'free' || !allowClaude) return ['QUBAX', 'CHEAPERINFERENCE', 'GLM', 'VERTEX', 'GEMINI'];
+  return ['QUBAX', 'CHEAPERINFERENCE', 'GLM', 'VERTEX', 'GEMINI', 'GROK', 'CLAUDE'];
 }
 
 /**
@@ -294,6 +300,8 @@ export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions)
   }
   assertLegacyInferenceAllowed('vision');
   const runners: Record<VisionResult['provider'], (a: VisionAttachment[], opt: VisionOptions) => Promise<string | null>> = {
+    QUBAX: async (a, opt) => (await tryQubaxVision(a, opt))?.text ?? null,
+    CHEAPERINFERENCE: async (a, opt) => (await tryCheaperInferenceVision(a, opt))?.text ?? null,
     GLM: tryGlm,
     VERTEX: tryVertex,
     GEMINI: tryGeminiKey,

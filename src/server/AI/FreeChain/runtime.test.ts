@@ -585,7 +585,9 @@ describe('free chat chain central dispatch', () => {
   finish.forEach(resolve => resolve()); await vi.advanceTimersByTimeAsync(0);
   expect(vi.getTimerCount()).toBe(0);
  });
- it('non-admin chain still skips open circuit without probing', async () => {
+ // Owner t357u: CheaperInference is never benched for long. A 1h window from an old 401 is probed by
+ // the next request (here the probe then meets the budget refusal of this mock store, not the bench).
+ it('non-admin chain probes a long-open cheapinf circuit instead of honouring the bench', async () => {
   vi.stubEnv('CHEAPERINFERENCE', 'all');
   vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
   vi.stubEnv('CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION', 'on');
@@ -596,10 +598,19 @@ describe('free chat chain central dispatch', () => {
   });
   getBreaker('free-chat-chain:cheapinf').recordFailure(3_600_000, Date.now(), 'auth:http=401');
   const result = await buildFreeChainRouter(db, cfg).route(input());
-  expect(m.execute).not.toHaveBeenCalled();
-  expect(result.ok).toBe(false);
-  expect(result.freeChain?.attempts[0].reason).toMatch(/^circuit:last=auth:http=401/);
+  expect(result.freeChain?.attempts[0].reason).not.toMatch(/^circuit:last=/);
   expect(result.content).not.toContain('[admin diagnostic]');
+ });
+ it('a cheapinf circuit inside the short always-on window is still skipped', async () => {
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  const cfg = freeChainConfig({
+    FREE_CHAIN_ENABLED: 'on', FREE_CHAIN_ROLLOUT_PERCENT: '100', FREE_CHAIN_ORDER: 'cheapinf',
+    CHEAPERINFERENCE_API_KEY: 'ci_live_test_key', FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off',
+  });
+  getBreaker('free-chat-chain:cheapinf').recordFailure(20_000, Date.now(), 'rate_limit:http=429');
+  const result = await buildFreeChainRouter(db, cfg).route(input());
+  expect(m.execute).not.toHaveBeenCalled();
+  expect(result.freeChain?.attempts[0].reason).toMatch(/^circuit:last=rate_limit/);
  });
  it('OpenRouter account admission works with the real quota validator and transaction store', async () => {
  const real = await vi.importActual<typeof import('./store')>('./store');

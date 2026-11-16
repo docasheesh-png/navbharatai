@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
+import { mitrifySwitchOn } from './alwaysOnSuppliers';
 
 /** Server-only transport. No upstream provider catalogue, pricing or capability assumptions. */
 type Env = Record<string, string | undefined>;
@@ -101,11 +102,20 @@ export async function runApprovedMitrifyChain(options: {
   reserve: (maximumNanoUsd: number) => Promise<null | { releaseUndispatched(): Promise<void> }>;
   /** Admin Test Chat Bot only. User chat never passes this hook. */
   onHttpError?: (detail: { status: number; body: string; requestId?: string }) => void;
+  /**
+   * User Chat only (owner t357u: "mitrify … hamesa on rahe, kisi bhi condition me ban nahi"). Mitrify is
+   * on unless `MITRIFY_CHAIN_ENABLED` is explicitly off, and no per-payload approval document is
+   * required. The shared owner budget is still reserved first, with the documented per-request reserve
+   * (`mitrifyDefaultReserveNanoUsd`), so spend stays bounded. The Gateway never sets this.
+   */
+  defaultOn?: boolean;
 }, env: Env = process.env, log: Log = defaultLog): Promise<
   { kind: 'skipped'; reason: string } |
   { kind: 'response'; content: string; model: string; usage?: { inputTokens: number; outputTokens: number } }
 > {
-  if (env.MITRIFY_CHAIN_ENABLED !== '1') return { kind: 'skipped', reason: 'mitrify-chain-disabled' };
+  const defaultOn = options.defaultOn === true;
+  const switchedOn = () => (defaultOn ? mitrifySwitchOn(env) : env.MITRIFY_CHAIN_ENABLED === '1');
+  if (!switchedOn()) return { kind: 'skipped', reason: 'mitrify-chain-disabled' };
   // Snapshot server classification; a later caller mutation cannot broaden the reviewed scope.
   const privateTurn = options.privateTurn, healthTurn = options.healthTurn;
   const maxHttpAttempts = options.maxHttpAttempts ?? 4;
@@ -124,7 +134,11 @@ export async function runApprovedMitrifyChain(options: {
   const ref = options.db.doc(`mitrify_chain_approvals/${binding.id}`);
   const policyDigest = (a: any) => JSON.stringify([a.kind, a.dataReview, a.uid, a.payloadDigest, a.gateway?.baseURL, a.gateway?.model, a.gateway?.credentialBinding, a.publicReview?.entirePayloadReviewed, a.publicReview?.containsSensitiveData, a.publicReview?.reviewRef, a.supplierContract?.currency, a.supplierContract?.hardCeilingEnforced, a.supplierContract?.includesInternalRetriesFailoversAndFees, a.supplierContract?.evidenceRef, a.supplierContract?.perHttpRequestCeilingNanoUsd, a.reviewedAtMs, a.expiresAtMs]);
   const now = Date.now();
-  const approval = await untilCancelled(() => options.db.runTransaction(async tx => {
+  const defaultReserve = defaultOn ? mitrifyDefaultReserveNanoUsd(env) : null;
+  if (defaultOn && defaultReserve === null) return { kind: 'skipped', reason: 'mitrify-configuration' };
+  const approval = defaultOn
+    ? { maximumNanoUsd: defaultReserve! * maxHttpAttempts, expiresAtMs: now + MITRIFY_DEFAULT_ON_MAX_MS, policyDigest: 'default-on' }
+    : await untilCancelled(() => options.db.runTransaction(async tx => {
     const a = (await tx.get(ref)).data();
     const perHttpCeiling = mitrifyReviewedApprovalCeiling(a, { uid: options.uid, binding, privateTurn, healthTurn, now });
     if (!a || perHttpCeiling === undefined) return null;
@@ -161,9 +175,9 @@ export async function runApprovedMitrifyChain(options: {
     if (!hold) return { kind: 'skipped', reason: 'mitrify-budget' };
     const result = await createMitrifyClient(requestEnv, log, options.onHttpError ? { onHttpError: options.onHttpError } : undefined).chat(body, { signal, maxAttempts: maxHttpAttempts,
       beforeAttempt: async () => {
-        if (env.MITRIFY_CHAIN_ENABLED !== '1' || mitrifyChainBinding(options.uid, body, env).id !== binding.id) throw new MitrifyError('MITRIFY_APPROVAL_REVOKED');
+        if (!switchedOn() || mitrifyChainBinding(options.uid, body, env).id !== binding.id) throw new MitrifyError('MITRIFY_APPROVAL_REVOKED');
         await untilCancelled(async () => { await options.revalidate?.(); }, signal);
-        await untilCancelled(() => options.db.runTransaction(async tx => {
+        if (!defaultOn) await untilCancelled(() => options.db.runTransaction(async tx => {
           const a = (await tx.get(ref)).data();
           if (!a || a.state !== 'claimed' || a.requestId !== options.requestId || policyDigest(a) !== approval.policyDigest || a.expiresAtMs !== approval.expiresAtMs
             || a.expiresAtMs <= Date.now() || !Number.isSafeInteger(a.attemptsStarted) || a.attemptsStarted < 0 || a.maxHttpAttempts !== maxHttpAttempts || a.attemptsStarted >= maxHttpAttempts) throw new MitrifyError('MITRIFY_APPROVAL_REVOKED');
@@ -192,6 +206,25 @@ export async function runApprovedMitrifyChain(options: {
     clearTimeout(timer); controller.abort();
     await releaseUnused();
   }
+}
+
+/** Default-on Chat: an attempt never outlives this bound (the Chat runtime's own deadlines are shorter). */
+export const MITRIFY_DEFAULT_ON_MAX_MS = 5 * 60_000;
+/** Same reserve Qubax uses per Chat try ($0.02). Mitrify publishes no per-request price this server can read. */
+export const MITRIFY_DEFAULT_REQUEST_USD = '0.02';
+/**
+ * The owner-budget HOLD for one default-on Mitrify Chat call, in nano-USD: `MITRIFY_MAX_USD_PER_REQUEST`
+ * (decimal USD, 0.000001–1) or the $0.02 default. It is a spending ceiling held against the shared
+ * owner budget, never a cost shown to anyone and never billed to a user. An explicit invalid value
+ * returns null and the rung is skipped rather than guessing.
+ */
+export function mitrifyDefaultReserveNanoUsd(env: Env = process.env): number | null {
+  const raw = env.MITRIFY_MAX_USD_PER_REQUEST?.trim() || MITRIFY_DEFAULT_REQUEST_USD;
+  if (!/^\d+(?:\.\d{1,9})?$/.test(raw)) return null;
+  const usd = Number(raw);
+  const nano = Math.round(usd * 1_000_000_000);
+  if (!(usd >= 0.000001) || usd > 1 || !Number.isSafeInteger(nano) || nano <= 0) return null;
+  return nano;
 }
 
 export function mitrifyConfig(env: Env = process.env) {

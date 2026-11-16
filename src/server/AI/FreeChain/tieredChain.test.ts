@@ -228,10 +228,11 @@ describe('fixed-order FreeChain opt-in', () => {
   await buildFreeChainRouter(db, fixed()).route({ ...input(), context: { ...input().context, isAdmin: true } });
   expect(m.execute.mock.calls[0][1].model).toBe('glm-4.5-flash');
  });
- it('records a disabled Mitrify slot and preserves budget denial', async () => {
+ // Owner t357u: Mitrify is default-on, so with no switch set it is tried; here it has no key and is skipped.
+ it('records an unconfigured Mitrify slot and preserves budget denial', async () => {
   m.execute.mockRejectedValue(new FreeChainProviderError('SERVER')); m.paid.mockResolvedValue(null);
   const result = await buildFreeChainRouter(db, fixed()).route(input());
-  expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'mitrify', entered: false, reason: 'mitrify-chain-disabled' }));
+  expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'mitrify', entered: false, reason: 'mitrify-configuration' }));
   expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'llama8b', entered: false, reason: 'budget' }));
  });
  it.each([false, true])('admitted Mitrify uses the same shared budget and stops the fixed chain, streaming=%s', async streaming => {
@@ -291,14 +292,18 @@ describe('fixed-order FreeChain opt-in', () => {
   const qubaxAdapter = vi.spyOn(qubax, 'runApprovedQubaxChat');
   const cfg = fixed(); cfg.features.monthlyCap = true;
   const result = await withFixedTextChainScope('chat', 'text', () => buildFreeChainRouter(db, cfg).route(input()));
-  expect(release).toHaveBeenCalledExactlyOnceWith(db, month, 400, 0); expect(m.settle).not.toHaveBeenCalled();
+  // Mitrify's own fresh month hold is released first; later rungs then make (and release) their own.
+  expect(release.mock.calls[0]).toEqual([db, month, 400, 0]); expect(release.mock.calls.every(call => call[3] === 0)).toBe(true);
+  expect(m.settle).not.toHaveBeenCalled();
   expect(result.freeChain?.attempts.find(a => a.provider === 'mitrify')).toMatchObject({ entered: false });
-  expect(adapter).toHaveBeenCalledOnce(); expect(qubaxAdapter).not.toHaveBeenCalled();
+  // Owner t357u: a Mitrify failure with nothing shown hands the turn to the next provider.
+  expect(adapter).toHaveBeenCalledOnce(); expect(qubaxAdapter).toHaveBeenCalledOnce();
  });
  it.each([false, true])('fixed Chat counts Mitrify only at its dispatch boundary, entered=%s', async entered => {
   vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');
   m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
-  m.paid.mockResolvedValue({ id: 'mitrify-hold', day: 'd', uidHash: 'u', maxCostNanoUsd: 400, createdAt: 0, mayDispatch: true });
+  // Only Mitrify gets a budget hold; later paid rungs are refused so the count below is Mitrify's alone.
+  m.paid.mockResolvedValueOnce({ id: 'mitrify-hold', day: 'd', uidHash: 'u', maxCostNanoUsd: 400, createdAt: 0, mayDispatch: true }).mockResolvedValue(null);
   const adapter = vi.spyOn(mitrify, 'runApprovedMitrifyChain').mockImplementation(async options => {
    expect(options.maxHttpAttempts).toBe(1); const receipt = await options.reserve(400); expect(receipt).not.toBeNull();
    if (entered) options.beforeHttpDispatch?.(); else await receipt!.releaseUndispatched();
@@ -307,19 +312,21 @@ describe('fixed-order FreeChain opt-in', () => {
   const qubaxAdapter = vi.spyOn(qubax, 'runApprovedQubaxChat');
   const result = await withFixedTextChainScope('chat', 'text', () => buildFreeChainRouter(db, fixed()).route(input()));
   expect(result.freeChain?.attempts.find(a => a.provider === 'mitrify')).toMatchObject({ entered });
-  expect(result.freeChain?.attempts.filter(a => a.entered)).toHaveLength(entered ? 1 : 0);
-  expect(adapter).toHaveBeenCalledOnce(); expect(qubaxAdapter).not.toHaveBeenCalled();
+  expect(result.freeChain?.attempts.filter(a => a.entered && a.provider === 'mitrify')).toHaveLength(entered ? 1 : 0);
+  // Owner t357u: the turn falls through to the next provider; Mitrify's hold is settled only when undispatched.
+  expect(adapter).toHaveBeenCalledOnce(); expect(qubaxAdapter).toHaveBeenCalledOnce();
   expect(m.settle).toHaveBeenCalledTimes(entered ? 0 : 1);
  });
  it.each([429, 503])('fixed Chat never treats Mitrify HTTP%s as a zero-charge retry receipt', async status => {
   vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
-  m.paid.mockResolvedValue({ id: 'possibly-spent', mayDispatch: true });
+  m.paid.mockResolvedValueOnce({ id: 'possibly-spent', mayDispatch: true }).mockResolvedValue(null);
   const adapter = vi.spyOn(mitrify, 'runApprovedMitrifyChain').mockImplementation(async options => {
    await options.reserve(400); options.beforeHttpDispatch?.(); throw new mitrify.MitrifyError(`MITRIFY_HTTP_${status}`, status, false, true);
   });
   const qubaxAdapter = vi.spyOn(qubax, 'runApprovedQubaxChat');
   const result = await withFixedTextChainScope('chat', 'text', () => buildFreeChainRouter(db, fixed()).route(input()));
-  expect(result.ok).toBe(false); expect(adapter).toHaveBeenCalledOnce(); expect(qubaxAdapter).not.toHaveBeenCalled(); expect(m.settle).not.toHaveBeenCalled();
+  // The possibly-spent Mitrify hold is never settled to zero; the turn still falls through (owner t357u).
+  expect(result.ok).toBe(false); expect(adapter).toHaveBeenCalledOnce(); expect(qubaxAdapter).toHaveBeenCalledOnce(); expect(m.settle).not.toHaveBeenCalled();
  });
  it.each(['duplicate', 'error'])('releases the fresh Qubax month hold and does not clear the daily hold when reservation is %s', async outcome => {
   vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');

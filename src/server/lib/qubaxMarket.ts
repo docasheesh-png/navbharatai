@@ -2,6 +2,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 import { civilDayKey } from '../AI/FreeChain/quota';
 import { PAID_BUDGET_TIME_ZONE } from '../AI/FreeChain/spendCap';
 import { QUBAX_PRICE_FEED_DOCUMENT } from './qubaxPriceFeedStore';
+import { qubaxSwitchOn } from './alwaysOnSuppliers';
 import { validQubaxPriceSnapshot, type QubaxObservedPrice, type QubaxPriceSnapshot } from './qubaxPriceFeed';
 
 /** Automatic health evidence. This is not the reviewed 100-sample catalog. */
@@ -65,7 +66,7 @@ export function parseUsdCeilingNano(raw: string): number | null {
 }
 /** Missing cap uses the built-in $0.02 reserve. An explicit invalid cap authorizes nothing. */
 export function qubaxRequestCeilingNanoUsd(env: Record<string, string | undefined>): number | null {
-  if (env.QUBAX_ENABLED !== '1' || !env.QUBAX_API_KEY?.trim()) return null;
+  if (!qubaxSwitchOn(env) || !env.QUBAX_API_KEY?.trim()) return null;
   const raw = env.QUBAX_MAX_USD_PER_REQUEST?.trim() || QUBAX_DEFAULT_REQUEST_USD;
   return parseUsdCeilingNano(raw);
 }

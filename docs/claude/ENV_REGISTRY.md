@@ -4515,7 +4515,7 @@ or protect against upgrades/external account traffic.
 | Name | Code default / interpretation |
 | --- | --- |
 | `FREE_CHAIN_ENABLED` | ON when absent (owner default, 2026-11-04). Deployment gate; saved admin controls cannot override OFF. |
-| `CHEAPERINFERENCE` (alias `CheaperInference`) | `off` (default) \| `admin` \| `all`. `admin` = ONLY verified admin Free Chat replies, from Beam with `reasoning_effort=low` and a 2048-token cap (Beam's card allows low\|medium\|high\|xhigh\|max; `none` is not valid and can 400). `all` does not dispatch unless `CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION=on` (Keak terms §6: no shared access to the key without written permission). |
+| `CHEAPERINFERENCE` (alias `CheaperInference`) | **Default ON (`all`) since 2026-11-16 (owner t357u).** Unset, empty or unknown = `all`; only `off`/`false`/`0`/`no` turns it off (kill switch). `admin` keeps its exclusive verified-admin path (Beam, `reasoning_effort=low`, 2048-token cap) and no longer hides the rung from users. `CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION` is still reported but is NO LONGER a dispatch gate (owner directive; see the 2026-11-16 always-on section). |
 | `CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION` | OFF. Set `on` only after Keak AI, Inc. has permitted this product to serve the key to end users (terms §6). Without it, `CHEAPERINFERENCE=all` stays closed. Admin-only mode does not need this flag. |
 | `CHEAPERINFERENCE_API_KEY` | Secret, unset. One server-side key (`ci_live_…`). Comma lists rejected. Never put in the frontend. Required for `admin` and `all`. **OWNER:** CheaperInference dashboard login is `aashishcpmt093@gmail.com` (platform.cheaperinference.com). Do not invent another account. |
 | `CHEAPERINFERENCE_MODEL` | `beam` default; allow-list `beam`, `beam-1.0-501b-a23b`, `deepseek-v4.1-flash-1017`. Beam is a reasoning model — exclusive `CHEAPERINFERENCE=admin` uses a 60s first-content grace (paid/all path 30s floor), and reasoning stream deltas pulse the watchdog without delivering text. Admin diagnostic shows `waitMs`, `ttftCapMs`, and `timeout:first-token:…ms`. |
@@ -4945,7 +4945,7 @@ Public chat and the admin Test Chat Bot call Qubax when `QUBAX_ENABLED=1` and `Q
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
-| `QUBAX_ENABLED` | `1` allows calls | disabled |
+| `QUBAX_ENABLED` | **Default ON since 2026-11-16 (owner t357u).** Unset/empty/unknown = on; only `off`/`false`/`0`/`no` stops it (kill switch). A missing `QUBAX_API_KEY` still skips it. | on |
 | `QUBAX_API_KEY` | Server-only Qubax credential | missing |
 | `QUBAX_PRICE_FEED_ENABLED` | `0` turns the public price feed off | on |
 | `QUBAX_MODEL` | Backup model id, used only when no model clears a 90% Qubax discount | automatic |
@@ -5069,3 +5069,27 @@ the call); it is now in the family, and switching Gemini off withdraws it too.
 Google Vertex AI has no key (server identity: `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_REGION`). Stability AI appears only in
 `ImageAiGenerator.ts`, which is generated INTO users' apps for their own key — it is not a NavBharatAI provider.
 `tests/everyAiProviderKeyIsInTheRegistry.test.ts` now fails when a provider family's key name is missing from this file.
+
+## 2026-11-16 — Always-on suppliers and provider order (owner t357u, order approved t359u)
+
+Code defaults only; no Cloud Run variable is required. Every switch below is ON when unset; only an explicit off value (`off` / `false` / `0` / `no`) is the emergency kill switch. A missing API key still skips that supplier.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `MITRIFY_CHAIN_ENABLED` | on | Chat Mitrify rung (first in Chat). Default-on calls need no Firestore approval doc; each holds `MITRIFY_MAX_USD_PER_REQUEST` (default $0.02) against the shared owner paid budget. |
+| `QUBAX_ENABLED` | on | Chat Qubax rung (second in Chat) and image analysis (Qubax vision). |
+| `CHEAPERINFERENCE` | `all` | Chat rung after OpenRouter free, for all users, private/health turns included; and image analysis. A failure benches it for at most 30 s. |
+| `BLUESMINDS_BUILDER_ENABLED` | on | Pro Weak builder rung `ENGINE_BM` after Router One. Key: `FREE_CHAIN_BLUESMINDS_API_KEY`. |
+| `BLUESMINDS_BUILDER_MODEL` | `openai/gpt-oss-20b` | Comma list of builder models. |
+| `BLUESMINDS_BUILDER_RATE_IN` / `_OUT` | unset | Real USD per 1M tokens. Unset = estimate from BluesMinds' published ratios ($0.06 in / $0.24 out, dearer reading). |
+
+**Chat order:** Mitrify → Qubax → GLM-4.5 Flash → GLM-4.7 Flash → Groq gpt-oss-120b → Cloudflare Llama 3.3 70B → OpenRouter free → CheaperInference → DeepInfra Llama 8B → DeepInfra DeepSeek V4 Flash → GPT-5 Nano → GLM-4.7 FlashX → Gemini Flash-Lite. A supplier that fails without showing anything hands the same turn to the next one.
+
+**Photo/image order (legacy vision chain):** Qubax (live MULTIMODAL rows from documented image-reading families only) → CheaperInference (catalog rows with `capabilities.vision=true` only) → GLM-4.6V Flash → Gemini Flash-Lite → Gemini Flash (paid tiers then Grok, Claude as before). PDFs skip the two suppliers. Mitrify is NOT in vision: it has no image-capable transport or public model catalog. The Inference Gateway vision path is unchanged.
+
+**Pro order (Weak):** Surplus → Router One → BluesMinds → Weak tier ladder. Normal and Strong ladders are unchanged (Surplus and Router One are Weak-only there too).
+
+**Brand:** users never see a supplier name; server labels stay in logs and admin views (`ENGINE_BM` for BluesMinds).
+
+**Risk recorded:** CheaperInference's terms (§6) restrict shared key access without Keak's written permission; the owner directed default-on for all users anyway.
+

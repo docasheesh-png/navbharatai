@@ -17,7 +17,15 @@
  *   base URL  https://api.cheaperinference.com/v1
  *   auth      Authorization: Bearer ci_live_…
  *
- * Doctor AI and App Builder are untouched. No hardcoded keys. Default stays off.
+ * Doctor AI and App Builder are untouched. No hardcoded keys.
+ *
+ * ⚠️ SUPERSEDED DEFAULT (owner t357u, 2026-11-16): "cheaperinference - yeh bhi hamesa on rahe, ban nahi
+ * hona chahiye kabhi (default on)". The rung is now ON for every Free Chat user whenever its key is
+ * set: unset / unknown values mean `all`, `admin` keeps the owner's exclusive admin path AND leaves the
+ * rung on for everyone else, and only an explicit `off` (or false/0/no) is the emergency kill switch.
+ * The owner's message is recorded as the written decision to serve this key to end users, so
+ * `CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION` no longer gates dispatch (it is still reported). Keak's own
+ * terms remain the owner's responsibility; see docs/claude/ENV_REGISTRY.md.
  */
 import { isAdminEmail } from './adminEmails';
 import { parseEnvFlag } from './envFlag';
@@ -44,12 +52,32 @@ export const CHEAPERINFERENCE_INDICATIVE_BEAM_USD_PER_MTOK = { input: 0.006, out
 
 export type CheaperInferenceMode = 'off' | 'admin' | 'all';
 
-/** Read CHEAPERINFERENCE or CheaperInference. Unknown values fail closed to off. */
+/**
+ * Read CHEAPERINFERENCE or CheaperInference. Default ON (owner t357u): unset, empty or an unknown value
+ * means `all`; `admin` stays `admin`; only an explicit off value (off/false/0/no/…) is `off`.
+ */
 export function cheaperInferenceMode(env: NodeJS.ProcessEnv = process.env): CheaperInferenceMode {
-  const raw = (env.CHEAPERINFERENCE ?? env.CheaperInference ?? 'off').trim().toLowerCase();
+  const raw = (env.CHEAPERINFERENCE ?? env.CheaperInference ?? '').trim().toLowerCase();
   if (raw === 'admin' || raw === 'all' || raw === 'off') return raw;
-  if (raw === '' || raw === 'false' || raw === '0' || raw === 'no') return 'off';
-  return 'off';
+  return parseEnvFlag(raw) === false ? 'off' : 'all';
+}
+
+/**
+ * The mode an operator WROTE (`admin` / `all`), or `off` when the switch is unset. Only the request-
+ * context admin diagnostic path reads this: the default-on rung needs no extra identity lookup, because
+ * FreeChain admission already carries the verified uid. Rung eligibility always uses cheaperInferenceMode.
+ */
+export function cheaperInferenceConfiguredMode(env: NodeJS.ProcessEnv = process.env): CheaperInferenceMode {
+  const raw = (env.CHEAPERINFERENCE ?? env.CheaperInference ?? '').trim().toLowerCase();
+  return raw === 'admin' || raw === 'all' ? raw : 'off';
+}
+
+/**
+ * Does the cheapinf rung serve ordinary (non-exclusive) Free Chat turns? Every mode except an explicit
+ * `off`, whenever the key is set. Admin mode no longer limits the rung to the owner.
+ */
+export function cheaperInferenceUserRungEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return cheaperInferenceMode(env) !== 'off' && cheaperInferenceApiKeyConfigured(env);
 }
 
 export function cheaperInferenceApiKeyConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -75,9 +103,9 @@ export function cheaperInferenceSharedAccessPermitted(env: NodeJS.ProcessEnv = p
   return parseEnvFlag(env.CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION) === true;
 }
 
-/** cheapinf rung may dispatch for everyone only in mode=all, with a key, and written permission. */
+/** cheapinf rung dispatch for everyone (owner t357u): on unless explicitly off, with a key. */
 export function cheaperInferencePaidRungEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return cheaperInferenceMode(env) === 'all' && cheaperInferenceApiKeyConfigured(env) && cheaperInferenceSharedAccessPermitted(env);
+  return cheaperInferenceUserRungEnabled(env);
 }
 
 /** Safe operator status — never returns the key. */

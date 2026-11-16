@@ -4,22 +4,24 @@ import { visionProviderOrder, runVisionChain } from './visionChain';
 describe('visionProviderOrder — universe isolation', () => {
   it('Free universe (allowClaude=false) NEVER includes Claude', () => {
     const order = visionProviderOrder(false);
-    expect(order).toEqual(['GLM', 'VERTEX', 'GEMINI']); // 2026-10-23: no Grok on Free either
+    expect(order).toEqual(['QUBAX', 'CHEAPERINFERENCE', 'GLM', 'VERTEX', 'GEMINI']); // 2026-10-23: no Grok on Free either
     expect(order).not.toContain('GROK');
     expect(order).not.toContain('CLAUDE');
   });
 
   // Slice C (NAVBHARATAI_ROUTING_PLAN.md §1 row 3): GLM-4.6V-Flash is $0 in/out, so it leads —
   // a free image turn costs NavBharatAI nothing; Vertex stays right behind it for PDFs + fallback.
-  it('leads with GLM (free vision) and keeps Vertex second for PDFs/fallback', () => {
-    expect(visionProviderOrder(false)[0]).toBe('GLM');
-    expect(visionProviderOrder(true)[0]).toBe('GLM');
-    expect(visionProviderOrder(false)[1]).toBe('VERTEX');
+  // Owner t359u: the always-on suppliers with real vision models lead; GLM then Vertex keep their order.
+  it('leads with Qubax → CheaperInference, then GLM (free vision) and Vertex for PDFs/fallback', () => {
+    for (const paid of [false, true]) expect(visionProviderOrder(paid).slice(0, 4)).toEqual(['QUBAX', 'CHEAPERINFERENCE', 'GLM', 'VERTEX']);
+  });
+  it('never lists Mitrify: it has no image-capable transport', () => {
+    expect(visionProviderOrder(true).join()).not.toMatch(/MITRIFY/);
   });
 
   it('non-Free universes may use Claude, but only as the LAST resort', () => {
     const order = visionProviderOrder(true);
-    expect(order).toEqual(['GLM', 'VERTEX', 'GEMINI', 'GROK', 'CLAUDE']);
+    expect(order).toEqual(['QUBAX', 'CHEAPERINFERENCE', 'GLM', 'VERTEX', 'GEMINI', 'GROK', 'CLAUDE']);
     expect(order[order.length - 1]).toBe('CLAUDE');
   });
 });

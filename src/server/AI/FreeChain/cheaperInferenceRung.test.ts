@@ -21,13 +21,16 @@ describe('CheaperInference FreeChain paid rung (simple mode)', () => {
     expect(rung.model).toBe('beam');
   });
 
-  it('stays disabled when only the API key is present', () => {
+  // Owner t357u (2026-11-16): CheaperInference is default-on for every user; no written-permission gate.
+  it('is on with only the API key present; CHEAPERINFERENCE=off is the kill switch', () => {
     const rung = freeChainConfig({ CHEAPERINFERENCE_API_KEY: 'ci_live_test_key_only' }).rungs.find(r => r.id === 'cheapinf')!;
     expect(rung.configured).toBe(true);
-    expect(rung.reason).toBe('disabled');
+    expect(rung.reason).toBeUndefined();
+    const off = freeChainConfig({ CHEAPERINFERENCE: 'off', CHEAPERINFERENCE_API_KEY: 'ci_live_test_key' }).rungs.find(r => r.id === 'cheapinf')!;
+    expect(off.reason).toBe('disabled');
   });
 
-  it('becomes configured for admin, and for all only with Keak written permission', () => {
+  it('serves admin and all modes alike, with no Keak written-permission gate', () => {
     const admin = freeChainConfig({
       CHEAPERINFERENCE: 'admin',
       CHEAPERINFERENCE_API_KEY: 'ci_live_test_key',
@@ -42,13 +45,7 @@ describe('CheaperInference FreeChain paid rung (simple mode)', () => {
       CHEAPERINFERENCE: 'all',
       CHEAPERINFERENCE_API_KEY: 'ci_live_test_key',
     }).rungs.find(r => r.id === 'cheapinf')!;
-    expect(shared.reason).toBe('terms-shared-access');
-    const permitted = freeChainConfig({
-      CHEAPERINFERENCE: 'all',
-      CHEAPERINFERENCE_API_KEY: 'ci_live_test_key',
-      CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION: 'on',
-    }).rungs.find(r => r.id === 'cheapinf')!;
-    expect(permitted.reason).toBeUndefined();
+    expect(shared.reason).toBeUndefined();
     expect(admin.keyEnv).toBe('CHEAPERINFERENCE_API_KEY');
   });
 

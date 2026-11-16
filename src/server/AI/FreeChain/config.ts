@@ -1,7 +1,7 @@
 import { CHAT_FIRST_CONTENT_MS } from '../../../lib/chatDeadline';
 import { fixedTextChainEnabled, FIXED_TEXT_CHAIN, FIXED_TEXT_CHAIN_MAX_ATTEMPTS } from '../fixedTextChain';
 import { parseEnvFlag } from '../../lib/envFlag';
-import { cheaperInferenceMode, cheaperInferenceApiKeyConfigured, cheaperInferenceSharedAccessPermitted } from '../../lib/cheaperInferencePolicy';
+import { cheaperInferenceMode, cheaperInferenceApiKeyConfigured } from '../../lib/cheaperInferencePolicy';
 import { usdToNanoUsd, DEFAULT_PAID_CAP_NANO_USD, OWNER_PAID_DAILY_CEILING_NANO_USD, NANO_USD } from './spendCap';
 import { dailyWindow } from './quota';
 import { DEFAULT_ADMISSION_QUEUE_LIMITS } from './admissionQueue';
@@ -25,7 +25,7 @@ export const PROVIDER_IDS = [
   // Tier 2 — limited free gateways
   'openrouter', 'modelscope', 'bluesminds', 'requesty', 'llm7',
   // Tier 3 — cheapest paid, shared owner budget; always after every free rung.
-  // cheapinf (CheaperInference) is first among paid when CHEAPERINFERENCE=all (or exclusive admin path).
+  // cheapinf (CheaperInference) is first among paid, right after OpenRouter free (owner order t359u), on for all users.
   'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid', 'deepseek',
 ] as const;
 /** Paid rungs. Each reserves against the one shared owner-funded daily budget before dispatch. */
@@ -41,7 +41,12 @@ export const TERMS_UNVERIFIED_IDS = ['bluesminds', 'requesty'] as const;
  * Free-tier Gemini is no longer in the default order (privacy); Nemotron Nano was removed.
  */
 export const DEFAULT_ORDER = ['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid'] as const;
-/** Chat dispatch inserts mitrify and qubax immediately after openrouter. They are not provider-config rungs. */
+/**
+ * Chat dispatch adds mitrify and qubax (not provider-config rungs) and prioritizeChatSuppliers puts them FIRST, so
+ * the owner's Chat order (t359u) is: Mitrify → Qubax → GLM-4.5 Flash → GLM-4.7 Flash → Groq gpt-oss-120b →
+ * Cloudflare Llama 3.3 70B → OpenRouter free → CheaperInference → DeepInfra Llama 8B → DeepInfra DeepSeek V4 Flash →
+ * GPT-5 Nano → GLM-4.7 FlashX → Gemini Flash-Lite.
+ */
 /** Default chat routing; explicit OFF remains authoritative at every ingress. */
 export function freeChainEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const value = env.FREE_CHAIN_ENABLED;
@@ -190,13 +195,11 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
     if (id === 'gemini' && (skipGemini || !privacyApproved)) reason = 'privacy';
     if (blocked && !writtenApproval) reason = 'terms-non-production';
     if (unverified && !writtenApproval) reason = 'terms-unverified';
-    // CheaperInference: admin = this owner's verified admin replies only.
-    // mode=all would share the key with every Free Chat user. Keak terms §6 forbid that
-    // unless CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION=on. mode=off ⇒ disabled.
+    // CheaperInference (owner t357u, "hamesa on … default on"): on for every Free Chat user whenever
+    // the key is set. Only an explicit CHEAPERINFERENCE=off disables it (emergency kill switch).
     if (id === 'cheapinf') {
       const mode = cheaperInferenceMode(env);
       if (mode === 'off' || !cheaperInferenceApiKeyConfigured(env)) reason = 'disabled';
-      else if (mode === 'all' && !cheaperInferenceSharedAccessPermitted(env)) reason = 'terms-shared-access';
     }
     const paidPrice = PAID_PRICES[id];
     const priceIn = paidPrice ? num(`FREE_CHAIN_${prefix}_PRICE_IN_PER_MTOK`, paidPrice[0], paidPrice[0], 1000, false) : 0;

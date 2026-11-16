@@ -21,9 +21,10 @@ describe('a hand-back after "ready" is corrected in the chat', () => {
   });
   it('the runner emits it to the user at both hand-backs, not only to the report', () => {
     const src = read('src/server/AgentV3/AgentRunner.ts');
-    expect(src).toContain("const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow() });");
+    // PIN UPDATED (BR1994): both hand-backs also pass whether the build already said "Out of time" (then they stay silent).
+    expect(src).toContain("const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow(), outOfTime: events.budgetStagesSaid?.has('final') === true });");
     expect(src).toContain("if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });");
-    expect(src).toContain("const unfinishedNotice = handBackNotice('unfinished', turn.text);");
+    expect(src).toContain("const unfinishedNotice = handBackNotice('unfinished', turn.text, { outOfTime: events.budgetStagesSaid?.has('final') === true });");
     expect(src).toContain("if (unfinishedNotice) events.emit({ type: 'narration', agent: agentRole, text: unfinishedNotice, ts: Date.now() });");
   });
 });

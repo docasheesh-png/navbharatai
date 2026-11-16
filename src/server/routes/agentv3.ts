@@ -273,7 +273,8 @@ import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote, strictReveri
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { createBuildRequestCoordination, createBuildPreflightStream, buildRequestInputRejection, withBuildRequestCleanup, startBuildLeaseHeartbeat, rethrowBuildSetupRecoveryUnavailable, buildExceptionDetails, publishBuildException, normalQueuedModuleRetirementAllowed, queuedContinuationBusyFields } from '../AgentV3/BuildRequestCoordination';
-import { isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable } from '../AgentV3/SandboxRecoveryError';
+import { isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable, latestSettledAttemptWasSandboxRecoveryUnavailable } from '../AgentV3/SandboxRecoveryError';
+import { openingEtaShownNote, recordOrEmitOpeningEta, emitPendingOpeningEta, sandboxRecoveryRepeatOpts } from '../AgentV3/sandboxOpeningEta';
 import { createBuildSourcePublication } from '../AgentV3/BuildSourcePublication';
 import { loadQueue, mutateQueue, mutateQueueWithResult, claimQueuedCommand, recoverQueuedCommand, stopWorkspaceQueueAndLease, QueueStoreUnavailableError, QueueClaimConflictError } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext, plannerDomainBrief } from '../AgentV3/RoleChats';
@@ -660,10 +661,11 @@ import { placePlatformContext } from '../lib/platformContext';
 import { previewAutoRepairEnabled, autoRepairPrecheck, autoRepairDecision, autoRepairPrompt, claimAutoRepair } from '../AgentV3/previewAutoRepair';
 import { clearPreviewGaveUp } from '../AgentV3/previewGiveUp';
 import { buildConfirmation, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
-import { loadProjectMemoryForTurn, memoryStopMessage, recordUserMessage, transcriptOf } from '../AgentV3/projectMemoryTurn';
+import { loadProjectMemoryForTurn, memoryStopMessage, recordUserMessage, transcriptOf, asksForTheApp, memoryMessageFor } from '../AgentV3/projectMemoryTurn';
 import { assessEditCandidate, rejectionMessage, type GateVerdict as EditGateVerdict } from '../AgentV3/editPromotionGate';
-import { decideRelease, candidateReplacesBase, editPromotionEnabled } from '../AgentV3/editRelease';
+import { decideRelease, candidateReplacesBase, editPromotionEnabled, renderEvidence, renderedInBuildUnchanged, buildOkOf } from '../AgentV3/editRelease';
 import { checkEditBaseForTurn, editIdFor } from '../AgentV3/editBase';
+import { fallbackDetail } from '../AgentV3/providerErrorClass';
 import { settleEditRevision, holdReplacementIfAny, billAfterHold, summaryAfterHold, recordRestoreRevision, pathsOf, persistedAfterHold } from '../AgentV3/editPromotion';
 import { messageIdFor } from '../AgentV3/projectRequirements';
 import { getRevisionStore, buildRevision, verifyBase, promoteWithRebase, type BaseVerification, type RevisionRecord } from '../AgentV3/projectRevisions';
@@ -764,6 +766,7 @@ import { entryIsStillTheStarter, starterRenderNote, importNeverTheStarter } from
 import { readProjectElsewhere, shouldAnswerProjectElsewhere, projectElsewhereSteer, projectElsewhereFallback } from '../AgentV3/projectElsewhere';
 import { runProvenApp, verdictHeldMessage, type ProdBuildOutcome, type LateFlip } from '../AgentV3/runProvenApp';
 import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
+import { devServerLaunchPlan, startFilesFromPaths } from '../AgentV3/devServerLaunchPlan';
 import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { attachedBytesNote } from '../AgentV3/attachedFileBytes';
@@ -6228,7 +6231,7 @@ async function noteBuildOutcome(
             } catch { /* best-effort — a bad tsconfig extends just falls through as before */ }
             try {
               const refs = sanitizeTsconfigReferences(saved, Object.keys(saved));
-              if (refs.fixes.length > 0) {
+              if (refs.fixes.length > 0 || (refs.stripped?.length ?? 0) > 0) {
                 Object.assign(saved, refs.patch);
                 await mergeWorkspaceFiles(workspaceId, refs.patch).catch(() => {});
               }
@@ -11983,7 +11986,7 @@ async function noteBuildOutcome(
           if (clarifyChips) { if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, 'clarify'); }
           else if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, askFramework ? 'framework' : answerThenOffer ? 'offer' : 'chat');
           // A lasting instruction said in CHAT ("always keep first-person controls") is the project's too.
-          await recordUserMessage(chatWsId, typedPrompt, false, echoesPlatformNotice);
+          await recordUserMessage(chatWsId, typedPrompt, asksForTheApp('chat', false, typedPrompt), echoesPlatformNotice);
           // Hydration at intent-time is a 3-second RACE, so it can be marked done while the read never
           // landed — `saveWorkspaceMemoryFor` checks the read itself, not the re-entrancy flag.
           void saveWorkspaceMemoryFor(chatWsId, chatMem).catch(() => {});
@@ -13095,6 +13098,7 @@ async function noteBuildOutcome(
     let sessionHistoryForSummary:
       | { history: Awaited<ReturnType<typeof listDiagnosticsHistory>>; startedAt: number }
       | null = null;
+    let priorHistoryEntries: Awaited<ReturnType<typeof listDiagnosticsHistory>> | undefined;
     // The latest live preview URL the build published — used by the post-build PREVIEW SELF-CHECK to
     // actually open the running app in a browser and verify it rendered.
     let lastPreviewUrl = '';
@@ -13295,12 +13299,12 @@ async function noteBuildOutcome(
      * its own project). When neither can be read, an EDIT stops before it mutates anything (see below).
      */
     /** What the user said this turn — the text the project's memory, the edit gate and the revision record all use. */
-    const turnMessage = typedPrompt || prompt;
+    const turnMessage = memoryMessageFor(typedPrompt, prompt, offerAccepted);
     const projectMemory = await loadProjectMemoryForTurn({
       skip: hasImportIntent,
       projectId: workspaceId,
       message: turnMessage,
-      isBuildRequest: intent === 'new_build' || offerAccepted,
+      isBuildRequest: asksForTheApp(intent, offerAccepted, turnMessage),
       replace: userApprovedReplace,
       readTranscript: async () => {
         return transcriptOf(await getConversationStore().get(conversationIdForWorkspace(workspaceId)));
@@ -14025,6 +14029,8 @@ async function noteBuildOutcome(
     // its answer is the platform's figure, not a number of its own (autopsy 68f0a486: "2-3 min" while the
     // line said ~4).
     let lastEtaShown: string | null = null;
+    // Held back until sandbox setup succeeds when the previous settled attempt failed to reconnect.
+    let pendingEtaShown: string | null = null;
     // Every ETA line carries the id 'eta-live'; one listener remembers the latest, so no emit site can forget.
     events.subscribe((e) => {
       if (e.type === 'narration' && (e as { id?: string }).id === 'eta-live' && typeof e.text === 'string') lastEtaShown = e.text;
@@ -14703,6 +14709,7 @@ async function noteBuildOutcome(
           //
           // The history `h` is what the read was for and it is correct — only the clock was wrong — so we
           // keep the rows and re-summarize at the end against the real end time.
+          priorHistoryEntries = h;
           sessionHistoryForSummary = { history: h, startedAt: buildStartedAt };
         })
         .catch(() => { /* history read is best-effort */ });
@@ -14983,7 +14990,7 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
             message: `A call to the ${name} engine was stopped by one of our own clocks, not by anything the engine did — the step it belonged to had run out of its time`,
-            autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+            autoResolved: true, detail: fallbackDetail(err),
           });
           return;
         }
@@ -15518,7 +15525,7 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
             message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: `${etaBasis} ${etaEvidenceNote(est, etaSource === 'platform' ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
+            detail: `${etaBasis} ${etaEvidenceNote(est, etaSource === 'platform' ? 'platform' : 'workspace')} ${openingEtaShownNote(etaSkippedForModule, latestSettledAttemptWasSandboxRecoveryUnavailable(priorHistoryEntries), etaShown)}`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
@@ -15533,7 +15540,9 @@ async function noteBuildOutcome(
             buildDiag.record({ phase: 'plan', severity: 'info', code: 'ETA_SKIPPED_MODULE_TURN', autoResolved: true,
               message: 'Opening ETA not shown: this "continue" builds the next module of a stored project plan, and the estimate describes the whole app.' });
           } else {
-            events.emit({ type: 'narration', agent: 'architect', text: etaShown, ts: Date.now(), id: 'eta-live' });
+            pendingEtaShown = recordOrEmitOpeningEta(etaShown, priorHistoryEntries, (text) => {
+              events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now(), id: 'eta-live' });
+            });
           }
         } catch { /* ETA is best-effort — never affects the build */ }
       }
@@ -15615,6 +15624,9 @@ async function noteBuildOutcome(
         const ensureT0 = Date.now();
         // An import turn's workspace is the user's project, never our starter plus theirs (build d62bf22d).
         await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId, hasImportIntent ? { seedStarter: false } : undefined);
+        pendingEtaShown = emitPendingOpeningEta(pendingEtaShown, (text) => {
+          events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now(), id: 'eta-live' });
+        });
         const ensureWorkspaceMs = Date.now() - ensureT0;
         try {
           buildDiag.recordSetupTiming({
@@ -16352,7 +16364,7 @@ async function noteBuildOutcome(
         registerSession(workspaceId, git, userId ?? undefined, actuator);
         events.emit({ type: 'workspace', workspaceId, ts: Date.now() });
       } catch (setupErr) {
-        rethrowBuildSetupRecoveryUnavailable(setupErr);
+        rethrowBuildSetupRecoveryUnavailable(setupErr, sandboxRecoveryRepeatOpts(priorHistoryEntries));
         const m = setupErr instanceof Error ? setupErr.message : String(setupErr);
         git = undefined;
         sandboxUnavailable = true;
@@ -19649,7 +19661,7 @@ async function noteBuildOutcome(
             } catch { /* best-effort — a bad tsconfig extends just falls through to the install as before */ }
             try {
               const refs = sanitizeTsconfigReferences(Object.fromEntries(writtenFiles), scaffold);
-              if (refs.fixes.length > 0) {
+              if (refs.fixes.length > 0 || (refs.stripped?.length ?? 0) > 0) {
                 const patch = Object.entries(refs.patch).map(([path, content]) => ({ path, content }));
                 const { landed } = readWriteOutcomes(patch, await inPlatformPass('fast-lane-foundation', () => writePlatform(patch, 'fast-tsconfig-refs-', 4)));
                 const done = new Set(landed.map((f) => f.path));
@@ -19658,29 +19670,73 @@ async function noteBuildOutcome(
                   fastLog(`🩹 Removed an unresolvable tsconfig project reference so the compiler can run: ${repaired.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`);
                   try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_REFERENCES_REPAIRED', message: `Removed an unresolvable tsconfig reference: ${repaired.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
                 }
+                const cleaned = (refs.stripped ?? []).filter((f) => done.has(f));
+                if (cleaned.length > 0) {
+                  fastLog(`🩹 Removed leftover apply-patch markup from ${cleaned.join(', ')} so the compiler can parse the tsconfig.`);
+                  try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_MARKUP_REPAIRED', message: `Removed leftover apply-patch markup from ${cleaned.join(', ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
+                }
               }
             } catch { /* best-effort — a dangling tsconfig reference just falls through to the install as before */ }
           }
-          // ALWAYS run a real install — a build that just (re)wrote package.json MUST have its FULL
-          // dependency tree installed. The old `… else echo "deps present"` skip trusted a pre-baked/
-          // partial node_modules (the E2B base image ships one), which left a transitive babel/
-          // browserslist dep (caniuse-lite/dist/unpacker/agents) missing → the dev server "came up" but
-          // crashed every transform with "[plugin:vite:react-babel] Cannot find module 'caniuse-lite/…'"
-          // (build report 2026-07-06). `npm install` is idempotent + fast when already satisfied, so
-          // always reconciling is correct and cheap — it also covers the earlier "Cannot find module
-          // 'tailwindcss'" case the skip caused. (buildBuildInstallCommand: pure, unit-tested.)
-          await dispatcher.dispatch({ id: 'fast-install', name: 'bash', input: { command: buildBuildInstallCommand() } }, 'frontend');
-          // DEPENDENCY RECONCILE (real fix for the broken preview): the AI sometimes imports a package
-          // it forgot to add to package.json (real report: `@dnd-kit/modifiers` imported by TodoList.tsx
-          // but never declared) → `npm install` never fetched it → Vite "could not be resolved" → the
-          // dev server's port is up but the app can't load. Scan the generated files for imported-but-
-          // undeclared packages and install exactly those BEFORE starting the dev server. Bounded + safe:
-          // each name is shell-quote-validated, capped, and this only ADDS missing deps (never removes).
-          // The manifest is the one the lane wrote, else the one ON DISK (autopsy BR1959: read from the lane's
-          // writes alone, a lane that never wrote package.json counted `react` itself as undeclared).
-          await fastReconcileDependencies('preview');
-          await dispatcher.dispatch({ id: 'fast-dev', name: 'bash', input: { command: 'npm run dev' } }, 'frontend');
-          await dispatcher.dispatch({ id: 'fast-preview', name: 'update_preview', input: { port: oneShotDevPort(framework) } }, 'frontend');
+          // Start the app with the toolchain it actually has (autopsy BR1987). A package.json still
+          // always gets a real install. A clearly non-Node Spring Boot or Go tree is started with
+          // its registry command; a JS/TS app missing package.json keeps main's Node install.
+          const previewPaths = [
+            ...writtenFiles.keys(),
+            ...scaffold,
+          ];
+          try {
+            if (!previewPaths.some((p) => /(^|\/)package\.json$/.test(String(p)))) {
+              const diskPkg = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
+              if (typeof diskPkg === 'string') previewPaths.push('package.json');
+            }
+            if (!previewPaths.some((p) => /(^|\/)pom\.xml$/.test(String(p)))) {
+              const diskPom = await actuator.readFile(workspaceId, 'pom.xml').catch(() => null);
+              if (typeof diskPom === 'string') previewPaths.push('pom.xml');
+            }
+            if (!previewPaths.some((p) => /(^|\/)(go\.mod|main\.go)$/.test(String(p)))) {
+              const diskGo = await actuator.readFile(workspaceId, 'go.mod').catch(() => null)
+                ?? await actuator.readFile(workspaceId, 'main.go').catch(() => null);
+              if (typeof diskGo === 'string') previewPaths.push('go.mod');
+            }
+          } catch { /* disk hints are best-effort — the plan still reads what we already have */ }
+          const launch = devServerLaunchPlan(buildDiag.setWorkspaceTree({
+            framework,
+            ...startFilesFromPaths(previewPaths),
+            nodePort: oneShotDevPort(framework),
+          }));
+          if (launch.kind === 'none' || !launch.startCommand) {
+            try {
+              buildDiag.record({
+                phase: 'preview', severity: 'info', code: 'FASTLANE_PREVIEW_SKIPPED_NON_NODE', autoResolved: true,
+                message: `The fast lane did not run npm install or npm run dev: ${launch.reason}.`,
+              });
+            } catch { /* diagnostics are best-effort */ }
+            return;
+          }
+          if (launch.installCommand) {
+            // ALWAYS run a real install when this is a Node app — a build that just (re)wrote
+            // package.json MUST have its FULL dependency tree installed. The old `… else echo
+            // "deps present"` skip trusted a pre-baked/partial node_modules (the E2B base image
+            // ships one), which left a transitive babel/browserslist dep
+            // (caniuse-lite/dist/unpacker/agents) missing → the dev server "came up" but crashed
+            // every transform with "[plugin:vite:react-babel] Cannot find module 'caniuse-lite/…'"
+            // (build report 2026-07-06). `npm install` is idempotent + fast when already satisfied,
+            // so always reconciling is correct and cheap — it also covers the earlier "Cannot find
+            // module 'tailwindcss'" case the skip caused. (buildBuildInstallCommand: pure, unit-tested.)
+            await dispatcher.dispatch({ id: 'fast-install', name: 'bash', input: { command: launch.installCommand } }, 'frontend');
+            // DEPENDENCY RECONCILE (real fix for the broken preview): the AI sometimes imports a package
+            // it forgot to add to package.json (real report: `@dnd-kit/modifiers` imported by TodoList.tsx
+            // but never declared) → `npm install` never fetched it → Vite "could not be resolved" → the
+            // dev server's port is up but the app can't load. Scan the generated files for imported-but-
+            // undeclared packages and install exactly those BEFORE starting the dev server. Bounded + safe:
+            // each name is shell-quote-validated, capped, and this only ADDS missing deps (never removes).
+            // The manifest is the one the lane wrote, else the one ON DISK (autopsy BR1959: read from the lane's
+            // writes alone, a lane that never wrote package.json counted `react` itself as undeclared).
+            await fastReconcileDependencies('preview');
+          }
+          await dispatcher.dispatch({ id: 'fast-dev', name: 'bash', input: { command: launch.startCommand } }, 'frontend');
+          await dispatcher.dispatch({ id: 'fast-preview', name: 'update_preview', input: { port: launch.port ?? oneShotDevPort(framework) } }, 'frontend');
         };
         // A — real compile check: install deps (idempotent) then type-check. tsc surfaces the exact
         // contract mismatch (e.g. a hook that doesn't return what a component destructures) that
@@ -19775,7 +19831,7 @@ async function noteBuildOutcome(
             if (process.env.AGENTV3_TSCONFIG_SANITIZE !== 'off') {
               try {
                 const refs = sanitizeTsconfigReferences(Object.fromEntries(writtenFiles), scaffold);
-                if (refs.fixes.length > 0) {
+                if (refs.fixes.length > 0 || (refs.stripped?.length ?? 0) > 0) {
                   const patch = Object.entries(refs.patch).map(([path, content]) => ({ path, content }));
                   const { landed } = readWriteOutcomes(patch, await fastWrite(patch));
                   for (const w of landed) writtenFiles.set(w.path, w.content);
@@ -19784,6 +19840,17 @@ async function noteBuildOutcome(
             }
             // 📦 Declared-and-installed BEFORE the compile check (autopsy BR1959): TS2307 for a package nobody
             // declared is not a code error, and a repair round cannot install a package.
+            // A Spring Boot / Go / bare-HTML tree has no package.json to type-check with tsc
+            // (autopsy BR1987): the in-process syntax / import / CSS gates above still ran; the
+            // sandbox tsc command is skipped rather than failing ENOENT and becoming VERIFY_DID_NOT_RUN.
+            const verifyLaunch = devServerLaunchPlan(buildDiag.setWorkspaceTree({
+              framework,
+              ...startFilesFromPaths([...writtenFiles.keys(), ...scaffold]),
+              nodePort: oneShotDevPort(framework),
+            }));
+            if (verifyLaunch.kind === 'framework') {
+              return { ok: true, errors: '', ran: false };
+            }
             await fastReconcileDependencies('verify');
             const r = await actuator.runCommand(workspaceId, `${TSC_ENSURE}; if ${TSC_BIN} --noEmit > /tmp/nb_tsc.log 2>&1; then echo __TSC_CLEAN__; fi; tail -200 /tmp/nb_tsc.log 2>/dev/null || true`);
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
@@ -22869,13 +22936,23 @@ async function noteBuildOutcome(
         const presentFiles = (!lastPreviewUrl && !abort.signal.aborted && expectsArtifacts && !isImportTurn && !answerOnlyNow())
           ? await withTimeout(actuator.listFiles(workspaceId), 15_000, 'platform-preview-list').catch(() => [] as string[])
           : [];
+        const presentStart = startFilesFromPaths(presentFiles);
+        const platformLaunch = devServerLaunchPlan(buildDiag.setWorkspaceTree({
+          framework,
+          ...presentStart,
+          nodePort: oneShotDevPort(framework),
+        }));
         const proofDecision = shouldAttemptPlatformPreview({
           expectsArtifacts: expectsArtifacts && !answerOnlyNow(),
           hasPreviewUrl: Boolean(lastPreviewUrl),
           aborted: abort.signal.aborted,
           isImportTurn,
           appFiles: presentFiles.length,
-          hasPackageJson: presentFiles.some((f) => /(^|\/)package\.json$/.test(String(f))),
+          hasPackageJson: presentStart.hasPackageJson,
+          framework,
+          hasPomXml: presentStart.hasPomXml,
+          hasGoModule: presentStart.hasGoModule,
+          hasJsTsAppSource: presentStart.hasJsTsAppSource,
           remainingMs: remainingForProof,
           // 🔒 DELIBERATELY THE RAW PREDICTION, not `awaitsShellNow()`. This decides whether the PLATFORM
           // starts the app itself; a module turn was told not to publish one, and forcing a preview it was
@@ -22888,14 +22965,14 @@ async function noteBuildOutcome(
           const budget = platformPreviewBudgetMs(remainingForProof, previewWakeBudgetMs());
           const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'platform-preview-record').catch(() => null);
           const recipe = await raceTimeout(sandboxStore.getRecipe(workspaceId), 3_000, 'platform-preview-recipe').catch(() => null);
-          const port = platformPreviewPort(recipe?.port, rec?.declaredPort, oneShotDevPort(framework));
+          const port = platformPreviewPort(recipe?.port, rec?.declaredPort, platformLaunch.port ?? oneShotDevPort(framework));
           events.emit({ type: 'narration', agent: 'architect', text: '🔎 Starting your app to check that it runs…', ts: Date.now() });
           const startedAt = Date.now();
-          // The health-check wrapper in devServerHost recognises this command, installs stale deps and
-          // waits for the port — the same single call the revive path below trusts.
-          // Bounded by the same remaining-build budget the front end's start gets.
+          // The health-check wrapper recognises the start command, waits for the port, and — only
+          // when a package.json exists — installs stale Node deps. Bounded by the same remaining-
+          // build budget the front end's start gets.
           await startPythonBackendFirst('platform-preview', budget);
-          const started = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), budget, 'platform-preview-start')
+          const started = await withTimeout(actuator.runCommand(workspaceId, platformLaunch.startCommand ?? 'npm run dev'), budget, 'platform-preview-start')
             .catch((e) => ({ stdout: '', stderr: e instanceof Error ? e.message : String(e), exitCode: -1 }));
           const health = parseDevServerHealthLine(`${started.stdout}\n${started.stderr}`);
           const servingPort = health?.up && health.port ? health.port : port;
@@ -27153,7 +27230,7 @@ async function noteBuildOutcome(
                   ? chooseRestoreBase({ snapshot: greenFiles, turnStart: projectFilesAtTurnStart, snapshotFromThisBuild: fromThisBuild })
                   : { base: greenFiles, kind: 'green-snapshot' as const };
                 if (!chosen) {
-                  if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })) {
+                  if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop', renderedInBuild: renderedInBuildUnchanged(inBuildGreenAt, postGreenWrites.length) })) {
                     events.emit({ type: 'narration', agent: 'architect', text: greenGuardUnverifiedMessage(), ts: Date.now() });
                     buildDiag.record({
                       phase: 'build', severity: 'warning', code: 'GREEN_GUARD_UNVERIFIED',
@@ -27193,7 +27270,7 @@ async function noteBuildOutcome(
                   buildDiag.record({ phase: 'build', severity: 'warning', code: 'GREEN_GUARD_RESTORE_INCOMPLETE', autoResolved: false, message: 'The automatic restore could not be fully confirmed in the sandbox and durable store; the final save follows only the changes confirmed in the sandbox.', detail: snapshotRestoreDetail(outcome) });
                 }
                 }
-              } else if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })) {
+              } else if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop', renderedInBuild: renderedInBuildUnchanged(inBuildGreenAt, postGreenWrites.length) })) {
                 // KEPT, BUT UNCHECKED — and the user hears so. This is the branch that used to be a
                 // silent rollback. Saying nothing here would replace one dishonest outcome with a
                 // quieter one; the change is theirs, it stayed, and we could not confirm it.
@@ -27319,8 +27396,8 @@ async function noteBuildOutcome(
             await finalSave;
             const settled = await settleEditRevision({
               store: getRevisionStore(), projectId: workspaceId, editId, headAtStart: editHeadAtStart, startFiles: projectFilesAtTurnStart,
-              persisted, base: editGateBase(), previewGreen, provenBroken: previewProvenBroken, baseCheck: editBaseCheck,
-              requirementsOk: projectMemory.status !== 'unrecoverable', userMessage: turnMessage,
+              persisted, base: editGateBase(), previewGreen: renderEvidence(previewGreen, inBuildGreenAt, postGreenWrites.length), provenBroken: previewProvenBroken, baseCheck: editBaseCheck,
+              requirementsOk: projectMemory.status !== 'unrecoverable', buildOk: buildOkOf(result), userMessage: turnMessage,
               messageId: messageIdFor(0, turnMessage), messageText: turnMessage, artifactDigest: snapshotDigest(), now: Date.now(),
             });
             buildDiag.record(settled.finding);
@@ -28746,7 +28823,7 @@ async function noteBuildOutcome(
       // emit at the end of this catch) — a bare error message never told the user WHAT went wrong.
       let crashReportForClient: unknown = undefined;
       try {
-        buildDiagRef?.record({ phase: crash.phase, severity: 'error', code: crash.code, message: errMsg, autoResolved: false });
+        buildDiagRef?.record({ phase: crash.phase, severity: 'error', code: crash.code, message: errMsg, autoResolved: false, ...(crash.adminDetail ? { adminDetail: crash.adminDetail } : {}) });
         // A preserved initial answer cannot mask a later failure while finalizing that answer.
         // All older outcomes keep their existing precedence; only this new informational one yields.
         if (outcomeCodeOf(buildDiagRef?.report()?.issues ?? []) === 'OUTCOME_INITIAL_DECLINED') {

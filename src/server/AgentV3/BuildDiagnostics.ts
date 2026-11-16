@@ -10,6 +10,7 @@
 // the live AgentEvent stream and (b) accepts explicitly-recorded issues for signals that are not
 // events (a provider fallback, a sandbox-create timeout).
 
+import { isNpmInstallWithoutPackageJson, isMissingStartToolchain, type DevServerLaunchInput } from './devServerLaunchPlan';
 import { startBandLabel } from './RequestAnalyser';
 import { todoOnlyTurnsLine } from './todoOnlyTurn';
 import { isBuildStoppedError } from './stopSignal';
@@ -534,6 +535,7 @@ export const HEAL_RESOLVES: Readonly<Record<string, readonly string[]>> = {
   SCRIPT_INTEGRITY_REPAIRED: [],
   TSCONFIG_EXTENDS_REPAIRED: [],
   TSCONFIG_REFERENCES_REPAIRED: [],
+  TSCONFIG_MARKUP_REPAIRED: [],
 };
 
 export function isAppFinding(issue: Pick<BuildIssue, 'phase' | 'code'>): boolean {
@@ -581,6 +583,12 @@ export interface BuildIssue {
   observation?: boolean;
   /** Extra context (tool name, provider, file path, raw error) — optional. */
   detail?: string;
+  /**
+   * Admin-only forensic note. `userFacingReport` must not copy this field (it is an allow-list).
+   * Ordinary user-facing context belongs in `detail`, which the user view keeps (after provider
+   * redaction). Do not put a recovery-reason token in `detail`.
+   */
+  adminDetail?: string;
   /** Set when the SAME code+message repeated back-to-back (e.g. many identical "▶ write_file" tool
    *  calls) — collapsed into one entry instead of one line per occurrence. Absent/1 = no repeat. */
   repeatCount?: number;
@@ -1142,12 +1150,25 @@ export class BuildDiagnostics {
   private session: BuildDiagnosticsReport['session'];
   private dataLossEvents: Array<{ ts: number; cause: string; detail: string }> = [];
 
+  /**
+   * Files/framework known for this workspace, used only to decide whether a failed
+   * npm install is a missing-manifest on a clearly non-Node tree. Unset means
+   * the exclusion does not fire (main's behaviour).
+   */
+  private workspaceTree: DevServerLaunchInput | null = null;
+
   constructor(meta: BuildDiagnosticsMeta = {}) {
     this.meta = meta;
     // A new build has proven nothing yet — see `renderSeenThisBuild` in renderProof.ts.
     if (meta.workspaceId) forgetRenderSeen(meta.workspaceId);
     this.now = meta.now ?? (() => Date.now());
     this.startedAt = this.now();
+  }
+
+  /** Record the tree the launch plan saw, so a later command can be judged against it. */
+  setWorkspaceTree(tree: DevServerLaunchInput): DevServerLaunchInput {
+    this.workspaceTree = tree;
+    return tree;
   }
 
   /** Persist the current report in REAL TIME (best-effort; never throws). */
@@ -1325,7 +1346,7 @@ export class BuildDiagnostics {
    */
   private compatibleAuditFixRan = false;
 
-  recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number; timing?: CommandTiming }): void {
+  recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number; timing?: CommandTiming; tree?: DevServerLaunchInput | null }): void {
     // TD-4: one door. The audit parser below still sees vulnerability counts; it does not need values.
     rec = {
       ...rec,
@@ -1409,7 +1430,13 @@ export class BuildDiagnostics {
       // A project-wide `tsc --noEmit` whose ONLY errors are in TEST files (missing vitest types in the
       // sandbox, a test's named-vs-default import) is not an APP-build failure — the app ships without
       // its test files and compiles clean. See isTestOnlyTypecheckFailure (deep-test build #4 rootCause).
-      && !isTestOnlyTypecheckFailure(rec.command, rec.stdout, rec.stderr);
+      && !isTestOnlyTypecheckFailure(rec.command, rec.stdout, rec.stderr)
+      // npm install ENOENT on a tree with no package.json is the platform running the Node
+      // toolchain on a non-Node app (autopsy BR1987). It is not a defect of the app's code.
+      && !isNpmInstallWithoutPackageJson(rec.command, rec.stdout, rec.stderr, rec.tree ?? this.workspaceTree)
+      // A Maven / Go start that failed only because the image lacks the compiler is
+      // infrastructure, not a compile error in the app.
+      && !isMissingStartToolchain(rec.command, rec.stdout, rec.stderr);
     const cmdHead = ourCommandLabel(rec.command) ?? rec.command.split('\n')[0].slice(0, 120);
     const durTxt = rec.durationMs != null ? ` (${Math.round(rec.durationMs / 1000)}s)` : '';
     // Q-273 — a slow command says where its time went (our setup / the machine / the command).
@@ -3860,6 +3887,12 @@ export const ETA_UNTESTED_OUTCOMES: ReadonlySet<string> = new Set([
   ...Object.values(ABORT_OUTCOME_CODES),
   'OUTCOME_INITIAL_DECLINED', // a preserved answer is not completed app delivery
   'OUTCOME_FINALIZATION_FAILED', // neither is a failure while settling that answer
+  // Infrastructure stops are also not completed delivery. A setup refusal in
+  // under a second was scored as "UNDER the band" against a several-minute
+  // opening estimate (BR1986). Past the upper bound, elapsed time still proves a miss.
+  'OUTCOME_SANDBOX_UNAVAILABLE',
+  'OUTCOME_ENGINE_UNAVAILABLE',
+  'OUTCOME_ENGINE_TIMEOUT',
 ]);
 
 /**
@@ -4569,6 +4602,7 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
       lines.push(`${n + 1}. [${i.severity.toUpperCase()}] (${i.phase}/${i.code})${rep} ${i.autoResolved ? 'auto-resolved' : 'UNRESOLVED'}`);
       lines.push(`   ${i.message}`);
       if (i.detail) lines.push(`   ↳ ${i.detail}`);
+      if (i.adminDetail) lines.push(`   ↳ ${i.adminDetail}`);
     });
   }
   if (infoCount > 0) {
@@ -4737,6 +4771,7 @@ export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosti
     message: redactProvidersText(stripEngineSafeDiag(i.message)),
     autoResolved: i.autoResolved,
     // BR2388: the `[engine-diag: …]` gate/stage/cost marker is for the admin report only.
+    // `adminDetail` is deliberately omitted — it is an admin-only field, not a user-facing detail.
     ...(i.detail !== undefined ? { detail: redactProvidersText(stripEngineSafeDiag(i.detail)) } : {}),
     ...(i.repeatCount !== undefined ? { repeatCount: i.repeatCount } : {}),
   });

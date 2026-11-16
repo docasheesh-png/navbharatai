@@ -8,6 +8,8 @@ import * as THREE from 'three';
 import { loadForge, authorObject, objectFileSource, pascal, FORGE_DIR, OBJECTS_DIR } from './forgeRuntime';
 import { FORGE_ENGINE } from './forgeEngineSource';
 import { FORGE_CHECK } from './forgeCheckSource';
+import { FORGE_BEHAVE } from './forgeBehaveSource';
+import { FORGE_CUSTOMISE } from './forgeCustomiseKitSource';
 import { FORGE_EXAMPLES } from './forgeExamples';
 import { generateObjectForge, objectForgeEnabled, FORGE_GUIDE } from './ObjectForgeGenerator';
 import { scanSecurity } from '../../AgentV3/SecurityAnalysis';
@@ -82,13 +84,13 @@ describe('the emitted engine', () => {
   it('is a single self-contained file that names its technique and imports nothing', () => {
     expect(FORGE_ENGINE).toMatch(/Technique:/);
     expect(FORGE_ENGINE).not.toMatch(/^import /m);
-    expect(Object.keys(generateObjectForge().files).sort()).toEqual([FORGE_DIR + 'customise.ts', FORGE_DIR + 'forge.ts']);
+    expect(Object.keys(generateObjectForge().files).sort()).toEqual([FORGE_DIR + 'behave.ts', FORGE_DIR + 'customise.ts', FORGE_DIR + 'forge.ts']);
   });
 
   it('typechecks under strict + noUnusedLocals, as a game would compile it (and so does the object file made from a spec)', () => {
     const root = join(process.cwd(), 'tests', '__forge_virtual__');
     const objectSource = objectFileSource(FORGE_EXAMPLES.person.spec);
-    const memory = new Map<string, string>([[join(root, FORGE_DIR + 'forge.ts'), FORGE_ENGINE], [join(root, OBJECTS_DIR + 'person.ts'), objectSource]]);
+    const memory = new Map<string, string>([[join(root, FORGE_DIR + 'forge.ts'), FORGE_ENGINE], [join(root, FORGE_DIR + 'behave.ts'), FORGE_BEHAVE], [join(root, FORGE_DIR + 'customise.ts'), FORGE_CUSTOMISE], [join(root, OBJECTS_DIR + 'person.ts'), objectSource]]);
     const host = ts.createCompilerHost({});
     const realRead = host.readFile.bind(host); const realExists = host.fileExists.bind(host);
     host.readFile = (p) => memory.get(p) ?? realRead(p);
@@ -516,9 +518,13 @@ describe('the object in a real three.js scene', () => {
     const engineExports: Record<string, unknown> = {};
     // eslint-disable-next-line no-new-func
     new Function('exports', engineJs)(engineExports);
+    const behaveJs = ts.transpileModule(FORGE_BEHAVE, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+    const behaveExports: Record<string, unknown> = {};
+    // eslint-disable-next-line no-new-func
+    new Function('exports', 'require', behaveJs)(behaveExports, (rel: string) => { if (rel === './forge') return engineExports; throw new Error('unexpected import ' + rel); });
     const objectExports: Record<string, any> = {};
     // eslint-disable-next-line no-new-func
-    new Function('exports', 'require', objectJs)(objectExports, (rel: string) => { if (rel === '../forge/forge') return engineExports; throw new Error('unexpected import ' + rel); });
+    new Function('exports', 'require', objectJs)(objectExports, (rel: string) => { if (rel === '../forge/forge') return engineExports; if (rel === '../forge/behave') return behaveExports; throw new Error('unexpected import ' + rel); });
     return objectExports['create' + pascal(id)](THREE);
   };
 

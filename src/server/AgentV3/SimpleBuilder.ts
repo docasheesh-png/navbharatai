@@ -2736,10 +2736,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         try {
           const before = Object.fromEntries(written.map((f) => [f.path, f.content]));
           const refs = sanitizeTsconfigReferences(before, deps.scaffoldPaths ?? []);
-          if (refs.fixes.length > 0) {
+          if (refs.fixes.length > 0 || (refs.stripped?.length ?? 0) > 0) {
             for (const f of written) { const nc = refs.patch[f.path]; if (typeof nc === 'string') f.content = nc; }
             const n = refs.fixes.reduce((s, f) => s + f.removed.length, 0);
-            deps.log?.(`🔧 Removed ${n} unresolvable tsconfig project reference(s) so the compiler can run.`);
+            if (n > 0) deps.log?.(`🔧 Removed ${n} unresolvable tsconfig project reference(s) so the compiler can run.`);
+            if ((refs.stripped?.length ?? 0) > 0) deps.log?.(`🔧 Removed leftover apply-patch markup from ${refs.stripped!.length} tsconfig file(s) so the compiler can parse them.`);
           }
         } catch { /* best-effort — a failure leaves the tsconfig as generated for the honest verify */ }
       }
@@ -2948,6 +2949,26 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   } : null;
   const beforeVerifyYield = steeringHandoff();
   if (beforeVerifyYield) return beforeVerifyYield;
+
+  // BR1981: a plan with no App.tsx / app/page (this report: HTML + JS + data files) can have
+  // every write refused and still leave unwrittenEntries empty, so the lane logged
+  // "Built your app — 0 file(s)" and returned ok:true (SIMPLE_BUILD_SUCCESS). classifyBuildOutcome
+  // already calls 0 files BUILD_FAILED; the boolean must agree. Do not run verify or preview
+  // against an empty workspace, and do not say we are "shipping the files unverified".
+  if (files.length === 0) {
+    // Not a file-carrying hand-off: do not forward contractRenames / contractEnumsAsConst
+    // (theRenamedTypeWasInvisible census locks those spreads to the two paths that do carry files).
+    return {
+      ok: false,
+      filesWritten: 0,
+      reason: 'nothing_landed',
+      summary: 'No files could be saved to the workspace — the app was not built.',
+      outcome: classifyBuildOutcome({ filesWritten: 0, typecheckOk: null }),
+      plannedFiles,
+      plannedPaths,
+      phases: phasesNow(),
+    };
+  }
 
   deps.log?.(`Built your app — ${files.length} file(s), each generated individually.`);
 

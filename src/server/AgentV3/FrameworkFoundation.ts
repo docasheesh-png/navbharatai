@@ -18,6 +18,7 @@
 // unit-testable without a sandbox.
 
 import { extractImportedPackages } from './DependencyReconciler';
+import { stripTrailingConflictMarkup } from './conflictMarkerGuard';
 
 export interface FoundationResult {
   /** ONLY the newly-synthesized foundational files, keyed by workspace-relative path. Empty when the
@@ -280,12 +281,18 @@ export interface TsconfigExtendsFix {
 export interface TsconfigSanitizeResult {
   patch: Record<string, string>;
   fixes: TsconfigExtendsFix[];
+  /** Paths whose trailing apply-patch / merge-conflict markup was dropped (BR1982). */
+  stripped?: string[];
 }
 
 const TSCONFIG_BASENAME_RE = /(?:^|\/)tsconfig(?:\.[\w-]+)?\.json$/i;
 
 /** Tolerant JSONC parse (tsconfig allows // and block comments + trailing commas). Returns null on failure
  *  so the caller leaves the file untouched. */
+export function parseTsconfigJsonc(text: string): Record<string, unknown> | null {
+  return parseJsonc(text);
+}
+
 function parseJsonc(text: string): Record<string, unknown> | null {
   const attempt = (s: string): Record<string, unknown> | null => {
     try {
@@ -422,14 +429,22 @@ export function sanitizeTsconfigReferences(
 ): TsconfigSanitizeResult {
   const patch: Record<string, string> = {};
   const fixes: TsconfigExtendsFix[] = [];
-  if (!files || typeof files !== 'object') return { patch, fixes };
+  const stripped: string[] = [];
+  if (!files || typeof files !== 'object') return { patch, fixes, stripped };
   const known = new Set<string>([
     ...Object.keys(files).map(normalizeRelPath),
     ...existingPaths.map((p) => normalizeRelPath(String(p))),
   ]);
   for (const [path, content] of Object.entries(files)) {
     if (!TSCONFIG_BASENAME_RE.test(path) || typeof content !== 'string') continue;
-    const json = parseJsonc(content);
+    let text = content;
+    const cut = stripTrailingConflictMarkup(content);
+    if (cut.stripped && parseJsonc(cut.content)) {
+      text = cut.content;
+      stripped.push(path);
+      patch[path] = text;
+    }
+    const json = parseJsonc(text);
     if (!json || !Array.isArray(json.references) || json.references.length === 0) continue;
     if (!tsconfigHasOwnSources(json)) continue; // solution-style configs stay as they are
     const removed: string[] = [];
@@ -454,7 +469,7 @@ export function sanitizeTsconfigReferences(
     patch[path] = `${JSON.stringify(json, null, 2)}\n`;
     fixes.push({ file: path, removed });
   }
-  return { patch, fixes };
+  return { patch, fixes, stripped };
 }
 
 /**

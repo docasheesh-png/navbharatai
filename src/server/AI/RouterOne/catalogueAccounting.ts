@@ -397,6 +397,7 @@ export function cataloguePricedRouterOneClient(client: OpenAiChatClient, key: st
     try {
       if (admitted.scope.stopped || options?.signal?.aborted) throw new RouterOneAccountingUnavailableError(admitted.scope.stopped ? 'scope_stopped' : 'aborted');
       attempt.dispatched = true;
+
       const raw = await dispatches.run(attempt, () => client.chat.completions.create(request, options));
       if (Symbol.asyncIterator in raw) {
         const stream = raw as OpenAiChatStream;

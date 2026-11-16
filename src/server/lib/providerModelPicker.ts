@@ -11,6 +11,7 @@
  */
 import { createHash } from 'node:crypto';
 import { fetchProviderModelIds } from './testChatBotOfficial';
+import { BoundedCache } from './boundedCache';
 
 /** Not chat: image, audio, video, embedding, moderation and rerank models. */
 const NON_CHAT = /(embed|whisper|tts|speech|audio|transcri|image|dall-?e|imagen|vision-only|moderation|rerank|ocr|video|sora|veo|flux|stable-diffusion|sdxl|midjourney|kling|suno)/i;
@@ -25,7 +26,8 @@ export function rankChatModels(ids: readonly string[], configured?: string | nul
 }
 
 const TTL_MS = 10 * 60_000;
-const cache = new Map<string, { at: number; ids: string[] }>();
+/** One entry per provider key, ten minutes each; bounded so it cannot grow with traffic (tests/boundedCaches.test.ts). */
+const cache = new BoundedCache<string, string[]>({ maxEntries: 64, ttlMs: TTL_MS });
 
 /**
  * The ordered models to try for this key: the provider's own chat models, ranked, capped at `max`. When the list cannot
@@ -34,13 +36,16 @@ const cache = new Map<string, { at: number; ids: string[] }>();
 export async function pickProviderModels(baseURL: string, apiKey: string, configured: string | null, max = 3,
   fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<{ models: string[]; source: 'provider-list' | 'configured-only'; note?: string }> {
   const slot = createHash('sha256').update(`${baseURL}|${apiKey}`).digest('hex');
-  let ids = cache.get(slot);
-  if (!ids || now() - ids.at > TTL_MS) {
+  let ids = cache.get(slot, now());
+  if (!ids) {
     const listed = await fetchProviderModelIds(baseURL, apiKey, fetchImpl);
-    if (listed.ok && listed.ids.length) { ids = { at: now(), ids: listed.ids }; cache.set(slot, ids); if (cache.size > 64) cache.delete(cache.keys().next().value!); }
-    else return { models: configured ? [configured] : [], source: 'configured-only', note: listed.ok ? 'the provider listed no models' : `model list ${listed.reason}` };
+    if (!listed.ok || !listed.ids.length) {
+      return { models: configured ? [configured] : [], source: 'configured-only', note: listed.ok ? 'the provider listed no models' : `model list ${listed.reason}` };
+    }
+    ids = listed.ids;
+    cache.set(slot, ids, now());
   }
-  const ranked = rankChatModels(ids.ids, configured).slice(0, Math.max(1, max));
+  const ranked = rankChatModels(ids, configured).slice(0, Math.max(1, max));
   return ranked.length ? { models: ranked, source: 'provider-list' } : { models: configured ? [configured] : [], source: 'configured-only', note: 'no chat models listed' };
 }
 

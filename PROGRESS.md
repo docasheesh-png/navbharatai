@@ -101607,6 +101607,26 @@ Independent review FAIL on the first BR1990 version (t311u): refusing every fold
 
 Second independent review FAIL (t311u): the host-name check still refused usable combined replies (lowercase `header.tsx` declaring `Header`, `.ts` utility and types hosts, a camelCase export from a kebab file, an anonymous default export). Replaced it with the reviewer's option (b): `pickGeneratedFile` refuses a folded-header first block only when `looksLikeOnlyFile` positively reads the content as the folded file alone (its own name declared or exported, no other top-level declaration or export); anything unclear keeps main's fallback. Host-name derivation removed. Pinned by 16 kept / 7 refused shape tables, unit cases, a real lane run, both reviewer probes and mutation checks.
 
+## 2026-11-16 — Discount reseller gateways: Moyi API, DiscountedTokens and MirAPI in the admin Test Chat Bot
+
+Owner asked for the three gateways in Admin → AI Engines → Test Chat Bot, and also on `z@gmail.com`'s Pro builder.
+
+**Done (admin Test Chat Bot only):** `src/server/lib/resellerGateways.ts` owns each gateway's key, endpoint and model.
+A base URL is accepted only on the provider's own registered domain. DiscountedTokens uses its published
+`https://discountedtokens.com/v1` and `gpt-6-sol`; Moyi uses `https://api.moyi-api.com/v1` (shown on its home page, owner's
+screenshot); MirAPI has no default endpoint because its could not be read, so the owner sets `MIRAPI_BASE_URL`. One streamed call, no retry,
+reserved at the dearest official list price (USD 10 / 50 per 1M). Each is a switch-board family and an API-providers row.
+Env names and the known risks are in `docs/claude/ENV_REGISTRY.md` (2026-11-16 entry).
+
+Tests: `src/server/lib/testChatBot.test.ts` ("discount reseller gateways…"). The own-domain guard was proven by
+reversion (a substring host check let `moyi-api.com.evil.example` and `evilmoyi-api.com` through; the tests failed).
+
+**OPEN — NOT DONE: the three gateways on `z@gmail.com`'s Pro builder.** Not built, deliberately, because the facts a
+builder rung needs are unknown until a real call answers: Moyi's and MirAPI's API endpoint and model ids, whether each
+gateway honours tool calling (the builder cannot run without it), and the real price per model for honest billing.
+Needs: the owner sets the keys (and the two base URLs), runs each in the Test Chat Bot, and reports which model
+answered. Then the rung is written the way `bluesmindsBuilder.ts` is (neutral label, own rate, brand-neutral errors,
+off-ladder census), gated to the z test account. Claude models through a reseller stay out without separate sign-off.
 ## 2026-11-16 — BR1991 autopsy (stopped build, report not retained): nothing to fix, evidence pinned
 
 Owner t311u sequential audit, BR1991 only (boundary 1951..2105 frozen). Branched from origin/main `a5e23403` (BR1990, #4265). The registry lists #1991 as stopped with `retained: false`; every read-only report tool answers "not found in retained storage", and the audit's starting inventory already showed it unretained, so the build's own defects cannot be read and were not reconstructed. From source: a numbered report always had saved bytes (registry row and history document are written in one transaction); the only in-repo path that removes a recent report is the user deleting that build's chat (GA-1 `purgeWorkspace` → `deleteDiagnostics`, registry row kept by design); 180-day retention and the refusing account erasure cannot explain it. Most likely an expected user deletion, not proven: Q-2703 (BLOCKED, needs one admin production read). No product code changed; `tests/br1991Autopsy.test.ts` pins the facts (5 mutations, each caught). Docs: `docs/build-report-autopsy-BR1991.md` and its evidence JSON.

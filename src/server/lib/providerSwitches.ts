@@ -82,7 +82,11 @@ export const PROVIDER_FAMILIES: readonly ProviderFamily[] = [
   { id: 'modelscope', name: 'ModelScope', keys: ['FREE_CHAIN_MODELSCOPE_API_KEY'], hosts: () => ['api-inference.modelscope.cn'] },
   { id: 'llm7', name: 'LLM7', keys: ['FREE_CHAIN_LLM7_API_KEY'], hosts: () => ['api.llm7.io'] },
   { id: 'bluesminds', name: 'BluesMinds', keys: ['FREE_CHAIN_BLUESMINDS_API_KEY'], hosts: () => ['api.bluesminds.com'] },
-  { id: 'requesty', name: 'Requesty', keys: ['FREE_CHAIN_REQUESTY_API_KEY'], hosts: () => ['router.requesty.ai'] },
+  { id: 'requesty', name: 'Requesty', keys: ['FREE_CHAIN_REQUESTY_API_KEY'], hosts: () => ['router.requesty.ai'] },  // Discount reseller gateways under evaluation (owner 2026-11-16): admin Test Chat Bot only. The whole registered
+  // domain is fenced, because the API host is whatever the owner configures on that domain (resellerGateways.ts).
+  { id: 'moyi', name: 'Moyi API', keys: ['MOYI_API_KEY'], hosts: () => ['moyi-api.com'] },
+  { id: 'discountedtokens', name: 'DiscountedTokens', keys: ['DISCOUNTEDTOKENS_API_KEY'], hosts: () => ['discountedtokens.com'] },
+  { id: 'mirapi', name: 'MirAPI', keys: ['MIRAPI_API_KEY'], hosts: () => ['mirapi.ai'] },
 ];
 
 const FAMILY_BY_ID = new Map(PROVIDER_FAMILIES.map((f) => [f.id, f]));

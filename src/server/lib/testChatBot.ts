@@ -31,6 +31,7 @@ import { nemotronBaseUrl, nemotronKey, nemotronSuperModel } from '../AgentV3/nem
 import { vertexGenAI, vertexProjectId } from './vertexGenAI';
 import { testChatRequestId, testChatUid } from './testChatPayload';
 import { pickProviderModels } from './providerModelPicker';
+import { isResellerGatewayId, RESELLER_GATEWAY_CEILING_RATE, RESELLER_GATEWAY_IDS, RESELLER_GATEWAYS, resellerGatewayRoute, resellerGatewayState } from './resellerGateways';
 
 type UnavailableReason = 'disabled' | 'configuration' | 'storage' | 'approval-or-budget' | 'budget' | 'no-model' | 'tries-exhausted' | 'capacity' | 'capability' | 'invalid' | 'unconfirmed';
 const SKIP_REASON: Record<string, UnavailableReason> = {
@@ -47,7 +48,7 @@ export class TestChatUnavailable extends Error {
 }
 
 type ProviderKind = 'qubax' | 'mitrify' | 'freechain' | 'openrouter' | 'glm-vision' | 'gemini-flash' | 'kimi' | 'grok' | 'anthropic' | 'surplus' | 'router-one'
-  | 'glm-builder' | 'nemotron' | 'bedrock-glm' | 'vertex' | 'non-chat';
+  | 'glm-builder' | 'nemotron' | 'bedrock-glm' | 'vertex' | 'reseller-gateway' | 'non-chat';
 const FREECHAIN_ADAPTER: Record<Exclude<ProviderId, never>, AdapterConfig['provider']> = {
   glm47: 'GLM', glm45: 'GLM', gemini: 'GEMINI', groq: 'GROQ', cloudflare: 'CLOUDFLARE', openrouter: 'OPENAI',
   deepseek: 'DEEPSEEK', nvidia: 'NVIDIA', modelscope: 'MODELSCOPE', llm7: 'LLM7', bluesminds: 'BLUESMINDS',
@@ -88,6 +89,9 @@ const META: Record<TestChatProviderId, {
   nemotron: { label: 'NVIDIA Nemotron (builder)', kind: 'nemotron', internalRouting: true },
   'bedrock-glm': { label: 'AWS Bedrock GLM', kind: 'bedrock-glm' },
   'vertex-gemini': { label: 'Google Vertex AI Gemini', kind: 'vertex' },
+  moyi: { label: RESELLER_GATEWAYS.moyi.label, kind: 'reseller-gateway', internalRouting: true },
+  discountedtokens: { label: RESELLER_GATEWAYS.discountedtokens.label, kind: 'reseller-gateway', internalRouting: true },
+  mirapi: { label: RESELLER_GATEWAYS.mirapi.label, kind: 'reseller-gateway', internalRouting: true },
   'sarvam-speech': { label: 'Sarvam AI (speech only)', kind: 'non-chat' },
   'pollinations-image': { label: 'Pollinations (images only)', kind: 'non-chat' },
 };
@@ -429,6 +433,12 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
       note: 'At send time this page reads Router One’s posted public price for the selected model from router.one (the same tariff the builder ranks on), reserves the highest posted band for this page’s 1,024-token bound against the shared paid budget, then makes one call with no retry. If no posted price can be read, it does not call. A typed model is priced the same way; Router One’s own "auto" router has no posted price and is not called.',
       ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY : 'This test page only calls the official Router One endpoint.' }) };
   }
+  if (meta.kind === 'reseller-gateway' && isResellerGatewayId(id)) {
+    const state = resellerGatewayState(id);
+    return { ...base, configured: state.ready || state.configured, enabled: state.ready, model: state.model, billed: true, approvalRequired: false,
+      note: 'A discount reseller under evaluation: this admin page is the only place it is called. One call, no retry, to the provider’s own domain. With no model set it reads the key’s own /models list and uses a listed chat model; a typed model is used as-is. On Moyi an OpenAI model id goes to its OpenAI-format endpoint and every other model to its Anthropic-format endpoint. The reply shows the model id the provider itself reports, which is the provider’s claim and not independent proof of which model answered. The shared-budget reserve uses the dearest official list price among the models these gateways sell (USD 10 / 50 per 1M tokens): a ceiling, not the bill.',
+      ...(state.ready ? {} : { unavailableReason: state.reason }) };
+  }
   if (meta.kind === 'kimi') {
     const configured = !!firstPresent(process.env, ['KIMI_API_KEY']);
     // The builder's own KIMI_BASE_URL, which may be the Kimi Code host (api.kimi.com) as well as Moonshot.
@@ -588,7 +598,8 @@ export function testChatStatus(): TestChatStatus {
 function needsSharedPaidConfig(id: TestChatProviderId): boolean {
   const meta = META[id];
   if (meta.kind === 'qubax' || meta.kind === 'mitrify' || meta.kind === 'kimi' || meta.kind === 'grok' || meta.kind === 'anthropic' || meta.kind === 'gemini-flash' || meta.kind === 'router-one'
-    || meta.kind === 'surplus' || meta.kind === 'glm-builder' || meta.kind === 'nemotron' || meta.kind === 'bedrock-glm' || meta.kind === 'vertex') return true;
+    || meta.kind === 'surplus' || meta.kind === 'glm-builder' || meta.kind === 'nemotron' || meta.kind === 'bedrock-glm' || meta.kind === 'vertex'
+    || meta.kind === 'reseller-gateway') return true;
   return !!(meta.rungId && isPaidRung(meta.rungId));
 }
 
@@ -614,6 +625,7 @@ function secretsFor(id: TestChatProviderId): string[] {
   push(firstPresent(process.env, ['GLM_API_KEY']));
   push(nemotronKey());
   push(firstPresent(process.env, ['BEDROCK_API_KEY']));
+  for (const gateway of RESELLER_GATEWAY_IDS) push(resellerGatewayState(gateway).apiKey);
   return found;
 }
 
@@ -855,6 +867,24 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         stream: true,
       });
       return finish(action, result.content, result.model || picked, startedAt, result.usage);
+    }
+
+    if (meta.kind === 'reseller-gateway' && isResellerGatewayId(action.provider)) {
+      const gateway = resellerGatewayState(action.provider);
+      if (!gateway.ready) throw new TestChatUnavailable('configuration');
+      // A typed model wins; else the configured one; else a chat model from the key's own list. Never a guessed id.
+      const model = requestedModel(action) || gateway.model
+        || (await pickProviderModels(gateway.baseUrl, gateway.apiKey, null, 1)).models[0];
+      if (!model) throw new TestChatUnavailable('no-model', 409);
+      dispatchedModel = model;
+      const ceiling = quoteTokens(action.messages, RESELLER_GATEWAY_CEILING_RATE.inputPerMTok, RESELLER_GATEWAY_CEILING_RATE.outputPerMTok);
+      const receipt = await reserveShared(db, requestId, uid, ceiling);
+      if (!receipt) throw new TestChatUnavailable('budget', 409);
+      const route = resellerGatewayRoute(gateway, model);
+      const result = await releaseIfUnused(receipt, () => route.format === 'anthropic'
+        ? runOfficialAnthropicTest({ apiKey: gateway.apiKey, model, messages: action.messages, signal: bounded, baseURL: route.baseUrl })
+        : sentTo(runOfficialOpenAiCompatTest)({ url: route.url, apiKey: gateway.apiKey, model, messages: action.messages, signal: bounded, stream: true }));
+      return finish(action, result.content, result.model || model, startedAt, result.usage);
     }
 
     let officialReceipt: Awaited<ReturnType<typeof reserveShared>> = null;

@@ -32,6 +32,10 @@ export const TEST_CHAT_PROVIDER_IDS = [
   'nemotron',
   'bedrock-glm',
   'vertex-gemini',
+  // Discount reseller gateways under evaluation (owner 2026-11-16). Admin test only; not in user chat or the builder.
+  'moyi',
+  'discountedtokens',
+  'mirapi',
   // Non-chat services: listed so the census is complete, always disabled with the reason.
   'sarvam-speech',
   'pollinations-image',

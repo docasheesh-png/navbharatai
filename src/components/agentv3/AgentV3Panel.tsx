@@ -5,6 +5,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ServiceRecommendationCard } from './ServiceRecommendationCard';
 import { offerWatchLive } from './earlyPreviewCue';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
+import { buildDiscountLine } from '../../lib/buildDiscountLine';
 import { stopVersionPreview } from '../../lib/versionPreviewStop';
 import { isLiveStatusLine, withoutStaleLiveStatus, latestLiveStatusText, lastActivityTs, ETA_LINE_ID } from '../../lib/liveStatusLine';
 import { buildElapsedMs } from './buildClock';
@@ -5511,7 +5512,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 they will ever see. Rendered only when something was really taken off. */}
             {state.done && (state.costBreakdown?.discountInr ?? 0) > 0 && (state.costBreakdown?.discountPct ?? 0) > 0 && (
               <div className="basis-full text-[11px] font-semibold text-success" data-testid="build-discount-line">
-                Build price ₹{(state.costBreakdown?.listInr ?? 0).toFixed(2)} · Discount {state.costBreakdown?.discountPct}% (−₹{(state.costBreakdown?.discountInr ?? 0).toFixed(2)}) · You pay ₹{(state.costBreakdown?.billedInr ?? 0).toFixed(2)}
+                {buildDiscountLine({ listInr: state.costBreakdown?.listInr ?? 0, discountInr: state.costBreakdown?.discountInr ?? 0, payInr: state.costBreakdown?.billedInr ?? 0, pct: state.costBreakdown?.discountPct ?? 0 })}
               </div>
             )}
             {/* T1-cost-transparency — expandable "why this build cost ₹X" breakdown. */}

@@ -5511,7 +5511,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 they will ever see. Rendered only when something was really taken off. */}
             {state.done && (state.costBreakdown?.discountInr ?? 0) > 0 && (state.costBreakdown?.discountPct ?? 0) > 0 && (
               <div className="basis-full text-[11px] font-semibold text-success" data-testid="build-discount-line">
-                Build price ₹{(state.costBreakdown?.listInr ?? 0).toFixed(2)} · Discount {state.costBreakdown?.discountPct}% (−₹{(state.costBreakdown?.discountInr ?? 0).toFixed(2)}) · You pay ₹{(state.costBreakdown?.billedInr ?? 0).toFixed(2)}
+                Build price ₹{(state.costBreakdown?.listInr ?? 0).toFixed(2)} · Discount {state.costBreakdown?.discountPct}% (−₹{(state.costBreakdown?.discountInr ?? 0).toFixed(2)}){/* BR1996: the fee added after the discount */}{typeof state.costBreakdown?.sandboxFeeInr === 'number' && Number.isFinite(state.costBreakdown.sandboxFeeInr) && state.costBreakdown.sandboxFeeInr > 0 ? ` · Sandbox service fee +₹${state.costBreakdown.sandboxFeeInr.toFixed(2)}` : null} · You pay ₹{(state.costBreakdown?.billedInr ?? 0).toFixed(2)}
               </div>
             )}
             {/* T1-cost-transparency — expandable "why this build cost ₹X" breakdown. */}

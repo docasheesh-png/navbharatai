@@ -101660,3 +101660,12 @@ Owner t311u sequential audit, BR1995 only (boundary 1951..2105 frozen). Branched
 - BR1994 doc correction: a specialist's `childEvents` (`Object.create(parent)`) inherits `budgetStagesSaid`, so it is silenced after "Out of time" too. Pinned.
 - 7 mutations, all caught.
 - Docs: `docs/build-report-autopsy-BR1995.md`, its evidence JSON, and `tests/br1995Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-17 — BR1996 autopsy (discounted build's green line did not add up): the line now names the sandbox fee added after the discount
+
+Owner t311u sequential audit, BR1996 only (boundary 1951..2105 frozen). Branched from origin/main `81a1e0ff` (BR1995, #4272). A free Weak build succeeded and was charged.
+- F1: the green discount line showed price, discount and "You pay", but the 2.5% sandbox fee is added after the discount, so the numbers did not add up. `buildDiscountLine` and the panel line now add "Sandbox service fee +₹X" before "You pay", only for a positive, finite fee. Display only: no amount, debit or fee changed. Main's line is byte-identical otherwise.
+- Already closed on main: `package.json` folded into `tsconfig.json` and the fast lane run against a failed setup (BR1952, #4124); "try building again" on a setup failure (BR1961, #4146); "0s of preparation" (BR1958, #4132).
+- Q-2710 (BLOCKED): the builder calls a new app a "fix" after a fast-lane hand-over.
+- 8 mutations: 7 caught, after strengthening one pin. One survivor is runtime-equivalent (kept for TypeScript narrowing).
+- Docs: `docs/build-report-autopsy-BR1996.md`, its evidence JSON, and `tests/br1996Autopsy.test.ts`. Not live until a Console Run.

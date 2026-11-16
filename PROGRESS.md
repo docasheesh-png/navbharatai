@@ -101649,3 +101649,14 @@ Owner t311u sequential audit, BR1994 only (boundary 1951..2105 frozen). Branched
 - Q-2706 (BLOCKED): a resume in the final stage. Q-2707 (BLOCKED, money-adjacent): a superseded failed command counted on a failed build's gate.
 - Two existing source pins were updated deliberately. 9 mutations were run: 8 were caught, and the one that survived exposed a redundant guard, which was removed.
 - Docs: `docs/build-report-autopsy-BR1994.md`, its evidence JSON, and `tests/br1994Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-17 — BR1995 autopsy ("Fix with AI" under our own reconnect refusal): the button stands down for the exact refusal sentence
+
+Owner t311u sequential audit, BR1995 only (boundary 1951..2105 frozen). Branched from origin/main `d167b888` (BR1994, #4271). The user pressed "Fix with AI" under BR1993's reconnect refusal, so this build's request was our own infrastructure sentence. Setup refused again after about 5.6 s.
+- F1: `errorCanBeFixedByEditingTheApp` now returns false for the exact first or repeat reconnect-refusal sentence. The sentences moved byte-identically to `src/lib/sandboxRecoveryMessages.ts`. Any other text keeps today's button.
+- Already closed on main: the repeat refusal's wording and its held-back ETA (BR1984, #4254), the admin reason (BR1983, #4251), and the "0s of preparation" line for a pre-build call (BR1958).
+- Q-2705 is referenced for the ETA before setup.
+- Q-2708 (BLOCKED): a 5.3 s "Routing and ETA" window with no named steps. Q-2709 (BLOCKED): other in-stream infrastructure endings.
+- BR1994 doc correction: a specialist's `childEvents` (`Object.create(parent)`) inherits `budgetStagesSaid`, so it is silenced after "Out of time" too. Pinned.
+- 7 mutations, all caught.
+- Docs: `docs/build-report-autopsy-BR1995.md`, its evidence JSON, and `tests/br1995Autopsy.test.ts`. Not live until a Console Run.

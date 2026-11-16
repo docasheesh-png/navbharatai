@@ -5,11 +5,14 @@
 //      first-block fallback saved the component's source under the host's path. (In the report the host was
 //      a binary asset, so the write was refused; with a JS host the slip compiles and the host's importers
 //      silently render the folded component.) A reply whose first block names a FOLDED path, and that has
-//      no block for the asked-for path, is now refused like an empty reply. Every other reply is main's.
+//      no block for the asked-for path, AND whose content does not declare or export the host's own name, is
+//      now refused like an empty reply. Review FAIL lesson: a usable host reply under the folded header (the
+//      host's component plus the folded one) keeps main's fallback, so the host is not lost to a paid repair.
+//      Every other reply is main's.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { pickGeneratedFile, runSimpleBuild, type SimpleFileSpec } from '../src/server/AgentV3/SimpleBuilder';
+import { pickGeneratedFile, runSimpleBuild, hostComponentName, declaresName, type SimpleFileSpec } from '../src/server/AgentV3/SimpleBuilder';
 import { parseFileBlocks } from '../src/server/AgentV3/OneShotBuilder';
 import { foldPlanToBudget, fileBudgetForPrompt } from '../src/server/AgentV3/fileBudget';
 
@@ -62,6 +65,53 @@ describe('D1 — pickGeneratedFile never saves a folded file under its host\'s p
   });
 });
 
+describe('D1 review — a usable host reply under the folded header is kept, exactly as main', () => {
+  const folded = new Set(['src/components/StatusBadge.tsx']);
+  const host = 'src/components/Panel.tsx';
+  const KEPT: Record<string, string> = {
+    'combined content (review probe)': 'function StatusBadge() { return <span>ok</span>; }\nexport default function Panel() { return <div><StatusBadge /></div>; }',
+    'const arrow component': 'const StatusBadge = () => <span/>;\nconst Panel = () => <div><StatusBadge /></div>;\nexport default Panel;',
+    'named export list': 'function StatusBadge() { return null; }\nfunction Inner() { return null; }\nexport { Inner as Panel };',
+    'export default identifier': 'function StatusBadge() { return null; }\nexport default Panel;',
+    'class component': 'export class Panel { render() { return null; } }',
+  };
+  it.each(Object.entries(KEPT))('%s → kept, identical to main', (_k, body) => {
+    const t = block('src/components/StatusBadge.tsx', body);
+    expect(pickGeneratedFile(t, host, folded)).toEqual(mainPick(t, host));
+    expect(pickGeneratedFile(t, host, folded)).not.toBeNull();
+  });
+
+  const REFUSED: Record<string, string> = {
+    'folded component only': 'export default function StatusBadge() { return <span>ok</span>; }',
+    'imports the host but does not define it': "import Panel from './Panel';\nexport default function StatusBadge() { return <Panel />; }",
+    'mentions the host only in a string/JSX': 'export default function StatusBadge() { return <div title="Panel">Panel</div>; }',
+    'a longer name that merely starts with the host name': 'export function PanelHeader() { return null; }',
+  };
+  it.each(Object.entries(REFUSED))('%s → refused (null)', (_k, body) => {
+    expect(pickGeneratedFile(block('src/components/StatusBadge.tsx', body), host, folded)).toBeNull();
+  });
+
+  it('host names: plain, kebab/snake, index-in-folder, and undeterminable (→ main fallback)', () => {
+    expect(hostComponentName('src/components/Panel.tsx')).toBe('Panel');
+    expect(hostComponentName('src/hooks/useNotes.ts')).toBe('useNotes');
+    expect(hostComponentName('src/components/status-badge.tsx')).toBe('StatusBadge');
+    expect(hostComponentName('src/components/note_list.jsx')).toBe('NoteList');
+    expect(hostComponentName('src/components/Panel/index.tsx')).toBe('Panel');
+    expect(hostComponentName('src/components/1st.tsx')).toBeNull();
+    const t = block('src/components/StatusBadge.tsx', 'export default function StatusBadge() { return null; }');
+    expect(pickGeneratedFile(t, 'src/components/1st.tsx', folded)).toEqual(mainPick(t, 'src/components/1st.tsx'));
+  });
+
+  it('declaresName only counts a declaration or an export', () => {
+    expect(declaresName('function Panel() {}', 'Panel')).toBe(true);
+    expect(declaresName('export const Panel = 1', 'Panel')).toBe(true);
+    expect(declaresName('export { A as Panel }', 'Panel')).toBe(true);
+    expect(declaresName("import Panel from './Panel'", 'Panel')).toBe(false);
+    expect(declaresName('<Panel />', 'Panel')).toBe(false);
+    expect(declaresName('function PanelX() {}', 'Panel')).toBe(false);
+  });
+});
+
 describe('D1 — through the real per-file lane', () => {
   const request = 'a small notes app for my class';
   const paths = ['src/main.tsx', 'src/App.tsx', ...Array.from({ length: 14 }, (_, i) => `src/components/Part${i}.tsx`)];
@@ -70,7 +120,7 @@ describe('D1 — through the real per-file lane', () => {
   const fold = foldPlanToBudget(specs, fileBudgetForPrompt(request));
   const hostPath = paths.find((p) => !fold.folded.includes(p) && fold.files.find((f) => f.path === p)?.purpose.includes('ALSO INCLUDE'));
 
-  const run = (hostAnswersWithFoldedOnly: boolean) => {
+  const run = (hostAnswersWithFoldedOnly: boolean, combined = false) => {
     const written = new Map<string, string>();
     return runSimpleBuild({
       prompt: request,
@@ -82,7 +132,10 @@ describe('D1 — through the real per-file lane', () => {
         if (!asked) return '';
         const name = asked.replace(/^.*\//, '').replace(/\.tsx?$/, '');
         if (asked === hostPath && hostAnswersWithFoldedOnly) {
-          return block(fold.folded[0], `export default function Folded() { return null; }`);
+          const hostName = asked.replace(/^.*\//, '').replace(/\.tsx?$/, '');
+          return block(fold.folded[0], combined
+            ? `function Folded() { return null; }\nexport default function ${hostName}() { return null; }`
+            : `export default function Folded() { return null; }`);
         }
         return block(asked, `export default function ${name.replace(/\W/g, '') || 'X'}() { return null; }`);
       },
@@ -100,6 +153,12 @@ describe('D1 — through the real per-file lane', () => {
   it('true positive: the host is never written with the folded component\'s source', async () => {
     const { written } = await run(true);
     expect(written.get(hostPath!) ?? '').not.toContain('function Folded()');
+  });
+
+  it('review neighbour: a combined host reply under the folded header is written under the host path, as main', async () => {
+    const { written } = await run(true, true);
+    const hostName = hostPath!.replace(/^.*\//, '').replace(/\.tsx?$/, '');
+    expect(written.get(hostPath!)).toContain(`export default function ${hostName}()`);
   });
 
   it('neighbour: a host that answers with its own block is written exactly as before', async () => {

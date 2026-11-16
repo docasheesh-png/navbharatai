@@ -9,7 +9,12 @@
     "the folded file's own path still gets its exact block",
     "a real runSimpleBuild with a synthetic 16-file plan that folds: the JS host is never written with the folded source; a host answering its own block is written as before",
     "wiring pin: only the folded paths are passed, and only when a fold happened",
-    "mutation checks (unique mktemp backups, restored): refusal removed (2 fail); lane not wired (2 fail)"
+    "review neighbours: under the folded header, content that declares or exports the host's own name (combined function component, const arrow, export list, export default identifier, class) is kept and identical to main",
+    "refused: folded-only content; content that only imports the host, only renders or mentions it, or declares a longer name starting with it",
+    "host name derivation: plain, hook module, kebab and snake case to PascalCase, index file uses its folder; an undeterminable name keeps main's fallback",
+    "a real runSimpleBuild where the host answers with combined content under the folded header writes it under the host path, as main",
+    "the reviewer's probe returns main's result for the combined reply",
+    "mutation checks (unique mktemp backups, restored): refuse regardless of content (8 \u2192 7 fail); never refuse (6 fail); declaration check counts any mention (3 fail); refusal removed (2 fail); lane not wired (2 fail)"
   ],
   "limitations": [
     "not a replay of a customer build",
@@ -18,6 +23,7 @@
     "the concurrent-sandbox cap remains Q-2621 (ops)",
     "the remaining type errors after the full builder's repair and the repair's unwritten component are not established from the retained report",
     "a first block naming another planned (not folded) file keeps main's fallback (candidate follow-up)",
-    "focused local tests and server/root typecheck only; no full local suite was run (box memory)"
+    "focused local tests and server/root typecheck only; no full local suite was run (box memory)",
+    "first D1 version (refuse any folded-header first block) was withdrawn after an independent review FAIL: it dropped usable mislabelled host replies and forced a paid repair"
   ]
 }

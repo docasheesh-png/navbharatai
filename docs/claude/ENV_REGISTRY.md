@@ -5126,6 +5126,16 @@ One module owns their env: `src/server/lib/resellerGateways.ts`. Key VALUES are 
   no uptime, latency or upstream and its "Why so cheap?" page is unread; none of the three published a rate limit
   on the reviewed pages; Moyi's upstream names and "No training" label are its own claims. The model id a reply
   reports is the provider's claim, not proof of which model answered.
+- **MirAPI Terms of Use (last updated 2026-09-20, text supplied by the owner 2026-11-16):** operator is Benxi
+  HengFeng Network Technology Co., Ltd. (China; PRC law, Benxi court). §6.4: inputs and outputs are not stored
+  beyond temporary processing and are not used for training, but §6.3 leaves each model provider's own retention
+  and training outside MirAPI's control. §5.6: reselling API access or running a downstream relay needs MirAPI's
+  prior written authorization; §4.1 allows building the service into one's own product, with §4.2 making us
+  responsible for our users' compliance with each model's terms — get written confirmation before any user path.
+  §5.8: rate limits exist but are published only in the dashboard/docs. §1.3/§4.4/§4.5: models are as-available
+  and can be withdrawn at once. §3.2: unused credits refundable within 7 days, crypto payments never. §3.3: a
+  USD 10/month fee after 365 days without a purchase. §11.3: liability capped at USD 100 or 12 months' payments.
+  The Terms do not say where the discount comes from.
 - **Claude through any of these is NOT approved.** NavBharatAI Pro v3.0 runs Claude on NavBharatAI's own
   Anthropic account (CLAUDE.md); a reseller Claude route needs separate owner sign-off.
 - **Reviewed and NOT added:** OpenCheese (buys third-party API credits and keys; sells safety-removed

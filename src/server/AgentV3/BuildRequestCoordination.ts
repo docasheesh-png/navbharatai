@@ -23,7 +23,7 @@ export function buildRequestInputRejection(input: { requestId?: unknown; session
 class BuildSetupRecoveryUnavailableError extends SandboxRecoveryUnavailableError {}
 
 export function rethrowBuildSetupRecoveryUnavailable(error: unknown): void {
-  if (isSandboxRecoveryUnavailable(error)) throw new BuildSetupRecoveryUnavailableError();
+  if (isSandboxRecoveryUnavailable(error)) throw new BuildSetupRecoveryUnavailableError(error.reason);
 }
 
 export function buildExceptionDetails(error: unknown): { message: string; phase: 'sandbox' | 'build'; code: string; summary: string; detail?: string } {
@@ -353,3 +353,4 @@ export function startBuildLeaseHeartbeat(opts: {
   timer.unref?.();
   return timer;
 }
+

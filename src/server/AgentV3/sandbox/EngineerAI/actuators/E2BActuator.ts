@@ -16,6 +16,7 @@ import { IEngineerActuator, BackendProvisionResult, EnsureWorkspaceOptions } fro
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
 import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS, buildPrebundleStaleCheckCommand, VITE_PREBUNDLE_DIR } from './devServerHost';
+import { fullstackDevPort } from '../../../devServerLaunchPlan';
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import { appPortsFrom } from '../../../appPorts';
 import type { DevFramework } from './devServerHost';
@@ -715,6 +716,9 @@ function extractDevPort(command: string): number {
   if (flag) return parseInt(flag[1], 10);
   const env = command.match(/\bPORT=(\d+)/);
   if (env) return parseInt(env[1], 10);
+  // Spring Boot / Go used to fall through to Vite's 5173 (autopsy BR1987).
+  const named = fullstackDevPort(command);
+  if (named) return named;
   // Python-style port argument (uvicorn main:app --port 8000 / runserver 0.0.0.0:8000)
   const pyPort = command.match(/\bport\s+(\d+)|\d+\.?\d*\.\d+\.?\d*:(\d+)/i);
   if (pyPort) return parseInt(pyPort[1] ?? pyPort[2], 10);

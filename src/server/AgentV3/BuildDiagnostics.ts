@@ -10,6 +10,7 @@
 // the live AgentEvent stream and (b) accepts explicitly-recorded issues for signals that are not
 // events (a provider fallback, a sandbox-create timeout).
 
+import { isNpmInstallWithoutPackageJson, isMissingStartToolchain } from './devServerLaunchPlan';
 import { startBandLabel } from './RequestAnalyser';
 import { todoOnlyTurnsLine } from './todoOnlyTurn';
 import { isBuildStoppedError } from './stopSignal';
@@ -1416,7 +1417,13 @@ export class BuildDiagnostics {
       // A project-wide `tsc --noEmit` whose ONLY errors are in TEST files (missing vitest types in the
       // sandbox, a test's named-vs-default import) is not an APP-build failure — the app ships without
       // its test files and compiles clean. See isTestOnlyTypecheckFailure (deep-test build #4 rootCause).
-      && !isTestOnlyTypecheckFailure(rec.command, rec.stdout, rec.stderr);
+      && !isTestOnlyTypecheckFailure(rec.command, rec.stdout, rec.stderr)
+      // npm install ENOENT on a tree with no package.json is the platform running the Node
+      // toolchain on a non-Node app (autopsy BR1987). It is not a defect of the app's code.
+      && !isNpmInstallWithoutPackageJson(rec.command, rec.stdout, rec.stderr)
+      // A Maven / Go start that failed only because the image lacks the compiler is
+      // infrastructure, not a compile error in the app.
+      && !isMissingStartToolchain(rec.command, rec.stdout, rec.stderr);
     const cmdHead = ourCommandLabel(rec.command) ?? rec.command.split('\n')[0].slice(0, 120);
     const durTxt = rec.durationMs != null ? ` (${Math.round(rec.durationMs / 1000)}s)` : '';
     // Q-273 — a slow command says where its time went (our setup / the machine / the command).

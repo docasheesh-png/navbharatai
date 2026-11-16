@@ -1,0 +1,31 @@
+{
+  "evidenceType": "synthetic-regression-cases",
+  "privateReportPayloadIncluded": false,
+  "cases": [
+    "a Spring Boot app with pom.xml and no package.json starts with Maven on 8080, not npm",
+    "a Go app with go.mod or main.go and no package.json starts with go run on 8080, not npm",
+    "a package.json still wins the Node install and start even when a pom.xml is also present",
+    "a Spring Boot label without a POM does not invent an npm start",
+    "a bare HTML page with no package.json still skips the platform preview",
+    "a Node tree with package.json still attempts the platform preview",
+    "independently written English and Hindi battle-royale map-game file lists that hold only a Spring Boot starter stay on Maven",
+    "Flask's one-shot port stays 8000, and Spring Boot and Go one-shot ports are 8080",
+    "a unique temporary directory with no package.json does not echo STALE from the deps check; a Node tree still does",
+    "mvn spring-boot:run and go run main.go are long-running dev servers; mvn package and go test are not",
+    "recordCommand files a missing-manifest npm install as an info sandbox command, not a shipping error; ERESOLVE still ships as a failure",
+    "a missing Maven or Go binary is not a shipping error; a Maven compile error from a present toolchain still is",
+    "an unknown release gate on this shape stays unproven and does not invent an npm blocker or flip ok only to keep a zero charge",
+    "fastPreview skips npm when the plan is not Node and records the non-Node skip; fastVerifyOnce skips sandbox tsc when the plan is not npm; the Node path still reconciles before tsc",
+    "an unterminated PNG tail is dropped, finished text files are kept, the continuation prompt does not name the PNG, and a truncated TypeScript file still continues",
+    "reversion of the Spring Boot Maven plan, the missing-manifest shipping exclusion, and the unterminated-binary drop each fail the matching tests; all three sources were restored from unique mktemp backups"
+  ],
+  "limitations": [
+    "not a replay of a customer build",
+    "not production or deployment validation",
+    "starting Maven or Go depends on those binaries being present on the sandbox image; a missing binary stays infrastructure and unproven, at real cost without markup, and is not counted as an app defect",
+    "the framework pick is not auto-switched away from Spring Boot",
+    "a bare HTML page with no package.json is still not statically served or browser-proved (Q-2662)",
+    "other preview-revive paths that still hard-code npm run dev were left unchanged; only the platform-preview start path uses the launch plan",
+    "full exact-tree CI remains required"
+  ]
+}

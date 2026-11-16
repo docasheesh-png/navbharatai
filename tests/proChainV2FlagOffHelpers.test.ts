@@ -1,3 +1,4 @@
+import { ProChainV2Build } from '../src/server/AgentV3/proChainV2/buildContext';
 import { describe, it, expect, vi } from 'vitest';
 import { attachProChainV2, consumeEarlySurplusFailure, plansOnBuildRunner, proChainV2ForBuild, scopeDropSurplus, scopeFinalAsk } from '../src/server/routes/agentv3';
 import { weakBuildAdmissionAsk } from '../src/server/AgentV3/weakBuildAdmissionAsk';
@@ -12,6 +13,21 @@ import { PublicBuildEngineError } from '../src/server/lib/buildEngineError';
 const hooks = (extra: Partial<SurplusPreWriteFailOpenHooks> = {}): SurplusPreWriteFailOpenHooks => ({ state: { dropped: false }, userFilesWritten: () => 0, ...extra });
 
 describe('flag OFF ⇒ every route helper is the old line', () => {
+  it('explicit activation flags cannot switch production helpers to the deferred chain', () => {
+    const old = process.env.PRO_CHAIN_V2;
+    const pub = process.env.PRO_CHAIN_V2_PUBLIC;
+    try {
+      process.env.PRO_CHAIN_V2 = 'on';
+      process.env.PRO_CHAIN_V2_PUBLIC = 'on';
+      const v2 = proChainV2ForBuild('weak', 'z@gmail.com', null);
+      expect(v2).toBeUndefined();
+      expect(scopeFinalAsk(v2, weakBuildAdmissionAsk)).toBe(weakBuildAdmissionAsk);
+      expect(plansOnBuildRunner(undefined, hooks({ proChainV2: v2 }))).toBe(false);
+    } finally {
+      if (old === undefined) delete process.env.PRO_CHAIN_V2; else process.env.PRO_CHAIN_V2 = old;
+      if (pub === undefined) delete process.env.PRO_CHAIN_V2_PUBLIC; else process.env.PRO_CHAIN_V2_PUBLIC = pub;
+    }
+  });
   it('scope: the GLM classifier and the build-wide Surplus drop are returned as the SAME functions', () => {
     const drop = () => {};
     expect(scopeFinalAsk(undefined, weakBuildAdmissionAsk)).toBe(weakBuildAdmissionAsk);
@@ -38,9 +54,9 @@ describe('flag OFF ⇒ every route helper is the old line', () => {
   });
 });
 
-describe('flag ON (z@) ⇒ the helpers switch to per-agent behaviour', () => {
+describe('isolated experimental context ⇒ helper behavior (not production eligibility)', () => {
   it('the early Surplus failure does NOT drop Surplus for the whole build; the planner uses the v2 chain', () => {
-    const v2 = proChainV2ForBuild('weak', 'z@gmail.com', null)!;
+    const v2 = new ProChainV2Build('isolated-test-only');
     expect(v2).toBeDefined();
     const h = hooks({ proChainV2: v2 });
     consumeEarlySurplusFailure(h, new PublicBuildEngineError());
@@ -52,13 +68,13 @@ describe('flag ON (z@) ⇒ the helpers switch to per-agent behaviour', () => {
     expect(scopeFinalAsk(v2, weakBuildAdmissionAsk)).not.toBe(weakBuildAdmissionAsk);
   });
   it('attach writes the activation line and moves scope usage into the ledger once', () => {
-    const v2 = proChainV2ForBuild('weak', 'z@gmail.com', null)!;
+    const v2 = new ProChainV2Build('isolated-test-only');
     v2.scopeUsage.push({ provider: 'ENGINE_QX', model: 'qwen3-235b-a22b-2507', usage: { inputTokens: 10, outputTokens: 1 }, estimated: false });
     const diag = new BuildDiagnostics();
     const add = vi.fn();
     attachProChainV2(v2, diag, { add });
     expect(add).toHaveBeenCalledTimes(1);
     expect(diag.report().issues.map((i) => i.code)).toContain('PRO_CHAIN_V2_ACTIVE');
-    expect(diag.report().proChainV2?.reason).toBe('test-profile');
+    expect(diag.report().proChainV2?.reason).toBe('isolated-test-only');
   });
 });

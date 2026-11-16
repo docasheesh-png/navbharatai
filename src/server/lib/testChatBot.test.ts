@@ -1177,3 +1177,42 @@ describe('the test page streams every provider the builder or user chat streams 
     expect((fake.officialOpenAi.mock.calls[0]?.[0] as { stream?: boolean }).stream).toBeUndefined();
   });
 });
+
+
+describe('a network failure says whether this server can reach the provider (admin report 2026-11-16)', () => {
+  const bluesRung = { id: 'bluesminds', configured: true, key: 'synthetic-blues-key', keyEnv: 'FREE_CHAIN_BLUESMINDS_API_KEY',
+    model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1', reason: 'terms-unverified', streamUsage: false, priceIn: 0, priceOut: 0 };
+
+  it('the exact BluesMinds failure (NETWORK, no HTTP status) gets a keyless /models check in its message, and the typed model', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    fake.compatTurn.mockRejectedValue(new FreeChainProviderError('NETWORK'));
+    const probe = vi.fn(async () => new Response('{"error":{"message":"Invalid token"}}', { status: 401 }));
+    vi.stubGlobal('fetch', probe);
+    const error = await runTestChat({ ...action, provider: 'bluesminds', model: 'z-ai/glm4.7' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.diagnostic?.providerMessage).toContain('Reachability check');
+    expect(error.diagnostic?.providerMessage).toContain('HTTP 401');
+    expect(error.diagnostic?.model).toBe('z-ai/glm4.7');
+    const [url, init] = probe.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://api.bluesminds.com/v1/models');
+    expect(JSON.stringify(init?.headers ?? {})).not.toContain('synthetic-blues-key');
+  });
+
+  it('does not probe when the provider did answer with an HTTP status', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    fake.compatTurn.mockRejectedValue(new FreeChainProviderError('NETWORK', { status: 502 }));
+    const probe = vi.fn();
+    vi.stubGlobal('fetch', probe);
+    await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal).catch(() => undefined);
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it('an official provider network failure is checked against the endpoint it was sent to', async () => {
+    vi.stubEnv('GLM_API_KEY', 'synthetic-glm-key-value');
+    fake.officialOpenAi.mockRejectedValue(new OfficialTestChatError('timeout', null, 'TimeoutError', null, null, null, null));
+    const probe = vi.fn(async () => { throw Object.assign(new Error('t'), { name: 'TimeoutError' }); });
+    vi.stubGlobal('fetch', probe);
+    const error = await runTestChat({ ...action, provider: 'glm-builder' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect((probe.mock.calls[0] as unknown as [string])[0]).toBe('https://api.z.ai/api/paas/v4/models');
+    expect(error.diagnostic?.providerMessage).toContain('cannot reach the host');
+  });
+});

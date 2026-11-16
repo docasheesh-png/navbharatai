@@ -306,3 +306,30 @@ export async function runOfficialVertexTest(input: {
   const model = typeof body.modelVersion === 'string' && body.modelVersion.trim() ? body.modelVersion : input.model;
   return { content: text.slice(0, 32_000), model, ...(usage ? { usage } : {}) };
 }
+
+/**
+ * Admin report 2026-11-16: BluesMinds timed out at 60 s from Cloud Run, while the same host answered a phone
+ * browser at once ("Invalid token"). A bare "Request timed out" cannot tell "our server cannot reach the host" from
+ * "the host took the request and never answered". So when a test call fails on network or timeout, this one
+ * unauthenticated GET to the provider's own /models (no key, no body, no redirects, 8 s) says which. The URL comes
+ * from server configuration only. It reports the HTTP status and timing — never a body.
+ */
+export async function probeChatHostReachability(baseURL: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+  let url: URL;
+  try { url = new URL(`${baseURL.replace(/\/+$/, '').replace(/\/chat\/completions$/, '')}/models`); } catch { return 'Reachability check skipped (no valid endpoint).'; }
+  if (url.protocol !== 'https:') return 'Reachability check skipped (not https).';
+  const started = Date.now();
+  try {
+    const response = await fetchImpl(url.toString(), { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(8_000), headers: { Accept: 'application/json' } });
+    try { await response.body?.cancel(); } catch { /* status is enough */ }
+    return `Reachability check: ${url.host} answered GET /models with HTTP ${response.status} in ${Date.now() - started} ms, so this server can reach the host; the chat request itself got no answer in time (the provider held it).`;
+  } catch (error) {
+    const name = error && typeof error === 'object' && 'name' in error ? String((error as { name?: unknown }).name) : '';
+    const cause = error && typeof error === 'object' && 'cause' in error ? (error as { cause?: { code?: unknown } }).cause : undefined;
+    const code = cause && typeof cause.code === 'string' ? cause.code : '';
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      return `Reachability check: ${url.host} did not answer GET /models within 8 s, so this server cannot reach the host (network, DNS or a firewall between this server and the provider), not a slow model.`;
+    }
+    return `Reachability check: GET /models to ${url.host} failed before any answer (${code || name || 'network error'}), so this server cannot reach the host.`;
+  }
+}

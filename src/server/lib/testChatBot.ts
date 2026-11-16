@@ -26,7 +26,7 @@ import { ROUTER_ONE_AUTO_MODEL } from '../AI/RouterOne/routerOneCatalog';
 import { routerOnePublicPrices } from '../AI/RouterOne/publicPriceSource';
 import type { CatalogueRateBand } from '../AI/RouterOne/catalogueMath';
 import { buildTestChatDiagnostic } from './testChatBotDiagnostics';
-import { isOfficialChatUrl, OfficialTestChatError, runOfficialAnthropicTest, runOfficialOpenAiCompatTest, runOfficialVertexTest } from './testChatBotOfficial';
+import { isOfficialChatUrl, OfficialTestChatError, probeChatHostReachability, runOfficialAnthropicTest, runOfficialOpenAiCompatTest, runOfficialVertexTest } from './testChatBotOfficial';
 import { nemotronBaseUrl, nemotronKey, nemotronSuperModel } from '../AgentV3/nemotron';
 import { vertexGenAI, vertexProjectId } from './vertexGenAI';
 import { testChatRequestId, testChatUid } from './testChatPayload';
@@ -681,6 +681,10 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
   await revalidate();
   const meta = META[action.provider];
   let dispatchedModel = status.model;
+  // The endpoint an OpenAI-compatible call was sent to, for the reachability check on a network failure.
+  let probeBase: string | null = null;
+  const sentTo = (call: typeof runOfficialOpenAiCompatTest): typeof runOfficialOpenAiCompatTest =>
+    input => { probeBase = input.url; return call(input); };
   let captured: AdminCapturedProviderError | { status: number; body: string; requestId?: string } | undefined;
   const qubaxAttempts: Array<{ model: string; status: number | null; code: string; latencyMs: number; body?: string; requestId?: string }> = [];
   try {
@@ -801,7 +805,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       }
       const receipt = await reserveShared(db, requestId, uid, ceiling);
       if (!receipt) throw new TestChatUnavailable('budget', 409);
-      const result = await releaseIfUnused(receipt, () => runOfficialOpenAiCompatTest({
+      const result = await releaseIfUnused(receipt, () => sentTo(runOfficialOpenAiCompatTest)({
         url: ROUTER_ONE_TEST_CHAT_URL, apiKey: routerOneApiKey(), model, messages: action.messages, signal: bounded,
         // Streamed, as the builder calls it: a non-streamed Router One reply waited past the 90-second bound.
         stream: true,
@@ -835,7 +839,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         });
       }
       const key = firstPresent(process.env, ['OPENROUTER_API_KEY']) || rungOf('openrouter')?.key || '';
-      const result = await runOfficialOpenAiCompatTest({
+      const result = await sentTo(runOfficialOpenAiCompatTest)({
         url: 'https://openrouter.ai/api/v1/chat/completions', apiKey: key, model: picked, messages: action.messages, signal: bounded,
         stream: true,
       });
@@ -870,7 +874,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
       if (meta.kind === 'kimi') {
-        const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
+        const result = await releaseIfUnused(officialReceipt, () => sentTo(runOfficialOpenAiCompatTest)({
           url: `${kimiBase()}/chat/completions`, apiKey: firstPresent(process.env, ['KIMI_API_KEY']), model, messages: action.messages, signal: bounded,
           stream: true, maxTokens: outputTokens,
         }));
@@ -881,7 +885,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
           : meta.kind === 'nemotron' ? { url: `${nemotronBaseUrl().replace(/\/+$/, '')}/chat/completions`, apiKey: nemotronKey() }
           : meta.kind === 'bedrock-glm' ? { url: `${bedrockBase()}/chat/completions`, apiKey: firstPresent(process.env, ['BEDROCK_API_KEY']) }
           : { url: SURPLUS_TEST_URL, apiKey: firstPresent(process.env, ['SURPLUS_API_KEY']) };
-        const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
+        const result = await releaseIfUnused(officialReceipt, () => sentTo(runOfficialOpenAiCompatTest)({
           ...target, model, messages: action.messages, signal: bounded,
           // Streamed like the builder; Surplus stays non-streamed, as the builder's dedicated Surplus runner is.
           ...(meta.kind === 'surplus' ? {} : { stream: true, maxTokens: outputTokens }),
@@ -897,7 +901,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
       if (meta.kind === 'grok') {
-        const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
+        const result = await releaseIfUnused(officialReceipt, () => sentTo(runOfficialOpenAiCompatTest)({
           url: 'https://api.x.ai/v1/chat/completions',
           apiKey: firstPresent(process.env, ['XAI_API_KEY', 'GROK_API_KEY']), model, messages: action.messages, signal: bounded,
           stream: true,
@@ -907,6 +911,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
     }
 
     const adapter = compatAdapter(action.provider, detail => { captured = detail; }, requestedModel(action));
+    dispatchedModel = requestedModel(action) || dispatchedModel;
     if (!adapter) {
       if (officialReceipt) {
         try { await officialReceipt.releaseUndispatched(); } catch { /* keep the configuration error */ }
@@ -932,18 +937,25 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
     if (error instanceof TestChatUnavailable) throw error;
     const latency = Math.max(0, Date.now() - startedAt);
     if (error instanceof OfficialTestChatError) {
+      const reach = (error.classificationHint === 'network' || error.classificationHint === 'timeout') && !error.httpStatus && probeBase
+        ? await probeChatHostReachability(probeBase) : null;
       return fail('unconfirmed', 503, {
-        model: status.model, latencyMs: latency, classification: error.classificationHint, httpStatus: error.httpStatus,
+        model: dispatchedModel, latencyMs: latency, classification: error.classificationHint, httpStatus: error.httpStatus,
         providerCode: error.providerCode, providerType: error.providerType, providerRequestId: error.providerRequestId,
-        providerMessage: error.providerMessage, rawErrorBody: error.rawErrorBody, extraSecrets,
+        providerMessage: [error.providerMessage, reach].filter(Boolean).join(' ') || null, rawErrorBody: error.rawErrorBody, extraSecrets,
       });
     }
     if (error instanceof FreeChainProviderError) {
       const cap = captured && 'httpStatus' in captured ? captured : undefined;
+      // A network failure or timeout with no HTTP status: say whether this server can reach the host at all.
+      const unreachedBase = (error.code === 'NETWORK' || error.code === 'TIMEOUT') && !(cap?.httpStatus ?? error.status)
+        ? (meta.rungId ? rungOf(meta.rungId)?.baseURL : undefined) : undefined;
+      const reach = unreachedBase ? await probeChatHostReachability(unreachedBase) : null;
       return fail('unconfirmed', 503, {
-        model: status.model, latencyMs: latency, httpStatus: cap?.httpStatus ?? error.status ?? null,
+        model: dispatchedModel, latencyMs: latency, httpStatus: cap?.httpStatus ?? error.status ?? null,
         providerCode: cap?.providerCode ?? error.code, providerType: cap?.providerType ?? null,
-        providerRequestId: cap?.requestId ?? null, providerMessage: cap?.providerMessage ?? null,
+        providerRequestId: cap?.requestId ?? null,
+        providerMessage: [cap?.providerMessage, reach].filter(Boolean).join(' ') || null,
         rawErrorBody: cap?.rawErrorBody ?? null, empty: error.code === 'EMPTY_RESPONSE', aborted: error.code === 'ABORTED',
         timeout: error.code === 'TIMEOUT', extraSecrets,
       });

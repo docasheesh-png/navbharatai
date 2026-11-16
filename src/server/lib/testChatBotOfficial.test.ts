@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isOfficialChatUrl, OfficialTestChatError, runOfficialOpenAiCompatTest, runOfficialVertexTest } from './testChatBotOfficial';
+import { isOfficialChatUrl, OfficialTestChatError, probeChatHostReachability, runOfficialOpenAiCompatTest, runOfficialVertexTest } from './testChatBotOfficial';
 
 describe('admin official OpenAI-compat helper', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
@@ -287,5 +287,41 @@ describe('admin official OpenAI-compat helper', () => {
       url: 'https://openrouter.ai/api/v1/chat/completions', apiKey: 'synthetic-key-value', model: 'alpha/cheap:free',
       messages: [{ role: 'user', content: 'hi' }], signal: new AbortController().signal,
     })).rejects.toBeInstanceOf(OfficialTestChatError);
+  });
+});
+
+
+describe('reachability check after a network failure (admin report 2026-11-16: BluesMinds 60 s timeout from Cloud Run, instant from a phone)', () => {
+  it('says the host is reachable when /models answers, even with 401, and sends no key', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('{"error":{"message":"Invalid token"}}', { status: 401 }));
+    const text = await probeChatHostReachability('https://api.bluesminds.com/v1', fetchImpl as unknown as typeof fetch);
+    expect(text).toContain('HTTP 401');
+    expect(text).toContain('can reach the host');
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.bluesminds.com/v1/models');
+    expect(JSON.stringify(init.headers ?? {})).not.toMatch(/authorization/i);
+    expect(init.method).toBe('GET');
+  });
+
+  it('derives /models from a full chat-completions URL', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('', { status: 200 }));
+    await probeChatHostReachability('https://api.z.ai/api/paas/v4/chat/completions', fetchImpl as unknown as typeof fetch);
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://api.z.ai/api/paas/v4/models');
+  });
+
+  it('says the host cannot be reached when /models also times out', async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(Object.assign(new Error('timed out'), { name: 'TimeoutError' }));
+    expect(await probeChatHostReachability('https://api.bluesminds.com/v1', fetchImpl as unknown as typeof fetch)).toContain('cannot reach the host');
+  });
+
+  it('names a DNS or connection error code', async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }));
+    expect(await probeChatHostReachability('https://api.bluesminds.com/v1', fetchImpl as unknown as typeof fetch)).toContain('ENOTFOUND');
+  });
+
+  it('never probes a non-https endpoint', async () => {
+    const fetchImpl = vi.fn();
+    expect(await probeChatHostReachability('http://api.example.invalid/v1', fetchImpl as unknown as typeof fetch)).toContain('skipped');
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

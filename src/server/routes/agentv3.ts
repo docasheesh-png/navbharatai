@@ -28752,7 +28752,7 @@ async function noteBuildOutcome(
       // emit at the end of this catch) — a bare error message never told the user WHAT went wrong.
       let crashReportForClient: unknown = undefined;
       try {
-        buildDiagRef?.record({ phase: crash.phase, severity: 'error', code: crash.code, message: errMsg, autoResolved: false });
+        buildDiagRef?.record({ phase: crash.phase, severity: 'error', code: crash.code, message: errMsg, autoResolved: false, ...(crash.adminDetail ? { adminDetail: crash.adminDetail } : {}) });
         // A preserved initial answer cannot mask a later failure while finalizing that answer.
         // All older outcomes keep their existing precedence; only this new informational one yields.
         if (outcomeCodeOf(buildDiagRef?.report()?.issues ?? []) === 'OUTCOME_INITIAL_DECLINED') {

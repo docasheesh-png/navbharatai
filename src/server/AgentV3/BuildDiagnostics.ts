@@ -582,6 +582,12 @@ export interface BuildIssue {
   observation?: boolean;
   /** Extra context (tool name, provider, file path, raw error) — optional. */
   detail?: string;
+  /**
+   * Admin-only forensic note. `userFacingReport` must not copy this field (it is an allow-list).
+   * Ordinary user-facing context belongs in `detail`, which the user view keeps (after provider
+   * redaction). Do not put a recovery-reason token in `detail`.
+   */
+  adminDetail?: string;
   /** Set when the SAME code+message repeated back-to-back (e.g. many identical "▶ write_file" tool
    *  calls) — collapsed into one entry instead of one line per occurrence. Absent/1 = no repeat. */
   repeatCount?: number;
@@ -4570,6 +4576,7 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
       lines.push(`${n + 1}. [${i.severity.toUpperCase()}] (${i.phase}/${i.code})${rep} ${i.autoResolved ? 'auto-resolved' : 'UNRESOLVED'}`);
       lines.push(`   ${i.message}`);
       if (i.detail) lines.push(`   ↳ ${i.detail}`);
+      if (i.adminDetail) lines.push(`   ↳ ${i.adminDetail}`);
     });
   }
   if (infoCount > 0) {
@@ -4738,6 +4745,7 @@ export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosti
     message: redactProvidersText(stripEngineSafeDiag(i.message)),
     autoResolved: i.autoResolved,
     // BR2388: the `[engine-diag: …]` gate/stage/cost marker is for the admin report only.
+    // `adminDetail` is deliberately omitted — it is an admin-only field, not a user-facing detail.
     ...(i.detail !== undefined ? { detail: redactProvidersText(stripEngineSafeDiag(i.detail)) } : {}),
     ...(i.repeatCount !== undefined ? { repeatCount: i.repeatCount } : {}),
   });

@@ -101627,3 +101627,7 @@ gateway honours tool calling (the builder cannot run without it), and the real p
 Needs: the owner sets the keys (and the two base URLs), runs each in the Test Chat Bot, and reports which model
 answered. Then the rung is written the way `bluesmindsBuilder.ts` is (neutral label, own rate, brand-neutral errors,
 off-ladder census), gated to the z test account. Claude models through a reseller stay out without separate sign-off.
+## 2026-11-16 — BR1991 autopsy (stopped build, report not retained): nothing to fix, evidence pinned
+
+Owner t311u sequential audit, BR1991 only (boundary 1951..2105 frozen). Branched from origin/main `a5e23403` (BR1990, #4265). The registry lists #1991 as stopped with `retained: false`; every read-only report tool answers "not found in retained storage", and the audit's starting inventory already showed it unretained, so the build's own defects cannot be read and were not reconstructed. From source: a numbered report always had saved bytes (registry row and history document are written in one transaction); the only in-repo path that removes a recent report is the user deleting that build's chat (GA-1 `purgeWorkspace` → `deleteDiagnostics`, registry row kept by design); 180-day retention and the refusing account erasure cannot explain it. Most likely an expected user deletion, not proven: Q-2703 (BLOCKED, needs one admin production read). No product code changed; `tests/br1991Autopsy.test.ts` pins the facts (5 mutations, each caught). Docs: `docs/build-report-autopsy-BR1991.md` and its evidence JSON.
+

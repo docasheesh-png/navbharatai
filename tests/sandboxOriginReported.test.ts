@@ -40,9 +40,16 @@ describe('the sandbox reports how it was really obtained', () => {
     const at = actuator.indexOf('} catch (error) {', actuator.indexOf('Sandbox.connect(resumeId'));
     expect(at).toBeGreaterThan(-1);
     const block = actuator.slice(at, actuator.indexOf('\n    } else {', at));
-    const refusal = block.indexOf('if (!(error instanceof SandboxNotFoundError)) throw new SandboxRecoveryUnavailableError();');
-    expect(refusal).toBeGreaterThan(-1);
-    expect(refusal).toBeLessThan(block.indexOf('Sandbox.create('));
+    // A proven concurrent-cap refusal is rethrown as itself (no replacement). Any other
+    // non-404 failure is still an uncertain reconnect and must not reach Sandbox.create.
+    const notFoundGate = block.indexOf('if (!(error instanceof SandboxNotFoundError))');
+    const capUnwrap = block.indexOf('if (isE2BConcurrentCapacityError(error)) throw error;');
+    const uncertain = block.indexOf("throw new SandboxRecoveryUnavailableError('connect-unknown')");
+    const create = block.indexOf('Sandbox.create(');
+    expect(notFoundGate).toBeGreaterThan(-1);
+    expect(capUnwrap).toBeGreaterThan(notFoundGate);
+    expect(uncertain).toBeGreaterThan(capUnwrap);
+    expect(create).toBeGreaterThan(uncertain);
     expect(block).toContain("this._sandboxOrigin.set(workspaceId, 'created-after-failed-resume');");
   });
 });

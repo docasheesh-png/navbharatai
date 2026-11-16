@@ -165,8 +165,13 @@
     "D4_typescriptMarkupSyntaxRefuse": "write-time syntax gate"
   },
   "shipped": {
-    "D5_conflictMarkupGuardAndTsconfigSalvage": "conflictMarkerRefusal on both write doors; sanitizeTsconfigReferences / healTsconfigConflictTail drop a parseable trailing marker block",
-    "D6_ensureTsconfigJsx": "DOM/app tsconfig missing jsx gains jsx: react-jsx; existing jsx, Node, Vue, tsconfig.node.json untouched"
+    "D5_conflictMarkupGuardAndTsconfigSalvage": "After salvage, conflictMarkerRefusal refuses only config-like files the syntax gate skips (tsconfig, json, jsonc). JS/TS that still parses, Markdown, plain text, and diff/patch are exempt. Repair-in-progress and the kill switch stay. sanitizeTsconfigReferences / healTsconfigConflictTail still drop a parseable trailing marker block (unchanged; review judged salvage sound).",
+    "D6_ensureTsconfigJsx": "Inserts jsx: react-jsx (comments kept; no JSON.stringify) only when the app is clearly React, the flag is absent, the tsconfig has a DOM lib, and it has no extends, no jsxImportSource, and no next plugin. Next / official Vue / Solid / Preact / extends / commented-without-React-evidence are left alone so TS17004 stays visible. ensureTsconfigBaseUrl's commented-tsconfig contract is unchanged."
+  },
+  "reviewFix": {
+    "failedAt": "14193bac6",
+    "reason": "t311u: conflict guard and jsx heal were too broad; salvage kept",
+    "narrowed": ["conflictMarkerRefusal path scope", "ensureTsconfigJsx React-only insertion"]
   },
   "queueUpdated": [
     "Q-2621",

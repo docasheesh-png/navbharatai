@@ -10,6 +10,7 @@ import { E2BActuator } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/
 import { sandboxStore } from '../src/server/AgentV3/SandboxStore';
 import { SandboxRecoveryUnavailableError } from '../src/server/AgentV3/SandboxRecoveryError';
 import { buildExceptionDetails, publishBuildException, rethrowBuildSetupRecoveryUnavailable } from '../src/server/AgentV3/BuildRequestCoordination';
+import { BuildDiagnostics, renderDiagnosticsText, userFacingReport } from '../src/server/AgentV3/BuildDiagnostics';
 import { isDeadSandboxError } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/sandboxHealth';
 import {
   isE2BConcurrentCapacityError,
@@ -188,21 +189,23 @@ describe('BR1983: uncertain reconnects still never replace a possibly live machi
     for (const effect of [f.connect, f.create, f.session, f.touch, f.restore]) expect(effect).not.toHaveBeenCalled();
   });
 
-  it('the admin report may record the reason; the user-facing event does not', () => {
+  it('the classified reason is an adminDetail, not a user-facing detail', () => {
     const error = new SandboxRecoveryUnavailableError('connect-unknown');
     expect(buildExceptionDetails(error)).toEqual({
       message: error.message,
       phase: 'sandbox',
       code: error.code,
       summary: error.message,
-      detail: 'connect-unknown',
+      adminDetail: 'connect-unknown',
     });
+    expect(buildExceptionDetails(error)).not.toHaveProperty('detail');
     const emit = vi.fn();
     try {
       rethrowBuildSetupRecoveryUnavailable(error);
       throw new Error('setup unexpectedly continued');
     } catch (thrown) {
-      expect(buildExceptionDetails(thrown).detail).toBe('connect-unknown');
+      expect(buildExceptionDetails(thrown).adminDetail).toBe('connect-unknown');
+      expect(buildExceptionDetails(thrown)).not.toHaveProperty('detail');
       publishBuildException(thrown, null, emit);
     }
     expect(emit.mock.calls.map(([event]) => event)).toEqual([
@@ -212,6 +215,102 @@ describe('BR1983: uncertain reconnects still never replace a possibly live machi
     const published = JSON.stringify(emit.mock.calls);
     expect(published).not.toContain('connect-unknown');
     expect(published).not.toContain('identity-unavailable');
+  });
+});
+
+const RECOVERY_REASONS = [
+  'connect-unknown',
+  'identity-lookup',
+  'identity-unavailable',
+  'allocation-unrecorded',
+  'allocation-lost',
+  'winner-reconnect',
+] as const;
+
+/** Same shape the crash path records for a setup recovery refusal. */
+function recordedSetupRefusal(reason: (typeof RECOVERY_REASONS)[number]) {
+  const error = new SandboxRecoveryUnavailableError(reason);
+  try {
+    rethrowBuildSetupRecoveryUnavailable(error);
+    throw new Error('setup unexpectedly continued');
+  } catch (thrown) {
+    const crash = buildExceptionDetails(thrown);
+    const diag = new BuildDiagnostics({ now: () => 1 });
+    const recorded = crash as { adminDetail?: string; detail?: string };
+    diag.record({
+      phase: crash.phase,
+      severity: 'error',
+      code: crash.code,
+      message: crash.message,
+      autoResolved: false,
+      ...(recorded.adminDetail ? { adminDetail: recorded.adminDetail } : {}),
+      ...(recorded.detail ? { detail: recorded.detail } : {}),
+    });
+    diag.finish(false, crash.summary);
+    return { thrown, crash, report: diag.report() };
+  }
+}
+
+function assertNoReasonToken(payload: unknown): void {
+  const text = JSON.stringify(payload);
+  for (const reason of RECOVERY_REASONS) {
+    expect(text, `leaked reason ${reason}`).not.toContain(reason);
+  }
+}
+
+describe('BR1983: recovery reasons stay off the user-facing report and the crash diagnostics event', () => {
+  it.each(RECOVERY_REASONS)('userFacingReport of a recorded %s setup refusal contains no reason token', (reason) => {
+    const { report } = recordedSetupRefusal(reason);
+    const user = userFacingReport(report);
+    expect(user.issues.some((i) => 'adminDetail' in i || i.detail === reason)).toBe(false);
+    expect(user.problems.some((i) => 'adminDetail' in i || i.detail === reason)).toBe(false);
+    assertNoReasonToken(user);
+  });
+
+  it.each(RECOVERY_REASONS)('publishBuildException with that user-facing report as diagnostics contains no %s token', (reason) => {
+    const { thrown, report } = recordedSetupRefusal(reason);
+    const emit = vi.fn();
+    publishBuildException(thrown, userFacingReport(report), emit);
+    assertNoReasonToken(emit.mock.calls);
+    const errorEvent = emit.mock.calls.map(([event]) => event).find((event) => event.type === 'error') as { diagnostics?: unknown };
+    expect(errorEvent?.diagnostics).toBeDefined();
+  });
+
+  it('the admin report and admin text view still show the reason', () => {
+    const { report } = recordedSetupRefusal('connect-unknown');
+    const recorded = report.issues.find((i) => i.code === 'SANDBOX_RECOVERY_UNAVAILABLE');
+    expect(recorded?.adminDetail).toBe('connect-unknown');
+    expect(recorded?.detail).toBeUndefined();
+    const adminText = renderDiagnosticsText(report);
+    expect(adminText).toContain('connect-unknown');
+    expect(adminText).toContain('safely reconnected');
+    assertNoReasonToken(userFacingReport(report));
+    expect(renderDiagnosticsText(userFacingReport(report))).not.toContain('connect-unknown');
+  });
+
+  it("a different code's user-facing detail is still kept (t311u)", () => {
+    const diag = new BuildDiagnostics({ now: () => 1 });
+    diag.record({
+      phase: 'sandbox',
+      severity: 'error',
+      code: 'SANDBOX_UNAVAILABLE',
+      message: 'The build sandbox could not be set up — the build cannot create files.',
+      autoResolved: false,
+      detail: 'the compiler said TS2307',
+    });
+    const user = userFacingReport(diag.report());
+    const issue = user.issues.find((i) => i.code === 'SANDBOX_UNAVAILABLE') ?? user.problems.find((i) => i.code === 'SANDBOX_UNAVAILABLE');
+    expect(issue?.detail).toBe('the compiler said TS2307');
+  });
+
+  it('the crash path records adminDetail, and userFacingReport does not copy that field', () => {
+    expect(ROUTE).toContain('...(crash.adminDetail ? { adminDetail: crash.adminDetail } : {})');
+    expect(ROUTE).not.toContain('...(crash.detail ? { detail: crash.detail } : {})');
+    const facing = readFileSync('src/server/AgentV3/BuildDiagnostics.ts', 'utf8');
+    const scrub = facing.slice(facing.indexOf('const scrubIssue'), facing.indexOf('const out: BuildDiagnosticsReport'));
+    expect(scrub).toContain('adminDetail');
+    expect(scrub).toContain('deliberately omitted');
+    expect(scrub).not.toMatch(/adminDetail: /);
   });
 });
 

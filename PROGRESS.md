@@ -101574,3 +101574,16 @@ Owner t311u sequential audit, BR1988 only (boundary 1951..2105 frozen). Branched
 ## 2026-11-16 — BR1988 review: only the user's own Stop, mid-generation on a fresh build, is an unfinished tree
 
 Independent review FAIL on the first BR1988 version (t311u): it keyed on `abort.signal.aborted` and a missing `readyAt`, so engine aborts would have been worded as a user stop and edit / module turns (where `readyAt` is never set) would have lost a real warning. Now the info line needs the typed cause `user-stop`, the runner's own `userStoppedBeforeReady` mark (set only in its aborted ending, with the done signal on, not an edit, not a module turn, and no ready mark), `ok === false`, no `readyAt`, and a fresh build. Everything else writes main's warning with main's own fields; any fault falls back to main. Heal gate and billing unchanged. Design-consistency findings on a stopped tree are left as they are. Ledger and evidence corrected in place.
+
+## 2026-11-16 — Surplus: the one-call-at-a-time limit is removed (owner: "ek bar me ek call wali limit hatao, 100+ call ek saath")
+
+Two serial points were found in code. The earlier claim that Surplus was "globally serial across builds" was stale: the cross-build lock had already been lifted for the live pilot on 2026-10-25.
+1. **Inside a build** (`buildSession.ts`), the two promise queues (`queue`, `turnQueue`) serialized every model call and every turn of all the build's agents. They are now a Stop-aware FIFO slot pool, `createSurplusSlots`, capped by `SURPLUS_PARALLEL_CALLS_PER_BUILD` (default 128, max 1024; `1` = the old order).
+2. **Across builds** (`receiptStore.ts`), every live call read and rewrote the ONE shared `surplus_pilot_admissions` document twice: once at reservation, once at settlement. Firestore sustains about one write per second per document, so this was the scale ceiling. Its limits also protected nothing: the budget is effectively unlimited, and the 1,000,000-call cap would have turned Surplus off for good. Live calls now touch only their own receipt document (`authorityId` stamped on it). Replay refusal, the pending/unknown state, the exact cost and the quarantine reason all stay per receipt. A live receipt reserved before this change still settles through the pilot document. Reviewed pilots are unchanged.
+
+Tests (all proven by reversion):
+- `surplusSlots.test.ts`: limit, FIFO, double release, Stop in line, 150 callers on 128 slots.
+- `buildSession.test.ts`: 120 parallel turns, and the env bound plus `1`.
+- `livePilotUnjam.test.ts`: 150 concurrent reserve+settle with zero pilot-document I/O, the 1M cap, replay/unknown/absorb on a live receipt, and a pre-change live receipt.
+
+Not proven: Surplus's own per-key concurrency limit. That needs the owner's live test.

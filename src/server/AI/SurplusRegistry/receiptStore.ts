@@ -30,6 +30,16 @@ export interface SurplusUnattemptedAudit {
  * per-call pending/unknown state and their quarantine reason for audit. Reviewed pilots are unchanged. */
 export const SURPLUS_LIVE_PILOT_ID = 'owner-live-key-flag-v1';
 const isLivePilot = (id: unknown) => id === SURPLUS_LIVE_PILOT_ID;
+/* DNA (owner 2026-11-16, "100+ calls ek saath"): even as a counter, the ONE global live-pilot document was
+ * read and rewritten inside the transaction of EVERY Surplus call, at reservation and again at settlement.
+ * Firestore sustains about one write per second on a single document; past that, transactions retry and
+ * then fail with contention, so at scale Surplus calls would queue on that document and then die before
+ * HTTP. Its limits did not protect anything either: the live budget is effectively unlimited, and the
+ * 1,000,000-call cap would have switched Surplus off for good once reached. A live-pilot call now touches
+ * ONLY its own receipt document, which keeps replay protection, the per-call pending/unknown state, the
+ * exact cost and the quarantine reason. Receipts carry `authorityId`; an older live receipt without it
+ * (reserved before this change) still settles through the pilot document, exactly as before. */
+const receiptIsLive = (receipt: StoredState) => isLivePilot(receipt.authorityId);
 const RESERVATION_IDENTITY = ['buildId', 'callId', 'accountId', 'model', 'providerId', 'endpoint', 'policyVersion', 'priceGeneration'] as const;
 type StoredState = Record<string, unknown>;
 const validText = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 512
@@ -93,28 +103,30 @@ export async function reserveSurplusAttempt(db: Pick<Firestore, 'doc' | 'runTran
   const pilotRef = db.doc(`surplus_pilot_admissions/${pilotKey}`);
   const receiptRef = db.doc(`surplus_build_receipts/${digest([input.accountId, input.callId])}`);
   await db.runTransaction(async tx => {
-    const [pilotDoc, receiptDoc, metadataDoc] = await Promise.all([tx.get(pilotRef), tx.get(receiptRef), tx.get(db.doc(SURPLUS_DOCUMENT))]);
+    const live = isLivePilot(pilot.id);
+    // A live call never reads the shared pilot document, so concurrent calls never contend on it.
+    const [pilotDoc, receiptDoc, metadataDoc] = await Promise.all([live ? null : tx.get(pilotRef), tx.get(receiptRef), tx.get(db.doc(SURPLUS_DOCUMENT))]);
     const controls = readSurplusModelControls(metadataDoc.data()?.controls);
     if (!controls || controls.revision !== controlRevision || controls.disabledModels.includes(input.model)) throw new Error('Surplus model controls revoked or changed');
     // Live admission (2026-10-25): pilot authority is carried on the in-process adapter permit.
     // No Firestore surplus-builder-reviews seed is required or re-checked here.
     if (receiptDoc.exists) throw new Error('Surplus attempt already reserved; reconcile before retrying');
+    if (live || !pilotDoc) {
+      tx.set(receiptRef, { state: 'pending', buildId: input.buildId, callId: input.callId, accountId: input.accountId,
+        model: input.model, providerId: input.providerId, endpoint: input.endpoint, policyVersion: input.policyVersion,
+        priceGeneration: input.priceGeneration, pilotKey, authorityId: pilot.id, estimatedMicroUsd: estimate.toString(), reservedAt: now,
+        invoiceReconciliation: 'not-reconciled' });
+      return;
+    }
     const state = pilotDoc.data() ?? {};
     if (pilotDoc.exists) {
       assertPilotAccountingState(state);
       if (state.authorityId !== pilot.id) throw new Error('Surplus pilot accounting state invalid');
     }
-    const live = isLivePilot(pilot.id);
-    if ((!live && (state.pendingCallId || state.blocked || state.quarantineReason != null || state.quarantinedAt != null)) || (state.calls ?? 0) >= pilot.maxCalls) throw new Error('Surplus pilot pending, blocked or exhausted');
+    if (state.pendingCallId || state.blocked || state.quarantineReason != null || state.quarantinedAt != null || (state.calls ?? 0) >= pilot.maxCalls) throw new Error('Surplus pilot pending, blocked or exhausted');
     const actual = BigInt(state.actualMicroUsd ?? '0');
     if (actual + estimate > limit) throw new Error('Surplus pilot estimated budget exhausted');
-    tx.set(pilotRef, live
-      // Counter only: concurrent builds and an earlier uncertain call never lock the next reservation.
-      ? { ...state, calls: (state.calls ?? 0) + 1, actualMicroUsd: actual.toString(), pendingCallId: null,
-        reservedEstimatedMicroUsd: '0', blocked: false, quarantineReason: null, quarantinedAt: null,
-        ...(state.quarantineReason != null ? { lastQuarantineReason: state.quarantineReason } : {}),
-        expiresAt: pilot.expiresAt, authorityId: pilot.id }
-      : { ...state, calls: (state.calls ?? 0) + 1, actualMicroUsd: actual.toString(), pendingCallId: input.callId,
+    tx.set(pilotRef, { ...state, calls: (state.calls ?? 0) + 1, actualMicroUsd: actual.toString(), pendingCallId: input.callId,
         reservedEstimatedMicroUsd: estimate.toString(), expiresAt: pilot.expiresAt, authorityId: pilot.id });
     tx.set(receiptRef, { state: 'pending', buildId: input.buildId, callId: input.callId, accountId: input.accountId,
       model: input.model, providerId: input.providerId, endpoint: input.endpoint, policyVersion: input.policyVersion,
@@ -131,6 +143,7 @@ export async function persistSurplusReceipt(db: Pick<Firestore, 'doc' | 'runTran
     if (!existing) throw new Error('Surplus receipt has no durable dispatch reservation');
     assertReservationIdentity(existing, value);
     if (existing.state === 'not_attempted') throw new Error('Surplus receipt audit conflict');
+    if (receiptIsLive(existing)) return settleLiveReceipt(tx, ref, existing, value);
     const pilotRef = db.doc(`surplus_pilot_admissions/${existing.pilotKey}`);
     const pilot = (await tx.get(pilotRef)).data() ?? {};
     assertPilotAccountingState(pilot);
@@ -173,6 +186,32 @@ export async function persistSurplusReceipt(db: Pick<Firestore, 'doc' | 'runTran
   });
 }
 
+/** A live-pilot receipt settles on its own document only (see `receiptIsLive`). Same decision rules as the
+ * pilot-document path: an identical replay is idempotent, the only allowed correction is absorbing the same
+ * call, and an unknown cost stays `unknown` with its quarantine reason kept for reconciliation. */
+function settleLiveReceipt(
+  tx: { set: (ref: never, value: unknown) => unknown },
+  ref: unknown, existing: StoredState, value: SurplusReceiptAudit,
+): SurplusPersistenceResult {
+  const pilot = { authorityId: SURPLUS_LIVE_PILOT_ID };
+  const prior = existing.decision as SurplusReceiptDecision | undefined;
+  if (prior) {
+    if (JSON.stringify(prior) === JSON.stringify(value.decision)) return continuation(pilot, existing);
+    if (prior.evidenceFingerprint !== value.decision.evidenceFingerprint || value.decision.userChargeUsd !== '0'
+        || value.decision.status !== 'absorbed' || prior.actualCostUsd !== value.decision.actualCostUsd) throw new Error('Surplus receipt audit conflict');
+    const reason = receiptQuarantineReason(value.decision, actualMicro(value.decision.actualCostUsd), existing.estimatedMicroUsd);
+    const receipt = { ...existing, ...value, quarantineReason: existing.quarantineReason ?? reason };
+    tx.set(ref as never, receipt);
+    return continuation(pilot, receipt);
+  }
+  if (existing.state !== 'pending') throw new Error('Surplus receipt audit conflict');
+  const known = value.decision.actualCostUsd !== null;
+  const reason = receiptQuarantineReason(value.decision, actualMicro(value.decision.actualCostUsd), existing.estimatedMicroUsd);
+  const receipt = { ...existing, ...value, state: known ? 'reported' : 'unknown', quarantineReason: existing.quarantineReason ?? reason };
+  tx.set(ref as never, receipt);
+  return continuation(pilot, receipt);
+}
+
 function actualMicro(actualCostUsd: string | null): bigint {
   if (actualCostUsd === null) return 0n;
   if (typeof actualCostUsd !== 'string' || !/^(0|[1-9]\d*)(?:\.\d{1,6})?$/.test(actualCostUsd)) throw new Error('Surplus canonical charge is not integer microUSD');
@@ -204,6 +243,18 @@ export async function resolveSurplusUnattempted(
     if (!existing) throw new Error('Surplus unattempted request has no durable dispatch reservation');
     assertReservationIdentity(existing, value);
     if (Object.hasOwn(existing, 'decision')) throw new Error('Surplus unattempted evidence conflicts with receipt');
+    if (receiptIsLive(existing)) {
+      const pilot = { authorityId: SURPLUS_LIVE_PILOT_ID };
+      if (existing.state === 'not_attempted') {
+        if (['reason', 'traceRequestId', 'evidenceSha256'].some(key => existing[key] !== value[key as keyof SurplusUnattemptedAudit])) throw new Error('Surplus unattempted evidence conflict');
+        return continuation(pilot, existing);
+      }
+      if (existing.state !== 'pending') throw new Error('Surplus unattempted evidence conflicts with receipt');
+      if (!Number.isSafeInteger(existing.reservedAt) || value.reportedAt < (existing.reservedAt as number)) throw new Error('Surplus unattempted evidence predates reservation');
+      const receipt = { ...existing, ...value, state: 'not_attempted' };
+      tx.set(ref, receipt);
+      return continuation(pilot, receipt);
+    }
     const pilotRef = db.doc(`surplus_pilot_admissions/${existing.pilotKey}`);
     const pilot = (await tx.get(pilotRef)).data() ?? {};
     assertPilotAccountingState(pilot);

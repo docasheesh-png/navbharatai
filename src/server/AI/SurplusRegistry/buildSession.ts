@@ -118,18 +118,17 @@ export async function createSurplusBuildSession(options: {
   // session, and the next turn moves to another Surplus-internal model (AI2/AI3) — never Weak.
   const benchedModels = new Set<string>();
   let terminalPolicyFailure: PublicBuildEngineError | undefined;
-  // Serialize inference across ALL runners of this build. Parallel tool execution is unchanged.
-  // A queued call may be cancelled before spending; only durably resolved safe failures can get a new attempt.
-  let queue: Promise<void> = Promise.resolve();
-  let turnQueue: Promise<void> = Promise.resolve();
+  // Owner 2026-11-16 ("ek bar me ek call wali limit hatao, 100+ call ek saath"): model calls of one build
+  // used to be fully serialized here, so a build's agents waited on each other. They now run in parallel up
+  // to `SURPLUS_PARALLEL_CALLS_PER_BUILD` (default 128; `1` restores the old one-at-a-time order). A queued
+  // call may still be cancelled before spending; only durably resolved safe failures get a new attempt.
+  const parallel = surplusParallelCallsPerBuild();
+  const callSlots = createSurplusSlots(parallel);
+  const turnSlots = createSurplusSlots(parallel);
   const activePermits = new Map<string, SurplusTurnPermit>();
   const releases = new WeakMap<object, () => void>();
   async function acquire(permit: SurplusTurnPermit, signal: AbortSignal) {
-    const previous = queue; let release!: () => void;
-    const slot = new Promise<void>(resolve => { release = resolve; });
-    queue = previous.then(() => slot);
-    try { await raceStop(previous, signal); throwIfStopped(signal); }
-    catch (error) { release(); throw error; }
+    const release = await callSlots.acquire(signal);
     releases.set(permit, release); activePermits.set(permit.callId, permit);
   }
   function release(permit: SurplusTurnPermit) { releases.get(permit)?.(); releases.delete(permit); activePermits.delete(permit.callId); }
@@ -275,15 +274,10 @@ export async function createSurplusBuildSession(options: {
       return { async runTurn(params: RunTurnParams) {
         // Queue the complete failed-turn boundary, not individual HTTP attempts. A normal
         // concurrent turn must authorize AFTER the prior fallback winner becomes sticky.
-        const previous = turnQueue;
-        let releaseTurn!: () => void;
-        const slot = new Promise<void>(resolve => { releaseTurn = resolve; });
-        turnQueue = previous.then(() => slot);
+        // Waiting for a free slot behind other turns of the SAME build is not a Surplus failure: never time
+        // it out into "engine unavailable" — each running turn is itself bounded by its own deadline.
+        const releaseTurn = await turnSlots.acquire(params.signal);
         try {
-          // Waiting behind another turn of the SAME build is not a Surplus failure: never time it out
-          // into "engine unavailable" — the previous turn is itself bounded by its own deadline.
-          await raceStop(previous, params.signal);
-          throwIfStopped(params.signal);
           // DNA (failedbr A–C 2026-10-31, owner: "Surplus marna nahi chahiye"): a single transient
           // turn failure (timeout / transport / empty / unsettled) used to end the whole game build with
           // ENGINE_UNAVAILABLE after files were half-written. Keep the SAME Surplus session alive:
@@ -316,6 +310,47 @@ export async function createSurplusBuildSession(options: {
       } };
     },
   });
+}
+
+export const SURPLUS_PARALLEL_CALLS_DEFAULT = 128;
+export const SURPLUS_PARALLEL_CALLS_MAX = 1024;
+/** How many model calls of ONE build may be in flight at once. `1` = the old strict one-at-a-time order. */
+export function surplusParallelCallsPerBuild(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.SURPLUS_PARALLEL_CALLS_PER_BUILD?.trim();
+  const n = Number(raw);
+  return raw && Number.isInteger(n) && n >= 1 ? Math.min(n, SURPLUS_PARALLEL_CALLS_MAX) : SURPLUS_PARALLEL_CALLS_DEFAULT;
+}
+
+/** A counting semaphore: at most `limit` holders, FIFO, Stop-aware. A waiter that is stopped leaves the line
+ * without taking a slot; every release is idempotent so a double release can never admit an extra caller. */
+export function createSurplusSlots(limit: number) {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  const next = () => {
+    while (active < limit && waiting.length) { active++; waiting.shift()!(); }
+  };
+  const releaser = () => { let done = false; return () => { if (done) return; done = true; active--; next(); }; };
+  return {
+    get active() { return active; },
+    get waiting() { return waiting.length; },
+    async acquire(signal?: AbortSignal): Promise<() => void> {
+      throwIfStopped(signal);
+      if (active < limit && waiting.length === 0) { active++; return releaser(); }
+      let admit!: () => void;
+      const admitted = new Promise<void>(resolve => { admit = resolve; });
+      let granted = false;
+      const entry = () => { granted = true; admit(); };
+      waiting.push(entry);
+      try { await raceStop(admitted, signal); throwIfStopped(signal); }
+      catch (error) {
+        const at = waiting.indexOf(entry);
+        if (at >= 0) waiting.splice(at, 1);
+        else if (granted) { active--; next(); }
+        throw error;
+      }
+      return releaser();
+    },
+  };
 }
 
 /** Owner 2026-10-31: one Surplus run finishes the whole build. Env-tunable, safe defaults. */

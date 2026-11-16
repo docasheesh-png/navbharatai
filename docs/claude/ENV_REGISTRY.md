@@ -4783,6 +4783,8 @@ See `docs/SURPLUS_REGISTRY.md` for the bounded candidate list and honest activat
 
 `AGENTV3_SURPLUS_BUILDER=false`: opt-in only. OFF bypasses new registry/review/receipt I/O and leaves existing Weak/Normal/Strong ladders and billing unchanged. ON requires independent server account/credential/pilot, quality, capability, official tariff and usage reviews before any Surplus HTTP. No defaults grant a live pilot. Main build inference uses fixed `/min90/v1`, provider-family allowlist and price objective; no ordinary paid fallback. Plain chat, Doctor, media and VM pricing are separate and unchanged. Full scope, concurrency, retention and honest activation blockers: `docs/SURPLUS_BUILDER.md`. Earlier observer-only notes describe Phase 1; this later opt-in caller does not turn it on.
 
+`SURPLUS_PARALLEL_CALLS_PER_BUILD` (optional, added 2026-11-16, NOT set in Cloud Run): how many Surplus model calls of ONE build may be in flight at once. Unset = 128; a positive integer up to 1024 is honoured; `1` restores the old strict one-at-a-time order (the kill switch if Surplus starts rate-limiting). Owner order: *"ek bar me ek call wali limit hatao, 100+ call ek saath"*. Since the same change, live-pilot calls no longer touch the shared `surplus_pilot_admissions` document (a Firestore hotspot). Details: `docs/SURPLUS_BUILDER.md`.
+
 ### Owner-reported Cloud Run configuration (current as of 2026-10-25 Asia/Calcutta)
 
 **Current Cloud Run (`navbharat-ai-prod`) — names only, never values:**

@@ -23,6 +23,7 @@
 //
 // PURE decisions here; the I/O lives in the route and is bounded by the budget below.
 
+import { devServerLaunchPlan } from './devServerLaunchPlan';
 export interface PlatformPreviewInput {
   /** The turn was supposed to produce an app (new build / edit), not a chat or an import. */
   expectsArtifacts: boolean;
@@ -32,8 +33,16 @@ export interface PlatformPreviewInput {
   isImportTurn: boolean;
   /** Files present in the workspace right now — the app the user would see. */
   appFiles: number;
-  /** A `package.json` is present — a runnable web app has one; a bare HTML file needs no server. */
+  /** A `package.json` is present — a runnable Node web app has one; a bare HTML file needs no Node server. */
   hasPackageJson: boolean;
+  /** Declared framework id, used only when there is no package.json (Spring Boot / Go). */
+  framework?: string;
+  /** A Maven POM is present — a Spring Boot app can start without package.json. */
+  hasPomXml?: boolean;
+  /** A Go module or main.go is present — a Go app can start without package.json. */
+  hasGoModule?: boolean;
+  /** Frontend app source — a JS/TS app missing package.json is not a Maven/Go start. */
+  hasJsTsAppSource?: boolean;
   /** ms left before the build's wall-clock cap; null = uncapped. */
   remainingMs: number | null;
   /** `AGENTV3_PLATFORM_PREVIEW` kill switch — anything but 'off' is on. */
@@ -67,7 +76,20 @@ export function shouldAttemptPlatformPreview(i: PlatformPreviewInput): { attempt
   // starter page and reads as a failure (autopsy 6a5fb04b).
   if (i.awaitingShell) return { attempt: false, reason: `this turn builds one project module; the app is assembled by the "${i.awaitingShell}" module, so there is nothing to start yet` };
   if (!(i.appFiles > 0)) return { attempt: false, reason: 'the workspace has no files — there is no app to start' };
-  if (!i.hasPackageJson) return { attempt: false, reason: 'no package.json — nothing to run a dev server from' };
+  const launch = devServerLaunchPlan({
+    framework: i.framework,
+    hasPackageJson: i.hasPackageJson,
+    hasPomXml: i.hasPomXml,
+    hasGoModule: i.hasGoModule,
+    hasJsTsAppSource: i.hasJsTsAppSource,
+  });
+  // Main declines a tree with no package.json. Only a clearly non-Node
+  // (Maven / Go) start is the exception; a JS app missing its manifest
+  // keeps the Node path in the fast lane but is not served here (Q-2662).
+  if (!i.hasPackageJson && launch.kind !== 'framework') {
+    return { attempt: false, reason: 'no package.json — nothing to run a Node dev server from' };
+  }
+  if (launch.kind === 'none' || !launch.startCommand) return { attempt: false, reason: launch.reason };
   if (i.remainingMs !== null && i.remainingMs < PLATFORM_PREVIEW_MIN_REMAINING_MS) {
     return { attempt: false, reason: `only ${Math.round(i.remainingMs / 1000)}s of build budget left` };
   }

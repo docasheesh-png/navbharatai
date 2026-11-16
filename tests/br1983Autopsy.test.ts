@@ -11,6 +11,8 @@ import { sandboxStore } from '../src/server/AgentV3/SandboxStore';
 import { SandboxRecoveryUnavailableError } from '../src/server/AgentV3/SandboxRecoveryError';
 import { buildExceptionDetails, publishBuildException, rethrowBuildSetupRecoveryUnavailable } from '../src/server/AgentV3/BuildRequestCoordination';
 import { BuildDiagnostics, renderDiagnosticsText, userFacingReport } from '../src/server/AgentV3/BuildDiagnostics';
+import { compactReportForRecord, trimReportForStorage } from '../src/server/AgentV3/DiagnosticsStore';
+import { conversationToEvents } from '../src/components/agentv3/agentV3History';
 import { isDeadSandboxError } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/sandboxHealth';
 import {
   isE2BConcurrentCapacityError,
@@ -311,6 +313,72 @@ describe('BR1983: recovery reasons stay off the user-facing report and the crash
     expect(scrub).toContain('adminDetail');
     expect(scrub).toContain('deliberately omitted');
     expect(scrub).not.toMatch(/adminDetail: /);
+  });
+});
+
+/** Same shape persistSessionTimeline writes, and GET /conversations/:id returns unsanitized. */
+function persistedConversationRecord(report: ReturnType<typeof recordedSetupRefusal>['report']) {
+  return {
+    id: 'agentv3-owner-br1983',
+    status: 'error' as const,
+    finalState: { ok: false, report: compactReportForRecord(report) },
+  };
+}
+
+describe('BR1983: recovery reasons stay off the persisted conversation record and the GET response', () => {
+  it.each(RECOVERY_REASONS)('the persisted conversation record of a %s setup refusal contains no reason token', (reason) => {
+    const { report } = recordedSetupRefusal(reason);
+    const rec = persistedConversationRecord(report);
+    assertNoReasonToken(rec);
+    const embedded = rec.finalState.report;
+    expect(embedded.issues.some((i) => 'adminDetail' in i || i.detail === reason)).toBe(false);
+    expect(embedded.problems.some((i) => 'adminDetail' in i || i.detail === reason)).toBe(false);
+  });
+
+  it.each(RECOVERY_REASONS)('the GET conversation response of a %s setup refusal contains no reason token', (reason) => {
+    const { report } = recordedSetupRefusal(reason);
+    const rec = persistedConversationRecord(report);
+    // GET /api/agentv3/conversations/:id returns the record unsanitized.
+    const response = { conversation: rec, workspaceState: undefined };
+    assertNoReasonToken(response);
+    const events = conversationToEvents(rec);
+    assertNoReasonToken(events);
+    const result = events.find((e) => e.type === 'result') as { diagnostics?: unknown };
+    expect(result?.diagnostics).toBeDefined();
+  });
+
+  it('the admin-gated stores and admin text view still show the reason', () => {
+    const { report } = recordedSetupRefusal('connect-unknown');
+    expect(report.issues.find((i) => i.code === 'SANDBOX_RECOVERY_UNAVAILABLE')?.adminDetail).toBe('connect-unknown');
+    const stored = trimReportForStorage(report);
+    expect(stored.issues.find((i) => i.code === 'SANDBOX_RECOVERY_UNAVAILABLE')?.adminDetail).toBe('connect-unknown');
+    expect(renderDiagnosticsText(stored)).toContain('connect-unknown');
+    expect(renderDiagnosticsText(report)).toContain('connect-unknown');
+  });
+
+  it("a different code's user-facing detail is still kept in the persisted record (t311u)", () => {
+    const diag = new BuildDiagnostics({ now: () => 1 });
+    diag.record({
+      phase: 'sandbox',
+      severity: 'error',
+      code: 'SANDBOX_UNAVAILABLE',
+      message: 'The build sandbox could not be set up — the build cannot create files.',
+      autoResolved: false,
+      detail: 'the compiler said TS2307',
+    });
+    const compact = compactReportForRecord(diag.report());
+    const issue = compact.issues.find((i) => i.code === 'SANDBOX_UNAVAILABLE')
+      ?? compact.problems.find((i) => i.code === 'SANDBOX_UNAVAILABLE');
+    expect(issue?.detail).toBe('the compiler said TS2307');
+  });
+
+  it('persist embeds the compact copy, and GET returns that record unsanitized', () => {
+    expect(ROUTE).toContain('report: compactReportForRecord(settledReport)');
+    expect(ROUTE).toContain('res.json({ conversation: rec, workspaceState })');
+    const store = readFileSync('src/server/AgentV3/DiagnosticsStore.ts', 'utf8');
+    const compact = store.slice(store.indexOf('export function compactReportForRecord'), store.indexOf('export async function deleteDiagnostics'));
+    expect(compact).toContain('adminDetail');
+    expect(compact).toContain('adminDetail: _adminOnly');
   });
 });
 

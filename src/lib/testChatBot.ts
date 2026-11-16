@@ -88,7 +88,14 @@ export interface TestChatReply {
   latencyMs: number;
   usage?: { inputTokens: number; outputTokens: number };
   noFallback: true;
+  /**
+   * Every model a gateway picker tried for this answer, in order (admin 2026-11-16: show which models were tried even
+   * when one answered, so the fastest working model can be found). Absent for a single-model call.
+   */
+  tries?: TestChatTry[];
 }
+export interface TestChatTry { model: string; latencyMs: number; outcome: string }
+export const TEST_CHAT_MAX_TRIES = 5;
 export interface TestChatAttemptDiagnostic {
   model: string | null;
   latencyMs: number;
@@ -212,7 +219,13 @@ export function isTestChatReply(v: unknown): v is TestChatReply {
     && safeText(v.content, TEST_CHAT_MAX_RESPONSE_CHARS) && safeText(v.model, 200) && v.noFallback === true
     && typeof v.latencyMs === 'number' && Number.isFinite(v.latencyMs) && v.latencyMs >= 0
     && (v.usage === undefined || (record(v.usage) && Number.isSafeInteger(v.usage.inputTokens) && (v.usage.inputTokens as number) >= 0
-      && Number.isSafeInteger(v.usage.outputTokens) && (v.usage.outputTokens as number) >= 0));
+      && Number.isSafeInteger(v.usage.outputTokens) && (v.usage.outputTokens as number) >= 0))
+    && (v.tries === undefined || (Array.isArray(v.tries) && v.tries.length <= TEST_CHAT_MAX_TRIES && v.tries.every(t => record(t)
+      && safeText(t.model, 200) && safeText(t.outcome, 200) && typeof t.latencyMs === 'number' && Number.isFinite(t.latencyMs) && t.latencyMs >= 0)));
+}
+/** One readable line for the panel: "deepseek-v4-flash (HTTP 503 model_not_found, 1.1 s) → kimi-k3 (answered, 34.7 s)". */
+export function formatTestChatTries(tries: readonly TestChatTry[]): string {
+  return tries.map(t => `${t.model} (${t.outcome}, ${(t.latencyMs / 1000).toFixed(1)} s)`).join(' → ');
 }
 function isTestChatAttempt(v: unknown): v is TestChatAttemptDiagnostic {
   return record(v) && exactKeys(v, ATTEMPT_KEYS)

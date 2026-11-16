@@ -140,6 +140,9 @@ export const ROUTER_ONE_TEST_CHAT_URL = `${ROUTER_ONE_DEFAULT_BASE_URL}/chat/com
  * answer, and the reserve is quoted for exactly this bound.
  */
 export const ROUTER_ONE_TEST_MAX_TOKENS = 8_192;
+/** Builder engines that reason before answering get the same room on this page (Kimi, GLM builder, Nemotron, Bedrock GLM). */
+export const BUILDER_TEST_MAX_TOKENS = 8_192;
+const BUILDER_REASONING_KINDS: ReadonlySet<string> = new Set(['kimi', 'glm-builder', 'nemotron', 'bedrock-glm']);
 export const ROUTER_ONE_PRICE_UNAVAILABLE = 'Router One’s posted price for this model could not be read from router.one, so this page has no spending ceiling for it and did not call it. Choose a model listed on router.one/models, or try again in a few minutes.';
 function routerOneOfficialEndpoint(): boolean {
   return routerOneBaseUrl().replace(/\/+$/, '') === ROUTER_ONE_DEFAULT_BASE_URL;
@@ -834,6 +837,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       const key = firstPresent(process.env, ['OPENROUTER_API_KEY']) || rungOf('openrouter')?.key || '';
       const result = await runOfficialOpenAiCompatTest({
         url: 'https://openrouter.ai/api/v1/chat/completions', apiKey: key, model: picked, messages: action.messages, signal: bounded,
+        stream: true,
       });
       return finish(action, result.content, result.model || picked, startedAt, result.usage);
     }
@@ -852,7 +856,10 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       let rate;
       // Surplus has no rate card (realRateFor refuses it by design); its reserve is the Sonnet card — a ceiling.
       try { rate = meta.kind === 'surplus' ? realRateFor('ANTHROPIC', 'sonnet') : realRateFor(rateProvider, model); } catch { throw new TestChatUnavailable('budget', 409); }
-      const ceiling = quoteTokens(action.messages, rate.inputPerMTok, rate.outputPerMTok);
+      // Builder reasoning engines get room to think and answer (the Router One lesson: at 1,024 a reasoning model
+      // spent every token thinking). The reserve is quoted for exactly the bound the call uses.
+      const outputTokens = BUILDER_REASONING_KINDS.has(meta.kind) ? BUILDER_TEST_MAX_TOKENS : TEST_CHAT_MAX_OUTPUT_TOKENS;
+      const ceiling = quoteTokens(action.messages, rate.inputPerMTok, rate.outputPerMTok, outputTokens);
       if (ceiling > 0) {
         officialReceipt = await reserveShared(db, requestId, uid, ceiling);
         if (!officialReceipt) throw new TestChatUnavailable('budget', 409);
@@ -865,6 +872,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       if (meta.kind === 'kimi') {
         const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
           url: `${kimiBase()}/chat/completions`, apiKey: firstPresent(process.env, ['KIMI_API_KEY']), model, messages: action.messages, signal: bounded,
+          stream: true, maxTokens: outputTokens,
         }));
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
@@ -875,6 +883,8 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
           : { url: SURPLUS_TEST_URL, apiKey: firstPresent(process.env, ['SURPLUS_API_KEY']) };
         const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
           ...target, model, messages: action.messages, signal: bounded,
+          // Streamed like the builder; Surplus stays non-streamed, as the builder's dedicated Surplus runner is.
+          ...(meta.kind === 'surplus' ? {} : { stream: true, maxTokens: outputTokens }),
           ...(meta.kind === 'nemotron' ? { allowPaid: true } : {}),
           ...(meta.kind === 'surplus' ? { extraBody: { si_route: { objective: 'price' } } } : {}),
         }));
@@ -890,6 +900,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
           url: 'https://api.x.ai/v1/chat/completions',
           apiKey: firstPresent(process.env, ['XAI_API_KEY', 'GROK_API_KEY']), model, messages: action.messages, signal: bounded,
+          stream: true,
         }));
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
@@ -911,6 +922,10 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       prompt: action.messages.at(-1)?.content ?? '',
       messages: action.messages,
       signal: bounded,
+      // Streamed, exactly as user chat calls these rungs. Without onChunk the adapter sent stream: false and waited
+      // for the whole answer: BluesMinds (openai/gpt-oss-20b, a reasoning model) timed out at 60,142 ms with no byte
+      // returned (admin report 2026-11-16). The page shows the final reply, so the chunks themselves are not used.
+      onChunk: () => {},
     }));
     return finish(action, result.content, result.model, startedAt, result.usage);
   } catch (error) {

@@ -118,7 +118,7 @@ function program(mutation?: Mutation): string {
     ${pureFunctions}
     ${text(variable('initialTerminalDecline'))}
     let result; let fastLaneGated = false; let deliveredTier; let buildPrompt = prompt;
-    let etaPlannedFiles = 0; let etaFirstFileAt = 0; let etaFinalChecks = false;
+    let etaPlannedFiles = 0; let etaFirstFileAt = 0; let etaFinalChecksAt = 0;
     let wholeProjectFiles = null; let inBuildWriteTick = 0;
     const osUsage = accumulatedUsage;
     ${selection}

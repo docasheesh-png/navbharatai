@@ -89,7 +89,7 @@ import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAutho
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, foldPlanToBudget, fileBudgetReport } from '../AgentV3/fileBudget';
-import { firstEtaLine, formatEtaRange, fleetEtaLine, etaTickLine, etaPhaseLine, etaAppExists } from '../AgentV3/progressEta';
+import { firstEtaLine, formatEtaRange, fleetEtaLine, etaTickLine, etaPhaseLine, etaAppExists, finalChecksAfterSteer } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity } from '../AgentV3/complexityRouting';
 import { isPortTurn, collectPortSources, portDigest, foreignSourcePaths } from '../AgentV3/portDigest';
@@ -14127,10 +14127,10 @@ async function noteBuildOutcome(
      * 🔴 And, since autopsy 9c612cdb, also the moment the runner's final result settles: the integrity
      * pass starts later still, and a tick that fell between the two promised "about 3 min more".
      */
-    let etaFinalChecks = false;
+    let etaFinalChecksAt = 0; // BR1992: epoch ms the phase began (0 = not yet) — a later pickup of a user message ends it
     /**
      * Epoch ms the app was first PROVEN rendered in a real browser and saved as the working version (the
-     * in-build green). 0 until then. Hoisted here, beside `etaFinalChecks`, because the green's own
+     * in-build green). 0 until then. Hoisted here, beside `etaFinalChecksAt`, because the green's own
      * `inBuildGreenAt` is block-scoped where the heartbeat cannot see it (autopsy 9c612cdb: rendered at
      * 350.0 s; the 361.4 s tick still said "about 3 min more to go").
      */
@@ -14153,7 +14153,7 @@ async function noteBuildOutcome(
         // file count when the caller has it (it is passed in, not closed over, because this helper runs
         // before `builderWroteCount` exists); without it the rendered fact still answers, and when
         // neither can the line reports the phase and claims nothing.
-        const line = etaPhaseLine({ elapsedMs: now - etaStartMs, finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt, appExists: etaAppExists(only?.wrote?.() ?? 0, etaLoopFailed) });
+        const line = etaPhaseLine({ elapsedMs: now - etaStartMs, finalChecks: finalChecksAfterSteer(etaFinalChecksAt, steeringHandoff.lastTakenAt()), appRenderedAt: etaAppRenderedAt, appExists: etaAppExists(only?.wrote?.() ?? 0, etaLoopFailed) });
         if (line && line !== lastEtaShown) events.emit({ type: 'narration', agent: 'architect', text: line, ts: now, id: 'eta-live' });
       } catch { /* the live line is best-effort — it must never affect a build */ }
     };
@@ -14292,7 +14292,7 @@ async function noteBuildOutcome(
           const etaFilesDone = Math.max(0, writtenFiles.size - etaPlatformSeededFiles);
           const decision = etaTickLine({
             elapsedMs, now,
-            finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt,
+            finalChecks: finalChecksAfterSteer(etaFinalChecksAt, steeringHandoff.lastTakenAt()), appRenderedAt: etaAppRenderedAt,
             // Q-1024: the heartbeat tick had no "is there an app?" guard, so it told a stopped or empty
             // build "your app is built". `etaFilesDone` is the builder's OWN files (our seed subtracted).
             appExists: etaAppExists(etaFilesDone, etaLoopFailed),
@@ -20737,7 +20737,7 @@ async function noteBuildOutcome(
       // The builder's loop is over here, so the live ETA stops promising minutes now — the integrity pass,
       // where this used to be set first, starts later (9c612cdb: a tick fell in between). The line is
       // announced at once only over an app that exists: a stopped or empty build is never told "your app is built".
-      etaFinalChecks = true;
+      etaFinalChecksAt = Date.now();
       etaLoopFailed = !result.ok;
       emitEtaPhaseNow({ unlessStopped: abort.signal, wrote: builderWroteCount });
       try {
@@ -21313,7 +21313,7 @@ async function noteBuildOutcome(
         // just closed on the import-boot path. Cutting on a guess is how a confident wrong fix ships.
         // So the next report will say where the time actually goes, and THEN it can be fixed with evidence.
         const integrityStartedAt = Date.now();
-        etaFinalChecks = true; // the app's turn is over — the ETA line says so instead of promising minutes
+        etaFinalChecksAt = Date.now(); // the app's turn is over — the ETA line says so instead of promising minutes
         const storeFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
         const storeLoadMs = Date.now() - integrityStartedAt;
         const integrityFiles: Record<string, string> = { ...storeFiles, ...Object.fromEntries(writtenFiles) };

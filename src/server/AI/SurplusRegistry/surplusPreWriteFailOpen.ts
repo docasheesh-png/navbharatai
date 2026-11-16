@@ -176,6 +176,9 @@ export function wrapSurplusRunnerPreWriteFailOpen(
     return weak;
   };
   return {
+    // BR1992: records name the runner that will take the next turn — Surplus until it is dropped, then the Weak
+    // chain once it exists. Read only; never builds the Weak chain just to answer (undefined ⇒ main's fallback).
+    get plannedModel() { return hooks.state.dropped ? weak?.plannedModel : surplus.plannedModel; },
     async runTurn(params) {
       if (hooks.state.dropped) return getWeak().runTurn(params);
       try {

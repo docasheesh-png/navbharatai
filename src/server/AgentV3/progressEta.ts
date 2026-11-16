@@ -210,6 +210,20 @@ export function etaAppExists(builderFiles: number, loopFailed: boolean): boolean
   return !loopFailed && Number.isFinite(builderFiles) && builderFiles > 0;
 }
 
+/**
+ * BR1992 — is the build still in its final checks? PURE.
+ *
+ * `finalChecksSince` is the epoch ms the builder's loop ended (or the integrity pass began); 0 = not yet.
+ * A platform pass that follows keeps listening to the user, and once it picks up a NEW message the builder
+ * is working again — on that message. One report showed "Almost done… running the final checks" again and
+ * again for twelve minutes while the builder built newly sent requests. So a pickup STRICTLY after the
+ * phase began ends it; a pickup before it, at the same millisecond, or none at all keeps main's answer.
+ */
+export function finalChecksAfterSteer(finalChecksSince: number, lastPickupAt: number): boolean {
+  if (!(Number.isFinite(finalChecksSince) && finalChecksSince > 0)) return false;
+  return !(Number.isFinite(lastPickupAt) && lastPickupAt > finalChecksSince);
+}
+
 export function finalChecksEtaLine(elapsedMs: number, appExists = false): string {
   const inTxt = formatEta(Math.max(0, elapsedMs)).replace('~', '');
   // 🔴 "YOUR APP IS BUILT" IS A CLAIM, AND IT IS MADE ONLY WHEN SOMETHING WAS BUILT (Q-1024).

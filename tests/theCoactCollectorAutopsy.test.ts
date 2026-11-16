@@ -282,7 +282,8 @@ describe('9 · the ETA line in the final checks, and after a hand-off', () => {
   it('the route switches to it once the loop is over — never before the runner\'s result exists (source guard)', () => {
     const settled = route.indexOf('if (!result) result = await runner.run(buildPrompt);');
     expect(settled).toBeGreaterThan(0);
-    const sets = [...route.matchAll(/etaFinalChecks = true;/g)].map((m) => m.index as number);
+    // PIN UPDATED (BR1992): the flag is now the phase's start epoch; the placement rule is unchanged.
+    const sets = [...route.matchAll(/etaFinalChecksAt = Date\.now\(\);/g)].map((m) => m.index as number);
     expect(sets.length).toBeGreaterThanOrEqual(2);
     for (const at of sets) expect(at).toBeGreaterThan(settled);
     expect(sets[0]).toBeLessThan(route.indexOf("code: 'READY_BEFORE_END'"));

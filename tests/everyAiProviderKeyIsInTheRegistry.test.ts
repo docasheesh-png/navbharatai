@@ -27,3 +27,17 @@ describe('every AI provider key the app reads is named in the env registry', () 
     expect(unnamed).toEqual([]);
   });
 });
+
+describe('switching Gemini off withdraws every name the app reads a Gemini key from (2026-11-16 census)', () => {
+  it('includes GOOGLE_API_KEY, which GeminiProvider, aiClients, imageEditRun and embeddings read', async () => {
+    const { applySwitchedOff, providerHasKey, __resetProviderSwitchesForTests } = await import('../src/server/lib/providerSwitches');
+    const env = { GOOGLE_API_KEY: 'synthetic-google-key' } as NodeJS.ProcessEnv;
+    __resetProviderSwitchesForTests(env);
+    expect(providerHasKey('gemini', env)).toBe(true);
+    applySwitchedOff(['gemini'], env);
+    expect(env.GOOGLE_API_KEY).toBeUndefined();
+    applySwitchedOff([], env);
+    expect(env.GOOGLE_API_KEY).toBe('synthetic-google-key');
+    __resetProviderSwitchesForTests(env);
+  });
+});

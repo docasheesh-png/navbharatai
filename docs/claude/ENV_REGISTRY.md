@@ -5042,22 +5042,29 @@ The earlier July entry says `NAV_STORE_ADMINS` falls back to `AGENTV3_FREE_LIST`
 
 **Census (admin asked: "ENV_REGISTRY me jo AI provider darj hain aur NavBharatAI me jo use ho rahe hain, sab match hai?").**
 Every one of the 25 provider families in `src/server/lib/providerSwitches.ts` (`PROVIDER_FAMILIES`) was already named here.
-These key names the code reads for those families were NOT, and are recorded now. **Whether each is set in Cloud Run is
-UNKNOWN** — none was reported by the owner; confirm in the console before relying on one. An env value always beats a code
+These key names the code reads for those families were NOT, and are recorded now. **Status:** the owner confirmed four as set in Cloud Run on 2026-11-16 (marked **set**); the rest are UNKNOWN — confirm in the
+console before relying on one. An env value always beats a code
 default, so a stale alias left set here silently wins.
 
 | Key name | Provider family | Read by | Status |
 |---|---|---|---|
-| `BEDROCK_API_KEY` | AWS Bedrock (builder cheap-floor GLM rung, Nova Sonic voice) | `routes/agentv3.ts` (with `BEDROCK_REGION`, default `us-west-2`, and `BEDROCK_GLM_MODEL`, default `zai.glm-5`), `sonic/SonicBridge.ts`, Test Chat Bot | unknown |
-| `CLAUDE_API_KEY` | Anthropic | alias of `ANTHROPIC_API_KEY` | unknown |
+| `BEDROCK_API_KEY` | AWS Bedrock (builder cheap-floor GLM rung, Nova Sonic voice) | `routes/agentv3.ts` (with `BEDROCK_REGION`, default `us-west-2`, and `BEDROCK_GLM_MODEL`, default `zai.glm-5`), `sonic/SonicBridge.ts`, Test Chat Bot | **set** (owner, 2026-11-16) |
+| `CLAUDE_API_KEY` | Anthropic | alias of `ANTHROPIC_API_KEY` | **set** (owner, 2026-11-16) |
 | `VITE_ANTHROPIC_API_KEY`, `VITE_CLAUDE_API_KEY` | Anthropic | legacy client-build aliases the switch board withdraws | unknown |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | Google Gemini API | alias of `GEMINI_API_KEY` | unknown |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Google Gemini API | alias of `GEMINI_API_KEY` | **set** (owner, 2026-11-16) |
 | `VITE_GEMINI_API_KEY` | Google Gemini API | legacy client-build alias | unknown |
 | `FREE_CHAIN_GEMINIPAID_API_KEY` | Google Gemini API | Free Chat paid Gemini rung | unknown |
 | `FREE_CHAIN_OPENROUTER_API_KEY` | OpenRouter | Free Chat OpenRouter rung alias | unknown |
-| `DEEPINFRA_TOKEN` | DeepInfra | alias of `DEEPINFRA_API_KEY` | unknown |
+| `DEEPINFRA_TOKEN` | DeepInfra | alias of `DEEPINFRA_API_KEY` | **set** (owner, 2026-11-16) |
 | `FREE_CHAIN_CHEAPINF_API_KEY` | CheaperInference | alias of `CHEAPERINFERENCE_API_KEY` | unknown |
 | `FREE_CHAIN_CF_API_KEY` | Cloudflare Workers AI | Free Chat Cloudflare rung alias | unknown |
+
+**Alias order (checked 2026-11-16):** every code path reads the primary name first — `ANTHROPIC_API_KEY` before
+`CLAUDE_API_KEY`, `GEMINI_API_KEY` before `GOOGLE_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY`, `DEEPINFRA_API_KEY` before
+`DEEPINFRA_TOKEN` — so with both set the alias is unused; if the two values differ, the primary wins everywhere.
+**`GOOGLE_API_KEY`** is a Gemini alias read by `GeminiProvider`, `aiClients`, `imageEditRun` and memory embeddings. It was
+missing from the Gemini switch family, so switching Gemini off did not withdraw it (the network host block still stopped
+the call); it is now in the family, and switching Gemini off withdraws it too.
 
 Google Vertex AI has no key (server identity: `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_REGION`). Stability AI appears only in
 `ImageAiGenerator.ts`, which is generated INTO users' apps for their own key — it is not a NavBharatAI provider.

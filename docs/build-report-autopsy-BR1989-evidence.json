@@ -1,0 +1,33 @@
+{
+  "evidenceType": "synthetic-regression-cases",
+  "privateReportPayloadIncluded": false,
+  "cases": [
+    "false positives from the independent review, each returning exactly main's result (main's parser copied verbatim as oracle) on the one-shot/repair parser, the truncation reader and the per-file pick: a one-bracket header followed by a trailing comment; a three-bracket header followed by trailing prose; a Markdown line with a bare-word path and one bracket; a template-literal line with an interpolated path and one bracket",
+    "main spellings unchanged: normal, quoted, CRLF, four brackets, inner '>', mid-sentence mention, prose line end, mid-line short header, space in path, braces in path, no slash and no extension, trailing spaces after three brackets",
+    "true positive: a line-start '<<<FILE path>>' or '<<<FILE path>' header with only whitespace after it and a plausible path yields the file, on both the one-shot parser and the per-file pick",
+    "a per-file reply whose only header-like line is prose yields nothing (not written under the planned path)",
+    "path rule: no whitespace or < > $ { }, and a slash or an extension",
+    "a non-resumed continuation joins byte-for-byte",
+    "source pin: parser and FastLaneContinuation keep main's '>>>' patterns and apply the one normaliser; the per-file lane reads through pickGeneratedFile",
+    "mutation checks (unique mktemp backups, restored): drop the line-start anchor (3 fail); allow trailing text after the brackets (18 fail); path rule always true (3 fail); parser not normalising (6 fail); tail reader not normalising (2 fail); folder rule removed (5 fail)",
+    "three blocks with a short header in the middle stay three separate files",
+    "a truncated tail behind a short header is still reported as cut off; a closed one is not; the '>>>' spelling is unchanged",
+    "a continuation re-opening a short-header stylesheet welds onto the partial head instead of replacing it",
+    "a cut-off turn's short-header text marker is listed for rewrite",
+    "a plan with a src/utils/ folder and no helper owner gets src/utils/helpers.ts, not src/utils.ts",
+    "a planned src/utils/index.ts barrel is not shadowed; a planned src/utils/helpers.ts is reused, not duplicated",
+    "neighbours keep main's path: no folder, a look-alike utilsPanel file, a nested lib/utils folder, root and .js contracts",
+    "owners the plan already names (purpose, beside-contract helper file, helper-named file) are unchanged",
+    "the shared-constants home stays src/data.ts, with or without a data folder",
+    "the moved helper home is generated in the same stage as the old one"
+  ],
+  "limitations": [
+    "not a replay of a customer build",
+    "not production or deployment validation",
+    "the binary placeholder and package.json fold were already closed on main by BR1952 (#4124) and are not re-tested here",
+    "the contract file beside a same-named types folder is unchanged (candidate follow-up)",
+    "ETA calibration, the YELLOW no-journey gate and the unanswered embedded question are unchanged",
+    "focused local tests and server/root typecheck only; no full local suite was run (box memory)",
+    "first D1 version (unanchored '>{1,3}') was withdrawn after an independent review FAIL for phantom files; replaced by the anchored line rule"
+  ]
+}

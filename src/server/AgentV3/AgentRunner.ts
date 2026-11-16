@@ -20,7 +20,7 @@ import { billedAmountUsd } from './pricing';
 import type { UsageSink } from './UsageSink';
 import { withTimeout, withDeadline } from './asyncUtils';
 import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
-import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, endOfTurnReadyMark, unassessedFailsBuild, type ReadyMark } from './doneSignal';
+import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, endOfTurnReadyMark, unassessedFailsBuild, userStoppedBeforeReady, type ReadyMark } from './doneSignal';
 import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
 import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { writerTaskSiblings, SIBLING_TASKS_INPUT_KEY } from './parallelSiblings';
@@ -511,6 +511,13 @@ export interface AgentRunResult {
    * be taken on a belief. Absent means "never judged finished", which is NOT an overrun of zero.
    */
   readyAt?: { step: number; elapsedMs: number; score: number; at?: number };
+  /**
+   * BR1988 — present (true) ONLY when the user's own Stop (`abortCauseOf === 'user-stop'`) ended this run
+   * through its aborted ending, on a fresh-build turn where the readiness check was eligible (done signal
+   * on, not an edit, not a project module) and had not yet judged the app finished. Absent in every other
+   * case — engine aborts, edits, module turns, success, crashes. See `userStoppedBeforeReady`.
+   */
+  userStoppedBeforeReady?: true;
   /** T1-budget-ux: the run stopped ONLY because it hit the per-build budget cap (work is saved and the
    *  build can be continued — a fresh run gets a fresh budget window). Lets the client show an honest
    *  "budget reached — continue" state instead of a hard failure. */
@@ -960,7 +967,17 @@ export class AgentRunner {
         });
         await persist('stopped');
         events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
-        return { ok: false, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
+        // BR1988 — a MEASUREMENT for the route, never a decision here: the user's own Stop ended this run
+        // before the readiness check (which was eligible on this turn) ever judged the app finished.
+        let stoppedBeforeReady = false;
+        try {
+          stoppedBeforeReady = userStoppedBeforeReady({
+            cause, readyMarked: readyMark != null, doneSignalEnabled: doneCfg.enabled,
+            editingExistingApp: this.opts.editingExistingApp === true,
+            projectModule: this.opts.projectModule?.() ?? null,
+          });
+        } catch { stoppedBeforeReady = false; }
+        return { ok: false, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}), ...(stoppedBeforeReady ? { userStoppedBeforeReady: true as const } : {}) };
       };
       while (steps < stepCap) {
         if (admission?.exhausted && !this.opts.signal?.aborted) {

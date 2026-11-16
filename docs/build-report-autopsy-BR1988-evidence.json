@@ -1,0 +1,29 @@
+{
+  "evidenceType": "synthetic-regression-cases",
+  "privateReportPayloadIncluded": false,
+  "cases": [
+    "a synthetic form-screen tree with only scaffold CSS is a real class mismatch at the ordinary threshold",
+    "true positive: typed cause 'user-stop', the runner's own userStoppedBeforeReady mark, ok=false, no readyAt, fresh build (not edit, not module) -> CSS_CLASSES_UNDEFINED is info, auto-resolved, not unresolved, not queued",
+    "each non-user abort cause (watchdog, advisory-cap, deploy-drain, lock-reclaimed, authority-unavailable, reaper, cost-cap, futile, review/recheck/repair budgets, unknown) with no readyAt -> main's warning, unresolved and queued, no stop wording",
+    "edit turn with a user-stop -> main's warning (readyAt is never set on edits)",
+    "project-module turn with a user-stop -> main's warning (readyAt is never set on module turns)",
+    "advisory-cap after success, and a build later rescued to ok -> main's warning",
+    "no runner mark (gate skipped, crashed, or the run never reached its aborted ending) -> main's warning",
+    "a ready mark (Stop after the app was judged finished) -> main's warning",
+    "a real AgentRunner run sets userStoppedBeforeReady only for a user-stop on a fresh build; not for any engine cause, edit, module, done signal off, or an unstopped run",
+    "the route helper returns null (main) on any fault; the main record keeps main's fields from obs(undefinedClassesNote(...))",
+    "the route calls the helper with abortCauseOf(abort.signal), never abort.signal.aborted; the CSS heal gate is unchanged",
+    "mutation checks: dropping the cause check or the edit check fails tests; sources restored from unique mktemp backups"
+  ],
+  "limitations": [
+    "the true-positive path for this report (fast lane stopped, then the full builder's aborted ending) is inferred from the report's event codes, not replayed",
+    "not a replay of a customer build",
+    "not production or deployment validation",
+    "USAGE_NOT_REPORTED on the streamed Surplus path remains Q-2414 / Q-2363; this report did not reconstruct usage or change the bill",
+    "TIME_TO_FIRST_CALL wording is unchanged (BR1958 / BR1983)",
+    "design and accessibility scores on an incomplete tree are unchanged",
+    "full exact-tree CI remains required",
+    "design-consistency findings on a stopped unfinished tree are unchanged (not proven on this report; candidate follow-up)",
+    "focused local tests and server/root/benchmark typecheck only; no full local suite was run (box memory)"
+  ]
+}

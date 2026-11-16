@@ -3867,6 +3867,12 @@ export const ETA_UNTESTED_OUTCOMES: ReadonlySet<string> = new Set([
   ...Object.values(ABORT_OUTCOME_CODES),
   'OUTCOME_INITIAL_DECLINED', // a preserved answer is not completed app delivery
   'OUTCOME_FINALIZATION_FAILED', // neither is a failure while settling that answer
+  // Infrastructure stops are also not completed delivery. A setup refusal in
+  // under a second was scored as "UNDER the band" against a several-minute
+  // opening estimate (BR1986). Past the upper bound, elapsed time still proves a miss.
+  'OUTCOME_SANDBOX_UNAVAILABLE',
+  'OUTCOME_ENGINE_UNAVAILABLE',
+  'OUTCOME_ENGINE_TIMEOUT',
 ]);
 
 /**

@@ -5095,3 +5095,38 @@ Code defaults only; no Cloud Run variable is required. Every switch below is ON 
 
 **Risk recorded:** CheaperInference's terms (§6) restrict shared key access without Keak's written permission; the owner directed default-on for all users anyway.
 
+
+## 2026-11-16 — Discount reseller gateways: Moyi API, DiscountedTokens, MirAPI (admin Test Chat Bot ONLY)
+
+Owner, verbatim: *"Moyi API, DiscountedTokens aur mir api se shuru karo! abhi bas 'test chat bot' me add karo"*.
+Three OpenAI-compatible resellers under evaluation as low-cost suppliers until NavBharatAI contracts with the
+model makers directly. **They are called from Admin → AI Engines → Test Chat Bot and nowhere else**: not user
+chat, not the builder, not any tier ladder. Wiring one into a user path is a separate, owner-approved change.
+One module owns their env: `src/server/lib/resellerGateways.ts`. Key VALUES are not recorded and not yet reported set.
+
+| Key | Meaning |
+|---|---|
+| `MOYI_API_KEY` | Secret, unset. One server-side key. Comma lists rejected. |
+| `MOYI_BASE_URL` | **Required, no default.** The API base URL from Moyi's own documentation. Must be https on `moyi-api.com` or a subdomain, no port/credentials/query. The endpoint was not readable from the build environment, so none is invented. |
+| `MOYI_MODEL` | Optional model id. Unset ⇒ a chat model from the key's own `GET /models` list. |
+| `DISCOUNTEDTOKENS_API_KEY` | Secret, unset. Prepaid account (minimum US$5). |
+| `DISCOUNTEDTOKENS_BASE_URL` | Optional; default `https://discountedtokens.com/v1` (their public API listing). Must stay on `discountedtokens.com`. |
+| `DISCOUNTEDTOKENS_MODEL` | Optional; default `gpt-6-sol` (callable on their pricing page, 2026-11-16). They sell OpenAI models only. |
+| `MIRAPI_API_KEY` | Secret, unset. |
+| `MIRAPI_BASE_URL` | **Required, no default.** Must be https on `mirapi.ai` or a subdomain. |
+| `MIRAPI_MODEL` | Optional model id. Unset ⇒ a chat model from the key's own list. |
+
+- **Spending ceiling:** the test reserves the dearest official LIST price among the models these gateways sell
+  (USD 10 / 50 per 1M tokens, GPT-6 Astra) against the shared paid budget. It is a ceiling, not the bill.
+- **Switch board:** each is a provider family (`moyi`, `discountedtokens`, `mirapi`); switching one off withdraws
+  its key and refuses every request to its registered domain.
+- **Known open risks, from the pages the owner supplied (2026-11-16) — re-read before any user-path wiring:**
+  DiscountedTokens states that "availability and model identity are not independently guaranteed"; MirAPI shows
+  no uptime, latency or upstream and its "Why so cheap?" page is unread; none of the three published a rate limit
+  on the reviewed pages; Moyi's upstream names and "No training" label are its own claims. The model id a reply
+  reports is the provider's claim, not proof of which model answered.
+- **Claude through any of these is NOT approved.** NavBharatAI Pro v3.0 runs Claude on NavBharatAI's own
+  Anthropic account (CLAUDE.md); a reseller Claude route needs separate owner sign-off.
+- **Reviewed and NOT added:** OpenCheese (buys third-party API credits and keys; sells safety-removed
+  "abliterated" models) is rejected. CloseRouter (anonymised upstreams, inverted prices) and faborapi
+  (prepaid credit packs, site unread) are not added. Infron, MaxonForge, APInex and relay.fast were not reviewed.

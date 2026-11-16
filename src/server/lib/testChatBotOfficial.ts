@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { TestChatMessage } from '../../lib/testChatBot';
 import { TEST_CHAT_MAX_OUTPUT_TOKENS } from '../../lib/testChatBot';
 import { anthropicTotalInput } from './anthropicUsage';
+import { isResellerGatewayHost } from './resellerGateways';
 
 /**
  * The official OpenAI-compatible hosts this admin page may call, and nothing else (admin 2026-11-15: every
@@ -25,7 +26,8 @@ export function isOfficialChatUrl(url: string): boolean {
   let parsed: URL;
   try { parsed = new URL(url); } catch { return false; }
   if (parsed.protocol !== 'https:' || parsed.port || parsed.username || parsed.password || parsed.search || parsed.hash) return false;
-  if (!OFFICIAL_CHAT_HOSTS.has(parsed.hostname) && !BEDROCK_RUNTIME_HOST.test(parsed.hostname)) return false;
+  // Reseller gateways (resellerGateways.ts): only each one's own registered domain or a subdomain of it.
+  if (!OFFICIAL_CHAT_HOSTS.has(parsed.hostname) && !BEDROCK_RUNTIME_HOST.test(parsed.hostname) && !isResellerGatewayHost(parsed.hostname)) return false;
   return parsed.pathname.endsWith('/chat/completions');
 }
 const OPENROUTER_FREE_GUARD = {

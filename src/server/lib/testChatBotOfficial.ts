@@ -344,23 +344,31 @@ export function isModelNotFound(code: string | null | undefined, text: string | 
   return /model[_ ]?not[_ ]?found|no available channel for model|model .*(does not exist|not (found|available|supported))|unknown model|invalid model/i
     .test(`${code ?? ''} ${text ?? ''}`);
 }
-export async function listProviderModels(baseURL: string, apiKey: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+/** The model ids a provider's own GET /models lists for this key (https, no redirects, 8 s; ids only, sanitized). */
+export async function fetchProviderModelIds(baseURL: string, apiKey: string, fetchImpl: typeof fetch = fetch)
+  : Promise<{ ok: true; host: string; ids: string[] } | { ok: false; host: string; reason: string }> {
   let url: URL;
-  try { url = new URL(`${baseURL.replace(/\/+$/, '').replace(/\/chat\/completions$/, '')}/models`); } catch { return ''; }
-  if (url.protocol !== 'https:' || !apiKey || /[\s,]/.test(apiKey)) return '';
+  try { url = new URL(`${baseURL.replace(/\/+$/, '').replace(/\/chat\/completions$/, '')}/models`); } catch { return { ok: false, host: '', reason: 'no valid endpoint' }; }
+  if (url.protocol !== 'https:' || !apiKey || /[\s,]/.test(apiKey)) return { ok: false, host: url.host, reason: 'not https or no key' };
   try {
     const response = await fetchImpl(url.toString(), { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(8_000),
       headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` } });
-    if (!response.ok) return `Model list: ${url.host} answered GET /models with HTTP ${response.status}.`;
+    if (!response.ok) return { ok: false, host: url.host, reason: `HTTP ${response.status}` };
     const raw = await response.text();
-    if (raw.length > 2_000_000) return 'Model list: the /models answer was too large to read.';
+    if (raw.length > 2_000_000) return { ok: false, host: url.host, reason: 'answer too large' };
     const parsed = JSON.parse(raw) as unknown;
     const rows = Array.isArray(parsed) ? parsed : record(parsed) && Array.isArray(parsed.data) ? parsed.data : [];
     const ids = [...new Set(rows.map(row => record(row) ? row.id : null).filter((id): id is string => typeof id === 'string' && /^[\w.:/@+-]{1,120}$/.test(id)))];
-    if (!ids.length) return `Model list: ${url.host} listed no models for this key.`;
-    const shown = ids.slice(0, 40);
-    return `Models this key can use on ${url.host} (${ids.length}): ${shown.join(', ')}${ids.length > shown.length ? ', …' : ''}. Type one of these in "Model (optional)".`;
+    return { ok: true, host: url.host, ids };
   } catch {
-    return `Model list: GET /models on ${url.host} could not be read.`;
+    return { ok: false, host: url.host, reason: 'could not be read' };
   }
+}
+export async function listProviderModels(baseURL: string, apiKey: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const listed = await fetchProviderModelIds(baseURL, apiKey, fetchImpl);
+  if (!listed.host) return '';
+  if (!listed.ok) return listed.reason === 'not https or no key' ? '' : `Model list: GET /models on ${listed.host} ${listed.reason.startsWith('HTTP') ? `answered with ${listed.reason}` : listed.reason}.`;
+  if (!listed.ids.length) return `Model list: ${listed.host} listed no models for this key.`;
+  const shown = listed.ids.slice(0, 40);
+  return `Models this key can use on ${listed.host} (${listed.ids.length}): ${shown.join(', ')}${listed.ids.length > shown.length ? ', …' : ''}. Type one of these in "Model (optional)".`;
 }

@@ -1117,6 +1117,8 @@ describe('user-chat policy gates do not block an admin test (admin 2026-11-16: B
     expect(status).toMatchObject({ configured: true, enabled: true, model: 'openai/gpt-oss-20b' });
     expect(status?.note).toContain('User chat keeps this provider off');
     fake.compatTurn.mockResolvedValue({ content: 'Hello from BluesMinds', model: 'openai/gpt-oss-20b' });
+    (await import('./providerModelPicker')).__resetProviderModelCache();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [{ id: 'openai/gpt-oss-20b' }] }), { status: 200 })));
     const result = await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal);
     expect(result).toMatchObject({ provider: 'bluesminds', content: 'Hello from BluesMinds', noFallback: true });
     expect(fake.compatCtor).toHaveBeenCalledWith(expect.objectContaining({
@@ -1233,5 +1235,56 @@ describe('the exact BluesMinds model_not_found answer lists the models the key c
     expect(error.diagnostic?.providerMessage).toContain('Models this key can use');
     expect(error.diagnostic?.providerMessage).toContain('deepseek-v4-flash');
     expect(JSON.stringify(error.diagnostic)).not.toContain('synthetic-blues-key');
+  });
+});
+
+describe('BluesMinds picks models from the key\'s own list and tries the next on failure (admin 2026-11-16)', () => {
+  const bluesRung = { id: 'bluesminds', configured: true, key: 'synthetic-blues-key', keyEnv: 'FREE_CHAIN_BLUESMINDS_API_KEY',
+    model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1', reason: 'terms-unverified', streamUsage: false, priceIn: 0, priceOut: 0 };
+  const listOf = (ids: string[]) => vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: ids.map(id => ({ id })) }), { status: 200 })));
+
+  beforeEach(async () => { (await import('./providerModelPicker')).__resetProviderModelCache(); });
+
+  it('when the first model is missing for the key, tries the second and returns its answer', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    listOf(['deepseek-v4-flash', 'qwen/qwen3-coder', 'moonshotai/kimi-k2.6']);
+    const models: string[] = [];
+    fake.compatCtor.mockImplementation((config: { model: string; timeoutMs: number }) => { models.push(config.model); });
+    fake.compatTurn
+      .mockRejectedValueOnce(new FreeChainProviderError('SERVER', { status: 503 }))
+      .mockResolvedValueOnce({ content: 'Hello from the second model', model: 'qwen/qwen3-coder' });
+    const result = await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal);
+    expect(result).toMatchObject({ content: 'Hello from the second model', model: 'qwen/qwen3-coder' });
+    expect(models).toEqual(['deepseek-v4-flash', 'qwen/qwen3-coder']);
+  });
+
+  it('reports every attempt when all three fail, and stops at once on a refused key', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    listOf(['deepseek-v4-flash', 'qwen/qwen3-coder', 'moonshotai/kimi-k2.6']);
+    fake.compatTurn.mockRejectedValue(new FreeChainProviderError('TIMEOUT'));
+    const error = await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.diagnostic).toMatchObject({ providerCode: 'ALL_MODELS_FAILED', finalOutcome: 'all-models-failed' });
+    expect(error.diagnostic?.attempts?.map(a => a.model)).toEqual(['deepseek-v4-flash', 'qwen/qwen3-coder', 'moonshotai/kimi-k2.6']);
+    expect(error.diagnostic?.providerMessage).toContain("key's own model list");
+
+    fake.compatTurn.mockReset();
+    fake.compatTurn.mockRejectedValue(new FreeChainProviderError('AUTH', { status: 401 }));
+    const refused = await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(refused.diagnostic?.attempts).toHaveLength(1);
+  });
+
+  it('a typed model is the only model tried', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    const listing = vi.fn();
+    vi.stubGlobal('fetch', listing);
+    fake.compatTurn.mockResolvedValue({ content: 'typed', model: 'moonshotai/kimi-k2.6' });
+    await runTestChat({ ...action, provider: 'bluesminds', model: 'moonshotai/kimi-k2.6' }, 'actor', new AbortController().signal);
+    expect(listing).not.toHaveBeenCalled();
+    expect(fake.compatTurn).toHaveBeenCalledOnce();
+  });
+
+  it('says so on the entry', () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    expect(testChatStatus().providers.find(p => p.id === 'bluesminds')?.note).toContain('tries them in turn');
   });
 });

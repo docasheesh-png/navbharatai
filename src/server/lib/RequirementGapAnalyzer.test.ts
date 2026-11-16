@@ -329,6 +329,45 @@ describe('game domain', () => {
     );
     expect(g.domain).toBe('game');
   });
+
+  it('an open-world game that names banks, ATMs and people as world objects is still a game', () => {
+    // Hindi "log" means people. A bare /log/ audit-log feature used to give fintech a feature
+    // score of 1 against a game that scored 0 on the playability features a prompt usually omits.
+    for (const prompt of [
+      'I want a realistic open-world game like Earth, with many kinds of people, multiplayer so others can play, jungle and desert, army recruitment, vending machines, ATM machines, a bank, a bridge, and a way to earn and redeem money in the world.',
+      'Mujhe ek real world game chahiye, multiplayer khel sake, jungle, vending machine, ATM machine, bank, paise kamana aur redeem karne ka system, kuchh log ho.',
+      'Ek open-world khel banao jisme jungle, bank, ATM aur kuchh log hon.',
+    ]) {
+      const g = analyzeRequirementGaps(prompt);
+      expect(g.domain, prompt).toBe('game');
+      expect(g.mentioned, prompt).not.toContain('audit log');
+      expect(g.likelyMissing.join(' | '), prompt).toMatch(/win \/ lose/i);
+      expect(g.likelyMissing.join(' | '), prompt).not.toMatch(/KYC/i);
+    }
+  });
+
+  it('a real bank or wallet product is still fintech, including when it names an audit log', () => {
+    expect(analyzeRequirementGaps('Build a mobile banking app with savings accounts, UPI payments, and KYC.').domain).toBe('fintech');
+    expect(analyzeRequirementGaps('a mobile wallet app with UPI and KYC').domain).toBe('fintech');
+    const audited = analyzeRequirementGaps('Build a neobank wallet with KYC and an audit log of every transfer');
+    expect(audited.domain).toBe('fintech');
+    expect(audited.mentioned).toContain('audit log');
+    expect(analyzeRequirementGaps('Add gamification badges to our banking app with KYC and UPI wallet').domain).toBe('fintech');
+    // A financial product that also mentions a game keeps fintech — the tie-break only
+    // prefers a game when the game is the thing being built, not a side feature.
+    expect(analyzeRequirementGaps('Build a bank app with a small game for kids on the home screen').domain).toBe('fintech');
+    expect(analyzeRequirementGaps('Add a game to our banking app with KYC').domain).toBe('fintech');
+  });
+
+  it('a hospital that names an audit log still records that feature, and a login is not an audit log', () => {
+    const named = analyzeRequirementGaps('A hospital system with staff roles and an audit log of every change');
+    expect(named.domain).toBe('healthcare');
+    expect(named.mentioned).toContain('audit log of record changes');
+    const loginOnly = analyzeRequirementGaps('A hospital system with staff roles and a login page');
+    expect(loginOnly.domain).toBe('healthcare');
+    expect(loginOnly.mentioned).not.toContain('audit log of record changes');
+    expect(loginOnly.likelyMissing).toContain('audit log of record changes');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────

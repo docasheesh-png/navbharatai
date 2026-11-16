@@ -42,10 +42,11 @@ describe('Free vision model allowlist (env cannot widen it)', () => {
     vi.stubEnv('VISION_GLM_MODELS', 'glm-4.6v,glm-4.6v-flash');
     expect(glmVisionModels('free')).toEqual(['glm-4.6v-flash']);
   });
-  // Owner t359u: the always-on suppliers with real vision models lead (each budgeted against the shared cap).
-  it('Free vision order is Qubax → CheaperInference → GLM → Vertex → Gemini, no Grok/Claude; non-Claude callers count as Free', () => {
-    expect(visionProviderOrder(false)).toEqual(['QUBAX', 'CHEAPERINFERENCE', 'GLM', 'VERTEX', 'GEMINI']);
-    expect(visionProviderOrder(true, 'free')).toEqual(['QUBAX', 'CHEAPERINFERENCE', 'GLM', 'VERTEX', 'GEMINI']);
+  it('Free vision order is GLM → Vertex → Gemini, no Grok/Claude; non-Claude callers count as Free', () => {
+    expect(visionProviderOrder(false)).toEqual(['GLM', 'VERTEX', 'GEMINI']);
+    expect(visionProviderOrder(true, 'free')).toEqual(['GLM', 'VERTEX', 'GEMINI']);
+    // Owner t359u, chat photo analysis only (opt-in): the always-on suppliers lead, each under the shared Free cap.
+    expect(visionProviderOrder(false, 'free', true)).toEqual(['QUBAX', 'CHEAPERINFERENCE', 'GLM', 'VERTEX', 'GEMINI']);
     expect(visionTier({ allowClaude: false })).toBe('free');
     expect(visionTier({ allowClaude: true, tier: 'free' })).toBe('free');
     expect(visionTier({ allowClaude: true })).toBe('paid');

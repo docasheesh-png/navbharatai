@@ -612,6 +612,54 @@ describe('free chat chain central dispatch', () => {
   expect(m.execute).not.toHaveBeenCalled();
   expect(result.freeChain?.attempts[0].reason).toMatch(/^circuit:last=rate_limit/);
  });
+ // Owner t357u: an always-on cheapinf failure is benched for at most ALWAYS_ON_MAX_COOLDOWN_MS (30s), never the
+ // ordinary 1h AUTH / 1d QUOTA window, in the breaker AND in the stored cooldown. Kills the clamp mutation.
+ it.each([
+  ['AUTH', { status: 401 }, 30_000],
+  ['QUOTA_EXHAUSTED', { status: 402, retryAfterMs: 86_400_000 }, 30_000],
+  ['RATE_LIMIT', { status: 429, retryAfterMs: 5_000 }, 5_000],
+ ] as const)('a cheapinf %s failure is benched for at most 30s', async (code, details, expected) => {
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  const cfg = freeChainConfig({
+   FREE_CHAIN_ENABLED: 'on', FREE_CHAIN_ROLLOUT_PERCENT: '100', FREE_CHAIN_ORDER: 'cheapinf',
+   CHEAPERINFERENCE_API_KEY: 'ci_live_test_key', FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off',
+  });
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  m.execute.mockRejectedValue(new FreeChainProviderError(code, details));
+  const before = Date.now();
+  const result = await buildFreeChainRouter(db, cfg).route(input());
+  const after = Date.now();
+  expect(result.ok).toBe(false); expect(m.execute).toHaveBeenCalledOnce();
+  const until = getBreaker('free-chat-chain:cheapinf').snapshot().openedUntil;
+  expect(until).toBeLessThanOrEqual(after + 30_000);
+  expect(until).toBeGreaterThanOrEqual(before + expected);
+  expect(until).toBeLessThanOrEqual(after + expected);
+  const stored = m.cooldown.mock.calls.find(c => c[0] === 'cheapinf');
+  expect(stored).toBeDefined();
+  expect(stored![1]).toBeLessThanOrEqual(after + 30_000);
+ });
+ it('a repeat cheapinf failure is still clamped to 30s after the breaker escalates', async () => {
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  const cfg = freeChainConfig({
+   FREE_CHAIN_ENABLED: 'on', FREE_CHAIN_ROLLOUT_PERCENT: '100', FREE_CHAIN_ORDER: 'cheapinf',
+   CHEAPERINFERENCE_API_KEY: 'ci_live_test_key', FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off',
+  });
+  const breaker = getBreaker('free-chat-chain:cheapinf');
+  for (let k = 0; k < 5; k += 1) breaker.recordFailure(1, Date.now() - 60_000, 'server:http=503'); // expired windows, escalation armed
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  m.execute.mockRejectedValue(new FreeChainProviderError('SERVER', { status: 503 }));
+  await buildFreeChainRouter(db, cfg).route(input());
+  expect(m.execute).toHaveBeenCalledOnce();
+  // The shared stored cooldown is clamped to 30s even though the in-process breaker escalated past it…
+  const stored = m.cooldown.mock.calls.find(c => c[0] === 'cheapinf');
+  expect(stored![1]).toBeLessThanOrEqual(Date.now() + 30_000);
+  expect(breaker.snapshot().openedUntil).toBeGreaterThan(Date.now() + 30_000);
+  // …and that longer in-process window is never honoured: the very next request probes cheapinf.
+  m.execute.mockImplementation(successful());
+  const next = await buildFreeChainRouter(db, cfg).route(input());
+  expect(m.execute).toHaveBeenCalledTimes(2);
+  expect(next.freeChain?.attempts[0].reason).not.toMatch(/^circuit:last=/);
+ });
  it('OpenRouter account admission works with the real quota validator and transaction store', async () => {
  const real = await vi.importActual<typeof import('./store')>('./store');
  const docs=new Map<string,unknown>();

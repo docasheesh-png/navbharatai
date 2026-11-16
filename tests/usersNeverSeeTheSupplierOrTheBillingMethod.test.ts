@@ -66,9 +66,60 @@ describe('the billing method never reaches a user', () => {
     expect(JSON.stringify(user)).not.toContain('adminDetail');
     expect('billing' in user).toBe(false);
   });
-  it('classifies by code and by method wording, not by the word "estimate" alone', () => {
-    expect(isBillingMethodIssue({ code: 'ENGINE_COST_ESTIMATED', message: 'x' })).toBe(true);
-    expect(isBillingMethodIssue({ code: 'X', message: 'charged from an estimate of tokens' })).toBe(true);
-    expect(isBillingMethodIssue({ code: 'ETA', message: 'rough estimate: 3 min left' })).toBe(false);
+  it('classifies by exact code only, never by wording', () => {
+    for (const code of ['ENGINE_COST_ESTIMATED', 'USAGE_NOT_REPORTED', 'DISCOUNT_COST_UNCONFIRMED', 'PRO_CHAIN_V2_USAGE_ESTIMATED',
+      'PRO_CHAIN_V2_RATE_ESTIMATED', 'ROUTER_ONE_CATALOGUE_ESTIMATED', 'SURPLUS_STOP_COST_ESTIMATED']) expect(isBillingMethodIssue({ code })).toBe(true);
+    for (const code of ['UNBILLED_BARREN_WORK', 'PROVIDER_RATE_LIMITED', 'CONTEXT_TOO_LARGE', 'PREVIEW_ERROR', 'RUNTIME_ERRORS_REMAIN',
+      'RECEIPT_PAGE_BROKEN', 'X_RATE_Y', 'ESTIMATED']) expect(isBillingMethodIssue({ code })).toBe(false);
+  });
+  it('counts match the issues a user sees', () => {
+    const user = userFacingReport(build());
+    expect(user.counts.total).toBe(user.issues.length);
+    const visibleWarnings = user.issues.filter(i => i.severity === 'warning').length;
+    expect(user.counts.warnings).toBe(visibleWarnings);
+    expect(build().counts.total).toBe(user.issues.length + 3);
+  });
+  it('a summary quoting a hidden line loses only that line', () => {
+    const r = build();
+    const msg = "A provider returned no token usage — this build's cost is an under-estimate";
+    const user = userFacingReport({ ...r, summary: `Built 3 files. ${msg}. The receipt page shows the price per item.`, rootCause: `Cause: ${msg}` });
+    expect(user.summary).toBe('Built 3 files. The receipt page shows the price per item.');
+    expect(user.rootCause).not.toContain('under-estimate');
   });
 });
+
+// Reviewer near-misses: a user's OWN app problems about receipts, prices, invoices, GST, rate limits or token
+// size must never be hidden by the billing-method filter, in English or Hindi.
+describe('app problems that merely mention money words stay visible', () => {
+  const NEAR_MISSES: Array<[string, 'error' | 'warning' | 'info', string]> = [
+    ['PREVIEW_ERROR', 'error', 'TypeError: price is undefined at Receipt.jsx:12'],
+    ['RUNTIME_ERRORS_REMAIN', 'error', 'The receipt page still throws when the cart is empty'],
+    ['CONTEXT_TOO_LARGE', 'warning', 'Prompt too large: estimated 140k tokens'],
+    ['PROVIDER_RATE_LIMITED', 'warning', 'Rate limited, retrying in 5s'],
+    ['BUILD_ERROR', 'error', 'Invoice.tsx: GST rate per item is NaN, so the billed total is wrong'],
+    ['PREVIEW_ERROR', 'error', 'रसीद पेज पर कीमत (price) नहीं दिख रही, अनुमानित GST गलत है'],
+    ['RUNTIME_ERRORS_REMAIN', 'error', 'चालान (invoice) में दर ₹ गलत दिख रही है'],
+    ['UNBILLED_BARREN_WORK', 'info', 'This step produced no files, so ₹0 was billed for it'],
+    ['TOKEN_BUDGET', 'warning', 'Estimated cost per million tokens exceeded the app quota'],
+  ];
+  const report = () => {
+    const d = new BuildDiagnostics({ now: () => 1000 });
+    for (const [code, severity, message] of NEAR_MISSES) d.record({ phase: 'build', severity, code, autoResolved: false, message });
+    return d.report();
+  };
+  it.each(NEAR_MISSES)('%s stays: %s', (code, _sev, message) => {
+    const user = userFacingReport(report());
+    expect(user.issues.some(i => i.code === code && i.message === message)).toBe(true);
+  });
+  it('counts are untouched when nothing is hidden', () => {
+    const r = report();
+    expect(userFacingReport(r).counts).toEqual(r.counts);
+  });
+  it('app sentences in summary, root cause and review are kept verbatim', () => {
+    const r = report();
+    const text = 'The receipt page shows the price per item. Estimated delivery: 3 days. रसीद में ₹ दर सही है.';
+    const user = userFacingReport({ ...r, summary: text, rootCause: text, review: text });
+    expect([user.summary, user.rootCause, user.review]).toEqual([text, text, text]);
+  });
+});
+

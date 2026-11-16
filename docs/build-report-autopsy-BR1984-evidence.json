@@ -1,0 +1,19 @@
+{
+  "evidenceType": "synthetic-regression-cases",
+  "privateReportPayloadIncluded": false,
+  "cases": [
+    "a settled prior reconnect refusal is detected by issue code or the reconnect goodbye",
+    "in-progress, user-stopped, successful, create-time unavailable, and unreadable history rows are not treated as a repeat",
+    "the first refusal keeps the existing retryable goodbye",
+    "a repeated refusal does not invite an immediate retry and is not marked retryable",
+    "a subsequent attempt still reconnects the same recorded identity",
+    "admin-only recovery reasons stay off the live report, the persisted conversation record, and the GET reopen, including on the repeated goodbye",
+    "a pre-timer Surplus scope call recorded after the build timer starts is not reported as a zero-second first call"
+  ],
+  "limitations": [
+    "not a replay of a customer build",
+    "not production or deployment validation",
+    "no proof of an actual provider capacity incident",
+    "full exact-tree CI remains required"
+  ]
+}

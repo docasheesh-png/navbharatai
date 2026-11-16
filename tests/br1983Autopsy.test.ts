@@ -69,9 +69,9 @@ describe('BR1983: already-closed neighbours stay closed', () => {
   });
 
   it('a recovery refusal still stops setup; an ordinary setup error still continues as SANDBOX_UNAVAILABLE', () => {
-    expect(ROUTE).toContain('rethrowBuildSetupRecoveryUnavailable(setupErr)');
+    expect(ROUTE).toContain('rethrowBuildSetupRecoveryUnavailable(setupErr,');
     const setupCatch = ROUTE.slice(ROUTE.indexOf('} catch (setupErr) {'));
-    expect(setupCatch.indexOf('rethrowBuildSetupRecoveryUnavailable(setupErr)'))
+    expect(setupCatch.indexOf('rethrowBuildSetupRecoveryUnavailable(setupErr,'))
       .toBeLessThan(setupCatch.indexOf("sandboxUnavailable = true"));
     expect(setupCatch).toContain("code: 'SANDBOX_UNAVAILABLE'");
     expect(setupCatch).toContain('sandboxUnavailableNotice()');

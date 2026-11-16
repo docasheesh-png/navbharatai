@@ -36,9 +36,21 @@ describe('the first ETA line is gated on evidence', () => {
     const block = route.slice(at, at + 600);
     // Since autopsy 19641ab5 the note also says WHOSE builds taught it (workspace vs platform).
     expect(block).toContain('etaEvidenceNote(est, ');
-    // It must still quote the line the user actually read (autopsy f04421ef) — the report is never
-    // allowed to be the less honest surface.
-    expect(block).toContain('Shown to the user');
+    // The report is never allowed to be the less honest surface (autopsy f04421ef). Since BR1984
+    // the note is built by openingEtaShownNote from the same etaShown binding: it quotes the line
+    // when it was shown, and says when it was withheld until workspace setup or skipped on a
+    // module turn. The literal "Shown to the user" sentence therefore lives in the helper, not
+    // inline in this route block.
+    expect(block).toContain('openingEtaShownNote(etaSkippedForModule,');
+    expect(block).toContain('etaShown)');
+    const helper = readFileSync(resolve(__dirname, '../src/server/AgentV3/sandboxOpeningEta.ts'), 'utf8');
+    const noteAt = helper.indexOf('export function openingEtaShownNote(');
+    expect(noteAt).toBeGreaterThan(-1);
+    const noteEnd = helper.indexOf('\n}\n', noteAt);
+    const noteBody = helper.slice(noteAt, noteEnd > noteAt ? noteEnd : noteAt + 800);
+    expect(noteBody).toContain('Shown to the user:');
+    expect(noteBody).toContain('Not shown to the user before workspace setup');
+    expect(noteBody).toContain('Not shown to the user: this "continue" builds the next module');
   });
 });
 

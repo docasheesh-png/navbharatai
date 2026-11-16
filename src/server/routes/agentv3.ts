@@ -273,7 +273,8 @@ import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote, strictReveri
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { createBuildRequestCoordination, createBuildPreflightStream, buildRequestInputRejection, withBuildRequestCleanup, startBuildLeaseHeartbeat, rethrowBuildSetupRecoveryUnavailable, buildExceptionDetails, publishBuildException, normalQueuedModuleRetirementAllowed, queuedContinuationBusyFields } from '../AgentV3/BuildRequestCoordination';
-import { isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable } from '../AgentV3/SandboxRecoveryError';
+import { isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable, latestSettledAttemptWasSandboxRecoveryUnavailable } from '../AgentV3/SandboxRecoveryError';
+import { openingEtaShownNote, recordOrEmitOpeningEta, emitPendingOpeningEta, sandboxRecoveryRepeatOpts } from '../AgentV3/sandboxOpeningEta';
 import { createBuildSourcePublication } from '../AgentV3/BuildSourcePublication';
 import { loadQueue, mutateQueue, mutateQueueWithResult, claimQueuedCommand, recoverQueuedCommand, stopWorkspaceQueueAndLease, QueueStoreUnavailableError, QueueClaimConflictError } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext, plannerDomainBrief } from '../AgentV3/RoleChats';
@@ -13096,6 +13097,7 @@ async function noteBuildOutcome(
     let sessionHistoryForSummary:
       | { history: Awaited<ReturnType<typeof listDiagnosticsHistory>>; startedAt: number }
       | null = null;
+    let priorHistoryEntries: Awaited<ReturnType<typeof listDiagnosticsHistory>> | undefined;
     // The latest live preview URL the build published — used by the post-build PREVIEW SELF-CHECK to
     // actually open the running app in a browser and verify it rendered.
     let lastPreviewUrl = '';
@@ -14026,6 +14028,8 @@ async function noteBuildOutcome(
     // its answer is the platform's figure, not a number of its own (autopsy 68f0a486: "2-3 min" while the
     // line said ~4).
     let lastEtaShown: string | null = null;
+    // Held back until sandbox setup succeeds when the previous settled attempt failed to reconnect.
+    let pendingEtaShown: string | null = null;
     // Every ETA line carries the id 'eta-live'; one listener remembers the latest, so no emit site can forget.
     events.subscribe((e) => {
       if (e.type === 'narration' && (e as { id?: string }).id === 'eta-live' && typeof e.text === 'string') lastEtaShown = e.text;
@@ -14704,6 +14708,7 @@ async function noteBuildOutcome(
           //
           // The history `h` is what the read was for and it is correct — only the clock was wrong — so we
           // keep the rows and re-summarize at the end against the real end time.
+          priorHistoryEntries = h;
           sessionHistoryForSummary = { history: h, startedAt: buildStartedAt };
         })
         .catch(() => { /* history read is best-effort */ });
@@ -15519,7 +15524,7 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
             message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: `${etaBasis} ${etaEvidenceNote(est, etaSource === 'platform' ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
+            detail: `${etaBasis} ${etaEvidenceNote(est, etaSource === 'platform' ? 'platform' : 'workspace')} ${openingEtaShownNote(etaSkippedForModule, latestSettledAttemptWasSandboxRecoveryUnavailable(priorHistoryEntries), etaShown)}`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
@@ -15534,7 +15539,9 @@ async function noteBuildOutcome(
             buildDiag.record({ phase: 'plan', severity: 'info', code: 'ETA_SKIPPED_MODULE_TURN', autoResolved: true,
               message: 'Opening ETA not shown: this "continue" builds the next module of a stored project plan, and the estimate describes the whole app.' });
           } else {
-            events.emit({ type: 'narration', agent: 'architect', text: etaShown, ts: Date.now(), id: 'eta-live' });
+            pendingEtaShown = recordOrEmitOpeningEta(etaShown, priorHistoryEntries, (text) => {
+              events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now(), id: 'eta-live' });
+            });
           }
         } catch { /* ETA is best-effort — never affects the build */ }
       }
@@ -15616,6 +15623,9 @@ async function noteBuildOutcome(
         const ensureT0 = Date.now();
         // An import turn's workspace is the user's project, never our starter plus theirs (build d62bf22d).
         await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId, hasImportIntent ? { seedStarter: false } : undefined);
+        pendingEtaShown = emitPendingOpeningEta(pendingEtaShown, (text) => {
+          events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now(), id: 'eta-live' });
+        });
         const ensureWorkspaceMs = Date.now() - ensureT0;
         try {
           buildDiag.recordSetupTiming({
@@ -16353,7 +16363,7 @@ async function noteBuildOutcome(
         registerSession(workspaceId, git, userId ?? undefined, actuator);
         events.emit({ type: 'workspace', workspaceId, ts: Date.now() });
       } catch (setupErr) {
-        rethrowBuildSetupRecoveryUnavailable(setupErr);
+        rethrowBuildSetupRecoveryUnavailable(setupErr, sandboxRecoveryRepeatOpts(priorHistoryEntries));
         const m = setupErr instanceof Error ? setupErr.message : String(setupErr);
         git = undefined;
         sandboxUnavailable = true;

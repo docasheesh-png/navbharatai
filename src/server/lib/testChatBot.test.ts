@@ -1256,6 +1256,8 @@ describe('BluesMinds picks models from the key\'s own list and tries the next on
     const result = await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal);
     expect(result).toMatchObject({ content: 'Hello from the second model', model: 'qwen/qwen3-coder' });
     expect(models).toEqual(['deepseek-v4-flash', 'qwen/qwen3-coder']);
+    // The reply names every try, including the one that failed before the answer (admin 2026-11-16).
+    expect(result.tries?.map(t => [t.model, t.outcome])).toEqual([['deepseek-v4-flash', 'HTTP 503 SERVER'], ['qwen/qwen3-coder', 'answered']]);
   });
 
   it('reports every attempt when all three fail, and stops at once on a refused key', async () => {

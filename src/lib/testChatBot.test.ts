@@ -80,3 +80,21 @@ describe('isolated test chat contract', () => {
     expect(formatTestChatDiagnostic(attempts)).toContain('Attempt 1');
   });
 });
+
+
+describe('reply tries (admin 2026-11-16: show which models were tried even when one answered)', () => {
+  const reply = { requestId: 'r', provider: 'bluesminds', content: 'ok', model: 'kimi-k3', latencyMs: 34734, noFallback: true };
+  it('accepts a bounded list of tries and formats it on one line', async () => {
+    const { isTestChatReply, formatTestChatTries } = await import('./testChatBot');
+    const tries = [{ model: 'deepseek-v4-flash', latencyMs: 1100, outcome: 'HTTP 503 model_not_found' }, { model: 'kimi-k3', latencyMs: 33600, outcome: 'answered' }];
+    expect(isTestChatReply({ ...reply, tries })).toBe(true);
+    expect(isTestChatReply(reply)).toBe(true);
+    expect(formatTestChatTries(tries)).toBe('deepseek-v4-flash (HTTP 503 model_not_found, 1.1 s) → kimi-k3 (answered, 33.6 s)');
+  });
+  it('rejects malformed or oversized tries', async () => {
+    const { isTestChatReply } = await import('./testChatBot');
+    expect(isTestChatReply({ ...reply, tries: [{ model: 'm', latencyMs: -1, outcome: 'x' }] })).toBe(false);
+    expect(isTestChatReply({ ...reply, tries: 'nope' })).toBe(false);
+    expect(isTestChatReply({ ...reply, tries: Array.from({ length: 6 }, () => ({ model: 'm', latencyMs: 1, outcome: 'x' })) })).toBe(false);
+  });
+});

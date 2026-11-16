@@ -1,5 +1,5 @@
 import type { Firestore } from 'firebase-admin/firestore';
-import { readTestChatAction, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_MAX_RESPONSE_CHARS,
+import { readTestChatAction, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_MAX_RESPONSE_CHARS, TEST_CHAT_MAX_TRIES,
   TEST_CHAT_PROVIDER_IDS,
   type TestChatAction, type TestChatDiagnostic, type TestChatProviderId, type TestChatProviderStatus,
   type TestChatReply, type TestChatStatus } from '../../lib/testChatBot';
@@ -144,6 +144,11 @@ export const ROUTER_ONE_TEST_MAX_TOKENS = 8_192;
 /** Builder engines that reason before answering get the same room on this page (Kimi, GLM builder, Nemotron, Bedrock GLM). */
 export const BUILDER_TEST_MAX_TOKENS = 8_192;
 const BUILDER_REASONING_KINDS: ReadonlySet<string> = new Set(['kimi', 'glm-builder', 'nemotron', 'bedrock-glm']);
+/** A short outcome for one failed picker try: "HTTP 503 model_not_found", "timeout", "NETWORK". */
+function tryOutcome(t: { httpStatus?: number | null; providerCode?: string | null; timeout?: boolean }): string {
+  if (t.timeout) return 'timeout';
+  return [t.httpStatus ? `HTTP ${t.httpStatus}` : '', t.providerCode ?? ''].filter(Boolean).join(' ').slice(0, 120) || 'failed';
+}
 /** Gateways whose test call picks models from the key's own list and tries the next on failure. */
 const MODEL_PICKER_RUNGS: ReadonlySet<string> = new Set(['bluesminds']);
 export const ROUTER_ONE_PRICE_UNAVAILABLE = 'Router One’s posted price for this model could not be read from router.one, so this page has no spending ceiling for it and did not call it. Choose a model listed on router.one/models, or try again in a few minutes.';
@@ -936,7 +941,9 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
           try {
             const result = await attempt.provider.executeTurn({ prompt: action.messages.at(-1)?.content ?? '', messages: action.messages, signal: bounded, onChunk: () => {} });
             dispatchedModel = model;
-            return finish(action, result.content, result.model || model, startedAt, result.usage);
+            const answered = finish(action, result.content, result.model || model, startedAt, result.usage);
+            return { ...answered, tries: [...tries.map(t => ({ model: t.model ?? 'unknown', latencyMs: t.latencyMs, outcome: tryOutcome(t) })),
+              { model, latencyMs: Date.now() - tried, outcome: 'answered' }].slice(-TEST_CHAT_MAX_TRIES) };
           } catch (error) {
             if (bounded.aborted) throw error;
             const d = detail && 'httpStatus' in detail ? detail : undefined;

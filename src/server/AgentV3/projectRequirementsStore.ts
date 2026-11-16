@@ -112,7 +112,21 @@ export async function ensureLedger(
   isBuildRequest: (text: string) => boolean,
 ): Promise<EnsureResult> {
   const loaded = await store.load(projectId);
-  if (loaded.status === 'ok') return { status: 'ok', ledger: loaded.ledger };
+  if (loaded.status === 'ok' && loaded.ledger.brief) return { status: 'ok', ledger: loaded.ledger };
+  // A stored ledger WITHOUT a brief (every ledger written before the brief was chosen by content) is repaired from
+  // the canonical transcript: the brief and requirements it finds are merged under what was stored.
+  if (loaded.status === 'ok') {
+    let tr: readonly unknown[] | null = null;
+    try { tr = await readTranscript(); } catch { tr = null; }
+    if (tr === null) return { status: 'ok', ledger: loaded.ledger };
+    const rebuilt = rebuildLedger(userMessagesOf(tr).map((m) => ({ ...m, isBuildRequest: isBuildRequest(m.text) })));
+    if (!rebuilt.brief) return { status: 'ok', ledger: loaded.ledger };
+    const known = new Set(rebuilt.processed);
+    let merged = rebuilt;
+    for (const r of loaded.ledger.items) if (!known.has(r.sourceId) && !merged.items.some((x) => x.id === r.id)) merged = { ...merged, items: [...merged.items, r] };
+    try { await store.replace(projectId, merged); } catch { /* the merge still serves this turn */ }
+    return { status: 'rebuilt', ledger: merged };
+  }
 
   let transcript: readonly unknown[] | null = null;
   try { transcript = await readTranscript(); } catch { transcript = null; }

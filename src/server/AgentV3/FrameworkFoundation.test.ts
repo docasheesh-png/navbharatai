@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureViteReactFoundation, isViteReactTarget, sanitizeTsconfigExtends } from './FrameworkFoundation';
+import { ensureViteReactFoundation, isViteReactTarget, sanitizeTsconfigExtends, sanitizeTsconfigReferences } from './FrameworkFoundation';
 
 // The EXACT file set the deep-test Level-1 planner produced (build 7c56b35a) — 5 files, NO package.json.
 const LEVEL1_PLANNER_OUTPUT: Record<string, string> = {
@@ -237,5 +237,129 @@ describe('sanitizeTsconfigExtends — strip a dangling tsconfig `extends` (autop
   it('skips an unparseable tsconfig rather than corrupting it', () => {
     const files = { 'package.json': REACT_PKG, 'tsconfig.json': 'this is not json at all {{{' };
     expect(sanitizeTsconfigExtends(files).fixes).toHaveLength(0);
+  });
+});
+
+
+describe('sanitizeTsconfigReferences — strip a dangling tsconfig.node.json reference (BR1979 f6b4a1c4)', () => {
+  const APP_TSCONFIG = JSON.stringify({
+    compilerOptions: { jsx: 'react-jsx', baseUrl: 'src', paths: { '@/*': ['*'] } },
+    include: ['src'],
+    references: [{ path: './tsconfig.node.json' }],
+  }, null, 2);
+
+  it("removes a missing ./tsconfig.node.json reference from this report's tsconfig (include already present)", () => {
+    const files = {
+      'package.json': '{}',
+      'tsconfig.json': APP_TSCONFIG,
+      'src/App.tsx': 'export default function App(){return null}',
+    };
+    const res = sanitizeTsconfigReferences(files);
+    expect(res.fixes).toHaveLength(1);
+    expect(res.fixes[0].file).toBe('tsconfig.json');
+    expect(res.fixes[0].removed).toEqual(['./tsconfig.node.json']);
+    const out = JSON.parse(res.patch['tsconfig.json']);
+    expect(out.references).toBeUndefined();
+    expect(out.include).toEqual(['src']);
+    expect(out.compilerOptions.jsx).toBe('react-jsx');
+    expect(files['tsconfig.json']).toBe(APP_TSCONFIG); // never mutates input
+  });
+
+  it('KEEPS the reference when tsconfig.node.json is in the same file set', () => {
+    const files = {
+      'tsconfig.json': APP_TSCONFIG,
+      'tsconfig.node.json': JSON.stringify({ compilerOptions: { composite: true }, include: ['vite.config.ts'] }),
+    };
+    expect(sanitizeTsconfigReferences(files).fixes).toHaveLength(0);
+  });
+
+  it('KEEPS the reference when tsconfig.node.json is only on disk (existingPaths)', () => {
+    const files = { 'tsconfig.json': APP_TSCONFIG };
+    expect(sanitizeTsconfigReferences(files, ['tsconfig.node.json']).fixes).toHaveLength(0);
+    expect(sanitizeTsconfigReferences(files, ['./tsconfig.node.json']).fixes).toHaveLength(0);
+  });
+
+  it('KEEPS a Vite 5 solution-style tsconfig (files: [] + references only) even if the node file is missing', () => {
+    const files = {
+      'tsconfig.json': JSON.stringify({ files: [], references: [{ path: './tsconfig.app.json' }, { path: './tsconfig.node.json' }] }),
+    };
+    const res = sanitizeTsconfigReferences(files);
+    expect(res.fixes).toHaveLength(0);
+    expect(Object.keys(res.patch)).toHaveLength(0);
+  });
+
+  it('KEEPS a reference to another project (tsconfig.app.json) and only drops the missing node sibling', () => {
+    const files = {
+      'tsconfig.json': JSON.stringify({
+        include: ['src'],
+        references: [{ path: './tsconfig.app.json' }, { path: './tsconfig.node.json' }],
+      }),
+      'tsconfig.app.json': '{}',
+    };
+    const res = sanitizeTsconfigReferences(files);
+    expect(res.fixes[0].removed).toEqual(['./tsconfig.node.json']);
+    expect(JSON.parse(res.patch['tsconfig.json']).references).toEqual([{ path: './tsconfig.app.json' }]);
+  });
+
+  it('is a no-op on the official starter tsconfig (include, no references)', () => {
+    const files = { 'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true }, include: ['src'] }) };
+    expect(sanitizeTsconfigReferences(files).fixes).toHaveLength(0);
+  });
+
+  it('skips an unparseable tsconfig rather than corrupting it', () => {
+    const files = { 'tsconfig.json': 'this is not json at all {{{' };
+    expect(sanitizeTsconfigReferences(files).fixes).toHaveLength(0);
+  });
+
+  it('resolves a reference against a nested tsconfig directory', () => {
+    const files = {
+      'packages/web/tsconfig.json': JSON.stringify({
+        include: ['src'],
+        references: [{ path: './tsconfig.node.json' }],
+      }),
+    };
+    const res = sanitizeTsconfigReferences(files);
+    expect(res.fixes).toHaveLength(1);
+    expect(sanitizeTsconfigReferences(files, ['packages/web/tsconfig.node.json']).fixes).toHaveLength(0);
+  });
+
+  it('mutation: a missing non-node reference is kept (the strip is not widened)', () => {
+    const files = {
+      'tsconfig.json': JSON.stringify({
+        include: ['src'],
+        references: [{ path: './tsconfig.app.json' }, { path: './tsconfig.node.json' }],
+      }),
+    };
+    const res = sanitizeTsconfigReferences(files);
+    expect(res.fixes[0].removed).toEqual(['./tsconfig.node.json']);
+    expect(JSON.parse(res.patch['tsconfig.json']).references).toEqual([{ path: './tsconfig.app.json' }]);
+  });
+
+  it('strips the dangling node reference when sources are listed in files, not include', () => {
+    const files = {
+      'tsconfig.json': JSON.stringify({
+        files: ['src/main.tsx', 'src/App.tsx'],
+        references: [{ path: './tsconfig.node.json' }],
+      }),
+    };
+    const res = sanitizeTsconfigReferences(files);
+    expect(res.fixes[0].removed).toEqual(['./tsconfig.node.json']);
+    const out = JSON.parse(res.patch['tsconfig.json']);
+    expect(out.references).toBeUndefined();
+    expect(out.files).toEqual(['src/main.tsx', 'src/App.tsx']);
+  });
+
+  it('neighbour: a relative extends is left alone', () => {
+    const raw = JSON.stringify({
+      extends: './tsconfig.base.json',
+      include: ['src'],
+      references: [{ path: './tsconfig.node.json' }],
+    });
+    const files = { 'tsconfig.json': raw };
+    const res = sanitizeTsconfigReferences(files);
+    expect(res.fixes[0].removed).toEqual(['./tsconfig.node.json']);
+    const out = JSON.parse(res.patch['tsconfig.json']);
+    expect(out.extends).toBe('./tsconfig.base.json');
+    expect(out.include).toEqual(['src']);
   });
 });

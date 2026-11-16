@@ -1,0 +1,181 @@
+{
+  "identity": {
+    "reportNumber": 1982,
+    "outcome": "succeeded",
+    "ok": true,
+    "model": "qwen3-coder",
+    "framework": "vite-react",
+    "builtBy": "SURPLUS",
+    "requestSummary": "A short request to make a weather app (generic summary; request details omitted).",
+    "privacy": "Raw prompt and account/workspace/session/history/build identifiers omitted from public evidence; retained report number is the audit reference."
+  },
+  "truncation": {
+    "complete": true
+  },
+  "counts": {
+    "total": 339,
+    "errors": 6,
+    "warnings": 9,
+    "autoResolved": 10,
+    "workarounds": 1,
+    "leftOpen": 1,
+    "healRule": 3,
+    "unresolved": 4
+  },
+  "billing": {
+    "userTier": "weak (free tier \u2014 cheap engines) \u00b7 charged \u20b93.81",
+    "charged": true,
+    "billedButNotDebited": false,
+    "walletDebited": true,
+    "billedUsd": 0.04047,
+    "billedInr": 3.81,
+    "realCostUsd": 0.004387,
+    "sandboxCostUsd": 0.041998,
+    "preSandboxSubtotalUsd": 0.039483,
+    "sandboxFeeUsd": 0.000987075,
+    "sandboxFeePct": 2.5,
+    "walletTokensDebited": 380,
+    "walletDebitedInr": 3.8,
+    "powerMode": false,
+    "powerLevel": "weak",
+    "noClaude": true
+  },
+  "etaAccuracy": {
+    "promisedMs": 346606,
+    "lowMs": 237555,
+    "highMs": 561641,
+    "actualMs": 962276,
+    "ratio": 2.7762820031967133,
+    "withinBand": false,
+    "evidenced": true,
+    "line": "The user was shown 4.0 min\u20139.4 min (midpoint 5.8 min); the build took 16.0 min \u2014 2.8\u00d7 the midpoint and OVER the band (not counting 0.5 min spent waiting for the user's answer).",
+    "key": "app_unsized",
+    "source": "platform"
+  },
+  "requestAnalysis": {
+    "taskType": "app_unsized",
+    "complexityScore": 15,
+    "startTier": "gemini",
+    "startBand": "cheapest band"
+  },
+  "providerDelivery": {
+    "SURPLUS": 76
+  },
+  "llmCallCount": 77,
+  "commandCount": 24,
+  "providerTokens": {
+    "SURPLUS": {
+      "inputTokens": 3186307,
+      "outputTokens": 14271,
+      "cacheReadInputTokens": 2905920
+    }
+  },
+  "cacheReadInputTokens": 2934896,
+  "providerWaste": {
+    "msByKind": {
+      "timeout": 0,
+      "crawl": 0,
+      "silent": 0,
+      "rate-limit": 0,
+      "error": 0
+    },
+    "callsByKind": {
+      "timeout": 0,
+      "crawl": 0,
+      "silent": 0,
+      "rate-limit": 0,
+      "error": 0
+    },
+    "msByFamily": {},
+    "buildMs": 993220
+  },
+  "sandboxUnavailable": {
+    "code": "SANDBOX_UNAVAILABLE",
+    "detailClass": "E2B concurrent-sandbox cap of 20",
+    "recovered": true,
+    "recoveryCode": "SANDBOX_RECOVERED"
+  },
+  "fastLane": {
+    "ran": true,
+    "phasesSeconds": {
+      "plan": 5.6,
+      "contract": 6.9,
+      "generate": 60.7,
+      "verify": 9.7,
+      "verifyRuns": 2,
+      "repair": 20.7,
+      "repairRounds": 1,
+      "other": 5,
+      "total": 108.6
+    },
+    "outcome": "TYPECHECK_FAILED",
+    "verifyErrorClass": "TS6053 dangling tsconfig.node.json reference",
+    "salvagedFiles": 12,
+    "platformWriteRefused": {
+      "refusedInPass": 1,
+      "of": 2,
+      "pathClass": "generated TypeScript types file",
+      "reasonClass": "syntax Unexpected <<"
+    }
+  },
+  "tsconfigSnapshotClass": {
+    "prefix": "JSONC Vite-style compilerOptions (moduleResolution bundler, DOM lib, no jsx, include src, no references)",
+    "tail": "leftover apply-patch SEARCH/REPLACE block whose SEARCH side named a tsconfig.node.json reference",
+    "syntaxGateSkippedBecause": "tsconfig is treated as JSONC"
+  },
+  "laterCompileClasses": [
+    "tsc binary missing during install",
+    "TS17004 jsx flag not set",
+    "unused React import",
+    "older tsc rejected moduleResolution bundler and allowImportingTsExtensions",
+    "allowSyntheticDefaultImports / default import"
+  ],
+  "readiness": {
+    "rendered": true,
+    "journeyPassed": true,
+    "mobileLayoutOk": true,
+    "releaseGate": "YELLOW",
+    "releaseGateReasonClass": "remaining dependency advisories that need a major upgrade",
+    "errorBoundaryWarning": true,
+    "errorBoundaryAutoResolvedMeans": "non-blocking reporting, not proof a boundary was added",
+    "cssClassesHealed": true,
+    "e2eScaffoldedNotRun": true
+  },
+  "problemCodes": [
+    "SANDBOX_UNAVAILABLE",
+    "TOOL_ERROR",
+    "PLATFORM_WRITE_REFUSED",
+    "SIMPLE_BUILD_VERIFY_ERROR",
+    "SANDBOX_CMD_FAILED",
+    "SANDBOX_CMD_FAILED",
+    "SANDBOX_CMD_FAILED",
+    "TOOL_ERROR",
+    "DEPENDENCY_VULNERABILITIES",
+    "SANDBOX_CMD_FAILED",
+    "SANDBOX_CMD_FAILED",
+    "READINESS_WARNING",
+    "CSS_CLASSES_UNDEFINED",
+    "TOOL_ERROR",
+    "RELEASE_GATE"
+  ],
+  "closedOnMainBy": {
+    "D1_fastLaneAgainstDeadWorkspace": "BR1952 #4124 FAST_LANE_SKIPPED_SANDBOX",
+    "D2_retryGoodbye": "BR1961 F2 #4146 sandboxUnavailableNotice",
+    "D3_danglingTsconfigNodeReference": "BR1979 #4241 sanitizeTsconfigReferences",
+    "D4_typescriptMarkupSyntaxRefuse": "write-time syntax gate"
+  },
+  "shipped": {
+    "D5_conflictMarkupGuardAndTsconfigSalvage": "After salvage, conflictMarkerRefusal refuses only config-like files the syntax gate skips (tsconfig, json, jsonc). JS/TS that still parses, Markdown, plain text, and diff/patch are exempt. Repair-in-progress and the kill switch stay. sanitizeTsconfigReferences / healTsconfigConflictTail still drop a parseable trailing marker block (unchanged; review judged salvage sound).",
+    "D6_ensureTsconfigJsx": "Inserts jsx: react-jsx (comments kept; no JSON.stringify) only when the app is clearly React, the flag is absent, the tsconfig has a DOM lib, and it has no extends, no jsxImportSource, and no next plugin. Next / official Vue / Solid / Preact / extends / commented-without-React-evidence are left alone so TS17004 stays visible. ensureTsconfigBaseUrl's commented-tsconfig contract is unchanged."
+  },
+  "reviewFix": {
+    "failedAt": "14193bac6",
+    "reason": "t311u: conflict guard and jsx heal were too broad; salvage kept",
+    "narrowed": ["conflictMarkerRefusal path scope", "ensureTsconfigJsx React-only insertion"]
+  },
+  "queueUpdated": [
+    "Q-2621",
+    "Q-2362",
+    "Q-2367"
+  ]
+}

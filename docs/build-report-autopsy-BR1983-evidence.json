@@ -1,0 +1,17 @@
+{
+  "evidenceType": "synthetic-regression-cases",
+  "privateReportPayloadIncluded": false,
+  "cases": [
+    "proven concurrent-cap refusal during reconnect preserves the recorded machine",
+    "a subsequent attempt reconnects the same recorded identity",
+    "unknown non-404 errors refuse replacement",
+    "typed provider 404 retains existing recovery behavior",
+    "setup wrapping preserves the diagnostic reason without exposing it in user events"
+  ],
+  "limitations": [
+    "not a replay of a customer build",
+    "not production or deployment validation",
+    "no proof of an actual provider capacity incident",
+    "full exact-tree CI remains required"
+  ]
+}

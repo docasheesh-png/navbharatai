@@ -65,9 +65,15 @@ describe('the ETA record states what the user was shown', () => {
     const at = code.indexOf('const etaShown = ');
     const assignment = code.slice(at, code.indexOf(';', at));
     expect(assignment).toMatch(/EtaLine\(/);
-    // …the report must quote that same binding…
-    expect(code).toMatch(/code: 'ETA_BASIS'[\s\S]{0,600}?Shown to the user: "\$\{etaShown/);
-    // …and the user must be emitted that same binding, not a second rendering of it.
-    expect(code).toMatch(/type: 'narration'[^\n]*text: etaShown/);
+    // The report quotes that same binding via openingEtaShownNote (BR1984). The helper says
+    // "Shown to the user" only when the line was actually shown; otherwise it records that the
+    // estimate was withheld until workspace setup, or skipped on a module turn.
+    expect(code).toMatch(/code: 'ETA_BASIS'[\s\S]{0,600}?openingEtaShownNote\([\s\S]{0,250}?etaShown\)/);
+    // …and the user is emitted that same binding, not a second rendering of it — immediately, or
+    // after a prior reconnect refusal, once the workspace is up.
+    expect(code).toContain('recordOrEmitOpeningEta(etaShown,');
+    expect(code).toContain('emitPendingOpeningEta(pendingEtaShown,');
+    expect(code).toMatch(/recordOrEmitOpeningEta\(etaShown[\s\S]{0,250}?type: 'narration'[\s\S]{0,80}?agent: 'architect'[\s\S]{0,40}?text,/);
+    expect(code).toMatch(/emitPendingOpeningEta\(pendingEtaShown[\s\S]{0,250}?type: 'narration'[\s\S]{0,80}?agent: 'architect'[\s\S]{0,40}?text,/);
   });
 });

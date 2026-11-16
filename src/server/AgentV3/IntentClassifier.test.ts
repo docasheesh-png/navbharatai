@@ -38,6 +38,30 @@ describe('isExplicitCompleteBuild — a full-app build wins over the non-empty-w
     expect(isExplicitCompleteBuild('change the app name to Acme')).toBe(false);
     expect(isExplicitCompleteBuild('')).toBe(false);
   });
+
+  it('does not treat "the whole app" / "the entire application" as a new complete product (BR1986)', () => {
+    // Independently written paraphrases of a change applied to an existing app.
+    const edits = [
+      'Please make the whole app easy to use on a phone, with no sideways scrolling.',
+      'Make the entire application comfortable on a mobile screen and friendly to touch.',
+      'Can you make the full website work well on a phone?',
+      'Make the whole dashboard faster on small screens.',
+      'Make the whole app ask for KYC before a payment is sent.',
+      'poori app ko mobile par aaram se use karne layak banao, sideways scroll na ho',
+      'poori application ko phone par comfortable bana do',
+    ];
+    for (const prompt of edits) {
+      expect(isExplicitCompleteBuild(prompt), prompt).toBe(false);
+    }
+  });
+
+  it('still recognises a new complete product in English and Hindi (BR1986 neighbours)', () => {
+    expect(isExplicitCompleteBuild('Create a complete Hospital OPD Management System')).toBe(true);
+    expect(isExplicitCompleteBuild('Create the complete Hospital OPD Management System')).toBe(true);
+    expect(isExplicitCompleteBuild('build a complete e-commerce website')).toBe(true);
+    expect(isExplicitCompleteBuild('Make a whole app for inventory management')).toBe(true);
+    expect(isExplicitCompleteBuild('ek complete hospital OPD management system banao')).toBe(true);
+  });
 });
 
 describe('wantsFreshStart — only an EXPLICIT reset overrides "edit the existing project"', () => {

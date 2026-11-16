@@ -23,6 +23,7 @@
 
 import { hasEndFileMarker, parseFileBlocks } from './OneShotBuilder';
 import { binaryTextGenerationProblem } from './binaryTextWrite';
+import { isBinaryAsset } from './fileClassification';
 
 /** Provider stop reasons that mean "I ran out of output budget", not "I finished". */
 export function isTruncatedStop(stopReason: string | null | undefined): boolean {
@@ -268,6 +269,22 @@ export async function continueFastLaneGeneration<T extends FastLaneReply>(
 }> {
   // BR1952's JPEG continuation could never become a valid text write. This boundary also
   // covers one-shot and repair replies, which have no manifest to reject in advance.
+  // A truncated, still-open binary block is the sibling (autopsy BR1987): parseFileBlocks
+  // may accept an unterminated `<<<FILE …png>>>`, the loop then "rejoined" it, and the
+  // later text-write refusal was the only thing that saved the project from a broken image.
+  // Drop that tail first so completed text files are kept and the binary is not continued.
+  let firstText = first.text;
+  const openBinary = unterminatedTailPath(firstText);
+  if (openBinary && isBinaryAsset(openBinary)) {
+    const cut = firstText.lastIndexOf('<<<FILE');
+    firstText = cut >= 0 ? firstText.slice(0, cut) : firstText;
+    // A reply that was only a truncated binary must still fail here, as BR1952 requires.
+    // Do not return an empty success after dropping the tail. Completed text files stay.
+    if (!firstText.trim()) {
+      throw new Error(binaryTextGenerationProblem([{ path: openBinary }]) ?? `binary continuation refused: ${openBinary}`);
+    }
+    first = { ...first, text: firstText };
+  }
   const firstBinaryProblem = binaryTextGenerationProblem(parseFileBlocks(first.text));
   if (firstBinaryProblem) throw new Error(firstBinaryProblem);
   let text = first.text;
@@ -293,6 +310,12 @@ export async function continueFastLaneGeneration<T extends FastLaneReply>(
       break;
     }
     const rejoined = resumedFilePath(text, next.text);
+    if (rejoined && isBinaryAsset(rejoined)) {
+      const cut = text.lastIndexOf('<<<FILE');
+      if (cut >= 0) text = text.slice(0, cut);
+      failure = { error: new Error(binaryTextGenerationProblem([{ path: rejoined }]) ?? `binary continuation refused: ${rejoined}`) };
+      break;
+    }
     if (rejoined) deps.onRejoined?.(rejoined);
     // A model can skip the interrupted file and start a different one. The parser deliberately
     // accepts missing end markers, so that would hide the known partial behind a complete final

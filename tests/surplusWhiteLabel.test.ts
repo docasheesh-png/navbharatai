@@ -14,6 +14,13 @@ describe('Surplus backend identity stays private without rewriting user integrat
     }
     expect(hasProviderLeak(text)).toBe(true);
   });
+  it('redacts the other supplier names a guest must not read', () => {
+    const raw = 'Reply from Qubax via Groq, OpenRouter, Mitrify, Sarvam, Qwen and Llama.';
+    const clean = redactProvidersText(raw);
+    expect(clean).not.toMatch(/qubax|groq|openrouter|mitrify|sarvam|qwen|llama/i);
+    expect(hasProviderLeak(clean)).toBe(false);
+    expect(hasProviderLeak(raw)).toBe(true);
+  });
   it('preserves the ordinary financial word surplus', () => {
     expect(redactProvidersText('The budget has a surplus this month.')).toBe('The budget has a surplus this month.');
     expect(hasProviderLeak('The budget has a surplus this month.')).toBe(false);

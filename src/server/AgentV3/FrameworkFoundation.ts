@@ -18,6 +18,7 @@
 // unit-testable without a sandbox.
 
 import { extractImportedPackages } from './DependencyReconciler';
+import { stripTrailingConflictMarkup } from './conflictMarkerGuard';
 
 export interface FoundationResult {
   /** ONLY the newly-synthesized foundational files, keyed by workspace-relative path. Empty when the
@@ -280,12 +281,18 @@ export interface TsconfigExtendsFix {
 export interface TsconfigSanitizeResult {
   patch: Record<string, string>;
   fixes: TsconfigExtendsFix[];
+  /** Paths whose trailing apply-patch / merge-conflict markup was dropped (BR1982). */
+  stripped?: string[];
 }
 
 const TSCONFIG_BASENAME_RE = /(?:^|\/)tsconfig(?:\.[\w-]+)?\.json$/i;
 
 /** Tolerant JSONC parse (tsconfig allows // and block comments + trailing commas). Returns null on failure
  *  so the caller leaves the file untouched. */
+export function parseTsconfigJsonc(text: string): Record<string, unknown> | null {
+  return parseJsonc(text);
+}
+
 function parseJsonc(text: string): Record<string, unknown> | null {
   const attempt = (s: string): Record<string, unknown> | null => {
     try {
@@ -367,6 +374,102 @@ export function sanitizeTsconfigExtends(files: Record<string, string>): Tsconfig
     fixes.push({ file: path, removed });
   }
   return { patch, fixes };
+}
+
+/**
+ * Strip a tsconfig `references` entry that points at a sibling `tsconfig.node.json` which is not
+ * in the file set and not already on disk.
+ *
+ * Autopsy BR1979 (f6b4a1c4): the fast lane wrote a Vite-style tsconfig.json with
+ * `"references": [{ "path": "./tsconfig.node.json" }]` and `"include": ["src"]`, but never wrote
+ * tsconfig.node.json. `tsc` failed TS6053, the lane handed off, and the full builder spent the
+ * next 15 minutes finishing an app that had already been generated. The official vite-react
+ * starter tsconfig has `include: ["src"]` and no project references — the node config is a
+ * sibling for vite.config.ts, not something the app tsconfig must list.
+ *
+ * SAFE by construction (owner t311u):
+ *   - only drops a reference whose resolved basename is `tsconfig.node.json`
+ *   - and only when that file is absent from `files` AND `existingPaths`
+ *   - and only when the tsconfig already has a non-empty `include` or `files` (so a Vite 5
+ *     solution-style `{ "files": [], "references": [...] }` is left untouched — stripping its
+ *     last reference would leave a config that typechecks nothing)
+ *   - other references, relative `extends`, and unparseable JSONC are never touched
+ *   - never mutates its input
+ *
+ * Same kill switch as the extends sanitizer: AGENTV3_TSCONFIG_SANITIZE=off at the call sites.
+ */
+function normalizeRelPath(p: string): string {
+  const parts: string[] = [];
+  for (const seg of p.replace(/\\/g, '/').split('/')) {
+    if (!seg || seg === '.') continue;
+    if (seg === '..') { if (parts.length) parts.pop(); continue; }
+    parts.push(seg);
+  }
+  return parts.join('/');
+}
+
+/** Resolve a tsconfig `references[].path` against the tsconfig's own directory. Null if not a path. */
+function resolveTsconfigReference(fromTsconfigPath: string, refPath: unknown): string | null {
+  if (typeof refPath !== 'string' || !refPath.trim()) return null;
+  const spec = refPath.trim();
+  if (!spec.startsWith('.') && !spec.startsWith('/')) return null; // bare package — not a file reference
+  const dir = fromTsconfigPath.includes('/') ? fromTsconfigPath.slice(0, fromTsconfigPath.lastIndexOf('/')) : '';
+  const joined = spec.startsWith('/') ? spec : (dir ? `${dir}/${spec}` : spec);
+  return normalizeRelPath(joined);
+}
+
+function tsconfigHasOwnSources(json: Record<string, unknown>): boolean {
+  return (Array.isArray(json.include) && json.include.length > 0)
+    || (Array.isArray(json.files) && json.files.length > 0);
+}
+
+export function sanitizeTsconfigReferences(
+  files: Record<string, string>,
+  existingPaths: readonly string[] = [],
+): TsconfigSanitizeResult {
+  const patch: Record<string, string> = {};
+  const fixes: TsconfigExtendsFix[] = [];
+  const stripped: string[] = [];
+  if (!files || typeof files !== 'object') return { patch, fixes, stripped };
+  const known = new Set<string>([
+    ...Object.keys(files).map(normalizeRelPath),
+    ...existingPaths.map((p) => normalizeRelPath(String(p))),
+  ]);
+  for (const [path, content] of Object.entries(files)) {
+    if (!TSCONFIG_BASENAME_RE.test(path) || typeof content !== 'string') continue;
+    let text = content;
+    const cut = stripTrailingConflictMarkup(content);
+    if (cut.stripped && parseJsonc(cut.content)) {
+      text = cut.content;
+      stripped.push(path);
+      patch[path] = text;
+    }
+    const json = parseJsonc(text);
+    if (!json || !Array.isArray(json.references) || json.references.length === 0) continue;
+    if (!tsconfigHasOwnSources(json)) continue; // solution-style configs stay as they are
+    const removed: string[] = [];
+    const kept: unknown[] = [];
+    for (const entry of json.references as unknown[]) {
+      const refPath = entry && typeof entry === 'object' && !Array.isArray(entry)
+        ? (entry as { path?: unknown }).path
+        : undefined;
+      const resolved = resolveTsconfigReference(path, refPath);
+      const isDanglingNode = !!resolved
+        && /(?:^|\/)tsconfig\.node\.json$/i.test(resolved)
+        && !known.has(resolved);
+      if (isDanglingNode) {
+        removed.push(typeof refPath === 'string' ? refPath : resolved);
+        continue;
+      }
+      kept.push(entry);
+    }
+    if (removed.length === 0) continue;
+    if (kept.length === 0) delete json.references;
+    else json.references = kept;
+    patch[path] = `${JSON.stringify(json, null, 2)}\n`;
+    fixes.push({ file: path, removed });
+  }
+  return { patch, fixes, stripped };
 }
 
 /**

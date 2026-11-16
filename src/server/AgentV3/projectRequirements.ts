@@ -156,7 +156,14 @@ function trim(items: Requirement[]): Requirement[] {
 export function applyMessage(ledger: RequirementLedger, msg: LedgerMessage): RequirementLedger {
   const text = String(msg?.text ?? '');
   const id = String(msg?.id ?? '');
-  if (!id || !text.trim() || ledger.processed.includes(id)) return ledger;
+  if (!id || !text.trim()) return ledger;
+  // A message already folded in is a no-op — EXCEPT that it may still become the brief. 🔴 Autopsy 57604006: the
+  // brief was recorded from `intent === 'new_build'`, which was false on the live turn, so the very message that
+  // asked for the app was stored as a plain message and (being "already processed") could never be promoted.
+  if (ledger.processed.includes(id)) {
+    if (ledger.brief || !msg.isBuildRequest) return ledger;
+    return { ...ledger, brief: { id: `${id}#brief`, kind: 'brief', text: clip(text, BRIEF_MAX_CHARS), sourceId: id, ts: msg.ts, topic: topicOf(text) } };
+  }
 
   let brief = ledger.brief;
   let items = ledger.items.slice();

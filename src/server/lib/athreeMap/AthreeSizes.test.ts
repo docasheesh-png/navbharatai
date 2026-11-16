@@ -35,11 +35,11 @@ describe('the reference size is untouched', () => {
 });
 
 describe('a stretched world is the reference world stretched', () => {
-  it('the ground at (x, z) is the reference ground at (x*k, z*k), taller by k^-0.75', () => {
+  it('the ground at (x, z) is the reference ground at (x*k, z*k), taller by heightStretch(k)', () => {
     const ref = A.createAthreeWorld({ seed: 5 });
     for (const km of [1, 10, 400]) {
       const w = A.createAthreeWorld({ seed: 5, sizeMeters: km * 1000 });
-      const k = 100 / km; const vs = Math.pow(k, -0.75);
+      const k = 100 / km; const vs = A.heightStretch(k);
       for (const [x, z] of spread(km * 1000, 9)) expect(w.baseHeightAt(x, z), `${km} km`).toBeCloseTo(ref.baseHeightAt(x * k, z * k) * vs, 6);
     }
   });
@@ -49,6 +49,13 @@ describe('a stretched world is the reference world stretched', () => {
     expect(p1).toBeLessThan(p100); expect(p100).toBeLessThan(p1000);
     expect(p1000 / p100).toBeLessThan(10); // not as tall as it is wide
     expect(p1000).toBeLessThan(12000);   // nothing taller than a real mountain
+  });
+});
+
+describe('the stretch never makes a map a wall', () => {
+  it('slopes change by k * heightStretch(k): never more than 1.7 times steeper than the reference, at ANY size', () => {
+    expect(A.heightStretch(1)).toBe(1);
+    for (let km = 1; km <= 1000; km *= 1.37) { const k = 100 / km; const slope = k * A.heightStretch(k); expect(slope, `${km.toFixed(1)} km`).toBeLessThan(1.7); expect(slope).toBeGreaterThan(0.15); }
   });
 });
 

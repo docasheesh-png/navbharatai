@@ -329,6 +329,68 @@ describe('game domain', () => {
     );
     expect(g.domain).toBe('game');
   });
+
+  it('Hindi "log" meaning people does not turn a clearly named game into fintech', () => {
+    // Independently written paraphrases. Hindi "log" means people; a bare /log/ audit-log
+    // feature used to give fintech a feature score of 1 against a game that scored 0 on
+    // the playability features a prompt usually omits. Extra game headlines (multiplayer,
+    // khel) already beat a single bank headline once that false score is gone, so no
+    // game-as-product tie-break is required.
+    for (const prompt of [
+      'Please build a multiplayer puzzle-adventure game set in a hillside town. Visitors talk to kuchh log in the square, and a bank lobby is only scenery.',
+      'Ek puzzle-adventure khel banana hai, multiplayer ho, pahadi sheher ho, sheher ke chauraha par kuchh log hon, aur ek bank ki building sirf backdrop ho.',
+      'Make a turn-based card game where kuchh log sit around a table and take turns.',
+    ]) {
+      const g = analyzeRequirementGaps(prompt);
+      expect(g.domain, prompt).toBe('game');
+      expect(g.mentioned, prompt).not.toContain('audit log');
+      expect(g.likelyMissing.join(' | '), prompt).toMatch(/win \/ lose/i);
+      expect(g.likelyMissing.join(' | '), prompt).not.toMatch(/KYC/i);
+    }
+  });
+
+  it('a real bank or wallet product is still fintech, including when it names an audit log', () => {
+    expect(analyzeRequirementGaps('Build a mobile banking app with savings accounts, UPI payments, and KYC.').domain).toBe('fintech');
+    expect(analyzeRequirementGaps('a mobile wallet app with UPI and KYC').domain).toBe('fintech');
+    const audited = analyzeRequirementGaps('Build a neobank wallet with KYC and an audit log of every transfer');
+    expect(audited.domain).toBe('fintech');
+    expect(audited.mentioned).toContain('audit log');
+    expect(analyzeRequirementGaps('Add gamification badges to our banking app with KYC and UPI wallet').domain).toBe('fintech');
+  });
+
+  it('mixed product-and-game requests stay on the earlier business domain', () => {
+    const cases: Array<{ prompt: string; domain: string }> = [
+      { prompt: 'Mujhe ek bank app chahiye with a small game for kids', domain: 'fintech' },
+      { prompt: 'Bank app chahiye with a small game on the home screen', domain: 'fintech' },
+      { prompt: 'Build a bank app with a small game for kids on the home screen', domain: 'fintech' },
+      { prompt: 'Add a game to our banking app with KYC', domain: 'fintech' },
+      { prompt: 'Make a fantasy cricket game with a wallet and real-money prizes', domain: 'fintech' },
+      { prompt: 'Mujhe ek wallet app chahiye jisme ek chota game ho aur real-money prizes hon', domain: 'fintech' },
+      { prompt: 'Build a gym membership app with a small game for kids', domain: 'fitness' },
+      { prompt: 'Mujhe ek gym app chahiye with a small game for members', domain: 'fitness' },
+      { prompt: 'Make a school app with a small game on the home screen', domain: 'education' },
+      { prompt: 'Mujhe ek education app chahiye with a small game for students', domain: 'education' },
+      { prompt: 'Create a school portal with a small game for students', domain: 'education' },
+      { prompt: 'Build a hospital clinic app with a small game in the waiting room', domain: 'healthcare' },
+      { prompt: 'Mujhe ek clinic app chahiye with a small game for kids', domain: 'healthcare' },
+      { prompt: 'Build a shop app with a small game for regular customers', domain: 'ecommerce' },
+    ];
+    for (const { prompt, domain } of cases) {
+      const g = analyzeRequirementGaps(prompt);
+      expect(g.domain, prompt).toBe(domain);
+      expect(g.domain, prompt).not.toBe('game');
+    }
+  });
+
+  it('a hospital that names an audit log still records that feature, and a login is not an audit log', () => {
+    const named = analyzeRequirementGaps('A hospital system with staff roles and an audit log of every change');
+    expect(named.domain).toBe('healthcare');
+    expect(named.mentioned).toContain('audit log of record changes');
+    const loginOnly = analyzeRequirementGaps('A hospital system with staff roles and a login page');
+    expect(loginOnly.domain).toBe('healthcare');
+    expect(loginOnly.mentioned).not.toContain('audit log of record changes');
+    expect(loginOnly.likelyMissing).toContain('audit log of record changes');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────

@@ -49,13 +49,21 @@ export function boundDevanagari(re: RegExp): RegExp {
 
 // Each feature carries a regex that decides whether the prompt already MENTIONS it (so we only ask about
 // what's genuinely missing). Kept deterministic + dependency-free.
+
+// An audit / change / activity log the product keeps.
+// Never a bare "log": in Hindi, "log" means "people", so a game that named "kuchh log" was scored as
+// fintech (the audit-log feature fired and beat a zero-scoring game domain). In English the same stem
+// sits inside login, blog, catalog, logic, logo, and logistics.
+const AUDIT_LOG_FEATURE_RE =
+  /audit(?:\s+(?:logs?|trail))?|\b(?:activity|change|event|access)\s+logs?\b|\blogs?\s+of\s+(?:changes?|activity|events?|records?|access)\b|\btrack changes\b/i;
+
 const DOMAINS: DomainDef[] = [
   {
     key: 'healthcare',
     re: /hospital|clinic|patient|\bemr\b|\behr\b|health|medical|doctor|pharmacy|appointment|\blab\b|diagnos|\baspatal\b|\bmareez\b|\bdawai\b|\bdavai\b|\bdavakhana\b|\bilaj\b|\bchikitsa\b|\bswasthya\b|अस्पताल|क्लिनिक|मरीज|दवाई|दवाखाना|इलाज|चिकित्सा|स्वास्थ्य|डॉक्टर/i,
     features: [
       { label: 'role-based access (staff / doctor / admin)', re: /role|rbac|permission|staff|admin|access control/i },
-      { label: 'audit log of record changes', re: /audit|history|log|track changes/i },
+      { label: 'audit log of record changes', re: new RegExp(`${AUDIT_LOG_FEATURE_RE.source}|history`, 'i') },
       { label: 'patient records (EMR) with privacy', re: /emr|ehr|record|history|privacy|hipaa/i },
       { label: 'appointment / scheduling flow', re: /appointment|schedul|booking|calendar|slot/i },
       { label: 'pharmacy / inventory', re: /pharmacy|inventory|stock|medicine|drug/i },
@@ -77,7 +85,7 @@ const DOMAINS: DomainDef[] = [
       { label: 'low-stock alerts', re: /low.?stock|reorder|threshold|alert/i },
       { label: 'items with units + suppliers', re: /unit|vendor|supplier|sku|item/i },
       { label: 'reports & export', re: /report|export|excel|csv|download/i },
-      { label: 'audit trail of changes', re: /audit|history|log/i },
+      { label: 'audit trail of changes', re: new RegExp(`${AUDIT_LOG_FEATURE_RE.source}|history`, 'i') },
       { label: 'roles (who may change stock)', re: /role|rbac|permission|admin|staff/i },
     ],
   },
@@ -234,7 +242,7 @@ const DOMAINS: DomainDef[] = [
       { label: 'transaction ledger + statements', re: /ledger|transaction|statement|history|balance/i },
       { label: 'secure auth + 2FA', re: /2fa|otp|two.?factor|mfa|biometric|pin/i },
       { label: 'fraud / limit checks', re: /fraud|limit|risk|suspicious|block/i },
-      { label: 'audit log', re: /audit|log|track changes/i },
+      { label: 'audit log', re: AUDIT_LOG_FEATURE_RE },
       { label: 'payments / transfers', re: /pay|payment|transfer|deposit|withdraw|payout/i },
       { label: 'roles (admin / user)', re: /role|rbac|permission|admin/i },
     ],
@@ -303,7 +311,7 @@ const DOMAINS: DomainDef[] = [
     features: [
       { label: 'contact / lead management (profiles, company, activity history)', re: /contact|lead|customer|client|account|company/i },
       { label: 'sales pipeline with deal stages (kanban: lead → qualified → won/lost)', re: /pipeline|deal|stage|kanban|funnel|opportunit|\bwon\b|\blost\b|qualif/i },
-      { label: 'activity timeline, notes & tasks per contact', re: /activit|note|task|follow.?up|reminder|timeline|interaction|\blog\b/i },
+      { label: 'activity timeline, notes & tasks per contact', re: /activit|note|task|follow.?up|reminder|timeline|interaction|\b(?:call|activity|contact)\s+logs?\b|\blog(?:ged|ging)?\s+(?:a\s+)?(?:calls?|activities|notes?|interactions?)/i },
       { label: 'pipeline-value dashboard & sales reporting', re: /dashboard|report|pipeline value|revenue|forecast|metric|analytic/i },
       { label: 'search & filters across contacts and deals', re: /search|filter|sort|segment/i },
       { label: 'roles (sales rep / manager / admin)', re: /role|rbac|permission|\brep\b|manager|team|admin/i },
@@ -557,6 +565,12 @@ const NON_DOMAIN_USES: RegExp[] = [
   // booking app, and would have been told to include payments, deposits and a cancellation policy.
   /\b(?:reference|text|study|course|note|exercise|work|practice|question|guide|school|college|coaching|revision)\s*-?\s*books?\b/gi,
   /\bbooks?\s+(?:progress|completed|finished|solved|read|chapters?|summar(?:y|ies)|notes|tracker|tracking|list|wise)\b/gi,
+  // fintech / audit-log features — Hindi "log" means "people", not an audit log
+  // (a game that named "kuchh log" was scored as fintech because a bare /log/ feature fired).
+  /\b(?:kuchh|yeh|ye|woh|wo|sab|saare|saara|saari|kai|zyada|bahut|jo|jin|un|inke|mere|apne|har|kisi|koi)\s+logs?\b/gi,
+  /\blogs?\s+(?:ho|hain|hai|hoga|honge|the|tha|thi|theen)\b/gi,
+  /\blogon\b/gi,
+  /लोगों|(?<![\wऀ-ॿ])लोग(?![\wऀ-ॿ])/g,
 ];
 
 /**

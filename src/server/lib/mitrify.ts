@@ -1,7 +1,16 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
-import { mitrifySwitchOn } from './alwaysOnSuppliers';
+
+/**
+ * Mitrify's default-on switch (owner t357u). Same rule as alwaysOnSuppliers.mitrifySwitchOn, written
+ * here because this file is also run directly by Node (`npm run test:mitrify`) and must stay free of
+ * extensionless local imports. tests/alwaysOnSuppliers.test.ts proves the two never disagree.
+ */
+const MITRIFY_OFF_VALUES = new Set(['off', 'false', '0', 'no', 'n', 'disable', 'disabled']);
+export function mitrifyDefaultSwitchOn(env: Record<string, string | undefined> = process.env): boolean {
+  return !MITRIFY_OFF_VALUES.has(String(env.MITRIFY_CHAIN_ENABLED ?? '').trim().toLowerCase());
+}
 
 /** Server-only transport. No upstream provider catalogue, pricing or capability assumptions. */
 type Env = Record<string, string | undefined>;
@@ -114,7 +123,7 @@ export async function runApprovedMitrifyChain(options: {
   { kind: 'response'; content: string; model: string; usage?: { inputTokens: number; outputTokens: number } }
 > {
   const defaultOn = options.defaultOn === true;
-  const switchedOn = () => (defaultOn ? mitrifySwitchOn(env) : env.MITRIFY_CHAIN_ENABLED === '1');
+  const switchedOn = () => (defaultOn ? mitrifyDefaultSwitchOn(env) : env.MITRIFY_CHAIN_ENABLED === '1');
   if (!switchedOn()) return { kind: 'skipped', reason: 'mitrify-chain-disabled' };
   // Snapshot server classification; a later caller mutation cannot broaden the reviewed scope.
   const privateTurn = options.privateTurn, healthTurn = options.healthTurn;

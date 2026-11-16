@@ -3,6 +3,7 @@ import { ALWAYS_ON_MAX_COOLDOWN_MS, mitrifySwitchOn, qubaxSwitchOn } from '../sr
 import { DEFAULT_ORDER } from '../src/server/AI/FreeChain/config';
 import { prioritizeChatSuppliers } from '../src/server/AI/fixedTextChain';
 import { qubaxRequestCeilingNanoUsd } from '../src/server/lib/qubaxMarket';
+import { mitrifyDefaultSwitchOn } from '../src/server/lib/mitrify';
 
 // Owner t357u + t359u (2026-11-16): Mitrify, Qubax and CheaperInference always on; one Chat order.
 describe('always-on suppliers', () => {
@@ -16,6 +17,12 @@ describe('always-on suppliers', () => {
     for (const raw of ['off', 'false', '0', 'no', 'OFF']) {
       expect(qubaxSwitchOn({ QUBAX_ENABLED: raw })).toBe(false);
       expect(mitrifySwitchOn({ MITRIFY_CHAIN_ENABLED: raw })).toBe(false);
+    }
+  });
+  it("Mitrify's self-contained switch agrees with the shared helper on every value", () => {
+    for (const raw of [undefined, '', ' ', 'on', 'ON', '1', 'true', 'yes', 'y', 'enable', 'enabled', 'odd',
+      'off', 'OFF', ' off ', 'false', '0', 'no', 'n', 'disable', 'disabled']) {
+      expect(mitrifyDefaultSwitchOn({ MITRIFY_CHAIN_ENABLED: raw })).toBe(mitrifySwitchOn({ MITRIFY_CHAIN_ENABLED: raw }));
     }
   });
   it('a missing key still means nothing to call (no invented supplier)', () => {

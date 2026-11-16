@@ -2,12 +2,9 @@
  * CheaperInference — one simple mode switch (owner 2026-10-26).
  *
  * Env: CHEAPERINFERENCE=off|admin|all  (also accepts CheaperInference=…)
- *   off   — never use (default)
- *   admin — ONLY verified admin Free Chat replies; free-chain ladder OFF for those
- *           replies so every admin answer comes from CheaperInference
- *   all   — would put this key on every Free Chat user. Keak terms §6 forbid shared
- *           access unless Keak has permitted it in writing, so `all` does not dispatch
- *           until CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION=on.
+ *   off   — never use (explicit kill switch only)
+ *   admin — verified admins get the exclusive CheaperInference path; everyone else keeps the rung
+ *   all   — every Free Chat user (DEFAULT when unset; owner t357u/t365u; no written-permission gate)
  *
  * Beam chat (model card, Reflection): reasoning effort is only low|medium|high|xhigh|max.
  * Admin sends `low` (the fastest allowed) and 2048 output tokens so thinking cannot

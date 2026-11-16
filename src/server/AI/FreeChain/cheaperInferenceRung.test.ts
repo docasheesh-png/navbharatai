@@ -49,6 +49,20 @@ describe('CheaperInference FreeChain paid rung (simple mode)', () => {
     expect(admin.keyEnv).toBe('CHEAPERINFERENCE_API_KEY');
   });
 
+  // Owner t365u: ON for all users by default; the written-permission flag is not a gate; only off disables.
+  it.each([
+    [{}, undefined], [{ CHEAPERINFERENCE: 'all' }, undefined], [{ CHEAPERINFERENCE: 'admin' }, undefined],
+    [{ CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION: 'off' }, undefined],
+  ] as const)('t365u: cheapinf rung is open for every user with %j', (extra, reason) => {
+    const rung = freeChainConfig({ CHEAPERINFERENCE_API_KEY: 'ci_live_test_key', ...extra }).rungs.find(r => r.id === 'cheapinf')!;
+    expect(rung.reason).toBe(reason);
+    expect(rung.reason).not.toBe('terms-shared-access');
+  });
+  it.each(['off', 'false', '0', 'no'])('t365u: only an explicit CHEAPERINFERENCE=%s disables the rung', off => {
+    const rung = freeChainConfig({ CHEAPERINFERENCE: off, CHEAPERINFERENCE_API_KEY: 'ci_live_test_key' }).rungs.find(r => r.id === 'cheapinf')!;
+    expect(rung.reason).toBeDefined();
+  });
+
   it('accepts CheaperInference spelling for the mode env', () => {
     const rung = freeChainConfig({
       CheaperInference: 'all',

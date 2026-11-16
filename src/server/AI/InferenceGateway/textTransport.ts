@@ -2,7 +2,7 @@ import { executeGatewayQubax } from './qubaxTransport';
 import { qubaxConfig } from '../../lib/qubax';
 import { executeGatewayMitrify } from './mitrifyTransport';
 import { mitrifyConfig } from '../../lib/mitrify';
-import { cheaperInferenceMode, cheaperInferenceSharedAccessPermitted } from '../../lib/cheaperInferencePolicy';
+import { cheaperInferenceMode } from '../../lib/cheaperInferencePolicy';
 /**
  * Server-only, single-dispatch text transport. This is NOT a public router or an
  * admission authority. Its caller must authenticate the exact durable claim and
@@ -256,7 +256,8 @@ function validRates(transport: GatewayTextTransportConfig, profile: ProviderProf
       CHEAPERINFERENCE: ['beam', 'beam-1.0-501b-a23b'] };
     if (!paidModels[transport.provider]?.includes(transport.model) || rate.supplierPerHttpRequestCeilingNanoUsd !== undefined) return false;
     if (transport.provider === 'CHEAPERINFERENCE') {
-      if (cheaperInferenceMode() !== 'all' || !cheaperInferenceSharedAccessPermitted()
+      // Owner t357u/t365u: default ON for every user; only an explicit CHEAPERINFERENCE=off disables it.
+      if (cheaperInferenceMode() === 'off'
         || typeof rate.minimumDiscountBasisPoints !== 'number' || !isCount(rate.minimumDiscountBasisPoints) || rate.minimumDiscountBasisPoints > 9999
         || typeof rate.supplierListInputNanoUsdPerMillion !== 'number' || !isPositiveCount(rate.supplierListInputNanoUsdPerMillion)
         || typeof rate.supplierListOutputNanoUsdPerMillion !== 'number' || !isPositiveCount(rate.supplierListOutputNanoUsdPerMillion)) return false;

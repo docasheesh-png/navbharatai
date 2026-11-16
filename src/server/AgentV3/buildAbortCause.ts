@@ -153,6 +153,26 @@ function engineFaultEnding(saved: boolean, seedKept: string): string {
   return providerDegradedMessage();
 }
 
+/**
+ * BR1994 — the minutes a wall-clock ending quotes ("I stopped after about N min"): the time the build has
+ * actually run, on the BUILD's clock. PURE.
+ *
+ * Main quoted the runner's `maxBuildMs`, which is the generation budget REMAINING when that runner started
+ * (the cap, less the correction reserve, less everything before it). The full builder of report BR1994
+ * began after the fast lane with a budget of about 22 minutes; the cap ended the build at 25 minutes, and
+ * the user, who had waited all 25, was told "I stopped after about 22 min". When the build's start is known
+ * (the event stream's own start, the request's arrival) the figure is the elapsed time since then. With no
+ * cap the sentence names no number, as on main; with an unknown or future start it keeps main's figure.
+ */
+export function buildClockMinutes(maxBuildMs: number | undefined, nowMs: number, buildStartedAt: unknown): number | undefined {
+  if (!maxBuildMs) return undefined;
+  const runnerMinutes = Math.round(maxBuildMs / 60000);
+  if (typeof buildStartedAt !== 'number' || !Number.isFinite(buildStartedAt) || buildStartedAt <= 0 || !Number.isFinite(nowMs)) return runnerMinutes;
+  const elapsed = nowMs - buildStartedAt;
+  const minutes = Math.round(elapsed / 60000);
+  return minutes > 0 ? minutes : runnerMinutes;
+}
+
 export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): string {
   const mins = typeof ctx.minutes === 'number' && ctx.minutes > 0 ? ctx.minutes : null;
   const saved = ctx.builtSomething === true;

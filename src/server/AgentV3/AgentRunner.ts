@@ -37,7 +37,7 @@ import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { serviceRecommendationEvent } from '../analyzer/serviceRecommendation';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
-import { abortCauseOf, abortSummary, timedOutSummary, stalledModelSummary, stoppedCallFields, type SeedState, type AbortCause } from './buildAbortCause';
+import { abortCauseOf, abortSummary, buildClockMinutes, timedOutSummary, stalledModelSummary, stoppedCallFields, type SeedState, type AbortCause } from './buildAbortCause';
 import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, buildBudgetNarration, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
@@ -962,7 +962,7 @@ export class AgentRunner {
       const endAborted = async () => {
         const cause = abortCauseOf(this.opts.signal as AbortSignal);
         const summary = abortSummary(cause, {
-          minutes: maxBuildMs ? Math.round(maxBuildMs / 60000) : undefined,
+          minutes: buildClockMinutes(maxBuildMs, Date.now(), events.startedAt),
           ...endingContext(),
         });
         await persist('stopped');
@@ -1007,7 +1007,7 @@ export class AgentRunner {
         // whatever was produced instead of looping for 20-30 minutes. A build that DID write files is
         // reported ok:true (the work is real and resumable); one that produced nothing is ok:false.
         if (buildTimedOut(buildStartMs, maxBuildMs, Date.now())) {
-          const minutes = Math.round((maxBuildMs as number) / 60000);
+          const minutes = buildClockMinutes(maxBuildMs, Date.now(), events.startedAt) ?? Math.round((maxBuildMs as number) / 60000);
           const ending = endingContext();
           const builtSomething = ending.builtSomething;
           const summary = timedOutSummary(minutes, ending);
@@ -1416,7 +1416,7 @@ export class AgentRunner {
                   // (autopsy 536c8189 — it is snapped deterministically in `spacingSnap.ts`).
                   styleResumeStartedAt = Date.now();
                   styleResumeHealth = buildHealth;
-                  const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow() });
+                  const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow(), outOfTime: events.budgetStagesSaid?.has('final') === true });
                   if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
                   try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0, style.a11y?.length ?? 0, style.noTokens?.colours ?? 0), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.orphans ?? []).map((o) => `${o}:unimported`), ...(style.noTokens ? [`${style.noTokens.colours}-colours:no-tokens`] : [])].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
@@ -1442,7 +1442,7 @@ export class AgentRunner {
                 if (standDownNote) { try { this.opts.onNote?.({ code: 'UNFINISHED_RESUME_STOOD_DOWN', message: standDownNote, detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ } }
                 if (resume.resume && !this.opts.signal?.aborted) {
                   unfinishedResumes++;
-                  const unfinishedNotice = handBackNotice('unfinished', turn.text);
+                  const unfinishedNotice = handBackNotice('unfinished', turn.text, { outOfTime: events.budgetStagesSaid?.has('final') === true });
                   if (unfinishedNotice) events.emit({ type: 'narration', agent: agentRole, text: unfinishedNotice, ts: Date.now() });
                   try { this.opts.onNote?.({ code: 'UNFINISHED_BUILD_RESUMED', message: unfinishedResumeNote(unfinishedResumes, readiness.blockers.length), detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(resume.message);
@@ -1528,7 +1528,7 @@ export class AgentRunner {
                 summaryBeforeStyleResume = turn.text.trim() || null;
                 // A specialist's text is forwarded to the chat too (SubAgent re-emits narration).
                 styleResumeStartedAt = Date.now();
-                const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow() });
+                const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow(), outOfTime: events.budgetStagesSaid?.has('final') === true });
                 if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
                 try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: `${agentRole}:${styleResumeNote(style.missing.length, style.pages.length, 0, style.a11y?.length ?? 0)}`, detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
                 pushPlatformTurn(decision.message);

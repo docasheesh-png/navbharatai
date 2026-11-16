@@ -101639,3 +101639,13 @@ Owner t311u sequential audit, BR1992 only (boundary 1951..2105 frozen). Branched
 ## 2026-11-16 — BR1993 autopsy (large-app first build, setup refused to reconnect): already closed on main; order residual queued
 
 Owner t311u sequential audit, BR1993 only (boundary 1951..2105 frozen). Branched from origin/main `d6a417f2` (BR1992, #4269). A free Weak/Surplus large-app first build ran the scope classifier and the roadmap planner, showed the roadmap message and a rough ETA, then failed setup within about a second with SANDBOX_RECOVERY_UNAVAILABLE, in about 19 s, with no files written. The report was written by code deployed before BR1983 (#4251) and BR1984 (#4254), which already closed its defects on main: an admin-only refusal reason, outcome phase normalisation, and a non-retryable repeat after a settled refusal. `tests/br1993Autopsy.test.ts` pins those facts on this report's shape (12 tests; 6 mutations, each caught). New Q-2705 (BLOCKED): planner, message and ETA run before setup on a first attempt. The BR1992 review residual (`recordModel` read at run start) is not on this path and is not changed. No product code changed. Docs: `docs/build-report-autopsy-BR1993.md` and its evidence JSON.
+
+## 2026-11-17 — BR1994 autopsy (large-app first build stopped by the 25-min cap): no "I am continuing" after "Out of time"; the ending quotes the build's minutes
+
+Owner t311u sequential audit, BR1994 only (boundary 1951..2105 frozen). Branched from origin/main `f631a04e` (BR1993, #4270). A free Weak/Surplus build rendered at about 416 s and was stopped by the 25-min cap during an unfinished-app resume.
+- F1: the user was told "Out of time — saving your app", then 19 s later "I am continuing. Please keep this open." The hand-back notice is now silent once the build-wide final stage was said (`outOfTime === true` only; the resume itself is unchanged).
+- F2: the ending said "about 22 min" (the full builder's remaining budget) after about 25 min. `buildClockMinutes` now quotes the minutes elapsed since the request arrived when that start is known, and main's figure otherwise.
+- The `claude-sonnet-4-6` label on the stopped call was already closed by BR1992 F1.
+- Q-2706 (BLOCKED): a resume in the final stage. Q-2707 (BLOCKED, money-adjacent): a superseded failed command counted on a failed build's gate.
+- Two existing source pins were updated deliberately. 9 mutations were run: 8 were caught, and the one that survived exposed a redundant guard, which was removed.
+- Docs: `docs/build-report-autopsy-BR1994.md`, its evidence JSON, and `tests/br1994Autopsy.test.ts`. Not live until a Console Run.

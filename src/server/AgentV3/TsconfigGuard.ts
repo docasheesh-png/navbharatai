@@ -155,6 +155,7 @@ export function ensureTsconfigJsx(path: string, content: string, ctx?: TsconfigJ
     : null;
   if (!co) return src;
   if ('jsx' in co) return src;
+  if ('jsxFactory' in co || 'jsxFragmentFactory' in co) return src;
   if (typeof co.jsxImportSource === 'string' && co.jsxImportSource.trim()) return src;
   if (hasNextPlugin(co)) return src;
   if (!tsconfigHasDomLib(co)) return src;

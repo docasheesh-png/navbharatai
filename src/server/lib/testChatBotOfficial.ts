@@ -333,3 +333,34 @@ export async function probeChatHostReachability(baseURL: string, fetchImpl: type
     return `Reachability check: GET /models to ${url.host} failed before any answer (${code || name || 'network error'}), so this server cannot reach the host.`;
   }
 }
+
+/**
+ * Admin report 2026-11-16: BluesMinds answered "No available channel for model z-ai/glm4.7 under group default"
+ * (model_not_found, HTTP 503). The admin cannot see which models the server's key may use, so when a test call fails
+ * with a model-not-found answer this reads the provider's own GET /models WITH that key and lists the model ids.
+ * The key goes only to the provider's configured https endpoint (no redirects, 8 s); only ids are returned.
+ */
+export function isModelNotFound(code: string | null | undefined, text: string | null | undefined): boolean {
+  return /model[_ ]?not[_ ]?found|no available channel for model|model .*(does not exist|not (found|available|supported))|unknown model|invalid model/i
+    .test(`${code ?? ''} ${text ?? ''}`);
+}
+export async function listProviderModels(baseURL: string, apiKey: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+  let url: URL;
+  try { url = new URL(`${baseURL.replace(/\/+$/, '').replace(/\/chat\/completions$/, '')}/models`); } catch { return ''; }
+  if (url.protocol !== 'https:' || !apiKey || /[\s,]/.test(apiKey)) return '';
+  try {
+    const response = await fetchImpl(url.toString(), { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(8_000),
+      headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` } });
+    if (!response.ok) return `Model list: ${url.host} answered GET /models with HTTP ${response.status}.`;
+    const raw = await response.text();
+    if (raw.length > 2_000_000) return 'Model list: the /models answer was too large to read.';
+    const parsed = JSON.parse(raw) as unknown;
+    const rows = Array.isArray(parsed) ? parsed : record(parsed) && Array.isArray(parsed.data) ? parsed.data : [];
+    const ids = [...new Set(rows.map(row => record(row) ? row.id : null).filter((id): id is string => typeof id === 'string' && /^[\w.:/@+-]{1,120}$/.test(id)))];
+    if (!ids.length) return `Model list: ${url.host} listed no models for this key.`;
+    const shown = ids.slice(0, 40);
+    return `Models this key can use on ${url.host} (${ids.length}): ${shown.join(', ')}${ids.length > shown.length ? ', …' : ''}. Type one of these in "Model (optional)".`;
+  } catch {
+    return `Model list: GET /models on ${url.host} could not be read.`;
+  }
+}

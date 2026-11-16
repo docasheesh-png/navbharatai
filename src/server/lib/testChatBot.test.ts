@@ -1216,3 +1216,22 @@ describe('a network failure says whether this server can reach the provider (adm
     expect(error.diagnostic?.providerMessage).toContain('cannot reach the host');
   });
 });
+
+describe('the exact BluesMinds model_not_found answer lists the models the key can use', () => {
+  it('appends the key-visible model list to the diagnostic', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [{ id: 'bluesminds', configured: true, key: 'synthetic-blues-key', keyEnv: 'FREE_CHAIN_BLUESMINDS_API_KEY',
+      model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1', reason: 'terms-unverified', streamUsage: false, priceIn: 0, priceOut: 0 }] }));
+    fake.compatCtor.mockImplementation((config: { adminErrorDetail?: (d: unknown) => void }) => {
+      fake.compatTurn.mockImplementation(async () => {
+        config.adminErrorDetail?.({ httpStatus: 503, providerCode: 'model_not_found', providerType: 'new_api_error',
+          providerMessage: 'No available channel for model z-ai/glm4.7 under group default (distributor)', rawErrorBody: null, requestId: null });
+        throw new FreeChainProviderError('SERVER', { status: 503 });
+      });
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [{ id: 'deepseek-v4-flash' }, { id: 'qwen/qwen3-coder' }] }), { status: 200 })));
+    const error = await runTestChat({ ...action, provider: 'bluesminds', model: 'z-ai/glm4.7' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.diagnostic?.providerMessage).toContain('Models this key can use');
+    expect(error.diagnostic?.providerMessage).toContain('deepseek-v4-flash');
+    expect(JSON.stringify(error.diagnostic)).not.toContain('synthetic-blues-key');
+  });
+});

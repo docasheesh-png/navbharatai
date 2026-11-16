@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isOfficialChatUrl, OfficialTestChatError, probeChatHostReachability, runOfficialOpenAiCompatTest, runOfficialVertexTest } from './testChatBotOfficial';
+import { isModelNotFound, isOfficialChatUrl, listProviderModels, OfficialTestChatError, probeChatHostReachability, runOfficialOpenAiCompatTest, runOfficialVertexTest } from './testChatBotOfficial';
 
 describe('admin official OpenAI-compat helper', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
@@ -323,5 +323,32 @@ describe('reachability check after a network failure (admin report 2026-11-16: B
     const fetchImpl = vi.fn();
     expect(await probeChatHostReachability('http://api.example.invalid/v1', fetchImpl as unknown as typeof fetch)).toContain('skipped');
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('model-not-found lists the models the key can use (admin report 2026-11-16: BluesMinds "No available channel for model z-ai/glm4.7")', () => {
+  it('recognises the exact BluesMinds answer and common siblings', () => {
+    expect(isModelNotFound('model_not_found', 'No available channel for model z-ai/glm4.7 under group default (distributor)')).toBe(true);
+    expect(isModelNotFound(null, 'The model `x` does not exist')).toBe(true);
+    expect(isModelNotFound('rate_limit', 'slow down')).toBe(false);
+  });
+  it('reads /models with the key, sent only to that endpoint, and returns ids only', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'z-ai/glm4.6', owned_by: 'x' }, { id: 'moonshotai/kimi-k2.6' }, { id: '<script>' }] }), { status: 200 }));
+    const text = await listProviderModels('https://api.bluesminds.com/v1', 'synthetic-key-value', fetchImpl as unknown as typeof fetch);
+    expect(text).toContain('z-ai/glm4.6');
+    expect(text).toContain('moonshotai/kimi-k2.6');
+    expect(text).not.toContain('<script>');
+    expect(text).not.toContain('synthetic-key-value');
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.bluesminds.com/v1/models');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer synthetic-key-value');
+    expect(init.redirect).toBe('error');
+  });
+  it('reports a refused list honestly and never calls a non-https endpoint', async () => {
+    const refused = vi.fn().mockResolvedValue(new Response('{}', { status: 401 }));
+    expect(await listProviderModels('https://api.bluesminds.com/v1', 'k-value', refused as unknown as typeof fetch)).toContain('HTTP 401');
+    const never = vi.fn();
+    expect(await listProviderModels('http://insecure.invalid/v1', 'k-value', never as unknown as typeof fetch)).toBe('');
+    expect(never).not.toHaveBeenCalled();
   });
 });

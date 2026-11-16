@@ -26,7 +26,7 @@ import { ROUTER_ONE_AUTO_MODEL } from '../AI/RouterOne/routerOneCatalog';
 import { routerOnePublicPrices } from '../AI/RouterOne/publicPriceSource';
 import type { CatalogueRateBand } from '../AI/RouterOne/catalogueMath';
 import { buildTestChatDiagnostic } from './testChatBotDiagnostics';
-import { isOfficialChatUrl, OfficialTestChatError, probeChatHostReachability, runOfficialAnthropicTest, runOfficialOpenAiCompatTest, runOfficialVertexTest } from './testChatBotOfficial';
+import { isModelNotFound, isOfficialChatUrl, listProviderModels, OfficialTestChatError, probeChatHostReachability, runOfficialAnthropicTest, runOfficialOpenAiCompatTest, runOfficialVertexTest } from './testChatBotOfficial';
 import { nemotronBaseUrl, nemotronKey, nemotronSuperModel } from '../AgentV3/nemotron';
 import { vertexGenAI, vertexProjectId } from './vertexGenAI';
 import { testChatRequestId, testChatUid } from './testChatPayload';
@@ -683,8 +683,9 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
   let dispatchedModel = status.model;
   // The endpoint an OpenAI-compatible call was sent to, for the reachability check on a network failure.
   let probeBase: string | null = null;
+  let probeKey = '';
   const sentTo = (call: typeof runOfficialOpenAiCompatTest): typeof runOfficialOpenAiCompatTest =>
-    input => { probeBase = input.url; return call(input); };
+    input => { probeBase = input.url; probeKey = input.apiKey; return call(input); };
   let captured: AdminCapturedProviderError | { status: number; body: string; requestId?: string } | undefined;
   const qubaxAttempts: Array<{ model: string; status: number | null; code: string; latencyMs: number; body?: string; requestId?: string }> = [];
   try {
@@ -939,10 +940,12 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
     if (error instanceof OfficialTestChatError) {
       const reach = (error.classificationHint === 'network' || error.classificationHint === 'timeout') && !error.httpStatus && probeBase
         ? await probeChatHostReachability(probeBase) : null;
+      const models = probeBase && probeKey && isModelNotFound(error.providerCode, `${error.providerMessage ?? ''} ${error.rawErrorBody ?? ''}`)
+        ? await listProviderModels(probeBase, probeKey) : null;
       return fail('unconfirmed', 503, {
         model: dispatchedModel, latencyMs: latency, classification: error.classificationHint, httpStatus: error.httpStatus,
         providerCode: error.providerCode, providerType: error.providerType, providerRequestId: error.providerRequestId,
-        providerMessage: [error.providerMessage, reach].filter(Boolean).join(' ') || null, rawErrorBody: error.rawErrorBody, extraSecrets,
+        providerMessage: [error.providerMessage, reach, models].filter(Boolean).join(' ') || null, rawErrorBody: error.rawErrorBody, extraSecrets,
       });
     }
     if (error instanceof FreeChainProviderError) {
@@ -951,11 +954,15 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       const unreachedBase = (error.code === 'NETWORK' || error.code === 'TIMEOUT') && !(cap?.httpStatus ?? error.status)
         ? (meta.rungId ? rungOf(meta.rungId)?.baseURL : undefined) : undefined;
       const reach = unreachedBase ? await probeChatHostReachability(unreachedBase) : null;
+      // A model the key's group cannot use: list the models it can (key sent only to that provider's own endpoint).
+      const rungForList = meta.rungId ? rungOf(meta.rungId) : undefined;
+      const models = rungForList?.baseURL && rungForList.key && isModelNotFound(cap?.providerCode ?? error.code, `${cap?.providerMessage ?? ''} ${cap?.rawErrorBody ?? ''}`)
+        ? await listProviderModels(rungForList.baseURL, rungForList.key) : null;
       return fail('unconfirmed', 503, {
         model: dispatchedModel, latencyMs: latency, httpStatus: cap?.httpStatus ?? error.status ?? null,
         providerCode: cap?.providerCode ?? error.code, providerType: cap?.providerType ?? null,
         providerRequestId: cap?.requestId ?? null,
-        providerMessage: [cap?.providerMessage, reach].filter(Boolean).join(' ') || null,
+        providerMessage: [cap?.providerMessage, reach, models].filter(Boolean).join(' ') || null,
         rawErrorBody: cap?.rawErrorBody ?? null, empty: error.code === 'EMPTY_RESPONSE', aborted: error.code === 'ABORTED',
         timeout: error.code === 'TIMEOUT', extraSecrets,
       });

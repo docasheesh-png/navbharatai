@@ -7,9 +7,9 @@ import type { Firestore } from 'firebase-admin/firestore';
  * here because this file is also run directly by Node (`npm run test:mitrify`) and must stay free of
  * extensionless local imports. tests/alwaysOnSuppliers.test.ts proves the two never disagree.
  */
-const MITRIFY_OFF_VALUES = new Set(['off', 'false', '0', 'no', 'n', 'disable', 'disabled']);
+const MITRIFY_OFF_VALUE = /^(?:off|false|0|no|n|disable|disabled)$/;
 export function mitrifyDefaultSwitchOn(env: Record<string, string | undefined> = process.env): boolean {
-  return !MITRIFY_OFF_VALUES.has(String(env.MITRIFY_CHAIN_ENABLED ?? '').trim().toLowerCase());
+  return !MITRIFY_OFF_VALUE.test(String(env.MITRIFY_CHAIN_ENABLED ?? '').trim().toLowerCase());
 }
 
 /** Server-only transport. No upstream provider catalogue, pricing or capability assumptions. */

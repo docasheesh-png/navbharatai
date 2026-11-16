@@ -26,10 +26,11 @@ import { ROUTER_ONE_AUTO_MODEL } from '../AI/RouterOne/routerOneCatalog';
 import { routerOnePublicPrices } from '../AI/RouterOne/publicPriceSource';
 import type { CatalogueRateBand } from '../AI/RouterOne/catalogueMath';
 import { buildTestChatDiagnostic } from './testChatBotDiagnostics';
-import { isOfficialChatUrl, OfficialTestChatError, runOfficialAnthropicTest, runOfficialOpenAiCompatTest, runOfficialVertexTest } from './testChatBotOfficial';
+import { isModelNotFound, isOfficialChatUrl, listProviderModels, OfficialTestChatError, probeChatHostReachability, runOfficialAnthropicTest, runOfficialOpenAiCompatTest, runOfficialVertexTest } from './testChatBotOfficial';
 import { nemotronBaseUrl, nemotronKey, nemotronSuperModel } from '../AgentV3/nemotron';
 import { vertexGenAI, vertexProjectId } from './vertexGenAI';
 import { testChatRequestId, testChatUid } from './testChatPayload';
+import { pickProviderModels } from './providerModelPicker';
 
 type UnavailableReason = 'disabled' | 'configuration' | 'storage' | 'approval-or-budget' | 'budget' | 'no-model' | 'tries-exhausted' | 'capacity' | 'capability' | 'invalid' | 'unconfirmed';
 const SKIP_REASON: Record<string, UnavailableReason> = {
@@ -143,6 +144,8 @@ export const ROUTER_ONE_TEST_MAX_TOKENS = 8_192;
 /** Builder engines that reason before answering get the same room on this page (Kimi, GLM builder, Nemotron, Bedrock GLM). */
 export const BUILDER_TEST_MAX_TOKENS = 8_192;
 const BUILDER_REASONING_KINDS: ReadonlySet<string> = new Set(['kimi', 'glm-builder', 'nemotron', 'bedrock-glm']);
+/** Gateways whose test call picks models from the key's own list and tries the next on failure. */
+const MODEL_PICKER_RUNGS: ReadonlySet<string> = new Set(['bluesminds']);
 export const ROUTER_ONE_PRICE_UNAVAILABLE = 'Router One’s posted price for this model could not be read from router.one, so this page has no spending ceiling for it and did not call it. Choose a model listed on router.one/models, or try again in a few minutes.';
 function routerOneOfficialEndpoint(): boolean {
   return routerOneBaseUrl().replace(/\/+$/, '') === ROUTER_ONE_DEFAULT_BASE_URL;
@@ -513,7 +516,9 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   const enabled = !blocked && configured;
   return {
     ...base, configured, enabled, model: model || null, billed: !!(meta.rungId && isPaidRung(meta.rungId)), approvalRequired: false,
-    ...(note ? { note } : {}),
+    ...(note || (meta.rungId && MODEL_PICKER_RUNGS.has(meta.rungId)) ? { note: [note, meta.rungId && MODEL_PICKER_RUNGS.has(meta.rungId)
+      ? 'Leave Model blank and this page reads the key\u2019s own model list, picks up to three chat models and tries them in turn until one answers.' : '']
+      .filter(Boolean).join(' ') } : {}),
     ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY
       : modelMissing ? REASON_TEXT['model-unverified']
       : REASON_TEXT[reason ?? ''] ?? 'This provider is not available for dispatch.' }),
@@ -681,6 +686,11 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
   await revalidate();
   const meta = META[action.provider];
   let dispatchedModel = status.model;
+  // The endpoint an OpenAI-compatible call was sent to, for the reachability check on a network failure.
+  let probeBase: string | null = null;
+  let probeKey = '';
+  const sentTo = (call: typeof runOfficialOpenAiCompatTest): typeof runOfficialOpenAiCompatTest =>
+    input => { probeBase = input.url; probeKey = input.apiKey; return call(input); };
   let captured: AdminCapturedProviderError | { status: number; body: string; requestId?: string } | undefined;
   const qubaxAttempts: Array<{ model: string; status: number | null; code: string; latencyMs: number; body?: string; requestId?: string }> = [];
   try {
@@ -801,7 +811,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       }
       const receipt = await reserveShared(db, requestId, uid, ceiling);
       if (!receipt) throw new TestChatUnavailable('budget', 409);
-      const result = await releaseIfUnused(receipt, () => runOfficialOpenAiCompatTest({
+      const result = await releaseIfUnused(receipt, () => sentTo(runOfficialOpenAiCompatTest)({
         url: ROUTER_ONE_TEST_CHAT_URL, apiKey: routerOneApiKey(), model, messages: action.messages, signal: bounded,
         // Streamed, as the builder calls it: a non-streamed Router One reply waited past the 90-second bound.
         stream: true,
@@ -835,7 +845,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         });
       }
       const key = firstPresent(process.env, ['OPENROUTER_API_KEY']) || rungOf('openrouter')?.key || '';
-      const result = await runOfficialOpenAiCompatTest({
+      const result = await sentTo(runOfficialOpenAiCompatTest)({
         url: 'https://openrouter.ai/api/v1/chat/completions', apiKey: key, model: picked, messages: action.messages, signal: bounded,
         stream: true,
       });
@@ -870,7 +880,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
       if (meta.kind === 'kimi') {
-        const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
+        const result = await releaseIfUnused(officialReceipt, () => sentTo(runOfficialOpenAiCompatTest)({
           url: `${kimiBase()}/chat/completions`, apiKey: firstPresent(process.env, ['KIMI_API_KEY']), model, messages: action.messages, signal: bounded,
           stream: true, maxTokens: outputTokens,
         }));
@@ -881,7 +891,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
           : meta.kind === 'nemotron' ? { url: `${nemotronBaseUrl().replace(/\/+$/, '')}/chat/completions`, apiKey: nemotronKey() }
           : meta.kind === 'bedrock-glm' ? { url: `${bedrockBase()}/chat/completions`, apiKey: firstPresent(process.env, ['BEDROCK_API_KEY']) }
           : { url: SURPLUS_TEST_URL, apiKey: firstPresent(process.env, ['SURPLUS_API_KEY']) };
-        const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
+        const result = await releaseIfUnused(officialReceipt, () => sentTo(runOfficialOpenAiCompatTest)({
           ...target, model, messages: action.messages, signal: bounded,
           // Streamed like the builder; Surplus stays non-streamed, as the builder's dedicated Surplus runner is.
           ...(meta.kind === 'surplus' ? {} : { stream: true, maxTokens: outputTokens }),
@@ -897,7 +907,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
       if (meta.kind === 'grok') {
-        const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
+        const result = await releaseIfUnused(officialReceipt, () => sentTo(runOfficialOpenAiCompatTest)({
           url: 'https://api.x.ai/v1/chat/completions',
           apiKey: firstPresent(process.env, ['XAI_API_KEY', 'GROK_API_KEY']), model, messages: action.messages, signal: bounded,
           stream: true,
@@ -906,7 +916,46 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       }
     }
 
+    // GATEWAY MODEL PICKER (admin 2026-11-16, "jaise Surplus aur Router One me"): a gateway serves a different model set
+    // to each key's group, so a fixed model can be missing (BluesMinds: "No available channel for model …") or hang.
+    // Read the key's own model list, rank it, and try up to three in turn inside this one test; stop on an auth refusal.
+    // A typed model is honoured as the only one.
+    if (meta.rungId && MODEL_PICKER_RUNGS.has(meta.rungId) && !requestedModel(action)) {
+      const rung = rungOf(meta.rungId);
+      if (rung?.configured && rung.key && rung.baseURL) {
+        const picked = await pickProviderModels(rung.baseURL, rung.key, rung.model || null, 3);
+        const tries: NonNullable<Parameters<typeof buildTestChatDiagnostic>[0]['attempts']>[number][] = [];
+        const deadline = startedAt + 85_000;
+        for (const model of picked.models) {
+          const left = deadline - Date.now();
+          if (left < 5_000) break;
+          let detail: AdminCapturedProviderError | undefined;
+          const attempt = compatAdapter(action.provider, d => { detail = d; }, model, Math.min(30_000, left - 1_000));
+          if (!attempt) break;
+          const tried = Date.now();
+          try {
+            const result = await attempt.provider.executeTurn({ prompt: action.messages.at(-1)?.content ?? '', messages: action.messages, signal: bounded, onChunk: () => {} });
+            dispatchedModel = model;
+            return finish(action, result.content, result.model || model, startedAt, result.usage);
+          } catch (error) {
+            if (bounded.aborted) throw error;
+            const d = detail && 'httpStatus' in detail ? detail : undefined;
+            const fe = error instanceof FreeChainProviderError ? error : null;
+            const httpStatus = d?.httpStatus ?? fe?.status ?? null;
+            tries.push({ model, latencyMs: Date.now() - tried, httpStatus, providerCode: d?.providerCode ?? fe?.code ?? null,
+              providerMessage: d?.providerMessage ?? null, rawErrorBody: d?.rawErrorBody ?? null, timeout: fe?.code === 'TIMEOUT' });
+            if (httpStatus === 401 || httpStatus === 403) break; // a refused key fails every model alike
+          }
+        }
+        const from = picked.source === 'provider-list' ? "the key's own model list" : `the configured model only (${picked.note ?? 'no list'})`;
+        return fail('unconfirmed', 503, { model: tries.at(-1)?.model ?? rung.model, latencyMs: Math.max(0, Date.now() - startedAt),
+          providerCode: 'ALL_MODELS_FAILED', finalOutcome: 'all-models-failed', attempts: tries, extraSecrets,
+          providerMessage: `Tried ${tries.length} model(s) chosen from ${from}: ${tries.map(t => t.model).join(', ') || 'none'}. None answered; see each attempt below.` });
+      }
+    }
+
     const adapter = compatAdapter(action.provider, detail => { captured = detail; }, requestedModel(action));
+    dispatchedModel = requestedModel(action) || dispatchedModel;
     if (!adapter) {
       if (officialReceipt) {
         try { await officialReceipt.releaseUndispatched(); } catch { /* keep the configuration error */ }
@@ -932,18 +981,31 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
     if (error instanceof TestChatUnavailable) throw error;
     const latency = Math.max(0, Date.now() - startedAt);
     if (error instanceof OfficialTestChatError) {
+      const reach = (error.classificationHint === 'network' || error.classificationHint === 'timeout') && !error.httpStatus && probeBase
+        ? await probeChatHostReachability(probeBase) : null;
+      const models = probeBase && probeKey && isModelNotFound(error.providerCode, `${error.providerMessage ?? ''} ${error.rawErrorBody ?? ''}`)
+        ? await listProviderModels(probeBase, probeKey) : null;
       return fail('unconfirmed', 503, {
-        model: status.model, latencyMs: latency, classification: error.classificationHint, httpStatus: error.httpStatus,
+        model: dispatchedModel, latencyMs: latency, classification: error.classificationHint, httpStatus: error.httpStatus,
         providerCode: error.providerCode, providerType: error.providerType, providerRequestId: error.providerRequestId,
-        providerMessage: error.providerMessage, rawErrorBody: error.rawErrorBody, extraSecrets,
+        providerMessage: [error.providerMessage, reach, models].filter(Boolean).join(' ') || null, rawErrorBody: error.rawErrorBody, extraSecrets,
       });
     }
     if (error instanceof FreeChainProviderError) {
       const cap = captured && 'httpStatus' in captured ? captured : undefined;
+      // A network failure or timeout with no HTTP status: say whether this server can reach the host at all.
+      const unreachedBase = (error.code === 'NETWORK' || error.code === 'TIMEOUT') && !(cap?.httpStatus ?? error.status)
+        ? (meta.rungId ? rungOf(meta.rungId)?.baseURL : undefined) : undefined;
+      const reach = unreachedBase ? await probeChatHostReachability(unreachedBase) : null;
+      // A model the key's group cannot use: list the models it can (key sent only to that provider's own endpoint).
+      const rungForList = meta.rungId ? rungOf(meta.rungId) : undefined;
+      const models = rungForList?.baseURL && rungForList.key && isModelNotFound(cap?.providerCode ?? error.code, `${cap?.providerMessage ?? ''} ${cap?.rawErrorBody ?? ''}`)
+        ? await listProviderModels(rungForList.baseURL, rungForList.key) : null;
       return fail('unconfirmed', 503, {
-        model: status.model, latencyMs: latency, httpStatus: cap?.httpStatus ?? error.status ?? null,
+        model: dispatchedModel, latencyMs: latency, httpStatus: cap?.httpStatus ?? error.status ?? null,
         providerCode: cap?.providerCode ?? error.code, providerType: cap?.providerType ?? null,
-        providerRequestId: cap?.requestId ?? null, providerMessage: cap?.providerMessage ?? null,
+        providerRequestId: cap?.requestId ?? null,
+        providerMessage: [cap?.providerMessage, reach, models].filter(Boolean).join(' ') || null,
         rawErrorBody: cap?.rawErrorBody ?? null, empty: error.code === 'EMPTY_RESPONSE', aborted: error.code === 'ABORTED',
         timeout: error.code === 'TIMEOUT', extraSecrets,
       });
@@ -1000,7 +1062,7 @@ function finish(action: TestChatAction, content: string, model: string, startedA
     latencyMs: Math.max(0, Date.now() - startedAt), ...(usage ? { usage } : {}), noFallback: true };
 }
 
-function compatAdapter(id: TestChatProviderId, sink: (detail: AdminCapturedProviderError) => void, modelOverride?: string | null): { provider: OpenAiCompatProvider; rung?: RungConfig } | null {
+function compatAdapter(id: TestChatProviderId, sink: (detail: AdminCapturedProviderError) => void, modelOverride?: string | null, timeoutMs = 60_000): { provider: OpenAiCompatProvider; rung?: RungConfig } | null {
   const meta = META[id];
   if (meta.kind === 'glm-vision') {
     const key = firstPresent(process.env, ['GLM_API_KEY', 'FREE_CHAIN_GLM_API_KEY']);
@@ -1031,7 +1093,7 @@ function compatAdapter(id: TestChatProviderId, sink: (detail: AdminCapturedProvi
     rung,
     provider: new OpenAiCompatProvider({
       provider: adapterName, key: rung.key, envName: rung.keyEnv, model: modelOverride || rung.model, baseURL: rung.baseURL,
-      priority: 0, maxOutputTokens: TEST_CHAT_MAX_OUTPUT_TOKENS, timeoutMs: 60_000, streamUsage: rung.streamUsage,
+      priority: 0, maxOutputTokens: TEST_CHAT_MAX_OUTPUT_TOKENS, timeoutMs, streamUsage: rung.streamUsage,
       extraBody: extraBodyFor(meta.rungId), adminErrorDetail: sink,
     }),
   };

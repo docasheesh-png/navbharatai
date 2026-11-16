@@ -306,3 +306,69 @@ export async function runOfficialVertexTest(input: {
   const model = typeof body.modelVersion === 'string' && body.modelVersion.trim() ? body.modelVersion : input.model;
   return { content: text.slice(0, 32_000), model, ...(usage ? { usage } : {}) };
 }
+
+/**
+ * Admin report 2026-11-16: BluesMinds timed out at 60 s from Cloud Run, while the same host answered a phone
+ * browser at once ("Invalid token"). A bare "Request timed out" cannot tell "our server cannot reach the host" from
+ * "the host took the request and never answered". So when a test call fails on network or timeout, this one
+ * unauthenticated GET to the provider's own /models (no key, no body, no redirects, 8 s) says which. The URL comes
+ * from server configuration only. It reports the HTTP status and timing — never a body.
+ */
+export async function probeChatHostReachability(baseURL: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+  let url: URL;
+  try { url = new URL(`${baseURL.replace(/\/+$/, '').replace(/\/chat\/completions$/, '')}/models`); } catch { return 'Reachability check skipped (no valid endpoint).'; }
+  if (url.protocol !== 'https:') return 'Reachability check skipped (not https).';
+  const started = Date.now();
+  try {
+    const response = await fetchImpl(url.toString(), { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(8_000), headers: { Accept: 'application/json' } });
+    try { await response.body?.cancel(); } catch { /* status is enough */ }
+    return `Reachability check: ${url.host} answered GET /models with HTTP ${response.status} in ${Date.now() - started} ms, so this server can reach the host; the chat request itself got no answer in time (the provider held it).`;
+  } catch (error) {
+    const name = error && typeof error === 'object' && 'name' in error ? String((error as { name?: unknown }).name) : '';
+    const cause = error && typeof error === 'object' && 'cause' in error ? (error as { cause?: { code?: unknown } }).cause : undefined;
+    const code = cause && typeof cause.code === 'string' ? cause.code : '';
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      return `Reachability check: ${url.host} did not answer GET /models within 8 s, so this server cannot reach the host (network, DNS or a firewall between this server and the provider), not a slow model.`;
+    }
+    return `Reachability check: GET /models to ${url.host} failed before any answer (${code || name || 'network error'}), so this server cannot reach the host.`;
+  }
+}
+
+/**
+ * Admin report 2026-11-16: BluesMinds answered "No available channel for model z-ai/glm4.7 under group default"
+ * (model_not_found, HTTP 503). The admin cannot see which models the server's key may use, so when a test call fails
+ * with a model-not-found answer this reads the provider's own GET /models WITH that key and lists the model ids.
+ * The key goes only to the provider's configured https endpoint (no redirects, 8 s); only ids are returned.
+ */
+export function isModelNotFound(code: string | null | undefined, text: string | null | undefined): boolean {
+  return /model[_ ]?not[_ ]?found|no available channel for model|model .*(does not exist|not (found|available|supported))|unknown model|invalid model/i
+    .test(`${code ?? ''} ${text ?? ''}`);
+}
+/** The model ids a provider's own GET /models lists for this key (https, no redirects, 8 s; ids only, sanitized). */
+export async function fetchProviderModelIds(baseURL: string, apiKey: string, fetchImpl: typeof fetch = fetch)
+  : Promise<{ ok: true; host: string; ids: string[] } | { ok: false; host: string; reason: string }> {
+  let url: URL;
+  try { url = new URL(`${baseURL.replace(/\/+$/, '').replace(/\/chat\/completions$/, '')}/models`); } catch { return { ok: false, host: '', reason: 'no valid endpoint' }; }
+  if (url.protocol !== 'https:' || !apiKey || /[\s,]/.test(apiKey)) return { ok: false, host: url.host, reason: 'not https or no key' };
+  try {
+    const response = await fetchImpl(url.toString(), { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(8_000),
+      headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` } });
+    if (!response.ok) return { ok: false, host: url.host, reason: `HTTP ${response.status}` };
+    const raw = await response.text();
+    if (raw.length > 2_000_000) return { ok: false, host: url.host, reason: 'answer too large' };
+    const parsed = JSON.parse(raw) as unknown;
+    const rows = Array.isArray(parsed) ? parsed : record(parsed) && Array.isArray(parsed.data) ? parsed.data : [];
+    const ids = [...new Set(rows.map(row => record(row) ? row.id : null).filter((id): id is string => typeof id === 'string' && /^[\w.:/@+-]{1,120}$/.test(id)))];
+    return { ok: true, host: url.host, ids };
+  } catch {
+    return { ok: false, host: url.host, reason: 'could not be read' };
+  }
+}
+export async function listProviderModels(baseURL: string, apiKey: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const listed = await fetchProviderModelIds(baseURL, apiKey, fetchImpl);
+  if (!listed.host) return '';
+  if (!listed.ok) return listed.reason === 'not https or no key' ? '' : `Model list: GET /models on ${listed.host} ${listed.reason.startsWith('HTTP') ? `answered with ${listed.reason}` : listed.reason}.`;
+  if (!listed.ids.length) return `Model list: ${listed.host} listed no models for this key.`;
+  const shown = listed.ids.slice(0, 40);
+  return `Models this key can use on ${listed.host} (${listed.ids.length}): ${shown.join(', ')}${listed.ids.length > shown.length ? ', …' : ''}. Type one of these in "Model (optional)".`;
+}

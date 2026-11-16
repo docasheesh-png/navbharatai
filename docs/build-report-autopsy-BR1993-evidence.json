@@ -1,0 +1,23 @@
+{
+  "evidenceType": "synthetic-fixtures-and-source-pins",
+  "privateReportPayloadIncluded": false,
+  "reportRetained": true,
+  "cases": [
+    "free Weak first build, LARGE scope; Surplus admitted; two Surplus calls (scope admission, roadmap planner), both ok",
+    "roadmap message, roadmap saved at step 1, rough ETA and 'Setting up your workspace' shown, then SANDBOX_RECOVERY_UNAVAILABLE and OUTCOME_SANDBOX_UNAVAILABLE about a second later; failed in about 19 s; no commands, no files, no builder turn",
+    "report written before BR1983/BR1984 were deployed: no admin-only refusal reason; outcome row phase sandbox",
+    "E1: all six refusal reasons reach adminDetail and never the message, summary, detail or user view; no reason ⇒ no adminDetail",
+    "E2: OUTCOME_SANDBOX_UNAVAILABLE is normalised to build/error/unresolved",
+    "E3: a settled refusal makes the next refusal a non-retryable repeat; in-progress rows skipped; user stop, later success and unreadable list are not a repeat",
+    "E4: a failed 18 s build never teaches the ETA; a finished one of the same length does",
+    "E5: the large-app planner still runs before the build clock and workspace setup (Q-2705)",
+    "mutation checks (unique mktemp backups, restored): M1 adminDetail dropped 6 fail; M2 reason also in detail 6 fail; M3 outcome phase not normalised 1 fail; M4 repeat retryable 1 fail; M5 user stop counted as repeat 1 fail; M6 failed build teaches 1 fail"
+  ],
+  "limitations": [
+    "the refusal reason was not recorded by the deployed code, so which reconnect step refused is not known",
+    "the supplier cost of the two Surplus calls is not in the report and is not estimated",
+    "D5 (planner and ETA before setup) is queued as Q-2705, not changed",
+    "BR1992 review residual (recordModel read once at run start) is not on this report's path; not changed",
+    "focused local tests only; no full local suite was run (box memory)"
+  ]
+}

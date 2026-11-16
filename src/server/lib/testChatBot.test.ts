@@ -1320,14 +1320,23 @@ describe('discount reseller gateways are testable here and nowhere else (owner 2
     expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(10, 50) }));
   });
 
-  it('Moyi and MirAPI have no invented endpoint: a key alone leaves them disabled, asking for the base URL', async () => {
-    vi.stubEnv('MOYI_API_KEY', 'synthetic-moyi-key-value');
+  it('MirAPI has no invented endpoint: a key alone leaves it disabled, asking for the base URL', async () => {
     vi.stubEnv('MIRAPI_API_KEY', 'synthetic-mir-key-value');
-    expect(row('moyi')).toMatchObject({ configured: true, enabled: false });
-    expect(row('moyi')?.unavailableReason).toContain('MOYI_BASE_URL');
+    expect(row('mirapi')).toMatchObject({ configured: true, enabled: false });
     expect(row('mirapi')?.unavailableReason).toContain('MIRAPI_BASE_URL');
-    await expect(run('moyi')).rejects.toMatchObject({ reason: 'disabled' });
+    await expect(run('mirapi')).rejects.toMatchObject({ reason: 'disabled' });
     expect(fake.officialOpenAi).not.toHaveBeenCalled();
+  });
+
+  it('Moyi works with a key alone on the endpoint its own site publishes; a base URL without /v1 is used as written', async () => {
+    vi.stubEnv('MOYI_API_KEY', 'synthetic-moyi-key-value');
+    expect(row('moyi')).toMatchObject({ configured: true, enabled: true });
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hi', model: 'grok-4.7' });
+    await run('moyi', 'grok-4.7');
+    expect(fake.officialOpenAi).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'https://api.moyi-api.com/v1/chat/completions', apiKey: 'synthetic-moyi-key-value' }));
+    vi.stubEnv('MOYI_BASE_URL', 'https://api.moyi-api.com');
+    await run('moyi', 'grok-4.7');
+    expect(fake.officialOpenAi).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'https://api.moyi-api.com/chat/completions' }));
   });
 
   it.each([

@@ -6,16 +6,18 @@
  * one's key, endpoint and model, so the status row, the call and the secret redaction can never disagree.
  * Nothing here is wired into user chat or the builder: this module is read only by the admin test page.
  *
- *   MOYI_API_KEY              MOYI_BASE_URL (required)              MOYI_MODEL (optional)
+ *   MOYI_API_KEY              MOYI_BASE_URL (optional)              MOYI_MODEL (optional)
  *   DISCOUNTEDTOKENS_API_KEY  DISCOUNTEDTOKENS_BASE_URL (optional)  DISCOUNTEDTOKENS_MODEL (optional)
  *   MIRAPI_API_KEY            MIRAPI_BASE_URL (required)            MIRAPI_MODEL (optional)
  *
  * WHAT IS KNOWN AND WHAT IS NOT (nothing is invented):
  *   - DiscountedTokens' base URL (`https://discountedtokens.com/v1`) and the model id `gpt-6-sol` come from
  *     its public API listing and the pricing page the owner supplied on 2026-11-16.
- *   - Moyi's and MirAPI's API endpoints were not readable from the build environment, so they have NO
- *     default: the owner copies the base URL from the provider's own documentation into the env key. Until
- *     then the row says exactly that and no call is made.
+ *   - Moyi's base URL (`https://api.moyi-api.com/v1`) is the OpenAI-compatible endpoint shown on moyi-api.com's
+ *     own home page (owner's screenshot, 2026-11-16).
+ *   - MirAPI's API endpoint was not readable from the build environment, so it has NO default: the owner
+ *     copies the base URL from MirAPI's own documentation into the env key. Until then the row says exactly
+ *     that and no call is made.
  *   - A base URL is accepted only on the provider's own registered domain (or a subdomain of it), over
  *     https, with no port, credentials, query or fragment. A key can therefore never be sent to another host.
  *   - With no model configured the page reads the key's own GET /models list and uses a listed chat model.
@@ -40,7 +42,7 @@ interface GatewaySpec {
 
 export const RESELLER_GATEWAYS: Readonly<Record<ResellerGatewayId, Readonly<GatewaySpec>>> = Object.freeze({
   moyi: { label: 'Moyi API', domain: 'moyi-api.com', keyEnv: 'MOYI_API_KEY', baseUrlEnv: 'MOYI_BASE_URL', modelEnv: 'MOYI_MODEL',
-    defaultBaseUrl: null, defaultModel: null },
+    defaultBaseUrl: 'https://api.moyi-api.com/v1', defaultModel: null },
   discountedtokens: { label: 'DiscountedTokens', domain: 'discountedtokens.com', keyEnv: 'DISCOUNTEDTOKENS_API_KEY',
     baseUrlEnv: 'DISCOUNTEDTOKENS_BASE_URL', modelEnv: 'DISCOUNTEDTOKENS_MODEL',
     defaultBaseUrl: 'https://discountedtokens.com/v1', defaultModel: 'gpt-6-sol' },

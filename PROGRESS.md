@@ -101613,8 +101613,8 @@ Owner asked for the three gateways in Admin → AI Engines → Test Chat Bot, an
 
 **Done (admin Test Chat Bot only):** `src/server/lib/resellerGateways.ts` owns each gateway's key, endpoint and model.
 A base URL is accepted only on the provider's own registered domain. DiscountedTokens uses its published
-`https://discountedtokens.com/v1` and `gpt-6-sol`; Moyi and MirAPI have no default endpoint because theirs could not be
-read from the build environment, so the owner sets `MOYI_BASE_URL` / `MIRAPI_BASE_URL`. One streamed call, no retry,
+`https://discountedtokens.com/v1` and `gpt-6-sol`; Moyi uses `https://api.moyi-api.com/v1` (shown on its home page, owner's
+screenshot); MirAPI has no default endpoint because its could not be read, so the owner sets `MIRAPI_BASE_URL`. One streamed call, no retry,
 reserved at the dearest official list price (USD 10 / 50 per 1M). Each is a switch-board family and an API-providers row.
 Env names and the known risks are in `docs/claude/ENV_REGISTRY.md` (2026-11-16 entry).
 

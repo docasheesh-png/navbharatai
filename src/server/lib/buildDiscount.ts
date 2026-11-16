@@ -31,6 +31,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
+import { buildDiscountLine } from '../../lib/buildDiscountLine';
 
 /** The highest percentage the admin panel accepts. A ceiling, not a suggestion: see rule 2. */
 export const BUILD_DISCOUNT_MAX_PCT = 50;
@@ -180,19 +181,6 @@ export const buildDiscountStore = new BuildDiscountStore();
 /**
  * The one line the user reads under a discounted build. Branded, names no cost and no vendor. PURE.
  * Empty when nothing was taken off, so a 0% build reads exactly as it does today.
+ * BR1996: the text lives in `src/lib/buildDiscountLine.ts` so the panel renders the same line.
  */
-export function buildDiscountLine(d: { listInr: number; discountInr: number; payInr: number; pct: number; sandboxFeeInr?: number }): string {
-  if (!(d.discountInr > 0) || !(d.pct > 0)) return '';
-  return `Build price ₹${d.listInr.toFixed(2)} · Discount ${d.pct}% (−₹${d.discountInr.toFixed(2)})${discountLineFeePart(d.sandboxFeeInr)} · You pay ₹${d.payInr.toFixed(2)}`;
-}
-
-/**
- * BR1996: the 2.5% sandbox service fee is added AFTER the discount, so "price − discount" alone did not
- * reach "You pay" (₹2.99 − ₹0.30 shown against ₹2.76). When a positive, finite fee is part of the bill,
- * the line names it between the two. Absent, zero or unusable ⇒ '' and the line is byte-identical to before.
- * The amount is the breakdown's own figure; nothing is recomputed or charged here. PURE.
- */
-export function discountLineFeePart(sandboxFeeInr: number | undefined): string {
-  if (typeof sandboxFeeInr !== 'number' || !Number.isFinite(sandboxFeeInr) || !(sandboxFeeInr > 0)) return '';
-  return ` · Sandbox service fee +₹${sandboxFeeInr.toFixed(2)}`;
-}
+export { buildDiscountLine };

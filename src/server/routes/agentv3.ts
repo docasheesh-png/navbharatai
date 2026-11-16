@@ -13798,7 +13798,7 @@ async function noteBuildOutcome(
         const watchdogLine = watchdogCostBreakdown ? livePreviewChargeLine(watchdogCostBreakdown) : '';
         const watchdogDiscountLine = watchdogCostBreakdown ? buildDiscountLine({
           listInr: watchdogCostBreakdown.listInr, discountInr: watchdogCostBreakdown.discountInr,
-          payInr: watchdogCostBreakdown.billedInr, pct: watchdogCostBreakdown.discountPct, sandboxFeeInr: watchdogCostBreakdown.sandboxFeeInr,
+          payInr: watchdogCostBreakdown.billedInr, pct: watchdogCostBreakdown.discountPct,
         }) : '';
         const watchdogSummary = [
           buildResultRef.summary || 'Built your app — your files are saved.',
@@ -28677,7 +28677,7 @@ async function noteBuildOutcome(
       // BUNDLED, so a panel change reaches it only with a new release, while this text reaches it now.
       const discountLine = costBreakdown && result.ok ? buildDiscountLine({
         listInr: costBreakdown.listInr, discountInr: costBreakdown.discountInr,
-        payInr: costBreakdown.billedInr, pct: costBreakdown.discountPct, sandboxFeeInr: costBreakdown.sandboxFeeInr,
+        payInr: costBreakdown.billedInr, pct: costBreakdown.discountPct,
       }) : '';
       if (discountLine && typeof result.summary === 'string') {
         result = { ...result, summary: `${result.summary}\n\n🟢 ${discountLine}` };

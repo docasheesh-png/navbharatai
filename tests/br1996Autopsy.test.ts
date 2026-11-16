@@ -1,11 +1,14 @@
 // BR1996 autopsy: a free Weak build with the build discount on. The green line read
-// "Build price · Discount · You pay", but the sandbox service fee was added AFTER the discount, so the
-// price minus the discount did not reach the amount paid. Synthetic fixtures only.
+// "Build price · Discount · You pay", but the settle adds to the bill after the discount, so the price
+// minus the discount did not reach the amount paid. Owner rule t362u: users see only the total charged;
+// how a bill is composed is admin-only. So a line that would not add up drops the worksheet and shows
+// only the discount and the total. Synthetic fixtures only.
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applyBuildDiscount, buildDiscountLine, discountLineFeePart } from '../src/server/lib/buildDiscount';
+import { applyBuildDiscount, buildDiscountLine } from '../src/server/lib/buildDiscount';
+import { buildDiscountLine as libLine, discountWorksheetReconciles } from '../src/lib/buildDiscountLine';
 import { proSandboxFee } from '../src/server/AgentV3/proSandboxFee';
 import { userCostBreakdown, sandboxUnavailableNotice } from '../src/server/routes/agentv3';
 import { foldPlanToBudget } from '../src/server/AgentV3/fileBudget';
@@ -13,6 +16,7 @@ import { foldPlanToBudget } from '../src/server/AgentV3/fileBudget';
 const src = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
 const usage = { inputTokens: 1000, outputTokens: 200 };
 const RATE = 90;
+const PINNED = 'Build price ₹156.60 · Discount 20% (−₹31.32) · You pay ₹125.28';
 
 /** The settle's order: discount on the AI bill, then the fee on what is left. */
 function settle(billedUsd: number, pct: number) {
@@ -22,79 +26,104 @@ function settle(billedUsd: number, pct: number) {
   return { d, fee, b };
 }
 const lineOf = (b: ReturnType<typeof userCostBreakdown>) => buildDiscountLine({
-  listInr: b.listInr, discountInr: b.discountInr, payInr: b.billedInr, pct: b.discountPct, sandboxFeeInr: b.sandboxFeeInr,
+  listInr: b.listInr, discountInr: b.discountInr, payInr: b.billedInr, pct: b.discountPct,
 });
+const FEE_WORDS = /fee|sandbox|service|rate|2\.5|subtotal|margin|cost|markup/i;
 
-describe('F1 — the discount line names the fee that was added after the discount', () => {
-  it('🔴 the report\'s shape: price − discount alone does not reach "You pay"; with the fee it does', () => {
+describe('F1 — a line that would not add up shows only the discount and the total', () => {
+  it('🔴 the report\'s shape: price − discount ≠ You pay ⇒ "Discount … · You pay …" only', () => {
     const { b } = settle(0.0333, 10);
-    expect(b.discountInr).toBeGreaterThan(0);
     expect(b.sandboxFeeInr).toBeGreaterThan(0);
-    // Main's line: the two numbers on it do not add up to the third.
     expect(Math.abs(b.listInr - b.discountInr - b.billedInr)).toBeGreaterThanOrEqual(0.05);
     const line = lineOf(b);
-    expect(line).toBe(
-      `Build price ₹${b.listInr.toFixed(2)} · Discount 10% (−₹${b.discountInr.toFixed(2)}) · Sandbox service fee +₹${b.sandboxFeeInr!.toFixed(2)} · You pay ₹${b.billedInr.toFixed(2)}`,
-    );
-    // Every figure is the breakdown's own; they now reconcile within one paisa of rounding.
-    expect(Math.abs(b.listInr - b.discountInr + b.sandboxFeeInr! - b.billedInr)).toBeLessThanOrEqual(0.011);
+    expect(line).toBe(`Discount 10% (−₹${b.discountInr.toFixed(2)}) · You pay ₹${b.billedInr.toFixed(2)}`);
+    expect(line).not.toContain('Build price');
   });
 
-  it('a larger bill reconciles too', () => {
-    const { b } = settle(1.8, 20);
-    expect(Math.abs(b.listInr - b.discountInr + b.sandboxFeeInr! - b.billedInr)).toBeLessThanOrEqual(0.011);
-    expect(lineOf(b)).toContain(' · Sandbox service fee +₹');
-  });
-
-  it('🔒 no fee passed: byte-identical to main (the existing pin)', () => {
-    expect(buildDiscountLine({ listInr: 156.6, discountInr: 31.32, payInr: 125.28, pct: 20 }))
-      .toBe('Build price ₹156.60 · Discount 20% (−₹31.32) · You pay ₹125.28');
-  });
-
-  it('a zero, negative or unusable fee keeps main\'s line exactly', () => {
-    const base = 'Build price ₹156.60 · Discount 20% (−₹31.32) · You pay ₹125.28';
-    for (const fee of [0, -0.5, Number.NaN, Infinity, -Infinity, undefined, '0.07' as unknown as number, null as unknown as number]) {
-      expect(buildDiscountLine({ listInr: 156.6, discountInr: 31.32, payInr: 125.28, pct: 20, sandboxFeeInr: fee }), String(fee)).toBe(base);
-      expect(discountLineFeePart(fee)).toBe('');
+  it('🔒 t362u: the line never names the fee, a rate or how the bill is composed', () => {
+    for (const [usd, pct] of [[0.0333, 10], [1.8, 20], [12, 50]] as const) {
+      expect(lineOf(settle(usd, pct).b), `${usd}/${pct}`).not.toMatch(FEE_WORDS);
     }
+    expect(PINNED.replace('Build price', '')).not.toMatch(FEE_WORDS);
   });
 
-  it('no discount ⇒ still no line, even with a fee', () => {
-    expect(buildDiscountLine({ listInr: 0, discountInr: 0, payInr: 2.5, pct: 0, sandboxFeeInr: 0.06 })).toBe('');
-    const fee = proSandboxFee(0.03);
-    const b = userCostBreakdown(usage, fee.totalUsd, 'weak', RATE, null, null, fee);
-    expect(lineOf(b)).toBe('');
-  });
-
-  it('a stop billed at the token floor carries no fee (proSandboxFee(0)), so its line is main\'s', () => {
-    const d = applyBuildDiscount({ billedUsd: 0.05, floorUsd: 0.005, pct: 10 });
-    const b = userCostBreakdown(usage, d.payUsd, 'weak', RATE, null, d, proSandboxFee(0));
-    expect(b.sandboxFeeInr).toBe(0);
-    expect(lineOf(b)).not.toContain('Sandbox service fee');
-  });
-
-  it('nothing charged changes: the bill is the same with or without the line', () => {
-    const { b, fee } = settle(0.0333, 10);
+  it('a larger bill with a fee also drops the worksheet, and the total is the billed amount', () => {
+    const { b, fee } = settle(1.8, 20);
+    expect(lineOf(b)).toBe(`Discount 20% (−₹${b.discountInr.toFixed(2)}) · You pay ₹${b.billedInr.toFixed(2)}`);
     expect(b.billedInr).toBe(Math.round(fee.totalUsd * RATE * 100) / 100);
   });
 
-  it('🔒 White-Label: the new part names no vendor and no cost of ours', () => {
-    const { b } = settle(0.0333, 10);
-    expect(lineOf(b)).not.toMatch(/e2b|glm|kimi|claude|sonnet|gemini|qwen|surplus|anthropic|real cost/i);
+  it('🔒 a reconciling line is byte-identical to main (the existing pin)', () => {
+    expect(buildDiscountLine({ listInr: 156.6, discountInr: 31.32, payInr: 125.28, pct: 20 })).toBe(PINNED);
   });
 
-  it('🔒 both route call sites pass the breakdown\'s fee; the panel line names it too', () => {
+  it('no fee at all: the real breakdown keeps main\'s full line', () => {
+    const d = applyBuildDiscount({ billedUsd: 1.8, floorUsd: 0.45, pct: 20 });
+    const b = userCostBreakdown(usage, d.payUsd, 'off', 87, null, d);
+    expect(lineOf(b)).toBe(PINNED);
+  });
+
+  it('a zero fee (a token-floor stop) keeps main\'s full line', () => {
+    const d = applyBuildDiscount({ billedUsd: 0.05, floorUsd: 0.005, pct: 10 });
+    const b = userCostBreakdown(usage, d.payUsd, 'weak', RATE, null, d, proSandboxFee(0));
+    expect(b.sandboxFeeInr).toBe(0);
+    expect(lineOf(b)).toMatch(/^Build price ₹/);
+  });
+
+  it('one paisa of independent rounding still reconciles (full line)', () => {
+    expect(buildDiscountLine({ listInr: 10.01, discountInr: 1.0, payInr: 9.0, pct: 10 }))
+      .toBe('Build price ₹10.01 · Discount 10% (−₹1.00) · You pay ₹9.00');
+    expect(buildDiscountLine({ listInr: 9.99, discountInr: 1.0, payInr: 9.0, pct: 10 }))
+      .toBe('Build price ₹9.99 · Discount 10% (−₹1.00) · You pay ₹9.00');
+  });
+
+  it('two paise apart, in either direction, drops the worksheet', () => {
+    expect(buildDiscountLine({ listInr: 10.02, discountInr: 1.0, payInr: 9.0, pct: 10 })).toBe('Discount 10% (−₹1.00) · You pay ₹9.00');
+    expect(buildDiscountLine({ listInr: 9.98, discountInr: 1.0, payInr: 9.0, pct: 10 })).toBe('Discount 10% (−₹1.00) · You pay ₹9.00');
+  });
+
+  it('NaN or unusable figures keep main\'s form (fail-safe: unclear keeps main)', () => {
+    const main = (d: { listInr: number; discountInr: number; payInr: number; pct: number }) =>
+      `Build price ₹${d.listInr.toFixed(2)} · Discount ${d.pct}% (−₹${d.discountInr.toFixed(2)}) · You pay ₹${d.payInr.toFixed(2)}`;
+    for (const d of [
+      { listInr: Number.NaN, discountInr: 1, payInr: 9, pct: 10 },
+      { listInr: 10, discountInr: 1, payInr: Number.NaN, pct: 10 },
+      { listInr: Infinity, discountInr: 1, payInr: 9, pct: 10 },
+    ]) {
+      expect(discountWorksheetReconciles(d)).toBe(true);
+      expect(buildDiscountLine(d)).toBe(main(d));
+    }
+  });
+
+  it('no discount ⇒ no line, as on main', () => {
+    expect(buildDiscountLine({ listInr: 0, discountInr: 0, payInr: 2.5, pct: 0 })).toBe('');
+    expect(buildDiscountLine({ listInr: 3, discountInr: 0.3, payInr: 2.7, pct: 0 })).toBe('');
+    expect(buildDiscountLine({ listInr: 3, discountInr: Number.NaN, payInr: 2.7, pct: 10 })).toBe('');
+    const fee = proSandboxFee(0.03);
+    expect(lineOf(userCostBreakdown(usage, fee.totalUsd, 'weak', RATE, null, null, fee))).toBe('');
+  });
+
+  it('🔒 the server line is the shared client-safe one', () => {
+    expect(buildDiscountLine).toBe(libLine);
+    expect(src('src/lib/buildDiscountLine.ts')).not.toMatch(/from ['"][^'"]*server/);
+  });
+
+  it('🔒 both settle paths call it with no fee field; the panel renders the same function', () => {
     const route = src('src/server/routes/agentv3.ts');
     expect(route.match(/buildDiscountLine\(\{/g)?.length).toBe(2);
-    expect(route).toContain('pct: costBreakdown.discountPct, sandboxFeeInr: costBreakdown.sandboxFeeInr,');
-    expect(route).toContain('pct: watchdogCostBreakdown.discountPct, sandboxFeeInr: watchdogCostBreakdown.sandboxFeeInr,');
+    expect(route).not.toMatch(/buildDiscountLine\(\{[^}]*sandboxFee/);
+    expect(route).toContain('payInr: costBreakdown.billedInr, pct: costBreakdown.discountPct,\n      })');
+    expect(route).toContain('payInr: watchdogCostBreakdown.billedInr, pct: watchdogCostBreakdown.discountPct,\n        })');
     const panel = src('src/components/agentv3/AgentV3Panel.tsx');
+    expect(panel).toContain("import { buildDiscountLine } from '../../lib/buildDiscountLine';");
     const at = panel.indexOf('data-testid="build-discount-line"');
     const block = panel.slice(at, panel.indexOf('</div>', at));
-    expect(block).toContain(' · Sandbox service fee +₹${state.costBreakdown.sandboxFeeInr.toFixed(2)}');
-    expect(block).toContain('state.costBreakdown.sandboxFeeInr > 0');
-    expect(block).toContain("(−₹{(state.costBreakdown?.discountInr ?? 0).toFixed(2)}){/* BR1996: the fee added after the discount */}{typeof state.costBreakdown?.sandboxFeeInr === 'number' && Number.isFinite(state.costBreakdown.sandboxFeeInr) && state.costBreakdown.sandboxFeeInr > 0 ? ");
-    expect(block.indexOf('Sandbox service fee')).toBeLessThan(block.indexOf('You pay'));
+    expect(block).toContain('{buildDiscountLine({ listInr: state.costBreakdown?.listInr ?? 0, discountInr: state.costBreakdown?.discountInr ?? 0, payInr: state.costBreakdown?.billedInr ?? 0, pct: state.costBreakdown?.discountPct ?? 0 })}');
+    expect(block).not.toMatch(/sandboxFee|Build price ₹\{/);
+  });
+
+  it('🔒 out of scope and unchanged: the fold\'s own fee line (queued as Q-2711)', () => {
+    expect(src('src/components/agentv3/AgentV3Panel.tsx')).toContain('Sandbox service fee (2.5% of subtotal): ₹{state.costBreakdown.sandboxFeeInr.toFixed(2)}');
   });
 });
 

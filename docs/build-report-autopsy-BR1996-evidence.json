@@ -7,14 +7,16 @@
     "the green discount line named price, discount and 'You pay' only; price minus discount did not equal the amount paid (the gap was the fee)",
     "workspace setup hit the sandbox concurrency cap at about 0.6 s; the text-only fast lane ran anyway, folded package.json into tsconfig.json, and failed its typecheck on missing React (already closed by BR1952 #4124)",
     "the setup-failure note told the user to try again although the build went on to deliver (already closed by BR1961 #4146)",
-    "F1: buildDiscountLine and the panel line add ' · Sandbox service fee +₹X' before 'You pay' only when the breakdown's sandboxFeeInr is a positive finite number; synthetic bills reconcile within one paisa",
-    "neighbours: no fee, zero, negative, NaN, Infinity, a string and null keep main's line byte-identical; no discount gives no line; a token-floor stop has no fee",
-    "mutation checks (unique mktemp backups, restored): M1 part unwired 2 fail; M2 no positive guard 2 fail; M3 no finite guard 1 fail; M5 normal settle unwired 1 fail; M6 watchdog unwired 1 fail; M7 panel unwired 1 fail (after the pin was strengthened); M8 fee after 'You pay' 1 fail; M4 typeof guard removed survives as runtime-equivalent and is kept for TypeScript narrowing"
+    "F1 (reworked under owner rule t362u): when list minus discount is more than one paisa from 'You pay', buildDiscountLine shows only 'Discount N% (−₹D) · You pay ₹P'; it never names a fee, rate or subtotal; the server summary and the panel render the same function from src/lib/buildDiscountLine.ts",
+    "neighbours: a reconciling line (no fee, a zero fee on a token-floor stop, one paisa of rounding either way) is byte-identical to main including the pinned line; two paise either way drops the worksheet; NaN or Infinity keeps main's form; no discount gives no line",
+    "mutation checks round 2 (unique mktemp backups, restored), all caught: N1 never drop 3 fail; N2 always drop 6 fail; N3 no rounding tolerance 1 fail; N4 ten-paise tolerance 2 fail; N5 one-sided check 1 fail; N6 unusable figures drop 1 fail; N7 line names a fee 4 fail; N8 panel keeps its own text 1 fail; N9 fee field back at a call site 1 fail; N10 no discount guard 1 fail",
+    "review history: the first version named 'Sandbox service fee +₹X' on the green line and failed review under t362u; it was replaced by ordinary commits on the same branch"
   ],
   "limitations": [
     "D6 (the builder calling a new app a fix after a hand-over) is queued as Q-2710, not changed",
-    "the line names the fee figure already in the breakdown; rounding of three separately rounded figures can differ by one paisa",
     "BR1992 review residual (recordModel read at run start) is not on this report's path",
-    "focused local tests and server/root typecheck only; no full local suite was run (box memory)"
+    "focused local tests and server/root typecheck only; no full local suite was run (box memory)",
+    "the pre-existing fold line 'Sandbox service fee (2.5% of subtotal)' and livePreviewChargeLine still show a rate and fee to users; out of scope here and queued as Q-2711",
+    "a fee that rounds to one paisa or less keeps the full worksheet, which can then differ from 'You pay' by one paisa"
   ]
 }

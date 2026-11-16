@@ -173,6 +173,22 @@ export function isEchoedFormatExample(path: string, content: string): boolean {
  */
 export const END_FILE_MARKER = '<<<ENDFILE>{1,3}';
 
+/**
+ * The closing brackets of a `<<<FILE path>>>` header as every reader must recognise them: `>>>`, and the
+ * one- or two-bracket-short `>>` / `>` (BR1989). A per-file call answered `<<<FILE src/x.tsx>>` and the
+ * parser, which only knew `>>>`, returned no block at all: the component was paid for, silently dropped,
+ * and an app that imported it failed to compile until a repair round wrote it again. The SAME widening the
+ * end marker got (eed79815), and for the same reason it is ONE definition: the truncation checks in
+ * FastLaneContinuation must see every header the parser accepts, or a cut-off file would be parsed as a
+ * finished one. A regex SOURCE, not a RegExp.
+ */
+export const FILE_HEADER_CLOSE = '>{1,3}';
+
+/** The path named by a `<<<FILE …>>>` header's captured text: trimmed, unquoted, stray closing `>` removed. Pure. */
+export function fileHeaderPath(raw: string): string {
+  return String(raw ?? '').trim().replace(/>+$/, '').trim().replace(/^["'`]|["'`]$/g, '');
+}
+
 /** Does `text` contain an end-of-file marker at or after `from`? Pure. */
 export function hasEndFileMarker(text: string, from = 0): boolean {
   return new RegExp(END_FILE_MARKER).test(String(text ?? '').slice(Math.max(0, from)));
@@ -198,10 +214,12 @@ export function parseFileBlocks(text: string): OneShotFile[] {
   // The terminator also accepts `<<<ENDFILE>>` and `<<<ENDFILE>` (autopsy eed79815, 2026-09-26): a model
   // that dropped one `>` left the marker INSIDE the file, and a stylesheet ending in `<<<ENDFILE>>`
   // broke the production build on the next turn.
-  const re = new RegExp(String.raw`<<<FILE\s+(.+?)>>>\r?\n([\s\S]*?)(?:\r?\n?${END_FILE_MARKER}|(?=\r?\n?<<<FILE\s)|$)`, 'g');
+  //
+  // The header accepts `>>` and `>` as well as `>>>` (FILE_HEADER_CLOSE, BR1989).
+  const re = new RegExp(String.raw`<<<FILE\s+(.+?)${FILE_HEADER_CLOSE}\r?\n([\s\S]*?)(?:\r?\n?${END_FILE_MARKER}|(?=\r?\n?<<<FILE\s)|$)`, 'g');
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    const path = m[1].trim().replace(/^["'`]|["'`]$/g, '');
+    const path = fileHeaderPath(m[1]);
     const content = m[2];
     // Reject empty / unsafe paths (no absolute, no traversal).
     if (!path || path.startsWith('/') || path.includes('..') || path.length > 300) continue;

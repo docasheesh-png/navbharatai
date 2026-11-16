@@ -986,7 +986,29 @@ export function utilOwnerFor(manifest: ReadonlyArray<SimpleFileSpec>, names: rea
   const described = helperModuleByWords(candidates, names);
   if (described) return { path: described.path, added: false };
   const ext = /\.js$/.test(contractPath) ? 'js' : 'ts';
-  return { path: dir === '.' ? `utils.${ext}` : `${dir}/utils.${ext}`, added: true };
+  return newSharedHome(manifest, dir, 'utils', 'helpers', ext);
+}
+
+/**
+ * The file a NEW shared home is added as: `<dir>/<stem>.<ext>`, unless the plan already has a
+ * `<dir>/<stem>/` FOLDER — then `<dir>/<stem>/<inner>.<ext>` inside it. PURE.
+ *
+ * 🔴 WHY (BR1989). The plan had a `src/utils/` folder holding one module and no file owned the
+ * contract's helper, so the lane added `src/utils.ts` beside that folder. A file and a folder with one
+ * name make every relative import ambiguous: the module inside the folder imported the helper from
+ * `./utils` (its own folder, where nothing was), the compile failed, and the repair round wrote a second,
+ * identical copy as `src/utils/utils.ts`, which then shipped. A planned `src/utils/index.ts` would be worse:
+ * `./utils` resolves to the FILE first, so the added file would shadow the planned barrel. A home inside
+ * the folder has one unambiguous import path. Only an ADDED home moves; a plan without such a folder gets
+ * exactly the old path, and an owner the plan already names is never touched. Used for the helpers' home only:
+ * the shared-constants home (`valueOwnerFor`) keeps its old path — a same-named data folder was not this
+ * report's failure, and `tests/theCoactCollectorAutopsy.test.ts` pins that path.
+ */
+export function newSharedHome(manifest: ReadonlyArray<SimpleFileSpec>, dir: string, stem: string, inner: string, ext: string): UtilOwner {
+  const folder = dir === '.' ? stem : `${dir}/${stem}`;
+  if (!manifest.some((f) => f.path.startsWith(`${folder}/`))) return { path: `${folder}.${ext}`, added: true };
+  const path = `${folder}/${inner}.${ext}`;
+  return { path, added: !manifest.some((f) => f.path === path) };
 }
 
 /**

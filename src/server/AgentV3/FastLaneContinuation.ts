@@ -21,7 +21,7 @@
 //
 // PURE + unit-tested. The impure LLM round trip lives at the call site in routes/agentv3.ts.
 
-import { hasEndFileMarker, parseFileBlocks } from './OneShotBuilder';
+import { FILE_HEADER_CLOSE, fileHeaderPath, hasEndFileMarker, parseFileBlocks } from './OneShotBuilder';
 import { binaryTextGenerationProblem } from './binaryTextWrite';
 import { isBinaryAsset } from './fileClassification';
 
@@ -117,7 +117,7 @@ function unterminatedTail(text: string): { path: string; body: string } | null {
   const path = unterminatedTailPath(text);
   if (!path) return null;
   const lastHeader = text.lastIndexOf('<<<FILE');
-  const m = /^<<<FILE\s+(.+?)>>>\r?\n([\s\S]*)$/.exec(text.slice(lastHeader));
+  const m = new RegExp(String.raw`^<<<FILE\s+(.+?)${FILE_HEADER_CLOSE}\r?\n([\s\S]*)$`).exec(text.slice(lastHeader));
   return m ? { path, body: m[2] } : { path, body: '' };
 }
 
@@ -176,9 +176,9 @@ function normalizedHead(body: string): string {
 export function resumedFilePath(previous: string, continuation: string): string | null {
   const tail = unterminatedTail(previous);
   if (!tail) return null;
-  const m = /^\s*<<<FILE\s+(.+?)>>>\r?\n([\s\S]*)$/.exec(continuation);
+  const m = new RegExp(String.raw`^\s*<<<FILE\s+(.+?)${FILE_HEADER_CLOSE}\r?\n([\s\S]*)$`).exec(continuation);
   if (!m) return null;
-  const contPath = m[1].trim().replace(/^["'`]|["'`]$/g, '');
+  const contPath = fileHeaderPath(m[1]);
   if (contPath !== tail.path) return null;
   return continuationRestartsFile(tail.body, m[2]) ? null : tail.path;
 }
@@ -210,7 +210,7 @@ export function joinContinuation(previous: string, continuation: string): string
   if (!previous) return continuation;
   const resumed = resumedFilePath(previous, continuation);
   const cont = resumed
-    ? continuation.replace(/^\s*<<<FILE\s+(.+?)>>>\r?\n/, '')
+    ? continuation.replace(new RegExp(String.raw`^\s*<<<FILE\s+(.+?)${FILE_HEADER_CLOSE}\r?\n`), '')
     : continuation;
   const needsBreak = cont.startsWith('<<<FILE') && !previous.endsWith('\n');
   return previous + (needsBreak ? '\n' : '') + cont;
@@ -232,9 +232,9 @@ export function unterminatedTailPath(text: string): string | null {
   if (lastHeader === -1) return null;
   // The parser's own terminator (END_FILE_MARKER): a block it closed is never a file cut off here.
   if (hasEndFileMarker(text, lastHeader)) return null;
-  const m = /^<<<FILE\s+(.+?)>>>/.exec(text.slice(lastHeader));
+  const m = new RegExp(String.raw`^<<<FILE\s+(.+?)${FILE_HEADER_CLOSE}`).exec(text.slice(lastHeader));
   if (!m) return null;
-  const path = m[1].trim().replace(/^["'`]|["'`]$/g, '');
+  const path = fileHeaderPath(m[1]);
   return path || null;
 }
 
@@ -321,10 +321,10 @@ export async function continueFastLaneGeneration<T extends FastLaneReply>(
     // accepts missing end markers, so that would hide the known partial behind a complete final
     // block. Remove it at the boundary where we still know which reply left it unfinished.
     const openPath = unterminatedTailPath(text);
-    const nextHeader = /<<<FILE\s+(.+?)>>>/.exec(next.text);
+    const nextHeader = new RegExp(String.raw`<<<FILE\s+(.+?)${FILE_HEADER_CLOSE}`).exec(next.text);
     let replacesTail = false;
     if (openPath && nextHeader && !hasEndFileMarker(next.text.slice(0, nextHeader.index))) {
-      const nextPath = nextHeader[1].trim().replace(/^["'`]|["'`]$/g, '');
+      const nextPath = fileHeaderPath(nextHeader[1]);
       replacesTail = nextPath === openPath && !rejoined;
       if (nextPath !== openPath) {
         abandoned.push({ path: openPath, reply: last, contributors: tailContributors });

@@ -1,0 +1,30 @@
+{
+  "evidenceType": "synthetic-regression-cases",
+  "privateReportPayloadIncluded": false,
+  "cases": [
+    "a synthetic note-card component behind a '<<<FILE path>>>' header parses byte-for-byte as on main",
+    "the same component behind '<<<FILE path>>' and '<<<FILE path>' headers parses to the same path and content",
+    "a '<<<FILE path>>>>' header yields a clean path with no trailing '>'",
+    "three blocks with a short header in the middle stay three separate files",
+    "neighbours: quoted path unquoted; '..' and absolute paths rejected; a mid-sentence '<<<FILE path>>' mention is not a file; empty input",
+    "a truncated tail behind a short header is still reported as cut off; a closed one is not; the '>>>' spelling is unchanged",
+    "a continuation re-opening a short-header stylesheet welds onto the partial head instead of replacing it",
+    "a cut-off turn's short-header text marker is listed for rewrite",
+    "source pin: no '>>>'-only header regex remains in FastLaneContinuation; the per-file lane reads through parseFileBlocks",
+    "a plan with a src/utils/ folder and no helper owner gets src/utils/helpers.ts, not src/utils.ts",
+    "a planned src/utils/index.ts barrel is not shadowed; a planned src/utils/helpers.ts is reused, not duplicated",
+    "neighbours keep main's path: no folder, a look-alike utilsPanel file, a nested lib/utils folder, root and .js contracts",
+    "owners the plan already names (purpose, beside-contract helper file, helper-named file) are unchanged",
+    "the shared-constants home stays src/data.ts, with or without a data folder",
+    "the moved helper home is generated in the same stage as the old one",
+    "mutation checks: header back to '>>>' (8 fail); continuation tail reader alone back to '>>>' (3 fail); folder rule removed (5 fail); sources restored from unique mktemp backups"
+  ],
+  "limitations": [
+    "not a replay of a customer build",
+    "not production or deployment validation",
+    "the binary placeholder and package.json fold were already closed on main by BR1952 (#4124) and are not re-tested here",
+    "the contract file beside a same-named types folder is unchanged (candidate follow-up)",
+    "ETA calibration, the YELLOW no-journey gate and the unanswered embedded question are unchanged",
+    "focused local tests and server/root typecheck only; no full local suite was run (box memory)"
+  ]
+}

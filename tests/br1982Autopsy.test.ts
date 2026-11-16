@@ -23,16 +23,18 @@
  *     parse error is leftover apply-patch markup.
  *
  * Shipped in this PR:
- *   • A write-time conflict-marker guard (all text files, including tsconfig
- *     JSONC) refuses leftover apply-patch / merge markers on a clean file.
+ *   • A write-time conflict-marker guard refuses leftover apply-patch / merge
+ *     markers only in config files the syntax gate skips (tsconfig, *.json,
+ *     *.jsonc). JS/TS that still parses, Markdown, plain text, and .diff /
+ *     .patch files are not refused.
  *   • A parseable tsconfig whose only fault is a trailing marker block is
- *     salvaged (prefix kept) and, when it is a DOM/app tsconfig missing jsx,
- *     gains "jsx": "react-jsx".
+ *     salvaged (prefix kept). When the app is clearly React, a DOM/app
+ *     tsconfig missing jsx gains "jsx": "react-jsx" by insertion, comments kept.
  */
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { sandboxUnavailableNotice } from '../src/server/routes/agentv3';
-import { sanitizeTsconfigReferences } from '../src/server/AgentV3/FrameworkFoundation';
+import { parseTsconfigJsonc, sanitizeTsconfigReferences } from '../src/server/AgentV3/FrameworkFoundation';
 import {
   ensureTsconfigBaseUrl,
   ensureTsconfigJsx,
@@ -41,6 +43,7 @@ import {
 import {
   conflictMarkerRefusal,
   firstConflictMarkerLine,
+  isConflictGuardTarget,
   stripTrailingConflictMarkup,
   writeConflictGuardEnabled,
 } from '../src/server/AgentV3/conflictMarkerGuard';
@@ -89,6 +92,7 @@ ${CLOSE} REPLACE>>>
 `;
 
 const BR1982_TSCONFIG = BR1982_TSCONFIG_PREFIX + BR1982_TSCONFIG_TAIL;
+const REACT = { framework: 'vite-react' as const };
 
 describe('BR1982 — a busy sandbox is not a goodbye, and the fast lane is not started', () => {
   it("the notice says we are still trying and does not invite this report's old retry", () => {
@@ -165,6 +169,77 @@ describe('BR1982 — leftover apply-patch markup is refused on a clean file, inc
   it('neighbour: the kill switch allows a marked write', () => {
     expect(conflictMarkerRefusal('tsconfig.json', BR1982_TSCONFIG, '', false)).toBeNull();
   });
+
+  it('neighbour: only config-like files are targets; JS/TS, docs, and patches are not', () => {
+    expect(isConflictGuardTarget('tsconfig.json')).toBe(true);
+    expect(isConflictGuardTarget('tsconfig.node.json')).toBe(true);
+    expect(isConflictGuardTarget('jsconfig.json')).toBe(true);
+    expect(isConflictGuardTarget('package.json')).toBe(true);
+    expect(isConflictGuardTarget('src/data.jsonc')).toBe(true);
+    expect(isConflictGuardTarget('src/app.ts')).toBe(false);
+    expect(isConflictGuardTarget('src/App.tsx')).toBe(false);
+    expect(isConflictGuardTarget('src/App.jsx')).toBe(false);
+    expect(isConflictGuardTarget('README.md')).toBe(false);
+    expect(isConflictGuardTarget('notes.mdx')).toBe(false);
+    expect(isConflictGuardTarget('notes.txt')).toBe(false);
+    expect(isConflictGuardTarget('fix.diff')).toBe(false);
+    expect(isConflictGuardTarget('fix.patch')).toBe(false);
+  });
+
+  it('neighbour: a README with a fenced opening-marker example is allowed', () => {
+    const md = [
+      '# Merge conflicts',
+      '',
+      'A conflict looks like this:',
+      '',
+      '```',
+      `${OPEN} HEAD`,
+      'ours',
+      '=======',
+      'theirs',
+      `${CLOSE} branch`,
+      '```',
+      '',
+    ].join('\n');
+    expect(firstConflictMarkerLine(md)).toBe(6);
+    expect(conflictMarkerRefusal('README.md', md, '')).toBeNull();
+    expect(conflictMarkerRefusal('docs/guide.mdx', md, '')).toBeNull();
+    expect(conflictMarkerRefusal('notes.txt', md, '')).toBeNull();
+  });
+
+  it('neighbour: a clean-parsing TypeScript template literal holding markers at column 0 is allowed', async () => {
+    const src = [
+      'export const example = `',
+      `${OPEN} HEAD`,
+      'old',
+      '=======',
+      'new',
+      `${CLOSE} branch`,
+      '`;',
+      'export const n = 1;',
+    ].join('\n');
+    expect(firstConflictMarkerLine(src)).toBe(2);
+    expect(conflictMarkerRefusal('src/docs.ts', src, '')).toBeNull();
+    expect(conflictMarkerRefusal('src/docs.tsx', src, '')).toBeNull();
+    expect(conflictMarkerRefusal('src/docs.jsx', src, '')).toBeNull();
+    expect(conflictMarkerRefusal('src/docs.js', src, '')).toBeNull();
+    const err = await firstSyntaxError('src/docs.ts', src);
+    expect(err).toBeNull();
+  });
+
+  it('neighbour: .diff and .patch files that start a marker line are allowed', () => {
+    const patch = [
+      'diff --git a/src/app.ts b/src/app.ts',
+      `${OPEN} HEAD`,
+      'foo',
+      '=======',
+      'bar',
+      `${CLOSE} main`,
+    ].join('\n');
+    expect(firstConflictMarkerLine(patch)).toBe(2);
+    expect(conflictMarkerRefusal('changes.diff', patch, '')).toBeNull();
+    expect(conflictMarkerRefusal('changes.patch', patch, '')).toBeNull();
+  });
 });
 
 describe('BR1982 — a parseable tsconfig with a trailing marker block is salvaged, then given jsx', () => {
@@ -200,19 +275,23 @@ describe('BR1982 — a parseable tsconfig with a trailing marker block is salvag
     expect(res.fixes).toHaveLength(0);
     expect(res.stripped ?? []).toHaveLength(0);
     expect(res.patch).toEqual({});
-    expect(ensureTsconfigJsx('tsconfig.json', officialStarterTsconfig)).toBe(officialStarterTsconfig);
+    expect(ensureTsconfigJsx('tsconfig.json', officialStarterTsconfig, REACT)).toBe(officialStarterTsconfig);
   });
 
-  it("the write-door compose turns this report's file into a clean tsconfig with jsx and no markers", () => {
+  it("the write-door compose (vite-react) turns this report's file into a clean tsconfig with jsx, kept comments, and no markers", () => {
     const out = ensureTsconfigBaseUrl(
       'tsconfig.json',
-      ensureTsconfigJsx('tsconfig.json', healTsconfigConflictTail('tsconfig.json', BR1982_TSCONFIG)),
+      ensureTsconfigJsx('tsconfig.json', healTsconfigConflictTail('tsconfig.json', BR1982_TSCONFIG), REACT),
     );
-    const json = JSON.parse(out);
-    expect(json.compilerOptions.jsx).toBe('react-jsx');
-    expect(json.compilerOptions.moduleResolution).toBe('bundler');
-    expect(json.references).toBeUndefined();
+    const json = parseTsconfigJsonc(out);
+    expect(json).not.toBeNull();
+    expect((json!.compilerOptions as { jsx: string }).jsx).toBe('react-jsx');
+    expect((json!.compilerOptions as { moduleResolution: string }).moduleResolution).toBe('bundler');
+    expect(json!.references).toBeUndefined();
+    expect(out).toContain('/* Bundler mode */');
     expect(firstConflictMarkerLine(out)).toBeNull();
+    // Comments remain, so ensureTsconfigBaseUrl must not rewrite the file.
+    expect(out).toBe(ensureTsconfigJsx('tsconfig.json', healTsconfigConflictTail('tsconfig.json', BR1982_TSCONFIG), REACT));
   });
 
   it('stripTrailingConflictMarkup is a no-op when there is nothing to salvage (marker on line 1, or none)', () => {
@@ -227,6 +306,8 @@ describe('BR1982 — hook census (a new write door cannot silently skip these he
     expect(DISPATCH).toContain('healTsconfigConflictTail(path, ensureViteResolveAlias(path, ensureViteAllowedHosts(path, content)))');
     expect(DISPATCH).toContain('ensureTsconfigJsx(path, healTsconfigConflictTail(');
     expect(DISPATCH).toContain('ensureTsconfigBaseUrl(path, ensureTsconfigJsx(');
+    expect(DISPATCH).toContain('guardConfigContent(rel, this.applyPostgresProviderLock(rel, content), { framework: this.framework })');
+    expect(DISPATCH).toContain("{ framework: this.framework }");
     expect(DISPATCH).toContain('conflictMarkerRefusal(path, newContent, oldContent, true)');
     expect(DISPATCH).toContain('writeConflictGuardEnabled()');
     // Both write doors share parseGuardRejection (write_file via guardedWrite, edit_file directly).

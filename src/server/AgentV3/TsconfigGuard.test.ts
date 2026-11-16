@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as ts from 'typescript';
-import { isTsconfigPath, ensureTsconfigBaseUrl, ensureTsconfigJsx, healTsconfigConflictTail } from './TsconfigGuard';
+import { isTsconfigPath, ensureTsconfigBaseUrl, ensureTsconfigJsx, healTsconfigConflictTail, isClearlyReactApp } from './TsconfigGuard';
+import { parseTsconfigJsonc } from './FrameworkFoundation';
 
 describe('isTsconfigPath', () => {
   it('matches tsconfig.json and variants but not tsconfig.node.json', () => {
@@ -116,44 +117,135 @@ describe('healTsconfigConflictTail — drop a leftover apply-patch tail (BR1982)
   });
 });
 
-describe('ensureTsconfigJsx — add react-jsx on a DOM tsconfig that has no jsx flag (BR1982)', () => {
-  it("this report's prefix (DOM lib, no jsx) gains jsx: react-jsx, and the official options stay", () => {
-    const after = JSON.parse(ensureTsconfigJsx('tsconfig.json', BR1982_TSCONFIG_PREFIX));
-    expect(after.compilerOptions.jsx).toBe('react-jsx');
-    expect(after.compilerOptions.moduleResolution).toBe('bundler');
-    expect(after.include).toEqual(['src']);
-    expect(after.compilerOptions.lib).toEqual(['ES2020', 'DOM', 'DOM.Iterable']);
+
+const REACT = { framework: 'vite-react' as const };
+
+describe('ensureTsconfigJsx — add react-jsx only on a clearly-React DOM tsconfig (BR1982)', () => {
+  it("this report's prefix (DOM lib, no jsx, vite-react) gains jsx: react-jsx and keeps its comments", () => {
+    const after = ensureTsconfigJsx('tsconfig.json', BR1982_TSCONFIG_PREFIX, REACT);
+    const parsed = parseTsconfigJsonc(after);
+    expect(parsed).not.toBeNull();
+    expect((parsed!.compilerOptions as { jsx: string }).jsx).toBe('react-jsx');
+    expect((parsed!.compilerOptions as { moduleResolution: string }).moduleResolution).toBe('bundler');
+    expect(parsed!.include).toEqual(['src']);
+    expect((parsed!.compilerOptions as { lib: string[] }).lib).toEqual(['ES2020', 'DOM', 'DOM.Iterable']);
+    expect(after).toContain('/* Bundler mode */');
+    expect(after).toContain('/* Linting */');
+    // ensureTsconfigBaseUrl's commented-tsconfig contract stays intact: comments still block a rewrite.
+    expect(ensureTsconfigBaseUrl('tsconfig.json', after)).toBe(after);
+  });
+
+  it('neighbour: without React evidence the file is left alone, so TS17004 stays visible', () => {
+    expect(ensureTsconfigJsx('tsconfig.json', BR1982_TSCONFIG_PREFIX)).toBe(BR1982_TSCONFIG_PREFIX);
+    expect(isClearlyReactApp(undefined)).toBe(false);
+    expect(isClearlyReactApp({})).toBe(false);
   });
 
   it('neighbour: an existing jsx value is never overwritten (preserve / react / react-jsx)', () => {
     for (const jsx of ['preserve', 'react', 'react-jsx']) {
       const before = JSON.stringify({ compilerOptions: { jsx, lib: ['DOM'] } });
-      expect(JSON.parse(ensureTsconfigJsx('tsconfig.json', before)).compilerOptions.jsx).toBe(jsx);
+      expect(ensureTsconfigJsx('tsconfig.json', before, REACT)).toBe(before);
     }
   });
 
-  it('neighbour: a Node tsconfig (no DOM lib) and a Vue jsxImportSource are left alone', () => {
+  it('neighbour: a Node tsconfig (no DOM lib) is left alone even on a React app', () => {
     const node = JSON.stringify({ compilerOptions: { module: 'NodeNext', lib: ['ES2020'] } }, null, 2);
-    expect(ensureTsconfigJsx('tsconfig.json', node)).toBe(node);
-    const vue = JSON.stringify({ compilerOptions: { lib: ['DOM'], jsxImportSource: 'vue' } }, null, 2);
-    expect(ensureTsconfigJsx('tsconfig.json', vue)).toBe(vue);
+    expect(ensureTsconfigJsx('tsconfig.json', node, REACT)).toBe(node);
+  });
+
+  it('neighbour: Next.js (jsx dropped, plugins next; or package.json with next) is left alone — Next needs preserve', () => {
+    const nextMissingJsx = JSON.stringify({
+      compilerOptions: {
+        lib: ['dom', 'dom.iterable', 'esnext'],
+        moduleResolution: 'bundler',
+        plugins: [{ name: 'next' }],
+      },
+    }, null, 2);
+    const reactAndNext = JSON.stringify({ dependencies: { react: '^18', next: '^15' } });
+    expect(ensureTsconfigJsx('tsconfig.json', nextMissingJsx, { framework: 'nextjs' })).toBe(nextMissingJsx);
+    expect(ensureTsconfigJsx('tsconfig.json', nextMissingJsx, { packageJson: reactAndNext })).toBe(nextMissingJsx);
+    expect(ensureTsconfigJsx('tsconfig.json', nextMissingJsx, { framework: 'vite-react', packageJson: reactAndNext })).toBe(nextMissingJsx);
+  });
+
+  it('neighbour: the official Vue shape, and a Vue app with jsx dropped, are left alone', () => {
+    const officialVue = JSON.stringify({
+      compilerOptions: {
+        target: 'ES2020',
+        lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+        moduleResolution: 'bundler',
+        jsx: 'preserve',
+      },
+      include: ['src/**/*.ts', 'src/**/*.vue'],
+    }, null, 2);
+    expect(ensureTsconfigJsx('tsconfig.json', officialVue, { framework: 'vue' })).toBe(officialVue);
+    const vueDropped = JSON.stringify({ compilerOptions: { lib: ['DOM'] } }, null, 2);
+    const vuePkg = JSON.stringify({ dependencies: { vue: '^3' } });
+    expect(ensureTsconfigJsx('tsconfig.json', vueDropped, { framework: 'vue' })).toBe(vueDropped);
+    expect(ensureTsconfigJsx('tsconfig.json', vueDropped, { framework: 'vite-react', packageJson: vuePkg })).toBe(vueDropped);
+  });
+
+  it('neighbour: Solid (jsxImportSource solid-js, jsx dropped) is left alone', () => {
+    const solid = JSON.stringify({
+      compilerOptions: { lib: ['ES2020', 'DOM', 'DOM.Iterable'], jsxImportSource: 'solid-js' },
+    }, null, 2);
+    const solidPkg = JSON.stringify({ dependencies: { 'solid-js': '^1' } });
+    expect(ensureTsconfigJsx('tsconfig.json', solid, { framework: 'solid' })).toBe(solid);
+    expect(ensureTsconfigJsx('tsconfig.json', solid, { framework: 'vite-react', packageJson: solidPkg })).toBe(solid);
+  });
+
+  it('neighbour: Preact with both jsx and jsxImportSource dropped is left alone', () => {
+    const preactDropped = JSON.stringify({
+      compilerOptions: { lib: ['ES2020', 'DOM', 'DOM.Iterable'] },
+    }, null, 2);
+    const preactPkg = JSON.stringify({ dependencies: { preact: '^10' } });
+    expect(ensureTsconfigJsx('tsconfig.json', preactDropped, { framework: 'preact' })).toBe(preactDropped);
+    expect(ensureTsconfigJsx('tsconfig.json', preactDropped, { framework: 'vite-react', packageJson: preactPkg })).toBe(preactDropped);
+  });
+
+  it('neighbour: a child tsconfig with extends is left alone', () => {
+    const child = JSON.stringify({
+      extends: './tsconfig.base.json',
+      compilerOptions: { lib: ['DOM'] },
+    }, null, 2);
+    expect(ensureTsconfigJsx('tsconfig.json', child, REACT)).toBe(child);
+    expect(ensureTsconfigJsx('tsconfig.app.json', child, REACT)).toBe(child);
+  });
+
+  it('neighbour: a commented tsconfig that is not clearly React is left alone (baseUrl contract too)', () => {
+    const commented = '{\n  // a comment\n  "compilerOptions": { "lib": ["DOM"] }\n}';
+    expect(ensureTsconfigJsx('tsconfig.json', commented)).toBe(commented);
+    expect(ensureTsconfigBaseUrl('tsconfig.json', commented)).toBe(commented);
   });
 
   it('neighbour: tsconfig.node.json and a non-tsconfig are left alone', () => {
     const src = JSON.stringify({ compilerOptions: { lib: ['DOM'] } });
-    expect(ensureTsconfigJsx('tsconfig.node.json', src)).toBe(src);
-    expect(ensureTsconfigJsx('src/App.tsx', src)).toBe(src);
+    expect(ensureTsconfigJsx('tsconfig.node.json', src, REACT)).toBe(src);
+    expect(ensureTsconfigJsx('src/App.tsx', src, REACT)).toBe(src);
+  });
+
+  it('a package.json with react and no next/vue/solid/preact is enough even without a framework label', () => {
+    const pkg = JSON.stringify({ dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' } });
+    const after = ensureTsconfigJsx('tsconfig.json', BR1982_TSCONFIG_PREFIX, { packageJson: pkg });
+    expect(parseTsconfigJsonc(after)!.compilerOptions).toMatchObject({ jsx: 'react-jsx' });
+    expect(after).toContain('/* Bundler mode */');
   });
 });
 
-describe('the write-door compose: strip then jsx then baseUrl on this report\'s exact file', () => {
-  it('produces a parseable tsconfig with jsx, no markers, and no invented references', () => {
+describe('the write-door compose: strip then jsx (vite-react) on this report\'s exact file', () => {
+  it('produces a tsconfig with jsx, no markers, kept comments, and no invented references', () => {
     const landed = BR1982_TSCONFIG_PREFIX + BR1982_TSCONFIG_TAIL;
-    const out = ensureTsconfigBaseUrl('tsconfig.json', ensureTsconfigJsx('tsconfig.json', healTsconfigConflictTail('tsconfig.json', landed)));
-    const json = JSON.parse(out);
-    expect(json.compilerOptions.jsx).toBe('react-jsx');
-    expect(json.compilerOptions.baseUrl).toBe('src');
-    expect(json.references).toBeUndefined();
-    expect(out.includes(OPEN) || out.includes(CLOSE)).toBe(false);
+    const out = ensureTsconfigBaseUrl(
+      'tsconfig.json',
+      ensureTsconfigJsx('tsconfig.json', healTsconfigConflictTail('tsconfig.json', landed), REACT),
+    );
+    const json = parseTsconfigJsonc(out);
+    expect(json).not.toBeNull();
+    expect((json!.compilerOptions as { jsx: string }).jsx).toBe('react-jsx');
+    expect((json!.compilerOptions as { moduleResolution: string }).moduleResolution).toBe('bundler');
+    expect(json!.references).toBeUndefined();
+    expect(out).toContain('/* Bundler mode */');
+    expect(out.includes(OPEN) || out.includes('\n' + CLOSE) || out.startsWith(CLOSE)).toBe(false);
+    // Comments remain, so the baseUrl rewrite must not fire.
+    expect(out).toBe(ensureTsconfigJsx('tsconfig.json', healTsconfigConflictTail('tsconfig.json', landed), REACT));
   });
 });

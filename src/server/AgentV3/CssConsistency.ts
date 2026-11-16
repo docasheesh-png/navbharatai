@@ -558,16 +558,35 @@ export function isProjectStylesheet(path: string): boolean {
 }
 
 /**
- * A CSS class mismatch is a defect of a finished app (autopsy "Universal Remote").
- * A user-stopped build that was never judged finished has not finished writing its
- * stylesheet, so the same mismatch is an incomplete tree, not an app finding (BR1988).
- * PURE.
+ * Was this build's tree left unfinished by the USER'S OWN Stop, mid-generation, on a fresh build (BR1988)?
+ * PURE, and FAIL-CLOSED: every input must say so, and anything else is `false`, which keeps the
+ * Universal Remote warning exactly as before.
+ *
+ * - `abortCause` must be exactly `'user-stop'` (from `abortCauseOf`). Cost-cap, futile, watchdog,
+ *   advisory-cap, deploy-drain, lock-reclaimed, reaper, budgets and unknown aborts are not a Stop.
+ * - `runStoppedBeforeReady` must be the runner's own `userStoppedBeforeReady` mark: the run ended through
+ *   its aborted ending, on a turn where the readiness check was eligible, before it judged the app
+ *   finished. A run that succeeded, crashed, or never reached that ending does not carry it.
+ * - `ok` must be `false` and `readyAt` absent — a later rescue that turned the build green, or a mark,
+ *   means the app is judged on its own merits.
+ * - Not an edit of an existing app and not a project-module turn: `readyAt` is never set on those
+ *   turns, so its absence proves nothing there.
  */
-export function cssClassesUndefinedIsAppFinding(opts: {
-  aborted: boolean;
-  appJudgedFinished: boolean;
+export function cssStopLeftTreeUnfinished(opts: {
+  abortCause: string;
+  runStoppedBeforeReady: boolean;
+  ok: boolean;
+  readyAt: unknown;
+  editingExistingApp: boolean;
+  projectModule?: string | null;
 }): boolean {
-  return !(opts.aborted === true && opts.appJudgedFinished !== true);
+  if (opts.abortCause !== 'user-stop') return false;
+  if (opts.runStoppedBeforeReady !== true) return false;
+  if (opts.ok !== false) return false;
+  if (opts.readyAt != null) return false;
+  if (opts.editingExistingApp !== false) return false;
+  if (opts.projectModule != null && String(opts.projectModule).trim() !== '') return false;
+  return true;
 }
 
 export type CssClassesUndefinedRecord = {
@@ -577,24 +596,68 @@ export type CssClassesUndefinedRecord = {
 };
 
 /**
- * How `CSS_CLASSES_UNDEFINED` should be recorded for this tree and build outcome. `null` when the
- * mismatch is below the ordinary threshold. PURE.
+ * How `CSS_CLASSES_UNDEFINED` should be recorded for this tree. `null` when the mismatch is below the
+ * ordinary threshold. With `stoppedUnfinished` anything but exactly `true`, the record is main's: the
+ * same warning, the same `undefinedClassesNote` text. PURE.
  */
 export function cssClassesUndefinedRecord(
   files: Record<string, string>,
-  opts: { aborted: boolean; appJudgedFinished: boolean },
+  opts: { stoppedUnfinished: boolean },
 ): CssClassesUndefinedRecord | null {
   const missing = findUndefinedClasses(files);
   if (missing.length < MISMATCH_THRESHOLD) return null;
-  const note = undefinedClassesNote(missing);
-  if (!cssClassesUndefinedIsAppFinding(opts)) {
+  if (opts.stoppedUnfinished === true) {
     const shown = missing.slice(0, 12).map((c) => `.${c}`).join(', ');
     const more = missing.length > 12 ? ` and ${missing.length - 12} more` : '';
     return {
       severity: 'info',
       autoResolved: true,
-      message: `The build was stopped before the app was judged finished, so style rules for ${missing.length} class name(s) were not finished (${shown}${more}). This is not a defect of a finished app.`,
+      message: `The build was stopped before the app was judged finished, so style rules for ${missing.length} class name(s) had not been written yet (${shown}${more}). This is an unfinished tree, not a defect of a finished app.`,
     };
   }
-  return { severity: 'warning', autoResolved: false, message: note };
+  return { severity: 'warning', autoResolved: false, message: undefinedClassesNote(missing) };
+}
+
+/**
+ * The route's single call (BR1988): the info record when — and only when — `cssStopLeftTreeUnfinished`
+ * holds for this run and the tree is over the threshold; otherwise `null`, and the caller writes main's
+ * warning unchanged. Takes the run result and module as the route holds them. Never throws: any fault
+ * is `null`, i.e. main's behaviour. PURE.
+ */
+export function cssStoppedUnfinishedRecord(
+  files: Record<string, string>,
+  facts: {
+    abortCause: string;
+    result: { ok: boolean; readyAt?: unknown; userStoppedBeforeReady?: true };
+    editingExistingApp: boolean;
+    projectModule: { name?: string | null } | null | undefined;
+  },
+): CssClassesUndefinedRecord | null {
+  try {
+    const unfinished = cssStopLeftTreeUnfinished({
+      abortCause: facts.abortCause,
+      runStoppedBeforeReady: facts.result.userStoppedBeforeReady === true,
+      ok: facts.result.ok,
+      readyAt: facts.result.readyAt,
+      editingExistingApp: facts.editingExistingApp,
+      projectModule: facts.projectModule == null ? null : String(facts.projectModule.name ?? ''),
+    });
+    if (!unfinished) return null;
+    const rec = cssClassesUndefinedRecord(files, { stoppedUnfinished: true });
+    return rec && rec.severity === 'info' ? rec : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The fields of the one `CSS_CLASSES_UNDEFINED` record the route writes: the BR1988 info line when `stop`
+ * is set, else main's warning with main's own fields (`mainFields` is only called then). PURE.
+ */
+export function cssClassesUndefinedFields<T extends { message: string; autoResolved: boolean }>(
+  stop: CssClassesUndefinedRecord | null,
+  mainFields: () => T,
+): { severity: 'info'; message: string; autoResolved: true } | ({ severity: 'warning' } & T) {
+  if (stop) return { severity: 'info', message: stop.message, autoResolved: true };
+  return { severity: 'warning', ...mainFields() };
 }

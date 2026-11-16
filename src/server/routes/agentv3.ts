@@ -771,7 +771,7 @@ import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { attachedBytesNote } from '../AgentV3/attachedFileBytes';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
-import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, cssClassesUndefinedRecord, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
+import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, cssStoppedUnfinishedRecord, cssClassesUndefinedFields, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
 import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../AgentV3/spacingSnap';
 import { filesANoteStillFlags } from '../AgentV3/writeTimeQualityCheck';
@@ -22096,14 +22096,16 @@ async function noteBuildOutcome(
            */
           const projectForCss = { ...integrityFiles, ...Object.fromEntries(writtenFiles) };
           const cssErr = (() => { try { return cssConsistencyError(projectForCss); } catch { return null; } })();
-          // BR1988: a user-stopped build that was never judged finished has not finished its
-          // stylesheet. Record that as info, not a leftover app warning (Universal Remote still
-          // fires when the app was judged finished, including a later Stop).
-          const cssFinding = (() => { try { return cssClassesUndefinedRecord(projectForCss, { aborted: abort.signal.aborted === true, appJudgedFinished: result.readyAt != null }); } catch { return null; } })();
-          if (cssFinding) {
+          if (cssErr) {
+            // BR1988: ONLY the user's own Stop, mid-generation on a fresh build (the runner's own
+            // `userStoppedBeforeReady` mark, no readyAt, not ok, not an edit or module turn), is recorded
+            // as an unfinished tree (info). Everything else — and any doubt — is main's warning, unchanged.
             buildDiag.record({
-              phase: 'build', severity: cssFinding.severity, code: 'CSS_CLASSES_UNDEFINED',
-              ...(cssFinding.autoResolved ? { message: cssFinding.message, autoResolved: true } : obs(cssFinding.message)),
+              phase: 'build', code: 'CSS_CLASSES_UNDEFINED',
+              ...cssClassesUndefinedFields(
+                cssStoppedUnfinishedRecord(projectForCss, { abortCause: abortCauseOf(abort.signal), result, editingExistingApp: isEditMode, projectModule: projectModuleRef }),
+                () => obs(undefinedClassesNote(findUndefinedClasses(projectForCss))),
+              ),
             });
           }
           const cssRepair = !!cssErr && cssHealEnabled() && result.ok && expectsArtifacts && !abort.signal.aborted;

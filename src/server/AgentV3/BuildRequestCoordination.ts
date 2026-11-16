@@ -22,8 +22,12 @@ export function buildRequestInputRejection(input: { requestId?: unknown; session
 /** A known setup refusal ends this attempt before the builder can run or retry on an empty VM. */
 class BuildSetupRecoveryUnavailableError extends SandboxRecoveryUnavailableError {}
 
-export function rethrowBuildSetupRecoveryUnavailable(error: unknown): void {
-  if (isSandboxRecoveryUnavailable(error)) throw new BuildSetupRecoveryUnavailableError(error.reason);
+export function rethrowBuildSetupRecoveryUnavailable(error: unknown, opts?: { repeated?: boolean }): void {
+  if (isSandboxRecoveryUnavailable(error)) {
+    throw new BuildSetupRecoveryUnavailableError(error.reason, {
+      repeated: opts?.repeated === true || error.repeated === true,
+    });
+  }
 }
 
 export function buildExceptionDetails(error: unknown): { message: string; phase: 'sandbox' | 'build'; code: string; summary: string; adminDetail?: string } {
@@ -42,7 +46,7 @@ export function buildExceptionDetails(error: unknown): { message: string; phase:
 export function publishBuildException(error: unknown, diagnostics: unknown, emit: (event: unknown) => void): void {
   const { message } = buildExceptionDetails(error);
   emit({ type: 'error', message: redactProvidersText(message), ts: Date.now(),
-    ...(isSandboxRecoveryUnavailable(error) ? { code: error.code, retryable: true } : {}),
+    ...(isSandboxRecoveryUnavailable(error) ? { code: error.code, retryable: error.retryable } : {}),
     ...(diagnostics ? { diagnostics } : {}),
   });
   if (error instanceof BuildSetupRecoveryUnavailableError) {

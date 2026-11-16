@@ -107,6 +107,8 @@ describe('F · a module turn is not promised the whole app\'s time', () => {
     const est = ROUTE.indexOf('const est = estimateBuildTime(etaComplexity');
     expect(peek).toBeGreaterThan(0);
     expect(peek).toBeLessThan(est);
-    expect(ROUTE).toMatch(/if \(etaSkippedForModule\) \{[\s\S]{0,400}ETA_SKIPPED_MODULE_TURN[\s\S]{0,300}\} else \{\s*\n\s*events\.emit\(\{ type: 'narration', agent: 'architect', text: etaShown/);
+    // Module turns still stay silent. The else branch (BR1984) may hold the same etaShown
+    // binding until the workspace is up after a reconnect refusal; it must not invent a second line.
+    expect(ROUTE).toMatch(/if \(etaSkippedForModule\) \{[\s\S]{0,400}ETA_SKIPPED_MODULE_TURN[\s\S]{0,400}\} else \{\s*\n\s*pendingEtaShown = recordOrEmitOpeningEta\(etaShown,/);
   });
 });

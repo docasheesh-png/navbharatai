@@ -58,7 +58,7 @@ export const PROVIDER_FAMILIES: readonly ProviderFamily[] = [
   { id: 'glm', name: 'Z.ai / GLM', keys: [/^GLM_API_KEY/, 'FREE_CHAIN_GLM_API_KEY', 'FREE_CHAIN_GLMX_API_KEY'], hosts: (e) => ['api.z.ai', 'open.bigmodel.cn', ...hostOf(e.GLM_BASE_URL)] },
   { id: 'kimi', name: 'Kimi / Moonshot', keys: [/^KIMI_API_KEY/], hosts: (e) => ['api.moonshot.ai', 'api.moonshot.cn', 'api.kimi.com', ...hostOf(e.KIMI_BASE_URL)] },
   { id: 'anthropic', name: 'Anthropic / Claude', keys: ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY', 'VITE_ANTHROPIC_API_KEY', 'VITE_CLAUDE_API_KEY'], hosts: () => ['api.anthropic.com'] },
-  { id: 'gemini', name: 'Google Gemini API', keys: ['GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'VITE_GEMINI_API_KEY', 'FREE_CHAIN_GEMINI_API_KEY', 'FREE_CHAIN_GEMINIPAID_API_KEY'], hosts: () => ['generativelanguage.googleapis.com'] },
+  { id: 'gemini', name: 'Google Gemini API', keys: ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'VITE_GEMINI_API_KEY', 'FREE_CHAIN_GEMINI_API_KEY', 'FREE_CHAIN_GEMINIPAID_API_KEY'], hosts: () => ['generativelanguage.googleapis.com'] },
   // Vertex runs on the server's own Google identity — there is no key to withdraw, so the network layer is its
   // enforcement. Only the Vertex AI endpoints are refused; Firestore, Storage and the rest of Google Cloud are not.
   { id: 'vertex', name: 'Google Vertex AI', keys: [], hosts: () => ['aiplatform.googleapis.com'] },

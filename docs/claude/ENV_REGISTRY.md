@@ -5034,3 +5034,31 @@ The earlier July entry says `NAV_STORE_ADMINS` falls back to `AGENTV3_FREE_LIST`
 - **`AGENTV3_ORIGINAL_ROYALE`**: NOT reported configured. Default OFF; the shared boolean flag parser accepts explicit enabled values to enable the explicit `generate_game_royale` recipe. Original bounded offline practice prototype, not multiplayer or photorealistic templates. Requires a verified empty user-owned source snapshot and a royale-style request; existing or imported projects and named/stored Athree worlds are not replaced. No pricing, billing, or artificial delay. Production acceptance and visual/mobile testing remain separate gates.
 - **`AGENTV3_OBJECT_FORGE`** (NOT set; default ON; `off` / `0` / `false` / `no` disables). The Object Forge (admin order 2026-11-15: "NavBharatAI should be able to make ANY object or subject, not depend on the modules somebody built"). The `author_object` recipe (reached through `run_recipe`) lets the builder describe an object as a JSON spec (primitives box, sphere, cylinder, capsule, torus, lathe, loft, extrude, tube; a transform tree with pivots, mirror and repeat; materials; animation clips). The server validates it, measures it with the SAME engine the game runs (`src/server/lib/objectForge/forgeEngineSource.ts` is both what a game receives as `src/game/forge/forge.ts` and what the server evaluates) and draws it back as FRONT/SIDE/TOP text with warnings (parts floating free, a clip that tears the object, base off the ground); only a valid spec is written, as `src/game/objects/<id>.ts` (replaced when the same id is authored again). SELF-AUTHORING (`author_object({ describe })`): the Forge asks a model for the spec through `aiRouter.routeDetailed(…, 'navbharat', …)` (the FREE namespace, never Claude), up to 4 correction rounds, each shown the Forge's own measurements and FRONT/SIDE/TOP drawings; the same description is reused from a bounded cache. It is a KILL SWITCH, not a gate: OFF refuses honestly ("switched off") and writes nothing. Honest ceiling: stylised low-poly figures from primitives, never photoreal; the tool, the guide and the prompt all say so. Limits (`FORGE_LIMITS` in `forgeCheckSource.ts`): 400 nodes after mirrors and repeats, 24000 triangles, depth 8, 32 materials, 12 clips.
 - **`AGENTV3_ATHREE_MAP` — MAP KINDS AND SIZES (admin 2026-11-15, "100+ type ke maps, 1 km se 1000 km").** The recipe takes `archetype` (continental, plains, hills, alpine, desert, tundra, jungle, savanna, archipelago, island, wetland, coast) and `size_km` (1 to 1000), or reads them from the user's words (`athreeMapKinds.ts`: `mapChoiceFor`, English and Hinglish); 12 x 10 size classes = 120 kinds, each seeded. The choice is written into `config.ts` as `MAP_OPTIONS` and `createAthreeMap` spreads it into the world. A world of ANY size is the reference world (a 100 km loop, an 8 km island) stretched by k = reference/size, heights by heightStretch(k) (k^-0.9 on a smaller map, k^-0.75 on a bigger one, so slopes never grow more than 1.7 times), rivers/lakes/dunes converted to the game's metres; at the reference size k = 1 and every number is byte-for-byte what it was (tested). A kind of land is five numbers (relief, seaShift, aridity, warmth, rivers). Roads default OFF under 20 km (loop) or 6 km (island): a road region is 12.5 km, a runway 900 m. Spawn reach and the land-height thresholds scale with the map. NOT built: a different terrain ALGORITHM per kind (canyons, volcanoes, karst), roads that fit a map of 1 to 5 km.
+
+## 2026-11-16 — AI provider key census (names only, never values)
+
+**Owner report:** `FREE_CHAIN_BLUESMINDS_API_KEY` is now **set** in Cloud Run (admin 2026-11-16). BluesMinds stays OFF for user chat
+(`terms-unverified`) until `FREE_CHAIN_BLUESMINDS_WRITTEN_APPROVAL=on`; the admin Test Chat Bot can call it (#4243 follow-up).
+
+**Census (admin asked: "ENV_REGISTRY me jo AI provider darj hain aur NavBharatAI me jo use ho rahe hain, sab match hai?").**
+Every one of the 25 provider families in `src/server/lib/providerSwitches.ts` (`PROVIDER_FAMILIES`) was already named here.
+These key names the code reads for those families were NOT, and are recorded now. **Whether each is set in Cloud Run is
+UNKNOWN** — none was reported by the owner; confirm in the console before relying on one. An env value always beats a code
+default, so a stale alias left set here silently wins.
+
+| Key name | Provider family | Read by | Status |
+|---|---|---|---|
+| `BEDROCK_API_KEY` | AWS Bedrock (builder cheap-floor GLM rung, Nova Sonic voice) | `routes/agentv3.ts` (with `BEDROCK_REGION`, default `us-west-2`, and `BEDROCK_GLM_MODEL`, default `zai.glm-5`), `sonic/SonicBridge.ts`, Test Chat Bot | unknown |
+| `CLAUDE_API_KEY` | Anthropic | alias of `ANTHROPIC_API_KEY` | unknown |
+| `VITE_ANTHROPIC_API_KEY`, `VITE_CLAUDE_API_KEY` | Anthropic | legacy client-build aliases the switch board withdraws | unknown |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Google Gemini API | alias of `GEMINI_API_KEY` | unknown |
+| `VITE_GEMINI_API_KEY` | Google Gemini API | legacy client-build alias | unknown |
+| `FREE_CHAIN_GEMINIPAID_API_KEY` | Google Gemini API | Free Chat paid Gemini rung | unknown |
+| `FREE_CHAIN_OPENROUTER_API_KEY` | OpenRouter | Free Chat OpenRouter rung alias | unknown |
+| `DEEPINFRA_TOKEN` | DeepInfra | alias of `DEEPINFRA_API_KEY` | unknown |
+| `FREE_CHAIN_CHEAPINF_API_KEY` | CheaperInference | alias of `CHEAPERINFERENCE_API_KEY` | unknown |
+| `FREE_CHAIN_CF_API_KEY` | Cloudflare Workers AI | Free Chat Cloudflare rung alias | unknown |
+
+Google Vertex AI has no key (server identity: `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_REGION`). Stability AI appears only in
+`ImageAiGenerator.ts`, which is generated INTO users' apps for their own key — it is not a NavBharatAI provider.
+`tests/everyAiProviderKeyIsInTheRegistry.test.ts` now fails when a provider family's key name is missing from this file.

@@ -44,7 +44,7 @@ Times below are seconds after the report's start, and are rounded.
 | Change | Adjacent behaviour | Check | Decision |
 |---|---|---|---|
 | F1: silence the hand-back notice after "Out of time" | The resume still happens, so the model still gets its turn | The integration test runs the real AgentRunner. Before the final stage (`wrapping` only) the notice is emitted exactly as on main. | Ship |
-| F1: a sub-agent's own stream | A specialist with a separate event stream has no `'final'` in its set | `=== true` only, so a separate or unknown stream keeps main's line | Ship |
+| F1: a sub-agent's stream | **Corrected in BR1995:** a specialist's `childEvents` is `Object.create(parent)` (`SubAgent.ts`), so it reads the parent's build-wide `budgetStagesSaid`. Once the build has said "Out of time", a specialist's hand-back notice is silent too, which is the intended behaviour. Only a stream with no such set (or one without `'final'`) keeps main's line. | `=== true` only, so an absent set keeps main's line | Ship |
 | F2: elapsed minutes in the wall-clock sentence | User Stop, futile and every other cause never quote minutes | A user-Stop test, plus `abortSummary` uses `minutes` only for `watchdog` | Ship |
 | F2: a single runner that started with the build | Same sentence as main whenever elapsed and the runner budget round to the same minute (a runner started with the build, as in the neighbour test). A build that timed out after a slow start now quotes its longer real duration. | Neighbour test; no successful build is affected | Ship |
 | Stop resuming in the final budget stage (D4) | Outcome changes from STOPPED-at-cap to a not-ready ending; may lose a last fix | — | **Not shipped** → Q-2706 |

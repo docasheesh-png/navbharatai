@@ -7,11 +7,9 @@ export type SandboxRecoveryRefuseReason =
   | 'allocation-lost'
   | 'winner-reconnect';
 
-export const SANDBOX_RECOVERY_FIRST_MESSAGE =
-  'Your workspace could not be safely reconnected. Please retry shortly.';
-
-export const SANDBOX_RECOVERY_REPEAT_MESSAGE =
-  'Your workspace could not be safely reconnected again. Retrying immediately is unlikely to help. Please try again in a few minutes.';
+// BR1995: the sentences live in src/lib so the client can recognise them; the bytes are unchanged.
+import { SANDBOX_RECOVERY_FIRST_MESSAGE, SANDBOX_RECOVERY_REPEAT_MESSAGE } from '../../lib/sandboxRecoveryMessages';
+export { SANDBOX_RECOVERY_FIRST_MESSAGE, SANDBOX_RECOVERY_REPEAT_MESSAGE };
 
 export class SandboxRecoveryUnavailableError extends Error {
   readonly code = 'SANDBOX_RECOVERY_UNAVAILABLE';

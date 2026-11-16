@@ -1,8 +1,10 @@
 /** Synthetic non-Node preview / install regression cases. No customer report payload.
- * A Spring Boot (or Go) app with no package.json must not be installed or started
- * with npm, must not be probed on Vite's port, and an npm ENOENT on a missing
- * package.json must not be counted as a build-breaking defect of the app.
- * A Node app with a package.json, and a bare HTML page, stay as they were.
+ * A clearly non-Node Spring Boot (or Go) app — start file present, no JS/TS app
+ * source, no package.json — must not be installed or started with npm, and an
+ * npm ENOENT on that tree must not be counted as a defect of the app.
+ * A package.json keeps main's Node path, including the port main would use.
+ * A JS/TS app or Node framework missing package.json keeps main's npm install,
+ * typecheck, RED release gate, and ₹0 bill.
  */
 import { describe, expect, it } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
@@ -16,9 +18,12 @@ import {
   fullstackDevPort,
   isNpmInstallWithoutPackageJson,
   isMissingStartToolchain,
+  isClearlyNonNodeApp,
+  isJsTsAppSourcePath,
 } from '../src/server/AgentV3/devServerLaunchPlan';
 import { shouldAttemptPlatformPreview } from '../src/server/AgentV3/deliveryProof';
-import { oneShotDevPort } from '../src/server/routes/agentv3';
+import { oneShotDevPort, zeroBillForFailedBuild } from '../src/server/routes/agentv3';
+import { FRAMEWORKS } from '../src/server/AgentV3/FrameworkRegistry';
 import { buildDepsStaleCheckCommand, isLongRunningCommand } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
 import { releaseGate } from '../src/server/AgentV3/releaseGate';
@@ -33,6 +38,23 @@ const ENOENT = [
   'npm error errno -2',
   'npm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open \'/home/user/workspace/package.json\'',
 ].join('\n');
+
+/** Byte-for-byte copy of main's `oneShotDevPort` (no registry fallback). */
+function mainOneShotDevPort(framework: string): number {
+  if (/next|nuxt|nest|express|fastify|node/i.test(framework)) return 3000;
+  if (/angular/i.test(framework)) return 4200;
+  if (/astro/i.test(framework)) return 4321;
+  if (/static|vanilla/i.test(framework)) return 3000;
+  if (/fastapi|flask|django|python/i.test(framework)) return 8000;
+  return 5173;
+}
+
+const SPRING_TREE = {
+  framework: 'spring-boot' as const,
+  hasPackageJson: false,
+  hasPomXml: true,
+  hasJsTsAppSource: false,
+};
 
 const previewBase = {
   expectsArtifacts: true, hasPreviewUrl: false, aborted: false, isImportTurn: false,
@@ -89,15 +111,76 @@ describe('devServerLaunchPlan — Node, Spring Boot, Go, and bare pages', () => 
     expect(plan.reason).toMatch(/Maven/i);
   });
 
-  it('a Spring Boot label without a POM does not invent a Maven start, and does not fall back to npm', () => {
+  it('a Spring Boot label without a POM does not invent a Maven start, and keeps main\'s Node path', () => {
     const plan = devServerLaunchPlan({
       framework: 'spring-boot',
       hasPackageJson: false,
       hasPomXml: false,
+      nodePort: oneShotDevPort('spring-boot'),
     });
-    expect(plan.kind).toBe('none');
-    expect(plan.startCommand).toBeNull();
-    expect(plan.installCommand).toBeNull();
+    expect(plan.kind).toBe('npm');
+    expect(plan.startCommand).toBe('npm run dev');
+    expect(plan.installCommand).toBe(buildBuildInstallCommand());
+    expect(plan.port).toBe(5173);
+  });
+
+  it('a Spring Boot or Go app that also has package.json keeps main\'s Node port, not 8080', () => {
+    const spring = devServerLaunchPlan({
+      framework: 'spring-boot',
+      hasPackageJson: true,
+      hasPomXml: true,
+      nodePort: oneShotDevPort('spring-boot'),
+    });
+    expect(spring.kind).toBe('npm');
+    expect(spring.startCommand).toBe('npm run dev');
+    expect(spring.installCommand).toBe(buildBuildInstallCommand());
+    expect(spring.port).toBe(5173);
+    expect(spring.port).toBe(mainOneShotDevPort('spring-boot'));
+
+    const go = devServerLaunchPlan({
+      framework: 'go',
+      hasPackageJson: true,
+      hasGoModule: true,
+      nodePort: oneShotDevPort('go'),
+    });
+    expect(go.kind).toBe('npm');
+    expect(go.startCommand).toBe('npm run dev');
+    expect(go.installCommand).toBe(buildBuildInstallCommand());
+    expect(go.port).toBe(5173);
+    expect(go.port).toBe(mainOneShotDevPort('go'));
+  });
+
+  it('the npm plan matches main\'s Node path for every registered framework', () => {
+    for (const fw of FRAMEWORKS) {
+      const nodePort = mainOneShotDevPort(fw.id);
+      const plan = devServerLaunchPlan({
+        framework: fw.id,
+        hasPackageJson: true,
+        hasPomXml: fw.id === 'spring-boot',
+        hasGoModule: fw.id === 'go',
+        nodePort,
+      });
+      expect(plan.kind, fw.id).toBe('npm');
+      expect(plan.installCommand, fw.id).toBe(buildBuildInstallCommand());
+      expect(plan.startCommand, fw.id).toBe('npm run dev');
+      expect(plan.port, fw.id).toBe(nodePort);
+      expect(oneShotDevPort(fw.id), fw.id).toBe(nodePort);
+    }
+  });
+
+  it('a Vite app with src/App.tsx and index.html but no package.json keeps main\'s npm path', () => {
+    const files = startFilesFromPaths(['src/App.tsx', 'index.html', 'src/main.tsx']);
+    expect(files.hasPackageJson).toBe(false);
+    expect(files.hasJsTsAppSource).toBe(true);
+    const plan = devServerLaunchPlan({
+      framework: 'vite-react',
+      ...files,
+      nodePort: oneShotDevPort('vite-react'),
+    });
+    expect(plan.kind).toBe('npm');
+    expect(plan.installCommand).toBe(buildBuildInstallCommand());
+    expect(plan.startCommand).toBe('npm run dev');
+    expect(plan.port).toBe(5173);
   });
 
   it('a Go app with go.mod and no package.json starts with go run on 8080', () => {
@@ -111,13 +194,28 @@ describe('devServerLaunchPlan — Node, Spring Boot, Go, and bare pages', () => 
     expect(plan.port).toBe(8080);
   });
 
-  it('a bare HTML page with no package.json is still skipped (Q-2662 is unchanged)', () => {
+  it('a bare HTML page with no package.json keeps main\'s Node install; platform preview still skips (Q-2662)', () => {
     const plan = devServerLaunchPlan({
       framework: 'static',
       ...startFilesFromPaths(['index.html', 'styles.css', 'app.js']),
+      nodePort: oneShotDevPort('static'),
     });
-    expect(plan.kind).toBe('none');
-    expect(plan.reason).toMatch(/no package\.json/i);
+    expect(plan.kind).toBe('npm');
+    expect(plan.startCommand).toBe('npm run dev');
+    expect(plan.port).toBe(3000);
+  });
+
+  it('Java static JS under src/main/resources is not JS/TS app source, so a Spring starter stays on Maven', () => {
+    const files = startFilesFromPaths([
+      'pom.xml',
+      'src/main/java/com/example/demo/Application.java',
+      'src/main/resources/static/js/map.js',
+      'src/main/resources/static/index.html',
+    ]);
+    expect(files.hasJsTsAppSource).toBe(false);
+    expect(isJsTsAppSourcePath('src/main/resources/static/js/map.js')).toBe(false);
+    expect(isJsTsAppSourcePath('src/App.tsx')).toBe(true);
+    expect(isClearlyNonNodeApp({ framework: 'spring-boot', ...files })).toBe(true);
   });
 
   it('English and Hindi battle-royale map-game file lists with only a Spring Boot starter stay on Maven', () => {
@@ -148,6 +246,17 @@ describe('shouldAttemptPlatformPreview — same rule, including opposite neighbo
     expect(d.reason).toMatch(/no package\.json/i);
   });
 
+  it('stands down for a Vite tree that has app source but no package.json (Q-2662 / main)', () => {
+    const d = shouldAttemptPlatformPreview({
+      ...previewBase,
+      hasPackageJson: false,
+      framework: 'vite-react',
+      hasJsTsAppSource: true,
+    });
+    expect(d.attempt).toBe(false);
+    expect(d.reason).toMatch(/no package\.json/i);
+  });
+
   it('does attempt a Spring Boot app that has a POM and no package.json', () => {
     const d = shouldAttemptPlatformPreview({
       ...previewBase,
@@ -170,9 +279,9 @@ describe('shouldAttemptPlatformPreview — same rule, including opposite neighbo
 });
 
 describe('oneShotDevPort and launch-command ports', () => {
-  it('Spring Boot and Go use 8080; Vite stays 5173; Flask stays 8000; Next stays 3000', () => {
-    expect(oneShotDevPort('spring-boot')).toBe(8080);
-    expect(oneShotDevPort('go')).toBe(8080);
+  it('oneShotDevPort matches main, including Spring Boot and Go falling through to 5173', () => {
+    expect(oneShotDevPort('spring-boot')).toBe(5173);
+    expect(oneShotDevPort('go')).toBe(5173);
     expect(oneShotDevPort('vite-react')).toBe(5173);
     expect(oneShotDevPort('vue')).toBe(5173);
     expect(oneShotDevPort('flask')).toBe(8000);
@@ -235,16 +344,31 @@ describe('buildDepsStaleCheckCommand — no package.json is not STALE', () => {
 });
 
 describe('npm install ENOENT without package.json is not an app-breaking blocker', () => {
-  it('recognises the missing-manifest install and ignores a real ERESOLVE on a Node project', () => {
-    expect(isNpmInstallWithoutPackageJson(INSTALL, '', ENOENT)).toBe(true);
-    expect(isNpmInstallWithoutPackageJson('npm install', 'added 0 packages', 'npm ERR! ERESOLVE could not resolve react@19')).toBe(false);
-    expect(isNpmInstallWithoutPackageJson('npm run build', '', ENOENT)).toBe(false);
-    expect(isNpmInstallWithoutPackageJson(INSTALL, '', 'ENOENT: no such file or directory, open \'/home/user/workspace/src/missing.js\'')).toBe(false);
+  it('recognises the missing-manifest install only on a clearly non-Node tree, and ignores a real ERESOLVE on a Node project', () => {
+    expect(isNpmInstallWithoutPackageJson(INSTALL, '', ENOENT, SPRING_TREE)).toBe(true);
+    expect(isNpmInstallWithoutPackageJson(INSTALL, '', ENOENT)).toBe(false);
+    expect(isNpmInstallWithoutPackageJson(INSTALL, '', ENOENT, null)).toBe(false);
+    expect(isNpmInstallWithoutPackageJson(INSTALL, '', ENOENT, { ...SPRING_TREE, hasPackageJson: true })).toBe(false);
+    expect(isNpmInstallWithoutPackageJson(INSTALL, '', ENOENT, {
+      framework: 'vite-react', hasPackageJson: false, hasJsTsAppSource: true,
+    })).toBe(false);
+    expect(isNpmInstallWithoutPackageJson(INSTALL, '', ENOENT, {
+      framework: 'vite-react', hasPackageJson: false, hasJsTsAppSource: false,
+    })).toBe(false);
+    expect(isNpmInstallWithoutPackageJson('npm install', 'added 0 packages', 'npm ERR! ERESOLVE could not resolve react@19', SPRING_TREE)).toBe(false);
+    expect(isNpmInstallWithoutPackageJson('npm run build', '', ENOENT, SPRING_TREE)).toBe(false);
+    expect(isNpmInstallWithoutPackageJson(INSTALL, '', 'ENOENT: no such file or directory, open \'/home/user/workspace/src/missing.js\'', SPRING_TREE)).toBe(false);
   });
 
-  it('recordCommand files the missing-manifest install as an info SANDBOX_CMD, not a shipping error', () => {
+  it('a nested frontend/package.json is not excluded just because the error text mentions package.json', () => {
+    const tree = startFilesFromPaths(['frontend/package.json', 'frontend/src/App.tsx', 'pom.xml']);
+    expect(tree.hasPackageJson).toBe(true);
+    expect(isNpmInstallWithoutPackageJson(INSTALL, '', ENOENT, { framework: 'spring-boot', ...tree })).toBe(false);
+  });
+
+  it('recordCommand files a clearly non-Node missing-manifest install as an info SANDBOX_CMD, not a shipping error', () => {
     const d = new BuildDiagnostics({ now: () => 1 });
-    d.recordCommand({ command: INSTALL, exitCode: 254, stdout: '', stderr: ENOENT, durationMs: 2000 });
+    d.recordCommand({ command: INSTALL, exitCode: 254, stdout: '', stderr: ENOENT, durationMs: 2000, tree: SPRING_TREE });
     const report = d.report();
     const failed = report.issues.filter((i) => i.code === 'SANDBOX_CMD_FAILED');
     const recorded = report.issues.filter((i) => i.code === 'SANDBOX_CMD' || i.code === 'SANDBOX_CMD_FAILED');
@@ -253,6 +377,37 @@ describe('npm install ENOENT without package.json is not an app-breaking blocker
     expect(recorded[0].severity).toBe('info');
     expect(recorded[0].autoResolved).toBe(true);
     expect(d.shippingIssueCount('error')).toBe(0);
+  });
+
+  it('without tree evidence, the same npm ENOENT stays a shipping error (main)', () => {
+    const d = new BuildDiagnostics({ now: () => 1 });
+    d.recordCommand({ command: INSTALL, exitCode: 254, stdout: '', stderr: ENOENT, durationMs: 2000 });
+    expect(d.report().issues.some((i) => i.code === 'SANDBOX_CMD_FAILED' && i.severity === 'error')).toBe(true);
+    expect(d.shippingIssueCount('error')).toBe(1);
+  });
+
+  it('a JS app missing package.json stays a shipping defect, turns the gate RED, and bills ₹0, matching main', () => {
+    const tree = {
+      framework: 'vite-react',
+      ...startFilesFromPaths(['src/App.tsx', 'index.html', 'src/main.tsx']),
+    };
+    expect(tree.hasPackageJson).toBe(false);
+    expect(tree.hasJsTsAppSource).toBe(true);
+    const d = new BuildDiagnostics({ now: () => 1 });
+    d.setWorkspaceTree(tree);
+    d.recordCommand({ command: INSTALL, exitCode: 254, stdout: '', stderr: ENOENT, durationMs: 2000 });
+    expect(d.report().issues.some((i) => i.code === 'SANDBOX_CMD_FAILED' && i.severity === 'error')).toBe(true);
+    expect(d.shippingIssueCount('error')).toBe(1);
+    const gate = releaseGate(
+      { preview: 'not-run', pages: 'not-run', journeys: 'not-run', typecheck: 'not-run', tests: 'not-run', buildOk: true },
+      { blockers: d.shippingIssueCount('error'), highSeverity: 0, warnings: 0 },
+    );
+    expect(gate.state).toBe('red');
+    const ok = gate.state !== 'red';
+    expect(ok).toBe(false);
+    expect(zeroBillForFailedBuild(ok)).toBe(true);
+    expect(zeroBillForFailedBuild(false)).toBe(true);
+    expect(zeroBillForFailedBuild(true)).toBe(false);
   });
 
   it('a real npm install failure on a Node project is still a shipping error, and still turns the gate red', () => {
@@ -299,11 +454,11 @@ describe('fast-lane and platform preview wiring (census)', () => {
     expect(body).toContain('FASTLANE_PREVIEW_SKIPPED_NON_NODE');
   });
 
-  it('fastVerifyOnce skips sandbox tsc when the launch plan is not npm, and still reconciles before tsc on the Node path', () => {
+  it('fastVerifyOnce skips sandbox tsc only for a framework (Maven/Go) plan, and still reconciles before tsc on the Node path', () => {
     const verifyStart = route.indexOf('const fastVerifyOnce = async ()');
     const tscAt = route.indexOf('${TSC_BIN} --noEmit > /tmp/nb_tsc.log', verifyStart);
     const body = route.slice(verifyStart, tscAt + 80);
-    expect(body).toContain("if (verifyLaunch.kind !== 'npm')");
+    expect(body).toContain("if (verifyLaunch.kind === 'framework')");
     const reconcileAt = route.indexOf("await fastReconcileDependencies('verify')", verifyStart);
     expect(reconcileAt).toBeGreaterThan(verifyStart);
     expect(reconcileAt).toBeLessThan(tscAt);

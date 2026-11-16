@@ -996,8 +996,8 @@ describe('oneShotDevPort — preview port per framework for the one-shot lane', 
     expect(oneShotDevPort('static')).toBe(3000);
     expect(oneShotDevPort('python-fastapi')).toBe(8000);
     expect(oneShotDevPort('flask')).toBe(8000);
-    expect(oneShotDevPort('spring-boot')).toBe(8080);
-    expect(oneShotDevPort('go')).toBe(8080);
+    expect(oneShotDevPort('spring-boot')).toBe(5173);
+    expect(oneShotDevPort('go')).toBe(5173);
   });
 });
 

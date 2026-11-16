@@ -10,7 +10,7 @@
 // the live AgentEvent stream and (b) accepts explicitly-recorded issues for signals that are not
 // events (a provider fallback, a sandbox-create timeout).
 
-import { isNpmInstallWithoutPackageJson, isMissingStartToolchain } from './devServerLaunchPlan';
+import { isNpmInstallWithoutPackageJson, isMissingStartToolchain, type DevServerLaunchInput } from './devServerLaunchPlan';
 import { startBandLabel } from './RequestAnalyser';
 import { todoOnlyTurnsLine } from './todoOnlyTurn';
 import { isBuildStoppedError } from './stopSignal';
@@ -1150,12 +1150,25 @@ export class BuildDiagnostics {
   private session: BuildDiagnosticsReport['session'];
   private dataLossEvents: Array<{ ts: number; cause: string; detail: string }> = [];
 
+  /**
+   * Files/framework known for this workspace, used only to decide whether a failed
+   * npm install is a missing-manifest on a clearly non-Node tree. Unset means
+   * the exclusion does not fire (main's behaviour).
+   */
+  private workspaceTree: DevServerLaunchInput | null = null;
+
   constructor(meta: BuildDiagnosticsMeta = {}) {
     this.meta = meta;
     // A new build has proven nothing yet — see `renderSeenThisBuild` in renderProof.ts.
     if (meta.workspaceId) forgetRenderSeen(meta.workspaceId);
     this.now = meta.now ?? (() => Date.now());
     this.startedAt = this.now();
+  }
+
+  /** Record the tree the launch plan saw, so a later command can be judged against it. */
+  setWorkspaceTree(tree: DevServerLaunchInput): DevServerLaunchInput {
+    this.workspaceTree = tree;
+    return tree;
   }
 
   /** Persist the current report in REAL TIME (best-effort; never throws). */
@@ -1333,7 +1346,7 @@ export class BuildDiagnostics {
    */
   private compatibleAuditFixRan = false;
 
-  recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number; timing?: CommandTiming }): void {
+  recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number; timing?: CommandTiming; tree?: DevServerLaunchInput | null }): void {
     // TD-4: one door. The audit parser below still sees vulnerability counts; it does not need values.
     rec = {
       ...rec,
@@ -1420,7 +1433,7 @@ export class BuildDiagnostics {
       && !isTestOnlyTypecheckFailure(rec.command, rec.stdout, rec.stderr)
       // npm install ENOENT on a tree with no package.json is the platform running the Node
       // toolchain on a non-Node app (autopsy BR1987). It is not a defect of the app's code.
-      && !isNpmInstallWithoutPackageJson(rec.command, rec.stdout, rec.stderr)
+      && !isNpmInstallWithoutPackageJson(rec.command, rec.stdout, rec.stderr, rec.tree ?? this.workspaceTree)
       // A Maven / Go start that failed only because the image lacks the compiler is
       // infrastructure, not a compile error in the app.
       && !isMissingStartToolchain(rec.command, rec.stdout, rec.stderr);

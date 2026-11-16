@@ -766,7 +766,6 @@ import { entryIsStillTheStarter, starterRenderNote, importNeverTheStarter } from
 import { readProjectElsewhere, shouldAnswerProjectElsewhere, projectElsewhereSteer, projectElsewhereFallback } from '../AgentV3/projectElsewhere';
 import { runProvenApp, verdictHeldMessage, type ProdBuildOutcome, type LateFlip } from '../AgentV3/runProvenApp';
 import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
-import { getFramework } from '../AgentV3/FrameworkRegistry';
 import { devServerLaunchPlan, startFilesFromPaths } from '../AgentV3/devServerLaunchPlan';
 import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { readyOverrunNote } from '../AgentV3/doneSignal';
@@ -2573,11 +2572,6 @@ export function oneShotDevPort(framework: string): number {
   if (/astro/i.test(framework)) return 4321;
   if (/static|vanilla/i.test(framework)) return 3000;
   if (/fastapi|flask|django|python/i.test(framework)) return 8000;
-  // Spring Boot / Go (and any other registry entry that is not a Node default)
-  // used to fall through to Vite's 5173, so a working Maven server was probed
-  // on the wrong port. The regexes above stay first so Flask remains 8000.
-  const registered = getFramework(framework)?.devPort;
-  if (typeof registered === 'number' && registered > 0) return registered;
   return 5173; // vite-react / vue / svelte and the default
 }
 
@@ -19685,9 +19679,8 @@ async function noteBuildOutcome(
             } catch { /* best-effort — a dangling tsconfig reference just falls through to the install as before */ }
           }
           // Start the app with the toolchain it actually has (autopsy BR1987). A package.json still
-          // always gets a real install — the caniuse-lite / tailwind cases this comment used to
-          // introduce are unchanged. A Spring Boot or Go tree with no package.json is started with
-          // its registry command, never with npm. A bare page is skipped, not installed.
+          // always gets a real install. A clearly non-Node Spring Boot or Go tree is started with
+          // its registry command; a JS/TS app missing package.json keeps main's Node install.
           const previewPaths = [
             ...writtenFiles.keys(),
             ...scaffold,
@@ -19707,11 +19700,11 @@ async function noteBuildOutcome(
               if (typeof diskGo === 'string') previewPaths.push('go.mod');
             }
           } catch { /* disk hints are best-effort — the plan still reads what we already have */ }
-          const launch = devServerLaunchPlan({
+          const launch = devServerLaunchPlan(buildDiag.setWorkspaceTree({
             framework,
             ...startFilesFromPaths(previewPaths),
             nodePort: oneShotDevPort(framework),
-          });
+          }));
           if (launch.kind === 'none' || !launch.startCommand) {
             try {
               buildDiag.record({
@@ -19850,12 +19843,12 @@ async function noteBuildOutcome(
             // A Spring Boot / Go / bare-HTML tree has no package.json to type-check with tsc
             // (autopsy BR1987): the in-process syntax / import / CSS gates above still ran; the
             // sandbox tsc command is skipped rather than failing ENOENT and becoming VERIFY_DID_NOT_RUN.
-            const verifyLaunch = devServerLaunchPlan({
+            const verifyLaunch = devServerLaunchPlan(buildDiag.setWorkspaceTree({
               framework,
               ...startFilesFromPaths([...writtenFiles.keys(), ...scaffold]),
               nodePort: oneShotDevPort(framework),
-            });
-            if (verifyLaunch.kind !== 'npm') {
+            }));
+            if (verifyLaunch.kind === 'framework') {
               return { ok: true, errors: '', ran: false };
             }
             await fastReconcileDependencies('verify');
@@ -22944,11 +22937,11 @@ async function noteBuildOutcome(
           ? await withTimeout(actuator.listFiles(workspaceId), 15_000, 'platform-preview-list').catch(() => [] as string[])
           : [];
         const presentStart = startFilesFromPaths(presentFiles);
-        const platformLaunch = devServerLaunchPlan({
+        const platformLaunch = devServerLaunchPlan(buildDiag.setWorkspaceTree({
           framework,
           ...presentStart,
           nodePort: oneShotDevPort(framework),
-        });
+        }));
         const proofDecision = shouldAttemptPlatformPreview({
           expectsArtifacts: expectsArtifacts && !answerOnlyNow(),
           hasPreviewUrl: Boolean(lastPreviewUrl),
@@ -22959,6 +22952,7 @@ async function noteBuildOutcome(
           framework,
           hasPomXml: presentStart.hasPomXml,
           hasGoModule: presentStart.hasGoModule,
+          hasJsTsAppSource: presentStart.hasJsTsAppSource,
           remainingMs: remainingForProof,
           // 🔒 DELIBERATELY THE RAW PREDICTION, not `awaitsShellNow()`. This decides whether the PLATFORM
           // starts the app itself; a module turn was told not to publish one, and forcing a preview it was

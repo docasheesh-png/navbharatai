@@ -30,6 +30,7 @@ import { resolveTemplateId } from './fullstackRouting';
 import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
 import { resumeSandboxChoice } from '../../../sandboxResumeChoice';
 import { SandboxRecoveryUnavailableError, isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable } from '../../../SandboxRecoveryError';
+import { isE2BConcurrentCapacityError } from '../../../e2bConcurrentCapacity';
 import { sandboxLifecycle } from '../../../previewWake';
 import { countRunningSandboxes, type LiveSandboxCount } from '../../../liveSandboxCount';
 import { reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, PAUSE_FAILURE_WARNING_THRESHOLD } from '../../../sandboxReaper';
@@ -1747,9 +1748,9 @@ export class E2BActuator implements IEngineerActuator {
       try {
         identity = await withTimeout(sandboxStore.lookupRecoveryIdentity(workspaceId), 3_000, 'sandboxStore.lookupRecoveryIdentity');
       } catch {
-        throw new SandboxRecoveryUnavailableError();
+        throw new SandboxRecoveryUnavailableError('identity-lookup');
       }
-      if (identity.state === 'unavailable') throw new SandboxRecoveryUnavailableError();
+      if (identity.state === 'unavailable') throw new SandboxRecoveryUnavailableError('identity-unavailable');
       if (identity.state === 'found') durableResumeId = identity.sandboxId;
     }
     const resumeId = resumeSandboxChoice({
@@ -1771,7 +1772,13 @@ export class E2BActuator implements IEngineerActuator {
         // At this specific SDK boundary Sandbox.connect maps API code 404 to this class. Transport,
         // authentication, rate-limit and deadline failures leave the target's state unknown. Broad
         // dead-sandbox message matching is appropriate for handle eviction, not machine replacement.
-        if (!(error instanceof SandboxNotFoundError)) throw new SandboxRecoveryUnavailableError();
+        // A proven concurrent-cap refusal is also not evidence the machine is gone — do not replace
+        // it. Rethrow the original message so setup and the admission budget keep their existing cap
+        // path (wait for a slot; do not abort with "please retry shortly").
+        if (!(error instanceof SandboxNotFoundError)) {
+          if (isE2BConcurrentCapacityError(error)) throw error;
+          throw new SandboxRecoveryUnavailableError('connect-unknown');
+        }
         sandbox = await withTimeout(Sandbox.create(this._opts(undefined, framework)), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
         freshCreate = true;
         // THE CASE THE OLD LINE COULD NOT SAY. We had an id, asked for it, and were refused — so this
@@ -1795,7 +1802,7 @@ export class E2BActuator implements IEngineerActuator {
           if (freshCreate) await this._killUnrecordedSandbox(workspaceId, sandbox, 'unrecorded-allocation');
           this._sandboxOrigin.delete(workspaceId);
           this._lastLifetimeExtend.delete(workspaceId);
-          throw new SandboxRecoveryUnavailableError();
+          throw new SandboxRecoveryUnavailableError('allocation-unrecorded');
         }
         if (winner.sandboxId !== sandbox.sandboxId) {
           // A newly created loser is ours to discard. A resumed old machine may still be in use by
@@ -1803,7 +1810,7 @@ export class E2BActuator implements IEngineerActuator {
           if (!freshCreate) {
             this._sandboxOrigin.delete(workspaceId);
             this._lastLifetimeExtend.delete(workspaceId);
-            throw new SandboxRecoveryUnavailableError();
+            throw new SandboxRecoveryUnavailableError('allocation-lost');
           }
           await this._killUnrecordedSandbox(workspaceId, sandbox, 'losing-allocation');
           try {
@@ -1812,10 +1819,11 @@ export class E2BActuator implements IEngineerActuator {
             this._lastLifetimeExtend.set(workspaceId, Date.now());
             this._sandboxOrigin.set(workspaceId, 'resumed');
             freshCreate = false;
-          } catch {
+          } catch (error) {
             this._sandboxOrigin.delete(workspaceId);
             this._lastLifetimeExtend.delete(workspaceId);
-            throw new SandboxRecoveryUnavailableError();
+            if (isE2BConcurrentCapacityError(error)) throw error;
+            throw new SandboxRecoveryUnavailableError('winner-reconnect');
           }
         }
       }

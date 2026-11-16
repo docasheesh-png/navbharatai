@@ -26,7 +26,7 @@ export function rethrowBuildSetupRecoveryUnavailable(error: unknown): void {
   if (isSandboxRecoveryUnavailable(error)) throw new BuildSetupRecoveryUnavailableError();
 }
 
-export function buildExceptionDetails(error: unknown): { message: string; phase: 'sandbox' | 'build'; code: string; summary: string } {
+export function buildExceptionDetails(error: unknown): { message: string; phase: 'sandbox' | 'build'; code: string; summary: string; detail?: string } {
   const message = error instanceof Error ? error.message : String(error);
   const recovery = isSandboxRecoveryUnavailable(error);
   return {
@@ -34,6 +34,7 @@ export function buildExceptionDetails(error: unknown): { message: string; phase:
     phase: recovery ? 'sandbox' : 'build',
     code: recovery ? error.code : 'BUILD_EXCEPTION',
     summary: (recovery ? message : `Build stopped — an unexpected error occurred: ${message}`).slice(0, 500),
+    ...(recovery && error.reason ? { detail: error.reason } : {}),
   };
 }
 

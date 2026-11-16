@@ -1,0 +1,82 @@
+{
+  "identity": {
+    "reportNumber": 1983,
+    "outcome": "failed",
+    "ok": false,
+    "model": "qwen3-coder",
+    "framework": "vite-react",
+    "builtBy": null,
+    "requestSummary": "A short follow-up asking to make an existing app comfortable on a phone (generic summary; request details omitted).",
+    "privacy": "Raw prompt and account/workspace/session/history/build identifiers omitted from public evidence; retained report number is the audit reference."
+  },
+  "truncation": {
+    "complete": true
+  },
+  "counts": {
+    "total": 12,
+    "errors": 2,
+    "warnings": 0,
+    "autoResolved": 0,
+    "workarounds": 0,
+    "leftOpen": 0,
+    "healRule": 3,
+    "unresolved": 2
+  },
+  "billing": {
+    "presentInRetainedReport": false,
+    "charged": false,
+    "billedUsd": 0,
+    "billedInr": 0,
+    "zeroBillReason": "The retained report has no billing block. The setup-recovery refusal path emits a failed result with billedUsd 0 and billedInr 0. Locked in this PR."
+  },
+  "etaAccuracy": {
+    "promisedMs": 348206,
+    "lowMs": 237555,
+    "highMs": 561641,
+    "actualMs": 586,
+    "ratio": 0.001682911839543259,
+    "withinBand": false,
+    "evidenced": true,
+    "line": "The user was shown 4.0 min\u20139.4 min (midpoint 5.8 min); the build took 0.0 min \u2014 0.0\u00d7 the midpoint and UNDER the band.",
+    "key": "app_unsized",
+    "source": "platform"
+  },
+  "requestAnalysis": {
+    "taskType": "app_unsized",
+    "complexityScore": 15,
+    "startTier": "gemini",
+    "startBand": "cheapest band"
+  },
+  "llmCallCount": 1,
+  "commandCount": 0,
+  "liveTokens": {
+    "SURPLUS": {
+      "inputTokens": 386,
+      "outputTokens": 2,
+      "cacheReadInputTokens": 336
+    }
+  },
+  "problemCodes": [
+    "SANDBOX_RECOVERY_UNAVAILABLE",
+    "OUTCOME_SANDBOX_UNAVAILABLE"
+  ],
+  "sandboxRecovery": {
+    "code": "SANDBOX_RECOVERY_UNAVAILABLE",
+    "userMessageClass": "workspace could not be safely reconnected; please retry shortly",
+    "vendorDetailPresent": false,
+    "durationClass": "ended during setup, well under one second",
+    "filesLanded": 0
+  },
+  "closedOnMainBy": {
+    "F2_retryGoodbyeForOrdinaryUnavailable": "BR1961 #4146 sandboxUnavailableNotice",
+    "fastLaneAgainstDeadWorkspace": "BR1952 #4124 FAST_LANE_SKIPPED_SANDBOX",
+    "uncertainReconnectDoesNotReplaceMachine": "Phase 2 recovery identity; leftover non-404 refusals stay"
+  },
+  "shipped": {
+    "D1_provenCapOnReconnect": "A proven E2B concurrent-cap refusal during resume/reconnect is rethrown as that cap error; the recorded machine is not replaced; setup can take the existing SANDBOX_UNAVAILABLE / F2 / wait-for-slot path",
+    "D3_adminOnlyReason": "Remaining recovery refusals carry an admin-only reason in diagnostic detail; the user-facing event and message are unchanged"
+  },
+  "queueUpdated": [
+    "Q-2621"
+  ]
+}

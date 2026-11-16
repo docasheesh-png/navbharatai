@@ -1,11 +1,7 @@
+import ts from 'typescript';
+
 // AgentV3 — refuse leftover apply-patch / merge-conflict markup in config files the
 // syntax gate does not judge (tsconfig / JSON / JSONC).
-//
-// WHY (BR1982). A generated TypeScript file that began a SEARCH/REPLACE block was correctly
-// refused by the write-time syntax gate ("Unexpected <<"). The same build's tsconfig.json was
-// not: tsconfig is treated as JSONC, so the syntax gate skips it, and the file landed with a
-// valid JSON object followed by leftover SEARCH / REPLACE marker lines. tsc then could not
-// use that file cleanly, and the dangling-reference sanitizer could not parse it either.
 //
 // Scope is deliberately narrow (t311u). After a tsconfig tail has been salvaged, this guard
 // refuses ONLY config-like files the syntax gate skips or does not treat as source
@@ -18,6 +14,15 @@
 // Markers are detected only at the start of a line (the same rule as tests/noConflictMarkers.test.ts).
 // `=======` is deliberately not a signal: it is a common Markdown underline and comment banner.
 // Built by concatenation so this file cannot match that repository-wide line-start guard.
+
+/** JSONC comments may legitimately contain marker examples. Never rewrite valid input. */
+function isValidJsonc(content: string): boolean {
+  try {
+    return !ts.parseConfigFileTextToJson('config.json', content).error;
+  } catch {
+    return false;
+  }
+}
 
 /** Opening marker (seven less-than signs). */
 const OPEN = '<'.repeat(7);
@@ -61,6 +66,7 @@ export function firstConflictMarkerLine(content: string): number | null {
  */
 export function stripTrailingConflictMarkup(content: string): { content: string; stripped: boolean } {
   if (typeof content !== 'string' || content.length === 0) return { content: content ?? '', stripped: false };
+  if (isValidJsonc(content)) return { content, stripped: false };
   const nl = content.includes('\r\n') ? '\r\n' : '\n';
   const lines = content.split(/\r?\n/);
   const idx = lines.findIndex((line) => line.startsWith(OPEN) || line.startsWith(CLOSE));
@@ -87,9 +93,10 @@ export function conflictMarkerRefusal(
 ): string | null {
   if (!enabled) return null;
   if (!isConflictGuardTarget(path)) return null;
+  if (isValidJsonc(newContent)) return null;
   const line = firstConflictMarkerLine(newContent);
   if (line == null) return null;
-  if (firstConflictMarkerLine(oldContent) != null) return null;
+  if (firstConflictMarkerLine(oldContent) != null && !isValidJsonc(oldContent)) return null;
   const name = path || 'the file';
   return (
     `WRITE REJECTED — ${name} contains leftover apply-patch / merge-conflict markers (line ${line}). ` +

@@ -1,36 +1,4 @@
-/**
- * BR1982 (a weather-app request, succeeded, charged a small free-tier amount) —
- * retained evidence, not a replay.
- *
- * Setup hit the E2B concurrent-sandbox cap of 20; the sandbox later served the
- * build (SANDBOX_RECOVERED). The text-only fast lane still ran. One generated
- * TypeScript file was correctly refused by the write-time syntax gate
- * ("Unexpected <<"). The same pass's tsconfig.json is treated as JSONC, so that
- * gate skipped it, and leftover apply-patch SEARCH/REPLACE markup landed after
- * a valid JSONC object. Fast-lane verify had already failed TS6053 on a
- * dangling tsconfig.node.json reference (the earlier, still-clean file). The
- * full builder then hit TS17004 because the model-written tsconfig had a DOM
- * lib but no jsx flag. The app eventually typechecked, rendered, and a user
- * journey passed; release gate YELLOW for remaining dependency advisories that
- * need a major upgrade. The build ran well over its ETA band.
- *
- * Already closed on main, locked here against this report's shape:
- *   • BR1961 F2 (#4146) — sandboxUnavailableNotice does not invite a second Start.
- *   • BR1952 (#4124) — a text-only fast lane is not started when setup failed.
- *   • BR1979 (#4241) — sanitizeTsconfigReferences drops a dangling
- *     tsconfig.node.json reference before the fast lane's tsc gate.
- *   • The write-time syntax gate still refuses a TypeScript file whose first
- *     parse error is leftover apply-patch markup.
- *
- * Shipped in this PR:
- *   • A write-time conflict-marker guard refuses leftover apply-patch / merge
- *     markers only in config files the syntax gate skips (tsconfig, *.json,
- *     *.jsonc). JS/TS that still parses, Markdown, plain text, and .diff /
- *     .patch files are not refused.
- *   • A parseable tsconfig whose only fault is a trailing marker block is
- *     salvaged (prefix kept). When the app is clearly React, a DOM/app
- *     tsconfig missing jsx gains "jsx": "react-jsx" by insertion, comments kept.
- */
+/** Synthetic regression coverage for config repair and existing builder safety gates. */
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { sandboxUnavailableNotice } from '../src/server/routes/agentv3';

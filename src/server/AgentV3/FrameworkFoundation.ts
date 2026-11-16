@@ -1,22 +1,6 @@
-// AgentV3 — Framework Foundation Guarantee: the fix for "the file-list planner omitted package.json".
-//
-// THE REAL BUG (deep-test Level-1, build 7c56b35a-dc3e-4236-a795-6bf738b065ae): the manifest planner
-// planned only 5 files for a vite-react app — `src/index.css, src/components/HelloWorld.tsx,
-// vite.config.ts, src/main.tsx, src/App.tsx` — with NO `package.json`. So the sandbox's very first
-// `npm install` failed `ENOENT … package.json` (exit -1); the missing-dependency reconcile
-// (`npm install <pkgs>`) then failed with exit 254 (there is no package.json to install INTO); and the
-// dev server never started (`npm run dev` exit 1). The whole build degraded to BUILD_PARTIAL and the
-// type-check could not run (VERIFY_DID_NOT_RUN) because node_modules was empty.
-//
-// ROOT CAUSE (the CLASS, not the instance): a framework build's FOUNDATIONAL files — the ones the
-// toolchain needs before any app code can install or boot — were left entirely to the LLM planner,
-// which can silently drop them. There was no invariant that guaranteed them. This module enforces that
-// invariant deterministically: given the file set a build is about to install, it synthesizes ONLY the
-// foundational files that are ABSENT (never overwriting a generated/scaffolded file), with the
-// package.json's dependencies derived from the code's REAL imports (reusing the same import scanner the
-// dependency reconciler uses, so there is one source of truth). PURE + dependency-free = fully
-// unit-testable without a sandbox.
+// Deterministic framework foundation and JSONC configuration repair helpers.
 
+import ts from 'typescript';
 import { extractImportedPackages } from './DependencyReconciler';
 import { stripTrailingConflictMarkup } from './conflictMarkerGuard';
 
@@ -294,21 +278,15 @@ export function parseTsconfigJsonc(text: string): Record<string, unknown> | null
 }
 
 function parseJsonc(text: string): Record<string, unknown> | null {
-  const attempt = (s: string): Record<string, unknown> | null => {
-    try {
-      const v = JSON.parse(s);
-      return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-    } catch {
-      return null;
-    }
-  };
-  const direct = attempt(text);
-  if (direct) return direct;
-  const stripped = text
-    .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
-    .replace(/(^|[^:"'])\/\/[^\n\r]*/g, '$1') // line comments (leave http:// etc.)
-    .replace(/,(\s*[}\]])/g, '$1'); // trailing commas
-  return attempt(stripped);
+  try {
+    const parsed = ts.parseConfigFileTextToJson('tsconfig.json', text);
+    if (parsed.error) return null;
+    const value: unknown = parsed.config;
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The package name of a BARE module specifier (null for a relative/absolute path, which is always kept). */

@@ -278,6 +278,11 @@ export async function continueFastLaneGeneration<T extends FastLaneReply>(
   if (openBinary && isBinaryAsset(openBinary)) {
     const cut = firstText.lastIndexOf('<<<FILE');
     firstText = cut >= 0 ? firstText.slice(0, cut) : firstText;
+    // A reply that was only a truncated binary must still fail here, as BR1952 requires.
+    // Do not return an empty success after dropping the tail. Completed text files stay.
+    if (!firstText.trim()) {
+      throw new Error(binaryTextGenerationProblem([{ path: openBinary }]) ?? `binary continuation refused: ${openBinary}`);
+    }
     first = { ...first, text: firstText };
   }
   const firstBinaryProblem = binaryTextGenerationProblem(parseFileBlocks(first.text));

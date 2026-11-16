@@ -1,3 +1,4 @@
+import { bluesmindsBuilderRate, isBluesmindsBuilderLabel } from './bluesmindsBuilder';
 import { routerOneCatalogueEntryCost } from '../AI/RouterOne/catalogueAccounting';
 import { PublicBuildEngineError } from '../lib/buildEngineError';
 import { isRouterOneAccountingProvider, RouterOneAccountingUnavailableError } from '../AI/RouterOne/accounting';
@@ -241,6 +242,9 @@ export function realRateCard(): Record<string, TokenRate> {
 export function realRateFor(provider: string, model?: string): TokenRate {
   if (isRouterOneAccountingProvider(provider ?? '')) throw new RouterOneAccountingUnavailableError('rate_unavailable');
   if ((provider ?? '').toUpperCase() === 'SURPLUS') throw new SurplusAccountingUnavailableError();
+  // BluesMinds builder rung (owner t359u): the owner-configured real rate, else its labelled estimate
+  // from the reseller's published ratios (bluesmindsBuilder.ts). Never the Sonnet fallback below.
+  if (isBluesmindsBuilderLabel(provider)) return bluesmindsBuilderRate().rate;
   // Pro Chain V2 suppliers (ENGINE_QX / ENGINE_MF only): the supplier's own price when known; otherwise
   // the existing model-first rules below price it as a conservative, report-labelled ESTIMATE.
   const v2 = proChainV2SupplierRate(provider, model);

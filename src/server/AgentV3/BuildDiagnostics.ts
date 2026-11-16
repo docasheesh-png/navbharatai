@@ -4756,8 +4756,62 @@ export function renderSessionDiagnosticsText(reports: readonly BuildDiagnosticsR
  * The user's OWN content — their prompt and their generated app files — is kept verbatim (echoing the user's own
  * words is not a provider leak, and scrubbing their source would corrupt it).
  */
+/**
+ * Owner t362u (2026-11-16): the ONLY issues hidden from a user's build report are these codes our own
+ * billing code records to explain HOW a charge was worked out. An exact allow-list, never word or substring
+ * matching, so an app's own receipt/price/rate-limit/token problems always stay visible. The BluesMinds
+ * builder rung records no issue of its own (its estimated rate reaches only the admin billing ledger via
+ * realRateFor); its Pro Chain V2 estimate is PRO_CHAIN_V2_RATE_ESTIMATED. UNBILLED_BARREN_WORK is NOT here:
+ * it states the ₹ billed, which the owner wants users to see.
+ */
+export const USER_HIDDEN_BILLING_METHOD_CODES: ReadonlySet<string> = new Set([
+  'ENGINE_COST_ESTIMATED', 'USAGE_NOT_REPORTED', 'DISCOUNT_COST_UNCONFIRMED',
+  'PRO_CHAIN_V2_USAGE_ESTIMATED', 'PRO_CHAIN_V2_RATE_ESTIMATED',
+  'ROUTER_ONE_CATALOGUE_ESTIMATED', 'SURPLUS_STOP_COST_ESTIMATED',
+]);
+/** True only for one of our own billing-method codes (exact match). PURE. */
+export function isBillingMethodIssue(i: Pick<BuildIssue, 'code'>): boolean {
+  return USER_HIDDEN_BILLING_METHOD_CODES.has(i.code);
+}
+
+/**
+ * Free text we author (summary, root cause, review) can quote a hidden issue's message verbatim. Remove
+ * exactly those messages, and nothing else, so no app wording is ever touched. PURE.
+ */
+export function withoutBillingMethod(text: string, hiddenMessages: readonly string[]): string {
+  let out = text;
+  for (const m of hiddenMessages) {
+    const msg = m.trim();
+    if (msg.length < 8 || !out.includes(msg)) continue;
+    out = out.split(msg).join('');
+  }
+  if (out === text) return text;
+  return out.replace(/\(\s*\)|\[\s*\]|"\s*"/g, '').replace(/\s*([;,.:])(\s*[;,.:])+/g, '$1').replace(/\s{2,}/g, ' ')
+    .replace(/^[\s;,.:—-]+/, '').replace(/[\s;,:—-]+$/, '').trim();
+}
+
+/** The report's counts with the hidden issues taken out, so every number matches the listed issues. PURE. */
+function countsWithout(counts: BuildDiagnosticsReport['counts'], hidden: readonly BuildIssue[]): BuildDiagnosticsReport['counts'] {
+  if (hidden.length === 0) return counts;
+  const counted = hidden.filter((i) => !isNarrationEntry(i));
+  const less = (n: number | undefined, k: number): number | undefined => (n === undefined ? undefined : Math.max(0, n - k));
+  return {
+    ...counts,
+    total: less(counts.total, hidden.length)!,
+    errors: less(counts.errors, counted.filter((i) => i.severity === 'error').length)!,
+    warnings: less(counts.warnings, counted.filter((i) => i.severity === 'warning').length)!,
+    autoResolved: less(counts.autoResolved, counted.filter(isSelfHeal).length)!,
+    ...(counts.workarounds !== undefined ? { workarounds: less(counts.workarounds, hidden.filter(isWorkaroundIssue).length) } : {}),
+    ...(counts.leftOpen !== undefined ? { leftOpen: less(counts.leftOpen, counted.filter(isLeftOpen).length) } : {}),
+    unresolved: less(counts.unresolved, counted.filter((i) => !i.autoResolved && i.observation !== true).length)!,
+    ...(counts.observations !== undefined ? { observations: less(counts.observations, hidden.filter((i) => i.observation === true).length) } : {}),
+  };
+}
+
 export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosticsReport {
-  const scrub = (s: string | undefined): string | undefined => (s === undefined ? undefined : redactProvidersText(stripEngineSafeDiag(s)));
+  const hidden = report.issues.filter(isBillingMethodIssue);
+  const hiddenMessages = [...hidden, ...report.problems.filter(isBillingMethodIssue)].map((i) => i.message);
+  const scrub = (s: string | undefined): string | undefined => (s === undefined ? undefined : redactProvidersText(stripEngineSafeDiag(withoutBillingMethod(s, hiddenMessages))));
   // Pro Chain V2 routing lines name suppliers and models by design (admin autopsy); a user sees one neutral line.
   const scrubIssue = (i: BuildIssue): BuildIssue => (/^PRO_CHAIN_V2_/.test(i.code) ? {
     ts: i.ts, phase: i.phase, severity: i.severity, code: 'ENGINE_ROUTING',
@@ -4775,12 +4829,15 @@ export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosti
     ...(i.detail !== undefined ? { detail: redactProvidersText(stripEngineSafeDiag(i.detail)) } : {}),
     ...(i.repeatCount !== undefined ? { repeatCount: i.repeatCount } : {}),
   });
+  // Owner t362u (2026-11-16): a user sees only the total charged in rupees. Our own billing-method lines
+  // (exact codes above) are admin-only and dropped from the user's view; counts are adjusted to match.
+  const userVisible = (i: BuildIssue): boolean => !isBillingMethodIssue(i);
   const out: BuildDiagnosticsReport = {
     schema: report.schema,
     startedAt: report.startedAt,
-    counts: report.counts,
-    issues: report.issues.map(scrubIssue),
-    problems: report.problems.map(scrubIssue),
+    counts: countsWithout(report.counts, hidden),
+    issues: report.issues.filter(userVisible).map(scrubIssue),
+    problems: report.problems.filter(userVisible).map(scrubIssue),
     // Optional, user-relevant, provider-free fields — kept verbatim.
     ...(report.buildId !== undefined ? { buildId: report.buildId } : {}),
     ...(report.promptHash !== undefined ? { promptHash: report.promptHash } : {}),

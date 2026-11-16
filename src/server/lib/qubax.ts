@@ -3,6 +3,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 import { noteQubaxModelSwitch, qubaxModelOverride, qubaxRequestCeilingNanoUsd, qubaxSwitchReason, QUBAX_TRIES_PER_TURN, readQubaxMarketPlan, type QubaxMarketChoice } from './qubaxMarket';
 import { qubaxReplyMatchesUser } from './qubaxLanguage';
 import { getQubaxSelection, type QubaxSelection, type QubaxWorkload } from './qubaxSelector';
+import { qubaxSwitchOn } from './alwaysOnSuppliers';
 
 /** A silent Qubax try must not hold the user. The next model, then the next provider, gets the same history. */
 export const QUBAX_FIRST_BYTE_MS = 8_000;
@@ -18,7 +19,8 @@ export function qubaxConfig(env: Env = process.env) {
   const maxInflight = Number(env.QUBAX_MAX_INFLIGHT || '20');
   if (!Number.isSafeInteger(maxInflight) || maxInflight < 1 || maxInflight > 200) throw new QubaxError('QUBAX_CONFIGURATION');
   // One verified gateway origin. Never take a host, URL or credential from request JSON.
-  return { enabled: env.QUBAX_ENABLED === '1', baseURL: 'https://api.qubax.ai/v1', apiKey: env.QUBAX_API_KEY?.trim() || '', maxInflight };
+  // Owner t357u: default ON; only an explicit off value is the emergency kill switch.
+  return { enabled: qubaxSwitchOn(env), baseURL: 'https://api.qubax.ai/v1', apiKey: env.QUBAX_API_KEY?.trim() || '', maxInflight };
 }
 function marketSelection(choice: QubaxMarketChoice, ceilingNanoUsd: number, now: number): QubaxSelection {
   return Object.freeze({ modelId: choice.modelId, modelRevision: choice.backup ? 'backup-model' : 'market-performance', sku: choice.backup ? 'backup-model' : 'market-performance',
@@ -86,7 +88,7 @@ export type QubaxChatResult = { kind: 'skipped'; reason: string } | { kind: 'res
 let inflight = 0;
 /** One paid HTTP attempt, no retry, redirect, direct-provider fallback or cached answer. */
 export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env = process.env): Promise<QubaxChatResult> {
-  if (env.QUBAX_ENABLED !== '1') return { kind: 'skipped', reason: 'qubax-disabled-or-unconfigured' };
+  if (!qubaxSwitchOn(env)) return { kind: 'skipped', reason: 'qubax-disabled-or-unconfigured' };
   let cfg: ReturnType<typeof qubaxConfig>;
   try { cfg = qubaxConfig(env); } catch { return { kind: 'skipped', reason: 'qubax-configuration' }; }
   if (!cfg.apiKey) return { kind: 'skipped', reason: 'qubax-disabled-or-unconfigured' };

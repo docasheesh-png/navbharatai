@@ -4,6 +4,7 @@ import { dueQubaxProbe, emptyProbeLedger, istProbeDay, qubaxProbeDailyCapNanoUsd
 import { QubaxPriceFeedStore } from './qubaxPriceFeedStore';
 import { qubaxProbeScriptOk } from './qubaxLanguage';
 import { qubaxConfig } from './qubax';
+import { qubaxSwitchOn } from './alwaysOnSuppliers';
 
 export function qubaxProbePrompt(language: 'hi' | 'en', nonce: string): string {
   return language === 'hi' ? `हिंदी में केवल यह लिखो: कोड ${nonce}` : `In English only, write: code ${nonce}`;
@@ -84,7 +85,7 @@ export async function runDueQubaxProbe(input: {
   }
 }
 export async function runScheduledQubaxProbe(env: Record<string, string | undefined> = process.env) {
-  if (env.QUBAX_ENABLED !== '1' || !env.QUBAX_API_KEY?.trim()) return { status: 'disabled' as const };
+  if (!qubaxSwitchOn(env) || !env.QUBAX_API_KEY?.trim()) return { status: 'disabled' as const };
   try {
     const { getServerDb } = await import('./serverDb');
     const db = getServerDb();

@@ -676,6 +676,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         signal: freeAnswerSignal(req),
         allowClaude: !isFree, // absolute rule: the Free universe NEVER uses Claude
         tier: isFree ? 'free' : 'paid', // Free: GLM → flash-lite → flash only, under the shared daily cap
+        alwaysOnSuppliers: true, // owner t357u/t359u: chat photo analysis leads with Qubax → CheaperInference
       });
       const answered = !!visionResult?.text.trim();
       if (answered) {

@@ -4756,8 +4756,30 @@ export function renderSessionDiagnosticsText(reports: readonly BuildDiagnosticsR
  * The user's OWN content — their prompt and their generated app files — is kept verbatim (echoing the user's own
  * words is not a provider leak, and scrubbing their source would corrupt it).
  */
+/** Admin-only accounting codes: how a build's cost was measured, estimated or priced. */
+const BILLING_METHOD_CODE_RE = /(?:ESTIMATED|_RATE_|RATE_CARD|USAGE_NOT_REPORTED|COST_UNCONFIRMED|RECEIPT|TARIFF|ENGINE_COST|UNBILLED)/;
+const BILLING_METHOD_WORD_RE = /\b(?:estimat\w*|tariff|rate card|per[- ]?(?:1m|million)|receipts?|under-estimate)\b/i;
+const MONEY_WORD_RE = /(?:\b(?:cost|costs|charge[ds]?|bill(?:ed|ing)?|price[ds]?|rate|usage|tokens?)\b|\u20b9|\$)/i;
+/** True for an issue that explains HOW a charge was worked out. PURE. */
+export function isBillingMethodIssue(i: Pick<BuildIssue, 'code' | 'message'> & { detail?: string }): boolean {
+  if (BILLING_METHOD_CODE_RE.test(i.code ?? '')) return true;
+  const text = `${i.message ?? ''} ${i.detail ?? ''}`;
+  return BILLING_METHOD_WORD_RE.test(text) && MONEY_WORD_RE.test(text);
+}
+
+/**
+ * Free text we author (summary, root cause) can quote a billing-method line. Drop each sentence or clause
+ * that explains HOW a charge was worked out; the rest of the text is kept. PURE.
+ */
+export function withoutBillingMethod(text: string): string {
+  if (!BILLING_METHOD_WORD_RE.test(text) || !MONEY_WORD_RE.test(text)) return text;
+  return text.split(/(?<=[.!?:])\s+/)
+    .filter(part => !(BILLING_METHOD_WORD_RE.test(part) && MONEY_WORD_RE.test(part)))
+    .join(' ').replace(/[\s:]+$/, '.').trim();
+}
+
 export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosticsReport {
-  const scrub = (s: string | undefined): string | undefined => (s === undefined ? undefined : redactProvidersText(stripEngineSafeDiag(s)));
+  const scrub = (s: string | undefined): string | undefined => (s === undefined ? undefined : redactProvidersText(stripEngineSafeDiag(withoutBillingMethod(s))));
   // Pro Chain V2 routing lines name suppliers and models by design (admin autopsy); a user sees one neutral line.
   const scrubIssue = (i: BuildIssue): BuildIssue => (/^PRO_CHAIN_V2_/.test(i.code) ? {
     ts: i.ts, phase: i.phase, severity: i.severity, code: 'ENGINE_ROUTING',
@@ -4775,12 +4797,16 @@ export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosti
     ...(i.detail !== undefined ? { detail: redactProvidersText(stripEngineSafeDiag(i.detail)) } : {}),
     ...(i.repeatCount !== undefined ? { repeatCount: i.repeatCount } : {}),
   });
+  // Owner t362u (2026-11-16): a user sees only the total charged in rupees. Lines about HOW a charge was
+  // worked out (an estimate, a rate, a receipt, missing usage, supplier accounting) are admin-only and are
+  // dropped from the user's view entirely, not merely scrubbed of names.
+  const userVisible = (i: BuildIssue): boolean => !isBillingMethodIssue(i);
   const out: BuildDiagnosticsReport = {
     schema: report.schema,
     startedAt: report.startedAt,
     counts: report.counts,
-    issues: report.issues.map(scrubIssue),
-    problems: report.problems.map(scrubIssue),
+    issues: report.issues.filter(userVisible).map(scrubIssue),
+    problems: report.problems.filter(userVisible).map(scrubIssue),
     // Optional, user-relevant, provider-free fields — kept verbatim.
     ...(report.buildId !== undefined ? { buildId: report.buildId } : {}),
     ...(report.promptHash !== undefined ? { promptHash: report.promptHash } : {}),

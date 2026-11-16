@@ -617,14 +617,14 @@ describe('review 2 — a call that never got any HTTP response is not billed (ne
 });
 
 describe('review 2 — user-visible estimate wording', () => {
-  it('ENGINE_COST_ESTIMATED tells the user the cost was estimated, with no markup, tariff or supplier words; admin keeps the detail', () => {
+  // Owner t362u (2026-11-16): a user sees only the total charged; the estimate line itself is admin-only now.
+  it('ENGINE_COST_ESTIMATED never reaches the user view (no estimate, markup, tariff or supplier words); admin keeps the detail', () => {
     const d = new BuildDiagnostics({ now: () => 1 });
     recordRouterOneEstimatedBill(d, { calls: 1, costUsd: 0.001, billedUsd: 0.0025, label: ROUTER_ONE_ESTIMATED_BILL_LABEL });
     const user = userFacingReport(d.report());
-    const issue = user.issues.find(i => i.code === 'ENGINE_COST_ESTIMATED')!;
-    expect(issue.message).toBe('This step\'s cost was estimated because the engine did not return a full usage receipt.');
+    expect(user.issues.find(i => i.code === 'ENGINE_COST_ESTIMATED')).toBeUndefined();
     const text = JSON.stringify(user).toLowerCase();
-    for (const banned of ['markup', '5/2', 'x5', 'tariff', 'router', 'engine-diag', 'estimated_bill_usd']) expect(text, banned).not.toContain(banned);
+    for (const banned of ['estimated', 'markup', '5/2', 'x5', 'tariff', 'router', 'engine-diag', 'estimated_bill_usd']) expect(text, banned).not.toContain(banned);
     const admin = JSON.stringify(d.report());
     expect(admin).toContain('markup=same_as_verified_x5_2');
     expect(admin).toContain('estimated_bill_usd=0.002500');

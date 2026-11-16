@@ -227,6 +227,7 @@ import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, dropped
 import { loadedMissingPackageUses, notInstalledBlockerLabel, undeclaredInstalledLabel, type MissingPackageUse } from './missingPackageBlockers';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
+import { importsOfDeletedFiles, danglingImportNote, deletedImportNoteEnabled } from './deletedImportNote';
 import { filesOutsideTheApp, outsideAppMatcher, outsideTheAppNote } from './outsideTheApp';
 import { userFileGuardEnabled, unaskedUserFileRemovals, userFileRemovalMessage } from './userFileGuard';
 import { prunableGraphPaths, pruneWasRefused, pruneRefusedMessage } from './graphReconcile';
@@ -1273,8 +1274,8 @@ export class ToolDispatcher {
    * Sequential on purpose: a delete command names one or two files, so the probe is two round trips
    * in the rare case an `rm` ran at all, and never anything on a normal build.
    */
-  private async reconcileDeletions(paths: readonly string[]): Promise<void> {
-    if (!paths.length) return;
+  private async reconcileDeletions(paths: readonly string[]): Promise<string[]> {
+    if (!paths.length) return [];
     const gone: string[] = [];
     for (const path of paths) {
       let stillThere = false;
@@ -1283,12 +1284,29 @@ export class ToolDispatcher {
       try { getWorkspaceMemory(this.workspaceId).removeFile(path); } catch { /* graph best-effort */ }
       gone.push(path);
     }
-    if (!gone.length) return;
+    if (!gone.length) return gone;
     try { this.fileDeletionSink?.(gone); } catch { /* the sink is best-effort — the graph is already correct */ }
     try {
       getWorkspaceMemory(this.workspaceId).recordAudit(`[DELETED] dropped from the project map: ${gone.join(', ')}`);
     } catch { /* audit best-effort */ }
     this.state?.appendTerminal(deletionReconciledMessage(gone));
+    // BR1997: the confirmed-gone list, for the bash path's dangling-import note. Other callers ignore it.
+    return gone;
+  }
+
+  /**
+   * BR1997: after a shell delete, name any module whose CURRENT sandbox text still imports a deleted
+   * file (`deletedImportNote.ts`). The project graph keeps only `from` imports, so a side-effect
+   * `import './x.css'` is invisible to it; the build's recorded source files are read fresh instead
+   * (bounded). Unreadable files are skipped. Advisory only: '' when nothing is confirmed.
+   */
+  private async deletedImportNoteFor(gone: readonly string[]): Promise<string> {
+    const sources: Record<string, string> = {};
+    const candidates = [...(this.recordedPaths?.() ?? [])].filter((p) => /\.(tsx?|jsx?|mjs|cjs)$/i.test(p) && !gone.includes(p));
+    for (const p of candidates.slice(0, 60)) {
+      try { sources[p] = await this.actuator.readFile(this.workspaceId, p); } catch { /* unreadable: silent */ }
+    }
+    return danglingImportNote(importsOfDeletedFiles(gone, sources));
   }
 
   /**
@@ -6307,13 +6325,14 @@ export class ToolDispatcher {
         // …AND EVERYTHING ELSE A SHELL TOOK OUT (queue Q-246): a stylesheet, a folder, a glob, the source
         // of a `mv`. Only recorded paths are named, and each is confirmed gone in the sandbox first.
         let removedRecorded: string[] = [];
+        let shellDeleted: string[] = [];
         if (exitCode === 0 && this.recordedPaths) {
           try { removedRecorded = removedRecordedPaths(shellRemovedOperands(command), this.recordedPaths()); }
           catch { removedRecorded = []; }
         }
         if (deleteTargets.length > 0 || removedRecorded.length > 0) {
           const candidates = [...new Set([...deletionCandidates(deleteTargets, exitCode), ...removedRecorded])];
-          try { await this.reconcileDeletions(candidates); }
+          try { shellDeleted = await this.reconcileDeletions(candidates); }
           catch { /* reconciliation is best-effort — a failure simply keeps today's stale entry */ }
         }
         /**
@@ -6480,6 +6499,11 @@ export class ToolDispatcher {
           const notice = repeatedCommandNotice(stalled);
           if (notice) { out = `${notice}${out}`; this._readLoopStops.n++; }
         } catch { /* the breaker is advisory — the output is still returned */ }
+        // BR1997: a file this command deleted that another module still imports (deletedImportNote.ts).
+        if (shellDeleted.length > 0 && deletedImportNoteEnabled()) {
+          try { const dangling = await this.deletedImportNoteFor(shellDeleted); if (dangling) out = `${out}\n\n${dangling}`; }
+          catch { /* advisory — the command's own output is still returned */ }
+        }
         this.state?.appendTerminal(out);
         // Remember real failures so the team can recall what went wrong (error memory) — redacted, since
         // recalled lessons are shown back to the model/user later.

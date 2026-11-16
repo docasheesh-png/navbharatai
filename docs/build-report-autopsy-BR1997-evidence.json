@@ -1,0 +1,23 @@
+{
+  "evidenceType": "synthetic-fixtures-and-source-pins",
+  "privateReportPayloadIncluded": false,
+  "reportRetained": true,
+  "cases": [
+    "free Weak new-app build, Surplus every turn, not charged, succeeded with gate YELLOW; ETA 4-10 min, took about 15 min",
+    "the fast lane wrote two stylesheets; platform orphan wiring added a side-effect import of one into the entry module at about 94 s; first render at about 129 s",
+    "during the design-consistency heal the builder ran rm on that stylesheet at about 281 s, calling it a duplicate; the deletion was confirmed and recorded; tsc stayed clean because side-effect CSS imports are not typechecked",
+    "POST_GREEN_RECHECK_OK at about 410 s, then the real-browser check found a build-error overlay at about 422 s; repair took until about 892 s",
+    "the project graph keeps only `from` imports, so a side-effect CSS import has no graph edge (checked locally with indexFile and whoImports)",
+    "F1: after a confirmed shell delete the bash result names each recorded JS/TS module whose current text still has a relative import resolving exactly to a deleted path; otherwise the output is byte-identical; kill switch AGENTV3_DELETED_IMPORT_NOTE=off",
+    "neighbours: no importer, similar file name, bare and alias specifiers, commented-out imports, deleted importer, non-source importer, empty input, importer already repointed, unreadable importer, rm that removed nothing, switch off",
+    "mutation checks (unique mktemp backups, restored), all caught: M1 bare specifiers allowed; M2 block comments kept; M3 line comments kept; M4 deleted importer scanned; M5 non-source importer scanned; M6 note cap 8; M7 kill switch ignored; M8 bash path not wired; M9 note not appended; M10 empty list gives a note; M11 query suffix not stripped (survived first, caught after adding the ?inline test)"
+  ],
+  "limitations": [
+    "D2 (post-green recheck said OK while the dev server was broken) is queued as Q-2712, not changed",
+    "only the build's recorded JS/TS files are scanned (at most 60); a pre-existing file the build never wrote, or a CSS @import, is not checked",
+    "only shell deletions get the note; the delete guard's other roads are unchanged",
+    "BR1992 review residual (recordModel read at run start) is not on this report's path",
+    "focused local tests and server/root typecheck only; no full local suite was run (box memory)",
+    "not live until a Console Run"
+  ]
+}

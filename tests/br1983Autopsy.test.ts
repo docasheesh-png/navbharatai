@@ -1,26 +1,6 @@
-/**
- * BR1983 (a short follow-up to make an existing app comfortable on a phone,
- * failed, not charged) — retained evidence, not a replay.
- *
- * Setup died in under a second with SANDBOX_RECOVERY_UNAVAILABLE / "Your
- * workspace could not be safely reconnected. Please retry shortly." The
- * retained report has no underlying reason, so this autopsy cannot prove the
- * vendor message. The same class of refusal aborts the build before the
- * tool-capable builder can wait, and the goodbye invites a second Start.
- *
- * Already closed on main, locked here against neighbouring shapes:
- *   • BR1961 F2 (#4146) — sandboxUnavailableNotice does not invite a second Start.
- *   • BR1952 (#4124) — a text-only fast lane is not started when setup failed.
- *   • A proven E2B concurrent-cap refusal on a *fresh create* is recorded as
- *     SANDBOX_UNAVAILABLE and the builder can still wait for a slot.
- *
- * Shipped in this PR:
- *   • A proven concurrent-cap refusal during resume/reconnect is rethrown as
- *     that cap error. The recorded machine is not replaced. Setup and the
- *     admission budget keep their existing cap path instead of aborting with
- *     "please retry shortly".
- *   • Any other non-404 reconnect failure still refuses without replacement
- *     (reason recorded for the admin report only).
+/** Synthetic reconnect-classification regression cases. No customer report payload.
+ * Verify recorded-machine preservation, bounded capacity handling, and private
+ * diagnostic reason propagation without changing public event shapes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -222,6 +202,7 @@ describe('BR1983: uncertain reconnects still never replace a possibly live machi
       rethrowBuildSetupRecoveryUnavailable(error);
       throw new Error('setup unexpectedly continued');
     } catch (thrown) {
+      expect(buildExceptionDetails(thrown).detail).toBe('connect-unknown');
       publishBuildException(thrown, null, emit);
     }
     expect(emit.mock.calls.map(([event]) => event)).toEqual([
@@ -245,3 +226,4 @@ describe('BR1983: source census for the shared matcher', () => {
     expect(ADMISSION).toContain('if (isE2BConcurrentCapacityError(error))');
   });
 });
+

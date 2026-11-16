@@ -161,7 +161,7 @@ describe('D1 — a short file header is accepted only as a real header line', ()
     const one = read('src/server/AgentV3/OneShotBuilder.ts');
     expect(one).toContain('text = normalizeShortFileHeaders(text);');
     expect(one).toContain("String.raw`<<<FILE\\s+(.+?)>>>\\r?\\n");
-    expect(read('src/server/AgentV3/SimpleBuilder.ts')).toMatch(/const match = pickGeneratedFile\(text, spec\.path\);/);
+    expect(read('src/server/AgentV3/SimpleBuilder.ts')).toMatch(/const match = pickGeneratedFile\(text, spec\.path(?:, [^)]*)?\);/);
   });
 });
 

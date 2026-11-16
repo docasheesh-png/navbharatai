@@ -2,11 +2,13 @@
   "evidenceType": "synthetic-regression-cases",
   "privateReportPayloadIncluded": false,
   "cases": [
-    "an open-world game that names banks, ATMs and Hindi people (kuchh log) is domain=game and does not mention an audit log",
-    "a short Hindi 'khel banao' request with a bank in the world is still a game",
-    "a mobile banking app, a wallet with KYC, a neobank that names an audit log, a bank app with a small game, and adding a game to a banking app stay fintech",
+    "independently written paraphrases of a clearly named multiplayer or khel game that uses Hindi people-log are domain=game and do not mention an audit log",
+    "a turn-based card game that names kuchh log (people) and no finance words is domain=game",
+    "Hindi and English bank or wallet apps that also mention a small game stay fintech and still list KYC",
+    "a fantasy cricket game with a wallet and real-money prizes stays fintech and still lists KYC",
+    "gym, school, education, clinic, and shop apps that also mention a small game stay on the earlier business domain and are not game",
+    "a neobank that names an audit log still records that feature; a hospital login is not an audit log",
     "gamification and a sales game plan are not games",
-    "a hospital that names an audit log still records that feature; a hospital login is not an audit log",
     "a Spring-style models/*.glb path is a binary asset, is a generation problem, and is refused as a text write; .tsx and .svg are not",
     "the per-file tick still says Generated — not saved yet, and the bare checkmark form is gone",
     "a pre-timer Surplus scope call recorded after the build timer starts is not reported as a zero-second first call",
@@ -16,7 +18,8 @@
     "not a replay of a customer build",
     "not production or deployment validation",
     "the recorded Spring Boot framework was an explicit account pick and was not overridden",
-    "a bank-tycoon game that names a ledger is still fintech (Q-2702)",
+    "a game-as-product tie-break is not shipped; mixed or ambiguous ties keep the earlier domain",
+    "a tycoon-style game that names a ledger is still fintech (Q-2702)",
     "full exact-tree CI remains required"
   ]
 }

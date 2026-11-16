@@ -806,30 +806,6 @@ export function indiaFirstGuidance(domain: string): string {
  */
 export const MEDIA_PLAYER_APP = /\b(?:music|audio|mp3|song|video|media|podcast|radio|fm)\s*[-\s]?\s*players?\b|(?:म्यूजिक|म्यूज़िक|संगीत|ऑडियो|वीडियो|गाने|गानों)\s*(?:का\s*)?प्लेयर/i;
 
-/**
- * Did the user name a game as the thing to build, rather than mentioning a game
- * inside another product ("a bank app with a small game")?
- * Used only to break a feature-score and headline-hit TIE, so a world object
- * such as a bank cannot steal "khel banao" by array order. A later domain
- * that is strictly more specific on features still wins unchanged.
- */
-function namesGameAsTheProduct(text: string): boolean {
-  const t = String(text || '');
-  if (!t.trim()) return false;
-  if (/\b(?:games?|khel)\s+(?:banao|bana|chahiye|chahie)\b/i.test(t)) return true;
-  if (/\b(?:banao|bana|chahiye|chahie)\b[\s\S]{0,48}\b(?:games?|khel)\b/i.test(t)) return true;
-  if (/\b(?:wala|wali|ka|ki|ke)\s+khel\b/i.test(t)) return true;
-  if (/\bmujhe\b[\s\S]{0,80}\b(?:games?|khel)\b/i.test(t)) return true;
-  if (/\b(?:make|build|create|want|wanted|i'?d like)\b(?:\s+\w+){0,6}\s+games?\b/i.test(t)) {
-    // The thing being built is a bank/wallet/… app that also mentions a game.
-    if (/\b(?:make|build|create|want)\b[\s\S]{0,48}\b(?:bank|banking|wallet|loan|insurance|neobank|fintech|hospital|clinic|shop|store|crm)\s+apps?\b/i.test(t)) return false;
-    return true;
-  }
-  if (/\b(?:open-?world|real(?:istic|[\s-]?world)|platformer|shooter|roguelike|rpg|arcade)\s+games?\b/i.test(t)
-      && !/\b(?:bank|banking|wallet|loan|insurance)\s+apps?\b/i.test(t)) return true;
-  return false;
-}
-
 function selectDomain(text: string): DomainDef | undefined {
   if (MEDIA_PLAYER_APP.test(text)) return undefined;
   return DOMAINS
@@ -846,16 +822,7 @@ function selectDomain(text: string): DomainDef | undefined {
       // DISTINCT headline words each domain matched breaks such a tie by what the person actually said;
       // only a tie on that too falls back to array order, so every classification without a feature tie
       // is byte-identical.
-      const aHits = domainHeadlineHits(best, text);
-      const bHits = domainHeadlineHits(d, text);
-      if (bHits !== aHits) return bHits > aHits ? d : best;
-      // A remaining tie used to keep the earlier domain. A game named as the thing to build
-      // ("khel banao", "I want a … game") must not lose that tie to a world object such as a bank.
-      if (namesGameAsTheProduct(text)) {
-        if (d.key === 'game') return d;
-        if (best.key === 'game') return best;
-      }
-      return best;
+      return domainHeadlineHits(d, text) > domainHeadlineHits(best, text) ? d : best;
     }, undefined);
 }
 

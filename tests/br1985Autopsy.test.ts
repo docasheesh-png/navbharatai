@@ -1,5 +1,6 @@
 /** Synthetic classification and honesty regressions. No customer report payload.
- * An open-world game that names banks, ATMs, and people must stay a game.
+ * Hindi "log" meaning people must not turn a clearly named game into fintech.
+ * Mixed product-and-game requests stay on the earlier business domain.
  * A text-only lane must not generate a binary model. Admin-only fields must
  * stay off every user-facing client path. A pre-timer model call must not be
  * reported as a zero-second first call.
@@ -19,21 +20,31 @@ const ANALYZER = readFileSync('src/server/lib/RequirementGapAnalyzer.ts', 'utf8'
 const ADMIN_TOKEN = 'connect-unknown';
 const GLB = 'src/main/resources/static/models/tree1.glb';
 
-const GAME_WITH_WORLD_BANK = [
-  'I want a realistic open-world game like Earth, with many kinds of people, multiplayer so others can play, jungle and desert, army recruitment, vending machines, ATM machines, a bank, a bridge, and a way to earn and redeem money in the world.',
-  'Mujhe ek real world game chahiye, multiplayer khel sake, jungle, vending machine, ATM machine, bank, paise kamana aur redeem karne ka system, kuchh log ho.',
-  'Ek open-world khel banao jisme jungle, bank, ATM aur kuchh log hon.',
+const CLEAR_GAMES = [
+  'Please build a multiplayer puzzle-adventure game set in a hillside town. Visitors talk to kuchh log in the square, and a bank lobby is only scenery.',
+  'Ek puzzle-adventure khel banana hai, multiplayer ho, pahadi sheher ho, sheher ke chauraha par kuchh log hon, aur ek bank ki building sirf backdrop ho.',
+  'Make a turn-based card game where kuchh log sit around a table and take turns.',
 ];
 
-const FINTECH_NEIGHBOURS = [
-  'Build a mobile banking app with savings accounts, UPI payments, and KYC.',
-  'a mobile wallet app with UPI and KYC',
-  'Add gamification badges to our banking app with KYC and UPI wallet',
-  'Build a bank app with a small game for kids on the home screen',
+const MIXED_PRODUCT_AND_GAME: Array<{ prompt: string; domain: string }> = [
+  { prompt: 'Mujhe ek bank app chahiye with a small game for kids', domain: 'fintech' },
+  { prompt: 'Bank app chahiye with a small game on the home screen', domain: 'fintech' },
+  { prompt: 'Build a bank app with a small game for kids on the home screen', domain: 'fintech' },
+  { prompt: 'Add a game to our banking app with KYC', domain: 'fintech' },
+  { prompt: 'Make a fantasy cricket game with a wallet and real-money prizes', domain: 'fintech' },
+  { prompt: 'Mujhe ek wallet app chahiye jisme ek chota game ho aur real-money prizes hon', domain: 'fintech' },
+  { prompt: 'Build a gym membership app with a small game for kids', domain: 'fitness' },
+  { prompt: 'Mujhe ek gym app chahiye with a small game for members', domain: 'fitness' },
+  { prompt: 'Make a school app with a small game on the home screen', domain: 'education' },
+  { prompt: 'Mujhe ek education app chahiye with a small game for students', domain: 'education' },
+  { prompt: 'Create a school portal with a small game for students', domain: 'education' },
+  { prompt: 'Build a hospital clinic app with a small game in the waiting room', domain: 'healthcare' },
+  { prompt: 'Mujhe ek clinic app chahiye with a small game for kids', domain: 'healthcare' },
+  { prompt: 'Build a shop app with a small game for regular customers', domain: 'ecommerce' },
 ];
 
-describe('BR1985: a game that names world banks and people is not fintech', () => {
-  it.each(GAME_WITH_WORLD_BANK)('classifies as game: %s', (prompt) => {
+describe('BR1985: Hindi people-log does not steal a clearly named game, and mixed requests stay put', () => {
+  it.each(CLEAR_GAMES)('classifies as game: %s', (prompt) => {
     const g = analyzeRequirementGaps(prompt);
     expect(g.domain).toBe('game');
     expect(g.mentioned).not.toContain('audit log');
@@ -42,9 +53,23 @@ describe('BR1985: a game that names world banks and people is not fintech', () =
     expect(fastLaneSkipsGame(g.domain)).toBe(true);
   });
 
-  it.each(FINTECH_NEIGHBOURS)('does not steal a real financial product: %s', (prompt) => {
-    expect(analyzeRequirementGaps(prompt).domain).toBe('fintech');
-    expect(fastLaneSkipsGame('fintech')).toBe(false);
+  it.each(MIXED_PRODUCT_AND_GAME)('stays $domain, not game: $prompt', ({ prompt, domain }) => {
+    const g = analyzeRequirementGaps(prompt);
+    expect(g.domain).toBe(domain);
+    expect(g.domain).not.toBe('game');
+    expect(fastLaneSkipsGame(g.domain)).toBe(false);
+  });
+
+  it('a bank request still gets KYC guidance, including Hindi chahiye / mujhe wording', () => {
+    for (const prompt of [
+      'Mujhe ek bank app chahiye with a small game for kids',
+      'Bank app chahiye with a small game on the home screen',
+      'Make a fantasy cricket game with a wallet and real-money prizes',
+    ]) {
+      const g = analyzeRequirementGaps(prompt);
+      expect(g.domain, prompt).toBe('fintech');
+      expect([...g.mentioned, ...g.likelyMissing].join(' | '), prompt).toMatch(/KYC/i);
+    }
   });
 
   it('an explicit audit log on a bank app is still a mentioned fintech feature', () => {
@@ -67,11 +92,12 @@ describe('BR1985: a game that names world banks and people is not fintech', () =
     expect(hospital.mentioned).toContain('audit log of record changes');
   });
 
-  it('the audit-log feature has no bare log token, and Hindi people-log is stripped', () => {
+  it('the audit-log feature has no bare log token, Hindi people-log is stripped, and the tie-break is gone', () => {
     expect(ANALYZER).toContain('AUDIT_LOG_FEATURE_RE');
     expect(ANALYZER).toMatch(/kuchh\|yeh\|ye\|woh\|wo\|sab/);
     expect(ANALYZER).not.toMatch(/label: 'audit log', re: \/audit\|log\|track changes\/i/);
     expect(ANALYZER).not.toMatch(/re: \/audit\|history\|log\|track changes\/i/);
+    expect(ANALYZER).not.toContain('namesGameAsTheProduct');
   });
 });
 

@@ -2,9 +2,11 @@
 // not the report's request or files.
 //  D1. A per-file fast-lane call answered with a header one bracket short (`<<<FILE path>>`). The parser
 //      only knew `>>>`, returned no block, and the planned component was silently dropped; the app failed
-//      to compile until a repair round wrote it. The header now accepts `>{1,3}` — and every truncation
-//      reader in FastLaneContinuation uses the SAME definition, so a cut-off file behind such a header is
-//      still treated as cut off, never as finished (the eed79815 lesson for the end marker).
+//      to compile until a repair round wrote it. A header one or two brackets short is now rewritten to
+//      `>>>` ONLY when it starts a line, nothing but whitespace follows, and the path looks like a real file
+//      path (review FAIL: an unanchored `>{1,3}` turned prose, Markdown and template lines into phantom
+//      files). Every truncation reader in FastLaneContinuation applies the same rule, so a cut-off file
+//      behind such a header is still treated as cut off. `>>>` input is byte-for-byte main's behaviour.
 //  D2. No planned file owned the contract's helper and the plan had a `src/utils/` folder, so the lane
 //      added `src/utils.ts` beside it. A module inside the folder imported `./utils`, the compile failed,
 //      and the repair wrote an identical `src/utils/utils.ts`. An ADDED helper home now goes inside a
@@ -12,32 +14,96 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { parseFileBlocks, fileHeaderPath, FILE_HEADER_CLOSE, END_FILE_MARKER } from '../src/server/AgentV3/OneShotBuilder';
+import { parseFileBlocks, normalizeShortFileHeaders, isPlausibleHeaderPath, END_FILE_MARKER } from '../src/server/AgentV3/OneShotBuilder';
 import { unterminatedTailPath, resumedFilePath, joinContinuation } from '../src/server/AgentV3/FastLaneContinuation';
 import { textMarkerFilePaths } from '../src/server/AgentV3/TruncationRecovery';
-import { utilOwnerFor, valueOwnerFor, helperOwners, newSharedHome, generationTier } from '../src/server/AgentV3/SimpleBuilder';
+import { utilOwnerFor, valueOwnerFor, helperOwners, newSharedHome, generationTier, pickGeneratedFile } from '../src/server/AgentV3/SimpleBuilder';
 
 const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
 
+/** main's parser, copied verbatim (eef10a4a), to prove `>>>` behaviour and every false positive are unchanged. */
+function mainParse(text: string) {
+  const out: Array<{ path: string; content: string }> = [];
+  if (!text) return out;
+  const re = new RegExp(String.raw`<<<FILE\s+(.+?)>>>\r?\n([\s\S]*?)(?:\r?\n?${END_FILE_MARKER}|(?=\r?\n?<<<FILE\s)|$)`, 'g');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const p = m[1].trim().replace(/^["'`]|["'`]$/g, '');
+    if (!p || p.startsWith('/') || p.includes('..') || p.length > 300) continue;
+    out.push({ path: p, content: m[2] });
+  }
+  const by = new Map<string, string>();
+  for (const f of out) by.set(f.path, f.content);
+  return [...by.entries()].map(([path, content]) => ({ path, content }));
+}
+/** main's unterminatedTailPath, verbatim. */
+function mainTail(text: string): string | null {
+  if (!text) return null;
+  const lastHeader = text.lastIndexOf('<<<FILE');
+  if (lastHeader === -1) return null;
+  if (new RegExp(END_FILE_MARKER).test(text.slice(lastHeader))) return null;
+  const m = /^<<<FILE\s+(.+?)>>>/.exec(text.slice(lastHeader));
+  if (!m) return null;
+  return m[1].trim().replace(/^["'`]|["'`]$/g, '') || null;
+}
+
 const NOTE_CARD = 'export default function NoteCard() {\n  return <div className="note">A note</div>;\n}';
 
-describe('D1 — a file header one or two brackets short is still a header', () => {
-  it('the exact old header parses byte-for-byte as before', () => {
-    const text = `<<<FILE src/components/NoteCard.tsx>>>\n${NOTE_CARD}\n<<<ENDFILE>>>`;
-    expect(parseFileBlocks(text)).toEqual([{ path: 'src/components/NoteCard.tsx', content: NOTE_CARD }]);
+// The reviewer's four phantom-file inputs, plus the other spellings main already handles.
+const FALSE_POSITIVES: Record<string, string> = {
+  'one bracket then a trailing comment': '<<<FILE src/a.tsx> // the component <App />\nbody\n<<<ENDFILE>>>',
+  'three brackets then trailing prose': '<<<FILE src/a.tsx>>> here is <b>\nbody\n<<<ENDFILE>>>',
+  'a Markdown line with a bare word path': '<<<FILE README.md>>>\nUse:\n<<<FILE path>\n<<<ENDFILE>>>',
+  'a template literal line': '<<<FILE src/t.ts>>>\nconst s = `\n<<<FILE ${p}>\n`;\n<<<ENDFILE>>>',
+};
+const MAIN_SPELLINGS: Record<string, string> = {
+  normal: '<<<FILE src/a.tsx>>>\nexport const a = 1 >> 2;\nconst x = <div>hi</div>;\n<<<ENDFILE>>>\n<<<FILE src/b.md>>>\n# T\n> quote\n`<<<FILE x>>>`\n<<<ENDFILE>>>',
+  quoted: '<<<FILE "src/a.ts">>>\nx\n<<<ENDFILE>>>',
+  crlf: '<<<FILE src/a.ts>>>\r\nx\r\n<<<ENDFILE>>>\r\n',
+  fourClose: '<<<FILE src/a.ts>>>>\nx\n<<<ENDFILE>>>',
+  innerGt: '<<<FILE src/a>b.ts>>>\nx',
+  proseMention: 'Write each as <<<FILE path>> then body.\n<<<FILE src/a.ts>>>\nx',
+  proseLineEnd: 'I will now write <<<FILE src/App.tsx>\n<<<FILE src/App.tsx>>>\nreal\n<<<ENDFILE>>>',
+  midLineShort: 'see <<<FILE src/a.ts>>\nx\n<<<ENDFILE>>>',
+  spaceInPath: '<<<FILE src/my file.ts>>\nx\n<<<ENDFILE>>>',
+  braces: '<<<FILE src/{a}.ts>>\nx',
+  noSlashNoExt: '<<<FILE Makefile>>\nall:\n<<<ENDFILE>>>',
+  tripleTrailingSpace: '<<<FILE src/a.ts>>>   \nx\n<<<ENDFILE>>>',
+};
+
+describe('D1 — a short file header is accepted only as a real header line', () => {
+  it.each(Object.entries({ ...FALSE_POSITIVES, ...MAIN_SPELLINGS }))('%s: the one-shot/repair parser returns exactly what main returns', (_k, text) => {
+    expect(parseFileBlocks(text)).toEqual(mainParse(text));
+    expect(unterminatedTailPath(text)).toBe(mainTail(text));
   });
 
-  it.each(['>>', '>'])('a header closed with %s yields the file (the dropped-component case)', (close) => {
+  it.each(Object.entries(FALSE_POSITIVES))('%s: no phantom file, and the text is left byte-for-byte', (_k, text) => {
+    expect(normalizeShortFileHeaders(text)).toBe(text);
+    const paths = parseFileBlocks(text).map((f) => f.path);
+    for (const p of paths) expect(/[\s<>${}]/.test(p)).toBe(false);
+    expect(paths).not.toContain('path');
+  });
+
+  it.each(Object.entries(FALSE_POSITIVES))('%s: the per-file lane reads it exactly as main', (_k, text) => {
+    const mainBlocks = mainParse(text);
+    const mainPick = mainBlocks.find((b) => b.path === 'src/a.tsx') ?? mainBlocks[0] ?? null;
+    expect(pickGeneratedFile(text, 'src/a.tsx')).toEqual(mainPick);
+  });
+
+  it('a per-file reply whose only header is a prose line yields nothing (not written under the planned path)', () => {
+    expect(pickGeneratedFile('<<<FILE src/a.tsx> // the component <App />\nbody', 'src/a.tsx')).toBeNull();
+    expect(pickGeneratedFile('Here: <<<FILE src/a.tsx>>\nbody', 'src/a.tsx')).toBeNull();
+  });
+
+  it.each(['>>', '>'])('true positive: a line-start header closed with %s yields the file (the dropped-component case)', (close) => {
     const text = `<<<FILE src/components/NoteCard.tsx${close}\n${NOTE_CARD}\n<<<ENDFILE>>>`;
     expect(parseFileBlocks(text)).toEqual([{ path: 'src/components/NoteCard.tsx', content: NOTE_CARD }]);
+    expect(pickGeneratedFile(text, 'src/components/NoteCard.tsx')).toEqual({ path: 'src/components/NoteCard.tsx', content: NOTE_CARD });
+    expect(parseFileBlocks(`<<<FILE src/x.ts${close}  \r\nexport {};\r\n<<<ENDFILE>>>`).map((f) => f.path)).toEqual(['src/x.ts']);
+    expect(parseFileBlocks(`<<<FILE index.html${close}\n<p></p>\n<<<ENDFILE>>>`).map((f) => f.path)).toEqual(['index.html']);
   });
 
-  it('a header with an extra bracket keeps a clean path, not a path ending in ">"', () => {
-    const text = `<<<FILE src/components/NoteCard.tsx>>>>\n${NOTE_CARD}\n<<<ENDFILE>>>`;
-    expect(parseFileBlocks(text).map((f) => f.path)).toEqual(['src/components/NoteCard.tsx']);
-  });
-
-  it('a short header between two normal blocks keeps all three files apart', () => {
+  it('true positive: a short header between two normal blocks keeps all three files apart', () => {
     const text = [
       '<<<FILE src/a.ts>>>', 'export const a = 1;', '<<<ENDFILE>>>',
       '<<<FILE src/b.ts>>', 'export const b = 2;', '<<<ENDFILE>>>',
@@ -50,29 +116,21 @@ describe('D1 — a file header one or two brackets short is still a header', () 
     ]);
   });
 
-  it('neighbours: quoted paths unquote, unsafe paths stay rejected, a mid-sentence mention is not a header', () => {
-    expect(parseFileBlocks('<<<FILE "src/q.ts">>\nexport {};\n<<<ENDFILE>>>').map((f) => f.path)).toEqual(['src/q.ts']);
+  it('the path rule: no whitespace or < > $ { }, and a slash or an extension', () => {
+    for (const ok of ['src/a.ts', 'index.html', 'src/components/NoteCard', '"src/q.ts"']) expect(isPlausibleHeaderPath(ok)).toBe(true);
+    for (const bad of ['path', '${p}', 'src/{a}.ts', 'a b.ts', 'src/a>b.ts', 'src/<x>.ts', '', 'Makefile']) expect(isPlausibleHeaderPath(bad)).toBe(false);
     expect(parseFileBlocks('<<<FILE ../escape.ts>>\nx\n<<<ENDFILE>>>')).toEqual([]);
     expect(parseFileBlocks('<<<FILE /etc/abs.ts>\nx\n<<<ENDFILE>>>')).toEqual([]);
-    expect(parseFileBlocks('Wrap each file as <<<FILE path>> and so on, then stop.\nNo files here.')).toEqual([]);
-    expect(parseFileBlocks('')).toEqual([]);
   });
 
-  it('fileHeaderPath only trims, unquotes and drops stray closing brackets', () => {
-    expect(fileHeaderPath(' src/x.ts ')).toBe('src/x.ts');
-    expect(fileHeaderPath('src/x.ts>')).toBe('src/x.ts');
-    expect(fileHeaderPath('`src/x.ts`')).toBe('src/x.ts');
-    expect(FILE_HEADER_CLOSE).toBe('>{1,3}');
-    expect(END_FILE_MARKER).toBe('<<<ENDFILE>{1,3}');
-  });
-
-  it('a TRUNCATED file behind a short header is still cut off — never passed off as finished', () => {
+  it('a TRUNCATED file behind a line-start short header is still cut off — never passed off as finished', () => {
     const cut = `<<<FILE src/a.ts>>>\nexport const a = 1;\n<<<ENDFILE>>>\n<<<FILE src/components/NoteCard.tsx>>\nexport default function NoteCard() {\n  return <div`;
     expect(unterminatedTailPath(cut)).toBe('src/components/NoteCard.tsx');
     expect(unterminatedTailPath(`${cut}>x</div>;\n}\n<<<ENDFILE>>>`)).toBeNull();
-    // the exact old spelling is unchanged
+    expect(unterminatedTailPath('<<<FILE src/z.ts>>')).toBe('src/z.ts');
     expect(unterminatedTailPath('<<<FILE src/z.ts>>>\nexport const z')).toBe('src/z.ts');
-    expect(unterminatedTailPath('plain text, no blocks')).toBeNull();
+    // a prose short header at the end is still not a header (main: null)
+    expect(unterminatedTailPath('done.\nI will write <<<FILE src/z.ts>>\nnext')).toBeNull();
   });
 
   it('a continuation that re-opens a short-header file is welded, not allowed to replace the head', () => {
@@ -85,18 +143,25 @@ describe('D1 — a file header one or two brackets short is still a header', () 
     expect(files[0].content).toContain('font-size: 14px;');
   });
 
-  it('a cut-off turn\'s text marker behind a short header is listed for rewrite', () => {
+  it('joinContinuation leaves a non-resumed continuation byte-for-byte', () => {
+    const prev = '<<<FILE src/a.ts>>>\nexport const a = 1;\n<<<ENDFILE>>>\n';
+    const cont = '<<<FILE src/b.ts>>\nexport const b = 2;\n<<<ENDFILE>>>';
+    expect(joinContinuation(prev, cont)).toBe(prev + cont);
+  });
+
+  it('a cut-off turn\'s text marker behind a line-start short header is listed for rewrite', () => {
     expect(textMarkerFilePaths('<<<FILE src/index.css>>\nbody { margin: 0; }')).toEqual(['src/index.css']);
+    expect(textMarkerFilePaths('see <<<FILE src/index.css> // later\nbody')).toEqual([]);
   });
 
-  it('every header reader in FastLaneContinuation uses the shared definition (no stray ">>>" literal)', () => {
-    const src = read('src/server/AgentV3/FastLaneContinuation.ts').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    expect(src).not.toMatch(/<<<FILE\\s\+\(\.\+\?\)>>>/);
-    expect((src.match(/FILE_HEADER_CLOSE/g) ?? []).length).toBeGreaterThanOrEqual(6);
-  });
-
-  it('the per-file fast lane still reads its answer through parseFileBlocks', () => {
-    expect(read('src/server/AgentV3/SimpleBuilder.ts')).toMatch(/const blocks = parseFileBlocks\(text\);/);
+  it('every reader keeps main\'s own >>> pattern and applies the one shared normaliser', () => {
+    const cont = read('src/server/AgentV3/FastLaneContinuation.ts');
+    expect((cont.match(/normalizeShortFileHeaders\(/g) ?? []).length).toBeGreaterThanOrEqual(5);
+    expect(cont).not.toMatch(/>\{1,3\}|FILE_HEADER_CLOSE/);
+    const one = read('src/server/AgentV3/OneShotBuilder.ts');
+    expect(one).toContain('text = normalizeShortFileHeaders(text);');
+    expect(one).toContain("String.raw`<<<FILE\\s+(.+?)>>>\\r?\\n");
+    expect(read('src/server/AgentV3/SimpleBuilder.ts')).toMatch(/const match = pickGeneratedFile\(text, spec\.path\);/);
   });
 });
 

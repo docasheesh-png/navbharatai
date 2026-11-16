@@ -958,6 +958,16 @@ export function contractUtilSignatures(contract: string | undefined): string[] {
   return names;
 }
 
+/**
+ * The block a per-file call returned for `path`: the block with that path, else the first block, else null.
+ * Exactly the selection genOne always made, named so the BR1989 header tests can drive the per-file lane's
+ * own reading of a reply. PURE.
+ */
+export function pickGeneratedFile(text: string, path: string): OneShotFile | null {
+  const blocks = parseFileBlocks(text);
+  return blocks.find((b) => b.path === path) ?? blocks[0] ?? null;
+}
+
 export interface UtilOwner {
   /** The file that implements and exports the contract's utility functions. */
   path: string;
@@ -2561,8 +2571,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             callsInFlight -= 1;
           }
           if (lapsed) return null; // timed out while this call was in flight — discard, don't log
-          const blocks = parseFileBlocks(text);
-          const match = blocks.find((b) => b.path === spec.path) ?? blocks[0];
+          const match = pickGeneratedFile(text, spec.path);
           if (!match) return null;
           filesDone += 1; // synchronous — safe even with concurrent genOne calls in flight
           deps.log?.(`🧩 Generated ${spec.path} (${filesDone}/${manifest.length}) — not saved yet.`);

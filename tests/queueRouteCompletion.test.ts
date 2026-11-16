@@ -147,7 +147,8 @@ describe('build admission preserves read-only chat and refuses uncertain mutatio
     const code = weakAdmissionCode(scope);
     expect(events.find((e) => e.type === 'narration')).toMatchObject({ text: reply });
     expect(events.find((e) => e.type === 'done')).toMatchObject({ ok: false, summary: reply, code });
-    expect(events.find((e) => e.type === 'result')).toMatchObject({ ok: false, summary: reply, steps: 0, billedUsd: 0, billedInr: 0, code });
+    expect(events.find((e) => e.type === 'result')).toMatchObject({ ok: false, summary: reply, steps: 0, billedInr: 0, code });
+    expect(events.find((e) => e.type === 'result')).not.toHaveProperty('billedUsd'); // owner t362u: ₹ only
     expect(builder).not.toHaveBeenCalled();
     expect(modelRoute).not.toHaveBeenCalled();
     expect(clarityJudgeAsk).toHaveBeenCalledExactlyOnceWith(expect.any(String), body.prompt, expect.any(AbortSignal));
@@ -180,7 +181,8 @@ describe('build admission preserves read-only chat and refuses uncertain mutatio
     expect(receipts[0][1]).toMatchObject({ state: 'terminal', outcome: 'complete', workspaceId: queuedWorkspace });
     expect(events.find((e) => e.type === 'narration')).toMatchObject({ text: chatReply });
     expect(events.find((e) => e.type === 'done')).toMatchObject({ ok: true, summary: chatReply });
-    expect(events.find((e) => e.type === 'result')).toMatchObject({ ok: true, summary: chatReply, steps: 0, billedUsd: 0, billedInr: 0 });
+    expect(events.find((e) => e.type === 'result')).toMatchObject({ ok: true, summary: chatReply, steps: 0, billedInr: 0 });
+    expect(events.find((e) => e.type === 'result')).not.toHaveProperty('billedUsd'); // owner t362u: ₹ only
     expect(builder).not.toHaveBeenCalled();
   });
   it('a real build is refused before headers when ownership cannot be confirmed', async () => {

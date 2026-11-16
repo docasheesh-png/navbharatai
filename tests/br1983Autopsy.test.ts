@@ -372,9 +372,9 @@ describe('BR1983: recovery reasons stay off the persisted conversation record an
     expect(issue?.detail).toBe('the compiler said TS2307');
   });
 
-  it('persist embeds the compact copy, and GET returns that record unsanitized', () => {
+  it('persist embeds the compact copy, and GET returns the owner view of that record (t362u)', () => {
     expect(ROUTE).toContain('report: compactReportForRecord(settledReport)');
-    expect(ROUTE).toContain('res.json({ conversation: rec, workspaceState })');
+    expect(ROUTE).toContain('res.json({ conversation: userConversationView(rec), workspaceState })');
     const store = readFileSync('src/server/AgentV3/DiagnosticsStore.ts', 'utf8');
     const compact = store.slice(store.indexOf('export function compactReportForRecord'), store.indexOf('export async function deleteDiagnostics'));
     expect(compact).toContain('adminDetail');

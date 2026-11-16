@@ -527,6 +527,7 @@ import { withAnswerNotDeliberation } from '../AgentV3/answerNotDeliberate';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { redactPII, redactEventForUser } from '../AgentV3/SourceSecretRedactor';
+import { userConversationView, userResultEvent } from '../AgentV3/userChargeView';
 import { audit } from '../lib/audit';
 import { persistenceHealth } from '../lib/persistenceHealth';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
@@ -2227,7 +2228,11 @@ export const MCP_CHECK_COOLDOWN_MS = 10_000;
 const mcpCheckCooldown = new Map<string, number>();
 
 /** Push an event into a build's replay buffer and fan it out to every subscriber. */
-function broadcastBuild(rb: RunningBuild, e: unknown): void {
+function broadcastBuild(rb: RunningBuild, eIn: unknown): void {
+  // Owner t362u: every copy a browser can receive (live subscribers, the replay buffer, the cross-device
+  // channel) is the user's view — ₹ total only, the user's build report, no adminDetail. The session
+  // timeline (persisted, admin-readable) records the full event before this point.
+  const e = userResultEvent(eIn);
   // Liveness stamp — the input to isSilentlyStale(). A build that emits is alive; a registry entry
   // that stops emitting is how a Resume button ends up pointing at a corpse (admin 2026-08-17).
   rb.lastEventTs = Date.now();
@@ -4481,7 +4486,7 @@ export function registerAgentV3Routes(app: Express): void {
             // the surest way to get "everywhere" right is to leave nothing to update. `appName` rides
             // along separately so a caller can still tell a chosen name from a derived one.
             id: c.id, title: effectiveAppName(c), status: c.status, workspaceId: c.workspaceId,
-            billedUsd: c.billedUsd, createdAt: c.createdAt, updatedAt: c.updatedAt,
+            createdAt: c.createdAt, updatedAt: c.updatedAt, // owner t362u: no USD bill in the user's list
             ...(c.appName ? { appName: c.appName } : {}),
             ...(c.pinned ? { pinned: true } : {}),
             ...(live ? { live: true, liveUrl: dep!.url } : {}),
@@ -4541,7 +4546,9 @@ export function registerAgentV3Routes(app: Express): void {
           if (todos.length > 0) workspaceState = { todos };
         }
       } catch { /* plan restore is best-effort — never blocks resume */ }
-      res.json({ conversation: rec, workspaceState });
+      // Owner t362u: the owner's copy shows the ₹ total only — the USD bill, token usage, the full build
+      // report and adminDetail stay on the server record for admin views.
+      res.json({ conversation: userConversationView(rec), workspaceState });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -10649,7 +10656,7 @@ async function noteBuildOutcome(
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders();
-      const sendLine = (e: unknown) => { if (!res.writableEnded) res.write(JSON.stringify(honestResultEvent(e)) + '\n'); };
+      const sendLine = (e: unknown) => { if (!res.writableEnded) res.write(JSON.stringify(userResultEvent(honestResultEvent(e))) + '\n'); };
       const roleWorkspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
       try {
         // Ground the role in the REAL project: durable files → tree + relevance-picked contents.

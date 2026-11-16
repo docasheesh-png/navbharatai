@@ -1,9 +1,9 @@
 import type { IEngineerActuator } from './sandbox/EngineerAI/actuators/IEngineerActuator';
 import type { ToolUse } from './ClaudeClient';
 import type { ToolResult } from './ToolDispatcher';
+import { isE2BConcurrentCapacityError, isE2BConcurrentCapacityMessage } from './e2bConcurrentCapacity';
 
 const SANDBOX_TOOLS = new Set(['bash', 'glob', 'read_file', 'write_file', 'append_file', 'write_files_batch', 'edit_file', 'list_directory', 'grep', 'screenshot', 'browser_action', 'find_ui_element']);
-const CAPACITY = /^(?:Error:\s*)?Rate limit exceeded, please try again later - you have reached the maximum number of concurrent E2B sandboxes \(\d+\)/;
 export const SANDBOX_ADMISSION_BLOCKED = 'Workspace admission is still unavailable after a recovery attempt. Stopping this attempt without completing the app; no capacity, quota or machine was changed. Existing files are kept. Try again when workspace capacity is available.';
 
 /** Build-scoped, shared across retry/heal runners. One real recovery after a proven capacity refusal.
@@ -19,7 +19,7 @@ export function createSandboxAdmissionBudget() {
   let recovery: Promise<ToolResult> | null = null;
   const exhausted = () => failures >= 2;
   const observe = (result: ToolResult): ToolResult => {
-    if (result.is_error && CAPACITY.test(result.content)) failures++;
+    if (result.is_error && isE2BConcurrentCapacityMessage(result.content)) failures++;
     else if (!result.is_error) failures = 0;
     return result;
   };
@@ -38,7 +38,7 @@ export function createSandboxAdmissionBudget() {
         try {
           const value = await run(); failures = 0; admitted = true; return value;
         } catch (error) {
-          if (CAPACITY.test(error instanceof Error ? error.message : String(error))) { failures++; admitted = false; }
+          if (isE2BConcurrentCapacityError(error)) { failures++; admitted = false; }
           throw error;
         }
       };

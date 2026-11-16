@@ -2322,14 +2322,14 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'src/game/objects/<id>.ts, and the game makes the object with createX(THREE). EASIEST: call it with { describe: "a lighthouse with a '
         + 'spiral stair" } and the Forge MAKES IT ITSELF (it asks a model for the spec, checks it, shows the model its own drawing and has it '
         + 'correct it, a few rounds) — you write no spec. Or call it with no arguments to read the guide, with '
-        + '{ example: "person" } for a worked spec to adapt (person, quadruped, house, tree, sword), or with { spec } to build. Use it when the '
+        + '{ example: "person" } for a worked spec to adapt (person, quadruped, house, tree, sword, train, car, bike, plane, boat), or with { spec } to build. Use it when the '
         + 'library has no match; never hand-write vertices or stacks of boxes for an object in game code. The result is stylised low-poly '
         + '(not photoreal): say so.',
       input_schema: {
         type: 'object',
         properties: {
           spec: { type: 'object', description: 'The object: { id, name, materials, nodes }. See the guide (call with no arguments).' },
-          example: { type: 'string', description: 'Return a worked example spec and its drawing: person, quadruped, house, tree or sword.' },
+          example: { type: 'string', description: 'Return a worked example spec and its drawing: person, quadruped, house, tree, sword, train, car, bike, plane or boat.' },
           customise: { type: 'string', description: 'CHANGE an object that exists, in the user\'s own words (English, Hinglish or Hindi): "dress ka rang neela karo, baal bade karo, thoda lamba". Needs target. Colours of named parts, size, and for the Forge person: gender, hair length, a dress, build.' },
           target: { type: 'string', description: 'With customise: the id of the object to change (see src/game/objects/).' },
           base: { type: 'string', enum: ['person'], description: 'With customise: when the target does not exist yet, start from the Forge person.' },

@@ -11,6 +11,8 @@
 
 import { PUBLIC_LEGAL_ROUTES, DELETE_ACCOUNT_PATH, CONTACT_PATH } from './legalPaths';
 import { MARKETING_PATHS } from '../../content/marketing';
+import { USE_CASE_INDEX_PATH, useCasePaths } from './useCaseCatalog';
+import { HOW_IT_WORKS_PATH } from './howItWorksPage';
 
 export const ROBOTS_PATH = '/robots.txt';
 export const SITEMAP_PATH = '/sitemap.xml';
@@ -18,7 +20,7 @@ export const SITEMAP_PATH = '/sitemap.xml';
 /** The public pages a visitor or a crawler can open without signing in, canonical spellings only. */
 export function publicSitePaths(): string[] {
   // Product pages come right after the homepage: they are the pages that exist to be found.
-  return ['/', ...MARKETING_PATHS, '/store', '/status', ...Object.keys(PUBLIC_LEGAL_ROUTES), CONTACT_PATH, DELETE_ACCOUNT_PATH];
+  return ['/', ...MARKETING_PATHS, USE_CASE_INDEX_PATH, ...useCasePaths(), HOW_IT_WORKS_PATH, '/store', '/status', ...Object.keys(PUBLIC_LEGAL_ROUTES), CONTACT_PATH, DELETE_ACCOUNT_PATH];
 }
 
 /** The site's public origin: PUBLIC_BASE_URL when it is a real https origin, else the production one. */

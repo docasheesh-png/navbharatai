@@ -5,6 +5,7 @@ import ts from 'typescript';
 import { FORGE_ENGINE } from './forgeEngineSource';
 import { FORGE_CHECK } from './forgeCheckSource';
 import { FORGE_CUSTOMISE } from './forgeCustomiseKitSource';
+import { FORGE_BEHAVE } from './forgeBehaveSource';
 
 import { FORGE_DIR, OBJECTS_DIR } from './forgePaths';
 
@@ -68,7 +69,8 @@ export function objectFileSource(spec: Record<string, unknown>): string {
   const name = String(spec.name).replace(/[\r\n*/]+/g, ' ');
   return [
     '// ' + name + ' — made by the Object Forge. The spec below is the object: change a size, a colour or a node and it changes.',
-    "import { createObject, type ObjectSpec } from '../forge/forge';",
+    "import { createObject, type ForgeObject, type ObjectSpec } from '../forge/forge';",
+    "import { behave, type BehaviourOptions } from '../forge/behave';",
     '',
     '// eslint-disable-next-line @typescript-eslint/no-explicit-any',
     'type ThreeLike = any;',
@@ -76,8 +78,13 @@ export function objectFileSource(spec: Record<string, unknown>): string {
     'export const SPEC: ObjectSpec = ' + JSON.stringify(spec, null, 2) + ';',
     '',
     '/** Make the object: pass the three.js module, add result.group to the scene, call result.play("walk") and result.update(dt) each frame. */',
-    'export function create' + pascal(id) + '(THREE: ThreeLike) {',
+    'export function create' + pascal(id) + '(THREE: ThreeLike): ForgeObject {',
     '  return createObject(THREE, SPEC);',
+    '}',
+    '',
+    '/** Make it move as its spec says (rails, wander, drive, orbit or static). Pass the world heightAt so it stands on the ground (heightOffset: 0 if you already set its y to the ground height); call .update(dt) each frame. */',
+    'export function behave' + pascal(id) + '(obj: ForgeObject, options?: BehaviourOptions) {',
+    '  return behave(obj, SPEC.behaviour, options);',
     '}',
     '',
   ].join('\n');
@@ -105,6 +112,7 @@ export function authorObject(input: unknown): AuthorResult {
   const files: Record<string, string> = {
     [FORGE_DIR + 'forge.ts']: FORGE_ENGINE,
     [FORGE_DIR + 'customise.ts']: FORGE_CUSTOMISE,
+    [FORGE_DIR + 'behave.ts']: FORGE_BEHAVE,
     [OBJECTS_DIR + id + '.ts']: objectFileSource(v.spec),
   };
   return { ok: true, errors: [], report, files, id, text: check.formatReport({ ...report, warnings: [...v.warnings.map((w) => w), ...report.warnings] }) };
@@ -112,5 +120,5 @@ export function authorObject(input: unknown): AuthorResult {
 
 /** The engine file alone (what a game needs once, however many objects it has). */
 export function forgeKitFiles(): Record<string, string> {
-  return { [FORGE_DIR + 'forge.ts']: FORGE_ENGINE, [FORGE_DIR + 'customise.ts']: FORGE_CUSTOMISE };
+  return { [FORGE_DIR + 'forge.ts']: FORGE_ENGINE, [FORGE_DIR + 'customise.ts']: FORGE_CUSTOMISE, [FORGE_DIR + 'behave.ts']: FORGE_BEHAVE };
 }

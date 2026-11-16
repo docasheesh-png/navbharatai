@@ -495,6 +495,17 @@ function containsUnnegatedSignal(haystack: string, signal: string): boolean {
  * "complete/full/production-ready <app>" construction or a sizeable structured brief (a real spec —
  * feature list + length — never a one-line edit instruction). Pure.
  */
+
+/**
+ * True when a `completeApp` match is only "the whole app" / "the entire website"
+ * and similar: a definite, bare product noun. "a whole app for inventory" and
+ * "the complete Hospital OPD Management System" are not this shape.
+ */
+function isDefiniteBareAppCompleteness(haystack: string, index: number, matched: string): boolean {
+  if (!/\bthe\s+$/i.test(haystack.slice(0, index))) return false;
+  return /^(?:complete|full|entire|whole|production[-\s]?ready|end[-\s]?to[-\s]?end|comprehensive)\s+(?:app|application|web\s?app|website|site|system|platform|dashboard|portal|saas|software|tool|clone|management\s+system)\s*$/i.test(matched.trim());
+}
+
 export function isExplicitCompleteBuild(message: string): boolean {
   if (typeof message !== 'string' || !message.trim()) return false;
   const m = message.toLowerCase();
@@ -509,8 +520,17 @@ export function isExplicitCompleteBuild(message: string): boolean {
     '\\b(complete|full|entire|whole|production[-\\s]?ready|end[-\\s]?to[-\\s]?end|comprehensive)\\b[\\s\\S]{0,40}\\b' +
       APP_NOUN +
       '\\b',
+    'gi',
   );
-  if (completeApp.test(m)) return true;
+  // "the whole app" / "the entire application" names an existing product as the
+  // scope of a change. It is not the "a complete <product> app" construction
+  // this function exists to detect. A definite article plus a bare app noun,
+  // with no product name between the completeness word and the noun, must not
+  // override the edit downgrade (precision-first in the safe direction).
+  let completeMatch: RegExpExecArray | null;
+  while ((completeMatch = completeApp.exec(m))) {
+    if (!isDefiniteBareAppCompleteness(m, completeMatch.index, completeMatch[0])) return true;
+  }
   // Or a build-verb + app-noun request carrying a sizeable structured brief (a genuine spec), which
   // a short edit instruction never has.
   const hasAppNoun = new RegExp('\\b' + APP_NOUN + '\\b').test(m);

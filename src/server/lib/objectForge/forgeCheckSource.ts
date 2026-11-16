@@ -8,9 +8,9 @@
 //
 // PURE source string, loaded by forgeRuntime.ts next to the engine. Rule for editing: no backticks and no dollar-brace inside the string.
 export const FORGE_CHECK = `// Object Forge — validation, measurement and a text drawing of an object spec.
-import { expandNodes, shapeMesh, worldMeshes, type ForgeNode, type ObjectSpec, type WorldMesh } from './forge';
+import { MAX_EXPANDED_NODES, expandNodes, shapeMesh, worldMeshes, type ForgeNode, type ObjectSpec, type WorldMesh } from './forge';
 
-export const FORGE_LIMITS = { maxNodes: 400, maxTriangles: 24000, maxDepth: 8, maxDimension: 2000, maxMaterials: 32, maxClips: 12, maxTracks: 12 };
+export const FORGE_LIMITS = { maxNodes: MAX_EXPANDED_NODES, maxTriangles: 24000, maxDepth: 8, maxDimension: 2000, maxMaterials: 32, maxClips: 12, maxTracks: 12 };
 
 const SHAPES = ['box', 'sphere', 'cylinder', 'capsule', 'torus', 'lathe', 'loft', 'extrude', 'tube', 'plane'];
 const NAME = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
@@ -134,6 +134,44 @@ function checkShape(shape: unknown, path: string, errors: string[]): void {
   }
 }
 
+const BEHAVIOURS = ['static', 'rails', 'wander', 'drive', 'orbit'];
+
+/** A behaviour is DATA the kit's fixed movements read: every number is bounded, every clip it names must exist on the object. */
+function checkBehaviour(b: unknown, clips: Set<string>, errors: string[]): void {
+  if (b === undefined) return;
+  if (!isRec(b) || typeof b.type !== 'string' || !BEHAVIOURS.includes(b.type)) { errors.push('behaviour.type must be one of: ' + BEHAVIOURS.join(', ')); return; }
+  const clip = (v: unknown, name: string): void => {
+    if (v === undefined) return;
+    if (typeof v !== 'string' || !clips.has(v)) errors.push('behaviour.' + name + ' is ' + JSON.stringify(v) + ' but the object has no clip called that (its clips: ' + ([...clips].join(', ') || 'none') + ')');
+  };
+  const num = (v: unknown, name: string, lo: number, hi: number, optional = true): void => checkNumber(v, 'behaviour.' + name, errors, lo, hi, optional);
+  switch (b.type) {
+    case 'rails': {
+      const pa = b.path;
+      if (!Array.isArray(pa) || pa.length < 2 || pa.length > 200) { errors.push('behaviour.path must be a list of 2 to 200 points [x, z] in metres'); break; }
+      pa.forEach((q, i) => {
+        if (!Array.isArray(q) || q.length !== 2) { errors.push('behaviour.path[' + i + '] must be [x, z]'); return; }
+        checkNumber(q[0], 'behaviour.path[' + i + '][0]', errors, -100000, 100000); checkNumber(q[1], 'behaviour.path[' + i + '][1]', errors, -100000, 100000);
+      });
+      num(b.speed, 'speed', 0.01, 300, false);
+      if (b.loop !== undefined && typeof b.loop !== 'boolean') errors.push('behaviour.loop must be true or false');
+      num(b.wheelRadius, 'wheelRadius', 0.05, 20); clip(b.clip, 'clip'); break;
+    }
+    case 'wander': {
+      num(b.radius, 'radius', 1, 10000, false); num(b.speed, 'speed', 0.05, 60, false); num(b.turnRate, 'turnRate', 0.1, 20); num(b.seed, 'seed', -2147483648, 2147483647);
+      if (b.pause !== undefined) {
+        if (!Array.isArray(b.pause) || b.pause.length !== 2) errors.push('behaviour.pause must be [shortest, longest] in seconds');
+        else { checkNumber(b.pause[0], 'behaviour.pause[0]', errors, 0, 600); checkNumber(b.pause[1], 'behaviour.pause[1]', errors, 0, 600); if (finite(b.pause[0]) && finite(b.pause[1]) && b.pause[0] > b.pause[1]) errors.push('behaviour.pause is [' + b.pause[0] + ', ' + b.pause[1] + '] but the shortest pause is longer than the longest'); }
+      }
+      clip(b.clip, 'clip'); clip(b.idleClip, 'idleClip'); break;
+    }
+    case 'drive':
+      num(b.maxSpeed, 'maxSpeed', 0.5, 400, false); num(b.accel, 'accel', 0.1, 400); num(b.brake, 'brake', 0.1, 800); num(b.turnRate, 'turnRate', 0.1, 10); num(b.wheelRadius, 'wheelRadius', 0.05, 20); clip(b.clip, 'clip'); break;
+    case 'orbit':
+      num(b.radius, 'radius', 2, 100000, false); num(b.altitude, 'altitude', 0, 10000, false); num(b.speed, 'speed', 0.5, 400, false); num(b.bank, 'bank', 0, 60); clip(b.clip, 'clip'); break;
+  }
+}
+
 function checkTracks(clips: unknown, path: string, errors: string[]): void {
   if (clips === undefined) return;
   if (!isRec(clips)) { errors.push(path + ' must be an object of named clips'); return; }
@@ -146,7 +184,13 @@ function checkTracks(clips: unknown, path: string, errors: string[]): void {
       if (t.property !== 'rotation' && t.property !== 'position' && t.property !== 'scale') errors.push(tp + '.property must be rotation, position or scale');
       if (typeof t.axis !== 'string' || !AXES.includes(t.axis)) errors.push(tp + '.axis must be x, y or z');
       const amax = t.property === 'rotation' ? 360 : 1000;
-      checkNumber(t.amplitude, tp + '.amplitude', errors, -amax, amax); checkNumber(t.speed, tp + '.speed', errors, 0.01, 10);
+      if (t.spin !== undefined && typeof t.spin !== 'boolean') errors.push(tp + '.spin must be true or false');
+      if (t.spin === true) {
+        if (t.property !== 'rotation') errors.push(tp + ' is a spin, which only a rotation can be (a wheel turns; a position swings)');
+        if (!finite(t.speed) || Math.abs(t.speed) < 0.01 || Math.abs(t.speed) > 10) errors.push(tp + '.speed is ' + String(t.speed) + ' but a spin turns between 0.01 and 10 times a second (negative is the other way)');
+      } else {
+        checkNumber(t.amplitude, tp + '.amplitude', errors, -amax, amax); checkNumber(t.speed, tp + '.speed', errors, 0.01, 10);
+      }
       checkNumber(t.phase, tp + '.phase', errors, -100, 100, true); checkNumber(t.offset, tp + '.offset', errors, -amax, amax, true);
     });
   }
@@ -216,13 +260,17 @@ export function validateObjectSpec(input: unknown): Validation {
   if (errors.length > 0) return { errors, warnings, spec: null };
 
   const spec = input as unknown as ObjectSpec;
-  const expanded = expandNodes(spec);
+  let expanded: ReturnType<typeof expandNodes>;
+  try { expanded = expandNodes(spec); } catch (error) {
+    return { errors: [error instanceof Error ? error.message : 'object expansion failed'], warnings, spec: null };
+  }
   if (expanded.length > FORGE_LIMITS.maxNodes) errors.push('the object expands to ' + expanded.length + ' nodes (mirrors and repeats count); the limit is ' + FORGE_LIMITS.maxNodes);
   const seen = new Set<string>();
   for (const n of expanded) { if (seen.has(n.name)) errors.push('two nodes are called ' + n.name + ' (a mirror adds _mirror to the name and a repeat adds _1, _2: pick names that do not collide)'); seen.add(n.name); }
   const clipNames = new Set<string>();
   for (const n of expanded) for (const c of Object.keys(n.clips)) clipNames.add(c);
   if (clipNames.size > FORGE_LIMITS.maxClips) errors.push('the object has ' + clipNames.size + ' clips; the limit is ' + FORGE_LIMITS.maxClips);
+  checkBehaviour(input.behaviour, clipNames, errors);
   if (errors.length > 0) return { errors, warnings, spec: null };
 
   let triangles = 0;
@@ -413,3 +461,4 @@ export function formatReport(r: ObjectReport): string {
   return lines.join(NL);
 }
 `;
+

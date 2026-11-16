@@ -576,7 +576,11 @@ function isDevServerInvocation(rawSegment: string): boolean {
     /\bng\s+serve\b/i.test(segment) ||            // Angular CLI
     /\bnext\s+dev\b/i.test(segment) ||             // Next.js direct
     /\bnuxt\s+dev\b/i.test(segment) ||             // Nuxt direct
-    /\bastro\s+dev\b/i.test(segment)               // Astro direct
+    /\bastro\s+dev\b/i.test(segment) ||             // Astro direct
+    // JVM / Go backends (autopsy BR1987): without these, `mvn spring-boot:run` and
+    // `go run main.go` took the foreground path and/or never got a port wait.
+    /\bmvn\b[^\n]*\bspring-boot:run\b/i.test(segment) ||
+    /(?:^|[\s;|&])go\s+run\b/.test(segment)
   );
 }
 
@@ -1064,7 +1068,10 @@ export function buildDepsStaleCheckCommand(): string {
     `node -e "try{var fs=require('fs');var p=require('./package.json');var d=Object.assign({},p.dependencies,p.devDependencies);` +
     `Object.keys(d).forEach(function(k){if(!fs.existsSync('node_modules/'+k+'/package.json'))throw new Error(k)});` +
     `if(d['@vitejs/plugin-react']){require.resolve('caniuse-lite/dist/unpacker/agents')}}catch(e){process.exit(1)}"`;
-  return `if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then echo STALE; elif ! ${integrity} 2>/dev/null; then echo STALE; fi; true`;
+  // A non-Node tree (Spring Boot, Go, bare HTML) has no package.json. Calling it STALE
+  // made the health-check run npm install, fail ENOENT, and still try `npm run dev`
+  // (autopsy BR1987). Do not install when there is nothing to install into.
+  return `if [ ! -f package.json ]; then true; elif [ ! -d node_modules ] || [ package.json -nt node_modules ]; then echo STALE; elif ! ${integrity} 2>/dev/null; then echo STALE; fi; true`;
 }
 
 /**

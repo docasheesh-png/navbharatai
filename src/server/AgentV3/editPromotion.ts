@@ -104,13 +104,14 @@ export interface SettleEditInput extends Omit<PromotionInput, 'release' | 'gate'
   provenBroken: boolean;
   baseCheck: BaseVerification;
   requirementsOk: boolean;
+  buildOk: boolean;
   userMessage: string;
 }
 
 /** The turn-end record: compare, decide the release, record the revision. Never throws. */
 export async function settleEditRevision(i: SettleEditInput): Promise<{ outcome: PromotionOutcome; finding: { phase: 'build'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean } }> {
   const gate = assessEditCandidate({ base: i.base ?? {}, candidate: i.persisted, userMessage: i.userMessage });
-  const release = decideRelease({ gate, previewGreen: i.previewGreen, provenBroken: i.provenBroken, base: i.baseCheck, requirementsOk: i.requirementsOk });
+  const release = decideRelease({ gate, previewGreen: i.previewGreen, provenBroken: i.provenBroken, base: i.baseCheck, requirementsOk: i.requirementsOk, buildOk: i.buildOk });
   const outcome = await recordTurnRevision({ ...i, gate, release });
   switch (outcome.outcome) {
     case 'promoted': return { outcome, finding: { phase: 'build', severity: 'info', code: 'EDIT_PROMOTED', message: `This turn is now the project's verified version (revision ${outcome.revisionId.slice(0, 8)}${outcome.baselineId ? `, on a baseline recorded from the saved source` : ''}).`, autoResolved: true } };

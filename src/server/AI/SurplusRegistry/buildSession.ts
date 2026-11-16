@@ -271,7 +271,12 @@ export async function createSurplusBuildSession(options: {
           } }
         },
       });
-      return { async runTurn(params: RunTurnParams) {
+      return {
+        // BR1992: what this Surplus session will call next, for RECORDS only (TurnRunner.plannedModel). Without it a
+        // Surplus call stopped by the build's clock was filed under the request's Claude default
+        // (`claude-sonnet-4-6`) on a Weak build that can never call Claude. Never sent to any provider.
+        get plannedModel() { return model; },
+        async runTurn(params: RunTurnParams) {
         // Queue the complete failed-turn boundary, not individual HTTP attempts. A normal
         // concurrent turn must authorize AFTER the prior fallback winner becomes sticky.
         // Waiting for a free slot behind other turns of the SAME build is not a Surplus failure: never time

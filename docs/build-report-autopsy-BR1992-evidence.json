@@ -1,0 +1,22 @@
+{
+  "evidenceType": "synthetic-fixtures-and-source-pins",
+  "privateReportPayloadIncluded": false,
+  "reportRetained": true,
+  "cases": [
+    "Weak free edit turn, Surplus admitted and built every delivered turn; noClaude true; not charged",
+    "one failed model-call row: stopped by the build's wall-clock cap, recorded under the request's Claude default although only Surplus was called (F1)",
+    "the final-checks ETA line repeated while the integrity pass built user requests picked up after the loop ended (F2)",
+    "outcome succeeded at the step limit; root cause STOPPED by the 25-min wall-clock cap, not by the user; ETA ratio 3.8",
+    "F1: session runner plannedModel equals the dispatched sticky model; wrapper names Surplus until dropped, the Weak chain once built, undefined otherwise without building it",
+    "F1: AgentRunner stopped and failed rows name the Surplus plan; no-plan runners keep the request model; delivered turns keep turn.model",
+    "F2: finalChecksAfterSteer ends the phase only for a pickup strictly after it began; the handoff stamps only real handovers",
+    "mutation checks (unique mktemp backups, restored): M1 session getter removed 3 fail; M2 wrapper getter removed 3 fail; M3 wrapper builds Weak 1 fail; M4 wrapper ignores drop 2 fail; M5 same-ms pickup ends phase 1 fail; M6 helper ignores pickup 3 fail; M7 empty poll stamps 1 fail; M8 reader reverted 1 fail"
+  ],
+  "limitations": [
+    "73 middle timeline entries were not retained; nothing here depends on them",
+    "D3 (repair passes absorb new user requests) is a design decision: Q-2704 BLOCKED",
+    "D4 (no JDK/Maven in the Weak sandbox), D5 (kill via ps|grep bypasses the pkill redirect), D6 (model edit misses, ETA overrun) not changed",
+    "ProChainV2 plannedModel sibling not changed (candidate)",
+    "focused local tests and server/root typecheck only; no full local suite was run (box memory)"
+  ]
+}

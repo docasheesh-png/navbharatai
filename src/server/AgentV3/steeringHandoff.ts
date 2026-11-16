@@ -3,8 +3,10 @@ import { SALVAGE_HANDOFF_MARKER } from './handoffRule';
 /** Steering is delivered by AgentRunner, never drained merely to detect a lane yield. */
 import { STEERING_YIELD_REASON, isSteeringYield } from './steeringYield';
 export { STEERING_YIELD_REASON, isSteeringYield } from './steeringYield';
-export function createSteeringHandoff<T>(queue: () => T[] | undefined, enabled: () => boolean) {
+export function createSteeringHandoff<T>(queue: () => T[] | undefined, enabled: () => boolean, now: () => number = Date.now) {
   let laneOwnsWorkspace = false;
+  /** BR1992: epoch ms the runner last actually picked up a user message (0 = never). Read only by the live ETA line. */
+  let lastTakenAt = 0;
   return {
     beginLane(): void { laneOwnsWorkspace = true; },
     // Called only AFTER the write fence has revoked the old lease and drained accepted writes.
@@ -13,8 +15,11 @@ export function createSteeringHandoff<T>(queue: () => T[] | undefined, enabled: 
     take(): T[] {
       if (laneOwnsWorkspace || !enabled()) return [];
       const messages = queue();
-      return messages?.splice(0, messages.length) ?? [];
+      const taken = messages?.splice(0, messages.length) ?? [];
+      if (taken.length > 0) lastTakenAt = now();
+      return taken;
     },
+    lastTakenAt(): number { return lastTakenAt; },
   };
 }
 

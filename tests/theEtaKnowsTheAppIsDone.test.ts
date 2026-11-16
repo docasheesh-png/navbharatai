@@ -214,7 +214,8 @@ describe('Q-1039 · the wiring — one decision, fed every fact, told the moment
   it('the tick hands it the phase facts and carries its state back', () => {
     const at = code.indexOf('const decision = etaTickLine({');
     const call = code.slice(at, code.indexOf('});', at));
-    expect(call).toContain('finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt');
+    // PIN UPDATED (BR1992): the phase is the start epoch, ended by a LATER pickup of a user message (pure helper).
+    expect(call).toContain('finalChecks: finalChecksAfterSteer(etaFinalChecksAt, steeringHandoff.lastTakenAt()), appRenderedAt: etaAppRenderedAt');
     expect(call).toContain('totalMs: etaTotalMs, baseMs: etaBaseMs, revisions: etaRevisions, promisedHighMs: etaPromisedHighMs');
     const after = code.slice(at, at + 1400);
     expect(after).toContain('etaTotalMs = decision.totalMs;');
@@ -226,14 +227,14 @@ describe('Q-1039 · the wiring — one decision, fed every fact, told the moment
     // Since 5413e6f1 the moment is claimed only when THIS turn changed a file (an untouched app rendering is the old one).
     expect(code).toMatch(/if \(st === 'saved'\) \{\s*inBuildGreenAt = Date\.now\(\);[\s\S]{0,400}if \(inBuildWroteThisTurn\(inBuildWriteTick\)\) \{\s*etaAppRenderedAt = inBuildGreenAt;[\s\S]{0,400}emitEtaPhaseNow\(\);/);
     // Hoisted beside the final-checks flag, where the heartbeat can see it.
-    expect(code.indexOf('let etaAppRenderedAt = 0;')).toBeGreaterThan(code.indexOf('let etaFinalChecks = false;'));
+    expect(code.indexOf('let etaAppRenderedAt = 0;')).toBeGreaterThan(code.indexOf('let etaFinalChecksAt = 0;'));
     expect(code.indexOf('let etaAppRenderedAt = 0;')).toBeLessThan(code.indexOf('const diagHeartbeatTimer'));
   });
 
   it('🔴 the loop\'s end flips the line when the final result settles, before READY_BEFORE_END', () => {
     const settled = code.indexOf('if (!result) result = await runner.run(buildPrompt);');
     const ready = code.indexOf("code: 'READY_BEFORE_END'");
-    const set = code.indexOf('etaFinalChecks = true;', settled);
+    const set = code.indexOf('etaFinalChecksAt = Date.now();', settled); // PIN UPDATED (BR1992): epoch, not boolean
     expect(set).toBeGreaterThan(settled);
     expect(set).toBeLessThan(ready);
     // Announced at once — but only over an app that exists (never 'your app is built' after a Stop or an empty build).

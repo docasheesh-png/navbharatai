@@ -1,0 +1,23 @@
+{
+  "evidenceType": "synthetic-regression-cases",
+  "privateReportPayloadIncluded": false,
+  "cases": [
+    "a per-file reply holding only a folded component's block for a host path: main's selection returns the folded source; the new selection returns null",
+    "the host's own block wins whether it comes before or after a folded block",
+    "neighbours identical to main's verbatim selection: exact block; a slipped path the plan does not know; another planned (not folded) file; a folded block that is not first; no block; empty reply",
+    "no fold (no set or an empty set): identical to main",
+    "the folded file's own path still gets its exact block",
+    "a real runSimpleBuild with a synthetic 16-file plan that folds: the JS host is never written with the folded source; a host answering its own block is written as before",
+    "wiring pin: only the folded paths are passed, and only when a fold happened",
+    "mutation checks (unique mktemp backups, restored): refusal removed (2 fail); lane not wired (2 fail)"
+  ],
+  "limitations": [
+    "not a replay of a customer build",
+    "not production or deployment validation",
+    "binary fold host and planned binary asset were already closed on main by BR1952 (#4124); the text-only lane against an unavailable workspace and the user notice by BR1961 (#4146)",
+    "the concurrent-sandbox cap remains Q-2621 (ops)",
+    "the remaining type errors after the full builder's repair and the repair's unwritten component are not established from the retained report",
+    "a first block naming another planned (not folded) file keeps main's fallback (candidate follow-up)",
+    "focused local tests and server/root typecheck only; no full local suite was run (box memory)"
+  ]
+}

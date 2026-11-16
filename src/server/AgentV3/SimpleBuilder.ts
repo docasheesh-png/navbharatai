@@ -962,10 +962,24 @@ export function contractUtilSignatures(contract: string | undefined): string[] {
  * The block a per-file call returned for `path`: the block with that path, else the first block, else null.
  * Exactly the selection genOne always made, named so the BR1989 header tests can drive the per-file lane's
  * own reading of a reply. PURE.
+ *
+ * 🔴 BR1990 — A BLOCK NAMED AFTER ANOTHER FILE OF THE PLAN IS THAT FILE, NOT THIS ONE. The budget fold told
+ * one planned file to "ALSO INCLUDE" a folded component; its call answered with ONLY the folded component's
+ * own `<<<FILE …>>>` block, and the first-block fallback saved that component's source under the host's
+ * path. With a JS host the same slip compiles: the host's importers silently render the folded component.
+ * When `otherPaths` (the FOLDED paths) is given and the reply has no block for `path`, a first block whose
+ * path is one of them is refused: null, the same as a call that returned nothing, so the existing
+ * missing-file handling (repair, hand-off) sees a missing file instead of a file holding another file's
+ * code. An exact match, a first block under any other name (including another planned file — main's
+ * fallback, deliberately kept), and every call without `otherPaths` (no fold happened) are unchanged.
  */
-export function pickGeneratedFile(text: string, path: string): OneShotFile | null {
+export function pickGeneratedFile(text: string, path: string, otherPaths?: ReadonlySet<string>): OneShotFile | null {
   const blocks = parseFileBlocks(text);
-  return blocks.find((b) => b.path === path) ?? blocks[0] ?? null;
+  const exact = blocks.find((b) => b.path === path);
+  if (exact) return exact;
+  const first = blocks[0] ?? null;
+  if (first && otherPaths && first.path !== path && otherPaths.has(first.path)) return null;
+  return first;
 }
 
 export interface UtilOwner {
@@ -2330,6 +2344,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       }
       plannedFiles = manifest.length;
       plannedPaths = manifest.map((f) => f.path);
+      // BR1990: the folded paths too — a per-file reply naming one of them is not the host file's source.
+      const foldedPaths: readonly string[] = foldedPlan.folded;
       if (deps.yieldRequested?.()) throw new Error(STEERING_YIELD_REASON);
       try { deps.onPlanned?.(manifest.length); } catch { /* an ETA hook must never affect a build */ }
       if (manifest.length < minFiles) throw new Error('manifest_too_small');
@@ -2522,6 +2538,10 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       let laneStopReason: string | null = null; // set by deps.stopLane; thrown at the next tier boundary
       /** Q-926: may THIS tier's file calls continue onto a reasoning rung? Decided per tier in the loop below. */
       let tierMayReason = false;
+      // BR1990: the paths the budget fold told a host file to ABSORB. A per-file reply that names one of
+      // them (and not the file asked for) is never saved under the host's path (pickGeneratedFile). Only
+      // folded paths: a reply naming another planned file keeps main's first-block fallback.
+      const foldedPathSet = new Set<string>(foldedPaths);
       const genOne = async (spec: SimpleFileSpec, produced: OneShotFile[]): Promise<OneShotFile | null> => {
         if (lapsed) return null; // the lane already timed out — stop burning tokens on files nobody will use
         // The lane's chain may have fallen to an engine this lane cannot afford (see SimpleBuildDeps.stopLane).
@@ -2571,7 +2591,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             callsInFlight -= 1;
           }
           if (lapsed) return null; // timed out while this call was in flight — discard, don't log
-          const match = pickGeneratedFile(text, spec.path);
+          const match = pickGeneratedFile(text, spec.path, foldedPathSet.size ? foldedPathSet : undefined);
           if (!match) return null;
           filesDone += 1; // synchronous — safe even with concurrent genOne calls in flight
           deps.log?.(`🧩 Generated ${spec.path} (${filesDone}/${manifest.length}) — not saved yet.`);

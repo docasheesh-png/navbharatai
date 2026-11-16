@@ -1096,3 +1096,50 @@ describe('every AI provider NavBharatAI uses is in the Test Chat Bot list (admin
     expect(JSON.stringify(error.diagnostic)).not.toContain('synthetic-glm-secret-value');
   });
 });
+
+describe('user-chat policy gates do not block an admin test (admin 2026-11-16: BluesMinds "pahle test kar lu, fir fix karna")', () => {
+  const bluesRung = (overrides: Record<string, unknown> = {}) => ({
+    id: 'bluesminds', configured: true, key: 'synthetic-blues-key', keyEnv: 'FREE_CHAIN_BLUESMINDS_API_KEY',
+    model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1', reason: 'terms-unverified',
+    streamUsage: false, priceIn: 0, priceOut: 0, ...overrides,
+  });
+
+  it('the real config keeps BluesMinds OFF for user chat until written approval — that is the gate this page now looks past', async () => {
+    const { freeChainConfig: real } = await vi.importActual<typeof import('../AI/FreeChain/config')>('../AI/FreeChain/config');
+    const rung = real({ FREE_CHAIN_BLUESMINDS_API_KEY: 'synthetic-blues-key' } as NodeJS.ProcessEnv).rungs.find(r => r.id === 'bluesminds');
+    expect(rung).toMatchObject({ configured: true, reason: 'terms-unverified', model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1' });
+  });
+
+  it('lists BluesMinds as testable when its key is set, saying user chat keeps it off, and calls api.bluesminds.com', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung()] }));
+    const status = testChatStatus().providers.find(p => p.id === 'bluesminds');
+    expect(status).toMatchObject({ configured: true, enabled: true, model: 'openai/gpt-oss-20b' });
+    expect(status?.note).toContain('User chat keeps this provider off');
+    fake.compatTurn.mockResolvedValue({ content: 'Hello from BluesMinds', model: 'openai/gpt-oss-20b' });
+    const result = await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal);
+    expect(result).toMatchObject({ provider: 'bluesminds', content: 'Hello from BluesMinds', noFallback: true });
+    expect(fake.compatCtor).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'BLUESMINDS', key: 'synthetic-blues-key', baseURL: 'https://api.bluesminds.com/v1', model: 'openai/gpt-oss-20b',
+    }));
+    expect(fake.compatTurn).toHaveBeenCalledOnce();
+  });
+
+  it.each(['terms-non-production', 'terms-shared-access', 'disabled'])('a %s rung is testable too', reason => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung({ reason })] }));
+    expect(testChatStatus().providers.find(p => p.id === 'bluesminds')?.enabled).toBe(true);
+  });
+
+  it('still refuses a rung whose model is not on the allowlist, naming that — never hidden behind the terms reason', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung({ model: '' })] }));
+    expect(testChatStatus().providers.find(p => p.id === 'bluesminds')).toMatchObject({ enabled: false, unavailableReason: 'The configured model is not on the server allowlist.' });
+    await expect(runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'disabled' });
+    expect(fake.compatTurn).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a missing key, a missing account and an unverified paid rate card', () => {
+    for (const rung of [bluesRung({ configured: false, key: '', reason: 'unconfigured' }), bluesRung({ reason: 'account-unconfigured' }), bluesRung({ reason: 'rate-card-unverified' })]) {
+      fake.budgetConfig.mockReturnValue(budget({ rungs: [rung] }));
+      expect(testChatStatus().providers.find(p => p.id === 'bluesminds')?.enabled).toBe(false);
+    }
+  });
+});

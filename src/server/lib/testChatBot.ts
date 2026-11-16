@@ -105,6 +105,8 @@ const REASON_TEXT: Record<string, string> = {
   'rate-card-unverified': 'The paid rate card for this provider is not verified, so this test will not invent a price or dispatch.',
 };
 const MISSING_KEY = 'No API credential is set on the server.';
+/** Reasons user chat uses to keep a rung OFF by policy. They are not a reason to refuse an admin test. */
+const USER_POLICY_REASONS = new Set(['disabled', 'terms-non-production', 'terms-unverified', 'terms-shared-access']);
 
 function firstPresent(env: NodeJS.ProcessEnv, names: readonly string[]): string {
   for (const name of names) {
@@ -478,9 +480,17 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   const rung = meta.rungId ? rungOf(meta.rungId) : undefined;
   const configured = !!rung?.configured;
   const reason = rung?.reason;
-  const cheapinfUserFlag = meta.rungId === 'cheapinf' && configured && (reason === 'disabled' || reason === 'terms-shared-access');
-  const blocked = !configured || (!!reason && BLOCKING_REASONS.has(reason) && !cheapinfUserFlag);
-  const note = reason === 'privacy'
+  // USER-CHAT POLICY IS NOT AN ADMIN-TEST GATE (admin 2026-11-15: "pahle drop down me rakho, test kar lu, fir fix
+  // karna"). A rung that user chat keeps off by policy — rollout off, terms not yet verified, not approved for
+  // production, no shared-access permission — is exactly the one the admin needs to try before deciding. This page
+  // still refuses a missing key, an unlisted model, a missing account and an unverified paid rate card, and
+  // user chat is unchanged. Generalises the earlier CheaperInference-only exception to every rung.
+  const userPolicyOnly = configured && !!reason && USER_POLICY_REASONS.has(reason) && !!rung?.model;
+  const blocked = !configured || (!!reason && BLOCKING_REASONS.has(reason) && !userPolicyOnly)
+    || (configured && !rung?.model && meta.kind !== 'openrouter');
+  const note = userPolicyOnly
+    ? `User chat keeps this provider off (${REASON_TEXT[reason!] ?? reason}). This admin test calls it anyway, from this page only; user chat is unchanged.`
+    : reason === 'privacy'
     ? 'User chat may skip this provider for private turns; this admin test still calls only the selected provider.'
     : reason === 'free-plan-review-required'
       ? 'The free-plan review used by user chat is missing or expired; this admin test still calls only the selected provider.'
@@ -489,6 +499,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
         : meta.rungId === 'cheapinf'
           ? 'This admin test can call CheaperInference when its key is set, using the same model string main chat would use. It does not change the user-chat sharing mode.'
         : undefined;
+  const modelMissing = configured && !rung?.model && meta.kind !== 'openrouter';
   const listed = chainConfig()?.openRouterModels ?? [];
   const model = (meta.kind === 'openrouter' ? (listed[0] ?? rung?.model ?? '') : rung?.model) || null;
   const enabled = !blocked && configured;
@@ -496,6 +507,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
     ...base, configured, enabled, model: model || null, billed: !!(meta.rungId && isPaidRung(meta.rungId)), approvalRequired: false,
     ...(note ? { note } : {}),
     ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY
+      : modelMissing ? REASON_TEXT['model-unverified']
       : REASON_TEXT[reason ?? ''] ?? 'This provider is not available for dispatch.' }),
   };
 }

@@ -556,3 +556,45 @@ export function isProjectStylesheet(path: string): boolean {
   const p = String(path ?? '').replace(/^\.?\/+/, '');
   return CSS_RE.test(p) && !/^(node_modules|dist|build|\.git|coverage)\//.test(p) && !/\/node_modules\//.test(p);
 }
+
+/**
+ * A CSS class mismatch is a defect of a finished app (autopsy "Universal Remote").
+ * A user-stopped build that was never judged finished has not finished writing its
+ * stylesheet, so the same mismatch is an incomplete tree, not an app finding (BR1988).
+ * PURE.
+ */
+export function cssClassesUndefinedIsAppFinding(opts: {
+  aborted: boolean;
+  appJudgedFinished: boolean;
+}): boolean {
+  return !(opts.aborted === true && opts.appJudgedFinished !== true);
+}
+
+export type CssClassesUndefinedRecord = {
+  severity: 'warning' | 'info';
+  autoResolved: boolean;
+  message: string;
+};
+
+/**
+ * How `CSS_CLASSES_UNDEFINED` should be recorded for this tree and build outcome. `null` when the
+ * mismatch is below the ordinary threshold. PURE.
+ */
+export function cssClassesUndefinedRecord(
+  files: Record<string, string>,
+  opts: { aborted: boolean; appJudgedFinished: boolean },
+): CssClassesUndefinedRecord | null {
+  const missing = findUndefinedClasses(files);
+  if (missing.length < MISMATCH_THRESHOLD) return null;
+  const note = undefinedClassesNote(missing);
+  if (!cssClassesUndefinedIsAppFinding(opts)) {
+    const shown = missing.slice(0, 12).map((c) => `.${c}`).join(', ');
+    const more = missing.length > 12 ? ` and ${missing.length - 12} more` : '';
+    return {
+      severity: 'info',
+      autoResolved: true,
+      message: `The build was stopped before the app was judged finished, so style rules for ${missing.length} class name(s) were not finished (${shown}${more}). This is not a defect of a finished app.`,
+    };
+  }
+  return { severity: 'warning', autoResolved: false, message: note };
+}

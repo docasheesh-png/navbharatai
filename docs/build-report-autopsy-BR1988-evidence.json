@@ -1,0 +1,24 @@
+{
+  "evidenceType": "synthetic-regression-cases",
+  "privateReportPayloadIncluded": false,
+  "cases": [
+    "a synthetic form-screen tree with only scaffold CSS is a real class mismatch at the ordinary threshold",
+    "the same tree, when the build was stopped before the app was judged finished, is recorded as info, auto-resolved, and not a leftover warning",
+    "that info line is not unresolved and does not enter the issue queue",
+    "the same tree on a finished app is still a user-facing CSS_CLASSES_UNDEFINED warning and is opened in the issue queue",
+    "Stop after the app was judged finished still flags the mismatch (Universal Remote neighbour)",
+    "a failed build that was not stopped still flags the mismatch (main neighbour)",
+    "a styled tree, and a miss of two class names, stay silent whether or not the build was stopped",
+    "the integrity pass records CSS_CLASSES_UNDEFINED through cssClassesUndefinedRecord with abort.signal.aborted and result.readyAt",
+    "the CSS heal gate is unchanged: only a successful, not-aborted build may repair",
+    "reversion of the abort+unfinished guard fails the matching tests; the source was restored from a unique mktemp backup"
+  ],
+  "limitations": [
+    "not a replay of a customer build",
+    "not production or deployment validation",
+    "USAGE_NOT_REPORTED on the streamed Surplus path remains Q-2414 / Q-2363; this report did not reconstruct usage or change the bill",
+    "TIME_TO_FIRST_CALL wording is unchanged (BR1958 / BR1983)",
+    "design and accessibility scores on an incomplete tree are unchanged",
+    "full exact-tree CI remains required"
+  ]
+}

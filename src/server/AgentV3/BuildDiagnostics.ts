@@ -534,6 +534,7 @@ export const HEAL_RESOLVES: Readonly<Record<string, readonly string[]>> = {
   SCRIPT_INTEGRITY_REPAIRED: [],
   TSCONFIG_EXTENDS_REPAIRED: [],
   TSCONFIG_REFERENCES_REPAIRED: [],
+  TSCONFIG_MARKUP_REPAIRED: [],
 };
 
 export function isAppFinding(issue: Pick<BuildIssue, 'phase' | 'code'>): boolean {

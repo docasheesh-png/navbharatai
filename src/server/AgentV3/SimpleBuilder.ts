@@ -963,53 +963,82 @@ export function contractUtilSignatures(contract: string | undefined): string[] {
  * Exactly the selection genOne always made, named so the BR1989 header tests can drive the per-file lane's
  * own reading of a reply. PURE.
  *
- * 🔴 BR1990 — A BLOCK NAMED AFTER ANOTHER FILE OF THE PLAN IS THAT FILE, NOT THIS ONE. The budget fold told
+ * 🔴 BR1990 — A REPLY HOLDING ONLY A FOLDED FILE IS NOT THE HOST FILE. The budget fold told
  * one planned file to "ALSO INCLUDE" a folded component; its call answered with ONLY the folded component's
  * own `<<<FILE …>>>` block, and the first-block fallback saved that component's source under the host's
  * path. With a JS host the same slip compiles: the host's importers silently render the folded component.
  * When `otherPaths` (the FOLDED paths) is given and the reply has no block for `path`, a first block whose
- * path is one of them AND whose content does not declare or export the host's own name (`hostComponentName`)
- * is refused: null, the same as a call that returned nothing, so the existing
- * missing-file handling (repair, hand-off) sees a missing file instead of a file holding another file's
- * code. An exact match, a first block under any other name (including another planned file — main's
- * fallback, deliberately kept), and every call without `otherPaths` (no fold happened) are unchanged.
+ * path is one of them is refused (null, the same as a call that returned nothing, so the existing
+ * missing-file handling sees a missing file) ONLY when its content positively looks like that folded file
+ * alone (`looksLikeOnlyFile`): it declares or exports the folded file's own name and has no other top-level
+ * declaration or export. Anything else — a combined host reply, a reply this check cannot read — keeps
+ * main's fallback. An exact match, a first block under any other name (including another planned file),
+ * and every call without `otherPaths` (no fold happened) are unchanged.
  */
 export function pickGeneratedFile(text: string, path: string, otherPaths?: ReadonlySet<string>): OneShotFile | null {
   const blocks = parseFileBlocks(text);
   const exact = blocks.find((b) => b.path === path);
   if (exact) return exact;
   const first = blocks[0] ?? null;
-  if (first && otherPaths && first.path !== path && otherPaths.has(first.path)) {
-    // Review FAIL on the first version: a host reply can be USABLE but mislabelled — the host's own
-    // component plus the folded one, under the folded header. Main saves that correctly under the host
-    // path; refusing it made the host go missing and forced a paid repair. Refuse only when the content
-    // does not declare or export the host's own name, and keep main's fallback whenever that cannot be told.
-    const name = hostComponentName(path);
-    if (name && !declaresName(first.content, name)) return null;
+  if (first && otherPaths && first.path !== path && otherPaths.has(first.path) && looksLikeOnlyFile(first.content, first.path)) {
+    return null;
   }
   return first;
 }
 
-/**
- * The component/module name a host file is named after: `Panel` from `src/components/Panel.tsx`,
- * `StatusBadge` from `status-badge.tsx`, the folder's name for an `index.*` file. Null when no plain
- * identifier can be derived (then the caller keeps main's behaviour). PURE.
- */
-export function hostComponentName(path: string): string | null {
+/** Comparable form of a name: `status-badge`, `status_badge`, `StatusBadge` → `statusbadge`. */
+const nameKey = (s: string) => s.replace(/[-_]/g, '').toLowerCase();
+
+/** A file's own name from its path: the base name without extension, or the folder's name for `index.*`. */
+function fileStem(path: string): string {
   const parts = String(path ?? '').split('/').filter(Boolean);
   let base = (parts[parts.length - 1] ?? '').replace(/\.[cm]?[jt]sx?$/i, '');
   if (/^index$/i.test(base)) base = parts[parts.length - 2] ?? '';
-  if (/[-_]/.test(base)) base = base.split(/[-_]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join('');
-  return /^[A-Za-z_$][\w$]*$/.test(base) ? base : null;
+  return base;
 }
 
-/** Does `content` DECLARE or EXPORT `name` (not merely import or render it)? PURE. */
-export function declaresName(content: string, name: string): boolean {
-  const n = name.replace(/\$/g, '\\$');
-  const text = String(content ?? '');
-  return new RegExp(String.raw`\b(?:function\*?|class|const|let|var)\s+${n}\b`).test(text)
-    || new RegExp(String.raw`\bexport\s+default\s+${n}\b`).test(text)
-    || new RegExp(String.raw`\bexport\s*\{[^}]*\b${n}\b[^}]*\}`).test(text);
+const TOP_DECL = /^(?:export\s+(?:default\s+)?)?(?:declare\s+)?(?:async\s+)?(?:abstract\s+)?(?:function\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)/;
+const DECL_KEYWORD_AFTER = /(?:;|\})\s*(?:export|function|class|const|let|var|interface|type|enum)\b/;
+
+/**
+ * BR1990 fail-safe: true ONLY when `content` positively reads as the file at `path` and nothing else —
+ * some top-level (column-0) declaration or export names that file's own name, and there is NO other
+ * top-level declaration or export (a second name, an anonymous or expression default export, `export *`,
+ * CommonJS exports, or a second declaration sharing a line). Imports, comments and indented code are not
+ * declarations. Whenever this cannot be told (no stem, no matching declaration, anything unrecognised),
+ * it returns false and the caller keeps main's behaviour. PURE.
+ */
+export function looksLikeOnlyFile(content: string, path: string): boolean {
+  const own = nameKey(fileStem(path));
+  if (!own) return false;
+  let ownDeclared = false;
+  for (const line of String(content ?? '').split(/\r?\n/)) {
+    if (!/^(?:export|function|class|const|let|var|interface|type|enum|async|abstract|declare|module\.exports|exports\.)\b/.test(line)) continue;
+    if (DECL_KEYWORD_AFTER.test(line.slice(1))) return false;
+    const decl = TOP_DECL.exec(line);
+    if (decl) {
+      if (nameKey(decl[1]) !== own) return false;
+      ownDeclared = true;
+      continue;
+    }
+    const dflt = /^export\s+default\s+([A-Za-z_$][\w$]*)\s*;?\s*$/.exec(line);
+    if (dflt) {
+      if (nameKey(dflt[1]) !== own) return false;
+      ownDeclared = true;
+      continue;
+    }
+    const list = /^export\s*(?:type\s*)?\{([^}]*)\}\s*;?\s*$/.exec(line);
+    if (list) {
+      for (const item of list[1].split(',').map((x) => x.trim()).filter(Boolean)) {
+        const m = /^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/.exec(item);
+        if (!m || nameKey(m[1]) !== own || (m[2] && m[2] !== 'default' && nameKey(m[2]) !== own)) return false;
+      }
+      ownDeclared = true;
+      continue;
+    }
+    return false; // any other top-level export/declaration form: not clearly the folded file alone
+  }
+  return ownDeclared;
 }
 
 export interface UtilOwner {
@@ -2374,7 +2403,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       }
       plannedFiles = manifest.length;
       plannedPaths = manifest.map((f) => f.path);
-      // BR1990: the folded paths too — a per-file reply naming one of them is not the host file's source.
+      // BR1990: the folded paths, for pickGeneratedFile's narrow folded-file-only refusal below.
       const foldedPaths: readonly string[] = foldedPlan.folded;
       if (deps.yieldRequested?.()) throw new Error(STEERING_YIELD_REASON);
       try { deps.onPlanned?.(manifest.length); } catch { /* an ETA hook must never affect a build */ }
@@ -2568,9 +2597,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       let laneStopReason: string | null = null; // set by deps.stopLane; thrown at the next tier boundary
       /** Q-926: may THIS tier's file calls continue onto a reasoning rung? Decided per tier in the loop below. */
       let tierMayReason = false;
-      // BR1990: the paths the budget fold told a host file to ABSORB. A per-file reply that names one of
-      // them (and not the file asked for) is never saved under the host's path (pickGeneratedFile). Only
-      // folded paths: a reply naming another planned file keeps main's first-block fallback.
+      // BR1990: the paths the budget fold told a host file to ABSORB. A per-file reply whose only usable
+      // block is headed with one of them AND clearly holds that folded file alone is not saved under the
+      // host's path (pickGeneratedFile / looksLikeOnlyFile); any other reply keeps main's first-block fallback.
       const foldedPathSet = new Set<string>(foldedPaths);
       const genOne = async (spec: SimpleFileSpec, produced: OneShotFile[]): Promise<OneShotFile | null> => {
         if (lapsed) return null; // the lane already timed out — stop burning tokens on files nobody will use

@@ -101602,3 +101602,7 @@ Owner t311u sequential audit, BR1990 only (boundary 1951..2105 frozen). Branched
 ## 2026-11-16 — BR1990 review: a usable host reply under the folded header is kept
 
 Independent review FAIL on the first BR1990 version (t311u): refusing every folded-header first block also dropped a usable but mislabelled host reply (the host's component plus the folded one under the folded header), which main saves correctly; the host went missing and a paid repair followed. Now the refusal applies only when the content does not declare or export the host's own name (`hostComponentName`, `declaresName`); a combined reply, and any host whose name cannot be derived, keep main's fallback. Pinned by kept/refused neighbour tables, a real lane run with a combined reply, and the reviewer's probe.
+
+## 2026-11-16 — BR1990 second review: fail-safe inversion of the folded-header refusal
+
+Second independent review FAIL (t311u): the host-name check still refused usable combined replies (lowercase `header.tsx` declaring `Header`, `.ts` utility and types hosts, a camelCase export from a kebab file, an anonymous default export). Replaced it with the reviewer's option (b): `pickGeneratedFile` refuses a folded-header first block only when `looksLikeOnlyFile` positively reads the content as the folded file alone (its own name declared or exported, no other top-level declaration or export); anything unclear keeps main's fallback. Host-name derivation removed. Pinned by 16 kept / 7 refused shape tables, unit cases, a real lane run, both reviewer probes and mutation checks.

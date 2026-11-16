@@ -7,14 +7,15 @@ import type { FreeChainContext } from './rollout';
 import { identityGrantEmail } from '../../AgentV3/featureFlag';
 import {
   cheaperInferenceExclusiveAdmin,
-  cheaperInferenceMode,
+  cheaperInferenceConfiguredMode,
 } from '../../lib/cheaperInferencePolicy';
 import { isAdminEmail } from '../../lib/adminEmails';
 
 /** Called only after attachment, vision, image, safety and direct-answer paths have returned. */
 export async function freeChainRequestContext(req: Request, input: { tier: string; message: string; history: unknown[]; replyLanguage?: FreeChainContext['replyLanguage']; attachments: number; hasProfile: boolean; hasMemory: boolean; grounded: boolean }): Promise<FreeChainContext | undefined> {
   const entryAdmission = entryAdmissionFor(req);
-  const mode = cheaperInferenceMode();
+  // Explicitly written admin/all only: the default-on rung rides ordinary FreeChain admission (owner t357u).
+  const mode = cheaperInferenceConfiguredMode();
   const freeChainOn = freeChainEnabled();
   if (input.tier !== 'navbharat' || input.attachments) return undefined;
   if (!entryAdmission && !freeChainOn && mode !== 'admin' && mode !== 'all') return undefined;

@@ -28,6 +28,12 @@ export const VENDOR_BRAND_PATTERNS: readonly RegExp[] = [
   /\bcloudflare(?:\s+workers?)?(?:\s+ai)?\b/gi,
   /\bworkers\s+ai\b/gi,
   /\bcheaper\s?inference\b/gi,
+  // Owner t357u / t362u (2026-11-16): the always-on suppliers and their internal routing labels.
+  // `mitrify.<tld>` other than mitrify.com is left alone: that domain also hosts users' own apps.
+  /\bqubax(?:\.ai)?\b/gi,
+  /\bmitrify(?:\.com)?\b(?!\.[a-z])/gi,
+  /\b(?:api\.)?blu(?:e|sh)s?minds?(?:\.com)?\b/gi,
+  /\bENGINE_(?:R1|BM|QX|MF)\b/g,
   /\bsurplus\b/gi,
   /\b(?:aws\s+)?bedrock\b/gi,
   /\b(?:amazon\s+nova|nova\s+sonic)\b/gi,

@@ -10,7 +10,8 @@ import { freeChainAdmissionFailure } from './admissionFailure';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../../lib/chatReplyLanguage';
 import { chatReplyLanguageInstruction } from '../../lib/freeChatReplyLanguage';
 import { publishDeploymentPaidLimit } from './deploymentBudget';
-import { cheaperInferenceAdminStatus, cheaperInferenceMode, cheaperInferenceSharedAccessPermitted, cheapinfFirstTokenMs } from '../../lib/cheaperInferencePolicy';
+import { cheaperInferenceAdminStatus, cheaperInferenceMode, cheapinfFirstTokenMs } from '../../lib/cheaperInferencePolicy';
+import { ALWAYS_ON_MAX_COOLDOWN_MS } from '../../lib/alwaysOnSuppliers';
 import { adminBusyDetail, withAdminBusyDetail } from './adminBusyDetail';
 import { persistFreeChainSample } from './eventSample';
 export { shouldPersistFreeChainEvent } from './eventSample';
@@ -111,19 +112,15 @@ function rungReason(rung: RungConfig, cfg: FreeChainConfig, input?: FreeChainInp
   if (isPaidRung(rung.id) && rung.id !== 'deepseek' && rung.id !== 'cheapinf' && !verifiedPaidReservationRate(rung)) return 'rate-card-unverified';
   if (rung.id === 'cheapinf') {
     if (cfg.fixedOrder && (!(Date.parse(process.env.FREE_CHAIN_CHEAPINF_RATE_VERIFIED_UNTIL ?? '') > Date.now()) || !verifiedPaidReservationRate(rung))) return 'rate-card-unverified';
-    const mode = cheaperInferenceMode();
-    if (mode === 'off') return 'disabled';
-    if (mode === 'admin' && !input?.context.isAdmin) return 'disabled';
-    // mode=all shares the key. Dispatch only after Keak's written permission is recorded.
-    if (mode === 'all' && !cheaperInferenceSharedAccessPermitted()) return 'terms-shared-access';
+    // Owner t357u: on for every user; only an explicit CHEAPERINFERENCE=off is the kill switch.
+    if (cheaperInferenceMode() === 'off') return 'disabled';
   }
   if (rung.id === 'openrouter' && !cfg.openRouterModels.length) return 'quality-allowlist-required';
   if (input && rung.id === 'gemini' && (!input.context.cacheEligible || !safeCacheKey({ message: input.message, history: input.history, eligible: true, language: 'public', systemPrompt: '', modelFamily: '' }))) return 'privacy-public-corpus-only';
   if (input && !rung.languages.includes(replyLanguageFor(input))) return 'language';
-  if (input && (rung.id === 'gemini' || isPaidRung(rung.id)) && (input.context.privateTurn || input.context.healthTurn)) {
-    // Exclusive CHEAPERINFERENCE=admin must answer every admin Free Chat turn, including profile/memory.
-    if (!(rung.id === 'cheapinf' && !cfg.fixedOrder && input.context.isAdmin === true && cheaperInferenceMode() === 'admin')) return 'privacy';
-  }
+  // CheaperInference serves every turn, like Mitrify and Qubax (owner t357u: "kisi bhi condition me ban
+  // nahi"). Gemini and the other paid rungs keep their private/health exclusion unchanged.
+  if (input && rung.id !== 'cheapinf' && (rung.id === 'gemini' || isPaidRung(rung.id)) && (input.context.privateTurn || input.context.healthTurn)) return 'privacy';
   const target = new URL(rung.baseURL);
   if (switchedOffProviderFor(target.hostname, target.pathname)) return 'disabled';
   return undefined;
@@ -246,7 +243,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         let content = '';
         try {
           const result = await runApprovedMitrifyChain({ db, uid: input.context.uid, requestId: `${requestId}:mitrify`,
-            privateTurn: input.context.privateTurn, healthTurn: input.context.healthTurn, signal, maxHttpAttempts: SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS,
+            privateTurn: input.context.privateTurn, healthTurn: input.context.healthTurn, signal, maxHttpAttempts: SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS, defaultOn: true,
             body: { messages: [{ role: 'system', content: prepared.systemPrompt }, { role: 'user', content: prepared.prompt }], max_tokens: cfg.features.replyMaxTokens, stream: true },
             beforeHttpDispatch: () => { signal.throwIfAborted(); if (fixedChat) attempt.entered = true; },
             onChunk: value => {
@@ -282,10 +279,12 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           return done({ content: result.content, provider: 'MITRIFY', model: result.model, ...(result.usage ? { usage: result.usage } : {}), ok: true, latencyMs: 0 });
         } catch (error) {
           attempt.reason = error instanceof MitrifyError ? error.code.toLowerCase() : 'mitrify-admission-unavailable';
-          // Unknown liability, cancellation, or committed output never opens a direct fallback.
+          // Caller cancellation and committed output never open a fallback (no mixed replies).
           if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
           if (content) { trace.rung = 'mitrify'; return done({ content: input.onChunk ? content : `${content}\n\nThe response was interrupted. Please try again.`, provider: 'MITRIFY', model: attempt.model, ok: true, reason: 'stalled', latencyMs: 0 }); }
-          break;
+          // Owner t357u: nothing was shown, so the next provider answers. A dispatched call keeps its
+          // conservative hold (never released), so this fallthrough cannot understate spend.
+          continue;
         } finally { clearTimeout(timer); controller.abort(); }
       }
       if (id === 'qubax') {
@@ -365,7 +364,9 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         const remainMs = Math.max(0, snap.openedUntil - Date.now());
         const last = snap.lastOpenReason || 'unknown';
         const retryableExclusiveOpen = /^(empty_response|timeout|network|server|rate_limit)(:|$)/.test(last);
-        if (exclusiveAdmin && id === 'cheapinf' && (remainMs > 30_000 || retryableExclusiveOpen)) {
+        // Always-on (owner t357u): a cheapinf window longer than the short always-on cooldown is never
+        // honoured — the next request probes it. The exclusive admin path also probes retryable windows.
+        if (id === 'cheapinf' && (remainMs > ALWAYS_ON_MAX_COOLDOWN_MS || (exclusiveAdmin && retryableExclusiveOpen))) {
           breaker.allowProbe();
           attempt.reason = `circuit-probe:last=${last}`;
         } else {
@@ -407,9 +408,10 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         let admission = await store.reserveQuota(quotaInput(rung, cfg, prepared.inputTokens));
         // Owner exclusive: a prior AUTH/402 wrote a 1h/1d Firestore cooldown; clear once so the
         // probe can reach CheaperInference and surface the real HTTP status.
-        if (!admission.allowed && exclusiveAdmin && id === 'cheapinf' && admission.reason === 'cooldown') {
+        // Always-on cheapinf (owner t357u) clears any stored cooldown longer than the short always-on window.
+        if (!admission.allowed && id === 'cheapinf' && admission.reason === 'cooldown') {
           const remainMs = typeof admission.resetAt === 'number' ? admission.resetAt - Date.now() : 0;
-          if (remainMs > 30_000) {
+          if (remainMs > ALWAYS_ON_MAX_COOLDOWN_MS) {
             await store.clearCooldown(accountId(id)).catch(() => {});
             admission = await store.reserveQuota(quotaInput(rung, cfg, prepared.inputTokens));
           }
@@ -513,10 +515,12 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           // Ordinary rungs keep AUTH=1h / QUOTA=1d. Owner exclusive cheapinf caps at 30s so a bad
           // key or empty wallet can be fixed and retried.
           const openReason = attempt.reason; // already auth:http=401 / quota_exhausted:http=402 …
-          const requestedCooldown = (exclusiveAdmin && id === 'cheapinf')
-            ? Math.min(30_000, safe?.retryAfterMs && safe.retryAfterMs > 0 ? safe.retryAfterMs : 30_000)
+          // Always-on cheapinf (owner t357u) is never benched longer than ALWAYS_ON_MAX_COOLDOWN_MS.
+          const requestedCooldown = id === 'cheapinf'
+            ? Math.min(ALWAYS_ON_MAX_COOLDOWN_MS, safe?.retryAfterMs && safe.retryAfterMs > 0 ? safe.retryAfterMs : ALWAYS_ON_MAX_COOLDOWN_MS)
             : safe?.code === 'AUTH' ? 3600000 : safe?.retryAfterMs ?? (safe?.code === 'QUOTA_EXHAUSTED' ? 86400000 : 10000);
-          const until = Math.max(Date.now() + requestedCooldown, breaker.recordFailure(requestedCooldown, Date.now(), openReason));
+          const escalated = Math.max(Date.now() + requestedCooldown, breaker.recordFailure(requestedCooldown, Date.now(), openReason));
+          const until = id === 'cheapinf' ? Math.min(escalated, Date.now() + ALWAYS_ON_MAX_COOLDOWN_MS) : escalated;
           breaker.honorRemoteOpenUntil(until, openReason);
           if (accountId(id) !== 'glm' || ['AUTH', 'RATE_LIMIT', 'QUOTA_EXHAUSTED'].includes(safe?.code ?? '')) await store.cooldown(accountId(id), until).catch(() => {}); recordProviderLatency(breakerName, 0, true);
         }

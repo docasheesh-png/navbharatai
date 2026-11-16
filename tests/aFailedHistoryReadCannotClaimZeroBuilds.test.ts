@@ -19,6 +19,12 @@ function visit(node: ts.Node): void {
       && node.expression.getText(route).includes('buildDiag.setPriorFailedBuilds(')) {
     reads.push(node.expression.expression);
   }
+  // The promise is also assigned so a later setup step can await the same read.
+  if (ts.isExpressionStatement(node) && ts.isBinaryExpression(node.expression)
+      && node.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      && node.expression.getText(route).includes('buildDiag.setPriorFailedBuilds(')) {
+    reads.push(node.expression.right);
+  }
   if (ts.isIfStatement(node) && node.expression.getText(route) === 'sessionHistoryForSummary') summaries.push(node);
   ts.forEachChild(node, visit);
 }

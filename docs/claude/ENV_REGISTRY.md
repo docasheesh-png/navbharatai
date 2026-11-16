@@ -5108,6 +5108,7 @@ One module owns their env: `src/server/lib/resellerGateways.ts`. Key VALUES are 
 |---|---|
 | `MOYI_API_KEY` | Secret, unset. One server-side key. Comma lists rejected. |
 | `MOYI_BASE_URL` | Optional; default `https://api.moyi-api.com/v1` — the OpenAI-compatible endpoint shown on moyi-api.com's home page (owner's screenshot, 2026-11-16). **Include `/v1`** if set: the value is used as written. Must be https on `moyi-api.com` or a subdomain, no port/credentials/query. |
+| `MOYI_ANTHROPIC_BASE_URL` | Optional; default `https://api.moyi-api.com` — the endpoint Moyi's site labels "Anthropic API". Owner 2026-11-16: *"api.moyi-api.com/v1 = only for open ai, api.moyi-api.com = for all other"*. An OpenAI model id (`gpt-…`, `o3…`, `codex…`) is sent to `MOYI_BASE_URL` in OpenAI format; every other model is sent here in Anthropic Messages format. Must stay on `moyi-api.com`. Not yet confirmed by a live call for non-Claude models. |
 | `MOYI_MODEL` | Optional model id. Unset ⇒ a chat model from the key's own `GET /models` list. |
 | `DISCOUNTEDTOKENS_API_KEY` | Secret, unset. Prepaid account (minimum US$5). |
 | `DISCOUNTEDTOKENS_BASE_URL` | Optional; default `https://discountedtokens.com/v1` (their public API listing). Must stay on `discountedtokens.com`. |

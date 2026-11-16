@@ -1328,15 +1328,38 @@ describe('discount reseller gateways are testable here and nowhere else (owner 2
     expect(fake.officialOpenAi).not.toHaveBeenCalled();
   });
 
-  it('Moyi works with a key alone on the endpoint its own site publishes; a base URL without /v1 is used as written', async () => {
+  it('Moyi with a key alone: an OpenAI model goes to its /v1 endpoint, every other model to its Anthropic-format endpoint', async () => {
     vi.stubEnv('MOYI_API_KEY', 'synthetic-moyi-key-value');
     expect(row('moyi')).toMatchObject({ configured: true, enabled: true });
-    fake.officialOpenAi.mockResolvedValue({ content: 'Hi', model: 'grok-4.7' });
-    await run('moyi', 'grok-4.7');
-    expect(fake.officialOpenAi).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'https://api.moyi-api.com/v1/chat/completions', apiKey: 'synthetic-moyi-key-value' }));
-    vi.stubEnv('MOYI_BASE_URL', 'https://api.moyi-api.com');
-    await run('moyi', 'grok-4.7');
-    expect(fake.officialOpenAi).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'https://api.moyi-api.com/chat/completions' }));
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hi', model: 'gpt-6-sol' });
+    fake.officialAnthropic.mockResolvedValue({ content: 'Hi', model: 'grok-4.7' });
+    for (const model of ['gpt-6-sol', 'openai/gpt-5.6-terra', 'o3-mini']) {
+      await run('moyi', model);
+      expect(fake.officialOpenAi).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'https://api.moyi-api.com/v1/chat/completions', apiKey: 'synthetic-moyi-key-value', model }));
+    }
+    expect(fake.officialAnthropic).not.toHaveBeenCalled();
+    fake.officialOpenAi.mockClear();
+    for (const model of ['grok-4.7', 'claude-haiku-5-5', 'deepseek-v4.1-flash', 'gemini-3.8-flash']) {
+      await run('moyi', model);
+      expect(fake.officialAnthropic).toHaveBeenLastCalledWith(expect.objectContaining({ baseURL: 'https://api.moyi-api.com', apiKey: 'synthetic-moyi-key-value', model }));
+    }
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+    expect(fake.reserve).toHaveBeenCalledTimes(7);
+  });
+
+  it('only Moyi has a second endpoint: DiscountedTokens sends a non-OpenAI model id to its one OpenAI-format endpoint', async () => {
+    vi.stubEnv('DISCOUNTEDTOKENS_API_KEY', 'synthetic-dt-key-value');
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hi', model: 'codex-auto-review' });
+    await run('discountedtokens', 'grok-4.7');
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://discountedtokens.com/v1/chat/completions', model: 'grok-4.7' }));
+    expect(fake.officialAnthropic).not.toHaveBeenCalled();
+  });
+
+  it('Moyi’s Anthropic-format endpoint must also be on its own domain', () => {
+    vi.stubEnv('MOYI_API_KEY', 'synthetic-moyi-key-value');
+    vi.stubEnv('MOYI_ANTHROPIC_BASE_URL', 'https://api.moyi-api.com.evil.example');
+    expect(row('moyi')).toMatchObject({ enabled: false });
+    expect(row('moyi')?.unavailableReason).toContain('MOYI_ANTHROPIC_BASE_URL');
   });
 
   it.each([

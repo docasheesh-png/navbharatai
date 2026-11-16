@@ -228,15 +228,27 @@ async function readSseReply(response: Response, input: { apiKey: string; model: 
   return { content: content.slice(0, 32_000), model: model || input.model, ...(usage ? { usage } : {}) };
 }
 
+function isGatewayAnthropicBase(raw: string): boolean {
+  let url: URL;
+  try { url = new URL(raw); } catch { return false; }
+  return url.protocol === 'https:' && !url.port && !url.username && !url.password && !url.search && !url.hash && isResellerGatewayHost(url.hostname);
+}
+
 export async function runOfficialAnthropicTest(input: {
   apiKey: string;
   model: string;
   messages: readonly TestChatMessage[];
   signal: AbortSignal;
+  /**
+   * A reseller gateway's Anthropic-format endpoint (resellerGateways.ts). Omitted ⇒ Anthropic itself. Accepted only
+   * over https on a registered gateway domain, so the key cannot be sent anywhere else.
+   */
+  baseURL?: string;
 }): Promise<{ content: string; model: string; usage?: { inputTokens: number; outputTokens: number } }> {
   if (!input.apiKey || input.apiKey.length > 4096 || /[\s,]/.test(input.apiKey)) throw new OfficialTestChatError('auth', null, 'configuration', null, null, null, null);
   try {
-    const client = new Anthropic({ apiKey: input.apiKey, maxRetries: 0 });
+    if (input.baseURL !== undefined && !isGatewayAnthropicBase(input.baseURL)) throw new OfficialTestChatError('unknown', null, 'url-not-allowlisted', null, null, null, null);
+    const client = new Anthropic({ apiKey: input.apiKey, maxRetries: 0, ...(input.baseURL ? { baseURL: input.baseURL } : {}) });
     const response = await client.messages.create({
       model: input.model,
       max_tokens: TEST_CHAT_MAX_OUTPUT_TOKENS,

@@ -31,7 +31,7 @@ import { nemotronBaseUrl, nemotronKey, nemotronSuperModel } from '../AgentV3/nem
 import { vertexGenAI, vertexProjectId } from './vertexGenAI';
 import { testChatRequestId, testChatUid } from './testChatPayload';
 import { pickProviderModels } from './providerModelPicker';
-import { isResellerGatewayId, RESELLER_GATEWAY_CEILING_RATE, RESELLER_GATEWAY_IDS, RESELLER_GATEWAYS, resellerGatewayState } from './resellerGateways';
+import { isResellerGatewayId, RESELLER_GATEWAY_CEILING_RATE, RESELLER_GATEWAY_IDS, RESELLER_GATEWAYS, resellerGatewayRoute, resellerGatewayState } from './resellerGateways';
 
 type UnavailableReason = 'disabled' | 'configuration' | 'storage' | 'approval-or-budget' | 'budget' | 'no-model' | 'tries-exhausted' | 'capacity' | 'capability' | 'invalid' | 'unconfirmed';
 const SKIP_REASON: Record<string, UnavailableReason> = {
@@ -436,7 +436,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   if (meta.kind === 'reseller-gateway' && isResellerGatewayId(id)) {
     const state = resellerGatewayState(id);
     return { ...base, configured: state.ready || state.configured, enabled: state.ready, model: state.model, billed: true, approvalRequired: false,
-      note: 'A discount reseller under evaluation: this admin page is the only place it is called. One call, no retry, to the provider’s own domain. With no model set it reads the key’s own /models list and uses a listed chat model; a typed model is used as-is. The reply shows the model id the provider itself reports, which is the provider’s claim and not independent proof of which model answered. The shared-budget reserve uses the dearest official list price among the models these gateways sell (USD 10 / 50 per 1M tokens): a ceiling, not the bill.',
+      note: 'A discount reseller under evaluation: this admin page is the only place it is called. One call, no retry, to the provider’s own domain. With no model set it reads the key’s own /models list and uses a listed chat model; a typed model is used as-is. On Moyi an OpenAI model id goes to its OpenAI-format endpoint and every other model to its Anthropic-format endpoint. The reply shows the model id the provider itself reports, which is the provider’s claim and not independent proof of which model answered. The shared-budget reserve uses the dearest official list price among the models these gateways sell (USD 10 / 50 per 1M tokens): a ceiling, not the bill.',
       ...(state.ready ? {} : { unavailableReason: state.reason }) };
   }
   if (meta.kind === 'kimi') {
@@ -880,9 +880,10 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       const ceiling = quoteTokens(action.messages, RESELLER_GATEWAY_CEILING_RATE.inputPerMTok, RESELLER_GATEWAY_CEILING_RATE.outputPerMTok);
       const receipt = await reserveShared(db, requestId, uid, ceiling);
       if (!receipt) throw new TestChatUnavailable('budget', 409);
-      const result = await releaseIfUnused(receipt, () => sentTo(runOfficialOpenAiCompatTest)({
-        url: `${gateway.baseUrl}/chat/completions`, apiKey: gateway.apiKey, model, messages: action.messages, signal: bounded, stream: true,
-      }));
+      const route = resellerGatewayRoute(gateway, model);
+      const result = await releaseIfUnused(receipt, () => route.format === 'anthropic'
+        ? runOfficialAnthropicTest({ apiKey: gateway.apiKey, model, messages: action.messages, signal: bounded, baseURL: route.baseUrl })
+        : sentTo(runOfficialOpenAiCompatTest)({ url: route.url, apiKey: gateway.apiKey, model, messages: action.messages, signal: bounded, stream: true }));
       return finish(action, result.content, result.model || model, startedAt, result.usage);
     }
 

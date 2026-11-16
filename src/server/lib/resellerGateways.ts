@@ -15,6 +15,11 @@
  *     its public API listing and the pricing page the owner supplied on 2026-11-16.
  *   - Moyi's base URL (`https://api.moyi-api.com/v1`) is the OpenAI-compatible endpoint shown on moyi-api.com's
  *     own home page (owner's screenshot, 2026-11-16).
+ *   - MOYI SERVES TWO ENDPOINTS (owner 2026-11-16, from moyi-api.com's own endpoint picker: "api.moyi-api.com/v1 =
+ *     only for open ai, api.moyi-api.com = for all other"). An OpenAI model id goes to the OpenAI-format
+ *     endpoint (`…/v1/chat/completions`); every other model goes to the endpoint the site labels "Anthropic API"
+ *     (`https://api.moyi-api.com`, Anthropic Messages format). `MOYI_ANTHROPIC_BASE_URL` overrides the second.
+ *     Whether a given non-OpenAI model answers there is a fact only a real call settles; a refusal is shown as is.
  *   - MirAPI's API endpoint was not readable from the build environment, so it has NO default: the owner
  *     copies the base URL from MirAPI's own documentation into the env key. Until then the row says exactly
  *     that and no call is made.
@@ -38,11 +43,15 @@ interface GatewaySpec {
   modelEnv: string;
   defaultBaseUrl: string | null;
   defaultModel: string | null;
+  /** Set only for a gateway that serves non-OpenAI models on a separate Anthropic-format endpoint. */
+  anthropicBaseUrlEnv?: string;
+  defaultAnthropicBaseUrl?: string;
 }
 
 export const RESELLER_GATEWAYS: Readonly<Record<ResellerGatewayId, Readonly<GatewaySpec>>> = Object.freeze({
   moyi: { label: 'Moyi API', domain: 'moyi-api.com', keyEnv: 'MOYI_API_KEY', baseUrlEnv: 'MOYI_BASE_URL', modelEnv: 'MOYI_MODEL',
-    defaultBaseUrl: 'https://api.moyi-api.com/v1', defaultModel: null },
+    defaultBaseUrl: 'https://api.moyi-api.com/v1', defaultModel: null,
+    anthropicBaseUrlEnv: 'MOYI_ANTHROPIC_BASE_URL', defaultAnthropicBaseUrl: 'https://api.moyi-api.com' },
   discountedtokens: { label: 'DiscountedTokens', domain: 'discountedtokens.com', keyEnv: 'DISCOUNTEDTOKENS_API_KEY',
     baseUrlEnv: 'DISCOUNTEDTOKENS_BASE_URL', modelEnv: 'DISCOUNTEDTOKENS_MODEL',
     defaultBaseUrl: 'https://discountedtokens.com/v1', defaultModel: 'gpt-6-sol' },
@@ -75,7 +84,9 @@ function onDomain(raw: string, domain: string): string | null {
 }
 
 export type ResellerGatewayState =
-  | { ready: true; label: string; apiKey: string; baseUrl: string; model: string | null }
+  | { ready: true; label: string; apiKey: string; baseUrl: string; model: string | null;
+      /** The Anthropic-format endpoint for non-OpenAI models, when this gateway has one. */
+      anthropicBaseUrl: string | null }
   | { ready: false; label: string; apiKey: string; configured: boolean; reason: string; model: string | null };
 
 /** The one reading of a gateway's env. `ready` only with a usable key AND an endpoint on its own domain. */
@@ -95,5 +106,26 @@ export function resellerGatewayState(id: ResellerGatewayId, env: NodeJS.ProcessE
     return { ready: false, label: spec.label, apiKey, configured: true, model,
       reason: `${spec.baseUrlEnv} must be an https URL on ${spec.domain} with no port, credentials or query. The key is never sent anywhere else.` };
   }
-  return { ready: true, label: spec.label, apiKey, baseUrl, model };
+  let anthropicBaseUrl: string | null = null;
+  if (spec.anthropicBaseUrlEnv) {
+    const rawAnthropic = String(env[spec.anthropicBaseUrlEnv] ?? '').trim() || spec.defaultAnthropicBaseUrl || '';
+    anthropicBaseUrl = rawAnthropic ? onDomain(rawAnthropic, spec.domain) : null;
+    if (!anthropicBaseUrl) {
+      return { ready: false, label: spec.label, apiKey, configured: true, model,
+        reason: `${spec.anthropicBaseUrlEnv} must be an https URL on ${spec.domain} with no port, credentials or query. The key is never sent anywhere else.` };
+    }
+  }
+  return { ready: true, label: spec.label, apiKey, baseUrl, model, anthropicBaseUrl };
+}
+
+/** An OpenAI model id (gpt-…, o3, codex-…, chatgpt-…), with or without an `openai/` prefix. */
+export function isOpenAiModelId(model: string): boolean {
+  return /^(?:openai\/)?(?:gpt-|o\d|codex|chatgpt)/i.test(model.trim());
+}
+
+/** Which of a ready gateway's endpoints a model is sent to (see the Moyi note in the header). */
+export function resellerGatewayRoute(state: Extract<ResellerGatewayState, { ready: true }>, model: string)
+  : { format: 'openai'; url: string } | { format: 'anthropic'; baseUrl: string } {
+  if (state.anthropicBaseUrl && !isOpenAiModelId(model)) return { format: 'anthropic', baseUrl: state.anthropicBaseUrl };
+  return { format: 'openai', url: `${state.baseUrl}/chat/completions` };
 }

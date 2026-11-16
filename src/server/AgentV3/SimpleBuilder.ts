@@ -2736,10 +2736,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         try {
           const before = Object.fromEntries(written.map((f) => [f.path, f.content]));
           const refs = sanitizeTsconfigReferences(before, deps.scaffoldPaths ?? []);
-          if (refs.fixes.length > 0) {
+          if (refs.fixes.length > 0 || (refs.stripped?.length ?? 0) > 0) {
             for (const f of written) { const nc = refs.patch[f.path]; if (typeof nc === 'string') f.content = nc; }
             const n = refs.fixes.reduce((s, f) => s + f.removed.length, 0);
-            deps.log?.(`🔧 Removed ${n} unresolvable tsconfig project reference(s) so the compiler can run.`);
+            if (n > 0) deps.log?.(`🔧 Removed ${n} unresolvable tsconfig project reference(s) so the compiler can run.`);
+            if ((refs.stripped?.length ?? 0) > 0) deps.log?.(`🔧 Removed leftover apply-patch markup from ${refs.stripped!.length} tsconfig file(s) so the compiler can parse them.`);
           }
         } catch { /* best-effort — a failure leaves the tsconfig as generated for the honest verify */ }
       }

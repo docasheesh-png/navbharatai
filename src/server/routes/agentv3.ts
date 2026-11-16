@@ -6229,7 +6229,7 @@ async function noteBuildOutcome(
             } catch { /* best-effort — a bad tsconfig extends just falls through as before */ }
             try {
               const refs = sanitizeTsconfigReferences(saved, Object.keys(saved));
-              if (refs.fixes.length > 0) {
+              if (refs.fixes.length > 0 || (refs.stripped?.length ?? 0) > 0) {
                 Object.assign(saved, refs.patch);
                 await mergeWorkspaceFiles(workspaceId, refs.patch).catch(() => {});
               }
@@ -19650,7 +19650,7 @@ async function noteBuildOutcome(
             } catch { /* best-effort — a bad tsconfig extends just falls through to the install as before */ }
             try {
               const refs = sanitizeTsconfigReferences(Object.fromEntries(writtenFiles), scaffold);
-              if (refs.fixes.length > 0) {
+              if (refs.fixes.length > 0 || (refs.stripped?.length ?? 0) > 0) {
                 const patch = Object.entries(refs.patch).map(([path, content]) => ({ path, content }));
                 const { landed } = readWriteOutcomes(patch, await inPlatformPass('fast-lane-foundation', () => writePlatform(patch, 'fast-tsconfig-refs-', 4)));
                 const done = new Set(landed.map((f) => f.path));
@@ -19658,6 +19658,11 @@ async function noteBuildOutcome(
                 if (repaired.length > 0) {
                   fastLog(`🩹 Removed an unresolvable tsconfig project reference so the compiler can run: ${repaired.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`);
                   try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_REFERENCES_REPAIRED', message: `Removed an unresolvable tsconfig reference: ${repaired.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
+                }
+                const cleaned = (refs.stripped ?? []).filter((f) => done.has(f));
+                if (cleaned.length > 0) {
+                  fastLog(`🩹 Removed leftover apply-patch markup from ${cleaned.join(', ')} so the compiler can parse the tsconfig.`);
+                  try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_MARKUP_REPAIRED', message: `Removed leftover apply-patch markup from ${cleaned.join(', ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
                 }
               }
             } catch { /* best-effort — a dangling tsconfig reference just falls through to the install as before */ }
@@ -19776,7 +19781,7 @@ async function noteBuildOutcome(
             if (process.env.AGENTV3_TSCONFIG_SANITIZE !== 'off') {
               try {
                 const refs = sanitizeTsconfigReferences(Object.fromEntries(writtenFiles), scaffold);
-                if (refs.fixes.length > 0) {
+                if (refs.fixes.length > 0 || (refs.stripped?.length ?? 0) > 0) {
                   const patch = Object.entries(refs.patch).map(([path, content]) => ({ path, content }));
                   const { landed } = readWriteOutcomes(patch, await fastWrite(patch));
                   for (const w of landed) writtenFiles.set(w.path, w.content);

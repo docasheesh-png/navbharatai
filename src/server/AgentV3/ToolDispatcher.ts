@@ -177,7 +177,8 @@ import { dependencyMutationGuard, dependencyMutationGuardMessage } from './Depen
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
 
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
-import { ensureTsconfigBaseUrl } from './TsconfigGuard';
+import { ensureTsconfigBaseUrl, ensureTsconfigJsx, healTsconfigConflictTail } from './TsconfigGuard';
+import { conflictMarkerRefusal, writeConflictGuardEnabled } from './conflictMarkerGuard';
 import { applyFullStackGuards, dedupeSameModuleImports } from './FullStackGuards';
 import { duplicateModuleTarget, dedupeStylesheetImports, isAppWideStylesheet } from './ProjectIntegrityChecks';
 import { writesAreUnread } from './unreadWrites';
@@ -188,7 +189,7 @@ import { writesAreUnread } from './unreadWrites';
  * model rewrite of vite.config/tsconfig can never silently re-break the preview or baseUrl-"src" resolution.
  */
 function guardConfigContent(path: string, content: string): string {
-  return applyFullStackGuards(path, ensureTsconfigBaseUrl(path, ensureViteResolveAlias(path, ensureViteAllowedHosts(path, content))));
+  return applyFullStackGuards(path, ensureTsconfigBaseUrl(path, ensureTsconfigJsx(path, healTsconfigConflictTail(path, ensureViteResolveAlias(path, ensureViteAllowedHosts(path, content))))));
 }
 import { ViteReactProvider } from './sandbox/AppMakerLab/generator/templates/ViteReactProvider';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
@@ -2545,8 +2546,18 @@ export class ToolDispatcher {
   }
 
   private async parseGuardRejection(path: string, oldContent: string, newContent: string): Promise<string | null> {
-    if (!writeParseGuardEnabled()) return null;
     try {
+      // Independent of the syntax parse guard (and of its kill switch): leftover apply-patch /
+      // merge-conflict markers must be refused even in files that gate skips, such as tsconfig JSONC
+      // (BR1982). A tsconfig whose prefix is clean JSON is healed earlier in guardConfigContent.
+      if (writeConflictGuardEnabled()) {
+        const conflict = conflictMarkerRefusal(path, newContent, oldContent, true);
+        if (conflict) {
+          try { getWorkspaceMemory(this.workspaceId).recordError(`[BLOCKED-CONFLICT-MARKUP] refused write that would leave markers in ${path}`); } catch { /* audit best-effort */ }
+          return conflict;
+        }
+      }
+      if (!writeParseGuardEnabled()) return null;
       const errNew = await firstSyntaxError(path, newContent);
       if (!errNew) return null; // parses clean → nothing to block (skips the second parse in the common case)
       const errOld = await firstSyntaxError(path, oldContent);

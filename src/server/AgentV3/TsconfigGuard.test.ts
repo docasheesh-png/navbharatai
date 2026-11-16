@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as ts from 'typescript';
-import { isTsconfigPath, ensureTsconfigBaseUrl } from './TsconfigGuard';
+import { isTsconfigPath, ensureTsconfigBaseUrl, ensureTsconfigJsx, healTsconfigConflictTail } from './TsconfigGuard';
 
 describe('isTsconfigPath', () => {
   it('matches tsconfig.json and variants but not tsconfig.node.json', () => {
@@ -53,5 +53,107 @@ describe('ensureTsconfigBaseUrl — restore baseUrl/paths when a rewrite wiped t
   it('never touches tsconfig.node.json (the vite-config project has no app sources)', () => {
     const before = JSON.stringify({ compilerOptions: { composite: true } });
     expect(ensureTsconfigBaseUrl('tsconfig.node.json', before)).toBe(before);
+  });
+});
+
+
+const OPEN = '<'.repeat(7);
+const CLOSE = '>'.repeat(7);
+
+/** The clean prefix of this report's model-written tsconfig (comments, no jsx, DOM lib, no references). */
+const BR1982_TSCONFIG_PREFIX = `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"]
+}
+`;
+
+/** The leftover apply-patch tail captured on this report's tsconfig snapshot. */
+const BR1982_TSCONFIG_TAIL = `${OPEN} SEARCH
+  "references": [{ "path": "./tsconfig.node.json" }]
+}
+=======
+}
+${CLOSE} REPLACE>>>
+`;
+
+describe('healTsconfigConflictTail — drop a leftover apply-patch tail (BR1982)', () => {
+  it("this report's tsconfig (valid JSONC prefix + SEARCH/REPLACE tail) keeps only the prefix", () => {
+    const landed = BR1982_TSCONFIG_PREFIX + BR1982_TSCONFIG_TAIL;
+    const healed = healTsconfigConflictTail('tsconfig.json', landed);
+    expect(healed).toBe(BR1982_TSCONFIG_PREFIX);
+    expect(healed.startsWith(OPEN) || healed.includes('\n' + OPEN)).toBe(false);
+  });
+
+  it('neighbour: a clean tsconfig is untouched, and a non-tsconfig is untouched even with a tail', () => {
+    expect(healTsconfigConflictTail('tsconfig.json', BR1982_TSCONFIG_PREFIX)).toBe(BR1982_TSCONFIG_PREFIX);
+    const md = 'Notes\n' + OPEN + ' SEARCH\nhello\n' + CLOSE + ' END\n';
+    expect(healTsconfigConflictTail('README.md', md)).toBe(md);
+    expect(healTsconfigConflictTail('tsconfig.node.json', md)).toBe(md);
+  });
+
+  it('neighbour: if the prefix is not parseable, the file is left alone (no invented salvage)', () => {
+    const broken = '{ not json\n' + OPEN + ' SEARCH\n}\n';
+    expect(healTsconfigConflictTail('tsconfig.json', broken)).toBe(broken);
+  });
+});
+
+describe('ensureTsconfigJsx — add react-jsx on a DOM tsconfig that has no jsx flag (BR1982)', () => {
+  it("this report's prefix (DOM lib, no jsx) gains jsx: react-jsx, and the official options stay", () => {
+    const after = JSON.parse(ensureTsconfigJsx('tsconfig.json', BR1982_TSCONFIG_PREFIX));
+    expect(after.compilerOptions.jsx).toBe('react-jsx');
+    expect(after.compilerOptions.moduleResolution).toBe('bundler');
+    expect(after.include).toEqual(['src']);
+    expect(after.compilerOptions.lib).toEqual(['ES2020', 'DOM', 'DOM.Iterable']);
+  });
+
+  it('neighbour: an existing jsx value is never overwritten (preserve / react / react-jsx)', () => {
+    for (const jsx of ['preserve', 'react', 'react-jsx']) {
+      const before = JSON.stringify({ compilerOptions: { jsx, lib: ['DOM'] } });
+      expect(JSON.parse(ensureTsconfigJsx('tsconfig.json', before)).compilerOptions.jsx).toBe(jsx);
+    }
+  });
+
+  it('neighbour: a Node tsconfig (no DOM lib) and a Vue jsxImportSource are left alone', () => {
+    const node = JSON.stringify({ compilerOptions: { module: 'NodeNext', lib: ['ES2020'] } }, null, 2);
+    expect(ensureTsconfigJsx('tsconfig.json', node)).toBe(node);
+    const vue = JSON.stringify({ compilerOptions: { lib: ['DOM'], jsxImportSource: 'vue' } }, null, 2);
+    expect(ensureTsconfigJsx('tsconfig.json', vue)).toBe(vue);
+  });
+
+  it('neighbour: tsconfig.node.json and a non-tsconfig are left alone', () => {
+    const src = JSON.stringify({ compilerOptions: { lib: ['DOM'] } });
+    expect(ensureTsconfigJsx('tsconfig.node.json', src)).toBe(src);
+    expect(ensureTsconfigJsx('src/App.tsx', src)).toBe(src);
+  });
+});
+
+describe('the write-door compose: strip then jsx then baseUrl on this report\'s exact file', () => {
+  it('produces a parseable tsconfig with jsx, no markers, and no invented references', () => {
+    const landed = BR1982_TSCONFIG_PREFIX + BR1982_TSCONFIG_TAIL;
+    const out = ensureTsconfigBaseUrl('tsconfig.json', ensureTsconfigJsx('tsconfig.json', healTsconfigConflictTail('tsconfig.json', landed)));
+    const json = JSON.parse(out);
+    expect(json.compilerOptions.jsx).toBe('react-jsx');
+    expect(json.compilerOptions.baseUrl).toBe('src');
+    expect(json.references).toBeUndefined();
+    expect(out.includes(OPEN) || out.includes(CLOSE)).toBe(false);
   });
 });

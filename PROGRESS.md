@@ -101692,3 +101692,7 @@ The review failed the first version under audit P0-C: up to 60 sequential reads 
 ## 2026-11-17 — builder fallthrough after phone drop (t400u)
 
 #2407 and #2408 failed ENGINE_UNAVAILABLE. Router One was marked stopped when the viewer's HTTP response closed, so a phone disconnect refused that rung before any request (`scope_stopped`). The stall banner treated "not in this process's memory" as the build being dead even when the workspace lease was still heartbeating. A build now keeps Router One until its own abort, status reports `buildHeldElsewhere` while the lease is live, and a BUILD_STARTED row is saved as soon as the report object exists. Account keys with an `ak-` prefix are redacted from stored reports and user-facing errors. Quotas, billing, referral, and white-label rules are unchanged. The wallet chip showing 0 tokens is the real token balance; it does not select the weak ladder by itself, and a paid refusal is still the 402 credits card.
+
+## 2026-11-17 — recharge sentence when the wallet cannot cover a build (t402u)
+
+The existing pre-start block (no positive balance, billing on, not a free-list account) now says the owner's sentence: Hindi when the request is Hindi, English otherwise, with a Recharge button. A stream error with that code uses the same card, not the stall banner. The step clock ("build budget exhausted") and a supplier account with no balance are not the user's wallet and do not show this sentence. Who is allowed to start is unchanged, including a free weak-ladder build the gate already allows.

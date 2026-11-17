@@ -198,14 +198,16 @@ describe('F1 the second review probes: a neighbour ending in , or ) is not code'
   });
 
   it('more than 8 stacked annotations is unsure: the warning stays', () => {
-    const NAMES = ['Override', 'Deprecated', 'Test', 'Nullable', 'Inject', 'Autowired', 'Transactional', 'Required', 'Immutable', 'Protected'];
+    // Names still in KNOWN_ANNOTATIONS (Test/Inject/Required/Immutable/Protected were removed as
+    // colliding app-file names). Ten stacked known annotations: the last has 9 to walk back over.
+    const NAMES = ['Override', 'Deprecated', 'Nullable', 'Autowired', 'Transactional', 'Composable', 'NonNull', 'NotNull', 'JvmStatic', 'JvmField'];
     const stack = NAMES.map((n) => `  @${n}`).join('\n');
     const fields = Array.from({ length: 12 }, (_, i) => `  int x${i};`).join('\n');
     const msg = `class A {\n${fields}\n${stack}\n  void f() {\n  }\n}`;
     expect(looksLikePastedCode(msg)).toBe(true);
     const unresolved = parseFileMentions(msg, NONE).unresolved;
-    expect(unresolved).toContain('Protected'); // 9 annotations to walk over before the code before it
-    expect(unresolved).not.toContain('Override'); // code right before it, a known annotation right after
+    expect(unresolved).toContain('JvmField'); // 9 annotations to walk over before the code before it
+    expect(unresolved).not.toContain('Override'); // code right before it, and a walk of known annotations reaches the declaration
     expect(unresolved).not.toContain('Nullable'); // within the cap
   });
 
@@ -247,7 +249,7 @@ describe('F1 the third review probes: a lone @Name between code lines keeps its 
   });
 
   it('common app-file and screen names are not known annotations', () => {
-    for (const n of ['Header', 'Footer', 'Login', 'App', 'Home', 'Profile', 'Settings', 'Dashboard', 'Sidebar', 'Navbar', 'Main', 'Index', 'Service', 'Controller', 'Repository', 'Value', 'Table', 'Page', 'Screen', 'Layout']) {
+    for (const n of ['Header', 'Footer', 'Login', 'App', 'Home', 'Profile', 'Settings', 'Dashboard', 'Sidebar', 'Navbar', 'Main', 'Index', 'Service', 'Controller', 'Repository', 'Value', 'Table', 'Page', 'Screen', 'Layout', 'Input', 'Output', 'Component', 'Test', 'Entity', 'Directive', 'Id', 'Required', 'Immutable', 'Protected', 'Preview', 'Inject']) {
       expect(KNOWN_ANNOTATIONS.has(n.toLowerCase())).toBe(false);
       const msg = `class A {\n  int x;\n  @${n}\n  void f() {\n  }\n}`;
       expect(parseFileMentions(msg, NONE).unresolved).toEqual([n]);
@@ -296,6 +298,69 @@ describe('F1 the third review probes: a lone @Name between code lines keeps its 
   it('a known annotation stacked on another known annotation (with arguments) is dropped', () => {
     const msg = 'class A {\n  int x;\n  @Override\n  @SuppressWarnings("unchecked")\n  public void f() {\n  }\n}';
     expect(parseFileMentions(msg, NONE).unresolved).toEqual([]);
+  });
+});
+
+describe('F1 the fourth review probes: colliding names and a stack with no declaration keep the warning', () => {
+  const NONE: string[] = [];
+  const CONST3 = 'const a = 1;\nconst b = 2;\nconst c = 3;';
+
+  it('🔴 tight sandwich: @Input/@Preview/@Test/@Component keep the warning, Hindi and English prose', () => {
+    const cases: Array<{ name: string; intro: string; decl: string }> = [
+      { name: 'Preview', intro: 'yeh current code hai:', decl: 'function Preview() {' },
+      { name: 'Preview', intro: 'Please look at this:', decl: 'function Preview() {' },
+      { name: 'Test', intro: 'yeh current code hai:', decl: 'export default function Test() {' },
+      { name: 'Test', intro: 'Please look at this:', decl: 'export default function Test() {' },
+      { name: 'Input', intro: 'yeh current code hai:', decl: 'export default function Input() {' },
+      { name: 'Input', intro: 'Please look at this:', decl: 'export default function Input() {' },
+      { name: 'Input', intro: '', decl: 'export default function Input() {' },
+      { name: 'Component', intro: 'yeh current code hai:', decl: 'function Component() {' },
+      { name: 'Component', intro: 'Please look at this:', decl: 'function Component() {' },
+    ];
+    for (const c of cases) {
+      const head = c.intro ? `${c.intro}\n` : '';
+      const msg = `${head}${CONST3}\n@${c.name}\n${c.decl}\n  return 1;\n}`;
+      expect(looksLikePastedCode(msg)).toBe(true);
+      const m = parseFileMentions(msg, NONE);
+      expect(m.unresolved).toEqual([c.name]);
+      expect(unresolvedMentionsNotice(m)).toContain(`@${c.name}`);
+    }
+  });
+
+  it('🔴 stacked then prose: @Input then @Component then a request, Hindi and English', () => {
+    for (const tail of ['I want these files created', 'in files ko create karo']) {
+      const msg = `${CONST3}\n@Input\n@Component\n${tail}`;
+      expect(looksLikePastedCode(msg)).toBe(true);
+      expect(parseFileMentions(msg, NONE).unresolved).toEqual(['Input', 'Component']);
+    }
+  });
+
+  it('🔴 stacked then prose for @Preview/@Test/@Component as well, Hindi and English', () => {
+    for (const names of [['Preview', 'Test'], ['Test', 'Preview'], ['Component', 'Input'], ['Preview', 'Component']]) {
+      for (const tail of ['I want these files created', 'in files ko create karo']) {
+        const msg = `${CONST3}\n@${names[0]}\n@${names[1]}\n${tail}`;
+        expect(looksLikePastedCode(msg)).toBe(true);
+        expect(parseFileMentions(msg, NONE).unresolved).toEqual(names);
+      }
+    }
+  });
+
+  it('🔴 @Input then @Override at EOF keeps both warnings', () => {
+    const msg = `${CONST3}\n@Input\n@Override`;
+    expect(looksLikePastedCode(msg)).toBe(true);
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual(['Input', 'Override']);
+  });
+
+  it('a paren-less @Preview above fun Foo() keeps the warning (accepted residual)', () => {
+    const msg = 'class B {\n  int x;\n  int y;\n  @Preview\n  fun Foo() {\n    return 1;\n  }\n}';
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual(['Preview']);
+  });
+
+  it('@Input(), @Component({ and @Test() with arguments still drop (non-lone path unchanged)', () => {
+    const input = 'class A {\n  int x;\n  int y;\n  @Input()\n  name: string;\n}';
+    const component = "import { Component } from '@angular/core';\n@Component({\n  selector: 'x',\n})\nexport class C {\n  n = 1;\n}";
+    const testAnn = 'public class A {\n  int x;\n  int y;\n  @Test()\n  public void f() {\n  }\n}';
+    for (const src of [input, component, testAnn]) expect(parseFileMentions(src, NONE).unresolved).toEqual([]);
   });
 });
 

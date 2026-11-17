@@ -47,9 +47,14 @@ const MENTION_RE = /(^|\s)@([A-Za-z0-9_./@-]+[A-Za-z0-9_/-]|[A-Za-z0-9_-]+)/g;
  *    line ends in `{ } ;`; and its own line ends in `{ } ;` or, walking forward the same way, the next
  *    non-empty line does. A neighbour ending in `,` or `)` is never code here (second review: a prose
  *    line ending in a comma, a `- item,` list, or a Hinglish list ending in `(1)`…`(5)`).
- * 6. (third review, the strict belt) a LONE token, with nothing after it on its line, also needs a name
- *    in `KNOWN_ANNOTATIONS`, and the very next line (no blank line between) must end in `{ } ;` or be
- *    another known annotation. Tokens with code after them on the same line keep rules 4 and 5.
+ * 6. (third/fourth review, the strict belt) a LONE token, with nothing after it on its line, also needs
+ *    a name in `KNOWN_ANNOTATIONS`. Names that are also plausible app files or components (Input, Output,
+ *    Component, Test, Entity, Directive, Id, Required, Immutable, Protected, Preview, Inject, and the
+ *    same class as Header/Login/App) are NOT in the list. The very next line (no blank line between)
+ *    must end in `{ } ;`, or be another known annotation from which a no-blank walk (cap 8 hops)
+ *    actually reaches a line ending in `{ } ;`. A stack of known annotations with no declaration after
+ *    it keeps the warning. Tokens with code after them on the same line keep rules 4 and 5 — `@Input()`,
+ *    `@Component({`, `@Test()` still drop that way, byte-identical.
  * Anything else, including every RESOLVED mention, behaves exactly as before.
  */
 const ANNOTATION_TOKEN_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -159,38 +164,70 @@ function codeNeighbour(text: string, from: number, step: (t: string, at: number)
 
 /**
  * Real annotation names (Dart, Java, Kotlin, TypeScript/Angular, Spring, JPA, JUnit), lower-case.
- * Conservative on purpose: names that are also common app files or screens (Header, Login, App, Home,
- * Profile, Settings, Service, Controller, …) are NOT here, so a lone `@Name` like that keeps its warning.
+ * Conservative on purpose: names that are also plausible app files or components (Header, Login, App,
+ * Home, Profile, Settings, Service, Controller, Input, Output, Component, Test, Entity, Directive, Id,
+ * Required, Immutable, Protected, Preview, Inject, …) are NOT here, so a lone `@Name` like that keeps
+ * its warning. The rest of the list was audited for the same collision; distinctive annotation-only
+ * names (override, composable, autowired, beforeeach, …) stay. An annotation with arguments still drops
+ * through the non-lone path and does not consult this list.
  */
 export const KNOWN_ANNOTATIONS: ReadonlySet<string> = new Set([
   // Java / Kotlin language and platform
   'override', 'deprecated', 'suppresswarnings', 'functionalinterface', 'safevarargs', 'retention',
   'documented', 'inherited', 'repeatable', 'jvmstatic', 'jvmoverloads', 'jvmfield', 'throws',
-  // Jetpack Compose
-  'composable', 'preview',
-  // Angular / TypeScript
-  'component', 'injectable', 'directive', 'ngmodule', 'input', 'output', 'hostlistener', 'hostbinding',
+  // Jetpack Compose (preview omitted: also a common screen/file name)
+  'composable',
+  // Angular / TypeScript (component, directive, input, output omitted: common app files)
+  'injectable', 'ngmodule', 'hostlistener', 'hostbinding',
   'viewchild', 'viewchildren', 'contentchild',
-  // Spring / DI / JPA / validation
-  'autowired', 'inject', 'restcontroller', 'getmapping', 'postmapping', 'requestmapping', 'pathvariable',
-  'requestbody', 'transactional', 'entity', 'id', 'generatedvalue', 'nullable', 'nonnull', 'notnull',
-  // JUnit
-  'test', 'before', 'after', 'beforeeach', 'aftereach', 'beforeall', 'afterall', 'parameterizedtest',
+  // Spring / DI / JPA / validation (inject, entity, id omitted: common app files)
+  'autowired', 'restcontroller', 'getmapping', 'postmapping', 'requestmapping', 'pathvariable',
+  'requestbody', 'transactional', 'generatedvalue', 'nullable', 'nonnull', 'notnull',
+  // JUnit (test omitted: a common file/component name)
+  'before', 'after', 'beforeeach', 'aftereach', 'beforeall', 'afterall', 'parameterizedtest',
   'displayname',
-  // Dart / Flutter
-  'required', 'immutable', 'protected', 'visiblefortesting', 'mustcallsuper', 'pragma', 'jsonkey',
+  // Dart / Flutter (required, immutable, protected omitted: common words/files)
+  'visiblefortesting', 'mustcallsuper', 'pragma', 'jsonkey',
   'jsonserializable', 'freezed', 'riverpod',
 ]);
 
-/** The line right after `lineEnd` (no blank line between) ends in `{ } ;` or is a known annotation. Pure. */
-function annotatesTheNextLine(text: string, lineEnd: number): boolean {
-  if (lineEnd >= text.length) return false;
+/** The immediately following line (no blank). Undefined at EOF or when the next line is blank. Pure. */
+function nextImmediateLine(text: string, lineEnd: number): Line | undefined {
+  if (lineEnd >= text.length) return undefined;
   const nl = text.indexOf('\n', lineEnd + 1);
-  const next = text.slice(lineEnd + 1, nl < 0 ? text.length : nl);
-  if (next.trim() === '') return false;
-  if (CODE_LINE_RE.test(next)) return true;
-  const ann = /^\s*@([A-Za-z_]\w*)/.exec(next);
+  const start = lineEnd + 1;
+  const end = nl < 0 ? text.length : nl;
+  const l = text.slice(start, end);
+  if (l.trim() === '') return undefined;
+  return { text: l, start, end };
+}
+
+/** A lone `@Name` or `@Name(...)` whose name is in `KNOWN_ANNOTATIONS`. Pure. */
+function isKnownAnnotationLine(line: string): boolean {
+  if (!ANNOTATION_LINE_RE.test(line)) return false;
+  const ann = /^\s*@([A-Za-z_]\w*)/.exec(line);
   return !!ann && KNOWN_ANNOTATIONS.has(ann[1].toLowerCase());
+}
+
+/**
+ * The very next line (no blank between) ends in `{ } ;`, or is a known annotation from which a
+ * no-blank walk (cap 8 hops) actually reaches a line ending in `{ } ;`. A following known annotation
+ * is not enough on its own — a stack that never reaches a declaration keeps the warning. Pure.
+ */
+function annotatesTheNextLine(text: string, lineEnd: number): boolean {
+  const first = nextImmediateLine(text, lineEnd);
+  if (!first) return false;
+  if (CODE_LINE_RE.test(first.text)) return true;
+  if (!isKnownAnnotationLine(first.text)) return false;
+  let at = first.end;
+  for (let hops = 0; hops <= MAX_ANNOTATION_HOPS; hops++) {
+    const l = nextImmediateLine(text, at);
+    if (!l) return false;
+    if (CODE_LINE_RE.test(l.text)) return true;
+    if (!isKnownAnnotationLine(l.text)) return false;
+    at = l.end;
+  }
+  return false;
 }
 
 /** Rules 4 and 5 above, for the `@` at `at` followed by `token`. Pure. */
@@ -208,10 +245,11 @@ function readsAsAnnotation(text: string, at: number, token: string): boolean {
   if (!ownLine) return false;
   const codeBefore = codeNeighbour(text, lineStart, previousNonEmptyLine, (l) => l.start);
   if (!codeBefore) return false;
-  // THE STRICT BELT FOR A LONE TOKEN (third review). `@Header` alone between code lines is as likely
-  // a missing file as an annotation, so a lone token is dropped only when its name is a real, known
-  // annotation AND the very next line (no blank line between) ends in `{ } ;` or is another known
-  // annotation — the shape of an annotation sitting on the declaration it marks.
+  // THE STRICT BELT FOR A LONE TOKEN (third/fourth review). `@Header` alone between code lines is as
+  // likely a missing file as an annotation, so a lone token is dropped only when its name is a real,
+  // known annotation (not a name that is also a plausible app file) AND the very next line (no blank
+  // line between) ends in `{ } ;`, or is another known annotation from which a no-blank walk reaches a
+  // line ending in `{ } ;` — the shape of an annotation sitting on the declaration it marks.
   if (rest === '') return KNOWN_ANNOTATIONS.has(token.toLowerCase()) && annotatesTheNextLine(text, lineEnd);
   return CODE_LINE_RE.test(line) || codeNeighbour(text, lineEnd, nextNonEmptyLine, (l) => l.end);
 }

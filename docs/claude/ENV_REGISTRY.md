@@ -4779,7 +4779,17 @@ selection remains non-dispatchable. The separate opt-in Builder adapter below co
 reviewed observations and honors exclusions; neither flag is activated by this change.
 See `docs/SURPLUS_REGISTRY.md` for the bounded candidate list and honest activation blockers.
 
-## Surplus Pro tool-loop integration (2026-10-24; default OFF)
+## Surplus Pro tool-loop integration (2026-10-24; default OFF until 2026-11-17, now default ON)
+
+🔴 **DEFAULT ON since 2026-11-17 (owner, verbatim: "surplus ko bhi default on karo").** `AGENTV3_SURPLUS_BUILDER`
+unset, empty or unrecognised = ON; only `off` / `false` / `0` / `no` turns it off (the emergency kill switch).
+One function reads it: `surplusBuilderSwitchOn` in `src/server/lib/alwaysOnSuppliers.ts`
+(`tests/surplusBuilderDefaultOn.test.ts` fails if another file reads the flag itself). Surplus serves a Weak
+build only when a usable `SURPLUS_API_KEY` is also set (`surplusBuilderLive`); with no key the build runs on
+its tier ladder with no Surplus I/O, exactly as the old default-OFF did. Cloud Run already had the flag `on`
+(owner-reported 2026-10-25, below), so this changes nothing in production today: it removes the dependence on
+that variable staying set. Everything else in this section (Weak only, `/min90/v1`, admission, billing) is unchanged.
+The paragraph below is the original 2026-10-24 text and describes the explicit-off path.
 
 `AGENTV3_SURPLUS_BUILDER=false`: opt-in only. OFF bypasses new registry/review/receipt I/O and leaves existing Weak/Normal/Strong ladders and billing unchanged. ON requires independent server account/credential/pilot, quality, capability, official tariff and usage reviews before any Surplus HTTP. No defaults grant a live pilot. Main build inference uses fixed `/min90/v1`, provider-family allowlist and price objective; no ordinary paid fallback. Plain chat, Doctor, media and VM pricing are separate and unchanged. Full scope, concurrency, retention and honest activation blockers: `docs/SURPLUS_BUILDER.md`. Earlier observer-only notes describe Phase 1; this later opt-in caller does not turn it on.
 

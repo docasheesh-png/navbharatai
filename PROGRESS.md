@@ -101688,3 +101688,15 @@ The review failed the first version under audit P0-C: up to 60 sequential reads 
 - Precision: a comment-, string- and template-aware tokenizer; only relative, extensioned specifiers that join to exactly a deleted path are named, so a remaining sibling never draws a note.
 - The note is kept out of the user's terminal and the `tool_result` summary.
 - 38 tests; 21 round-2 mutations, all caught (one after an added test).
+
+## 2026-11-17 — Surplus Pro builder is default ON
+
+Owner: "surplus ko bhi default on karo". `AGENTV3_SURPLUS_BUILDER` is now ON unless explicitly off, matching
+Mitrify, Qubax, CheaperInference and BluesMinds. The switch moved to `surplusBuilderSwitchOn` in
+`alwaysOnSuppliers.ts`; the eight places that each compared the flag to `true` (buildSession, liveAdmission x2,
+productionAdapter, transport x2, the route via `surplusBuilderEnabled`, one test fixture) now read it there.
+`surplusBuilderEnabled` additionally requires a usable `SURPLUS_API_KEY`, so a keyless server (CI, local) takes the
+same no-I/O ladder path as before. Production already had the flag `on` (owner-reported 2026-10-25), so behaviour
+there does not change. Tests: `tests/surplusBuilderDefaultOn.test.ts` (default, kill switch, keyless, and a census
+that fails when another file reads the flag; proven by putting a raw reader back in `productionAdapter.ts`).
+Not verified: a live Surplus build; this session cannot read Cloud Run's env or reach Surplus.

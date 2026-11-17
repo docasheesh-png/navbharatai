@@ -1,6 +1,6 @@
 import { assertCanaryLegacyAllowed } from '../../AgentV3/reliability/canarySpendGuard';
 import { PublicBuildEngineError } from '../../lib/buildEngineError';
-import { parseEnvFlag } from '../../lib/envFlag';
+import { surplusBuilderSwitchOn } from '../../lib/alwaysOnSuppliers';
 import { BuildStoppedError } from '../../AgentV3/stopSignal';
 import { Agent } from 'undici';
 
@@ -238,13 +238,13 @@ async function sleepBackoff(ms: number, signal: AbortSignal, deadline: AbortSign
  * - After retries exhaust: return last HTTP body for accounting (never invent success); throw on pure network
  */
 export function createSurplusBuildTransport(env: NodeJS.ProcessEnv = process.env, fetcher: typeof fetch = globalThis.fetch) {
-  if (typeof window !== 'undefined' || parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) !== true) throw new SurplusBuildTransportError('configuration');
+  if (typeof window !== 'undefined' || !surplusBuilderSwitchOn(env)) throw new SurplusBuildTransportError('configuration');
   const key = env.SURPLUS_API_KEY?.trim();
   if (!key || key.startsWith('inf_admin_') || key === 'replace_with_your_surplus_api_key' || /[\r\n]/.test(key)) throw new SurplusBuildTransportError('configuration');
   return async (request: Record<string, unknown>, signal: AbortSignal): Promise<SurplusBuildTransportResponse> => {
     assertCanaryLegacyAllowed('surplus-builder');
     if (signal.aborted) throw stoppedError();
-    if (parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) !== true) throw new SurplusBuildTransportError('configuration');
+    if (!surplusBuilderSwitchOn(env)) throw new SurplusBuildTransportError('configuration');
     let body: string;
     try { body = encodeRequest(request); }
     catch (error) {

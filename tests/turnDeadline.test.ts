@@ -4,6 +4,7 @@ import { join } from 'path';
 import {
   turnDeadline,
   deadlineFromBudget,
+  deadlineLeavingFallback,
   MIN_USEFUL_CALL_MS,
   BUDGET_EXHAUSTED_MESSAGE,
   BUDGET_REACHED_MESSAGE,
@@ -158,7 +159,7 @@ describe('WIRING — a contract nothing calls is a comment', () => {
 
   it('the fast lane hands its OWN cap down — the exact inversion the report found', () => {
     const src = read('src/server/AgentV3/SimpleBuilder.ts');
-    expect(src).toContain('{ deadlineAt: deadlineFromBudget(planCap, laneStartedAt) }');
+    expect(src).toContain('{ deadlineAt: deadlineFromBudget(planCap, laneStartedAt), reserveFallbackBudget: true }');
     expect(src).toContain('{ deadlineAt: deadlineFromBudget(contractCap) }');
   });
 
@@ -166,7 +167,7 @@ describe('WIRING — a contract nothing calls is a comment', () => {
     const src = read('src/server/routes/agentv3.ts');
     // Since Q-926 the continuation also carries the per-file stay decision.
     expect(src).toContain('continueFastLaneGeneration(first, {');
-    expect(src).toContain('generate: (prompt) => fastGenerateOnce(system, prompt, genOpts?.deadlineAt, genOpts?.mayReason === true, genOpts?.repair === true)');
+    expect(src).toContain('generate: (prompt) => fastGenerateOnce(system, prompt, genOpts?.deadlineAt, genOpts?.mayReason === true, genOpts?.repair === true, reserve)');
     expect(read('src/server/AgentV3/FastLaneContinuation.ts')).toContain('deps.generate(continuationPrompt(text))');
     expect(src).toMatch(/deadlineAt,/);
   });
@@ -228,5 +229,17 @@ describe('BEHAVIOUR — the runner really refuses, not just the helper', () => {
     }).catch((e: unknown) => e);
     expect(String((err as Error).message)).toBe(BUDGET_REACHED_MESSAGE);
     expect(isTimeoutProviderError(err)).toBe(false);
+  });
+});
+
+describe('a hung plan rung keeps time for the rungs after it (#2428)', () => {
+  it('gives the first of several rungs a third of a 90s step, and the last rung the whole step', () => {
+    expect(deadlineLeavingFallback(NOW + 90_000, NOW, 3)).toBe(NOW + 30_000);
+    expect(deadlineLeavingFallback(NOW + 90_000, NOW, 0)).toBe(NOW + 90_000);
+    expect(deadlineLeavingFallback(undefined, NOW, 3)).toBeUndefined();
+  });
+
+  it('does not split a step that cannot leave a useful call after this rung', () => {
+    expect(deadlineLeavingFallback(NOW + 15_200, NOW, 2)).toBe(NOW + 15_200);
   });
 });

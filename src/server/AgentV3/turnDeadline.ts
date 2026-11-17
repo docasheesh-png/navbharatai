@@ -216,3 +216,29 @@ export function firstAnswerBoundMs(idleMs: number, timeoutMs: number, source: Tu
   if (source !== 'deadline' || !hasNextRung) return idleMs;
   return Math.min(idleMs, Math.max(FIRST_ANSWER_FLOOR_MS, Math.round(timeoutMs / 3)));
 }
+
+/**
+ * The deadline one rung may hold when the caller asked to keep time for the rungs after it.
+ *
+ * Report #2428 (2026-11-17): the plan step had 90s and one Surplus call held all of it. The next
+ * rung was then refused with "budget exhausted before this call could start", so Router One, GLM
+ * and Kimi were never tried. The slice is `firstAnswerBoundMs` (at most a third of what is left,
+ * never under the 15s first-answer floor). For a non-streaming rung that slice is both the first
+ * byte and the total, because the body arrives in one shot. A streaming rung still has its own
+ * 15s silence bound inside the runner; this slice is the total it may hold. The last rung is
+ * given the step deadline unchanged — a slow answer from the last engine beats no answer.
+ * Returns the step deadline unchanged when it cannot leave a useful call after this one.
+ */
+export function deadlineLeavingFallback(
+  stepDeadlineAt: number | undefined,
+  nowMs: number,
+  laterRungs: number,
+): number | undefined {
+  if (typeof stepDeadlineAt !== 'number' || !Number.isFinite(stepDeadlineAt) || stepDeadlineAt <= 0) return undefined;
+  if (!Number.isFinite(laterRungs) || laterRungs <= 0) return stepDeadlineAt;
+  const remaining = stepDeadlineAt - nowMs;
+  if (remaining < MIN_USEFUL_CALL_MS) return stepDeadlineAt;
+  const slice = firstAnswerBoundMs(remaining, remaining, 'deadline', true);
+  if (slice <= 0 || remaining - slice < MIN_USEFUL_CALL_MS) return stepDeadlineAt;
+  return nowMs + slice;
+}

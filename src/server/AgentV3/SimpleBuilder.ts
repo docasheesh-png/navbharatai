@@ -1868,7 +1868,7 @@ export interface SimpleBuildDeps {
    * is optional on purpose: a caller (and every test) that omits it gets exactly today's behaviour.
    * See turnDeadline.ts for the report that produced it.
    */
-  generate: (system: string, user: string, opts?: { deadlineAt?: number; mayReason?: boolean }) => Promise<string>;
+  generate: (system: string, user: string, opts?: { deadlineAt?: number; mayReason?: boolean; reserveFallbackBudget?: boolean }) => Promise<string>;
   /**
    * Asked before every per-file call starts, and again whenever one returns a file or fails (Q-982 —
    * the call that carries the decision is usually the one in flight), plus before every repair round:
@@ -2315,7 +2315,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           deps.generate(
             manifestSystemPrompt(deps.framework, deps.scaffoldPaths),
             manifestUserPrompt(deps.prompt, deps.scaffoldPaths, request),
-            { deadlineAt: deadlineFromBudget(planCap, laneStartedAt) },
+            { deadlineAt: deadlineFromBudget(planCap, laneStartedAt), reserveFallbackBudget: true },
           ),
           planCap, 'simple-plan');
       } finally {

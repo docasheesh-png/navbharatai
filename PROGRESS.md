@@ -101733,3 +101733,31 @@ The existing pre-start block (no positive balance, billing on, not a free-list a
 ## 2026-11-17 — no build when the wallet cannot cover it (t403u)
 
 Owner override: a balance of 0, or below the pre-flight estimate, does not start a build at all, including the weak ladder. The same sentence stops a build whose running bill passes that balance; files already written are kept. Admin free-list and the z test account stay exempt. Prices, chat quotas, gift and referral rules are unchanged. An unreadable balance is still not treated as zero.
+
+## 2026-11-17 — DiscountedTokens tries up to three of its own models (owner: "sabse pahle sasta aur accha, response na aaye to 2nd, fail to 3rd, phir aage badho")
+
+Owner report: a DiscountedTokens chat answered (gpt-6-sol, 24 s) but a coding message died as `cancelled`, HTTP status not reported, at **90,001 ms**. That was not the model failing. The admin test page aborts every call at 90 s, and a reasoning model writing code takes longer, so the page cut the reply while it was still being written. The page also called one fixed model only.
+
+Fix (admin Test Chat Bot, all three reseller gateways; the shared class is "a gateway called with one fixed model and one fixed short bound"):
+- `resellerModelLadder` (`resellerGateways.ts`): at most three models, in this order:
+  1. the owner's comma list in `DISCOUNTEDTOKENS_MODEL` / `MOYI_MODEL` / `MIRAPI_MODEL`, in that order;
+  2. else the gateway's default model;
+  3. then the gaps, filled from the key's own `/models` list.
+- `testChatBot.ts` tries the models in order:
+  - Each try reserves its own budget hold.
+  - A model showing no response within **45 s** is given up and the next is tried. Activity is reported by `onActivity`, which fires on every stream event, reasoning included.
+  - A model that IS answering keeps going until the test's **240 s** budget.
+  - A 401/403 stops at once, because a refused key fails every model.
+  - A typed model is the only one tried.
+  - The reply lists every model tried.
+  - When all models fail, the result is `ALL_MODELS_FAILED`, with each attempt shown.
+- The client wait was raised from 100 s to 250 s, so the server bound (90 s, or 240 s for a reseller) decides when a test ends.
+
+Tests:
+- `resellerModelLadder.test.ts`
+- `testChatBot.test.ts`, "the gateway's own three-model fallback". It covers: order, the second model answering, all three failing with no fourth try, a refused key, the 45 s quiet cut versus a 100 s answer that streams, and a typed model.
+- `testChatBotOfficial.test.ts`: activity on reasoning events.
+
+Every new test was proven by reversion.
+
+NOT done: DiscountedTokens in the Pro builder. The tier and position are the owner's call. My recommendation is Normal and Strong, before Sonnet. The same ladder function is ready for a builder rung. Also not done: the "cheapest and good" order. This environment cannot read DiscountedTokens' pricing page, so the order is the owner's list in `DISCOUNTEDTOKENS_MODEL`.

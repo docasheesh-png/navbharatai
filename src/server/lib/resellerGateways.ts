@@ -85,6 +85,8 @@ function onDomain(raw: string, domain: string): string | null {
 
 export type ResellerGatewayState =
   | { ready: true; label: string; apiKey: string; baseUrl: string; model: string | null;
+      /** Every model named in the model env key, in the owner's order (the first is `model`). */
+      models: string[];
       /** The Anthropic-format endpoint for non-OpenAI models, when this gateway has one. */
       anthropicBaseUrl: string | null }
   | { ready: false; label: string; apiKey: string; configured: boolean; reason: string; model: string | null };
@@ -94,7 +96,8 @@ export function resellerGatewayState(id: ResellerGatewayId, env: NodeJS.ProcessE
   const spec = RESELLER_GATEWAYS[id];
   const rawKey = String(env[spec.keyEnv] ?? '').trim();
   const apiKey = rawKey && !/[\s,]/.test(rawKey) ? rawKey : '';
-  const model = String(env[spec.modelEnv] ?? '').split(',').map(v => v.trim()).find(v => /^[\w.:/@+-]{1,128}$/.test(v)) || spec.defaultModel;
+  const models = [...new Set(String(env[spec.modelEnv] ?? '').split(',').map(v => v.trim()).filter(v => /^[\w.:/@+-]{1,128}$/.test(v)))];
+  const model = models[0] || spec.defaultModel;
   if (!apiKey) return { ready: false, label: spec.label, apiKey: '', configured: false, model, reason: `No API credential is set on the server (${spec.keyEnv}).` };
   const rawBase = String(env[spec.baseUrlEnv] ?? '').trim() || spec.defaultBaseUrl || '';
   if (!rawBase) {
@@ -115,7 +118,7 @@ export function resellerGatewayState(id: ResellerGatewayId, env: NodeJS.ProcessE
         reason: `${spec.anthropicBaseUrlEnv} must be an https URL on ${spec.domain} with no port, credentials or query. The key is never sent anywhere else.` };
     }
   }
-  return { ready: true, label: spec.label, apiKey, baseUrl, model, anthropicBaseUrl };
+  return { ready: true, label: spec.label, apiKey, baseUrl, model, models, anthropicBaseUrl };
 }
 
 /** An OpenAI model id (gpt-…, o3, codex-…, chatgpt-…), with or without an `openai/` prefix. */
@@ -129,3 +132,34 @@ export function resellerGatewayRoute(state: Extract<ResellerGatewayState, { read
   if (state.anthropicBaseUrl && !isOpenAiModelId(model)) return { format: 'anthropic', baseUrl: state.anthropicBaseUrl };
   return { format: 'openai', url: `${state.baseUrl}/chat/completions` };
 }
+
+/** At most this many models are tried inside one gateway before the caller moves on. */
+export const RESELLER_MODEL_LADDER_MAX = 3;
+
+/**
+ * THE GATEWAY'S OWN FALLBACK (owner 2026-11-17, DiscountedTokens: "ek fix provider ko hi call kiya ja raha hai …
+ * sabse pahle sasta aur accha call ho, response na aaye to 2nd, fail hone par 3rd (last try), 3rd bhi fail to
+ * discounted token chhod ke aage badho").
+ *
+ * The models to try, in order, at most three:
+ *   1. the models the owner listed in the model env key (e.g. DISCOUNTEDTOKENS_MODEL=cheap-a,cheap-b,good-c),
+ *      in exactly that order: the owner reads the gateway's price page, so the owner's order IS "cheapest and good";
+ *   2. else the gateway's default model (DiscountedTokens: gpt-6-sol, the one the owner's test showed answering);
+ *   3. then the gaps are filled from the key's own /models list, ranked by the shared picker.
+ * Nothing is guessed: with no list and no configured model the ladder is empty and the caller says so.
+ */
+export async function resellerModelLadder(
+  state: Extract<ResellerGatewayState, { ready: true }>,
+  listModels: (baseUrl: string, apiKey: string, configured: string | null, max: number) => Promise<{ models: string[] }>,
+  max = RESELLER_MODEL_LADDER_MAX,
+): Promise<string[]> {
+  const head = state.models.length ? state.models : state.model ? [state.model] : [];
+  const ladder = head.slice(0, max);
+  if (ladder.length < max) {
+    let listed: string[] = [];
+    try { listed = (await listModels(state.baseUrl, state.apiKey, null, max + ladder.length)).models; } catch { listed = []; }
+    for (const id of listed) { if (ladder.length >= max) break; if (!ladder.includes(id)) ladder.push(id); }
+  }
+  return ladder;
+}
+

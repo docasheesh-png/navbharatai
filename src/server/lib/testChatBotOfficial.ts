@@ -82,6 +82,11 @@ export async function runOfficialOpenAiCompatTest(input: {
   maxTokens?: number;
   /** Provider-specific request fields from server code only (never from the client), e.g. Surplus routing. */
   extraBody?: Readonly<Record<string, unknown>>;
+  /**
+   * Called when the provider shows it is answering: the response headers of a non-streamed reply, and every
+   * event of a stream (answer or reasoning). A caller uses it to tell "no response yet" from "still writing".
+   */
+  onActivity?: () => void;
 }): Promise<{ content: string; model: string; usage?: { inputTokens: number; outputTokens: number } }> {
   if (!isOfficialChatUrl(input.url)) throw new OfficialTestChatError('unknown', null, 'url-not-allowlisted', null, null, null, null);
   const openRouterFreeGuard = new URL(input.url).hostname === 'openrouter.ai' && input.allowPaid !== true;
@@ -104,8 +109,10 @@ export async function runOfficialOpenAiCompatTest(input: {
     throw new OfficialTestChatError(name.includes('Timeout') ? 'timeout' : 'network', null, name || 'network', null, null, null, null);
   }
   const requestId = response.headers.get('x-request-id') || response.headers.get('request-id') || response.headers.get('cf-ray');
+  const activity = () => { try { input.onActivity?.(); } catch { /* observation only */ } };
   const isSse = /text\/event-stream/i.test(response.headers.get('content-type') ?? '');
-  if (response.ok && isSse) return readSseReply(response, input, textField(requestId));
+  if (response.ok && isSse) return readSseReply(response, { ...input, onActivity: activity }, textField(requestId));
+  activity();
   let raw = '';
   try { raw = await response.text(); }
   catch {
@@ -178,7 +185,7 @@ function bodyNotFinished(status: number, requestId: string | null, signal: Abort
 }
 
 /** Read an OpenAI-compatible SSE chat stream into one reply. Bounded by the response size limit; no retry. */
-async function readSseReply(response: Response, input: { apiKey: string; model: string; signal: AbortSignal; maxTokens?: number }, requestId: string | null)
+async function readSseReply(response: Response, input: { apiKey: string; model: string; signal: AbortSignal; maxTokens?: number; onActivity?: () => void }, requestId: string | null)
   : Promise<{ content: string; model: string; usage?: { inputTokens: number; outputTokens: number } }> {
   const reader = response.body?.getReader();
   if (!reader) throw bodyNotFinished(response.status, requestId, input.signal, 0);
@@ -189,6 +196,7 @@ async function readSseReply(response: Response, input: { apiKey: string; model: 
     const trimmed = line.trim();
     if (!trimmed.startsWith('data:')) return;
     const data = trimmed.slice(5).trim();
+    input.onActivity?.();
     if (data === '[DONE]') { done = true; return; }
     let event: unknown;
     try { event = JSON.parse(data); } catch { return; }

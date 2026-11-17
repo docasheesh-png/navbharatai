@@ -153,7 +153,7 @@ export function redactReportSecrets(report: BuildDiagnosticsReport): BuildDiagno
     issues: report.issues?.map((i) => ({ ...i, message: redactSecrets(i.message), detail: rs(i.detail) })),
     problems: report.problems?.map((i) => ({ ...i, message: redactSecrets(i.message), detail: rs(i.detail) })),
     commands: report.commands?.map((c) => ({ ...c, command: redactSecrets(c.command), stdout: redactSecrets(c.stdout), stderr: redactSecrets(c.stderr) })),
-    llmCalls: report.llmCalls?.map((c) => ({ ...c, promptPreview: rs(c.promptPreview), responsePreview: rs(c.responsePreview) })),
+    llmCalls: report.llmCalls?.map((c) => ({ ...c, promptPreview: rs(c.promptPreview), responsePreview: rs(c.responsePreview), error: rs(c.error) })),
     errors: report.errors?.map((e) => ({ ...e, message: redactSecrets(e.message), stack: rs(e.stack) })),
     generatedFiles: report.generatedFiles?.map((f) => ({ ...f, content: redactSecrets(f.content) })),
     previewErrors: report.previewErrors?.map((p) => ({ ...p, message: redactSecrets(p.message) })),

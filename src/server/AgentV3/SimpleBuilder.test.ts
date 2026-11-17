@@ -228,6 +228,26 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     }
   });
 
+  it('the plan call reserves fallback budget and a file call does not (#2428)', async () => {
+    const planFlags: boolean[] = [];
+    const fileFlags: boolean[] = [];
+    await runSimpleBuild(baseDeps({
+      shareContract: false,
+      generate: async (_s: string, user: string, opts?: { reserveFallbackBudget?: boolean }) => {
+        if (user.includes('Plan the file list')) {
+          planFlags.push(opts?.reserveFallbackBudget === true);
+          return 'src/App.tsx :: root\nsrc/TodoList.tsx :: the list';
+        }
+        fileFlags.push(opts?.reserveFallbackBudget === true);
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        return `<<<FILE ${path}>>>\n// ${path}\nexport default function X(){return null}\n<<<ENDFILE>>>`;
+      },
+    }));
+    expect(planFlags).toEqual([true]);
+    expect(fileFlags.length).toBeGreaterThan(0);
+    expect(fileFlags.every((flag) => flag === false)).toBe(true);
+  });
+
   // WIRING TESTS for the budget allocation (admin report 858f6d7b). FastLaneBudget's own unit tests prove
   // the arithmetic; these prove runSimpleBuild actually USES it. Without them the pure functions could be
   // perfect and the lane could still starve its file-generation phase — which is precisely the bug that

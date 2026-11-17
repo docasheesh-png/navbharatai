@@ -18,10 +18,11 @@ import { streamingBudget, streamNoClampEnabled } from '../reliability/streamBudg
 import { modelAcceptsReasoningPassback, reasoningPassbackEnabled } from '../reliability/reasoningPassback';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { turnDeadline, firstAnswerBoundMs, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_STREAM_MESSAGE, SILENT_OPEN_MARK, isSlowStreamAbandon } from '../turnDeadline';
+import { answerCarriedInReasoning, reasoningContinuationMessages } from './reasoningContinuation';
 import { glmThinkingParam, isThinkingParamRejection, modelAlwaysReasons, type GlmThinkingLevel } from './glmThinking';
 import { reconcileFloorBudget, turnStarvedItsBudget, starvedBudgetError } from '../floorBudget';
 import { markAbandonedTurn } from '../unbilledTurns';
-import { BuildStoppedError, onStop, raceStop, throwIfStopped } from '../stopSignal';
+import { BuildStoppedError, isBuildStoppedError, onStop, raceStop, throwIfStopped } from '../stopSignal';
 import {
   toolDefsToOpenAI,
   transcriptToOpenAI,
@@ -676,6 +677,11 @@ export class OpenAiToolRunner implements TurnRunner {
     // Throwing puts it where it belongs: the chain falls to the NEXT rung, which is a different
     // vendor and usually not a forced-thinking one, and the build proceeds instead of ending empty.
     if (turnStarvedItsBudget(result)) {
+      const reasoning = typeof completion.choices?.[0]?.message?.reasoning_content === 'string'
+        ? completion.choices[0].message.reasoning_content
+        : '';
+      const recovered = await this.recoverStarvedAnswer(params, result, reasoning, configuredMs);
+      if (recovered) return recovered;
       // Learn it, so this model is never clamped again in this process. Only a CLAMPED starvation is
       // evidence — see `modelStarvedWhileClamped`.
       if (!budget.reasoningUnclamped) rememberStarvedWhileClamped(thinkingModel);
@@ -708,5 +714,49 @@ export class OpenAiToolRunner implements TurnRunner {
     return streamedText && openedAt !== null
       ? { ...result, openedAfterMs: Math.max(0, openedAt - startedAt), ...(firstOutputAt !== null ? { firstOutputAfterMs: Math.max(0, firstOutputAt - startedAt) } : {}) }
       : result;
+  }
+
+  /**
+   * A starved turn spent our output cap on reasoning (#2430). Use the answer when it is already
+   * in that reasoning, otherwise ask once for the answer with the reasoning tail attached.
+   * A continuation that starves again returns null so the caller throws the original failure
+   * and the chain can move to the next rung. One continuation only.
+   */
+  private async recoverStarvedAnswer(
+    params: RunTurnParams,
+    result: TurnResult,
+    reasoning: string,
+    configuredMs: number,
+  ): Promise<TurnResult | null> {
+    // A tool turn's answer is a tool call. A file list found in its reasoning is planning, not
+    // the call, so only a text turn (the plan and the per-file lane) may use that text as-is.
+    const carried = params.tools?.length ? null : answerCarriedInReasoning(reasoning);
+    if (carried) {
+      if (params.onText) params.onText(carried);
+      const { reasoningOnly: _dropped, truncated: _cut, ...rest } = result;
+      return { ...rest, text: carried, stopReason: 'end_turn', rawContent: [{ type: 'text', text: carried }] };
+    }
+    if (params.reasoningContinuation || !reasoning.trim()) return null;
+    if (turnDeadline(configuredMs, params.deadlineAt).expired) return null;
+    try {
+      const continued = await this.runTurn({
+        ...params,
+        messages: reasoningContinuationMessages(params.messages, reasoning),
+        reasoningContinuation: true,
+      });
+      if (turnStarvedItsBudget(continued) || (!continued.text.trim() && continued.toolUses.length === 0)) return null;
+      return {
+        ...continued,
+        usage: {
+          inputTokens: result.usage.inputTokens + continued.usage.inputTokens,
+          outputTokens: result.usage.outputTokens + continued.usage.outputTokens,
+          cacheCreationInputTokens: (result.usage.cacheCreationInputTokens ?? 0) + (continued.usage.cacheCreationInputTokens ?? 0),
+          cacheReadInputTokens: (result.usage.cacheReadInputTokens ?? 0) + (continued.usage.cacheReadInputTokens ?? 0),
+        },
+      };
+    } catch (err) {
+      if (isBuildStoppedError(err) || params.signal?.aborted) throw err;
+      return null;
+    }
   }
 }

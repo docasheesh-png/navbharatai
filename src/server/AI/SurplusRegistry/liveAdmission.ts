@@ -3,7 +3,7 @@
  * Missing verified records decline Weak-builder admission; diagnostic bots are separate.
  */
 import { createHash } from 'node:crypto';
-import { parseEnvFlag } from '../../lib/envFlag';
+import { surplusBuilderSwitchOn } from '../../lib/alwaysOnSuppliers';
 import { SURPLUS_MIN90_BASE_URL } from '../../lib/surplusClient';
 import type { SurplusCapabilityReview } from './buildSession';
 import type { SurplusOfficialTariff } from './receiptPolicy';
@@ -42,8 +42,9 @@ export function surplusLiveKey(env: NodeJS.ProcessEnv = process.env): string | n
   return key;
 }
 
+/** Surplus can serve a build: the switch is not off (default ON) AND a usable key is set. */
 export function surplusBuilderLive(env: NodeJS.ProcessEnv = process.env): boolean {
-  return parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) === true && !!surplusLiveKey(env);
+  return surplusBuilderSwitchOn(env) && !!surplusLiveKey(env);
 }
 
 export function credentialSha256(key: string): string {
@@ -110,7 +111,7 @@ function synthesizeOwnerLiveReviews(
 ): LiveProductionReviews {
   const key = surplusLiveKey(env);
   if (!key) throw new Error('Surplus API key missing or invalid for live builder');
-  if (parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) !== true) throw new Error('Surplus builder is disabled');
+  if (!surplusBuilderSwitchOn(env)) throw new Error('Surplus builder is disabled');
 
   const expiresAt = now + EVIDENCE_TTL_MS;
   const reviewedAt = Math.max(0, now - 1_000);

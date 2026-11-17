@@ -101709,3 +101709,52 @@ The second review found that the neighbour rule counted a line ending in `,` or 
 ## 2026-11-17 — BR1998 third rework (the strict belt for a lone @Name)
 
 The third review found that a lone `@Header` or `@Login` sandwiched between code lines (three `const` lines, then the token, then a function), with or without an intro line, was still dropped. Took the strict belt: a lone token is dropped only when its name is on a conservative, case-insensitive allowlist of real Dart, Java, Kotlin, TS/Angular, Spring/JPA and JUnit annotations (no app-file or screen names), and the very next line, with no blank line between, ends in `{ } ;` or is another known annotation. Tokens with code after them on their line keep the earlier rules. The report's `@override` and the Java, Kotlin, TS and Spring fixtures are still silenced. Added 13 tests (49 in the file); all earlier probes still warn; mutation round 4 (40 mutants) ends with every behavioural mutant caught.
+
+## 2026-11-17 — Surplus Pro builder is default ON
+
+Owner: "surplus ko bhi default on karo". `AGENTV3_SURPLUS_BUILDER` is now ON unless explicitly off, matching
+Mitrify, Qubax, CheaperInference and BluesMinds. The switch moved to `surplusBuilderSwitchOn` in
+`alwaysOnSuppliers.ts`; the eight places that each compared the flag to `true` (buildSession, liveAdmission x2,
+productionAdapter, transport x2, the route via `surplusBuilderEnabled`, one test fixture) now read it there.
+`surplusBuilderEnabled` additionally requires a usable `SURPLUS_API_KEY`, so a keyless server (CI, local) takes the
+same no-I/O ladder path as before. Production already had the flag `on` (owner-reported 2026-10-25), so behaviour
+there does not change. Tests: `tests/surplusBuilderDefaultOn.test.ts` (default, kill switch, keyless, and a census
+that fails when another file reads the flag; proven by putting a raw reader back in `productionAdapter.ts`).
+Not verified: a live Surplus build; this session cannot read Cloud Run's env or reach Surplus.
+
+## 2026-11-17 — Moyi API is a Pro Weak builder rung, after BluesMinds
+
+Owner: "moyi api ko bhi bluesminds ke baad lagao, its working". Weak order: Surplus → Router One → BluesMinds → Moyi →
+tier ladder. `src/server/AgentV3/moyiBuilder.ts` mirrors `bluesmindsBuilder.ts`: neutral label `ENGINE_MY`, brand-neutral
+errors, off-ladder census, label and name added to the redaction lists. The rung exists only when `MOYI_API_KEY`,
+`MOYI_BUILDER_MODEL` and `MOYI_BUILDER_RATE_IN/_OUT` are all set: no model id is guessed and no price is invented.
+Claude-family model ids are dropped from the list. Tests: `tests/weakMoyiOrder.test.ts` (order in every lane, each
+missing key removes the rung and leaves the old chain, own-domain endpoint, rate, brand; the no-Claude filter was
+proven by reversion). This closes the 2026-11-16 open item for Moyi, for all Weak users rather than only the
+z test account, by the owner's new order. DiscountedTokens and MirAPI remain Test Chat Bot only.
+OPEN: tool calling on the chosen Moyi model is unverified until a real Weak build runs through `ENGINE_MY`.
+
+## 2026-11-17 — Moyi builder rung works with the key alone, for every Weak user
+
+Owner: "moyi ai ko sabhi user ke liye default on kar do". `MOYI_BUILDER_MODEL` and `MOYI_BUILDER_RATE_IN/_OUT` are now
+optional. With only `MOYI_API_KEY`, the rung reads Moyi's own `/models` list (cached 6 h, background refresh) and runs up
+to two listed models that have a published price, priced from `MOYI_PUBLISHED_RATES` (Moyi's own page, owner-supplied
+2026-11-16). No model id is guessed: until the list has been read, a build runs without the rung (proven by reversion:
+returning a guessed id on an empty list failed 3 tests). Owner-set model/rate keys still win. Not verified live: whether
+Moyi's ids match the table's patterns, and whether the chosen model honours tool calling; the first Weak build reports
+will show `ENGINE_MY` turns or failures.
+## 2026-11-17 — builder fallthrough after phone drop (t400u)
+
+#2407 and #2408 failed ENGINE_UNAVAILABLE. Router One was marked stopped when the viewer's HTTP response closed, so a phone disconnect refused that rung before any request (`scope_stopped`). The stall banner treated "not in this process's memory" as the build being dead even when the workspace lease was still heartbeating. A build now keeps Router One until its own abort, status reports `buildHeldElsewhere` while the lease is live, and a BUILD_STARTED row is saved as soon as the report object exists. Account keys with an `ak-` prefix are redacted from stored reports and user-facing errors. Quotas, billing, referral, and white-label rules are unchanged. The wallet chip showing 0 tokens is the real token balance; it does not select the weak ladder by itself, and a paid refusal is still the 402 credits card.
+
+## 2026-11-17 — recharge sentence when the wallet cannot cover a build (t402u)
+
+The existing pre-start block (no positive balance, billing on, not a free-list account) now says the owner's sentence: Hindi when the request is Hindi, English otherwise, with a Recharge button. A stream error with that code uses the same card, not the stall banner. The step clock ("build budget exhausted") and a supplier account with no balance are not the user's wallet and do not show this sentence. Who is allowed to start is unchanged, including a free weak-ladder build the gate already allows.
+
+## 2026-11-17 — no build when the wallet cannot cover it (t403u)
+
+Owner override: a balance of 0, or below the pre-flight estimate, does not start a build at all, including the weak ladder. The same sentence stops a build whose running bill passes that balance; files already written are kept. Admin free-list and the z test account stay exempt. Prices, chat quotas, gift and referral rules are unchanged. An unreadable balance is still not treated as zero.
+
+## 2026-11-17 — BR1998 fourth rework (colliding names and a stack with no declaration)
+
+The fourth review found that the allowlist still contained names that are also plausible app files or components (`Input`, `Preview`, `Test`, `Component`, and others), so a tight sandwich such as three `const` lines, then `@Preview`, then `function Preview() {` dropped the warning; and that a following known annotation was enough even when no declaration followed, so `@Input` then `@Component` then a request, or `@Input` then `@Override` at EOF, also dropped the warning. Removed every colliding name (input, output, component, test, entity, directive, id, required, immutable, protected, preview, inject; the rest of the list was audited). A following known annotation now counts only if a no-blank walk (cap 8 hops) actually reaches a line ending in `{ } ;`. Annotations with arguments (`@Input()`, `@Component({`, `@Test()`) still drop through the unchanged non-lone path. Accepted residual: a paren-less Compose `@Preview` above `fun Foo()` warns again (fail-safe). 55 tests; all 49 earlier tests still pass; the three earlier FAIL probes still warn.

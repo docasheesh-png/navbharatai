@@ -4779,7 +4779,17 @@ selection remains non-dispatchable. The separate opt-in Builder adapter below co
 reviewed observations and honors exclusions; neither flag is activated by this change.
 See `docs/SURPLUS_REGISTRY.md` for the bounded candidate list and honest activation blockers.
 
-## Surplus Pro tool-loop integration (2026-10-24; default OFF)
+## Surplus Pro tool-loop integration (2026-10-24; default OFF until 2026-11-17, now default ON)
+
+🔴 **DEFAULT ON since 2026-11-17 (owner, verbatim: "surplus ko bhi default on karo").** `AGENTV3_SURPLUS_BUILDER`
+unset, empty or unrecognised = ON; only `off` / `false` / `0` / `no` turns it off (the emergency kill switch).
+One function reads it: `surplusBuilderSwitchOn` in `src/server/lib/alwaysOnSuppliers.ts`
+(`tests/surplusBuilderDefaultOn.test.ts` fails if another file reads the flag itself). Surplus serves a Weak
+build only when a usable `SURPLUS_API_KEY` is also set (`surplusBuilderLive`); with no key the build runs on
+its tier ladder with no Surplus I/O, exactly as the old default-OFF did. Cloud Run already had the flag `on`
+(owner-reported 2026-10-25, below), so this changes nothing in production today: it removes the dependence on
+that variable staying set. Everything else in this section (Weak only, `/min90/v1`, admission, billing) is unchanged.
+The paragraph below is the original 2026-10-24 text and describes the explicit-off path.
 
 `AGENTV3_SURPLUS_BUILDER=false`: opt-in only. OFF bypasses new registry/review/receipt I/O and leaves existing Weak/Normal/Strong ladders and billing unchanged. ON requires independent server account/credential/pilot, quality, capability, official tariff and usage reviews before any Surplus HTTP. No defaults grant a live pilot. Main build inference uses fixed `/min90/v1`, provider-family allowlist and price objective; no ordinary paid fallback. Plain chat, Doctor, media and VM pricing are separate and unchanged. Full scope, concurrency, retention and honest activation blockers: `docs/SURPLUS_BUILDER.md`. Earlier observer-only notes describe Phase 1; this later opt-in caller does not turn it on.
 
@@ -5098,6 +5108,10 @@ Code defaults only; no Cloud Run variable is required. Every switch below is ON 
 
 ## 2026-11-16 — Discount reseller gateways: Moyi API, DiscountedTokens, MirAPI (admin Test Chat Bot ONLY)
 
+🔴 **CORRECTED 2026-11-17: Moyi is no longer Test-Chat-Bot-only.** The owner tested it ("its working") and ordered
+*"moyi api ko bhi bluesminds ke baad lagao"*: Moyi is now a Pro Weak builder rung. See the 2026-11-17 entry below.
+DiscountedTokens and MirAPI are still Test Chat Bot only.
+
 Owner, verbatim: *"Moyi API, DiscountedTokens aur mir api se shuru karo! abhi bas 'test chat bot' me add karo"*.
 Three OpenAI-compatible resellers under evaluation as low-cost suppliers until NavBharatAI contracts with the
 model makers directly. **They are called from Admin → AI Engines → Test Chat Bot and nowhere else**: not user
@@ -5141,3 +5155,22 @@ One module owns their env: `src/server/lib/resellerGateways.ts`. Key VALUES are 
 - **Reviewed and NOT added:** OpenCheese (buys third-party API credits and keys; sells safety-removed
   "abliterated" models) is rejected. CloseRouter (anonymised upstreams, inverted prices) and faborapi
   (prepaid credit packs, site unread) are not added. Infron, MaxonForge, APInex and relay.fast were not reviewed.
+
+
+## 2026-11-17 — Moyi API as a Pro Weak builder rung (owner: "moyi api ko bhi bluesminds ke baad lagao, its working")
+
+**Pro order (Weak) is now:** Surplus → Router One → BluesMinds → **Moyi** → Weak tier ladder. Normal and Strong are
+unchanged. Module: `src/server/AgentV3/moyiBuilder.ts` (same shape as `bluesmindsBuilder.ts`). Neutral label `ENGINE_MY`.
+
+| Key | Meaning |
+|---|---|
+| `MOYI_API_KEY` | Required (shared with the Test Chat Bot). No key ⇒ no rung. **With the key alone the rung is ON for every Weak user** (2026-11-17). Owner reports Moyi working on 2026-11-17; value not recorded. |
+| `MOYI_BUILDER_MODEL` | **Optional since 2026-11-17 (owner: "moyi ai ko sabhi user ke liye default on kar do").** Unset ⇒ the model ids are read from Moyi's own `GET /models` for the key (cached 6 h, refreshed in the background, retried after 60 s on failure), and up to two that match a priced row of `MOYI_PUBLISHED_RATES` (`moyiBuilder.ts`) are used, in that order: Grok 4.7, GPT-6.1 Terra, Grok 4.6, GPT-5.6 Terra, DeepSeek V4.1 Flash. "Fast" variants are skipped. No id is guessed: until the list has been read once (the first Weak build after a deploy starts the read), a build runs without the rung. When set, the listed ids are used. Any id naming a Claude family (`claude`, `anthropic`, `sonnet`, `opus`, `haiku`, `fable`) is dropped either way. |
+| `MOYI_BUILDER_RATE_IN` / `MOYI_BUILDER_RATE_OUT` | **Optional since 2026-11-17.** When set, they price every Moyi model (the owner's real account rate wins). Unset ⇒ each model is priced from `MOYI_PUBLISHED_RATES`: Moyi's own discounted prices from the model page the owner supplied on 2026-11-16 (Grok 4.7/4.6 $0.30/$0.90, GPT-6.1 Terra $0.171/$0.855, GPT-5.6 Terra $0.342/$2.052, DeepSeek V4.1 Flash $0.1275/$0.51 per 1M). Base context tier only; Moyi marks some rows context-tiered, so set these keys if long builds are billed higher. A model with neither price is not run. |
+| `MOYI_BUILDER_ENABLED` | Default ON. Only `off`/`false`/`0`/`no` removes the rung (kill switch). |
+| `MOYI_BASE_URL` | As above; the builder always uses this OpenAI-format endpoint (default `https://api.moyi-api.com/v1`), never the Anthropic-format one. |
+
+- **Not verified from here:** whether the chosen Moyi model honours tool calling, which the builder needs. A turn it
+  cannot do fails and the chain moves to the next rung; the build report will show `ENGINE_MY` failures if so.
+- **Owner's recorded risk:** users' prompts and code on Weak builds now pass through Moyi, a reseller whose upstream
+  and "No training" label are its own claims and whose rate limits were not published on the reviewed page.

@@ -33,7 +33,7 @@ export const VENDOR_BRAND_PATTERNS: readonly RegExp[] = [
   /\bqubax(?:\.ai)?\b/gi,
   /\bmitrify(?:\.com)?\b(?!\.[a-z])/gi,
   /\b(?:api\.)?blu(?:e|sh)s?minds?(?:\.com)?\b/gi,
-  /\bENGINE_(?:R1|BM|QX|MF)\b/g,
+  /\bENGINE_(?:R1|BM|MY|QX|MF)\b/g,
   /\bsurplus\b/gi,
   /\b(?:aws\s+)?bedrock\b/gi,
   /\b(?:amazon\s+nova|nova\s+sonic)\b/gi,

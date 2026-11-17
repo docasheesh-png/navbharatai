@@ -1,7 +1,7 @@
 import { surplusUnattemptedEvidence } from './failureEvidence';
 import { tagScopeFailure } from '../../AgentV3/scopeFailureDiagnostic';
 import { createHash } from 'node:crypto';
-import { parseEnvFlag } from '../../lib/envFlag';
+import { surplusBuilderSwitchOn } from '../../lib/alwaysOnSuppliers';
 import { getServerDb } from '../../lib/serverDb';
 import { persistSurplusReceipt, reserveSurplusAttempt, resolveSurplusUnattempted, type SurplusPilotAuthority } from './receiptStore';
 import { planSurplusDispatchCandidate } from './selector';
@@ -106,7 +106,7 @@ export function normalizeSurplusCompletion(completion: OpenAiCompletionLike, exp
 }
 /** Configuration permits evaluation, but never substitutes for verified evidence. */
 function assertLive(env: NodeJS.ProcessEnv): string {
-  if (parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) !== true) throw new Error('Surplus builder is disabled');
+  if (!surplusBuilderSwitchOn(env)) throw new Error('Surplus builder is disabled');
   const key = surplusLiveKey(env);
   if (!key) throw new Error('Surplus API key missing or invalid for live builder');
   return key;

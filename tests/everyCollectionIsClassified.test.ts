@@ -22,7 +22,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import {
   RETENTION_POLICIES, RETAINED_INDEFINITELY, USER_SCOPED_COLLECTIONS,
 } from '../src/server/lib/DataRetentionManager';
@@ -478,7 +478,9 @@ function scanServer(): ScanResult {
       const p = join(dir, entry);
       if (statSync(p).isDirectory()) { walk(p); continue; }
       if (!/\.ts$/.test(p) || /\.test\.ts$/.test(p)) continue;
-      const rel = p.replace(root + '/', '');
+      // Normalize scanner keys because `join()` uses `\\` on Windows while
+      // the registry is intentionally repository-relative POSIX paths.
+      const rel = relative(root, p).replace(/\\/g, '/');
       const src = stripComments(readFileSync(p, 'utf8'));
       for (const re of [CONST_FORM, WEB_COLLECTION_FORM, WEB_DOC_FORM]) {
         re.lastIndex = 0;

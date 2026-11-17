@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { evaluateAudit, isAuditErrorResponse, loadAllowlist, blockingAdvisoryIds } from '../scripts/auditGate.mjs';
+import { evaluateAudit, isAuditErrorResponse, loadAllowlist, blockingAdvisoryIds, parseAuditOutput } from '../scripts/auditGate.mjs';
 import { readFileSync } from 'node:fs';
 
 function audit(vulns: Record<string, { severity: string }>) {
@@ -87,6 +87,23 @@ describe('isAuditErrorResponse (2026-07-26 — the legacy /audits/quick endpoint
     expect(isAuditErrorResponse(weird)).toBe(false);
   });
 });
+
+describe('parseAuditOutput', () => {
+  it('reads a valid audit report from stderr when npm exits non-zero for vulnerabilities', () => {
+    const report = { vulnerabilities: { pkg: { severity: 'moderate' } } };
+    expect(parseAuditOutput('', JSON.stringify(report))).toEqual(report);
+  });
+
+  it('preserves a registry error body that follows npm diagnostics', () => {
+    const error = { statusCode: 503, error: { summary: 'registry unavailable' } };
+    expect(parseAuditOutput('', `npm error audit endpoint returned an error\n${JSON.stringify(error)}`)).toEqual(error);
+  });
+
+  it('fails closed for empty output', () => {
+    expect(() => parseAuditOutput('', '')).toThrow('npm audit produced no output');
+  });
+});
+
 
 // Q-619 (forensic audit 2026-10-04): the allowlist accepted a PACKAGE, so once axios was triaged for one
 // advisory, seven later HIGH advisories in axios passed with nobody looking. An entry now accepts only the

@@ -90,22 +90,52 @@ export function loadAllowlist(path = '.audit-allowlist.json') {
   }
 }
 
-/** Run `npm audit --json` and return the parsed object (audit exits non-zero when vulns exist — we read stdout regardless). */
+/**
+ * Parse npm's JSON report from either stream. npm writes a vulnerability
+ * report to stderr on some supported versions when it exits non-zero, so
+ * treating stdout as the only source turns a real clean high/critical scan
+ * into a false CI failure.
+ */
+export function parseAuditOutput(stdout, stderr = '') {
+  const outputs = [stdout, stderr].filter((value) => String(value).trim());
+  for (const output of outputs) {
+    const text = String(output).trim();
+    try {
+      return JSON.parse(text);
+    } catch {
+      // Registry failures can prefix a JSON body with npm diagnostics. Parse
+      // that body too so isAuditErrorResponse can fail closed with its cause.
+      const jsonStart = text.indexOf('{');
+      if (jsonStart >= 0) {
+        try {
+          return JSON.parse(text.slice(jsonStart));
+        } catch {
+          // Continue to the other stream before reporting an invalid payload.
+        }
+      }
+    }
+  }
+  if (!outputs.length) throw new Error('npm audit produced no output');
+  throw new Error('npm audit produced invalid JSON');
+}
+
+/** Run `npm audit --json` and return the parsed object (audit exits non-zero when vulns exist). */
 function runNpmAudit() {
-  let out = '';
+  let stdout = '';
+  let stderr = '';
   // `npm` is a .cmd shim on Windows and cannot be spawned by execFileSync without a shell. npm
   // exposes its actual CLI entry point while running scripts, so invoke that with this Node binary
   // (works on Windows and CI Linux without shell quoting).
   const npmCli = process.env.npm_execpath;
   try {
-    out = npmCli
+    stdout = npmCli
       ? execFileSync(process.execPath, [npmCli, 'audit', '--json'], { encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 })
       : execFileSync('npm', ['audit', '--json'], { encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 });
   } catch (err) {
-    out = err.stdout ? err.stdout.toString() : '';
+    stdout = err.stdout ? err.stdout.toString() : '';
+    stderr = err.stderr ? err.stderr.toString() : '';
   }
-  if (!out.trim()) throw new Error('npm audit produced no output');
-  return JSON.parse(out);
+  return parseAuditOutput(stdout, stderr);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {

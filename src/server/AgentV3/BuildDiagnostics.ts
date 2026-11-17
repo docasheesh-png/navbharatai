@@ -4457,12 +4457,12 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
       // "0 in · 0 out". Zeros read as a measurement, and this exact line made me report to the admin
       // that a build had served zero tokens from cache when in truth nothing had been written yet.
       const tokenPart = row.known
-        ? `${row.inTok.toLocaleString()} in · ${row.outTok.toLocaleString()} out · ${row.total.toLocaleString()} total`
+        ? `${row.inTok.toLocaleString('en-US')} in · ${row.outTok.toLocaleString('en-US')} out · ${row.total.toLocaleString('en-US')} total`
         : 'tokens not recorded';
       lines.push(`  ${row.name.padEnd(8)}: ${row.calls} call(s) · ${tokenPart}`);
     }
     if (usage.tokens) {
-      lines.push(`  ${'TOTAL'.padEnd(8)}: ${totCalls} call(s) · ${totIn.toLocaleString()} in · ${totOut.toLocaleString()} out · ${(totIn + totOut).toLocaleString()} total`);
+      lines.push(`  ${'TOTAL'.padEnd(8)}: ${totCalls} call(s) · ${totIn.toLocaleString('en-US')} in · ${totOut.toLocaleString('en-US')} out · ${(totIn + totOut).toLocaleString('en-US')} total`);
     }
     if (usage.caveat) lines.push(`  ${usage.caveat}`);
     // WHICH ENGINES WERE EVEN AVAILABLE (autopsy f04421ef). A provider missing from the table above is
@@ -4477,13 +4477,13 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
     if (typeof r.billing.billedUsd === 'number') {
       const inr = typeof r.billing.billedInr === 'number' ? `₹${r.billing.billedInr.toFixed(2)} ` : '';
       const wallet = typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0
-        ? ` · ${r.billing.walletTokensDebited.toLocaleString()} wallet tokens debited` : '';
+        ? ` · ${r.billing.walletTokensDebited.toLocaleString('en-US')} wallet tokens debited` : '';
       // A capped debit says so: the bill above is NOT what the wallet paid (lib/chargeRecord.ts).
       const capped = r.billing.partialDebit && typeof r.billing.walletDebitedInr === 'number'
         ? ` · PARTIAL DEBIT: wallet paid ₹${r.billing.walletDebitedInr.toFixed(2)}, ₹${(r.billing.absorbedInr ?? 0).toFixed(2)} absorbed by the overdraft floor` : '';
       lines.push(`Charged to user: ${inr}($${r.billing.billedUsd.toFixed(4)})${r.billing.billedUsd === 0 ? ' — FREE build' : ''}${wallet}${capped}`);
     } else if (typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0) {
-      lines.push(`Charged to user: ${r.billing.walletTokensDebited.toLocaleString()} wallet tokens debited`);
+      lines.push(`Charged to user: ${r.billing.walletTokensDebited.toLocaleString('en-US')} wallet tokens debited`);
     }
     if (r.billing.zeroBillReason) lines.push(`Why free : ${r.billing.zeroBillReason}`);
     // Cap-4 cost-alerting: surface an unusually expensive build (admin-only, env-gated, default off).

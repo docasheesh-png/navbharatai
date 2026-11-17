@@ -76,6 +76,11 @@ export interface MeasuredFacts {
    * playable" claim about the game stands only on 'passed' (autopsy 61279465: "The 3D train simulator game is
    * complete and working properly" about a game the playtest timed out on). Omitted ⇒ not a canvas game, not judged.
    */
+  /**
+   * Whether this build relaunched the dev server or only found it running (BuildDiagnostics.devServerLaunchEvidence).
+   * A "restarted the preview" claim is contradicted only on 'reused' (Q-2714). Omitted ⇒ not judged.
+   */
+  devServerLaunch?: 'relaunched' | 'reused';
   /** Explicit create/reload evidence only; a generic submit or paint cannot prove persistence. */
   persistence?: 'passed' | 'failed' | 'not-run';
   /** A functional journey outcome is distinct from rendering and static readiness. */
@@ -155,7 +160,7 @@ export interface MeasuredFacts {
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'functionality-unverified' | 'persistence-unverified' | 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable';
+export type ClaimKind = 'functionality-unverified' | 'persistence-unverified' | 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable' | 'restart-claimed';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -450,6 +455,8 @@ const GAME_DELIVERED_CLAIM = /(?:\b(?:built|created|implemented|delivered)\b[^.!
 // is never a verdict.
 const GAME_WORKS_CLAIMED_MORE = /\b(verified working|fully healthy|healthy and working|renders correctly|you can play it|play it right now|kaam kar raha hai|kaam karta hai|chal raha hai|khel sakte ho)\b/i;
 const APP_VERDICT_CLAIMED = /\b(fully shippable|ready to ship|no bugs left|nothing left (?:broken|to fix)|everything is verified(?: working)?|everything is working)\b/i;
+// "It's now restarted", "I restarted the dev server", "the server had gone stale" — a restart, or the outage it fixed.
+const RESTART_CLAIMED = /\b(?:(?:it'?s|it is|is) now restarted|(?:i )?(?:restarted|relaunched|rebooted) (?:the |your )?(?:dev |development |preview )?(?:server|preview)|(?:server|preview) had gone stale)\b/i;
 const GAME_DELIVERY_NOT_ASSERTED = /\b(?:not|never|cannot|can't|isn't|is not|wasn't|doesn't|does not|will|would|could|should|plan(?:ning)?|when|if|until|before|once)\b/i;
 
 
@@ -557,6 +564,17 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
           : 'NavBharatAI could not finish playing it in a real browser, so whether it is playable is NOT VERIFIED',
       });
     }
+  }
+  // A RESTART NOBODY PERFORMED (Q-2714): the launch was answered "reused it (no relaunch)" and the summary says the
+  // preview was restarted — and with it an outage that the build's own record never contained.
+  if (facts.devServerLaunch === 'reused') {
+    // By SENTENCE: the reported line carried the claim and an offer ("ask me to restart") side by side.
+    const line = text.split(/(?<=[.!?])\s+|\n+/).find((l) => RESTART_CLAIMED.test(l.replace(/[*_`]/g, '')) && !/\b(?:if|when|ask me to|can restart|will restart|would restart|could restart)\b/i.test(l));
+    if (line) out.push({
+      kind: 'restart-claimed',
+      claimed: 'that the preview or its server was restarted',
+      measured: 'the dev server was already running and was reused as it was — nothing was restarted on this run',
+    });
   }
   if (facts.journeyOutcome && facts.journeyOutcome !== 'passed' && facts.gamePlayed !== 'passed') {
     const line = text.split(/\n+/).find(l => /\b(?:app|features?|functionality)\b/i.test(l)

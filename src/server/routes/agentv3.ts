@@ -25764,6 +25764,7 @@ async function noteBuildOutcome(
           phoneLayout: phoneProof,
           // "complete and working properly" stands for a canvas game only when the playtest PASSED (autopsy 61279465).
           gamePlayed: gateEvidence.game,
+          devServerLaunch: buildDiag.devServerLaunchEvidence(),
           persistence: persistenceProof,
           journeyOutcome: gateEvidence.journeys === 'passed' ? 'passed' : gateEvidence.journeys === 'failed' ? 'failed' : 'not-run',
           screenshotTaken: buildDiag.toolWasUsed('screenshot'),

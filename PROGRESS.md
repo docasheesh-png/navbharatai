@@ -101752,3 +101752,80 @@ Fix (`GameShellGenerator.ts`, the shared shell):
 Test: `tests/aGameRunsWhenItSaysItIsPlaying.test.ts` runs the REAL generated `Game.ts` and `core/state.ts`. It covers setup setting 'playing', the menu first frame, a later 'playing' from game code, and a disposed game. Reverting the shell fails 3 of the 4 tests. All 693 game-shell tests pass.
 
 Still open from this report: the build that said "100/100, fully shippable" while the release gate was RED (autopsy item), and the preview that would not wake 3 days after a failed build.
+## 2026-11-17 — an empty provider account is recognised by every router (owner: "jis provider ka balance khatam hoga, woh khud hi band ho jayega"; "user ko 100% response mile, jaldi bhi mile")
+
+Class: "has this provider account run out?" was answered by four private copies that had drifted. One shared, pure module now answers it: `src/server/lib/providerAccountQuota.ts`.
+
+What was wrong, per copy:
+- **Free Chat chain** (`openAiCompatProvider.ts`): a 402 was recognised from DeepSeek and CheaperInference only. A 402 from any other rung (Groq, DeepInfra, OpenAI, Cloudflare, GLM, …) became `INVALID_REQUEST`, and the chain **stops** on that code. The user got no answer, the empty account was never cooled down, and the next user hit it again.
+- **Gateway text transport**: `insufficient_balance` was missing, and a 402 was recognised from DeepSeek only.
+- **Gateway vision transport**: GLM codes only, and only on a 429.
+- **Builder predicate** `isProviderBalanceError` (also read by the shared live-health layer in #4282): English phrases only. GLM, the lead rung of every ladder, reports an empty balance as HTTP 429, code 1113, with a Chinese message, so it was read as a rate limit and retried. OpenAI's `insufficient_quota` lives in the error code, not the message.
+
+Fix:
+- `isAccountQuotaSignal` checks status and exact enums only, keeping the no-message-parsing rule of the Free chain and the gateway. A 402 counts on any provider. GLM quota codes count only on GLM.
+- `isAccountBalanceFailure` checks status, codes on the error and its nested body, and a narrow set of phrases (including 余额不足 and Vertex "requires billing to be enabled").
+- Deliberately NOT matched: Gemini's per-minute "You exceeded your current quota…" (status RESOURCE_EXHAUSTED), so a healthy free rung is not benched for a per-minute limit. GLM 1308/1310/1313 are quota (they reset), not "needs recharge".
+
+Tests:
+- `providerAccountQuota.test.ts`: real error shapes, both positive and negative, plus a source census that fails when any other file keeps its own copy of the list.
+- 402 cases for five Free-chain rungs.
+- Each site was reverted and its test watched fail.
+
+Live effect to watch: once #4282 (shared live health) merges, an empty GLM or OpenAI account is marked suspended there and skipped by every ladder, instead of retried as a rate limit.
+
+Not changed: no price or spend cap was added or removed. The existing Free Chat paid cap (`FREE_CHAIN_PAID_DAILY_CAP_USD`) is untouched, pending the owner's answer on whether "price cap na lagao" includes it.
+## 2026-11-17 — DiscountedTokens tries up to three of its own models (owner: "sabse pahle sasta aur accha, response na aaye to 2nd, fail to 3rd, phir aage badho")
+
+Owner report: a DiscountedTokens chat answered (gpt-6-sol, 24 s) but a coding message died as `cancelled`, HTTP status not reported, at **90,001 ms**. That was not the model failing. The admin test page aborts every call at 90 s, and a reasoning model writing code takes longer, so the page cut the reply while it was still being written. The page also called one fixed model only.
+
+Fix (admin Test Chat Bot, all three reseller gateways; the shared class is "a gateway called with one fixed model and one fixed short bound"):
+- `resellerModelLadder` (`resellerGateways.ts`): at most three models, in this order:
+  1. the owner's comma list in `DISCOUNTEDTOKENS_MODEL` / `MOYI_MODEL` / `MIRAPI_MODEL`, in that order;
+  2. else the gateway's default model;
+  3. then the gaps, filled from the key's own `/models` list.
+- `testChatBot.ts` tries the models in order:
+  - Each try reserves its own budget hold.
+  - A model showing no response within **45 s** is given up and the next is tried. Activity is reported by `onActivity`, which fires on every stream event, reasoning included.
+  - A model that IS answering keeps going until the test's **240 s** budget.
+  - A 401/403 stops at once, because a refused key fails every model.
+  - A typed model is the only one tried.
+  - The reply lists every model tried.
+  - When all models fail, the result is `ALL_MODELS_FAILED`, with each attempt shown.
+- The client wait was raised from 100 s to 250 s, so the server bound (90 s, or 240 s for a reseller) decides when a test ends.
+
+Tests:
+- `resellerModelLadder.test.ts`
+- `testChatBot.test.ts`, "the gateway's own three-model fallback". It covers: order, the second model answering, all three failing with no fourth try, a refused key, the 45 s quiet cut versus a 100 s answer that streams, and a typed model.
+- `testChatBotOfficial.test.ts`: activity on reasoning events.
+
+Every new test was proven by reversion.
+
+NOT done: DiscountedTokens in the Pro builder. The tier and position are the owner's call. My recommendation is Normal and Strong, before Sonnet. The same ladder function is ready for a builder rung. Also not done: the "cheapest and good" order. This environment cannot read DiscountedTokens' pricing page, so the order is the owner's list in `DISCOUNTEDTOKENS_MODEL`.
+
+## 2026-11-17 — main red after #4218: a game-asset test fixture skipped the Stop signal
+
+#4218 (merged 12:36 UTC) added `options.signal.throwIfAborted()` to `prepareGameAssets`. Its only production caller (`agentv3.ts`) always passes `abort.signal`. But `assetRolloutGate.test.ts` built its options with `as never` and no `signal`, so CI failed with `Cannot read properties of undefined (reading 'throwIfAborted')`. That fails every PR rebased on main.
+
+The production code is right. The fixture now passes a signal, and its outer `as never` is gone, so the type checks the options. Every other test caller of `prepareGameAssets` was checked: all of them already pass a signal.
+
+## 2026-11-17 — Traffic Manager V2, P1: read-only registry snapshot and upstream families (owner-approved plan)
+
+The owner approved the V2 plan with five improvements: shared-health safety, Firestore efficiency, safe rollback, accurate SLO measurement, and spending controls. They authorised P1 only, and P2 waits for the P1 report.
+
+New in `src/server/AI/TrafficRegistry/`:
+- `types.ts`: the snapshot shapes.
+- `upstreamFamilies.ts`: each provider's own outage domain, plus the domains each route (provider + model) may share. Two routes are independent fallbacks only when their dependency sets are disjoint and neither is `unknown`. A reseller with an unverified host is assumed to share the model maker's domain. Unproven independence counts as shared.
+- `snapshot.ts`: `buildRegistrySnapshot(env)`. It READS the kill-switch families, the API directory, `freeChainConfig(env)` (with each rung's price kept as its own offer), the builder ladders in force (`tierLadder(level, env)`, env overrides included) plus `PLAN_RUNG`, and the reseller gateways. It calls no provider, reads no secret value, and writes nothing.
+
+Nothing reads the snapshot to route yet. It is in `tests/deadCodeGuard.test.ts`'s `KNOWN_UNREACHABLE` with "remove in P2", following the repository's building-block precedent.
+
+Findings the snapshot makes visible (no routing change):
+- The builder `NEMOTRON` rung is served through OpenRouter by default (`NEMOTRON_BASE_URL_DEFAULT`), so it is not independent of other OpenRouter traffic.
+- The three GLM Free Chat rungs share one domain (zhipu).
+- The two DeepInfra paid fallbacks (Llama 8B, DeepSeek V4 Flash) share one domain.
+- CheaperInference `beam` and LLM7 `default` have unknown makers, so they are independent of nothing.
+
+Census tests (`snapshot.test.ts`, `upstreamFamilies.test.ts`, 33 in total) fail when any of these is missing from the registry: a kill-switch family, a directory row, a Free Chat rung, or a builder rung. Five reversions were each caught: an unclassified family, `unknown` treated as independent, Vertex split from Google, the builder ladder not read, and the Requesty route host ignored.
+
+Not in P1, by design: runtime catalogs (the gateway's reviewed Firestore catalog, the live OpenRouter free list, Surplus offers). They join in P2 with the control store.

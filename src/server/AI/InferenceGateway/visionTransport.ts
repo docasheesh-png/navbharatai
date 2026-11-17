@@ -1,5 +1,6 @@
 import { isInferenceExecutorTimeout } from './executor';
 import { gatewayRetryAfterUntil } from './retryAfter';
+import { isAccountQuotaSignal } from '../../lib/providerAccountQuota';
 /** Single-dispatch reviewed Free vision transport. No catalog, retry or budget authority.
  * Sources: https://docs.z.ai/guides/vlm/glm-4.6v and https://docs.z.ai/guides/overview/pricing
  * https://ai.google.dev/gemini-api/docs/document-processing and https://ai.google.dev/gemini-api/docs/pricing
@@ -378,8 +379,9 @@ export async function executeGatewayVision(input: GatewayVisionInput): Promise<G
             throw error;
         }
         if (!response.ok) {
-            const quotaCode = ['1113', '1308', '1310', '1313'].includes(String(data?.error?.code));
-            const error = new GatewayTextTransportError(response.status === 429 ? (quotaCode ? 'QUOTA_EXHAUSTED' : 'RATE_LIMIT') : response.status === 401 || response.status === 403 ? 'AUTH' : response.status >= 500 ? 'SERVER' : 'INVALID_REQUEST', response.status);
+            const quotaCode = isAccountQuotaSignal({ provider: a.transport.provider, status: response.status,
+                codes: [data?.error?.code, data?.error?.type].flatMap(v => typeof v === 'string' ? [v.toLowerCase()] : typeof v === 'number' ? [String(v)] : []) });
+            const error = new GatewayTextTransportError(quotaCode ? 'QUOTA_EXHAUSTED' : response.status === 429 ? 'RATE_LIMIT' : response.status === 401 || response.status === 403 ? 'AUTH' : response.status >= 500 ? 'SERVER' : 'INVALID_REQUEST', response.status);
             const receivedAtMs = Date.now();
             const cooldownUntilMs = gatewayRetryAfterUntil(response.headers?.get('retry-after'), receivedAtMs);
             if (response.status === 429 && error.code === 'RATE_LIMIT' && !flags.ambiguous && cooldownUntilMs !== null)

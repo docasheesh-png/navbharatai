@@ -15,10 +15,16 @@
 // PURE, dependency-free, and deliberately a leaf module: BuildDiagnostics and the provider chain both
 // import it, so it must never import either.
 
-/** Account funding is a permanent credential failure, even when a provider uses HTTP 429 for it. */
+import { isAccountBalanceFailure } from '../lib/providerAccountQuota';
+
+/**
+ * Account funding is a permanent credential failure, even when a provider uses HTTP 429 for it.
+ * The recognition is shared with every router (`lib/providerAccountQuota.ts`): it reads the status and the error's
+ * own codes as well as its words, so GLM's 429 + code 1113 ("余额不足") and OpenAI's `insufficient_quota` code are
+ * caught, not read as a rate limit.
+ */
 export function isProviderBalanceError(reason: unknown): boolean {
-  const text = reason instanceof Error ? reason.message : String(reason ?? '');
-  return /credit balance is too low|\binsufficient[ _-](?:balance|credits?|funds)\b|\binsufficient_quota\b/i.test(text);
+  return isAccountBalanceFailure(reason);
 }
 
 const FATAL_PROVIDER_PATTERNS: readonly RegExp[] = [

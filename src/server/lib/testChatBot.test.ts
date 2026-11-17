@@ -1399,4 +1399,72 @@ describe('discount reseller gateways are testable here and nowhere else (owner 2
     await expect(run('moyi', 'grok-4.7')).rejects.toMatchObject({ reason: 'budget' });
     expect(fake.officialOpenAi).not.toHaveBeenCalled();
   });
+  // Owner 2026-11-17 (DiscountedTokens): "sabse pahle sasta aur accha call ho, response na aaye to 2nd, fail hone par
+  // 3rd (last try), 3rd bhi fail to discounted token chhod ke aage badho".
+  describe("the gateway's own three-model fallback", () => {
+    const listing = (ids: string[]) => vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: ids.map(id => ({ id })) }), { status: 200 })));
+    const models = () => fake.officialOpenAi.mock.calls.map(c => (c[0] as { model: string }).model);
+    const refused = (status: number) => new OfficialTestChatError('http', status, `E${status}`, null, null, 'refused', null);
+    beforeEach(() => { vi.stubEnv('DISCOUNTEDTOKENS_API_KEY', 'synthetic-dt-key-value'); });
+
+    it('tries the owner-listed models in order, then fills from the key list; the second answers', async () => {
+      vi.stubEnv('DISCOUNTEDTOKENS_MODEL', 'gpt-6-luna,gpt-6-sol');
+      listing(['gpt-6-sol', 'gpt-6-astra', 'text-embedding-4']);
+      fake.officialOpenAi.mockRejectedValueOnce(refused(503)).mockResolvedValueOnce({ content: 'Hello from sol', model: 'gpt-6-sol' });
+      const result = await run('discountedtokens');
+      expect(result).toMatchObject({ content: 'Hello from sol', model: 'gpt-6-sol' });
+      expect(models()).toEqual(['gpt-6-luna', 'gpt-6-sol']);
+      expect(result.tries?.map(t => [t.model, t.outcome])).toEqual([['gpt-6-luna', expect.stringContaining('503')], ['gpt-6-sol', 'answered']]);
+      // Each try holds its own budget reservation, so one test never spends past its ceiling twice on one hold.
+      const ids = fake.reserve.mock.calls.map(c => (c[0] as { requestId: string }).requestId);
+      expect(new Set(ids).size).toBe(2);
+    });
+
+    it('all three fail: every attempt is reported, a fourth model is never tried', async () => {
+      listing(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna', 'gpt-6-nova']);
+      fake.officialOpenAi.mockRejectedValue(refused(500));
+      const error = await run('discountedtokens').catch(value => value) as TestChatUnavailable;
+      expect(error.diagnostic).toMatchObject({ providerCode: 'ALL_MODELS_FAILED', finalOutcome: 'all-models-failed' });
+      expect(models()).toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna']);
+      expect(error.diagnostic?.attempts?.map(a => a.model)).toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna']);
+    });
+
+    it('a refused key stops at once', async () => {
+      listing(['gpt-6-sol', 'gpt-6-astra']);
+      fake.officialOpenAi.mockRejectedValue(refused(401));
+      const error = await run('discountedtokens').catch(value => value) as TestChatUnavailable;
+      expect(error.diagnostic?.attempts).toHaveLength(1);
+      expect(models()).toEqual(['gpt-6-sol']);
+    });
+
+    it('no response within 45 s moves on; a model that is answering keeps its time (the 90,001 ms coding cut)', async () => {
+      vi.useFakeTimers();
+      try {
+        listing(['gpt-6-sol', 'gpt-6-astra']);
+        // First model: silent until its signal aborts. Second: starts streaming at once, finishes after 100 s.
+        fake.officialOpenAi
+          .mockImplementationOnce(({ signal }: { signal: AbortSignal }) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(new OfficialTestChatError('cancelled', null, 'aborted', null, null, null, null)))))
+          .mockImplementationOnce(({ onActivity }: { onActivity: () => void }) => { onActivity(); return new Promise(resolve => setTimeout(() => resolve({ content: 'function add(a, b) { return a + b; }', model: 'gpt-6-astra' }), 100_000)); });
+        const pending = run('discountedtokens');
+        await vi.advanceTimersByTimeAsync(45_000);
+        await vi.advanceTimersByTimeAsync(100_000);
+        const result = await pending;
+        expect(result).toMatchObject({ model: 'gpt-6-astra' });
+        expect(result.tries?.[0]).toMatchObject({ model: 'gpt-6-sol', outcome: expect.stringMatching(/timeout|NO_RESPONSE/i) });
+      } finally { vi.useRealTimers(); }
+    });
+
+    it('a typed model is the only one tried, and the whole test may take up to 4 minutes', async () => {
+      listing(['gpt-6-sol', 'gpt-6-astra']);
+      fake.officialOpenAi.mockRejectedValue(refused(500));
+      await expect(run('discountedtokens', 'gpt-6-astra')).rejects.toBeDefined();
+      expect(models()).toEqual(['gpt-6-astra']);
+      const { RESELLER_TEST_BUDGET_MS, RESELLER_FIRST_RESPONSE_MS } = await import('./testChatBot');
+      expect([RESELLER_TEST_BUDGET_MS, RESELLER_FIRST_RESPONSE_MS]).toEqual([240_000, 45_000]);
+    });
+
+    it('the entry says it tries up to three models', () => {
+      expect(row('discountedtokens')?.note).toContain('tries up to three');
+    });
+  });
 });

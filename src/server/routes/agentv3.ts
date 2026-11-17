@@ -7,7 +7,7 @@ import { prepareGameSeedWorkspace } from '../AgentV3/gameSeedWorkspace';
 import { withReplyLanguage, replyVoiceForRequest } from '../AgentV3/replyLanguageBinding';
 import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
 import { createSandboxAdmissionBudget, sandboxAdmissionActuator } from '../AgentV3/sandboxAdmissionBudget';
-import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges, recordRouterOneEstimatedBill } from '../AI/RouterOne/catalogueAccounting';
+import { routerOneAccountingScope, bindRouterOneAccountingScope, routerOneAbortController, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges, recordRouterOneEstimatedBill } from '../AI/RouterOne/catalogueAccounting';
 import { planKitRefresh } from '../lib/gameRecipeLayers';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
 import { PRO_SANDBOX_FEE_PCT, proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../AgentV3/proSandboxFee';
@@ -218,6 +218,7 @@ import {
   readWalletBalanceInr,
   firestoreWalletReader,
   decidePaidGate,
+  balanceRechargeNotice,
   identityGrantEmail,
   type GrantEmail,
 } from '../AgentV3';
@@ -229,6 +230,8 @@ import {
   claimWorkspaceBuild, claimWorkspaceBuildAwaitingRelease, releaseWorkspaceBuild, workspaceBuildIsLive,
   BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
 } from '../AgentV3/workspaceBuildLease';
+import { zTestFreeBilling } from '../lib/zTestAccount';
+import { shouldRefuseBuildForBalance } from '../AgentV3/balanceRechargeNotice';
 import { getConnection } from '../lib/supabaseConnectionStore';
 import { provisionDatabaseForUser, freshAccessToken, databaseReadyNarration, connectedDatabaseAsleepNote } from '../lib/supabaseProvisionFlow';
 import { setupSupabasePayments, supabasePaymentsEnabled, PAYMENT_SECRET_NAMES } from '../lib/supabasePayments';
@@ -3984,6 +3987,17 @@ export function sanitizeSteerMessage(raw: unknown): string | null {
   return t.length > 2000 ? t.slice(0, 2000) : t;
 }
 
+/** A report row from the moment the diagnostics object exists, so a drop before the first model call still leaves one. */
+function noteBuildAccepted(diag: BuildDiagnostics): BuildDiagnostics {
+  try {
+    diag.record({
+      phase: 'build', severity: 'info', code: 'BUILD_STARTED', autoResolved: true,
+      message: 'Build accepted. This report is saved from here on, including when the connection drops before the build finishes.',
+    });
+  } catch { /* a start line must never stop the build */ }
+  return diag;
+}
+
 /**
  * Whether a build claims its workspace in Firestore so a retry on ANOTHER instance cannot start a
  * second build in the same workspace (autopsy eed79815 — see workspaceBuildLease.ts). Default ON;
@@ -4271,11 +4285,51 @@ function respondBuilderEngineUnavailable(res: Response, tier: PowerLevel, debugD
 
 // Explicit admission context keeps the route's flow graph bounded. Policy is shared verbatim
 // between default routing and opt-in routing; only the timing/estimate differs.
-export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res, release, onFreeTier, onEconomy }: {
+export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res, release, onFreeTier, onEconomy, onSpendable }: {
   userId: string | null; email: GrantEmail | null; onlyOpus: boolean; prompt: string;
   powerLevelReqEffective: PowerLevel; surplusSession?: SurplusBuildSession; res: Response;
   release: () => void; onFreeTier: (free: boolean) => void; onEconomy: (notice: string) => void;
+  onSpendable?: (balanceInr: number | null) => void;
 }): Promise<boolean> {
+    // Owner t403u: a wallet that cannot cover the estimate does not start a build, including the
+    // free weak ladder. Admin free-list and the z test account stay exempt. An unreadable balance
+    // is not treated as zero. This runs even when the paid-public flag is off, because that flag
+    // was what let a 0-balance account build on the weak ladder.
+    const balanceExempt = isAgentV3FreeUser(userId, email) || zTestFreeBilling(email, userId);
+    if (!balanceExempt && userId) {
+      const walletDoc = await firestoreWalletReader(getDb())(userId).catch(() => null);
+      const balanceInr = await readWalletBalanceInr(async () => walletDoc, userId, powerLevelReqEffective === 'weak' ? 'build' : 'usage');
+      onSpendable?.(balanceInr);
+      if (userId) onFreeTier(isFreeTierUser(walletDoc));
+      // Power mode is refused before any cost estimate, exactly as before. A never-paid account
+      // asking for it never reaches the balance math.
+      if (billingAppliesTo(userId, email) && powerModeBlockedForFreeUser(onlyOpus, walletDoc)) {
+        release();
+        audit('AGENTV3_POWER_MODE_BLOCKED_FREE_USER', { userId }, 'info');
+        res.status(402).json({
+          error: powerModePaidOnlyMessage(),
+          code: 'POWER_MODE_PAID_ONLY',
+          ...(typeof balanceInr === 'number' ? { balanceInr, balanceTokens: inrToWalletTokens(balanceInr) } : {}),
+        });
+        return false;
+      }
+      const estimate = surplusSession
+        ? { inr: Number(surplusSession.estimatedMicroUsd) / 1_000_000 * 10 * usdInrRate(), usd: Number(surplusSession.estimatedMicroUsd) / 1_000_000 * 10 }
+        : estimateBuildCost(prompt, powerLevelReqEffective, usdInrRate());
+      if (shouldRefuseBuildForBalance({ exempt: false, balanceInr, estimateInr: estimate.inr })) {
+        release();
+        audit('AGENTV3_BUILD_BLOCKED_NO_CREDITS', { userId, balanceInr, estimateInr: estimate.inr }, 'warn');
+        void warnAboutBalance(userId, email, 'blocked');
+        res.status(402).json({
+          error: balanceRechargeNotice(prompt),
+          code: 'INSUFFICIENT_CREDITS',
+          balanceInr,
+          ...(typeof balanceInr === 'number' ? { balanceTokens: inrToWalletTokens(balanceInr) } : {}),
+          ...(surplusSession ? { billingBasis: 'usage-based' } : { estimateInr: estimate.inr, estimateTokens: inrToWalletTokens(estimate.inr) }),
+        });
+        return false;
+      }
+    }
     if (billingAppliesTo(userId, email)) {
       // ONE wallet read serves the whole paid-surface gate: the power-mode paid-only check (doc's
       // totalMoneySpent) AND the balance math below (doc's remaining_balance via the same pure reader).
@@ -4319,7 +4373,11 @@ export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, promp
         // notification, which is the thing that used to arrive five times.
         void warnAboutBalance(userId, email, 'blocked');
         res.status(402).json({
-          error: surplusSession ? 'Your credits are used up. Add credits to start a new build. Charges are based on actual usage, not a fixed build quote.' : gate.notice || 'Your credits are used up. Add credits to start a new build.',
+          // Owner t402u: one sentence, in the language of the request, before any build starts.
+          // This is the existing block only (no positive balance). A free weak-ladder build is one
+          // this gate already allows — billing off, a free-list account, an unreadable balance, or
+          // a positive balance — and that path is unchanged.
+          error: balanceRechargeNotice(prompt),
           code: 'INSUFFICIENT_CREDITS',
           balanceInr,
           // Billing Phase 2 — token-first display: the same numbers in the wallet's primary unit,
@@ -4429,6 +4487,15 @@ export function registerAgentV3Routes(app: Express): void {
     const buildRunningHere = !!findAttachableBuild((k: string) => runningBuilds.get(k), {
       verifiedUid: statusVerifiedUid, workspaceId, perWorkspace: perWs,
     });
+    // A phone's status poll often lands on a DIFFERENT instance from the one holding the build.
+    // Memory says "not running" there, and the client's stall watchdog then shows "stopped
+    // responding" while the build is still heartbeating its workspace lease. The lease is the
+    // cross-instance fact. Unknown (store unreachable) stays false — a doubt must not hide a
+    // build that really ended.
+    let buildHeldElsewhere = false;
+    if (!buildRunningHere && workspaceId && workspaceLeaseEnabled()) {
+      buildHeldElsewhere = (await workspaceBuildIsLive(getDb() as unknown as BuildLeaseStore, workspaceId)) === true;
+    }
     // T0-9 SECURITY (2026-07-14): `billed`/`powerUnlocked` are MONEY/entitlement facts and were computed
     // from the CLAIMED `?userId`/`?email` — so `?userId=<victim>` leaked whether that account had ever
     // purchased (its wallet's paid status). They are now derived from the VERIFIED token only (the client
@@ -4443,6 +4510,7 @@ export function registerAgentV3Routes(app: Express): void {
       ...statusEntitlement(verified, wallet),
       buildRunning,
       buildRunningHere,
+      buildHeldElsewhere,
       ...agentV3Status(),
       team: agentLifecycle.snapshot(),
     });
@@ -10857,13 +10925,15 @@ async function noteBuildOutcome(
     // purchased) — used to emit the localized "you are on the free Weak engine, recharge unlocks all
     // tiers" narration once the stream opens. Stays null when billing is off / no wallet read happened.
     let callerIsFreeTier: boolean | null = null;
+    let spendableBalanceInr: number | null = null;
     // The affordability gate runs when EITHER the full paid-public switch OR the decoupled credit gate
     // (AGENTV3_CREDIT_GATE) is on. The credit gate lets ₹0-balance accounts be blocked from spending
     // NavBharatAI's model budget without turning on the rest of paid-public (which stays OFF during the
     // security migration). Free-list users (admin/testers) always bypass it.
     const checkPaidBuildAdmission = () => checkBuilderPaidAdmission({ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res,
-      release: () => releaseBuildLock(buildKey, buildLockToken), onFreeTier: value => { callerIsFreeTier = value; }, onEconomy: value => { paidEconomyNotice = value; } });
-    if (!surplusBuilderEnabled() && !(await checkPaidBuildAdmission())) return;
+      release: () => releaseBuildLock(buildKey, buildLockToken), onFreeTier: value => { callerIsFreeTier = value; }, onEconomy: value => { paidEconomyNotice = value; },
+      onSpendable: (balance) => { if (typeof balance === 'number') spendableBalanceInr = balance; } });
+    if (!(await checkPaidBuildAdmission())) return;
 
     // FREE-TIER cheap-only routing (admin 2026-07-10) — DORMANT unless AGENTV3_FREE_TIER_CHEAP=true.
     // A not-yet-paying public user's build runs on the cheap floor (GLM/Kimi) ALONE — never Claude —
@@ -12082,7 +12152,7 @@ async function noteBuildOutcome(
     // Register this build so it can be STOPPED and RE-ATTACHED to ("Resume") after the
     // original connection is lost. The client's response is the first subscriber; if it
     // disconnects we keep the build alive (still buffering) so the user can resume it.
-    const abort = new AbortController();
+    const abort = routerOneAbortController(new AbortController());
     // intentWorkspaceId was already derived above (deriveWorkspaceId(userId, req.body?.sessionId)) for
     // intent classification — reuse it so the running-build registry knows which session owns this
     // build, instead of computing it twice from the same (userId, sessionId) pair.
@@ -14516,7 +14586,7 @@ async function noteBuildOutcome(
             + (starterEditReadAsBuild ? ' The request had been read as an edit; it runs as a fresh build instead.' : ''),
         });
       }
-      buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
+      buildDiagRef = noteBuildAccepted(buildDiag); // expose to the outer catch so a build crash is captured too
       // Q-200 / Q-201: decided before this report existed, so carried here.
       if (offerAccepted) {
         try {
@@ -14744,6 +14814,7 @@ async function noteBuildOutcome(
       /** The cost ceiling fires at most once per build — see captureTurnUsage below. */
       let costUnconfirmedNoted = false;
       let costCeilingFired = false;
+      let walletStopFired = false;
       /**
        * The "this provider reported no tokens" notice fires at most once per build, same reasoning as
        * the ceiling: a report that says the same thing on every turn reads like many events.
@@ -14895,6 +14966,32 @@ async function noteBuildOutcome(
             // A ceiling we could not evaluate must never end somebody's build. Failing OPEN here is
             // the same call the affordability gate makes on an unreadable balance.
           }
+        }
+        // Owner t403u: once the running bill passes the balance this build was allowed to spend,
+        // stop. Files already written stay. Admin and the z test account never reach a numeric
+        // spendable balance here, because they were exempt at admission.
+        if (!walletStopFired && typeof spendableBalanceInr === 'number') {
+          try {
+            const vm = billableSandboxDetail(actuator, workspaceId, buildStartedAt);
+            const d = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, vm.usd, barrenPhases);
+            const inr = liveCostInr({
+              charged: true, onboardingFreeBuildPossible: false,
+              billedUsd: d.effectiveBilledUsd, floorUsd: d.realCostUsd,
+              discountPct: liveCostDiscountPct ?? 0, usdInr: usdInrRate(),
+            });
+            if (inr !== null && inr > spendableBalanceInr) {
+              walletStopFired = true;
+              const notice = balanceRechargeNotice(prompt);
+              emit({ type: 'error', message: notice, code: 'INSUFFICIENT_CREDITS', ts: Date.now() });
+              try {
+                buildDiag.record({
+                  phase: 'build', severity: 'warning', code: 'WALLET_BALANCE_EXHAUSTED', autoResolved: false,
+                  message: notice,
+                });
+              } catch { /* a note must not replace the stop */ }
+              abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'wallet-empty');
+            }
+          } catch { /* a bill we could not price must not stop a build that was allowed to start */ }
         }
         // THE LIVE ₹ FIGURE. Priced by `decideBuildBilledUsd` — the function the final bill uses — over
         // this same ledger, with the same sandbox measure and the same discount. Throttled BEFORE it is
@@ -17880,6 +17977,7 @@ async function noteBuildOutcome(
         // runner that spreads baseRunnerOpts (escalation/retry/heal/fix/critFix) so all their tokens
         // are billed even when their `result` is later discarded.
         usageSink: buildUsage,
+        balanceEmptyNotice: () => balanceRechargeNotice(prompt),
         // 🧠 A complex app skips the cheap flash opener, so KIMI writes its first file (admin
         // 2026-09-17). Spread into every runner that shares these opts, so an escalation or heal
         // pass inherits the same judgement instead of re-deriving it.

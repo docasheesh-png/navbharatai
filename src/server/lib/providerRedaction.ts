@@ -73,6 +73,7 @@ export function redactProvidersText(raw: unknown): string {
     .replace(/https?:\/\/[^\s)]+/gi, '[link]')                       // URLs, incl. token-embedded clone URLs
     .replace(/x-access-token:[^@\s]+/gi, '[token]')                  // git credential in a remote URL
     .replace(/\b(bearer|token|key|secret|password)[\s:=]+[A-Za-z0-9._\-]{6,}/gi, '$1 [redacted]')
+    .replace(/\bak-[A-Za-z0-9]{16,}\b/g, '[redacted]')
     .replace(MODEL_ID_RE, 'the model')
     .replace(/\bSURPLUS\b/g, 'NavBharatAI') // Internal routing tag, not the ordinary word surplus
     .replace(/\bENGINE_(?:R1|BM|MY|QX|MF)\b/g, 'NavBharatAI') // Internal supplier labels are admin-only (owner t362u)

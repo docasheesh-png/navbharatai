@@ -101722,3 +101722,14 @@ to two listed models that have a published price, priced from `MOYI_PUBLISHED_RA
 returning a guessed id on an empty list failed 3 tests). Owner-set model/rate keys still win. Not verified live: whether
 Moyi's ids match the table's patterns, and whether the chosen model honours tool calling; the first Weak build reports
 will show `ENGINE_MY` turns or failures.
+## 2026-11-17 — builder fallthrough after phone drop (t400u)
+
+#2407 and #2408 failed ENGINE_UNAVAILABLE. Router One was marked stopped when the viewer's HTTP response closed, so a phone disconnect refused that rung before any request (`scope_stopped`). The stall banner treated "not in this process's memory" as the build being dead even when the workspace lease was still heartbeating. A build now keeps Router One until its own abort, status reports `buildHeldElsewhere` while the lease is live, and a BUILD_STARTED row is saved as soon as the report object exists. Account keys with an `ak-` prefix are redacted from stored reports and user-facing errors. Quotas, billing, referral, and white-label rules are unchanged. The wallet chip showing 0 tokens is the real token balance; it does not select the weak ladder by itself, and a paid refusal is still the 402 credits card.
+
+## 2026-11-17 — recharge sentence when the wallet cannot cover a build (t402u)
+
+The existing pre-start block (no positive balance, billing on, not a free-list account) now says the owner's sentence: Hindi when the request is Hindi, English otherwise, with a Recharge button. A stream error with that code uses the same card, not the stall banner. The step clock ("build budget exhausted") and a supplier account with no balance are not the user's wallet and do not show this sentence. Who is allowed to start is unchanged, including a free weak-ladder build the gate already allows.
+
+## 2026-11-17 — no build when the wallet cannot cover it (t403u)
+
+Owner override: a balance of 0, or below the pre-flight estimate, does not start a build at all, including the weak ladder. The same sentence stops a build whose running bill passes that balance; files already written are kept. Admin free-list and the z test account stay exempt. Prices, chat quotas, gift and referral rules are unchanged. An unreadable balance is still not treated as zero.

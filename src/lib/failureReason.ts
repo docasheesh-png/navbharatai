@@ -130,6 +130,7 @@ export const OUTCOME_REASONS: Readonly<Record<string, FailureReason>> = {
    */
   OUTCOME_USER_STOPPED: { key: 'user-stopped', label: 'Stopped by the user — not a failure' },
   OUTCOME_COST_CEILING: { key: 'cost-ceiling', label: 'Hit the build cost ceiling' },
+  OUTCOME_WALLET_EMPTY: { key: 'wallet-empty', label: 'Stopped because the wallet could not cover the rest of the build' },
   OUTCOME_FUTILE: { key: 'futile', label: 'Stopped because nothing was being produced (futility breaker)' },
   OUTCOME_DEPLOY_DRAIN: { key: 'deploy-drain', label: 'Interrupted by a NavBharatAI deploy (resumes on its own)' },
   OUTCOME_SUPERSEDED: { key: 'superseded', label: 'Replaced by a newer build on the same project' },

@@ -101734,6 +101734,29 @@ The existing pre-start block (no positive balance, billing on, not a free-list a
 
 Owner override: a balance of 0, or below the pre-flight estimate, does not start a build at all, including the weak ladder. The same sentence stops a build whose running bill passes that balance; files already written are kept. Admin free-list and the z test account stay exempt. Prices, chat quotas, gift and referral rules are unchanged. An unreadable balance is still not treated as zero.
 
+## 2026-11-17 — an empty provider account is recognised by every router (owner: "jis provider ka balance khatam hoga, woh khud hi band ho jayega"; "user ko 100% response mile, jaldi bhi mile")
+
+Class: "has this provider account run out?" was answered by four private copies that had drifted. One shared, pure module now answers it: `src/server/lib/providerAccountQuota.ts`.
+
+What was wrong, per copy:
+- **Free Chat chain** (`openAiCompatProvider.ts`): a 402 was recognised from DeepSeek and CheaperInference only. A 402 from any other rung (Groq, DeepInfra, OpenAI, Cloudflare, GLM, …) became `INVALID_REQUEST`, and the chain **stops** on that code. The user got no answer, the empty account was never cooled down, and the next user hit it again.
+- **Gateway text transport**: `insufficient_balance` was missing, and a 402 was recognised from DeepSeek only.
+- **Gateway vision transport**: GLM codes only, and only on a 429.
+- **Builder predicate** `isProviderBalanceError` (also read by the shared live-health layer in #4282): English phrases only. GLM, the lead rung of every ladder, reports an empty balance as HTTP 429, code 1113, with a Chinese message, so it was read as a rate limit and retried. OpenAI's `insufficient_quota` lives in the error code, not the message.
+
+Fix:
+- `isAccountQuotaSignal` checks status and exact enums only, keeping the no-message-parsing rule of the Free chain and the gateway. A 402 counts on any provider. GLM quota codes count only on GLM.
+- `isAccountBalanceFailure` checks status, codes on the error and its nested body, and a narrow set of phrases (including 余额不足 and Vertex "requires billing to be enabled").
+- Deliberately NOT matched: Gemini's per-minute "You exceeded your current quota…" (status RESOURCE_EXHAUSTED), so a healthy free rung is not benched for a per-minute limit. GLM 1308/1310/1313 are quota (they reset), not "needs recharge".
+
+Tests:
+- `providerAccountQuota.test.ts`: real error shapes, both positive and negative, plus a source census that fails when any other file keeps its own copy of the list.
+- 402 cases for five Free-chain rungs.
+- Each site was reverted and its test watched fail.
+
+Live effect to watch: once #4282 (shared live health) merges, an empty GLM or OpenAI account is marked suspended there and skipped by every ladder, instead of retried as a rate limit.
+
+Not changed: no price or spend cap was added or removed. The existing Free Chat paid cap (`FREE_CHAIN_PAID_DAILY_CAP_USD`) is untouched, pending the owner's answer on whether "price cap na lagao" includes it.
 ## 2026-11-17 — DiscountedTokens tries up to three of its own models (owner: "sabse pahle sasta aur accha, response na aaye to 2nd, fail to 3rd, phir aage badho")
 
 Owner report: a DiscountedTokens chat answered (gpt-6-sol, 24 s) but a coding message died as `cancelled`, HTTP status not reported, at **90,001 ms**. That was not the model failing. The admin test page aborts every call at 90 s, and a reasoning model writing code takes longer, so the page cut the reply while it was still being written. The page also called one fixed model only.

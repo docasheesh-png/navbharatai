@@ -101767,3 +101767,24 @@ NOT done: DiscountedTokens in the Pro builder. The tier and position are the own
 #4218 (merged 12:36 UTC) added `options.signal.throwIfAborted()` to `prepareGameAssets`. Its only production caller (`agentv3.ts`) always passes `abort.signal`. But `assetRolloutGate.test.ts` built its options with `as never` and no `signal`, so CI failed with `Cannot read properties of undefined (reading 'throwIfAborted')`. That fails every PR rebased on main.
 
 The production code is right. The fixture now passes a signal, and its outer `as never` is gone, so the type checks the options. Every other test caller of `prepareGameAssets` was checked: all of them already pass a signal.
+
+## 2026-11-17 — Traffic Manager V2, P1: read-only registry snapshot and upstream families (owner-approved plan)
+
+The owner approved the V2 plan with five improvements: shared-health safety, Firestore efficiency, safe rollback, accurate SLO measurement, and spending controls. They authorised P1 only, and P2 waits for the P1 report.
+
+New in `src/server/AI/TrafficRegistry/`:
+- `types.ts`: the snapshot shapes.
+- `upstreamFamilies.ts`: each provider's own outage domain, plus the domains each route (provider + model) may share. Two routes are independent fallbacks only when their dependency sets are disjoint and neither is `unknown`. A reseller with an unverified host is assumed to share the model maker's domain. Unproven independence counts as shared.
+- `snapshot.ts`: `buildRegistrySnapshot(env)`. It READS the kill-switch families, the API directory, `freeChainConfig(env)` (with each rung's price kept as its own offer), the builder ladders in force (`tierLadder(level, env)`, env overrides included) plus `PLAN_RUNG`, and the reseller gateways. It calls no provider, reads no secret value, and writes nothing.
+
+Nothing reads the snapshot to route yet. It is in `tests/deadCodeGuard.test.ts`'s `KNOWN_UNREACHABLE` with "remove in P2", following the repository's building-block precedent.
+
+Findings the snapshot makes visible (no routing change):
+- The builder `NEMOTRON` rung is served through OpenRouter by default (`NEMOTRON_BASE_URL_DEFAULT`), so it is not independent of other OpenRouter traffic.
+- The three GLM Free Chat rungs share one domain (zhipu).
+- The two DeepInfra paid fallbacks (Llama 8B, DeepSeek V4 Flash) share one domain.
+- CheaperInference `beam` and LLM7 `default` have unknown makers, so they are independent of nothing.
+
+Census tests (`snapshot.test.ts`, `upstreamFamilies.test.ts`, 33 in total) fail when any of these is missing from the registry: a kill-switch family, a directory row, a Free Chat rung, or a builder rung. Five reversions were each caught: an unclassified family, `unknown` treated as independent, Vertex split from Google, the builder ladder not read, and the Requesty route host ignored.
+
+Not in P1, by design: runtime catalogs (the gateway's reviewed Firestore catalog, the live OpenRouter free list, Surplus offers). They join in P2 with the control store.

@@ -101733,3 +101733,22 @@ The existing pre-start block (no positive balance, billing on, not a free-list a
 ## 2026-11-17 — no build when the wallet cannot cover it (t403u)
 
 Owner override: a balance of 0, or below the pre-flight estimate, does not start a build at all, including the weak ladder. The same sentence stops a build whose running bill passes that balance; files already written are kept. Admin free-list and the z test account stay exempt. Prices, chat quotas, gift and referral rules are unchanged. An unreadable balance is still not treated as zero.
+
+## 2026-11-17 — A published 3D game opened to an empty page: the game loop ran only from start()
+
+Admin: the battle royale's published link (`a-6b8ad5b4e2f4ce94b8a8d7df.mitrify.in`) "open nahi ho raha"; *"mai chahta hu har baar pura game open ho"*.
+
+Evidence: every published file is in the bucket (index, the 797 KB bundle, CSS, icon, manifest, service worker, all HTTP 200). Loaded in a real browser, the HUD renders (Score 0 · Enemies left 19 · ⏸), but the WebGL canvas holds zero drawn pixels and records zero draw calls. In the bundle, the game's own `setupBattleRoyale` calls `setStatus('playing')`, which hides the Play menu. The shell's `GameLoop` started only from `Game.start()`, and nothing called that. The build's playtest had already measured the result ("input ignored · no canvas large enough to measure", Controls 0).
+
+Class: the loop was tied to one caller (`start()`) instead of to the state it represents.
+
+Fix (`GameShellGenerator.ts`, the shared shell):
+- the loop follows the status: `GAME_STARTED` / `GAME_RESUMED`, plus a check right after setup;
+- one frame is drawn after setup, so a menu game shows its world behind the menu;
+- a disposed game never restarts.
+
+`gameKitHistory.ts` was regenerated, so an existing game whose `Game.ts` is untouched kit code receives the fix on its next edit.
+
+Test: `tests/aGameRunsWhenItSaysItIsPlaying.test.ts` runs the REAL generated `Game.ts` and `core/state.ts`. It covers setup setting 'playing', the menu first frame, a later 'playing' from game code, and a disposed game. Reverting the shell fails 3 of the 4 tests. All 693 game-shell tests pass.
+
+Still open from this report: the build that said "100/100, fully shippable" while the release gate was RED (autopsy item), and the preview that would not wake 3 days after a failed build.

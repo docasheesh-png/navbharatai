@@ -101761,3 +101761,9 @@ Tests:
 Every new test was proven by reversion.
 
 NOT done: DiscountedTokens in the Pro builder. The tier and position are the owner's call. My recommendation is Normal and Strong, before Sonnet. The same ladder function is ready for a builder rung. Also not done: the "cheapest and good" order. This environment cannot read DiscountedTokens' pricing page, so the order is the owner's list in `DISCOUNTEDTOKENS_MODEL`.
+
+## 2026-11-17 — main red after #4218: a game-asset test fixture skipped the Stop signal
+
+#4218 (merged 12:36 UTC) added `options.signal.throwIfAborted()` to `prepareGameAssets`. Its only production caller (`agentv3.ts`) always passes `abort.signal`. But `assetRolloutGate.test.ts` built its options with `as never` and no `signal`, so CI failed with `Cannot read properties of undefined (reading 'throwIfAborted')`. That fails every PR rebased on main.
+
+The production code is right. The fixture now passes a signal, and its outer `as never` is gone, so the type checks the options. Every other test caller of `prepareGameAssets` was checked: all of them already pass a signal.

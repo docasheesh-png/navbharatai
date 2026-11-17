@@ -26,8 +26,10 @@ describe('L3 limited rollout gate (AGENTV3_EXTERNAL_GAME_ASSETS=admin)', () => {
     expect(externalGameAssetsEnabled({ AGENTV3_EXTERNAL_GAME_ASSETS: 'on' }, 'normal-user')).toBe(true);
   });
   it('prepareGameAssets returns off for a non-allowlisted user in admin mode (no workspace touched)', async () => {
+    // `signal` is a required option (the one production caller passes the build's abort signal); #4218 made
+    // prepareGameAssets read it after the scenery step, so a call without one no longer reaches the assertion.
     const r = await prepareGameAssets({ prompt: 'a game with a table and chair', workspaceId: 'w', workspace: {} as never,
-      verifiedOwnerUid: 'normal-user', env: { AGENTV3_EXTERNAL_GAME_ASSETS: 'admin' } } as never);
+      signal: new AbortController().signal, verifiedOwnerUid: 'normal-user', env: { AGENTV3_EXTERNAL_GAME_ASSETS: 'admin' } } as never);
     expect(r.status).toBe('off');
     expect(r.files).toEqual({});
   });

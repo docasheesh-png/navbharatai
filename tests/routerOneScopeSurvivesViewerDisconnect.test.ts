@@ -30,6 +30,6 @@ describe('Router One scope survives a viewer disconnect', () => {
     const accounting = readFileSync('src/server/AI/RouterOne/catalogueAccounting.ts', 'utf8');
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     expect(accounting).not.toContain("res.once('close'");
-    expect(route).toContain('routerOneAbortController()');
+    expect(route).toContain('routerOneAbortController(new AbortController())');
   });
 });

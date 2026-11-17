@@ -440,6 +440,16 @@ const GAME_WORKS_CLAIMED = /\b(complete and working|working (properly|perfectly|
 // BR1955's exact summary said all requested features / Milestone 1 Complete, not 'fully playable'.
 // Only an affirmative delivery claim on a line naming the game; plans/negations are not verdicts.
 const GAME_DELIVERED_CLAIM = /(?:\b(?:built|created|implemented|delivered)\b[^.!?\n]{0,160}\ball (?:the )?requested features\b|\bmilestone\s+\d+\s+complete\b)/i;
+// AUTOPSY 57604006 (2026-11-17): two builds in a row told the user a game was working while the playtest had
+// played it and found every control ignored (release gate RED). Build 1712adfa: "Everything is verified working.
+// Your battle royale game is fully healthy", "you can play it right now", "100/100, fully shippable", "There was
+// nothing left broken". Build 969740df: "Battle royale game ab end-to-end kaam kar raha hai". Not one of those was
+// in the vocabulary above, so CLAIM_UNSUPPORTED never fired. The class is the vocabulary, so it is widened here —
+// English and the Hinglish the builder writes — and a WHOLE-APP verdict counts when the game was played and FAILED,
+// because then the app is the game. Precision is kept: the game line must still name the game, and a negated line
+// is never a verdict.
+const GAME_WORKS_CLAIMED_MORE = /\b(verified working|fully healthy|healthy and working|renders correctly|you can play it|play it right now|kaam kar raha hai|kaam karta hai|chal raha hai|khel sakte ho)\b/i;
+const APP_VERDICT_CLAIMED = /\b(fully shippable|ready to ship|no bugs left|nothing left (?:broken|to fix)|everything is verified(?: working)?|everything is working)\b/i;
 const GAME_DELIVERY_NOT_ASSERTED = /\b(?:not|never|cannot|can't|isn't|is not|wasn't|doesn't|does not|will|would|could|should|plan(?:ning)?|when|if|until|before|once)\b/i;
 
 
@@ -533,8 +543,11 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
   // A GAME CALLED WORKING THAT NOBODY PLAYED (autopsy 61279465). Narrow: the same line must name the game and
   // claim it works or is playable — "the game has a start screen" is a description, not a verdict.
   if (facts.gamePlayed && facts.gamePlayed !== 'passed') {
-    const line = text.split(/\n+/).find((l) => GAME_NAMED.test(l) && (GAME_WORKS_CLAIMED.test(l)
-      || (GAME_DELIVERED_CLAIM.test(l.replace(/[*_`]/g, '')) && !GAME_DELIVERY_NOT_ASSERTED.test(l))));
+    const line = text.split(/\n+/).find((l) => (GAME_NAMED.test(l) && (GAME_WORKS_CLAIMED.test(l)
+      || (GAME_WORKS_CLAIMED_MORE.test(l.replace(/[*_`]/g, '')) && !GAME_DELIVERY_NOT_ASSERTED.test(l))
+      || (GAME_DELIVERED_CLAIM.test(l.replace(/[*_`]/g, '')) && !GAME_DELIVERY_NOT_ASSERTED.test(l))))
+      // Played and failed: a verdict on the whole app is a verdict on the game.
+      || (facts.gamePlayed === 'failed' && APP_VERDICT_CLAIMED.test(l.replace(/[*_`]/g, '')) && !GAME_DELIVERY_NOT_ASSERTED.test(l)));
     if (line) {
       out.push({
         kind: 'game-claimed-playable',

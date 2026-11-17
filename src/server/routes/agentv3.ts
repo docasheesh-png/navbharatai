@@ -3848,6 +3848,22 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
  * only say "past the opener" when the chain really is. `aBuildIsNamedByItsLadderNotByClaude.test.ts`
  * checks it against the constructed chain on every tier. PURE (reads the same env the chain does).
  */
+/**
+ * THE CHAIN A BUILD OF THIS TIER WOULD TRY RIGHT NOW, read from `buildTurnRunner` itself (owner 2026-11-17: the AI
+ * Engines page showed only the tier ladder, so Surplus, Router One, BluesMinds and Moyi, which take most Weak turns,
+ * were invisible). Surplus is prepended exactly when a Weak build would open a Surplus session. No I/O: building the
+ * runners constructs clients only. Admin observation only; never used to route a build.
+ */
+export function liveBuildChain(tier: PowerLevel): Array<{ name: string; model: string | null }> {
+  let chain: ChainRung[] = [];
+  try { buildTurnRunner({ tier, onChain: (c) => { chain = c; } }); } catch { chain = []; }
+  const rows = chain.map((r) => ({
+    name: String(r.name),
+    model: String((r as unknown as { runner?: { plannedModel?: unknown } }).runner?.plannedModel ?? r.modelId ?? '') || null,
+  }));
+  return toPowerLevel(tier) === 'weak' && surplusBuilderEnabled() ? [{ name: 'SURPLUS', model: null }, ...rows] : rows;
+}
+
 export function buildChainOpensPastOpener(tier: PowerLevel | string | boolean | null | undefined, complex: boolean): boolean {
   if (toPowerLevel(tier) === 'weak' && (routerOneWeakFallbackEnabled() || bluesmindsBuilderEnabled() || moyiBuilderEnabled())) return false;
   return openingRung(tierLadder(toPowerLevel(tier as PowerLevel | boolean | string | undefined | null)).rungs, { complex }) > 1;

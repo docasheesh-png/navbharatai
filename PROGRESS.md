@@ -101733,3 +101733,20 @@ The existing pre-start block (no positive balance, billing on, not a free-list a
 ## 2026-11-17 — no build when the wallet cannot cover it (t403u)
 
 Owner override: a balance of 0, or below the pre-flight estimate, does not start a build at all, including the weak ladder. The same sentence stops a build whose running bill passes that balance; files already written are kept. Admin free-list and the z test account stay exempt. Prices, chat quotas, gift and referral rules are unchanged. An unreadable balance is still not treated as zero.
+
+## 2026-11-17 — AI Engines page shows the engines that really run, live, and why each fails
+
+Owner: "jo ai/provider use ho rahe hai, wahi dikhen chahiye, aur yeh live rahe, kon se provider fail ho raha kyu fail ho
+raha likh kar aye, admin ko saf dikhe". The page showed Weak as GLM → KIMI → GLM while its own footer said "Calls today:
+ENGINE_R1 581 · SURPLUS 514": the engines doing most Weak work were missing, nothing said why an engine failed, and
+13 keyless providers were listed as if in use.
+
+- Build Engines now draws the whole chain per tier from `liveBuildChain` (read from `buildTurnRunner`, Surplus prepended
+  exactly when a Weak build opens a Surplus session), each chip marked with its 24-hour failures.
+- New "Engine health — last 24 hours" (`engineHealth.ts`): per engine, turns delivered, failed calls, causes in plain
+  words (from `classifyProviderFailure` buckets), last failure time, from the latest build of every project saved in the
+  window on every server. An engine with no recorded use is "No recent use", never "Working"; an unreadable window says so.
+- The tab refreshes engines every minute while open.
+- Provider switches: providers with a key first; keyless ones in a closed "Not set up on this server (N)" list.
+- Tests: `src/components/admin/BuildEngineHealth.test.tsx` (9), proven by reversion (idle shown as working; chain without
+  the leads). Not verified: the page against live production data.

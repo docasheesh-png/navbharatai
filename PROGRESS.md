@@ -101748,5 +101748,7 @@ ENGINE_R1 581 · SURPLUS 514": the engines doing most Weak work were missing, no
   window on every server. An engine with no recorded use is "No recent use", never "Working"; an unreadable window says so.
 - The tab refreshes engines every minute while open.
 - Provider switches: providers with a key first; keyless ones in a closed "Not set up on this server (N)" list.
-- Tests: `src/components/admin/BuildEngineHealth.test.tsx` (9), proven by reversion (idle shown as working; chain without
+- Tests: `tests/aiEnginesShowWhatRunsAndWhyItFails.test.ts` (server half) and `src/components/admin/BuildEngineHealth.test.tsx`
+  (render half, no server imports: the first version imported server routes into a src test and the frontend typecheck
+  failed with 5,539 errors, the 2026-09-08 class), proven by reversion (idle shown as working; chain without
   the leads). Not verified: the page against live production data.

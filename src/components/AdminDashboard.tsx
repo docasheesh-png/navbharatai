@@ -30,6 +30,7 @@ import { BotsLedgerPanel } from './admin/BotsLedgerPanel';
 import { AdsPanel } from './admin/AdsPanel';
 import { ApiProvidersPanel } from './admin/ApiProvidersPanel';
 import { ProviderSwitchesPanel } from './admin/ProviderSwitchesPanel';
+import { EngineChain, EngineHealthList } from './admin/BuildEngineHealth';
 import { GameAssetLiveCheckPanel } from './admin/GameAssetLiveCheckPanel';
 import { chatProviderHealth, chatProviderLatencyText } from '../lib/chatProviderHealth';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
@@ -1603,6 +1604,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }, [adminToken]);
 
   useEffect(() => { if (activeTab === 'engines') { fetchLlmLatency(); fetchLatencyAnomaly(); void fetchEngines(); } }, [activeTab, fetchLlmLatency, fetchLatencyAnomaly, fetchEngines]);
+  // Live (owner 2026-11-17): while the AI Engines tab is open, the engine chain and health refresh every minute.
+  useEffect(() => {
+    if (activeTab !== 'engines') return;
+    const id = window.setInterval(() => { void fetchEngines(); }, 60_000);
+    return () => window.clearInterval(id);
+  }, [activeTab, fetchEngines]);
   // The bar is loaded once, independently of which tab is open — that is the whole point of it.
   useEffect(() => { void fetchTabBadges(); }, [fetchTabBadges]);
 
@@ -2667,6 +2674,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             {t.available ? 'Can build' : 'No engine — builds refused'}
                           </span>
                         </div>
+                        {Array.isArray(engines.chains?.[t.level]) && engines.chains[t.level].length > 0 ? (
+                          /* The whole chain this tier tries now, leads included, coloured by 24-hour health. */
+                          <EngineChain chain={engines.chains[t.level]} health={engines.health} names={engines.engineNames} />
+                        ) : (
                         <div className="flex flex-wrap items-center gap-2">
                           {(t.rungs || []).map((r: any, i: number) => (
                             <React.Fragment key={`${r.provider}-${r.model}-${i}`}>
@@ -2686,8 +2697,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             </React.Fragment>
                           ))}
                         </div>
+                        )}
                       </div>
                     ))}
+
+                    <EngineHealthList health={engines.health} names={engines.engineNames} />
 
                     {/* WHAT REALLY RAN TODAY. Withheld entirely when the day could not be read —
                         "nothing built today" and "we could not look" must never render the same. */}

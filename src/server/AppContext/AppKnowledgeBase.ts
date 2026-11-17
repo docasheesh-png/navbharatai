@@ -3226,6 +3226,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['provider switch', 'turn off provider', 'disable ai provider', 'kill switch', 'ai on off', 'provider band karo', 'provider off', 'engine off'],
   },
   {
+    id: 'admin-build-engine-health',
+    name: 'Build Engines and engine health (live)',
+    path: 'Admin Dashboard → AI Engines → Build Engines (verified admin only)',
+    description: 'The full order a build of each tier tries right now, including the engines in front of the tier ladder (Surplus, Router One, BluesMinds, Moyi API), each marked with its failures in the last 24 hours. Below it, "Engine health — last 24 hours" lists every engine builds used: turns delivered, failed calls, and why each failed in plain words (rate limit, timed out, no answer, key refused, out of balance, model not available, and so on), with the time of the last failure. It is read from the latest build of every project on every server and refreshes every minute while the page is open. The provider switch list now shows the providers with a key first; providers with no key are in a closed "Not set up on this server" list.',
+    howToUse: 'Verified admins open AI Engines and read Build Engines. A red "failed" count on an engine, or "Failing" in Engine health, names the engine that is failing; the lines under it say why. Press Refresh to read it at once.',
+    relatedFeatures: ['admin-provider-switches', 'admin-api-providers'],
+    keywords: ['engine health', 'which provider is failing', 'provider failing', 'why provider failed', 'build engines', 'ladder', 'kaun sa provider fail', 'provider fail kyu', 'live engines', 'engine status'],
+  },
+  {
     id: 'admin-api-providers',
     name: 'API Providers (balances and billing links)',
     path: 'Admin Dashboard → Money → API Providers (verified admin only)',

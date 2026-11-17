@@ -101741,8 +101741,11 @@ raha likh kar aye, admin ko saf dikhe". The page showed Weak as GLM → KIMI →
 ENGINE_R1 581 · SURPLUS 514": the engines doing most Weak work were missing, nothing said why an engine failed, and
 13 keyless providers were listed as if in use.
 
-- Build Engines now draws the whole chain per tier from `liveBuildChain` (read from `buildTurnRunner`, Surplus prepended
-  exactly when a Weak build opens a Surplus session), each chip marked with its 24-hour failures.
+- Build Engines now draws the whole chain per tier: for Weak, the leads from `weakLeadEngines.ts` (Surplus when a Weak build
+  opens its session, Router One, BluesMinds, Moyi), then the keyed ladder rungs; each chip marked with its 24-hour failures.
+  The admin route may not import the build route, so the leads live in their own module, and
+  `tests/weakLeadEnginesMatchTheChain.test.ts` builds the real chain and fails if the two ever disagree (proven by
+  reversion). A first version imported the build route into admin.ts and failed three censuses.
 - New "Engine health — last 24 hours" (`engineHealth.ts`): per engine, turns delivered, failed calls, causes in plain
   words (from `classifyProviderFailure` buckets), last failure time, from the latest build of every project saved in the
   window on every server. An engine with no recorded use is "No recent use", never "Working"; an unreadable window says so.

@@ -163,7 +163,7 @@ import {
 import { loadBoard, worstLevel, AI_MIN_SAMPLE, type LoadReadings } from '../lib/loadBoard';
 import { tierLadder, availableRungs, rungHasKey, tierDisplayName, tierEngineAvailable } from '../AgentV3/tierLadder';
 import { aggregateEngineHealth, ENGINE_DISPLAY_NAMES } from '../AgentV3/engineHealth';
-import { liveBuildChain } from './agentv3';
+import { weakLeadEngines } from '../AgentV3/weakLeadEngines';
 import { readEngineUse, engineUseDayKey } from '../AgentV3/engineUseStore';
 import { reportStatus, openReportCount } from '../AgentV3/reportTriage';
 import { listReports } from '../lib/userReportStore';
@@ -2207,10 +2207,15 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       });
     } catch { /* unmeasured ⇒ the client shows "could not read", never an empty ladder */ }
 
-    // THE WHOLE CHAIN, not only the ladder (owner 2026-11-17): the engines a build of each tier would try now,
-    // in order, including the off-ladder leads (Surplus, Router One, BluesMinds, Moyi), read from the chain builder.
+    // THE WHOLE CHAIN, not only the ladder (owner 2026-11-17): the engines a build of each tier would try now, in
+    // order — for Weak, the leads in front of the ladder (Surplus, Router One, BluesMinds, Moyi; weakLeadEngines.ts,
+    // pinned to the real chain by tests/weakLeadEnginesMatchTheChain.test.ts), then the keyed ladder rungs.
     try {
-      out.chains = Object.fromEntries((['weak', 'off', 'mini'] as const).map((level) => [level, liveBuildChain(level)]));
+      out.chains = Object.fromEntries((['weak', 'off', 'mini'] as const).map((level) => {
+        const leads = level === 'weak' ? weakLeadEngines().map((e) => ({ name: e.name, model: e.models.join(', ') || null })) : [];
+        const ladder = availableRungs(tierLadder(level).rungs).map((r) => ({ name: r.provider, model: r.model }));
+        return [level, [...leads, ...ladder]];
+      }));
       out.engineNames = ENGINE_DISPLAY_NAMES;
     } catch { /* unmeasured ⇒ the client falls back to the ladder above */ }
 

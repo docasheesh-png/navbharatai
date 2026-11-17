@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { aggregateEngineHealth, engineStatus, FAILURE_REASON_TEXT } from '../src/server/AgentV3/engineHealth';
-import { liveBuildChain } from '../src/server/routes/agentv3';
+import { weakLeadEngines } from '../src/server/AgentV3/weakLeadEngines';
 
 const perf = (delivery: Record<string, number>, failures: Array<{ provider: string; failures: number; byReason: Record<string, number> }>) =>
   ({ providerDelivery: delivery, providerFailures: failures.map(f => ({ ...f, raw: '', starvedCalls: 0, timeoutCalls: 0, silentCalls: 0, crawlCalls: 0 })) });
@@ -49,28 +49,24 @@ describe('the Build Engines chain shows the engines in front of the ladder', () 
     vi.stubEnv('ROUTER_ONE_MODEL', 'deepseek-v4.1-flash');
     vi.stubEnv('ROUTER_ONE_ENABLED', 'on');
     vi.stubEnv('FREE_CHAIN_BLUESMINDS_API_KEY', 'synthetic-bm-key');
-    vi.stubEnv('GLM_API_KEY', 'synthetic-glm-key');
-    vi.stubEnv('KIMI_API_KEY', 'synthetic-kimi-key');
-    vi.stubEnv('AGENTV3_LADDER_WEAK', 'GLM:glm-4.7-flashx,KIMI:kimi-k2.7-code,GLM:glm-5.3');
     vi.stubEnv('SURPLUS_API_KEY', 'synthetic-surplus-key');
     vi.stubEnv('AGENTV3_SURPLUS_BUILDER', '');
   });
   afterEach(() => vi.unstubAllEnvs());
 
-  it('Weak: Surplus → Router One → BluesMinds → the ladder, each with its model', () => {
-    const chain = liveBuildChain('weak');
-    expect(chain.map(r => r.name).slice(0, 4)).toEqual(['SURPLUS', 'ENGINE_R1', 'ENGINE_BM', 'GLM']);
-    expect(chain.find(r => r.name === 'GLM')?.model).toBe('glm-4.7-flashx');
+  it('Weak leads: Surplus → Router One → BluesMinds, each with its models', () => {
+    expect(weakLeadEngines().map(e => e.name)).toEqual(['SURPLUS', 'ENGINE_R1', 'ENGINE_BM']);
+    expect(weakLeadEngines().find(e => e.name === 'ENGINE_R1')?.models).toEqual(['deepseek-v4.1-flash']);
   });
-  it('without a Surplus key the chain does not pretend Surplus runs; Normal never shows the Weak-only leads', () => {
+  it('without a Surplus key the list does not pretend Surplus runs', () => {
     vi.stubEnv('SURPLUS_API_KEY', '');
-    expect(liveBuildChain('weak').map(r => r.name)).not.toContain('SURPLUS');
-    expect(liveBuildChain('off').map(r => r.name)).not.toContain('ENGINE_R1');
+    expect(weakLeadEngines().map(e => e.name)).not.toContain('SURPLUS');
   });
-  it('the endpoint and the page are wired to it', () => {
+  it('the endpoint and the page are wired to it, and the admin route still does not load the build route', () => {
     const route = readFileSync('src/server/routes/admin.ts', 'utf8');
-    expect(route).toContain('liveBuildChain(level)');
+    expect(route).toContain('weakLeadEngines()');
     expect(route).toContain('aggregateEngineHealth(recent, windowHours)');
+    expect(route).not.toMatch(/from '\.\/agentv3'/);
     const dash = readFileSync('src/components/AdminDashboard.tsx', 'utf8');
     expect(dash).toContain('<EngineChain chain={engines.chains[t.level]}');
     expect(dash).toContain('<EngineHealthList health={engines.health}');

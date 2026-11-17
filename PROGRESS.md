@@ -101671,3 +101671,20 @@ Owner t311u sequential audit, BR1996 only (boundary 1951..2105 frozen). Branched
 - Q-2710 (BLOCKED): the builder calls a new app a "fix" after a fast-lane hand-over. Q-2711 (BLOCKED): the pre-existing user-visible fee lines conflict with t362u.
 - 10 mutations, all caught.
 - Docs: `docs/build-report-autopsy-BR1996.md`, its evidence JSON, and `tests/br1996Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-17 — BR1997 autopsy (a shell rm deleted a stylesheet the entry still imported): name any module that still imports a deleted file
+
+Owner t311u sequential audit, BR1997 only (boundary 1951..2105 frozen). Branched from origin/main `2c66e533` (BR1996, #4273). A free Weak build succeeded and was not charged.
+
+- F1: after a confirmed shell delete, the bash result names each recorded JS/TS module whose current text still imports a deleted file (`src/server/AgentV3/deletedImportNote.ts`, wired in `ToolDispatcher`). Advisory only; no importer means byte-identical output. Kill switch `AGENTV3_DELETED_IMPORT_NOTE=off`.
+- Q-2712 (BLOCKED): the post-green recheck said OK while the dev server could not compile the entry module.
+- 11 mutations, all caught (one after an added test).
+- Docs: `docs/build-report-autopsy-BR1997.md`, its evidence JSON, and `tests/br1997Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-17 — BR1997 rework after review (bounded reads on the bash critical path)
+
+The review failed the first version under audit P0-C: up to 60 sequential reads on the bash path, each bounded only by `fileOp`'s 30 s, whose timeout also drops the sandbox. Reworked with ordinary commits on the same branch:
+- Reads: entry modules first, at most 60, 12 at a time, 5 s each, an 8 s overall budget (`readSourcesWithinBudget`). They use the new `E2BActuator.readFileAdvisory`, whose timeout does not drop the cached sandbox; `readFile` is unchanged.
+- Precision: a comment-, string- and template-aware tokenizer; only relative, extensioned specifiers that join to exactly a deleted path are named, so a remaining sibling never draws a note.
+- The note is kept out of the user's terminal and the `tool_result` summary.
+- 38 tests; 21 round-2 mutations, all caught (one after an added test).

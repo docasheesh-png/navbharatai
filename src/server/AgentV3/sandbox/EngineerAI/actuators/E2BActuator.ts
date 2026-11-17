@@ -2194,7 +2194,7 @@ export class E2BActuator implements IEngineerActuator {
    * in-flight promise). On timeout we ALSO evict the cached sandbox so the next call gets a fresh one
    * instead of repeatedly hanging against a dead reference. (audit P0-B / P1)
    */
-  private async fileOp<T>(workspaceId: string, label: string, op: (sandbox: Sandbox) => Promise<T>, timeoutMs = 30_000): Promise<T> {
+  private async fileOp<T>(workspaceId: string, label: string, op: (sandbox: Sandbox) => Promise<T>, timeoutMs = 30_000, evictOnTimeout = true): Promise<T> {
     const sandbox = await this.getSandbox(workspaceId);
     try {
       return await withTimeout(op(sandbox), timeoutMs, label);
@@ -2203,7 +2203,8 @@ export class E2BActuator implements IEngineerActuator {
       // rejects FAST (the "exit -1 in 0s" from the report), so the old timeout-only check never fired
       // and the corpse was reused forever. isDeadSandboxError catches the reaped/not-running/network
       // shapes too, so the next getSandbox recreates (and replays the cached source files).
-      if (e instanceof Error && (isDeadSandboxError(e.message) || / timed out after /.test(e.message)) && this.sandboxes.get(workspaceId) === sandbox) {
+      // BR1997: an ADVISORY op (evictOnTimeout=false) never drops the sandbox for its own timeout.
+      if (e instanceof Error && (isDeadSandboxError(e.message) || (evictOnTimeout && / timed out after /.test(e.message))) && this.sandboxes.get(workspaceId) === sandbox) {
         this._dropSandbox(workspaceId);
         // 🔴 THE CALL THAT FOUND THE CORPSE WAS LOST . Dropping the handle
         // fixes the NEXT call, but this one threw. An architect's `edit_file` on `src/index.css` came
@@ -2245,6 +2246,15 @@ export class E2BActuator implements IEngineerActuator {
 
   async readFile(workspaceId: string, filePath: string): Promise<string> {
     return this.fileOp(workspaceId, 'files.read', (sb) => sb.files.read(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`));
+  }
+
+  /**
+   * BR1997: an ADVISORY read (the deleted-import note). Bounded by `timeoutMs`; its timeout never drops
+   * the cached sandbox, because a slow optional read is no evidence the machine is dead. A dead-sandbox
+   * error is handled exactly as for `readFile`.
+   */
+  async readFileAdvisory(workspaceId: string, filePath: string, timeoutMs = 5_000): Promise<string> {
+    return this.fileOp(workspaceId, 'files.read', (sb) => sb.files.read(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`), timeoutMs, false);
   }
 
   /** A file's RAW bytes as base64 — for a binary asset, which `readFile` would mangle as UTF-8. */

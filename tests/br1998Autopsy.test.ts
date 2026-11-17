@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseFileMentions, unresolvedMentionsNotice, looksLikePastedCode, fileMentionsBlock } from '../src/server/AgentV3/fileMentions';
+import { parseFileMentions, unresolvedMentionsNotice, looksLikePastedCode, fileMentionsBlock, KNOWN_ANNOTATIONS } from '../src/server/AgentV3/fileMentions';
 
 const ROOT = join(__dirname, '..');
 const TREE = ['src/App.tsx', 'src/main.tsx', 'package.json', 'Makefile'];
@@ -198,14 +198,15 @@ describe('F1 the second review probes: a neighbour ending in , or ) is not code'
   });
 
   it('more than 8 stacked annotations is unsure: the warning stays', () => {
-    const stack = Array.from({ length: 10 }, (_, i) => `  @a${i}`).join('\n');
+    const NAMES = ['Override', 'Deprecated', 'Test', 'Nullable', 'Inject', 'Autowired', 'Transactional', 'Required', 'Immutable', 'Protected'];
+    const stack = NAMES.map((n) => `  @${n}`).join('\n');
     const fields = Array.from({ length: 12 }, (_, i) => `  int x${i};`).join('\n');
     const msg = `class A {\n${fields}\n${stack}\n  void f() {\n  }\n}`;
     expect(looksLikePastedCode(msg)).toBe(true);
     const unresolved = parseFileMentions(msg, NONE).unresolved;
-    expect(unresolved).toContain('a0'); // 9 annotations to walk over before the code after it
-    expect(unresolved).toContain('a9'); // 9 annotations to walk over before the code before it
-    expect(unresolved).not.toContain('a4'); // within the cap on both sides
+    expect(unresolved).toContain('Protected'); // 9 annotations to walk over before the code before it
+    expect(unresolved).not.toContain('Override'); // code right before it, a known annotation right after
+    expect(unresolved).not.toContain('Nullable'); // within the cap
   });
 
   it('an own line ending in ) or , is not code for the after-test', () => {
@@ -216,6 +217,84 @@ describe('F1 the second review probes: a neighbour ending in , or ) is not code'
 
   it('the report shape: @override between "const DemoApp({super.key});" and "Widget build(...) {" still matches', () => {
     const msg = ['class DemoApp extends StatelessWidget {', '  const DemoApp({super.key});', '', '  @override', '  Widget build(BuildContext context) {', '    return const Placeholder();', '  }', '}'].join('\n');
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual([]);
+  });
+});
+
+describe('F1 the third review probes: a lone @Name between code lines keeps its warning (strict belt)', () => {
+  const NONE: string[] = [];
+  const SANDWICH = (name: string) => `const a=1;\nconst b=2;\nconst c=3;\n\n@${name}\n\nfunction f() {\n  return 1;\n}`;
+
+  it('🔴 the sandwich: three const lines, a lone @Header, then a function', () => {
+    expect(looksLikePastedCode(SANDWICH('Header'))).toBe(true);
+    expect(parseFileMentions(SANDWICH('Header'), NONE).unresolved).toEqual(['Header']);
+  });
+
+  it('🔴 the sandwich with an intro line (English and Hinglish)', () => {
+    for (const intro of ['Please look at this:', 'yeh abhi ka code hai:']) {
+      expect(parseFileMentions(`${intro}\n${SANDWICH('Header')}`, NONE).unresolved).toEqual(['Header']);
+    }
+  });
+
+  it('🔴 @Login in the same shape', () => {
+    expect(parseFileMentions(SANDWICH('Login'), NONE).unresolved).toEqual(['Login']);
+    expect(parseFileMentions(`Please look at this:\n${SANDWICH('Login')}`, NONE).unresolved).toEqual(['Login']);
+  });
+
+  it('🔴 @Header with no blank line before function f() {', () => {
+    const msg = 'const a=1;\nconst b=2;\nconst c=3;\n@Header\nfunction f() {\n  return 1;\n}';
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual(['Header']);
+  });
+
+  it('common app-file and screen names are not known annotations', () => {
+    for (const n of ['Header', 'Footer', 'Login', 'App', 'Home', 'Profile', 'Settings', 'Dashboard', 'Sidebar', 'Navbar', 'Main', 'Index', 'Service', 'Controller', 'Repository', 'Value', 'Table', 'Page', 'Screen', 'Layout']) {
+      expect(KNOWN_ANNOTATIONS.has(n.toLowerCase())).toBe(false);
+      const msg = `class A {\n  int x;\n  @${n}\n  void f() {\n  }\n}`;
+      expect(parseFileMentions(msg, NONE).unresolved).toEqual([n]);
+    }
+  });
+
+  it('a known annotation with a blank line before its declaration keeps the warning', () => {
+    const msg = 'class A {\n  int x;\n  @override\n\n  void f() {\n  }\n}';
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual(['override']);
+  });
+
+  it('a known annotation followed by an unknown lone @Name keeps both warnings', () => {
+    const msg = 'class A {\n  int x;\n  @Override\n  @Header\n  void f() {\n  }\n}';
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual(['Override', 'Header']);
+  });
+
+  it('a known annotation whose next line ends in , or ) keeps the warning', () => {
+    const msg = 'class A {\n  int x;\n  int y;\n  @override\n  Widget build(BuildContext c)\n  {\n  }\n}';
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual(['override']);
+  });
+
+  it('a known annotation after a line ending in , keeps the warning', () => {
+    const msg = 'class A {\n  int x;\n  int y;\n  f(a,\n  @override\n  void g() {\n  }\n}';
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual(['override']);
+  });
+
+  it('a known annotation in the middle of a line keeps the warning', () => {
+    const msg = 'class A {\n  int x;\n  int y; @override\n  void g() {\n  }\n}';
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual(['override']);
+  });
+
+  it('a path-shaped token with code after it keeps the warning', () => {
+    for (const t of ['util.ts', 'lib/util', 'my-file']) {
+      const msg = `class A {\n  int x;\n  int y;\n  @${t}();\n  void g() {\n  }\n}`;
+      expect(parseFileMentions(msg, NONE).unresolved).toEqual([t]);
+    }
+  });
+
+  it('a well-known file name with code-like arguments after it keeps the warning', () => {
+    for (const t of ['Makefile', 'Dockerfile', 'README', 'license']) {
+      const msg = `class A {\n  int x;\n  int y;\n  @${t}(x = 1)\n  void g() {\n  }\n}`;
+      expect(parseFileMentions(msg, NONE).unresolved).toEqual([t]);
+    }
+  });
+
+  it('a known annotation stacked on another known annotation (with arguments) is dropped', () => {
+    const msg = 'class A {\n  int x;\n  @Override\n  @SuppressWarnings("unchecked")\n  public void f() {\n  }\n}';
     expect(parseFileMentions(msg, NONE).unresolved).toEqual([]);
   });
 });
@@ -253,7 +332,7 @@ describe('looksLikePastedCode', () => {
   });
 
   it('is linear: a 200 KB code message with 5,000 annotations parses quickly', () => {
-    const big = `class Big {\n${Array.from({ length: 5_000 }, (_, i) => `  @ann${i}\n  void f${i}() {\n  }`).join('\n')}\n}`;
+    const big = `class Big {\n${Array.from({ length: 5_000 }, (_, i) => `  @override\n  void f${i}() {\n  }`).join('\n')}\n}`;
     const t0 = Date.now();
     expect(parseFileMentions(big, TREE).unresolved).toEqual([]);
     expect(Date.now() - t0).toBeLessThan(2_000);

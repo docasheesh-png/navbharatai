@@ -47,6 +47,9 @@ const MENTION_RE = /(^|\s)@([A-Za-z0-9_./@-]+[A-Za-z0-9_/-]|[A-Za-z0-9_-]+)/g;
  *    line ends in `{ } ;`; and its own line ends in `{ } ;` or, walking forward the same way, the next
  *    non-empty line does. A neighbour ending in `,` or `)` is never code here (second review: a prose
  *    line ending in a comma, a `- item,` list, or a Hinglish list ending in `(1)`…`(5)`).
+ * 6. (third review, the strict belt) a LONE token, with nothing after it on its line, also needs a name
+ *    in `KNOWN_ANNOTATIONS`, and the very next line (no blank line between) must end in `{ } ;` or be
+ *    another known annotation. Tokens with code after them on the same line keep rules 4 and 5.
  * Anything else, including every RESOLVED mention, behaves exactly as before.
  */
 const ANNOTATION_TOKEN_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -154,6 +157,42 @@ function codeNeighbour(text: string, from: number, step: (t: string, at: number)
   return false;
 }
 
+/**
+ * Real annotation names (Dart, Java, Kotlin, TypeScript/Angular, Spring, JPA, JUnit), lower-case.
+ * Conservative on purpose: names that are also common app files or screens (Header, Login, App, Home,
+ * Profile, Settings, Service, Controller, …) are NOT here, so a lone `@Name` like that keeps its warning.
+ */
+export const KNOWN_ANNOTATIONS: ReadonlySet<string> = new Set([
+  // Java / Kotlin language and platform
+  'override', 'deprecated', 'suppresswarnings', 'functionalinterface', 'safevarargs', 'retention',
+  'documented', 'inherited', 'repeatable', 'jvmstatic', 'jvmoverloads', 'jvmfield', 'throws',
+  // Jetpack Compose
+  'composable', 'preview',
+  // Angular / TypeScript
+  'component', 'injectable', 'directive', 'ngmodule', 'input', 'output', 'hostlistener', 'hostbinding',
+  'viewchild', 'viewchildren', 'contentchild',
+  // Spring / DI / JPA / validation
+  'autowired', 'inject', 'restcontroller', 'getmapping', 'postmapping', 'requestmapping', 'pathvariable',
+  'requestbody', 'transactional', 'entity', 'id', 'generatedvalue', 'nullable', 'nonnull', 'notnull',
+  // JUnit
+  'test', 'before', 'after', 'beforeeach', 'aftereach', 'beforeall', 'afterall', 'parameterizedtest',
+  'displayname',
+  // Dart / Flutter
+  'required', 'immutable', 'protected', 'visiblefortesting', 'mustcallsuper', 'pragma', 'jsonkey',
+  'jsonserializable', 'freezed', 'riverpod',
+]);
+
+/** The line right after `lineEnd` (no blank line between) ends in `{ } ;` or is a known annotation. Pure. */
+function annotatesTheNextLine(text: string, lineEnd: number): boolean {
+  if (lineEnd >= text.length) return false;
+  const nl = text.indexOf('\n', lineEnd + 1);
+  const next = text.slice(lineEnd + 1, nl < 0 ? text.length : nl);
+  if (next.trim() === '') return false;
+  if (CODE_LINE_RE.test(next)) return true;
+  const ann = /^\s*@([A-Za-z_]\w*)/.exec(next);
+  return !!ann && KNOWN_ANNOTATIONS.has(ann[1].toLowerCase());
+}
+
 /** Rules 4 and 5 above, for the `@` at `at` followed by `token`. Pure. */
 function readsAsAnnotation(text: string, at: number, token: string): boolean {
   const lineStart = text.lastIndexOf('\n', at - 1) + 1;
@@ -168,8 +207,13 @@ function readsAsAnnotation(text: string, at: number, token: string): boolean {
     || TYPED_DECLARATION_RE.test(rest);
   if (!ownLine) return false;
   const codeBefore = codeNeighbour(text, lineStart, previousNonEmptyLine, (l) => l.start);
-  const codeAfter = CODE_LINE_RE.test(line) || codeNeighbour(text, lineEnd, nextNonEmptyLine, (l) => l.end);
-  return codeBefore && codeAfter;
+  if (!codeBefore) return false;
+  // THE STRICT BELT FOR A LONE TOKEN (third review). `@Header` alone between code lines is as likely
+  // a missing file as an annotation, so a lone token is dropped only when its name is a real, known
+  // annotation AND the very next line (no blank line between) ends in `{ } ;` or is another known
+  // annotation — the shape of an annotation sitting on the declaration it marks.
+  if (rest === '') return KNOWN_ANNOTATIONS.has(token.toLowerCase()) && annotatesTheNextLine(text, lineEnd);
+  return CODE_LINE_RE.test(line) || codeNeighbour(text, lineEnd, nextNonEmptyLine, (l) => l.end);
 }
 
 export interface FileMentions {

@@ -101705,3 +101705,7 @@ The review failed the first version: the pasted-code test looked at the whole me
 ## 2026-11-17 — BR1998 second rework (a neighbour ending in , or ) counted as code)
 
 The second review found that the neighbour rule counted a line ending in `,` or `)` as code, so a lone `@Header` after a prose line, a `- item,` list or a numbered `(1)`…`(5)` list, plus a short snippet, lost its warning. Now a neighbour counts as code only when it ends in `{ } ;`, or is an annotation line that leads (within 8) to such a line; the wider set stays only in the half-of-lines test. The report's `@override` and the Dart, Java, Kotlin and TS pastes still match. 36 tests; 30 mutations rerun, all caught.
+
+## 2026-11-17 — BR1998 third rework (the strict belt for a lone @Name)
+
+The third review found that a lone `@Header` or `@Login` sandwiched between code lines (three `const` lines, then the token, then a function), with or without an intro line, was still dropped. Took the strict belt: a lone token is dropped only when its name is on a conservative, case-insensitive allowlist of real Dart, Java, Kotlin, TS/Angular, Spring/JPA and JUnit annotations (no app-file or screen names), and the very next line, with no blank line between, ends in `{ } ;` or is another known annotation. Tokens with code after them on their line keep the earlier rules. The report's `@override` and the Java, Kotlin, TS and Spring fixtures are still silenced. Added 13 tests (49 in the file); all earlier probes still warn; mutation round 4 (40 mutants) ends with every behavioural mutant caught.

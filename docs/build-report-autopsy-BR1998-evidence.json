@@ -12,7 +12,26 @@
     "the report's own paste: 16 of 63 non-empty lines end in { } ; and 61 of 63 in the wider set; checked locally against the retained report (not committed) and silenced",
     "mutation checks round 2 after review, all caught: R1 no well-known list; R2 case-sensitive list; R3 no own-line rule; R4 no half rule; R5 no statement floor; R6 narrow half set; R7 blank lines counted; R8 no arguments rule; R9 line end without keyword; R10 keyword without line end; R11 no typed declaration; R12 any arguments; R13 no previous-line rule; R14 no next-line rule; R15 no stacked annotations; R16 lower-case type; R17 prose words as keywords; R18 any token; R19 no line-start test (R10, R14, R15, R16, R18 and R19 survived first and were caught after added tests)",
     "second-review probes all keep the warning: 'Please fix the header,' then a lone @Header then three const lines; a '- home,' '- profile,' '- settings,' list then @Header then the snippet; a Hinglish list ending in (1)..(5) then @Header then the snippet; also a stack of lone @Name lines beside prose and code on only one side; the report's @override between 'const DemoApp({super.key});' and 'Widget build(...) {' still matches, as do the Dart, Flutter-style, Java, Kotlin and TS pastes; the retained report's own paste was rechecked locally (not committed) and is silenced",
-    "mutation checks round 3 after the second review, every earlier mutant rerun plus new ones, all caught (30): any token, dotted token, no line start, line start always true, no code gate, no well-known list, case-sensitive list, no own-line rule, no half, no statement floor, floor 2, floor 4, narrow half set, no semicolon, blank lines counted, no arguments rule, line end without keyword, keyword without line end, no typed declaration, any arguments, lower-case type, prose words as keywords, no previous-line rule, no next-line rule, wide set for neighbours, annotation neighbour counted as code, no annotation hops, wide set for own line, own line ignored, no hop cap (the last two kinds survived first and were caught after added tests)"
+    "mutation checks round 3 after the second review, every earlier mutant rerun plus new ones, all caught (30): any token, dotted token, no line start, line start always true, no code gate, no well-known list, case-sensitive list, no own-line rule, no half, no statement floor, floor 2, floor 4, narrow half set, no semicolon, blank lines counted, no arguments rule, line end without keyword, keyword without line end, no typed declaration, any arguments, lower-case type, prose words as keywords, no previous-line rule, no next-line rule, wide set for neighbours, annotation neighbour counted as code, no annotation hops, wide set for own line, own line ignored, no hop cap (the last two kinds survived first and were caught after added tests)",
+    {
+      "id": "third-review-strict-belt",
+      "synthetic": true,
+      "probes": [
+        "three const lines, blank, lone @Header, blank, function (no intro / English intro / Hinglish intro): warns",
+        "@Login same shape: warns",
+        "@Header directly before function f() {: warns",
+        "app and screen names not on the allowlist: warn",
+        "known annotation then blank line / line ending ) / unknown annotation: warns"
+      ],
+      "stillSilenced": [
+        "report-shaped Dart @override",
+        "Java stacked @Override/@Deprecated",
+        "Kotlin @Preview(...) over lone @Composable",
+        "TS @Component({ and @Input() name: string;",
+        "Spring @Autowired over a field, @Nullable String label;"
+      ],
+      "mutations": "round 4: 40 mutants, 32 caught at first, 8 survivors killed with new tests (round 4b); comment-only control survives as expected"
+    }
   ],
   "limitations": [
     "brace-less code (Python decorators) is still reported, as before",
@@ -22,6 +41,7 @@
     "D3 (USAGE_NOT_REPORTED) is already tracked as Q-2414",
     "BR1992 review residual (recordModel read at run start) is not on this report's path",
     "focused local tests and server/root typecheck only; no full local suite was run (box memory)",
-    "not live until a Console Run"
+    "not live until a Console Run",
+    "Third review: a real lone annotation not on the conservative allowlist, or separated from its declaration by a blank line, keeps the missing-file warning (fail-safe side, by design)."
   ]
 }

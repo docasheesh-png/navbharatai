@@ -57,6 +57,7 @@ export interface AbortOutcome {
 export const ABORT_OUTCOME_CODES = Object.freeze({
   userStopped: 'OUTCOME_USER_STOPPED',
   costCeiling: 'OUTCOME_COST_CEILING',
+  walletEmpty: 'OUTCOME_WALLET_EMPTY',
   futile: 'OUTCOME_FUTILE',
   deployDrain: 'OUTCOME_DEPLOY_DRAIN',
   superseded: 'OUTCOME_SUPERSEDED',
@@ -112,6 +113,11 @@ export function abortOutcomeFor(cause: AbortCause, opts: { platformComposed?: bo
           code: ABORT_OUTCOME_CODES.userStopped, severity: 'info',
           message: 'Build outcome: STOPPED BY THE USER — that is why it ended. No failure of the app or the engine is implied.',
         };
+    case 'wallet-empty':
+      return {
+        code: ABORT_OUTCOME_CODES.walletEmpty, severity: 'error',
+        message: 'Build outcome: STOPPED — the wallet balance could not cover the rest of this build. Files already written are kept. Not a defect in the app.',
+      };
     case 'cost-cap':
       return {
         code: ABORT_OUTCOME_CODES.costCeiling, severity: 'error',

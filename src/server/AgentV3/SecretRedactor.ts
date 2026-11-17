@@ -30,6 +30,9 @@ function mask(kind: string): string {
 const PROVIDER_PATTERNS: Array<{ kind: string; re: RegExp }> = [
   // OpenAI / Anthropic style: sk-... (incl. sk-ant-, sk-proj-). >= 20 trailing chars.
   { kind: 'api-key', re: /\bsk-(?:ant-|proj-|live-|test-)?[A-Za-z0-9_-]{20,}\b/g },
+  // Account keys that arrive inside a provider 429 (`<ak-…>`). Same precision bar: a known prefix
+  // plus a long token, never a short word.
+  { kind: 'api-key', re: /\bak-[A-Za-z0-9]{16,}\b/g },
   // xAI / Grok
   { kind: 'api-key', re: /\bxai-[A-Za-z0-9]{20,}\b/g },
   // Google API key

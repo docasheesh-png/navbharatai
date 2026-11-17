@@ -73,6 +73,7 @@ export const OUTCOME_TO_CATEGORY: Readonly<Record<string, { category: FailureCat
   // used to end a build with no outcome at all. None is a fact about the app's code.
   OUTCOME_USER_STOPPED: { category: 'incomplete', hint: 'The user stopped this build. Nothing failed; send another message to continue from the saved files.' },
   OUTCOME_COST_CEILING: { category: 'incomplete', hint: 'The build reached its cost ceiling and was paused between turns — the files so far are kept; a follow-up resumes it.' },
+  OUTCOME_WALLET_EMPTY: { category: 'incomplete', hint: 'The wallet could not cover the rest of the build. Files already written are kept; recharge and send another message to continue.' },
   OUTCOME_FUTILE: { category: 'incomplete', hint: 'The futility breaker ended it: no file, command or step for the whole quiet window. Usually a prompt with too little to build from, or an engine that was not converging.' },
   OUTCOME_DEPLOY_DRAIN: { category: 'network', hint: 'A NavBharatAI deploy drained this build; it resumes on its own. An infrastructure event, not the app or the prompt.' },
   OUTCOME_SUPERSEDED: { category: 'incomplete', hint: 'A newer build on the same project took over this one\'s lock — the later build is the one to read.' },

@@ -206,6 +206,8 @@ export interface AgentRunnerOptions {
    * before, so this is additive only.
    */
   hasExistingFiles?: () => boolean;
+  /** The recharge sentence for this request, used when the wallet runs out mid-build. */
+  balanceEmptyNotice?: () => string;
   /**
    * Does the workspace hold files the PLATFORM set up for this build (a tested template, a game kit, the page
    * the user pasted)? Checked live. Read only when `hasExistingFiles` says nothing of the build's own exists,
@@ -961,7 +963,9 @@ export class AgentRunner {
       // from INSIDE a turn, when the stop cancelled the model call this loop was waiting on.
       const endAborted = async () => {
         const cause = abortCauseOf(this.opts.signal as AbortSignal);
-        const summary = abortSummary(cause, {
+        const summary = cause === 'wallet-empty' && this.opts.balanceEmptyNotice
+          ? this.opts.balanceEmptyNotice()
+          : abortSummary(cause, {
           minutes: buildClockMinutes(maxBuildMs, Date.now(), events.startedAt),
           ...endingContext(),
         });

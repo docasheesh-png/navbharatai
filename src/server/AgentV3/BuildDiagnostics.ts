@@ -69,6 +69,8 @@ export const PROCESS_ONLY_CODES = new Set([
   // e628efd4). A WARNING, so the error count a RED gate reads cannot change and no bill moves; the server's
   // last words stay in the admin report.
   'PREVIEW_SERVER_DOWN',
+  // The user's wallet could not cover the rest of the build. It is our stop, not a defect in their app.
+  'WALLET_BALANCE_EXHAUSTED',
   // Q-982 (report 9c612cdb, 2026-10-13). The workspace refused a file one of OUR passes wrote (a guard, a sandbox
   // read that failed). It is evidence about our write, recorded so the refusal is never silent again; whatever
   // the refused file means for the app is measured by the checks that read the workspace afterwards.
@@ -330,7 +332,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // futility breaker, a deploy drain, a reclaimed lock, a reaper sweep or the user's own Stop says
   // nothing about the app's code, and counting one as a "build-breaking blocker" on the user's health
   // card is the provider-error-as-app-blocker class (autopsy 4efab9d7) through a new door.
-  'OUTCOME_USER_STOPPED', 'OUTCOME_COST_CEILING', 'OUTCOME_FUTILE', 'OUTCOME_DEPLOY_DRAIN',
+  'OUTCOME_USER_STOPPED', 'OUTCOME_COST_CEILING', 'OUTCOME_WALLET_EMPTY', 'OUTCOME_FUTILE', 'OUTCOME_DEPLOY_DRAIN',
   'OUTCOME_SUPERSEDED', 'OUTCOME_REAPED', 'OUTCOME_AUTHORITY_UNAVAILABLE',
   // …and the two the deadline finalizer already wrote, for the same reason (the siblings, rule 3): the
   // wall-clock cap and an abort with no recorded cause end the RUN; neither is evidence about the app.

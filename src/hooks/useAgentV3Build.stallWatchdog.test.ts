@@ -17,6 +17,12 @@ describe('stallWatchdogAction — never show "stopped responding" on a build tha
   it('build gone AND no terminal result → the honest "stopped responding" error', () => {
     expect(stallWatchdogAction({ alive: false, sawResult: false })).toBe('error');
   });
+
+  it('a live lease on another instance is not a stall — keep waiting, do not show the banner', () => {
+    expect(stallWatchdogAction({ alive: false, heldElsewhere: true, sawResult: false })).toBe('wait');
+    // A result already in hand still finishes cleanly; the lease must not reopen a done build.
+    expect(stallWatchdogAction({ alive: false, heldElsewhere: true, sawResult: true })).toBe('finish');
+  });
 });
 
 describe('shouldAutoContinue (VAJRA V4-1a) — an interrupted build resumes itself, exactly once', () => {

@@ -5211,7 +5211,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 <div className="flex items-start gap-2">
                   <Wallet className="w-4 h-4 shrink-0 mt-0.5" />
                   <div className="min-w-0">
-                    <div className="font-semibold text-warn">Add credits to build</div>
+                    <div className="font-semibold text-warn">Recharge to build</div>
                     <div className="mt-0.5 whitespace-pre-wrap break-words">{billingBlock.notice}</div>
                     {/* Billing Phase 2 — token-first: balance and estimate in the wallet's primary unit
                         (server-converted tokens); older servers without token fields fall back to ₹. */}
@@ -5233,10 +5233,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 <div className="mt-2 flex items-center gap-1.5">
                   <button
                     onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
-                    title="Open Wallet & Billing to add credits"
+                    title="Open Wallet & Billing to recharge"
                     className="inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-amber-600 hover:bg-amber-500 rounded px-2.5 py-1"
                   >
-                    <Wallet className="w-3.5 h-3.5" /> Add credits
+                    <Wallet className="w-3.5 h-3.5" /> Recharge
                   </button>
                   <button
                     onClick={clearBillingBlock}

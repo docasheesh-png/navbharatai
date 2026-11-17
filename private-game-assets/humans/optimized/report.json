@@ -1,0 +1,74 @@
+[
+  {
+    "file": "human_01_cap.glb",
+    "before": 62424,
+    "after": 57328,
+    "sourceBytes": 2620816,
+    "bytes": 2590196,
+    "sha256": "d67c8ab51a1d482f1ac1f341e0911baed618015bb9f327786bd2be8d03b02e28",
+    "details": [
+      {
+        "name": "Textile",
+        "before": 37346,
+        "after": 32864,
+        "relativeError": 0.00008352915028808638,
+        "absoluteError": 0.00014639246806665528
+      },
+      {
+        "name": "Leather",
+        "before": 5104,
+        "after": 4490,
+        "relativeError": 0.00019747325859498233,
+        "absoluteError": 0.00008046929331294002
+      }
+    ]
+  },
+  {
+    "file": "human_02_leather.glb",
+    "before": 60650,
+    "after": 56496,
+    "sourceBytes": 2548388,
+    "bytes": 2523416,
+    "sha256": "cb61d382726a4fe9506a7ea66e262addc321b79939eb9659b6fc2a61a6155c82",
+    "details": [
+      {
+        "name": "Textile",
+        "before": 17312,
+        "after": 15234,
+        "relativeError": 0.00012193597649456933,
+        "absoluteError": 0.00017237706514452306
+      },
+      {
+        "name": "Leather",
+        "before": 17290,
+        "after": 15214,
+        "relativeError": 0.00008494028588756919,
+        "absoluteError": 0.00012218514712188794
+      }
+    ]
+  },
+  {
+    "file": "human_03_denim.glb",
+    "before": 59568,
+    "after": 55528,
+    "sourceBytes": 2504296,
+    "bytes": 2480008,
+    "sha256": "eb6b890f17af196b4bb04d3d5e8a29cb446bb22d189dafa5da9b1f21689fd357",
+    "details": [
+      {
+        "name": "Textile",
+        "before": 28538,
+        "after": 25112,
+        "relativeError": 0.00011721235205186531,
+        "absoluteError": 0.00016071696206259364
+      },
+      {
+        "name": "Leather",
+        "before": 5104,
+        "after": 4490,
+        "relativeError": 0.00018779622041620314,
+        "absoluteError": 0.00008197321493561612
+      }
+    ]
+  }
+]

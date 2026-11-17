@@ -1,6 +1,7 @@
+import { prepareHumanAssets } from './humanPack';
 import { createPolyHavenDiscovery, withDiscoveredAssetCache, isDiscoveredAsset } from './polyHavenDiscovery';
 import { createHash } from 'node:crypto';
-import { localModelsOverride } from './localModelNote';
+import { localModelsOverride, localModelSubjects } from './localModelNote';
 import { downloadGameAsset } from './assetDownload';
 import { acquireGameAsset, type AssetEngineDependencies, type AssetOutcome } from './assetEngine';
 import type { AssetRequirement } from './assetPolicy';
@@ -26,6 +27,8 @@ export interface GameAssetSeedResult {
 }
 export interface GameAssetSeedOptions {
   prompt: string;
+  /** Trusted builder plan override; false means deliberately no visible human. */
+  needsHuman?: boolean;
   workspaceId: string;
   verifiedOwnerUid?: string;
   workspace: GameAssetWorkspace;
@@ -42,6 +45,31 @@ export interface GameAssetSeedOptions {
 export const GAME_ASSET_CONCURRENCY = 3;
 
 export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<GameAssetSeedResult> {
+  // Preserve scenery/vehicles and their manifest. Optional humans use separate filenames.
+  const scenery = await prepareExternalGameAssets(options);
+  options.signal.throwIfAborted();
+  // Never install a second competing visible-human authority.
+  if (localModelSubjects(scenery.files[GAME_ASSET_MODELS_PATH]).includes('human')) return scenery;
+  const humanPaths = ['src/game/three/humanRuntime.ts', 'src/game/three/humanAssets.ts', 'public/game-assets/HUMANS_NOTICE.txt'];
+  if (humanPaths.some(path => Object.prototype.hasOwnProperty.call(scenery.files, path))) return scenery;
+  let humans: GameAssetSeedResult | null;
+  try {
+    humans = await prepareHumanAssets(options);
+  } catch {
+    options.signal.throwIfAborted();
+    // Do not discard already prepared scenery or advertise an unprepared human.
+    return scenery;
+  }
+  if (!humans) return scenery;
+  return {
+    files: { ...scenery.files, ...humans.files },
+    handoff: [scenery.handoff, humans.handoff].filter(Boolean).join('\n'),
+    outcomes: [...scenery.outcomes, ...humans.outcomes],
+    status: 'prepared',
+  };
+}
+
+async function prepareExternalGameAssets(options: GameAssetSeedOptions): Promise<GameAssetSeedResult> {
   const out: GameAssetSeedResult = { files: {}, handoff: '', outcomes: [], status: 'off' };
   if (!externalGameAssetsEnabled(options.env, options.verifiedOwnerUid)) return out;
   const catalogue = options.catalogue ?? REVIEWED_GAME_ASSETS;

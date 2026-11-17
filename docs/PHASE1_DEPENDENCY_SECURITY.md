@@ -62,3 +62,24 @@ npm run native:guard
 ```
 
 A direct local compatibility probe exercised real `src/server/{lib,routes}/*.ts` brace patterns through legacy CommonJS glob 7 (ExcelJS/archiver-utils), Firebase glob 10, and E2B glob 13; all returned real matches. This specifically checks the historical CommonJS export-shape failure without a cross-major override. Full CI results and merge evidence belong in the phase roadmap/PR; they are not assumed by this document.
+
+
+## 2026-11-17 — picomatch GHSA-fc5q-39xc-vjpf (no patched release; owner-approved allowlist)
+
+A new high advisory against `picomatch <=4.0.7` (ReDoS through single-branch repeated extglobs) turned `npm run audit:gate`
+red repo-wide on 2026-11-17, with no dependency change in any branch. `npm audit` listed ten high entries; nine carry no
+advisory of their own and inherit this one (`fdir`, `tinyglobby`, `@ts-morph/common`, `@typescript-eslint/typescript-estree`,
+`vite`, `vitest`, `@vitest/coverage-v8`, `node-gyp`, `re2`). npm's suggested "fixes" were major DOWNGRADES of vite/vitest, not
+fixes. npm latest picomatch is 4.0.7, so no patched release exists.
+
+Reachability, checked in code:
+- Production importer: `ts-morph` (`@ts-morph/common -> tinyglobby -> picomatch`). Every production `new Project(...)` in
+  `src/server/AgentV3` uses `useInMemoryFileSystem: true` and `skipAddingFilesFromTsConfig: true`; no `addSourceFilesAtPaths`,
+  tsconfig path or glob is passed, so picomatch never receives a pattern at runtime.
+- Everything else is build/test tooling (vite, vitest, coverage, typescript-eslint) or the `firebase-tools` deploy CLI
+  (`superstatic -> re2 -> node-gyp`).
+
+The owner approved accepting it on 2026-11-17 ("allowlist kar do") after being shown both options (allowlist now, or block
+every merge and deploy until a patch). Accepted in `.audit-allowlist.json` by advisory id (the picomatch entry names
+`GHSA-fc5q-39xc-vjpf`; the nine dependents carry none of their own), reviewBy 2026-12-01. Remove all ten once a patched
+picomatch is published.

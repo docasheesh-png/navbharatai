@@ -27,7 +27,7 @@ import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isFatalProviderError, isModelUnavailableError, isProviderBalanceError, isAccountingRefusalError } from '../providerErrorClass';
 import { isRestOfBuildSkip } from '../../lib/engineSafeDiag';
-import { isBudgetEndedError, isSlowStreamAbandon, isSilentAbandon, providerNeverAnswered, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
+import { deadlineLeavingFallback, isBudgetEndedError, isSlowStreamAbandon, isSilentAbandon, MIN_USEFUL_CALL_MS, providerNeverAnswered, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
 import type { WasteKind } from '../providerWaste';
 import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
 import { abandonedTurnUsage } from '../unbilledTurns';
@@ -874,6 +874,13 @@ export function makeMultiProviderTurnRunner(
         const attemptStartedAt = now();
         /** Did THIS attempt claim a crawl abandon? (see `canAbandonSlowStream`) */
         let claimedAbandon = false;
+        // The step deadline stays on `params`. A plan call that asked to reserve fallback time
+        // hands THIS rung only a slice, so a hang cannot expire the rungs after it (#2428).
+        // Hoisted out of the try so the catch can tell a rung slice from the step itself ending.
+        const stepDeadline = params.deadlineAt;
+        const rungDeadline = params.reserveFallbackBudget
+          ? deadlineLeavingFallback(stepDeadline, now(), chain.length - 1 - i)
+          : stepDeadline;
         try {
           /**
            * 🔴 MAY WE WALK AWAY FROM THIS RUNG IF IT CRAWLS? (autopsy 2b0a3ed5, 2026-09-17.)
@@ -919,6 +926,7 @@ export function makeMultiProviderTurnRunner(
           await assertAiAvailable();
           const result = await raceStop(runner.runTurn({
             ...params, canAbandonSlowStream, hasNextRung: i + 1 < chain.length,
+            deadlineAt: rungDeadline,
             // The first-byte grace is EARNED by answering recently (firstByteGraceFor, owner 2026-10-18).
             firstByteGraceMs: firstByteGraceFor(opts.silenceMemory?.answeredAt?.(benchKey) ?? 0, now()),
             maxTokens: reasoningAwareAsk(params.maxTokens, chain[i].modelId),
@@ -1152,12 +1160,21 @@ export function makeMultiProviderTurnRunner(
           }
           if (isBudgetEndedError(err)) {
             const reason1 = err instanceof Error ? err.message : String(err);
-            // ⚠️ "the time allowed for THIS STEP", never "this build's time budget". The deadline handed
-            // down may be a single step's — the fast lane's 90 s plan cap — with most of the build still
-            // ahead, and this runner cannot tell which clock it was. Two autopsies found the same lie:
-            // 0d297b25 (56 minutes left) and ac41a924 (90 s into a 29-minute build). Sibling of the fix
-            // in aFailedProbeIsNotAnAnswer.
-            throw new Error(`The time allowed for this step ran out before it could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
+            // A slice we imposed (`reserveFallbackBudget`) can fire while the STEP deadline is still
+            // open. That is this rung's cap, not the step ending — the next rung still has the time
+            // that was reserved for it (#2428). The step itself ending still aborts the chain: no
+            // later rung can be given back time the step no longer has.
+            const stepStillOpen = typeof stepDeadline === 'number'
+              && now() + MIN_USEFUL_CALL_MS < stepDeadline
+              && rungDeadline !== stepDeadline;
+            if (!stepStillOpen) {
+              // ⚠️ "the time allowed for THIS STEP", never "this build's time budget". The deadline handed
+              // down may be a single step's — the fast lane's 90 s plan cap — with most of the build still
+              // ahead, and this runner cannot tell which clock it was. Two autopsies found the same lie:
+              // 0d297b25 (56 minutes left) and ac41a924 (90 s into a 29-minute build). Sibling of the fix
+              // in aFailedProbeIsNotAnAnswer.
+              throw new Error(`The time allowed for this step ran out before it could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
+            }
           }
           if (isFatalProviderError(err) || isModelUnavailableError(err) || isStarvedBudgetError(err) || isAccountingRefusalError(err)) {
             // 🔴 A STARVED RUNG IS RETIRED ON ITS FIRST OCCURRENCE, AND THE ARGUMENT IS NOT "PROBABLY"

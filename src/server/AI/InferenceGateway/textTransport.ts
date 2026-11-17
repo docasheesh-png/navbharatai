@@ -11,6 +11,7 @@ import { cheaperInferenceMode } from '../../lib/cheaperInferencePolicy';
  */
 import { createHash } from 'node:crypto';
 import { realRateFor } from '../../AgentV3/providerRates';
+import { isAccountQuotaSignal } from '../../lib/providerAccountQuota';
 import { CHAT_INPUT_WEIGHT } from '../freeTierCostCeiling';
 import { maximumCostNanoUsd, usdToNanoUsd } from '../FreeChain/spendCap';
 import type { AIProviderResponse, ProviderUsage } from '../Router/ProviderTypes';
@@ -407,8 +408,7 @@ function remoteError(value: unknown, provider: GatewayTextProvider, status?: num
       || (typeof reason === 'string' && SAFETY_REASONS.has(reason.toLowerCase()));
   })));
   if (typedRefusal || has('content_filter', 'content_policy_violation', 'safety', 'safety_refusal', 'prohibited_content') || (provider === 'GLM' && has('1301'))) code = 'SAFETY_REFUSAL';
-  else if (has('insufficient_quota', 'quota_exceeded', 'quota_exhausted', 'billing_hard_limit_reached')
-    || (provider === 'GLM' && has('1113', '1308', '1310', '1313')) || (provider === 'DEEPSEEK' && status === 402)) code = 'QUOTA_EXHAUSTED';
+  else if (isAccountQuotaSignal({ provider, status, codes: enums })) code = 'QUOTA_EXHAUSTED';
   else if (status === 401 || status === 403) code = 'AUTH';
   else if (status === 429 || has('rate_limit_exceeded', 'resource_exhausted') || (provider === 'GLM' && has('1302'))) code = 'RATE_LIMIT';
   else if (status === 404 || has('model_not_found', 'model_not_available')) code = 'MODEL_UNAVAILABLE';

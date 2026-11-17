@@ -25,6 +25,33 @@ export const MAX_FILE_MENTIONS = 10;
  */
 const MENTION_RE = /(^|\s)@([A-Za-z0-9_./@-]+[A-Za-z0-9_/-]|[A-Za-z0-9_-]+)/g;
 
+/**
+ * BR1998: A CODE ANNOTATION IS NOT A FILE MENTION. A user pasted a whole Flutter source file as the
+ * message, and its indented `@override` lines passed the whitespace guard above. They matched no file,
+ * so the user was told "⚠️ I could not find @override in this project", which is noise about their own
+ * code. An UNRESOLVED token is now dropped as an annotation only when all three hold:
+ * - it is a bare identifier (no `.`, `/` or `-`), so `@src/Missing.tsx` and `@Header.tsx` are still reported;
+ * - it is the first thing on its line (annotation position: `@override`, `@Composable fun …`);
+ * - the message looks like pasted code: at least 3 lines ending in `{`, `}` or `;`.
+ * Anything else, including every RESOLVED mention, behaves exactly as before.
+ */
+const ANNOTATION_TOKEN_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** At least three lines end in `{`, `}` or `;` — the shape of pasted source, not of a sentence. Pure. */
+export function looksLikePastedCode(text: string): boolean {
+  let n = 0;
+  for (const line of String(text ?? '').split('\n')) {
+    if (/[{};]\s*$/.test(line) && ++n >= 3) return true;
+  }
+  return false;
+}
+
+/** True when only spaces or tabs precede `index` on its line. Pure. */
+function atLineStart(text: string, index: number): boolean {
+  const lineStart = text.lastIndexOf('\n', index - 1) + 1;
+  return /^[ \t]*$/.test(text.slice(lineStart, index));
+}
+
 export interface FileMentions {
   /** Mentioned paths that really exist, in the order written, deduped and capped. */
   resolved: string[];
@@ -60,6 +87,7 @@ export function parseFileMentions(prompt: string | null | undefined, knownPaths:
     push(byBase, (clean.split('/').pop() ?? clean).toLowerCase(), p);
   }
 
+  let codeLike: boolean | undefined;
   for (const m of text.matchAll(MENTION_RE)) {
     const token = m[2];
     if (!token) continue;
@@ -70,6 +98,9 @@ export function parseFileMentions(prompt: string | null | undefined, knownPaths:
     const base = byBase.get(key);
     const hit = exact?.[0] ?? (base && base.length === 1 ? base[0] : undefined);
     if (!hit) {
+      // BR1998: an annotation in pasted code (`@override`) is not a missing file.
+      if (ANNOTATION_TOKEN_RE.test(token) && atLineStart(text, (m.index ?? 0) + m[1].length)
+        && (codeLike ??= looksLikePastedCode(text))) continue;
       if (!unresolved.includes(token)) unresolved.push(token);
       continue;
     }

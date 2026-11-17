@@ -101688,3 +101688,12 @@ The review failed the first version under audit P0-C: up to 60 sequential reads 
 - Precision: a comment-, string- and template-aware tokenizer; only relative, extensioned specifiers that join to exactly a deleted path are named, so a remaining sibling never draws a note.
 - The note is kept out of the user's terminal and the `tool_result` summary.
 - 38 tests; 21 round-2 mutations, all caught (one after an added test).
+
+## 2026-11-17 — BR1998 autopsy (pasted source code was told "I could not find @override"): annotations in pasted code are not missing files
+
+Owner t311u sequential audit, BR1998 only (boundary 1951..2105 frozen). Branched from origin/main `8e5fec7b` (BR1997, #4274). A free Weak edit build succeeded and was not charged.
+
+- F1: `parseFileMentions` no longer reports an unresolved bare identifier that is the first thing on its line in a message that looks like pasted code (3+ lines ending in `{`, `}` or `;`). Everything else is byte-identical. Pure, no I/O.
+- No new queue row (USAGE_NOT_REPORTED is Q-2414).
+- 9 mutations, all caught (plus one comment-only control).
+- Docs: `docs/build-report-autopsy-BR1998.md`, its evidence JSON, and `tests/br1998Autopsy.test.ts`. Not live until a Console Run.

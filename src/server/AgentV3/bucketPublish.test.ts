@@ -44,12 +44,13 @@ describe('isFingerprinted / cacheControlFor', () => {
     expect(isFingerprinted('assets/style.css')).toBe(false);
   });
 
-  it('holds fingerprinted assets for a year and HTML for a minute', () => {
+  it('does not cache HTML or the service worker — a republish has to replace the page people already have', () => {
     expect(cacheControlFor('assets/index-a1b2c3d4.js')).toContain('immutable');
     expect(cacheControlFor('assets/index-a1b2c3d4.js')).toContain('31536000');
-    // HTML is the entry point: a republish has to become visible quickly.
-    expect(cacheControlFor('index.html')).toBe('public, max-age=60');
-    expect(cacheControlFor('about/index.HTML')).toBe('public, max-age=60');
+    expect(cacheControlFor('index.html')).toBe('no-cache');
+    expect(cacheControlFor('about/index.HTML')).toBe('no-cache');
+    expect(cacheControlFor('sw.js')).toBe('no-cache');
+    expect(cacheControlFor('public/sw.js')).toBe('no-cache');
   });
 
   it('gives everything else a modest life rather than forever', () => {
@@ -146,6 +147,12 @@ describe('the publish path stays safe (locked)', () => {
     expect(bucketOnly).toBeGreaterThan(-1);
     expect(firebaseAuth).toBeGreaterThan(-1);
     expect(bucketOnly).toBeLessThan(firebaseAuth);
+  });
+
+  it('a republish returns the address already handed out instead of a new page', () => {
+    expect(deployment).toContain('return pinned.url');
+    expect(deployment).toContain('planRepublish');
+    expect(deployment).toContain("pinned.kind === 'none' && channelId === makeChannelId(workspaceId) && bucketOnlyPublishEnabled()");
   });
 
   it('🔒 an incomplete bucket-only publish FALLS BACK to Firebase instead of shipping a broken app', () => {

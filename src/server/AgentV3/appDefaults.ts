@@ -184,6 +184,25 @@ export function upgradeGeneratedServiceWorker(existing: string | null | undefine
   return norm(existing) === norm(LEGACY_SERVICE_WORKER_V1) ? swJs() : null;
 }
 
+/**
+ * Replace our own cache-first service worker inside a built site, in place.
+ *
+ * Called at publish, on the dist bytes, because that is the copy visitors actually receive. A worker
+ * the app itself wrote is not ours and is not touched. Returns how many files changed.
+ */
+export function upgradeShippedServiceWorker(files: Map<string, Buffer> | null | undefined): number {
+  if (!files || files.size === 0) return 0;
+  let changed = 0;
+  for (const [path, bytes] of files) {
+    if (!/(^|\/)sw\.js$/i.test(String(path || ''))) continue;
+    const next = upgradeGeneratedServiceWorker(bytes.toString('utf8'));
+    if (!next) continue;
+    files.set(path, Buffer.from(next));
+    changed += 1;
+  }
+  return changed;
+}
+
 /** The workspace path of the generated service worker (before `defaultAssetPath`). */
 export const SERVICE_WORKER_FILE = 'sw.js';
 

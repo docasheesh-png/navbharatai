@@ -105,7 +105,7 @@ describe('the Worker can say which copy of itself is running', () => {
 
     const body = worker.replace(/^const WORKER_VERSION = '[^']*';$/m, '');
     const hash = createHash('sha256').update(body).digest('hex').slice(0, 16);
-    const PINNED = 'fa6da542200c8691';
+    const PINNED = '1185bf0f69e06520';
     expect(
       hash,
       `The Worker changed but WORKER_VERSION/the pin did not.\n` +

@@ -20,8 +20,8 @@
  * EDGE CACHING (added 2026-08-21): repeat visits are served from Cloudflare, not Firebase. Firebase
  * bills egress past its free 10 GB while Cloudflare's bandwidth is free, so this is the cheapest
  * saving available — and the app loads faster, because the edge is nearer than Firebase. Fingerprinted
- * assets are held for a year (that URL can never mean anything else); index.html for 60s only, so a
- * republish is visible within a minute instead of people seeing an old app.
+ * assets are held for a year (that URL can never mean anything else). HTML and sw.js are not stored:
+ * a republish writes new bytes at the same address, and a cached document is the old page staying up.
  *
  * DEPLOY (Cloudflare dashboard):
  *   1. Workers & Pages -> Create -> Worker. Paste this file. Deploy.
@@ -57,7 +57,7 @@ const APEX = 'mitrify.in';
 // ⚠️ BUMP `WORKER_VERSION` WHENEVER THIS FILE CHANGES. That is the entire contract: the value is
 // compared against this file BY A TEST, so a change that forgets to bump it fails CI rather than
 // producing a version string that lies — which would be worse than having no version at all.
-const WORKER_VERSION = '2026-10-13.1';
+const WORKER_VERSION = '2026-11-17.1';
 
 // ── TRAFFIC METER (FRONTEND_TRAFFIC_METER on the server) ─────────────────────────────────────────
 // Every response this Worker sends, cache hits too, is one Workers Analytics Engine data point:
@@ -175,8 +175,11 @@ export default {
     const cache = caches.default;
     // Key by the ORIGIN url so two branded hosts can never read each other's entries.
     const cacheKey = new Request(originUrl.toString(), { method: 'GET' });
+    // The document and the worker are what a republish replaces in place. Caching either one is how
+    // the old page keeps serving the first version after Publish is pressed again.
+    const revalidate = isLiveDocument(url.pathname);
 
-    if (cacheable) {
+    if (cacheable && !revalidate) {
       const hit = await cache.match(cacheKey);
       if (hit) {
         const h = new Headers(hit.headers);
@@ -194,8 +197,9 @@ export default {
         const headers = new Headers(fromBucket.headers);
         headers.set('x-nbai-origin', 'bucket');
         headers.set('x-nbai-cache', 'MISS');
+        if (revalidate) headers.set('cache-control', 'no-cache');
         const out = new Response(fromBucket.body, { status: 200, headers });
-        ctx.waitUntil(cache.put(cacheKey, out.clone()));
+        if (!revalidate) ctx.waitUntil(cache.put(cacheKey, out.clone()));
         return meter(env, sub, out);
       }
       // Nothing in the bucket for this app — fall through to Firebase, which is what keeps every
@@ -221,23 +225,33 @@ export default {
 
     // ── HOW LONG, AND WHY IT DIFFERS BY FILE ────────────────────────────────────────────────────
     // A Vite build fingerprints its assets (`/assets/index-a1b2c3.js`), so that exact URL can never
-    // mean anything else — it is safe to hold for a year. index.html is the OPPOSITE: its URL stays
-    // the same while its contents change on every republish, so holding it long would leave people
-    // looking at an old app after the user pressed Publish. It gets a SHORT life, which still removes
-    // the vast majority of origin hits (a busy page is served thousands of times a minute) while a
-    // republish becomes visible within a minute.
+    // mean anything else — it is safe to hold for a year. The document (and sw.js) is the opposite:
+    // the URL stays and the bytes change on every republish, so it is not stored at the edge at all.
     const path = originUrl.pathname;
     const fingerprinted = /\/assets\/|\.[0-9a-f]{8,}\.(js|css|woff2?|png|jpe?g|svg|webp|avif|gif|ico)$/i.test(path);
     const headers = new Headers(resp.headers);
-    headers.set('cache-control', fingerprinted ? 'public, max-age=31536000, immutable' : 'public, max-age=60');
+    headers.set('cache-control', revalidate ? 'no-cache' : fingerprinted ? 'public, max-age=31536000, immutable' : 'public, max-age=60');
     headers.set('x-nbai-cache', 'MISS');
 
     const out = new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
-    // Store a COPY: the response body can only be read once, and the visitor gets the original.
-    ctx.waitUntil(cache.put(cacheKey, out.clone()));
+    if (!revalidate) ctx.waitUntil(cache.put(cacheKey, out.clone()));
     return meter(env, sub, out);
   },
 };
+
+/**
+ * The page itself, and the worker that decides whether the browser even asks for a new page.
+ * These stay out of the edge cache so a republish is visible at the address people already have.
+ * A path with no file extension is an SPA route — the bucket serves index.html for it, so caching
+ * that response would freeze the old app on every deep link too.
+ */
+function isLiveDocument(pathname) {
+  const p = String(pathname || '').toLowerCase();
+  if (p === '/' || p.endsWith('/') || p.endsWith('.html') || p.endsWith('.htm')) return true;
+  if (/(^|\/)sw\.js$/.test(p)) return true;
+  const last = p.split('/').pop() || '';
+  return !last.includes('.');
+}
 
 /**
  * Fetch one path for one app from the bucket, with the SPA fallback Firebase Hosting did for free.

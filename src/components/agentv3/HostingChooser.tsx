@@ -98,6 +98,11 @@ export interface HostingChooserProps {
    * button this file exists to avoid.
    */
   liveUrl?: string | null;
+  /**
+   * Open straight on the published-apps list (the 3-dot menu) instead of the publish choices.
+   * The list is the same one this sheet already loads — a second implementation would drift.
+   */
+  initialView?: 'choose' | 'myapps';
   /** Take the app off NavBharatAI hosting. Resolves to an honest message; the caller shows it. */
   onUnpublish?: () => Promise<void>;
   /**
@@ -249,9 +254,9 @@ export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr, navActions,
   liveUrl, onUnpublish, onRollback, onLoadMyApps, onUnpublishApp, siteAnalytics, onLoadSiteAnalytics, onLoadRollbackChoices, onLoadSiteConfig, onSaveSiteConfig,
   ownRepo, githubConnected, onConnectGitHub, onRepoPushed, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
-  publishRefusalCode, backendKeySource, deployRepo, serverHalf,
+  publishRefusalCode, backendKeySource, deployRepo, serverHalf, initialView,
 }: HostingChooserProps) {
-  const [view, setView] = useState<'choose' | 'domain' | 'selfhost' | 'myapps'>('choose');
+  const [view, setView] = useState<'choose' | 'domain' | 'selfhost' | 'myapps'>(initialView === 'myapps' ? 'myapps' : 'choose');
   // VISITOR COUNTS (ROADMAP §13, 1.1): loaded the moment a live app is on screen, because "did
   // anyone come?" is the first question after publishing and should not need a click to answer.
   const [analyticsDays, setAnalyticsDays] = useState<7 | 30>(7);
@@ -300,6 +305,28 @@ export function HostingChooser({
   const [myPausedApps, setMyPausedApps] = useState<Array<{ workspaceId: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }>>([]);
   const [myAppsErr, setMyAppsErr] = useState('');
   const [myAppsBusy, setMyAppsBusy] = useState('');
+  // Loaded when the list is actually on screen — the Publish button's own click, or the 3-dot menu
+  // opening this sheet already on `myapps`. Not on first paint of the publish choices.
+  useEffect(() => {
+    if (view !== 'myapps' || !onLoadMyApps) return;
+    let cancelled = false;
+    setMyApps(null);
+    setMyAppsErr('');
+    setMyAppsMeta(null);
+    setMyPausedApps([]);
+    void onLoadMyApps()
+      .then((r) => {
+        if (cancelled) return;
+        if (!r) { setMyAppsErr('Could not load your published apps. Please try again.'); return; }
+        setMyApps(r.apps);
+        setMyPausedApps(Array.isArray(r.paused) ? r.paused : []);
+        setMyAppsMeta({ used: r.used, cap: r.cap, freeCap: r.freeCap, planName: r.planName });
+      })
+      .catch(() => { if (!cancelled) setMyAppsErr('Could not load your published apps. Please try again.'); });
+    return () => { cancelled = true; };
+    // onLoadMyApps is recreated every render of the panel; the view change is the request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
   // Unpublish: two-step, because taking a public site down is irreversible from the visitor's side —
   // anyone holding the link loses it the moment this runs. `confirm` is the second step.
   const [unpubConfirm, setUnpubConfirm] = useState(false);
@@ -1379,18 +1406,7 @@ export function HostingChooser({
                 published yet, because the count itself is the useful part. */}
             {onLoadMyApps && (
               <button
-                onClick={() => {
-                  setView('myapps');
-                  setMyApps(null); setMyAppsErr(''); setMyAppsMeta(null); setMyPausedApps([]);
-                  void onLoadMyApps()
-                    .then((r) => {
-                      if (!r) { setMyAppsErr('Could not load your published apps. Please try again.'); return; }
-                      setMyApps(r.apps);
-                      setMyPausedApps(Array.isArray(r.paused) ? r.paused : []);
-                      setMyAppsMeta({ used: r.used, cap: r.cap, freeCap: r.freeCap, planName: r.planName });
-                    })
-                    .catch(() => setMyAppsErr('Could not load your published apps. Please try again.'));
-                }}
+                onClick={() => setView('myapps')}
                 className="w-full py-1.5 rounded-lg border border-line hover:border-emerald-700 text-muted hover:text-success text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
               >
                 <Globe className="w-3.5 h-3.5" />

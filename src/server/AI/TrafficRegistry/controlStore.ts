@@ -13,6 +13,7 @@
  * Server-only: `firestore.rules` denies every client read and write (default-deny), and these are admin-SDK writes.
  */
 import type { Firestore } from 'firebase-admin/firestore';
+import { redactSecrets } from '../../AgentV3/SecretRedactor';
 import { bodyOf, ControlInputError, parseControlBody, parseControlDoc, type ControlBody, type ControlDoc } from './controlTypes';
 
 export const TRAFFIC_CONTROL_COLLECTION = 'admin_traffic_control';
@@ -69,10 +70,13 @@ export class TrafficControlStore {
 
   async apply(args: { expectedRevision: unknown; body: unknown; actor: string; reason: unknown; kind?: 'change' | 'rollback' }): Promise<ControlDoc> {
     if (!Number.isSafeInteger(args.expectedRevision) || (args.expectedRevision as number) < 0) throw new ControlInputError('expectedRevision is required.');
-    const reason = typeof args.reason === 'string' ? args.reason.trim() : '';
-    if (reason.length < 5 || reason.length > 300) throw new ControlInputError('Give a reason of 5–300 characters. It is kept in the audit log.');
+    const typed = typeof args.reason === 'string' ? args.reason.trim() : '';
+    if (typed.length < 5 || typed.length > 300) throw new ControlInputError('Give a reason of 5–300 characters. It is kept in the audit log.');
+    // Free text an admin types is the ONLY place a secret could enter these records (every other field is a
+    // validated enum, id or number). A key pasted by mistake is masked before anything is stored.
+    const reason = redactSecrets(typed).slice(0, 300);
     const body = parseControlBody(args.body);
-    const actor = String(args.actor || '').slice(0, 120) || 'admin';
+    const actor = redactSecrets(String(args.actor || '')).slice(0, 120) || 'admin';
     const now = this.now();
     return this.db.runTransaction(async tx => {
       const snap = await tx.get(this.current());

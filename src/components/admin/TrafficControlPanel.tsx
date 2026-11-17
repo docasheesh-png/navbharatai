@@ -100,6 +100,10 @@ export function TrafficControlBody(props: {
           Emergency and routing switches for the AI gateway. They can only take traffic away: send the gateway, or one surface, back to its
           older path, or stop new requests reaching a provider or model. Requests already running finish where they started.
         </p>
+        <p className="text-sm text-ink" data-testid="traffic-control-scope">
+          <strong>Applies to gateway-managed requests only.</strong> The older routing paths (the Free Chat chain, the chat router and the
+          Pro builder) do not read these switches yet. To stop a provider everywhere, use AI provider switches above.
+        </p>
       </div>
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       {props.done && <p role="status" className="text-sm font-medium text-success" data-testid="traffic-control-done">{props.done}</p>}
@@ -111,10 +115,12 @@ export function TrafficControlBody(props: {
           </p>
           <div className="flex items-center justify-between gap-3 rounded-md border border-line p-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-ink">Gateway (emergency switch)</p>
-              <p className="text-xs text-muted">{draft.global.gateway === 'on' ? 'On: surfaces follow the deployment settings.' : 'OFF: every surface uses its older path.'}</p>
+              <p className="text-sm font-medium text-ink">Gateway Emergency OFF</p>
+              <p className="text-xs text-muted">{draft.global.gateway === 'on'
+                ? 'Gateway on: surfaces follow the deployment settings.'
+                : 'Gateway OFF: every gateway surface uses its older path. Older paths that never used the gateway are not changed.'}</p>
             </div>
-            <button type="button" role="switch" aria-checked={draft.global.gateway === 'on'} aria-label={`Gateway: ${draft.global.gateway}`}
+            <button type="button" role="switch" aria-checked={draft.global.gateway === 'on'} aria-label={`Gateway Emergency OFF switch: gateway is ${draft.global.gateway}`}
               data-testid="traffic-control-global" onClick={() => props.onDraft({ ...draft, global: { gateway: draft.global.gateway === 'on' ? 'off' : 'on' } })}
               className={`relative h-6 w-11 shrink-0 rounded-full border border-line ${draft.global.gateway === 'on' ? 'bg-success' : 'bg-danger/40'}`}>
               <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-surface transition-all ${draft.global.gateway === 'on' ? 'left-5' : 'left-0.5'}`} />
@@ -135,7 +141,8 @@ export function TrafficControlBody(props: {
             ))}
           </fieldset>
           <details>
-            <summary className="cursor-pointer text-sm text-ink">Providers ({data.providers.length})</summary>
+            <summary className="cursor-pointer text-sm text-ink">Providers ({data.providers.length}) · gateway-managed requests only</summary>
+            <p className="mt-1 text-xs text-muted">Drain, disable and traffic caps here stop new gateway requests only. The older paths still call the provider until it is switched off under AI provider switches.</p>
             <ul className="mt-1 divide-y divide-line rounded-md border border-line">
               {data.providers.map((p) => {
                 const c = draft.providers[p.id];
@@ -157,7 +164,7 @@ export function TrafficControlBody(props: {
             </ul>
           </details>
           <details>
-            <summary className="cursor-pointer text-sm text-ink">Models ({data.models.length})</summary>
+            <summary className="cursor-pointer text-sm text-ink">Models ({data.models.length}) · gateway-managed requests only</summary>
             <ul className="mt-1 divide-y divide-line rounded-md border border-line">
               {data.models.map((m) => {
                 const c = draft.models[m.key];

@@ -2,11 +2,11 @@
  * Traffic Manager V2, P2 (owner-approved 2026-11-17): the control store, its decisions and its sync.
  * Each block names the owner requirement it locks.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ControlInputError, parseControlBody, parseControlDoc, type ControlDoc } from './controlTypes';
 import { admissionGaps, candidateVerdict, controlAllowsGateway, familyOfGatewayProvider, trafficBucket } from './controlDecision';
 import { ControlConflictError, describeChanges, revisionDocId, TrafficControlStore, TRAFFIC_CONTROL_AUDIT_COLLECTION, TRAFFIC_CONTROL_REVISIONS_COLLECTION } from './controlStore';
-import { __resetTrafficControlSyncForTests, adoptTrafficControl, currentTrafficControl, jittered, nextInterval, SYNC_BASE_MS, SYNC_MAX_MS, syncTrafficControlOnce, trafficControlSyncStatus } from './controlSync';
+import { __resetTrafficControlSyncForTests, adoptTrafficControl, currentTrafficControl, jittered, nextInterval, startTrafficControlSync, SYNC_BASE_MS, SYNC_MAX_MS, syncTrafficControlOnce, trafficControlSyncStatus } from './controlSync';
 import { PROVIDER_UPSTREAM } from './upstreamFamilies';
 import { MemoryFirestore } from '../../../../tests/helpers/memoryFirestore';
 
@@ -181,5 +181,78 @@ describe('sync: last-known-good, monotonic, adaptive with jitter, safe startup (
     expect(trafficControlSyncStatus().intervalMs).toBeGreaterThan(SYNC_BASE_MS);
     await syncTrafficControlOnce(async () => doc({ revision: 1 }));
     expect(trafficControlSyncStatus().intervalMs).toBe(SYNC_BASE_MS);
+  });
+});
+
+describe('owner P2 review item 3: nothing that can go wrong with the store changes existing routing', () => {
+  afterEach(() => __resetTrafficControlSyncForTests());
+  const allowedToday = () => controlAllowsGateway(currentTrafficControl(), 'chat')
+    && candidateVerdict(currentTrafficControl(), 'GLM', 'glm-4.5-flash', 'r', NOW).allowed;
+  it('cold start: nothing read yet = today\'s routing', () => { expect(allowedToday()).toBe(true); });
+  it('cold start + the read fails: still today\'s routing', async () => {
+    await syncTrafficControlOnce(async () => { throw new Error('PERMISSION_DENIED'); });
+    expect(currentTrafficControl()).toBeNull();
+    expect(allowedToday()).toBe(true);
+  });
+  it('cold start + a malformed stored document: rejected whole, still today\'s routing', async () => {
+    const db = new MemoryFirestore();
+    db.data.set('admin_traffic_control', new Map([['current', { revision: 3, updatedAtMs: 1, global: { gateway: 'off' }, surfaces: { chat: 'everything' } }]]));
+    const store = new TrafficControlStore(db as never);
+    await expect(store.read()).rejects.toThrow(ControlInputError);
+    await syncTrafficControlOnce(() => store.read());
+    expect(currentTrafficControl()).toBeNull();
+    expect(allowedToday()).toBe(true);
+  });
+  it('a malformed document after a good one keeps the good one (last-known-good), never a half-applied one', async () => {
+    await syncTrafficControlOnce(async () => doc({ revision: 2, surfaces: { professional: 'legacy' } }));
+    await syncTrafficControlOnce(async () => parseControlDoc({ revision: 3, updatedAtMs: 1, providers: { glm: { state: 'gone' } } }));
+    expect(currentTrafficControl()?.revision).toBe(2);
+    expect(allowedToday()).toBe(true);
+  });
+  it('a stale revision from a slow instance is ignored', async () => {
+    await syncTrafficControlOnce(async () => doc({ revision: 5 }));
+    await syncTrafficControlOnce(async () => doc({ revision: 4, global: { gateway: 'off' } }));
+    expect(allowedToday()).toBe(true);
+  });
+});
+
+describe('owner P2 review item 8: no key, conversation content or sensitive data enters the store or its audit', () => {
+  it('records hold only fixed fields; a key pasted into a reason is masked in current, revision and audit', async () => {
+    const db = new MemoryFirestore();
+    const store = new TrafficControlStore(db as never, () => NOW);
+    const leaked = 'sk-ant-api03-' + 'A'.repeat(90);
+    await store.apply({ expectedRevision: 0, body: { global: { gateway: 'off' } }, actor: 'owner', reason: `outage, key was ${leaked}` });
+    const all = JSON.stringify([...db.data.entries()].map(([k, v]) => [k, [...v.values()]]));
+    expect(all).not.toContain(leaked);
+    expect(all).toContain('[REDACTED');
+    const audit = [...db.data.get(TRAFFIC_CONTROL_AUDIT_COLLECTION)!.values()][0];
+    expect(Object.keys(audit).sort()).toEqual(['actor', 'atMs', 'changes', 'fromRevision', 'kind', 'reason', 'toRevision']);
+    const current = db.data.get('admin_traffic_control')!.get('current')!;
+    expect(Object.keys(current).sort()).toEqual(['actor', 'global', 'models', 'providers', 'reason', 'revision', 'surfaces', 'updatedAtMs']);
+  });
+  it('admission free text (price source, reviewer) is masked too', () => {
+    const leaked = 'sk-proj-' + 'B'.repeat(60);
+    const b = parseControlBody({ models: { 'glm/x': { state: 'enabled', admission: { required: false, priceSource: `page ${leaked}`, reviewer: 'owner' } } } });
+    expect(JSON.stringify(b)).not.toContain(leaked);
+  });
+});
+
+describe('owner P2 review item 10: synchronization is bounded across instances', () => {
+  afterEach(() => { __resetTrafficControlSyncForTests(); vi.useRealTimers(); });
+  it('one small document read per instance per tick; ten idle minutes cost at most ~15 reads, never a burst', async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    startTrafficControlSync(async () => { reads++; return doc({ revision: 1 }); });
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(reads).toBeGreaterThanOrEqual(10);
+    expect(reads).toBeLessThanOrEqual(16);
+    expect(trafficControlSyncStatus().intervalMs).toBe(SYNC_MAX_MS);
+  });
+  it('a failing store is retried at the base interval, not in a tight loop', async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    startTrafficControlSync(async () => { reads++; throw new Error('down'); });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(reads).toBeLessThanOrEqual(6); // ≥12 s apart (15 s − 20% jitter), plus the first read at boot
   });
 });

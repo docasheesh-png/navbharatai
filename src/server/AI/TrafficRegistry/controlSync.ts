@@ -73,10 +73,10 @@ async function defaultRead(): Promise<ControlDoc | null> {
 }
 
 /** Start the per-instance loop once. Never blocks boot; a timer that is unref'd never holds the process open. */
-export function startTrafficControlSync(): void {
+export function startTrafficControlSync(read: () => Promise<ControlDoc | null> = defaultRead): void {
   if (timer) return;
   const tick = async () => {
-    await syncTrafficControlOnce();
+    await syncTrafficControlOnce(read);
     timer = setTimeout(() => { void tick(); }, jittered(state.intervalMs));
     (timer as { unref?: () => void }).unref?.();
   };

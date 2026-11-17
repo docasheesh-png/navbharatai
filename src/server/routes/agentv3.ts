@@ -6212,10 +6212,18 @@ async function noteBuildOutcome(
     // the JSON mode returns. Non-stream callers keep the original single-JSON contract.
     const wantsStream = req.body?.stream === true;
     let streaming = false;
+    // Every wake leaves a record (previewWakeLog.ts): the last stage it reached and how it ended.
+    const wakeStartedAt = Date.now();
+    let lastWakeStage = '';
     const sendStage = (label: string, pct: number): void => {
+      lastWakeStage = label;
       if (streaming && !res.writableEnded) res.write(JSON.stringify({ type: 'stage', label, pct }) + '\n');
     };
     const finish = (payload: Record<string, unknown>, status = 200): void => {
+      void sandboxStore.recordWakeAttempt(workspaceId, {
+        at: Date.now(), ok: payload.ok === true, stage: lastWakeStage,
+        reason: typeof payload.reason === 'string' ? payload.reason : '', seconds: (Date.now() - wakeStartedAt) / 1000,
+      }).catch(() => {});
       if (streaming) {
         if (!res.writableEnded) {
           res.write(JSON.stringify({ type: 'result', ...payload }) + '\n');
@@ -15745,6 +15753,11 @@ async function noteBuildOutcome(
           events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now(), id: 'eta-live' });
         });
         const ensureWorkspaceMs = Date.now() - ensureT0;
+        // A preview that would not wake between builds is answered here, in this build's report, from the
+        // attempts' own records (previewWakeLog.ts). Off the critical path; a read failure just says nothing.
+        void sandboxStore.takeUnreportedWakeFailures(workspaceId).then((line) => {
+          if (line) buildDiag.record({ phase: 'build', severity: 'warning', code: 'PREVIEW_WAKE_HISTORY', message: line, autoResolved: true });
+        }).catch(() => {});
         try {
           buildDiag.recordSetupTiming({
             startMs: setupT0,

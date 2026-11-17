@@ -98,6 +98,7 @@ export const NOT_A_REPAIR_CODES: ReadonlySet<string> = new Set([
   'IN_BUILD_GREEN_HELD', // the in-build proof refused to save a REPLACEMENT as the last known good — nothing was repaired, the earlier version is simply untouched
   'READINESS_WARNING',
   'PREVIEW_SNAPSHOT_STALE',
+  'PREVIEW_WAKE_HISTORY', // failed wake-ups BETWEEN builds, reported as evidence (previewWakeLog.ts) — nothing was repaired
   'USAGE_NOT_REPORTED',
   'CHEAP_REVIEW_NOT_RUN',
   // A repair that was UNDONE: the defect it targeted is still there.

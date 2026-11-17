@@ -31,7 +31,7 @@ import { nemotronBaseUrl, nemotronKey, nemotronSuperModel } from '../AgentV3/nem
 import { vertexGenAI, vertexProjectId } from './vertexGenAI';
 import { testChatRequestId, testChatUid } from './testChatPayload';
 import { pickProviderModels } from './providerModelPicker';
-import { isResellerGatewayId, RESELLER_GATEWAY_CEILING_RATE, RESELLER_GATEWAY_IDS, RESELLER_GATEWAYS, resellerGatewayRoute, resellerGatewayState } from './resellerGateways';
+import { isResellerGatewayId, RESELLER_GATEWAY_CEILING_RATE, RESELLER_GATEWAY_IDS, RESELLER_GATEWAYS, resellerGatewayRoute, resellerGatewayState, resellerModelLadder } from './resellerGateways';
 
 type UnavailableReason = 'disabled' | 'configuration' | 'storage' | 'approval-or-budget' | 'budget' | 'no-model' | 'tries-exhausted' | 'capacity' | 'capability' | 'invalid' | 'unconfirmed';
 const SKIP_REASON: Record<string, UnavailableReason> = {
@@ -155,6 +155,15 @@ function tryOutcome(t: { httpStatus?: number | null; providerCode?: string | nul
 }
 /** Gateways whose test call picks models from the key's own list and tries the next on failure. */
 const MODEL_PICKER_RUNGS: ReadonlySet<string> = new Set(['bluesminds']);
+/**
+ * A reseller gateway tries up to three of its models (owner 2026-11-17). Coding answers from a reasoning model take
+ * minutes, and the page's old 90-second bound cut a DiscountedTokens coding reply at 90,001 ms ("coding me fail hai")
+ * while it was still being written. So: a model that shows no response within RESELLER_FIRST_RESPONSE_MS is given up
+ * and the next one is tried; a model that IS answering keeps the time until the whole test's RESELLER_TEST_BUDGET_MS.
+ */
+export const RESELLER_TEST_BUDGET_MS = 240_000;
+export const RESELLER_FIRST_RESPONSE_MS = 45_000;
+const TEST_CHAT_BOUND_MS = 90_000;
 export const ROUTER_ONE_PRICE_UNAVAILABLE = 'Router One’s posted price for this model could not be read from router.one, so this page has no spending ceiling for it and did not call it. Choose a model listed on router.one/models, or try again in a few minutes.';
 function routerOneOfficialEndpoint(): boolean {
   return routerOneBaseUrl().replace(/\/+$/, '') === ROUTER_ONE_DEFAULT_BASE_URL;
@@ -436,7 +445,7 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   if (meta.kind === 'reseller-gateway' && isResellerGatewayId(id)) {
     const state = resellerGatewayState(id);
     return { ...base, configured: state.ready || state.configured, enabled: state.ready, model: state.model, billed: true, approvalRequired: false,
-      note: 'A discount reseller under evaluation: this admin page is the only place it is called. One call, no retry, to the provider’s own domain. With no model set it reads the key’s own /models list and uses a listed chat model; a typed model is used as-is. On Moyi an OpenAI model id goes to its OpenAI-format endpoint and every other model to its Anthropic-format endpoint. The reply shows the model id the provider itself reports, which is the provider’s claim and not independent proof of which model answered. The shared-budget reserve uses the dearest official list price among the models these gateways sell (USD 10 / 50 per 1M tokens): a ceiling, not the bill.',
+      note: 'A discount reseller under evaluation: this admin page is the only place it is called, always on the provider’s own domain. With the Model box empty it tries up to three of the gateway’s models, one after another: the models listed in its model setting in that order (else its default), then chat models from the key’s own /models list. A model that shows no response within 45 s is given up and the next is tried; a model that is answering keeps going for up to 4 minutes. A refused key stops at once. A typed model is used as-is, alone. On Moyi an OpenAI model id goes to its OpenAI-format endpoint and every other model to its Anthropic-format endpoint. The reply shows the model id the provider itself reports, which is the provider’s claim and not independent proof of which model answered. The shared-budget reserve uses the dearest official list price among the models these gateways sell (USD 10 / 50 per 1M tokens): a ceiling, not the bill.',
       ...(state.ready ? {} : { unavailableReason: state.reason }) };
   }
   if (meta.kind === 'kimi') {
@@ -684,7 +693,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
   }
   const uid = testChatUid(actor);
   const requestId = testChatRequestId(action);
-  const bounded = AbortSignal.any([signal, AbortSignal.timeout(90_000)]);
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(META[action.provider].kind === 'reseller-gateway' ? RESELLER_TEST_BUDGET_MS : TEST_CHAT_BOUND_MS)]);
   const startedAt = Date.now();
   const extraSecrets = secretsFor(action.provider);
   const fail = (reason: UnavailableReason, statusCode: number, extra: Omit<Parameters<typeof buildTestChatDiagnostic>[0], 'provider'>): never => {
@@ -872,19 +881,49 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
     if (meta.kind === 'reseller-gateway' && isResellerGatewayId(action.provider)) {
       const gateway = resellerGatewayState(action.provider);
       if (!gateway.ready) throw new TestChatUnavailable('configuration');
-      // A typed model wins; else the configured one; else a chat model from the key's own list. Never a guessed id.
-      const model = requestedModel(action) || gateway.model
-        || (await pickProviderModels(gateway.baseUrl, gateway.apiKey, null, 1)).models[0];
-      if (!model) throw new TestChatUnavailable('no-model', 409);
-      dispatchedModel = model;
-      const ceiling = quoteTokens(action.messages, RESELLER_GATEWAY_CEILING_RATE.inputPerMTok, RESELLER_GATEWAY_CEILING_RATE.outputPerMTok);
-      const receipt = await reserveShared(db, requestId, uid, ceiling);
-      if (!receipt) throw new TestChatUnavailable('budget', 409);
-      const route = resellerGatewayRoute(gateway, model);
-      const result = await releaseIfUnused(receipt, () => route.format === 'anthropic'
-        ? runOfficialAnthropicTest({ apiKey: gateway.apiKey, model, messages: action.messages, signal: bounded, baseURL: route.baseUrl })
-        : sentTo(runOfficialOpenAiCompatTest)({ url: route.url, apiKey: gateway.apiKey, model, messages: action.messages, signal: bounded, stream: true }));
-      return finish(action, result.content, result.model || model, startedAt, result.usage);
+      // A typed model is honoured as the ONLY one. Otherwise the gateway's own ladder: the owner's listed order,
+      // else its default, then the key's own /models list — at most three, never a guessed id.
+      const typed = requestedModel(action);
+      const ladder = typed ? [typed] : await resellerModelLadder(gateway, pickProviderModels);
+      if (!ladder.length) throw new TestChatUnavailable('no-model', 409);
+      const tries: NonNullable<Parameters<typeof buildTestChatDiagnostic>[0]['attempts']>[number][] = [];
+      const deadline = startedAt + RESELLER_TEST_BUDGET_MS;
+      for (const [index, model] of ladder.entries()) {
+        if (deadline - Date.now() < 5_000) break;
+        dispatchedModel = model;
+        const ceiling = quoteTokens(action.messages, RESELLER_GATEWAY_CEILING_RATE.inputPerMTok, RESELLER_GATEWAY_CEILING_RATE.outputPerMTok);
+        const receipt = await reserveShared(db, index === 0 ? requestId : `${requestId}:try${index + 1}`, uid, ceiling);
+        if (!receipt) throw new TestChatUnavailable('budget', 409);
+        const route = resellerGatewayRoute(gateway, model);
+        // This try's own stop: "no response yet" after RESELLER_FIRST_RESPONSE_MS gives up on this model only.
+        // The Anthropic-format route reports no stream activity, so it gets the remaining budget instead.
+        const own = new AbortController();
+        const quiet = route.format === 'openai' && ladder.length > 1 && index < ladder.length - 1
+          ? setTimeout(() => own.abort(), RESELLER_FIRST_RESPONSE_MS) : null;
+        const trySignal = AbortSignal.any([bounded, own.signal]);
+        const tried = Date.now();
+        try {
+          const result = await releaseIfUnused(receipt, () => route.format === 'anthropic'
+            ? runOfficialAnthropicTest({ apiKey: gateway.apiKey, model, messages: action.messages, signal: trySignal, baseURL: route.baseUrl })
+            : sentTo(runOfficialOpenAiCompatTest)({ url: route.url, apiKey: gateway.apiKey, model, messages: action.messages, signal: trySignal, stream: true,
+              onActivity: () => { if (quiet) clearTimeout(quiet); } }));
+          const answered = finish(action, result.content, result.model || model, startedAt, result.usage);
+          return ladder.length > 1 || tries.length ? { ...answered, tries: [...tries.map(t => ({ model: t.model ?? 'unknown', latencyMs: t.latencyMs, outcome: tryOutcome(t) })),
+            { model, latencyMs: Date.now() - tried, outcome: 'answered' as const }].slice(-TEST_CHAT_MAX_TRIES) } : answered;
+        } catch (error) {
+          if (bounded.aborted || typed) throw error;
+          const fe = error instanceof OfficialTestChatError ? error : null;
+          const quietOut = own.signal.aborted;
+          const httpStatus = fe?.httpStatus ?? null;
+          tries.push({ model, latencyMs: Date.now() - tried, httpStatus, providerCode: quietOut ? 'NO_RESPONSE' : fe?.providerCode ?? null,
+            providerMessage: quietOut ? `No response within ${Math.round(RESELLER_FIRST_RESPONSE_MS / 1000)} s; the next model was tried.` : fe?.providerMessage ?? null,
+            rawErrorBody: quietOut ? null : fe?.rawErrorBody ?? null, timeout: quietOut || fe?.classificationHint === 'timeout' });
+          if (httpStatus === 401 || httpStatus === 403) break; // a refused key fails every model alike
+        } finally { if (quiet) clearTimeout(quiet); }
+      }
+      return fail('unconfirmed', 503, { model: tries.at(-1)?.model ?? ladder[0], latencyMs: Math.max(0, Date.now() - startedAt),
+        providerCode: 'ALL_MODELS_FAILED', finalOutcome: 'all-models-failed', attempts: tries, extraSecrets,
+        providerMessage: `${gateway.label} tried ${tries.length} model(s): ${tries.map(t => t.model).join(', ') || 'none'}. None answered; see each attempt below. In a builder chain the next provider would be tried now.` });
     }
 
     let officialReceipt: Awaited<ReturnType<typeof reserveShared>> = null;

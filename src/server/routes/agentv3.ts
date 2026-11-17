@@ -600,6 +600,7 @@ import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage
 import { previewKeepAliveEnabled, isTopLevelNavigation } from '../AgentV3/previewKeepAlive';
 import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
+import { keepFailedBuildCopy, takeBuildCopy } from '../AgentV3/failedBuildCopy';
 import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, snapshotStandIn, snapshotStandInNote, PREVIEW_COPY_REFRESH_MS } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
@@ -24819,6 +24820,14 @@ async function noteBuildOutcome(
       // block or fail a build, and it does NOT feed classifyBuildOutcome — a green, rendering app whose
       // production build is broken is a working app with a shipping problem, not a failed build, and
       // calling it BUILD_FAILED would both lie to the user and change what they are charged.
+      // ONE definition of "take the copy" (buildCopy in failedBuildCopy.ts): after a passing production build,
+      // after a kept repair (refreshPreviewCopy), and after a FAILED build whose app rendered.
+      const takePreviewCopy = async (): Promise<boolean> => {
+        const taken = await takeBuildCopy({ actuator, workspaceId, record: (e) => buildDiag.record(e) });
+        if (taken) snapshotTaken = taken;
+        return taken !== null;
+      };
+
       if (
         prodBuildGateEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
@@ -24909,53 +24918,6 @@ async function noteBuildOutcome(
               ...(await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>))),
               ...Object.fromEntries(writtenFiles),
             })) {
-              // ONE definition of "take the copy", run here and again after a kept repair (refreshPreviewCopy).
-              const takePreviewCopy = async (): Promise<boolean> => {
-                if (!actuator.downloadDistFiles) return false;
-                try {
-                  const dist = await withTimeout(actuator.downloadDistFiles(workspaceId), 60_000, 'snapshot-dist');
-                  if (dist && dist.size > 0) {
-                    const url = await withTimeout(
-                      new FirebaseHostingDeployer().deployStatic(workspaceId, withPreviewAiRelay(dist), snapshotChannelId(workspaceId)),
-                      90_000, 'snapshot-deploy',
-                    );
-                    if (url) {
-                      const at = Date.now();
-                      // WHAT THE COPY WAS BUILT FROM. Read now, from the same tree `npm run build` just
-                      // consumed — nothing writes between the two. The final durable save compares this
-                      // with what it persists; a copy whose source could not be read is never promoted.
-                      const source = await withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')
-                        .then((c) => c.files as Record<string, string>).catch(() => null);
-                      // The SANDBOX copy of index.html carries our preview bridge the moment a dev server
-                      // has run; the durable copy never does. Hash the APP, not our console mirror —
-                      // see identitySource (autopsy Study-Racer, 2026-09-25: PREVIEW_SNAPSHOT_STALE on a
-                      // build where nothing had written after the copy).
-                      const filesHash = source ? workspaceContentHash(identitySource(source)) : null;
-                      await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
-                      // The paths travel with the copy for THIS build only, so a mismatch can say which
-                      // side holds what — see staleDetail. The hash is still what decides.
-                      snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(identitySource(source)) : undefined, fileHashes: source ? fileContentHashes(identitySource(source)) : undefined };
-                      // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
-                      // Raising the flag lets the idle sweep use the shorter snapshot window; the event
-                      // lets the frame move to the real build output the moment the build settles,
-                      // instead of on the next 150-second poll. The actuator clears the flag by itself
-                      // on the next write, so a later heal pass that changes a file cannot leave a
-                      // stale copy counted as current.
-                      try { actuator.noteSnapshotCurrent?.(workspaceId, true); } catch { /* advisory */ }
-                      // The `snapshot` event is emitted at the FINAL durable save, once the copy is
-                      // proven to match what was persisted — the surface only applies it after the
-                      // build ends anyway, so nothing is lost and nothing stale is ever announced.
-                      buildDiag.record({
-                        phase: 'readiness', severity: 'info', code: 'PREVIEW_SNAPSHOT_SAVED',
-                        message: 'Kept a permanent copy of this build, so the preview still works after its live server expires.',
-                        autoResolved: true,
-                      });
-                      return true;
-                    }
-                  }
-                } catch { /* a fallback copy must never be able to affect the build it is copying */ }
-                return false;
-              };
               await takePreviewCopy();
               refreshPreviewCopy = async () => {
                 // The copy is the output of `npm run build`, so a changed source needs a new build first;
@@ -24971,6 +24933,10 @@ async function noteBuildOutcome(
           }
         } catch { /* the detector must never affect a build it is only observing */ }
       }
+
+      // A FAILED build whose app rendered still leaves a copy (failedBuildCopy.ts decides; the route only reports).
+      await keepFailedBuildCopy({ actuator, workspaceId, writtenFiles, takeCopy: takePreviewCopy, record: (e) => buildDiag.record(e),
+        turn: { ok: result.ok, rendered: previewGreen, copyTaken: snapshotTaken, expectsArtifacts, aborted: abort.signal.aborted, startedAt: buildStartedAt, maxSeconds: effectiveBuildSeconds } });
 
       // APP HEALTH CULTURE — VACCINE (Immune System Phase 2, opt-in AGENTV3_VACCINE=on): run_tests is a
       // TOOL the agent MAY skip; the vaccine makes it a SYSTEM reflex. If the built project ships a real

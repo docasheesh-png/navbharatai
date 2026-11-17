@@ -101829,3 +101829,30 @@ Findings the snapshot makes visible (no routing change):
 Census tests (`snapshot.test.ts`, `upstreamFamilies.test.ts`, 33 in total) fail when any of these is missing from the registry: a kill-switch family, a directory row, a Free Chat rung, or a builder rung. Five reversions were each caught: an unclassified family, `unknown` treated as independent, Vertex split from Google, the builder ladder not read, and the Requesty route host ignored.
 
 Not in P1, by design: runtime catalogs (the gateway's reviewed Firestore catalog, the live OpenRouter free list, Surplus offers). They join in P2 with the control store.
+
+## 2026-11-17 — A preview is never blank: the three layers (admin: "iska koi permanent solution dhundo … han bilkul banao")
+
+Report: the admin opened a three-day-old battle royale to edit it, and the preview "1 second bhi nahi chala". This is the same class as 2026-09-08 ("2-3 din bad preview band"). The earlier fix (`previewWake.ts`) never covered the state a FAILED build leaves behind.
+
+The chain:
+- Build 3 ended ENGINE_UNAVAILABLE after changing files, and after its app had rendered.
+- The VM-free copy is taken only inside the production-build gate, which needs `result.ok`. So no copy was taken.
+- The copy from build 2 became "not current". The door refused it for a 'starting' machine.
+- The machine did not answer.
+- The result was an endless waiting page over an app we held a working copy of.
+
+The fix:
+1. **A failed build that rendered still leaves a copy** (`failedBuildCopy.ts`, `keepFailedBuildCopy`). This runs only for a failed turn that rendered, took no copy, was not stopped and has 90 s left. It runs the same production build and, only if that passes, takes the same copy. It changes no verdict, outcome or charge. It reports FAILED_BUILD_COPY_KEPT / _NOT_KEPT. The copy-taking itself moved out of the route into `takeBuildCopy`, so the gate and this path share one definition.
+2. **A starting preview shows the last working version, labelled** (`snapshotStandIn` in `previewSnapshot.ts`). An OLDER copy stands in, with SNAPSHOT_OLDER_NOTE ("changes made after it are not in this copy yet"). It never does so while a build runs, and never within 10 minutes of the last write, so a fresh edit is never hidden. The door and preview-health ask the same function, and the live app still replaces the copy by itself.
+3. **Every wake-up is recorded** (`previewWakeLog.ts`). Each preview-diagnose finish appends {at, ok, last stage, reason, seconds} to a bounded five-entry log on the sandbox record, with URLs and keys stripped. The next build writes the not-yet-reported failures into its report as PREVIEW_WAKE_HISTORY.
+
+Constraint found: the build function in `agentv3.ts` sits exactly at TypeScript's control-flow-analysis limit (TS2563). Even a three-line `if` tipped it over and broke typechecking across the whole server. New logic therefore lives in modules, and the route keeps one branch-free call. Record this before adding anything to that function.
+
+Tests (each proven by reversion):
+- `aPreviewIsNeverBlank.test.ts`
+- `failedBuildCopy.test.ts`
+- `previewWakeLog.test.ts`, including a wiring guard
+
+Five source guards were repointed to the moved copy code: `previewSnapshotWiring`, `sandboxLifetime`, `snapshotIdentity`, `theCopyFollowsEveryPass`, `theSearchBoxWasInHindi`.
+
+Not proven: why that day's wake did not bring the machine back. No record of it existed; layer 3 makes the next one visible.

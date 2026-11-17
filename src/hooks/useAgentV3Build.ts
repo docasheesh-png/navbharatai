@@ -327,9 +327,12 @@ export function serverBuildNeedsAttention(opts: {
   return opts.polledWorkspaceId !== opts.resultWorkspaceId;
 }
 
-export function stallWatchdogAction(opts: { alive: boolean; sawResult: boolean }): 'reconnect' | 'finish' | 'error' {
+export function stallWatchdogAction(opts: { alive: boolean; heldElsewhere?: boolean; sawResult: boolean }): 'reconnect' | 'wait' | 'finish' | 'error' {
   if (opts.alive) return 'reconnect';
   if (opts.sawResult) return 'finish';
+  // The build is heartbeating on another instance. It has not finished and it has not exhausted
+  // its engines. Keep the spinner; do not tell the user it stopped.
+  if (opts.heldElsewhere) return 'wait';
   return 'error';
 }
 
@@ -1764,7 +1767,8 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
           const r = await fetch(`/api/agentv3/status?${params.toString()}`, { signal: AbortSignal.timeout(15_000) });
           const j = await r.json().catch(() => ({}));
           const alive = workspaceIdRef.current ? j?.buildRunningHere === true : j?.buildRunning === true;
-          const action = stallWatchdogAction({ alive, sawResult: sawResultRef.current });
+          const action = stallWatchdogAction({ alive, heldElsewhere: j?.buildHeldElsewhere === true, sawResult: sawResultRef.current });
+          if (action === 'wait') return;
           if (action === 'reconnect') {
             // The build is alive but OUR stream went quiet — reconnect and keep going.
             abortRef.current?.abort();

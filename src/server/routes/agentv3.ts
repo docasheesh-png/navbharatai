@@ -7,7 +7,7 @@ import { prepareGameSeedWorkspace } from '../AgentV3/gameSeedWorkspace';
 import { withReplyLanguage, replyVoiceForRequest } from '../AgentV3/replyLanguageBinding';
 import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
 import { createSandboxAdmissionBudget, sandboxAdmissionActuator } from '../AgentV3/sandboxAdmissionBudget';
-import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges, recordRouterOneEstimatedBill } from '../AI/RouterOne/catalogueAccounting';
+import { routerOneAccountingScope, bindRouterOneAccountingScope, routerOneAbortController, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges, recordRouterOneEstimatedBill } from '../AI/RouterOne/catalogueAccounting';
 import { planKitRefresh } from '../lib/gameRecipeLayers';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
 import { PRO_SANDBOX_FEE_PCT, proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../AgentV3/proSandboxFee';
@@ -3981,6 +3981,17 @@ export function sanitizeSteerMessage(raw: unknown): string | null {
   return t.length > 2000 ? t.slice(0, 2000) : t;
 }
 
+/** A report row from the moment the diagnostics object exists, so a drop before the first model call still leaves one. */
+function noteBuildAccepted(diag: BuildDiagnostics): BuildDiagnostics {
+  try {
+    diag.record({
+      phase: 'build', severity: 'info', code: 'BUILD_STARTED', autoResolved: true,
+      message: 'Build accepted. This report is saved from here on, including when the connection drops before the build finishes.',
+    });
+  } catch { /* a start line must never stop the build */ }
+  return diag;
+}
+
 /**
  * Whether a build claims its workspace in Firestore so a retry on ANOTHER instance cannot start a
  * second build in the same workspace (autopsy eed79815 — see workspaceBuildLease.ts). Default ON;
@@ -4426,6 +4437,15 @@ export function registerAgentV3Routes(app: Express): void {
     const buildRunningHere = !!findAttachableBuild((k: string) => runningBuilds.get(k), {
       verifiedUid: statusVerifiedUid, workspaceId, perWorkspace: perWs,
     });
+    // A phone's status poll often lands on a DIFFERENT instance from the one holding the build.
+    // Memory says "not running" there, and the client's stall watchdog then shows "stopped
+    // responding" while the build is still heartbeating its workspace lease. The lease is the
+    // cross-instance fact. Unknown (store unreachable) stays false — a doubt must not hide a
+    // build that really ended.
+    let buildHeldElsewhere = false;
+    if (!buildRunningHere && workspaceId && workspaceLeaseEnabled()) {
+      buildHeldElsewhere = (await workspaceBuildIsLive(getDb() as unknown as BuildLeaseStore, workspaceId)) === true;
+    }
     // T0-9 SECURITY (2026-07-14): `billed`/`powerUnlocked` are MONEY/entitlement facts and were computed
     // from the CLAIMED `?userId`/`?email` — so `?userId=<victim>` leaked whether that account had ever
     // purchased (its wallet's paid status). They are now derived from the VERIFIED token only (the client
@@ -4440,6 +4460,7 @@ export function registerAgentV3Routes(app: Express): void {
       ...statusEntitlement(verified, wallet),
       buildRunning,
       buildRunningHere,
+      buildHeldElsewhere,
       ...agentV3Status(),
       team: agentLifecycle.snapshot(),
     });
@@ -12079,7 +12100,7 @@ async function noteBuildOutcome(
     // Register this build so it can be STOPPED and RE-ATTACHED to ("Resume") after the
     // original connection is lost. The client's response is the first subscriber; if it
     // disconnects we keep the build alive (still buffering) so the user can resume it.
-    const abort = new AbortController();
+    const abort = routerOneAbortController();
     // intentWorkspaceId was already derived above (deriveWorkspaceId(userId, req.body?.sessionId)) for
     // intent classification — reuse it so the running-build registry knows which session owns this
     // build, instead of computing it twice from the same (userId, sessionId) pair.
@@ -14513,7 +14534,7 @@ async function noteBuildOutcome(
             + (starterEditReadAsBuild ? ' The request had been read as an edit; it runs as a fresh build instead.' : ''),
         });
       }
-      buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
+      buildDiagRef = noteBuildAccepted(buildDiag); // expose to the outer catch so a build crash is captured too
       // Q-200 / Q-201: decided before this report existed, so carried here.
       if (offerAccepted) {
         try {

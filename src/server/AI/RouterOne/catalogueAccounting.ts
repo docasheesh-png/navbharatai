@@ -172,11 +172,31 @@ const scopes = new AsyncLocalStorage<Scope>();
 const turns = new AsyncLocalStorage<{ attempts: Attempt[] }>();
 const dispatches = new AsyncLocalStorage<Attempt>();
 
-export const routerOneAccountingScope: RequestHandler = (_req, res, next) => {
+export const routerOneAccountingScope: RequestHandler = (_req, _res, next) => {
   const scope: Scope = { stopped: false, receipts: [] };
-  res.once('close', () => { scope.stopped = true; });
+  // The build outlives the viewer's socket (runningBuilds keeps going after a phone drop, and
+  // /attach reconnects). Stopping this scope on `res.close` made every later Router One call throw
+  // scope_stopped for the rest of that build — the rung was never asked. The build's own abort
+  // (Stop, deadline, lock reclaim) is what ends it. bindRouterOneScopeToAbort wires that.
   scopes.run(scope, next);
 };
+/** An abort controller whose signal also stops this request's Router One scope. */
+export function routerOneAbortController(): AbortController {
+  const abort = new AbortController();
+  bindRouterOneScopeToAbort(abort.signal);
+  return abort;
+}
+/** Stop Router One spending when THIS build aborts. A viewer disconnect is not an abort. */
+export function bindRouterOneScopeToAbort(signal: AbortSignal): void {
+  const scope = scopes.getStore();
+  if (!scope) return;
+  if (signal.aborted) { scope.stopped = true; return; }
+  signal.addEventListener('abort', () => { scope.stopped = true; }, { once: true });
+}
+/** Whether the current request's Router One scope has been stopped. False outside a scope. */
+export function routerOneAccountingScopeStopped(): boolean {
+  return scopes.getStore()?.stopped === true;
+}
 export function bindRouterOneAccountingScope(binding: Omit<CatalogueCallBinding, 'uid'> & { uid: string | null | undefined }): void {
   const scope = scopes.getStore();
   if (!scope || scope.binding || typeof binding.uid !== 'string' || !binding.uid || !binding.buildId || !binding.workspaceId) return;

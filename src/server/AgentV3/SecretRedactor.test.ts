@@ -13,6 +13,13 @@ describe('redactSecrets — provider key shapes', () => {
     expect(redactSecrets('xai-ABCdef0123456789ABCdef0123')).toBe('[REDACTED:api-key]');
   });
 
+  it('masks an ak- account key carried inside a provider error', () => {
+    const leaked = 'ak-examplekeyvalue1234';
+    const out = redactSecrets(`429 account <${leaked}> is suspended due to insufficient balance`);
+    expect(out).not.toContain(leaked);
+    expect(out).toContain('[REDACTED:api-key]');
+  });
+
   it('masks a Google API key', () => {
     const key = 'AIzaSyA1234567890abcdefghijklmnopqrstuv';
     expect(redactSecrets(`key=${key}`)).not.toContain(key);

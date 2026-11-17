@@ -101733,3 +101733,8 @@ The existing pre-start block (no positive balance, billing on, not a free-list a
 ## 2026-11-17 — no build when the wallet cannot cover it (t403u)
 
 Owner override: a balance of 0, or below the pre-flight estimate, does not start a build at all, including the weak ladder. The same sentence stops a build whose running bill passes that balance; files already written are kept. Admin free-list and the z test account stay exempt. Prices, chat quotas, gift and referral rules are unchanged. An unreadable balance is still not treated as zero.
+
+## 2026-11-17 — Admin panel copy (Builds · Reports): the failure panel's two numbers
+- **"Worked, called failed 44" and "User got a working app 97%":** an app that rendered was taken as proof the request was delivered. 21 of the 58 failures carry an engine / sandbox / account / cap outcome code; they are now their own line (`renderedButUnfinished`) and earn no delivered credit — 92.4%, not 97% (the page's own counts reproduce both: tests fixture). Content verdicts a render contradicts (the cases of autopsies 697b38ee / 4efab9d7) are unchanged.
+- **"12.6% of 497 settled builds":** the rate is 58 ÷ 460 judged (the 37 the user stopped are in neither half); the note now says so.
+- Other findings on the page are queue rows Q-2721…Q-2725 (unexplained outcomes, a first-pass measure that cannot move, a fake login in a password manager, phone-size overflow ×3, save-then-lose ×2).

@@ -901,6 +901,11 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
       import('./src/server/lib/providerSwitches')
         .then(({ startProviderSwitchSync }) => startProviderSwitchSync())
         .catch(() => { /* nothing is switched off until a sync succeeds; boot is never blocked */ });
+      // Traffic Manager V2 control store: read now, then every 15–60 s (adaptive, jittered). Until a read succeeds
+      // this instance enforces nothing extra, which is exactly today's routing; boot is never blocked.
+      import('./src/server/AI/TrafficRegistry/controlSync')
+        .then(({ startTrafficControlSync }) => startTrafficControlSync())
+        .catch(() => { /* no control document is applied until a read succeeds */ });
       // P-BRE.6 — recover build jobs orphaned by a previous instance's restart/crash: any job left
       // in a non-terminal status with a stale heartbeat is honestly marked FAILED (never silently
       // stuck). Fire-and-forget + self-guarded so it can never delay or crash startup.

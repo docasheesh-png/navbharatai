@@ -577,3 +577,21 @@ describe('fixed text chain uses approved candidates in owner order', () => {
     const c = context(); c.input.request = { ...c.input.request, fixedTextChain: 'v1' }; expect(planInference(c.input)).toMatchObject({ kind: 'blocked', reason: 'evidence' });
   });
 });
+
+// Traffic Manager V2, P2: the control-store gate is applied only when supplied, before any other evaluation.
+describe('control-store gate (Traffic Manager V2, P2)', () => {
+  it('a candidate the gate refuses is rejected as control or admission; the rest plan as before', () => {
+    const r = request();
+    const c = context(r, [candidate(r, 'free-a'), candidate(r, 'free-b')]);
+    const gate = (profile: ProviderProfile) => (profile.id === 'free-a' ? 'control' as const : null);
+    const result = plan(planInference({ ...c.input, controlGate: gate }));
+    expect(result.profileId).toBe('free-b');
+    expect(result.rejected).toEqual([{ profileId: 'free-a', reason: 'control' }]);
+    rejected(planInference({ ...c.input, controlGate: () => 'admission' }), 'admission');
+  });
+  it('without a gate, planning is byte-identical to before (no production change in P2)', () => {
+    const r = request();
+    const c = context(r, [candidate(r, 'free-a'), candidate(r, 'free-b')]);
+    expect(JSON.stringify(planInference(c.input))).toBe(JSON.stringify(planInference({ ...c.input, controlGate: () => null })));
+  });
+});

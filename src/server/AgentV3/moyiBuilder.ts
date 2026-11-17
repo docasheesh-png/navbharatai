@@ -7,14 +7,18 @@
  * OpenAiToolRunner), so tool calling, streaming, the size gate, the pacer, the bench and the fallthrough
  * are the ordinary ones. A turn it cannot do fails, and the chain moves on.
  *
- *   MOYI_API_KEY              required (the key the admin Test Chat Bot uses). No key ⇒ no rung.
- *   MOYI_BUILDER_MODEL        required comma list of model ids, exactly as Moyi's /models lists them.
- *                             There is NO default: the ids were never readable from the build environment,
- *                             and a guessed id would fail every Weak build's Moyi turn. Unset ⇒ no rung.
- *   MOYI_BUILDER_RATE_IN/_OUT required USD per 1M tokens the owner's Moyi account really pays for that
- *                             model. Unset ⇒ no rung: a rung without a real price cannot be billed honestly,
- *                             and no estimate is invented (BluesMinds had published ratios; Moyi's prices
- *                             differ per model and were seen only as a pasted page).
+ *   MOYI_API_KEY              required (the key the admin Test Chat Bot uses). No key ⇒ no rung. With the
+ *                             key alone the rung is ON for every Weak user (owner 2026-11-17: "moyi ai ko
+ *                             sabhi user ke liye default on kar do").
+ *   MOYI_BUILDER_MODEL        optional comma list of model ids. UNSET (the default): the model ids are read
+ *                             from Moyi's OWN `GET /models` list for this key (cached, refreshed in the
+ *                             background) and the first that matches a priced row in MOYI_PUBLISHED_RATES is
+ *                             used, in that table's order. No id is guessed: a model Moyi does not list is
+ *                             never called. Until the list has been read once, a build runs without the rung.
+ *   MOYI_BUILDER_RATE_IN/_OUT optional USD per 1M tokens. When set, they price every Moyi model (the owner's
+ *                             real account rate wins). Unset ⇒ each model is priced from MOYI_PUBLISHED_RATES,
+ *                             the prices on Moyi's own model page as the owner supplied it on 2026-11-16. A
+ *                             model with neither is dropped: no price is invented.
  *   MOYI_BUILDER_ENABLED      default ON. Only an explicit off value (`off`/`0`/`false`/`no`) removes it.
  *   MOYI_BASE_URL             optional; default `https://api.moyi-api.com/v1`, held to Moyi's own domain
  *                             (resellerGateways.ts). The builder speaks the OpenAI format only, so it always
@@ -30,6 +34,7 @@
  */
 import { parseEnvFlag } from '../lib/envFlag';
 import { resellerGatewayState } from '../lib/resellerGateways';
+import { fetchProviderModelIds } from '../lib/testChatBotOfficial';
 import type { NamedRunner } from './providers/MultiProviderTurnRunner';
 import type { TokenRate } from './pricing';
 import type { RunTurnParams, TurnRunner } from './ClaudeClient';
@@ -39,32 +44,99 @@ export const MOYI_BUILDER_LABEL = 'ENGINE_MY';
 /** Claude family names, in any spelling a gateway uses (`claude-…`, `anthropic/…`, bare tier words). */
 const CLAUDE_FAMILY = /claude|anthropic|sonnet|opus|haiku|fable/i;
 
-export function moyiBuilderModels(env: NodeJS.ProcessEnv = process.env): string[] {
-  return String(env.MOYI_BUILDER_MODEL ?? '').split(',').map(s => s.trim())
-    .filter(s => /^[\w.:/@+-]{1,128}$/.test(s) && !CLAUDE_FAMILY.test(s));
-}
+/**
+ * Moyi's own published prices (USD per 1M tokens, Moyi's discounted price, base context tier), from the model
+ * page the owner supplied on 2026-11-16, in the order the rung prefers them: the owner's 80%+-discount models
+ * first, Grok first because it is NavBharatAI's own Engineer AI engine. "Fast" variants are priced higher and
+ * are excluded. Long-context requests can cost more on Moyi (its page marks some rows "context-tiered");
+ * the owner's MOYI_BUILDER_RATE_IN/_OUT override covers that when set.
+ */
+export const MOYI_PUBLISHED_RATES: ReadonlyArray<{ match: RegExp; rate: Readonly<TokenRate> }> = Object.freeze([
+  { match: /grok-?4[.-]7(?![\d.])/i, rate: { inputPerMTok: 0.3, outputPerMTok: 0.9 } },
+  { match: /gpt-?6[.-]1-terra/i, rate: { inputPerMTok: 0.171, outputPerMTok: 0.855 } },
+  { match: /grok-?4[.-]6(?![\d.])/i, rate: { inputPerMTok: 0.3, outputPerMTok: 0.9 } },
+  { match: /gpt-?5[.-]6-terra/i, rate: { inputPerMTok: 0.342, outputPerMTok: 2.052 } },
+  { match: /deepseek-?v4[.-]1-flash/i, rate: { inputPerMTok: 0.1275, outputPerMTok: 0.51 } },
+]);
+/** How many of Moyi's listed models the rung tries, in order, before the chain moves on. */
+export const MOYI_DEFAULT_MODEL_COUNT = 2;
+
+const validId = (s: string) => /^[\w.:/@+-]{1,128}$/.test(s) && !CLAUDE_FAMILY.test(s) && !/fast/i.test(s);
 
 function rate(raw: string | undefined): number | undefined {
   if (raw === undefined || String(raw).trim() === '') return undefined;
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
-/** The owner's real Moyi rate, or null when it is not configured (then there is no rung). */
-export function moyiBuilderRate(env: NodeJS.ProcessEnv = process.env): TokenRate | null {
+function ownerRate(env: NodeJS.ProcessEnv): TokenRate | null {
   const input = rate(env.MOYI_BUILDER_RATE_IN), output = rate(env.MOYI_BUILDER_RATE_OUT);
   return input !== undefined && output !== undefined && input + output > 0 ? { inputPerMTok: input, outputPerMTok: output } : null;
 }
+function publishedRate(model: string): TokenRate | null {
+  const row = MOYI_PUBLISHED_RATES.find(r => r.match.test(model));
+  return row ? { ...row.rate } : null;
+}
+/** The rate a Moyi turn on `model` is billed at: the owner's configured rate, else Moyi's published price, else null. */
+export function moyiBuilderRate(env: NodeJS.ProcessEnv = process.env, model?: string): TokenRate | null {
+  return ownerRate(env) ?? (model ? publishedRate(model) : null);
+}
+
+// ─── Moyi's own model list (the default when MOYI_BUILDER_MODEL is unset) ───────────────────────────────
+const LIST_TTL_MS = 6 * 60 * 60_000;
+const RETRY_AFTER_FAILURE_MS = 60_000;
+let listed: { ids: string[]; at: number } | null = null;
+let lastAttemptAt = 0;
+let inFlight: Promise<void> | null = null;
+
+/** Read Moyi's /models for this key into the cache. Never throws; a failure keeps the previous list. */
+export function refreshMoyiModelList(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<void> {
+  if (inFlight) return inFlight;
+  const gateway = resellerGatewayState('moyi', env);
+  if (!gateway.ready) return Promise.resolve();
+  lastAttemptAt = now();
+  inFlight = fetchProviderModelIds(gateway.baseUrl, gateway.apiKey, fetchImpl)
+    .then(result => { if (result.ok && result.ids.length) listed = { ids: result.ids, at: now() }; })
+    .catch(() => undefined)
+    .finally(() => { inFlight = null; });
+  return inFlight;
+}
+function listedModelsFor(env: NodeJS.ProcessEnv, now: number): string[] {
+  const stale = !listed || now - listed.at > LIST_TTL_MS;
+  if (stale && !inFlight && now - lastAttemptAt > RETRY_AFTER_FAILURE_MS) void refreshMoyiModelList(env);
+  if (!listed) return [];
+  const ids = listed.ids.filter(validId);
+  const picked: string[] = [];
+  for (const row of MOYI_PUBLISHED_RATES) {
+    const id = ids.find(candidate => row.match.test(candidate) && !picked.includes(candidate));
+    if (id) picked.push(id);
+    if (picked.length >= MOYI_DEFAULT_MODEL_COUNT) break;
+  }
+  return picked;
+}
+
+/** The models the rung runs, each with a known price: the owner's list when set, else Moyi's own listed models. */
+export function moyiBuilderModels(env: NodeJS.ProcessEnv = process.env, now: number = Date.now()): string[] {
+  const configured = String(env.MOYI_BUILDER_MODEL ?? '').split(',').map(s => s.trim()).filter(s => /^[\w.:/@+-]{1,128}$/.test(s) && !CLAUDE_FAMILY.test(s));
+  const models = configured.length ? configured : listedModelsFor(env, now);
+  return models.filter(model => moyiBuilderRate(env, model) !== null);
+}
+
+/** TEST ONLY. */
+export function __resetMoyiModelList(): void { listed = null; lastAttemptAt = 0; inFlight = null; }
 
 /** Why the rung is absent, for the admin's eyes (names of env keys only); null when it is present. */
 export function moyiBuilderMissing(env: NodeJS.ProcessEnv = process.env): string | null {
   if (parseEnvFlag(env.MOYI_BUILDER_ENABLED) === false) return 'MOYI_BUILDER_ENABLED is off';
   const gateway = resellerGatewayState('moyi', env);
   if (!gateway.ready) return gateway.configured ? 'MOYI_BASE_URL is not a valid Moyi endpoint' : 'MOYI_API_KEY is not set';
-  if (!moyiBuilderModels(env).length) return 'MOYI_BUILDER_MODEL is not set (or names only Claude models, which are not allowed here)';
-  if (!moyiBuilderRate(env)) return 'MOYI_BUILDER_RATE_IN and MOYI_BUILDER_RATE_OUT are not set';
+  if (!moyiBuilderModels(env).length) {
+    return String(env.MOYI_BUILDER_MODEL ?? '').trim()
+      ? 'MOYI_BUILDER_MODEL names no usable model (Claude models are not allowed; a model needs a price: set MOYI_BUILDER_RATE_IN/_OUT for one Moyi does not publish)'
+      : 'Moyi’s model list has not been read yet, or it lists none of the priced models';
+  }
   return null;
 }
-/** Default ON once the key, a model and a real rate exist; the explicit off value is the kill switch. */
+/** Default ON with the key alone (models and prices resolved as above); the explicit off value is the kill switch. */
 export function moyiBuilderEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return moyiBuilderMissing(env) === null;
 }
@@ -84,7 +156,7 @@ export function neutraliseMoyiName(err: unknown): void {
 
 export type MoyiRungFactory = (label: string, apiKey: string, baseURL: string, models: string[]) => NamedRunner[];
 
-/** The Moyi rungs (empty when switched off, keyless, model-less or rate-less), each with brand-neutral errors. */
+/** The Moyi rungs (empty when switched off, keyless, or no priced model is known yet), each with brand-neutral errors. */
 export function moyiBuilderRungs(factory: MoyiRungFactory, env: NodeJS.ProcessEnv = process.env): NamedRunner[] {
   if (!moyiBuilderEnabled(env)) return [];
   const gateway = resellerGatewayState('moyi', env);

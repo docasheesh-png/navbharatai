@@ -101712,3 +101712,13 @@ missing key removes the rung and leaves the old chain, own-domain endpoint, rate
 proven by reversion). This closes the 2026-11-16 open item for Moyi, for all Weak users rather than only the
 z test account, by the owner's new order. DiscountedTokens and MirAPI remain Test Chat Bot only.
 OPEN: tool calling on the chosen Moyi model is unverified until a real Weak build runs through `ENGINE_MY`.
+
+## 2026-11-17 — Moyi builder rung works with the key alone, for every Weak user
+
+Owner: "moyi ai ko sabhi user ke liye default on kar do". `MOYI_BUILDER_MODEL` and `MOYI_BUILDER_RATE_IN/_OUT` are now
+optional. With only `MOYI_API_KEY`, the rung reads Moyi's own `/models` list (cached 6 h, background refresh) and runs up
+to two listed models that have a published price, priced from `MOYI_PUBLISHED_RATES` (Moyi's own page, owner-supplied
+2026-11-16). No model id is guessed: until the list has been read, a build runs without the rung (proven by reversion:
+returning a guessed id on an empty list failed 3 tests). Owner-set model/rate keys still win. Not verified live: whether
+Moyi's ids match the table's patterns, and whether the chosen model honours tool calling; the first Weak build reports
+will show `ENGINE_MY` turns or failures.

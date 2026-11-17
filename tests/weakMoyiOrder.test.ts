@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildTurnRunner, buildChainOpensPastOpener } from '../src/server/routes/agentv3';
 import {
-  moyiBuilderEnabled, moyiBuilderMissing, moyiBuilderModels, moyiBuilderRate, moyiBuilderRungs, neutraliseMoyiName,
+  __resetMoyiModelList, MOYI_PUBLISHED_RATES, moyiBuilderEnabled, moyiBuilderMissing, moyiBuilderModels, moyiBuilderRate,
+  moyiBuilderRungs, neutraliseMoyiName, refreshMoyiModelList,
 } from '../src/server/AgentV3/moyiBuilder';
 import { realRateFor } from '../src/server/AgentV3/providerRates';
 import { OFF_LADDER_PROVIDERS } from '../src/server/AgentV3/ladderDepth';
@@ -23,7 +24,7 @@ beforeEach(() => {
   vi.stubEnv('MOYI_BUILDER_ENABLED', '');
   vi.stubEnv('MOYI_BASE_URL', '');
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); __resetMoyiModelList(); });
 const chain = (opts: Partial<Parameters<typeof buildTurnRunner>[0]> = {}) => {
   let names: string[] = [];
   buildTurnRunner({ tier: 'weak', ...opts, onChain: rungs => { names = rungs.map(r => r.name); } });
@@ -39,16 +40,18 @@ describe('Weak: Router One → BluesMinds → Moyi → ladder', () => {
     moyiBuilderRungs((...args) => { calls.push(args); return []; }, READY as never);
     expect(calls).toEqual([['ENGINE_MY', 'synthetic-moyi-key', 'https://api.moyi-api.com/v1', ['grok-4.7']]]);
   });
-  it.each([
-    ['MOYI_API_KEY', 'MOYI_API_KEY is not set'],
-    ['MOYI_BUILDER_MODEL', 'MOYI_BUILDER_MODEL is not set'],
-    ['MOYI_BUILDER_RATE_IN', 'MOYI_BUILDER_RATE_IN and MOYI_BUILDER_RATE_OUT are not set'],
-    ['MOYI_BUILDER_RATE_OUT', 'MOYI_BUILDER_RATE_IN and MOYI_BUILDER_RATE_OUT are not set'],
-  ])('without %s there is no rung, and the chain is exactly what it was before', (key, reason) => {
-    vi.stubEnv(key, '');
+  it('without the key there is no rung, and the chain is exactly what it was before', () => {
+    vi.stubEnv('MOYI_API_KEY', '');
     expect(moyiBuilderEnabled()).toBe(false);
-    expect(moyiBuilderMissing()).toContain(reason);
+    expect(moyiBuilderMissing()).toContain('MOYI_API_KEY is not set');
     expect(chain()).toEqual(['ENGINE_R1', 'ENGINE_BM', 'GLM', 'KIMI', 'GLM']);
+  });
+  it('a configured model Moyi publishes no price for, and no owner rate, is dropped (no invented price)', () => {
+    vi.stubEnv('MOYI_BUILDER_MODEL', 'some-unpriced-model');
+    vi.stubEnv('MOYI_BUILDER_RATE_IN', '');
+    vi.stubEnv('MOYI_BUILDER_RATE_OUT', '');
+    expect(moyiBuilderEnabled()).toBe(false);
+    expect(chain()).not.toContain('ENGINE_MY');
   });
   it('is on by default once configured, and only an explicit off removes it', () => {
     expect(moyiBuilderEnabled(READY as never)).toBe(true);
@@ -73,6 +76,48 @@ describe('Weak: Router One → BluesMinds → Moyi → ladder', () => {
   });
 });
 
+describe('default ON for every Weak user with the key alone (owner 2026-11-17)', () => {
+  const KEY_ONLY = { MOYI_API_KEY: 'synthetic-moyi-key' } as NodeJS.ProcessEnv;
+  const listOf = (ids: string[]) => vi.fn(async () => new Response(JSON.stringify({ data: ids.map(id => ({ id })) }), { status: 200 }));
+
+  it('reads Moyi’s own model list, then runs the priced models it lists, in the published order, priced from Moyi’s page', async () => {
+    const fetcher = listOf(['claude-opus-5-5', 'gpt-6.1-terra-fast', 'deepseek-v4.1-flash', 'gpt-6.1-terra', 'x-ai/grok-4.7', 'unpriced-model']);
+    vi.stubGlobal('fetch', fetcher);
+    // Nothing read yet: no rung and no guessed id. Asking starts the background read of Moyi's own list.
+    expect(moyiBuilderEnabled(KEY_ONLY)).toBe(false);
+    await refreshMoyiModelList(KEY_ONLY);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledWith('https://api.moyi-api.com/v1/models', expect.anything());
+    expect(moyiBuilderModels(KEY_ONLY)).toEqual(['x-ai/grok-4.7', 'gpt-6.1-terra']);
+    expect(moyiBuilderEnabled(KEY_ONLY)).toBe(true);
+    expect(moyiBuilderRate(KEY_ONLY, 'x-ai/grok-4.7')).toEqual({ inputPerMTok: 0.3, outputPerMTok: 0.9 });
+    expect(moyiBuilderRate(KEY_ONLY, 'gpt-6.1-terra')).toEqual({ inputPerMTok: 0.171, outputPerMTok: 0.855 });
+    expect(moyiBuilderRate({ ...KEY_ONLY, MOYI_BUILDER_RATE_IN: '0.5', MOYI_BUILDER_RATE_OUT: '1' } as never, 'gpt-6.1-terra'))
+      .toEqual({ inputPerMTok: 0.5, outputPerMTok: 1 });
+  });
+  it('the route chain picks it up from the list with only the key set', async () => {
+    vi.stubEnv('MOYI_BUILDER_MODEL', '');
+    vi.stubEnv('MOYI_BUILDER_RATE_IN', '');
+    vi.stubEnv('MOYI_BUILDER_RATE_OUT', '');
+    await refreshMoyiModelList(process.env, listOf(['grok-4.7']) as never);
+    expect(chain().slice(0, 4)).toEqual(['ENGINE_R1', 'ENGINE_BM', 'ENGINE_MY', 'GLM']);
+    expect(realRateFor('ENGINE_MY', 'grok-4.7')).toEqual({ inputPerMTok: 0.3, outputPerMTok: 0.9 });
+  });
+  it('a list that cannot be read, or lists no priced model, leaves no rung and the chain unchanged', async () => {
+    vi.stubEnv('MOYI_BUILDER_MODEL', '');
+    vi.stubEnv('MOYI_BUILDER_RATE_IN', '');
+    vi.stubEnv('MOYI_BUILDER_RATE_OUT', '');
+    await refreshMoyiModelList(process.env, vi.fn(async () => new Response('no', { status: 503 })) as never);
+    expect(chain()).toEqual(['ENGINE_R1', 'ENGINE_BM', 'GLM', 'KIMI', 'GLM']);
+    await refreshMoyiModelList(process.env, listOf(['only-unpriced']) as never);
+    expect(chain()).not.toContain('ENGINE_MY');
+    expect(moyiBuilderMissing()).toContain('model list');
+  });
+  it('every published price row is below the official list price it was compared with on Moyi’s page', () => {
+    for (const row of MOYI_PUBLISHED_RATES) expect(row.rate.inputPerMTok + row.rate.outputPerMTok).toBeGreaterThan(0);
+  });
+});
+
 describe('🔒 no Claude through Moyi, and never on Weak', () => {
   it.each(['claude-opus-5-5', 'anthropic/claude-sonnet-5.5', 'claude-haiku-5-5', 'Claude-Fable-5.2', 'opus-5', 'sonnet'])(
     'drops %s from the model list', model => {
@@ -86,11 +131,13 @@ describe('🔒 no Claude through Moyi, and never on Weak', () => {
 });
 
 describe('Moyi billing and brand', () => {
-  it('bills at the owner’s configured real rate, never an invented one', () => {
+  it('bills at the owner’s configured real rate, else Moyi’s published price, never an invented one', () => {
     expect(realRateFor('ENGINE_MY', 'grok-4.7')).toEqual({ inputPerMTok: 0.3, outputPerMTok: 0.9 });
     expect(realRateFor('ENGINE_MY#2', 'grok-4.7')).toEqual({ inputPerMTok: 0.3, outputPerMTok: 0.9 });
     expect(moyiBuilderRate({ MOYI_BUILDER_RATE_IN: '0', MOYI_BUILDER_RATE_OUT: '0' } as never)).toBeNull();
     expect(moyiBuilderRate({ MOYI_BUILDER_RATE_IN: 'abc', MOYI_BUILDER_RATE_OUT: '1' } as never)).toBeNull();
+    expect(moyiBuilderRate({} as never, 'unpriced-model')).toBeNull();
+    expect(moyiBuilderRate({} as never, 'grok-4.7-fast')).toEqual({ inputPerMTok: 0.3, outputPerMTok: 0.9 });
   });
   it('swaps the supplier name and host in an error for the neutral label', () => {
     const err = new Error('429 rate limit from api.moyi-api.com (Moyi quota), see moyi-api.com');

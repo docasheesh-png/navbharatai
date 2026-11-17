@@ -41,6 +41,15 @@ export interface AppFeature {
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
+    id: 'recovered_human_pack',
+    name: 'Recovered human character pack (disabled draft)',
+    path: 'NavBharatAI Pro → new 3D games (not activated)',
+    description: 'Three original recovered human GLBs are stored outside the frontend public-assets directory (repository access still applies). Rights approval and atomic no-overwrite integration review are both pending. Environment settings cannot activate the disabled draft. No existing projects are migrated.',
+    howToUse: 'Unavailable until rights and engineering acceptance are recorded. Original files contain Idle and Walk only; no riding, combat, 2D or finished-game guarantee is made.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['human pack', 'r2h', 'human character'],
+  },
+  {
     id: 'original_royale_practice',
     name: 'Experimental offline royale practice starter',
     path: 'NavBharatAI Pro → request a new royale-style game',

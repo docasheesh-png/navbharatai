@@ -218,6 +218,7 @@ import {
   readWalletBalanceInr,
   firestoreWalletReader,
   decidePaidGate,
+  balanceRechargeNotice,
   identityGrantEmail,
   type GrantEmail,
 } from '../AgentV3';
@@ -4327,7 +4328,11 @@ export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, promp
         // notification, which is the thing that used to arrive five times.
         void warnAboutBalance(userId, email, 'blocked');
         res.status(402).json({
-          error: surplusSession ? 'Your credits are used up. Add credits to start a new build. Charges are based on actual usage, not a fixed build quote.' : gate.notice || 'Your credits are used up. Add credits to start a new build.',
+          // Owner t402u: one sentence, in the language of the request, before any build starts.
+          // This is the existing block only (no positive balance). A free weak-ladder build is one
+          // this gate already allows — billing off, a free-list account, an unreadable balance, or
+          // a positive balance — and that path is unchanged.
+          error: balanceRechargeNotice(prompt),
           code: 'INSUFFICIENT_CREDITS',
           balanceInr,
           // Billing Phase 2 — token-first display: the same numbers in the wallet's primary unit,

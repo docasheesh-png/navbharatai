@@ -600,7 +600,7 @@ import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage
 import { previewKeepAliveEnabled, isTopLevelNavigation } from '../AgentV3/previewKeepAlive';
 import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
-import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE, PREVIEW_COPY_REFRESH_MS } from '../AgentV3/previewSnapshot';
+import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, snapshotStandIn, snapshotStandInNote, PREVIEW_COPY_REFRESH_MS } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
 import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, fileContentHashes, savedDivergesFromSandbox, type SnapshotTaken, describeDivergence } from '../AgentV3/snapshotIdentity';
@@ -6693,12 +6693,16 @@ async function noteBuildOutcome(
         ? await raceTimeout(workspaceFilesSavedAt(ws), 3_000, 'doorLastChange').catch(() => null)
         : null;
       startingSnapshot = () => {
-        if (!shouldServeSnapshot({
+        // A current copy, or an OLDER one once nobody is waiting for a fresh edit (snapshotStandIn): the
+        // panel says which, from the same decision (preview-health below).
+        if (!snapshotStandIn({
           enabled: previewSnapshotEnabled(),
           doorState: 'starting',
           snapshotUrl: doorRecord?.snapshotUrl,
           snapshotAt: doorRecord?.snapshotAt,
           lastChangeAt,
+          buildRunning: isBuildRunningFor(ws),
+          now: Date.now(),
         })) return false;
         res.redirect(302, String(doorRecord!.snapshotUrl));
         return true;
@@ -6934,7 +6938,7 @@ async function noteBuildOutcome(
       // move together, from one shared function, or neither should move.
       let snapshotServing = false;
       let snapshotTakenAt: number | null = null;
-      let snapshotWaking = false;
+      let snapshotKind: 'expired' | 'current' | 'older' = 'expired';
       try {
         if (previewSnapshotEnabled() && livePortUp !== true) {
           const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'healthSnapshot').catch(() => null);
@@ -6947,15 +6951,18 @@ async function noteBuildOutcome(
             ? null
             : await raceTimeout(workspaceFilesSavedAt(workspaceId), 3_000, 'healthLastChange').catch(() => null);
           const doorState = sandboxGone ? 'asleep' as const : 'starting' as const;
-          if (shouldServeSnapshot({
+          const standIn = snapshotStandIn({
             enabled: true,
             doorState,
             snapshotUrl: rec?.snapshotUrl,
             snapshotAt: rec?.snapshotAt,
             lastChangeAt,
-          })) {
+            buildRunning: isBuildRunningFor(workspaceId),
+            now: Date.now(),
+          });
+          if (standIn) {
             snapshotServing = true;
-            snapshotWaking = doorState === 'starting';
+            snapshotKind = standIn;
             snapshotTakenAt = typeof rec?.snapshotAt === 'number' ? rec.snapshotAt : null;
           }
         }
@@ -7001,7 +7008,7 @@ async function noteBuildOutcome(
         // Two situations, two notes: an EXPIRED machine (the user may want to bring it back) and one
         // that is STARTING (nothing is wrong and they need do nothing). One note for both would be
         // wrong for one of them every time.
-        ...(snapshotServing ? { snapshotServing: true, snapshotNote: snapshotWaking ? SNAPSHOT_WAKING_NOTE : SNAPSHOT_NOTE, snapshotAt: snapshotTakenAt } : {}),
+        ...(snapshotServing ? { snapshotServing: true, snapshotNote: snapshotStandInNote(snapshotKind), snapshotAt: snapshotTakenAt } : {}),
         // The machine is deliberately asleep and the saved copy is answering for the app. Distinct from
         // `snapshotServing` above, which means the machine is GONE — here it is alive and we are simply
         // not waking it. The client frames the copy and says so; nothing is broken and nothing is lost.

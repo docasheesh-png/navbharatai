@@ -80,7 +80,9 @@ describe('4. the user is told WHICH version they are looking at', () => {
     // REPOINTED (2026-09-08): there are now TWO situations and two notes — an EXPIRED machine and one
     // that is STARTING UP — so the payload picks between them instead of always sending SNAPSHOT_NOTE.
     // What this test protects is unchanged: whenever a copy is framed, the user is told so.
-    expect(route).toContain('snapshotServing: true, snapshotNote: snapshotWaking ? SNAPSHOT_WAKING_NOTE : SNAPSHOT_NOTE');
+    // REPOINTED AGAIN (2026-11-17): a third situation — an OLDER copy standing in for a starting preview
+    // (snapshotStandIn) — so the note comes from the one table that maps each stand-in to its words.
+    expect(route).toContain('snapshotServing: true, snapshotNote: snapshotStandInNote(snapshotKind)');
   });
 
   it('🔒 the health verdict is the DOOR\'S OWN rule, not a second copy of it', () => {
@@ -91,9 +93,13 @@ describe('4. the user is told WHICH version they are looking at', () => {
     expect(at).toBeGreaterThan(-1);
     const block = route.slice(at, at + 1600);
     expect(block).toContain("const doorState = sandboxGone ? 'asleep' as const : 'starting' as const;");
-    expect(block).toContain('shouldServeSnapshot({');
+    expect(block).toContain('snapshotStandIn({');
     expect(block).toContain('workspaceFilesSavedAt(workspaceId)');
-    expect(block).toContain("snapshotWaking = doorState === 'starting'");
+    expect(block).toContain('snapshotKind = standIn;');
+    // And the door's 'starting' branch asks the SAME function with the same build guard (2026-11-17).
+    const door = route.slice(route.indexOf('startingSnapshot = () => {'), route.indexOf('startingSnapshot = () => {') + 900);
+    expect(door).toContain('snapshotStandIn({');
+    expect(door).toContain('buildRunning: isBuildRunningFor(ws)');
   });
 
   it('🔒 and the frame returns to the live app by itself, exactly once, on the edge', () => {

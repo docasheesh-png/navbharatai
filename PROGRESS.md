@@ -101688,3 +101688,7 @@ The review failed the first version under audit P0-C: up to 60 sequential reads 
 - Precision: a comment-, string- and template-aware tokenizer; only relative, extensioned specifiers that join to exactly a deleted path are named, so a remaining sibling never draws a note.
 - The note is kept out of the user's terminal and the `tool_result` summary.
 - 38 tests; 21 round-2 mutations, all caught (one after an added test).
+
+## 2026-11-17 — builder fallthrough after phone drop (t400u)
+
+#2407 and #2408 failed ENGINE_UNAVAILABLE. Router One was marked stopped when the viewer's HTTP response closed, so a phone disconnect refused that rung before any request (`scope_stopped`). The stall banner treated "not in this process's memory" as the build being dead even when the workspace lease was still heartbeating. A build now keeps Router One until its own abort, status reports `buildHeldElsewhere` while the lease is live, and a BUILD_STARTED row is saved as soon as the report object exists. Account keys with an `ak-` prefix are redacted from stored reports and user-facing errors. Quotas, billing, referral, and white-label rules are unchanged. The wallet chip showing 0 tokens is the real token balance; it does not select the weak ladder by itself, and a paid refusal is still the 402 credits card.

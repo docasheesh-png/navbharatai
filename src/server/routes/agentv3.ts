@@ -519,6 +519,7 @@ import {
 import OpenAI from 'openai';
 import { routerOneCatalogStatus, startRouterOneCatalogSync, syncRouterOneCatalog } from '../AI/RouterOne/routerOneCatalog';
 import { bluesmindsBuilderEnabled, bluesmindsBuilderRungs } from '../AgentV3/bluesmindsBuilder';
+import { moyiBuilderEnabled, moyiBuilderRungs } from '../AgentV3/moyiBuilder';
 import { ROUTER_ONE_LABEL, ROUTER_ONE_NOT_CONFIGURED, routerOneApiKey, routerOneBaseUrl, routerOneModels, routerOnePinnedForTier, routerOneWeakFallbackEnabled } from '../AI/RouterOne/routerOne';
 import { ProChainV2Build, proChainV2Decision, proChainV2ScopeAsk, proChainV2RedactSecrets, roleForRunnerOpts } from '../AgentV3/proChainV2';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
@@ -3548,7 +3549,7 @@ export function ladderRunners(rungs: readonly LadderRung[]): NamedRunner[] {
  * pin on non-Weak bands. Weak Router One models share the ordinary guarded chain below.
  */
 function buildTierEngineAvailable(tier: PowerLevel): boolean {
-  return (tier === 'weak' && (routerOneWeakFallbackEnabled() || bluesmindsBuilderEnabled())) || tierEngineAvailable(tier);
+  return (tier === 'weak' && (routerOneWeakFallbackEnabled() || bluesmindsBuilderEnabled() || moyiBuilderEnabled())) || tierEngineAvailable(tier);
 }
 
 /** Preserve configured models and tail order; move only the first GLM rung to the front. */
@@ -3793,10 +3794,12 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
   // may advance past a failed rung. Other bands retain their existing transformations.
   if (level === 'weak' && !opts.afterLeadRung && !opts.fromProvider) rungs = weakGlmFirst(rungs);
   // Owner t357u + t359u: Weak is Surplus (above) → Router One → BluesMinds → the tier ladder, all default on.
+  // Owner 2026-11-17: Moyi sits right after BluesMinds (moyiBuilder.ts; present once its key, model and rate are set).
   const runners = [
     ...(level === 'weak' && routerOneWeakFallbackEnabled()
       ? openAiCompatRunners(ROUTER_ONE_LABEL, routerOneApiKey(), routerOneBaseUrl(), routerOneModels()) : []),
     ...(level === 'weak' ? bluesmindsBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models)) : []),
+    ...(level === 'weak' ? moyiBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models)) : []),
     ...ladderRunners(rungs),
   ];
   if (runners.length === 0) {
@@ -3843,7 +3846,7 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
  * checks it against the constructed chain on every tier. PURE (reads the same env the chain does).
  */
 export function buildChainOpensPastOpener(tier: PowerLevel | string | boolean | null | undefined, complex: boolean): boolean {
-  if (toPowerLevel(tier) === 'weak' && (routerOneWeakFallbackEnabled() || bluesmindsBuilderEnabled())) return false;
+  if (toPowerLevel(tier) === 'weak' && (routerOneWeakFallbackEnabled() || bluesmindsBuilderEnabled() || moyiBuilderEnabled())) return false;
   return openingRung(tierLadder(toPowerLevel(tier as PowerLevel | boolean | string | undefined | null)).rungs, { complex }) > 1;
 }
 

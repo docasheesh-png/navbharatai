@@ -5108,6 +5108,10 @@ Code defaults only; no Cloud Run variable is required. Every switch below is ON 
 
 ## 2026-11-16 — Discount reseller gateways: Moyi API, DiscountedTokens, MirAPI (admin Test Chat Bot ONLY)
 
+🔴 **CORRECTED 2026-11-17: Moyi is no longer Test-Chat-Bot-only.** The owner tested it ("its working") and ordered
+*"moyi api ko bhi bluesminds ke baad lagao"*: Moyi is now a Pro Weak builder rung. See the 2026-11-17 entry below.
+DiscountedTokens and MirAPI are still Test Chat Bot only.
+
 Owner, verbatim: *"Moyi API, DiscountedTokens aur mir api se shuru karo! abhi bas 'test chat bot' me add karo"*.
 Three OpenAI-compatible resellers under evaluation as low-cost suppliers until NavBharatAI contracts with the
 model makers directly. **They are called from Admin → AI Engines → Test Chat Bot and nowhere else**: not user
@@ -5151,3 +5155,22 @@ One module owns their env: `src/server/lib/resellerGateways.ts`. Key VALUES are 
 - **Reviewed and NOT added:** OpenCheese (buys third-party API credits and keys; sells safety-removed
   "abliterated" models) is rejected. CloseRouter (anonymised upstreams, inverted prices) and faborapi
   (prepaid credit packs, site unread) are not added. Infron, MaxonForge, APInex and relay.fast were not reviewed.
+
+
+## 2026-11-17 — Moyi API as a Pro Weak builder rung (owner: "moyi api ko bhi bluesminds ke baad lagao, its working")
+
+**Pro order (Weak) is now:** Surplus → Router One → BluesMinds → **Moyi** → Weak tier ladder. Normal and Strong are
+unchanged. Module: `src/server/AgentV3/moyiBuilder.ts` (same shape as `bluesmindsBuilder.ts`). Neutral label `ENGINE_MY`.
+
+| Key | Meaning |
+|---|---|
+| `MOYI_API_KEY` | Required (shared with the Test Chat Bot). No key ⇒ no rung. Owner reports Moyi working on 2026-11-17; value not recorded. |
+| `MOYI_BUILDER_MODEL` | **Required, no default.** Comma list of model ids exactly as Moyi's `/models` lists them. Unset ⇒ no rung. Moyi's ids were never readable from the build environment, so none is guessed. Any id naming a Claude family (`claude`, `anthropic`, `sonnet`, `opus`, `haiku`, `fable`) is dropped: Weak never runs Sonnet/Opus, and Claude through a reseller is not approved. |
+| `MOYI_BUILDER_RATE_IN` / `MOYI_BUILDER_RATE_OUT` | **Required, no default.** USD per 1M tokens the Moyi account really pays for that model. Unset ⇒ no rung, because a turn cannot be billed honestly without a real price. With several models in the list, set the DEAREST model's rate (one rate covers the rung). |
+| `MOYI_BUILDER_ENABLED` | Default ON. Only `off`/`false`/`0`/`no` removes the rung (kill switch). |
+| `MOYI_BASE_URL` | As above; the builder always uses this OpenAI-format endpoint (default `https://api.moyi-api.com/v1`), never the Anthropic-format one. |
+
+- **Not verified from here:** whether the chosen Moyi model honours tool calling, which the builder needs. A turn it
+  cannot do fails and the chain moves to the next rung; the build report will show `ENGINE_MY` failures if so.
+- **Owner's recorded risk:** users' prompts and code on Weak builds now pass through Moyi, a reseller whose upstream
+  and "No training" label are its own claims and whose rate limits were not published on the reviewed page.

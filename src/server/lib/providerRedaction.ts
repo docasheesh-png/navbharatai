@@ -48,6 +48,7 @@ const PROVIDER_HOST_RE = new RegExp(
     String.raw`qubax\.ai`,
     String.raw`mitrify\.com`,
     String.raw`bluesminds\.com`,
+    String.raw`moyi-api\.com`,
     String.raw`cheaperinference\.com`,
     String.raw`sarvam\.ai`,
     String.raw`cerebras\.ai`,
@@ -58,7 +59,7 @@ const PROVIDER_HOST_RE = new RegExp(
 
 // Model ids first (so `glm-5.2` doesn't leave a stray `-5.2`), then vendor names, then the Claude tier words.
 const MODEL_ID_RE = /\b(?:openai|meta-llama|gemma|glm|kimi|claude|gemini|grok|groq|gpt|deepseek|mistral|llama|qwen|nova|titan|nvidia|nemotron|mitrify|qubax|sarvam)[-/][\w.:-]+/gi;
-const AI_VENDOR_RE = /\b(?:surplus\s+intelligence|cheaper\s*inference|cheaperinference|anthropic|claude|openai|chatgpt|gpt-?\d[\w.-]*|google\s+gemini|gemini|vertex(?:\s*ai)?|xai|grok|groq|moonshot|kimi|z\.?ai|zhipu|chatglm|glm|deepseek|qwen|cohere|mistral|perplexity|bedrock|nvidia|nemotron|openrouter|deepinfra|sarvam|qubax|mitrify|bluesminds|blueminds|blushminds?|cerebras|llama)\b/gi;
+const AI_VENDOR_RE = /\b(?:surplus\s+intelligence|cheaper\s*inference|cheaperinference|anthropic|claude|openai|chatgpt|gpt-?\d[\w.-]*|google\s+gemini|gemini|vertex(?:\s*ai)?|xai|grok|groq|moonshot|kimi|z\.?ai|zhipu|chatglm|glm|deepseek|qwen|cohere|mistral|perplexity|bedrock|nvidia|nemotron|openrouter|deepinfra|sarvam|qubax|mitrify|bluesminds|blueminds|blushminds?|moyi(?:[-\s]?api)?|cerebras|llama)\b/gi;
 const MODEL_TIER_RE = /\b(?:sonnet|opus|haiku)\b/gi; // Claude tier words identify the vendor
 
 /**
@@ -74,7 +75,7 @@ export function redactProvidersText(raw: unknown): string {
     .replace(/\b(bearer|token|key|secret|password)[\s:=]+[A-Za-z0-9._\-]{6,}/gi, '$1 [redacted]')
     .replace(MODEL_ID_RE, 'the model')
     .replace(/\bSURPLUS\b/g, 'NavBharatAI') // Internal routing tag, not the ordinary word surplus
-    .replace(/\bENGINE_(?:R1|BM|QX|MF)\b/g, 'NavBharatAI') // Internal supplier labels are admin-only (owner t362u)
+    .replace(/\bENGINE_(?:R1|BM|MY|QX|MF)\b/g, 'NavBharatAI') // Internal supplier labels are admin-only (owner t362u)
     .replace(AI_VENDOR_RE, 'NavBharatAI')
     .replace(MODEL_TIER_RE, 'the model')
     // Don't name the infra vendor — but NEVER inside the preview HOST. `e2b.app` is the user's own
@@ -101,5 +102,5 @@ export function hasProviderLeak(s: string): boolean {
   // would have cleaned, which is the worst of both.
   if (PROVIDER_HOST_RE.test(String(s ?? ''))) { PROVIDER_HOST_RE.lastIndex = 0; return true; }
   PROVIDER_HOST_RE.lastIndex = 0;
-  return /\b(?:SURPLUS|ENGINE_(?:R1|BM|QX|MF))\b/.test(String(s ?? '')) || /\b(?:surplus\s+intelligence|cheaper\s*inference|cheaperinference|glm|kimi|claude|anthropic|sonnet|opus|haiku|gemini|vertex|grok|groq|xai|openai|gpt|deepseek|qwen|zhipu|moonshot|z\.?ai|bedrock|cohere|mistral|nvidia|nemotron|openrouter|deepinfra|sarvam|qubax|mitrify|bluesminds|blueminds|blushminds?|cerebras|llama)\b|(?:glm|kimi|claude|gemini|grok|groq|gpt|nvidia|nemotron|mitrify|qubax|sarvam)[-/][\w.:-]+/i.test(String(s ?? ''));
+  return /\b(?:SURPLUS|ENGINE_(?:R1|BM|MY|QX|MF))\b/.test(String(s ?? '')) || /\b(?:surplus\s+intelligence|cheaper\s*inference|cheaperinference|glm|kimi|claude|anthropic|sonnet|opus|haiku|gemini|vertex|grok|groq|xai|openai|gpt|deepseek|qwen|zhipu|moonshot|z\.?ai|bedrock|cohere|mistral|nvidia|nemotron|openrouter|deepinfra|sarvam|qubax|mitrify|bluesminds|blueminds|blushminds?|moyi(?:[-\s]?api)?|cerebras|llama)\b|(?:glm|kimi|claude|gemini|grok|groq|gpt|nvidia|nemotron|mitrify|qubax|sarvam)[-/][\w.:-]+/i.test(String(s ?? ''));
 }

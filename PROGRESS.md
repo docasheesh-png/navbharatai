@@ -101700,3 +101700,15 @@ same no-I/O ladder path as before. Production already had the flag `on` (owner-r
 there does not change. Tests: `tests/surplusBuilderDefaultOn.test.ts` (default, kill switch, keyless, and a census
 that fails when another file reads the flag; proven by putting a raw reader back in `productionAdapter.ts`).
 Not verified: a live Surplus build; this session cannot read Cloud Run's env or reach Surplus.
+
+## 2026-11-17 — Moyi API is a Pro Weak builder rung, after BluesMinds
+
+Owner: "moyi api ko bhi bluesminds ke baad lagao, its working". Weak order: Surplus → Router One → BluesMinds → Moyi →
+tier ladder. `src/server/AgentV3/moyiBuilder.ts` mirrors `bluesmindsBuilder.ts`: neutral label `ENGINE_MY`, brand-neutral
+errors, off-ladder census, label and name added to the redaction lists. The rung exists only when `MOYI_API_KEY`,
+`MOYI_BUILDER_MODEL` and `MOYI_BUILDER_RATE_IN/_OUT` are all set: no model id is guessed and no price is invented.
+Claude-family model ids are dropped from the list. Tests: `tests/weakMoyiOrder.test.ts` (order in every lane, each
+missing key removes the rung and leaves the old chain, own-domain endpoint, rate, brand; the no-Claude filter was
+proven by reversion). This closes the 2026-11-16 open item for Moyi, for all Weak users rather than only the
+z test account, by the owner's new order. DiscountedTokens and MirAPI remain Test Chat Bot only.
+OPEN: tool calling on the chosen Moyi model is unverified until a real Weak build runs through `ENGINE_MY`.

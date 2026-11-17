@@ -41,9 +41,12 @@ describe('dedicated min90 build transport', () => {
 
   it('reads no key when disabled and performs no work at import or factory', () => {
     const key = vi.fn(() => { throw new Error('must not read'); });
-    const config = Object.defineProperty({}, 'SURPLUS_API_KEY', { get: key });
+    // Default ON since 2026-11-17: "disabled" is the explicit kill switch, and it still reads no key.
+    const config = Object.defineProperty({ AGENTV3_SURPLUS_BUILDER: 'off' }, 'SURPLUS_API_KEY', { get: key });
     expect(() => createSurplusBuildTransport(config)).toThrow(SurplusBuildTransportError);
     expect(key).not.toHaveBeenCalled();
+    // Switch unset (ON) but no key: still a configuration refusal, never a call.
+    expect(() => createSurplusBuildTransport({})).toThrow(SurplusBuildTransportError);
     const fetcher = vi.fn<typeof fetch>(); createSurplusBuildTransport(env(), fetcher);
     expect(fetcher).not.toHaveBeenCalled();
   });

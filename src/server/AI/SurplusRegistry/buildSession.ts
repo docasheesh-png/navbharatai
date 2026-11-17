@@ -2,7 +2,7 @@ import { PublicBuildEngineError, publicBuildEngineError, publicBuildEngineSafeRe
 import { AiMaintenanceError } from '../../lib/aiMaintenance';
 import { BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../../AgentV3/turnDeadline';
 import { randomUUID } from 'node:crypto';
-import { parseEnvFlag } from '../../lib/envFlag';
+import { surplusBuilderLive } from './liveAdmission';
 import { SURPLUS_MIN90_BASE_URL } from '../../lib/surplusClient';
 import { BuildStoppedError, raceStop, throwIfStopped } from '../../AgentV3/stopSignal';
 import type { RunTurnParams, TurnResult, TurnUsage } from '../../AgentV3/ClaudeClient';
@@ -14,8 +14,12 @@ import { createProductionSurplusAdapter } from './productionAdapter';
 import type { Reviews, Snapshot, Workload } from './types';
 
 export const SURPLUS_BUILD_POLICY = 'surplus-build-10x-official-cap-v1';
+/**
+ * Default ON (owner 2026-11-17). True when the switch is not explicitly off AND a usable SURPLUS_API_KEY is set.
+ * Without a key this is false, so a keyless server takes the same no-I/O path the old default-OFF took.
+ */
 export function surplusBuilderEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) === true;
+  return surplusBuilderLive(env);
 }
 const SAFE_ADMISSION_REASONS = new Set([
   'reviewed_capability_or_exact_route_contract_missing', 'invalid_build_scope', 'weak_model_not_authorized',
@@ -86,7 +90,7 @@ export function isSurplusReasoningModel(model: string): boolean {
   if (/flash|instruct|chat|non-?reason|turbo/.test(m)) return false;
   return /(^|\/)(gpt-5|o[1-9])|-(sol|terra)\b|think|reason|\br1\b/.test(m);
 }
-/** Default OFF is a strict no-I/O path. ON with SURPLUS_API_KEY uses live key+flag admission (no Firestore review seed). */
+/** Switched off or keyless is a strict no-I/O path. A key with the switch not off uses live admission (no Firestore review seed). */
 export async function createSurplusBuildSession(options: {
   buildId: string; tier: string; initialWorkload?: Workload; enabled?: boolean; adapter?: SurplusReviewedAdapter; now?: () => number;
 }): Promise<SurplusBuildSession | undefined> {

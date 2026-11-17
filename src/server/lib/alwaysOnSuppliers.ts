@@ -38,6 +38,17 @@ export function mitrifySwitchOn(env: Env = process.env): boolean {
 }
 
 /**
+ * Surplus for Pro Weak builds (owner 2026-11-17: "surplus ko bhi default on karo"). `AGENTV3_SURPLUS_BUILDER`
+ * unset, empty or unrecognised is ON; only an explicit off value (`off`/`false`/`0`/`no`) is the kill switch.
+ * This is the SWITCH only. Surplus serves a build only when a usable `SURPLUS_API_KEY` is also set
+ * (`surplusBuilderLive` in SurplusRegistry/liveAdmission.ts): with no key there is nothing to call, and
+ * the build runs on its tier ladder exactly as before. Every reader of the flag goes through here.
+ */
+export function surplusBuilderSwitchOn(env: Env = process.env): boolean {
+  return defaultOn(env.AGENTV3_SURPLUS_BUILDER);
+}
+
+/**
  * Longest a failure of an always-on supplier may keep it out of later requests. A provider-side
  * 401/402/429 used to bench a rung for an hour or a day; for these three it now waits at most this
  * long, so a fixed key or a topped-up wallet is used again on the very next minute.

@@ -1,4 +1,5 @@
 import { bluesmindsBuilderRate, isBluesmindsBuilderLabel } from './bluesmindsBuilder';
+import { isMoyiBuilderLabel, moyiBuilderRate } from './moyiBuilder';
 import { routerOneCatalogueEntryCost } from '../AI/RouterOne/catalogueAccounting';
 import { PublicBuildEngineError } from '../lib/buildEngineError';
 import { isRouterOneAccountingProvider, RouterOneAccountingUnavailableError } from '../AI/RouterOne/accounting';
@@ -245,6 +246,13 @@ export function realRateFor(provider: string, model?: string): TokenRate {
   // BluesMinds builder rung (owner t359u): the owner-configured real rate, else its labelled estimate
   // from the reseller's published ratios (bluesmindsBuilder.ts). Never the Sonnet fallback below.
   if (isBluesmindsBuilderLabel(provider)) return bluesmindsBuilderRate().rate;
+  // Moyi builder rung (owner 2026-11-17): the owner-configured rate, else Moyi's published price for that model.
+  // The rung never runs a model without one (moyiBuilder.ts); if neither is found here, the turn takes the
+  // ordinary unknown-model rules below (conservative, never under-billed) instead of failing the build's accounting.
+  if (isMoyiBuilderLabel(provider)) {
+    const moyi = moyiBuilderRate(process.env, model);
+    if (moyi) return moyi;
+  }
   // Pro Chain V2 suppliers (ENGINE_QX / ENGINE_MF only): the supplier's own price when known; otherwise
   // the existing model-first rules below price it as a conservative, report-labelled ESTIMATE.
   const v2 = proChainV2SupplierRate(provider, model);

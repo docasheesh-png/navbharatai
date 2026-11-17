@@ -101689,6 +101689,39 @@ The review failed the first version under audit P0-C: up to 60 sequential reads 
 - The note is kept out of the user's terminal and the `tool_result` summary.
 - 38 tests; 21 round-2 mutations, all caught (one after an added test).
 
+## 2026-11-17 — Surplus Pro builder is default ON
+
+Owner: "surplus ko bhi default on karo". `AGENTV3_SURPLUS_BUILDER` is now ON unless explicitly off, matching
+Mitrify, Qubax, CheaperInference and BluesMinds. The switch moved to `surplusBuilderSwitchOn` in
+`alwaysOnSuppliers.ts`; the eight places that each compared the flag to `true` (buildSession, liveAdmission x2,
+productionAdapter, transport x2, the route via `surplusBuilderEnabled`, one test fixture) now read it there.
+`surplusBuilderEnabled` additionally requires a usable `SURPLUS_API_KEY`, so a keyless server (CI, local) takes the
+same no-I/O ladder path as before. Production already had the flag `on` (owner-reported 2026-10-25), so behaviour
+there does not change. Tests: `tests/surplusBuilderDefaultOn.test.ts` (default, kill switch, keyless, and a census
+that fails when another file reads the flag; proven by putting a raw reader back in `productionAdapter.ts`).
+Not verified: a live Surplus build; this session cannot read Cloud Run's env or reach Surplus.
+
+## 2026-11-17 — Moyi API is a Pro Weak builder rung, after BluesMinds
+
+Owner: "moyi api ko bhi bluesminds ke baad lagao, its working". Weak order: Surplus → Router One → BluesMinds → Moyi →
+tier ladder. `src/server/AgentV3/moyiBuilder.ts` mirrors `bluesmindsBuilder.ts`: neutral label `ENGINE_MY`, brand-neutral
+errors, off-ladder census, label and name added to the redaction lists. The rung exists only when `MOYI_API_KEY`,
+`MOYI_BUILDER_MODEL` and `MOYI_BUILDER_RATE_IN/_OUT` are all set: no model id is guessed and no price is invented.
+Claude-family model ids are dropped from the list. Tests: `tests/weakMoyiOrder.test.ts` (order in every lane, each
+missing key removes the rung and leaves the old chain, own-domain endpoint, rate, brand; the no-Claude filter was
+proven by reversion). This closes the 2026-11-16 open item for Moyi, for all Weak users rather than only the
+z test account, by the owner's new order. DiscountedTokens and MirAPI remain Test Chat Bot only.
+OPEN: tool calling on the chosen Moyi model is unverified until a real Weak build runs through `ENGINE_MY`.
+
+## 2026-11-17 — Moyi builder rung works with the key alone, for every Weak user
+
+Owner: "moyi ai ko sabhi user ke liye default on kar do". `MOYI_BUILDER_MODEL` and `MOYI_BUILDER_RATE_IN/_OUT` are now
+optional. With only `MOYI_API_KEY`, the rung reads Moyi's own `/models` list (cached 6 h, background refresh) and runs up
+to two listed models that have a published price, priced from `MOYI_PUBLISHED_RATES` (Moyi's own page, owner-supplied
+2026-11-16). No model id is guessed: until the list has been read, a build runs without the rung (proven by reversion:
+returning a guessed id on an empty list failed 3 tests). Owner-set model/rate keys still win. Not verified live: whether
+Moyi's ids match the table's patterns, and whether the chosen model honours tool calling; the first Weak build reports
+will show `ENGINE_MY` turns or failures.
 ## 2026-11-17 — builder fallthrough after phone drop (t400u)
 
 #2407 and #2408 failed ENGINE_UNAVAILABLE. Router One was marked stopped when the viewer's HTTP response closed, so a phone disconnect refused that rung before any request (`scope_stopped`). The stall banner treated "not in this process's memory" as the build being dead even when the workspace lease was still heartbeating. A build now keeps Router One until its own abort, status reports `buildHeldElsewhere` while the lease is live, and a BUILD_STARTED row is saved as soon as the report object exists. Account keys with an `ak-` prefix are redacted from stored reports and user-facing errors. Quotas, billing, referral, and white-label rules are unchanged. The wallet chip showing 0 tokens is the real token balance; it does not select the weak ladder by itself, and a paid refusal is still the 402 credits card.

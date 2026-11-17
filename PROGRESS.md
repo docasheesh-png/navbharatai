@@ -101696,3 +101696,7 @@ The review failed the first version under audit P0-C: up to 60 sequential reads 
 ## 2026-11-17 — recharge sentence when the wallet cannot cover a build (t402u)
 
 The existing pre-start block (no positive balance, billing on, not a free-list account) now says the owner's sentence: Hindi when the request is Hindi, English otherwise, with a Recharge button. A stream error with that code uses the same card, not the stall banner. The step clock ("build budget exhausted") and a supplier account with no balance are not the user's wallet and do not show this sentence. Who is allowed to start is unchanged, including a free weak-ladder build the gate already allows.
+
+## 2026-11-17 — no build when the wallet cannot cover it (t403u)
+
+Owner override: a balance of 0, or below the pre-flight estimate, does not start a build at all, including the weak ladder. The same sentence stops a build whose running bill passes that balance; files already written are kept. Admin free-list and the z test account stay exempt. Prices, chat quotas, gift and referral rules are unchanged. An unreadable balance is still not treated as zero.

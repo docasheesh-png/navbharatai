@@ -73,14 +73,13 @@ export function decideAffordability(input: AffordabilityInput): AffordabilityDec
   }
 
   // 3. Enough for the estimate → proceed exactly as today (no routing change).
-  if (balance >= estimate) return { action: 'proceed', reason: 'covers-estimate' };
+  if (Number.isFinite(estimate) && estimate > 0 && balance >= estimate) return { action: 'proceed', reason: 'covers-estimate' };
 
-  // 4. Positive but below the estimate → build on the economy engine so a paying-but-low user's work is
-  //    not stopped, and an over-cautious estimate never refuses a user who actually has money. Any real
-  //    overrun settles negative post-build, and the very NEXT build is then blocked by rule 2 above.
+  // 4. Positive but below the estimate. Owner t403u: do not start a cheap or weak build to
+  //    cover the gap. The app is not built. A balance that covers the estimate already returned above.
   return {
-    action: 'economy',
-    reason: 'low-balance-economy',
-    notice: 'Low balance — building on the economy engine to keep your work going. Add credits for the full engine.',
+    action: 'block',
+    reason: 'below-estimate',
+    notice: 'Your balance is not enough for this build, please recharge!',
   };
 }

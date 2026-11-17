@@ -16,3 +16,20 @@ export const BALANCE_RECHARGE_EN = 'Your balance is not enough for this build, p
 export function balanceRechargeNotice(requestText: string): string {
   return detectLanguageHint(requestText)?.code === 'hi' ? BALANCE_RECHARGE_HI : BALANCE_RECHARGE_EN;
 }
+
+/**
+ * Refuse a build before it starts when the wallet cannot cover it (owner t403u).
+ * An unreadable balance stays allowed: that is an unknown, not a measured zero.
+ * Exempt accounts (admin free-list, the z test account) are decided by the caller.
+ */
+export function shouldRefuseBuildForBalance(input: {
+  exempt: boolean;
+  balanceInr: number | null;
+  estimateInr: number;
+}): boolean {
+  if (input.exempt) return false;
+  if (typeof input.balanceInr !== 'number' || !Number.isFinite(input.balanceInr)) return false;
+  const needed = input.estimateInr;
+  if (typeof needed === 'number' && Number.isFinite(needed) && needed > 0) return input.balanceInr < needed;
+  return input.balanceInr <= 0;
+}

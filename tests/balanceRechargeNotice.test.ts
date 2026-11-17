@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { BALANCE_RECHARGE_EN, BALANCE_RECHARGE_HI, balanceRechargeNotice } from '../src/server/AgentV3/balanceRechargeNotice';
+import { BALANCE_RECHARGE_EN, BALANCE_RECHARGE_HI, balanceRechargeNotice, shouldRefuseBuildForBalance } from '../src/server/AgentV3/balanceRechargeNotice';
 import { decideAffordability } from '../src/server/AgentV3/Affordability';
 
 describe('balance recharge notice (owner t402u)', () => {
@@ -20,8 +20,13 @@ describe('balance recharge notice (owner t402u)', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     expect(route).toContain('error: balanceRechargeNotice(prompt)');
     expect(decideAffordability({ isFreeUser: false, balance: 0, estimate: 10 }).action).toBe('block');
-    expect(decideAffordability({ isFreeUser: false, balance: 5, estimate: 10 }).action).toBe('economy');
+    expect(decideAffordability({ isFreeUser: false, balance: 5, estimate: 10 }).action).toBe('block');
     expect(decideAffordability({ isFreeUser: true, balance: 0, estimate: 10 }).action).toBe('proceed');
+    expect(shouldRefuseBuildForBalance({ exempt: true, balanceInr: 0, estimateInr: 10 })).toBe(false);
+    expect(shouldRefuseBuildForBalance({ exempt: false, balanceInr: 0, estimateInr: 10 })).toBe(true);
+    expect(shouldRefuseBuildForBalance({ exempt: false, balanceInr: 4, estimateInr: 10 })).toBe(true);
+    expect(shouldRefuseBuildForBalance({ exempt: false, balanceInr: 10, estimateInr: 10 })).toBe(false);
+    expect(shouldRefuseBuildForBalance({ exempt: false, balanceInr: null, estimateInr: 10 })).toBe(false);
   });
 
   it('the recharge button is English and the Hindi sentence stays on the server', () => {

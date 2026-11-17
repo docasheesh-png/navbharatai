@@ -9,6 +9,7 @@
 // never ships node_modules, build output, .git, or live .env secrets; binary and
 // oversized files are skipped (a deploy is source/text).
 
+import { isScratchCapture } from './scratchCapture';
 import { buildTarGz, shouldBulkLand, bulkLandEnabled } from './BulkLanding';
 import { isBinaryAsset } from './fileClassification';
 import { IMPORT_LIMITS } from '../../lib/importRules';
@@ -147,6 +148,8 @@ export async function collectWorkspaceFiles(
     if (Object.keys(files).length >= MAX_FILES) { skipped.push(path); continue; }
     const content = contents.get(path);
     if (typeof content !== 'string') { skipped.push(path); continue; }
+    // A tool's output redirected into a file is scratch, never the user's project (scratchCapture.ts, Q-2713).
+    if (isScratchCapture(path, content)) { skipped.push(path); continue; }
     const bytes = Buffer.byteLength(content, 'utf8');
     if (bytes > MAX_FILE_BYTES || looksBinary(content)) { skipped.push(path); continue; }
     if (totalBytes + bytes > MAX_TOTAL_BYTES) { skipped.push(path); continue; }
@@ -218,6 +221,8 @@ export async function collectNamedWorkspaceFiles(
   for (const path of candidates) {
     const content = contents.get(path);
     if (typeof content !== 'string') { skipped.push(path); continue; }
+    // A tool's output redirected into a file is scratch, never the user's project (scratchCapture.ts, Q-2713).
+    if (isScratchCapture(path, content)) { skipped.push(path); continue; }
     const bytes = Buffer.byteLength(content, 'utf8');
     if (bytes > MAX_FILE_BYTES || looksBinary(content)) { skipped.push(path); continue; }
     if (totalBytes + bytes > MAX_TOTAL_BYTES) { skipped.push(path); continue; }

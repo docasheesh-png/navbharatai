@@ -101877,3 +101877,32 @@ Tests (each proven by reversion):
 Five source guards were repointed to the moved copy code: `previewSnapshotWiring`, `sandboxLifetime`, `snapshotIdentity`, `theCopyFollowsEveryPass`, `theSearchBoxWasInHindi`.
 
 Not proven: why that day's wake did not bring the machine back. No record of it existed; layer 3 makes the next one visible.
+
+## 2026-11-17 — Autopsy 57604006, builds 969740df and 1712adfa (the battle royale): ledger
+
+Builds 5e558cb2, 7dc42243, d0c5a371 and 9ed80cc9 of the same session were autopsied by another session (Q-2690–Q-2701, branch `claude/practical-dijkstra-e7o2hc`), and were not redone here.
+
+Tally:
+- ✅ self-heal: 2 (the write-time syntax guard; type errors left by failed build 9ed80cc9, healed in 969740df)
+- 🔀 workaround: 0
+- ⏭️ skip: 1 (an invented restart)
+- ❌ shipped imperfect: 3 (a blank, uncontrollable game; "working / fully shippable" over a RED gate; a scratch file in the project)
+- 🥵 struggle: 3 (a `cat .env` attempt blocked; an unused kit canvas; an over-estimated ETA)
+
+Plus the session-level preview that would not wake.
+
+Missing system: the model's closing message was not reconciled with the platform's own verdict. The claim audit existed, but its vocabulary missed every sentence these builds used.
+
+| Item | Root cause → class | Fix | Lock |
+|---|---|---|---|
+| Blank canvas, Controls 0, published link "not opening" | setup() set 'playing'; the loop ran only from start() → the loop is tied to one caller, not to the state | Shell loop follows the status, plus a first frame; kit history regenerated (#4286) | `aGameRunsWhenItSaysItIsPlaying` (reverted: 3 fail) |
+| "Verified working / fully healthy / fully shippable / kaam kar raha hai" over RED | Claim vocabulary too narrow → verdicts phrased outside a fixed word list | Vocabulary widened (EN + Hinglish); a whole-app verdict counts when the game failed | `aGameThatIgnoresInputIsNotCalledWorking` (reverted: 3 fail) |
+| "Preview not running … now restarted" (Q-2714) | No fact for a restart → a claimed action that no command performed | `devServerLaunchEvidence()` from the command log, plus a `restart-claimed` rule | `aRestartNobodyPerformedIsCorrected` (reverted: 1 fail) |
+| `typecheck_output.txt` saved with the app (Q-2713) | The ledger adopts every shell write → a tool-output capture treated as source | `isScratchCapture` (name AND content) in the ledger and both collectors | `aToolOutputCaptureIsNotTheApp` (reverted: 1 fail) |
+| Preview dead 3 days after a failed build | No copy on a failed turn; an older copy refused; wakes unrecorded | Layers 1–3 (#4286) | `failedBuildCopy`, `aPreviewIsNeverBlank`, `previewWakeLog` |
+| Type errors and `edit_file` misses after the failed build | Belongs to Q-2691 / Q-2697 (other session) | — | — |
+| `cat .env` blocked | Not a defect: the governance guard did its job | — | — |
+| USAGE_NOT_REPORTED (Surplus) | Already Q-2414 🟡 | — | — |
+| Unused kit `GameCanvas.tsx` (Q-2715) | Dead-file removal skips a green-latched app | 🟡 BLOCKED: admin decision | — |
+| ETA under the band (Q-2716) | The fastest build of this workspace so far; the band low sat below every earlier build | 🟡 BLOCKED: close as not-a-defect, pending agreement | — |
+| Why that day's wake failed (Q-2717) | No record existed | 🟡 BLOCKED: needs the next PREVIEW_WAKE_HISTORY | — |

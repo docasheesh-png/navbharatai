@@ -230,10 +230,12 @@ describe('owner P2 review item 8: no key, conversation content or sensitive data
     const current = db.data.get('admin_traffic_control')!.get('current')!;
     expect(Object.keys(current).sort()).toEqual(['actor', 'global', 'models', 'providers', 'reason', 'revision', 'surfaces', 'updatedAtMs']);
   });
-  it('admission free text (price source, reviewer) is masked too', () => {
+  it('admission free text (price source, reviewer) is masked before it is stored', async () => {
     const leaked = 'sk-proj-' + 'B'.repeat(60);
-    const b = parseControlBody({ models: { 'glm/x': { state: 'enabled', admission: { required: false, priceSource: `page ${leaked}`, reviewer: 'owner' } } } });
-    expect(JSON.stringify(b)).not.toContain(leaked);
+    const db = new MemoryFirestore();
+    await new TrafficControlStore(db as never, () => NOW).apply({ expectedRevision: 0, actor: 'owner', reason: 'record evidence',
+      body: { models: { 'glm/x': { state: 'enabled', admission: { required: false, priceSource: `page ${leaked}`, reviewer: 'owner' } } } } });
+    expect(JSON.stringify([...db.data.entries()].map(([k, v]) => [k, [...v.values()]]))).not.toContain(leaked);
   });
 });
 

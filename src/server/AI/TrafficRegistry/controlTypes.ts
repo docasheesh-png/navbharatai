@@ -10,7 +10,6 @@
  */
 import type { Surface } from '../InferenceGateway/types';
 import { PROVIDER_UPSTREAM } from './upstreamFamilies';
-import { redactSecrets } from '../../AgentV3/SecretRedactor';
 
 /** Surfaces the gateway can serve today. A surface switch can only send one of them back to its legacy path. */
 export const CONTROL_SURFACES: readonly Surface[] = Object.freeze(['chat', 'professional', 'doctor', 'sda', 'developer-api'] as Surface[]);
@@ -86,7 +85,7 @@ function epoch(v: unknown, what: string): number | undefined {
 function text(v: unknown, what: string, max: number): string | undefined {
   if (v === undefined) return undefined;
   if (typeof v !== 'string' || !v.trim() || v.length > max) throw new ControlInputError(`${what} must be text of at most ${max} characters.`);
-  return redactSecrets(v.trim());
+  return v.trim();
 }
 function admission(v: unknown, what: string): AdmissionEvidence {
   const o = obj(v, what);

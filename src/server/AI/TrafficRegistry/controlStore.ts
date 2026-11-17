@@ -57,6 +57,18 @@ export function describeChanges(before: ControlBody, after: ControlBody): string
   return out.slice(0, 40);
 }
 
+/** The only free text inside a body is a model's admission notes; mask them the same way. */
+function maskFreeText(body: ControlBody): ControlBody {
+  const models: ControlBody['models'] = {};
+  for (const [k, m] of Object.entries(body.models)) {
+    const a = m.admission;
+    models[k] = a ? { ...m, admission: { ...a,
+      ...(a.priceSource ? { priceSource: redactSecrets(a.priceSource).slice(0, 200) } : {}),
+      ...(a.reviewer ? { reviewer: redactSecrets(a.reviewer).slice(0, 120) } : {}) } } : m;
+  }
+  return { ...body, models };
+}
+
 export class TrafficControlStore {
   constructor(private readonly db: Firestore, private readonly now: () => number = Date.now) {}
 
@@ -75,7 +87,7 @@ export class TrafficControlStore {
     // Free text an admin types is the ONLY place a secret could enter these records (every other field is a
     // validated enum, id or number). A key pasted by mistake is masked before anything is stored.
     const reason = redactSecrets(typed).slice(0, 300);
-    const body = parseControlBody(args.body);
+    const body = maskFreeText(parseControlBody(args.body));
     const actor = redactSecrets(String(args.actor || '')).slice(0, 120) || 'admin';
     const now = this.now();
     return this.db.runTransaction(async tx => {

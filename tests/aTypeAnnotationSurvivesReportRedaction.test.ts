@@ -57,6 +57,9 @@ describe('one server evidence policy, with a compiler-free client boundary', () 
       .filter((p) => /(?:from\s*|import\s*\()['"][^'"]*\/SecretRedactor['"]/.test(readFileSync(p, 'utf8')))
       .map((p) => relative(ROOT, p)).sort();
     expect(genericCallers).toEqual([
+      // Admin-typed reasons and notes in the traffic-control store: plain text, never source evidence, and on the
+      // gateway's import path, which must not load the TypeScript compiler.
+      'src/server/AI/TrafficRegistry/controlStore.ts',
       'src/server/AgentV3/SourceSecretRedactor.ts',
       // Vault/config views and uploaded-content safety are not source-evidence exemptions.
       'src/server/AgentV3/secretFileView.ts',

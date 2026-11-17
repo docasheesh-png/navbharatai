@@ -6,13 +6,16 @@
     "free Weak build, Surplus every turn, not charged, succeeded with gate YELLOW; the message was one pasted Dart source file sent to an existing vite-react project and was turned into an edit",
     "at about 8 s the user was shown 'I could not find @override in this project' for an indented annotation in the pasted code",
     "MENTION_RE accepts an @ after whitespace; an indented annotation therefore matched, resolved to no file and was reported",
-    "F1: an unresolved bare identifier that is the first thing on its line, in a message with at least 3 lines ending in {, } or ;, is not reported; everything else is unchanged",
-    "neighbours: English, Hinglish and Hindi messages naming a missing file; path-shaped missing mentions in code; a mid-line mention in code; two code lines; Python decorators; resolved mentions including a bare Makefile; email and no-mention messages; a 200 KB message",
-    "mutation checks (unique mktemp backups, restored), all caught: M1 any token; M2 no line-start test; M3 no code gate; M4 threshold 2; M5 threshold 4; M6 no semicolon; M7 line start always true; M9 dotted tokens allowed; M10 match offset; M8 was a comment-only control and survived as expected"
+    "F1 (reworked after review): an unresolved bare identifier is dropped only when it is not a well-known extensionless file name, is first on its line, the message has 3+ lines ending in { } ; and code-shaped lines (ending in { } ; ( ) [ ] ,) are at least half of the non-empty lines, its own line reads as an annotation (alone, code-like arguments, keyword on a code-ending line, or typed declaration), and it sits between code lines; MENTION_RE unchanged",
+    "review probes all keep the warning: '@Header ko sticky karo' plus a 3-line function; '@Header को ऊपर चिपका दो' plus three const lines; 'Please add:' with @Dockerfile and @Makefile plus a snippet; @Dockerfile and '@Makefile add karo' at line start in prose plus a snippet and at the top of a paste; '@App' plus a snippet; whole Dart, Flutter-style, Java, Kotlin and TS pastes still silenced",
+    "mutation checks (unique mktemp backups, restored), all caught: M1 any token; M2 no line-start test; M3 no code gate; M4 threshold 2; M5 threshold 4; M6 no semicolon; M7 line start always true; M9 dotted tokens allowed; M10 match offset; M8 was a comment-only control and survived as expected",
+    "the report's own paste: 16 of 63 non-empty lines end in { } ; and 61 of 63 in the wider set; checked locally against the retained report (not committed) and silenced",
+    "mutation checks round 2 after review, all caught: R1 no well-known list; R2 case-sensitive list; R3 no own-line rule; R4 no half rule; R5 no statement floor; R6 narrow half set; R7 blank lines counted; R8 no arguments rule; R9 line end without keyword; R10 keyword without line end; R11 no typed declaration; R12 any arguments; R13 no previous-line rule; R14 no next-line rule; R15 no stacked annotations; R16 lower-case type; R17 prose words as keywords; R18 any token; R19 no line-start test (R10, R14, R15, R16, R18 and R19 survived first and were caught after added tests)"
   ],
   "limitations": [
     "brace-less code (Python decorators) is still reported, as before",
-    "a bare @Name at line start inside pasted code that was meant as a missing file is no longer reported",
+    "a bare, non-listed @Name alone on a line between code lines of a pasted file that was meant as a missing file is no longer reported",
+    "the half-of-lines test counts lines ending in { } ; ( ) [ ] , rather than only { } ; because Flutter-style code ends most lines in ( , or ); the three-line floor uses { } ; only",
     "D2 (the builder calling placeholders intentional) was handled by the existing resume; not changed",
     "D3 (USAGE_NOT_REPORTED) is already tracked as Q-2414",
     "BR1992 review residual (recordModel read at run start) is not on this report's path",

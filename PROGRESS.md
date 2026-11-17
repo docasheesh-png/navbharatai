@@ -101697,3 +101697,7 @@ Owner t311u sequential audit, BR1998 only (boundary 1951..2105 frozen). Branched
 - No new queue row (USAGE_NOT_REPORTED is Q-2414).
 - 9 mutations, all caught (plus one comment-only control).
 - Docs: `docs/build-report-autopsy-BR1998.md`, its evidence JSON, and `tests/br1998Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-17 — BR1998 rework after review (a short request plus a snippet dropped real warnings)
+
+The review failed the first version: the pasted-code test looked at the whole message, so a short request plus a 3-line snippet dropped real missing-file warnings. Reworked with ordinary commits on the same branch: the message must be mostly code (3+ lines ending in `{ } ;`, and code-shaped lines at least half the non-empty lines); well-known extensionless names (Dockerfile, Makefile, LICENSE, README, …) are never dropped; the token's own line must read as an annotation and sit between code lines. Every review probe keeps its warning; whole Dart, Java, Kotlin and TS pastes are still silenced. 28 tests; 19 round-2 mutations, all caught (six after added tests).

@@ -162,6 +162,8 @@ import {
 } from '../AgentV3/cloudRunHosting';
 import { loadBoard, worstLevel, AI_MIN_SAMPLE, type LoadReadings } from '../lib/loadBoard';
 import { tierLadder, availableRungs, rungHasKey, tierDisplayName, tierEngineAvailable } from '../AgentV3/tierLadder';
+import { testChatStatus } from '../lib/testChatBot';
+import { buildTrafficBoard } from '../AI/ProviderHealth/trafficBoard';
 import { readEngineUse, engineUseDayKey } from '../AgentV3/engineUseStore';
 import { reportStatus, openReportCount } from '../AgentV3/reportTriage';
 import { listReports } from '../lib/userReportStore';
@@ -2218,6 +2220,15 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       out.chat = { scope: 'this server instance, since it started', stats: getProviderStats() };
     } catch { /* unmeasured */ }
+
+    // Live health for the same page: Test Chat's provider list, plus what real calls just did.
+    try {
+      const catalog = testChatStatus().providers.map((p) => ({
+        id: p.id, label: p.label, configured: p.configured, enabled: p.enabled, model: p.model,
+      }));
+      const buildProviders = (['weak', 'off', 'mini'] as const).flatMap((level) => tierLadder(level).rungs.map((r) => r.provider));
+      out.traffic = buildTrafficBoard(catalog, buildProviders);
+    } catch { /* unmeasured ⇒ the section says it could not be read */ }
 
     res.json(out);
   });

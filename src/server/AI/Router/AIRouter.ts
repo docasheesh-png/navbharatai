@@ -11,6 +11,7 @@ import { providerCooldownStore } from '../../lib/ProviderCooldownStore';
 import { getBreaker, allBreakerNames } from './CircuitBreaker';
 import { tracer } from '../../observability/Tracer';
 import { shouldRaceStreams } from './streamRacePolicy';
+import { noteProviderCall, shouldSkipProvider } from '../ProviderHealth/trafficHealth';
 
 /**
  * Which rung actually served a streamed turn.
@@ -180,6 +181,9 @@ export class AIRouter {
 
   /** Per-universe slot key for the bulkhead concurrency pool. */
   private slotKey(name: string): string { return `${this.universe}:${name}`; }
+  private trafficSurface(): 'chat' | 'professional' {
+    return this.universe.includes('professional') ? 'professional' : 'chat';
+  }
   private acquire(name: string): boolean { return acquireSlot(this.slotKey(name)); }
   private release(name: string): void { releaseSlot(this.slotKey(name)); }
   private inFlightCount(name: string): number { return inFlight.get(this.slotKey(name)) || 0; }
@@ -234,6 +238,7 @@ export class AIRouter {
     const eligible: AIProvider[] = [];
     for (const p of racers) {
       signal?.throwIfAborted();
+      if (shouldSkipProvider(p.name)) { console.log(`[RACE] skip ${p.name} (suspended or down)`); continue; }
       if (isOnCooldown(p.name)) { console.log(`[RACE] skip ${p.name} (cooldown)`); continue; }
       assertFreeAnswerDispatch();
       const healthy = await p.healthCheck().catch(() => false);
@@ -252,14 +257,14 @@ export class AIRouter {
           assertFreeAnswerDispatch(); signal?.throwIfAborted();
           const response = assertNonEmpty(await p.execute(prompt, undefined, undefined, systemPrompt, images, signal), p.name);
           signal?.throwIfAborted();
-          recordProviderLatency(p.name, Date.now() - t, false);
+          recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface() });
           return { response, name: p.name };
         } catch (err: any) {
           // Genuine failure → cool the provider down. (Slow-but-successful losers
           // resolve instead of rejecting, so they are never wrongly penalized.)
           signal?.throwIfAborted();
           noteProviderFailure(p.name, err);
-          recordProviderLatency(p.name, 0, true);
+          recordProviderLatency(p.name, 0, true, { error: err, surface: this.trafficSurface() });
           errors.push(`${p.name}: ${String(err?.message).slice(0, 60)}`);
           throw err;
         } finally {
@@ -284,6 +289,7 @@ export class AIRouter {
     // Last-resort fallback (sequential) — e.g. Claude Haiku.
     for (const p of fallbacks) {
       signal?.throwIfAborted();
+      if (shouldSkipProvider(p.name)) continue;
       assertFreeAnswerDispatch();
       const healthy = await p.healthCheck().catch(() => false);
       signal?.throwIfAborted();
@@ -295,7 +301,7 @@ export class AIRouter {
         assertFreeAnswerDispatch(); signal?.throwIfAborted();
         const response = assertNonEmpty(await p.execute(prompt, undefined, undefined, systemPrompt, images, signal), p.name);
         signal?.throwIfAborted();
-        recordProviderLatency(p.name, Date.now() - t, false);
+        recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface() });
         recordRouterOutcome(true);
         return {
           response,
@@ -304,7 +310,7 @@ export class AIRouter {
       } catch (err: any) {
         signal?.throwIfAborted();
         noteProviderFailure(p.name, err);
-        recordProviderLatency(p.name, 0, true);
+        recordProviderLatency(p.name, 0, true, { error: err, surface: this.trafficSurface() });
         errors.push(`${p.name}: ${String(err?.message).slice(0, 60)}`);
       } finally {
         this.release(p.name);
@@ -350,6 +356,7 @@ export class AIRouter {
     for (const p of providers) {
       await assertAiAvailable();
       if (signal?.aborted) return { ok: false, reason: 'aborted' };
+      if (shouldSkipProvider(p.name)) continue;
       if (!p.executeStream) continue;
       if (!this.acquire(p.name)) continue;
       const t = Date.now();
@@ -412,26 +419,26 @@ export class AIRouter {
             // provider is benched: it accepted a request and did not answer, which is a real failure
             // however it looks from the outside.
             setCooldown(p.name, cooldownSeconds(new Error(watched.verdict)));
-            recordProviderLatency(p.name, 0, true);
+            recordProviderLatency(p.name, 0, true, { error: new Error(watched.verdict), surface: this.trafficSurface() });
             console.warn(`[STREAM] ${p.name} ${watched.verdict} — next rung`);
             continue;
           }
           if (watched.verdict !== 'completed') {
             // Text is already on screen. A second rung would repeat itself, so the turn ends here with
             // what was delivered — partial and honest beats duplicated.
-            recordProviderLatency(p.name, Date.now() - t, false);
+            recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface() });
             console.warn(`[STREAM] ${p.name} ${watched.verdict} after delivering — ending the turn`);
             return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false, reason: 'stalled' };
           }
         }
         if (signal?.aborted) return { ok: false, reason: 'aborted' };
         if (!delivered) throw new Error('stream produced no content');
-        recordProviderLatency(p.name, Date.now() - t, false);
+        recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface() });
         return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false };
       } catch (err: any) {
         if (signal?.aborted) return { ok: false, reason: 'aborted' };
         noteProviderFailure(p.name, err);
-        recordProviderLatency(p.name, 0, true);
+        recordProviderLatency(p.name, 0, true, { error: err, surface: this.trafficSurface() });
         if (delivered) {
           console.warn(`[STREAM] ${p.name} failed after delivering — ending the turn`);
           return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false, reason: 'stalled' };
@@ -548,14 +555,14 @@ export class AIRouter {
           }, undefined, signal);
           if (signal?.aborted) return 'cancelled';
           if (!delivered) throw new Error('stream produced no content');
-          recordProviderLatency(p.name, Date.now() - t, false);
+          recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface() });
           return 'completed';
         } catch (err: any) {
           // Only the observed caller signal proves cancellation. An adapter may implement a timeout
           // using AbortError too, so the error name alone must never hide a provider-health failure.
           if (signal?.aborted) return 'cancelled';
           noteProviderFailure(p.name, err);
-          recordProviderLatency(p.name, 0, true);
+          recordProviderLatency(p.name, 0, true, { error: err, surface: this.trafficSurface() });
           console.warn(`[RACE_STREAM] ${p.name} failed: ${err?.message?.slice(0, 60)}`);
           return 'failed';
         } finally {
@@ -640,6 +647,10 @@ export class AIRouter {
         signal?.throwIfAborted();
         if (pass === 2 && attempted.has(provider.name)) continue;
 
+        if (shouldSkipProvider(provider.name)) {
+          console.log(`[TRAFFIC] Skipping ${provider.name} (suspended or down)`);
+          continue;
+        }
         const onCooldown = isOnCooldown(provider.name);
         if (pass === 1 && onCooldown) {
           console.log(`[CIRCUIT] Skipping ${provider.name} (cooldown active)`);
@@ -674,7 +685,7 @@ export class AIRouter {
           signal?.throwIfAborted();
           const latency = Date.now() - startTime;
           console.log(`[ROUTER] ${provider.name} SUCCESS in ${latency}ms`);
-          recordProviderLatency(provider.name, latency, false);
+          recordProviderLatency(provider.name, latency, false, { surface: this.trafficSurface() });
           recordRouterOutcome(true);
 
           return {
@@ -692,7 +703,7 @@ export class AIRouter {
           signal?.throwIfAborted();
           console.error(`[ROUTER] ${provider.name} FAILED (${error?.message?.slice(0, 80)})`);
           noteProviderFailure(provider.name, error);
-          recordProviderLatency(provider.name, 0, true);
+          recordProviderLatency(provider.name, 0, true, { error, surface: this.trafficSurface() });
           errors.push(`${provider.name}: ${error?.message?.slice(0, 60)}`);
         } finally {
           this.release(provider.name);
@@ -758,13 +769,19 @@ export function _resetRouterOutcomes(): void {
 // Per-provider latency accumulator for stats
 const latencyAccum = new Map<string, { total: number; count: number; errors: number }>();
 
-export function recordProviderLatency(name: string, latencyMs: number, failed: boolean) {
+export function recordProviderLatency(name: string, latencyMs: number, failed: boolean, detail?: { error?: unknown; surface?: 'chat' | 'professional'; firstByteMs?: number }) {
   const cur = latencyAccum.get(name) || { total: 0, count: 0, errors: 0 };
   latencyAccum.set(name, {
     total: cur.total + (failed ? 0 : latencyMs),
     count: cur.count + 1,
     errors: cur.errors + (failed ? 1 : 0),
   });
+  try {
+    noteProviderCall({
+      provider: name, surface: detail?.surface ?? 'chat', ok: !failed,
+      totalMs: failed ? 0 : latencyMs, firstByteMs: detail?.firstByteMs, error: detail?.error,
+    });
+  } catch { /* health recording never changes the route */ }
   // P1.3 — success is the single chokepoint that closes the breaker (every router
   // success path funnels through here with failed=false). Failures open it via setCooldown.
   if (!failed) markProviderSuccess(name);

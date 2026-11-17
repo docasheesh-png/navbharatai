@@ -37,6 +37,7 @@
 // PURE builders; unit-tested and compiled with the real TypeScript compiler in the tests.
 
 import { appImageKeyOptionsText, APP_KEYS_PLACE } from './appImageKeyOptions';
+import { noteProviderCall } from '../AI/ProviderHealth/trafficHealth';
 
 export interface ImageAiOptions {
   /** Route requests through the app's own server (needed for the owner's own provider key). */
@@ -424,9 +425,13 @@ export async function generateImage(request: ImageRequest, options: GenerateOpti
     }, timeoutMs);
     const follow = () => ctl.abort();
     options.signal?.addEventListener('abort', follow, { once: true });
+    const started = Date.now();
     try {
-      return await provider.generate(job, ctl.signal);
+      const image = await provider.generate(job, ctl.signal);
+      noteProviderCall({ provider: provider.name, surface: 'image', ok: true, totalMs: Date.now() - started });
+      return image;
     } catch (err) {
+      noteProviderCall({ provider: provider.name, surface: 'image', ok: false, totalMs: Date.now() - started, error: err });
       if (options.signal?.aborted) throw cancelled();
       let error: ImageGenError;
       if (timedOut) error = new ImageGenError('timeout', 'The picture took too long to make.', true);

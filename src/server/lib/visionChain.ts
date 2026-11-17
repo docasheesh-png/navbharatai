@@ -25,6 +25,7 @@ import { dispatchWithFreeTierPaidHold, estimateTextTokens, geminiUsage, reserveF
 import { nextPoolKey } from './keyPool';
 import { vertexGenAI } from './vertexGenAI';
 import { tryCheaperInferenceVision, tryQubaxVision } from './visionSuppliers';
+import { noteProviderCall, shouldSkipProvider } from '../AI/ProviderHealth/trafficHealth';
 
 export interface VisionAttachment {
   name: string;
@@ -332,10 +333,16 @@ export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions)
   };
   for (const provider of visionProviderOrder(o.allowClaude, visionTier(o), o.alwaysOnSuppliers === true)) {
     o.signal?.throwIfAborted();
+    if (shouldSkipProvider(provider)) continue;
+    const started = Date.now();
     try {
       const text = await runners[provider](atts, o);
-      if (text) return { text, provider };
+      if (text) {
+        noteProviderCall({ provider, surface: 'vision', ok: true, totalMs: Date.now() - started });
+        return { text, provider };
+      }
     } catch (err: any) {
+      noteProviderCall({ provider, surface: 'vision', ok: false, totalMs: Date.now() - started, error: err });
       console.warn(`[VISION_CHAIN] ${provider} failed: ${err?.message || err}`);
     }
   }

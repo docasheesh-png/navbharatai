@@ -493,7 +493,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           : completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) : null;
         if (reservation && actual !== null) await store.settlePaid(reservation, actual);
         if (monthHold) { monthSettled = true; await settleMonthly(db, monthHold.month, monthHold.amount, actual); }
-        breaker.recordSuccess(); recordProviderLatency(breakerName, Date.now() - attemptStarted, false);
+        breaker.recordSuccess(); recordProviderLatency(breakerName, Date.now() - attemptStarted, false, { surface: 'chat', firstByteMs: trace.ttftMs ?? undefined });
         trace.rung = id; trace.costUsdEstimate = isPaidRung(id) ? (completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) / 1e9 : null) : 0;
         // Token exhaustion is a completed transport, not a complete answer. Preserve reported
         // charges above, never cache it or mix another provider into already committed text.
@@ -522,7 +522,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           const escalated = Math.max(Date.now() + requestedCooldown, breaker.recordFailure(requestedCooldown, Date.now(), openReason));
           const until = id === 'cheapinf' ? Math.min(escalated, Date.now() + ALWAYS_ON_MAX_COOLDOWN_MS) : escalated;
           breaker.honorRemoteOpenUntil(until, openReason);
-          if (accountId(id) !== 'glm' || ['AUTH', 'RATE_LIMIT', 'QUOTA_EXHAUSTED'].includes(safe?.code ?? '')) await store.cooldown(accountId(id), until).catch(() => {}); recordProviderLatency(breakerName, 0, true);
+          if (accountId(id) !== 'glm' || ['AUTH', 'RATE_LIMIT', 'QUOTA_EXHAUSTED'].includes(safe?.code ?? '')) await store.cooldown(accountId(id), until).catch(() => {}); recordProviderLatency(breakerName, 0, true, { error: safe ?? error, surface: 'chat' });
         }
         // A failed response can still carry a settled supplier receipt. Unknown failures retain holds.
         const failedCharge = id === 'cheapinf' ? reportedChargeNanoUsd(safe) : null;

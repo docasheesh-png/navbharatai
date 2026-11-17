@@ -26,6 +26,7 @@ import { modelAlwaysReasons } from './glmThinking';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isFatalProviderError, isModelUnavailableError, isProviderBalanceError, isAccountingRefusalError } from '../providerErrorClass';
+import { noteProviderCall, providerInFlight, providerSkipReason, shouldSkipProvider } from '../../AI/ProviderHealth/trafficHealth';
 import { isRestOfBuildSkip } from '../../lib/engineSafeDiag';
 import { deadlineLeavingFallback, isBudgetEndedError, isSlowStreamAbandon, isSilentAbandon, MIN_USEFUL_CALL_MS, providerNeverAnswered, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
 import type { WasteKind } from '../providerWaste';
@@ -860,6 +861,12 @@ export function makeMultiProviderTurnRunner(
           ?? (chain[i].modelId ? deadForRun.get(`${name}::${chain[i].modelId}`) : undefined)
           // …or this MODEL starved on ANY key of this family earlier in the run (see `deadKeyFor`).
           ?? (chain[i].modelId ? deadForRun.get(starvedKeyFor(chain[i])) : undefined);
+        if (shouldSkipProvider(reportName, now())) {
+          fellBackFrom.push(name);
+          const why = providerSkipReason(reportName);
+          if (lastError === undefined && why) lastError = new Error(why);
+          continue;
+        }
         if (fatalReason !== undefined) {
           // Known-fatal from an earlier turn — skipping saves the whole re-grind (the report's build
           // burned 8+ minutes re-discovering the same "credit balance too low" answer).
@@ -874,6 +881,7 @@ export function makeMultiProviderTurnRunner(
         const attemptStartedAt = now();
         /** Did THIS attempt claim a crawl abandon? (see `canAbandonSlowStream`) */
         let claimedAbandon = false;
+        let trafficOpen = false;
         // The step deadline stays on `params`. A plan call that asked to reserve fallback time
         // hands THIS rung only a slice, so a hang cannot expire the rungs after it (#2428).
         // Hoisted out of the try so the catch can tell a rung slice from the step itself ending.
@@ -924,6 +932,8 @@ export function makeMultiProviderTurnRunner(
           // `raceStop` makes EVERY runner stop waiting on a stop, including one with no cancel handle of
           // its own; a streaming runner additionally closes its stream (it receives the same signal).
           await assertAiAvailable();
+          providerInFlight(reportName, 1);
+          trafficOpen = true;
           const result = await raceStop(runner.runTurn({
             ...params, canAbandonSlowStream, hasNextRung: i + 1 < chain.length,
             deadlineAt: rungDeadline,
@@ -1000,9 +1010,22 @@ export function makeMultiProviderTurnRunner(
           // chain; the row they file is labelled with the rung that answered. Without this, KIMI's 3.4 s was
           // recorded as 18.4 s — GLM's 15 s crawl charged to the engine that rescued it. `??` keeps the
           // innermost value when one chain wraps another; the rungs left behind add up across both.
+          noteProviderCall({
+            provider: reportName, model: result.model ?? chain[i].modelId, surface: 'builder', ok: true,
+            totalMs: answeredInMs, firstByteMs: result.firstOutputAfterMs,
+          });
+          providerInFlight(reportName, -1);
+          trafficOpen = false;
           return { ...result, attemptMs: result.attemptMs ?? answeredInMs, fallbackMs: fallbackMs + (result.fallbackMs ?? 0) };
         } catch (err) {
           fallbackMs += Math.max(0, now() - attemptStartedAt);
+          if (trafficOpen) { providerInFlight(reportName, -1); trafficOpen = false; }
+          if (!isBuildStoppedError(err) && !params.signal?.aborted && !isBudgetEndedError(err)) {
+            noteProviderCall({
+              provider: reportName, model: chain[i].modelId, surface: 'builder', ok: false,
+              totalMs: Math.max(0, now() - attemptStartedAt), error: err,
+            });
+          }
           // 🔴 A STOP IS NOT A PROVIDER FAILURE (autopsy 2720e553). Decided FIRST, before any
           // classification below can bench this vendor, count the wait as its waste, or fall to the
           // next rung and start a new call for a build nobody is waiting on.

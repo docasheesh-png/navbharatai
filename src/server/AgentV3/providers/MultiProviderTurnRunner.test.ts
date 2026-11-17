@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { makeMultiProviderTurnRunner, forceModelRunner, pacedRunner, isFatalProviderError, fatalProviderHint, isServiceOverloadedError, createRateLimitCooldowns, sharedRateLimitCooldowns, rateLimitBenchAfter, type NamedRunner } from './MultiProviderTurnRunner';
 import { BUDGET_REACHED_MESSAGE } from '../turnDeadline';
+import { noteProviderCall, resetTrafficHealthForTests } from '../../AI/ProviderHealth/trafficHealth';
 import { _resetSharedPacers } from '../RateLimitPacer';
 
 // The shared 429-cooldown singleton persists across runner instances BY DESIGN — reset it between
 // tests so one test's simulated 429 storm can never bench a provider for an unrelated test.
-beforeEach(() => sharedRateLimitCooldowns.reset());
+beforeEach(() => { sharedRateLimitCooldowns.reset(); resetTrafficHealthForTests(); });
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 
 const PARAMS: RunTurnParams = { model: 'm', messages: [{ role: 'user', content: 'hi' }] };
@@ -905,6 +906,17 @@ describe('🔴 the timeout bench is keyed by provider FAMILY (autopsy 4efab9d7, 
     const res = await runner.runTurn({ ...PARAMS, deadlineAt: step, reserveFallbackBudget: true });
     expect(res.text).toBe('planned');
     expect(second.runTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call a provider the health registry has marked suspended', async () => {
+    resetTrafficHealthForTests();
+    noteProviderCall({ provider: 'KIMI', surface: 'builder', ok: false, error: new Error('suspended due to insufficient balance'), at: Date.now() });
+    const kimi = runnerOk('no');
+    const glm = runnerOk('glm');
+    const runner = makeMultiProviderTurnRunner([{ name: 'KIMI', runner: kimi }, { name: 'GLM', runner: glm }], {});
+    await expect(runner.runTurn(PARAMS)).resolves.toMatchObject({ text: 'glm' });
+    expect(kimi.runTurn).not.toHaveBeenCalled();
+    resetTrafficHealthForTests();
   });
 
   it('a budget error still aborts the chain when the caller did not reserve fallback time', async () => {

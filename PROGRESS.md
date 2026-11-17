@@ -101811,3 +101811,48 @@ Findings the snapshot makes visible (no routing change):
 Census tests (`snapshot.test.ts`, `upstreamFamilies.test.ts`, 33 in total) fail when any of these is missing from the registry: a kill-switch family, a directory row, a Free Chat rung, or a builder rung. Five reversions were each caught: an unclassified family, `unknown` treated as independent, Vertex split from Google, the builder ladder not read, and the Requesty route host ignored.
 
 Not in P1, by design: runtime catalogs (the gateway's reviewed Firestore catalog, the live OpenRouter free list, Surplus offers). They join in P2 with the control store.
+
+## 2026-11-17 — Traffic Manager V2, P2: the control store (owner-approved; STOP after P2)
+
+What it is: a versioned, atomic, audited Firestore control store, plus an admin screen (AI Engines → Traffic control).
+- **Global emergency OFF**: every gateway surface goes to its legacy path.
+- **Per-surface switches**: `env` or `legacy`.
+- **Per provider or model**: `enabled`, `draining`, `disabled`, plus a traffic cap of 0–100%.
+- **Admission evidence per model**: capability test, price check, security review and ops test, with a reviewer and an expiry.
+
+Files:
+- `src/server/AI/TrafficRegistry/controlTypes.ts`: strict schema and validation.
+- `controlDecision.ts`: the pure gates.
+- `controlStore.ts`: one transaction writes the `admin_traffic_control/current` doc, CREATEs the immutable `admin_traffic_control_revisions/{rev}` copy, and creates the `admin_traffic_control_audit` row. It checks the revision before writing. A rollback is a new revision.
+- `controlSync.ts`: keeps the last-known-good doc and only ever moves to a higher revision. It reads one doc per instance on an adaptive 15→60 s interval with ±20% jitter.
+- `routes/trafficControlAdmin.ts`, `components/admin/TrafficControlPanel.tsx`, `lib/trafficControlView.ts`.
+
+Safety design (owner requirements 9 and 10):
+- **It can only NARROW.** No mode widens what the env enables. An empty store is exactly today's routing, so nothing changes in production until an admin turns something off.
+- **Ingress decides.** Ingress (`runWithAuthenticatedInferenceGatewayRequest`, `inferenceGatewayEnabled`) takes one control snapshot per request, before any provider call.
+- **The planner gate applies only to new attempts.** It is supplied only where a NEW attempt is planned (`executor.ts`), never on the ledger's re-check of an already-selected attempt.
+- **Mid-request checks are env-only.** `selectedCohortCurrent` and `verifiedPrincipal` stay env-only, so a switch flipped mid-request never strands, re-runs or double-charges a request.
+- **Guest quota is never double-counted.** A guest already admitted to the gateway quota keeps that decision for the request, and the guest-selection step consults the store.
+- **The env OFF still beats everything.**
+
+**DEVIATION from the approved plan text, stated plainly:**
+- The plan said "legacy until the first read". That would move every cold start off the gateway, which is a production change P2 must not make.
+- So before the first read the instance enforces nothing extra, which is exactly today's routing.
+- The first read starts at boot, and the env OFF remains the instant backstop.
+
+**MFA finding:**
+- Admin login MFA is optional in this codebase. With nothing enrolled, login is password-only.
+- So writes also need a fresh 6-digit TOTP code, accepted once per instance, and are refused until MFA is enrolled.
+
+**Admission:**
+- `required: false` means observe only: the gaps are shown and nothing is blocked. That way models serving today are unaffected.
+- `required: true` means the planner refuses the model until all checks are present and unexpired.
+
+Scope limits (P3+):
+- Provider and model drain, disable and caps are enforced on the GATEWAY path.
+- The legacy ladders (FreeChain, AIRouter, builder) still honour the kill switch only. They gain drain and skip through the shared health layer in P3.
+
+Tests:
+- `control.test.ts`, `trafficControlAdmin.test.ts`, `policy.test.ts` (gate), and `tests/trafficControlNeverStrandsStartedWork.test.ts` (source guards and behaviour).
+- 8 reversions each caught: mid-request recheck reading live control, global switch ignored, planner ignoring the gate, no revision check, no replay guard, LKG dropped, older revision adopted, admission gate off.
+- The P1 `KNOWN_UNREACHABLE` entries were removed, since the route now reads the snapshot. The three new collections are classified as kept for ever, with reasons.

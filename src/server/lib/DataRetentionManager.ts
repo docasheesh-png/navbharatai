@@ -852,6 +852,9 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
   // doc is replaced in place, but every settled build also writes `{workspace}/history/{startedAt}`, and
   // that subcollection grew for ever. It is on SUBCOLLECTION_RETENTION_POLICIES (180 days) now.
   { collection: 'workspace_diagnostics_v3', reason: "the latest report per workspace, replaced in place. Its `history` subcollection is on a 180-day clock (SUBCOLLECTION_RETENTION_POLICIES)" },
+  { collection: 'admin_traffic_control', reason: 'the Traffic Manager control store (Admin → AI Engines → Traffic control): ONE current document; deleting it would silently undo an emergency OFF or a provider drain' },
+  { collection: 'admin_traffic_control_revisions', reason: 'immutable copy of every traffic-control revision (admin changes only, MFA-gated and rate-limited), the source of rollback' },
+  { collection: 'admin_traffic_control_audit', reason: 'the audit trail of traffic-control changes: who, when, why, what changed; never prompts or keys' },
   { collection: 'admin_provider_switches', reason: 'the AI provider on/off switches (Admin → AI Engines): ONE state doc with the last 50 changes; deleting it would silently switch every provider back on' },
   { collection: 'admin_api_provider_accounts', reason: 'the admin’s note of which login each outside API account uses (Admin → Money → API Providers). At most one doc per provider, replaced in place; the admin clears it' },
   { collection: 'admin_build_report_counter', reason: 'singleton counter for permanent build report numbers (every outcome). Replaced in place; deleting it would let numbers be issued twice and break every reference to a report by number' },

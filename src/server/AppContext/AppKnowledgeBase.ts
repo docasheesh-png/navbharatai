@@ -3226,6 +3226,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['provider switch', 'turn off provider', 'disable ai provider', 'kill switch', 'ai on off', 'provider band karo', 'provider off', 'engine off'],
   },
   {
+    id: 'admin-traffic-control',
+    name: 'Traffic control (AI gateway switches)',
+    path: 'Admin Dashboard → AI Engines → Traffic control (verified admin only)',
+    description: 'Emergency and routing switches for the AI gateway. They can only take traffic away, never add it: • a gateway emergency switch that sends every chat surface back to its older path; • one switch per surface (chat, professional, doctor, sda, developer API) to send just that surface back; • per provider and per model: drain (no new requests, running ones finish), disable, or a traffic cap in percent; • production admission evidence per model (capability test, price check, security review, operational test), shown as missing or complete, and blocking only when marked required. Every save is a new numbered revision with an audit row (who, when, why, what changed), and any earlier revision can be restored as a new revision. Other servers apply a change within about a minute. Requests already running are never re-run or charged twice.',
+    howToUse: 'Verified admins open AI Engines → Traffic control, change a switch, type a reason and the current 6-digit code from their authenticator app, and press "Save as a new revision". To undo, open "Revisions and audit log" and press "Roll back to this" on an earlier revision. Saving needs admin MFA to be set up; without it the page explains that and saves nothing.',
+    relatedFeatures: ['admin-provider-switches', 'admin-api-providers'],
+    keywords: ['traffic control', 'gateway switch', 'emergency off', 'drain provider', 'traffic cap', 'rollback routing', 'routing revision', 'admission gate', 'gateway band karo', 'provider drain', 'surface legacy'],
+  },
+  {
     id: 'admin-api-providers',
     name: 'API Providers (balances and billing links)',
     path: 'Admin Dashboard → Money → API Providers (verified admin only)',

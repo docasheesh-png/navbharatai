@@ -13,6 +13,7 @@ import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
 import { registerSurplusRegistryAdminRoutes } from './surplusRegistryAdmin';
 import { registerApiProvidersAdminRoutes } from './apiProvidersAdmin';
 import { registerProviderSwitchesAdminRoutes } from './providerSwitchesAdmin';
+import { registerTrafficControlAdminRoutes } from './trafficControlAdmin';
 import { registerGameAssetsAdminRoutes } from './gameAssetsAdmin';
 import { sendAdminOwnerApps } from './adminOwnerApps';
 import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
@@ -224,6 +225,8 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'admin_api_provider_accounts',
   // The AI provider on/off switches: one state doc with a bounded change history (RETAINED_INDEFINITELY).
   'admin_provider_switches',
+  // Traffic Manager V2 control store: one current doc plus revision and audit rows (RETAINED_INDEFINITELY).
+  'admin_traffic_control', 'admin_traffic_control_revisions', 'admin_traffic_control_audit',
   'hosting_billing', 'hosting_period_usage',
   // Already on clocks, and absent from this inventory for the same reason the eleven above were.
   'takedown_records', 'safety_flags', 'admin_audit_log', 'build_jobs', 'build_failures',
@@ -462,6 +465,14 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   registerDeepinfraComparisonRoutes(app, verifyAdminToken);
   registerTestChatBotRoutes(app, verifyAdminToken);
   registerInferenceGatewayAdminRoutes(app, verifyAdminToken);
+  // Traffic Manager V2 control store. Writes need a FRESH authenticator code on top of the session, because login
+  // MFA is optional here; with no MFA enrolled the writes refuse (reads still work).
+  registerTrafficControlAdminRoutes(app, verifyAdminToken, async (code) => {
+    const mfa = await getAdminMfa();
+    if (!mfa.available) return 'unavailable';
+    if (!mfa.enabled || !mfa.secret) return 'not-enrolled';
+    return verifyTotp(mfa.secret, code) ? 'ok' : 'invalid';
+  });
   registerAiMaintenanceRoutes(app, verifyAdminToken);
   registerFreeProgramRoutes(app, verifyAdminToken);
 

@@ -101701,3 +101701,7 @@ Owner t311u sequential audit, BR1998 only (boundary 1951..2105 frozen). Branched
 ## 2026-11-17 — BR1998 rework after review (a short request plus a snippet dropped real warnings)
 
 The review failed the first version: the pasted-code test looked at the whole message, so a short request plus a 3-line snippet dropped real missing-file warnings. Reworked with ordinary commits on the same branch: the message must be mostly code (3+ lines ending in `{ } ;`, and code-shaped lines at least half the non-empty lines); well-known extensionless names (Dockerfile, Makefile, LICENSE, README, …) are never dropped; the token's own line must read as an annotation and sit between code lines. Every review probe keeps its warning; whole Dart, Java, Kotlin and TS pastes are still silenced. 28 tests; 19 round-2 mutations, all caught (six after added tests).
+
+## 2026-11-17 — BR1998 second rework (a neighbour ending in , or ) counted as code)
+
+The second review found that the neighbour rule counted a line ending in `,` or `)` as code, so a lone `@Header` after a prose line, a `- item,` list or a numbered `(1)`…`(5)` list, plus a short snippet, lost its warning. Now a neighbour counts as code only when it ends in `{ } ;`, or is an annotation line that leads (within 8) to such a line; the wider set stays only in the half-of-lines test. The report's `@override` and the Dart, Java, Kotlin and TS pastes still match. 36 tests; 30 mutations rerun, all caught.

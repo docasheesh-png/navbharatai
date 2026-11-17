@@ -163,6 +163,63 @@ describe('F1 the review probes: prose plus a short snippet keeps every real warn
   });
 });
 
+describe('F1 the second review probes: a neighbour ending in , or ) is not code', () => {
+  const NONE: string[] = [];
+  const CONST3 = 'const a = 1;\nconst b = 2;\nconst c = 3;';
+
+  it('🔴 probe 1: a prose line ending in a comma, then a lone @Header, then a snippet', () => {
+    const msg = 'Please fix the header,\n\n@Header\n\nconst a = 1;\nconst b = 2;\nconst c = 3;';
+    expect(looksLikePastedCode(msg)).toBe(true);
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual(['Header']);
+  });
+
+  it('🔴 probe 2: a "- item," list, then @Header, then the snippet', () => {
+    const msg = `- home,\n- profile,\n- settings,\n@Header\n${CONST3}`;
+    expect(looksLikePastedCode(msg)).toBe(true);
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual(['Header']);
+  });
+
+  it('🔴 probe 3: a Hinglish list ending in (1)..(5), then @Header, then the snippet', () => {
+    const list = ['header ko sticky karo (1)', 'footer ka color badlo (2)', 'logo bada karo (3)', 'menu theek karo (4)', 'font change karo (5)'].join('\n');
+    const msg = `${list}\n@Header\n${CONST3}`;
+    expect(looksLikePastedCode(msg)).toBe(true);
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual(['Header']);
+  });
+
+  it('a stack of lone @Name lines beside prose is not code: every one keeps its warning', () => {
+    const msg = `Please add:\n@Header\n@Footer\n@Sidebar\n${CONST3}\n${CONST3}`;
+    expect(looksLikePastedCode(msg)).toBe(true);
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual(['Header', 'Footer', 'Sidebar']);
+  });
+
+  it('a code line on only one side is not enough', () => {
+    expect(parseFileMentions(`${CONST3}\n@Header\nthen make it sticky`, NONE).unresolved).toEqual(['Header']);
+    expect(parseFileMentions(`Make it sticky.\n@Header\n${CONST3}`, NONE).unresolved).toEqual(['Header']);
+  });
+
+  it('more than 8 stacked annotations is unsure: the warning stays', () => {
+    const stack = Array.from({ length: 10 }, (_, i) => `  @a${i}`).join('\n');
+    const fields = Array.from({ length: 12 }, (_, i) => `  int x${i};`).join('\n');
+    const msg = `class A {\n${fields}\n${stack}\n  void f() {\n  }\n}`;
+    expect(looksLikePastedCode(msg)).toBe(true);
+    const unresolved = parseFileMentions(msg, NONE).unresolved;
+    expect(unresolved).toContain('a0'); // 9 annotations to walk over before the code after it
+    expect(unresolved).toContain('a9'); // 9 annotations to walk over before the code before it
+    expect(unresolved).not.toContain('a4'); // within the cap on both sides
+  });
+
+  it('an own line ending in ) or , is not code for the after-test', () => {
+    const msg = `const a = 1;\nconst b = 2;\nconst c = 3;\n@Header(x: 1)\nmake it sticky`;
+    expect(looksLikePastedCode(msg)).toBe(true);
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual(['Header']);
+  });
+
+  it('the report shape: @override between "const DemoApp({super.key});" and "Widget build(...) {" still matches', () => {
+    const msg = ['class DemoApp extends StatelessWidget {', '  const DemoApp({super.key});', '', '  @override', '  Widget build(BuildContext context) {', '    return const Placeholder();', '  }', '}'].join('\n');
+    expect(parseFileMentions(msg, NONE).unresolved).toEqual([]);
+  });
+});
+
 describe('F1 whole pastes are still silenced', () => {
   it('Dart, Java, Kotlin and TS pastes report nothing', () => {
     const java = 'public class A {\n  @Override\n  @Deprecated\n  public String toString() {\n    return "a";\n  }\n  @Override public int hashCode() {\n    return 1;\n  }\n}';

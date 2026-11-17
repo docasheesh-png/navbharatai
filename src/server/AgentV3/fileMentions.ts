@@ -43,8 +43,10 @@ const MENTION_RE = /(^|\s)@([A-Za-z0-9_./@-]+[A-Za-z0-9_/-]|[A-Za-z0-9_-]+)/g;
  *    arguments that look like code (`()`, `({`, `("/x")`), or by a code keyword on a line ending in
  *    `{ ; ) ,`, or by a typed declaration (`String name;`). A word such as `ko`, `add`, `को` or
  *    `please` after it keeps the warning;
- * 5. it sits inside the code: the previous non-empty line ends in `{ } ; , )` (or is itself an
- *    annotation), and its own line or the next non-empty line does too (or is an annotation).
+ * 5. it sits inside the code: walking back over any stacked annotation lines, the previous non-empty
+ *    line ends in `{ } ;`; and its own line ends in `{ } ;` or, walking forward the same way, the next
+ *    non-empty line does. A neighbour ending in `,` or `)` is never code here (second review: a prose
+ *    line ending in a comma, a `- item,` list, or a Hinglish list ending in `(1)`…`(5)`).
  * Anything else, including every RESOLVED mention, behaves exactly as before.
  */
 const ANNOTATION_TOKEN_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -63,7 +65,7 @@ const WELL_KNOWN_FILES: ReadonlySet<string> = new Set([
 const CODE_LINE_RE = /[{};]\s*$/;
 /** Ends like any code line: these must be at least half of the non-empty lines. */
 const CODE_SHAPED_LINE_RE = /[{};()[\],]\s*$/;
-/** Ends like a code line, for the neighbouring-line and own-line tests. */
+/** Ends like a code line, for rule 4's keyword test only (`@Override public int f() {`, `@Input() a,`). */
 const CODE_END_RE = /[{};,)]\s*$/;
 const ANNOTATION_LINE_RE = /^\s*@[A-Za-z_][\w.]*(\(.*\))?\s*$/;
 const CODE_KEYWORDS: ReadonlySet<string> = new Set([
@@ -104,30 +106,52 @@ function codeLikeArguments(rest: string): boolean {
   return inner.trim() === '' || /["'`{[=:]/.test(inner);
 }
 
+interface Line { text: string; start: number; end: number }
+
 /** The nearest non-empty line ending before `lineStart`, walking back line by line. Pure. */
-function previousNonEmptyLine(text: string, lineStart: number): string | undefined {
+function previousNonEmptyLine(text: string, lineStart: number): Line | undefined {
   let end = lineStart - 1; // the '\n' that ends the previous line
   while (end >= 0) {
     const start = text.lastIndexOf('\n', end - 1) + 1;
     const l = text.slice(start, end);
-    if (l.trim() !== '') return l;
+    if (l.trim() !== '') return { text: l, start, end };
     end = start - 1;
   }
   return undefined;
 }
 
 /** The nearest non-empty line starting after `lineEnd`, walking forward line by line. Pure. */
-function nextNonEmptyLine(text: string, lineEnd: number): string | undefined {
+function nextNonEmptyLine(text: string, lineEnd: number): Line | undefined {
   let start = lineEnd + 1;
   while (start <= text.length && lineEnd < text.length) {
     const nl = text.indexOf('\n', start);
     const end = nl < 0 ? text.length : nl;
     const l = text.slice(start, end);
-    if (l.trim() !== '') return l;
+    if (l.trim() !== '') return { text: l, start, end };
     if (nl < 0) return undefined;
     start = nl + 1;
   }
   return undefined;
+}
+
+/** Most stacked annotation lines walked over to find the code they belong to; past this, unsure. */
+const MAX_ANNOTATION_HOPS = 8;
+
+/**
+ * Rule 5's neighbour test (second review): walking away from the token over any stacked annotation
+ * lines, the first other non-empty line must end in `{`, `}` or `;`. A line ending in `,` or `)` is
+ * NOT code here (a prose sentence, a list item, a numbered "(1)" item), and a stack of lone `@Name`
+ * lines with no code beside it is not code either. Pure.
+ */
+function codeNeighbour(text: string, from: number, step: (t: string, at: number) => Line | undefined, edge: (l: Line) => number): boolean {
+  let at = from;
+  for (let hops = 0; hops <= MAX_ANNOTATION_HOPS; hops++) {
+    const l = step(text, at);
+    if (!l) return false;
+    if (!ANNOTATION_LINE_RE.test(l.text)) return CODE_LINE_RE.test(l.text);
+    at = edge(l);
+  }
+  return false;
 }
 
 /** Rules 4 and 5 above, for the `@` at `at` followed by `token`. Pure. */
@@ -143,10 +167,9 @@ function readsAsAnnotation(text: string, at: number, token: string): boolean {
     || (CODE_KEYWORDS.has(firstWord) && CODE_END_RE.test(line))
     || TYPED_DECLARATION_RE.test(rest);
   if (!ownLine) return false;
-  const before = previousNonEmptyLine(text, lineStart);
-  const after = nextNonEmptyLine(text, lineEnd);
-  const codeOrAnnotation = (l: string | undefined): boolean => l !== undefined && (CODE_END_RE.test(l) || ANNOTATION_LINE_RE.test(l));
-  return codeOrAnnotation(before) && (CODE_END_RE.test(line) || codeOrAnnotation(after));
+  const codeBefore = codeNeighbour(text, lineStart, previousNonEmptyLine, (l) => l.start);
+  const codeAfter = CODE_LINE_RE.test(line) || codeNeighbour(text, lineEnd, nextNonEmptyLine, (l) => l.end);
+  return codeBefore && codeAfter;
 }
 
 export interface FileMentions {

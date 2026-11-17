@@ -19496,7 +19496,7 @@ async function noteBuildOutcome(
         /** Q-926: the per-file calls a reasoning rung answered while the lane stayed on it — the measurement. */
         const laneReasoningStays: Array<{ model: string; ms: number }> = [];
         steeringHandoff.beginLane();
-        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number, mayReason = false, heal = false): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
+        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number, mayReason = false, heal = false, reserveFallback = false): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
           if (steeringHandoff.pending()) throw new Error(STEERING_YIELD_REASON);
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
@@ -19535,6 +19535,7 @@ async function noteBuildOutcome(
               // outlive the wait (turnDeadline.ts). Undefined for every caller that does not set one,
               // which is every lane except the fast lane's plan and contract calls today.
               deadlineAt,
+              ...(reserveFallback ? { reserveFallbackBudget: true as const } : {}),
               // The walk stops BEFORE a rung that reasons before every answer, rather than spending the
               // lane's clock inside one (autopsy 33812996: 497 s of one repair call on two such rungs).
               // …except a per-file call the lane decided may carry on there (Q-926, FastLaneBudget.mayStayOnReasoningRung).
@@ -19602,11 +19603,12 @@ async function noteBuildOutcome(
         // on text we discarded. Continuing is provider-cap-agnostic (raising max_tokens only moves the
         // ceiling and can 400 on a provider whose real cap is lower), bounded to MAX_CONTINUATIONS, and
         // a continuation that FAILS never loses the work already produced — we keep what we have.
-        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number; mayReason?: boolean; repair?: boolean }): Promise<string> => {
-          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt, genOpts?.mayReason === true, genOpts?.repair === true);
+        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number; mayReason?: boolean; repair?: boolean; reserveFallbackBudget?: boolean }): Promise<string> => {
+          const reserve = genOpts?.reserveFallbackBudget === true;
+          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt, genOpts?.mayReason === true, genOpts?.repair === true, reserve);
           const generation = await continueFastLaneGeneration(first, {
             // A continuation faces the same deadline as its first call, including the mayReason gate.
-            generate: (prompt) => fastGenerateOnce(system, prompt, genOpts?.deadlineAt, genOpts?.mayReason === true, genOpts?.repair === true),
+            generate: (prompt) => fastGenerateOnce(system, prompt, genOpts?.deadlineAt, genOpts?.mayReason === true, genOpts?.repair === true, reserve),
             onAttempt: (attempt) => events.emit({ type: 'narration', agent: 'architect', text: `✍️ That file list was longer than one response allows — continuing it (${attempt}/${MAX_CONTINUATIONS}) so nothing is left half-written…`, ts: Date.now() }),
             // HONESTY (rule 5): when the model re-opened the cut file's own header and carried on
             // inside it, the two halves are WELDED rather than the second replacing the first — say

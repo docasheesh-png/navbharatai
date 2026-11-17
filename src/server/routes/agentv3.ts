@@ -4298,6 +4298,18 @@ export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, promp
       const balanceInr = await readWalletBalanceInr(async () => walletDoc, userId, powerLevelReqEffective === 'weak' ? 'build' : 'usage');
       onSpendable?.(balanceInr);
       if (userId) onFreeTier(isFreeTierUser(walletDoc));
+      // Power mode is refused before any cost estimate, exactly as before. A never-paid account
+      // asking for it never reaches the balance math.
+      if (billingAppliesTo(userId, email) && powerModeBlockedForFreeUser(onlyOpus, walletDoc)) {
+        release();
+        audit('AGENTV3_POWER_MODE_BLOCKED_FREE_USER', { userId }, 'info');
+        res.status(402).json({
+          error: powerModePaidOnlyMessage(),
+          code: 'POWER_MODE_PAID_ONLY',
+          ...(typeof balanceInr === 'number' ? { balanceInr, balanceTokens: inrToWalletTokens(balanceInr) } : {}),
+        });
+        return false;
+      }
       const estimate = surplusSession
         ? { inr: Number(surplusSession.estimatedMicroUsd) / 1_000_000 * 10 * usdInrRate(), usd: Number(surplusSession.estimatedMicroUsd) / 1_000_000 * 10 }
         : estimateBuildCost(prompt, powerLevelReqEffective, usdInrRate());
@@ -12137,7 +12149,7 @@ async function noteBuildOutcome(
     // Register this build so it can be STOPPED and RE-ATTACHED to ("Resume") after the
     // original connection is lost. The client's response is the first subscriber; if it
     // disconnects we keep the build alive (still buffering) so the user can resume it.
-    const abort = routerOneAbortController();
+    const abort = routerOneAbortController(new AbortController());
     // intentWorkspaceId was already derived above (deriveWorkspaceId(userId, req.body?.sessionId)) for
     // intent classification — reuse it so the running-build registry knows which session owns this
     // build, instead of computing it twice from the same (userId, sessionId) pair.

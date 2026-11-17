@@ -371,7 +371,6 @@ export function stoppedCallCauseWords(cause: AbortCause): string {
  *    travels beside it for the detail line. PURE.
  */
 export function stoppedCallError(cause: AbortCause, ownMessage: string): string {
-  if (cause === 'wallet-empty') return 'Your balance is not enough for this build, please recharge!';
   switch (stoppedCallOwner(cause)) {
     case 'our-clock':
       return `${BUDGET_REACHED_MESSAGE} — stopped by ${stoppedCallCauseWords(cause)}, not by the user; no provider failed`;

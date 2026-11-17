@@ -181,8 +181,7 @@ export const routerOneAccountingScope: RequestHandler = (_req, _res, next) => {
   scopes.run(scope, next);
 };
 /** An abort controller whose signal also stops this request's Router One scope. */
-export function routerOneAbortController(): AbortController {
-  const abort = new AbortController();
+export function routerOneAbortController(abort = new AbortController()): AbortController {
   bindRouterOneScopeToAbort(abort.signal);
   return abort;
 }

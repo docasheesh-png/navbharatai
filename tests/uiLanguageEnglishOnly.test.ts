@@ -48,6 +48,7 @@ const ALLOWED: Record<string, string> = {
   'src/lib/registrarGuide.ts': 'owner-requested Hindi registrar DNS steps (#4043) beside the English steps for each registrar',
   'src/lib/nextStepGuide.ts': 'owner-requested {en, hi} copy pairs for the NEXT STEP card (#4045); English always present',
   'src/lib/apnapanEngine.ts': 'greeting DETECTION patterns + a key passed to the AI, never shown as UI',
+  'src/lib/platformStopNotices.ts': 'RECOGNITION only: the opening of the server\'s Hindi wallet notice (balanceRechargeNotice.ts), matched so "Fix with AI" is not offered under it; never rendered',
   // A translation editor the user runs on THEIR OWN app. A language picker must print each language
   // in its own script — "Hindi" written in Latin is exactly what a Hindi reader cannot find.
   'src/components/ide/LocalizationManager.tsx': "a localisation tool for the USER's app; native language names must be in their own script",

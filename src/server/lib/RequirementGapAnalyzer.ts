@@ -288,7 +288,7 @@ const DOMAINS: DomainDef[] = [
   },
   {
     key: 'jobs',
-    re: /\bjob\b|recruit|hiring|\bcareers?\b|applicant|\bresume\b|\bcv\b|vacancy|employer|candidate|\bats\b|job.?board|placement|\bnaukri\b|\brozgar\b|\bbharti\b|\bniyukti\b|नौकरी|रोजगार|रोज़गार|भर्ती|नियुक्ति/i,
+    re: /\bjob\b|recruit|hiring|\bcareers?\b|applicant|\bresume\b|\bcv\b|vacancy|employer|candidate|\bats\b|job.?board|\bplacements?\b|\bnaukri\b|\brozgar\b|\bbharti\b|\bniyukti\b|नौकरी|रोजगार|रोज़गार|भर्ती|नियुक्ति/i,
     features: [
       { label: 'job postings + search / filters', re: /post|listing|search|filter|categor|location/i },
       { label: 'applications + resume upload', re: /appl|resume|\bcv\b|upload|attach/i },
@@ -543,6 +543,12 @@ const NON_DOMAIN_USES: RegExp[] = [
   /\bmessages?\s+(?:saying|like|that\s+says)\b/gi,
   /\b(?:code|inline|block|html|todo|doc|jsdoc)\s+comments?\b/gi,
   /\b(?:my|your|our|their|his|her|the\s+user'?s?)\s+profile\b/gi,
+  // social — a SHAPE, not a person's page (autopsy 05eb30ba, 2026-11-18): "Low-profile drag tires" in a 400 km/h
+  // racing spec was the ONLY social hit, so a car game was handed notifications, moderation and media upload, and
+  // the designer built "reports, notifications and media panels" into it. Low/high/slim/thin-profile is how an
+  // object is described; "profile tyres/wheels" is a tyre spec.
+  /\b(?:low|high|slim|thin|mid|narrow|wide)[\s-]profile\b/gi,
+  /\bprofile\s+(?:tires?|tyres?|wheels?|rims?|cuts?|views?\s+of\s+the\s+(?:car|vehicle|engine))\b/gi,
   // saas — "a team of", "billing" on its own is generic money language.
   /\b(?:a|our|my|your|the|small|large|whole|entire|dev(?:eloper)?|engineering|design|support)\s+teams?\s+of\b/gi,
   /\bteams?\s+(?:of|member)\b/gi,

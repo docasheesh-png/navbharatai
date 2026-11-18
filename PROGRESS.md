@@ -102026,6 +102026,24 @@ Full combined coverage correctly refused the fixture's oversized request: the co
 
 The #4225 composition integration moved `archetype` and `size_km` into `generate_game_systems`, while the dispatcher still reads them only for `generate_athree_map`. The existing map-kind wiring test reproduced the failure on combined head dbd1137a. Moved both properties back to the map schema; preserved gameplay `include` and the new map `composition` schema. Added a tool-scoped regression so matching property names elsewhere cannot pass the check. Four focused suites (map-kind wiring, catalogue, composition dispatch, gameplay systems): 94 tests passed on Node 22.23.4. Combined full local and remote CI remain required before merge.
 
+## 2026-11-18 — Autopsy 05eb30ba (racing spec: stopped → wallet stop → "Fix this error" → preview RED)
+
+Three builds in one session: 7f11628a (user stopped at 11 s), 375b8d37 (wallet stop at 3.6 min, 40 files), 5881272e
+(the "Fix with AI" turn on our own wallet sentence, 11.7 min, release gate RED on "does not provide an export named
+'Game'"). Ledger (rows in `BUILD_REPORT_QUEUE.md`):
+
+- Q-2726 ✅(PR) the wallet stop's sentence offered "Fix with AI" → class: every platform build ending; census over all
+  `AbortCause`s. **Came back before:** Q-2709 (BR1995) fixed two sentences only; its abort-cause half is now closed.
+- Q-2727 ✅(PR) blank app judged rendered — `<title>` + our badge counted as app text. Consequences in the same
+  report: POST_GREEN_RECHECK_OK over a blank page, green guard "could not be opened" + no restore of the 246 s version.
+  **Came back before:** Q-2712 (BR1997) — this is a second cause of that row.
+- Q-2728 ✅(PR) the dev-server fast path swallowed 3 self-managed probe commands.
+- Q-2729 ✅(PR) governance false positives (loopback curl, `/tmp/<sub>` delete).
+- Q-2730 ✅(PR) domain social (low-profile) / jobs (displacement) → notifications/moderation/media built into a racing game.
+- Q-2731 ✅(PR) AWD flagged as unknown service.
+- OPEN: Q-2732 (stale dev-server module, no restart heal) … Q-2752. Not-a-defect, with evidence: the wallet stop on a
+  Weak build is correct (Weak is charged on success, `buildBillingLabel.ts`); "the last version that ran correctly"
+  was true (in-build green at 246 s).
 ## 2026-11-18 — One model rule for every gateway (admin: "sabhi provider ke liye same … top 10 strong family, sabse sasta")
 
 `src/server/lib/modelChoice.ts` is the one answer to "which model?" for every gateway:

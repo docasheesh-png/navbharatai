@@ -31,6 +31,7 @@
 // PURE. No I/O. Imported by client and server alike (60 server files already import from `src/lib/`).
 
 import { isSandboxRecoveryRefusalMessage } from './sandboxRecoveryMessages';
+import { isPlatformStopNotice } from './platformStopNotices';
 
 /**
  * The opening line of the platform's own preview-fix request.
@@ -158,6 +159,9 @@ export function errorCanBeFixedByEditingTheApp(opts: {
   // BR1995: our own reconnect refusal comes out of the stream, but no edit to the app can fix it.
   // Exact sentence only; any other text keeps today's behaviour.
   if (isSandboxRecoveryRefusalMessage(opts.message)) return false;
+  // Autopsy 05eb30ba: a build the PLATFORM stopped (the wallet, a clock, a deploy, the user's own Stop) ends with
+  // our own sentence, out of the stream. No edit to the app answers it. See platformStopNotices.ts.
+  if (isPlatformStopNotice(opts.message)) return false;
   return String(opts.message ?? '').trim() !== '';
 }
 

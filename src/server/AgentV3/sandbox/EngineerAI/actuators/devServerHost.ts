@@ -803,10 +803,40 @@ export function shellCommandSegments(command: string, options: {
   return segments;
 }
 
+/**
+ * A command that starts a server for ITSELF and stops it again: it captures the background process (`pid=$!`)
+ * and later kills that same process. That is a probe with its own lifetime, never the app's dev server to
+ * adopt, background or health-check.
+ *
+ * 🔴 WHY (autopsy 05eb30ba, 2026-11-18). A debugger chasing "does not provide an export named 'Game'" ran
+ * `npx vite --port 5189 … & pid=$!; … curl …/src/game/Game.ts …; kill $pid` to see what a FRESH server
+ * serves. It was classified as a dev-server start, the fast path answered "dev server already healthy on
+ * port 5173 — reused it" without running a line of it, and the same happened to the QA agent's
+ * `npm run preview … & pid=$!; curl :4173 …; kill $pid` — wrong command, wrong port, canned answer. Three
+ * diagnostic commands in one build returned the platform's own sentence instead of their output, so the
+ * stale-server fault they were aimed at was never seen.
+ *
+ * ⚠️ Narrow on purpose: both halves are required, and a dev-server start AFTER the last kill (stop it, then
+ * start it for real) keeps today's handling. PURE.
+ */
+export function managesItsOwnServerLifetime(rawCommand: string): boolean {
+  const command = withoutHeredocBodies(String(rawCommand ?? ''));
+  const captured = [...command.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)=\$!/g)].map((m) => m[1]);
+  if (captured.length === 0) return false;
+  const kills = captured.map((v) => new RegExp(`\\bkill\\b[^;&|\\n]*\\$\\{?${v}\\b`, 'g'));
+  let lastKill = -1;
+  for (const re of kills) for (const m of command.matchAll(re)) lastKill = Math.max(lastKill, (m.index ?? 0) + m[0].length);
+  if (lastKill < 0) return false;
+  const after = command.slice(lastKill);
+  return !shellCommandSegments(after).map(withoutGroupingPrefix)
+    .some((seg) => !ONE_SHOT_PREFIX.test(seg) && isDevServerInvocation(stripShellPlumbing(seg)));
+}
+
 export function isLongRunningCommand(rawCommand: string): boolean {
   if (!rawCommand) return false;
   const command = withoutHeredocBodies(rawCommand);
   if (/^\s*(?:curl|wget)\b/.test(command)) return false;
+  if (managesItsOwnServerLifetime(command)) return false;
   // Judge EACH top-level chained segment (split on `;`/`&&`/`||`) on its own, not just the whole
   // string. A one-shot process-inspection/management segment (pkill/ps/grep/…) is NEVER itself a
   // dev-server start, even when it references "vite" as a filter/pattern — e.g. `pkill -f "vite"`,

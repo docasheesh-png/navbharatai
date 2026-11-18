@@ -471,7 +471,7 @@ import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
-import { tscVerdict, looksLikeBrokenTscInstall, buildScriptTypecheckVerdict, salvageTypecheckLine } from '../AgentV3/TscGate';
+import { tscVerdict, looksLikeBrokenTscInstall, buildScriptTypecheckVerdict, salvageTypecheckLine, currentTypecheckProof, mergeCurrentTypecheckProof, type RevisionedTypecheck } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
@@ -14602,6 +14602,7 @@ async function noteBuildOutcome(
         // No `model`: the report's plannedModel comes from the chain itself (setProviderChain → firstRungLabel)
         // and is honestly absent until the chain exists — never the request's Claude default (Q-970).
         workspaceId, prompt, framework,
+        currentSourceRevision: () => getWorkspaceMemory(workspaceId).verificationRevision(),
         // REAL-TIME: persist the report after every recorded issue, so "Build report" is never empty
         // mid-build and genuinely survives a crash/hang/rotation (the user can download it any time).
         onUpdate: (r) => {
@@ -20983,6 +20984,8 @@ async function noteBuildOutcome(
         buildOk: false, preview: 'not-run', pages: 'not-run', journeys: 'not-run',
         typecheck: 'not-run', tests: 'not-run',
       };
+      let commandTypecheckEvidence = false;
+      let platformTypecheckProof: RevisionedTypecheck | undefined;
       // Zero means "none found", and it stays zero when the browser never ran — which is correct here
       // only because the gate cannot reach GREEN without runtime proof anyway, so an unmeasured app is
       // already held back by the evidence rules rather than by a fabricated quality score.
@@ -21030,7 +21033,8 @@ async function noteBuildOutcome(
         // `verified` is separate from `ok` on purpose. Two of the paths below return ok=true meaning
         // "we could not check, so do not block" — which is right for the gate and would be a LIE as
         // release evidence. Collapsing the two is how "we did not look" becomes "it passed".
-        const runTsc = async (): Promise<{ ok: boolean; verified: boolean; errors: string }> => {
+        const runTsc = async (): Promise<{ ok: boolean; verified: boolean; errors: string; revision: number }> => {
+          const revision = getWorkspaceMemory(workspaceId).verificationRevision();
           try {
             // ENSURE A TSCONFIG FIRST: an imported/older project can have NO tsconfig.json, in which case
             // `tsc --noEmit` prints its HELP page and exits 0 — a FALSE "clean" pass while real type
@@ -21044,13 +21048,13 @@ async function noteBuildOutcome(
             // The same output reader as the fast lane: unknown setup output is not proof of a
             // compile, even when the shell pipeline itself exits successfully.
             const verdict = tscVerdict(out);
-            if (verdict === 'not-run' || verdict === 'unknown') return { ok: true, verified: false, errors: '' };
+            if (verdict === 'not-run' || verdict === 'unknown') return { ok: true, verified: false, errors: '', revision };
             return verdict === 'failed'
-              ? { ok: false, verified: true, errors: out.slice(0, 6000) }
-              : { ok: true, verified: true, errors: '' };
+              ? { ok: false, verified: true, errors: out.slice(0, 6000), revision }
+              : { ok: true, verified: true, errors: '', revision };
           } catch {
             // Couldn't verify (no real sandbox / tooling) → don't block, and don't claim a pass either.
-            return { ok: true, verified: false, errors: '' };
+            return { ok: true, verified: false, errors: '', revision };
           }
         };
         // The agentic lane's own "the app exists, now I am fixing it" moment — same meaning as the fast
@@ -21134,18 +21138,12 @@ async function noteBuildOutcome(
             events.emit({ type: 'narration', agent: 'architect', text: '⚠️ The TypeScript errors could not be verified as fixed. Your files are saved; further checking is needed.', ts: Date.now() });
           }
         }
-        if (check.verified) gateEvidence.typecheck = check.ok ? 'passed' : 'failed';
+        if (check.verified) platformTypecheckProof = { outcome: check.ok ? 'passed' : 'failed', revision: check.revision };
+        gateEvidence.typecheck = currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision());
       }
-      // Fallback (production build report, 2026-09-16): the deterministic gate above only runs when
-      // the build is already marked `ok` at this point, so a build not yet called successful never
-      // even attempts it and this evidence stays 'not-run' — even when the AGENT ITSELF already ran a
-      // real `tsc --noEmit` earlier in its own turn. That build's report showed exactly this: two clean
-      // agent-run typechecks sitting in its own `commands` log, and the release gate still telling the
-      // user "the typecheck did not run". Only fills a gap; never overrides real G3 evidence above.
-      if (gateEvidence.typecheck === 'not-run') {
-        const fromAgent = buildDiag.typecheckEvidenceFromAgentCommands();
-        if (fromAgent) gateEvidence.typecheck = fromAgent;
-      }
+      // Agent-run compiler evidence is filled by the shared ledger immediately before the release
+      // gate, after finishing writes. Filling it here would cache a clean receipt across later edits
+      // (BR99771bc7); the ledger reads the command's scope and source revision at consumption time.
 
       // MISSING-FILES GATE for the AGENTIC path (deep-test App #4 — Instagram, 2026-07-13). The fast
       // lane already runs findUnresolvedLocalImports before verify (Fix 38c), but the AGENTIC build (the
@@ -24896,6 +24894,7 @@ async function noteBuildOutcome(
             let ran = false;
             let exitCode: number | null = null;
             let output = '';
+            const prodBuildCheckedRevision = getWorkspaceMemory(workspaceId).verificationRevision();
             try {
               const r = await withTimeout(actuator.runCommand(workspaceId, prodBuildCommand('$(command -v timeout >/dev/null 2>&1 && echo "timeout -k 5 170") npm run build')), PROD_BUILD_TIMEOUT_MS, 'prod-build-gate');
               ran = true;
@@ -24906,11 +24905,12 @@ async function noteBuildOutcome(
             prodBuildOutcome = verdict.code === 'PROD_BUILD_OK' ? 'ok' : verdict.code === 'PROD_BUILD_FAILED' ? 'failed' : 'not-run';
             // The build script that just ran usually compiles FIRST (`tsc -p tsconfig.build.json && vite
             // build`) — so it is typecheck evidence too, read from its own echoed script line (autopsy
-            // 0c2a987a: "the typecheck did not run" beside PROD_BUILD_OK). Fills a gap only.
-            if (gateEvidence.typecheck === 'not-run') {
-              const fromBuild = buildScriptTypecheckVerdict({ command: prodBuildCommand('$(command -v timeout >/dev/null 2>&1 && echo "timeout -k 5 170") npm run build'), stdout: output, exitCode });
-              if (fromBuild) gateEvidence.typecheck = fromBuild;
-            }
+            // 0c2a987a: "the typecheck did not run" beside PROD_BUILD_OK). A current compiler failure
+            // also retires an earlier pass; a stale result cannot certify later finishing writes.
+            const fromBuild = buildScriptTypecheckVerdict({ command: prodBuildCommand('$(command -v timeout >/dev/null 2>&1 && echo "timeout -k 5 170") npm run build'), stdout: output, exitCode });
+            if (fromBuild) platformTypecheckProof = mergeCurrentTypecheckProof(platformTypecheckProof,
+              { outcome: fromBuild, revision: prodBuildCheckedRevision }, getWorkspaceMemory(workspaceId).verificationRevision());
+            gateEvidence.typecheck = currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision());
             buildDiag.record({
               phase: 'readiness',
               severity: verdict.code === 'PROD_BUILD_FAILED' ? 'warning' : 'info',
@@ -25166,7 +25166,12 @@ async function noteBuildOutcome(
         // typecheck and tests from the command log, pages and preview from facts an actor recorded on the
         // timeline. FILL-ONLY: a recorded failure keeps its failure, so this moves the sentence, never the
         // bill (see evidenceLedger.ts / provenFromTimeline.ts).
-        try { fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger()); }
+        try {
+          gateEvidence.typecheck = currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision());
+          const beforeTypecheck = gateEvidence.typecheck;
+          fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger());
+          commandTypecheckEvidence = beforeTypecheck === 'not-run' && gateEvidence.typecheck !== 'not-run';
+        }
         catch { /* evidence recovery is best-effort and must never touch a build */ }
         // THE EARLY SYNTAX VERDICT IS RE-CHECKED BEFORE THE GATE COUNTS IT (Q-821). A later pass can have made
         // every file parse since the syntax gate gave up; re-parse the same files and answer the early finding
@@ -26455,7 +26460,12 @@ async function noteBuildOutcome(
                 for (const p of paths) { try { stylesheets[p] = await actuator.readFile(workspaceId, p); } catch { /* unreadable ⇒ not evidence */ } }
               } catch { stylesheets = undefined; /* could not look ⇒ the findings stand */ }
             }
-            const checked = refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck, stylesheets });
+            // A command-derived receipt may have become stale during finishing/review work. The
+            // deterministic platform checks retain their own verdict; command proof is read live.
+            const currentTypecheck = commandTypecheckEvidence
+              ? buildDiag.typecheckEvidenceFromAgentCommands() ?? 'not-run'
+              : currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision());
+            const checked = refuteReviewByEvidence(review, { typecheck: currentTypecheck, stylesheets });
             if (checked.refuted.length > 0 || checked.amended.length > 0) {
               review = checked.review;
               try {

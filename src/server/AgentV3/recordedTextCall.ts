@@ -61,7 +61,7 @@ export interface RecordedTextCallDeps {
    * answerer's own time. A shared door must be MORE visible to a census than the copies it replaced,
    * never less.
    */
-  readonly recordLlmCall: (row: Omit<LlmCallRecord, 'ts'>) => void;
+  readonly recordLlmCall: (row: LlmCallRecord) => void;
 }
 
 export interface RecordedTextCallOptions {
@@ -106,6 +106,7 @@ export async function recordedTextCall(
     const servedBy = deps.identify(reported, usedProvider, t.model);
     try {
       deps.recordLlmCall({
+        ts: Date.now(),
         model: servedBy.model,
         provider: servedBy.provider,
         promptPreview: opts.promptPreview,
@@ -126,6 +127,7 @@ export async function recordedTextCall(
     const failedAs = deps.identify(reported, usedProvider);
     try {
       deps.recordLlmCall({
+        ts: Date.now(),
         model: failedAs.model,
         provider: failedAs.provider,
         promptPreview: opts.promptPreview,

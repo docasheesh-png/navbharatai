@@ -64,7 +64,8 @@ import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
 import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER, sharedBareTypecheckCommand } from './tscCommand';
 import { parseTscErrors, fixTypeOnlyValueImports as fixTypeOnlyValueImportsFromErrors, type TscError } from './EndgameRepair';
-import { tscCommandVerdict, looksLikeTypecheckCommand, tscVerdict, countTscErrors } from './TscGate';
+import { tscCommandVerdict, looksLikeTypecheckCommand, tscVerdict, countTscErrors, buildScriptTypecheckVerdict, type TypecheckCommandProof } from './TscGate';
+import { checksWholeDefaultTsProject } from './tscCommandMode';
 import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome, withSandboxBrowsers, withTestFilter } from './testRunner';
@@ -780,7 +781,7 @@ export class ToolDispatcher {
      * BuildDiagnostics.recordCommand so a failing npm install / tsc / vite build is captured in
      * full — the single highest-value "why won't the app run" signal. Best-effort; never blocks.
      */
-    private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number; timing?: CommandTiming }) => void,
+    private readonly onCommand?: (result: { command: string; typecheckProof?: TypecheckCommandProof; exitCode: number | null; stdout: string; stderr: string; durationMs: number; timing?: CommandTiming }) => void,
     /** Per-build paid-tool budget. Omit it and this dispatcher keeps a fresh zeroed object. */
     toolBudget?: BuildToolBudget,
   ) {
@@ -3684,11 +3685,26 @@ export class ToolDispatcher {
    * always 0, so a FAILING tsc was recorded as clean), and nothing ever resolved an old error. The
    * verdict is read from the output, never an exit code. Best-effort: memory must never break a tool.
    */
-  private noteCompileOutput(output: string, command?: string): void {
+  private noteCompileOutput(output: string, command: string | undefined, skippedBeforeCompile: number, revisionBeforeCompile: number): void {
     const verdict = command ? tscCommandVerdict(command, output) : tscVerdict(output);
-    try { if (verdict === 'passed') getWorkspaceMemory(this.workspaceId).markTscClean(); }
+    const mem = getWorkspaceMemory(this.workspaceId);
+    const current = mem.verificationRevision() === revisionBeforeCompile;
+    const project = !command || checksWholeDefaultTsProject(command);
+    const coversProject = verdict === 'passed' && output.trim() === '' && project;
+    try {
+      if (coversProject && current) mem.markTscClean(Date.now(), revisionBeforeCompile);
+      else if (verdict === 'failed' && project && current) mem.markTscFailed(revisionBeforeCompile);
+    }
     catch { /* audit best-effort */ }
-    this.noteTypeErrorCount(output, verdict !== 'passed');
+    // BR99771bc7: explicit typecheck and shell checks already enter this same door, but Q-910 only
+    // credited write-time runs. Shared stats must follow the evidence from every eligible caller.
+    // Internal callers run the default whole-project check; arbitrary shell commands must prove that
+    // scope. Silence is the clean compiler output, never a clipped diagnostic or an unknown banner.
+    if (coversProject && current
+      && skippedBeforeCompile > 0 && this._writeTypecheckStats.skippedNotReady === skippedBeforeCompile) {
+      this._writeTypecheckStats.cleanRunCoveredSkips = true;
+    }
+    this.noteTypeErrorCount(output, !coversProject || !current);
   }
 
   /**
@@ -4063,6 +4079,8 @@ export class ToolDispatcher {
         if (unprobed) s.compiledUnprobed += 1;
         const command = writeTypecheckCommand(this.tsBuildInfoId);
         const startedAt = Date.now();
+        const skippedBeforeCompile = s.skippedNotReady ?? 0;
+        const revisionBeforeCompile = getWorkspaceMemory(this.workspaceId).verificationRevision();
         let r: { stdout: string; stderr: string };
         try {
           r = await withTimeout(this.actuator.runCommand(this.workspaceId, command), WRITE_TYPECHECK_TIMEOUT_MS, 'write-typecheck');
@@ -4086,7 +4104,7 @@ export class ToolDispatcher {
         s.timeouts = 0; // a run that finished resets the consecutive-timeout count
         // The same evidence bridge the `typecheck` tool reports through (autopsy e4ebcb5f): the release
         // gate's typecheck evidence reads recorded commands, and a real compile that ran must be on it.
-        try { this.onCommand?.({ command, exitCode: null, stdout: r.stdout || '', stderr: r.stderr || '', durationMs }); }
+        try { this.onCommand?.({ command, typecheckProof: { revision: revisionBeforeCompile, project: true }, exitCode: null, stdout: r.stdout || '', stderr: r.stderr || '', durationMs }); }
         catch { /* diagnostics are best-effort */ }
         const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
         // tsc printed nothing at all — the only output that means "clean".
@@ -4094,16 +4112,13 @@ export class ToolDispatcher {
         // 🔴 AUTOPSY 12c642ed: a missing compiler also parses to zero errors, and was counted as clean.
         const verdict = tscVerdict(combined);
         const neverRan = verdict === 'not-run' || verdict === 'unknown';
-        this.noteCompileOutput(combined);
+        this.noteCompileOutput(combined, undefined, skippedBeforeCompile, revisionBeforeCompile);
         // A tsc that printed no `error TSxxxx` line is clean; a help page or an install log parses to zero
         // errors too, which is why a clean run here is evidence only through the bridge above, never on its own.
         const errors = parseTscErrors(combined);
         if (neverRan) s.notRunRuns += 1;
         else if (errors.length === 0) {
           s.cleanRuns += 1;
-          // `tsc --noEmit` is project-wide, so this run covered every file skipped before it (Q-910). A fact of
-          // the RUN, so it is counted here, once, with the run's other counters (Q-983).
-          if ((s.skippedNotReady ?? 0) > 0) s.cleanRunCoveredSkips = true;
         }
         return { errors, silent, neverRan, notReady: false, notReadyWhy: null };
       });
@@ -6158,6 +6173,8 @@ export class ToolDispatcher {
         // TD-12 — pin, quote, detach, vault .env and Postgres live in runShellLikeBash (also used by
         // run_migrations, TD-15). Every retry below runs `prepared`, the same string as this first run.
         const pageSnaps = await this.snapshotPagesNamedBy(command);
+        const skippedBeforeCompile = this._writeTypecheckStats.skippedNotReady ?? 0;
+        const revisionBeforeCompile = getWorkspaceMemory(this.workspaceId).verificationRevision();
         const shell = await this.runShellLikeBash(command, agent, { record: false });
         const effectiveCommand = shell.effectiveCommand;
         const prepared = shell.prepared;
@@ -6363,7 +6380,10 @@ export class ToolDispatcher {
         }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
         try {
-          this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt, timing });
+          this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt, timing,
+            typecheckProof: { revision: revisionBeforeCompile,
+              project: checksWholeDefaultTsProject(command) || buildScriptTypecheckVerdict({ command, stdout, stderr, exitCode }) !== undefined },
+          });
         } catch { /* diagnostics capture is best-effort */ }
         // 🔴 AND NOW TELL THE PROJECT MAP THE FILE IS GONE (autopsy 8b3dca5c). Everything above this
         // line already knew which source files the command would remove; nothing had ever acted on it
@@ -6562,11 +6582,18 @@ export class ToolDispatcher {
           // specialists don't redundantly re-run them (they receive verificationStatus()).
           const mem = getWorkspaceMemory(this.workspaceId);
           if (/\bnpm\s+(ci|install|i)\b/.test(command) || /\b(pnpm|yarn)\s+(install|add)\b/.test(command)) mem.markDepsInstalled();
-          if (shellBuildProvesSuccess(command, exitCode, `${stdout}\n${stderr}`)) mem.markProdBuildClean();
+          if (shellBuildProvesSuccess(command, exitCode, `${stdout}\n${stderr}`)) mem.markProdBuildClean(Date.now(), revisionBeforeCompile);
         }
         // Read from the OUTPUT, never the exit code: `tsc --noEmit 2>&1 | head -40` exits with head's 0
         // whether or not tsc failed, and that used to be recorded as "TypeScript already checked CLEAN".
-        if (looksLikeTypecheckCommand(command) && exitCode === 0) this.noteCompileOutput(`${stdout}\n${stderr}`, command);
+        if (looksLikeTypecheckCommand(command) && (exitCode === 0 || tscCommandVerdict(command, `${stdout}\n${stderr}`) === 'failed')) {
+          this.noteCompileOutput(`${stdout}\n${stderr}`, command, skippedBeforeCompile, revisionBeforeCompile);
+        }
+        // A production script that actually ran its compiler and failed cannot leave an older
+        // production/typecheck proof current. A generic bundler failure says nothing about types.
+        if (buildScriptTypecheckVerdict({ command, stdout, stderr, exitCode }) === 'failed') {
+          getWorkspaceMemory(this.workspaceId).markTscFailed(revisionBeforeCompile, true);
+        }
         if (typoFix.fixed) out = `(Ran it as ./node_modules/… — the folder is node_modules, with no leading dot.)\n${out}`;
         if (cdFix.fixed) out = `(Ran it under the sandbox project root — there is no /workspace folder here.)\n${out}`;
         // A compile whose exit code already said it failed still tells the done check it has errors
@@ -7517,6 +7544,8 @@ export class ToolDispatcher {
           const replacement = existing != null && rel === SERVICE_WORKER_FILE ? upgradeGeneratedServiceWorker(existing) : null;
           if (existing != null && replacement == null) continue;
           await this.actuator.writeFile(this.workspaceId, target, replacement ?? content);
+          // Record at the write, so a later read-only evaluation cannot date this change after a compile.
+          getWorkspaceMemory(this.workspaceId).indexFile(target, replacement ?? content);
           this.state?.recordFileChange({ path: target, kind: existing != null ? 'modify' : 'create' }, agent);
           written.push(target);
         }
@@ -7526,6 +7555,7 @@ export class ToolDispatcher {
           const upgraded = upgradeGeneratedServiceWorker(await this.actuator.readFile(this.workspaceId, SERVICE_WORKER_FILE).catch(() => null));
           if (upgraded) {
             await this.actuator.writeFile(this.workspaceId, SERVICE_WORKER_FILE, upgraded);
+            getWorkspaceMemory(this.workspaceId).indexFile(SERVICE_WORKER_FILE, upgraded);
             this.state?.recordFileChange({ path: SERVICE_WORKER_FILE, kind: 'modify' }, agent);
             written.push(SERVICE_WORKER_FILE);
           }
@@ -7834,6 +7864,8 @@ export class ToolDispatcher {
           try {
             const tscCommand = robustTscCommand(`--noEmit --incremental --tsBuildInfoFile /tmp/agentv3-${this.tsBuildInfoId}.tsbuildinfo`, '2>&1 | head -60');
             const tscStartedAt = Date.now();
+            const skippedBeforeCompile = this._writeTypecheckStats.skippedNotReady ?? 0;
+            const revisionBeforeCompile = getWorkspaceMemory(this.workspaceId).verificationRevision();
             const r = await withTimeout(
               this.actuator.runCommand(this.workspaceId, tscCommand),
               30_000,
@@ -7858,6 +7890,7 @@ export class ToolDispatcher {
             try {
               this.onCommand?.({
                 command: tscCommand,
+                typecheckProof: { revision: revisionBeforeCompile, project: true },
                 exitCode: null, // piped through `head`, so the shell's code is not tsc's — the parser reads the output
                 stdout: r.stdout || '',
                 stderr: r.stderr || '',
@@ -7870,6 +7903,7 @@ export class ToolDispatcher {
             // '../lib/tsc.js'` — no `error TS` line — and this tool said "type-checks clean" while the
             // app held 15 errors. Zero parsed errors is not a verdict; the ONE reader decides.
             const verdict = tscVerdict(combined);
+            this.noteCompileOutput(combined, undefined, skippedBeforeCompile, revisionBeforeCompile);
             if (verdict === 'not-run' || verdict === 'unknown') {
               tscStatus = 'did-not-complete';
               this._lastTypeErrors = null;
@@ -7886,7 +7920,6 @@ export class ToolDispatcher {
               tscHeader = `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`;
             } else {
               tscStatus = 'clean';
-              this.noteCompileOutput(combined);
             }
           } catch {
             tscStatus = 'did-not-complete';

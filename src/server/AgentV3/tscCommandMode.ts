@@ -108,6 +108,21 @@ function withoutCanonicalEnsure(command: string): string {
 const OUTPUT_PIPE = /^(?:2>&1\s*)?(?:\|\s*(?:head|tail)(?:\s+(?:-\d+|-n\s+\d+))?\s*)?(?:\|\|\s*true\s*)?$/;
 
 /**
+ * Positive evidence that a shell command checked the workspace's default project, rather than one
+ * file or another config. Used only for covering skipped writes, not the broader compiler verdict.
+ * Opaque chains, pipes and alternate projects abstain: an empty captured output cannot prove them.
+ */
+export function checksWholeDefaultTsProject(command: string): boolean {
+  const part = literalCommand(command.trim());
+  if (!part.complete || !/^(?:2>&1)?$/.test(part.rest.trim())) return false;
+  const args = compilerArgs(part.words, part.rawWords);
+  if (!args || tscModeFromArgs(args) !== 'checking' || ts.isBuildCommand(args)) return false;
+  const parsed = ts.parseCommandLine(args, () => undefined);
+  return parsed.errors.length === 0 && parsed.fileNames.length === 0
+    && parsed.options.project === undefined;
+}
+
+/**
  * Add command context only where literal compiler argv is recoverable. Unknown argv for a recognised
  * compiler abstains. An opaque legacy wrapper returns undefined, preserving the existing recognizer
  * rather than pretending this small reader understands conditionals, substitutions or shell scripts.

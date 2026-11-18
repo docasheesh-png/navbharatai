@@ -9,19 +9,21 @@
  * gateway that publishes no prices. The list is cached per key for ten minutes; nothing is invented when it cannot be
  * read (the configured model is the only candidate then).
  */
+import { chooseModels, NON_CHAT_MODEL, type ModelPurpose } from './modelChoice';
 import { createHash } from 'node:crypto';
 import { fetchProviderModelIds } from './testChatBotOfficial';
 import { BoundedCache } from './boundedCache';
 
-/** Not chat: image, audio, video, embedding, moderation and rerank models. */
-const NON_CHAT = /(embed|whisper|tts|speech|audio|transcri|image|dall-?e|imagen|vision-only|moderation|rerank|ocr|video|sora|veo|flux|stable-diffusion|sdxl|midjourney|kling|suno)/i;
-/** Families that answer ordinary chat well, earliest first. Unmatched chat models follow, alphabetically. */
-const PREFERRED: readonly RegExp[] = [/gpt-oss/i, /deepseek/i, /qwen/i, /glm/i, /kimi/i, /llama/i, /gemini.*flash/i, /gpt-4o-mini|gpt-4\.1-mini|gpt-5-mini/i, /mistral|mixtral/i, /gemma/i];
-
-export function rankChatModels(ids: readonly string[], configured?: string | null): string[] {
-  const chat = [...new Set(ids)].filter(id => !NON_CHAT.test(id));
-  const score = (id: string) => { const i = PREFERRED.findIndex(rx => rx.test(id)); return i === -1 ? PREFERRED.length : i; };
-  const ranked = chat.sort((a, b) => score(a) - score(b) || a.localeCompare(b));
+/**
+ * The key's own models, in the order the SHARED RULE gives (modelChoice.ts, admin 2026-11-18): strong families for the
+ * purpose first (none of these lists carry prices, so by strength), then every other chat model alphabetically, so a key
+ * with no strong model still has something to try. A configured model the list contains always leads.
+ */
+export function rankChatModels(ids: readonly string[], configured?: string | null, purpose: ModelPurpose = 'text'): string[] {
+  const chat = [...new Set(ids)].filter(id => !NON_CHAT_MODEL.test(id)).sort((a, b) => a.localeCompare(b));
+  const choice = chooseModels(chat.map(id => ({ id })), { purpose, max: chat.length });
+  const lead = choice.basis === 'strong' ? choice.models : [];
+  const ranked = [...lead, ...chat.filter(id => !lead.includes(id))];
   return configured && ranked.includes(configured) ? [configured, ...ranked.filter(id => id !== configured)] : ranked;
 }
 
@@ -34,7 +36,7 @@ const cache = new BoundedCache<string, string[]>({ maxEntries: 64, ttlMs: TTL_MS
  * be read or is empty, the configured model alone — an honest fallback, never a guessed id.
  */
 export async function pickProviderModels(baseURL: string, apiKey: string, configured: string | null, max = 3,
-  fetchImpl: typeof fetch = fetch, now: () => number = Date.now): Promise<{ models: string[]; source: 'provider-list' | 'configured-only'; note?: string }> {
+  fetchImpl: typeof fetch = fetch, now: () => number = Date.now, purpose: ModelPurpose = 'text'): Promise<{ models: string[]; source: 'provider-list' | 'configured-only'; note?: string }> {
   const slot = createHash('sha256').update(`${baseURL}|${apiKey}`).digest('hex');
   let ids = cache.get(slot, now());
   if (!ids) {
@@ -45,7 +47,7 @@ export async function pickProviderModels(baseURL: string, apiKey: string, config
     ids = listed.ids;
     cache.set(slot, ids, now());
   }
-  const ranked = rankChatModels(ids, configured).slice(0, Math.max(1, max));
+  const ranked = rankChatModels(ids, configured, purpose).slice(0, Math.max(1, max));
   return ranked.length ? { models: ranked, source: 'provider-list' } : { models: configured ? [configured] : [], source: 'configured-only', note: 'no chat models listed' };
 }
 
@@ -56,12 +58,12 @@ export function __resetProviderModelCache(): void { cache.clear(); }
  * The ranked models already cached for this key, synchronously, and a background refresh when there are none —
  * for a caller that must build its chain without waiting (a builder rung). Never throws; [] when nothing is known.
  */
-export function cachedProviderModels(baseURL: string, apiKey: string, max = 3, fetchImpl: typeof fetch = fetch, now: () => number = Date.now): string[] {
+export function cachedProviderModels(baseURL: string, apiKey: string, max = 3, fetchImpl: typeof fetch = fetch, now: () => number = Date.now, purpose: ModelPurpose = 'coding'): string[] {
   try {
     const slot = createHash('sha256').update(`${baseURL}|${apiKey}`).digest('hex');
     const ids = cache.get(slot, now());
-    if (ids) return rankChatModels(ids, null).slice(0, Math.max(1, max));
-    void pickProviderModels(baseURL, apiKey, null, max, fetchImpl, now).catch(() => {});
+    if (ids) return rankChatModels(ids, null, purpose).slice(0, Math.max(1, max));
+    void pickProviderModels(baseURL, apiKey, null, max, fetchImpl, now, purpose).catch(() => {});
   } catch { /* a cache that cannot be read is an empty one */ }
   return [];
 }

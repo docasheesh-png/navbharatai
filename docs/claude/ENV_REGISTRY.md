@@ -5190,3 +5190,28 @@ unchanged. Module: `src/server/AgentV3/moyiBuilder.ts` (same shape as `bluesmind
 ### `AGENTV3_TRAFFIC_HEALTH` — live provider health
 
 Default on; `off`, `false` or `0` disables the additional in-process health recording and skip. The existing router/builder/vision ladders retain their own admission, billing, cooldown and maintenance checks. A suspended credential or three consecutive timeout/invalid outcomes opens a five-minute recovery window. Pool credentials retain separate identities. A recovery lease is bounded and a tracked physical call keeps ownership until it settles. State is bounded to 256 account labels with 40 samples each and is local to each server; it is not a fleet-wide health database. App image integrations are catalogued only, because their generated clients run outside this server. Providers with no recorded outcomes are displayed as not measured.
+
+## 2026-11-18 — One model rule for every gateway (`src/server/lib/modelChoice.ts`)
+
+Admin: *"sabhi provider me module chunne ka ek same tarika … top 10 strong family, usme se sabse sasta; kaam accha ho (text ke liye best, coding ke liye coding wala); sasta ho"*. Scope as approved:
+- **Applies to:** the gateways (Router One, Qubax, Moyi, and the key lists of BluesMinds, MirAPI and DiscountedTokens).
+- **Surplus:** filter only.
+- **Not changed:** the tier ladders.
+
+| Key | Meaning |
+|---|---|
+| `MODEL_CHOICE` | Optional. Default ON. `off` / `false` / `0` / `no` is the kill switch: every gateway goes back to its own previous order. |
+
+Rule, in order:
+1. **Fit:** a builder turn needs a strong CODING family and tool calling; chat needs a strong TEXT family. Image and audio models are never used.
+2. **Strong:** the ten families per purpose in `CODING_FAMILIES` / `TEXT_FAMILIES`.
+3. **Cheapest:** blended price; a builder turn is weighted 3:1 input to output, chat 1:3. Unpriced models come after priced ones.
+
+Two more properties:
+- **Never empty:** a gateway with no strong model keeps its own order.
+- **Tier guard:** a Weak build never receives Sonnet or Opus.
+
+An owner-written model list (e.g. `QUBAX_BUILDER_MODELS`, `MOYI_BUILDER_MODEL`, `DISCOUNTEDTOKENS_MODEL`) is always used as written.
+
+Gateways with no per-model price (BluesMinds, DiscountedTokens, Mitrify) run only their owner or default models in the BUILDER, because their one rate prices those models. A list model could cost more and be billed below its real cost. In the Test Chat Bot their key lists are ordered by strength.
+

@@ -32,6 +32,7 @@
  * BRAND: the rung reports as the neutral `ENGINE_MY`, and its error text has the supplier's name and host
  * swapped for that label before anything can show it.
  */
+import { chooseModels } from '../lib/modelChoice';
 import { parseEnvFlag } from '../lib/envFlag';
 import { resellerGatewayState } from '../lib/resellerGateways';
 import { fetchProviderModelIds } from '../lib/testChatBotOfficial';
@@ -117,8 +118,13 @@ function listedModelsFor(env: NodeJS.ProcessEnv, now: number): string[] {
 /** The models the rung runs, each with a known price: the owner's list when set, else Moyi's own listed models. */
 export function moyiBuilderModels(env: NodeJS.ProcessEnv = process.env, now: number = Date.now()): string[] {
   const configured = String(env.MOYI_BUILDER_MODEL ?? '').split(',').map(s => s.trim()).filter(s => /^[\w.:/@+-]{1,128}$/.test(s) && !CLAUDE_FAMILY.test(s));
-  const models = configured.length ? configured : listedModelsFor(env, now);
-  return models.filter(model => moyiBuilderRate(env, model) !== null);
+  if (configured.length) return configured.filter(model => moyiBuilderRate(env, model) !== null);
+  // THE SHARED RULE (modelChoice.ts, admin 2026-11-18): from Moyi's own list, the strong coding families, cheapest by
+  // Moyi's own price; with none strong, its priced models as before.
+  const pricedListed = listedModelsFor(env, now).filter(model => moyiBuilderRate(env, model) !== null);
+  const choice = chooseModels(pricedListed.map((id) => { const r = moyiBuilderRate(env, id)!; return { id, inputPerMTok: r.inputPerMTok, outputPerMTok: r.outputPerMTok }; }),
+    { purpose: 'coding', max: pricedListed.length, noClaude: true, env });
+  return choice.basis === 'strong' ? [...choice.models, ...pricedListed.filter((m) => !choice.models.includes(m))] : pricedListed;
 }
 
 /** TEST ONLY. */

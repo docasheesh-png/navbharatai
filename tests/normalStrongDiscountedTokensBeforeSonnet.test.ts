@@ -66,14 +66,16 @@ describe('where it sits', () => {
 });
 
 describe("its own three-model fallback", () => {
-  it("the owner's order first, then the key's list; at most three; one runner per model", () => {
-    expect(discountedTokensBuilderModels(READY as never, () => ['gpt-6-sol', 'gpt-6-astra', 'gpt-6-nova'])).toEqual(['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra']);
+  it("only the owner's models (their rate prices exactly those), at most three; one runner per model", () => {
+    // 2026-11-18: never a model from the key's list — it could cost more than the owner's one rate and be under-billed.
+    expect(discountedTokensBuilderModels({ ...READY, DISCOUNTEDTOKENS_MODEL: 'a,b,c,d' } as never)).toEqual(['a', 'b', 'c']);
+    expect(discountedTokensBuilderModels(READY as never)).toEqual(['gpt-6-luna', 'gpt-6-sol']);
     const seen: string[][] = [];
     discountedTokensBuilderRungs((_l, _k, _b, models) => { seen.push(models); return []; }, READY as never);
     expect(seen[0].slice(0, 2)).toEqual(['gpt-6-luna', 'gpt-6-sol']);
   });
   it('with no owner list it starts with gpt-6-sol', () => {
-    expect(discountedTokensBuilderModels({ DISCOUNTEDTOKENS_API_KEY: 'k' } as never, () => [])).toEqual(['gpt-6-sol']);
+    expect(discountedTokensBuilderModels({ DISCOUNTEDTOKENS_API_KEY: 'k' } as never)).toEqual(['gpt-6-sol']);
   });
 });
 

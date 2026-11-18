@@ -10,8 +10,8 @@
  *
  * ITS OWN FALLBACK (owner 2026-11-17: "sabse pahle sasta aur accha, response na aaye to 2nd, fail to 3rd, phir aage
  * badho"). The rung factory makes one runner per model, so the models here ARE that order: up to three — the owner's
- * comma list in DISCOUNTEDTOKENS_MODEL (cheapest good first, from their price page), else gpt-6-sol and then the key's
- * own /models list as far as it is already known — after which the chain moves on to Sonnet.
+ * comma list in DISCOUNTEDTOKENS_MODEL (cheapest good first, from their price page), else gpt-6-sol — after which the
+ * chain moves on to Sonnet. Never models from the key's list: the owner's rate prices the models the owner chose.
  *
  * PRICE (honest billing, "a cost is never invented"). DiscountedTokens' prices are on a page this platform cannot read,
  * and its OpenAI models have no published list price we hold. So the rung exists only once the owner sets the real
@@ -27,7 +27,6 @@
  */
 import { parseEnvFlag } from '../lib/envFlag';
 import { resellerGatewayState, RESELLER_MODEL_LADDER_MAX } from '../lib/resellerGateways';
-import { cachedProviderModels } from '../lib/providerModelPicker';
 import type { NamedRunner } from './providers/MultiProviderTurnRunner';
 import type { TokenRate } from './pricing';
 import type { RunTurnParams, TurnRunner } from './ClaudeClient';
@@ -60,15 +59,16 @@ export function discountedTokensBuilderEnabled(env: NodeJS.ProcessEnv = process.
   return parseEnvFlag(env.DISCOUNTEDTOKENS_BUILDER_ENABLED) !== false && discountedTokensBuilderMissing(env).length === 0;
 }
 
-/** Up to three models, in the owner's order; else the default and then the key's own list as far as it is known. */
-export function discountedTokensBuilderModels(env: NodeJS.ProcessEnv = process.env, listed: (base: string, key: string) => string[] = cachedProviderModels): string[] {
+/**
+ * Up to three models, in the owner's order, else the default — and NOTHING from the key's own list. The rung is billed
+ * at the owner's one configured rate, which prices the models the owner chose; a model taken from the list could cost
+ * more than that rate and be billed below its real cost (corrected 2026-11-18, with the shared model rule: a gateway that
+ * publishes no per-model price cannot be ordered "cheapest", so its builder rung runs only models with a known price).
+ */
+export function discountedTokensBuilderModels(env: NodeJS.ProcessEnv = process.env): string[] {
   const state = resellerGatewayState('discountedtokens', env);
   if (!state.ready) return [];
-  const out = (state.models.length ? state.models : state.model ? [state.model] : []).slice(0, RESELLER_MODEL_LADDER_MAX);
-  if (out.length < RESELLER_MODEL_LADDER_MAX) {
-    for (const id of listed(state.baseUrl, state.apiKey)) { if (out.length >= RESELLER_MODEL_LADDER_MAX) break; if (!out.includes(id)) out.push(id); }
-  }
-  return out;
+  return (state.models.length ? state.models : state.model ? [state.model] : []).slice(0, RESELLER_MODEL_LADDER_MAX);
 }
 
 export function isDiscountedTokensBuilderLabel(provider: string | null | undefined): boolean {

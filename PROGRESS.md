@@ -102240,3 +102240,15 @@ NOT done (needs the owner):
 - Then deciding on `on`.
 
 The plan's "Free Chat fully on the gateway" switch is the owner's existing env (`INFERENCE_GATEWAY_ROLLOUT_MODE` canary/all). This phase does not change it.
+
+## 2026-11-18 — Traffic Manager V2, P8/P9: image reading (vision) and image generation obey drain/disable per path (off by default)
+
+What changed:
+- `COVERED_PATHS` / `LEGACY_PATHS` gain `vision` and `image`.
+- `visionChain.ts` skips a drained or disabled provider next to its existing health skip.
+- `navbharatImageEngine.ts` skips a drained or disabled engine (cloudflare, pollinations, grok → xai) before calling it.
+- Skip only. Order, image holds, quotas and the word-ban guard are unchanged. Off until an admin covers the path.
+
+Deliberately NOT done: recording image-engine health. The image engine shares provider labels with chat (GROK). An image failure would make chat skip that provider, which is a cross-surface routing change nobody approved. That needs separate image labels first.
+
+Tests: `visionImageCoverage.test.ts` covers the census, the source guard, and the image engine with coverage off (still tried) and on (skipped, next engine tried). Reversion of each hook was caught.

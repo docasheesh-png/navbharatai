@@ -232,6 +232,7 @@ import {
 } from '../AgentV3/workspaceBuildLease';
 import { zTestFreeBilling } from '../lib/zTestAccount';
 import { shouldRefuseBuildForBalance } from '../AgentV3/balanceRechargeNotice';
+import { buildWalletBudgetDiagnostic, buildWalletStopDetail } from '../AgentV3/buildWalletDiagnostic';
 import { getConnection } from '../lib/supabaseConnectionStore';
 import { provisionDatabaseForUser, freshAccessToken, databaseReadyNarration, connectedDatabaseAsleepNote } from '../lib/supabaseProvisionFlow';
 import { setupSupabasePayments, supabasePaymentsEnabled, PAYMENT_SECRET_NAMES } from '../lib/supabasePayments';
@@ -456,7 +457,7 @@ import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
 import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
-import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
+import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, salvageReadInstruction, repairCompilerFiles, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { contractRenameHandoffClause, contractEnumHandoffClause, salvageWhyClause } from '../AgentV3/handoffRule';
 import { entryFirstHandoffLine, renderWhileBuilding } from '../AgentV3/earlyPreview';
 import { planHandoffText } from '../AgentV3/planHandoff';
@@ -471,7 +472,7 @@ import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
-import { tscVerdict, looksLikeBrokenTscInstall, buildScriptTypecheckVerdict, salvageTypecheckLine } from '../AgentV3/TscGate';
+import { tscVerdict, looksLikeBrokenTscInstall, buildScriptTypecheckVerdict, salvageTypecheckLine, combinedVerifyErrors } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
@@ -4313,7 +4314,7 @@ export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, promp
   userId: string | null; email: GrantEmail | null; onlyOpus: boolean; prompt: string;
   powerLevelReqEffective: PowerLevel; surplusSession?: SurplusBuildSession; res: Response;
   release: () => void; onFreeTier: (free: boolean) => void; onEconomy: (notice: string) => void;
-  onSpendable?: (balanceInr: number | null) => void;
+  onSpendable?: (balanceInr: number | null, estimatedBuildCostInr?: number) => void;
 }): Promise<boolean> {
     // Owner t403u: a wallet that cannot cover the estimate does not start a build, including the
     // free weak ladder. Admin free-list and the z test account stay exempt. An unreadable balance
@@ -4323,7 +4324,6 @@ export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, promp
     if (!balanceExempt && userId) {
       const walletDoc = await firestoreWalletReader(getDb())(userId).catch(() => null);
       const balanceInr = await readWalletBalanceInr(async () => walletDoc, userId, powerLevelReqEffective === 'weak' ? 'build' : 'usage');
-      onSpendable?.(balanceInr);
       if (userId) onFreeTier(isFreeTierUser(walletDoc));
       // Power mode is refused before any cost estimate, exactly as before. A never-paid account
       // asking for it never reaches the balance math.
@@ -4340,6 +4340,7 @@ export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, promp
       const estimate = surplusSession
         ? { inr: Number(surplusSession.estimatedMicroUsd) / 1_000_000 * 10 * usdInrRate(), usd: Number(surplusSession.estimatedMicroUsd) / 1_000_000 * 10 }
         : estimateBuildCost(prompt, powerLevelReqEffective, usdInrRate());
+      onSpendable?.(balanceInr, estimate.inr);
       if (shouldRefuseBuildForBalance({ exempt: false, balanceInr, estimateInr: estimate.inr })) {
         release();
         audit('AGENTV3_BUILD_BLOCKED_NO_CREDITS', { userId, balanceInr, estimateInr: estimate.inr }, 'warn');
@@ -10965,13 +10966,14 @@ async function noteBuildOutcome(
     // tiers" narration once the stream opens. Stays null when billing is off / no wallet read happened.
     let callerIsFreeTier: boolean | null = null;
     let spendableBalanceInr: number | null = null;
+    let spendableEstimateInr: number | null = null;
     // The affordability gate runs when EITHER the full paid-public switch OR the decoupled credit gate
     // (AGENTV3_CREDIT_GATE) is on. The credit gate lets ₹0-balance accounts be blocked from spending
     // NavBharatAI's model budget without turning on the rest of paid-public (which stays OFF during the
     // security migration). Free-list users (admin/testers) always bypass it.
     const checkPaidBuildAdmission = () => checkBuilderPaidAdmission({ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res,
       release: () => releaseBuildLock(buildKey, buildLockToken), onFreeTier: value => { callerIsFreeTier = value; }, onEconomy: value => { paidEconomyNotice = value; },
-      onSpendable: (balance) => { if (typeof balance === 'number') spendableBalanceInr = balance; } });
+      onSpendable: (balance, estimate: number | null = null) => { if (typeof balance === 'number') spendableBalanceInr = balance; spendableEstimateInr = estimate; } });
     if (!(await checkPaidBuildAdmission())) return;
 
     // FREE-TIER cheap-only routing (admin 2026-07-10) — DORMANT unless AGENTV3_FREE_TIER_CHEAP=true.
@@ -14626,6 +14628,7 @@ async function noteBuildOutcome(
         });
       }
       buildDiagRef = noteBuildAccepted(buildDiag); // expose to the outer catch so a build crash is captured too
+      buildDiag.record(buildWalletBudgetDiagnostic(spendableBalanceInr, spendableEstimateInr));
       // Q-200 / Q-201: decided before this report existed, so carried here.
       if (offerAccepted) {
         try {
@@ -15026,6 +15029,7 @@ async function noteBuildOutcome(
                 buildDiag.record({
                   phase: 'build', severity: 'warning', code: 'WALLET_BALANCE_EXHAUSTED', autoResolved: false,
                   message: notice,
+                  detail: buildWalletStopDetail(spendableBalanceInr, spendableEstimateInr, inr),
                 });
               } catch { /* a note must not replace the stop */ }
               abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'wallet-empty');
@@ -20040,9 +20044,10 @@ async function noteBuildOutcome(
                 }
               } catch { /* offending-file capture is best-effort */ }
             }
-            if (hasErrors) return { ok: false, errors: out.slice(0, 6000) };
-            // tsc is clean — but it CANNOT see a className-vs-CSS mismatch (class names are just
-            // strings), which renders the app unstyled/broken (the DigitalWatch bug). Run the
+            // The compiler cannot see a className-vs-CSS mismatch (class names are just strings).
+            // Run style checks even on a failed compile: skipping them also skipped the platform's
+            // free spacing snap in calculator report 9fba77d7. Preserve both kinds of evidence.
+            // A mismatch renders the app unstyled/broken (the DigitalWatch bug). Run the
             // deterministic CSS-consistency check and, on a real mismatch, fail verify so the SAME
             // auto-repair pass makes the components and stylesheet agree. Conservative (Tailwind-aware,
             // kebab-case only, thresholded) so a consistent app is never flagged.
@@ -20081,8 +20086,9 @@ async function noteBuildOutcome(
                 }
               } catch { /* deterministic and best-effort — the check below still runs */ }
               const cssErr = cssConsistencyError(project);
-              if (cssErr) return { ok: false, errors: cssErr };
+              if (cssErr) return { ok: false, errors: combinedVerifyErrors(out, cssErr) };
             } catch { /* css check is best-effort — never blocks on its own failure */ }
+            if (hasErrors) return { ok: false, errors: out.slice(0, 6000) };
             if (verdict !== 'passed' || !out.includes('__TSC_CLEAN__')) {
               // The compiler is UNVERIFIED: known refusal/unknown output or no clean marker. A common case
               // is a vite-react JS app whose scaffold has no `typescript` dependency, so `npx --no-install
@@ -20098,6 +20104,8 @@ async function noteBuildOutcome(
               // returns ok:false above (unchanged); only the un-runnable case is downgraded to ran:false.
               return { ok: true, errors: '', ran: false };
             }
+            buildDiag.resolveOnRecheck('SIMPLE_BUILD_VERIFY_ERROR');
+            buildDiag.resolveOnRecheck('ONESHOT_VERIFY_FAILED');
             return { ok: true, errors: '', ran: true };
           }
           // NOTE: no catch here on purpose — an infra THROW must reach fastVerify's retry wrapper
@@ -20108,11 +20116,9 @@ async function noteBuildOutcome(
           // focus-offenders → contract-authority) instead of re-firing the identical repair call.
           // `contractPath` names the contract FILE the lane wrote (SimpleBuilder `contractModule`), so
           // the repair imports shared symbols from it instead of re-inventing a home for them.
-          takeWeakTextRepair();
-          const weakRepair = weakCandidateActive(powerLevelReqEffective);
-          const text = await fastGenerate(repairSystemPrompt(framework, strategy), repairUserPrompt(prompt, errors, currentFiles, contract, strategy, contractPath),
-            weakRepair ? { repair: true, mayReason: true } : undefined);
-          return parseFileBlocks(text).map((b) => ({ path: b.path, content: b.content }));
+          return repairCompilerFiles({ framework, prompt, errors, currentFiles, contract, strategy, contractPath,
+            workspaceFiles: Object.fromEntries(writtenFiles), weakRepair: weakCandidateActive(powerLevelReqEffective),
+            generate: fastGenerate, beforeModel: takeWeakTextRepair, log: fastLog });
         };
         const fastLog = (msg: string) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() });
         const fastResult = (summary: string, steps: number, typecheckRan = true) => {
@@ -20190,7 +20196,7 @@ async function noteBuildOutcome(
         // was un-diagnosable). Warning severity + full message in `detail`; never blocks (the full builder
         // still finishes the app).
         if (!sb.ok && sb.verifyErrors) {
-          buildDiag.record({ phase: 'build', severity: 'warning', code: 'SIMPLE_BUILD_VERIFY_ERROR', message: `Fast-lane verify failed: ${sb.verifyErrors.split('\n')[0].slice(0, 200)}`, autoResolved: true, detail: sb.verifyErrors });
+          buildDiag.record({ phase: 'build', severity: 'warning', code: 'SIMPLE_BUILD_VERIFY_ERROR', message: `Fast-lane verify failed: ${sb.verifyErrors.split('\n')[0].slice(0, 200)}`, autoResolved: false, detail: sb.verifyErrors });
         }
         // Deterministic end-state classification (BUILD_SUCCESS / TYPECHECK_FAILED / BUILD_PARTIAL / …)
         // recorded into the build report so dashboards/retry policy can branch on the exact outcome.
@@ -20247,7 +20253,7 @@ async function noteBuildOutcome(
             `${SALVAGE_HANDOFF_MARKER} A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app ${salvageWhy}; ` +
             `they are in the workspace now and they are YOUR OWN prior work (any project context below that lists fewer files was taken before they were written):\n${sb.salvagedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
             salvageErrors +
-            `READ these files first and COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
+            `${salvageReadInstruction(sb.verifyErrors, Object.fromEntries(writtenFiles))} COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
             `fix any error in place. ${HANDOFF_NOTE_FIX_LINE} Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.` +
             // 🖥️ The calendar report's first build (earlyPreview.ts): the lane stopped before its entry and
             // the full builder wrote five more leaves and never the entry — five minutes of a starter page.
@@ -20337,6 +20343,7 @@ async function noteBuildOutcome(
             // fastVerify + ONE bounded fastRepair; on a still-broken result we do NOT claim success —
             // the agentic loop below finishes the job. "Preview is EARNED."
             let osVerified: boolean | null = null;
+            let osVerifyErrors = '';
             if (process.env.AGENTV3_ONESHOT_VERIFY !== 'off') {
               try {
                 let v = await fastVerify();
@@ -20349,12 +20356,13 @@ async function noteBuildOutcome(
                 }
                 // ran:false = the check never executed — "unknown", never a pass (no fake success).
                 osVerified = v.ran === false ? null : v.ok;
+                osVerifyErrors = v.errors;
               } catch { osVerified = null; /* could not verify → don't block (matches fastVerify's own policy) */ }
             }
             const osOutcome = classifyBuildOutcome({ filesWritten: os.filesWritten, typecheckOk: osVerified });
             buildDiag.record(oneShotOutcomeRecord(osOutcome, steeringHandoff.pending()));
             if (osVerified === false) {
-              buildDiag.record({ phase: 'build', severity: 'warning', code: 'ONESHOT_VERIFY_FAILED', message: 'One-shot app did not compile after one repair — handing to the full builder.', autoResolved: true });
+              buildDiag.record({ phase: 'build', severity: 'warning', code: 'ONESHOT_VERIFY_FAILED', message: 'One-shot app did not compile after one repair — handing to the full builder.', autoResolved: false, detail: osVerifyErrors });
               fastLog('The one-shot app still has build errors — switching to the full builder to finish it.');
             } else if (!steeringHandoff.pending()) {
               // osVerified null = the check never ran → keep the agentic gate ON (audited downstream).
@@ -21045,6 +21053,7 @@ async function noteBuildOutcome(
             // compile, even when the shell pipeline itself exits successfully.
             const verdict = tscVerdict(out);
             if (verdict === 'not-run' || verdict === 'unknown') return { ok: true, verified: false, errors: '' };
+            if (verdict === 'passed') buildDiag.resolveCompilerFailuresOnRecheck();
             return verdict === 'failed'
               ? { ok: false, verified: true, errors: out.slice(0, 6000) }
               : { ok: true, verified: true, errors: '' };

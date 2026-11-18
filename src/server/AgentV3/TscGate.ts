@@ -16,6 +16,11 @@ export function hasTscErrors(output: string | null | undefined): boolean {
   return /error TS\d+/.test(output);
 }
 
+/** Keep compiler and stylesheet evidence when both verifiers find a problem in one tree. */
+export function combinedVerifyErrors(compilerOutput: string, styleError: string): string {
+  return [hasTscErrors(compilerOutput) ? compilerOutput.slice(0, 6000) : '', styleError].filter(Boolean).join('\n\n');
+}
+
 /**
  * How many real TypeScript diagnostics the output contains.
  *

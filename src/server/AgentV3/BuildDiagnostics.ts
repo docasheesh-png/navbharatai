@@ -35,7 +35,7 @@ import { isModelUnavailableError, isProviderBalanceError } from './providerError
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError, isReasoningRungHandoff, providerNeverAnswered, isSlowStreamAbandon } from './turnDeadline';
-import { typecheckEvidenceFromCommands, commandOutcomeText } from './TscGate';
+import { typecheckEvidenceFromCommands, commandOutcomeText, looksLikeTypecheckCommand } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
@@ -1188,6 +1188,10 @@ export class BuildDiagnostics {
    * repeat into the PREVIOUS entry's `repeatCount` instead of pushing a new one.
    */
   record(issue: Omit<BuildIssue, 'ts'> & { ts?: number }): void {
+    // A handoff is not a successful recheck. Only the verifier may close these findings later.
+    if (issue.code === 'SIMPLE_BUILD_VERIFY_ERROR' || issue.code === 'ONESHOT_VERIFY_FAILED') {
+      issue = { ...issue, autoResolved: false };
+    }
     // Outcomes are facts, not narration. The route's generic onNote adapter labels notes as
     // info/auto-resolved; restore the canonical severity so the final outcome cannot be hidden.
     if (issue.code === 'OUTCOME_ASKED_USER') {
@@ -1489,6 +1493,28 @@ export class BuildDiagnostics {
       autoResolved: !failed,
       detail: failed ? capTail(rec.stderr || rec.stdout, 400) : undefined,
     });
+    // A completed whole-project compiler check, never a build-only command, a help page,
+    // a partial-file check, a pipe whose exit belongs to head/tail, or an interrupted command.
+    if (rec.exitCode === 0 && looksLikeTypecheckCommand(rec.command)
+      && /^\s*(?:(?:[.\w/-]+\/)?tsc|npx(?:\s+--no-install)?\s+tsc)\s/.test(rec.command)
+      && !/[|;&]/.test(rec.command)
+      && !/(?:^|\s)["']?[^\s"']+\.tsx?["']?(?=\s|$)/.test(rec.command)
+      && !/(?:^|\s)(?:-p|--project)(?:\s|=)/.test(rec.command)
+      && typecheckEvidenceFromCommands([rec]) === 'passed') this.resolveCompilerFailuresOnRecheck();
+  }
+
+  /** Called only after the compiler genuinely passed; CSS-only/mixed failures need their own recheck. */
+  resolveCompilerFailuresOnRecheck(): number {
+    let cleared = 0;
+    for (const issue of this.issues) {
+      if (!['SIMPLE_BUILD_VERIFY_ERROR', 'ONESHOT_VERIFY_FAILED'].includes(issue.code) || issue.autoResolved) continue;
+      const evidence = `${issue.message}\n${issue.detail ?? ''}`;
+      if (!/\berror TS\d+\b/.test(evidence) || /CSS class mismatch/.test(evidence)) continue;
+      issue.autoResolved = true;
+      cleared++;
+    }
+    if (cleared > 0) this.notify();
+    return cleared;
   }
 
   /**

@@ -3,7 +3,7 @@ import { proSandboxFee, proSandboxFeeFields } from '../src/server/AgentV3/proSan
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runSimpleBuild, unwrittenEntries } from '../src/server/AgentV3/SimpleBuilder';
+import { runSimpleBuild, unwrittenEntries, salvageReadInstruction } from '../src/server/AgentV3/SimpleBuilder';
 import { runOneShot, classifyForOneShot, oneShotStillViable, oneShotSkipReason } from '../src/server/AgentV3/OneShotBuilder';
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../src/server/AgentV3/laneFailure';
 import { createLaneWriteFence, LaneAbandonedError } from '../src/server/AgentV3/laneWriteFence';
@@ -237,7 +237,7 @@ async function runCaller(options: { files: Record<string, string>; replies?: str
     weakCandidateActive: () => false, powerLevelReqEffective: 'off', analysis: { startTier: 'haiku' },
     recordReasoningStays, laneReasoningStays: [], fastLanePhaseSummary, dominantFastLanePhase,
     classifyForOneShot, oneShotStillViable, oneShotSkipReason, anotherLaneWorthTrying,
-    unwrittenEntries, entryFirstHandoffLine, planHandoffText,
+    unwrittenEntries, entryFirstHandoffLine, planHandoffText, salvageReadInstruction,
     withTimeout: async <T,>(p: Promise<T>) => p,
     billedAmountUsd, freeTierBuildActive: true, tierEscalationPath: [], runner: { run: fullRunner },
     expectsArtifacts: true, builderWroteCount: () => writtenFiles.size, isEditMode: false, editFileTree: [],

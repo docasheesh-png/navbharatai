@@ -184,14 +184,15 @@ export class AIRouter {
   private trafficSurface(): 'chat' | 'professional' {
     return this.universe.includes('professional') ? 'professional' : 'chat';
   }
+  private managedTrafficHealth(name: string): boolean { return this.providers.some(p => p.name === name && p.managesTrafficHealth); }
   private acquire(name: string): boolean {
     // Claim a recovery probe only at the actual dispatch boundary, after health/capacity checks.
-    if (this.inFlightCount(name) >= MAX_IN_FLIGHT || shouldSkipProvider(name)) return false;
+    if (this.inFlightCount(name) >= MAX_IN_FLIGHT || (!this.managedTrafficHealth(name) && shouldSkipProvider(name))) return false;
     if (!acquireSlot(this.slotKey(name))) return false;
-    providerInFlight(name, 1);
+    if (!this.managedTrafficHealth(name)) providerInFlight(name, 1);
     return true;
   }
-  private release(name: string): void { releaseSlot(this.slotKey(name)); providerInFlight(name, -1); }
+  private release(name: string): void { releaseSlot(this.slotKey(name)); if (!this.managedTrafficHealth(name)) providerInFlight(name, -1); }
   private inFlightCount(name: string): number { return inFlight.get(this.slotKey(name)) || 0; }
 
   private async routeVerifiedFree(prompt: string, systemPrompt?: string, schema?: unknown, images?: string[], modelOverride?: string, signal?: AbortSignal): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
@@ -262,14 +263,14 @@ export class AIRouter {
           assertFreeAnswerDispatch(); signal?.throwIfAborted();
           const response = assertNonEmpty(await p.execute(prompt, undefined, undefined, systemPrompt, images, signal), p.name);
           signal?.throwIfAborted();
-          recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface() });
+          recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface(), recordHealth: !this.managedTrafficHealth(p.name) });
           return { response, name: p.name };
         } catch (err: any) {
           // Genuine failure → cool the provider down. (Slow-but-successful losers
           // resolve instead of rejecting, so they are never wrongly penalized.)
           signal?.throwIfAborted();
           noteProviderFailure(p.name, err);
-          recordProviderLatency(p.name, 0, true, { error: err, surface: this.trafficSurface() });
+          recordProviderLatency(p.name, 0, true, { error: err, surface: this.trafficSurface(), recordHealth: !this.managedTrafficHealth(p.name) });
           errors.push(`${p.name}: ${String(err?.message).slice(0, 60)}`);
           throw err;
         } finally {
@@ -305,7 +306,7 @@ export class AIRouter {
         assertFreeAnswerDispatch(); signal?.throwIfAborted();
         const response = assertNonEmpty(await p.execute(prompt, undefined, undefined, systemPrompt, images, signal), p.name);
         signal?.throwIfAborted();
-        recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface() });
+        recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface(), recordHealth: !this.managedTrafficHealth(p.name) });
         recordRouterOutcome(true);
         return {
           response,
@@ -314,7 +315,7 @@ export class AIRouter {
       } catch (err: any) {
         signal?.throwIfAborted();
         noteProviderFailure(p.name, err);
-        recordProviderLatency(p.name, 0, true, { error: err, surface: this.trafficSurface() });
+        recordProviderLatency(p.name, 0, true, { error: err, surface: this.trafficSurface(), recordHealth: !this.managedTrafficHealth(p.name) });
         errors.push(`${p.name}: ${String(err?.message).slice(0, 60)}`);
       } finally {
         this.release(p.name);
@@ -422,26 +423,26 @@ export class AIRouter {
             // provider is benched: it accepted a request and did not answer, which is a real failure
             // however it looks from the outside.
             setCooldown(p.name, cooldownSeconds(new Error(watched.verdict)));
-            recordProviderLatency(p.name, 0, true, { error: new Error(watched.verdict), surface: this.trafficSurface() });
+            recordProviderLatency(p.name, 0, true, { error: new Error(watched.verdict), surface: this.trafficSurface(), recordHealth: !this.managedTrafficHealth(p.name) });
             console.warn(`[STREAM] ${p.name} ${watched.verdict} — next rung`);
             continue;
           }
           if (watched.verdict !== 'completed') {
             // Text is already on screen. A second rung would repeat itself, so the turn ends here with
             // what was delivered — partial and honest beats duplicated.
-            recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface() });
+            recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface(), recordHealth: !this.managedTrafficHealth(p.name) });
             console.warn(`[STREAM] ${p.name} ${watched.verdict} after delivering — ending the turn`);
             return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false, reason: 'stalled' };
           }
         }
         if (signal?.aborted) return { ok: false, reason: 'aborted' };
         if (!delivered) throw new Error('stream produced no content');
-        recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface() });
+        recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface(), recordHealth: !this.managedTrafficHealth(p.name) });
         return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false };
       } catch (err: any) {
         if (signal?.aborted) return { ok: false, reason: 'aborted' };
         noteProviderFailure(p.name, err);
-        recordProviderLatency(p.name, 0, true, { error: err, surface: this.trafficSurface() });
+        recordProviderLatency(p.name, 0, true, { error: err, surface: this.trafficSurface(), recordHealth: !this.managedTrafficHealth(p.name) });
         if (delivered) {
           console.warn(`[STREAM] ${p.name} failed after delivering — ending the turn`);
           return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false, reason: 'stalled' };
@@ -558,14 +559,14 @@ export class AIRouter {
           }, undefined, signal);
           if (signal?.aborted) return 'cancelled';
           if (!delivered) throw new Error('stream produced no content');
-          recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface() });
+          recordProviderLatency(p.name, Date.now() - t, false, { surface: this.trafficSurface(), recordHealth: !this.managedTrafficHealth(p.name) });
           return 'completed';
         } catch (err: any) {
           // Only the observed caller signal proves cancellation. An adapter may implement a timeout
           // using AbortError too, so the error name alone must never hide a provider-health failure.
           if (signal?.aborted) return 'cancelled';
           noteProviderFailure(p.name, err);
-          recordProviderLatency(p.name, 0, true, { error: err, surface: this.trafficSurface() });
+          recordProviderLatency(p.name, 0, true, { error: err, surface: this.trafficSurface(), recordHealth: !this.managedTrafficHealth(p.name) });
           console.warn(`[RACE_STREAM] ${p.name} failed: ${err?.message?.slice(0, 60)}`);
           return 'failed';
         } finally {
@@ -684,7 +685,7 @@ export class AIRouter {
           signal?.throwIfAborted();
           const latency = Date.now() - startTime;
           console.log(`[ROUTER] ${provider.name} SUCCESS in ${latency}ms`);
-          recordProviderLatency(provider.name, latency, false, { surface: this.trafficSurface() });
+          recordProviderLatency(provider.name, latency, false, { surface: this.trafficSurface(), recordHealth: !this.managedTrafficHealth(provider.name) });
           recordRouterOutcome(true);
 
           return {
@@ -702,7 +703,7 @@ export class AIRouter {
           signal?.throwIfAborted();
           console.error(`[ROUTER] ${provider.name} FAILED (${error?.message?.slice(0, 80)})`);
           noteProviderFailure(provider.name, error);
-          recordProviderLatency(provider.name, 0, true, { error, surface: this.trafficSurface() });
+          recordProviderLatency(provider.name, 0, true, { error, surface: this.trafficSurface(), recordHealth: !this.managedTrafficHealth(provider.name) });
           errors.push(`${provider.name}: ${error?.message?.slice(0, 60)}`);
         } finally {
           this.release(provider.name);
@@ -768,7 +769,7 @@ export function _resetRouterOutcomes(): void {
 // Per-provider latency accumulator for stats
 const latencyAccum = new Map<string, { total: number; count: number; errors: number }>();
 
-export function recordProviderLatency(name: string, latencyMs: number, failed: boolean, detail?: { error?: unknown; surface?: 'chat' | 'professional'; firstByteMs?: number }) {
+export function recordProviderLatency(name: string, latencyMs: number, failed: boolean, detail?: { error?: unknown; surface?: 'chat' | 'professional'; firstByteMs?: number; recordHealth?: boolean }) {
   const cur = latencyAccum.get(name) || { total: 0, count: 0, errors: 0 };
   latencyAccum.set(name, {
     total: cur.total + (failed ? 0 : latencyMs),
@@ -776,7 +777,7 @@ export function recordProviderLatency(name: string, latencyMs: number, failed: b
     errors: cur.errors + (failed ? 1 : 0),
   });
   try {
-    noteProviderCall({
+    if (detail?.recordHealth !== false) noteProviderCall({
       provider: name, surface: detail?.surface ?? 'chat', ok: !failed,
       totalMs: failed ? 0 : latencyMs, firstByteMs: detail?.firstByteMs, error: detail?.error,
     });

@@ -44,12 +44,21 @@ const cursors = new Map<string, number>();
  * other fifty idle while key 1 is throttled. '' when the pool is empty.
  */
 export function nextPoolKey(env: string | undefined | null): string {
+  return nextPoolKeyEntry(env)?.key ?? '';
+}
+
+/** Select one eligible slot while preserving its stable position in the configured pool. */
+export function nextPoolKeyEntry(env: string | undefined | null, allow: (index: number) => boolean = () => true): { key: string; index: number } | null {
   const pool = parseKeyPool(env);
-  if (pool.length === 0) return '';
+  if (pool.length === 0) return null;
   const id = pool.join(',');
-  const i = cursors.get(id) ?? 0;
-  cursors.set(id, (i + 1) % pool.length);
-  return pool[i % pool.length];
+  const start = cursors.get(id) ?? 0;
+  for (let offset = 0; offset < pool.length; offset++) {
+    const index = (start + offset) % pool.length;
+    cursors.set(id, (index + 1) % pool.length);
+    if (allow(index)) return { key: pool[index], index };
+  }
+  return null;
 }
 
 /** Test seam: forget every rotation cursor. */

@@ -15,6 +15,7 @@ import { cappedFreeTierRung, isFreeTierPaidModelAllowed } from '../lib/freeTierP
 function slot(base: AIProvider, priority: number, model: string): AIProvider {
   return {
     name: base.name,
+    managesTrafficHealth: base.managesTrafficHealth,
     priority,
     // What this rung pins — so telemetry can name the model that actually served, not just "VERTEX".
     pinnedModel: model,

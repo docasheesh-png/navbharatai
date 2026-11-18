@@ -1,5 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+const dispatchedKeys = vi.hoisted(() => [] as string[]);
+vi.mock('openai', () => ({ default: class {
+  chat: any;
+  constructor(options: { apiKey: string }) { this.chat = { completions: { create: async () => { dispatchedKeys.push(options.apiKey); return { choices: [{ message: { content: 'answer' } }] }; } } }; }
+} }));
 import { join } from 'node:path';
 import { parseKeyPool, firstPoolKey, nextPoolKey, _resetKeyPoolCursors } from '../src/server/lib/keyPool';
 import { GlmProvider } from '../src/server/AI/Router/providers/GlmProvider';
@@ -51,11 +56,12 @@ describe('1 · a pooled key is a pool everywhere it is read', () => {
     expect(nextPoolKey('')).toBe('');
   });
 
-  it('the free chat provider sends ONE key per call — never the comma string — and rotates', () => {
+  it('the free chat provider sends ONE key per call — never the comma string — and rotates', async () => {
     process.env.GLM_API_KEY = 'zk-one,zk-two';
-    const p = new GlmProvider() as any;
-    const first = p.client.apiKey;
-    const second = p.client.apiKey;
+    dispatchedKeys.length = 0;
+    const p = new GlmProvider();
+    await p.execute('first'); await p.execute('second');
+    const [first, second] = dispatchedKeys;
     expect([first, second]).toEqual(['zk-one', 'zk-two']);
     expect(first).not.toContain(',');
   });

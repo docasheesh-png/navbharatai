@@ -75,6 +75,11 @@ export function canonProvider(name: string): string {
   return raw;
 }
 
+/** Same non-secret identity as the builder's configured credential slots. */
+export function providerPoolSlot(provider: string, index: number): string {
+  return index === 0 ? provider : `${provider}#${index + 1}`;
+}
+
 /**
  * What kind of failure a call was, from the words the provider already returned.
  * Suspension and an empty balance are one kind: the account will not answer until somebody recharges it.

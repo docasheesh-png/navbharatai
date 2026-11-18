@@ -1,3 +1,4 @@
+import { chunkSaysStop, sseData, takeSseEvents } from './sseFrames';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
@@ -483,43 +484,44 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
           }
           if (prefixes.size > 1024) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status, partial);
         };
+        // A normal finish is `[DONE]` OR a chunk whose finish_reason is "stop" — servers send either or both (sseFrames.ts).
+        let sawStop = false;
+        // Inspect one bounded SSE event; forward a valid event immediately. Returns true at `[DONE]`.
+        const handleEvent = async (event: string): Promise<boolean> => {
+          signal.throwIfAborted();
+          if (event.length > 1024 * 1024) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status, partial);
+          if (event.includes(config.apiKey)) throw new MitrifyError('MITRIFY_STREAM_ERROR', response.status, partial);
+          // SSE comments/control fields are not answer data and must not expose
+          // arbitrary upstream strings to the client.
+          const { lines: dataLines, payload } = sseData(event);
+          if (payload && payload !== '[DONE]') {
+            const data = JSON.parse(payload);
+            if (JSON.stringify(data).includes(config.apiKey) || data.error) throw new MitrifyError('MITRIFY_STREAM_ERROR', response.status, partial);
+            inspectStrings(data, []);
+            if (chunkSaysStop(data)) sawStop = true;
+          }
+          if (dataLines.length) {
+            partial = true; // The consumer may write before throwing or stalling.
+            const wire = `${dataLines.join('\n')}\n\n`;
+            await untilCancelled(() => options.onChunk!(new TextEncoder().encode(wire)), signal);
+            signal.throwIfAborted();
+          }
+          return payload === '[DONE]';
+        };
         try {
           for (;;) {
             signal.throwIfAborted();
             const item = await reader.read();
             signal.throwIfAborted();
-            if (item.done) break;
-            // Inspect one bounded SSE event at a time; forward valid events immediately.
-            pending += decoder.decode(item.value, { stream: true });
-            pending = pending.replace(/\r\n/g, '\n');
-            let boundary: number;
-            while ((boundary = pending.indexOf('\n\n')) >= 0) {
-              signal.throwIfAborted();
-              const event = pending.slice(0, boundary); pending = pending.slice(boundary + 2);
-              if (event.length > 1024 * 1024) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status, partial);
-              if (event.includes(config.apiKey)) throw new MitrifyError('MITRIFY_STREAM_ERROR', response.status, partial);
-              // SSE comments/control fields are not answer data and must not expose
-              // arbitrary upstream strings to the client.
-              const dataLines = event.split('\n').filter(line => line.startsWith('data:'));
-              const payload = dataLines.map(line => line.slice(5).trimStart()).join('\n');
-              if (payload && payload !== '[DONE]') {
-                const data = JSON.parse(payload);
-                if (JSON.stringify(data).includes(config.apiKey) || data.error) throw new MitrifyError('MITRIFY_STREAM_ERROR', response.status, partial);
-                inspectStrings(data, []);
-              }
-              if (payload === '[DONE]') done = true;
-              if (dataLines.length) {
-                partial = true; // The consumer may write before throwing or stalling.
-                const wire = `${dataLines.join('\n')}\n\n`;
-                await untilCancelled(() => options.onChunk!(new TextEncoder().encode(wire)), signal);
-                signal.throwIfAborted();
-              }
-              if (done) break;
-            }
-            if (done) break;
+            if (!item.done) pending += decoder.decode(item.value, { stream: true });
+            // At the end of the stream the remainder is the final event, blank line or not (sseFrames.ts).
+            const split = takeSseEvents(pending, item.done);
+            pending = split.rest;
+            for (const event of split.events) { if (await handleEvent(event)) { done = true; break; } }
+            if (done || item.done) break;
             if (pending.length > 1024 * 1024) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status, partial);
           }
-          if (!done) throw new MitrifyError('MITRIFY_INCOMPLETE_STREAM', response.status, partial);
+          if (!done && !sawStop) throw new MitrifyError('MITRIFY_INCOMPLETE_STREAM', response.status, partial);
         } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
         signal.throwIfAborted();
         return { status: response.status, headers, data: undefined };

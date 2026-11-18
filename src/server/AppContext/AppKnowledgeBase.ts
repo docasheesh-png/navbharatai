@@ -60,6 +60,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   },
 
   {
+    id: 'athree_requested_composition',
+    name: 'Requested procedural world modules',
+    path: 'NavBharatAI Pro → request a 3D world when Athree is enabled',
+    description: 'The optional Athree composition recipe can emit an explicit seeded runtime world and bounded original visual humans, six animal kinds, cars and motorcycles. It refuses unsupported kinds and sizes above 100 km, checks phone/mid/desktop object budgets, and preserves conflicting project source. This is not a promise of 1000 km worlds, photorealism, mobile FPS, NPC AI, combat or vehicle driving. The builder still wires the returned helper into the game lifecycle. Missing placements and dependency failures must be reported honestly.',
+    howToUse: 'Describe the world, target device and objects. The builder selects supported structured parameters and calls the guarded recipe. Existing source conflicts require an explicit manual adaptation rather than a replacement. Test the resulting game and requested gameplay; code generation is not device certification.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['world modules', 'runtime world', 'procedural objects', 'animal module', 'human module'],
+  },
+
+  {
     id: 'game_enterable_house_kit',
     name: 'Explorable house game kit',
     path: 'NavBharatAI Pro → describe a game with enterable houses',
@@ -3224,6 +3234,24 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     howToUse: 'Verified admins open AI Engines, press the switch next to a service, type a reason (for example "balance finished") and confirm. To undo, press the switch again. The change history lists the last changes.',
     relatedFeatures: ['admin-api-providers'],
     keywords: ['provider switch', 'turn off provider', 'disable ai provider', 'kill switch', 'ai on off', 'provider band karo', 'provider off', 'engine off'],
+  },
+  {
+    id: 'admin-traffic-control',
+    name: 'Traffic control (AI gateway switches)',
+    path: 'Admin Dashboard → AI Engines → Traffic control (verified admin only)',
+    description: 'Emergency and routing switches for the AI gateway. They can only take traffic away, never add it, and today they apply ONLY to requests the AI gateway manages (the Free Chat chain, the chat router and the Pro builder do not read them yet; to stop a provider everywhere use AI provider switches): • Gateway Emergency OFF, which sends every gateway surface back to its older path; • one switch per surface (chat, professional, doctor, sda, developer API) to send just that surface back; • per provider and per model: drain (no new requests, running ones finish), disable, or a traffic cap in percent; • production admission evidence per model (capability test, price check, security review, operational test), shown as missing or complete, and blocking only when marked required. Every save is a new numbered revision with an audit row (who, when, why, what changed), and any earlier revision can be restored as a new revision. Other servers apply a change within about a minute. Requests already running are never re-run or charged twice.',
+    howToUse: 'Verified admins open AI Engines → Traffic control, change a switch, type a reason and the current 6-digit code from their authenticator app, and press "Save as a new revision". To undo, open "Revisions and audit log" and press "Roll back to this" on an earlier revision. Saving needs admin MFA to be set up; without it the page explains that and saves nothing.',
+    relatedFeatures: ['admin-provider-switches', 'admin-api-providers'],
+    keywords: ['traffic control', 'gateway switch', 'emergency off', 'drain provider', 'traffic cap', 'rollback routing', 'routing revision', 'admission gate', 'gateway band karo', 'provider drain', 'surface legacy'],
+  },
+  {
+    id: 'admin-build-engine-health',
+    name: 'Build Engines and engine health (live)',
+    path: 'Admin Dashboard → AI Engines → Build Engines (verified admin only)',
+    description: 'The full order a build of each tier tries right now, including the engines in front of the tier ladder (Surplus, Router One, BluesMinds, Moyi API), each marked with its failures in the last 24 hours. Below it, "Engine health — last 24 hours" lists every engine builds used: turns delivered, failed calls, and why each failed in plain words (rate limit, timed out, no answer, key refused, out of balance, model not available, and so on), with the time of the last failure. It is read from the latest build of every project on every server and refreshes every minute while the page is open. The provider switch list now shows the providers with a key first; providers with no key are in a closed "Not set up on this server" list.',
+    howToUse: 'Verified admins open AI Engines and read Build Engines. A red "failed" count on an engine, or "Failing" in Engine health, names the engine that is failing; the lines under it say why. Press Refresh to read it at once.',
+    relatedFeatures: ['admin-provider-switches', 'admin-api-providers'],
+    keywords: ['engine health', 'which provider is failing', 'provider failing', 'why provider failed', 'build engines', 'ladder', 'kaun sa provider fail', 'provider fail kyu', 'live engines', 'engine status'],
   },
   {
     id: 'admin-api-providers',

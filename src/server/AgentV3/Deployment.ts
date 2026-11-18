@@ -128,8 +128,8 @@ export class FirebaseHostingDeployer {
     upgradeShippedServiceWorker(files);
 
     // SAME ADDRESS ON THE SECOND PRESS. Read before any upload so a later write cannot change the
-    // answer. Tests have no registry (the store no-ops under VITEST); production that cannot read
-    // the record behaves as a first publish rather than guessing a second URL.
+    // answer. An unreadable registry must stop publication; treating it as empty could abandon
+    // an existing address and publish to a different host.
     const pinned = await this.republishPlanFor(workspaceId, channelId);
 
     if (pinned.kind === 'bucket') {
@@ -145,7 +145,7 @@ export class FirebaseHostingDeployer {
         + `${mirror.failed} failed${mirror.error ? ` — ${mirror.error}` : ''}. Existing URL kept.`,
       );
       throw new Error(
-        'Your live app could not be updated just now, so the existing page was left as it is. '
+        'Your live app update did not complete. Some files may have changed at the existing address. '
         + 'Nothing was moved to a new address. Please publish again in a moment.',
       );
     }
@@ -158,12 +158,12 @@ export class FirebaseHostingDeployer {
         attempted: true, bucket: '', uploaded: 0, failed: files.size, error: String((err as Error)?.message ?? err),
       }));
       if (bucketOnlyPublishUsable(mirror)) return pinned.url;
-      // A half-written prefix is what the edge would serve INSTEAD of the channel we are about to
-      // update. Sweep it so the old address falls through to that channel, and do not mint `a-`.
-      if (mirror.uploaded > 0) await removePublishFromBucket(pinned.sub).catch(() => undefined);
-      console.warn(
-        `[PUBLISH-BUCKET-ONLY] ${pinned.sub}: edge republish incomplete, releasing onto the existing channel — `
-        + `${mirror.uploaded} uploaded, ${mirror.failed} failed${mirror.error ? ` — ${mirror.error}` : ''}`,
+      // This prefix is already live. Removing it can erase the last successful publication, and
+      // falling through can mint a different Firebase host if the old channel has expired.
+      console.warn(`[PUBLISH-BUCKET-ONLY] ${pinned.sub}: edge republish incomplete; existing address retained.`);
+      throw new Error(
+        'Your live app update did not complete. Some files may have changed at the existing address. '
+        + 'Nothing was moved to a new address. Please publish again in a moment.',
       );
     }
 
@@ -218,7 +218,9 @@ export class FirebaseHostingDeployer {
     const site = FIREBASE_PROJECT;
 
     // The REAL channel URL, from Firebase — see ensureChannel for why it can never be constructed.
-    const channelUrl = await this.ensureChannel(site, channelId, headers);
+    const channelUrl = pinned.kind === 'channel'
+      ? await this.existingRepublishChannel(site, channelId, pinned.sub, headers)
+      : await this.ensureChannel(site, channelId, headers);
     const versionName = await this.publishVersion(site, files, token, headers, await this.versionConfigFor(workspaceId, files));
     await this.hostingCall('release', () =>
       axios.post(
@@ -600,22 +602,26 @@ export class FirebaseHostingDeployer {
   }
 
   /**
-   * Where a republish of this workspace must land. A snapshot deploy passes its own channel id and
-   * must never be pinned onto the published URL. An unreadable registry is a first publish, not a
-   * guessed second address. Tests skip the registry entirely — they assert the Firebase call, and
-   * a store import must not change that.
+   * Where a republish of this workspace must land. Snapshots have a separate channel and do not
+   * read the published-app registry. Read failures are not evidence that a workspace is unpublished.
    */
   private async republishPlanFor(workspaceId: string, channelId: string): Promise<RepublishPlan> {
     if (channelId !== makeChannelId(workspaceId)) return { kind: 'none' };
-    if (process.env.VITEST || process.env.NODE_ENV === 'test') return { kind: 'none' };
-    try {
-      const { deploymentStore, isLiveDeployment } = await import('./DeploymentStore');
-      const rec = await deploymentStore.get(workspaceId);
-      const url = isLiveDeployment(rec) ? String(rec?.url ?? '') : '';
-      return planRepublish({ workspaceId, priorUrl: url, domain: publishedAppDomain(), site: FIREBASE_PROJECT });
-    } catch {
-      return { kind: 'none' };
+    const { readDeploymentForPublish, isLiveDeployment } = await import('./DeploymentStore');
+    const rec = await readDeploymentForPublish(workspaceId);
+    const url = isLiveDeployment(rec) ? String(rec?.url ?? '') : '';
+    return planRepublish({ workspaceId, priorUrl: url, domain: publishedAppDomain(), site: FIREBASE_PROJECT });
+  }
+
+  /** Never recreate an expired channel and report its obsolete URL as a successful republish. */
+  private async existingRepublishChannel(site: string, channelId: string, sub: string, headers: Record<string, string>): Promise<string> {
+    const existing = await this.hostingCall('channel lookup', () =>
+      axios.get<{ url?: string }>(`${HOSTING_API}/sites/${site}/channels/${channelId}`, { headers }));
+    const url = typeof existing.data?.url === 'string' ? existing.data.url : '';
+    if (channelSubdomain(url, site) !== sub) {
+      throw new Error('The existing published address could not be verified. No new version was released; please try again.');
     }
+    return url;
   }
 
   /**

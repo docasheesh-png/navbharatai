@@ -101950,3 +101950,13 @@ Tests:
 - `control.test.ts`, `trafficControlAdmin.test.ts`, `policy.test.ts` (gate), and `tests/trafficControlNeverStrandsStartedWork.test.ts` (source guards and behaviour).
 - 8 reversions each caught: mid-request recheck reading live control, global switch ignored, planner ignoring the gate, no revision check, no replay guard, LKG dropped, older revision adopted, admission gate off.
 - The P1 `KNOWN_UNREACHABLE` entries were removed, since the route now reads the snapshot. The three new collections are classified as kept for ever, with reasons.
+
+
+## 2026-11-18 — PR #4287 republish review corrections
+
+- Synced current main, including its existing audited dependency triage; the original PR CI failure stopped at the dependency audit gate.
+- Republish now uses the existing strict, bounded registry reader. A missing record permits first publish; a read outage cannot silently choose a new address. Tests exercise the production planning path instead of bypassing it under VITEST.
+- A partial overwrite of a live bucket prefix is not swept away or called unchanged. It reports that some files may have changed and keeps the existing address for a retry. Branded channel republishes require a complete bucket update, so a failed update cannot delete the live copy or fall through to a newly recreated channel.
+- Raw Firebase channel republishes look up and verify the existing channel URL before uploading/releasing. Expired or mismatched channels fail without claiming the old address was updated.
+- Added behavioral regressions for same-address updates, partial failure preservation, unavailable registry, stale/deleted channels, snapshot isolation and shipped service-worker upgrades. Focused checks and full validation results are recorded separately; this entry is not a full CI or deployment claim.
+- Cloudflare worker source still requires its separate deployment to serve the new cache policy; merging server code does not deploy the Worker. Bucket writes remain per-file, not an atomic whole-site transaction; failure messages now state that limitation honestly.

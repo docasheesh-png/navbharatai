@@ -15,6 +15,11 @@ vi.mock('axios', () => {
   return { default: { post, patch, delete: del, get }, AxiosError: class AxiosError extends Error {} };
 });
 
+vi.mock('./DeploymentStore', () => ({
+  readDeploymentForPublish: vi.fn(async () => null),
+  isLiveDeployment: () => false,
+}));
+
 import axios from 'axios';
 import { FirebaseHostingDeployer } from './Deployment';
 

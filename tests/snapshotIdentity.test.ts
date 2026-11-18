@@ -98,11 +98,13 @@ describe('wiring — the build records the identity, the final save confirms it,
   const store = readFileSync(join(process.cwd(), 'src/server/AgentV3/SandboxStore.ts'), 'utf8');
 
   it('the copy is taken with the hash of the source that produced it, read from the same tree the build consumed', () => {
-    const at = route.indexOf("code: 'PREVIEW_SNAPSHOT_SAVED'");
+    // MOVED (2026-11-17) into failedBuildCopy.ts (takeBuildCopy), shared by the gate and the failed-build path.
+    const copySource = readFileSync(join(process.cwd(), 'src/server/AgentV3/failedBuildCopy.ts'), 'utf8');
+    const at = copySource.indexOf("code: 'PREVIEW_SNAPSHOT_SAVED'");
     // ⚠️ A FIXED WINDOW IS THE BRITTLE PART, not the facts. At 1500 chars this failed on 2026-09-20
     // because the change being made ADDED COMMENTS above the line it was looking for — a test that
     // fails when the code around it is explained better is measuring the wrong thing.
-    const block = route.slice(Math.max(0, at - 2600), at);
+    const block = copySource.slice(Math.max(0, at - 2600), at);
     // Asserted as the FACTS it is about — the same tree, bounded, and hashed — rather than as one
     // string, which a legitimate refactor moves (it did, on 2026-09-20).
     expect(block).toContain('collectWorkspaceFiles(actuator, workspaceId)');

@@ -3024,6 +3024,23 @@ export class BuildDiagnostics {
    * screenshot" against whether a screenshot was ever taken. Reads the timeline rather than a separate
    * counter, so it cannot drift from what the report shows.
    */
+  /**
+   * Did this build RELAUNCH the dev server, or only find it already running? (Q-2714, autopsy 57604006.)
+   *
+   * Build 1712adfa told the user "the earlier 'preview not running' issue was temporary … It's now restarted",
+   * while its only launch command had answered "dev server already healthy on port 5173 — reused it (no relaunch)".
+   * 'reused' only when a launch was answered that way and nothing relaunched (no other UP report, no platform
+   * start); undefined when the log does not settle it — silence is never an accusation.
+   */
+  devServerLaunchEvidence(): 'relaunched' | 'reused' | undefined {
+    const outs = this.commands.map((c) => String(c.stdout ?? ''));
+    const reused = outs.some((o) => o.includes('reused it (no relaunch'));
+    const relaunched = outs.some((o) => o.includes('[health-check] dev server is UP') && !o.includes('reused it (no relaunch'))
+      || this.issues.some((i) => i.code === 'PLATFORM_PREVIEW_UP');
+    if (relaunched) return 'relaunched';
+    return reused ? 'reused' : undefined;
+  }
+
   toolWasUsed(tool: string): boolean {
     const needle = String(tool ?? '').trim().toLowerCase();
     if (!needle) return false;

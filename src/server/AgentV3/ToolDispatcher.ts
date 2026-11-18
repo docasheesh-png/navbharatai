@@ -131,6 +131,7 @@ import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemo
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { isBareManifestInstall, manifestRangeRepairEnabled, repairUnavailableRanges, manifestRepairNote } from './manifestRangeRepair';
 import { shellMayWriteOpaquely, markCommand, changedFilesCommand, parseChangedFiles } from './shellWriteReconcile';
+import { isScratchCapture } from './scratchCapture';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, shadowKeptToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames, mistypedImport } from './tscErrorCause';
 import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
@@ -910,7 +911,8 @@ export class ToolDispatcher {
         this.kitCurrentPaths.delete(path);
         try {
           const content = await this.actuator.readFile(this.workspaceId, path);
-          if (typeof content === 'string') this.onFileWrite(path, content);
+          // A tool's output redirected into a file is scratch, not the app (scratchCapture.ts, Q-2713).
+          if (typeof content === 'string' && !isScratchCapture(path, content)) this.onFileWrite(path, content);
         } catch { /* removed or unreadable — nothing to record */ }
       }
     } catch { /* reconciliation is best-effort — the parser's own read-back already ran */ }
@@ -957,7 +959,7 @@ export class ToolDispatcher {
       this.kitCurrentPaths.delete(path); // a shell write is not the kit's current content any more (Q-863)
       try {
         const content = await this.actuator.readFile(this.workspaceId, path);
-        if (typeof content === 'string') this.onFileWrite(path, content);
+        if (typeof content === 'string' && !isScratchCapture(path, content)) this.onFileWrite(path, content);
       } catch { /* removed or unreadable — nothing to record */ }
     }
   }

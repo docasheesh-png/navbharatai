@@ -600,7 +600,8 @@ import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage
 import { previewKeepAliveEnabled, isTopLevelNavigation } from '../AgentV3/previewKeepAlive';
 import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
-import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE, PREVIEW_COPY_REFRESH_MS } from '../AgentV3/previewSnapshot';
+import { keepFailedBuildCopy, takeBuildCopy } from '../AgentV3/failedBuildCopy';
+import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, snapshotStandIn, snapshotStandInNote, PREVIEW_COPY_REFRESH_MS } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
 import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, fileContentHashes, savedDivergesFromSandbox, type SnapshotTaken, describeDivergence } from '../AgentV3/snapshotIdentity';
@@ -6212,10 +6213,18 @@ async function noteBuildOutcome(
     // the JSON mode returns. Non-stream callers keep the original single-JSON contract.
     const wantsStream = req.body?.stream === true;
     let streaming = false;
+    // Every wake leaves a record (previewWakeLog.ts): the last stage it reached and how it ended.
+    const wakeStartedAt = Date.now();
+    let lastWakeStage = '';
     const sendStage = (label: string, pct: number): void => {
+      lastWakeStage = label;
       if (streaming && !res.writableEnded) res.write(JSON.stringify({ type: 'stage', label, pct }) + '\n');
     };
     const finish = (payload: Record<string, unknown>, status = 200): void => {
+      void sandboxStore.recordWakeAttempt(workspaceId, {
+        at: Date.now(), ok: payload.ok === true, stage: lastWakeStage,
+        reason: typeof payload.reason === 'string' ? payload.reason : '', seconds: (Date.now() - wakeStartedAt) / 1000,
+      }).catch(() => {});
       if (streaming) {
         if (!res.writableEnded) {
           res.write(JSON.stringify({ type: 'result', ...payload }) + '\n');
@@ -6693,12 +6702,16 @@ async function noteBuildOutcome(
         ? await raceTimeout(workspaceFilesSavedAt(ws), 3_000, 'doorLastChange').catch(() => null)
         : null;
       startingSnapshot = () => {
-        if (!shouldServeSnapshot({
+        // A current copy, or an OLDER one once nobody is waiting for a fresh edit (snapshotStandIn): the
+        // panel says which, from the same decision (preview-health below).
+        if (!snapshotStandIn({
           enabled: previewSnapshotEnabled(),
           doorState: 'starting',
           snapshotUrl: doorRecord?.snapshotUrl,
           snapshotAt: doorRecord?.snapshotAt,
           lastChangeAt,
+          buildRunning: isBuildRunningFor(ws),
+          now: Date.now(),
         })) return false;
         res.redirect(302, String(doorRecord!.snapshotUrl));
         return true;
@@ -6934,7 +6947,7 @@ async function noteBuildOutcome(
       // move together, from one shared function, or neither should move.
       let snapshotServing = false;
       let snapshotTakenAt: number | null = null;
-      let snapshotWaking = false;
+      let snapshotKind: 'expired' | 'current' | 'older' = 'expired';
       try {
         if (previewSnapshotEnabled() && livePortUp !== true) {
           const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'healthSnapshot').catch(() => null);
@@ -6947,15 +6960,18 @@ async function noteBuildOutcome(
             ? null
             : await raceTimeout(workspaceFilesSavedAt(workspaceId), 3_000, 'healthLastChange').catch(() => null);
           const doorState = sandboxGone ? 'asleep' as const : 'starting' as const;
-          if (shouldServeSnapshot({
+          const standIn = snapshotStandIn({
             enabled: true,
             doorState,
             snapshotUrl: rec?.snapshotUrl,
             snapshotAt: rec?.snapshotAt,
             lastChangeAt,
-          })) {
+            buildRunning: isBuildRunningFor(workspaceId),
+            now: Date.now(),
+          });
+          if (standIn) {
             snapshotServing = true;
-            snapshotWaking = doorState === 'starting';
+            snapshotKind = standIn;
             snapshotTakenAt = typeof rec?.snapshotAt === 'number' ? rec.snapshotAt : null;
           }
         }
@@ -7001,7 +7017,7 @@ async function noteBuildOutcome(
         // Two situations, two notes: an EXPIRED machine (the user may want to bring it back) and one
         // that is STARTING (nothing is wrong and they need do nothing). One note for both would be
         // wrong for one of them every time.
-        ...(snapshotServing ? { snapshotServing: true, snapshotNote: snapshotWaking ? SNAPSHOT_WAKING_NOTE : SNAPSHOT_NOTE, snapshotAt: snapshotTakenAt } : {}),
+        ...(snapshotServing ? { snapshotServing: true, snapshotNote: snapshotStandInNote(snapshotKind), snapshotAt: snapshotTakenAt } : {}),
         // The machine is deliberately asleep and the saved copy is answering for the app. Distinct from
         // `snapshotServing` above, which means the machine is GONE — here it is alive and we are simply
         // not waking it. The client frames the copy and says so; nothing is broken and nothing is lost.
@@ -15738,6 +15754,11 @@ async function noteBuildOutcome(
           events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now(), id: 'eta-live' });
         });
         const ensureWorkspaceMs = Date.now() - ensureT0;
+        // A preview that would not wake between builds is answered here, in this build's report, from the
+        // attempts' own records (previewWakeLog.ts). Off the critical path; a read failure just says nothing.
+        void sandboxStore.takeUnreportedWakeFailures(workspaceId).then((line) => {
+          if (line) buildDiag.record({ phase: 'build', severity: 'warning', code: 'PREVIEW_WAKE_HISTORY', message: line, autoResolved: true });
+        }).catch(() => {});
         try {
           buildDiag.recordSetupTiming({
             startMs: setupT0,
@@ -24799,6 +24820,14 @@ async function noteBuildOutcome(
       // block or fail a build, and it does NOT feed classifyBuildOutcome — a green, rendering app whose
       // production build is broken is a working app with a shipping problem, not a failed build, and
       // calling it BUILD_FAILED would both lie to the user and change what they are charged.
+      // ONE definition of "take the copy" (buildCopy in failedBuildCopy.ts): after a passing production build,
+      // after a kept repair (refreshPreviewCopy), and after a FAILED build whose app rendered.
+      const takePreviewCopy = async (): Promise<boolean> => {
+        const taken = await takeBuildCopy({ actuator, workspaceId, record: (e) => buildDiag.record(e) });
+        if (taken) snapshotTaken = taken;
+        return taken !== null;
+      };
+
       if (
         prodBuildGateEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
@@ -24889,53 +24918,6 @@ async function noteBuildOutcome(
               ...(await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>))),
               ...Object.fromEntries(writtenFiles),
             })) {
-              // ONE definition of "take the copy", run here and again after a kept repair (refreshPreviewCopy).
-              const takePreviewCopy = async (): Promise<boolean> => {
-                if (!actuator.downloadDistFiles) return false;
-                try {
-                  const dist = await withTimeout(actuator.downloadDistFiles(workspaceId), 60_000, 'snapshot-dist');
-                  if (dist && dist.size > 0) {
-                    const url = await withTimeout(
-                      new FirebaseHostingDeployer().deployStatic(workspaceId, withPreviewAiRelay(dist), snapshotChannelId(workspaceId)),
-                      90_000, 'snapshot-deploy',
-                    );
-                    if (url) {
-                      const at = Date.now();
-                      // WHAT THE COPY WAS BUILT FROM. Read now, from the same tree `npm run build` just
-                      // consumed — nothing writes between the two. The final durable save compares this
-                      // with what it persists; a copy whose source could not be read is never promoted.
-                      const source = await withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')
-                        .then((c) => c.files as Record<string, string>).catch(() => null);
-                      // The SANDBOX copy of index.html carries our preview bridge the moment a dev server
-                      // has run; the durable copy never does. Hash the APP, not our console mirror —
-                      // see identitySource (autopsy Study-Racer, 2026-09-25: PREVIEW_SNAPSHOT_STALE on a
-                      // build where nothing had written after the copy).
-                      const filesHash = source ? workspaceContentHash(identitySource(source)) : null;
-                      await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
-                      // The paths travel with the copy for THIS build only, so a mismatch can say which
-                      // side holds what — see staleDetail. The hash is still what decides.
-                      snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(identitySource(source)) : undefined, fileHashes: source ? fileContentHashes(identitySource(source)) : undefined };
-                      // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
-                      // Raising the flag lets the idle sweep use the shorter snapshot window; the event
-                      // lets the frame move to the real build output the moment the build settles,
-                      // instead of on the next 150-second poll. The actuator clears the flag by itself
-                      // on the next write, so a later heal pass that changes a file cannot leave a
-                      // stale copy counted as current.
-                      try { actuator.noteSnapshotCurrent?.(workspaceId, true); } catch { /* advisory */ }
-                      // The `snapshot` event is emitted at the FINAL durable save, once the copy is
-                      // proven to match what was persisted — the surface only applies it after the
-                      // build ends anyway, so nothing is lost and nothing stale is ever announced.
-                      buildDiag.record({
-                        phase: 'readiness', severity: 'info', code: 'PREVIEW_SNAPSHOT_SAVED',
-                        message: 'Kept a permanent copy of this build, so the preview still works after its live server expires.',
-                        autoResolved: true,
-                      });
-                      return true;
-                    }
-                  }
-                } catch { /* a fallback copy must never be able to affect the build it is copying */ }
-                return false;
-              };
               await takePreviewCopy();
               refreshPreviewCopy = async () => {
                 // The copy is the output of `npm run build`, so a changed source needs a new build first;
@@ -24951,6 +24933,10 @@ async function noteBuildOutcome(
           }
         } catch { /* the detector must never affect a build it is only observing */ }
       }
+
+      // A FAILED build whose app rendered still leaves a copy (failedBuildCopy.ts decides; the route only reports).
+      await keepFailedBuildCopy({ actuator, workspaceId, writtenFiles, takeCopy: takePreviewCopy, record: (e) => buildDiag.record(e),
+        turn: { ok: result.ok, rendered: previewGreen, copyTaken: snapshotTaken, expectsArtifacts, aborted: abort.signal.aborted, startedAt: buildStartedAt, maxSeconds: effectiveBuildSeconds } });
 
       // APP HEALTH CULTURE — VACCINE (Immune System Phase 2, opt-in AGENTV3_VACCINE=on): run_tests is a
       // TOOL the agent MAY skip; the vaccine makes it a SYSTEM reflex. If the built project ships a real
@@ -25778,6 +25764,7 @@ async function noteBuildOutcome(
           phoneLayout: phoneProof,
           // "complete and working properly" stands for a canvas game only when the playtest PASSED (autopsy 61279465).
           gamePlayed: gateEvidence.game,
+          devServerLaunch: buildDiag.devServerLaunchEvidence(),
           persistence: persistenceProof,
           journeyOutcome: gateEvidence.journeys === 'passed' ? 'passed' : gateEvidence.journeys === 'failed' ? 'failed' : 'not-run',
           screenshotTaken: buildDiag.toolWasUsed('screenshot'),

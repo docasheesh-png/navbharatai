@@ -299,6 +299,16 @@ export class Game {
       (delta) => this.fixedUpdate(delta),
       (alpha, frameDelta) => this.render(alpha, frameDelta),
     );
+
+    // THE LOOP FOLLOWS THE STATUS, WHOEVER SETS IT (autopsy 2026-11-17, a published battle royale). The
+    // game's own setup() called setStatus('playing') itself, so the HUD showed a running game and hid the
+    // Play menu, while start() — the only thing that ran the loop — was never called. Not one frame was
+    // drawn: an empty page behind the HUD, every control ignored. Now 'playing' from anywhere runs the loop.
+    const follow = () => { if (!this.disposed && state.status === 'playing') this.loop.start(); };
+    this.disposers.push(events.on('GAME_STARTED', follow), events.on('GAME_RESUMED', follow));
+    follow();
+    // One frame now, so the world shows behind the menu instead of an empty page. The loop draws the rest.
+    try { this.render(0, 0); } catch { /* the loop reports a render that keeps failing */ }
     } catch (error) {
       // A constructor can fail before its caller receives the instance. Roll back here.
       this.dispose();

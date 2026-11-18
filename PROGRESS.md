@@ -101734,6 +101734,24 @@ The existing pre-start block (no positive balance, billing on, not a free-list a
 
 Owner override: a balance of 0, or below the pre-flight estimate, does not start a build at all, including the weak ladder. The same sentence stops a build whose running bill passes that balance; files already written are kept. Admin free-list and the z test account stay exempt. Prices, chat quotas, gift and referral rules are unchanged. An unreadable balance is still not treated as zero.
 
+## 2026-11-17 — A published 3D game opened to an empty page: the game loop ran only from start()
+
+Admin: the battle royale's published link (`a-6b8ad5b4e2f4ce94b8a8d7df.mitrify.in`) "open nahi ho raha"; *"mai chahta hu har baar pura game open ho"*.
+
+Evidence: every published file is in the bucket (index, the 797 KB bundle, CSS, icon, manifest, service worker, all HTTP 200). Loaded in a real browser, the HUD renders (Score 0 · Enemies left 19 · ⏸), but the WebGL canvas holds zero drawn pixels and records zero draw calls. In the bundle, the game's own `setupBattleRoyale` calls `setStatus('playing')`, which hides the Play menu. The shell's `GameLoop` started only from `Game.start()`, and nothing called that. The build's playtest had already measured the result ("input ignored · no canvas large enough to measure", Controls 0).
+
+Class: the loop was tied to one caller (`start()`) instead of to the state it represents.
+
+Fix (`GameShellGenerator.ts`, the shared shell):
+- the loop follows the status: `GAME_STARTED` / `GAME_RESUMED`, plus a check right after setup;
+- one frame is drawn after setup, so a menu game shows its world behind the menu;
+- a disposed game never restarts.
+
+`gameKitHistory.ts` was regenerated, so an existing game whose `Game.ts` is untouched kit code receives the fix on its next edit.
+
+Test: `tests/aGameRunsWhenItSaysItIsPlaying.test.ts` runs the REAL generated `Game.ts` and `core/state.ts`. It covers setup setting 'playing', the menu first frame, a later 'playing' from game code, and a disposed game. Reverting the shell fails 3 of the 4 tests. All 693 game-shell tests pass.
+
+Still open from this report: the build that said "100/100, fully shippable" while the release gate was RED (autopsy item), and the preview that would not wake 3 days after a failed build.
 ## 2026-11-17 — AI Engines page shows the engines that really run, live, and why each fails
 
 Owner: "jo ai/provider use ho rahe hai, wahi dikhen chahiye, aur yeh live rahe, kon se provider fail ho raha kyu fail ho
@@ -101833,6 +101851,61 @@ Census tests (`snapshot.test.ts`, `upstreamFamilies.test.ts`, 33 in total) fail 
 
 Not in P1, by design: runtime catalogs (the gateway's reviewed Firestore catalog, the live OpenRouter free list, Surplus offers). They join in P2 with the control store.
 
+## 2026-11-17 — A preview is never blank: the three layers (admin: "iska koi permanent solution dhundo … han bilkul banao")
+
+Report: the admin opened a three-day-old battle royale to edit it, and the preview "1 second bhi nahi chala". This is the same class as 2026-09-08 ("2-3 din bad preview band"). The earlier fix (`previewWake.ts`) never covered the state a FAILED build leaves behind.
+
+The chain:
+- Build 3 ended ENGINE_UNAVAILABLE after changing files, and after its app had rendered.
+- The VM-free copy is taken only inside the production-build gate, which needs `result.ok`. So no copy was taken.
+- The copy from build 2 became "not current". The door refused it for a 'starting' machine.
+- The machine did not answer.
+- The result was an endless waiting page over an app we held a working copy of.
+
+The fix:
+1. **A failed build that rendered still leaves a copy** (`failedBuildCopy.ts`, `keepFailedBuildCopy`). This runs only for a failed turn that rendered, took no copy, was not stopped and has 90 s left. It runs the same production build and, only if that passes, takes the same copy. It changes no verdict, outcome or charge. It reports FAILED_BUILD_COPY_KEPT / _NOT_KEPT. The copy-taking itself moved out of the route into `takeBuildCopy`, so the gate and this path share one definition.
+2. **A starting preview shows the last working version, labelled** (`snapshotStandIn` in `previewSnapshot.ts`). An OLDER copy stands in, with SNAPSHOT_OLDER_NOTE ("changes made after it are not in this copy yet"). It never does so while a build runs, and never within 10 minutes of the last write, so a fresh edit is never hidden. The door and preview-health ask the same function, and the live app still replaces the copy by itself.
+3. **Every wake-up is recorded** (`previewWakeLog.ts`). Each preview-diagnose finish appends {at, ok, last stage, reason, seconds} to a bounded five-entry log on the sandbox record, with URLs and keys stripped. The next build writes the not-yet-reported failures into its report as PREVIEW_WAKE_HISTORY.
+
+Constraint found: the build function in `agentv3.ts` sits exactly at TypeScript's control-flow-analysis limit (TS2563). Even a three-line `if` tipped it over and broke typechecking across the whole server. New logic therefore lives in modules, and the route keeps one branch-free call. Record this before adding anything to that function.
+
+Tests (each proven by reversion):
+- `aPreviewIsNeverBlank.test.ts`
+- `failedBuildCopy.test.ts`
+- `previewWakeLog.test.ts`, including a wiring guard
+
+Five source guards were repointed to the moved copy code: `previewSnapshotWiring`, `sandboxLifetime`, `snapshotIdentity`, `theCopyFollowsEveryPass`, `theSearchBoxWasInHindi`.
+
+Not proven: why that day's wake did not bring the machine back. No record of it existed; layer 3 makes the next one visible.
+
+## 2026-11-17 — Autopsy 57604006, builds 969740df and 1712adfa (the battle royale): ledger
+
+Builds 5e558cb2, 7dc42243, d0c5a371 and 9ed80cc9 of the same session were autopsied by another session (Q-2690–Q-2701, branch `claude/practical-dijkstra-e7o2hc`), and were not redone here.
+
+Tally:
+- ✅ self-heal: 2 (the write-time syntax guard; type errors left by failed build 9ed80cc9, healed in 969740df)
+- 🔀 workaround: 0
+- ⏭️ skip: 1 (an invented restart)
+- ❌ shipped imperfect: 3 (a blank, uncontrollable game; "working / fully shippable" over a RED gate; a scratch file in the project)
+- 🥵 struggle: 3 (a `cat .env` attempt blocked; an unused kit canvas; an over-estimated ETA)
+
+Plus the session-level preview that would not wake.
+
+Missing system: the model's closing message was not reconciled with the platform's own verdict. The claim audit existed, but its vocabulary missed every sentence these builds used.
+
+| Item | Root cause → class | Fix | Lock |
+|---|---|---|---|
+| Blank canvas, Controls 0, published link "not opening" | setup() set 'playing'; the loop ran only from start() → the loop is tied to one caller, not to the state | Shell loop follows the status, plus a first frame; kit history regenerated (#4286) | `aGameRunsWhenItSaysItIsPlaying` (reverted: 3 fail) |
+| "Verified working / fully healthy / fully shippable / kaam kar raha hai" over RED | Claim vocabulary too narrow → verdicts phrased outside a fixed word list | Vocabulary widened (EN + Hinglish); a whole-app verdict counts when the game failed | `aGameThatIgnoresInputIsNotCalledWorking` (reverted: 3 fail) |
+| "Preview not running … now restarted" (Q-2714) | No fact for a restart → a claimed action that no command performed | `devServerLaunchEvidence()` from the command log, plus a `restart-claimed` rule | `aRestartNobodyPerformedIsCorrected` (reverted: 1 fail) |
+| `typecheck_output.txt` saved with the app (Q-2713) | The ledger adopts every shell write → a tool-output capture treated as source | `isScratchCapture` (name AND content) in the ledger and both collectors | `aToolOutputCaptureIsNotTheApp` (reverted: 1 fail) |
+| Preview dead 3 days after a failed build | No copy on a failed turn; an older copy refused; wakes unrecorded | Layers 1–3 (#4286) | `failedBuildCopy`, `aPreviewIsNeverBlank`, `previewWakeLog` |
+| Type errors and `edit_file` misses after the failed build | Belongs to Q-2691 / Q-2697 (other session) | — | — |
+| `cat .env` blocked | Not a defect: the governance guard did its job | — | — |
+| USAGE_NOT_REPORTED (Surplus) | Already Q-2414 🟡 | — | — |
+| Unused kit `GameCanvas.tsx` (Q-2715) | Dead-file removal skips a green-latched app | 🟡 BLOCKED: admin decision | — |
+| ETA under the band (Q-2716) | The fastest build of this workspace so far; the band low sat below every earlier build | 🟡 BLOCKED: close as not-a-defect, pending agreement | — |
+| Why that day's wake failed (Q-2717) | No record existed | 🟡 BLOCKED: needs the next PREVIEW_WAKE_HISTORY | — |
 ## 2026-11-17 — Traffic Manager V2, P2: the control store (owner-approved; STOP after P2)
 
 What it is: a versioned, atomic, audited Firestore control store, plus an admin screen (AI Engines → Traffic control).

@@ -17,6 +17,7 @@
 //   for a uid that isn't theirs, so get(workspaceId) can only ever return THIS user's sandbox. Combined
 //   with the single-build-per-account lock (activeBuilds 409), two instances never resume the same
 //   sandbox concurrently. Mirrors DeploymentStore: VITEST-skip, best-effort, never throws/blocks a build.
+import { appendWakeAttempt, wakeHistoryLine, type WakeAttempt } from './previewWakeLog';
 import * as admin from 'firebase-admin';
 import { createHash } from 'node:crypto';
 import { FieldValue, FieldPath } from 'firebase-admin/firestore';
@@ -96,6 +97,10 @@ export interface SandboxRecord {
    * door was falling through to a common-ports guess and landing on 3000 for an app on 5000.
    */
   declaredPort?: number;
+  /** The last few attempts to wake this preview (previewWakeLog.ts), so a failed one is never unexplained. */
+  wakeAttempts?: WakeAttempt[];
+  /** When the failed wakes up to now were written into a build report. */
+  wakeReportedAt?: number;
 }
 
 export type SandboxRecoveryIdentity =
@@ -497,6 +502,39 @@ export class SandboxStore {
    * instance protects nothing, so the ping writes the DURABLE record and the sweep reads it here
    * before pausing anything. Best-effort — a read failure yields null and today's behaviour.
    */
+  /** Append one wake attempt to this workspace's bounded log (previewWakeLog.ts). Best-effort, never throws. */
+  async recordWakeAttempt(workspaceId: string, attempt: WakeAttempt): Promise<void> {
+    const db = this.getDb();
+    if (!db || !workspaceId) return;
+    try {
+      const ref = db.collection('agentv3_sandboxes').doc(workspaceId);
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        tx.set(ref, { workspaceId, wakeAttempts: appendWakeAttempt(snap.exists ? snap.get('wakeAttempts') : [], attempt) }, { merge: true });
+      });
+    } catch { /* a lost log line must never affect the wake itself */ }
+  }
+
+  /**
+   * The report line for wake failures not yet reported, marking them reported (previewWakeLog.ts). Read once
+   * per build, so each failed wake lands in exactly one build report. Never throws; null when none.
+   */
+  async takeUnreportedWakeFailures(workspaceId: string, now = Date.now()): Promise<string | null> {
+    const db = this.getDb();
+    if (!db || !workspaceId) return null;
+    try {
+      const ref = db.collection('agentv3_sandboxes').doc(workspaceId);
+      return await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists) return null;
+        const since = Number(snap.get('wakeReportedAt')) || 0;
+        const line = wakeHistoryLine(snap.get('wakeAttempts'), since);
+        if (line) tx.set(ref, { wakeReportedAt: now }, { merge: true });
+        return line;
+      });
+    } catch { return null; }
+  }
+
   async getRecord(workspaceId: string): Promise<SandboxRecord | null> {
     const db = this.getDb();
     if (!db || !workspaceId) return null;

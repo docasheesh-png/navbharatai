@@ -47,7 +47,7 @@ describe('a slow command says where its time went', () => {
     expect(actuator).toMatch(/const reachStartedAt = Date\.now\(\);\s*const sandbox = await this\.getSandbox\(workspaceId\);\s*let sandboxMs = Date\.now\(\) - reachStartedAt;/);
     expect(actuator.match(/timing: \{ sandboxMs, runMs: priorRunMs \+ Date\.now\(\) - t0 \}/g)?.length).toBe(2);
     const dispatcher = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
-    expect(dispatcher).toContain('durationMs: Date.now() - cmdStartedAt, timing });');
+    expect(dispatcher).toContain('this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt, timing,');
     // Setup time is measured inside runShellLikeBash, whose clock starts where the bash
     // case used to stamp cmdStartedAt (pin, postgres, vault .env) and stops at runCommand.
     expect(dispatcher).toContain('setupMs: runStartedAt - started');

@@ -101950,3 +101950,12 @@ Tests:
 - `control.test.ts`, `trafficControlAdmin.test.ts`, `policy.test.ts` (gate), and `tests/trafficControlNeverStrandsStartedWork.test.ts` (source guards and behaviour).
 - 8 reversions each caught: mid-request recheck reading live control, global switch ignored, planner ignoring the gate, no revision check, no replay guard, LKG dropped, older revision adopted, admission gate off.
 - The P1 `KNOWN_UNREACHABLE` entries were removed, since the route now reads the snapshot. The three new collections are classified as kept for ever, with reasons.
+
+## 2026-11-17 — Owner approved every suggestion ("apke sabhi suggestion approved, build karo")
+
+- **Qubax is the third Pro Weak engine:** Surplus → Router One → Qubax → BluesMinds → Moyi → ladder. It uses the existing Qubax builder adapter (catalogue-checked tools, own price or a labelled estimate, `ENGINE_QX`). Test: `weakQubaxThirdOrder`. `proChainV2Wiring` was repointed, because Qubax now comes from the owner's order and not from v2.
+- **DiscountedTokens on Normal and Strong, right before Sonnet/Opus** (`discountedTokensBuilder.ts`, `ENGINE_DT`). It tries up to three of its models (the owner's order, else gpt-6-sol, then the key's list), one runner each, and then hands over to Claude. It is never on Weak. It is billed only at `DISCOUNTEDTOKENS_BUILDER_RATE_IN/_OUT`, and **it does not run until the owner sets those two rates**. The brand scrub now also knows Moyi, which #4276 missed. Test: `normalStrongDiscountedTokensBeforeSonnet`.
+- **Q-2715 resolved, differently from the approved option:** the deletion was rejected on evidence. The builder's prompt promises the kit's modules, so deleting an unused kit file would break a later edit that imports it, and an unused module is not bundled anyway. The actual defect was the false attribution "your existing code … never used". An untouched kit file (`isKnownKitVersion`) now gets a kit note. Test: `anUnusedKitFileIsNotTheUsersCode`.
+- **Q-2716 closed as not-a-defect,** with the owner's agreement: it was the workspace's fastest build so far, and the ETA learns from history.
+
+Every new test was proven by reversion.

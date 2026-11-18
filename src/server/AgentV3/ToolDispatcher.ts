@@ -132,7 +132,10 @@ import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { isBareManifestInstall, manifestRangeRepairEnabled, repairUnavailableRanges, manifestRepairNote } from './manifestRangeRepair';
 import { shellMayWriteOpaquely, markCommand, changedFilesCommand, parseChangedFiles } from './shellWriteReconcile';
 import { isScratchCapture } from './scratchCapture';
+<<<<<<< HEAD
 import { isKnownKitVersion } from '../lib/gameRecipeLayers';
+=======
+>>>>>>> origin/main
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, shadowKeptToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames, mistypedImport } from './tscErrorCause';
 import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,

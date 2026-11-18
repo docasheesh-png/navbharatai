@@ -249,6 +249,35 @@ export interface GateVerdict {
 // ⚠️ Every field added to RuntimeEvidence that is NOT a runtime CHECK must be excluded here, or it
 // silently becomes a row the gate tries to label and grade. tsc catches the omission, which is
 // how `stoppedByUser` was caught the moment it was added.
+/**
+ * 🔴 BR1999: A REASON IS CUT AT A CLAUSE, NEVER MID-SENTENCE. The gate used to take `.slice(0, 200)` of
+ * the journey derivation's own sentence. The game sentence is about 330 characters, so every game's
+ * RELEASE_GATE read "… in src/game/GameManager.js), and its settings  (not a defect)", a sentence cut in
+ * half and then labelled. The class: a consumer caps a sentence its producer writes, and the cap is
+ * shorter than the producer's own sentences. Two fixes: the cap fits every sentence `noJourneyReason`
+ * can return (`tests/br1999Autopsy.test.ts` checks each branch), and text that is still too long is cut
+ * at the last clause or word, never inside an open parenthesis, and ends with "…". PURE.
+ */
+export const JOURNEY_NONE_WHY_MAX = 480;
+export const JOURNEY_UNREACHABLE_WHY_MAX = 200;
+export function clipReason(text: unknown, max: number): string {
+  const s = String(text ?? '').trim().replace(/\s+/g, ' ');
+  if (s.length <= max) return s;
+  let head = s.slice(0, Math.max(1, max - 1));
+  const clause = Math.max(head.lastIndexOf('; '), head.lastIndexOf(', '), head.lastIndexOf(' — '), head.lastIndexOf('. '));
+  const word = head.lastIndexOf(' ');
+  const end = clause >= max / 2 ? clause : word;
+  if (end > 0) head = head.slice(0, end);
+  // Never leave an unclosed "(": cut before it.
+  const open = (head.match(/\(/g) ?? []).length;
+  const close = (head.match(/\)/g) ?? []).length;
+  if (open > close) {
+    const at = head.lastIndexOf('(');
+    if (at > 0) head = head.slice(0, at);
+  }
+  return `${head.replace(/[\s,;:(—-]+$/, '')}…`;
+}
+
 export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'previewServerDown' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'awaitingShell' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy' | 'journeyReloaded' | 'gameIncomplete' | 'game'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
@@ -386,7 +415,7 @@ export function releaseGate(
   // Derivation describes what the runner could drive, not what the app can store. Reuse its reason
   // in both the details and the headline so a button-driven app with saved state is never told it
   // has "nothing to save" merely because no fill-and-submit journey was derived.
-  const noJourneyWhy = String(ev.journeyNoneWhy ?? '').trim().replace(/\s+/g, ' ').slice(0, 200);
+  const noJourneyWhy = clipReason(ev.journeyNoneWhy, JOURNEY_NONE_WHY_MAX);
 
   for (const key of Object.keys(RUNTIME_LABEL) as Array<keyof typeof RUNTIME_LABEL>) {
     const outcome = ev[key];
@@ -402,7 +431,7 @@ export function releaseGate(
     }
     else if (outcome === 'unreachable') {
       // Reached but inconclusive. Neither a pass nor a defect, and it must be neither here too.
-      const why = String(ev.journeyUnreachableWhy ?? '').trim().replace(/\s+/g, ' ').slice(0, 160);
+      const why = clipReason(ev.journeyUnreachableWhy, JOURNEY_UNREACHABLE_WHY_MAX);
       unproven.push(why
         ? `a user journey was derived but could not be reached (${why})`
         : 'a user journey was derived but could not be reached in the browser');

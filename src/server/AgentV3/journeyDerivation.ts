@@ -651,11 +651,14 @@ export function savedStateEvidence(files: Record<string, string>): { path: strin
  * the game playtest (gamePlaytest.ts) does and reports on its own line — including, when it could not,
  * that the game was never played. The release gate repeats this sentence (journeyNoneWhy), so it must not
  * claim more than that: it says how a game is judged, never that this one passed. PURE.
+ *
+ * 🔴 BR1999: it used to say "its settings controls (a sound switch, a speed slider)", which reads as a fact
+ * about THIS game. The gun game it was said about had neither. Settings are named as examples only.
  */
 export function gameNoJourneyReason(saved: { path: string; what: string } | null): string {
   return 'this is a game — there is no form to fill in and reload, so a save-and-reload journey is the wrong test '
-    + `for it${saved ? ` (it keeps its progress in ${saved.what} in ${saved.path})` : ''}, and its settings controls `
-    + '(a sound switch, a speed slider) are not data. A game is proven by being PLAYED: the game playtest, '
+    + `for it${saved ? ` (it keeps its progress in ${saved.what} in ${saved.path})` : ''}, and settings such as `
+    + 'a sound switch or a speed slider are not data. A game is proven by being PLAYED: the game playtest, '
     + 'reported on its own line, drives its keys, a drag and a touch';
 }
 

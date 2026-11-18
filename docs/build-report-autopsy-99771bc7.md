@@ -56,3 +56,9 @@ Queue state: Q-2764 through Q-2768 are **IN PROGRESS**, owned by branch `codex/a
 The highest-value lever is one truthful verification record shared by compilation, source observation, specialist prompts and report summaries. A write must be indexed when it occurs, a scoped check is not a whole-project check, an interrupted audit is not a pass, and a continuation default is not a classifier verdict. Enforce those distinctions at their shared evidence boundary.
 
 Next, validate first-write design and board-rule/playability contracts against the actual generated source, preserving Stop. Do not add broad model retries, larger budgets or cosmetic post-Stop repairs to hide missing evidence. Full private reports remain necessary for each later BR; this is one sequential autopsy, not a claim to have reviewed the plugin inventory.
+
+## Final candidate validation checkpoint
+
+The restored candidate passed 678 focused tests in 15 files and the final strict server typecheck. Reverting compiler coverage/freshness behavior produced 22 assertion failures among 54 new cases; restoring the exact candidate passed all 54. Scope reversion produced 6 failures among 8 cases; provenance reversion produced 6 failures among 11, and its isolated liveness reversion produced 1 among 11. Two independent final source reviews found no remaining blocker in this bounded compiler evidence change. These checks precede the mandatory full CI-equivalent run and do not substitute for it.
+
+Before that full run, main advanced to `a9ecb055af30d49e38a7c06b83dde84e84b0b6c5` (BR1999). This branch integrates it, preserving its journey-reason change and both queue/progress histories; this autopsy keeps Q-2764–Q-2773. All final full-gate results are recorded in the session/PR, after the final-tree run. No merge to main is authorized.

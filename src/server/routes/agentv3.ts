@@ -26460,8 +26460,8 @@ async function noteBuildOutcome(
                 for (const p of paths) { try { stylesheets[p] = await actuator.readFile(workspaceId, p); } catch { /* unreadable ⇒ not evidence */ } }
               } catch { stylesheets = undefined; /* could not look ⇒ the findings stand */ }
             }
-            // A command-derived receipt may have become stale during finishing/review work. The
-            // deterministic platform checks retain their own verdict; command proof is read live.
+            // Compiler receipts may become stale during finishing/review work. Both command and
+            // deterministic platform proof are checked against the current source revision here.
             const currentTypecheck = commandTypecheckEvidence
               ? buildDiag.typecheckEvidenceFromAgentCommands() ?? 'not-run'
               : currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision());

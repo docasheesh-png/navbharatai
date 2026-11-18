@@ -109,7 +109,7 @@ const OUTPUT_PIPE = /^(?:2>&1\s*)?(?:\|\s*(?:head|tail)(?:\s+(?:-\d+|-n\s+\d+))?
 
 /**
  * Positive evidence that a shell command checked the workspace's default project, rather than one
- * file or another config. Used only for covering skipped writes, not the broader compiler verdict.
+ * file or another config. Shared by skipped-write coverage, workspace memory and live command proof.
  * Opaque chains, pipes and alternate projects abstain: an empty captured output cannot prove them.
  */
 export function checksWholeDefaultTsProject(command: string): boolean {

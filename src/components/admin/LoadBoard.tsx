@@ -89,12 +89,25 @@ const LEVEL_WORD: Record<LoadLevel, string> = {
  * unread ceiling is still the worst thing on the board — but the chip now says how MANY were unread,
  * so a board that is mostly seen is not summarised as a board that was not looked at.
  */
-export function chipWord(worst: LoadLevel, unreadCount: number, tileCount: number): string {
+export function chipWord(worst: LoadLevel, unreadCount: number, tileCount: number, worstTileIds?: readonly string[]): string {
   if (worst === 'unknown' && unreadCount > 0 && unreadCount < tileCount) {
     return `${unreadCount} not measured`;
   }
+  // 🔴 A RATE IS NOT A FILL LEVEL (admin Home capture, 2026-11-18). The chip read "Nearly full" while the
+  // board's own tiles said 1 of 100 instances, CPU 22 %, memory 26 %, 0 builds — because the only critical
+  // tile was "AI load: 25 % unanswered" (3 of 12 requests). "Full" is a statement about capacity; an
+  // unanswered-request rate or unrecovered money is a problem of a different kind, and calling it "Nearly
+  // full" sends the admin to scale servers that are idle. When EVERY tile at the worst level is a rate tile,
+  // the chip says what is true: it needs attention. A capacity tile at that level keeps the fill word.
+  const ids = worstTileIds ?? [];
+  if ((worst === 'warn' || worst === 'critical' || worst === 'full') && ids.length > 0 && ids.every((id) => RATE_TILE_IDS.has(id))) {
+    return 'Needs attention';
+  }
   return LEVEL_WORD[worst] ?? 'Not measured';
 }
+
+/** Tiles whose level is a RATE or an amount, not how full a ceiling is (see `chipWord`). */
+export const RATE_TILE_IDS: ReadonlySet<string> = new Set(['ai', 'money']);
 
 /**
  * The headline sentence. PURE, and exported so its honesty is testable without a browser.
@@ -179,7 +192,7 @@ export function LoadBoard({ adminToken }: { adminToken: string }): React.ReactEl
           <Gauge className="w-4 h-4 text-accent-text" />
           <h3 className="text-sm font-black text-ink uppercase tracking-tight">Platform Load</h3>
           <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${tone.chip}`}>
-            {chipWord(worst, unreadable.length, tiles.length)}
+            {chipWord(worst, unreadable.length, tiles.length, tiles.filter((t) => t.level === worst).map((t) => t.id))}
           </span>
         </div>
         <button

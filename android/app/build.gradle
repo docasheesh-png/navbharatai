@@ -103,7 +103,12 @@ android {
     buildTypes {
         release {
             manifestPlaceholders = [crashlyticsCollectionEnabled: "true"]
-            minifyEnabled false
+            // R8 shrinking + obfuscation ON (owner 2026-11-18, D-7; Play Console flagged Obfuscation at 2% against a 25%
+            // threshold, fix by Feb 2027). The keep rules in proguard-rules.pro protect everything found by name at run
+            // time (Capacitor plugins, the bridge, our plugins, the Facebook reflection). proguard-android.txt, not the
+            // -optimize file: renaming and dead-code removal only. shrinkResources stays off — resources are looked up by
+            // name too (splash, icons).
+            minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
             // Play Console warning (admin 2026-09-29): "This App Bundle contains native code, and you've
             // not uploaded debug symbols." The .so files come from dependencies (Firebase, Play services,

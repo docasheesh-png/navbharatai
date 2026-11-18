@@ -99,7 +99,8 @@ export function TestChatBotPanel({ adminToken }: { adminToken: string }): React.
     if (!action) { setError('This conversation is too long. Start a new test chat or shorten the message. No test was sent.'); return; }
     lock.current = true; setBusy(true); setAccepted(false); setError(''); setDiagnostic(null);
     const current = epoch.current, controller = new AbortController(); sendAbort.current = controller;
-    const timeout = setTimeout(() => controller.abort(), 100_000);
+    // The server bounds each test (90 s; a reseller gateway trying up to three models, 240 s). This only outlives it.
+    const timeout = setTimeout(() => controller.abort(), 250_000);
     try {
       const response = await fetch(`${API}/chat`, { method: 'POST', cache: 'no-store',
         headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' }, signal: controller.signal, body: JSON.stringify(action) });

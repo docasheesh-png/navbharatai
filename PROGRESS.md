@@ -101738,3 +101738,219 @@ Owner override: a balance of 0, or below the pre-flight estimate, does not start
 - **"Worked, called failed 44" and "User got a working app 97%":** an app that rendered was taken as proof the request was delivered. 21 of the 58 failures carry an engine / sandbox / account / cap outcome code; they are now their own line (`renderedButUnfinished`) and earn no delivered credit — 92.4%, not 97% (the page's own counts reproduce both: tests fixture). Content verdicts a render contradicts (the cases of autopsies 697b38ee / 4efab9d7) are unchanged.
 - **"12.6% of 497 settled builds":** the rate is 58 ÷ 460 judged (the 37 the user stopped are in neither half); the note now says so.
 - Other findings on the page are queue rows Q-2721…Q-2725 (unexplained outcomes, a first-pass measure that cannot move, a fake login in a password manager, phone-size overflow ×3, save-then-lose ×2).
+## 2026-11-17 — A published 3D game opened to an empty page: the game loop ran only from start()
+
+Admin: the battle royale's published link (`a-6b8ad5b4e2f4ce94b8a8d7df.mitrify.in`) "open nahi ho raha"; *"mai chahta hu har baar pura game open ho"*.
+
+Evidence: every published file is in the bucket (index, the 797 KB bundle, CSS, icon, manifest, service worker, all HTTP 200). Loaded in a real browser, the HUD renders (Score 0 · Enemies left 19 · ⏸), but the WebGL canvas holds zero drawn pixels and records zero draw calls. In the bundle, the game's own `setupBattleRoyale` calls `setStatus('playing')`, which hides the Play menu. The shell's `GameLoop` started only from `Game.start()`, and nothing called that. The build's playtest had already measured the result ("input ignored · no canvas large enough to measure", Controls 0).
+
+Class: the loop was tied to one caller (`start()`) instead of to the state it represents.
+
+Fix (`GameShellGenerator.ts`, the shared shell):
+- the loop follows the status: `GAME_STARTED` / `GAME_RESUMED`, plus a check right after setup;
+- one frame is drawn after setup, so a menu game shows its world behind the menu;
+- a disposed game never restarts.
+
+`gameKitHistory.ts` was regenerated, so an existing game whose `Game.ts` is untouched kit code receives the fix on its next edit.
+
+Test: `tests/aGameRunsWhenItSaysItIsPlaying.test.ts` runs the REAL generated `Game.ts` and `core/state.ts`. It covers setup setting 'playing', the menu first frame, a later 'playing' from game code, and a disposed game. Reverting the shell fails 3 of the 4 tests. All 693 game-shell tests pass.
+
+Still open from this report: the build that said "100/100, fully shippable" while the release gate was RED (autopsy item), and the preview that would not wake 3 days after a failed build.
+## 2026-11-17 — AI Engines page shows the engines that really run, live, and why each fails
+
+Owner: "jo ai/provider use ho rahe hai, wahi dikhen chahiye, aur yeh live rahe, kon se provider fail ho raha kyu fail ho
+raha likh kar aye, admin ko saf dikhe". The page showed Weak as GLM → KIMI → GLM while its own footer said "Calls today:
+ENGINE_R1 581 · SURPLUS 514": the engines doing most Weak work were missing, nothing said why an engine failed, and
+13 keyless providers were listed as if in use.
+
+- Build Engines now draws the whole chain per tier: for Weak, the leads from `weakLeadEngines.ts` (Surplus when a Weak build
+  opens its session, Router One, BluesMinds, Moyi), then the keyed ladder rungs; each chip marked with its 24-hour failures.
+  The admin route may not import the build route, so the leads live in their own module, and
+  `tests/weakLeadEnginesMatchTheChain.test.ts` builds the real chain and fails if the two ever disagree (proven by
+  reversion). A first version imported the build route into admin.ts and failed three censuses.
+- New "Engine health — last 24 hours" (`engineHealth.ts`): per engine, turns delivered, failed calls, causes in plain
+  words (from `classifyProviderFailure` buckets), last failure time, from the latest build of every project saved in the
+  window on every server. An engine with no recorded use is "No recent use", never "Working"; an unreadable window says so.
+- The tab refreshes engines every minute while open.
+- Provider switches: providers with a key first; keyless ones in a closed "Not set up on this server (N)" list.
+- Tests: `tests/aiEnginesShowWhatRunsAndWhyItFails.test.ts` (server half) and `src/components/admin/BuildEngineHealth.test.tsx`
+  (render half, no server imports: the first version imported server routes into a src test and the frontend typecheck
+  failed with 5,539 errors, the 2026-09-08 class), proven by reversion (idle shown as working; chain without
+  the leads). Not verified: the page against live production data.
+## 2026-11-17 — an empty provider account is recognised by every router (owner: "jis provider ka balance khatam hoga, woh khud hi band ho jayega"; "user ko 100% response mile, jaldi bhi mile")
+
+Class: "has this provider account run out?" was answered by four private copies that had drifted. One shared, pure module now answers it: `src/server/lib/providerAccountQuota.ts`.
+
+What was wrong, per copy:
+- **Free Chat chain** (`openAiCompatProvider.ts`): a 402 was recognised from DeepSeek and CheaperInference only. A 402 from any other rung (Groq, DeepInfra, OpenAI, Cloudflare, GLM, …) became `INVALID_REQUEST`, and the chain **stops** on that code. The user got no answer, the empty account was never cooled down, and the next user hit it again.
+- **Gateway text transport**: `insufficient_balance` was missing, and a 402 was recognised from DeepSeek only.
+- **Gateway vision transport**: GLM codes only, and only on a 429.
+- **Builder predicate** `isProviderBalanceError` (also read by the shared live-health layer in #4282): English phrases only. GLM, the lead rung of every ladder, reports an empty balance as HTTP 429, code 1113, with a Chinese message, so it was read as a rate limit and retried. OpenAI's `insufficient_quota` lives in the error code, not the message.
+
+Fix:
+- `isAccountQuotaSignal` checks status and exact enums only, keeping the no-message-parsing rule of the Free chain and the gateway. A 402 counts on any provider. GLM quota codes count only on GLM.
+- `isAccountBalanceFailure` checks status, codes on the error and its nested body, and a narrow set of phrases (including 余额不足 and Vertex "requires billing to be enabled").
+- Deliberately NOT matched: Gemini's per-minute "You exceeded your current quota…" (status RESOURCE_EXHAUSTED), so a healthy free rung is not benched for a per-minute limit. GLM 1308/1310/1313 are quota (they reset), not "needs recharge".
+
+Tests:
+- `providerAccountQuota.test.ts`: real error shapes, both positive and negative, plus a source census that fails when any other file keeps its own copy of the list.
+- 402 cases for five Free-chain rungs.
+- Each site was reverted and its test watched fail.
+
+Live effect to watch: once #4282 (shared live health) merges, an empty GLM or OpenAI account is marked suspended there and skipped by every ladder, instead of retried as a rate limit.
+
+Not changed: no price or spend cap was added or removed. The existing Free Chat paid cap (`FREE_CHAIN_PAID_DAILY_CAP_USD`) is untouched, pending the owner's answer on whether "price cap na lagao" includes it.
+## 2026-11-17 — DiscountedTokens tries up to three of its own models (owner: "sabse pahle sasta aur accha, response na aaye to 2nd, fail to 3rd, phir aage badho")
+
+Owner report: a DiscountedTokens chat answered (gpt-6-sol, 24 s) but a coding message died as `cancelled`, HTTP status not reported, at **90,001 ms**. That was not the model failing. The admin test page aborts every call at 90 s, and a reasoning model writing code takes longer, so the page cut the reply while it was still being written. The page also called one fixed model only.
+
+Fix (admin Test Chat Bot, all three reseller gateways; the shared class is "a gateway called with one fixed model and one fixed short bound"):
+- `resellerModelLadder` (`resellerGateways.ts`): at most three models, in this order:
+  1. the owner's comma list in `DISCOUNTEDTOKENS_MODEL` / `MOYI_MODEL` / `MIRAPI_MODEL`, in that order;
+  2. else the gateway's default model;
+  3. then the gaps, filled from the key's own `/models` list.
+- `testChatBot.ts` tries the models in order:
+  - Each try reserves its own budget hold.
+  - A model showing no response within **45 s** is given up and the next is tried. Activity is reported by `onActivity`, which fires on every stream event, reasoning included.
+  - A model that IS answering keeps going until the test's **240 s** budget.
+  - A 401/403 stops at once, because a refused key fails every model.
+  - A typed model is the only one tried.
+  - The reply lists every model tried.
+  - When all models fail, the result is `ALL_MODELS_FAILED`, with each attempt shown.
+- The client wait was raised from 100 s to 250 s, so the server bound (90 s, or 240 s for a reseller) decides when a test ends.
+
+Tests:
+- `resellerModelLadder.test.ts`
+- `testChatBot.test.ts`, "the gateway's own three-model fallback". It covers: order, the second model answering, all three failing with no fourth try, a refused key, the 45 s quiet cut versus a 100 s answer that streams, and a typed model.
+- `testChatBotOfficial.test.ts`: activity on reasoning events.
+
+Every new test was proven by reversion.
+
+NOT done: DiscountedTokens in the Pro builder. The tier and position are the owner's call. My recommendation is Normal and Strong, before Sonnet. The same ladder function is ready for a builder rung. Also not done: the "cheapest and good" order. This environment cannot read DiscountedTokens' pricing page, so the order is the owner's list in `DISCOUNTEDTOKENS_MODEL`.
+
+## 2026-11-17 — main red after #4218: a game-asset test fixture skipped the Stop signal
+
+#4218 (merged 12:36 UTC) added `options.signal.throwIfAborted()` to `prepareGameAssets`. Its only production caller (`agentv3.ts`) always passes `abort.signal`. But `assetRolloutGate.test.ts` built its options with `as never` and no `signal`, so CI failed with `Cannot read properties of undefined (reading 'throwIfAborted')`. That fails every PR rebased on main.
+
+The production code is right. The fixture now passes a signal, and its outer `as never` is gone, so the type checks the options. Every other test caller of `prepareGameAssets` was checked: all of them already pass a signal.
+
+## 2026-11-17 — Traffic Manager V2, P1: read-only registry snapshot and upstream families (owner-approved plan)
+
+The owner approved the V2 plan with five improvements: shared-health safety, Firestore efficiency, safe rollback, accurate SLO measurement, and spending controls. They authorised P1 only, and P2 waits for the P1 report.
+
+New in `src/server/AI/TrafficRegistry/`:
+- `types.ts`: the snapshot shapes.
+- `upstreamFamilies.ts`: each provider's own outage domain, plus the domains each route (provider + model) may share. Two routes are independent fallbacks only when their dependency sets are disjoint and neither is `unknown`. A reseller with an unverified host is assumed to share the model maker's domain. Unproven independence counts as shared.
+- `snapshot.ts`: `buildRegistrySnapshot(env)`. It READS the kill-switch families, the API directory, `freeChainConfig(env)` (with each rung's price kept as its own offer), the builder ladders in force (`tierLadder(level, env)`, env overrides included) plus `PLAN_RUNG`, and the reseller gateways. It calls no provider, reads no secret value, and writes nothing.
+
+Nothing reads the snapshot to route yet. It is in `tests/deadCodeGuard.test.ts`'s `KNOWN_UNREACHABLE` with "remove in P2", following the repository's building-block precedent.
+
+Findings the snapshot makes visible (no routing change):
+- The builder `NEMOTRON` rung is served through OpenRouter by default (`NEMOTRON_BASE_URL_DEFAULT`), so it is not independent of other OpenRouter traffic.
+- The three GLM Free Chat rungs share one domain (zhipu).
+- The two DeepInfra paid fallbacks (Llama 8B, DeepSeek V4 Flash) share one domain.
+- CheaperInference `beam` and LLM7 `default` have unknown makers, so they are independent of nothing.
+
+Census tests (`snapshot.test.ts`, `upstreamFamilies.test.ts`, 33 in total) fail when any of these is missing from the registry: a kill-switch family, a directory row, a Free Chat rung, or a builder rung. Five reversions were each caught: an unclassified family, `unknown` treated as independent, Vertex split from Google, the builder ladder not read, and the Requesty route host ignored.
+
+Not in P1, by design: runtime catalogs (the gateway's reviewed Firestore catalog, the live OpenRouter free list, Surplus offers). They join in P2 with the control store.
+
+## 2026-11-17 — A preview is never blank: the three layers (admin: "iska koi permanent solution dhundo … han bilkul banao")
+
+Report: the admin opened a three-day-old battle royale to edit it, and the preview "1 second bhi nahi chala". This is the same class as 2026-09-08 ("2-3 din bad preview band"). The earlier fix (`previewWake.ts`) never covered the state a FAILED build leaves behind.
+
+The chain:
+- Build 3 ended ENGINE_UNAVAILABLE after changing files, and after its app had rendered.
+- The VM-free copy is taken only inside the production-build gate, which needs `result.ok`. So no copy was taken.
+- The copy from build 2 became "not current". The door refused it for a 'starting' machine.
+- The machine did not answer.
+- The result was an endless waiting page over an app we held a working copy of.
+
+The fix:
+1. **A failed build that rendered still leaves a copy** (`failedBuildCopy.ts`, `keepFailedBuildCopy`). This runs only for a failed turn that rendered, took no copy, was not stopped and has 90 s left. It runs the same production build and, only if that passes, takes the same copy. It changes no verdict, outcome or charge. It reports FAILED_BUILD_COPY_KEPT / _NOT_KEPT. The copy-taking itself moved out of the route into `takeBuildCopy`, so the gate and this path share one definition.
+2. **A starting preview shows the last working version, labelled** (`snapshotStandIn` in `previewSnapshot.ts`). An OLDER copy stands in, with SNAPSHOT_OLDER_NOTE ("changes made after it are not in this copy yet"). It never does so while a build runs, and never within 10 minutes of the last write, so a fresh edit is never hidden. The door and preview-health ask the same function, and the live app still replaces the copy by itself.
+3. **Every wake-up is recorded** (`previewWakeLog.ts`). Each preview-diagnose finish appends {at, ok, last stage, reason, seconds} to a bounded five-entry log on the sandbox record, with URLs and keys stripped. The next build writes the not-yet-reported failures into its report as PREVIEW_WAKE_HISTORY.
+
+Constraint found: the build function in `agentv3.ts` sits exactly at TypeScript's control-flow-analysis limit (TS2563). Even a three-line `if` tipped it over and broke typechecking across the whole server. New logic therefore lives in modules, and the route keeps one branch-free call. Record this before adding anything to that function.
+
+Tests (each proven by reversion):
+- `aPreviewIsNeverBlank.test.ts`
+- `failedBuildCopy.test.ts`
+- `previewWakeLog.test.ts`, including a wiring guard
+
+Five source guards were repointed to the moved copy code: `previewSnapshotWiring`, `sandboxLifetime`, `snapshotIdentity`, `theCopyFollowsEveryPass`, `theSearchBoxWasInHindi`.
+
+Not proven: why that day's wake did not bring the machine back. No record of it existed; layer 3 makes the next one visible.
+
+## 2026-11-17 — Autopsy 57604006, builds 969740df and 1712adfa (the battle royale): ledger
+
+Builds 5e558cb2, 7dc42243, d0c5a371 and 9ed80cc9 of the same session were autopsied by another session (Q-2690–Q-2701, branch `claude/practical-dijkstra-e7o2hc`), and were not redone here.
+
+Tally:
+- ✅ self-heal: 2 (the write-time syntax guard; type errors left by failed build 9ed80cc9, healed in 969740df)
+- 🔀 workaround: 0
+- ⏭️ skip: 1 (an invented restart)
+- ❌ shipped imperfect: 3 (a blank, uncontrollable game; "working / fully shippable" over a RED gate; a scratch file in the project)
+- 🥵 struggle: 3 (a `cat .env` attempt blocked; an unused kit canvas; an over-estimated ETA)
+
+Plus the session-level preview that would not wake.
+
+Missing system: the model's closing message was not reconciled with the platform's own verdict. The claim audit existed, but its vocabulary missed every sentence these builds used.
+
+| Item | Root cause → class | Fix | Lock |
+|---|---|---|---|
+| Blank canvas, Controls 0, published link "not opening" | setup() set 'playing'; the loop ran only from start() → the loop is tied to one caller, not to the state | Shell loop follows the status, plus a first frame; kit history regenerated (#4286) | `aGameRunsWhenItSaysItIsPlaying` (reverted: 3 fail) |
+| "Verified working / fully healthy / fully shippable / kaam kar raha hai" over RED | Claim vocabulary too narrow → verdicts phrased outside a fixed word list | Vocabulary widened (EN + Hinglish); a whole-app verdict counts when the game failed | `aGameThatIgnoresInputIsNotCalledWorking` (reverted: 3 fail) |
+| "Preview not running … now restarted" (Q-2714) | No fact for a restart → a claimed action that no command performed | `devServerLaunchEvidence()` from the command log, plus a `restart-claimed` rule | `aRestartNobodyPerformedIsCorrected` (reverted: 1 fail) |
+| `typecheck_output.txt` saved with the app (Q-2713) | The ledger adopts every shell write → a tool-output capture treated as source | `isScratchCapture` (name AND content) in the ledger and both collectors | `aToolOutputCaptureIsNotTheApp` (reverted: 1 fail) |
+| Preview dead 3 days after a failed build | No copy on a failed turn; an older copy refused; wakes unrecorded | Layers 1–3 (#4286) | `failedBuildCopy`, `aPreviewIsNeverBlank`, `previewWakeLog` |
+| Type errors and `edit_file` misses after the failed build | Belongs to Q-2691 / Q-2697 (other session) | — | — |
+| `cat .env` blocked | Not a defect: the governance guard did its job | — | — |
+| USAGE_NOT_REPORTED (Surplus) | Already Q-2414 🟡 | — | — |
+| Unused kit `GameCanvas.tsx` (Q-2715) | Dead-file removal skips a green-latched app | 🟡 BLOCKED: admin decision | — |
+| ETA under the band (Q-2716) | The fastest build of this workspace so far; the band low sat below every earlier build | 🟡 BLOCKED: close as not-a-defect, pending agreement | — |
+| Why that day's wake failed (Q-2717) | No record existed | 🟡 BLOCKED: needs the next PREVIEW_WAKE_HISTORY | — |
+## 2026-11-17 — Traffic Manager V2, P2: the control store (owner-approved; STOP after P2)
+
+What it is: a versioned, atomic, audited Firestore control store, plus an admin screen (AI Engines → Traffic control).
+- **Global emergency OFF**: every gateway surface goes to its legacy path.
+- **Per-surface switches**: `env` or `legacy`.
+- **Per provider or model**: `enabled`, `draining`, `disabled`, plus a traffic cap of 0–100%.
+- **Admission evidence per model**: capability test, price check, security review and ops test, with a reviewer and an expiry.
+
+Files:
+- `src/server/AI/TrafficRegistry/controlTypes.ts`: strict schema and validation.
+- `controlDecision.ts`: the pure gates.
+- `controlStore.ts`: one transaction writes the `admin_traffic_control/current` doc, CREATEs the immutable `admin_traffic_control_revisions/{rev}` copy, and creates the `admin_traffic_control_audit` row. It checks the revision before writing. A rollback is a new revision.
+- `controlSync.ts`: keeps the last-known-good doc and only ever moves to a higher revision. It reads one doc per instance on an adaptive 15→60 s interval with ±20% jitter.
+- `routes/trafficControlAdmin.ts`, `components/admin/TrafficControlPanel.tsx`, `lib/trafficControlView.ts`.
+
+Safety design (owner requirements 9 and 10):
+- **It can only NARROW.** No mode widens what the env enables. An empty store is exactly today's routing, so nothing changes in production until an admin turns something off.
+- **Ingress decides.** Ingress (`runWithAuthenticatedInferenceGatewayRequest`, `inferenceGatewayEnabled`) takes one control snapshot per request, before any provider call.
+- **The planner gate applies only to new attempts.** It is supplied only where a NEW attempt is planned (`executor.ts`), never on the ledger's re-check of an already-selected attempt.
+- **Mid-request checks are env-only.** `selectedCohortCurrent` and `verifiedPrincipal` stay env-only, so a switch flipped mid-request never strands, re-runs or double-charges a request.
+- **Guest quota is never double-counted.** A guest already admitted to the gateway quota keeps that decision for the request, and the guest-selection step consults the store.
+- **The env OFF still beats everything.**
+
+**DEVIATION from the approved plan text, stated plainly:**
+- The plan said "legacy until the first read". That would move every cold start off the gateway, which is a production change P2 must not make.
+- So before the first read the instance enforces nothing extra, which is exactly today's routing.
+- The first read starts at boot, and the env OFF remains the instant backstop.
+
+**MFA finding:**
+- Admin login MFA is optional in this codebase. With nothing enrolled, login is password-only.
+- So writes also need a fresh 6-digit TOTP code, accepted once per instance, and are refused until MFA is enrolled.
+
+**Admission:**
+- `required: false` means observe only: the gaps are shown and nothing is blocked. That way models serving today are unaffected.
+- `required: true` means the planner refuses the model until all checks are present and unexpired.
+
+Scope limits (P3+):
+- Provider and model drain, disable and caps are enforced on the GATEWAY path.
+- The legacy ladders (FreeChain, AIRouter, builder) still honour the kill switch only. They gain drain and skip through the shared health layer in P3.
+
+Tests:
+- `control.test.ts`, `trafficControlAdmin.test.ts`, `policy.test.ts` (gate), and `tests/trafficControlNeverStrandsStartedWork.test.ts` (source guards and behaviour).
+- 8 reversions each caught: mid-request recheck reading live control, global switch ignored, planner ignoring the gate, no revision check, no replay guard, LKG dropped, older revision adopted, admission gate off.
+- The P1 `KNOWN_UNREACHABLE` entries were removed, since the route now reads the snapshot. The three new collections are classified as kept for ever, with reasons.

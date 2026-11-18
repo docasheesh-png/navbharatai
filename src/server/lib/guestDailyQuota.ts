@@ -38,6 +38,8 @@ import { verifyFirebaseIdentity } from './authMiddleware';
 import { anonymousCallerTier, type GuestSurface } from './anonymousCapabilities';
 import { parseEnvFlag } from './envFlag';
 import { gatewayRolloutAllowsGuest } from '../AI/InferenceGateway/rollout';
+import { controlAllowsGateway } from '../AI/TrafficRegistry/controlDecision';
+import { currentTrafficControl } from '../AI/TrafficRegistry/controlSync';
 
 /** The header the app sends with its anonymous device id. */
 export const GUEST_ID_HEADER = 'x-nb-guest';
@@ -89,7 +91,10 @@ function issueGuestInferenceAdmission(req: Request, res: Response, principalId: 
 }
 function gatewayGuestSelected(surface: GuestSurface, env: NodeJS.ProcessEnv): boolean {
   return (surface === 'chat' || (fixedTextChainEnabled(env) && surface === 'repo-analyst')) && gatewayRolloutAllowsGuest(env) && parseEnvFlag(env.INFERENCE_GATEWAY_ENABLED) === true
-    && (fixedTextChainEnabled(env) || !env.INFERENCE_GATEWAY_SURFACES?.trim() || env.INFERENCE_GATEWAY_SURFACES.split(',').map(s => s.trim()).includes('chat'));
+    && (fixedTextChainEnabled(env) || !env.INFERENCE_GATEWAY_SURFACES?.trim() || env.INFERENCE_GATEWAY_SURFACES.split(',').map(s => s.trim()).includes('chat'))
+    // The control store (Traffic Manager V2) can send this surface to its legacy path; then the guest is not
+    // admitted to the gateway's quota at all, so the legacy path counts it once, as it always has.
+    && controlAllowsGateway(currentTrafficControl(), surface === 'chat' ? 'chat' : 'professional');
 }
 function guestStoreUnavailable(res: Response): void {
   if (!res.destroyed && !res.writableEnded) res.status(503).json({ code: 'INFERENCE_GATEWAY_UNAVAILABLE',

@@ -42,7 +42,7 @@ const norm = (s: string): string => String(s ?? '').normalize('NFKC').toLowerCas
 
 // "athree" / "a-three" / "a three"; "a3" only next to map/world (otherwise it is a paper size). Hindi spellings too.
 const NAMED = /\bathree\b|\ba[\s._-]three\b|\ba[\s._-]?3\s+(?:map|world|duniya|nakshe|nakshā)\b|\b(?:map|world)\s+a[\s._-]?3\b|(?:अथ्री|एथ्री|आथ्री|अथरी|एथरी)/;
-const DECLINED = /\b(?:no|not|don'?t|dont|without|nahi|nahin|mat|naa)\b[^.!?\n]{0,24}\b(?:athree|a[\s._-]three)\b|\b(?:athree|a[\s._-]three)\b[^.!?\n]{0,24}\b(?:nahi|nahin|mat|not|no|nahi\s+chahiye)\b/;
+const DECLINED = /\b(?:no|not|don'?t|dont|without|nahi|nahin|mat|naa)\s+(?:(?:use|using|add|the|a|an|to|generate|want|need|install|select)\s+){0,5}(?:athree|a[\s._-]three)\b|\b(?:athree|a[\s._-]three)\s+(?:(?:map|world|ko|ka|is|use)\s+){0,4}(?:(?:nahi|nahin|mat)\b|(?:not|no)\b(?=\s*(?:needed\b|wanted\b|required\b|$|[,.;!?])))|(?:अथ्री|एथ्री|आथ्री|अथरी|एथरी)\s+(?:(?:मैप|नक्शा|नक्शे)\s+)?(?:नहीं|नही|मत)/;
 const CHANGE_MAP = /\b(?:change|switch|different|another|new|badlo|badal|naya|doosra|dusra)\b[^.!?\n]{0,16}\bmap\b|\bmap\b[^.!?\n]{0,16}\b(?:change|badlo|badal|different)\b/;
 
 // Devanagari spellings are input parsing (this module is server code, outside the English-only UI rule).
@@ -126,32 +126,4 @@ export function athreeMapIntent(input: AthreeIntentInput): AthreeIntent {
 // A request that names none of them ("a big open world") gets everything: the safe default is the whole map, never a bare one.
 // PURE: no I/O, no clock, no env. Never throws.
 
-const MODULE_WORDS: Record<string, string[]> = {
-  sea: ['sea', 'ocean', 'samudra', 'samundar', 'sagar', 'beach', 'coast', 'shore', 'waves', 'lehar', 'boat', 'naav', 'island', 'dweep', 'sea level'],
-  plants: ['tree', 'trees', 'ped', 'jungle', 'forest', 'grass', 'ghaas', 'plants', 'paudhe', 'bagicha', 'garden', 'woods'],
-  rivers: ['river', 'rivers', 'nadi', 'lake', 'talab', 'jheel', 'pond', 'stream', 'waterfall', 'jharna'],
-  sky: ['sky', 'aasmaan', 'asman', 'weather', 'mausam', 'rain', 'baarish', 'barish', 'night', 'raat', 'sunset', 'sunrise', 'cloud', 'clouds', 'baadal', 'fog', 'kohra', 'storm', 'toofan', 'time of day', 'day and night', 'din raat'],
-  roads: ['road', 'roads', 'sadak', 'highway', 'race', 'racing', 'track', 'circuit', 'runway', 'bridge', 'pul', 'city', 'village', 'gaon', 'street', 'town'],
-  vehicles: ['car', 'cars', 'gaadi', 'gadi', 'bike', 'bikes', 'motorcycle', 'drive', 'driving', 'vehicle', 'vehicles', 'racing', 'race', 'truck'],
-};
-const ALL_WORDS = ['everything', 'sab kuch', 'sabkuch', 'poora', 'pura', 'full map', 'all modules', 'sabhi', 'all of it', 'complete map'];
-
-export interface AthreeModules {
-  /** The optional modules this request needs, in the build's own order. */
-  modules: string[];
-  /** One sentence for the build report: which words picked which modules, or why it is everything. */
-  reason: string;
-}
-
-export function athreeModulesFor(prompt: string): AthreeModules {
-  const all = Object.keys(MODULE_WORDS);
-  const text = ' ' + String(prompt ?? '').toLowerCase().replace(/[^a-z0-9\u0900-\u097f]+/g, ' ') + ' ';
-  const has = (w: string): boolean => text.includes(' ' + w + ' ');
-  if (ALL_WORDS.some(has)) return { modules: all, reason: 'The request asks for everything, so every module is included.' };
-  const hit: Record<string, string[]> = {};
-  for (const m of all) { const words = MODULE_WORDS[m].filter(has); if (words.length) hit[m] = words; }
-  const chosen = all.filter((m) => hit[m]);
-  if (chosen.length === 0) return { modules: all, reason: 'The request names no particular feature, so every module is included.' };
-  return { modules: chosen, reason: 'Only what the request asks for: ' + chosen.map((m) => m + ' (' + hit[m].slice(0, 2).join(', ') + ')').join('; ') + '.' };
-}
-
+export { athreeModulesFor, enforceAthreeModuleExclusions, type AthreeModules } from './athreeModuleSelection';

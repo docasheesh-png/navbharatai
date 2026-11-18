@@ -47,6 +47,7 @@ export interface IEngineerActuator {
    */
   takeSeededScaffold?(workspaceId: string): Record<string, string> | undefined;
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
+  createFileExclusive?(workspaceId: string, filePath: string, content: string): Promise<void>;
   /**
    * Phase 12C/12D — write a binary file (e.g. an uploaded image/logo) from a
    * base64 payload. Decodes to raw bytes so the asset is usable as-is (a UTF-8

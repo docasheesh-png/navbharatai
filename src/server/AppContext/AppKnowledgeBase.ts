@@ -60,6 +60,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   },
 
   {
+    id: 'athree_requested_composition',
+    name: 'Requested procedural world modules',
+    path: 'NavBharatAI Pro → request a 3D world when Athree is enabled',
+    description: 'The optional Athree composition recipe can emit an explicit seeded runtime world and bounded original visual humans, six animal kinds, cars and motorcycles. It refuses unsupported kinds and sizes above 100 km, checks phone/mid/desktop object budgets, and preserves conflicting project source. This is not a promise of 1000 km worlds, photorealism, mobile FPS, NPC AI, combat or vehicle driving. The builder still wires the returned helper into the game lifecycle. Missing placements and dependency failures must be reported honestly.',
+    howToUse: 'Describe the world, target device and objects. The builder selects supported structured parameters and calls the guarded recipe. Existing source conflicts require an explicit manual adaptation rather than a replacement. Test the resulting game and requested gameplay; code generation is not device certification.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['world modules', 'runtime world', 'procedural objects', 'animal module', 'human module'],
+  },
+
+  {
     id: 'game_enterable_house_kit',
     name: 'Explorable house game kit',
     path: 'NavBharatAI Pro → describe a game with enterable houses',

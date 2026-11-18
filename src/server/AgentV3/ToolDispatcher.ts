@@ -366,16 +366,17 @@ import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
-import { generateGameShell } from '../lib/GameShellGenerator';
-import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
-import { athreeMapIntent, athreeModulesFor } from '../lib/athreeMap/athreeMapIntent';
-import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
-import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
 import { selfAuthorObject, madeCache } from '../lib/objectForge/forgeSelfAuthor';
 import { parseCustomisation, applyEdits, customiseSummary, nodeNamesOf, specFromObjectFile, personSpecFor } from '../lib/objectForge/forgeCustomise';
+import { generateGameShell } from '../lib/GameShellGenerator';
+import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
+import { generateRequestedAthreeWorld } from '../lib/athreeMap/compositionRequest';
+import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from '../lib/athreeMap/athreeMapIntent';
+import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
+import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
@@ -550,6 +551,8 @@ export interface ActuatorPort {
    */
   readFileAdvisory?(workspaceId: string, filePath: string, timeoutMs?: number): Promise<string>;
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
+  /** Atomic exclusive creation, never replace an existing path. Required by new procedural recipes. */
+  createFileExclusive?(workspaceId: string, filePath: string, content: string): Promise<void>;
   listFiles(workspaceId: string): Promise<string[]>;
   runCommand(
     workspaceId: string,
@@ -1365,7 +1368,7 @@ export class ToolDispatcher {
    * then the destructive / parse / duplicate checks. `AGENTV3_GUARDED_WRITE_DOOR=off` does NOT
    * skip these — that flag only disables the actuator `beforeWrite` backstop.
    */
-  private async guardedWrite(path: string, content: string, opts: { agent: AgentRole; source: string; allowOverwrite?: boolean }): Promise<{ kind: 'create' | 'modify'; content: string; existingContent: string; kitNote: string }> {
+  private async guardedWrite(path: string, content: string, opts: { agent: AgentRole; source: string; allowOverwrite?: boolean; exclusiveCreate?: boolean }): Promise<{ kind: 'create' | 'modify'; content: string; existingContent: string; kitNote: string }> {
     const rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT);
     this.assertWritable(rel);
     this.assertTextWritable(rel);
@@ -1421,7 +1424,10 @@ export class ToolDispatcher {
     const writeParseReject = await this.parseGuardRejection(rel, existingContent, content);
     if (writeParseReject) refuse(writeParseReject);
     await this.refuseBrokenPageEdit(rel, existingContent, content);
-    await this.actuator.writeFile(this.workspaceId, rel, content);
+    if (opts.exclusiveCreate) {
+      if (!this.actuator.createFileExclusive) refuse('Atomic file creation is unavailable; preserve existing source.');
+      await this.actuator.createFileExclusive!(this.workspaceId, rel, content);
+    } else await this.actuator.writeFile(this.workspaceId, rel, content);
     this.onFileWrite?.(rel, content);
     if (kind === 'modify') this.noteDroppedImports(rel, existingContent, content);
     return { kind, content, existingContent, kitNote };
@@ -3744,7 +3750,7 @@ export class ToolDispatcher {
     }
   }
 
-  private async writeRecipeFiles(files: Record<string, string>, agent: AgentRole): Promise<string[]> {
+  private async writeRecipeFiles(files: Record<string, string>, agent: AgentRole, additiveOnly = false, exclusiveCreate = false): Promise<string[]> {
     const lines: string[] = [];
     const runner = await this.declareVitestForRecipeTests(files, agent);
     if (runner) lines.push(runner);
@@ -3768,6 +3774,7 @@ export class ToolDispatcher {
         lines.push(`Unchanged ${path} (already exactly what this recipe writes)`);
         continue;
       }
+      if (additiveOnly && !missing) refuse('Additive composition found changed existing source at ' + path + '; no replacement attempted. Earlier new files may exist; inspect before retry.');
       // 🧬 An older kit version nobody edited is brought up to date (Q-863, gameRecipeLayers.ts): the recipe's
       // instructions describe the CURRENT files, and code written from them against the old file would not compile.
       if (!missing && existing !== null && kitRefreshable(path, existing, content)) {
@@ -3790,7 +3797,7 @@ export class ToolDispatcher {
         lines.push(`skipped existing ${path}${stale ? ' — it is not the current kit version (somebody changed it), so it was kept as it is; the instructions below may name functions it does not have' : ''}`);
         continue;
       }
-      const wrote = await this.guardedWrite(path, content, { agent, source: 'writeRecipeFiles', allowOverwrite: false });
+      const wrote = await this.guardedWrite(path, content, { agent, source: 'writeRecipeFiles', allowOverwrite: false, exclusiveCreate });
       this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
       getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
       this.noteKitCurrent(path, wrote.content);
@@ -9690,21 +9697,55 @@ export class ToolDispatcher {
         const athreeStored = await this.actuator.readFile(this.workspaceId, 'src/game/athree/index.ts').then(() => ({ mapId: 'athree' }), () => null);
         const athreeDecision = athreeMapIntent({ prompt: this.coverageRequest ?? this.userRequest ?? '', stored: athreeStored, seedKey: this.workspaceId });
         if (!athreeDecision.use) refuse(`The Athree map is not used here: ${athreeDecision.reason} Build without it.`);
-        // WHICH MODULES (admin 2026-11-15): the builder may pass `include`; otherwise the request decides, so a game that asked for a river and
-        // some trees gets those, and a request that names no feature gets the whole map.
+        // Retain the native request-driven module selector for both plain and composed worlds.
         const athRec = (input as Record<string, unknown>) || {};
         const athModules = Array.isArray(athRec.include) ? athRec.include.filter((v): v is string => typeof v === 'string') : undefined;
-        const athPick = athModules ?? athreeModulesFor(this.coverageRequest ?? this.userRequest ?? '').modules;
-        // WHICH MAP (admin 2026-11-15, "100+ type ke maps, 1 km se 1000 km"): the builder may pass archetype and size_km; otherwise the user's
-        // words decide (a size, a kind of land); naming neither gives the default world.
+        const athSelection = athreeModulesFor(this.coverageRequest ?? this.userRequest ?? '');
+        const athPick = athModules ? enforceAthreeModuleExclusions(athModules, athSelection) : athSelection.modules;
+        const composition = athRec.composition;
         const athArchetype = typeof athRec.archetype === 'string' ? athRec.archetype.trim().toLowerCase() : '';
         const athSize = typeof athRec.size_km === 'number' && Number.isFinite(athRec.size_km) ? athRec.size_km : null;
-        let athChoice = (athArchetype && !(athArchetype in ARCHETYPES)) ? null : (athArchetype || athSize !== null ? { archetype: (athArchetype || 'continental') as Archetype, sizeKm: athSize ?? 100 } : mapChoiceFor(this.coverageRequest ?? this.userRequest ?? ''));
-        if (athArchetype && !(athArchetype in ARCHETYPES)) return `Unknown map kind "${athArchetype}". The kinds are: ${ARCHETYPE_IDS.join(', ')}.`;
+        if (athArchetype && !(athArchetype in ARCHETYPES)) refuse(`Unknown map kind "${athArchetype}". The kinds are: ${ARCHETYPE_IDS.join(', ')}.`);
+        let athChoice = athArchetype || athSize !== null ? { archetype: (athArchetype || 'continental') as Archetype, sizeKm: athSize ?? 100 } : mapChoiceFor(this.coverageRequest ?? this.userRequest ?? '');
         if (athChoice) athChoice = { archetype: athChoice.archetype, sizeKm: clampSizeKm(athChoice.sizeKm) };
-        const ath = generateAthreeMap(athPick, athChoice);
-        const athWritten = await this.writeRecipeFiles(ath.files, agent);
-        const athLayers = await this.addMissingRecipeLayers(ath.files, agent);
+        if (composition !== undefined) {
+          const promptSize = sizeKmIn(this.coverageRequest ?? this.userRequest ?? '');
+          const requestedSizes = [athSize, promptSize].filter((size): size is number => size !== null);
+          const width = (composition as {widthKm?:unknown})?.widthKm;
+          if (requestedSizes.some(size => width !== size)) refuse('Requested map size and composition widthKm must agree; composition supports only 1–100 km. No map was installed.');
+          if (athChoice && typeof width === 'number') athChoice = {...athChoice,sizeKm:width};
+        }
+        const ath = composition === undefined ? generateAthreeMap(athPick, athChoice, athSelection.excluded) : generateRequestedAthreeWorld(composition, athPick, athSelection.excluded, athChoice);
+        // Additive only: a read failure is not a missing file, and custom project source must not be replaced.
+        if (composition !== undefined) {
+          if (!this.actuator.createFileExclusive) refuse('World composition requires atomic exclusive source creation; this backend is unavailable. No source was installed.');
+          // Require a real scaffold manifest; dependency setup must not silently skip an unreadable project.
+          const manifest = JSON.parse(await this.actuator.readFile(this.workspaceId, 'package.json'));
+          const declaredThree = manifest?.dependencies?.three ?? manifest?.devDependencies?.three;
+          if (declaredThree !== undefined && !['0.180.0', '^0.180.0', '~0.180.0'].includes(declaredThree)) refuse('Existing Three.js version needs compatibility review; preserve the project.');
+          for (const [path, source] of Object.entries(ath.files)) {
+            let existing: string;
+            try { existing = await this.actuator.readFile(this.workspaceId, path); }
+            catch (error) { if (isNotFoundError(error)) continue; throw error; }
+            if (existing !== source) refuse('World composition would replace existing source at ' + path + '. Preserve it and adapt manually instead.');
+          }
+        }
+        const athWritten = await this.writeRecipeFiles(ath.files, agent, composition !== undefined, composition !== undefined);
+        let athLayers = composition === undefined ? await this.addMissingRecipeLayers(ath.files, agent) : '';
+        if (composition !== undefined) {
+          const dependencies = await this.installRecipeDependenciesOutcome(ath.files);
+          athLayers = dependencies.note;
+          if (dependencies.outcome === 'failed' || dependencies.outcome === 'busy') refuse('World composition files were added, but dependencies are not ready. Do not claim a runnable world.' + dependencies.note);
+          const finalManifest = JSON.parse(await this.actuator.readFile(this.workspaceId, 'package.json'));
+          const finalThree = finalManifest?.dependencies?.three ?? finalManifest?.devDependencies?.three;
+          if (!['0.180.0', '^0.180.0', '~0.180.0'].includes(finalThree)) refuse('World composition files exist but the required Three.js dependency is not verified. Do not claim a runnable world.');
+        }
+        if (composition !== undefined) {
+          for (const [path, source] of Object.entries(ath.files)) {
+            const saved = await this.actuator.readFile(this.workspaceId, path);
+            if (saved !== source) refuse('World composition is incomplete or changed at ' + path + '. Preserve existing files and inspect; do not claim installation.');
+          }
+        }
         this.scheduleCheckpoint('athree map');
         return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${ath.instructions}${athLayers}`;
       }
@@ -12843,3 +12884,4 @@ export function globToRegExp(glob: string): RegExp {
   }
   return new RegExp(`^${re}$`);
 }
+

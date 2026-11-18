@@ -101991,3 +101991,16 @@ Tests:
 ## 2026-11-18 — reconcile #4228 Forge preservation with current main
 
 Owner requested errors fixed before merging all open PRs. Kept #4225's exclusive-create path and Forge's preservation guards together. Updated the catalogue, prompt and tests to state real behavior: admitted architect specs can create new objects; describe-only sidecalls remain held, and existing-object customization is refused without genuine atomic expected-content replacement. The optional replacement interface now passes cancellation/authorization and durable recording. Added preservation/race tests and Unicode/project-cache isolation cases. The production actuator still has no CAS implementation; none is simulated or claimed. Final integration CI is tracked by the merge session; no live E2B or browser acceptance claimed here.
+## 2026-11-17 — Owner approved every suggestion ("apke sabhi suggestion approved, build karo")
+
+- **Qubax is the third Pro Weak engine:** Surplus → Router One → Qubax → BluesMinds → Moyi → ladder. It uses the existing Qubax builder adapter (catalogue-checked tools, own price or a labelled estimate, `ENGINE_QX`). Test: `weakQubaxThirdOrder`. `proChainV2Wiring` was repointed, because Qubax now comes from the owner's order and not from v2.
+- **DiscountedTokens on Normal and Strong, right before Sonnet/Opus** (`discountedTokensBuilder.ts`, `ENGINE_DT`). It tries up to three of its models (the owner's order, else gpt-6-sol, then the key's list), one runner each, and then hands over to Claude. It is never on Weak. It is billed only at `DISCOUNTEDTOKENS_BUILDER_RATE_IN/_OUT`, and **it does not run until the owner sets those two rates**. The brand scrub now also knows Moyi, which #4276 missed. Test: `normalStrongDiscountedTokensBeforeSonnet`.
+- **Q-2715 resolved, differently from the approved option:** the deletion was rejected on evidence. The builder's prompt promises the kit's modules, so deleting an unused kit file would break a later edit that imports it, and an unused module is not bundled anyway. The actual defect was the false attribution "your existing code … never used". An untouched kit file (`isKnownKitVersion`) now gets a kit note. Test: `anUnusedKitFileIsNotTheUsersCode`.
+- **Q-2716 closed as not-a-defect,** with the owner's agreement: it was the workspace's fastest build so far, and the ETA learns from history.
+
+Every new test was proven by reversion.
+
+
+## 2026-11-18 — PR #4288 merge review: admission follows the configured chain; Weak supplier IDs cannot bypass its guard
+
+Reconciled with main without dropping the existing composition changes. Fixed the pre-flight availability check so Normal and Strong can start when their only configured runner is DiscountedTokens; its missing-rate and off-switch rules still refuse it, and Weak never borrows it. Qubax model selection now excludes Claude-family IDs before they acquire the neutral ENGINE_QX name: the final Weak guard cannot recognize an underlying model from that neutral name. A configuration containing only excluded models makes the rung unavailable instead of admitting an empty chain. Regression cases cover the constructed chain, missing rates, explicit disable, catalogue and no-catalogue model filtering. Full integration validation is coordinated by the merge task; focused results are recorded separately and are not a full CI claim.

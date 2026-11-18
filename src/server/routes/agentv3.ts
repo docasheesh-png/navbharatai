@@ -523,6 +523,9 @@ import OpenAI from 'openai';
 import { routerOneCatalogStatus, startRouterOneCatalogSync, syncRouterOneCatalog } from '../AI/RouterOne/routerOneCatalog';
 import { bluesmindsBuilderEnabled, bluesmindsBuilderRungs } from '../AgentV3/bluesmindsBuilder';
 import { moyiBuilderEnabled, moyiBuilderRungs } from '../AgentV3/moyiBuilder';
+import { qubaxBuilderRungs } from '../AgentV3/proChainV2/builderAdapters';
+import { qubaxBuilderEnabled } from '../AgentV3/proChainV2/qubaxBuilder';
+import { beforeFirstClaudeRung, discountedTokensBuilderEnabled, discountedTokensBuilderRungs } from '../AgentV3/discountedTokensBuilder';
 import { ROUTER_ONE_LABEL, ROUTER_ONE_NOT_CONFIGURED, routerOneApiKey, routerOneBaseUrl, routerOneModels, routerOnePinnedForTier, routerOneWeakFallbackEnabled } from '../AI/RouterOne/routerOne';
 import { ProChainV2Build, proChainV2Decision, proChainV2ScopeAsk, proChainV2RedactSecrets, roleForRunnerOpts } from '../AgentV3/proChainV2';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
@@ -3552,8 +3555,10 @@ export function ladderRunners(rungs: readonly LadderRung[]): NamedRunner[] {
  * Router One runner: every rung is a Router One model (ROUTER_ONE_MODEL list). Used by the z@gmail.com
  * pin on non-Weak bands. Weak Router One models share the ordinary guarded chain below.
  */
-function buildTierEngineAvailable(tier: PowerLevel): boolean {
-  return (tier === 'weak' && (routerOneWeakFallbackEnabled() || bluesmindsBuilderEnabled() || moyiBuilderEnabled())) || tierEngineAvailable(tier);
+export function buildTierEngineAvailable(tier: PowerLevel): boolean {
+  return (tier === 'weak'
+    ? routerOneWeakFallbackEnabled() || qubaxBuilderEnabled() || bluesmindsBuilderEnabled() || moyiBuilderEnabled()
+    : discountedTokensBuilderEnabled()) || tierEngineAvailable(tier);
 }
 
 /** Preserve configured models and tail order; move only the first GLM rung to the front. */
@@ -3799,12 +3804,19 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
   if (level === 'weak' && !opts.afterLeadRung && !opts.fromProvider) rungs = weakGlmFirst(rungs);
   // Owner t357u + t359u: Weak is Surplus (above) → Router One → BluesMinds → the tier ladder, all default on.
   // Owner 2026-11-17: Moyi sits right after BluesMinds (moyiBuilder.ts; present once its key, model and rate are set).
+  // Owner 2026-11-17 ("apke sabhi suggestion approved"): Qubax is third, right after Router One and before BluesMinds —
+  // its tool calling is checked against its own catalogue and its price is its own (proChainV2/qubaxBuilder.ts).
   const runners = [
     ...(level === 'weak' && routerOneWeakFallbackEnabled()
       ? openAiCompatRunners(ROUTER_ONE_LABEL, routerOneApiKey(), routerOneBaseUrl(), routerOneModels()) : []),
+    ...(level === 'weak' ? qubaxBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models)) : []),
     ...(level === 'weak' ? bluesmindsBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models)) : []),
     ...(level === 'weak' ? moyiBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models)) : []),
-    ...ladderRunners(rungs),
+    // Owner 2026-11-17: on Normal and Strong, DiscountedTokens (up to three of its models) sits right before the first
+    // Sonnet/Opus rung (discountedTokensBuilder.ts). Weak never gets it.
+    ...ladderRunners(level === 'weak' ? rungs : rungs.slice(0, beforeFirstClaudeRung(rungs))),
+    ...(level === 'weak' ? [] : discountedTokensBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models))),
+    ...(level === 'weak' ? [] : ladderRunners(rungs.slice(beforeFirstClaudeRung(rungs)))),
   ];
   if (runners.length === 0) {
     const missing = [...new Set(rungs.map((r) => keyEnvFor(r.provider)))].filter((k) => !(process.env[k] && String(process.env[k]).trim()));
@@ -3850,7 +3862,7 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
  * checks it against the constructed chain on every tier. PURE (reads the same env the chain does).
  */
 export function buildChainOpensPastOpener(tier: PowerLevel | string | boolean | null | undefined, complex: boolean): boolean {
-  if (toPowerLevel(tier) === 'weak' && (routerOneWeakFallbackEnabled() || bluesmindsBuilderEnabled() || moyiBuilderEnabled())) return false;
+  if (toPowerLevel(tier) === 'weak' && (routerOneWeakFallbackEnabled() || qubaxBuilderEnabled() || bluesmindsBuilderEnabled() || moyiBuilderEnabled())) return false;
   return openingRung(tierLadder(toPowerLevel(tier as PowerLevel | boolean | string | undefined | null)).rungs, { complex }) > 1;
 }
 

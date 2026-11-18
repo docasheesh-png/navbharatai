@@ -31,3 +31,11 @@
 -keepclassmembers class * {
     @android.webkit.JavascriptInterface <methods>;
 }
+
+# The Firebase Authentication plugin carries a Facebook sign-in handler compiled against facebook-login as compileOnly.
+# We do not enable that provider (capacitor.config.ts providers: google.com, apple.com, github.com, phone), so the
+# handler is never built and its classes are never loaded; R8 only needs to be told they are absent on purpose.
+# If 'facebook.com' is ever added to the providers, add facebook-login as a dependency and remove these lines —
+# tests/androidReleaseIsHardened.test.ts fails until both are true.
+-dontwarn com.facebook.FacebookCallback
+-dontwarn com.facebook.login.**

@@ -56,4 +56,12 @@ describe('UI-8 / D-7 android release hardening', () => {
     const rules = readFileSync('android/app/proguard-rules.pro', 'utf8');
     for (const m of src.matchAll(/Class\.forName\("([\w.]+)"\)/g)) expect(rules, m[1]).toContain(`-keep class ${m[1]}`);
   });
+  it('the Facebook sign-in classes are ignored only while that provider is off (R8 run 160 missed them)', () => {
+    const rules = readFileSync('android/app/proguard-rules.pro', 'utf8');
+    const cfg = readFileSync('capacitor.config.ts', 'utf8');
+    const ignoresFacebookLogin = rules.includes('-dontwarn com.facebook.login.**');
+    const facebookProviderOn = /providers:\s*\[[^\]]*'facebook\.com'/.test(cfg);
+    // The handler that needs com.facebook.login.* only runs for the 'facebook.com' provider.
+    expect(facebookProviderOn && ignoresFacebookLogin).toBe(false);
+  });
 });

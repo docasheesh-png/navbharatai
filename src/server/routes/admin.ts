@@ -64,7 +64,7 @@ import { readAdminAuditPage } from '../lib/adminAuditLog';
 import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } from '../lib/buildDiscount';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mergeWallets } from '../lib/accountMerge';
-import { serverStats } from '../lib/serverStats';
+import { serverStats, wholeDayHits } from '../lib/serverStats';
 import { getProviderStats, getRouterOutcomeStats, visibleProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
@@ -87,7 +87,7 @@ import { listApkReports, getApkReport, markApkReportFixed, deleteApkReport, dele
 import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics, listRecentBuildReports } from '../AgentV3/DiagnosticsStore';
 import { buildCostRow, summarizeCosts, costTrend, SIMPLE_MAX_FILES, MID_MAX_FILES } from '../lib/buildCostLedger';
 import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
-import { fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt } from '../lib/adminUserActivity';
+import { fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt, walletsCreatedOn } from '../lib/adminUserActivity';
 import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, statusCounts, usersInBuilds } from '../lib/buildListFilter';
 import { accountTier, matchesTier, parseTierFilter, type AccountTier } from '../lib/accountTier';
 import { freeListLabelForStoredEmail } from '../AgentV3/featureFlag';
@@ -1920,13 +1920,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const today2 = new Date().toISOString().slice(0, 10);
       const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
       const todayHits = serverStats.dailyHits.get(today2) || 0;
-      const yesterdayHits = serverStats.dailyHits.get(yesterday) || 0;
+      // null when this process did not run all of yesterday — never a zero it never counted (wholeDayHits).
+      const yesterdayHits = wholeDayHits(serverStats.dailyHits, yesterday, Date.now() - process.uptime() * 1000);
 
       // New users today (wallets created today)
-      const newUsersToday = wallets.filter((w: any) => {
-        const created = w.updatedAt || w.createdAt || '';
-        return created.startsWith(today2);
-      }).length;
+      // By creation only — a wallet written today is not a person who joined today (walletsCreatedOn).
+      const newUsersToday = walletsCreatedOn(wallets as Array<{ createdAt?: unknown }>, today2);
 
       // Active users last 24h (from usage logs)
       const cutoff24h = new Date(Date.now() - 86400000).toISOString();
@@ -2438,7 +2437,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           // which would be a third answer to "has this person paid?" on the very screen that asks it.
           hasEverPaid: hasEverPaid(u as { totalMoneySpent?: unknown }),
           banned: u.banned || false,
-          createdAt: u.updatedAt || u.createdAt || '',
+          createdAt: u.createdAt || '', // when the wallet was made — never updatedAt (walletsCreatedOn)
           joinedAt: joined.atMs,
           joinedAtSource: joined.source,
           lastActiveAt: lastActive.atMs,

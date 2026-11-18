@@ -102171,3 +102171,17 @@ Each BLOCKED row carries **what, why, required evidence/action and already tried
 **BR99771bc7 first full-gate attempt (5ad1d3e):** all non-coverage build checks and all 11 database/emulator drills passed, with unchanged start/end source fingerprints. Full coverage exposed one stale route source assertion in `theReviewerSearchedInTheWrongDialect.test.ts`: it still expected the cached `gateEvidence.typecheck` argument instead of revision-checked `currentTypecheck`. The conditional stylesheet-read assertion remains intact. After the exact cause was confirmed, this known-failing coverage attempt was deliberately interrupted (exit 130, 1122 s); it is **failed/incomplete, never a full-suite pass**. The source assertion is corrected without changing runtime code, test selection or coverage thresholds. A complete final-tree CI-equivalent rerun is required before push; results belong to the retained session/PR evidence.
 
 **Queue ownership refresh before rerun:** open PR #4298 now claims Q-2764. This unpublished autopsy uses Q-2774–Q-2783, above every currently committed/open-PR ID; previous history and other owners remain untouched. The corrected source-wiring assertion plus all four new regression files passed 99 tests in 5 files. Full final-tree rerun remains required.
+## 2026-11-18 — Autopsy of the admin Home page copy (18:26Z)
+
+- Q-2754 ✅(PR) "Nearly full" from a rate tile → chip says "Needs attention" when only rate tiles are worst.
+- Q-2755 ✅(PR) "+465 today" counted wallets WRITTEN today (`updatedAt || createdAt`); creation only now, sibling in
+  the users list fixed, source guard against the pattern.
+- Q-2756 ✅(PR) "vs 0 yesterday" on a 54-minute-old server → unknown unless the process ran all of yesterday.
+- OPEN/BLOCKED: Q-2757…Q-2764 — UTC "today", per-instance hit counters, Reliability 0 from the legacy sample, 3 idle
+  billed sandboxes, the −₹16,102 margin (admin decision), BUILD_BLOCKED_NO_CREDITS on new users, two reason-less log
+  lines, the Grievance Officer env.
+
+
+### 2026-11-18 — BR 99771bc7: fresh-main integration and honest validation retries
+
+Integrated main `766af3a` (PRs #4295 and #4298), keeping both queue append histories and all unrelated source changes. The previous final-tree coverage attempt was interrupted by an environment transition; the next attempt could not start because its orphaned Vitest process remained a zombie and held the reports-directory lock. The exact stale lock and process-state evidence are archived outside the repository. An unchanged full-suite retry had no reported assertion failure but was interrupted after 641 seconds when main advanced; it is **incomplete**, never a passing coverage result. All 15 other required build checks and 11 database/emulator drills passed on `d61b88f`, but those results do not replace the required full gate on this newly integrated tree. The complete merged-state gate remains pending and will be recorded in the session/PR. No test selection, coverage threshold or runtime gate was weakened; no merge to main is authorized.

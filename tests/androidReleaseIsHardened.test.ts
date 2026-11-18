@@ -29,9 +29,39 @@ describe('UI-8 / D-7 android release hardening', () => {
 
     const gradle = readFileSync('android/app/build.gradle', 'utf8');
     const release = gradle.slice(gradle.indexOf('buildTypes'), gradle.indexOf('buildTypes') + 800);
-    expect(release).toMatch(/minifyEnabled\s+false/);
-    expect(release).not.toMatch(/minifyEnabled\s+true/);
+    // D-7 opted in (owner 2026-11-18, Play Console: Obfuscation 2% < 25%). Minify is ON, with the NON-optimising
+    // default file, and resource shrinking stays off.
+    expect(release).toMatch(/minifyEnabled\s+true/);
+    expect(release).not.toMatch(/minifyEnabled\s+false/);
+    expect(release).toContain("getDefaultProguardFile('proguard-android.txt')");
+    expect(release).not.toContain('proguard-android-optimize.txt');
     expect(gradle).not.toMatch(/shrinkResources\s+true/);
-    // D-7 is not YES: minify stays off, and ProGuard keep rules are intentionally absent until the owner sets D-7.
+  });
+
+  it('the keep rules protect everything the Capacitor shell finds by name at run time', () => {
+    const rules = readFileSync('android/app/proguard-rules.pro', 'utf8');
+    for (const keep of [
+      '-keep class com.navbharatai.app.** { *; }',          // MainActivity + our three plugins
+      '-keep class com.getcapacitor.** { *; }',             // bridge, PluginManager (Class.forName), SystemBars by name
+      '-keep class com.capacitorjs.** { *; }',
+      '-keep class io.capawesome.** { *; }',
+      '-keep class org.apache.cordova.** { *; }',
+      '-keep class com.facebook.FacebookSdk { public static *; }', // MetaConsentPlugin reflection
+      '@android.webkit.JavascriptInterface <methods>;',
+      '-keepattributes SourceFile,LineNumberTable',
+    ]) expect(rules, keep).toContain(keep);
+  });
+  it('every class our own Java reaches by reflection is kept by name', () => {
+    const src = readFileSync('android/app/src/main/java/com/navbharatai/app/MetaConsentPlugin.java', 'utf8');
+    const rules = readFileSync('android/app/proguard-rules.pro', 'utf8');
+    for (const m of src.matchAll(/Class\.forName\("([\w.]+)"\)/g)) expect(rules, m[1]).toContain(`-keep class ${m[1]}`);
+  });
+  it('the Facebook sign-in classes are ignored only while that provider is off (R8 run 160 missed them)', () => {
+    const rules = readFileSync('android/app/proguard-rules.pro', 'utf8');
+    const cfg = readFileSync('capacitor.config.ts', 'utf8');
+    const ignoresFacebookLogin = rules.includes('-dontwarn com.facebook.login.**');
+    const facebookProviderOn = /providers:\s*\[[^\]]*'facebook\.com'/.test(cfg);
+    // The handler that needs com.facebook.login.* only runs for the 'facebook.com' provider.
+    expect(facebookProviderOn && ignoresFacebookLogin).toBe(false);
   });
 });

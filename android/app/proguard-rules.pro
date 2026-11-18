@@ -1,21 +1,41 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
+# NavBharatAI release shrinking and obfuscation (owner 2026-11-18, D-7 opt-in requested; Play Console:
+# "DEX code optimisation is below our threshold — Obfuscation (2%)", fix by Feb 2027).
 #
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# The app is a Capacitor shell: most of it is JavaScript, and the Java side is found BY NAME at run time —
+# plugins are loaded from capacitor.plugins.json with Class.forName, their @PluginMethod methods are called by
+# name from JavaScript, and the WebView bridge exposes @JavascriptInterface methods by name. Obfuscation breaks
+# exactly those, in the release build only. So the shell, every plugin and our own code keep their names; the
+# large libraries (Firebase, Play services, Facebook, androidx) are obfuscated under the rules they ship.
+# proguard-android.txt (not -optimize) is used on purpose: Play flagged obfuscation only, and leaving code
+# optimisation off keeps the change to renaming and dead-code removal.
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Readable crash reports: Play and Crashlytics map names back with mapping.txt, line numbers need these.
+-keepattributes SourceFile,LineNumberTable,*Annotation*,Signature,InnerClasses,EnclosingMethod,Exceptions
+-renamesourcefileattribute SourceFile
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Our own native code: MainActivity and the PlayBilling, DeviceIntegrity and MetaConsent plugins.
+-keep class com.navbharatai.app.** { *; }
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Capacitor itself: the bridge, PluginManager (loads plugins by class name) and classes looked up by name
+# (the Keyboard plugin asks for com.getcapacitor.plugin.SystemBars). Capacitor's own consumer rules keep every
+# Plugin subclass; this keeps the rest of the runtime as well.
+-keep class com.getcapacitor.** { *; }
+-keep class com.capacitorjs.** { *; }
+-keep class io.capawesome.** { *; }
+-keep class org.apache.cordova.** { *; }
+
+# MetaConsentPlugin calls these by name through reflection (Class.forName + getMethod), so they must not be renamed.
+-keep class com.facebook.FacebookSdk { public static *; }
+
+# The JavaScript bridge: any method the WebView may call by name.
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+
+# The Firebase Authentication plugin carries a Facebook sign-in handler compiled against facebook-login as compileOnly.
+# We do not enable that provider (capacitor.config.ts providers: google.com, apple.com, github.com, phone), so the
+# handler is never built and its classes are never loaded; R8 only needs to be told they are absent on purpose.
+# If 'facebook.com' is ever added to the providers, add facebook-login as a dependency and remove these lines —
+# tests/androidReleaseIsHardened.test.ts fails until both are true.
+-dontwarn com.facebook.FacebookCallback
+-dontwarn com.facebook.login.**

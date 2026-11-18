@@ -400,3 +400,22 @@ export function summariseChatTokens(rows: ReadonlyArray<ChatTokenRow | null | un
   }
   return { requests, measuredRequests, unmeasuredRequests, inputTokens, outputTokens, failedRequests, lastAtMs };
 }
+
+/**
+ * How many accounts were CREATED on `dayIso` (YYYY-MM-DD, the same day the caller calls "today") — by the
+ * wallet's `createdAt` alone. PURE.
+ *
+ * 🔴 WHY (admin Home capture, 2026-11-18): "Registered Users 4654 · +465 today" beside "Active (24h) 2". The
+ * count read `w.updatedAt || w.createdAt`, so every wallet that was merely WRITTEN today — a balance change, a
+ * free-program sweep, a gift reset — was counted as a new sign-up. `updatedAt` is when a wallet last changed,
+ * never when the person joined (`resolveJoinedAt` above already refuses it for the same reason). A wallet with
+ * no `createdAt` is not counted: its join day is unread, and unread is not today.
+ */
+export function walletsCreatedOn(wallets: ReadonlyArray<{ createdAt?: unknown }>, dayIso: string): number {
+  let n = 0;
+  for (const w of wallets) {
+    const created = typeof w?.createdAt === 'string' ? w.createdAt : '';
+    if (created && created.startsWith(dayIso)) n += 1;
+  }
+  return n;
+}

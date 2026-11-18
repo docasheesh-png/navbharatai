@@ -67,6 +67,7 @@ export function buildTrafficBoard(catalog: TrafficCatalogRow[], buildProviders: 
     const base: TrafficProviderView = view ?? {
       provider, state: 'up' as TrafficState, reason: null, inFlight: 0, samples: 0, errorRate: {},
       totalP50: null, totalP95: null, firstByteP50: null, firstByteP95: null, model, recoverAt: 0,
+      changedAt: 0, lastFailureKind: null,
     };
     rows.push({
       ...base,

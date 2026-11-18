@@ -10,6 +10,7 @@ import { isCount, isIdentifier, isPositiveCount } from './capabilities';
 import { planInference } from './policy';
 import { candidateVerdict } from '../TrafficRegistry/controlDecision';
 import { currentTrafficControl } from '../TrafficRegistry/controlSync';
+import { familyDiversityFor, profileDependsOn } from '../TrafficRegistry/familyDiversity';
 import { evidenceBinding, withoutEvidence } from './profiles';
 import type { AttemptRecord, BudgetAuthorization, Candidate, EvidenceAuthority, Payer,
   PlanningResult, RoutingRequest, SelectionPlan } from './types';
@@ -376,7 +377,9 @@ export function createInferenceExecutor(ports: ExecutionPorts) {
       controlGate: (profile, request) => {
         const v = candidateVerdict(control, profile.providerId, profile.modelId, request.logicalRequestId, nowMs);
         return v.allowed ? null : v.reason;
-      } });
+      },
+      // P5: upstream diversity after a failure — OFF unless GATEWAY_FAMILY_DIVERSITY is canary (staff) or on.
+      ...(familyDiversityFor(r.principalId) ? { dependsOn: profileDependsOn } : {}) });
   }
   async function release(reservation: Reservation, reason: string, id: string): Promise<ExecutionResult> {
     try { await control(() => ports.ledger.releaseUndispatched(reservation, reason)); return stopped(reason); }

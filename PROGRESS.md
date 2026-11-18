@@ -102206,3 +102206,22 @@ The code is in `src/server/AI/TrafficRegistry/decisionRecords.ts`. It hooks the 
 - `decisionRecords.test.ts`: sampling, fixed fields, SLO from counters only, absolute counters across instances, bounded buffer, kill switch, the boundary records gateway and legacy paths and rethrows.
 - `ReliabilityBody.render.test.tsx`.
 - 5 reversions each caught.
+
+## 2026-11-18 — Traffic Manager V2, P5 (code): upstream diversity after a gateway failure, OFF by default, staff canary first
+
+`policy.ts` gains `diversified()`, which is pure:
+- after a `retryable-provider-failure` of the same request, the pick moves to the nearest eligible candidate of the SAME payment class whose route shares none of the failed outage domains;
+- `unknown` is independent of nothing;
+- if there is no independent candidate, the original order stands;
+- a terminal failure ends the request exactly as before.
+
+`familyDiversity.ts`: `GATEWAY_FAMILY_DIVERSITY` = off (default) / canary (the uids in `INFERENCE_GATEWAY_CANARY_UIDS`) / on. The executor supplies `dependsOn` only when it is active. The ledger's re-check of the selected attempt is unchanged.
+
+Tests: policy (6 cases, including "without the hook the plan is byte-identical"), familyDiversity (4). 4 reversions each caught.
+
+NOT done (needs the owner):
+- Setting `GATEWAY_FAMILY_DIVERSITY=canary` in Cloud Run.
+- Watching the Reliability card and decision records for 7 days.
+- Then deciding on `on`.
+
+The plan's "Free Chat fully on the gateway" switch is the owner's existing env (`INFERENCE_GATEWAY_ROLLOUT_MODE` canary/all). This phase does not change it.

@@ -195,7 +195,11 @@ describe('source guards', () => {
   it('Router One is called only through its existing builder entry point, and its accounting files are not edited by v2', () => {
     const route = stripCodeComments(readFileSync(resolve(__dirname, '../src/server/routes/agentv3.ts'), 'utf8'));
     const fn = route.slice(route.indexOf('function proChainV2TurnRunner'), route.indexOf('export function proChainV2ForBuild'));
-    expect(fn).toContain('openAiCompatRunners(ROUTER_ONE_LABEL');
+    // gatewayRunners splits Router One into one rung per model (gatewayModelRungs.ts) and still builds each through
+    // openAiCompatRunners, the entry point that carries Router One's accounting fetch.
+    expect(fn).toContain('gatewayRunners(ROUTER_ONE_LABEL');
+    const gw = route.slice(route.indexOf('export function gatewayRunners'), route.indexOf('export function cheapBuildFloorRunners'));
+    expect(gw).toContain('openAiCompatRunners(label, apiKeyRaw, baseURL, [model])');
     expect(fn).toContain('routerOneWeakFallbackEnabled()');
   });
   it('every PRO_CHAIN_V2_* code (and its user-facing ENGINE_ROUTING fold) is our routing, never a finding about the app', () => {

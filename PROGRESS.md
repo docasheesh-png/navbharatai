@@ -102065,3 +102065,25 @@ Correction found on the way: the DiscountedTokens builder rung (#4288) filled up
 
 Tests: `src/server/lib/modelChoice.test.ts` covers the families, the rule, Router One, the key lists, Surplus and Qubax. Expectations whose ORDER the rule changes were updated: picker, Moyi and DiscountedTokens.
 
+
+## 2026-11-18 — Hardening: a gateway's models now fail alone (the owner's "1st → 2nd → 3rd" fallback really runs)
+
+Found by driving the real `MultiProviderTurnRunner` with three same-gateway rungs (owner asked for the live system to be
+made rock-solid). Ledger:
+
+- **Problem:** with DiscountedTokens (and Router One, Qubax, BluesMinds, Moyi) the first model's timeout or 429 sent the
+  turn straight past models 2 and 3 to the next, dearer engine (Sonnet on Normal/Strong). Only 400/500 errors walked all three.
+- **Root cause:** `openAiCompatRunners(label, key, url, [m1, m2, m3])` gave every model the SAME bench name, and the chain's
+  transient memory (429 streak, shared cooldown, family timeout streak, `pool:` cooldown) is keyed on name/family — so one
+  model's failure was recorded as the whole gateway's.
+- **Class:** a multi-upstream gateway treated as one service. Fixed ladders (GLM, KIMI, OPENAI, NEMOTRON) are genuinely one
+  service and keep their family semantics.
+- **Fix:** `gatewayModelRungs.ts` + `gatewayRunners()` — unique `#n` bench names, `reportAs` = the label (reports, prices,
+  white-label scrub unchanged), new `NamedRunner.familyKey` (`label::model`) scoping timeout/overload benches, new
+  `accountKey` so an empty balance / revoked key / spend lock still retires every model on the key at once.
+- **Siblings fixed:** all five gateways and all three Router One entry points (Weak chain, pinned Router One runner, Pro Chain V2).
+- **Locked by:** `tests/aGatewayModelFailsAloneNotItsSiblings.test.ts` — timeout / 429 / 500 each walk to model 3, an
+  account fact is proved once, and a census fails if any route call hands one rung more than one model outside
+  `gatewayRunners`. Proven by reversion (familyKey ignored → 2 fail; accountKey ignored → 1 fail).
+- **Trade-off stated honestly:** a gateway now spends up to three model attempts per turn before moving on, as the owner
+  specified; each timed-out model is still cooled down on its own, so the next turn does not re-wait it.

@@ -1,0 +1,30 @@
+{
+  "evidenceType": "synthetic-regression-cases",
+  "privateReportPayloadIncluded": false,
+  "cases": [
+    "a one-second sandbox setup refusal against a several-minute evidenced unsized-app estimate is untested, not UNDER the band",
+    "OUTCOME_ENGINE_UNAVAILABLE and OUTCOME_ENGINE_TIMEOUT inside the same band are also untested",
+    "a sandbox refusal past the band still reports the elapsed lower-bound miss",
+    "a successful or advisory-cap finish inside the band still landed INSIDE",
+    "the serialized setup-refusal report is not counted in admin etaRatio / etaWithinBand",
+    "independently written English paraphrases of a phone-comfort change to 'the whole app' / 'the entire application' / 'the full website' are not explicit complete builds",
+    "an independently written KYC-before-payment change to 'the whole app' is not an explicit complete build",
+    "independently written Hindi paraphrases of a phone-comfort change to 'poori app' / 'poori application' are not explicit complete builds",
+    "Create a complete Hospital OPD Management System, Create the complete Hospital OPD Management System, build a complete e-commerce website, Make a whole app for inventory management, and ek complete hospital OPD management system banao still are explicit complete builds",
+    "add a logout button and make the dashboard complete stay false",
+    "the first reconnect refusal keeps the existing goodbye, stays retryable, and bills 0; a repeat still uses the stronger goodbye",
+    "a first attempt still emits the opening estimate before setup",
+    "admin-only recovery reasons stay off the live report, the persisted conversation record, and the GET reopen on a first refusal; admin text still shows the reason; a different code's user-facing detail is kept",
+    "a 2554ms Surplus scope row recorded 9ms after the timer starts is a window mismatch, not a 0s first call; a compatible in-window call still reports preparation and model time",
+    "reversion of the definite-bare completeness skip fails the edit-paraphrase tests; reversion of the infrastructure untested outcomes fails the UNDER-the-band test; both sources were restored from unique mktemp backups"
+  ],
+  "limitations": [
+    "not a replay of a customer build",
+    "not production or deployment validation",
+    "the retained report has no vendor detail, so a concurrent-cap refusal is not claimed for this report",
+    "the first-refusal goodbye and the pre-setup opening estimate are unchanged",
+    "holding the opening estimate until setup on every first attempt is not shipped",
+    "raising the E2B cap, auto-retry, and replacing the machine on an uncertain reconnect are not shipped (Q-2621)",
+    "full exact-tree CI remains required"
+  ]
+}

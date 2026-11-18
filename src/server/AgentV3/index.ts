@@ -32,6 +32,7 @@ export type { EstimatedUsage, PreflightEstimate } from './PreflightEstimate';
 export { readWalletBalanceInr, firestoreWalletReader } from './WalletBalance';
 export type { WalletReader, WalletDocData } from './WalletBalance';
 export { decidePaidGate } from './PaidGate';
+export { balanceRechargeNotice } from './balanceRechargeNotice';
 export type { PaidGateInput } from './PaidGate';
 export { ClaudeClient, parseMessage, isRetryableError, sanitizeApiKey } from './ClaudeClient';
 export type {

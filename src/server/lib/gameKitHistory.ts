@@ -27,7 +27,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "b6b8efd7fd54a9922e6fa5db3c00c60ab98118233e2d034289e4f005dd2d49a5",
     "54151cd273d6b21c0c2fb1f56f435d362499321c648585b95e1c255942be2a65",
     "9a4875fa493df5133f278972dca8e813c763b95202b37f794398b2dcdabd5cfe",
-    "7527a2e5ef0ac683fdcf5fa698656303fb57aa26a91255683d265afdcaaac58e"
+    "7527a2e5ef0ac683fdcf5fa698656303fb57aa26a91255683d265afdcaaac58e",
+    "7d363cac186c24083cfa9259db22c6d5221b65c07c410d3e2a7a548645b20616"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -50,7 +51,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/athree/config.ts": [
     "0daa780af7666b5884ab80dc784accc7928edd551c23a01a108e54a78da53202",
     "1a5e74ff45a4d3eb8bd212b4822e888c97ddc98c05d4c60f6d6f768df92a17fb",
-    "1ba3e1598af232984df7764ef44905e4230b2ed22bdf24b65be14d46783ca3dc"
+    "1ba3e1598af232984df7764ef44905e4230b2ed22bdf24b65be14d46783ca3dc",
+    "ca2cb63543970f8ba8acc4a999c1785b3ae45f736d280fd552075382056ca6fb"
   ],
   "src/game/athree/dunes.ts": [
     "e874d9a83f2cc996bacaedf0969d91231a4dde4543304a401fa708eabd5f33be"
@@ -63,7 +65,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "4726a0bef95872bdbdb40397b6f1a75d0d0df01b320557c4006714446e23aa10",
     "93d2a2400fa8a3d389f9877b8c4e70354c03ad86d91c466ec1d8236041689213",
     "0736c95fca90633bc7adca0c0d9235934240b367c82689fc1e83162bb7c0aa96",
-    "6d325fe1c544bda8000946312877dd7456e809c8e4ff7a0c929e398e017aec86"
+    "6d325fe1c544bda8000946312877dd7456e809c8e4ff7a0c929e398e017aec86",
+    "b8559a47de4724c631b800270fbb5263acbec65b0796cf2430fc451b86f94392"
   ],
   "src/game/athree/noise.ts": [
     "f0a7c7eaf4622707b7788540fc373e0b3d2e06687a2c5e2362aab39924371b98"
@@ -78,7 +81,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/athree/rivers.ts": [
     "8ca7148c58ea6f6bf4cd8b514495a6015bbc60743087abe42e5511e317dbdfb4",
     "5cdfde7611af7eb2418f657afe3f0d0cad7c4c61d0dd0cf928bf0d873689df27",
-    "6dca612126f52177de5a837110e423aab2bd0c687a8a530b0ef18a34e09509ae"
+    "6dca612126f52177de5a837110e423aab2bd0c687a8a530b0ef18a34e09509ae",
+    "1bfc518effd3bd8bbfad01a48c04dbc08bd1a8c897729120b3cd077e4c950eb6"
   ],
   "src/game/athree/riverwater.ts": [
     "6ee30341e76bfe28e764e70685ee0145dcace6dd6565c067be6afe5f3c393eb7",
@@ -119,7 +123,10 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "0a39ea816cd1e84a2f2b41fc9b0c8eca1d7d5bf8a35a4c2af125c74c26eb3bcf",
     "ae21089f0f5f187fbb11a2d69a7bad4c4cdb62f9038e45ef50ca6e25163159dc",
     "a9460bf0a54b9eff00e5502cfacd42677dfdadceb3f01ccd50c9b6f098f9ab16",
-    "28a01d4fcebcc2b0bc75eb0fb6c63f1144a73cbc0dad0630d4a84f3c69c1abbb"
+    "28a01d4fcebcc2b0bc75eb0fb6c63f1144a73cbc0dad0630d4a84f3c69c1abbb",
+    "2befad6c1f46c5927f77edbfade3f58173505bc89245cc030412766636dfcd0b",
+    "d35a8cd244f22d8cd904c02e4433d23ff6ba11548a7468585ce9e6ca97cbd8ff",
+    "0fe39b5c79c7a12b6ebe68b056e70521921795677a1a4387adbd6ae9a204f19e"
   ],
   "src/game/controls.test.ts": [
     "2df3798b667fc3fe66d971a938e25286bdf3066b668eed9527c6200d4c26f03c",
@@ -152,11 +159,24 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "a89b35a839d47bfddf76d72d89f25ad6085c5dc66edfb5c9cd8983898b88fcba",
     "dfc9f2a2a953a287b80e12e6c1d06f3e54a61535e12eee60a37c5834976df54b"
   ],
+  "src/game/forge/behave.ts": [
+    "a6a8751f2a3e0a244fcb606b7e1f558a0617c95e713a710205ebdabd7751ce7e",
+    "ef706e2fd58806041271a2162e66d6986d1916cb4ee7fd1dbcad15d3f657081f",
+    "ce0247e99450b514cc100e68c229e6d5150ddcdf8e951a9cb387f3eb590417c8",
+    "b576ed33af5b61a7c278f1713762cdde24a5c87db9df939a63f7727442adfce3",
+    "875baef8e7097668443636293542d7d9ce2e030dc89c5be8bd9046076cff869a"
+  ],
   "src/game/forge/customise.ts": [
     "ebbe5dc2ce1c464e7c11c4e0b9de78ebb6bcebc3614a3093211dff8e598fab52"
   ],
   "src/game/forge/forge.ts": [
-    "6bcf47428e5c609130be1210f22263317e2111f3ab3c7d3f6eed0f9d4694dd66"
+    "1b939425df42bef69d0704ac1921cf47ef4a38f544b702efaf6c481e459c5817",
+    "6bcf47428e5c609130be1210f22263317e2111f3ab3c7d3f6eed0f9d4694dd66",
+    "46c099d742ae8e833386e8bee441194631533a7cd1be9776a097c4234466c721",
+    "fd5a74f6a7f1f4788ed8ad65cec18c77ffbc9449ba240498e9eaa3b34e3b8e57",
+    "1630a5f669abf667f2484edbc8dc73c0f8777809c0e850b86681181f734b8dfc",
+    "1debda41801cf7c30dce16adebcdb82a6d10e2d1f74c285b5efe203f3d97cc32",
+    "e0d37df619916a9140f036c1faf87defa6ef3c2dcf8e25d45f8d9707c9ad733b"
   ],
   "src/game/fx/audio.ts": [
     "c9b08a58e84a865c0d58353f6ebd7af60211622cb95639ac6f4c56d20ad82c7d",

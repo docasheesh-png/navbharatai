@@ -85,6 +85,11 @@ const isTest = (p: string) => p.includes('.test.') || p.includes('.spec.');
  * becomes a place to hide the next dead engine.
  */
 const KNOWN_UNREACHABLE = new Set([
+  // Forge describe-only calls are held until admitted budget/cancellation is wired. The independently
+  // tested helper is retained for that integration; remove this exemption when its caller returns.
+  'src/server/lib/objectForge/forgeSelfAuthor.ts',
+  // Subject examples/checklists belong to the same held describe-only helper, not a live provider path.
+  'src/server/lib/objectForge/forgeSubjects.ts',
   // Deliberately dormant benchmark prerequisite: no authority issuer or production driver.
   // Activation requires separate privacy/transport/template/budget review; remove only with that wiring.
   // canaryResumeProvenance.test.ts independently asserts that production entry points remain absent.
@@ -109,12 +114,13 @@ const KNOWN_UNREACHABLE = new Set([
   // npm-install safety scan the LIVE actuator does not run yet, so the right move is to wire it in, not
   // to delete a working check. Remove this entry in the change that wires it.
   'src/server/AgentV3/PackageSafetyScanner.ts',
-  // Five tests of LIVE template providers import this. Deleting it means editing five tests that
-  // cover working code — a worse trade than keeping the file.
-  'src/server/AgentV3/FrameworkRegistry.ts',
+  // FrameworkRegistry sat here because only template-provider tests imported it. The
+  // launch plan and one-shot port now read it from the live server graph, so the
+  // exemption is spent and the guard covers the file again.
   // scripts/loadTest.mjs runs this logic INLINE and names this file as its unit-tested source, so
   // its test is the only coverage the running logic has.
   'src/server/lib/loadTestStats.ts',
+  // (Traffic Manager V2 P1's registry snapshot sat here until P2's control store and its admin route imported it.)
   // (The unused UI kit that sat here — Badge, Card, Tabs, Tooltip, Drawer, BottomSheet and the
   // barrel — was removed on 2026-08-24 once its two tests were trimmed of the dead cases. The
   // allowlist is meant to shrink; the staleness test below is what keeps it honest.)

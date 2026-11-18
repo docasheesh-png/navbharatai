@@ -30,6 +30,8 @@
 //
 // PURE. No I/O. Imported by client and server alike (60 server files already import from `src/lib/`).
 
+import { isSandboxRecoveryRefusalMessage } from './sandboxRecoveryMessages';
+
 /**
  * The opening line of the platform's own preview-fix request.
  *
@@ -153,6 +155,9 @@ export function errorCanBeFixedByEditingTheApp(opts: {
   message?: string | null;
 }): boolean {
   if (opts.beforeBuildStarted) return false;
+  // BR1995: our own reconnect refusal comes out of the stream, but no edit to the app can fix it.
+  // Exact sentence only; any other text keeps today's behaviour.
+  if (isSandboxRecoveryRefusalMessage(opts.message)) return false;
   return String(opts.message ?? '').trim() !== '';
 }
 

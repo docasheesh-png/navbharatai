@@ -78,7 +78,8 @@ describe('Q-066 — a writing sub-agent gets the style hand-back, scoped to its 
     expect(runner).toContain('undefinedClassesNow({ onlyWritten: true })');
     // A specialist's "ready" reaches the chat too, so its hand-back says "not finished yet" (#3468's rule).
     const subBlock = runner.slice(runner.indexOf('this.opts.styleHandBack === true'), runner.indexOf('U-1 — LintGate'));
-    expect(subBlock).toContain("handBackNotice('style', turn.text, { previewLive: previewLiveNow() })");
+    // PIN UPDATED (BR1994): plus the build-wide "Out of time" flag, which silences a promise of more work.
+    expect(subBlock).toContain("handBackNotice('style', turn.text, { previewLive: previewLiveNow(), outOfTime: events.budgetStagesSaid?.has('final') === true })");
     const sub = read('src/server/AgentV3/SubAgent.ts');
     expect(sub).toContain('styleHandBack: roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools)');
     expect(sub).toContain('onNote: deps.onNote');

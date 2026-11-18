@@ -131,6 +131,7 @@ import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemo
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { isBareManifestInstall, manifestRangeRepairEnabled, repairUnavailableRanges, manifestRepairNote } from './manifestRangeRepair';
 import { shellMayWriteOpaquely, markCommand, changedFilesCommand, parseChangedFiles } from './shellWriteReconcile';
+import { isScratchCapture } from './scratchCapture';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, shadowKeptToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames, mistypedImport } from './tscErrorCause';
 import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
@@ -177,7 +178,8 @@ import { dependencyMutationGuard, dependencyMutationGuardMessage } from './Depen
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
 
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
-import { ensureTsconfigBaseUrl } from './TsconfigGuard';
+import { ensureTsconfigBaseUrl, ensureTsconfigJsx, healTsconfigConflictTail, type TsconfigJsxContext } from './TsconfigGuard';
+import { conflictMarkerRefusal, writeConflictGuardEnabled } from './conflictMarkerGuard';
 import { applyFullStackGuards, dedupeSameModuleImports } from './FullStackGuards';
 import { duplicateModuleTarget, dedupeStylesheetImports, isAppWideStylesheet } from './ProjectIntegrityChecks';
 import { writesAreUnread } from './unreadWrites';
@@ -187,8 +189,8 @@ import { writesAreUnread } from './unreadWrites';
  * Vite preview-host allowance, the dep-free `@`→/src alias, and tsconfig baseUrl/paths restoration — so a
  * model rewrite of vite.config/tsconfig can never silently re-break the preview or baseUrl-"src" resolution.
  */
-function guardConfigContent(path: string, content: string): string {
-  return applyFullStackGuards(path, ensureTsconfigBaseUrl(path, ensureViteResolveAlias(path, ensureViteAllowedHosts(path, content))));
+function guardConfigContent(path: string, content: string, ctx: TsconfigJsxContext = {}): string {
+  return applyFullStackGuards(path, ensureTsconfigBaseUrl(path, ensureTsconfigJsx(path, healTsconfigConflictTail(path, ensureViteResolveAlias(path, ensureViteAllowedHosts(path, content))), ctx)));
 }
 import { ViteReactProvider } from './sandbox/AppMakerLab/generator/templates/ViteReactProvider';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
@@ -226,6 +228,7 @@ import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, dropped
 import { loadedMissingPackageUses, notInstalledBlockerLabel, undeclaredInstalledLabel, type MissingPackageUse } from './missingPackageBlockers';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
+import { importsOfDeletedFiles, danglingImportNote, deletedImportNoteEnabled, orderImportCandidates, readSourcesWithinBudget, withoutDeletedImportNote } from './deletedImportNote';
 import { filesOutsideTheApp, outsideAppMatcher, outsideTheAppNote } from './outsideTheApp';
 import { userFileGuardEnabled, unaskedUserFileRemovals, userFileRemovalMessage } from './userFileGuard';
 import { prunableGraphPaths, pruneWasRefused, pruneRefusedMessage } from './graphReconcile';
@@ -363,14 +366,16 @@ import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
-import { generateGameShell } from '../lib/GameShellGenerator';
-import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
-import { athreeMapIntent, athreeModulesFor } from '../lib/athreeMap/athreeMapIntent';
-import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
 import { authorObject, objectFileSource, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
 import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
 import { parseCustomisation, applyEdits, customiseSummary, nodeNamesOf, specFromObjectFile, personSpecFor } from '../lib/objectForge/forgeCustomise';
+import { generateGameShell } from '../lib/GameShellGenerator';
+import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
+import { generateRequestedAthreeWorld } from '../lib/athreeMap/compositionRequest';
+import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from '../lib/athreeMap/athreeMapIntent';
+import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
+import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
@@ -539,7 +544,16 @@ export type BrowserActionName = (typeof BROWSER_ACTIONS)[number];
  */
 export interface ActuatorPort {
   readFile(workspaceId: string, filePath: string): Promise<string>;
+  /**
+   * BR1997: an ADVISORY read, bounded by `timeoutMs`, whose timeout never drops the cached sandbox
+   * (E2BActuator). Optional; without it the caller races a plain `readFile`.
+   */
+  readFileAdvisory?(workspaceId: string, filePath: string, timeoutMs?: number): Promise<string>;
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
+  /** Atomic exclusive creation, never replace an existing path. Required by new procedural recipes. */
+  createFileExclusive?(workspaceId: string, filePath: string, content: string): Promise<void>;
+  /** Optional genuine expected-content atomic replacement; never emulate with read then write. */
+  compareAndSwapFile?(workspaceId: string, filePath: string, expected: string, content: string): Promise<void>;
   listFiles(workspaceId: string): Promise<string[]>;
   runCommand(
     workspaceId: string,
@@ -901,7 +915,8 @@ export class ToolDispatcher {
         this.kitCurrentPaths.delete(path);
         try {
           const content = await this.actuator.readFile(this.workspaceId, path);
-          if (typeof content === 'string') this.onFileWrite(path, content);
+          // A tool's output redirected into a file is scratch, not the app (scratchCapture.ts, Q-2713).
+          if (typeof content === 'string' && !isScratchCapture(path, content)) this.onFileWrite(path, content);
         } catch { /* removed or unreadable — nothing to record */ }
       }
     } catch { /* reconciliation is best-effort — the parser's own read-back already ran */ }
@@ -948,7 +963,7 @@ export class ToolDispatcher {
       this.kitCurrentPaths.delete(path); // a shell write is not the kit's current content any more (Q-863)
       try {
         const content = await this.actuator.readFile(this.workspaceId, path);
-        if (typeof content === 'string') this.onFileWrite(path, content);
+        if (typeof content === 'string' && !isScratchCapture(path, content)) this.onFileWrite(path, content);
       } catch { /* removed or unreadable — nothing to record */ }
     }
   }
@@ -1270,8 +1285,8 @@ export class ToolDispatcher {
    * Sequential on purpose: a delete command names one or two files, so the probe is two round trips
    * in the rare case an `rm` ran at all, and never anything on a normal build.
    */
-  private async reconcileDeletions(paths: readonly string[]): Promise<void> {
-    if (!paths.length) return;
+  private async reconcileDeletions(paths: readonly string[]): Promise<string[]> {
+    if (!paths.length) return [];
     const gone: string[] = [];
     for (const path of paths) {
       let stillThere = false;
@@ -1280,12 +1295,34 @@ export class ToolDispatcher {
       try { getWorkspaceMemory(this.workspaceId).removeFile(path); } catch { /* graph best-effort */ }
       gone.push(path);
     }
-    if (!gone.length) return;
+    if (!gone.length) return gone;
     try { this.fileDeletionSink?.(gone); } catch { /* the sink is best-effort — the graph is already correct */ }
     try {
       getWorkspaceMemory(this.workspaceId).recordAudit(`[DELETED] dropped from the project map: ${gone.join(', ')}`);
     } catch { /* audit best-effort */ }
     this.state?.appendTerminal(deletionReconciledMessage(gone));
+    // BR1997: the confirmed-gone list, for the bash path's dangling-import note. Other callers ignore it.
+    return gone;
+  }
+
+  /**
+   * BR1997: after a shell delete, name any module whose CURRENT sandbox text still imports a deleted
+   * file (`deletedImportNote.ts`). The project graph keeps only `from` imports, so a side-effect
+   * `import './x.css'` is invisible to it; the build's recorded source files are read fresh instead.
+   * This is on the bash critical path (audit P0-C), so: entry modules first, at most 60 files, 12 at a
+   * time, 5 s each, 8 s in all, using whatever was read by then. The read is the actuator's advisory
+   * read where it has one, so a slow read never drops the sandbox. Advisory only: '' when unsure.
+   */
+  private async deletedImportNoteFor(gone: readonly string[]): Promise<string> {
+    const act = this.actuator;
+    const candidates = orderImportCandidates(
+      [...(this.recordedPaths?.() ?? [])].filter((p) => /\.(tsx?|jsx?|mjs|cjs)$/i.test(p) && !gone.includes(p)),
+    ).slice(0, 60);
+    const read = (p: string): Promise<string> => (typeof act.readFileAdvisory === 'function'
+      ? act.readFileAdvisory(this.workspaceId, p, 5_000)
+      : act.readFile(this.workspaceId, p));
+    const sources = await readSourcesWithinBudget(candidates, read);
+    return danglingImportNote(importsOfDeletedFiles(gone, sources));
   }
 
   /**
@@ -1332,11 +1369,11 @@ export class ToolDispatcher {
    * then the destructive / parse / duplicate checks. `AGENTV3_GUARDED_WRITE_DOOR=off` does NOT
    * skip these — that flag only disables the actuator `beforeWrite` backstop.
    */
-  private async guardedWrite(path: string, content: string, opts: { agent: AgentRole; source: string; allowOverwrite?: boolean; expectedSource?: string | null }): Promise<{ kind: 'create' | 'modify'; content: string; existingContent: string; kitNote: string }> {
+  private async guardedWrite(path: string, content: string, opts: { agent: AgentRole; source: string; allowOverwrite?: boolean; exclusiveCreate?: boolean; expectedSource?: string | null }): Promise<{ kind: 'create' | 'modify'; content: string; existingContent: string; kitNote: string }> {
     const rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT);
     this.assertWritable(rel);
     this.assertTextWritable(rel);
-    content = guardConfigContent(rel, this.applyPostgresProviderLock(rel, content));
+    content = guardConfigContent(rel, this.applyPostgresProviderLock(rel, content), { framework: this.framework });
     content = withoutPreviewBridge(rel, content);
     let kind: 'create' | 'modify' = 'create';
     let existingContent = '';
@@ -1389,17 +1426,16 @@ export class ToolDispatcher {
     if (writeParseReject) refuse(writeParseReject);
     await this.refuseBrokenPageEdit(rel, existingContent, content);
     if (opts.expectedSource !== undefined) {
-      const atomic = this.actuator as ActuatorPort & {
-        createFileExclusive?: (workspaceId: string, path: string, content: string) => Promise<void>;
-        compareAndSwapFile?: (workspaceId: string, path: string, expected: string, content: string) => Promise<void>;
-      };
       if (opts.expectedSource === null) {
-        if (!atomic.createFileExclusive) refuse('Atomic object creation is unavailable; no unsafe write attempted.');
-        await atomic.createFileExclusive!(this.workspaceId, rel, content);
+        if (!this.actuator.createFileExclusive) refuse('Atomic object creation is unavailable; no unsafe write attempted.');
+        await this.actuator.createFileExclusive!(this.workspaceId, rel, content);
       } else {
-        if (!atomic.compareAndSwapFile) refuse('Atomic object replacement is unavailable; existing project source was preserved.');
-        await atomic.compareAndSwapFile!(this.workspaceId, rel, opts.expectedSource, content);
+        if (!this.actuator.compareAndSwapFile) refuse('Atomic object replacement is unavailable; existing project source was preserved.');
+        await this.actuator.compareAndSwapFile!(this.workspaceId, rel, opts.expectedSource, content);
       }
+    } else if (opts.exclusiveCreate) {
+      if (!this.actuator.createFileExclusive) refuse('Atomic file creation is unavailable; preserve existing source.');
+      await this.actuator.createFileExclusive!(this.workspaceId, rel, content);
     } else await this.actuator.writeFile(this.workspaceId, rel, content);
     this.onFileWrite?.(rel, content);
     if (kind === 'modify') this.noteDroppedImports(rel, existingContent, content);
@@ -2555,8 +2591,19 @@ export class ToolDispatcher {
   }
 
   private async parseGuardRejection(path: string, oldContent: string, newContent: string): Promise<string | null> {
-    if (!writeParseGuardEnabled()) return null;
     try {
+      // Independent of the syntax parse guard (and of its kill switch): leftover apply-patch /
+      // merge-conflict markers in config files the syntax gate skips (tsconfig / JSON / JSONC)
+      // are refused here (BR1982). JS/TS, Markdown, and patch files are not. A tsconfig whose
+      // prefix is parseable is healed earlier in guardConfigContent.
+      if (writeConflictGuardEnabled()) {
+        const conflict = conflictMarkerRefusal(path, newContent, oldContent, true);
+        if (conflict) {
+          try { getWorkspaceMemory(this.workspaceId).recordError(`[BLOCKED-CONFLICT-MARKUP] refused write that would leave markers in ${path}`); } catch { /* audit best-effort */ }
+          return conflict;
+        }
+      }
+      if (!writeParseGuardEnabled()) return null;
       const errNew = await firstSyntaxError(path, newContent);
       if (!errNew) return null; // parses clean → nothing to block (skips the second parse in the common case)
       const errOld = await firstSyntaxError(path, oldContent);
@@ -3712,7 +3759,7 @@ export class ToolDispatcher {
     }
   }
 
-  private async writeRecipeFiles(files: Record<string, string>, agent: AgentRole): Promise<string[]> {
+  private async writeRecipeFiles(files: Record<string, string>, agent: AgentRole, additiveOnly = false, exclusiveCreate = false): Promise<string[]> {
     const lines: string[] = [];
     const runner = await this.declareVitestForRecipeTests(files, agent);
     if (runner) lines.push(runner);
@@ -3736,6 +3783,7 @@ export class ToolDispatcher {
         lines.push(`Unchanged ${path} (already exactly what this recipe writes)`);
         continue;
       }
+      if (additiveOnly && !missing) refuse('Additive composition found changed existing source at ' + path + '; no replacement attempted. Earlier new files may exist; inspect before retry.');
       // 🧬 An older kit version nobody edited is brought up to date (Q-863, gameRecipeLayers.ts): the recipe's
       // instructions describe the CURRENT files, and code written from them against the old file would not compile.
       if (!missing && existing !== null && kitRefreshable(path, existing, content)) {
@@ -3758,7 +3806,7 @@ export class ToolDispatcher {
         lines.push(`skipped existing ${path}${stale ? ' — it is not the current kit version (somebody changed it), so it was kept as it is; the instructions below may name functions it does not have' : ''}`);
         continue;
       }
-      const wrote = await this.guardedWrite(path, content, { agent, source: 'writeRecipeFiles', allowOverwrite: false });
+      const wrote = await this.guardedWrite(path, content, { agent, source: 'writeRecipeFiles', allowOverwrite: false, exclusiveCreate });
       this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
       getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
       this.noteKitCurrent(path, wrote.content);
@@ -4297,7 +4345,7 @@ export class ToolDispatcher {
         agent,
         callId: call.id,
         ok: !visual?.isError,
-        summary: redactSecrets(summarize(content)),
+        summary: redactSecrets(summarize(withoutDeletedImportNote(content))),
         ts: Date.now(),
       });
       return { tool_use_id: call.id, content, is_error: visual?.isError ?? false, image: visual?.image };
@@ -5795,7 +5843,7 @@ export class ToolDispatcher {
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
         const { updated: edited, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
-        const deduped = this.dedupeImportsForSource(path, guardConfigContent(path, this.applyPostgresProviderLock(path, edited)), agent);
+        const deduped = this.dedupeImportsForSource(path, guardConfigContent(path, this.applyPostgresProviderLock(path, edited), { framework: this.framework }), agent);
         // Parity with write_file: an edit that cuts design-kit rules out of the stylesheet keeps them
         // (autopsy e725e002 — this door was the one left open by the write-door guard).
         const editKit = this.keepDesignKit(path, deduped, existing);
@@ -6305,13 +6353,14 @@ export class ToolDispatcher {
         // …AND EVERYTHING ELSE A SHELL TOOK OUT (queue Q-246): a stylesheet, a folder, a glob, the source
         // of a `mv`. Only recorded paths are named, and each is confirmed gone in the sandbox first.
         let removedRecorded: string[] = [];
+        let shellDeleted: string[] = [];
         if (exitCode === 0 && this.recordedPaths) {
           try { removedRecorded = removedRecordedPaths(shellRemovedOperands(command), this.recordedPaths()); }
           catch { removedRecorded = []; }
         }
         if (deleteTargets.length > 0 || removedRecorded.length > 0) {
           const candidates = [...new Set([...deletionCandidates(deleteTargets, exitCode), ...removedRecorded])];
-          try { await this.reconcileDeletions(candidates); }
+          try { shellDeleted = await this.reconcileDeletions(candidates); }
           catch { /* reconciliation is best-effort — a failure simply keeps today's stale entry */ }
         }
         /**
@@ -6479,6 +6528,12 @@ export class ToolDispatcher {
           if (notice) { out = `${notice}${out}`; this._readLoopStops.n++; }
         } catch { /* the breaker is advisory — the output is still returned */ }
         this.state?.appendTerminal(out);
+        // BR1997: a file this command deleted that another module still imports (deletedImportNote.ts).
+        // Added AFTER the terminal line, so it reaches the builder only, not the user's terminal.
+        if (shellDeleted.length > 0 && deletedImportNoteEnabled()) {
+          try { const dangling = await this.deletedImportNoteFor(shellDeleted); if (dangling) out = `${out}\n\n${dangling}`; }
+          catch { /* advisory — the command's own output is still returned */ }
+        }
         // Remember real failures so the team can recall what went wrong (error memory) — redacted, since
         // recalled lessons are shown back to the model/user later.
         if (exitCode !== 0) {
@@ -9651,14 +9706,55 @@ export class ToolDispatcher {
         const athreeStored = await this.actuator.readFile(this.workspaceId, 'src/game/athree/index.ts').then(() => ({ mapId: 'athree' }), () => null);
         const athreeDecision = athreeMapIntent({ prompt: this.coverageRequest ?? this.userRequest ?? '', stored: athreeStored, seedKey: this.workspaceId });
         if (!athreeDecision.use) refuse(`The Athree map is not used here: ${athreeDecision.reason} Build without it.`);
-        // WHICH MODULES (admin 2026-11-15): the builder may pass `include`; otherwise the request decides, so a game that asked for a river and
-        // some trees gets those, and a request that names no feature gets the whole map.
+        // Retain the native request-driven module selector for both plain and composed worlds.
         const athRec = (input as Record<string, unknown>) || {};
         const athModules = Array.isArray(athRec.include) ? athRec.include.filter((v): v is string => typeof v === 'string') : undefined;
-        const athPick = athModules ?? athreeModulesFor(this.coverageRequest ?? this.userRequest ?? '').modules;
-        const ath = generateAthreeMap(athPick);
-        const athWritten = await this.writeRecipeFiles(ath.files, agent);
-        const athLayers = await this.addMissingRecipeLayers(ath.files, agent);
+        const athSelection = athreeModulesFor(this.coverageRequest ?? this.userRequest ?? '');
+        const athPick = athModules ? enforceAthreeModuleExclusions(athModules, athSelection) : athSelection.modules;
+        const composition = athRec.composition;
+        const athArchetype = typeof athRec.archetype === 'string' ? athRec.archetype.trim().toLowerCase() : '';
+        const athSize = typeof athRec.size_km === 'number' && Number.isFinite(athRec.size_km) ? athRec.size_km : null;
+        if (athArchetype && !(athArchetype in ARCHETYPES)) refuse(`Unknown map kind "${athArchetype}". The kinds are: ${ARCHETYPE_IDS.join(', ')}.`);
+        let athChoice = athArchetype || athSize !== null ? { archetype: (athArchetype || 'continental') as Archetype, sizeKm: athSize ?? 100 } : mapChoiceFor(this.coverageRequest ?? this.userRequest ?? '');
+        if (athChoice) athChoice = { archetype: athChoice.archetype, sizeKm: clampSizeKm(athChoice.sizeKm) };
+        if (composition !== undefined) {
+          const promptSize = sizeKmIn(this.coverageRequest ?? this.userRequest ?? '');
+          const requestedSizes = [athSize, promptSize].filter((size): size is number => size !== null);
+          const width = (composition as {widthKm?:unknown})?.widthKm;
+          if (requestedSizes.some(size => width !== size)) refuse('Requested map size and composition widthKm must agree; composition supports only 1–100 km. No map was installed.');
+          if (athChoice && typeof width === 'number') athChoice = {...athChoice,sizeKm:width};
+        }
+        const ath = composition === undefined ? generateAthreeMap(athPick, athChoice, athSelection.excluded) : generateRequestedAthreeWorld(composition, athPick, athSelection.excluded, athChoice);
+        // Additive only: a read failure is not a missing file, and custom project source must not be replaced.
+        if (composition !== undefined) {
+          if (!this.actuator.createFileExclusive) refuse('World composition requires atomic exclusive source creation; this backend is unavailable. No source was installed.');
+          // Require a real scaffold manifest; dependency setup must not silently skip an unreadable project.
+          const manifest = JSON.parse(await this.actuator.readFile(this.workspaceId, 'package.json'));
+          const declaredThree = manifest?.dependencies?.three ?? manifest?.devDependencies?.three;
+          if (declaredThree !== undefined && !['0.180.0', '^0.180.0', '~0.180.0'].includes(declaredThree)) refuse('Existing Three.js version needs compatibility review; preserve the project.');
+          for (const [path, source] of Object.entries(ath.files)) {
+            let existing: string;
+            try { existing = await this.actuator.readFile(this.workspaceId, path); }
+            catch (error) { if (isNotFoundError(error)) continue; throw error; }
+            if (existing !== source) refuse('World composition would replace existing source at ' + path + '. Preserve it and adapt manually instead.');
+          }
+        }
+        const athWritten = await this.writeRecipeFiles(ath.files, agent, composition !== undefined, composition !== undefined);
+        let athLayers = composition === undefined ? await this.addMissingRecipeLayers(ath.files, agent) : '';
+        if (composition !== undefined) {
+          const dependencies = await this.installRecipeDependenciesOutcome(ath.files);
+          athLayers = dependencies.note;
+          if (dependencies.outcome === 'failed' || dependencies.outcome === 'busy') refuse('World composition files were added, but dependencies are not ready. Do not claim a runnable world.' + dependencies.note);
+          const finalManifest = JSON.parse(await this.actuator.readFile(this.workspaceId, 'package.json'));
+          const finalThree = finalManifest?.dependencies?.three ?? finalManifest?.devDependencies?.three;
+          if (!['0.180.0', '^0.180.0', '~0.180.0'].includes(finalThree)) refuse('World composition files exist but the required Three.js dependency is not verified. Do not claim a runnable world.');
+        }
+        if (composition !== undefined) {
+          for (const [path, source] of Object.entries(ath.files)) {
+            const saved = await this.actuator.readFile(this.workspaceId, path);
+            if (saved !== source) refuse('World composition is incomplete or changed at ' + path + '. Preserve existing files and inspect; do not claim installation.');
+          }
+        }
         this.scheduleCheckpoint('athree map');
         return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${ath.instructions}${athLayers}`;
       }
@@ -9745,7 +9841,7 @@ export class ToolDispatcher {
           if (editSource !== undefined && editSource !== expectedSource) refuse('Object changed while the edit was prepared; retry from its current version.');
         } catch (err) { if (!isNotFoundError(err)) throw err; }
         if (editSource !== undefined && expectedSource === null) refuse('Object was removed while editing; no stale recreation attempted.');
-        const atomic = this.actuator as ActuatorPort & { createFileExclusive?: unknown; compareAndSwapFile?: unknown };
+        const atomic = this.actuator;
         if (expectedSource === null ? typeof atomic.createFileExclusive !== 'function' : typeof atomic.compareAndSwapFile !== 'function') {
           refuse('Required atomic object write capability is unavailable; no object or kit writes attempted.');
         }
@@ -9765,7 +9861,7 @@ export class ToolDispatcher {
           this.scheduleCheckpoint('object forge kit');
           forgeWritten.push(`Created ${path}`);
         }
-        // The object file is REPLACED on purpose when the builder calls again with the same id (that is how it fixes what the drawing showed).
+        // Only an explicit customise target with an unchanged expected version may replace an object.
         const wroteObject = await this.guardedWrite(objectPath, forged.files[objectPath], { agent, source: 'author_object', allowOverwrite: true, expectedSource });
         this.state?.recordFileChange({ path: objectPath, kind: wroteObject.kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(objectPath, wroteObject.content);

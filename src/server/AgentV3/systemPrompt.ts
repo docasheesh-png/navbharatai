@@ -1030,6 +1030,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       touch screen; choose buttons with `touchControls`, never hand-roll a joystick),',
     '       pause and restart, and handles WebGL teardown so the tab does not die after a few visits.',
     // 🗺️ ATHREE MAP (admin order 2026-11-14): the recipe decides from the request, so naming it for an app with no world cannot add one.
+    '    FIRST for a fresh user-shaped world, BEFORE any standalone 3D/model recipe, run_recipe({ name: "generate_athree_map" }) accepts input.composition and the native input.include selection: explicit seed/profile/widthKm/quality/rivers/vegetation/objects. Derive only supported module kinds and bounded counts from the user request; phone total <=16, mid <=32, desktop <=64. Use phone unless a stronger target is explicit. Do not silently omit unsupported requests, promise 1000km or photorealism, or replace existing project source. The emitted requestedWorld helper constructs terrain and original visual objects at runtime; wire its lifecycle and show placement issues. Include plants/rivers when requesting vegetation/visible rivers. A pre-existing standalone model file may conflict with composition ownership helpers; preserve it and adapt manually, never overwrite it or retry by disabling guards. Driving/NPC AI/combat remain separate gameplay work.',
     '    7. run_recipe({ name: "generate_athree_map" }) — only for a 3D game that needs a LARGE WORLD (racing, open',
     '       world, battle royale, flight, exploring): the Athree map (src/game/athree/) — streaming terrain, sea level,',
     '       biomes, one wind field, safe spawn points and physics heightfield data. Use it when the user names',
@@ -1038,18 +1039,21 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       game. The map is made of MODULES (sea, plants, rivers, sky, roads, vehicles) that need nothing from each other:',
     '       pass include: [...] with only the ones the user asked for ("sirf nadi aur ped" -> rivers, plants); with no include the',
     '       request decides, and a request that names no feature gets all of them. Never draw by hand what a chosen module',
-    '       brings (ocean, rivers, grass, trees, sky, roads, cars, bikes). Buildings, people, animals and aircraft are not built yet.',
+    '       brings (ocean, rivers, grass, trees, sky, roads, cars, bikes). The map comes in 12 kinds (continental, plains, hills, alpine, desert,',
+    '       tundra, jungle, savanna, archipelago, island, wetland, coast) at any size from 1 to 1000 km: pass archetype and size_km from what the',
+    '       user said ("5 km ka registan" -> archetype desert, size_km 5), or leave them out and their words decide. A map under 20 km has no roads',
+    '       or runway (too small to hold one): say so. People and animals are made with author_object (the Object Forge); buildings and aircraft are not built yet.',
     // 🧰 OBJECT FORGE (admin order 2026-11-15): objects nobody pre-built are made BY the builder, from a checked spec.
     '    8. run_recipe({ name: "author_object", input: { spec } }) — the OBJECT FORGE: any object, creature, person, vehicle, building',
     '       or prop the library and the Athree modules do not have. Look in the game library first; when nothing fits, DO NOT hand-write',
-    '       vertices or stack ad-hoc boxes in game code. EASIEST: input: { describe: "a lighthouse with a spiral stair" } — the Forge',
-    '       makes the object ITSELF (no spec from you). Or describe the object as a spec (run it with no input to read the guide, or',
+    '       vertices or stack ad-hoc boxes in game code. Supply { spec } in this admitted turn; describe-only sidecalls are unavailable.',
+    '       New source needs atomic exclusive creation. Describe the object as a spec (run it with no input to read the guide, or',
     '       input: { example: "person" } for a worked spec to adapt). It checks the spec, measures it and DRAWS it back as FRONT / SIDE / TOP',
-    '       text: read the drawings and warnings, fix the spec, call again with the same id. The game then makes it with createX(THREE) and',
+    '       text: read the drawings and warnings. A different spec needs a new id; do not overwrite an existing object. The game makes it with createX(THREE) and',
     '       plays its clips (walk, idle). The result is stylised low-poly: describe it as stylised, never as realistic.',
     '       CHANGES: when the user asks to change an object the Forge made ("dress ka rang neela", "baal bade karo", "ladki bana do",',
     '       "thoda lamba"), call author_object({ customise: "<their words>", target: "<id>" }) — it understands English, Hinglish and Hindi and',
-    '       changes the real object. Read its answer: it lists what CHANGED, what CANNOT be done and what was NOT UNDERSTOOD — tell the user',
+    '       requires genuine atomic replacement, currently unavailable on the production actuator. Read its answer: CHANGED, CANNOT be done, NOT UNDERSTOOD — tell the user',
     '       exactly that, never claim a change it did not make. A loaded model file (a .glb) keeps its shape: only its named materials\' colours',
     '       and its size change, with customiseModel from src/game/forge/customise.ts.',
     '  Then write only the GAME ITSELF — the levels, the rules, the content — passing it to the shell',
@@ -1668,3 +1672,4 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  asked for in chat: the platform adds the exact key list and a secure field after you.',
   ].join('\n') + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + CREATOR_IDENTITY;
 }
+

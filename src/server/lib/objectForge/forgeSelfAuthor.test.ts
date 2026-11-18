@@ -39,7 +39,7 @@ describe('the loop', () => {
     expect(r.ok).toBe(true);
     expect(m.calls.length).toBe(1);
     expect(r.remainingWarnings).toEqual([]);
-    expect(r.spec!.id).toBe('a-lighthouse');
+    expect(r.spec!.id).toBe(objectIdFor('a lighthouse'));
     expect(r.report!.size[1]).toBeGreaterThan(14);
   });
 
@@ -129,8 +129,8 @@ describe('what the model is told', () => {
     const m = scripted([j(good())]);
     await selfAuthorObject('a lighthouse', { ask: m.ask, groundTruth: 'Lighthouse: 20 m tall, tower base 6 m wide.' });
     const p = m.calls[0].prompt;
-    expect(p).toContain('"a lighthouse"'); expect(p).toContain('20 m tall'); expect(p).toContain('"id":"sword"');
-    expect(p).toContain('"id": "a-lighthouse"');
+    expect(p).toContain('"a lighthouse"'); expect(p).toContain('20 m tall'); expect(p).toContain('"id":"house"'); expect(p).toContain('WHAT A BUILDING MUST HAVE');
+    expect(p).toContain('"id": "' + objectIdFor('a lighthouse') + '"');
   });
 
   it('the system prompt teaches the grammar and the conventions, and says to answer with JSON only', () => {
@@ -154,16 +154,29 @@ describe('helpers', () => {
     for (const bad of [null, undefined, '', 'no braces', '[1,2]', '{broken', '{"a":1} {"b":2}']) expect(parseSpecText(bad as string)).toBeNull();
   });
 
-  it('objectIdFor makes a valid, stable id from any words', () => {
-    expect(objectIdFor('A Lighthouse with a spiral stair!')).toBe('a-lighthouse-with-a-spiral-stair');
-    expect(objectIdFor('a lighthouse')).toBe(objectIdFor('A  LIGHTHOUSE '));
+  it('objectIdFor preserves full Unicode identity with stable NFC equivalence', () => {
     for (const w of ['9 lives', '!!!', 'ऊँट', 'x'.repeat(200)]) expect(objectIdFor(w)).toMatch(/^[a-z][a-z0-9-]{1,39}$/);
+    expect(objectIdFor(' café ')).toBe(objectIdFor('cafe\u0301'));
+    expect(objectIdFor('ऊँट')).not.toBe(objectIdFor('हाथी'));
+    expect(objectIdFor('x'.repeat(300) + 'red')).not.toBe(objectIdFor('x'.repeat(300) + 'blue'));
+    expect(objectIdFor('A Lighthouse')).not.toBe(objectIdFor('a lighthouse'));
   });
 
-  it('the cache is bounded and keyed by the normalised description', () => {
-    madeCache.set('A Lighthouse', { id: 'l' });
-    expect(madeCache.get('a lighthouse')).toEqual({ id: 'l' });
-    for (let i = 0; i < 300; i++) madeCache.set('thing ' + i, { id: 'x' });
+  it('the cache requires project and object identity, clones values, and is bounded', () => {
+    const spec = { id: 'lamp', nested: { color: 'red' } };
+    madeCache.set('a lamp', spec);
+    expect(madeCache.get('a lamp')).toBeUndefined();
+    expect(madeCache.size()).toBe(0);
+    madeCache.set(' café ', spec, 'project-a', 'lamp');
+    spec.nested.color = 'blue';
+    const got = madeCache.get('cafe\u0301', 'project-a', 'lamp')!;
+    expect(got).toEqual({ id: 'lamp', nested: { color: 'red' } });
+    (got.nested as { color: string }).color = 'green';
+    expect(madeCache.get('café', 'project-a', 'lamp')).toEqual({ id: 'lamp', nested: { color: 'red' } });
+    expect(madeCache.get('café', 'project-b', 'lamp')).toBeUndefined();
+    expect(madeCache.get('café', 'project-a', 'other')).toBeUndefined();
+    expect(madeCache.get('café', 'project-a')).toBeUndefined();
+    for (let i = 0; i < 300; i++) madeCache.set('thing ' + i, { id: 'x' }, 'project-a', 'x');
     expect(madeCache.size()).toBeLessThanOrEqual(200);
   });
 });

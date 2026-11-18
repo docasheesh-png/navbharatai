@@ -186,7 +186,9 @@ describe('The route carries the evidence (source guard — tsc and vitest cannot
   const sugg = readFileSync(join(__dirname, '../src/server/AgentV3/buildFindingSuggestions.ts'), 'utf8');
 
   it('the copy records per-file hashes', () => {
-    expect(route).toMatch(/snapshotTaken = \{[^}]*fileHashes: source \? fileContentHashes\(identitySource\(source\)\)/);
+    // MOVED (2026-11-17) into failedBuildCopy.ts's takeBuildCopy; the route keeps what it returns.
+    const copy = readFileSync(join(__dirname, '../src/server/AgentV3/failedBuildCopy.ts'), 'utf8');
+    expect(copy).toMatch(/return \{ url, filesHash[^}]*fileHashes: source \? fileContentHashes\(identitySource\(source\)\)/);
   });
   it('the confirmation passes the saved and the sandbox per-file hashes', () => {
     // Both sides through identitySource (autopsy cc3ef776: a secrets file is never part of the copy).

@@ -8,6 +8,7 @@
 
 import { applyMessage, emptyLedger, messageIdFor, renderRequirements, type RequirementLedger } from './projectRequirements';
 import { ensureLedger, getRequirementsStore, type RequirementsStore } from './projectRequirementsStore';
+import { buildConfirmation } from './buildConfirmation';
 
 export type ProjectMemoryStatus = 'ok' | 'rebuilt' | 'unrecoverable';
 
@@ -97,4 +98,21 @@ export function transcriptOf(rec: unknown): readonly unknown[] | null {
   if (!rec) return null;
   const m = (rec as { messages?: unknown }).messages;
   return Array.isArray(m) ? m : [];
+}
+
+/**
+ * Did this message ASK FOR THE APP? Decided by what the message says (the same reader that decides whether a build may
+ * start), with the route's own intent as one more way to be yes. 🔴 It used to be the route's `intent` alone, and that
+ * was `edit_existing` on a scaffolded workspace — so the first message of a brand-new game was never the brief.
+ */
+export function asksForTheApp(intent: string, offerAccepted: boolean, message: string): boolean {
+  return intent === 'new_build' || offerAccepted || buildConfirmation(message).confirmed;
+}
+
+/**
+ * The words that stand for this turn in the project's memory and in the edit gate. A bare "yes" to our offer to build
+ * means the request that was OFFERED — never the word "yes".
+ */
+export function memoryMessageFor(typedPrompt: string, prompt: string, offerAccepted: boolean): string {
+  return offerAccepted ? prompt : (typedPrompt || prompt);
 }

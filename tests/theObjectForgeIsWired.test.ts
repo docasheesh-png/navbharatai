@@ -1,7 +1,7 @@
 // THE OBJECT FORGE IS WIRED, AND WIRED HONESTLY (admin 2026-11-15: NavBharatAI makes ANY object itself). These tests drive the REAL
 // ToolDispatcher: the tool is registered everywhere a recipe must be; a bad spec writes nothing and says why; a good spec writes the
-// engine once and the object by id; calling again with the same id REPLACES the object (that is how the builder fixes what the drawing
-// showed); the kill switch refuses; and the system prompt tells the builder when to reach for it.
+// engine once and the object by id; replacements require explicit customisation and a genuine CAS capability.
+// Unknown or changed source is preserved; the kill switch refuses; the prompt reports capability limits.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { aiRouter } from '../src/server/lib/aiRouter';
 import { madeCache } from '../src/server/lib/objectForge/forgeSelfAuthor';
@@ -20,6 +20,14 @@ class Fake implements ActuatorPort {
   writes: string[] = [];
   async readFile(_w: string, p: string): Promise<string> { const f = this.files.get(p); if (f === undefined) throw new Error('ENOENT: ' + p); return f; }
   async writeFile(_w: string, p: string, c: string): Promise<void> { this.writes.push(p); this.files.set(p, c); }
+  async createFileExclusive(_w: string, p: string, c: string): Promise<void> {
+    if (this.files.has(p)) throw new Error('EEXIST: ' + p);
+    this.files.set(p, c); this.writes.push(p);
+  }
+  async compareAndSwapFile(_w: string, p: string, expected: string, c: string): Promise<void> {
+    if (this.files.get(p) !== expected) throw new Error('Changed since read: ' + p);
+    this.files.set(p, c); this.writes.push(p);
+  }
   async listFiles(): Promise<string[]> { return [...this.files.keys()]; }
   async runCommand() { return { exitCode: 0, stdout: '', stderr: '' }; }
 }
@@ -121,21 +129,25 @@ describe('a spec', () => {
     expect(text(await forge({ spec: '{not json' }))).toMatch(/not valid JSON/);
   });
 
-  it('called again with the same id REPLACES the object and leaves the engine alone', async () => {
+  it('creation with an existing id cannot authorize replacement, but an identical retry is unchanged', async () => {
     await forge({ spec: lamp() });
     const first = act.files.get('src/game/objects/street-lamp.ts')!;
-    const r = await forge({ spec: lamp({ name: 'Street lamp, taller', nodes: [{ name: 'pole', shape: { type: 'cylinder', radiusTop: 0.05, radiusBottom: 0.08, height: 6, seg: 10 }, material: 'iron', position: [0, 3, 0] }, { name: 'bulb', shape: { type: 'sphere', radius: 0.15, seg: 10 }, material: 'glow', position: [0, 5.9, 0] }] }) });
-    const second = act.files.get('src/game/objects/street-lamp.ts')!;
-    expect(second).not.toBe(first);
-    expect(second).toContain('Street lamp, taller');
-    expect(text(r)).toMatch(/Replaced src\/game\/objects\/street-lamp\.ts/);
-    expect(text(r)).toMatch(/Unchanged src\/game\/forge\/forge\.ts/);
+    act.writes.length = 0;
+    const r = await forge({ spec: lamp({ name: 'Different lamp' }) });
+    expect(r.is_error).toBe(true);
+    expect(text(r)).toMatch(/Creation cannot authorize replacement/);
+    expect(act.files.get('src/game/objects/street-lamp.ts')).toBe(first);
+    expect(act.writes).toEqual([]);
+    const retry = await forge({ spec: lamp() });
+    expect(retry.is_error).toBeFalsy();
+    expect(text(retry)).toMatch(/Unchanged.*does not verify the kit, scene mount or gameplay/);
+    expect(act.writes).toEqual([]);
   });
 
   it('two different objects share one engine file', async () => {
     await forge({ spec: lamp() });
     await forge({ spec: { ...lamp(), id: 'street-lamp-2' } });
-    expect([...act.files.keys()].filter((p) => p.startsWith('src/game/forge/')).sort()).toEqual(['src/game/forge/customise.ts', 'src/game/forge/forge.ts']);
+    expect([...act.files.keys()].filter((p) => p.startsWith('src/game/forge/')).sort()).toEqual(['src/game/forge/behave.ts', 'src/game/forge/customise.ts', 'src/game/forge/forge.ts']);
     expect([...act.files.keys()].filter((p) => p.startsWith('src/game/objects/')).sort()).toEqual(['src/game/objects/street-lamp-2.ts', 'src/game/objects/street-lamp.ts']);
   });
 
@@ -166,75 +178,29 @@ describe('the kill switch', () => {
   });
 });
 
-describe('describe: the user\'s words in, an object out (self-authoring)', () => {
-  const answerWith = (...texts: Array<string | null>) => {
-    const seen: Array<{ prompt: string; system?: string; ns?: string }> = [];
-    vi.spyOn(aiRouter, 'routeDetailed').mockImplementation((async (prompt: string, _h: unknown, ns: string, _x: unknown, system?: string) => {
-      seen.push({ prompt, system, ns });
-      const t = texts[Math.min(seen.length - 1, texts.length - 1)];
-      return t === null ? { ok: false, content: '' } : { ok: true, content: t };
-    }) as never);
-    return seen;
-  };
-
-  it('makes the object from a description alone: asks the FREE router, checks it, writes it, and says how it was made', async () => {
-    const seen = answerWith(JSON.stringify(lamp()));
-    const r = await forge({ describe: 'a street lamp' });
-    expect(r.is_error).toBeFalsy();
-    expect(seen.length).toBe(1);
-    expect(seen[0].ns).toBe('navbharat'); // the free namespace: never a paid model, never NavBharatAI money
-    expect(seen[0].prompt).toContain('"a street lamp"');
-    expect(act.files.has('src/game/objects/a-street-lamp.ts')).toBe(true);
-    expect(act.files.get('src/game/forge/forge.ts')).toBe(FORGE_ENGINE);
-    expect(text(r)).toMatch(/Made by the Forge from the description in 1 round\(s\), clean/);
-  });
-
-  it('corrects itself: a floating part comes back as the Forge\'s drawing and the second answer is what is written', async () => {
-    const bad: any = lamp(); bad.nodes.push({ name: 'balloon', shape: { type: 'sphere', radius: 0.3 }, material: 'glow', position: [0, 9, 0] });
-    const seen = answerWith(JSON.stringify(bad), JSON.stringify(lamp()));
-    const r = await forge({ describe: 'a street lamp' });
-    expect(seen.length).toBe(2);
-    expect(seen[1].prompt).toMatch(/float free of the main body: \[balloon\]/);
-    expect(seen[1].prompt).toContain('FRONT');
-    expect(text(r)).toMatch(/in 2 round\(s\), clean/);
-    expect(act.files.get('src/game/objects/a-street-lamp.ts')).not.toContain('balloon');
-  });
-
-  it('the same description twice costs ONE model call (the second is reused)', async () => {
-    const seen = answerWith(JSON.stringify(lamp()));
-    await forge({ describe: 'a street lamp' });
-    const r = await forge({ describe: 'A Street Lamp' });
-    expect(seen.length).toBe(1);
-    expect(text(r)).toMatch(/reused, no new model call/);
-  });
-
-  it('a model that does not answer writes NOTHING and points the builder at the spec route', async () => {
-    answerWith(null);
-    const r = await forge({ describe: 'a street lamp' });
-    expect(r.is_error).toBeFalsy();
-    expect(text(r)).toMatch(/could not make "a street lamp"/);
+describe('describe-only calls require admitted provider context', () => {
+  it('refuses without a sidecall or write and tells the admitted architect to supply a spec', async () => {
+    const route = vi.spyOn(aiRouter, 'routeDetailed');
+    const r = await forge({ describe: 'a street lamp', id: 'lamp-post' });
+    expect(r.is_error).toBe(true);
+    expect(text(r)).toMatch(/held pending admitted provider accounting\/cancellation/);
+    expect(text(r)).toContain('author_object({ spec })');
+    expect(route).not.toHaveBeenCalled();
     expect(act.files.size).toBe(0);
   });
 
-  it('keeps the id the builder asked for', async () => {
-    answerWith(JSON.stringify(lamp()));
-    await forge({ describe: 'a street lamp', id: 'lamp-post' });
-    expect(act.files.has('src/game/objects/lamp-post.ts')).toBe(true);
-  });
-
-  it('a spec the builder passes wins over a description (no model call)', async () => {
-    const seen = answerWith(JSON.stringify(lamp()));
-    await forge({ describe: 'a street lamp', spec: lamp({ id: 'mine' }) });
-    expect(seen.length).toBe(0);
+  it('a supplied spec wins over the description without a sidecall', async () => {
+    const route = vi.spyOn(aiRouter, 'routeDetailed');
+    expect((await forge({ describe: 'a lamp', spec: lamp({ id: 'mine' }) })).is_error).toBeFalsy();
+    expect(route).not.toHaveBeenCalled();
     expect(act.files.has('src/game/objects/mine.ts')).toBe(true);
   });
 
-  it('the kill switch stops it before any model call', async () => {
+  it('the kill switch still stops describe-only calls before any sidecall', async () => {
     process.env.AGENTV3_OBJECT_FORGE = 'off';
-    const seen = answerWith(JSON.stringify(lamp()));
-    const r = await forge({ describe: 'a street lamp' });
-    expect(r.is_error).toBe(true);
-    expect(seen.length).toBe(0);
+    const route = vi.spyOn(aiRouter, 'routeDetailed');
+    expect((await forge({ describe: 'a lamp' })).is_error).toBe(true);
+    expect(route).not.toHaveBeenCalled();
   });
 });
 
@@ -302,5 +268,89 @@ describe('customise: the user\'s words change an object that exists', () => {
     expect(props.customise.description).toMatch(/Hinglish/); expect(props.target.type).toBe('string'); expect(props.base.enum).toEqual(['person']);
     const prompt = architectSystemPrompt();
     expect(prompt).toMatch(/customise: "<their words>"/); expect(prompt).toMatch(/never claim a change it did not make/);
+  });
+});
+
+describe('source preservation and atomic capability boundaries', () => {
+  it('without exclusive creation no kit or object file is written', async () => {
+    Object.defineProperty(act, 'createFileExclusive', { value: undefined });
+    const r = await forge({ spec: lamp() });
+    expect(r.is_error).toBe(true);
+    expect(text(r)).toMatch(/atomic object write capability is unavailable/);
+    expect(act.writes).toEqual([]);
+  });
+
+  it('without genuine CAS an existing object is preserved and the change is refused', async () => {
+    await forge({ spec: FORGE_EXAMPLES.house.spec });
+    const first = new Map(act.files);
+    act.writes.length = 0;
+    Object.defineProperty(act, 'compareAndSwapFile', { value: undefined });
+    const r = await forge({ customise: 'door ka rang neela karo', target: 'house' });
+    expect(r.is_error).toBe(true);
+    expect(text(r)).toMatch(/atomic object write capability is unavailable/);
+    expect(act.files).toEqual(first);
+    expect(act.writes).toEqual([]);
+  });
+
+  it('custom source is never replaced or mistaken for a missing person', async () => {
+    const path = 'src/game/objects/sita.ts';
+    act.files.set(path, '// user-authored source');
+    const r = await forge({ customise: 'ladki banao', target: 'sita', base: 'person' });
+    expect(r.is_error).toBe(true);
+    expect(text(r)).toMatch(/customized or not a canonical Forge object/);
+    expect(act.files.get(path)).toBe('// user-authored source');
+    expect(act.writes).toEqual([]);
+  });
+
+  it('an unreadable target is preserved instead of being recreated from a base', async () => {
+    vi.spyOn(act, 'readFile').mockRejectedValue(new Error('EACCES: permission denied'));
+    const r = await forge({ customise: 'ladki banao', target: 'sita', base: 'person' });
+    expect(r.is_error).toBe(true);
+    expect(act.writes).toEqual([]);
+  });
+
+  it('a canonical object with a different embedded identity is not a valid target', async () => {
+    await forge({ spec: lamp() });
+    act.files.set('src/game/objects/sita.ts', act.files.get('src/game/objects/street-lamp.ts')!);
+    act.writes.length = 0;
+    const r = await forge({ customise: 'lal karo', target: 'sita' });
+    expect(r.is_error).toBe(true);
+    expect(text(r)).toMatch(/identity does not match/);
+    expect(act.writes).toEqual([]);
+  });
+
+  it('a changed runtime kit is preserved and no missing files are added', async () => {
+    act.files.set('src/game/forge/forge.ts', '// customized runtime');
+    const r = await forge({ spec: lamp() });
+    expect(r.is_error).toBe(true);
+    expect(text(r)).toMatch(/Existing Forge kit differs/);
+    expect(act.files).toEqual(new Map([['src/game/forge/forge.ts', '// customized runtime']]));
+    expect(act.writes).toEqual([]);
+  });
+
+  it('exclusive create cannot clobber an object that appeared after the read', async () => {
+    const original = act.createFileExclusive.bind(act);
+    vi.spyOn(act, 'createFileExclusive').mockImplementation(async (w, p, c) => {
+      if (p === 'src/game/objects/street-lamp.ts') act.files.set(p, '// concurrently authored');
+      return original(w, p, c);
+    });
+    const r = await forge({ spec: lamp() });
+    expect(r.is_error).toBe(true);
+    expect(act.files.get('src/game/objects/street-lamp.ts')).toBe('// concurrently authored');
+    expect(act.writes).not.toContain('src/game/objects/street-lamp.ts');
+  });
+
+  it('atomic replacement rejects a concurrent edit and preserves its bytes', async () => {
+    await forge({ spec: FORGE_EXAMPLES.house.spec });
+    act.writes.length = 0;
+    const original = act.compareAndSwapFile.bind(act);
+    vi.spyOn(act, 'compareAndSwapFile').mockImplementation(async (w, p, expected, c) => {
+      act.files.set(p, '// concurrent edit');
+      return original(w, p, expected, c);
+    });
+    const r = await forge({ customise: 'door ka rang neela karo', target: 'house' });
+    expect(r.is_error).toBe(true);
+    expect(act.files.get('src/game/objects/house.ts')).toBe('// concurrent edit');
+    expect(act.writes).toEqual([]);
   });
 });

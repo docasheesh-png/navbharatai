@@ -1,0 +1,132 @@
+{
+  "identity": {
+    "reportNumber": 1981,
+    "outcome": "failed",
+    "ok": false,
+    "model": "qwen3-coder",
+    "framework": "vite-react",
+    "builtBy": "SURPLUS",
+    "requestSummary": "A one-line create-this-app request plus one text attachment describing a study/quiz app (generic summary; request details omitted).",
+    "privacy": "Raw prompt, attachment text, and account/workspace/session/history/build identifiers omitted from public evidence; retained report number is the audit reference."
+  },
+  "truncation": {
+    "complete": true
+  },
+  "counts": {
+    "total": 95,
+    "errors": 2,
+    "warnings": 25,
+    "autoResolved": 0,
+    "workarounds": 0,
+    "leftOpen": 0,
+    "healRule": 3,
+    "unresolved": 27
+  },
+  "billing": {
+    "userTier": "weak (free tier — cheap engines) · not charged",
+    "charged": false,
+    "billedButNotDebited": false,
+    "walletDebited": false,
+    "billedUsd": 0,
+    "billedInr": 0,
+    "realCostUsd": 0.000619,
+    "sandboxCostUsd": 0,
+    "preSandboxSubtotalUsd": 0,
+    "sandboxFeeUsd": 0,
+    "sandboxFeePct": 2.5,
+    "powerMode": false,
+    "powerLevel": "weak",
+    "noClaude": true,
+    "zeroBillReason": "empty build (0 files produced) — never charged"
+  },
+  "etaAccuracy": {
+    "promisedMs": 1098012,
+    "lowMs": 772422,
+    "highMs": 1379103,
+    "actualMs": 199083,
+    "ratio": 0.18131222609588965,
+    "withinBand": false,
+    "evidenced": false,
+    "line": "The user was shown a ROUGH ESTIMATE, labelled a guess (unevidenced): 12.9 min–23.0 min (midpoint 18.3 min); the build took 3.3 min — 0.2× the midpoint and UNDER the band.",
+    "key": "complex_app",
+    "source": "platform"
+  },
+  "requestAnalysis": {
+    "taskType": "complex_app",
+    "complexityScore": 88,
+    "startTier": "sonnet",
+    "startBand": "standard band"
+  },
+  "providerDelivery": {
+    "SURPLUS": 13
+  },
+  "llmCallCount": 14,
+  "providerTokens": {
+    "SURPLUS": {
+      "inputTokens": 120072,
+      "outputTokens": 10978,
+      "cacheReadInputTokens": 65248
+    }
+  },
+  "providerWaste": {
+    "msByKind": {
+      "timeout": 0,
+      "crawl": 0,
+      "silent": 0,
+      "rate-limit": 0,
+      "error": 0
+    },
+    "callsByKind": {
+      "timeout": 0,
+      "crawl": 0,
+      "silent": 0,
+      "rate-limit": 0,
+      "error": 0
+    },
+    "msByFamily": {},
+    "buildMs": 198645
+  },
+  "sandboxUnavailable": {
+    "code": "SANDBOX_UNAVAILABLE",
+    "detailClass": "E2B concurrent-sandbox cap of 20",
+    "recovered": false,
+    "workspacePathsAtSetup": 0
+  },
+  "fastLane": {
+    "ran": true,
+    "phasesSeconds": {
+      "plan": 8.8,
+      "contract": 11.9,
+      "generate": 148.3,
+      "verify": 0.6,
+      "repair": 0,
+      "other": 12,
+      "total": 181.6
+    },
+    "simpleBuildSuccessWithZeroFiles": true,
+    "writesRefused": {
+      "appPass": 12,
+      "foundationPass": 3
+    },
+    "previewPublished": false,
+    "commands": 0
+  },
+  "writeRefusalClass": "Could not read the existing path safely (transient sandbox error) — not overwriting it",
+  "upsell": {
+    "offeredStrongestEngineCredits": true,
+    "suppressedOnMainBy": "BR1952 interrupted includes sandboxUnavailable"
+  },
+  "manifestFiles": [],
+  "closedOnMainBy": {
+    "D1_fastLaneAgainstDeadWorkspace": "BR1952 #4124 FAST_LANE_SKIPPED_SANDBOX",
+    "D2_retryGoodbye": "BR1961 F2 #4146 sandboxUnavailableNotice",
+    "D3_paidUpsell": "BR1952 sandboxUnavailable is not a capability verdict",
+    "D4_checkmarkBeforeSave": "per-file tick is now 'Generated … — not saved yet'"
+  },
+  "shipped": {
+    "D5_zeroFileSuccess": "runSimpleBuild returns ok:false reason nothing_landed when no file landed; no 'Built your app' / 'shipping the files unverified' / verify / preview"
+  },
+  "queueUpdated": [
+    "Q-2621"
+  ]
+}

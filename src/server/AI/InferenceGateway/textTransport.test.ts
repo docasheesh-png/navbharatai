@@ -497,7 +497,7 @@ describe('exact named paid transports never substitute models', () => {
     ['DEEPINFRA', 'deepseek-ai/DeepSeek-V4-Flash-0731', 0.06, 0.18],
     ['CHEAPERINFERENCE', 'beam-1.0-501b-a23b', 0.65, 1.95],
   ] as const)('sends the exact reviewed %s/%s model once', async (provider, model, pin, pout) => {
-    vi.stubEnv('CHEAPERINFERENCE', 'all'); vi.stubEnv('CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION', 'on');
+    vi.stubEnv('CHEAPERINFERENCE', ''); vi.stubEnv('CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION', '');
     fetchMock.mockResolvedValue(jsonResponse({ ...completion(), model })); const input = namedPaid(provider, model, [pin, pout]);
     expect(await executeGatewayText(input)).toMatchObject({ model, provider, content: 'Hello back' }); expect(fetchMock).toHaveBeenCalledOnce();
     const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string); expect(body.model).toBe(model);
@@ -522,8 +522,14 @@ describe('exact named paid transports never substitute models', () => {
     await expect(executeGatewayText(input)).rejects.toMatchObject({ code: 'POLICY_BLOCKED' });
     expect(input.markOutputVisible).not.toHaveBeenCalled();
   });
-  it.each(['permission', 'ceiling', 'list-price', 'underpriced', 'invalid-alias'] as const)('refuses Beam before HTTP when %s is unreviewed', async kind => {
-    vi.stubEnv('CHEAPERINFERENCE', 'all'); vi.stubEnv('CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION', kind === 'permission' ? 'off' : 'on');
+  it.each(['', 'all', 'admin'])('owner t365u: Beam is on with CHEAPERINFERENCE=%j and no written-permission flag', async mode => {
+    vi.stubEnv('CHEAPERINFERENCE', mode); vi.stubEnv('CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION', 'off');
+    fetchMock.mockResolvedValue(jsonResponse({ ...completion(), model: 'beam-1.0-501b-a23b' }));
+    await expect(executeGatewayText(namedPaid('CHEAPERINFERENCE', 'beam-1.0-501b-a23b', [0.65, 1.95]))).resolves.toMatchObject({ content: 'Hello back' });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+  it.each(['kill-switch', 'ceiling', 'list-price', 'underpriced', 'invalid-alias'] as const)('refuses Beam before HTTP when %s', async kind => {
+    vi.stubEnv('CHEAPERINFERENCE', kind === 'kill-switch' ? 'off' : ''); vi.stubEnv('CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION', '');
     let input = namedPaid('CHEAPERINFERENCE', kind === 'invalid-alias' ? 'imaginary-beam' : 'beam-1.0-501b-a23b', [0.65, 1.95]);
     const rate = { ...input.transport.rateCard! }; if (kind === 'ceiling') delete rate.minimumDiscountBasisPoints;
     if (kind === 'list-price') delete rate.supplierListInputNanoUsdPerMillion;

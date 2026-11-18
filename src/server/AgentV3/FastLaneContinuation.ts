@@ -21,8 +21,9 @@
 //
 // PURE + unit-tested. The impure LLM round trip lives at the call site in routes/agentv3.ts.
 
-import { hasEndFileMarker, parseFileBlocks } from './OneShotBuilder';
+import { hasEndFileMarker, normalizeShortFileHeaders, parseFileBlocks } from './OneShotBuilder';
 import { binaryTextGenerationProblem } from './binaryTextWrite';
+import { isBinaryAsset } from './fileClassification';
 
 /** Provider stop reasons that mean "I ran out of output budget", not "I finished". */
 export function isTruncatedStop(stopReason: string | null | undefined): boolean {
@@ -113,6 +114,7 @@ export function continuationPrompt(producedSoFar: string): string {
  * body is what `unterminatedTailPath` throws away, and it is the half this module was losing.
  */
 function unterminatedTail(text: string): { path: string; body: string } | null {
+  text = normalizeShortFileHeaders(text); // the parser's own short-header rule (BR1989)
   const path = unterminatedTailPath(text);
   if (!path) return null;
   const lastHeader = text.lastIndexOf('<<<FILE');
@@ -175,6 +177,7 @@ function normalizedHead(body: string): string {
 export function resumedFilePath(previous: string, continuation: string): string | null {
   const tail = unterminatedTail(previous);
   if (!tail) return null;
+  continuation = normalizeShortFileHeaders(continuation);
   const m = /^\s*<<<FILE\s+(.+?)>>>\r?\n([\s\S]*)$/.exec(continuation);
   if (!m) return null;
   const contPath = m[1].trim().replace(/^["'`]|["'`]$/g, '');
@@ -209,7 +212,7 @@ export function joinContinuation(previous: string, continuation: string): string
   if (!previous) return continuation;
   const resumed = resumedFilePath(previous, continuation);
   const cont = resumed
-    ? continuation.replace(/^\s*<<<FILE\s+(.+?)>>>\r?\n/, '')
+    ? normalizeShortFileHeaders(continuation).replace(/^\s*<<<FILE\s+(.+?)>>>\r?\n/, '')
     : continuation;
   const needsBreak = cont.startsWith('<<<FILE') && !previous.endsWith('\n');
   return previous + (needsBreak ? '\n' : '') + cont;
@@ -227,6 +230,7 @@ export function joinContinuation(previous: string, continuation: string): string
  */
 export function unterminatedTailPath(text: string): string | null {
   if (!text) return null;
+  text = normalizeShortFileHeaders(text); // a header the parser accepts is a header here too (BR1989)
   const lastHeader = text.lastIndexOf('<<<FILE');
   if (lastHeader === -1) return null;
   // The parser's own terminator (END_FILE_MARKER): a block it closed is never a file cut off here.
@@ -268,6 +272,22 @@ export async function continueFastLaneGeneration<T extends FastLaneReply>(
 }> {
   // BR1952's JPEG continuation could never become a valid text write. This boundary also
   // covers one-shot and repair replies, which have no manifest to reject in advance.
+  // A truncated, still-open binary block is the sibling (autopsy BR1987): parseFileBlocks
+  // may accept an unterminated `<<<FILE …png>>>`, the loop then "rejoined" it, and the
+  // later text-write refusal was the only thing that saved the project from a broken image.
+  // Drop that tail first so completed text files are kept and the binary is not continued.
+  let firstText = first.text;
+  const openBinary = unterminatedTailPath(firstText);
+  if (openBinary && isBinaryAsset(openBinary)) {
+    const cut = firstText.lastIndexOf('<<<FILE');
+    firstText = cut >= 0 ? firstText.slice(0, cut) : firstText;
+    // A reply that was only a truncated binary must still fail here, as BR1952 requires.
+    // Do not return an empty success after dropping the tail. Completed text files stay.
+    if (!firstText.trim()) {
+      throw new Error(binaryTextGenerationProblem([{ path: openBinary }]) ?? `binary continuation refused: ${openBinary}`);
+    }
+    first = { ...first, text: firstText };
+  }
   const firstBinaryProblem = binaryTextGenerationProblem(parseFileBlocks(first.text));
   if (firstBinaryProblem) throw new Error(firstBinaryProblem);
   let text = first.text;
@@ -293,14 +313,21 @@ export async function continueFastLaneGeneration<T extends FastLaneReply>(
       break;
     }
     const rejoined = resumedFilePath(text, next.text);
+    if (rejoined && isBinaryAsset(rejoined)) {
+      const cut = text.lastIndexOf('<<<FILE');
+      if (cut >= 0) text = text.slice(0, cut);
+      failure = { error: new Error(binaryTextGenerationProblem([{ path: rejoined }]) ?? `binary continuation refused: ${rejoined}`) };
+      break;
+    }
     if (rejoined) deps.onRejoined?.(rejoined);
     // A model can skip the interrupted file and start a different one. The parser deliberately
     // accepts missing end markers, so that would hide the known partial behind a complete final
     // block. Remove it at the boundary where we still know which reply left it unfinished.
     const openPath = unterminatedTailPath(text);
-    const nextHeader = /<<<FILE\s+(.+?)>>>/.exec(next.text);
+    const nextText = normalizeShortFileHeaders(next.text);
+    const nextHeader = /<<<FILE\s+(.+?)>>>/.exec(nextText);
     let replacesTail = false;
-    if (openPath && nextHeader && !hasEndFileMarker(next.text.slice(0, nextHeader.index))) {
+    if (openPath && nextHeader && !hasEndFileMarker(nextText.slice(0, nextHeader.index))) {
       const nextPath = nextHeader[1].trim().replace(/^["'`]|["'`]$/g, '');
       replacesTail = nextPath === openPath && !rejoined;
       if (nextPath !== openPath) {

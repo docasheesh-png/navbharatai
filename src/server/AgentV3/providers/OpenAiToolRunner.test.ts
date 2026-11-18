@@ -165,4 +165,51 @@ describe('OpenAiToolRunner', () => {
       expect(res.text).toBe('built it');
     });
   });
+
+  describe('a reasoning-only cap is used or continued once (#2430)', () => {
+    const capped = (reasoning: string, content: string | null = null, tokens = content ? 20 : 8000) => ({
+      choices: [{
+        message: { role: 'assistant', content, ...(reasoning ? { reasoning_content: reasoning } : {}) },
+        finish_reason: content ? 'stop' : 'length',
+      }],
+      usage: { prompt_tokens: 10, completion_tokens: tokens },
+    });
+
+    it('returns the file list that arrived inside the reasoning and does not call again', async () => {
+      const { client, create } = clientReturning(capped('notes\nsrc/App.tsx :: screen\nsrc/main.tsx :: entry'));
+      const res = await new OpenAiToolRunner(client, { model: 'deepseek-v4.1-flash' }).runTurn(baseParams({ tools: [], maxTokens: 8000 }));
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(res.text).toContain('src/App.tsx :: screen');
+      expect(res.text).toContain('src/main.tsx :: entry');
+      expect(res.stopReason).toBe('end_turn');
+    });
+
+    it('asks once for the answer when the reasoning holds no file list, and keeps that answer', async () => {
+      const create = vi.fn()
+        .mockResolvedValueOnce(capped('still thinking about the layout'))
+        .mockResolvedValueOnce(capped('', 'src/App.tsx :: screen\nsrc/main.tsx :: entry'));
+      const client = { chat: { completions: { create } } } as unknown as OpenAiChatClient;
+      const res = await new OpenAiToolRunner(client, { model: 'deepseek-v4.1-flash' }).runTurn(baseParams({ tools: [], maxTokens: 8000 }));
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(res.text).toContain('src/App.tsx :: screen');
+      expect(res.usage.outputTokens).toBe(8020);
+      expect(JSON.stringify(create.mock.calls[1][0].messages)).toContain('output only the answer');
+    });
+
+    it('does not treat a file list inside reasoning as the answer of a tool turn', async () => {
+      const create = vi.fn().mockResolvedValue(capped('src/App.tsx :: screen\nsrc/main.tsx :: entry'));
+      const client = { chat: { completions: { create } } } as unknown as OpenAiChatClient;
+      await expect(new OpenAiToolRunner(client, { model: 'deepseek-v4.1-flash' }).runTurn(baseParams({ maxTokens: 8000 })))
+        .rejects.toThrow(/output budget ran out/);
+      expect(create).toHaveBeenCalledTimes(2);
+    });
+
+    it('stops after one continuation when that continuation is also reasoning only', async () => {
+      const create = vi.fn().mockResolvedValue(capped('thinking forever'));
+      const client = { chat: { completions: { create } } } as unknown as OpenAiChatClient;
+      await expect(new OpenAiToolRunner(client, { model: 'deepseek-v4.1-flash' }).runTurn(baseParams({ tools: [], maxTokens: 8000 })))
+        .rejects.toThrow(/output budget ran out/);
+      expect(create).toHaveBeenCalledTimes(2);
+    });
+  });
 });

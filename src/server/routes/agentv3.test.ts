@@ -995,6 +995,9 @@ describe('oneShotDevPort — preview port per framework for the one-shot lane', 
     expect(oneShotDevPort('astro')).toBe(4321);
     expect(oneShotDevPort('static')).toBe(3000);
     expect(oneShotDevPort('python-fastapi')).toBe(8000);
+    expect(oneShotDevPort('flask')).toBe(8000);
+    expect(oneShotDevPort('spring-boot')).toBe(5173);
+    expect(oneShotDevPort('go')).toBe(5173);
   });
 });
 
@@ -2553,7 +2556,12 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     // or the bytes npm left on disk after an install the lane ran, and only when the lane itself wrote package.json
     // (a scaffold manifest read from disk is never credited to the build). It only ADDS declarations. Considered ✓.
     expect(SRC).toContain('if (plan.manifest === \'written\' && laneManifest !== null) writtenFiles.set(\'package.json\', laneManifest);');
-    expect(count).toBe(37);
+    // BR1979: +1 the FAST-LANE TSCONFIG REFERENCES repair inside fastVerifyOnce — that lane never runs
+    // on an import/survey turn (`fastLaneWouldRun` requires `intent === 'new_build' && !isImportTurn`).
+    // It writes only a tsconfig already in `writtenFiles`, and only to drop a dangling tsconfig.node.json
+    // reference (sanitizeTsconfigReferences). Kill switch AGENTV3_TSCONFIG_SANITIZE. Considered ✓.
+    expect(SRC).toContain('for (const w of landed) writtenFiles.set(w.path, w.content);');
+    expect(count).toBe(38);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

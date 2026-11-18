@@ -10,6 +10,7 @@
 // the live AgentEvent stream and (b) accepts explicitly-recorded issues for signals that are not
 // events (a provider fallback, a sandbox-create timeout).
 
+import { isNpmInstallWithoutPackageJson, isMissingStartToolchain, type DevServerLaunchInput } from './devServerLaunchPlan';
 import { startBandLabel } from './RequestAnalyser';
 import { todoOnlyTurnsLine } from './todoOnlyTurn';
 import { isBuildStoppedError } from './stopSignal';
@@ -28,6 +29,7 @@ import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
 import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { sandboxCost, describeSandboxCost } from './sandboxCost';
 import { redactProvidersText } from '../lib/providerRedaction';
+import { stripEngineSafeDiag } from '../lib/engineSafeDiag';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError, isProviderBalanceError } from './providerErrorClass';
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
@@ -67,6 +69,8 @@ export const PROCESS_ONLY_CODES = new Set([
   // e628efd4). A WARNING, so the error count a RED gate reads cannot change and no bill moves; the server's
   // last words stay in the admin report.
   'PREVIEW_SERVER_DOWN',
+  // The user's wallet could not cover the rest of the build. It is our stop, not a defect in their app.
+  'WALLET_BALANCE_EXHAUSTED',
   // Q-982 (report 9c612cdb, 2026-10-13). The workspace refused a file one of OUR passes wrote (a guard, a sandbox
   // read that failed). It is evidence about our write, recorded so the refusal is never silent again; whatever
   // the refused file means for the app is measured by the checks that read the workspace afterwards.
@@ -118,6 +122,13 @@ export const PROCESS_ONLY_CODES = new Set([
   'UNUSED_DEPS_RESTORE_INCOMPLETE', 'DEAD_SALVAGE_RESTORE_INCOMPLETE',
   'DESIGN_HEAL_RESTORE_INCOMPLETE',
   'HEAL_NOT_DURABLE',         // our repair wrote twice to one file; the user never sees repair passes
+  // Pro Chain V2 (owner t350u): which engine served a step, a fallback, an estimated price or usage. All of it is
+  // OUR routing, never the user's app; the user report folds every PRO_CHAIN_V2_* line into ENGINE_ROUTING.
+  // Warnings/info only, so no error count and no bill moves.
+  'ENGINE_ROUTING',
+  'PRO_CHAIN_V2_ACTIVE', 'PRO_CHAIN_V2_AGENT', 'PRO_CHAIN_V2_ENGINE', 'PRO_CHAIN_V2_FALLBACK',
+  'PRO_CHAIN_V2_PRIMARY_DROPPED', 'PRO_CHAIN_V2_PRIMARY_SKIP', 'PRO_CHAIN_V2_EXHAUSTED', 'PRO_CHAIN_V2_CALL_FAILED',
+  'PRO_CHAIN_V2_USAGE_ESTIMATED', 'PRO_CHAIN_V2_RATE_ESTIMATED', 'PRO_CHAIN_V2_SCOPE_FAILED', 'PRO_CHAIN_V2_SCOPE_PRIMARY',
   'IMPORT_NOT_DURABLE',       // our store did not confirm saving an import (autopsy d0b2fcd6, Q-735) — their app is unchanged
   'IMPORT_DURABLE_PENDING',   // our background save of an import was still running when the turn ended (build d62bf22d) — their app is unchanged
   // ── Q-381 batch two (2026-10-11): each of these says, at its own recording site, that it is about OUR run.
@@ -321,7 +332,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // futility breaker, a deploy drain, a reclaimed lock, a reaper sweep or the user's own Stop says
   // nothing about the app's code, and counting one as a "build-breaking blocker" on the user's health
   // card is the provider-error-as-app-blocker class (autopsy 4efab9d7) through a new door.
-  'OUTCOME_USER_STOPPED', 'OUTCOME_COST_CEILING', 'OUTCOME_FUTILE', 'OUTCOME_DEPLOY_DRAIN',
+  'OUTCOME_USER_STOPPED', 'OUTCOME_COST_CEILING', 'OUTCOME_WALLET_EMPTY', 'OUTCOME_FUTILE', 'OUTCOME_DEPLOY_DRAIN',
   'OUTCOME_SUPERSEDED', 'OUTCOME_REAPED', 'OUTCOME_AUTHORITY_UNAVAILABLE',
   // …and the two the deadline finalizer already wrote, for the same reason (the siblings, rule 3): the
   // wall-clock cap and an abort with no recorded cause end the RUN; neither is evidence about the app.
@@ -525,6 +536,8 @@ export const HEAL_RESOLVES: Readonly<Record<string, readonly string[]>> = {
   LABELS_REPAIRED: [],
   SCRIPT_INTEGRITY_REPAIRED: [],
   TSCONFIG_EXTENDS_REPAIRED: [],
+  TSCONFIG_REFERENCES_REPAIRED: [],
+  TSCONFIG_MARKUP_REPAIRED: [],
 };
 
 export function isAppFinding(issue: Pick<BuildIssue, 'phase' | 'code'>): boolean {
@@ -572,6 +585,12 @@ export interface BuildIssue {
   observation?: boolean;
   /** Extra context (tool name, provider, file path, raw error) — optional. */
   detail?: string;
+  /**
+   * Admin-only forensic note. `userFacingReport` must not copy this field (it is an allow-list).
+   * Ordinary user-facing context belongs in `detail`, which the user view keeps (after provider
+   * redaction). Do not put a recovery-reason token in `detail`.
+   */
+  adminDetail?: string;
   /** Set when the SAME code+message repeated back-to-back (e.g. many identical "▶ write_file" tool
    *  calls) — collapsed into one entry instead of one line per occurrence. Absent/1 = no repeat. */
   repeatCount?: number;
@@ -928,6 +947,20 @@ export interface BuildDiagnosticsReport {
    * prose, per build. `buildMs` is the clock the shares are of. Absent on reports written before it.
    */
   providerWaste?: { msByKind: Record<string, number>; callsByKind: Record<string, number>; msByFamily: Record<string, number>; buildMs: number };
+  /**
+   * Pro Chain V2 (owner t350u, z@ test chain Surplus → Router One → Qubax → Mitrify): which engine each
+   * agent used, fallbacks, Surplus drops and how each supplier's price/usage was known. Admin-only like
+   * every provider name here. Absent on every build that does not run the v2 chain.
+   */
+  proChainV2?: {
+    reason: string;
+    agents: Record<string, Record<string, number>>;
+    fallbackTurns: number;
+    surplusDrops: number;
+    failedCalls: Record<string, number>;
+    rateSources: Record<string, string>;
+    usageEstimatedTurns: Record<string, number>;
+  };
   /** Fix 37c — explicit data-loss/recovery events (sandbox recycled, files restored, generation
    *  reset), each with the observed CAUSE, so "data kyu udha" is answered inside the report itself. */
   dataLossEvents?: Array<{ ts: number; cause: string; detail: string }>;
@@ -1093,6 +1126,8 @@ export class BuildDiagnostics {
   private sandboxCostRecord?: { seconds: number; usd: number; estimated: true };
   private cacheReadInputTokens?: number;
   private providerWaste?: BuildDiagnosticsReport['providerWaste'];
+  /** Live Pro Chain V2 tally, read at serialization (same lifetime rule as todoOnlyTally). */
+  private proChainV2Source?: { snapshot(): NonNullable<BuildDiagnosticsReport['proChainV2']> };
   /** When the build waited for the USER ([start, end] ms) — see addUserWait. */
   private userWaitSpans: Array<{ a: number; b: number }> = [];
   /** Timed setup spans before the first model call ([start, end] ms) — see recordSetupTiming. */
@@ -1117,12 +1152,25 @@ export class BuildDiagnostics {
   private session: BuildDiagnosticsReport['session'];
   private dataLossEvents: Array<{ ts: number; cause: string; detail: string }> = [];
 
+  /**
+   * Files/framework known for this workspace, used only to decide whether a failed
+   * npm install is a missing-manifest on a clearly non-Node tree. Unset means
+   * the exclusion does not fire (main's behaviour).
+   */
+  private workspaceTree: DevServerLaunchInput | null = null;
+
   constructor(meta: BuildDiagnosticsMeta = {}) {
     this.meta = meta;
     // A new build has proven nothing yet — see `renderSeenThisBuild` in renderProof.ts.
     if (meta.workspaceId) forgetRenderSeen(meta.workspaceId);
     this.now = meta.now ?? (() => Date.now());
     this.startedAt = this.now();
+  }
+
+  /** Record the tree the launch plan saw, so a later command can be judged against it. */
+  setWorkspaceTree(tree: DevServerLaunchInput): DevServerLaunchInput {
+    this.workspaceTree = tree;
+    return tree;
   }
 
   /** Persist the current report in REAL TIME (best-effort; never throws). */
@@ -1300,7 +1348,7 @@ export class BuildDiagnostics {
    */
   private compatibleAuditFixRan = false;
 
-  recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number; timing?: CommandTiming }): void {
+  recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number; timing?: CommandTiming; tree?: DevServerLaunchInput | null }): void {
     // TD-4: one door. The audit parser below still sees vulnerability counts; it does not need values.
     rec = {
       ...rec,
@@ -1384,7 +1432,13 @@ export class BuildDiagnostics {
       // A project-wide `tsc --noEmit` whose ONLY errors are in TEST files (missing vitest types in the
       // sandbox, a test's named-vs-default import) is not an APP-build failure — the app ships without
       // its test files and compiles clean. See isTestOnlyTypecheckFailure (deep-test build #4 rootCause).
-      && !isTestOnlyTypecheckFailure(rec.command, rec.stdout, rec.stderr);
+      && !isTestOnlyTypecheckFailure(rec.command, rec.stdout, rec.stderr)
+      // npm install ENOENT on a tree with no package.json is the platform running the Node
+      // toolchain on a non-Node app (autopsy BR1987). It is not a defect of the app's code.
+      && !isNpmInstallWithoutPackageJson(rec.command, rec.stdout, rec.stderr, rec.tree ?? this.workspaceTree)
+      // A Maven / Go start that failed only because the image lacks the compiler is
+      // infrastructure, not a compile error in the app.
+      && !isMissingStartToolchain(rec.command, rec.stdout, rec.stderr);
     const cmdHead = ourCommandLabel(rec.command) ?? rec.command.split('\n')[0].slice(0, 120);
     const durTxt = rec.durationMs != null ? ` (${Math.round(rec.durationMs / 1000)}s)` : '';
     // Q-273 — a slow command says where its time went (our setup / the machine / the command).
@@ -2690,6 +2744,11 @@ export class BuildDiagnostics {
    * only reading that describes the build the user was given. A copy here would re-create the very bug this
    * closes — see todoOnlyTurnsLine.
    */
+  /** Attach the live Pro Chain V2 tally (read at serialization, so heals that run late are counted). */
+  setProChainV2(source: { snapshot(): NonNullable<BuildDiagnosticsReport['proChainV2']> }): void {
+    if (source && typeof source.snapshot === 'function') this.proChainV2Source = source;
+  }
+
   setTodoOnlyTally(tally: { turns: number; latencyMs: number; firstInRun?: number }): void {
     if (tally && typeof tally === 'object') this.todoOnlyTally = tally;
   }
@@ -2965,6 +3024,23 @@ export class BuildDiagnostics {
    * screenshot" against whether a screenshot was ever taken. Reads the timeline rather than a separate
    * counter, so it cannot drift from what the report shows.
    */
+  /**
+   * Did this build RELAUNCH the dev server, or only find it already running? (Q-2714, autopsy 57604006.)
+   *
+   * Build 1712adfa told the user "the earlier 'preview not running' issue was temporary … It's now restarted",
+   * while its only launch command had answered "dev server already healthy on port 5173 — reused it (no relaunch)".
+   * 'reused' only when a launch was answered that way and nothing relaunched (no other UP report, no platform
+   * start); undefined when the log does not settle it — silence is never an accusation.
+   */
+  devServerLaunchEvidence(): 'relaunched' | 'reused' | undefined {
+    const outs = this.commands.map((c) => String(c.stdout ?? ''));
+    const reused = outs.some((o) => o.includes('reused it (no relaunch'));
+    const relaunched = outs.some((o) => o.includes('[health-check] dev server is UP') && !o.includes('reused it (no relaunch'))
+      || this.issues.some((i) => i.code === 'PLATFORM_PREVIEW_UP');
+    if (relaunched) return 'relaunched';
+    return reused ? 'reused' : undefined;
+  }
+
   toolWasUsed(tool: string): boolean {
     const needle = String(tool ?? '').trim().toLowerCase();
     if (!needle) return false;
@@ -3097,6 +3173,7 @@ export class BuildDiagnostics {
       priorFailedBuilds: this.priorFailedBuilds,
       session: this.session,
       ...(this.providerWaste ? { providerWaste: this.providerWaste } : {}),
+      ...(this.proChainV2Source ? (() => { try { return { proChainV2: this.proChainV2Source!.snapshot() }; } catch { return {}; } })() : {}),
       dataLossEvents: this.dataLossEvents.length ? [...this.dataLossEvents] : undefined,
       // DERIVED AT SERIALIZATION, like etaAccuracy above, so no ending path can forget it. This is
       // the FIRST of the report's two truncation passes: what the recorder's own caps refused. The
@@ -3385,7 +3462,12 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
  * Deliberately NARROW: only prefixes whose whole family is advisory BY DEFINITION. `PREVIEW_`, for
  * instance, is NOT here — a preview that did not render genuinely can be why a build failed.
  */
-const NEVER_ROOT_CAUSE_FAMILIES: readonly string[] = ['DESIGN_', 'ACCESSIBILITY_', 'DEPHEALTH_'];
+// `PRO_CHAIN_V2_` (owner t350u) qualifies by the same definition: every line of that family is routing
+// telemetry (which engine served an agent, a fallback, an estimated price) recorded autoResolved, and the
+// build's real ending is recorded by its own error/outcome lines. Without this, a failed or still-running
+// z@ build named "[v2] builder#1: ENGINE_QX failed" as its root cause — in the user's report too.
+// ENGINE_ROUTING is the user-facing fold of the same lines (userFacingReport).
+const NEVER_ROOT_CAUSE_FAMILIES: readonly string[] = ['DESIGN_', 'ACCESSIBILITY_', 'DEPHEALTH_', 'PRO_CHAIN_V2_', 'ENGINE_ROUTING'];
 
 /**
  * Bucket a provider error into something countable.
@@ -3824,6 +3906,12 @@ export const ETA_UNTESTED_OUTCOMES: ReadonlySet<string> = new Set([
   ...Object.values(ABORT_OUTCOME_CODES),
   'OUTCOME_INITIAL_DECLINED', // a preserved answer is not completed app delivery
   'OUTCOME_FINALIZATION_FAILED', // neither is a failure while settling that answer
+  // Infrastructure stops are also not completed delivery. A setup refusal in
+  // under a second was scored as "UNDER the band" against a several-minute
+  // opening estimate (BR1986). Past the upper bound, elapsed time still proves a miss.
+  'OUTCOME_SANDBOX_UNAVAILABLE',
+  'OUTCOME_ENGINE_UNAVAILABLE',
+  'OUTCOME_ENGINE_TIMEOUT',
 ]);
 
 /**
@@ -4533,6 +4621,7 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
       lines.push(`${n + 1}. [${i.severity.toUpperCase()}] (${i.phase}/${i.code})${rep} ${i.autoResolved ? 'auto-resolved' : 'UNRESOLVED'}`);
       lines.push(`   ${i.message}`);
       if (i.detail) lines.push(`   ↳ ${i.detail}`);
+      if (i.adminDetail) lines.push(`   ↳ ${i.adminDetail}`);
     });
   }
   if (infoCount > 0) {
@@ -4686,24 +4775,88 @@ export function renderSessionDiagnosticsText(reports: readonly BuildDiagnosticsR
  * The user's OWN content — their prompt and their generated app files — is kept verbatim (echoing the user's own
  * words is not a provider leak, and scrubbing their source would corrupt it).
  */
+/**
+ * Owner t362u (2026-11-16): the ONLY issues hidden from a user's build report are these codes our own
+ * billing code records to explain HOW a charge was worked out. An exact allow-list, never word or substring
+ * matching, so an app's own receipt/price/rate-limit/token problems always stay visible. The BluesMinds
+ * builder rung records no issue of its own (its estimated rate reaches only the admin billing ledger via
+ * realRateFor); its Pro Chain V2 estimate is PRO_CHAIN_V2_RATE_ESTIMATED. UNBILLED_BARREN_WORK is NOT here:
+ * it states the ₹ billed, which the owner wants users to see.
+ */
+export const USER_HIDDEN_BILLING_METHOD_CODES: ReadonlySet<string> = new Set([
+  'ENGINE_COST_ESTIMATED', 'USAGE_NOT_REPORTED', 'DISCOUNT_COST_UNCONFIRMED',
+  'PRO_CHAIN_V2_USAGE_ESTIMATED', 'PRO_CHAIN_V2_RATE_ESTIMATED',
+  'ROUTER_ONE_CATALOGUE_ESTIMATED', 'SURPLUS_STOP_COST_ESTIMATED',
+]);
+/** True only for one of our own billing-method codes (exact match). PURE. */
+export function isBillingMethodIssue(i: Pick<BuildIssue, 'code'>): boolean {
+  return USER_HIDDEN_BILLING_METHOD_CODES.has(i.code);
+}
+
+/**
+ * Free text we author (summary, root cause, review) can quote a hidden issue's message verbatim. Remove
+ * exactly those messages, and nothing else, so no app wording is ever touched. PURE.
+ */
+export function withoutBillingMethod(text: string, hiddenMessages: readonly string[]): string {
+  let out = text;
+  for (const m of hiddenMessages) {
+    const msg = m.trim();
+    if (msg.length < 8 || !out.includes(msg)) continue;
+    out = out.split(msg).join('');
+  }
+  if (out === text) return text;
+  return out.replace(/\(\s*\)|\[\s*\]|"\s*"/g, '').replace(/\s*([;,.:])(\s*[;,.:])+/g, '$1').replace(/\s{2,}/g, ' ')
+    .replace(/^[\s;,.:—-]+/, '').replace(/[\s;,:—-]+$/, '').trim();
+}
+
+/** The report's counts with the hidden issues taken out, so every number matches the listed issues. PURE. */
+function countsWithout(counts: BuildDiagnosticsReport['counts'], hidden: readonly BuildIssue[]): BuildDiagnosticsReport['counts'] {
+  if (hidden.length === 0) return counts;
+  const counted = hidden.filter((i) => !isNarrationEntry(i));
+  const less = (n: number | undefined, k: number): number | undefined => (n === undefined ? undefined : Math.max(0, n - k));
+  return {
+    ...counts,
+    total: less(counts.total, hidden.length)!,
+    errors: less(counts.errors, counted.filter((i) => i.severity === 'error').length)!,
+    warnings: less(counts.warnings, counted.filter((i) => i.severity === 'warning').length)!,
+    autoResolved: less(counts.autoResolved, counted.filter(isSelfHeal).length)!,
+    ...(counts.workarounds !== undefined ? { workarounds: less(counts.workarounds, hidden.filter(isWorkaroundIssue).length) } : {}),
+    ...(counts.leftOpen !== undefined ? { leftOpen: less(counts.leftOpen, counted.filter(isLeftOpen).length) } : {}),
+    unresolved: less(counts.unresolved, counted.filter((i) => !i.autoResolved && i.observation !== true).length)!,
+    ...(counts.observations !== undefined ? { observations: less(counts.observations, hidden.filter((i) => i.observation === true).length) } : {}),
+  };
+}
+
 export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosticsReport {
-  const scrub = (s: string | undefined): string | undefined => (s === undefined ? undefined : redactProvidersText(s));
-  const scrubIssue = (i: BuildIssue): BuildIssue => ({
+  const hidden = report.issues.filter(isBillingMethodIssue);
+  const hiddenMessages = [...hidden, ...report.problems.filter(isBillingMethodIssue)].map((i) => i.message);
+  const scrub = (s: string | undefined): string | undefined => (s === undefined ? undefined : redactProvidersText(stripEngineSafeDiag(withoutBillingMethod(s, hiddenMessages))));
+  // Pro Chain V2 routing lines name suppliers and models by design (admin autopsy); a user sees one neutral line.
+  const scrubIssue = (i: BuildIssue): BuildIssue => (/^PRO_CHAIN_V2_/.test(i.code) ? {
+    ts: i.ts, phase: i.phase, severity: i.severity, code: 'ENGINE_ROUTING',
+    message: 'NavBharatAI routed this step to another engine.', autoResolved: i.autoResolved,
+    ...(i.repeatCount !== undefined ? { repeatCount: i.repeatCount } : {}),
+  } : {
     ts: i.ts,
     phase: i.phase,
     severity: i.severity,
     code: /^SURPLUS(?:_|$)/i.test(i.code) ? 'ENGINE_UNAVAILABLE' : i.code, // Supplier-specific codes stay in the admin report.
-    message: redactProvidersText(i.message),
+    message: redactProvidersText(stripEngineSafeDiag(i.message)),
     autoResolved: i.autoResolved,
-    ...(i.detail !== undefined ? { detail: redactProvidersText(i.detail) } : {}),
+    // BR2388: the `[engine-diag: …]` gate/stage/cost marker is for the admin report only.
+    // `adminDetail` is deliberately omitted — it is an admin-only field, not a user-facing detail.
+    ...(i.detail !== undefined ? { detail: redactProvidersText(stripEngineSafeDiag(i.detail)) } : {}),
     ...(i.repeatCount !== undefined ? { repeatCount: i.repeatCount } : {}),
   });
+  // Owner t362u (2026-11-16): a user sees only the total charged in rupees. Our own billing-method lines
+  // (exact codes above) are admin-only and dropped from the user's view; counts are adjusted to match.
+  const userVisible = (i: BuildIssue): boolean => !isBillingMethodIssue(i);
   const out: BuildDiagnosticsReport = {
     schema: report.schema,
     startedAt: report.startedAt,
-    counts: report.counts,
-    issues: report.issues.map(scrubIssue),
-    problems: report.problems.map(scrubIssue),
+    counts: countsWithout(report.counts, hidden),
+    issues: report.issues.filter(userVisible).map(scrubIssue),
+    problems: report.problems.filter(userVisible).map(scrubIssue),
     // Optional, user-relevant, provider-free fields — kept verbatim.
     ...(report.buildId !== undefined ? { buildId: report.buildId } : {}),
     ...(report.promptHash !== undefined ? { promptHash: report.promptHash } : {}),

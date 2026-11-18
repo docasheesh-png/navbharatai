@@ -50,20 +50,20 @@ describe('the release rule', () => {
   const gateOk = assessEditCandidate({ base: cityGame(), candidate: cityGame() });
   const gateBad = assessEditCandidate({ base: cityGame(), candidate: differentGame(), userMessage: 'camera' });
   it('promotes only a gated, rendered, instruction-aware candidate', () => {
-    expect(decideRelease({ gate: gateOk, previewGreen: true, provenBroken: false, base, requirementsOk: true }).action).toBe('promote');
+    expect(decideRelease({ gate: gateOk, previewGreen: true, provenBroken: false, base, requirementsOk: true, buildOk: true }).action).toBe('promote');
   });
   it('🔴 a candidate that compiles and RENDERS but replaces the project is held', () => {
-    const d = decideRelease({ gate: gateBad, previewGreen: true, provenBroken: false, base, requirementsOk: true });
+    const d = decideRelease({ gate: gateBad, previewGreen: true, provenBroken: false, base, requirementsOk: true, buildOk: true });
     expect(d.action).toBe('hold');
     expect(d.reasons.join(' ')).toMatch(/replaces the project/);
   });
   it('a candidate observed broken in the browser is held', () => {
-    expect(decideRelease({ gate: gateOk, previewGreen: false, provenBroken: true, base, requirementsOk: true }).action).toBe('hold');
+    expect(decideRelease({ gate: gateOk, previewGreen: false, provenBroken: true, base, requirementsOk: true, buildOk: true }).action).toBe('hold');
   });
   it('not being able to look keeps the user\'s edit but does not promote it', () => {
-    expect(decideRelease({ gate: gateOk, previewGreen: false, provenBroken: false, base, requirementsOk: true }).action).toBe('keep-unverified');
-    expect(decideRelease({ gate: gateOk, previewGreen: true, provenBroken: false, base, requirementsOk: false }).action).toBe('keep-unverified');
-    expect(decideRelease({ gate: gateOk, previewGreen: true, provenBroken: false, base: { ...base, state: 'stale' }, requirementsOk: true }).action).toBe('keep-unverified');
+    expect(decideRelease({ gate: gateOk, previewGreen: false, provenBroken: false, base, requirementsOk: true, buildOk: true }).action).toBe('keep-unverified');
+    expect(decideRelease({ gate: gateOk, previewGreen: true, provenBroken: false, base, requirementsOk: false, buildOk: true }).action).toBe('keep-unverified');
+    expect(decideRelease({ gate: gateOk, previewGreen: true, provenBroken: false, base: { ...base, state: 'stale' }, requirementsOk: true, buildOk: true }).action).toBe('keep-unverified');
   });
 });
 
@@ -215,7 +215,7 @@ import { settleEditRevision, heldEditReport } from '../src/server/AgentV3/editPr
 
 describe('the turn-end settle', () => {
   const okBase = { state: 'verified' as const, missing: [], extra: [], differing: [] };
-  const common = { projectId: 'proj-S', messageId: 'm', messageText: 't', userMessage: 'make the camera third person', baseCheck: okBase, requirementsOk: true, now: 9000 };
+  const common = { projectId: 'proj-S', messageId: 'm', messageText: 't', userMessage: 'make the camera third person', baseCheck: okBase, requirementsOk: true, buildOk: true, now: 9000 };
   it('🔴 a rendered replacement is NOT promoted and its report tells the user the app is as it was', async () => {
     const s = new InMemoryRevisionStore();
     const h = buildRevision({ projectId: 'proj-S', parentId: null, editId: 'b', kind: 'baseline', files: cityGame(), validation: { previewGreen: true, checks: [] }, now: 1 });

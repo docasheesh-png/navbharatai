@@ -1,0 +1,143 @@
+{
+  "identity": {
+    "reportNumber": 1978,
+    "outcome": "succeeded",
+    "ok": true,
+    "prompt": "Build one game",
+    "promptLength": 14,
+    "promptHash": "6debba63",
+    "reportDigest": "11160535a09d1297a6967859dba3f344e9d5671bade8f12f7bcdae4411c5448a",
+    "buildId": "87a6202d-3990-4535-8c56-a8973412b4d2",
+    "workspaceId": "agentv3-vPaoFLzHOeMv8uz8HsseZdKjajp1-caf8a18c-0098-44d8-aa4f-8d5cf772e4ad",
+    "historyId": "1794111619727",
+    "sessionId": "caf8a18c-0098-44d8-aa4f-8d5cf772e4ad",
+    "model": "qwen3-coder",
+    "framework": "vite-react",
+    "builtBy": "SURPLUS",
+    "startedAt": 1794111619727,
+    "endedAt": 1794112390515,
+    "startedAtIST": "2026-11-08 09:50:19.727 IST",
+    "endedAtIST": "2026-11-08 10:03:10.515 IST",
+    "userWaitMs": 30392
+  },
+  "rawReportSha256": "575a08c158c83b03818f85a3d696dbc1d944331504b16deabbbea374e428f93e",
+  "truncation": {
+    "complete": true
+  },
+  "counts": {
+    "total": 283,
+    "errors": 3,
+    "warnings": 9,
+    "autoResolved": 8,
+    "workarounds": 0,
+    "leftOpen": 1,
+    "healRule": 3,
+    "unresolved": 3
+  },
+  "billing": {
+    "userTier": "weak (free tier — cheap engines) · charged ₹5.55",
+    "charged": true,
+    "billedButNotDebited": false,
+    "walletDebited": true,
+    "billedUsd": 0.059012,
+    "billedInr": 5.55,
+    "realCostUsd": 0.006397,
+    "sandboxCostUsd": 0.030452,
+    "preSandboxSubtotalUsd": 0.057573,
+    "sandboxFeeUsd": 0.001439325,
+    "sandboxFeePct": 2.5,
+    "walletTokensDebited": 555,
+    "walletDebitedInr": 5.55,
+    "powerMode": false,
+    "powerLevel": "weak",
+    "noClaude": true
+  },
+  "etaAccuracy": {
+    "promisedMs": 606153,
+    "lowMs": 536445,
+    "highMs": 1040806,
+    "actualMs": 740396,
+    "ratio": 1.221467187327292,
+    "withinBand": true,
+    "evidenced": true,
+    "line": "The user was shown 8.9 min–17.3 min (midpoint 10.1 min); the build landed INSIDE that band (not counting 0.5 min spent waiting for the user's answer).",
+    "key": "game",
+    "source": "platform"
+  },
+  "requestAnalysis": {
+    "taskType": "simple_app",
+    "complexityScore": 15,
+    "startTier": "gemini",
+    "startBand": "cheapest band"
+  },
+  "providerDelivery": {
+    "SURPLUS": 49
+  },
+  "providerWaste": {
+    "msByKind": {
+      "timeout": 0,
+      "crawl": 0,
+      "silent": 0,
+      "rate-limit": 0,
+      "error": 0
+    },
+    "callsByKind": {
+      "timeout": 0,
+      "crawl": 0,
+      "silent": 0,
+      "rate-limit": 0,
+      "error": 0
+    },
+    "msByFamily": {},
+    "buildMs": 770773
+  },
+  "gameKitSeeded": {
+    "recipes": [
+      "generate_game_runtime",
+      "generate_game_vfx",
+      "generate_melody"
+    ],
+    "files": 0,
+    "seconds": 7.4
+  },
+  "writeTimeTypecheck": "never ran although 20 TypeScript write(s) happened — no tsconfig.json was found; builder wrote tsconfig.json at 09:53:53 IST",
+  "manifestFiles": [
+    ".gitignore",
+    "README.md",
+    "docs/decisions/ADR-001.md",
+    "e2e/smoke.spec.ts",
+    "index.html",
+    "package.json",
+    "playwright.config.ts",
+    "public/icon.svg",
+    "public/manifest.webmanifest",
+    "public/nbai-native.css",
+    "public/robots.txt",
+    "public/sw.js",
+    "src/App.tsx",
+    "src/game/color-rush/ColorRushGame.tsx",
+    "src/game/color-rush/GameLogic.ts",
+    "src/game/color-rush/audio.ts",
+    "src/game/color-rush/types.ts",
+    "src/index.css",
+    "src/main.tsx",
+    "tsconfig.json",
+    "tsconfig.node.json",
+    "vite.config.ts"
+  ],
+  "closedOnMainBy": {
+    "D1_no_recipes_without_manifest": "BR1958 #4132 prepareGameSeedWorkspace",
+    "D2_empty_seed_success": "BR1977 #4170 downgradeEmptyKitSeedSuccesses",
+    "D3_tsconfig_rearm": "BR1951 ToolDispatcher.onFileWrite"
+  },
+  "measuredOnMain55dcc3e20": {
+    "assessBuildInput('Build one game')": "buildable",
+    "buildConfirmation('Build one game')": "explicit-order (high-confidence build)",
+    "assessBuildInput('Build one app')": "no-object"
+  },
+  "shipped": "tests and ledger only — no production code change",
+  "queueUpdated": [
+    "Q-2653",
+    "Q-2654"
+  ]
+}

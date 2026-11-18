@@ -122,8 +122,10 @@ describe('Q-1033 — a bill has ONE rule, and the route holds no copy of it', ()
     expect((flags.match(/isAgentV3PaidPublicEnabled\(\) \|\| isAgentV3CreditGateEnabled\(\)/g) ?? []).length).toBe(1);
   });
 
-  it('all six readings call the one function', () => {
-    expect((route.match(/billingAppliesTo\(userId, email\)/g) ?? []).length).toBe(6);
+  it('every reading calls the one function', () => {
+    // Six original sites, plus the pre-estimate power-mode check (t403u) which must use the same
+    // predicate rather than copying it. The lock is "no copied expression", counted here.
+    expect((route.match(/billingAppliesTo\(userId, email\)/g) ?? []).length).toBe(7);
   });
 
   it('a caller that also needs a billable uid still says so itself', () => {

@@ -1,3 +1,4 @@
+import { exclusiveCreateCommand } from '../../../../lib/proceduralObjects/exclusiveCreateCommand';
 import { randomUUID } from 'node:crypto';
 import { assertNotCanaryWorkspace } from '../../../reliability/canaryIsolation';
 import { assertCanaryLegacyAllowed } from '../../../reliability/canarySpendGuard';
@@ -16,6 +17,7 @@ import { IEngineerActuator, BackendProvisionResult, EnsureWorkspaceOptions } fro
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
 import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS, buildPrebundleStaleCheckCommand, VITE_PREBUNDLE_DIR } from './devServerHost';
+import { fullstackDevPort } from '../../../devServerLaunchPlan';
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import { appPortsFrom } from '../../../appPorts';
 import type { DevFramework } from './devServerHost';
@@ -30,6 +32,7 @@ import { resolveTemplateId } from './fullstackRouting';
 import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
 import { resumeSandboxChoice } from '../../../sandboxResumeChoice';
 import { SandboxRecoveryUnavailableError, isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable } from '../../../SandboxRecoveryError';
+import { isE2BConcurrentCapacityError } from '../../../e2bConcurrentCapacity';
 import { sandboxLifecycle } from '../../../previewWake';
 import { countRunningSandboxes, type LiveSandboxCount } from '../../../liveSandboxCount';
 import { reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, PAUSE_FAILURE_WARNING_THRESHOLD } from '../../../sandboxReaper';
@@ -714,6 +717,9 @@ function extractDevPort(command: string): number {
   if (flag) return parseInt(flag[1], 10);
   const env = command.match(/\bPORT=(\d+)/);
   if (env) return parseInt(env[1], 10);
+  // Spring Boot / Go used to fall through to Vite's 5173 (autopsy BR1987).
+  const named = fullstackDevPort(command);
+  if (named) return named;
   // Python-style port argument (uvicorn main:app --port 8000 / runserver 0.0.0.0:8000)
   const pyPort = command.match(/\bport\s+(\d+)|\d+\.?\d*\.\d+\.?\d*:(\d+)/i);
   if (pyPort) return parseInt(pyPort[1] ?? pyPort[2], 10);
@@ -1747,9 +1753,9 @@ export class E2BActuator implements IEngineerActuator {
       try {
         identity = await withTimeout(sandboxStore.lookupRecoveryIdentity(workspaceId), 3_000, 'sandboxStore.lookupRecoveryIdentity');
       } catch {
-        throw new SandboxRecoveryUnavailableError();
+        throw new SandboxRecoveryUnavailableError('identity-lookup');
       }
-      if (identity.state === 'unavailable') throw new SandboxRecoveryUnavailableError();
+      if (identity.state === 'unavailable') throw new SandboxRecoveryUnavailableError('identity-unavailable');
       if (identity.state === 'found') durableResumeId = identity.sandboxId;
     }
     const resumeId = resumeSandboxChoice({
@@ -1771,7 +1777,13 @@ export class E2BActuator implements IEngineerActuator {
         // At this specific SDK boundary Sandbox.connect maps API code 404 to this class. Transport,
         // authentication, rate-limit and deadline failures leave the target's state unknown. Broad
         // dead-sandbox message matching is appropriate for handle eviction, not machine replacement.
-        if (!(error instanceof SandboxNotFoundError)) throw new SandboxRecoveryUnavailableError();
+        // A proven concurrent-cap refusal is also not evidence the machine is gone — do not replace
+        // it. Rethrow the original message so setup and the admission budget keep their existing cap
+        // path (wait for a slot; do not abort with "please retry shortly").
+        if (!(error instanceof SandboxNotFoundError)) {
+          if (isE2BConcurrentCapacityError(error)) throw error;
+          throw new SandboxRecoveryUnavailableError('connect-unknown');
+        }
         sandbox = await withTimeout(Sandbox.create(this._opts(undefined, framework)), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
         freshCreate = true;
         // THE CASE THE OLD LINE COULD NOT SAY. We had an id, asked for it, and were refused — so this
@@ -1795,7 +1807,7 @@ export class E2BActuator implements IEngineerActuator {
           if (freshCreate) await this._killUnrecordedSandbox(workspaceId, sandbox, 'unrecorded-allocation');
           this._sandboxOrigin.delete(workspaceId);
           this._lastLifetimeExtend.delete(workspaceId);
-          throw new SandboxRecoveryUnavailableError();
+          throw new SandboxRecoveryUnavailableError('allocation-unrecorded');
         }
         if (winner.sandboxId !== sandbox.sandboxId) {
           // A newly created loser is ours to discard. A resumed old machine may still be in use by
@@ -1803,7 +1815,7 @@ export class E2BActuator implements IEngineerActuator {
           if (!freshCreate) {
             this._sandboxOrigin.delete(workspaceId);
             this._lastLifetimeExtend.delete(workspaceId);
-            throw new SandboxRecoveryUnavailableError();
+            throw new SandboxRecoveryUnavailableError('allocation-lost');
           }
           await this._killUnrecordedSandbox(workspaceId, sandbox, 'losing-allocation');
           try {
@@ -1812,10 +1824,11 @@ export class E2BActuator implements IEngineerActuator {
             this._lastLifetimeExtend.set(workspaceId, Date.now());
             this._sandboxOrigin.set(workspaceId, 'resumed');
             freshCreate = false;
-          } catch {
+          } catch (error) {
             this._sandboxOrigin.delete(workspaceId);
             this._lastLifetimeExtend.delete(workspaceId);
-            throw new SandboxRecoveryUnavailableError();
+            if (isE2BConcurrentCapacityError(error)) throw error;
+            throw new SandboxRecoveryUnavailableError('winner-reconnect');
           }
         }
       }
@@ -2182,7 +2195,7 @@ export class E2BActuator implements IEngineerActuator {
    * in-flight promise). On timeout we ALSO evict the cached sandbox so the next call gets a fresh one
    * instead of repeatedly hanging against a dead reference. (audit P0-B / P1)
    */
-  private async fileOp<T>(workspaceId: string, label: string, op: (sandbox: Sandbox) => Promise<T>, timeoutMs = 30_000): Promise<T> {
+  private async fileOp<T>(workspaceId: string, label: string, op: (sandbox: Sandbox) => Promise<T>, timeoutMs = 30_000, evictOnTimeout = true): Promise<T> {
     const sandbox = await this.getSandbox(workspaceId);
     try {
       return await withTimeout(op(sandbox), timeoutMs, label);
@@ -2191,7 +2204,8 @@ export class E2BActuator implements IEngineerActuator {
       // rejects FAST (the "exit -1 in 0s" from the report), so the old timeout-only check never fired
       // and the corpse was reused forever. isDeadSandboxError catches the reaped/not-running/network
       // shapes too, so the next getSandbox recreates (and replays the cached source files).
-      if (e instanceof Error && (isDeadSandboxError(e.message) || / timed out after /.test(e.message)) && this.sandboxes.get(workspaceId) === sandbox) {
+      // BR1997: an ADVISORY op (evictOnTimeout=false) never drops the sandbox for its own timeout.
+      if (e instanceof Error && (isDeadSandboxError(e.message) || (evictOnTimeout && / timed out after /.test(e.message))) && this.sandboxes.get(workspaceId) === sandbox) {
         this._dropSandbox(workspaceId);
         // 🔴 THE CALL THAT FOUND THE CORPSE WAS LOST . Dropping the handle
         // fixes the NEXT call, but this one threw. An architect's `edit_file` on `src/index.css` came
@@ -2207,6 +2221,16 @@ export class E2BActuator implements IEngineerActuator {
       }
       throw e;
     }
+  }
+
+  /** Atomic create used by additive procedural recipes. No overwrite fallback. */
+  async createFileExclusive(workspaceId:string,filePath:string,content:string):Promise<void> {
+    const rel=safeRelPath(filePath);
+    assertWriteAllowed(workspaceId,rel);
+    this._snapshotCurrent.delete(workspaceId);
+    const result=await this.fileOp(workspaceId,'source.createExclusive',(sb)=>sb.commands.run(exclusiveCreateCommand(WORKSPACE_ROOT,rel,content),{timeoutMs:20000}),25000);
+    if(result.exitCode!==0||!result.stdout.includes('NBI_EXCLUSIVE_CREATED'))throw new Error('Atomic source creation failed; existing or partial source preserved.');
+    this._cacheFileWrite(workspaceId,rel,content);
   }
 
   async writeFile(workspaceId: string, filePath: string, content: string): Promise<void> {
@@ -2233,6 +2257,15 @@ export class E2BActuator implements IEngineerActuator {
 
   async readFile(workspaceId: string, filePath: string): Promise<string> {
     return this.fileOp(workspaceId, 'files.read', (sb) => sb.files.read(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`));
+  }
+
+  /**
+   * BR1997: an ADVISORY read (the deleted-import note). Bounded by `timeoutMs`; its timeout never drops
+   * the cached sandbox, because a slow optional read is no evidence the machine is dead. A dead-sandbox
+   * error is handled exactly as for `readFile`.
+   */
+  async readFileAdvisory(workspaceId: string, filePath: string, timeoutMs = 5_000): Promise<string> {
+    return this.fileOp(workspaceId, 'files.read', (sb) => sb.files.read(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`), timeoutMs, false);
   }
 
   /** A file's RAW bytes as base64 — for a binary asset, which `readFile` would mangle as UTF-8. */

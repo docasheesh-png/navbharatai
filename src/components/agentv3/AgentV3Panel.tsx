@@ -5,6 +5,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ServiceRecommendationCard } from './ServiceRecommendationCard';
 import { offerWatchLive } from './earlyPreviewCue';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
+import { buildDiscountLine } from '../../lib/buildDiscountLine';
 import { stopVersionPreview } from '../../lib/versionPreviewStop';
 import { isLiveStatusLine, withoutStaleLiveStatus, latestLiveStatusText, lastActivityTs, ETA_LINE_ID } from '../../lib/liveStatusLine';
 import { buildElapsedMs } from './buildClock';
@@ -34,7 +35,7 @@ const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ defaul
 // A2 — the REAL shell. LAZY on purpose: it pulls xterm (~70 KB gz), which must never land on the
 // first-paint path for the many users who never open a terminal.
 const TerminalPanel = lazy(() => import('../ide/TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
-import { Bot, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle, ArrowUp } from 'lucide-react';
+import { Bot, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle, ArrowUp } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
@@ -96,6 +97,7 @@ import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId, takeRemixHandoff } from './v3SessionContinuity';
 import { showColdStart } from './coldStartPolicy';
 import { loadDraft, saveDraft } from './composerDraft';
+import { USE_CASE_PROMPT_KEY } from '../../lib/useCaseEntry';
 import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
 import { claimCurrentQueueItem, reconcileCurrentQueue, QueueSessionScope, type QueueSessionSnapshot } from './queueSessionScope';
@@ -164,6 +166,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const { state, running, isBusy, error, errorBeforeBuildStarted, start, markUserMessage, respond, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop: stopBuild, unsend, reset: resetBuild, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueState, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build(userId);
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
+  useEffect(() => {
+    try {
+      const text = sessionStorage.getItem(USE_CASE_PROMPT_KEY);
+      if (!text || !text.trim()) return;
+      sessionStorage.removeItem(USE_CASE_PROMPT_KEY);
+      setPrompt(text);
+    } catch { /* private mode: the draft from loadDraft still applies on first mount */ }
+  }, [freshOpenNonce]);
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
   const [shipping, setShipping] = useState(false);
   const [reverting, setReverting] = useState(false);
@@ -5201,7 +5211,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 <div className="flex items-start gap-2">
                   <Wallet className="w-4 h-4 shrink-0 mt-0.5" />
                   <div className="min-w-0">
-                    <div className="font-semibold text-warn">Add credits to build</div>
+                    <div className="font-semibold text-warn">Recharge to build</div>
                     <div className="mt-0.5 whitespace-pre-wrap break-words">{billingBlock.notice}</div>
                     {/* Billing Phase 2 — token-first: balance and estimate in the wallet's primary unit
                         (server-converted tokens); older servers without token fields fall back to ₹. */}
@@ -5223,10 +5233,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 <div className="mt-2 flex items-center gap-1.5">
                   <button
                     onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
-                    title="Open Wallet & Billing to add credits"
+                    title="Open Wallet & Billing to recharge"
                     className="inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-amber-600 hover:bg-amber-500 rounded px-2.5 py-1"
                   >
-                    <Wallet className="w-3.5 h-3.5" /> Add credits
+                    <Wallet className="w-3.5 h-3.5" /> Recharge
                   </button>
                   <button
                     onClick={clearBillingBlock}
@@ -5490,12 +5500,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 </div>
               </div>
             )}
-            {state.done && (typeof state.billedInr === 'number' || typeof state.billedUsd === 'number') && (
+            {/* Owner t362u: the user sees only the ₹ total — never a USD amount, token counts or the rate. */}
+            {state.done && typeof state.billedInr === 'number' && (
               <div className="flex items-center gap-1 text-[11px] text-faint" title="Customer bill (INR)">
                 <Rocket className="w-3 h-3" />{' '}
-                {typeof state.billedInr === 'number'
-                  ? `₹${state.billedInr.toFixed(2)}`
-                  : `$${(state.billedUsd as number).toFixed(4)}`}
+                {`₹${state.billedInr.toFixed(2)}`}
               </div>
             )}
             {/* THE BUILD DISCOUNT (admin 2026-09-25: "green colour me likh kar aye, discount!!") — shown
@@ -5503,7 +5512,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 they will ever see. Rendered only when something was really taken off. */}
             {state.done && (state.costBreakdown?.discountInr ?? 0) > 0 && (state.costBreakdown?.discountPct ?? 0) > 0 && (
               <div className="basis-full text-[11px] font-semibold text-success" data-testid="build-discount-line">
-                Build price ₹{(state.costBreakdown?.listInr ?? 0).toFixed(2)} · Discount {state.costBreakdown?.discountPct}% (−₹{(state.costBreakdown?.discountInr ?? 0).toFixed(2)}) · You pay ₹{(state.costBreakdown?.billedInr ?? 0).toFixed(2)}
+                {buildDiscountLine({ listInr: state.costBreakdown?.listInr ?? 0, discountInr: state.costBreakdown?.discountInr ?? 0, payInr: state.costBreakdown?.billedInr ?? 0, pct: state.costBreakdown?.discountPct ?? 0 })}
               </div>
             )}
             {/* T1-cost-transparency — expandable "why this build cost ₹X" breakdown. */}
@@ -5513,8 +5522,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   Why this cost?
                 </summary>
                 <div className="mt-1 ml-1 flex flex-col gap-0.5 border-l border-line pl-2">
-                  <span>Input: {state.costBreakdown.inputTokens.toLocaleString()} tokens · Output: {state.costBreakdown.outputTokens.toLocaleString()} tokens</span>
-                  <span>Engine: {state.costBreakdown.engine} · {state.costBreakdown.tier} tier</span>
+                  {state.costBreakdown.engine && state.costBreakdown.tier && (
+                    <span>Engine: {state.costBreakdown.engine} · {state.costBreakdown.tier} tier</span>
+                  )}
                   {/* BUILD MACHINE TIME (admin 2026-08-22; renamed 2026-10-04, Q-306) — shown only when it was
                       actually charged. It is the time the BUILD held our machine, capped at the build's own
                       duration, never a live preview the user opened — so it is not called one, and no
@@ -5540,13 +5550,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   <span>Total: ₹{state.costBreakdown.billedInr.toFixed(2)}</span>
                 </div>
               </details>
-            )}
-            {/* P-UX.7 — token usage for this build (input + output), shown alongside the ₹ cost. */}
-            {state.done && typeof state.tokens === 'number' && state.tokens > 0 && (
-              <div className="flex items-center gap-1 text-[11px] text-faint" title="Tokens used by this build (input + output)">
-                <FileCode className="w-3 h-3" />
-                {state.tokens >= 1000 ? `${(state.tokens / 1000).toFixed(1)}k` : state.tokens} tokens
-              </div>
             )}
             {/* Billing Phase 1 — the REAL wallet deduction for this build (tokens out + balance left). */}
             {state.done && typeof state.walletTokensDebited === 'number' && state.walletTokensDebited > 0 && (

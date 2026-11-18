@@ -26,10 +26,10 @@ describe('decidePaidGate — paid-public build gate composition', () => {
     expect(decidePaidGate({ ...base, balanceInr: 60 }).reason).toBe('covers-estimate');
   });
 
-  it('0 < balance < estimate → economy with notice (paying-but-low user keeps working)', () => {
+  it('0 < balance < estimate → block (a short balance does not start the build)', () => {
     const d = decidePaidGate({ ...base, balanceInr: 5 });
-    expect(d.action).toBe('economy');
-    expect(d.notice).toBeTruthy();
+    expect(d.action).toBe('block');
+    expect(d.reason).toBe('below-estimate');
   });
 
   it('balance ≤ 0 → block with add-credits notice (no free builds at zero balance, admin 2026-07-12)', () => {
@@ -40,6 +40,6 @@ describe('decidePaidGate — paid-public build gate composition', () => {
     expect(decidePaidGate({ ...base, balanceInr: -19.99 }).action).toBe('block');
     expect(decidePaidGate({ ...base, balanceInr: -20 }).action).toBe('block');
     // boundary: the smallest positive balance is still economy, exactly 0 blocks
-    expect(decidePaidGate({ ...base, balanceInr: 0.01 }).action).toBe('economy');
+    expect(decidePaidGate({ ...base, balanceInr: 0.01 }).action).toBe('block');
   });
 });

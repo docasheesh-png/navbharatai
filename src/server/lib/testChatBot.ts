@@ -1,5 +1,5 @@
 import type { Firestore } from 'firebase-admin/firestore';
-import { readTestChatAction, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_MAX_RESPONSE_CHARS,
+import { readTestChatAction, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_MAX_RESPONSE_CHARS, TEST_CHAT_MAX_TRIES,
   TEST_CHAT_PROVIDER_IDS,
   type TestChatAction, type TestChatDiagnostic, type TestChatProviderId, type TestChatProviderStatus,
   type TestChatReply, type TestChatStatus } from '../../lib/testChatBot';
@@ -21,10 +21,17 @@ import { exactModelId, zero } from '../AI/LiveRegistry/eligibility';
 import { catalogJson, OPENROUTER_MODELS_URL } from '../AI/LiveRegistry/sync';
 import { FreeRoutingError } from '../AI/LiveRegistry/dispatcher';
 import { realRateFor } from '../AgentV3/providerRates';
-import { ROUTER_ONE_DEFAULT_MODEL } from '../AI/RouterOne/routerOne';
+import { ROUTER_ONE_DEFAULT_BASE_URL, ROUTER_ONE_DEFAULT_MODEL, routerOneApiKey, routerOneBaseUrl, routerOneModels } from '../AI/RouterOne/routerOne';
+import { ROUTER_ONE_AUTO_MODEL } from '../AI/RouterOne/routerOneCatalog';
+import { routerOnePublicPrices } from '../AI/RouterOne/publicPriceSource';
+import type { CatalogueRateBand } from '../AI/RouterOne/catalogueMath';
 import { buildTestChatDiagnostic } from './testChatBotDiagnostics';
-import { OfficialTestChatError, runOfficialAnthropicTest, runOfficialOpenAiCompatTest } from './testChatBotOfficial';
+import { isModelNotFound, isOfficialChatUrl, listProviderModels, OfficialTestChatError, probeChatHostReachability, runOfficialAnthropicTest, runOfficialOpenAiCompatTest, runOfficialVertexTest } from './testChatBotOfficial';
+import { nemotronBaseUrl, nemotronKey, nemotronSuperModel } from '../AgentV3/nemotron';
+import { vertexGenAI, vertexProjectId } from './vertexGenAI';
 import { testChatRequestId, testChatUid } from './testChatPayload';
+import { pickProviderModels } from './providerModelPicker';
+import { isResellerGatewayId, RESELLER_GATEWAY_CEILING_RATE, RESELLER_GATEWAY_IDS, RESELLER_GATEWAYS, resellerGatewayRoute, resellerGatewayState, resellerModelLadder } from './resellerGateways';
 
 type UnavailableReason = 'disabled' | 'configuration' | 'storage' | 'approval-or-budget' | 'budget' | 'no-model' | 'tries-exhausted' | 'capacity' | 'capability' | 'invalid' | 'unconfirmed';
 const SKIP_REASON: Record<string, UnavailableReason> = {
@@ -40,7 +47,8 @@ export class TestChatUnavailable extends Error {
   constructor(readonly reason: UnavailableReason, readonly status = 503, readonly diagnostic?: TestChatDiagnostic) { super(reason); }
 }
 
-type ProviderKind = 'qubax' | 'mitrify' | 'freechain' | 'openrouter' | 'glm-vision' | 'gemini-flash' | 'kimi' | 'grok' | 'anthropic' | 'surplus' | 'router-one';
+type ProviderKind = 'qubax' | 'mitrify' | 'freechain' | 'openrouter' | 'glm-vision' | 'gemini-flash' | 'kimi' | 'grok' | 'anthropic' | 'surplus' | 'router-one'
+  | 'glm-builder' | 'nemotron' | 'bedrock-glm' | 'vertex' | 'reseller-gateway' | 'non-chat';
 const FREECHAIN_ADAPTER: Record<Exclude<ProviderId, never>, AdapterConfig['provider']> = {
   glm47: 'GLM', glm45: 'GLM', gemini: 'GEMINI', groq: 'GROQ', cloudflare: 'CLOUDFLARE', openrouter: 'OPENAI',
   deepseek: 'DEEPSEEK', nvidia: 'NVIDIA', modelscope: 'MODELSCOPE', llm7: 'LLM7', bluesminds: 'BLUESMINDS',
@@ -77,6 +85,15 @@ const META: Record<TestChatProviderId, {
   'anthropic-claude': { label: 'Anthropic Claude', kind: 'anthropic' },
   kimi: { label: 'Kimi / Moonshot', kind: 'kimi' },
   'xai-grok': { label: 'xAI Grok', kind: 'grok' },
+  'glm-builder': { label: 'Z.AI GLM (builder models)', kind: 'glm-builder' },
+  nemotron: { label: 'NVIDIA Nemotron (builder)', kind: 'nemotron', internalRouting: true },
+  'bedrock-glm': { label: 'AWS Bedrock GLM', kind: 'bedrock-glm' },
+  'vertex-gemini': { label: 'Google Vertex AI Gemini', kind: 'vertex' },
+  moyi: { label: RESELLER_GATEWAYS.moyi.label, kind: 'reseller-gateway', internalRouting: true },
+  discountedtokens: { label: RESELLER_GATEWAYS.discountedtokens.label, kind: 'reseller-gateway', internalRouting: true },
+  mirapi: { label: RESELLER_GATEWAYS.mirapi.label, kind: 'reseller-gateway', internalRouting: true },
+  'sarvam-speech': { label: 'Sarvam AI (speech only)', kind: 'non-chat' },
+  'pollinations-image': { label: 'Pollinations (images only)', kind: 'non-chat' },
 };
 const BLOCKING_REASONS = new Set([
   'unconfigured', 'disabled', 'terms-non-production', 'terms-unverified', 'terms-shared-access',
@@ -93,6 +110,8 @@ const REASON_TEXT: Record<string, string> = {
   'rate-card-unverified': 'The paid rate card for this provider is not verified, so this test will not invent a price or dispatch.',
 };
 const MISSING_KEY = 'No API credential is set on the server.';
+/** Reasons user chat uses to keep a rung OFF by policy. They are not a reason to refuse an admin test. */
+const USER_POLICY_REASONS = new Set(['disabled', 'terms-non-production', 'terms-unverified', 'terms-shared-access']);
 
 function firstPresent(env: NodeJS.ProcessEnv, names: readonly string[]): string {
   for (const name of names) {
@@ -114,6 +133,72 @@ function rungOf(id: ProviderId): RungConfig | undefined {
   return chainConfig()?.rungs?.find(r => r.id === id);
 }
 function present(value: string): boolean { return !!value && !/[\s,]/.test(value); }
+
+// Router One (admin 2026-11-15: "jaise mai other api provider test karta hu ... usi list me, router one bhi test ho
+// jaye"). It was listed but never called because this page had no per-request spending ceiling for it. The ceiling now
+// comes from Router One's own POSTED public tariff on router.one — the same source the builder's catalogue ranks on — so
+// nothing is invented: no posted price for the model means no call.
+export const ROUTER_ONE_TEST_CHAT_URL = `${ROUTER_ONE_DEFAULT_BASE_URL}/chat/completions`;
+/**
+ * Router One's default models are reasoning models: at the page's 1,024-token bound deepseek-v4.1-flash spent
+ * every token thinking and returned an empty answer (admin report 2026-11-15). This call gets room to think and
+ * answer, and the reserve is quoted for exactly this bound.
+ */
+export const ROUTER_ONE_TEST_MAX_TOKENS = 8_192;
+/** Builder engines that reason before answering get the same room on this page (Kimi, GLM builder, Nemotron, Bedrock GLM). */
+export const BUILDER_TEST_MAX_TOKENS = 8_192;
+const BUILDER_REASONING_KINDS: ReadonlySet<string> = new Set(['kimi', 'glm-builder', 'nemotron', 'bedrock-glm']);
+/** A short outcome for one failed picker try: "HTTP 503 model_not_found", "timeout", "NETWORK". */
+function tryOutcome(t: { httpStatus?: number | null; providerCode?: string | null; timeout?: boolean }): string {
+  if (t.timeout) return 'timeout';
+  return [t.httpStatus ? `HTTP ${t.httpStatus}` : '', t.providerCode ?? ''].filter(Boolean).join(' ').slice(0, 120) || 'failed';
+}
+/** Gateways whose test call picks models from the key's own list and tries the next on failure. */
+const MODEL_PICKER_RUNGS: ReadonlySet<string> = new Set(['bluesminds']);
+/**
+ * A reseller gateway tries up to three of its models (owner 2026-11-17). Coding answers from a reasoning model take
+ * minutes, and the page's old 90-second bound cut a DiscountedTokens coding reply at 90,001 ms ("coding me fail hai")
+ * while it was still being written. So: a model that shows no response within RESELLER_FIRST_RESPONSE_MS is given up
+ * and the next one is tried; a model that IS answering keeps the time until the whole test's RESELLER_TEST_BUDGET_MS.
+ */
+export const RESELLER_TEST_BUDGET_MS = 240_000;
+export const RESELLER_FIRST_RESPONSE_MS = 45_000;
+const TEST_CHAT_BOUND_MS = 90_000;
+export const ROUTER_ONE_PRICE_UNAVAILABLE = 'Router One’s posted price for this model could not be read from router.one, so this page has no spending ceiling for it and did not call it. Choose a model listed on router.one/models, or try again in a few minutes.';
+function routerOneOfficialEndpoint(): boolean {
+  return routerOneBaseUrl().replace(/\/+$/, '') === ROUTER_ONE_DEFAULT_BASE_URL;
+}
+/** The first priced model on the Router One path. Router One's own "auto" router has no posted price, so it is skipped. */
+function routerOneTestModel(): string {
+  return routerOneModels().find(model => model !== ROUTER_ONE_AUTO_MODEL) ?? ROUTER_ONE_DEFAULT_MODEL;
+}
+/** Highest posted band, so a long conversation that lands in a pricier band is still inside the reserve. */
+export function routerOneTariffCeilingNanoUsd(messages: TestChatAction['messages'], bands: readonly CatalogueRateBand[]): number {
+  const priceIn = Math.max(0, ...bands.map(band => Number(band.inputUsdPerMillion)));
+  const priceOut = Math.max(0, ...bands.map(band => Number(band.outputUsdPerMillion)));
+  if (!bands.length || !Number.isFinite(priceIn) || !Number.isFinite(priceOut) || priceIn + priceOut <= 0) return 0;
+  return quoteTokens(messages, priceIn, priceOut, ROUTER_ONE_TEST_MAX_TOKENS);
+}
+
+// ─── Builder and fallback engines (admin 2026-11-15) ────────────────────────────────────────────────────
+// Each reads the SAME env the builder reads, so a green test here means the builder's own key, endpoint and
+// model answer. Only official hosts are called (isOfficialChatUrl); a custom proxy URL leaves the entry
+// disabled with the reason, never silently pointed somewhere else.
+const firstModel = (raw: string | undefined, fallback: string): string =>
+  String(raw ?? '').split(',').map(v => v.trim()).find(Boolean) || fallback;
+function kimiBase(): string { return (process.env.KIMI_BASE_URL?.trim() || 'https://api.moonshot.ai/v1').replace(/\/+$/, ''); }
+function glmBuilderBase(): string { return (process.env.GLM_BASE_URL?.trim() || 'https://api.z.ai/api/paas/v4').replace(/\/+$/, ''); }
+function bedrockBase(): string { return `https://bedrock-runtime.${(process.env.BEDROCK_REGION || 'us-west-2').trim()}.amazonaws.com/openai/v1`; }
+const SURPLUS_TEST_URL = 'https://api.surplusintelligence.ai/min90/v1/chat/completions';
+const SURPLUS_DEFAULT_MODEL = 'deepseek-v4.1-flash';
+/** Each non-chat service names what it actually does, so the list is a complete census without a fake button. */
+const NON_CHAT_REASON: Partial<Record<TestChatProviderId, string>> = {
+  'sarvam-speech': 'Sarvam AI is used only for text-to-speech (Voice AI). It has no chat endpoint, so it cannot be tested in a chat.',
+  'pollinations-image': 'Pollinations is used only for image generation. It has no chat endpoint here, so it cannot be tested in a chat.',
+};
+const NON_CHAT_KEY: Partial<Record<TestChatProviderId, string>> = {
+  'sarvam-speech': 'SARVAM_API_KEY', 'pollinations-image': 'POLLINATIONS_API_KEY',
+};
 function requestedModel(action: TestChatAction): string | null {
   const model = action.model?.trim() ?? '';
   return model && model.length <= 200 && !/[\s,]/.test(model) ? model : null;
@@ -346,26 +431,29 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   }
   if (meta.kind === 'surplus') {
     const configured = !!firstPresent(process.env, ['SURPLUS_API_KEY']);
-    return { ...base, configured, enabled: false, model: null, billed: true, approvalRequired: false,
-      unavailableReason: configured
-        ? 'Surplus is a builder marketplace with no verified per-request spending ceiling on this test page, and its production transport retries. This test will not call it (no invented cap, no reused retry path).'
-        : MISSING_KEY };
+    return { ...base, configured, enabled: configured, model: SURPLUS_DEFAULT_MODEL, billed: true, approvalRequired: false,
+      note: 'One direct call to Surplus’s min90 chat endpoint (its price-first route), never the builder transport that retries. Surplus publishes no per-model price this page can read, so the reserve uses the Claude Sonnet rate card for the 1,024-token bound — deliberately above any min90 price; it is a ceiling, not the bill.',
+      ...(configured ? {} : { unavailableReason: MISSING_KEY }) };
   }
   if (meta.kind === 'router-one') {
-    const configured = !!firstPresent(process.env, ['ROUTER_ONE_API_KEY']);
-    const listed = String(process.env.ROUTER_ONE_MODEL ?? '').split(',').map(s => s.trim()).filter(Boolean);
-    return { ...base, configured, enabled: false, model: listed[0] || ROUTER_ONE_DEFAULT_MODEL, billed: true, approvalRequired: false,
-      unavailableReason: configured
-        ? 'Router One has no verified per-request spending ceiling on this test page, so it will not be called (no invented cap).'
-        : MISSING_KEY };
+    const configured = present(routerOneApiKey());
+    const enabled = configured && routerOneOfficialEndpoint();
+    return { ...base, configured, enabled, model: routerOneTestModel(), billed: true, approvalRequired: false,
+      note: 'At send time this page reads Router One’s posted public price for the selected model from router.one (the same tariff the builder ranks on), reserves the highest posted band for this page’s 1,024-token bound against the shared paid budget, then makes one call with no retry. If no posted price can be read, it does not call. A typed model is priced the same way; Router One’s own "auto" router has no posted price and is not called.',
+      ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY : 'This test page only calls the official Router One endpoint.' }) };
+  }
+  if (meta.kind === 'reseller-gateway' && isResellerGatewayId(id)) {
+    const state = resellerGatewayState(id);
+    return { ...base, configured: state.ready || state.configured, enabled: state.ready, model: state.model, billed: true, approvalRequired: false,
+      note: 'A discount reseller under evaluation: this admin page is the only place it is called, always on the provider’s own domain. With the Model box empty it tries up to three of the gateway’s models, one after another: the models listed in its model setting in that order (else its default), then chat models from the key’s own /models list. A model that shows no response within 45 s is given up and the next is tried; a model that is answering keeps going for up to 4 minutes. A refused key stops at once. A typed model is used as-is, alone. On Moyi an OpenAI model id goes to its OpenAI-format endpoint and every other model to its Anthropic-format endpoint. The reply shows the model id the provider itself reports, which is the provider’s claim and not independent proof of which model answered. The shared-budget reserve uses the dearest official list price among the models these gateways sell (USD 10 / 50 per 1M tokens): a ceiling, not the bill.',
+      ...(state.ready ? {} : { unavailableReason: state.reason }) };
   }
   if (meta.kind === 'kimi') {
     const configured = !!firstPresent(process.env, ['KIMI_API_KEY']);
-    const baseUrl = (process.env.KIMI_BASE_URL?.trim() || 'https://api.moonshot.ai/v1').replace(/\/+$/, '');
-    const official = baseUrl === 'https://api.moonshot.ai/v1' || baseUrl === 'https://api.moonshot.cn/v1';
-    const enabled = configured && official;
-    return { ...base, configured, enabled, model: 'kimi-k2.7', billed: true, approvalRequired: false,
-      ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY : 'This test page only calls the official Moonshot endpoints.' }) };
+    // The builder's own KIMI_BASE_URL, which may be the Kimi Code host (api.kimi.com) as well as Moonshot.
+    const enabled = configured && isOfficialChatUrl(`${kimiBase()}/chat/completions`);
+    return { ...base, configured, enabled, model: firstModel(process.env.KIMI_MODEL, 'kimi-k2.7'), billed: true, approvalRequired: false,
+      ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY : 'This test page only calls the official Kimi / Moonshot endpoints.' }) };
   }
   if (meta.kind === 'grok') {
     const configured = !!firstPresent(process.env, ['XAI_API_KEY', 'GROK_API_KEY']);
@@ -376,6 +464,38 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
     const configured = !!firstPresent(process.env, ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY']);
     return { ...base, configured, enabled: configured, model: 'claude-sonnet-4-6', billed: true, approvalRequired: false,
       ...(configured ? {} : { unavailableReason: MISSING_KEY }) };
+  }
+  if (meta.kind === 'glm-builder') {
+    const configured = !!firstPresent(process.env, ['GLM_API_KEY']);
+    const enabled = configured && isOfficialChatUrl(`${glmBuilderBase()}/chat/completions`);
+    return { ...base, configured, enabled, model: 'glm-5.3', billed: true, approvalRequired: false,
+      note: 'The builder’s GLM key and endpoint. Type any GLM model id the builder uses (for example glm-5.3 or glm-4.7-flashx); it is priced from the in-repo rate card.',
+      ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY : 'This test page only calls the official Z.AI endpoint.' }) };
+  }
+  if (meta.kind === 'nemotron') {
+    const configured = present(nemotronKey());
+    const enabled = configured && isOfficialChatUrl(`${nemotronBaseUrl().replace(/\/+$/, '')}/chat/completions`);
+    return { ...base, configured, enabled, model: nemotronSuperModel(), billed: true, approvalRequired: false,
+      note: 'The builder’s Nemotron key, host and model (super by default; type the ultra id to test it).',
+      ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY : 'This test page only calls the official OpenRouter or NVIDIA endpoints.' }) };
+  }
+  if (meta.kind === 'bedrock-glm') {
+    const configured = !!firstPresent(process.env, ['BEDROCK_API_KEY']);
+    const enabled = configured && isOfficialChatUrl(`${bedrockBase()}/chat/completions`);
+    return { ...base, configured, enabled, model: firstModel(process.env.BEDROCK_GLM_MODEL, 'zai.glm-5'), billed: true, approvalRequired: false,
+      note: 'The builder’s Bedrock cheap-floor rung, through Bedrock’s OpenAI-compatible endpoint in the configured region.',
+      ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY : 'The configured Bedrock region is not a valid AWS region name.' }) };
+  }
+  if (meta.kind === 'vertex') {
+    const configured = !!vertexProjectId();
+    return { ...base, configured, enabled: configured, model: 'gemini-2.5-pro', billed: true, approvalRequired: false,
+      note: 'Engineer AI’s Vertex fallback, through the server’s own Google identity (no API key). Type gemini-2.5-flash to test the cheaper model.',
+      ...(configured ? {} : { unavailableReason: 'No Google Cloud project is configured on the server.' }) };
+  }
+  if (meta.kind === 'non-chat') {
+    const keyName = NON_CHAT_KEY[id];
+    return { ...base, configured: !!(keyName && firstPresent(process.env, [keyName])), enabled: false, model: null, billed: false, approvalRequired: false,
+      unavailableReason: NON_CHAT_REASON[id] ?? 'This service has no chat endpoint.' };
   }
   if (meta.kind === 'glm-vision') {
     const configured = !!firstPresent(process.env, ['GLM_API_KEY', 'FREE_CHAIN_GLM_API_KEY']);
@@ -390,9 +510,22 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
   const rung = meta.rungId ? rungOf(meta.rungId) : undefined;
   const configured = !!rung?.configured;
   const reason = rung?.reason;
-  const cheapinfUserFlag = meta.rungId === 'cheapinf' && configured && (reason === 'disabled' || reason === 'terms-shared-access');
-  const blocked = !configured || (!!reason && BLOCKING_REASONS.has(reason) && !cheapinfUserFlag);
-  const note = reason === 'privacy'
+  // 🔴 OWNER DECISION — DO NOT RE-BLOCK WITHOUT THE OWNER (2026-11-16). Asked directly with both options laid out
+  // ("let BluesMinds be tested on the admin page" vs "keep it blocked until terms and cost are verified"), the owner
+  // chose testing: "to kro yaar", then "abhi bhi nahi chala" after a re-block. Two commits that hard-blocked BluesMinds
+  // here (019880044, a06a679d9) were reverted on that instruction. Terms still gate USER CHAT, which is unchanged.
+  // tests/theOwnerChoseAdminTestingForBluesMinds.test.ts fails if this page refuses BluesMinds again.
+  // USER-CHAT POLICY IS NOT AN ADMIN-TEST GATE (admin 2026-11-15: "pahle drop down me rakho, test kar lu, fir fix
+  // karna"). A rung that user chat keeps off by policy — rollout off, terms not yet verified, not approved for
+  // production, no shared-access permission — is exactly the one the admin needs to try before deciding. This page
+  // still refuses a missing key, an unlisted model, a missing account and an unverified paid rate card, and
+  // user chat is unchanged. Generalises the earlier CheaperInference-only exception to every rung.
+  const userPolicyOnly = configured && !!reason && USER_POLICY_REASONS.has(reason) && !!rung?.model;
+  const blocked = !configured || (!!reason && BLOCKING_REASONS.has(reason) && !userPolicyOnly)
+    || (configured && !rung?.model && meta.kind !== 'openrouter');
+  const note = userPolicyOnly
+    ? `User chat keeps this provider off (${REASON_TEXT[reason!] ?? reason}). This admin test calls it anyway, from this page only; user chat is unchanged.`
+    : reason === 'privacy'
     ? 'User chat may skip this provider for private turns; this admin test still calls only the selected provider.'
     : reason === 'free-plan-review-required'
       ? 'The free-plan review used by user chat is missing or expired; this admin test still calls only the selected provider.'
@@ -401,13 +534,17 @@ function providerStatus(id: TestChatProviderId): TestChatProviderStatus {
         : meta.rungId === 'cheapinf'
           ? 'This admin test can call CheaperInference when its key is set, using the same model string main chat would use. It does not change the user-chat sharing mode.'
         : undefined;
+  const modelMissing = configured && !rung?.model && meta.kind !== 'openrouter';
   const listed = chainConfig()?.openRouterModels ?? [];
   const model = (meta.kind === 'openrouter' ? (listed[0] ?? rung?.model ?? '') : rung?.model) || null;
   const enabled = !blocked && configured;
   return {
     ...base, configured, enabled, model: model || null, billed: !!(meta.rungId && isPaidRung(meta.rungId)), approvalRequired: false,
-    ...(note ? { note } : {}),
+    ...(note || (meta.rungId && MODEL_PICKER_RUNGS.has(meta.rungId)) ? { note: [note, meta.rungId && MODEL_PICKER_RUNGS.has(meta.rungId)
+      ? 'Leave Model blank and this page reads the key\u2019s own model list, picks up to three chat models and tries them in turn until one answers.' : '']
+      .filter(Boolean).join(' ') } : {}),
     ...(enabled ? {} : { unavailableReason: !configured ? MISSING_KEY
+      : modelMissing ? REASON_TEXT['model-unverified']
       : REASON_TEXT[reason ?? ''] ?? 'This provider is not available for dispatch.' }),
   };
 }
@@ -469,13 +606,15 @@ export function testChatStatus(): TestChatStatus {
 
 function needsSharedPaidConfig(id: TestChatProviderId): boolean {
   const meta = META[id];
-  if (meta.kind === 'qubax' || meta.kind === 'mitrify' || meta.kind === 'kimi' || meta.kind === 'grok' || meta.kind === 'anthropic' || meta.kind === 'gemini-flash') return true;
+  if (meta.kind === 'qubax' || meta.kind === 'mitrify' || meta.kind === 'kimi' || meta.kind === 'grok' || meta.kind === 'anthropic' || meta.kind === 'gemini-flash' || meta.kind === 'router-one'
+    || meta.kind === 'surplus' || meta.kind === 'glm-builder' || meta.kind === 'nemotron' || meta.kind === 'bedrock-glm' || meta.kind === 'vertex'
+    || meta.kind === 'reseller-gateway') return true;
   return !!(meta.rungId && isPaidRung(meta.rungId));
 }
 
-function quoteTokens(messages: TestChatAction['messages'], priceIn: number, priceOut: number): number {
+function quoteTokens(messages: TestChatAction['messages'], priceIn: number, priceOut: number, outputTokens = TEST_CHAT_MAX_OUTPUT_TOKENS): number {
   const inputTokens = Buffer.byteLength(JSON.stringify(messages), 'utf8') + 256;
-  return maximumCostNanoUsd(inputTokens, TEST_CHAT_MAX_OUTPUT_TOKENS, usdToNanoUsd(priceIn), usdToNanoUsd(priceOut));
+  return maximumCostNanoUsd(inputTokens, outputTokens, usdToNanoUsd(priceIn), usdToNanoUsd(priceOut));
 }
 
 function secretsFor(id: TestChatProviderId): string[] {
@@ -490,6 +629,12 @@ function secretsFor(id: TestChatProviderId): string[] {
   push(firstPresent(process.env, ['KIMI_API_KEY']));
   push(firstPresent(process.env, ['XAI_API_KEY', 'GROK_API_KEY']));
   push(firstPresent(process.env, ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY']));
+  push(routerOneApiKey());
+  push(firstPresent(process.env, ['SURPLUS_API_KEY']));
+  push(firstPresent(process.env, ['GLM_API_KEY']));
+  push(nemotronKey());
+  push(firstPresent(process.env, ['BEDROCK_API_KEY']));
+  for (const gateway of RESELLER_GATEWAY_IDS) push(resellerGatewayState(gateway).apiKey);
   return found;
 }
 
@@ -548,7 +693,7 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
   }
   const uid = testChatUid(actor);
   const requestId = testChatRequestId(action);
-  const bounded = AbortSignal.any([signal, AbortSignal.timeout(90_000)]);
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(META[action.provider].kind === 'reseller-gateway' ? RESELLER_TEST_BUDGET_MS : TEST_CHAT_BOUND_MS)]);
   const startedAt = Date.now();
   const extraSecrets = secretsFor(action.provider);
   const fail = (reason: UnavailableReason, statusCode: number, extra: Omit<Parameters<typeof buildTestChatDiagnostic>[0], 'provider'>): never => {
@@ -567,6 +712,11 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
   await revalidate();
   const meta = META[action.provider];
   let dispatchedModel = status.model;
+  // The endpoint an OpenAI-compatible call was sent to, for the reachability check on a network failure.
+  let probeBase: string | null = null;
+  let probeKey = '';
+  const sentTo = (call: typeof runOfficialOpenAiCompatTest): typeof runOfficialOpenAiCompatTest =>
+    input => { probeBase = input.url; probeKey = input.apiKey; return call(input); };
   let captured: AdminCapturedProviderError | { status: number; body: string; requestId?: string } | undefined;
   const qubaxAttempts: Array<{ model: string; status: number | null; code: string; latencyMs: number; body?: string; requestId?: string }> = [];
   try {
@@ -673,7 +823,28 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       });
       return finish(action, content, reported, startedAt, usage);
     }
-    if (meta.kind === 'surplus' || meta.kind === 'router-one') throw new TestChatUnavailable('disabled');
+    if (meta.kind === 'non-chat') throw new TestChatUnavailable('disabled');
+
+    if (meta.kind === 'router-one') {
+      const model = requestedModel(action) || status.model || ROUTER_ONE_DEFAULT_MODEL;
+      dispatchedModel = model;
+      let ceiling = 0;
+      try { ceiling = routerOneTariffCeilingNanoUsd(action.messages, (await routerOnePublicPrices.snapshot(model)).bands); }
+      catch { ceiling = 0; }
+      if (ceiling <= 0) {
+        return fail('budget', 409, { model, latencyMs: Math.max(0, Date.now() - startedAt),
+          providerCode: 'ROUTER_ONE_PRICE_UNAVAILABLE', providerMessage: ROUTER_ONE_PRICE_UNAVAILABLE, extraSecrets });
+      }
+      const receipt = await reserveShared(db, requestId, uid, ceiling);
+      if (!receipt) throw new TestChatUnavailable('budget', 409);
+      const result = await releaseIfUnused(receipt, () => sentTo(runOfficialOpenAiCompatTest)({
+        url: ROUTER_ONE_TEST_CHAT_URL, apiKey: routerOneApiKey(), model, messages: action.messages, signal: bounded,
+        // Streamed, as the builder calls it: a non-streamed Router One reply waited past the 90-second bound.
+        stream: true,
+        maxTokens: ROUTER_ONE_TEST_MAX_TOKENS,
+      }));
+      return finish(action, result.content, result.model || model, startedAt, result.usage);
+    }
 
     if (meta.kind === 'openrouter') {
       const listed = chainConfig()?.openRouterModels ?? [];
@@ -700,19 +871,79 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         });
       }
       const key = firstPresent(process.env, ['OPENROUTER_API_KEY']) || rungOf('openrouter')?.key || '';
-      const result = await runOfficialOpenAiCompatTest({
+      const result = await sentTo(runOfficialOpenAiCompatTest)({
         url: 'https://openrouter.ai/api/v1/chat/completions', apiKey: key, model: picked, messages: action.messages, signal: bounded,
+        stream: true,
       });
       return finish(action, result.content, result.model || picked, startedAt, result.usage);
     }
 
+    if (meta.kind === 'reseller-gateway' && isResellerGatewayId(action.provider)) {
+      const gateway = resellerGatewayState(action.provider);
+      if (!gateway.ready) throw new TestChatUnavailable('configuration');
+      // A typed model is honoured as the ONLY one. Otherwise the gateway's own ladder: the owner's listed order,
+      // else its default, then the key's own /models list — at most three, never a guessed id.
+      const typed = requestedModel(action);
+      const ladder = typed ? [typed] : await resellerModelLadder(gateway, pickProviderModels);
+      if (!ladder.length) throw new TestChatUnavailable('no-model', 409);
+      const tries: NonNullable<Parameters<typeof buildTestChatDiagnostic>[0]['attempts']>[number][] = [];
+      const deadline = startedAt + RESELLER_TEST_BUDGET_MS;
+      for (const [index, model] of ladder.entries()) {
+        if (deadline - Date.now() < 5_000) break;
+        dispatchedModel = model;
+        const ceiling = quoteTokens(action.messages, RESELLER_GATEWAY_CEILING_RATE.inputPerMTok, RESELLER_GATEWAY_CEILING_RATE.outputPerMTok);
+        const receipt = await reserveShared(db, index === 0 ? requestId : `${requestId}:try${index + 1}`, uid, ceiling);
+        if (!receipt) throw new TestChatUnavailable('budget', 409);
+        const route = resellerGatewayRoute(gateway, model);
+        // This try's own stop: "no response yet" after RESELLER_FIRST_RESPONSE_MS gives up on this model only.
+        // The Anthropic-format route reports no stream activity, so it gets the remaining budget instead.
+        const own = new AbortController();
+        const quiet = route.format === 'openai' && ladder.length > 1 && index < ladder.length - 1
+          ? setTimeout(() => own.abort(), RESELLER_FIRST_RESPONSE_MS) : null;
+        const trySignal = AbortSignal.any([bounded, own.signal]);
+        const tried = Date.now();
+        try {
+          const result = await releaseIfUnused(receipt, () => route.format === 'anthropic'
+            ? runOfficialAnthropicTest({ apiKey: gateway.apiKey, model, messages: action.messages, signal: trySignal, baseURL: route.baseUrl })
+            : sentTo(runOfficialOpenAiCompatTest)({ url: route.url, apiKey: gateway.apiKey, model, messages: action.messages, signal: trySignal, stream: true,
+              onActivity: () => { if (quiet) clearTimeout(quiet); } }));
+          const answered = finish(action, result.content, result.model || model, startedAt, result.usage);
+          return ladder.length > 1 || tries.length ? { ...answered, tries: [...tries.map(t => ({ model: t.model ?? 'unknown', latencyMs: t.latencyMs, outcome: tryOutcome(t) })),
+            { model, latencyMs: Date.now() - tried, outcome: 'answered' as const }].slice(-TEST_CHAT_MAX_TRIES) } : answered;
+        } catch (error) {
+          if (bounded.aborted || typed) throw error;
+          const fe = error instanceof OfficialTestChatError ? error : null;
+          const quietOut = own.signal.aborted;
+          const httpStatus = fe?.httpStatus ?? null;
+          tries.push({ model, latencyMs: Date.now() - tried, httpStatus, providerCode: quietOut ? 'NO_RESPONSE' : fe?.providerCode ?? null,
+            providerMessage: quietOut ? `No response within ${Math.round(RESELLER_FIRST_RESPONSE_MS / 1000)} s; the next model was tried.` : fe?.providerMessage ?? null,
+            rawErrorBody: quietOut ? null : fe?.rawErrorBody ?? null, timeout: quietOut || fe?.classificationHint === 'timeout' });
+          if (httpStatus === 401 || httpStatus === 403) break; // a refused key fails every model alike
+        } finally { if (quiet) clearTimeout(quiet); }
+      }
+      return fail('unconfirmed', 503, { model: tries.at(-1)?.model ?? ladder[0], latencyMs: Math.max(0, Date.now() - startedAt),
+        providerCode: 'ALL_MODELS_FAILED', finalOutcome: 'all-models-failed', attempts: tries, extraSecrets,
+        providerMessage: `${gateway.label} tried ${tries.length} model(s): ${tries.map(t => t.model).join(', ') || 'none'}. None answered; see each attempt below. In a builder chain the next provider would be tried now.` });
+    }
+
     let officialReceipt: Awaited<ReturnType<typeof reserveShared>> = null;
-    if (meta.kind === 'kimi' || meta.kind === 'grok' || meta.kind === 'anthropic' || meta.kind === 'gemini-flash') {
-      const model = status.model || (meta.kind === 'kimi' ? 'kimi-k2.7' : meta.kind === 'grok' ? 'grok-3-fast' : meta.kind === 'anthropic' ? 'claude-sonnet-4-6' : 'gemini-2.5-flash');
-      const rateProvider = meta.kind === 'kimi' ? 'KIMI' : meta.kind === 'grok' ? 'GROK' : meta.kind === 'anthropic' ? 'ANTHROPIC' : 'GEMINI';
+    if (meta.kind === 'kimi' || meta.kind === 'grok' || meta.kind === 'anthropic' || meta.kind === 'gemini-flash'
+      || meta.kind === 'surplus' || meta.kind === 'glm-builder' || meta.kind === 'nemotron' || meta.kind === 'bedrock-glm' || meta.kind === 'vertex') {
+      // A typed model is honoured for every official adapter (admin 2026-11-15: test every model the builder
+      // uses — kimi-k3, Claude Opus/Haiku, glm-5.3 …). Gemini Flash stays fixed: its compat adapter pins the model.
+      const model = (meta.kind !== 'gemini-flash' ? requestedModel(action) : null) || status.model
+        || (meta.kind === 'kimi' ? 'kimi-k2.7' : meta.kind === 'grok' ? 'grok-3-fast' : meta.kind === 'anthropic' ? 'claude-sonnet-4-6' : 'gemini-2.5-flash');
+      dispatchedModel = model;
+      const rateProvider = meta.kind === 'kimi' ? 'KIMI' : meta.kind === 'grok' ? 'GROK' : meta.kind === 'anthropic' ? 'ANTHROPIC'
+        : meta.kind === 'glm-builder' ? 'GLM' : meta.kind === 'nemotron' ? 'NEMOTRON' : meta.kind === 'bedrock-glm' ? 'BEDROCK-GLM'
+        : meta.kind === 'vertex' ? 'VERTEX' : 'GEMINI';
       let rate;
-      try { rate = realRateFor(rateProvider, model); } catch { throw new TestChatUnavailable('budget', 409); }
-      const ceiling = quoteTokens(action.messages, rate.inputPerMTok, rate.outputPerMTok);
+      // Surplus has no rate card (realRateFor refuses it by design); its reserve is the Sonnet card — a ceiling.
+      try { rate = meta.kind === 'surplus' ? realRateFor('ANTHROPIC', 'sonnet') : realRateFor(rateProvider, model); } catch { throw new TestChatUnavailable('budget', 409); }
+      // Builder reasoning engines get room to think and answer (the Router One lesson: at 1,024 a reasoning model
+      // spent every token thinking). The reserve is quoted for exactly the bound the call uses.
+      const outputTokens = BUILDER_REASONING_KINDS.has(meta.kind) ? BUILDER_TEST_MAX_TOKENS : TEST_CHAT_MAX_OUTPUT_TOKENS;
+      const ceiling = quoteTokens(action.messages, rate.inputPerMTok, rate.outputPerMTok, outputTokens);
       if (ceiling > 0) {
         officialReceipt = await reserveShared(db, requestId, uid, ceiling);
         if (!officialReceipt) throw new TestChatUnavailable('budget', 409);
@@ -723,22 +954,84 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
       if (meta.kind === 'kimi') {
-        const base = (process.env.KIMI_BASE_URL?.trim() || 'https://api.moonshot.ai/v1').replace(/\/+$/, '');
-        const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
-          url: `${base}/chat/completions`, apiKey: firstPresent(process.env, ['KIMI_API_KEY']), model, messages: action.messages, signal: bounded,
+        const result = await releaseIfUnused(officialReceipt, () => sentTo(runOfficialOpenAiCompatTest)({
+          url: `${kimiBase()}/chat/completions`, apiKey: firstPresent(process.env, ['KIMI_API_KEY']), model, messages: action.messages, signal: bounded,
+          stream: true, maxTokens: outputTokens,
+        }));
+        return finish(action, result.content, result.model, startedAt, result.usage);
+      }
+      if (meta.kind === 'glm-builder' || meta.kind === 'nemotron' || meta.kind === 'bedrock-glm' || meta.kind === 'surplus') {
+        const target = meta.kind === 'glm-builder' ? { url: `${glmBuilderBase()}/chat/completions`, apiKey: firstPresent(process.env, ['GLM_API_KEY']) }
+          : meta.kind === 'nemotron' ? { url: `${nemotronBaseUrl().replace(/\/+$/, '')}/chat/completions`, apiKey: nemotronKey() }
+          : meta.kind === 'bedrock-glm' ? { url: `${bedrockBase()}/chat/completions`, apiKey: firstPresent(process.env, ['BEDROCK_API_KEY']) }
+          : { url: SURPLUS_TEST_URL, apiKey: firstPresent(process.env, ['SURPLUS_API_KEY']) };
+        const result = await releaseIfUnused(officialReceipt, () => sentTo(runOfficialOpenAiCompatTest)({
+          ...target, model, messages: action.messages, signal: bounded,
+          // Streamed like the builder; Surplus stays non-streamed, as the builder's dedicated Surplus runner is.
+          ...(meta.kind === 'surplus' ? {} : { stream: true, maxTokens: outputTokens }),
+          ...(meta.kind === 'nemotron' ? { allowPaid: true } : {}),
+          ...(meta.kind === 'surplus' ? { extraBody: { si_route: { objective: 'price' } } } : {}),
+        }));
+        return finish(action, result.content, result.model, startedAt, result.usage);
+      }
+      if (meta.kind === 'vertex') {
+        const result = await releaseIfUnused(officialReceipt, () => runOfficialVertexTest({
+          client: vertexGenAI() as unknown as Parameters<typeof runOfficialVertexTest>[0]['client'], model, messages: action.messages, signal: bounded,
         }));
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
       if (meta.kind === 'grok') {
-        const result = await releaseIfUnused(officialReceipt, () => runOfficialOpenAiCompatTest({
+        const result = await releaseIfUnused(officialReceipt, () => sentTo(runOfficialOpenAiCompatTest)({
           url: 'https://api.x.ai/v1/chat/completions',
           apiKey: firstPresent(process.env, ['XAI_API_KEY', 'GROK_API_KEY']), model, messages: action.messages, signal: bounded,
+          stream: true,
         }));
         return finish(action, result.content, result.model, startedAt, result.usage);
       }
     }
 
+    // GATEWAY MODEL PICKER (admin 2026-11-16, "jaise Surplus aur Router One me"): a gateway serves a different model set
+    // to each key's group, so a fixed model can be missing (BluesMinds: "No available channel for model …") or hang.
+    // Read the key's own model list, rank it, and try up to three in turn inside this one test; stop on an auth refusal.
+    // A typed model is honoured as the only one.
+    if (meta.rungId && MODEL_PICKER_RUNGS.has(meta.rungId) && !requestedModel(action)) {
+      const rung = rungOf(meta.rungId);
+      if (rung?.configured && rung.key && rung.baseURL) {
+        const picked = await pickProviderModels(rung.baseURL, rung.key, rung.model || null, 3);
+        const tries: NonNullable<Parameters<typeof buildTestChatDiagnostic>[0]['attempts']>[number][] = [];
+        const deadline = startedAt + 85_000;
+        for (const model of picked.models) {
+          const left = deadline - Date.now();
+          if (left < 5_000) break;
+          let detail: AdminCapturedProviderError | undefined;
+          const attempt = compatAdapter(action.provider, d => { detail = d; }, model, Math.min(30_000, left - 1_000));
+          if (!attempt) break;
+          const tried = Date.now();
+          try {
+            const result = await attempt.provider.executeTurn({ prompt: action.messages.at(-1)?.content ?? '', messages: action.messages, signal: bounded, onChunk: () => {} });
+            dispatchedModel = model;
+            const answered = finish(action, result.content, result.model || model, startedAt, result.usage);
+            return { ...answered, tries: [...tries.map(t => ({ model: t.model ?? 'unknown', latencyMs: t.latencyMs, outcome: tryOutcome(t) })),
+              { model, latencyMs: Date.now() - tried, outcome: 'answered' }].slice(-TEST_CHAT_MAX_TRIES) };
+          } catch (error) {
+            if (bounded.aborted) throw error;
+            const d = detail && 'httpStatus' in detail ? detail : undefined;
+            const fe = error instanceof FreeChainProviderError ? error : null;
+            const httpStatus = d?.httpStatus ?? fe?.status ?? null;
+            tries.push({ model, latencyMs: Date.now() - tried, httpStatus, providerCode: d?.providerCode ?? fe?.code ?? null,
+              providerMessage: d?.providerMessage ?? null, rawErrorBody: d?.rawErrorBody ?? null, timeout: fe?.code === 'TIMEOUT' });
+            if (httpStatus === 401 || httpStatus === 403) break; // a refused key fails every model alike
+          }
+        }
+        const from = picked.source === 'provider-list' ? "the key's own model list" : `the configured model only (${picked.note ?? 'no list'})`;
+        return fail('unconfirmed', 503, { model: tries.at(-1)?.model ?? rung.model, latencyMs: Math.max(0, Date.now() - startedAt),
+          providerCode: 'ALL_MODELS_FAILED', finalOutcome: 'all-models-failed', attempts: tries, extraSecrets,
+          providerMessage: `Tried ${tries.length} model(s) chosen from ${from}: ${tries.map(t => t.model).join(', ') || 'none'}. None answered; see each attempt below.` });
+      }
+    }
+
     const adapter = compatAdapter(action.provider, detail => { captured = detail; }, requestedModel(action));
+    dispatchedModel = requestedModel(action) || dispatchedModel;
     if (!adapter) {
       if (officialReceipt) {
         try { await officialReceipt.releaseUndispatched(); } catch { /* keep the configuration error */ }
@@ -754,24 +1047,41 @@ export async function runTestChat(value: TestChatAction, actor: string, signal: 
       prompt: action.messages.at(-1)?.content ?? '',
       messages: action.messages,
       signal: bounded,
+      // Streamed, exactly as user chat calls these rungs. Without onChunk the adapter sent stream: false and waited
+      // for the whole answer: BluesMinds (openai/gpt-oss-20b, a reasoning model) timed out at 60,142 ms with no byte
+      // returned (admin report 2026-11-16). The page shows the final reply, so the chunks themselves are not used.
+      onChunk: () => {},
     }));
     return finish(action, result.content, result.model, startedAt, result.usage);
   } catch (error) {
     if (error instanceof TestChatUnavailable) throw error;
     const latency = Math.max(0, Date.now() - startedAt);
     if (error instanceof OfficialTestChatError) {
+      const reach = (error.classificationHint === 'network' || error.classificationHint === 'timeout') && !error.httpStatus && probeBase
+        ? await probeChatHostReachability(probeBase) : null;
+      const models = probeBase && probeKey && isModelNotFound(error.providerCode, `${error.providerMessage ?? ''} ${error.rawErrorBody ?? ''}`)
+        ? await listProviderModels(probeBase, probeKey) : null;
       return fail('unconfirmed', 503, {
-        model: status.model, latencyMs: latency, classification: error.classificationHint, httpStatus: error.httpStatus,
+        model: dispatchedModel, latencyMs: latency, classification: error.classificationHint, httpStatus: error.httpStatus,
         providerCode: error.providerCode, providerType: error.providerType, providerRequestId: error.providerRequestId,
-        providerMessage: error.providerMessage, rawErrorBody: error.rawErrorBody, extraSecrets,
+        providerMessage: [error.providerMessage, reach, models].filter(Boolean).join(' ') || null, rawErrorBody: error.rawErrorBody, extraSecrets,
       });
     }
     if (error instanceof FreeChainProviderError) {
       const cap = captured && 'httpStatus' in captured ? captured : undefined;
+      // A network failure or timeout with no HTTP status: say whether this server can reach the host at all.
+      const unreachedBase = (error.code === 'NETWORK' || error.code === 'TIMEOUT') && !(cap?.httpStatus ?? error.status)
+        ? (meta.rungId ? rungOf(meta.rungId)?.baseURL : undefined) : undefined;
+      const reach = unreachedBase ? await probeChatHostReachability(unreachedBase) : null;
+      // A model the key's group cannot use: list the models it can (key sent only to that provider's own endpoint).
+      const rungForList = meta.rungId ? rungOf(meta.rungId) : undefined;
+      const models = rungForList?.baseURL && rungForList.key && isModelNotFound(cap?.providerCode ?? error.code, `${cap?.providerMessage ?? ''} ${cap?.rawErrorBody ?? ''}`)
+        ? await listProviderModels(rungForList.baseURL, rungForList.key) : null;
       return fail('unconfirmed', 503, {
-        model: status.model, latencyMs: latency, httpStatus: cap?.httpStatus ?? error.status ?? null,
+        model: dispatchedModel, latencyMs: latency, httpStatus: cap?.httpStatus ?? error.status ?? null,
         providerCode: cap?.providerCode ?? error.code, providerType: cap?.providerType ?? null,
-        providerRequestId: cap?.requestId ?? null, providerMessage: cap?.providerMessage ?? null,
+        providerRequestId: cap?.requestId ?? null,
+        providerMessage: [cap?.providerMessage, reach, models].filter(Boolean).join(' ') || null,
         rawErrorBody: cap?.rawErrorBody ?? null, empty: error.code === 'EMPTY_RESPONSE', aborted: error.code === 'ABORTED',
         timeout: error.code === 'TIMEOUT', extraSecrets,
       });
@@ -828,7 +1138,7 @@ function finish(action: TestChatAction, content: string, model: string, startedA
     latencyMs: Math.max(0, Date.now() - startedAt), ...(usage ? { usage } : {}), noFallback: true };
 }
 
-function compatAdapter(id: TestChatProviderId, sink: (detail: AdminCapturedProviderError) => void, modelOverride?: string | null): { provider: OpenAiCompatProvider; rung?: RungConfig } | null {
+function compatAdapter(id: TestChatProviderId, sink: (detail: AdminCapturedProviderError) => void, modelOverride?: string | null, timeoutMs = 60_000): { provider: OpenAiCompatProvider; rung?: RungConfig } | null {
   const meta = META[id];
   if (meta.kind === 'glm-vision') {
     const key = firstPresent(process.env, ['GLM_API_KEY', 'FREE_CHAIN_GLM_API_KEY']);
@@ -859,7 +1169,7 @@ function compatAdapter(id: TestChatProviderId, sink: (detail: AdminCapturedProvi
     rung,
     provider: new OpenAiCompatProvider({
       provider: adapterName, key: rung.key, envName: rung.keyEnv, model: modelOverride || rung.model, baseURL: rung.baseURL,
-      priority: 0, maxOutputTokens: TEST_CHAT_MAX_OUTPUT_TOKENS, timeoutMs: 60_000, streamUsage: rung.streamUsage,
+      priority: 0, maxOutputTokens: TEST_CHAT_MAX_OUTPUT_TOKENS, timeoutMs, streamUsage: rung.streamUsage,
       extraBody: extraBodyFor(meta.rungId), adminErrorDetail: sink,
     }),
   };

@@ -27,7 +27,8 @@ describe('🔴 the report case: files written by a loop that failed are not "you
     const sites = route.match(/appExists:\s*\S.{0,80}/g) ?? [];
     expect(sites.length).toBeGreaterThanOrEqual(2);
     for (const site of sites) expect(site).toMatch(/^appExists:\s*etaAppExists\(.*, etaLoopFailed\)/);
-    expect(route).toMatch(/etaFinalChecks = true;\n\s*etaLoopFailed = !result\.ok;/);
+    // PIN UPDATED (BR1992): the flag became the phase's start epoch, so a later pickup of a user message can end it.
+    expect(route).toMatch(/etaFinalChecksAt = Date\.now\(\);\n\s*etaLoopFailed = !result\.ok;/);
   });
 });
 

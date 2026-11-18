@@ -87,12 +87,28 @@ describe('Surplus build-scoped authority', () => {
     const session = await make(); await expect(session!.runner().runTurn(params)).resolves.toBeDefined();
     await expect(session!.runner().runTurn(params)).resolves.toBeDefined(); expect(adapter.dispatch).toHaveBeenCalledTimes(2);
   });
-  it('serializes concurrent model calls while preserving parallel tools within turns', async () => {
-    const { make, adapter } = setup(); const session = await make(); let active = 0, peak = 0;
-    const original = adapter.dispatch;
-    adapter.dispatch = vi.fn(async (...args) => { active++; peak = Math.max(peak, active); await new Promise(resolve => setTimeout(resolve, 2)); const r = await original(...args); active--; return r; });
-    await Promise.all([session!.runner().runTurn(params), session!.runner().runTurn(params)]);
-    expect(peak).toBe(1); expect(adapter.dispatch).toHaveBeenCalledTimes(2);
+  // Owner 2026-11-16: the one-call-at-a-time order is gone; a build's agents call Surplus in parallel.
+  async function peakOf(turns: number, envValue?: string) {
+    const before = process.env.SURPLUS_PARALLEL_CALLS_PER_BUILD;
+    if (envValue === undefined) delete process.env.SURPLUS_PARALLEL_CALLS_PER_BUILD; else process.env.SURPLUS_PARALLEL_CALLS_PER_BUILD = envValue;
+    try {
+      const { make, adapter } = setup(); const session = await make(); let active = 0, peak = 0;
+      const original = adapter.dispatch;
+      adapter.dispatch = vi.fn(async (...args) => { active++; peak = Math.max(peak, active); await new Promise(resolve => setTimeout(resolve, 5)); const r = await original(...args); active--; return r; });
+      await Promise.all(Array.from({ length: turns }, () => session!.runner().runTurn(params)));
+      expect(adapter.dispatch).toHaveBeenCalledTimes(turns);
+      return peak;
+    } finally {
+      if (before === undefined) delete process.env.SURPLUS_PARALLEL_CALLS_PER_BUILD; else process.env.SURPLUS_PARALLEL_CALLS_PER_BUILD = before;
+    }
+  }
+  it('runs concurrent model calls of one build in parallel (no one-at-a-time queue)', async () => {
+    expect(await peakOf(2)).toBe(2);
+    expect(await peakOf(120)).toBe(120);
+  });
+  it('SURPLUS_PARALLEL_CALLS_PER_BUILD bounds the parallel calls; 1 restores the strict old order', async () => {
+    expect(await peakOf(6, '3')).toBe(3);
+    expect(await peakOf(3, '1')).toBe(1);
   });
 
 });

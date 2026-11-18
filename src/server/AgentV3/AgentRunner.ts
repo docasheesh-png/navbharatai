@@ -20,7 +20,7 @@ import { billedAmountUsd } from './pricing';
 import type { UsageSink } from './UsageSink';
 import { withTimeout, withDeadline } from './asyncUtils';
 import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
-import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, endOfTurnReadyMark, unassessedFailsBuild, type ReadyMark } from './doneSignal';
+import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, endOfTurnReadyMark, unassessedFailsBuild, userStoppedBeforeReady, type ReadyMark } from './doneSignal';
 import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
 import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { writerTaskSiblings, SIBLING_TASKS_INPUT_KEY } from './parallelSiblings';
@@ -37,7 +37,7 @@ import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { serviceRecommendationEvent } from '../analyzer/serviceRecommendation';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
-import { abortCauseOf, abortSummary, timedOutSummary, stalledModelSummary, stoppedCallFields, type SeedState, type AbortCause } from './buildAbortCause';
+import { abortCauseOf, abortSummary, buildClockMinutes, timedOutSummary, stalledModelSummary, stoppedCallFields, type SeedState, type AbortCause } from './buildAbortCause';
 import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, buildBudgetNarration, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
@@ -206,6 +206,8 @@ export interface AgentRunnerOptions {
    * before, so this is additive only.
    */
   hasExistingFiles?: () => boolean;
+  /** The recharge sentence for this request, used when the wallet runs out mid-build. */
+  balanceEmptyNotice?: () => string;
   /**
    * Does the workspace hold files the PLATFORM set up for this build (a tested template, a game kit, the page
    * the user pasted)? Checked live. Read only when `hasExistingFiles` says nothing of the build's own exists,
@@ -511,6 +513,13 @@ export interface AgentRunResult {
    * be taken on a belief. Absent means "never judged finished", which is NOT an overrun of zero.
    */
   readyAt?: { step: number; elapsedMs: number; score: number; at?: number };
+  /**
+   * BR1988 — present (true) ONLY when the user's own Stop (`abortCauseOf === 'user-stop'`) ended this run
+   * through its aborted ending, on a fresh-build turn where the readiness check was eligible (done signal
+   * on, not an edit, not a project module) and had not yet judged the app finished. Absent in every other
+   * case — engine aborts, edits, module turns, success, crashes. See `userStoppedBeforeReady`.
+   */
+  userStoppedBeforeReady?: true;
   /** T1-budget-ux: the run stopped ONLY because it hit the per-build budget cap (work is saved and the
    *  build can be continued — a fresh run gets a fresh budget window). Lets the client show an honest
    *  "budget reached — continue" state instead of a hard failure. */
@@ -954,13 +963,25 @@ export class AgentRunner {
       // from INSIDE a turn, when the stop cancelled the model call this loop was waiting on.
       const endAborted = async () => {
         const cause = abortCauseOf(this.opts.signal as AbortSignal);
-        const summary = abortSummary(cause, {
-          minutes: maxBuildMs ? Math.round(maxBuildMs / 60000) : undefined,
+        const summary = cause === 'wallet-empty' && this.opts.balanceEmptyNotice
+          ? this.opts.balanceEmptyNotice()
+          : abortSummary(cause, {
+          minutes: buildClockMinutes(maxBuildMs, Date.now(), events.startedAt),
           ...endingContext(),
         });
         await persist('stopped');
         events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
-        return { ok: false, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
+        // BR1988 — a MEASUREMENT for the route, never a decision here: the user's own Stop ended this run
+        // before the readiness check (which was eligible on this turn) ever judged the app finished.
+        let stoppedBeforeReady = false;
+        try {
+          stoppedBeforeReady = userStoppedBeforeReady({
+            cause, readyMarked: readyMark != null, doneSignalEnabled: doneCfg.enabled,
+            editingExistingApp: this.opts.editingExistingApp === true,
+            projectModule: this.opts.projectModule?.() ?? null,
+          });
+        } catch { stoppedBeforeReady = false; }
+        return { ok: false, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}), ...(stoppedBeforeReady ? { userStoppedBeforeReady: true as const } : {}) };
       };
       while (steps < stepCap) {
         if (admission?.exhausted && !this.opts.signal?.aborted) {
@@ -990,7 +1011,7 @@ export class AgentRunner {
         // whatever was produced instead of looping for 20-30 minutes. A build that DID write files is
         // reported ok:true (the work is real and resumable); one that produced nothing is ok:false.
         if (buildTimedOut(buildStartMs, maxBuildMs, Date.now())) {
-          const minutes = Math.round((maxBuildMs as number) / 60000);
+          const minutes = buildClockMinutes(maxBuildMs, Date.now(), events.startedAt) ?? Math.round((maxBuildMs as number) / 60000);
           const ending = endingContext();
           const builtSomething = ending.builtSomething;
           const summary = timedOutSummary(minutes, ending);
@@ -1399,7 +1420,7 @@ export class AgentRunner {
                   // (autopsy 536c8189 — it is snapped deterministically in `spacingSnap.ts`).
                   styleResumeStartedAt = Date.now();
                   styleResumeHealth = buildHealth;
-                  const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow() });
+                  const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow(), outOfTime: events.budgetStagesSaid?.has('final') === true });
                   if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
                   try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0, style.a11y?.length ?? 0, style.noTokens?.colours ?? 0), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.orphans ?? []).map((o) => `${o}:unimported`), ...(style.noTokens ? [`${style.noTokens.colours}-colours:no-tokens`] : [])].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
@@ -1425,7 +1446,7 @@ export class AgentRunner {
                 if (standDownNote) { try { this.opts.onNote?.({ code: 'UNFINISHED_RESUME_STOOD_DOWN', message: standDownNote, detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ } }
                 if (resume.resume && !this.opts.signal?.aborted) {
                   unfinishedResumes++;
-                  const unfinishedNotice = handBackNotice('unfinished', turn.text);
+                  const unfinishedNotice = handBackNotice('unfinished', turn.text, { outOfTime: events.budgetStagesSaid?.has('final') === true });
                   if (unfinishedNotice) events.emit({ type: 'narration', agent: agentRole, text: unfinishedNotice, ts: Date.now() });
                   try { this.opts.onNote?.({ code: 'UNFINISHED_BUILD_RESUMED', message: unfinishedResumeNote(unfinishedResumes, readiness.blockers.length), detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(resume.message);
@@ -1511,7 +1532,7 @@ export class AgentRunner {
                 summaryBeforeStyleResume = turn.text.trim() || null;
                 // A specialist's text is forwarded to the chat too (SubAgent re-emits narration).
                 styleResumeStartedAt = Date.now();
-                const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow() });
+                const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow(), outOfTime: events.budgetStagesSaid?.has('final') === true });
                 if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
                 try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: `${agentRole}:${styleResumeNote(style.missing.length, style.pages.length, 0, style.a11y?.length ?? 0)}`, detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
                 pushPlatformTurn(decision.message);

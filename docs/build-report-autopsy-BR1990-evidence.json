@@ -1,0 +1,31 @@
+{
+  "evidenceType": "synthetic-regression-cases",
+  "privateReportPayloadIncluded": false,
+  "cases": [
+    "a per-file reply holding only a folded component's block for a host path: main's selection returns the folded source; the new selection returns null",
+    "the host's own block wins whether it comes before or after a folded block",
+    "neighbours identical to main's verbatim selection: exact block; a slipped path the plan does not know; another planned (not folded) file; a folded block that is not first; no block; empty reply",
+    "no fold (no set or an empty set): identical to main",
+    "the folded file's own path still gets its exact block",
+    "a real runSimpleBuild with a synthetic 16-file plan that folds: the JS host is never written with the folded source; a host answering its own block is written as before",
+    "wiring pin: only the folded paths are passed, and only when a fold happened",
+    "a real runSimpleBuild where the host answers with combined content under the folded header writes it under the host path, as main",
+    "second review: refusal only when the folded-header content positively looks like the folded file alone (declares/exports the folded file's own name, no other top-level declaration or export); host name derivation removed",
+    "kept and identical to main (16): combined component; lowercase header.tsx declaring Header; .ts utility hosts helpers.ts, storage.ts, types.ts; camelCase taskList export from task-list.tsx; anonymous default export; hook host; const arrow plus export default identifier; export list renaming; re-export only; an unrelated name only; folded name plus a helper; expression default export; two declarations on one line; indented code",
+    "refused (7): folded-only content, including when it imports or renders the host, names it in strings, is declared then exported by name, uses an export list, sits under a non-identifier host name, or is a folded .ts utility under a .ts host",
+    "both reviewer probes rerun: every combined case returns main's result; only folded-only content is refused",
+    "mutation checks (unique mktemp backups, restored): never refuse 9 fail; refuse regardless of content 17; ignore other declarations 6; skip own-name check 2; accept unknown top-level forms 2; drop one-line guard 1; lane not wired 2"
+  ],
+  "limitations": [
+    "not a replay of a customer build",
+    "not production or deployment validation",
+    "binary fold host and planned binary asset were already closed on main by BR1952 (#4124); the text-only lane against an unavailable workspace and the user notice by BR1961 (#4146)",
+    "the concurrent-sandbox cap remains Q-2621 (ops)",
+    "the remaining type errors after the full builder's repair and the repair's unwritten component are not established from the retained report",
+    "a first block naming another planned (not folded) file keeps main's fallback (candidate follow-up)",
+    "focused local tests and server/root typecheck only; no full local suite was run (box memory)",
+    "first D1 version (refuse any folded-header first block) was withdrawn after an independent review FAIL: it dropped usable mislabelled host replies and forced a paid repair",
+    "second D1 version (host-name declaration check) was withdrawn after a second independent review FAIL: it still refused usable combined replies for lowercase, kebab/camelCase, .ts utility and anonymous-default hosts",
+    "residual: folded-only replies with an extra top-level helper, type, expression default or indentation are not caught and keep main's mislabel"
+  ]
+}

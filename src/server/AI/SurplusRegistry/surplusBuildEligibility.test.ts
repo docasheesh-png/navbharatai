@@ -41,7 +41,8 @@ describe('Surplus builder eligibility is independent of CheaperInference admin-o
   it.each(['user@example.invalid', 'admin@example.invalid'])('keeps the two provider policies separate for %s', async email => {
     const trustedEmail = identityGrantEmail({ uid: 'synthetic-user', email, emailVerified: true });
     expect(cheaperInferenceExclusiveAdmin(trustedEmail)).toBe(email === 'admin@example.invalid');
-    expect(cheaperInferencePaidRungEnabled()).toBe(false);
+    // Owner t357u: the chat rung is now on for everyone; Surplus admission still ignores it entirely.
+    expect(cheaperInferencePaidRungEnabled()).toBe(true);
     expect(await runWeakSurplusAdmissionForChat(options())).toMatchObject({ ok: true, session });
     expect(admission.resolve).toHaveBeenCalledOnce();
   });

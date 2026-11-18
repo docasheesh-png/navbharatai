@@ -40,6 +40,98 @@
       "reviewedAt": "2026-10-20",
       "reviewBy": "2026-11-03",
       "evidence": "docs/PHASE1_DEPENDENCY_SECURITY.md"
+    },
+    {
+      "package": "picomatch",
+      "severity": "high",
+      "reason": "Owner-approved 2026-11-17 ('allowlist kar do'). GHSA-fc5q-39xc-vjpf (ReDoS through single-branch repeated extglobs) affects every picomatch <=4.0.7; npm latest is 4.0.7, so no patched release exists on 2026-11-17. Reachability: the only production importer is ts-morph (@ts-morph/common -> tinyglobby -> picomatch), and every production ts-morph Project is created with useInMemoryFileSystem: true and skipAddingFilesFromTsConfig: true, so no glob pattern (let alone a user-supplied one) reaches picomatch at runtime. Every other path is build/test tooling (vite, vitest, @vitest/coverage-v8, @typescript-eslint) or the firebase-tools deployment CLI (superstatic -> re2 -> node-gyp). Remove this entry and its dependents once a patched picomatch is published.",
+      "advisories": [
+        "GHSA-fc5q-39xc-vjpf"
+      ],
+      "reviewedAt": "2026-11-17",
+      "reviewBy": "2026-12-01",
+      "evidence": "docs/PHASE1_DEPENDENCY_SECURITY.md"
+    },
+    {
+      "package": "fdir",
+      "severity": "high",
+      "reason": "Inherits only GHSA-fc5q-39xc-vjpf from picomatch (fdir -> picomatch); carries no high/critical advisory of its own. No patched picomatch exists on 2026-11-17. Owner-approved 2026-11-17. See the picomatch entry for reachability. Remove with it.",
+      "advisories": [],
+      "reviewedAt": "2026-11-17",
+      "reviewBy": "2026-12-01",
+      "evidence": "docs/PHASE1_DEPENDENCY_SECURITY.md"
+    },
+    {
+      "package": "tinyglobby",
+      "severity": "high",
+      "reason": "Inherits only GHSA-fc5q-39xc-vjpf from picomatch (tinyglobby -> fdir/picomatch); carries no high/critical advisory of its own. No patched picomatch exists on 2026-11-17. Owner-approved 2026-11-17. See the picomatch entry for reachability. Remove with it.",
+      "advisories": [],
+      "reviewedAt": "2026-11-17",
+      "reviewBy": "2026-12-01",
+      "evidence": "docs/PHASE1_DEPENDENCY_SECURITY.md"
+    },
+    {
+      "package": "@ts-morph/common",
+      "severity": "high",
+      "reason": "Inherits only GHSA-fc5q-39xc-vjpf from picomatch (@ts-morph/common -> tinyglobby -> picomatch; production ts-morph use is in-memory only); carries no high/critical advisory of its own. No patched picomatch exists on 2026-11-17. Owner-approved 2026-11-17. See the picomatch entry for reachability. Remove with it.",
+      "advisories": [],
+      "reviewedAt": "2026-11-17",
+      "reviewBy": "2026-12-01",
+      "evidence": "docs/PHASE1_DEPENDENCY_SECURITY.md"
+    },
+    {
+      "package": "@typescript-eslint/typescript-estree",
+      "severity": "high",
+      "reason": "Inherits only GHSA-fc5q-39xc-vjpf from picomatch (dev-only lint tooling -> tinyglobby); carries no high/critical advisory of its own. No patched picomatch exists on 2026-11-17. Owner-approved 2026-11-17. See the picomatch entry for reachability. Remove with it.",
+      "advisories": [],
+      "reviewedAt": "2026-11-17",
+      "reviewBy": "2026-12-01",
+      "evidence": "docs/PHASE1_DEPENDENCY_SECURITY.md"
+    },
+    {
+      "package": "vite",
+      "severity": "high",
+      "reason": "Inherits only GHSA-fc5q-39xc-vjpf from picomatch (dev/build-only -> picomatch, tinyglobby); carries no high/critical advisory of its own. No patched picomatch exists on 2026-11-17. Owner-approved 2026-11-17. See the picomatch entry for reachability. Remove with it.",
+      "advisories": [],
+      "reviewedAt": "2026-11-17",
+      "reviewBy": "2026-12-01",
+      "evidence": "docs/PHASE1_DEPENDENCY_SECURITY.md"
+    },
+    {
+      "package": "vitest",
+      "severity": "high",
+      "reason": "Inherits only GHSA-fc5q-39xc-vjpf from picomatch (test-only -> vite, picomatch, tinyglobby); carries no high/critical advisory of its own. No patched picomatch exists on 2026-11-17. Owner-approved 2026-11-17. See the picomatch entry for reachability. Remove with it.",
+      "advisories": [],
+      "reviewedAt": "2026-11-17",
+      "reviewBy": "2026-12-01",
+      "evidence": "docs/PHASE1_DEPENDENCY_SECURITY.md"
+    },
+    {
+      "package": "@vitest/coverage-v8",
+      "severity": "high",
+      "reason": "Inherits only GHSA-fc5q-39xc-vjpf from picomatch (test-only -> vitest); carries no high/critical advisory of its own. No patched picomatch exists on 2026-11-17. Owner-approved 2026-11-17. See the picomatch entry for reachability. Remove with it.",
+      "advisories": [],
+      "reviewedAt": "2026-11-17",
+      "reviewBy": "2026-12-01",
+      "evidence": "docs/PHASE1_DEPENDENCY_SECURITY.md"
+    },
+    {
+      "package": "node-gyp",
+      "severity": "high",
+      "reason": "Inherits only GHSA-fc5q-39xc-vjpf from picomatch (install-time native build tool: firebase-tools -> superstatic -> re2 -> node-gyp -> tinyglobby); carries no high/critical advisory of its own. No patched picomatch exists on 2026-11-17. Owner-approved 2026-11-17. See the picomatch entry for reachability. Remove with it.",
+      "advisories": [],
+      "reviewedAt": "2026-11-17",
+      "reviewBy": "2026-12-01",
+      "evidence": "docs/PHASE1_DEPENDENCY_SECURITY.md"
+    },
+    {
+      "package": "re2",
+      "severity": "high",
+      "reason": "Inherits only GHSA-fc5q-39xc-vjpf from picomatch (firebase-tools deployment CLI devDependency -> superstatic -> re2 -> node-gyp); carries no high/critical advisory of its own. No patched picomatch exists on 2026-11-17. Owner-approved 2026-11-17. See the picomatch entry for reachability. Remove with it.",
+      "advisories": [],
+      "reviewedAt": "2026-11-17",
+      "reviewBy": "2026-12-01",
+      "evidence": "docs/PHASE1_DEPENDENCY_SECURITY.md"
     }
   ]
 }

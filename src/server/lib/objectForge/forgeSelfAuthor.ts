@@ -15,7 +15,7 @@
 // costs nothing and breaks nothing — the caller falls back to writing a spec itself.
 import { FORGE_GUIDE } from './ObjectForgeGenerator';
 import { loadForge, type ObjectReport } from './forgeRuntime';
-import { FORGE_EXAMPLES } from './forgeExamples';
+import { exampleForSubject, subjectChecklist } from './forgeSubjects';
 import { createHash } from 'node:crypto';
 import { BoundedCache } from '../boundedCache';
 
@@ -51,9 +51,10 @@ export const SELF_AUTHOR_SYSTEM = [
   FORGE_GUIDE.split('\n').filter((l) => !l.includes('author_object')).join('\n'),
 ].join('\n');
 
-/** A compact worked example, so the format is shown and not only described. */
-function exampleBlock(): string {
-  return 'A COMPLETE EXAMPLE of the format (a sword); yours will be different:\n' + JSON.stringify(FORGE_EXAMPLES.sword.spec);
+/** A worked example CLOSEST TO THE SUBJECT (a train gets the train, a lion the four-legged animal, a temple the house) and what that kind of thing must have. */
+function exampleBlock(request: string): string {
+  const { kind, id, spec } = exampleForSubject(request);
+  return 'A COMPLETE EXAMPLE of the format (a ' + id + '; yours will be different):\n' + JSON.stringify(spec) + '\n\n' + subjectChecklist(kind);
 }
 
 /** The model's text → a JSON object, or null. Models wrap JSON in a fence or a sentence more often than not. */
@@ -67,7 +68,7 @@ export function parseSpecText(raw: string | null | undefined): Record<string, un
   } catch { return null; }
 }
 
-/** The id an object is saved under, made from what the user asked for ("a lighthouse with a spiral stair" → lighthouse-with-a-spiral-stair). */
+/** A stable valid id from the full Unicode description, without lossy ASCII or prefix collisions. */
 export function objectIdFor(request: string): string {
   const canonical = request.trim().normalize('NFC');
   return 'object-' + createHash('sha256').update(canonical).digest('hex').slice(0, 32);
@@ -78,7 +79,7 @@ function firstPrompt(request: string, groundTruth: string | undefined, id: strin
     'Make this object for a 3D game: "' + request.trim() + '".',
     groundTruth ? '\nReal-world facts to build to (use these sizes, in metres):\n' + groundTruth : '',
     '',
-    exampleBlock(),
+    exampleBlock(request),
     '',
     'Answer with ONLY the JSON spec. Use "id": "' + id + '". Block the main masses with true proportions, make every part touch its neighbour, stand it on y = 0 facing +z, and give anything alive pivots at its joints and a "walk" clip.',
   ].filter((l) => l !== '').join('\n');

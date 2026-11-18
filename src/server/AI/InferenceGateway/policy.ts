@@ -152,6 +152,8 @@ export function planInference(input: PlanningInput): PlanningResult {
     const eligible: EvaluatedCandidate[] = [];
     for (const c of candidates) {
       try {
+        const controlled = input.controlGate?.(c.profile, r) ?? null;
+        if (controlled) { rejected.push({ profileId: c.profile.id, reason: controlled }); continue; }
         const result = evaluate(c, input, requestBinding);
         if (typeof result === 'string') rejected.push({ profileId: c?.profile?.id ?? 'invalid-profile', reason: result });
         else eligible.push(result);

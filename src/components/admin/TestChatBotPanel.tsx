@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import { newRequestIdentity } from '../../lib/requestIdentity';
-import { formatTestChatDiagnostic, isTestChatDiagnostic, isTestChatReply, readPartialTestChatStatus, readTestChatAction, TEST_CHAT_FAILURE, TEST_CHAT_MAX_CONTEXT_CHARS,
+import { formatTestChatDiagnostic, formatTestChatTries, isTestChatDiagnostic, isTestChatReply, readPartialTestChatStatus, readTestChatAction, TEST_CHAT_FAILURE, TEST_CHAT_MAX_CONTEXT_CHARS,
   TEST_CHAT_MAX_MESSAGE_CHARS, TEST_CHAT_PROVIDER_IDS, isAllowedTestChatModel, type TestChatDiagnostic, type TestChatMessage, type TestChatProviderId, type TestChatReply, type TestChatStatus } from '../../lib/testChatBot';
 
 const API = '/api/v1/admin/test-chat-bot';
@@ -99,7 +99,8 @@ export function TestChatBotPanel({ adminToken }: { adminToken: string }): React.
     if (!action) { setError('This conversation is too long. Start a new test chat or shorten the message. No test was sent.'); return; }
     lock.current = true; setBusy(true); setAccepted(false); setError(''); setDiagnostic(null);
     const current = epoch.current, controller = new AbortController(); sendAbort.current = controller;
-    const timeout = setTimeout(() => controller.abort(), 100_000);
+    // The server bounds each test (90 s; a reseller gateway trying up to three models, 240 s). This only outlives it.
+    const timeout = setTimeout(() => controller.abort(), 250_000);
     try {
       const response = await fetch(`${API}/chat`, { method: 'POST', cache: 'no-store',
         headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' }, signal: controller.signal, body: JSON.stringify(action) });
@@ -177,6 +178,7 @@ export function TestChatBotPanel({ adminToken }: { adminToken: string }): React.
       {messages.map((message, index) => <article key={index} className="rounded-lg bg-well p-3"><h3 className="mb-1 text-sm font-semibold text-ink">{message.role === 'user' ? 'You' : `${displayName} response`}</h3><p className="whitespace-pre-wrap break-words text-sm">{message.content}</p></article>)}
     </div>
     {lastReply && <p className="text-xs text-muted">Gateway: {lastReply.provider} · Selected model: {lastReply.model} · {lastReply.latencyMs} ms{lastReply.usage ? ` · ${lastReply.usage.inputTokens} input / ${lastReply.usage.outputTokens} output tokens` : ' · Usage not reported'} · Invoice cost not verified.</p>}
+    {lastReply?.tries && lastReply.tries.length > 0 && <p className="text-xs text-muted">Models tried: {formatTestChatTries(lastReply.tries)}</p>}
     <form onSubmit={event => void send(event)} className="space-y-3">
       <label className="block text-sm">Test message<textarea rows={4} maxLength={TEST_CHAT_MAX_MESSAGE_CHARS} value={draft} disabled={busy} onChange={event => { setDraft(event.target.value); setAccepted(false); }} placeholder={`Write a synthetic question to test ${displayName}…`} className="mt-1 block w-full resize-y rounded-lg border border-line bg-well p-3 text-ink" /></label>
       <p className="text-xs text-muted">{totalChars.toLocaleString()} / {TEST_CHAT_MAX_CONTEXT_CHARS.toLocaleString()} context characters. Start a new test chat when this context is full.</p>

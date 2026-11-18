@@ -24,6 +24,7 @@ import { claudeVisionAnswerModel, glmVisionModels, grokVisionModels, geminiVisio
 import { dispatchWithFreeTierPaidHold, estimateTextTokens, geminiUsage, reserveFreeTierPaid, settleFreeTierPaid, FREE_TIER_PAID_OUTPUT_QUOTE } from './freeTierPaidCap';
 import { nextPoolKey } from './keyPool';
 import { vertexGenAI } from './vertexGenAI';
+import { tryCheaperInferenceVision, tryQubaxVision } from './visionSuppliers';
 
 export interface VisionAttachment {
   name: string;
@@ -33,7 +34,8 @@ export interface VisionAttachment {
 
 export interface VisionResult {
   text: string;
-  provider: 'GLM' | 'VERTEX' | 'GEMINI' | 'GROK' | 'CLAUDE';
+  /** Server-side label for logs only. Never shown to a user (owner t357u: no provider brand visible). */
+  provider: 'QUBAX' | 'CHEAPERINFERENCE' | 'GLM' | 'VERTEX' | 'GEMINI' | 'GROK' | 'CLAUDE';
   model?: string;
   usage?: AIProviderResponse['usage'];
   inferenceGateway?: AIProviderResponse['inferenceGateway'];
@@ -51,6 +53,12 @@ export interface VisionOptions {
   timeoutMs?: number;
   /** Optional request admission/deadline cancellation, never changes provider selection. */
   signal?: AbortSignal;
+  /**
+   * Owner t357u/t359u: put the always-on vision suppliers (Qubax, CheaperInference) first. OPT-IN: only
+   * the chat photo-analysis path sets it. The avatar safety gate and screenshot-to-code leave it unset and
+   * keep main's chain exactly.
+   */
+  alwaysOnSuppliers?: boolean;
   /**
    * Who pays. 'free' = GLM-4.6V-flash → gemini-2.5-flash-lite → gemini-2.5-flash ONLY (no pro, no
    * Grok, no Claude, env overrides cannot widen it) and every paid call is budgeted against the shared
@@ -263,10 +271,30 @@ async function tryClaude(atts: VisionAttachment[], o: VisionOptions): Promise<st
  * Slice C); Vertex next because it is the primary Google auth and reads BOTH images and PDFs
  * (an image+PDF batch skips GLM and lands here); then Gemini(key) → Grok. Non-Free adds Claude last.
  */
-export function visionProviderOrder(allowClaude: boolean, tier: VisionTier = allowClaude ? 'paid' : 'free'): VisionResult['provider'][] {
+export function visionProviderOrder(allowClaude: boolean, tier: VisionTier = allowClaude ? 'paid' : 'free', alwaysOnSuppliers = false): VisionResult['provider'][] {
   // 🔒 FREE (admin 2026-10-23): GLM ($0) → Google flash-lite → flash. Grok-4 and Claude are gone.
-  if (tier === 'free' || !allowClaude) return ['GLM', 'VERTEX', 'GEMINI'];
-  return ['GLM', 'VERTEX', 'GEMINI', 'GROK', 'CLAUDE'];
+  const base: VisionResult['provider'][] = tier === 'free' || !allowClaude ? ['GLM', 'VERTEX', 'GEMINI'] : ['GLM', 'VERTEX', 'GEMINI', 'GROK', 'CLAUDE'];
+  // Owner t357u + t359u (2026-11-16), chat photo analysis only (opt-in): the always-on suppliers with REAL
+  // vision models lead — Qubax, then CheaperInference (Mitrify has no image-capable transport, see
+  // visionSuppliers.ts). Each skips itself without a key, a vision model, for a PDF batch, or when off.
+  return alwaysOnSuppliers ? ['QUBAX', 'CHEAPERINFERENCE', ...base] : base;
+}
+
+/** The added suppliers get a short budget (catalog + call), so a hang costs seconds, not the 28s default, before GLM. */
+export const VISION_SUPPLIER_TIMEOUT_MS = 10_000;
+/** Run one added supplier under its own short deadline (catalog + call together). The timer is always cleared. */
+async function withSupplierDeadline(o: VisionOptions, run: (opt: VisionOptions) => Promise<{ text: string } | null>): Promise<string | null> {
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(new Error(`vision supplier timed out after ${VISION_SUPPLIER_TIMEOUT_MS}ms`)), VISION_SUPPLIER_TIMEOUT_MS);
+  try {
+    const signal = o.signal ? AbortSignal.any([o.signal, deadline.signal]) : deadline.signal;
+    const opt = { ...o, timeoutMs: Math.min(o.timeoutMs ?? VISION_SUPPLIER_TIMEOUT_MS, VISION_SUPPLIER_TIMEOUT_MS), signal };
+    const aborted = new Promise<never>((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+    aborted.catch(() => undefined);
+    return (await Promise.race([run(opt), aborted]))?.text ?? null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -294,13 +322,15 @@ export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions)
   }
   assertLegacyInferenceAllowed('vision');
   const runners: Record<VisionResult['provider'], (a: VisionAttachment[], opt: VisionOptions) => Promise<string | null>> = {
+    QUBAX: (a, opt) => withSupplierDeadline(opt, so => tryQubaxVision(a, so)),
+    CHEAPERINFERENCE: (a, opt) => withSupplierDeadline(opt, so => tryCheaperInferenceVision(a, so)),
     GLM: tryGlm,
     VERTEX: tryVertex,
     GEMINI: tryGeminiKey,
     GROK: tryGrok,
     CLAUDE: tryClaude,
   };
-  for (const provider of visionProviderOrder(o.allowClaude, visionTier(o))) {
+  for (const provider of visionProviderOrder(o.allowClaude, visionTier(o), o.alwaysOnSuppliers === true)) {
     o.signal?.throwIfAborted();
     try {
       const text = await runners[provider](atts, o);

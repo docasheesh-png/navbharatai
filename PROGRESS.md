@@ -102178,3 +102178,31 @@ To decide next (owner):
 - OPEN/BLOCKED: Q-2757…Q-2764 — UTC "today", per-instance hit counters, Reliability 0 from the legacy sample, 3 idle
   billed sandboxes, the −₹16,102 margin (admin decision), BUILD_BLOCKED_NO_CREDITS on new users, two reason-less log
   lines, the Grievance Officer env.
+
+## 2026-11-18 — Traffic Manager V2, P4: decision records + complete SLO counters (observation only)
+
+The code is in `src/server/AI/TrafficRegistry/decisionRecords.ts`. It hooks the one chat boundary, `observeChatOutcome`, which every chat route passes on both the gateway and the legacy paths. `UniversalAIRouter` passes which path answered.
+
+**Counters (owner improvement #4):**
+- EVERY outcome is counted, with no sampling.
+- Each instance writes its own absolute per-day, per-surface totals once a minute to `routing_slo_daily` (35 days). A retry never double-counts, and there is no hot shared doc.
+- The SLO comes only from these counters. "Eligible" means complete, partial or failed. Policy refusals and user cancels are excluded.
+- Shown with its denominator and a Wilson 95% interval. Target: 99.5% for free, navbharat and professional.
+
+**Decision records (owner decision 4):**
+- 100% of failures and critical events (no provider at all), plus 10% of successes, deterministic and weighted ×10.
+- Fixed fields only (`RECORD_FIELDS`): no prompt, answer, uid, key or provider message. The request id is hashed.
+- Bounded buffer (1,000), at most 200 written per 30 s, and a failed write keeps the records.
+- `routing_decisions`, kept 30 days.
+
+**Admin:** a "Reliability (last 7 days)" card and a recent-failures list, via `GET /api/admin/traffic-control/slo`.
+
+**NOT built in P4, stated plainly:**
+- The planned "shadow plan" for surfaces the gateway does not serve. The gateway's planner needs evidence-bound requests and candidates that only its own ingress builds. Faking them outside it would record a pick the gateway could never have made.
+- The P5 baseline is therefore the legacy path's REAL outcomes from these counters, not a hypothetical gateway pick.
+- Builder, vision and image decisions are recorded in their own phases (P8–P10).
+
+**Tests:**
+- `decisionRecords.test.ts`: sampling, fixed fields, SLO from counters only, absolute counters across instances, bounded buffer, kill switch, the boundary records gateway and legacy paths and rethrows.
+- `ReliabilityBody.render.test.tsx`.
+- 5 reversions each caught.

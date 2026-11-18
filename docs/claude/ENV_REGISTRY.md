@@ -5187,6 +5187,14 @@ unchanged. Module: `src/server/AgentV3/moyiBuilder.ts` (same shape as `bluesmind
 - **Normal and Strong**: **DiscountedTokens (`ENGINE_DT`)** sits right before the first Sonnet/Opus rung (`discountedTokensBuilder.ts`), with up to three models (owner's order in `DISCOUNTEDTOKENS_MODEL`, else gpt-6-sol then the key's own list). It needs `DISCOUNTEDTOKENS_API_KEY` **and** `DISCOUNTEDTOKENS_BUILDER_RATE_IN/_OUT`; until the rates are set it does not run. Never on Weak.
 - Both labels are admin-only: redaction, brand scrub (Moyi was missing there since #4276 and is added too) and the off-ladder census know them.
 
+### `ROUTING_DECISIONS` — routing decision records and SLO counters (Traffic Manager V2, P4)
+
+Default ON. `off` / `false` / `0` stops both writers.
+- **Decision records:** `routing_decisions`, kept 30 days. Every failure and critical event is kept, plus 10% of successes (deterministic, weighted ×10). Fixed fields only: no prompt, answer, uid, key or provider text.
+- **SLO counters:** `routing_slo_daily`, kept 35 days. Each instance writes its own per-day, per-surface absolute totals once a minute.
+
+The SLO on Admin → AI Engines → Traffic control is computed only from the counters. Observation only: no route changes.
+
 ### `TRAFFIC_HEALTH_SHARE` — provider health shared across instances (Traffic Manager V2, P3)
 
 | Value | Meaning |

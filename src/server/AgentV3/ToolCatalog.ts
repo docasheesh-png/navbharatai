@@ -2334,9 +2334,9 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'torus, lathe, loft, extrude, tube; a transform tree with pivots, mirror and repeat; materials; animation clips such as walk and idle) and '
         + 'the Forge CHECKS it, MEASURES it (triangles, size in metres, parts that float free, a clip that tears it apart) and DRAWS it back to you '
         + 'as FRONT / SIDE / TOP text silhouettes, so you can see it and fix it before it ships. It writes src/game/forge/forge.ts and '
-        + 'src/game/objects/<id>.ts, and the game makes the object with createX(THREE). EASIEST: call it with { describe: "a lighthouse with a '
-        + 'spiral stair" } and the Forge MAKES IT ITSELF (it asks a model for the spec, checks it, shows the model its own drawing and has it '
-        + 'correct it, a few rounds) — you write no spec. Or call it with no arguments to read the guide, with '
+        + 'src/game/objects/<id>.ts using atomic exclusive creation, and the game makes the object with createX(THREE). Supply the spec in this admitted turn; '
+        + 'describe-only sidecalls are unavailable pending accounting and cancellation integration. Existing-object changes require genuine atomic replacement, '
+        + 'currently unavailable on the production actuator. Preserve the source and report any refusal. Call it with no arguments to read the guide, with '
         + '{ example: "person" } for a worked spec to adapt (person, quadruped, house, tree, sword, train, car, bike, plane, boat), or with { spec } to build. Use it when the '
         + 'library has no match; never hand-write vertices or stacks of boxes for an object in game code. The result is stylised low-poly '
         + '(not photoreal): say so.',
@@ -2348,8 +2348,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           customise: { type: 'string', description: 'CHANGE an object that exists, in the user\'s own words (English, Hinglish or Hindi): "dress ka rang neela karo, baal bade karo, thoda lamba". Needs target. Colours of named parts, size, and for the Forge person: gender, hair length, a dress, build.' },
           target: { type: 'string', description: 'With customise: the id of the object to change (see src/game/objects/).' },
           base: { type: 'string', enum: ['person'], description: 'With customise: when the target does not exist yet, start from the Forge person.' },
-          describe: { type: 'string', description: 'The object in words (what it is, roughly how big, what matters). The Forge makes it itself and writes it.' },
-          id: { type: 'string', description: 'With describe: the id to save it under (lowercase letters, digits, -). Default: made from the description.' },
+          describe: { type: 'string', description: 'Describe-only generation is currently unavailable. Supply spec from the admitted architect turn instead.' },
+          id: { type: 'string', description: 'Reserved for describe-only generation, which is currently unavailable. Put a new object id inside spec.' },
         },
       },
     },

@@ -61,6 +61,12 @@ export function recordingActuator<T extends WritablePort>(
         await (target as unknown as {createFileExclusive(ws:string,p:string,c:string):Promise<void>}).createFileExclusive(ws,filePath,content);
         if(ws===workspaceId&&!isDurableSecretEnv(filePath)){try{onWritten(filePath,content);}catch{/* recording must never fail a completed write */}}
       };
+      if (prop === 'compareAndSwapFile' && typeof (target as {compareAndSwapFile?:unknown}).compareAndSwapFile === 'function') return async (ws:string,filePath:string,expected:string,content:string):Promise<void> => {
+        refuseIfLapsed();
+        beforeWrite?.(filePath);
+        await (target as unknown as {compareAndSwapFile(ws:string,p:string,expected:string,c:string):Promise<void>}).compareAndSwapFile(ws,filePath,expected,content);
+        if(ws===workspaceId&&!isDurableSecretEnv(filePath)){try{onWritten(filePath,content);}catch{/* recording must never fail a completed write */}}
+      };
       if (prop === 'runCommand' && typeof (target as { runCommand?: unknown }).runCommand === 'function') return runCommand;
       const value = Reflect.get(target, prop, receiver);
       return typeof value === 'function' ? value.bind(target) : value;

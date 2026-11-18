@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { SharedReadCache } from '../lib/boundedCache';
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
-import { isStoreAdmin } from './navStore';
+import { storeAdminRequest } from './navStore';
 import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
 import { isAgentV3FreeUser, identityGrantEmail } from '../AgentV3/featureFlag';
 import { remixGate, remixRefusal } from '../lib/remixPlanGate';
@@ -213,7 +213,7 @@ export function registerGalleryRoutes(app: Express): void {
 
   app.get('/api/gallery/admin/pending', async (req: Request, res: Response) => {
     const who = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(identityGrantEmail(who))) return res.status(403).json({ error: 'Not allowed.' });
+    if (!storeAdminRequest(req, identityGrantEmail(who))) return res.status(403).json({ error: 'Not allowed.' });
     const apps = await listGalleryAppsWithSource('pending', 100);
     res.json({
       apps: apps.map((a) => ({
@@ -230,7 +230,7 @@ export function registerGalleryRoutes(app: Express): void {
   /** An admin reads the actual code before approving it — that is the entire point of the queue. */
   app.get('/api/gallery/admin/:id/source', async (req: Request, res: Response) => {
     const who = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(identityGrantEmail(who))) return res.status(403).json({ error: 'Not allowed.' });
+    if (!storeAdminRequest(req, identityGrantEmail(who))) return res.status(403).json({ error: 'Not allowed.' });
     const found = await getGalleryApp(String(routeParam(req.params.id)));
     if (!found) return res.status(404).json({ error: 'Not found.' });
     res.json({ id: found.id, title: found.title, status: found.status, files: found.files });
@@ -242,7 +242,7 @@ export function registerGalleryRoutes(app: Express): void {
    */
   app.post('/api/gallery/admin/:id/review', async (req: Request, res: Response) => {
     const who = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(identityGrantEmail(who))) return res.status(403).json({ error: 'Not allowed.' });
+    if (!storeAdminRequest(req, identityGrantEmail(who))) return res.status(403).json({ error: 'Not allowed.' });
     approvedGallery.forget(); // only an admin's decision clears the shared listing
 
     const decision = String(req.body?.decision || '');

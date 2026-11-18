@@ -21,6 +21,7 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { cardClasses } from '../ui/variants';
 import { GalleryReviewQueue, galleryReviewApi } from './GalleryReviewQueue';
+import { withStoreAdminSession } from '../../lib/storeAdminHeaders';
 
 interface GalleryPanelProps {
   user: FirebaseUser | null;
@@ -95,7 +96,7 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadMine(); }, [loadMine]);
   // Only a reviewer ever sees the queue — the server decides that, not this screen.
-  const reviewApi = useMemo(() => galleryReviewApi(authedHeaders), []);
+  const reviewApi = useMemo(() => galleryReviewApi(async () => withStoreAdminSession(await authedHeaders())), []);
 
   const publish = async () => {
     setPublishing(true); setMessage(''); setBlockers([]);

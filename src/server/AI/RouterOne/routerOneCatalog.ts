@@ -15,6 +15,7 @@
  *   ROUTER_ONE_MAX_OUT_PER_M   optional USD/1M output-token ceiling for candidates
  *   ROUTER_ONE_EXCLUDE         comma list of model ids (or substrings) never to use
  */
+import { chooseModels } from '../../lib/modelChoice';
 import { routerOnePublicPrices, type RouterOnePublicPriceSource } from './publicPriceSource';
 import { getServerDb } from '../../lib/serverDb';
 
@@ -75,12 +76,18 @@ export function rankForCoding(entries: RouterOneModelEntry[], env: NodeJS.Proces
   const ceiling = Number(env.ROUTER_ONE_MAX_OUT_PER_M);
   const exclude = String(env.ROUTER_ONE_EXCLUDE ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   const seen = new Set<string>();
-  return entries
+  const byPrice = entries
     .filter((e) => e.inPerM + e.outPerM > 0)
     .filter((e) => !(Number.isFinite(ceiling) && ceiling > 0 && e.outPerM > ceiling))
     .filter((e) => !exclude.some((x) => e.id.toLowerCase().includes(x)))
     .filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)))
     .sort((a, b) => (0.75 * a.inPerM + 0.25 * a.outPerM) - (0.75 * b.inPerM + 0.25 * b.outPerM) || a.id.localeCompare(b.id));
+  // THE SHARED RULE (modelChoice.ts, admin 2026-11-18): strong coding families first, cheapest among them; the rest
+  // keep their price order behind, so a catalogue with no strong model still has every engine it had.
+  const choice = chooseModels(byPrice.map((e) => ({ id: e.id, inputPerMTok: e.inPerM, outputPerMTok: e.outPerM, tools: e.tools })), { purpose: 'coding', max: byPrice.length, env });
+  if (choice.basis !== 'strong') return byPrice;
+  const lead = choice.models.map((id) => byPrice.find((e) => e.id === id)!);
+  return [...lead, ...byPrice.filter((e) => !choice.models.includes(e.id))];
 }
 
 // ---- state (last good) ----

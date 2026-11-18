@@ -5127,7 +5127,7 @@ One module owns their env: `src/server/lib/resellerGateways.ts`. Key VALUES are 
 | `DISCOUNTEDTOKENS_API_KEY` | Secret, unset. Prepaid account (minimum US$5). |
 | `DISCOUNTEDTOKENS_BASE_URL` | Optional; default `https://discountedtokens.com/v1` (their public API listing). Must stay on `discountedtokens.com`. |
 | `DISCOUNTEDTOKENS_MODEL` | Optional; default `gpt-6-sol` (callable on their pricing page, 2026-11-16). They sell OpenAI models only. **Since 2026-11-17 a comma list is the gateway's own fallback order** (owner: *"sabse pahle sasta aur accha, response na aaye to 2nd, fail to 3rd"*): put the cheapest good coding model first. Up to three are tried; gaps are filled from the key's `/models` list. The same applies to `MOYI_MODEL` and `MIRAPI_MODEL` in the Test Chat Bot. |
-| `DISCOUNTEDTOKENS_BUILDER_RATE_IN` / `_OUT` | **Required for the Pro builder rung** (added 2026-11-17, NOT yet set): the real USD per 1M tokens the owner's account pays. Without both, there is no DiscountedTokens builder rung — a cost is never invented. Read them from DiscountedTokens' price page for the models listed in `DISCOUNTEDTOKENS_MODEL`. |
+| `DISCOUNTEDTOKENS_BUILDER_RATE_IN` / `_OUT` | Optional (since 2026-11-18). The owner's account rate, USD per 1M tokens; when set it prices every DiscountedTokens builder model. Unset ⇒ each model is billed at DiscountedTokens' own published price (`DISCOUNTEDTOKENS_PUBLISHED_RATES` in `discountedTokensBuilder.ts`, copied from its rates page by the owner on 2026-11-18). A model with neither is never run. |
 | `DISCOUNTEDTOKENS_BUILDER_ENABLED` | Optional; default ON. Only `off`/`false`/`0`/`no` removes the builder rung. |
 | `MIRAPI_API_KEY` | Secret, unset. |
 | `MIRAPI_BASE_URL` | **Required, no default.** Must be https on `mirapi.ai` or a subdomain. |
@@ -5190,3 +5190,34 @@ unchanged. Module: `src/server/AgentV3/moyiBuilder.ts` (same shape as `bluesmind
 ### `AGENTV3_TRAFFIC_HEALTH` — live provider health
 
 Default on; `off`, `false` or `0` disables the additional in-process health recording and skip. The existing router/builder/vision ladders retain their own admission, billing, cooldown and maintenance checks. A suspended credential or three consecutive timeout/invalid outcomes opens a five-minute recovery window. Pool credentials retain separate identities. A recovery lease is bounded and a tracked physical call keeps ownership until it settles. State is bounded to 256 account labels with 40 samples each and is local to each server; it is not a fleet-wide health database. App image integrations are catalogued only, because their generated clients run outside this server. Providers with no recorded outcomes are displayed as not measured.
+
+## 2026-11-18 — One model rule for every gateway (`src/server/lib/modelChoice.ts`)
+
+Admin: *"sabhi provider me module chunne ka ek same tarika … top 10 strong family, usme se sabse sasta; kaam accha ho (text ke liye best, coding ke liye coding wala); sasta ho"*. Scope as approved:
+- **Applies to:** the gateways (Router One, Qubax, Moyi, and the key lists of BluesMinds, MirAPI and DiscountedTokens).
+- **Surplus:** filter only.
+- **Not changed:** the tier ladders.
+
+| Key | Meaning |
+|---|---|
+| `MODEL_CHOICE` | Optional. Default ON. `off` / `false` / `0` / `no` is the kill switch: every gateway goes back to its own previous order. |
+
+Rule, in order:
+1. **Fit:** a builder turn needs a strong CODING family and tool calling; chat needs a strong TEXT family. Image and audio models are never used.
+2. **Strong:** the ten families per purpose in `CODING_FAMILIES` / `TEXT_FAMILIES`.
+3. **Cheapest:** blended price; a builder turn is weighted 3:1 input to output, chat 1:3. Unpriced models come after priced ones.
+
+Two more properties:
+- **Never empty:** a gateway with no strong model keeps its own order.
+- **Tier guard:** a Weak build never receives Sonnet or Opus.
+
+An owner-written model list (e.g. `QUBAX_BUILDER_MODELS`, `MOYI_BUILDER_MODEL`, `DISCOUNTEDTOKENS_MODEL`) is always used as written.
+
+Gateways with no per-model price (BluesMinds, DiscountedTokens, Mitrify) run only their owner or default models in the BUILDER, because their one rate prices those models. A list model could cost more and be billed below its real cost. In the Test Chat Bot their key lists are ordered by strength.
+
+**2026-11-18, DiscountedTokens prices:** the owner supplied its "Compare model rates" page.
+- `discountedTokensBuilder.ts` now holds the callable models' prices.
+- The builder rung needs only `DISCOUNTEDTOKENS_API_KEY`.
+- With no `DISCOUNTEDTOKENS_MODEL`, the shared model rule picks the cheapest strong coding models: gpt-6-sol, gpt-6.1-sol, then gpt-5.6-terra.
+- Billing = that real price + the tier markup.
+

@@ -10,16 +10,16 @@
  *
  * ITS OWN FALLBACK (owner 2026-11-17: "sabse pahle sasta aur accha, response na aaye to 2nd, fail to 3rd, phir aage
  * badho"). The rung factory makes one runner per model, so the models here ARE that order: up to three — the owner's
- * comma list in DISCOUNTEDTOKENS_MODEL (cheapest good first, from their price page), else gpt-6-sol and then the key's
- * own /models list as far as it is already known — after which the chain moves on to Sonnet.
+ * comma list in DISCOUNTEDTOKENS_MODEL, else the shared model rule over its published prices (strong coding family,
+ * cheapest first) — after which the chain moves on to Sonnet. Never a model without a known price.
  *
- * PRICE (honest billing, "a cost is never invented"). DiscountedTokens' prices are on a page this platform cannot read,
- * and its OpenAI models have no published list price we hold. So the rung exists only once the owner sets the real
- * rate it pays: DISCOUNTEDTOKENS_BUILDER_RATE_IN / _OUT (USD per 1M tokens). Without both, no rung — and
- * `discountedTokensBuilderMissing` names exactly what to set.
+ * PRICE (honest billing, "a cost is never invented"). Each model is billed at DiscountedTokens' own published price
+ * (DISCOUNTEDTOKENS_PUBLISHED_RATES, copied from its rates page by the owner on 2026-11-18), or at the owner's account
+ * rate when DISCOUNTEDTOKENS_BUILDER_RATE_IN/_OUT are set. A model with neither is never run. The markup applies on top
+ * of that real cost, as for every engine.
  *
  *   DISCOUNTEDTOKENS_API_KEY            required (the key the Test Chat Bot uses)
- *   DISCOUNTEDTOKENS_BUILDER_RATE_IN/_OUT  required, the real rate
+ *   DISCOUNTEDTOKENS_BUILDER_RATE_IN/_OUT  optional: the owner's account rate, overriding the published prices
  *   DISCOUNTEDTOKENS_BUILDER_ENABLED    default ON; only an explicit off removes it
  *   DISCOUNTEDTOKENS_MODEL              optional comma list, the owner's order
  *
@@ -27,7 +27,7 @@
  */
 import { parseEnvFlag } from '../lib/envFlag';
 import { resellerGatewayState, RESELLER_MODEL_LADDER_MAX } from '../lib/resellerGateways';
-import { cachedProviderModels } from '../lib/providerModelPicker';
+import { chooseModels } from '../lib/modelChoice';
 import type { NamedRunner } from './providers/MultiProviderTurnRunner';
 import type { TokenRate } from './pricing';
 import type { RunTurnParams, TurnRunner } from './ClaudeClient';
@@ -41,10 +41,30 @@ function rateOf(raw: string | undefined): number | undefined {
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
-/** The real rate the owner pays, or undefined — never an invented one. */
-export function discountedTokensBuilderRate(env: NodeJS.ProcessEnv = process.env): TokenRate | undefined {
+/**
+ * DiscountedTokens' own per-model prices, USD per 1M tokens, CALLABLE models only — copied from its "Compare model rates"
+ * page as the owner supplied it on 2026-11-18 (the page this platform cannot read itself). Base token rates; the page
+ * states they exclude cache, batch and long-context fees. Re-copy when the page changes; a model not here is never run
+ * by the builder unless the owner prices it with DISCOUNTEDTOKENS_BUILDER_RATE_IN/_OUT.
+ */
+export const DISCOUNTEDTOKENS_PUBLISHED_RATES: Readonly<Record<string, Readonly<TokenRate>>> = Object.freeze({
+  'gpt-6-sol': { inputPerMTok: 0.1, outputPerMTok: 0.5 },
+  'gpt-6.1-sol': { inputPerMTok: 0.1, outputPerMTok: 0.5 },
+  'gpt-5.6-terra': { inputPerMTok: 0.1, outputPerMTok: 0.6 },
+  'gpt-5.6': { inputPerMTok: 0.2, outputPerMTok: 1.0 },
+  'gpt-5.5': { inputPerMTok: 0.25, outputPerMTok: 1.5 },
+  'gpt-5.6-sol': { inputPerMTok: 0.25, outputPerMTok: 1.5 },
+  'codex-auto-review': { inputPerMTok: 0.25, outputPerMTok: 1.5 },
+  'gpt-6-astra': { inputPerMTok: 0.5, outputPerMTok: 2.5 },
+});
+
+/** The rate a DiscountedTokens model is billed at: the owner's configured rate when set, else its published price; else none. */
+export function discountedTokensBuilderRate(env: NodeJS.ProcessEnv = process.env, model?: string): TokenRate | undefined {
   const input = rateOf(env.DISCOUNTEDTOKENS_BUILDER_RATE_IN), output = rateOf(env.DISCOUNTEDTOKENS_BUILDER_RATE_OUT);
-  return input !== undefined && output !== undefined && (input > 0 || output > 0) ? { inputPerMTok: input, outputPerMTok: output } : undefined;
+  if (input !== undefined && output !== undefined && (input > 0 || output > 0)) return { inputPerMTok: input, outputPerMTok: output };
+  const id = String(model ?? '').trim().replace(/^openai\//i, '');
+  const published = DISCOUNTEDTOKENS_PUBLISHED_RATES[id];
+  return published ? { ...published } : undefined;
 }
 
 /** What is still missing before the rung can exist ([] = ready). For the admin, never the user. */
@@ -52,7 +72,7 @@ export function discountedTokensBuilderMissing(env: NodeJS.ProcessEnv = process.
   const missing: string[] = [];
   const state = resellerGatewayState('discountedtokens', env);
   if (!state.ready) missing.push('DISCOUNTEDTOKENS_API_KEY');
-  if (!discountedTokensBuilderRate(env)) missing.push('DISCOUNTEDTOKENS_BUILDER_RATE_IN', 'DISCOUNTEDTOKENS_BUILDER_RATE_OUT');
+  else if (discountedTokensBuilderModels(env).length === 0) missing.push('a priced model (DISCOUNTEDTOKENS_MODEL names none with a published price; set DISCOUNTEDTOKENS_BUILDER_RATE_IN/_OUT)');
   return missing;
 }
 
@@ -60,15 +80,19 @@ export function discountedTokensBuilderEnabled(env: NodeJS.ProcessEnv = process.
   return parseEnvFlag(env.DISCOUNTEDTOKENS_BUILDER_ENABLED) !== false && discountedTokensBuilderMissing(env).length === 0;
 }
 
-/** Up to three models, in the owner's order; else the default and then the key's own list as far as it is known. */
-export function discountedTokensBuilderModels(env: NodeJS.ProcessEnv = process.env, listed: (base: string, key: string) => string[] = cachedProviderModels): string[] {
+/**
+ * Up to three models, every one with a known price (published, or the owner's rate):
+ *   - the owner's DISCOUNTEDTOKENS_MODEL list, in that order, when set;
+ *   - otherwise THE SHARED RULE (modelChoice.ts) over every published model: strong coding family, cheapest first.
+ * Never a model without a price — it could be billed below its real cost.
+ */
+export function discountedTokensBuilderModels(env: NodeJS.ProcessEnv = process.env): string[] {
   const state = resellerGatewayState('discountedtokens', env);
   if (!state.ready) return [];
-  const out = (state.models.length ? state.models : state.model ? [state.model] : []).slice(0, RESELLER_MODEL_LADDER_MAX);
-  if (out.length < RESELLER_MODEL_LADDER_MAX) {
-    for (const id of listed(state.baseUrl, state.apiKey)) { if (out.length >= RESELLER_MODEL_LADDER_MAX) break; if (!out.includes(id)) out.push(id); }
-  }
-  return out;
+  const priced = (id: string) => discountedTokensBuilderRate(env, id) !== undefined;
+  if (state.models.length) return state.models.filter(priced).slice(0, RESELLER_MODEL_LADDER_MAX);
+  const pool = Object.keys(DISCOUNTEDTOKENS_PUBLISHED_RATES).map((id) => { const r = discountedTokensBuilderRate(env, id)!; return { id, inputPerMTok: r.inputPerMTok, outputPerMTok: r.outputPerMTok }; });
+  return chooseModels(pool, { purpose: 'coding', max: RESELLER_MODEL_LADDER_MAX, env }).models;
 }
 
 export function isDiscountedTokensBuilderLabel(provider: string | null | undefined): boolean {

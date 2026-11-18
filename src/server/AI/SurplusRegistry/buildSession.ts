@@ -1,4 +1,5 @@
 import { PublicBuildEngineError, publicBuildEngineError, publicBuildEngineSafeReason } from '../../lib/buildEngineError';
+import { strongOffersOnly } from './strongOffers';
 import { AiMaintenanceError } from '../../lib/aiMaintenance';
 import { BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../../AgentV3/turnDeadline';
 import { randomUUID } from 'node:crypto';
@@ -101,11 +102,15 @@ export async function createSurplusBuildSession(options: {
   const initialWorkload: Workload = options.initialWorkload ?? { input: 8192, output: 8192, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
   const initialState = await adapter.readState();
   function eligibleSnapshot(state: SurplusReviewedState, workload: Workload, at: number, selectedModel?: string, excluded = new Set<string>()) {
-    return state.snapshot ? { ...state.snapshot, offers: state.snapshot.offers.filter(offer => {
+    if (!state.snapshot) return null;
+    const offers = state.snapshot.offers.filter(offer => {
       if ((selectedModel && offer.model !== selectedModel) || excluded.has(offer.model)
           || (options.tier === 'weak' && /claude|sonnet|opus/i.test(offer.model))) return false;
       try { capability(state, offer, at, workload); return true; } catch { return false; }
-    }) } : null;
+    });
+    // THE SHARED RULE'S FILTER (modelChoice.ts, admin 2026-11-18): Surplus keeps its own reviewed, price-objective
+    // choice and its accounting; it only stops choosing outside the strong coding families — and never empties.
+    return { ...state.snapshot, offers: strongOffersOnly(offers) };
   }
   // Scope/first call: prefer a flash / non-reasoning Surplus model (reasoning models burned the budget
   // thinking → empty/invalid scope answers). Reasoning models stay eligible as the Surplus-internal B/C.

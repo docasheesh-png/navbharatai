@@ -88,7 +88,9 @@ describe('default ON for every Weak user with the key alone (owner 2026-11-17)',
     await refreshMoyiModelList(KEY_ONLY);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher).toHaveBeenCalledWith('https://api.moyi-api.com/v1/models', expect.anything());
-    expect(moyiBuilderModels(KEY_ONLY)).toEqual(['x-ai/grok-4.7', 'gpt-6.1-terra']);
+    // The shared rule (modelChoice.ts, 2026-11-18): strong coding families, cheapest blended price first —
+    // gpt-6.1-terra (0.75×0.171 + 0.25×0.855 = 0.342) before grok-4.7 (0.45).
+    expect(moyiBuilderModels(KEY_ONLY)).toEqual(['gpt-6.1-terra', 'x-ai/grok-4.7']);
     expect(moyiBuilderEnabled(KEY_ONLY)).toBe(true);
     expect(moyiBuilderRate(KEY_ONLY, 'x-ai/grok-4.7')).toEqual({ inputPerMTok: 0.3, outputPerMTok: 0.9 });
     expect(moyiBuilderRate(KEY_ONLY, 'gpt-6.1-terra')).toEqual({ inputPerMTok: 0.171, outputPerMTok: 0.855 });

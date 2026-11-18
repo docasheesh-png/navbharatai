@@ -41,3 +41,16 @@ export function defaultServerStats(): ServerStats {
 
 /** The one shared instance every route mutates. Starts from the defaults above. */
 export const serverStats: ServerStats = defaultServerStats();
+
+/**
+ * One UTC day's hit count, or null when THIS process did not run for that whole day. PURE.
+ *
+ * 🔴 WHY (admin Home capture, 2026-11-18): "Today Hits 2,625 · vs 0 yesterday" on a server that had been up
+ * 54 minutes. `dailyHits` lives in memory and resets on every deploy, so a process started today has never
+ * seen yesterday — "0" there was a counter that did not exist, shown as a measured zero.
+ */
+export function wholeDayHits(dailyHits: ReadonlyMap<string, number>, dayIso: string, processStartedAtMs: number): number | null {
+  const dayStart = Date.parse(`${dayIso}T00:00:00.000Z`);
+  if (!Number.isFinite(dayStart) || !Number.isFinite(processStartedAtMs) || processStartedAtMs > dayStart) return null;
+  return dailyHits.get(dayIso) ?? 0;
+}

@@ -8,7 +8,8 @@ describe('provider model picker (admin 2026-11-16: "andar se chune… 2nd and 3r
 
   it('keeps chat models, drops image/audio/embedding ones, and ranks known chat families first', () => {
     expect(rankChatModels(['flux-pro', 'text-embedding-3', 'zeta-chat', 'qwen/qwen3-coder', 'openai/gpt-oss-120b', 'whisper-1', 'deepseek-v4-flash']))
-      .toEqual(['openai/gpt-oss-120b', 'deepseek-v4-flash', 'qwen/qwen3-coder', 'zeta-chat']);
+      // The shared rule (modelChoice.ts, 2026-11-18): the strong TEXT families first (deepseek, qwen), then the rest A–Z.
+      .toEqual(['deepseek-v4-flash', 'qwen/qwen3-coder', 'openai/gpt-oss-120b', 'zeta-chat']);
   });
 
   it('puts the configured model first when the key can actually use it', () => {
@@ -20,7 +21,8 @@ describe('provider model picker (admin 2026-11-16: "andar se chune… 2nd and 3r
     const fetchImpl = list(['a-chat', 'deepseek-v4-flash', 'qwen/qwen3', 'moonshotai/kimi-k2.6', 'z-ai/glm4.6']);
     let t = 0;
     const first = await pickProviderModels('https://api.bluesminds.com/v1', 'synthetic-key', null, 3, fetchImpl as unknown as typeof fetch, () => t);
-    expect(first).toEqual({ models: ['deepseek-v4-flash', 'qwen/qwen3', 'z-ai/glm4.6'], source: 'provider-list' });
+    // Strong text families by strength (modelChoice.ts): deepseek, qwen, kimi — then glm.
+    expect(first).toEqual({ models: ['deepseek-v4-flash', 'qwen/qwen3', 'moonshotai/kimi-k2.6'], source: 'provider-list' });
     t = 9 * 60_000;
     await pickProviderModels('https://api.bluesminds.com/v1', 'synthetic-key', null, 3, fetchImpl as unknown as typeof fetch, () => t);
     expect(fetchImpl).toHaveBeenCalledTimes(1);

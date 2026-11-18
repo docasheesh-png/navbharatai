@@ -102025,3 +102025,25 @@ Full combined coverage correctly refused the fixture's oversized request: the co
 ## 2026-11-18 — Restore Athree map options to their own tool schema
 
 The #4225 composition integration moved `archetype` and `size_km` into `generate_game_systems`, while the dispatcher still reads them only for `generate_athree_map`. The existing map-kind wiring test reproduced the failure on combined head dbd1137a. Moved both properties back to the map schema; preserved gameplay `include` and the new map `composition` schema. Added a tool-scoped regression so matching property names elsewhere cannot pass the check. Four focused suites (map-kind wiring, catalogue, composition dispatch, gameplay systems): 94 tests passed on Node 22.23.4. Combined full local and remote CI remain required before merge.
+
+## 2026-11-18 — One model rule for every gateway (admin: "sabhi provider ke liye same … top 10 strong family, sabse sasta")
+
+`src/server/lib/modelChoice.ts` is the one answer to "which model?" for every gateway:
+- strong families (ten for coding, ten for text);
+- fit (tools for coding);
+- cheapest blended price, unpriced last;
+- never-empty, tier guard, and the kill switch `MODEL_CHOICE=off`.
+
+Wired into:
+- Router One (`rankForCoding`): a strong model now leads even when a weak one is cheaper;
+- the shared key-list picker (BluesMinds, MirAPI, DiscountedTokens and the Moyi tests in the Test Chat Bot);
+- the Qubax builder (its whole catalogue, when there is no owner list);
+- the Moyi builder (its priced list);
+- Surplus, as a strong-offer filter only (`strongOffers.ts`). Surplus keeps its reviewed, price-objective accounting.
+
+The approved scope did NOT include the tier ladders.
+
+Correction found on the way: the DiscountedTokens builder rung (#4288) filled up to three models from the key's list. It is billed at one owner rate, so a list model could cost more and be under-billed. It now runs only the owner's (or the default) models. BluesMinds and Mitrify already did. A gateway with no per-model price cannot honestly be ordered "cheapest", so its builder rung stays on priced models.
+
+Tests: `src/server/lib/modelChoice.test.ts` covers the families, the rule, Router One, the key lists, Surplus and Qubax. Expectations whose ORDER the rule changes were updated: picker, Moyi and DiscountedTokens.
+

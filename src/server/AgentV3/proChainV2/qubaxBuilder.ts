@@ -16,6 +16,7 @@
  *
  * The catalogue is a free public GET, fetched lazily (only when a v2 runner is built) and cached.
  */
+import { chooseModels } from '../../lib/modelChoice';
 import { parseEnvFlag } from '../../lib/envFlag';
 import type { TokenRate } from '../pricing';
 
@@ -150,6 +151,14 @@ function usable(e: QubaxCatalogEntry | undefined): boolean {
  */
 export function qubaxBuilderModels(env: NodeJS.ProcessEnv = process.env): { models: string[]; verifiedByCatalog: boolean } {
   const configured = String(env.QUBAX_BUILDER_MODELS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  // THE SHARED RULE (modelChoice.ts, admin 2026-11-18): with no owner list and a known catalogue, choose from EVERY
+  // usable catalogue model — strong coding family, tool calling, cheapest by its own price. The owner's list still wins.
+  if (!configured.length && cache) {
+    const pool = [...cache.entries.values()].filter((e) => usable(e) && !CLAUDE_FAMILY.test(e.id))
+      .map((e) => ({ id: e.id, tools: e.tools, inputPerMTok: e.rate?.inputPerMTok, outputPerMTok: e.rate?.outputPerMTok }));
+    const choice = chooseModels(pool, { purpose: 'coding', max: 3, noClaude: true, env });
+    if (choice.basis === 'strong') return { models: choice.models, verifiedByCatalog: true };
+  }
   const list = (configured.length ? configured : [...QUBAX_BUILDER_DEFAULT_MODELS]).filter((model) => !CLAUDE_FAMILY.test(model));
   if (!cache) return { models: list, verifiedByCatalog: false };
   const kept = list.filter((m) => usable(cache!.entries.get(m)));

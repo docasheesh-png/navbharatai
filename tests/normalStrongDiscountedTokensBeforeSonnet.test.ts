@@ -42,7 +42,11 @@ describe('where it sits', () => {
     expect(buildTierEngineAvailable('off')).toBe(false);
     expect(buildTierEngineAvailable('mini')).toBe(false);
     vi.stubEnv('DISCOUNTEDTOKENS_BUILDER_ENABLED', '');
+    // 2026-11-18: published prices price gpt-6-sol, so no owner rate is needed — but a list naming only unpriced models
+    // with no owner rate leaves no runnable model, and the tier is not admitted on it.
     vi.stubEnv('DISCOUNTEDTOKENS_BUILDER_RATE_IN', '');
+    expect(buildTierEngineAvailable('off')).toBe(true);
+    vi.stubEnv('DISCOUNTEDTOKENS_MODEL', 'gpt-6-luna');
     expect(buildTierEngineAvailable('off')).toBe(false);
     expect(buildTierEngineAvailable('mini')).toBe(false);
   });
@@ -66,26 +70,34 @@ describe('where it sits', () => {
 });
 
 describe("its own three-model fallback", () => {
-  it("the owner's order first, then the key's list; at most three; one runner per model", () => {
-    expect(discountedTokensBuilderModels(READY as never, () => ['gpt-6-sol', 'gpt-6-astra', 'gpt-6-nova'])).toEqual(['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra']);
+  it("the owner's models first (their rate prices them), at most three; one runner per model", () => {
+    // Never a model from the key's list — only a model with a known price (published, or the owner's rate).
+    expect(discountedTokensBuilderModels({ ...READY, DISCOUNTEDTOKENS_MODEL: 'a,b,c,d' } as never)).toEqual(['a', 'b', 'c']);
+    expect(discountedTokensBuilderModels({ DISCOUNTEDTOKENS_API_KEY: 'k', DISCOUNTEDTOKENS_MODEL: 'gpt-6-luna,gpt-5.5' } as never)).toEqual(['gpt-5.5']);
+    expect(discountedTokensBuilderModels(READY as never)).toEqual(['gpt-6-luna', 'gpt-6-sol']);
     const seen: string[][] = [];
     discountedTokensBuilderRungs((_l, _k, _b, models) => { seen.push(models); return []; }, READY as never);
     expect(seen[0].slice(0, 2)).toEqual(['gpt-6-luna', 'gpt-6-sol']);
   });
-  it('with no owner list it starts with gpt-6-sol', () => {
-    expect(discountedTokensBuilderModels({ DISCOUNTEDTOKENS_API_KEY: 'k' } as never, () => [])).toEqual(['gpt-6-sol']);
+  it('with no owner list, the shared rule over its own published prices: strong coding family, cheapest first', () => {
+    // From the owner-supplied rates page (2026-11-18): gpt-6-sol and gpt-6.1-sol $0.10/$0.50, gpt-5.6-terra $0.10/$0.60.
+    expect(discountedTokensBuilderModels({ DISCOUNTEDTOKENS_API_KEY: 'k' } as never)).toEqual(['gpt-6-sol', 'gpt-6.1-sol', 'gpt-5.6-terra']);
   });
 });
 
 describe('no invented price, no leaked name', () => {
-  it('without the real rate there is no rung, and the admin is told exactly what to set', () => {
-    const env = { DISCOUNTEDTOKENS_API_KEY: 'k' } as never;
+  it('a key alone is enough (published prices); a list of only unpriced models is not, and says why', () => {
+    expect(discountedTokensBuilderEnabled({ DISCOUNTEDTOKENS_API_KEY: 'k' } as never)).toBe(true);
+    const env = { DISCOUNTEDTOKENS_API_KEY: 'k', DISCOUNTEDTOKENS_MODEL: 'gpt-6-luna' } as never;
     expect(discountedTokensBuilderEnabled(env)).toBe(false);
-    expect(discountedTokensBuilderMissing(env)).toEqual(['DISCOUNTEDTOKENS_BUILDER_RATE_IN', 'DISCOUNTEDTOKENS_BUILDER_RATE_OUT']);
+    expect(discountedTokensBuilderMissing(env)[0]).toMatch(/priced model/);
     expect(discountedTokensBuilderEnabled({ ...READY, DISCOUNTEDTOKENS_BUILDER_ENABLED: 'off' } as never)).toBe(false);
   });
-  it('is billed at the configured rate, never the Sonnet card', () => {
+  it("is billed at the owner's rate when set, else DiscountedTokens' own price — never the Sonnet card", () => {
     expect(realRateFor('ENGINE_DT', 'gpt-6-luna')).toEqual({ inputPerMTok: 0.8, outputPerMTok: 3.2 });
+    vi.stubEnv('DISCOUNTEDTOKENS_BUILDER_RATE_IN', '');
+    vi.stubEnv('DISCOUNTEDTOKENS_BUILDER_RATE_OUT', '');
+    expect(realRateFor('ENGINE_DT', 'gpt-6-astra')).toEqual({ inputPerMTok: 0.5, outputPerMTok: 2.5 });
     expect(OFF_LADDER_PROVIDERS).toContain('ENGINE_DT');
   });
   it('the supplier name and host never reach a user', () => {

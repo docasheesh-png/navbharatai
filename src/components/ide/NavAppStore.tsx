@@ -9,6 +9,10 @@ import {
 } from 'lucide-react';
 import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../lib/authHeaders';
+import { withStoreAdminSession } from '../../lib/storeAdminHeaders';
+
+/** The store's own requests: the user's identity plus, when active, the admin session (store authority). */
+const storeHeaders = async (extra?: Record<string, string>): Promise<Record<string, string>> => withStoreAdminSession(await authedHeaders(extra));
 import { SORT_LABELS, type SortMode } from '../../lib/appMartForYou';
 import { readSortPref, writeSortPref, sessionSeed, markOpened, logAppMartEvent } from './appMart/forYouClient';
 import { authedFetch } from '../../lib/authedFetch';
@@ -391,7 +395,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
 
   const loadStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/nav-store/status', { headers: await authedHeaders() });
+      const res = await fetch('/api/nav-store/status', { headers: await storeHeaders() });
       const data = await res.json().catch(() => null);
       // Only the real status may become the status. An `{ error }` body from a guard (429 / 401 / 500)
       // used to be stored as if it were one, and `.missing.join` then crashed the whole screen.
@@ -432,7 +436,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
 
   const loadMine = useCallback(async () => {
     try {
-      const res = await fetch('/api/nav-store/mine', { headers: await authedHeaders() });
+      const res = await fetch('/api/nav-store/mine', { headers: await storeHeaders() });
       const data = await res.json().catch(() => null);
       if (liveRef.current) setMine(Array.isArray(data?.apps) ? data.apps : []);
     } catch { /* shown as an empty list */ }
@@ -449,8 +453,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   const loadQueue = useCallback(async () => {
     try {
       const [pendingRes, approvedRes] = await Promise.all([
-        fetch('/api/nav-store/admin/queue?status=pending', { headers: await authedHeaders() }),
-        fetch('/api/nav-store/admin/queue?status=approved', { headers: await authedHeaders() }),
+        fetch('/api/nav-store/admin/queue?status=pending', { headers: await storeHeaders() }),
+        fetch('/api/nav-store/admin/queue?status=approved', { headers: await storeHeaders() }),
       ]);
       const pending = await pendingRes.json().catch(() => null);
       const approved = await approvedRes.json().catch(() => null);
@@ -470,7 +474,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   const loadWebApps = useCallback(async () => {
     try {
       const res = sortMode === 'foryou'
-        ? await fetch(`/api/nav-store/web/apps?sort=foryou&seed=${encodeURIComponent(sessionSeed())}`, { headers: await authedHeaders().catch(() => ({})) })
+        ? await fetch(`/api/nav-store/web/apps?sort=foryou&seed=${encodeURIComponent(sessionSeed())}`, { headers: await storeHeaders().catch(() => ({})) })
         : await fetch('/api/nav-store/web/apps');
       const data = await res.json().catch(() => null);
       if (!liveRef.current) return;
@@ -481,7 +485,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
 
   const loadWebMine = useCallback(async () => {
     try {
-      const res = await fetch('/api/nav-store/web/mine', { headers: await authedHeaders() });
+      const res = await fetch('/api/nav-store/web/mine', { headers: await storeHeaders() });
       const data = await res.json().catch(() => null);
       if (liveRef.current) setWebMine(Array.isArray(data?.apps) ? data.apps : []);
     } catch { /* shown as an empty list */ }
@@ -599,7 +603,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
 
   const loadOwned = useCallback(async () => {
     try {
-      const res = await fetch('/api/nav-store/web/purchases', { headers: await authedHeaders() });
+      const res = await fetch('/api/nav-store/web/purchases', { headers: await storeHeaders() });
       const data = await res.json().catch(() => null);
       if (liveRef.current && Array.isArray(data?.apps)) setOwned(data.apps);
     } catch { /* signed out or offline — the section simply stays hidden */ }
@@ -613,8 +617,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       // remove it from the only screen that showed it, so the review page went empty and there was no
       // way back to the app to take it down. Same rule as the APK list (mergeReviewQueue).
       const [reqRes, liveRes] = await Promise.all([
-        fetch('/api/nav-store/web/admin/queue', { headers: await authedHeaders() }),
-        fetch('/api/nav-store/web/admin/queue?status=listed', { headers: await authedHeaders() }),
+        fetch('/api/nav-store/web/admin/queue', { headers: await storeHeaders() }),
+        fetch('/api/nav-store/web/admin/queue?status=listed', { headers: await storeHeaders() }),
       ]);
       const requests = reqRes.ok ? await reqRes.json().catch(() => null) : null;
       const live = liveRes.ok ? await liveRes.json().catch(() => null) : null;
@@ -627,7 +631,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
 
   const loadReports = useCallback(async () => {
     try {
-      const res = await fetch('/api/nav-store/web/admin/reports', { headers: await authedHeaders() });
+      const res = await fetch('/api/nav-store/web/admin/reports', { headers: await storeHeaders() });
       const data = await res.json().catch(() => null);
       if (liveRef.current) setReports(Array.isArray(data?.reports) ? data.reports : []);
     } catch { /* shown as no reports */ }
@@ -641,7 +645,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       // A refused unpublish used to look done (the list just reloaded) while the link stayed live.
       const res = await fetch(`/api/nav-store/web/app/${encodeURIComponent(id)}/settings`, {
         method: 'POST',
-        headers: await authedHeaders({ 'Content-Type': 'application/json' }),
+        headers: await storeHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
       });
       const failure = await writeFailure(res, 'That change could not be saved.');
@@ -662,7 +666,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     try {
       const res = await fetch('/api/nav-store/web/admin/review', {
         method: 'POST',
-        headers: await authedHeaders({ 'Content-Type': 'application/json' }),
+        headers: await storeHeaders({ 'Content-Type': 'application/json' }),
         // `reasonContract`: this client enforces the reason (Q-681), so the server refuses a removal without one.
         body: JSON.stringify({ id, decision, ...(note ? { note } : {}), reasonContract: REVIEW_REASON_CONTRACT }),
       });
@@ -701,7 +705,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     try {
       const res = await fetch('/api/nav-store/admin/review', {
         method: 'POST',
-        headers: await authedHeaders({ 'Content-Type': 'application/json' }),
+        headers: await storeHeaders({ 'Content-Type': 'application/json' }),
         // `reasonContract`: this client enforces the reason (Q-681), so the server refuses a removal without one.
         body: JSON.stringify({ id, decision, ...(note ? { note } : {}), reasonContract: REVIEW_REASON_CONTRACT }),
       });
@@ -761,7 +765,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     try {
       const r = await fetch(`/api/nav-store/download-ticket/${encodeURIComponent(appId)}`, {
         method: 'POST',
-        headers: await authedHeaders(),
+        headers: await storeHeaders(),
       });
       const d = await r.json().catch(() => null);
       if (!r.ok || !d?.path) {
@@ -872,7 +876,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         {/* Tabs — scroll rather than overflow on a phone */}
         <div className="flex gap-1.5 mb-5 overflow-x-auto pb-1">
           {([['browse', 'Browse'], ['publish', 'Publish'], ['mine', 'My apps'],
-             ...(status?.isAdmin ? [['review', `Review${pendingCount ? ` (${pendingCount})` : ''}`]] : []),
+             ...(status?.isAdmin ? [['review', `Manage apps${pendingCount ? ` (${pendingCount})` : ''}`]] : []),
             ] as Array<[Tab, string]>).map(([id, label]) => (
             <button
               key={id}

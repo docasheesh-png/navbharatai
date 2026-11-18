@@ -34,7 +34,7 @@ describe('the server answers both questions', () => {
   it('the web admin queue returns the listed apps when asked', () => {
     const start = ROUTE.indexOf("app.get('/api/nav-store/web/admin/queue'");
     const h = ROUTE.slice(start, ROUTE.indexOf("app.post('/api/nav-store/web/admin/review'", start));
-    expect(h).toContain("isStoreAdmin(");
+    expect(h).toContain("storeAdminRequest(req, ");
     expect(h).toMatch(/req\.query\.status[\s\S]{0,80}=== 'listed'/);
     expect(h).toContain('listListedWebApps(');
     expect(h).toContain('listUnlistedWebApps(');

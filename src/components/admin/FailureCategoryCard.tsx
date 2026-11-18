@@ -33,6 +33,9 @@ interface DomainRow {
 interface VerdictSplit {
   engineFailed: number;
   builtButJudgedFailed: number;
+  /** Absent on a server that predates the split of "rendered, but an external condition stopped the work". */
+  renderedButUnfinished?: number;
+
   succeeded: number;
   unjudged: number;
   /** Absent on a server that predates the split of user-stopped builds. */
@@ -44,6 +47,8 @@ interface VerdictSplit {
 
 interface ReportData {
   totalBuilds: number;
+  /** Builds judged succeeded (the user-stopped ones are in neither this nor `failed`). Absent on an older server. */
+  ok?: number;
   verdictSplit?: VerdictSplit;
   unjudged: number;
   failed: number;
@@ -103,6 +108,9 @@ export function FailureCategoryCard({ adminToken }: { adminToken: string }): Rea
   const total = data?.totalBuilds ?? 0;
   const failed = data?.failed ?? 0;
   const rate = data?.overallFailureRatePct ?? null;
+  // 🔴 The rate is failed ÷ JUDGED builds (the user-stopped ones are in neither half). The note beside it used to say
+  // "of {all settled}", which includes them: 58 failed of 460 judged is 12.6%, not 58 of 497.
+  const judgedBuilds = typeof data?.ok === 'number' ? data.ok + failed : total - (data?.unjudged ?? 0);
 
   return (
     <div className="rounded-2xl border border-line bg-card p-6">
@@ -153,9 +161,15 @@ export function FailureCategoryCard({ adminToken }: { adminToken: string }): Rea
                   {
                     label: 'Worked, called failed',
                     value: data.verdictSplit.builtButJudgedFailed,
-                    note: 'rendered in a real browser — a wrong verdict, not a failure',
+                    note: 'rendered in a real browser while the record says a defect — a wrong verdict, not a failure',
                     tone: 'text-warn',
                   },
+                  ...(typeof data.verdictSplit.renderedButUnfinished === 'number' ? [{
+                    label: 'Rendered, work stopped',
+                    value: data.verdictSplit.renderedButUnfinished,
+                    note: 'an app rendered, but the engine, sandbox, account or a cap ended the work — it may be the previous version, so this is NOT counted as a delivered app',
+                    tone: 'text-warn',
+                  }] : []),
                   {
                     label: 'Cannot tell',
                     value: data.verdictSplit.evidenceUnknown,
@@ -224,7 +238,7 @@ export function FailureCategoryCard({ adminToken }: { adminToken: string }): Rea
             {[
               ['Builds examined', String(total), `${data.unjudged ?? 0} still in progress / excluded`],
               ['Failed', String(failed), ''],
-              ['Overall failure rate', rate == null ? '—' : `${rate}%`, `of ${total - (data.unjudged ?? 0)} settled builds`],
+              ['Overall failure rate', rate == null ? '—' : `${rate}%`, `of ${judgedBuilds} judged builds (${total - (data.unjudged ?? 0) - judgedBuilds} the user stopped are left out)`],
               ['App types seen', String(byDomain.length), 'grouped by likely domain'],
             ].map(([label, value, note]) => (
               <div key={label} className="rounded-xl border border-line bg-well p-4">

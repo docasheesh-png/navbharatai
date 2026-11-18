@@ -42,6 +42,22 @@ import { classifyFailureReason, type FailureReason } from '../../lib/failureReas
 export { classifyFailureReason };
 export type { FailureReason };
 
+/**
+ * Outcome codes that say an EXTERNAL condition ended the work — the engine, the sandbox, the account, a cap, a deploy.
+ * 🔴 Admin panel copy 2026-11-17: "Worked, called failed — 44 · rendered in a real browser — a wrong verdict", and the
+ * headline "User got a working app 97%" (target 90%) was built on it. But "an app rendered" is not "the user's request
+ * was delivered": on an EDIT the app that renders is the PREVIOUS version, and a build the engine abandoned half-way
+ * (autopsy 57604006, build 9ed80cc9: ENGINE_UNAVAILABLE after 4 of 5 requested changes) renders too. For these codes the
+ * verdict "failed" is not shown wrong by a render, so they earn NO delivered credit — they stay in the denominator and
+ * are shown on their own line. Content verdicts (release gate, typecheck, "never recorded a code" …) that a render
+ * CONTRADICTS stay as they were: those are the wrong verdicts the earlier autopsies (697b38ee, 4efab9d7) fixed.
+ */
+export const WORK_STOPPED_OUTCOME_CODES: ReadonlySet<string> = new Set([
+  'OUTCOME_ENGINE_UNAVAILABLE', 'OUTCOME_ENGINE_TIMEOUT', 'OUTCOME_SANDBOX_UNAVAILABLE',
+  'OUTCOME_AUTHORITY_UNAVAILABLE', 'OUTCOME_AI_PAUSED', 'OUTCOME_DEPLOY_DRAIN', 'OUTCOME_REAPED',
+  'OUTCOME_COST_CEILING', 'OUTCOME_FUTILE', 'OUTCOME_EMPTY_BUILD',
+]);
+
 /** The subset of a stored build's data this module needs. Matches AllDiagnosticsEntry by shape. */
 export interface CategorizableBuild {
   workspaceId: string;
@@ -141,6 +157,11 @@ export interface VerdictSplit {
    * verdict, and every one of these is a user who was told their working app had failed.
    */
   builtButJudgedFailed: number;
+  /**
+   * Judged failed, the app was seen running, but an EXTERNAL condition stopped the work (`WORK_STOPPED_OUTCOME_CODES`).
+   * Not a wrong verdict — the render may be the previous version — so it earns no credit in `appDeliveredPct`.
+   */
+  renderedButUnfinished: number;
   /** Judged ok. */
   succeeded: number;
   /** No settled verdict — still running, or a legacy record. */
@@ -309,13 +330,17 @@ export function categorizeBuildFailures(
    * look" and "we looked and saw nothing" are different facts, and only one of them is a bug report.
    */
   const engineFailed = failed.filter((b) => b.appSeenRunning === false).length;
-  const builtButJudgedFailed = failed.filter((b) => b.appSeenRunning === true).length;
-  const evidenceUnknown = failed.length - engineFailed - builtButJudgedFailed;
-  // Only builds we can actually judge count — see `appDeliveredPct`.
-  const judgeable = ok.length + engineFailed + builtButJudgedFailed;
+  const renderedFailed = failed.filter((b) => b.appSeenRunning === true);
+  const renderedButUnfinished = renderedFailed.filter((b) => WORK_STOPPED_OUTCOME_CODES.has(String(b.outcomeCode ?? ''))).length;
+  const builtButJudgedFailed = renderedFailed.length - renderedButUnfinished;
+  const evidenceUnknown = failed.length - engineFailed - renderedFailed.length;
+  // Only builds we can actually judge count — see `appDeliveredPct`. A build whose work an external condition stopped
+  // is judgeable (it is in the denominator) and earns no delivered credit.
+  const judgeable = ok.length + engineFailed + builtButJudgedFailed + renderedButUnfinished;
   const verdictSplit: VerdictSplit = {
     engineFailed,
     builtButJudgedFailed,
+    renderedButUnfinished,
     succeeded: ok.length,
     unjudged: rows.length - judged.length - userStopped.length,
     userStopped: userStopped.length,

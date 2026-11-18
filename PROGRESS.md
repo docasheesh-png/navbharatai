@@ -102088,6 +102088,8 @@ made rock-solid). Ledger:
 - **Trade-off stated honestly:** a gateway now spends up to three model attempts per turn before moving on, as the owner
   specified; each timed-out model is still cooled down on its own, so the next turn does not re-wait it.
 
+**2026-11-18, later: #4290 merged** — Q-2726 Q-2727 Q-2728 Q-2729 Q-2730 Q-2731 closed (6). Autopsy 05eb30ba stays NOT
+COMPLETE: Q-2732…Q-2752 open; Q-2709 and Q-2712 carry the notes of what is still open in them.
 ## 2026-11-18 — A race the user did not describe never runs out of road (owner request)
 
 Owner: *"jab bhi koi racing game bane, to hamesa (100%) navbharatai me library se road map liye jaye (agar user kuch na kahe road ke bare me to!) … race bas 10-12 second ke baad track khatam ho jata hai … 10-12 road track … 1-2-3-…→1-2-3 cycle … hamesa infinity road"*.

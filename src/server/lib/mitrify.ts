@@ -1,4 +1,4 @@
-import { chunkSaysStop, sseData, takeSseEvents } from './sseFrames';
+import { chunkSaysStop, sseData, takeSseEvents } from './sseFrames.ts'; // .ts: scripts/checks/mitrify.check.mjs loads this file with plain Node
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';

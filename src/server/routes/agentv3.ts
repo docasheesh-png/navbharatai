@@ -525,7 +525,7 @@ import { bluesmindsBuilderEnabled, bluesmindsBuilderRungs } from '../AgentV3/blu
 import { moyiBuilderEnabled, moyiBuilderRungs } from '../AgentV3/moyiBuilder';
 import { qubaxBuilderRungs } from '../AgentV3/proChainV2/builderAdapters';
 import { qubaxBuilderEnabled } from '../AgentV3/proChainV2/qubaxBuilder';
-import { beforeFirstClaudeRung, discountedTokensBuilderRungs } from '../AgentV3/discountedTokensBuilder';
+import { beforeFirstClaudeRung, discountedTokensBuilderEnabled, discountedTokensBuilderRungs } from '../AgentV3/discountedTokensBuilder';
 import { ROUTER_ONE_LABEL, ROUTER_ONE_NOT_CONFIGURED, routerOneApiKey, routerOneBaseUrl, routerOneModels, routerOnePinnedForTier, routerOneWeakFallbackEnabled } from '../AI/RouterOne/routerOne';
 import { ProChainV2Build, proChainV2Decision, proChainV2ScopeAsk, proChainV2RedactSecrets, roleForRunnerOpts } from '../AgentV3/proChainV2';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
@@ -3555,8 +3555,10 @@ export function ladderRunners(rungs: readonly LadderRung[]): NamedRunner[] {
  * Router One runner: every rung is a Router One model (ROUTER_ONE_MODEL list). Used by the z@gmail.com
  * pin on non-Weak bands. Weak Router One models share the ordinary guarded chain below.
  */
-function buildTierEngineAvailable(tier: PowerLevel): boolean {
-  return (tier === 'weak' && (routerOneWeakFallbackEnabled() || qubaxBuilderEnabled() || bluesmindsBuilderEnabled() || moyiBuilderEnabled())) || tierEngineAvailable(tier);
+export function buildTierEngineAvailable(tier: PowerLevel): boolean {
+  return (tier === 'weak'
+    ? routerOneWeakFallbackEnabled() || qubaxBuilderEnabled() || bluesmindsBuilderEnabled() || moyiBuilderEnabled()
+    : discountedTokensBuilderEnabled()) || tierEngineAvailable(tier);
 }
 
 /** Preserve configured models and tail order; move only the first GLM rung to the front. */

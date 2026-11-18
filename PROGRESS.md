@@ -101959,3 +101959,8 @@ Tests:
 - **Q-2716 closed as not-a-defect,** with the owner's agreement: it was the workspace's fastest build so far, and the ETA learns from history.
 
 Every new test was proven by reversion.
+
+
+## 2026-11-18 — PR #4288 merge review: admission follows the configured chain; Weak supplier IDs cannot bypass its guard
+
+Reconciled with main without dropping the existing composition changes. Fixed the pre-flight availability check so Normal and Strong can start when their only configured runner is DiscountedTokens; its missing-rate and off-switch rules still refuse it, and Weak never borrows it. Qubax model selection now excludes Claude-family IDs before they acquire the neutral ENGINE_QX name: the final Weak guard cannot recognize an underlying model from that neutral name. A configuration containing only excluded models makes the rung unavailable instead of admitting an empty chain. Regression cases cover the constructed chain, missing rates, explicit disable, catalogue and no-catalogue model filtering. Full integration validation is coordinated by the merge task; focused results are recorded separately and are not a full CI claim.

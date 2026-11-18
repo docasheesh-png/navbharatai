@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildTurnRunner } from '../src/server/routes/agentv3';
 import { realRateFor } from '../src/server/AgentV3/providerRates';
 import { OFF_LADDER_PROVIDERS } from '../src/server/AgentV3/ladderDepth';
+import { __setQubaxBuilderCatalogForTests, qubaxBuilderEnabled, qubaxBuilderModels } from '../src/server/AgentV3/proChainV2/qubaxBuilder';
 
 beforeEach(() => {
   vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-test-key');
@@ -19,7 +20,7 @@ beforeEach(() => {
   vi.stubEnv('AGENTV3_LADDER_WEAK', 'GLM:glm-4.7-flashx,KIMI:kimi-k2.7-code,GLM:glm-5.3');
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{"data":[]}', { status: 200 })));
 });
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+afterEach(() => { __setQubaxBuilderCatalogForTests(null); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 const chain = (opts: Partial<Parameters<typeof buildTurnRunner>[0]> = {}) => {
   let names: string[] = [];
   buildTurnRunner({ tier: 'weak', ...opts, onChain: (rungs) => { names = rungs.map((r) => r.name); } });
@@ -27,6 +28,18 @@ const chain = (opts: Partial<Parameters<typeof buildTurnRunner>[0]> = {}) => {
 };
 
 describe('Weak: Router One → Qubax → BluesMinds → ladder', () => {
+  it('a neutral Qubax label cannot hide Claude models on Weak', () => {
+    const forbidden = ['claude-sonnet-4-8', 'anthropic/claude-opus-4-8', 'SONNET', 'Opus', 'haiku', 'fable'];
+    vi.stubEnv('QUBAX_BUILDER_MODELS', [...forbidden, 'glm-5.3'].join(','));
+    __setQubaxBuilderCatalogForTests(null);
+    expect(qubaxBuilderModels().models).toEqual(['glm-5.3']);
+    __setQubaxBuilderCatalogForTests(new Map(forbidden.map(id => [id, { id, tools: true, ready: true, contextLength: 128_000, maxOutput: 8192 }])));
+    expect(qubaxBuilderModels().models).toEqual(['glm-5.3']);
+    vi.stubEnv('QUBAX_BUILDER_MODELS', forbidden.join(','));
+    expect(qubaxBuilderModels().models).toEqual([]);
+    expect(qubaxBuilderEnabled()).toBe(false);
+    expect(chain()).not.toContain('ENGINE_QX');
+  });
   it.each([{}, { heal: true }, { plan: true }, { complex: true }])('Qubax is third in lane %j', (opts) => {
     expect(chain(opts).slice(0, 3)).toEqual(['ENGINE_R1', 'ENGINE_QX', 'ENGINE_BM']);
   });

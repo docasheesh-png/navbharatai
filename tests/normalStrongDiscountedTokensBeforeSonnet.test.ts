@@ -1,7 +1,7 @@
 // Owner 2026-11-17 ("apke sabhi suggestion approved"): DiscountedTokens on NORMAL and STRONG, right before the first
 // Sonnet/Opus rung, trying up to three of its own models (cheapest good first), then the chain moves on. Never Weak.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildTurnRunner } from '../src/server/routes/agentv3';
+import { buildTierEngineAvailable, buildTurnRunner } from '../src/server/routes/agentv3';
 import {
   beforeFirstClaudeRung, discountedTokensBuilderEnabled, discountedTokensBuilderMissing, discountedTokensBuilderModels,
   discountedTokensBuilderRungs, neutraliseDiscountedTokensName,
@@ -30,6 +30,22 @@ const chain = (tier: string) => {
 };
 
 describe('where it sits', () => {
+  it('admits Normal and Strong when their only configured engine is DiscountedTokens', () => {
+    for (const key of ['GLM_API_KEY', 'KIMI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'NEMOTRON_API_KEY', 'ROUTER_ONE_API_KEY', 'QUBAX_API_KEY', 'FREE_CHAIN_BLUESMINDS_API_KEY', 'MOYI_API_KEY']) vi.stubEnv(key, '');
+    for (const tier of ['off', 'mini'] as const) {
+      expect(chain(tier).every(name => name.startsWith('ENGINE_DT'))).toBe(true);
+      expect(chain(tier).length).toBeGreaterThan(0);
+      expect(buildTierEngineAvailable(tier)).toBe(true);
+    }
+    expect(buildTierEngineAvailable('weak')).toBe(false);
+    vi.stubEnv('DISCOUNTEDTOKENS_BUILDER_ENABLED', 'off');
+    expect(buildTierEngineAvailable('off')).toBe(false);
+    expect(buildTierEngineAvailable('mini')).toBe(false);
+    vi.stubEnv('DISCOUNTEDTOKENS_BUILDER_ENABLED', '');
+    vi.stubEnv('DISCOUNTEDTOKENS_BUILDER_RATE_IN', '');
+    expect(buildTierEngineAvailable('off')).toBe(false);
+    expect(buildTierEngineAvailable('mini')).toBe(false);
+  });
   it('Normal and Strong: right before the first Sonnet/Opus rung', () => {
     for (const tier of ['off', 'mini']) {
       const names = chain(tier);

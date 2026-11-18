@@ -1,4 +1,5 @@
 import { runApprovedQubaxChat, QubaxError, QUBAX_FIRST_BYTE_MS } from '../../lib/qubax';
+import { familyOfFreeChainRung, legacyPathAllows } from '../TrafficRegistry/legacyControl';
 import { chatAttemptLimits, watchChatAttempt } from './attemptBudget';
 import { CHAT_SERVER_DEADLINE_MS, CHAT_PROVIDER_ATTEMPT_MS } from '../../../lib/chatDeadline';
 import { prioritizeChatSuppliers, FIXED_TEXT_CHAIN, fixedTextChainRank, fixedTextChainSurface, fixedTextChainSelected, SINGLE_USE_SUPPLIER_HTTP_ATTEMPTS } from '../fixedTextChain';
@@ -223,6 +224,12 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     const observedCapacity = capacityRevision(); let capacityBusy = false;
     for (const [position, id] of order.entries()) {
       if (input.signal?.aborted || Date.now() >= deadlineAt) return done({ ...empty('aborted'), content: '' });
+      // Traffic Manager V2 (P3): an account the admin drained or disabled gets no new attempt, before anything is
+      // reserved or dispatched — only when the control store covers the Free Chat chain (off by default).
+      if (!legacyPathAllows('free-chain', familyOfFreeChainRung(id))) {
+        trace.attempts.push({ provider: id, model: 'traffic-control', reason: 'traffic-control', entered: false });
+        continue;
+      }
       if (id === 'mitrify') {
         const fixedChat = fixedTextChainSelected() && fixedTextChainSurface() === 'chat';
         // A malformed optional supplier must not take down the later healthy rungs.

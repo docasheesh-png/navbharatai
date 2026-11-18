@@ -49,6 +49,11 @@ export function describeChanges(before: ControlBody, after: ControlBody): string
     const x = show(before.providers[k]); const y = show(after.providers[k]);
     if (x !== y) out.push(`provider ${k}: ${x} → ${y}`);
   }
+  for (const k of keys(before.coverage ?? {}, after.coverage ?? {})) {
+    const x = before.coverage?.[k as keyof NonNullable<ControlBody['coverage']>] === true;
+    const y = after.coverage?.[k as keyof NonNullable<ControlBody['coverage']>] === true;
+    if (x !== y) out.push(`path ${k}: ${x ? 'covered' : 'not covered'} → ${y ? 'covered' : 'not covered'}`);
+  }
   for (const k of keys(before.models, after.models)) {
     const a = before.models[k]; const b = after.models[k];
     if (show(a) !== show(b)) out.push(`model ${k}: ${show(a)} → ${show(b)}`);

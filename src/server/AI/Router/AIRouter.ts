@@ -12,6 +12,7 @@ import { getBreaker, allBreakerNames } from './CircuitBreaker';
 import { tracer } from '../../observability/Tracer';
 import { shouldRaceStreams } from './streamRacePolicy';
 import { noteProviderCall, providerInFlight, shouldSkipProvider } from '../ProviderHealth/trafficHealth';
+import { familyOfEngineName, legacyPathAllows } from '../TrafficRegistry/legacyControl';
 
 /**
  * Which rung actually served a streamed turn.
@@ -188,6 +189,9 @@ export class AIRouter {
   private acquire(name: string): boolean {
     // Claim a recovery probe only at the actual dispatch boundary, after health/capacity checks.
     if (this.inFlightCount(name) >= MAX_IN_FLIGHT || (!this.managedTrafficHealth(name) && shouldSkipProvider(name))) return false;
+    // Traffic Manager V2 (P3): a provider the admin drained or disabled is skipped like a busy one — only when the
+    // control store's coverage for this path is on (off by default, so nothing changes until an admin turns it on).
+    if (!legacyPathAllows('chat-router', familyOfEngineName(name))) return false;
     if (!acquireSlot(this.slotKey(name))) return false;
     if (!this.managedTrafficHealth(name)) providerInFlight(name, 1);
     return true;

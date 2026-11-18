@@ -1,4 +1,4 @@
-import { explicitStoreAdmin } from '../lib/storeAdminPermission';
+import { explicitStoreAdmin, storeAdminRequest } from '../lib/storeAdminPermission';
 // Nav App Store — a place where a NavBharatAI user can publish their Android app, and anyone can
 // install it.
 //
@@ -141,9 +141,11 @@ export async function listedWebAppMeta(id: string): Promise<AppMeta | undefined>
 }
 const publicApprovedApps = new SharedReadCache<StoreApp[]>({ maxEntries: 4, ttlMs: 60_000 });
 
+/** The email half of store authority only. Routes ask `storeAdminRequest(req, …)`, which also accepts the admin session. */
 export function isStoreAdmin(email: GrantEmail | null): boolean { // a verified email only (Q-624)
   return explicitStoreAdmin(email, process.env.NAV_STORE_ADMINS);
 }
+export { storeAdminRequest };
 
 export interface SubmissionForm {
   developerName: string;
@@ -347,7 +349,7 @@ export function registerNavStoreRoutes(app: Express): void {
       categories: STORE_CATEGORIES,
       // The number users see must be the one that can actually publish (see publishableApkLimitBytes).
       maxSizeMb: publishableApkLimitBytes(MAX_APK_BYTES, MAX_SCANNABLE_BYTES) / 1024 / 1024,
-      isAdmin: isStoreAdmin(identityGrantEmail(me)),
+      isAdmin: storeAdminRequest(req, identityGrantEmail(me)),
       // Named plainly so the admin knows exactly what to switch on, rather than seeing a dead button.
       missing: [
         ...(storage ? [] : ['app storage (NAV_STORE_BUCKET)']),
@@ -585,7 +587,7 @@ export function registerNavStoreRoutes(app: Express): void {
   /** The review queue, with everything a reviewer needs to decide. */
   app.get('/api/nav-store/admin/queue', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
+    if (!storeAdminRequest(req, identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
     try {
       const status = String(req.query.status || 'pending') as SubmissionStatus;
       const valid: SubmissionStatus[] = ['pending', 'approved', 'rejected', 'removed'];
@@ -603,7 +605,7 @@ export function registerNavStoreRoutes(app: Express): void {
    */
   app.post('/api/nav-store/admin/review', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
+    if (!storeAdminRequest(req, identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
     publicApprovedApps.forget(); // only an admin's review clears the shared listing
 
     const { id, decision } = (req.body || {}) as Record<string, unknown>;
@@ -1402,7 +1404,7 @@ export function registerNavStoreRoutes(app: Express): void {
    */
   app.get('/api/nav-store/web/admin/reports', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
+    if (!storeAdminRequest(req, identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
     try {
       res.json({ reports: await listWebAppReports() });
     } catch (e) {
@@ -1470,7 +1472,7 @@ export function registerNavStoreRoutes(app: Express): void {
   /** Admin: the listing queue + decisions. Same review discipline as the APK store. */
   app.get('/api/nav-store/web/admin/queue', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
+    if (!storeAdminRequest(req, identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
     try {
       // `?status=listed` returns the apps ON the store, so an app the admin just listed stays on the review
       // screen saying so, with a Remove button — the APK lane has done this since 2026-08-21, and the web
@@ -1485,7 +1487,7 @@ export function registerNavStoreRoutes(app: Express): void {
 
   app.post('/api/nav-store/web/admin/review', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
+    if (!storeAdminRequest(req, identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
     publicListings.forget(); // only an admin's review clears the shared listing
     const id = String(req.body?.id || '');
     const decision = String(req.body?.decision || '');

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../../lib/firebase';
 import { authHeader, authJsonHeaders } from '../../../lib/authHeaders';
+import { withStoreAdminSession } from '../../../lib/storeAdminHeaders';
 import { optimisticReact } from './socialFormat';
 
 export type Reaction = 'like' | 'dislike';
@@ -70,12 +71,12 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
 }
 
 async function post(path: string, body: unknown): Promise<Record<string, unknown>> {
-  const res = await fetch(path, { method: 'POST', headers: await authJsonHeaders(), body: JSON.stringify(body ?? {}) });
+  const res = await fetch(path, { method: 'POST', headers: withStoreAdminSession(await authJsonHeaders()), body: JSON.stringify(body ?? {}) });
   return readJson(res);
 }
 
 async function get(path: string): Promise<Record<string, unknown>> {
-  const res = await fetch(path, { headers: await authHeader() });
+  const res = await fetch(path, { headers: withStoreAdminSession(await authHeader()) });
   return readJson(res);
 }
 

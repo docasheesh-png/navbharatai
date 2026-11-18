@@ -60,6 +60,15 @@ const REQUIRED_INPUTS: Record<string, Record<string, unknown>> = {
   generate_i18n: { languages: ['en', 'hi', 'ta'] },
   generate_env_validation: { keys: ['DATABASE_URL'] },
   generate_release_notes: { features: ['Browse items'] },
+  generate_procedural_object: {
+    id: 'census-object',
+    plan_json: JSON.stringify({ version: 1, label: 'Original census object', parts: [
+      { id: 'body', geometry: { kind: 'box', size: [1, 2, 1] } },
+      { id: 'sphere', geometry: { kind: 'sphere', radius: 0.5, segments: 8, rings: 4 } },
+      { id: 'cylinder', geometry: { kind: 'cylinder', top: 0.3, bottom: 0.5, height: 1, segments: 8 } },
+      { id: 'lathe', geometry: { kind: 'lathe', points: [[0, -1], [0.5, 0], [0, 1]], segments: 8 } },
+    ].map((part) => ({ ...part, position: [0, 0, 0], rotation: [0, 0, 0], color: '#887766', roughness: 0.8, metalness: 0 })) }),
+  },
 };
 /** Files a tool reads before it writes (generate_types turns a schema into types). */
 const PRESENT: Record<string, Record<string, string>> = {
@@ -94,10 +103,27 @@ function inputCombos(name: string, schema: { properties?: Record<string, Prop>; 
  * REQUEST (it refuses an app with no world), so the census has to switch it on and ask for a world — otherwise the census would
  * never read the map's code, which is exactly the code that must pass the scan.
  */
-const NEEDS_CONTEXT: Record<string, { env: Record<string, string>; request: string; newProject?: boolean }> = {
+const NEEDS_CONTEXT: Record<string, {
+  env: Record<string, string>; request: string; newProject?: boolean;
+  dependencies?: Record<string, string>; devDependencies?: Record<string, string>; expectedFiles?: string[];
+}> = {
+  generate_procedural_object: {
+    env: { AGENTV3_PROCEDURAL_OBJECTS: 'on' }, request: 'Build a 3D game with an original object',
+    dependencies: { three: '0.180.0' }, devDependencies: { '@types/three': '0.180.0' },
+    expectedFiles: ['src/game/generatedObjects/runtime.ts', 'src/game/generatedObjects/census-object.ts'],
+  },
   generate_athree_map: { env: { AGENTV3_ATHREE_MAP: 'on' }, request: 'athree map par ek 3D racing game banao' },
   generate_game_royale: { env: { AGENTV3_ORIGINAL_ROYALE: 'on' }, request: 'Build an original battle royale practice game', newProject: true },
 };
+
+/** Model the no-clobber capability only in this positive-path recipe census.
+ * Missing-capability/race behavior remains covered by the recipe dispatcher tests. */
+class CensusActuator extends FakeActuator {
+  async createFileExclusive(_ws: string, path: string, content: string): Promise<void> {
+    if (this.files.has(path)) throw new Error(`EEXIST: ${path}`);
+    this.files.set(path, content);
+  }
+}
 
 async function toolCensus(): Promise<{ hits: string[]; silent: string[]; calls: number; tools: number }> {
   const tools = defaultToolCatalog().filter((t) => /^generate_/.test(t.name));
@@ -108,12 +134,20 @@ async function toolCensus(): Promise<{ hits: string[]; silent: string[]; calls: 
     let wrote = 0;
     for (const input of inputCombos(t.name, t.input_schema as never)) {
       for (const [shape, files] of Object.entries(SHAPES)) {
-        const act = new FakeActuator();
+        const act = new CensusActuator();
+        const ctx = NEEDS_CONTEXT[t.name];
         const seeded = { ...files, ...(PRESENT[t.name] ?? {}) };
+        if (ctx?.dependencies || ctx?.devDependencies) {
+          // Keep each workspace shape (including its server dependencies) while satisfying the recipe's prerequisites.
+          const manifest = JSON.parse(seeded['package.json']);
+          seeded['package.json'] = JSON.stringify({ ...manifest,
+            dependencies: { ...manifest.dependencies, ...ctx.dependencies },
+            devDependencies: { ...manifest.devDependencies, ...ctx.devDependencies },
+          });
+        }
         for (const [p, c] of Object.entries(seeded)) act.files.set(p, c);
         const stream = new AgentEventStream();
         const dispatcher = new ToolDispatcher(act, `ws-census-${t.name}`, new WorkspaceState(stream), stream);
-        const ctx = NEEDS_CONTEXT[t.name];
         const saved: Record<string, string | undefined> = {};
         if (ctx) { for (const [k, v] of Object.entries(ctx.env)) { saved[k] = process.env[k]; process.env[k] = v; } dispatcher.setCoverageRequest(ctx.request); }
         // These are platform-owned scaffold fixtures, not reopened user projects. Supply the
@@ -124,7 +158,13 @@ async function toolCensus(): Promise<{ hits: string[]; silent: string[]; calls: 
           dispatcher.setUserOwnedFiles([], ctx.request);
           dispatcher.setRoyaleNewProjectAllowed(true);
         }
-        try { await dispatcher.dispatch({ id: 'c', name: t.name, input }, 'architect'); }
+        try {
+          const result = await dispatcher.dispatch({ id: 'c', name: t.name, input }, 'architect');
+          if (ctx?.expectedFiles) {
+            expect(result.is_error, `${t.name} [${shape}] ${JSON.stringify(input)}: ${result.content}`).not.toBe(true);
+            for (const path of ctx.expectedFiles) expect(act.files.has(path), `${t.name} [${shape}] emits ${path}`).toBe(true);
+          }
+        }
         finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
         calls++;
         for (const [p, c] of act.files) {

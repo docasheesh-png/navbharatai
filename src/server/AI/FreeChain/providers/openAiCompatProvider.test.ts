@@ -303,6 +303,21 @@ describe('one pinned dispatch, usage and policy boundary', () => {
     expect(JSON.stringify(error)).not.toContain(KEY);
   });
 
+  // Owner 2026-11-17 ("jis provider ka balance khatam hoga, woh khud hi band ho jayega"): before the shared
+  // recognition, a 402 from any rung but DeepSeek/CheaperInference became INVALID_REQUEST, which STOPS the chain —
+  // the user got no answer and the empty account was never cooled down.
+  it.each([
+    ['GROQ', 'https://api.groq.com/openai/v1'],
+    ['DEEPINFRA', 'https://api.deepinfra.com/v1/openai'],
+    ['OPENAI', 'https://api.openai.com/v1'],
+    ['CLOUDFLARE', `https://api.cloudflare.com/client/v4/accounts/${'a'.repeat(32)}/ai/v1`],
+    ['GLM', 'https://api.z.ai/api/paas/v4'],
+  ] as const)('%s HTTP 402 is an empty account, so the chain moves on', async (provider, baseURL) => {
+    withResponse.mockRejectedValue({ status: 402, message: KEY });
+    const error = await failure(new OpenAiCompatProvider(config({ provider, baseURL })).execute('hello'));
+    expect(error).toMatchObject({ code: 'QUOTA_EXHAUSTED', status: 402, retryable: false });
+  });
+
   it('DeepSeek always disables thinking and preserves separate cache-hit usage', async () => {
     reply(completion('hi', { prompt_tokens: 20, completion_tokens: 3, prompt_cache_hit_tokens: 12 }));
     const adapter = new OpenAiCompatProvider(config({ provider: 'DEEPSEEK', baseURL: 'https://api.deepseek.com/v1', model: 'deepseek-flash' }));

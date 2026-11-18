@@ -201,6 +201,61 @@ export const SNAPSHOT_WAKING_NOTE =
   'Showing your saved copy while the live preview starts up. Nothing has changed since it was saved, so this is your current app — the live version takes over by itself the moment it is ready.';
 
 /**
+ * 🔒 A PREVIEW IS NEVER BLANK (admin 2026-11-17, verbatim: "iska koi permanent solution dhundo … han bilkul
+ * banao"). The admin opened a three-day-old game to edit it and the preview "1 second bhi nahi chala". The
+ * last build had FAILED after changing files, so it took no new copy; the copy from the build before was
+ * therefore "not current", the door refused it, and the machine that existed did not answer — so the pane
+ * showed a waiting page that never ended, over an app NavBharatAI was holding a perfectly good copy of.
+ *
+ * The refusal protected one thing: the seconds after an edit, when the live app is about to come back
+ * WITH that edit and a stale copy would hide it. That protection is kept, exactly: no stand-in while a
+ * build runs, and none within OLDER_STANDIN_QUIET_MS of the last write. Past that, nobody is waiting for
+ * a fresh edit to appear — a working older version, said to be older, beats an empty pane every time.
+ * The live app replaces it by itself the moment it answers (PreviewSurface's snapshotFramedRef edge).
+ */
+export const OLDER_STANDIN_QUIET_MS = 10 * 60_000;
+
+/** What may stand in for the app right now, and therefore which note the panel must show. */
+export type SnapshotStandIn = 'expired' | 'current' | 'older' | null;
+
+export function snapshotStandIn(o: {
+  enabled: boolean;
+  doorState: 'asleep' | 'starting';
+  snapshotUrl: string | null | undefined;
+  snapshotAt?: number | null;
+  lastChangeAt?: number | null;
+  /** Is a build running for this workspace? Its edits are about to appear: never stand in during one. */
+  buildRunning?: boolean;
+  now?: number;
+}): SnapshotStandIn {
+  if (!o.enabled) return null;
+  if (typeof o.snapshotUrl !== 'string' || !/^https?:\/\//i.test(o.snapshotUrl)) return null;
+  if (o.doorState === 'asleep') return 'expired';
+  if (snapshotStillCurrent(o.snapshotAt, o.lastChangeAt)) return 'current';
+  if (o.buildRunning === true) return null;
+  const now = Number(o.now);
+  if (!Number.isFinite(now)) return null;
+  const changed = Number(o.lastChangeAt);
+  // A write we can date: wait out the quiet period, so a just-made edit is never hidden behind an old copy.
+  // A write we cannot date (the store did not answer): no build is running, so no edit is on its way.
+  if (Number.isFinite(changed) && changed > 0 && now - changed < OLDER_STANDIN_QUIET_MS) return null;
+  return 'older';
+}
+
+/**
+ * The line shown while an OLDER copy stands in for a preview that is starting. It must say both things the
+ * user needs: this is their app and it works, and changes made after it are not in it yet. No vendor, no
+ * machine.
+ */
+export const SNAPSHOT_OLDER_NOTE =
+  'Showing the last working version of your app while the live preview starts up. Changes made after it are not in this copy yet — the live version takes over by itself the moment it is ready.';
+
+/** The note for each stand-in. One table, so the door and the panel can never disagree about the words. */
+export function snapshotStandInNote(kind: Exclude<SnapshotStandIn, null>): string {
+  return kind === 'expired' ? SNAPSHOT_NOTE : kind === 'current' ? SNAPSHOT_WAKING_NOTE : SNAPSHOT_OLDER_NOTE;
+}
+
+/**
  * How long a refresh of the preview copy may take after a kept repair: a production rebuild plus the
  * copy itself (autopsy 972acde5). Past it the earlier copy stays a fallback, and the report says so.
  */

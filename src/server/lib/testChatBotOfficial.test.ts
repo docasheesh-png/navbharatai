@@ -168,6 +168,16 @@ describe('admin official OpenAI-compat helper', () => {
       expect(body).toMatchObject({ stream: true, stream_options: { include_usage: true }, max_tokens: 1024 });
     });
 
+    it('reports activity on every stream event, reasoning included, so a caller can tell "silent" from "still writing"', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(sse([
+        'data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n',
+      ]))));
+      const onActivity = vi.fn();
+      expect((await runOfficialOpenAiCompatTest({ ...routerOne, signal: new AbortController().signal, stream: true, onActivity })).content).toBe('ok');
+      expect(onActivity.mock.calls.length).toBeGreaterThanOrEqual(3);
+    });
+
     it('reads a stream even when the provider ignores stream: false', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(sse(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n']))));
       expect((await runOfficialOpenAiCompatTest({ ...routerOne, signal: new AbortController().signal })).content).toBe('ok');

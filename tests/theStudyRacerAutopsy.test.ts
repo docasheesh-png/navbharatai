@@ -225,7 +225,10 @@ describe('5 · the snapshot identity hashes the app, never our preview bridge', 
   });
   it('🔒 both hash sites in the route read through identitySource', () => {
     const route = strip(src('src/server/routes/agentv3.ts'));
-    expect(route).toContain('workspaceContentHash(identitySource(source))');
+    // The copy-side hash moved into failedBuildCopy.ts (takeBuildCopy) on 2026-11-17; the save-side stays here.
+    const copy = strip(src('src/server/AgentV3/failedBuildCopy.ts'));
+    expect(copy).toContain('workspaceContentHash(identitySource(source))');
+    expect(copy).not.toMatch(/workspaceContentHash\(source\)/);
     expect(route).toContain('workspaceContentHash(identitySource(persisted))');
     expect(route).not.toMatch(/workspaceContentHash\(source\)/);
     expect(route).not.toMatch(/workspaceContentHash\(persisted\)/);

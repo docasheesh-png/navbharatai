@@ -60,6 +60,7 @@ export function TrafficControlPanel({ adminToken }: { adminToken: string }) {
 }
 
 const STATES: Array<RouteState | 'default'> = ['default', 'enabled', 'draining', 'disabled'];
+const PATH_LABELS: Record<string, string> = { 'free-chain': 'Free Chat chain', 'chat-router': 'Chat router', builder: 'Pro builder' };
 const fmt = (t: number | null | undefined) => (t ? new Date(t).toLocaleString() : 'never');
 
 /** The panel's markup: pure props, so static render tests read exactly what the admin sees. */
@@ -70,6 +71,7 @@ export function TrafficControlBody(props: {
   onRollbackPick: (r: number | null) => void; onSave: () => void; onRollback: () => void; onReset: () => void;
 }) {
   const { data, error, draft } = props;
+  const covered = (data?.paths ?? []).filter((p) => draft?.coverage?.[p] === true);
   const changed = !!data && !!draft && JSON.stringify(draft) !== JSON.stringify(editableBody(data));
   const setRoute = (kind: 'providers' | 'models', key: string, state: RouteState | 'default', cap?: number) => {
     if (!draft) return;
@@ -100,10 +102,17 @@ export function TrafficControlBody(props: {
           Emergency and routing switches for the AI gateway. They can only take traffic away: send the gateway, or one surface, back to its
           older path, or stop new requests reaching a provider or model. Requests already running finish where they started.
         </p>
-        <p className="text-sm text-ink" data-testid="traffic-control-scope">
-          <strong>Applies to gateway-managed requests only.</strong> The older routing paths (the Free Chat chain, the chat router and the
-          Pro builder) do not read these switches yet. To stop a provider everywhere, use AI provider switches above.
-        </p>
+        {covered.length === 0 ? (
+          <p className="text-sm text-ink" data-testid="traffic-control-scope">
+            <strong>Applies to gateway-managed requests only.</strong> The older routing paths (the Free Chat chain, the chat router and the
+            Pro builder) do not read these switches unless you turn them on under Older routing paths below. To stop a provider everywhere, use AI provider switches above.
+          </p>
+        ) : (
+          <p className="text-sm text-ink" data-testid="traffic-control-scope">
+            <strong>Provider drain and disable apply to the gateway and to: {covered.map((p) => PATH_LABELS[p] ?? p).join(', ')}.</strong> Traffic caps and the
+            Gateway Emergency OFF still apply to gateway-managed requests only.
+          </p>
+        )}
       </div>
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       {props.done && <p role="status" className="text-sm font-medium text-success" data-testid="traffic-control-done">{props.done}</p>}
@@ -140,8 +149,22 @@ export function TrafficControlBody(props: {
               </label>
             ))}
           </fieldset>
+          {(data.paths ?? []).length > 0 && (
+            <fieldset className="space-y-1 rounded-md border border-line p-2" data-testid="traffic-control-paths">
+              <legend className="text-sm font-medium text-ink">Older routing paths</legend>
+              <p className="text-xs text-muted">When on, that path skips a provider you drained or disabled below and moves to its next rung. Nothing is added or reordered, and the Pro builder never leaves the selected tier. Turn it off again to roll back.</p>
+              {(data.paths ?? []).map((p) => (
+                <label key={p} className="flex items-center gap-2 text-sm text-ink">
+                  <input type="checkbox" checked={draft.coverage?.[p] === true} data-testid={`traffic-path-${p}`}
+                    onChange={(e) => { const next = { ...(draft.coverage ?? {}) }; if (e.target.checked) next[p] = true; else delete next[p];
+                      const { coverage: _old, ...rest } = draft; props.onDraft(Object.keys(next).length ? { ...rest, coverage: next } : rest); }} />
+                  {PATH_LABELS[p] ?? p} obeys provider drain and disable
+                </label>
+              ))}
+            </fieldset>
+          )}
           <details>
-            <summary className="cursor-pointer text-sm text-ink">Providers ({data.providers.length}) · gateway-managed requests only</summary>
+            <summary className="cursor-pointer text-sm text-ink">Providers ({data.providers.length}) · {covered.length ? 'gateway and covered paths' : 'gateway-managed requests only'}</summary>
             <p className="mt-1 text-xs text-muted">Drain, disable and traffic caps here stop new gateway requests only. The older paths still call the provider until it is switched off under AI provider switches.</p>
             <ul className="mt-1 divide-y divide-line rounded-md border border-line">
               {data.providers.map((p) => {
@@ -185,6 +208,27 @@ export function TrafficControlBody(props: {
               })}
             </ul>
           </details>
+          {data.sharedHealth && (
+            <details data-testid="traffic-shared-health">
+              <summary className="cursor-pointer text-sm text-ink">Shared provider health ({data.sharedHealth.mode === 'on' ? 'acting on reports' : data.sharedHealth.mode === 'observe' ? 'observe only' : 'off'})</summary>
+              <p className="mt-1 text-xs text-muted">
+                {data.sharedHealth.mode === 'observe'
+                  ? 'Servers share which providers they found down or out of balance. Shown here only: no server skips a provider because another one reported it.'
+                  : data.sharedHealth.mode === 'on' ? 'Servers share which providers they found down, and skip a provider another server reported, until it recovers.'
+                  : 'Sharing is off on this server.'}
+                {' '}Last read {fmt(data.sharedHealth.lastPullAtMs)}{data.sharedHealth.lastPullOk ? '' : ' (the last read failed)'}.
+              </p>
+              {data.sharedHealth.families.map((f) => (
+                <p key={f.domain} className="text-xs font-medium text-danger">Suspected shared outage: {f.domain} ({f.providers.join(', ')} are down). Shown only; nothing is suppressed.</p>
+              ))}
+              <ul className="mt-1 space-y-1">
+                {data.sharedHealth.reported.map((r) => (
+                  <li key={r.provider} className="text-xs text-muted">{r.provider}: {r.state} ({r.kind}), {fmt(r.atMs)}</li>
+                ))}
+                {data.sharedHealth.reported.length === 0 && <li className="text-xs text-muted">No other server has reported a problem in the last 15 minutes.</li>}
+              </ul>
+            </details>
+          )}
           {changed && (
             <div className="space-y-1">
               <p className="text-sm text-ink">You have unsaved changes.</p>

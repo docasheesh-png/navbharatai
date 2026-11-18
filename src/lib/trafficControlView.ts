@@ -12,6 +12,14 @@ export interface ControlBodyView {
   surfaces: Record<string, SurfaceMode>;
   providers: Record<string, RouteControlView>;
   models: Record<string, ModelControlView>;
+  /** P3: older routing paths that also obey provider drain/disable. */
+  coverage?: Record<string, boolean>;
+}
+export interface SharedHealthView {
+  mode: 'off' | 'observe' | 'on';
+  lastPullAtMs: number | null; lastPullOk: boolean; intervalMs: number; writes: number; adopted: number;
+  reported: Array<{ provider: string; state: string; kind: string; atMs: number }>;
+  families: Array<{ domain: string; providers: string[]; since: number }>;
 }
 export interface ControlDocView extends ControlBodyView { revision: number; updatedAtMs: number; actor: string; reason: string }
 export interface TrafficControlView {
@@ -21,6 +29,8 @@ export interface TrafficControlView {
   providers: Array<{ id: string; name: string; kind: string; family: string }>;
   models: Array<{ key: string; surfaces: string[]; dependsOn: string[] }>;
   admission: Record<string, { required: boolean; gaps: string[] }>;
+  paths?: string[];
+  sharedHealth?: SharedHealthView;
   history: {
     revisions: Array<{ revision: number; updatedAtMs: number; actor: string; reason: string }>;
     audit: Array<{ atMs: number; actor: string; reason: string; kind: string; fromRevision: number; toRevision: number; changes: string[] }>;
@@ -49,6 +59,11 @@ export function isTrafficControlView(v: unknown): v is TrafficControlView {
   if (!v.providers.every(p => rec(p) && str(p.id) && str(p.name) && str(p.kind) && str(p.family))) return false;
   if (!v.models.every(m => rec(m) && str(m.key) && strs(m.surfaces) && strs(m.dependsOn))) return false;
   const h = v.history;
+  if (v.paths !== undefined && !strs(v.paths)) return false;
+  const sh = v.sharedHealth;
+  if (sh !== undefined && !(rec(sh) && ['off', 'observe', 'on'].includes(sh.mode as string) && Array.isArray(sh.reported) && Array.isArray(sh.families)
+    && sh.reported.every(r => rec(r) && str(r.provider) && str(r.state) && str(r.kind) && int(r.atMs))
+    && sh.families.every(f => rec(f) && str(f.domain) && strs(f.providers)))) return false;
   return Array.isArray(h.revisions) && h.revisions.every(r => rec(r) && int(r.revision) && int(r.updatedAtMs) && str(r.actor) && str(r.reason))
     && Array.isArray(h.audit) && h.audit.every(a => rec(a) && int(a.atMs) && str(a.actor) && str(a.reason) && int(a.fromRevision) && int(a.toRevision) && strs(a.changes));
 }
@@ -56,7 +71,7 @@ export function isTrafficControlView(v: unknown): v is TrafficControlView {
 /** The body to edit: the saved one, or today's defaults (nothing narrowed). */
 export function editableBody(v: TrafficControlView): ControlBodyView {
   const c = v.current;
-  return c ? { global: { ...c.global }, surfaces: { ...c.surfaces }, providers: { ...c.providers }, models: { ...c.models } }
+  return c ? { global: { ...c.global }, surfaces: { ...c.surfaces }, providers: { ...c.providers }, models: { ...c.models }, ...(c.coverage ? { coverage: { ...c.coverage } } : {}) }
     : { global: { gateway: 'on' }, surfaces: {}, providers: {}, models: {} };
 }
 

@@ -43,4 +43,20 @@ describe('the panel says exactly what the switches cover', () => {
     expect(isTrafficControlView(data)).toBe(true);
     expect(isTrafficControlView({ ...data, current: { revision: 'x' } })).toBe(false);
   });
+  it('with a path covered, the scope note names it and says caps and Emergency OFF stay gateway-only (P3)', () => {
+    const withPaths = { ...data, paths: ['free-chain', 'chat-router', 'builder'] };
+    const html = renderToStaticMarkup(<TrafficControlBody data={withPaths} error={null} draft={{ ...editableBody(withPaths), coverage: { builder: true } }}
+      reason="" totp="" rollbackTo={null} saving={false} saveError={null} done={null} onDraft={noop} onReason={noop} onTotp={noop}
+      onRollbackPick={noop} onSave={noop} onRollback={noop} onReset={noop} />);
+    expect(html).toContain('apply to the gateway and to: Pro builder');
+    expect(html).toContain('Traffic caps and the');
+    expect(html).toContain('Older routing paths');
+  });
+  it('shared health in observe mode says nothing is skipped because of another server', () => {
+    const html = render({ data: { ...data, sharedHealth: { mode: 'observe', lastPullAtMs: 1, lastPullOk: true, intervalMs: 20_000, writes: 0, adopted: 0,
+      reported: [{ provider: 'GLM', state: 'suspended', kind: 'suspended', atMs: 1 }], families: [{ domain: 'deepseek', providers: ['deepseek', 'router-one'], since: 1 }] } } });
+    expect(html).toContain('observe only');
+    expect(html).toContain('no server skips a provider because another one reported it');
+    expect(html).toContain('Suspected shared outage: deepseek');
+  });
 });

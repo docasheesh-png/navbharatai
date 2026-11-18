@@ -22,6 +22,10 @@ import { ControlInputError, CONTROL_SURFACES } from '../AI/TrafficRegistry/contr
 import { adoptTrafficControl, currentTrafficControl, trafficControlSyncStatus } from '../AI/TrafficRegistry/controlSync';
 import { admissionGaps } from '../AI/TrafficRegistry/controlDecision';
 import { buildRegistrySnapshot } from '../AI/TrafficRegistry/snapshot';
+import { LEGACY_PATHS } from '../AI/TrafficRegistry/legacyControl';
+import { sharedHealthStatus } from '../AI/ProviderHealth/healthShare';
+import { suspectedFamilyOutages, type HealthObservation } from '../AI/ProviderHealth/familyHealth';
+import { trafficProviderViews } from '../AI/ProviderHealth/trafficHealth';
 
 export type StepUpResult = 'ok' | 'invalid' | 'not-enrolled' | 'unavailable';
 export type StepUpVerifier = (code: string) => Promise<StepUpResult>;
@@ -55,6 +59,20 @@ function writeFailure(e: unknown): { status: number; error: string } {
   return { status: 503, error: 'The change could not be confirmed. Reload to see the saved revision before trying again.' };
 }
 
+/** Shared provider health (P3) for the admin: what other servers report, and suspected shared outages. No free text. */
+function sharedHealthView(now: number) {
+  const shared = sharedHealthStatus(now);
+  const local: HealthObservation[] = trafficProviderViews(now).filter(v => v.state !== 'up')
+    .map(v => ({ provider: v.provider, state: v.state, kind: v.lastFailureKind ?? 'other', at: v.changedAt, model: v.model, source: 'local' as const }));
+  const remote: HealthObservation[] = shared.remote.map(r => ({ provider: r.provider, state: r.state, kind: r.kind, at: r.atMs, model: r.model ?? null, source: 'shared' as const }));
+  return {
+    mode: shared.mode, lastPullAtMs: shared.lastPullAtMs, lastPullOk: shared.lastPullOk, intervalMs: shared.intervalMs,
+    writes: shared.writes, adopted: shared.adopted,
+    reported: shared.remote.map(r => ({ provider: r.provider, state: r.state, kind: r.kind, atMs: r.atMs })),
+    families: suspectedFamilyOutages([...local, ...remote], now),
+  };
+}
+
 export function registerTrafficControlAdminRoutes(app: Express, verifyAdminToken: RequestHandler, verifyStepUp: StepUpVerifier): void {
   const reads = rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many reads. Please wait one minute.' } });
   const writes = rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many changes. Please wait one minute.' } });
@@ -75,6 +93,8 @@ export function registerTrafficControlAdminRoutes(app: Express, verifyAdminToken
         admission: Object.fromEntries(Object.entries(saved?.models ?? {}).filter(([, m]) => m.admission)
           .map(([k, m]) => [k, { required: m.admission!.required, gaps: admissionGaps(m.admission, now) }])),
         history,
+        paths: LEGACY_PATHS,
+        sharedHealth: sharedHealthView(now),
       });
     } catch {
       res.status(503).json({ error: 'The traffic controls could not be read. Nothing is confirmed on or off.' });

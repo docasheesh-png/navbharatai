@@ -102147,6 +102147,43 @@ Owner t311u sequential audit, BR1999 only (boundary 1951..2105 frozen). Branched
   admin account, not with this panel's login" was the very drift fixed above and is replaced. Locked in
   `tests/theAdminMenuHasNineTabs.test.ts`.
 
+## 2026-11-18 — Traffic Manager V2, P3: older paths obey drain/disable (per-path, off by default) + shared health (observe)
+
+The owner approved P3 ("continue, until full work done"). Nothing in P3 changes routing until an admin acts.
+
+**Older paths and the control store:**
+- `src/server/AI/TrafficRegistry/legacyControl.ts` adds a new control-store field, `coverage`, set per path: `free-chain`, `chat-router`, `builder`. Absent means today's behaviour.
+- When a path is covered, it skips a `draining` or `disabled` provider before starting a NEW attempt. The hooks are in `AIRouter.acquire`, the `MultiProviderTurnRunner` rung loop, and the very first step of the Free Chat rung loop, before any reservation.
+- This is skip only: nothing is added or reordered, and the builder never leaves the selected tier.
+- Traffic caps stay gateway-only, because these paths have no stable request id.
+- Turning a path's coverage off is the rollback, with no deploy.
+
+**Shared health:** `src/server/AI/ProviderHealth/healthShare.ts`, mode set by `TRAFFIC_HEALTH_SHARE`, default **observe**.
+- `trafficHealth.ts` now emits state transitions and records when each state changed.
+- Writes are coalesced: at most one per provider per 20 s, at most 32 per flush, and failures stay queued.
+- One bounded read (last 15 min, newest 64), every 20 s backing off to 60 s, with jitter.
+- Only state, kind, recovery time, model and a random instance id are shared. No provider text.
+- `on` mode adopts only NEWER evidence (`adoptSharedState`). Observe mode shows the reports but nobody skips because of them.
+
+**Family outages (owner improvement #1):** `familyHealth.ts`, display only.
+- Only `down` providers with outage-shaped failures count. An empty balance (suspended) or a rate limit never counts.
+- A domain is flagged only when at least 2 DIFFERENT providers that depend on it are down within 10 min.
+- A reseller's own gateway and `unknown` are never shared domains.
+
+**Admin panel:**
+- An "Older routing paths" switch for each path.
+- The scope note names the covered paths, and says caps and Gateway Emergency OFF stay gateway-only.
+- A "Shared provider health" section, with its mode stated and any suspected shared outage shown.
+
+**Tests:**
+- `legacyControl.test.ts`: default off, per-path skip, census of every builder engine label and Free Chat rung, source guards on where each path asks.
+- `familyHealth.test.ts`, `healthShare.test.ts`, and the panel render test.
+- 10 reversions were each caught. Two were missed at first because one test combined both guards; each guard now has its own case.
+- The `provider_health_shared` collection is classified as `platform`.
+
+To decide next (owner):
+- Turn `TRAFFIC_HEALTH_SHARE=on` after observing it.
+- Turn path coverage on, one path at a time.
 ## 2026-11-18 — Autopsy of the admin Home page copy (18:26Z)
 
 - Q-2754 ✅(PR) "Nearly full" from a rate tile → chip says "Needs attention" when only rate tiles are worst.

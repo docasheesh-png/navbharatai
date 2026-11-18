@@ -137,6 +137,26 @@ export function scaffoldCrashScreen(html: string): string | null {
   return msg || 'an error with no message';
 }
 
+/**
+ * The text the APP put on the page — the visible text minus what is never the app's own content: the
+ * document `<head>` (its `<title>` is text a tag-stripper keeps), `<noscript>` fallbacks, and NavBharatAI's own
+ * "Made with" badge (madeWithBadge.ts), which is injected beside the app and survives every crash.
+ *
+ * 🔴 WHY (autopsy 05eb30ba, 2026-11-18). An ESM link error ("does not provide an export named 'Game'") stopped
+ * the whole module graph, so React never mounted: `#root` empty, no canvas, nothing to press, nothing at phone
+ * size. The verdict still said RENDERED, because "Apex AWD" in the `<title>` and the badge's label made the
+ * page's text longer than the five characters the blank-page rule asks for. So the green guard read the build as
+ * "could not check", kept the broken tree, and never restored the version that rendered 4 minutes earlier; the
+ * post-green recheck said "the app still renders" over the same blank page. PURE.
+ */
+export function appVisibleText(html: string): string {
+  return visibleText(String(html ?? '')
+    .replace(/<head\b[\s\S]*?<\/head>/gi, ' ')
+    .replace(/<title\b[\s\S]*?<\/title>/gi, ' ')
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<(a|div|span|button)\b[^>]*(?:id=["']nbai-badge["']|data-nbai-badge)[^>]*>[\s\S]*?<\/\1>/gi, ' '));
+}
+
 function visibleText(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -334,7 +354,8 @@ export function analyzePreviewHtml(html: string, capture: PreviewCaptureContext 
   // a cause, asserted from an observation that cannot distinguish a crash from a photograph taken too
   // early. When the capture could not see the app, it now says what actually happened instead.
   const rootEmpty = /<div[^>]*id=["'](?:root|app)["'][^>]*>\s*<\/div>/i.test(h);
-  const text = seen;
+  // What the APP shows — never the title or our own badge (autopsy 05eb30ba, see appVisibleText).
+  const text = appVisibleText(h);
   if (rootEmpty && text.length < 5) {
     // POSITIVE EVIDENCE OUTRANKS BLINDNESS. An error overlay or a host error page in this same html is
     // something we genuinely SAW, and returning "inconclusive" here would throw that away and let a

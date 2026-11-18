@@ -58,6 +58,19 @@ const FILE_FORMATS = [
 ];
 for (const f of FILE_FORMATS) COMMON_ACRONYMS.add(f);
 
+/**
+ * Vehicle, engine and measurement terms — a part of a car or a unit, never a service (autopsy 05eb30ba,
+ * 2026-11-18: a racing spec's "Fully Adjustable AWD" told the builder AWD was an unknown name it must not build a
+ * client for, in two builds). One family, so the next drivetrain word is not added one name at a time.
+ */
+const VEHICLE_AND_UNIT_TERMS = [
+  'AWD', 'FWD', 'RWD', '4WD', '2WD', '4X4', 'ABS', 'ESP', 'ESC', 'TCS', 'ECU', 'EBD', 'CVT', 'DCT', 'AMT', 'DSG',
+  'DRS', 'KERS', 'ERS', 'NOS', 'NOX', 'LSD', 'DOHC', 'SOHC', 'VVT', 'CNG', 'LPG', 'EV', 'EVS', 'HEV', 'PHEV',
+  'BEV', 'ICE', 'SUV', 'MUV', 'MPV', 'GT', 'RPM', 'HP', 'BHP', 'PS', 'KW', 'NM', 'PSI', 'KPH', 'KMPH', 'MPH',
+  'MPG', 'CC', 'KMS', 'G', 'AFR', 'OBD', 'TPMS', 'ADAS', 'HUD',
+];
+for (const t of VEHICLE_AND_UNIT_TERMS) COMMON_ACRONYMS.add(t);
+
 /** Services, platforms and stacks NavBharatAI knows by name — the request may really mean to connect them. */
 const KNOWN_SERVICES = new Set([
   'STRIPE', 'RAZORPAY', 'CASHFREE', 'PAYTM', 'PHONEPE', 'PAYPAL', 'FIREBASE', 'SUPABASE', 'MONGODB', 'MYSQL',

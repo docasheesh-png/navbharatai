@@ -29,17 +29,47 @@ interface Rule {
   level: 'high' | 'medium';
   test: RegExp;
   reason: string;
+  /** A command the rule's own reason cannot apply to, though the pattern matched it (see each use). */
+  unless?: (command: string) => boolean;
+}
+
+/**
+ * Every network command in this text talks only to THIS machine: each curl/wget names a literal loopback URL,
+ * and no raw socket tool (nc/netcat/socat/telnet) appears. Data sent to 127.0.0.1 never leaves the sandbox, so
+ * "exfiltration" cannot be what is happening.
+ *
+ * 🔴 WHY (autopsy 05eb30ba, 2026-11-18). A debugger ran `curl -sS -D /tmp/game-headers
+ * http://127.0.0.1:5173/src/game/Game.ts -o /tmp/Game.js; cat /tmp/game-headers; …` to read what the dev server
+ * served. The exfiltration rule spans the whole line, so `cat` … `|` … `curl` matched across three separate
+ * commands, and the one probe that could have shown the stale module was refused as "pipes environment/secrets
+ * to the network". ⚠️ A URL held in a variable (`curl "$U"`) is not literal, so it never qualifies. PURE.
+ */
+export function onlyLoopbackNetwork(command: string): boolean {
+  const text = String(command ?? '');
+  if (/\b(?:nc|netcat|ncat|socat|telnet|ssh|scp|rsync|ftp)\b/i.test(text)) return false;
+  const calls = [...text.matchAll(/\b(?:curl|wget)\b([^;&|\n]*)/gi)];
+  if (calls.length === 0) return false;
+  const LOOPBACK = /^(?:127(?:\.\d{1,3}){3}|localhost|0\.0\.0\.0|\[::1\])$/i;
+  return calls.every((call) => {
+    const urls = [...call[1].matchAll(/\bhttps?:\/\/([^\/\s:'"?#]+|\[[^\]]+\])/gi)].map((m) => m[1]);
+    // A flag that re-points a loopback name somewhere else (`--resolve localhost:80:1.2.3.4`, a proxy) disqualifies.
+    if (/(?:^|\s)(?:--resolve|--connect-to|--proxy|-x|--socks\S*|-e\s+use_proxy)\b/i.test(call[1])) return false;
+    return urls.length > 0 && urls.every((host) => LOOPBACK.test(host));
+  });
 }
 
 // HIGH — irreversible damage, remote code execution, or secret exfiltration.
 const HIGH_RULES: Rule[] = [
-  { level: 'high', test: /\brm\s+(-[a-z]*\s+)*-[a-z]*[rf][a-z]*\b[^|&;]*\s(\/|~|\$HOME|\/\*|\.\s*$|\*\s*$)/i, reason: 'recursive delete of a root/home/wildcard path (irreversible)' },
+  // A path under /tmp is scratch space, never "root/home" (autopsy 05eb30ba: `rm -rf /tmp/nav-transform` was refused
+  // as a root delete, because `\s\/` matched the leading slash of ANY absolute path). /tmp itself, a /tmp wildcard
+  // and a path that climbs out with `..` stay blocked.
+  { level: 'high', test: /\brm\s+(-[a-z]*\s+)*-[a-z]*[rf][a-z]*\b[^|&;]*\s(\/(?!tmp\/(?![^\s;&|]*\.\.)[^\s*;&|]+)|~|\$HOME|\/\*|\.\s*$|\*\s*$)/i, reason: 'recursive delete of a root/home/wildcard path (irreversible)' },
   { level: 'high', test: /--no-preserve-root/i, reason: 'rm --no-preserve-root (removes the entire filesystem)' },
   { level: 'high', test: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: 'fork bomb' },
   { level: 'high', test: /\b(mkfs|fdisk|dd)\b[^\n]*\b(of=)?\/dev\//i, reason: 'writes directly to a disk device (data loss)' },
   { level: 'high', test: />\s*\/dev\/sd[a-z]/i, reason: 'redirect to a raw disk device' },
   { level: 'high', test: /\b(curl|wget|fetch)\b[^\n|]*\|[^\n]*\b(sh|bash|zsh|python[0-9.]*|node)\b/i, reason: 'pipes downloaded content straight into a shell/interpreter (remote code execution)' },
-  { level: 'high', test: /\b(printenv|env|cat)\b[^\n]*\|[^\n]*\b(curl|wget|nc|netcat)\b/i, reason: 'pipes environment/secrets to the network (exfiltration)' },
+  { level: 'high', test: /\b(printenv|env|cat)\b[^\n]*\|[^\n]*\b(curl|wget|nc|netcat)\b/i, reason: 'pipes environment/secrets to the network (exfiltration)', unless: onlyLoopbackNetwork },
   { level: 'high', test: /\b(cat|cp|scp)\b[^\n]*(\.ssh\/|id_rsa|id_ed25519|\.aws\/credentials|\.netrc)/i, reason: 'reads/copies private keys or credentials' },
   // SECURITY Phase 2.4 — a BARE env dump (`printenv`, `env` as a standalone command, optionally piped/
   // redirected) exposes EVERY server secret (ANTHROPIC_API_KEY, SECRET_ENCRYPTION_KEY, …) into the
@@ -88,7 +118,7 @@ export function classifyCommandRisk(command: string): CommandRisk {
   const variants = shellCommandVariants(cmd);
 
   const highReasons = [...new Set(
-    variants.flatMap((v) => HIGH_RULES.filter((r) => r.test.test(v)).map((r) => r.reason)),
+    variants.flatMap((v) => HIGH_RULES.filter((r) => r.test.test(v) && !(r.unless && r.unless(v))).map((r) => r.reason)),
   )];
   if (highReasons.length) return { level: 'high', reasons: highReasons };
 

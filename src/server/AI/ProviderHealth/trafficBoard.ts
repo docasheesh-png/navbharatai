@@ -36,7 +36,7 @@ export interface TrafficBoard {
 
 function priceOf(provider: string, model: string | null): TrafficBoardRow['price'] {
   try {
-    const rate = realRateFor(provider, model ?? undefined);
+    const rate = realRateFor(provider.replace(/#\d+$/, ''), model ?? undefined);
     if (!rate || !Number.isFinite(rate.inputPerMTok) || !Number.isFinite(rate.outputPerMTok)) return null;
     return { inputPerMTok: rate.inputPerMTok, outputPerMTok: rate.outputPerMTok };
   } catch {

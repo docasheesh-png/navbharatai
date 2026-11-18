@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildTrafficBoard } from './trafficBoard';
-import { IMAGE_PROVIDER_IDS, VISION_PROVIDER_IDS } from './providerCapabilities';
+import { IMAGE_PROVIDER_IDS, VISION_PROVIDER_IDS, providerCapabilities } from './providerCapabilities';
 import {
-  classifyTrafficError, noteProviderCall, percentile, resetTrafficHealthForTests,
+  classifyTrafficError, noteProviderCall, percentile, providerInFlight, resetTrafficHealthForTests,
   shouldSkipProvider, TRAFFIC_RECOVERY_MS, trafficProviderViews,
 } from './trafficHealth';
 
@@ -24,7 +24,8 @@ describe('traffic health', () => {
   it('skips a suspended provider immediately and allows one recovery call after the window', () => {
     noteProviderCall({ provider: 'KIMI', model: 'kimi-k2.7-code', surface: 'builder', ok: false, totalMs: 400, error: new Error(SUSPENDED), at: 1_000 });
     expect(shouldSkipProvider('kimi', 1_000)).toBe(true);
-    expect(shouldSkipProvider('KIMI#2', 1_000 + TRAFFIC_RECOVERY_MS)).toBe(false);
+    expect(shouldSkipProvider('KIMI#2', 1_000)).toBe(false); // independently funded credential
+    expect(shouldSkipProvider('KIMI', 1_000 + TRAFFIC_RECOVERY_MS)).toBe(false);
     expect(shouldSkipProvider('KIMI', 1_000 + TRAFFIC_RECOVERY_MS + 1)).toBe(true);
     noteProviderCall({ provider: 'KIMI', surface: 'builder', ok: true, totalMs: 800, firstByteMs: 200, at: 2_000 });
     expect(shouldSkipProvider('KIMI', 9_000)).toBe(false);
@@ -42,6 +43,42 @@ describe('traffic health', () => {
     expect(view?.totalP50).toBe(percentile([100, 300, 500], 50));
     expect(view?.totalP95).toBe(percentile([100, 300, 500], 95));
     expect(view?.firstByteP50).toBe(30);
+  });
+
+  it('does not leave a cancelled or undispatched recovery probe stuck forever', () => {
+    noteProviderCall({ provider: 'KIMI', surface: 'builder', ok: false, error: new Error(SUSPENDED), at: 0 });
+    expect(shouldSkipProvider('KIMI', TRAFFIC_RECOVERY_MS)).toBe(false);
+    expect(shouldSkipProvider('KIMI', TRAFFIC_RECOVERY_MS + 1)).toBe(true);
+    expect(shouldSkipProvider('KIMI', 2 * TRAFFIC_RECOVERY_MS)).toBe(false);
+  });
+
+  it('does not release a second recovery while a physical attempt still owns its slot', () => {
+    noteProviderCall({ provider: 'GLM', surface: 'chat', ok: false, error: new Error(SUSPENDED), at: 0 });
+    expect(shouldSkipProvider('GLM', TRAFFIC_RECOVERY_MS)).toBe(false);
+    providerInFlight('GLM', 1);
+    expect(shouldSkipProvider('GLM', 2 * TRAFFIC_RECOVERY_MS)).toBe(true);
+    providerInFlight('GLM', -1);
+    expect(shouldSkipProvider('GLM', 2 * TRAFFIC_RECOVERY_MS)).toBe(false);
+  });
+
+  it('a failed recovery with a different error permits another bounded probe', () => {
+    noteProviderCall({ provider: 'GLM', surface: 'chat', ok: false, error: new Error(SUSPENDED), at: 0 });
+    expect(shouldSkipProvider('GLM', TRAFFIC_RECOVERY_MS)).toBe(false);
+    noteProviderCall({ provider: 'GLM', surface: 'chat', ok: false, error: new Error('429 rate limit'), at: TRAFFIC_RECOVERY_MS + 10 });
+    expect(shouldSkipProvider('GLM', 2 * TRAFFIC_RECOVERY_MS)).toBe(true);
+    expect(shouldSkipProvider('GLM', 2 * TRAFFIC_RECOVERY_MS + 10)).toBe(false);
+  });
+
+  it('keeps provider state bounded even when diagnostic names vary', () => {
+    for (let i = 0; i < 300; i++) noteProviderCall({ provider: `test-${i}`, surface: 'builder', ok: true });
+    expect(trafficProviderViews()).toHaveLength(256);
+  });
+
+  it('chat/image overlap and the Qubax builder alias keep their real capabilities', () => {
+    expect(providerCapabilities('GEMINI', new Set())).toMatchObject({ chat: true, imageGen: true, vision: true });
+    expect(providerCapabilities('ENGINE_QX', new Set(['ENGINE_QX']))).toMatchObject({ build: true, vision: true });
+    noteProviderCall({ provider: 'QUBAX', surface: 'qubax', ok: false, error: new Error(SUSPENDED), at: 0 });
+    expect(shouldSkipProvider('ENGINE_QX', 1)).toBe(true);
   });
 
   it('the kill switch stops the skip', () => {

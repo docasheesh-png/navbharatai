@@ -101950,3 +101950,10 @@ Tests:
 - `control.test.ts`, `trafficControlAdmin.test.ts`, `policy.test.ts` (gate), and `tests/trafficControlNeverStrandsStartedWork.test.ts` (source guards and behaviour).
 - 8 reversions each caught: mid-request recheck reading live control, global switch ignored, planner ignoring the gate, no revision check, no replay guard, LKG dropped, older revision adopted, admission gate off.
 - The P1 `KNOWN_UNREACHABLE` entries were removed, since the route now reads the snapshot. The three new collections are classified as kept for ever, with reasons.
+
+
+## 2026-11-18 — PR #4282 reconciliation and health regression fixes
+
+Merged current main while retaining both live-health and traffic-control/engine-history admin features. Fixed the generated image client referencing server-only `noteProviderCall`; generated client source is again standalone, and the health board explicitly labels app image integrations as catalog-only. Provider health now uses bounded storage, retains separate pool credential identities, aliases Qubax/ENGINE_QX, records the supplied builder clock, and prevents cancelled or failed recovery probes from being stuck forever. Router admission claims recovery at dispatch and tracks physical occupancy; vision cancellation does not count as provider failure. Unmeasured providers show “not measured”. Each test starts fresh process-health state; physical-capacity/maintenance-threshold fixtures explicitly isolate their own independent gates.
+
+Validation on Node 22.23.4: 12 historical-failure suites passed (287 tests); six router/vision/health suites passed (51 tests); final recovery/account/capability suite passed (10 tests); strict server TypeScript passed. Full combined coverage, remaining CI gates and emulator drills are being handled by the integration coordinator. No full-CI or merge completion is claimed by this entry.

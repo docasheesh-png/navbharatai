@@ -20,11 +20,11 @@ export interface ProviderCapabilities {
 }
 
 export function providerCapabilities(id: string, buildProviders: ReadonlySet<string>): ProviderCapabilities {
-  const name = String(id ?? '').trim().toUpperCase();
+  const name = String(id ?? '').trim().toUpperCase().replace(/#\d+$/, '');
   const image = new Set(IMAGE_PROVIDER_IDS.map((x) => x.toUpperCase()));
-  const vision = new Set<string>(VISION_PROVIDER_IDS);
+  const vision = new Set<string>([...VISION_PROVIDER_IDS, 'ENGINE_QX']);
   return {
-    chat: !image.has(name),
+    chat: !['NAVBHARATAI', 'POLLINATIONS', 'STABILITY'].includes(name),
     build: buildProviders.has(name),
     vision: vision.has(name),
     imageGen: image.has(name) || name === 'GEMINI' || name === 'OPENAI' || name === 'XAI' || name === 'GROK',

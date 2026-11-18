@@ -861,9 +861,9 @@ export function makeMultiProviderTurnRunner(
           ?? (chain[i].modelId ? deadForRun.get(`${name}::${chain[i].modelId}`) : undefined)
           // …or this MODEL starved on ANY key of this family earlier in the run (see `deadKeyFor`).
           ?? (chain[i].modelId ? deadForRun.get(starvedKeyFor(chain[i])) : undefined);
-        if (shouldSkipProvider(reportName, now())) {
+        if (shouldSkipProvider(name, now())) {
           fellBackFrom.push(name);
-          const why = providerSkipReason(reportName);
+          const why = providerSkipReason(name);
           if (lastError === undefined && why) lastError = new Error(why);
           continue;
         }
@@ -932,7 +932,7 @@ export function makeMultiProviderTurnRunner(
           // `raceStop` makes EVERY runner stop waiting on a stop, including one with no cancel handle of
           // its own; a streaming runner additionally closes its stream (it receives the same signal).
           await assertAiAvailable();
-          providerInFlight(reportName, 1);
+          providerInFlight(name, 1);
           trafficOpen = true;
           const result = await raceStop(runner.runTurn({
             ...params, canAbandonSlowStream, hasNextRung: i + 1 < chain.length,
@@ -1011,18 +1011,18 @@ export function makeMultiProviderTurnRunner(
           // recorded as 18.4 s — GLM's 15 s crawl charged to the engine that rescued it. `??` keeps the
           // innermost value when one chain wraps another; the rungs left behind add up across both.
           noteProviderCall({
-            provider: reportName, model: result.model ?? chain[i].modelId, surface: 'builder', ok: true,
+            provider: name, at: now(), model: result.model ?? chain[i].modelId, surface: 'builder', ok: true,
             totalMs: answeredInMs, firstByteMs: result.firstOutputAfterMs,
           });
-          providerInFlight(reportName, -1);
+          providerInFlight(name, -1);
           trafficOpen = false;
           return { ...result, attemptMs: result.attemptMs ?? answeredInMs, fallbackMs: fallbackMs + (result.fallbackMs ?? 0) };
         } catch (err) {
           fallbackMs += Math.max(0, now() - attemptStartedAt);
-          if (trafficOpen) { providerInFlight(reportName, -1); trafficOpen = false; }
+          if (trafficOpen) { providerInFlight(name, -1); trafficOpen = false; }
           if (!isBuildStoppedError(err) && !params.signal?.aborted && !isBudgetEndedError(err)) {
             noteProviderCall({
-              provider: reportName, model: chain[i].modelId, surface: 'builder', ok: false,
+              provider: name, at: now(), model: chain[i].modelId, surface: 'builder', ok: false,
               totalMs: Math.max(0, now() - attemptStartedAt), error: err,
             });
           }

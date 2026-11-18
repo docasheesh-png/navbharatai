@@ -56,7 +56,7 @@ export function TrafficHealthPanel({ traffic }: { traffic: TrafficHealthPayload 
         <div>
           <h3 className="text-sm font-black text-ink uppercase tracking-tight">Live provider health</h3>
           <p className="text-[9px] text-muted font-bold uppercase tracking-widest mt-0.5">
-            This server, since it started. A suspended or down provider is skipped by the existing ladders until one recovery call.
+            Recent calls on this server. Chat, builder and vision health can skip an unavailable account until a recovery call.
           </p>
         </div>
       </div>
@@ -94,7 +94,7 @@ export function TrafficHealthPanel({ traffic }: { traffic: TrafficHealthPayload 
               {rows.filter((row) => row.samples > 0 || row.state !== 'up' || row.configured).slice(0, 40).map((row) => (
                 <tr key={row.provider}>
                   <td className="py-2 px-2 font-mono font-black text-ink">{row.label || row.provider}<span className="block font-normal text-muted">{row.model || '—'}</span></td>
-                  <td className={`py-2 px-2 font-black uppercase ${row.state === 'up' ? 'text-success' : 'text-danger'}`}>{row.state}</td>
+                  <td className={`py-2 px-2 font-black uppercase ${row.state === 'up' ? 'text-success' : 'text-danger'}`}>{row.samples ? row.state : 'not measured'}</td>
                   <td className="py-2 px-2 font-mono text-ink">{row.inFlight}</td>
                   <td className="py-2 px-2 font-mono text-muted">{ms(row.firstByteP50)} / {ms(row.firstByteP95)}</td>
                   <td className="py-2 px-2 font-mono text-muted">{ms(row.totalP50)} / {ms(row.totalP95)}</td>
@@ -109,7 +109,7 @@ export function TrafficHealthPanel({ traffic }: { traffic: TrafficHealthPayload 
       )}
 
       <p className="text-[9px] text-faint font-bold uppercase tracking-widest">
-        Vision: {(traffic?.vision ?? []).join(', ') || '—'}. Image generation: {(traffic?.imageGen ?? []).join(', ') || '—'}.
+        Vision: {(traffic?.vision ?? []).join(', ') || '—'}. App image integrations (catalog only): {(traffic?.imageGen ?? []).join(', ') || '—'}.
         Hindi-probe score and long-context score are not measured yet.
       </p>
     </div>

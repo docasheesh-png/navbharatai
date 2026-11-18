@@ -5174,3 +5174,7 @@ unchanged. Module: `src/server/AgentV3/moyiBuilder.ts` (same shape as `bluesmind
   cannot do fails and the chain moves to the next rung; the build report will show `ENGINE_MY` failures if so.
 - **Owner's recorded risk:** users' prompts and code on Weak builds now pass through Moyi, a reseller whose upstream
   and "No training" label are its own claims and whose rate limits were not published on the reviewed page.
+
+### `AGENTV3_TRAFFIC_HEALTH` — live provider health
+
+Default on; `off`, `false` or `0` disables the additional in-process health recording and skip. The existing router/builder/vision ladders retain their own admission, billing, cooldown and maintenance checks. A suspended credential or three consecutive timeout/invalid outcomes opens a five-minute recovery window. Pool credentials retain separate identities. A recovery lease is bounded and a tracked physical call keeps ownership until it settles. State is bounded to 256 account labels with 40 samples each and is local to each server; it is not a fleet-wide health database. App image integrations are catalogued only, because their generated clients run outside this server. Providers with no recorded outcomes are displayed as not measured.

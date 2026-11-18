@@ -4,7 +4,7 @@
 // ladder. It remembers what real calls just did, and a ladder asks `shouldSkipProvider` before it
 // spends another request on an account that has already said it is suspended or has stopped answering.
 // Chat, the free chain and professionals already pass through `recordProviderLatency`; the builder
-// chain, Qubax, vision and image generation call `noteProviderCall` at the same place they already
+// chain, Qubax and vision call `noteProviderCall` at the same place they already
 // handle the outcome. Prices, keys and the configured model come from the Test Chat status and the
 // rate card — this module does not keep a second copy of either.
 //
@@ -13,6 +13,7 @@
 
 import { isFatalProviderError, isProviderBalanceError } from '../../AgentV3/providerErrorClass';
 import { parseEnvFlag } from '../../lib/envFlag';
+import { BoundedCache } from '../../lib/boundedCache';
 
 export type TrafficSurface = 'chat' | 'professional' | 'builder' | 'qubax' | 'vision' | 'image';
 export type TrafficErrorKind = 'ok' | 'rate-limit' | 'invalid' | 'timeout' | 'suspended' | 'other';
@@ -55,16 +56,17 @@ interface Row {
   probing: boolean;
 }
 
-const rows = new Map<string, Row>();
+const rows = new BoundedCache<string, Row>({ maxEntries: 256 });
 
 /** Default on. Only an explicit off (`off` / `false` / `0`) stops it. */
 export function trafficHealthEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return parseEnvFlag(env.AGENTV3_TRAFFIC_HEALTH) !== false;
 }
 
-/** One name for the same account, whatever the caller spelled. `GLM#2` and `glm` are GLM. */
+/** One name for the same account, whatever the caller spelled. Pool slots stay separate: one exhausted credential must not disable a funded neighbour. */
 export function canonProvider(name: string): string {
-  const raw = String(name ?? '').trim().toUpperCase().replace(/#\d+$/, '');
+  const raw = String(name ?? '').trim().toUpperCase();
+  if (raw === 'QUBAX' || raw === 'ENGINE-QX') return 'ENGINE_QX';
   if (raw === 'GLM-BUILDER' || raw === 'GLM_BUILDER') return 'GLM';
   if (raw === 'ROUTER-ONE' || raw === 'ROUTER_ONE' || raw === 'ENGINE-R1') return 'ENGINE_R1';
   if (raw === 'BLUESMINDS' || raw === 'ENGINE-BM') return 'ENGINE_BM';
@@ -124,6 +126,8 @@ export function noteProviderCall(call: TrafficCall): void {
     row.recoverAt = 0;
     return;
   }
+  // Every completed probe releases its lease, including a rate-limit/other failure.
+  if (row.probing) { row.probing = false; row.recoverAt = sample.at + TRAFFIC_RECOVERY_MS; }
   if (kind === 'suspended') {
     row.state = 'suspended';
     row.reason = errorText(call.error);
@@ -156,8 +160,10 @@ export function shouldSkipProvider(provider: string, now = Date.now()): boolean 
   // A rate-limit is the existing cooldown's job. Skip only an account that cannot answer
   // (suspended / empty balance) or one that has stopped answering (repeated timeout or rejection).
   if (!row || row.state === 'up') return false;
-  if (now >= row.recoverAt && !row.probing) {
+  if (now >= row.recoverAt && (!row.probing || row.inFlight === 0)) {
     row.probing = true;
+    // Bound an abandoned probe: cancellation or a pre-dispatch refusal has no provider outcome.
+    row.recoverAt = now + TRAFFIC_RECOVERY_MS;
     return false;
   }
   return true;
@@ -197,7 +203,7 @@ export interface TrafficProviderView {
 }
 
 export function trafficProviderViews(now = Date.now()): TrafficProviderView[] {
-  return [...rows.entries()].map(([provider, row]) => {
+  return [...rows.entries(now)].map(([provider, row]) => {
     const totals = row.samples.filter((s) => s.ok && s.totalMs > 0).map((s) => s.totalMs);
     const first = row.samples.filter((s) => s.ok && typeof s.firstByteMs === 'number').map((s) => s.firstByteMs as number);
     const errorRate: Partial<Record<TrafficErrorKind, number>> = {};

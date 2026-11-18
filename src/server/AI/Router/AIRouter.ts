@@ -11,7 +11,7 @@ import { providerCooldownStore } from '../../lib/ProviderCooldownStore';
 import { getBreaker, allBreakerNames } from './CircuitBreaker';
 import { tracer } from '../../observability/Tracer';
 import { shouldRaceStreams } from './streamRacePolicy';
-import { noteProviderCall, shouldSkipProvider } from '../ProviderHealth/trafficHealth';
+import { noteProviderCall, providerInFlight, shouldSkipProvider } from '../ProviderHealth/trafficHealth';
 
 /**
  * Which rung actually served a streamed turn.
@@ -184,8 +184,14 @@ export class AIRouter {
   private trafficSurface(): 'chat' | 'professional' {
     return this.universe.includes('professional') ? 'professional' : 'chat';
   }
-  private acquire(name: string): boolean { return acquireSlot(this.slotKey(name)); }
-  private release(name: string): void { releaseSlot(this.slotKey(name)); }
+  private acquire(name: string): boolean {
+    // Claim a recovery probe only at the actual dispatch boundary, after health/capacity checks.
+    if (this.inFlightCount(name) >= MAX_IN_FLIGHT || shouldSkipProvider(name)) return false;
+    if (!acquireSlot(this.slotKey(name))) return false;
+    providerInFlight(name, 1);
+    return true;
+  }
+  private release(name: string): void { releaseSlot(this.slotKey(name)); providerInFlight(name, -1); }
   private inFlightCount(name: string): number { return inFlight.get(this.slotKey(name)) || 0; }
 
   private async routeVerifiedFree(prompt: string, systemPrompt?: string, schema?: unknown, images?: string[], modelOverride?: string, signal?: AbortSignal): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
@@ -238,7 +244,6 @@ export class AIRouter {
     const eligible: AIProvider[] = [];
     for (const p of racers) {
       signal?.throwIfAborted();
-      if (shouldSkipProvider(p.name)) { console.log(`[RACE] skip ${p.name} (suspended or down)`); continue; }
       if (isOnCooldown(p.name)) { console.log(`[RACE] skip ${p.name} (cooldown)`); continue; }
       assertFreeAnswerDispatch();
       const healthy = await p.healthCheck().catch(() => false);
@@ -289,7 +294,6 @@ export class AIRouter {
     // Last-resort fallback (sequential) — e.g. Claude Haiku.
     for (const p of fallbacks) {
       signal?.throwIfAborted();
-      if (shouldSkipProvider(p.name)) continue;
       assertFreeAnswerDispatch();
       const healthy = await p.healthCheck().catch(() => false);
       signal?.throwIfAborted();
@@ -356,7 +360,6 @@ export class AIRouter {
     for (const p of providers) {
       await assertAiAvailable();
       if (signal?.aborted) return { ok: false, reason: 'aborted' };
-      if (shouldSkipProvider(p.name)) continue;
       if (!p.executeStream) continue;
       if (!this.acquire(p.name)) continue;
       const t = Date.now();
@@ -647,10 +650,6 @@ export class AIRouter {
         signal?.throwIfAborted();
         if (pass === 2 && attempted.has(provider.name)) continue;
 
-        if (shouldSkipProvider(provider.name)) {
-          console.log(`[TRAFFIC] Skipping ${provider.name} (suspended or down)`);
-          continue;
-        }
         const onCooldown = isOnCooldown(provider.name);
         if (pass === 1 && onCooldown) {
           console.log(`[CIRCUIT] Skipping ${provider.name} (cooldown active)`);

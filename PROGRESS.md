@@ -102141,3 +102141,5 @@ Owner t311u sequential audit, BR1999 only (boundary 1951..2105 frozen). Branched
 - OPEN/BLOCKED: Q-2757…Q-2764 — UTC "today", per-instance hit counters, Reliability 0 from the legacy sample, 3 idle
   billed sandboxes, the −₹16,102 margin (admin decision), BUILD_BLOCKED_NO_CREDITS on new users, two reason-less log
   lines, the Grievance Officer env.
+
+**2026-11-18, later: #4298 merged** — Q-2754 Q-2755 Q-2756 closed (3). The admin Home autopsy stays NOT COMPLETE: Q-2757…Q-2764 open (Q-2761, Q-2764 blocked on the admin).

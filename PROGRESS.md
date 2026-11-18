@@ -102114,3 +102114,8 @@ Owner: *"jab bhi koi racing game bane, to hamesa (100%) navbharatai me library s
   expired denied, client header, census of all three route files). Reversion: session ignored → the screenshot case fails.
 - **Owner action:** sign in to Admin Panel once on the device (the tab follows that session); a frontend change reaches the
   phone apps only with the next store build.
+- **Same day, owner follow-up ("admin penal ke andar alag 'app mart' button bana do, waha sab dikhe"):** Admin Panel →
+  Apps → the page formerly called "Review" is now **"App Mart"** and embeds the store's own `NavAppStore` on its Manage
+  apps tab (lazy-loaded, the same component — not a second review screen). The old copy "It opens as the signed-in store
+  admin account, not with this panel's login" was the very drift fixed above and is replaced. Locked in
+  `tests/theAdminMenuHasNineTabs.test.ts`.

@@ -117,6 +117,7 @@ const FEATURE_HOME: Record<string, string | string[]> = {
   '>Publish Capacity</h3>': 'publishing',
   'only={ENGINE_REPORTS_ON.publishing}': 'publishing',
   "storeTab: 'review'": 'review',
+  '<EmbeddedAppMart initialTab="review"': 'review', // 2026-11-18: Apps → App Mart shows the store's Manage apps tab inline
   '<BotsLedgerPanel': 'bots',
   // Money · Ads (2026-10-20): the admin's own product ads — form, picture crop, preview and list.
   '<AdsPanel': 'ads',
@@ -253,5 +254,7 @@ describe('destructive controls on the moved pages ask first (PR 2 audit point 9)
 
   it('the App Mart review entry reuses the existing navigation event, not a second review screen', () => {
     expect(DASH).toContain("new CustomEvent('navbharat:navigate', { detail: { view: 'appstore', storeTab: 'review' } })");
+    // The inline App Mart (2026-11-18) is the SAME NavAppStore component users open, on its Manage apps tab.
+    expect(DASH).toContain("lazy(() => import('./ide/NavAppStore').then((m) => ({ default: m.NavAppStore })))");
   });
 });

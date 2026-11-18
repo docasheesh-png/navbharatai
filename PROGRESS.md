@@ -102087,3 +102087,6 @@ made rock-solid). Ledger:
   `gatewayRunners`. Proven by reversion (familyKey ignored → 2 fail; accountKey ignored → 1 fail).
 - **Trade-off stated honestly:** a gateway now spends up to three model attempts per turn before moving on, as the owner
   specified; each timed-out model is still cooled down on its own, so the next turn does not re-wait it.
+
+**2026-11-18, later: #4290 merged** — Q-2726 Q-2727 Q-2728 Q-2729 Q-2730 Q-2731 closed (6). Autopsy 05eb30ba stays NOT
+COMPLETE: Q-2732…Q-2752 open; Q-2709 and Q-2712 carry the notes of what is still open in them.

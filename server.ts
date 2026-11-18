@@ -910,6 +910,10 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
       import('./src/server/AI/ProviderHealth/healthShare')
         .then(({ startHealthShare }) => startHealthShare())
         .catch(() => { /* sharing is an observer; boot never depends on it */ });
+      // Traffic Manager V2 P4: decision records (sampled) and complete SLO counters, flushed in the background.
+      import('./src/server/AI/TrafficRegistry/decisionRecords')
+        .then(({ startDecisionSink }) => startDecisionSink())
+        .catch(() => { /* recording is an observer; boot never depends on it */ });
       // P-BRE.6 — recover build jobs orphaned by a previous instance's restart/crash: any job left
       // in a non-terminal status with a stale heartbeat is honestly marked FAILED (never silently
       // stuck). Fire-and-forget + self-guarded so it can never delay or crash startup.

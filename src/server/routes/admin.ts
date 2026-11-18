@@ -231,6 +231,8 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'admin_provider_switches',
   // Traffic Manager V2 control store: one current doc plus revision and audit rows (RETAINED_INDEFINITELY).
   'admin_traffic_control', 'admin_traffic_control_revisions', 'admin_traffic_control_audit',
+  // Traffic Manager V2 P4: decision records (30 days) and per-instance daily SLO counters (35 days).
+  'routing_decisions', 'routing_slo_daily',
   'hosting_billing', 'hosting_period_usage',
   // Already on clocks, and absent from this inventory for the same reason the eleven above were.
   'takedown_records', 'safety_flags', 'admin_audit_log', 'build_jobs', 'build_failures',

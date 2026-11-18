@@ -102252,3 +102252,37 @@ The complete CI coverage run on `5950b230` finished in 1629.5 seconds: 3,488 fil
 ### 2026-11-18 — BR 99771bc7: reconnect recovery and Traffic Manager integration
 
 An environment reconnect interrupted the new `97112b2` gate after its audit check; that attempt is incomplete. A detached rerun preserved the unchanged commit and completed all 15 non-coverage required build checks and all 11 emulator drills. Its full coverage was interrupted after 575.5 seconds without a reported assertion failure when main advanced to `4fb28f0` (#4301), including changes to `MultiProviderTurnRunner`. Integrated that main update without source conflicts; the mandatory complete gate must now run on this merged tree. Earlier failures/interruptions remain in the evidence record and are not counted as passes. No coverage gate, test selection, routing policy or budget was changed by this autopsy. No merge to main is authorized.
+## 2026-11-18 — Traffic Manager V2, P4: decision records + complete SLO counters (observation only)
+
+The code is in `src/server/AI/TrafficRegistry/decisionRecords.ts`. It hooks the one chat boundary, `observeChatOutcome`, which every chat route passes on both the gateway and the legacy paths. `UniversalAIRouter` passes which path answered.
+
+**Counters (owner improvement #4):**
+- EVERY outcome is counted, with no sampling.
+- Each instance writes its own absolute per-day, per-surface totals once a minute to `routing_slo_daily` (35 days). A retry never double-counts, and there is no hot shared doc.
+- The SLO comes only from these counters. "Eligible" means complete, partial or failed. Policy refusals and user cancels are excluded.
+- Shown with its denominator and a Wilson 95% interval. Target: 99.5% for free, navbharat and professional.
+
+**Decision records (owner decision 4):**
+- 100% of failures and critical events (no provider at all), plus 10% of successes, deterministic and weighted ×10.
+- Fixed fields only (`RECORD_FIELDS`): no prompt, answer, uid, key or provider message. The request id is hashed.
+- Bounded buffer (1,000), at most 200 written per 30 s, and a failed write keeps the records.
+- `routing_decisions`, kept 30 days.
+
+**Admin:** a "Reliability (last 7 days)" card and a recent-failures list, via `GET /api/admin/traffic-control/slo`.
+
+**NOT built in P4, stated plainly:**
+- The planned "shadow plan" for surfaces the gateway does not serve. The gateway's planner needs evidence-bound requests and candidates that only its own ingress builds. Faking them outside it would record a pick the gateway could never have made.
+- The P5 baseline is therefore the legacy path's REAL outcomes from these counters, not a hypothetical gateway pick.
+- Builder, vision and image decisions are recorded in their own phases (P8–P10).
+
+**Tests:**
+- `decisionRecords.test.ts`: sampling, fixed fields, SLO from counters only, absolute counters across instances, bounded buffer, kill switch, the boundary records gateway and legacy paths and rethrows.
+- `ReliabilityBody.render.test.tsx`.
+- 5 reversions each caught.
+
+
+### 2026-11-18 — BR 99771bc7: PR4303 green, then fresh Traffic Manager P4 integration
+
+Published PR #4303 at `c172ee3` after all 27 required local CI checks plus package signatures passed. Local coverage: 53,817 passed/89 skipped; all 11 emulator drills passed. GitHub run `44407511896` passed build/test and drills on that same head (53,811 passed/95 skipped); its artifact uploads succeeded and the asset-only conditional job was inapplicable. The six-test difference matched built-CSS/JS availability: local coverage had prior-build artifacts, while CI ran coverage before building. A separate check against the completed final8 build passed 12 tests/1 skipped, including all six actual built-asset checks; no earlier artifact-freshness claim was invented.
+
+During remote CI, main advanced to `a5b136d` (#4302 Traffic Manager P4). GitHub subsequently reported PR mergeability as dirty; the local merge completed automatically without manual source conflicts, preserving both progress histories. The complete gate must now verify this newly combined tree before updating the PR branch. The previous head's successful checks remain valid historical evidence, not a substitute for the new combined run. The generated prior `dist` is archived outside the repository before the next coverage run so local built-asset availability matches CI's fresh checkout; fresh output will be checked after the build as a separate supplemental test. No production gate, coverage threshold or test selection changed. No merge to main is authorized.

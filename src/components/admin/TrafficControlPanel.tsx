@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { adminFailed, adminGet, adminHeaders } from '../../lib/adminFetch';
 import {
-  editableBody, isTrafficControlView, saveProblem,
+  editableBody, isSloView, isTrafficControlView, saveProblem, sloText, type SloView,
   type ControlBodyView, type RouteState, type SurfaceMode, type TrafficControlView,
 } from '../../lib/trafficControlView';
 
@@ -29,6 +29,16 @@ export function TrafficControlPanel({ adminToken }: { adminToken: string }) {
     setError(null); setData(r.data); setDraft(editableBody(r.data));
   }, [adminToken]);
   useEffect(() => { void load(); }, [load]);
+  const [slo, setSlo] = useState<SloView | null>(null);
+  const [sloError, setSloError] = useState<string | null>(null);
+  useEffect(() => {
+    void (async () => {
+      const r = await adminGet<unknown>('/api/admin/traffic-control/slo', { token: adminToken });
+      if (adminFailed(r)) { setSloError(r.message); return; }
+      if (!isSloView(r.data)) { setSloError('The reliability numbers came back in a shape this screen does not know.'); return; }
+      setSlo(r.data);
+    })();
+  }, [adminToken]);
 
   const send = async (path: string, payload: Record<string, unknown>, success: string) => {
     if (!data) return;
@@ -49,6 +59,7 @@ export function TrafficControlPanel({ adminToken }: { adminToken: string }) {
   };
 
   return (
+    <>
     <TrafficControlBody data={data} error={error} draft={draft} reason={reason} totp={totp} rollbackTo={rollbackTo}
       saving={saving} saveError={saveError} done={done}
       onDraft={(d) => { setDraft(d); setDone(null); }} onReason={setReason} onTotp={setTotp}
@@ -56,6 +67,39 @@ export function TrafficControlPanel({ adminToken }: { adminToken: string }) {
       onSave={() => { if (draft) void send('/api/admin/traffic-control', { body: draft }, 'Controls updated.'); }}
       onRollback={() => { if (rollbackTo) void send('/api/admin/traffic-control/rollback', { targetRevision: rollbackTo }, `Rolled back to revision ${rollbackTo}.`); }}
       onReset={() => { if (data) setDraft(editableBody(data)); setSaveError(null); }} />
+    <ReliabilityBody slo={slo} error={sloError} />
+    </>
+  );
+}
+
+/** Reliability over 7 days, from complete counters: rate, 95% interval, denominator, target. Pure props. */
+export function ReliabilityBody({ slo, error }: { slo: SloView | null; error: string | null }) {
+  return (
+    <section className="mt-3 space-y-2 rounded-md border border-line bg-surface p-4" aria-labelledby="reliability-title" data-testid="traffic-reliability">
+      <h3 id="reliability-title" className="text-base font-semibold text-ink">Reliability (last 7 days)</h3>
+      <p className="text-xs text-muted">Counted from every request on every server, not from a sample. Eligible = answered or failed; refusals for policy and requests the person cancelled are not counted either way.</p>
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      {slo && slo.slo.length === 0 && <p className="text-sm text-muted">No requests counted yet. Numbers appear within a minute of the first chat.</p>}
+      {slo && slo.slo.map((r) => (
+        <p key={r.surface} className="text-sm text-ink">
+          <strong>{r.surface}</strong>: {sloText(r)}
+          {r.target !== null && r.rate !== null && r.eligible > 0 && (
+            <span className={r.rate >= r.target ? 'text-success' : 'text-danger'}> · target {(r.target * 100).toFixed(1)}% {r.rate >= r.target ? 'met' : 'not met'}</span>
+          )}
+        </p>
+      ))}
+      {slo && slo.recentFailures.length > 0 && (
+        <details>
+          <summary className="cursor-pointer text-sm text-ink">Recent failures ({slo.recentFailures.length})</summary>
+          <ul className="mt-1 space-y-1">
+            {slo.recentFailures.map((f, i) => (
+              <li key={i} className="text-xs text-muted">{new Date(f.atMs).toLocaleString()} · {f.surface} via {f.path} · {f.outcome}{f.failure ? ` (${f.failure})` : ''} · {f.provider}/{f.model} · {f.attempts} attempt(s)</li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {slo && slo.sink.dropped > 0 && <p className="text-xs text-danger">{slo.sink.dropped} decision record(s) were dropped on this server because the write buffer was full. Counts are unaffected.</p>}
+    </section>
   );
 }
 

@@ -1,3 +1,4 @@
+import { sseData, takeSseEvents } from './sseFrames';
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import { noteQubaxModelSwitch, qubaxModelOverride, qubaxRequestCeilingNanoUsd, qubaxSwitchReason, QUBAX_TRIES_PER_TURN, readQubaxMarketPlan, type QubaxMarketChoice } from './qubaxMarket';
@@ -264,10 +265,9 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
         bytes += item.value.byteLength; if (bytes > 2 * 1024 * 1024) throw new QubaxError('QUBAX_INVALID_RESPONSE');
         pending += decoder.decode(item.value, { stream: true });
         if (body.stream === true) {
-          pending = pending.replace(/\r\n/g, '\n'); let boundary: number;
-          while ((boundary = pending.indexOf('\n\n')) >= 0) {
-            const frame = pending.slice(0, boundary); pending = pending.slice(boundary + 2);
-            const data = frame.split('\n').filter(s => s.startsWith('data:')).map(s => s.slice(5).trimStart()).join('\n');
+          const split = takeSseEvents(pending, false); pending = split.rest;
+          for (const frame of split.events) {
+            const { payload: data } = sseData(frame);
             if (data === '[DONE]') { done = true; break; }
             if (data) await inspect(JSON.parse(data));
           }
@@ -275,7 +275,19 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
         }
       }
       if (body.stream !== true) { pending += decoder.decode(); await inspect(JSON.parse(pending)); }
-      else if (!done) throw new QubaxError('QUBAX_INCOMPLETE_STREAM');
+      // The stream ended: its last event counts even without a closing blank line (sseFrames.ts). A normal finish is
+      // `[DONE]` or a "stop" finish_reason; a cut-off stream has neither and still fails here or just below.
+      else {
+        if (!done) {
+          const split = takeSseEvents(pending, true); pending = split.rest;
+          for (const frame of split.events) {
+            const { payload: data } = sseData(frame);
+            if (data === '[DONE]') { done = true; break; }
+            if (data) await inspect(JSON.parse(data));
+          }
+        }
+        if (!done && !finished) throw new QubaxError('QUBAX_INCOMPLETE_STREAM');
+      }
     } finally {
       cancelBody(() => reader.cancel());
       try { reader.releaseLock(); } catch { /* A cancelled pending read may still own the lock. */ }

@@ -102101,6 +102101,21 @@ Owner: *"jab bhi koi racing game bane, to hamesa (100%) navbharatai me library s
 - **Honest limit:** the model still writes the game; the platform states the rule, checks the code and notes the exact repair, but a note does not fail a build. Watch the next racing build report for `RACE_COURSE_ENDLESS` and whether the note fired.
 - **Same day, owner correction:** *"12 par takna nahi hai … user jab chahe map ko badlao karwa sake, flexibility maximum ho, kuch bhi hard-core nahi"*. The twelve pieces are now only the STARTING course: the handoff tells the builder to keep the course in the game's own `src/game/<game>/trackPlan.ts` (any number of pieces, any order, any loop mode), and `createTrackStream` gained `stream.setPlan(plan, { now })` — a new course while the game runs, continuing seamlessly from the road already laid (`now` also replaces the pieces ahead; never the one under the car). Width, land seed and stream distance stay as created (they keep joins exact); an ended course is not reopened (returns false). Tests: live swap to 2 and 20 pieces, seamless joins and distance, refusal cases; reversion of the replace-ahead step → fails.
 
+## 2026-11-18 — Mitrify (and Qubax) complete answers were reported as "incomplete stream"
+
+- **Problem (owner, Test Chat Bot):** Mitrify `HTTP 200 · 3144 ms · MITRIFY_INCOMPLETE_STREAM` — "ab ye mitrify response band kar gaya".
+- **Root cause:** the SSE reader split events on a blank line and only then read them. A stream that ends with
+  `data: [DONE]` and no blank line (or `[DONE]\n`) left that last event unread; a stream that finishes with
+  `finish_reason: "stop"` and no `[DONE]` was never accepted. Driving the real reader: only `…[DONE]\n\n` passed.
+- **Class:** an SSE reader that ignores the stream's final event. **Sibling:** Qubax's reader (first in the live chat
+  chain) had the identical loop. Both now use `src/server/lib/sseFrames.ts` (`takeSseEvents` flushes the last event at
+  end of stream; a normal finish is `[DONE]` or a "stop" finish_reason). A really cut-off stream still fails.
+- **Not changed, deliberately:** the inference-gateway and LiveRegistry readers are line-based with different
+  invariants; they were not touched without evidence of the same failure.
+- **Locked by:** `tests/aStreamEndsWhereTheServerEndsIt.test.ts` (five valid endings pass, two cut-off streams fail,
+  splitter units, census). Reversion: the old Mitrify reader fails 5 of 10.
+- **Honest limit:** no live Mitrify key in the session, so the exact bytes Mitrify now sends are inferred from the error
+  (HTTP 200, stream ended without the accepted ending), not captured. Re-test from Test Chat Bot after deploy.
 ## 2026-11-18 — BR1999 autopsy (a gun game's release-gate line was cut mid-sentence): a reason is never cut in half
 
 Owner t311u sequential audit, BR1999 only (boundary 1951..2105 frozen). Branched from origin/main `58fa9a6` (#4292). BR1998 is merged. A free Weak new-game build succeeded GREEN and was not charged.
@@ -102185,3 +102200,8 @@ Each BLOCKED row carries **what, why, required evidence/action and already tried
 ### 2026-11-18 — BR 99771bc7: fresh-main integration and honest validation retries
 
 Integrated main `766af3a` (PRs #4295 and #4298), keeping both queue append histories and all unrelated source changes. The previous final-tree coverage attempt was interrupted by an environment transition; the next attempt could not start because its orphaned Vitest process remained a zombie and held the reports-directory lock. The exact stale lock and process-state evidence are archived outside the repository. An unchanged full-suite retry had no reported assertion failure but was interrupted after 641 seconds when main advanced; it is **incomplete**, never a passing coverage result. All 15 other required build checks and 11 database/emulator drills passed on `d61b88f`, but those results do not replace the required full gate on this newly integrated tree. The complete merged-state gate remains pending and will be recorded in the session/PR. No test selection, coverage threshold or runtime gate was weakened; no merge to main is authorized.
+
+
+### 2026-11-18 — BR 99771bc7: final stream-fix main integration
+
+Main advanced again to `586e6281` (PR #4297) during the mandatory full coverage run. Integrated its stream-frame fixes without source conflicts and preserved its progress history. The `9150288` coverage run was interrupted after 1203.5 seconds solely to validate the newly merged state; no assertion failure had been reported, but the run is incomplete and is not counted as passing. Its other 15 required build checks and all 11 emulator drills passed with unchanged source fingerprints. A new complete gate on the final integrated commit is required; actual final results remain in the session/PR record. No source gate or coverage threshold changed, and no merge to main is authorized.

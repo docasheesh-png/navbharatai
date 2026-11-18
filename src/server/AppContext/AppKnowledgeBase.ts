@@ -60,6 +60,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   },
 
   {
+    id: 'bounded_procedural_game_objects',
+    name: 'Procedural object source recipe (when enabled)',
+    path: 'NavBharatAI Pro → describe an original game object',
+    description: 'An optional builder recipe can compile bounded declarative part plans into original procedural object source. It is disabled unless explicitly configured and needs a compatible Three.js project. A source-installed result does not mean the object is mounted or visually verified. Existing custom files are preserved. This is not arbitrary photorealistic asset generation and does not automatically add physics, animation or gameplay.',
+    howToUse: 'Describe the object and needed behavior. The builder must integrate the generated factory into the game, verify the preview and report unsupported or unverified requirements honestly. No additional object-provider call or new billing mode is introduced by this recipe.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['procedural object', 'custom game object', 'generated geometry'],
+  },
+  {
     id: 'athree_requested_composition',
     name: 'Requested procedural world modules',
     path: 'NavBharatAI Pro → request a 3D world when Athree is enabled',

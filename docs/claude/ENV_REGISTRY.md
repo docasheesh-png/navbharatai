@@ -5174,3 +5174,7 @@ unchanged. Module: `src/server/AgentV3/moyiBuilder.ts` (same shape as `bluesmind
   cannot do fails and the chain moves to the next rung; the build report will show `ENGINE_MY` failures if so.
 - **Owner's recorded risk:** users' prompts and code on Weak builds now pass through Moyi, a reseller whose upstream
   and "No training" label are its own claims and whose rate limits were not published on the reviewed page.
+
+## Optional staged procedural-object flag (not reported configured)
+
+`AGENTV3_PROCEDURAL_OBJECTS` is read by the generated-object recipe. Default disabled; explicit enablement is required. This is a code-supported key name only, not evidence that Cloud Run has it configured. It does not change providers or billing. See `docs/game-engine/procedural-objects.md`.

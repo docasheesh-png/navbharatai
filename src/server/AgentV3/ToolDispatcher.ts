@@ -249,6 +249,7 @@ import { binaryTextWriteRefusal } from './binaryTextWrite';
 import { isKeyboardOnlyGame, touchGameNoteEnabled, touchPlayableNote } from './touchPlayableGame';
 import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type VehicleShapeHalves } from './handWrittenVehicleScan';
 import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, type GroundShapeHalves } from './handWrittenGroundScan';
+import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, type RaceCourseHalves } from './endlessRaceCourse';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
@@ -1155,6 +1156,10 @@ export class ToolDispatcher {
   /** Hand-written flat roads / pinned vehicle y / own trains on hilly terrain (handWrittenGroundScan.ts, 2026-11-02). */
   private _groundShapeIndex = new Map<string, GroundShapeHalves>();
   private _groundShapeNoted = false;
+  /** A race whose course the request did not describe must stream the endless track (endlessRaceCourse.ts, 2026-11-18). */
+  private _endlessRaceCourse = false;
+  private _raceCourseIndex = new Map<string, RaceCourseHalves>();
+  private _raceCourseNoted = false;
   /** Recipe-known packages a hand-written import already had its one install attempt for (see below). */
   private _importInstallTried = new Set<string>();
   /** Q-862: imports whose install stood down because the background install held the lock — retried, and how often. */
@@ -1166,6 +1171,9 @@ export class ToolDispatcher {
   setCoverageRequest(text: string | null): void {
     this.coverageRequest = typeof text === 'string' && text.trim() ? text : null;
   }
+
+  /** This build is a race whose course the request did not describe: check its code streams the endless track. */
+  requireEndlessRaceCourse(): void { this._endlessRaceCourse = true; }
 
   /**
    * Files the USER put in the workspace, and the request this build answers — so a shell delete of one
@@ -4780,6 +4788,15 @@ export class ToolDispatcher {
         for (const p of paths) this._groundShapeIndex.set(p, groundShapeHalves(p, files[p]));
         const found = groundShapeFindings(this._groundShapeIndex);
         if (found.length > 0) { vehicle += handWrittenGroundNote(found); this._groundShapeNoted = true; }
+      } catch { /* a note is best-effort */ }
+    }
+    // 🛣️ A race the user did not describe that drives a car on no endless track (owner 2026-11-18: "race bas 10-12
+    // second ke baad track khatam ho jata hai") — once per build, naming the exact call.
+    if (this._endlessRaceCourse && !this._raceCourseNoted) {
+      try {
+        for (const p of paths) this._raceCourseIndex.set(p, raceCourseHalves(p, files[p]));
+        const finding = raceCourseFinding(this._raceCourseIndex);
+        if (finding) { vehicle += endlessRaceCourseNote(finding); this._raceCourseNoted = true; }
       } catch { /* a note is best-effort */ }
     }
     const style = await this.styleWriteNotes(files);

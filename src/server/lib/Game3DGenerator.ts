@@ -4276,7 +4276,7 @@ export function createRailTrack(options: RailTrackOptions = {}): THREE.Group {
 // road. createTrackStream() lays the pieces end to end (each one starts EXACTLY where the last ended:
 // position, heading, height and width), keeps a few ahead of the player, recycles the ones behind, moves
 // a chunk of terrain with each piece, rebases the origin so a long drive never loses float precision,
-// and counts distance and laps. loop: 'infinite' repeats the pieces (A..I, A..I, …), 'none' ends the
+// and counts distance and laps. loop: 'infinite' repeats the pieces (A..L, A..L, …), 'none' ends the
 // track (an 'end' barrier or a 'water' shore are terminal), 'circuit' closes it into a loop, and
 // loopFrom: k plays pieces 0..k-1 once and loops the rest. DERIVE THE PLAN FROM THE USER'S WORDS; the
 // default (DEFAULT_TRACK_PLAN, infinite) is only for a user who said nothing about the course.
@@ -4311,7 +4311,12 @@ export interface TrackPlan {
   /** Coins and cones per piece; they change every loop (more cones each lap). false = none. */
   pickups?: boolean;
 }
-/** The default endless course: nine DIFFERENT pieces, A..I, looped for ever. */
+/**
+ * The default endless course: TWELVE different pieces, A..L, looped for ever (A..L, A..L, …). Owner
+ * 2026-11-18: "10-12 road track ko systemically add karo — 1-2-3-…→1-2-3 aise cycle me … user ko hamesa
+ * infinity road dikhe". The turns cancel over one loop (+60° −60° +45° −45°), so every lap leaves the car
+ * heading the way it started: the course winds, but never spirals back over itself.
+ */
 export const DEFAULT_TRACK_PLAN: TrackPlan = {
   loop: 'infinite',
   pieces: [
@@ -4324,6 +4329,9 @@ export const DEFAULT_TRACK_PLAN: TrackPlan = {
     { kind: 'tunnel', length: 80, scenery: 'city', name: 'G tunnel' },
     { kind: 'curve', angle: Math.PI / 4, length: 120, scenery: 'desert', name: 'H desert bend' },
     { kind: 'checkpoint', length: 60, scenery: 'village', name: 'I checkpoint' },
+    { kind: 'curve', angle: -Math.PI / 4, length: 120, scenery: 'field', name: 'J field bend' },
+    { kind: 'hill', length: 140, rise: 5, scenery: 'field', name: 'K valley crest' },
+    { kind: 'straight', length: 120, scenery: 'village', name: 'L home straight' },
   ],
 };
 export interface TrackPose { x: number; z: number; heading: number; y: number }
@@ -4354,6 +4362,12 @@ export interface TrackStream {
   startPose: TrackPose;
   /** Call every frame with the player's object: streams pieces, rebases the origin (moving the player and \`carry\`). */
   update: (player: THREE.Object3D, carry?: THREE.Object3D[]) => TrackStatus;
+  /**
+   * Change the course at any time — any number of pieces, any order, any loop mode. The new plan continues
+   * seamlessly from the road already laid; { now: true } also replaces the pieces ahead of the player. Returns
+   * false (and changes nothing) for an empty plan or a course that has already ended.
+   */
+  setPlan: (plan: TrackPlan, options?: { now?: boolean }) => boolean;
   /** Pieces ever created (for a lap / variety HUD) and pieces alive now. */
   stats: () => { created: number; alive: number };
   dispose: () => void;
@@ -4407,7 +4421,7 @@ function pieceProfile(piece: TrackPiece, y0: number, L: number): (s: number) => 
 
 export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, options: BaseOpts = {}): TrackStream {
   const d = tier(options);
-  const plan: TrackPlan = { ...DEFAULT_TRACK_PLAN, ...planIn, pieces: planIn.pieces && planIn.pieces.length ? planIn.pieces : DEFAULT_TRACK_PLAN.pieces };
+  let plan: TrackPlan = { ...DEFAULT_TRACK_PLAN, ...planIn, pieces: planIn.pieces && planIn.pieces.length ? planIn.pieces : DEFAULT_TRACK_PLAN.pieces };
   const W = plan.width ?? 9;
   const ahead = Math.max(1, plan.ahead ?? 3);
   const behind = Math.max(0, plan.behind ?? 1);
@@ -4451,10 +4465,13 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
 
   let pose: TrackPose = { x: 0, z: 0, heading: 0, y: 0 };
   let cursor = 0, loop = 0, serial = 0, distance = 0, ended = false, created = 0;
-  const loopFrom = Math.max(0, Math.min(plan.pieces.length - 1, plan.loopFrom ?? 0));
+  let loopFrom = Math.max(0, Math.min(plan.pieces.length - 1, plan.loopFrom ?? 0));
+  /** The piece the player was last on (its serial), so setPlan({ now }) keeps it and replaces only what is ahead. */
+  let currentSerial = -1;
   const stream: TrackStream = {
     root, plan, segments, startPose: { ...pose },
     update: () => ({ distance: 0, lap: 0, segment: null, ended: false, rebased: null }),
+    setPlan: () => false,
     stats: () => ({ created, alive: segments.length }),
     dispose: () => { while (segments.length) segments.shift()!.dispose(); groundMat.dispose(); registerTerrain(null); },
   };
@@ -4467,6 +4484,31 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
     const index = cursor++;
     return { piece: plan.pieces[index], index };
   }
+
+  // NOTHING ABOUT THE COURSE IS FIXED (owner 2026-11-18: "12 par takna nahi hai … user jab chahe map ko badlao
+  // karwa sake, flexibility maximum ho, kuch bhi hard-core nahi"). Any number of pieces, any order, any loop mode,
+  // swapped while the game runs: the new plan starts exactly where the road laid so far ends, so the join stays
+  // seamless. { now: true } also replaces the pieces already laid AHEAD of the player (never the one under the
+  // car). The road width, the land seed and how far ahead it streams stay as created — they are what keeps every
+  // join exact. A course that has ENDED (a barrier, a lake, a closed circuit) is not reopened: create a new
+  // stream for a new course.
+  stream.setPlan = (next, opts = {}) => {
+    if (ended || !next || !Array.isArray(next.pieces) || next.pieces.length === 0) return false;
+    plan = { ...plan, ...next, width: plan.width, pieces: next.pieces.slice() };
+    stream.plan = plan;
+    loopFrom = Math.max(0, Math.min(plan.pieces.length - 1, plan.loopFrom ?? 0));
+    cursor = 0;
+    if (opts.now && segments.length > 0) {
+      const keep = Math.max(currentSerial, segments[0].serial);
+      while (segments.length > 1 && segments[segments.length - 1].serial > keep) {
+        const dropped = segments.pop()!;
+        distance -= dropped.length;
+        pose = { ...dropped.start };
+        dropped.dispose();
+      }
+    }
+    return true;
+  };
 
   function spawn(): boolean {
     const next = nextPiece();
@@ -4638,6 +4680,7 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
     }
     const here = locate(player.position);
     if (!here) return { distance: 0, lap: 0, segment: null, ended, rebased };
+    currentSerial = here.seg.serial;
     const at = segments.indexOf(here.seg);
     while (segments.length - 1 - at < ahead && spawn()) { /* stream ahead */ }
     while (segments.indexOf(here.seg) > behind) segments.shift()!.dispose();
@@ -6199,8 +6242,13 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "  'tunnel' | 'checkpoint' | 'finish' | 'water' (road runs into a lake: declared water) | 'end' (a\n" +
       "  barrier) — loop: 'infinite' (repeat; loopFrom: k keeps an intro once), 'none' (the course ENDS),\n" +
       "  or 'circuit' (closes back to the start). Only when the user said nothing about the course use\n" +
-      "  DEFAULT_TRACK_PLAN (nine different pieces looped for ever). Start the car at stream.startPose.\n" +
-      "  A one-off curved road or circuit: createRoad({ path: [[x, z], ...], closed }).\n" +
+      "  DEFAULT_TRACK_PLAN (twelve different pieces, A..L, looped for ever) as the STARTING list. Start the car at\n" +
+      "  stream.startPose. Nothing is fixed: any number of pieces, any order. Keep the plan in its own file\n" +
+      "  (src/game/<your-game>/trackPlan.ts) so a later 'change the map' is an edit there, and call\n" +
+      "  stream.setPlan(plan, { now: true }) to change the course while the game runs (a track picker, a stage).\n" +
+      "  🔴 A RACE is never one createRoad(): its default is 300 m, which a racing car covers in about ten\n" +
+      "  seconds and then the road is gone. createRoad is for a town street or a closed circuit the user drew:\n" +
+      "  createRoad({ path: [[x, z], ...], closed }).\n" +
       "- 🌦️ An outdoor world gets atmosphere.ts: createAtmosphere({ scene, renderer, camera, lighting })\n" +
       "  — a day-night clock (dayLength seconds per day) and weather via setWeather('rain'|'storm'|'snow'|\n" +
       "  'fog'|'dust'|'cloudy'|'clear', seconds). addNightLight(lamp), wet([roadMaterial]), and\n" +

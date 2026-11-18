@@ -3245,6 +3245,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['provider switch', 'turn off provider', 'disable ai provider', 'kill switch', 'ai on off', 'provider band karo', 'provider off', 'engine off'],
   },
   {
+    id: 'admin-traffic-health',
+    name: 'Live provider health',
+    path: 'Admin Dashboard → AI Engines → Live provider health (verified admin only)',
+    description: 'On the AI Engines page, under the build ladders. For each provider it shows up, down or suspended, calls in flight, first-byte and total latency (p50 and p95), recent errors by type, the rate-card price when one exists, and whether it can chat, build, read a picture or make a picture. Hindi-probe and long-context scores are shown as not measured until a probe records them. A provider that reports a suspended or empty account, or that has repeatedly timed out or rejected the completion, is skipped by the existing chat, professional, builder and vision ladders until one recovery call. The alert list says needs recharge or key issue. App image integrations are catalogued only; their calls run in user apps and are not measured here. Provider names are shown only on this admin page.',
+    howToUse: 'Verified admins open AI Engines and read Live provider health. Press Refresh on Build Engines to reload it. A recharge alert means that provider’s account needs money. A key issue means the credential was refused. Set AGENTV3_TRAFFIC_HEALTH=off only to stop the skip.',
+    relatedFeatures: ['admin-provider-switches', 'admin-api-providers'],
+    keywords: ['provider health', 'engine health', 'suspended provider', 'needs recharge', 'key issue', 'latency p95', 'which engine is down'],
+  },
+  {
     id: 'admin-traffic-control',
     name: 'Traffic control (AI gateway switches)',
     path: 'Admin Dashboard → AI Engines → Traffic control (verified admin only)',

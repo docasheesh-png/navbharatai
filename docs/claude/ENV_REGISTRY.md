@@ -5180,9 +5180,13 @@ unchanged. Module: `src/server/AgentV3/moyiBuilder.ts` (same shape as `bluesmind
 ## Optional staged procedural-object flag (not reported configured)
 
 `AGENTV3_PROCEDURAL_OBJECTS` is read by the generated-object recipe. Default disabled; explicit enablement is required. This is a code-supported key name only, not evidence that Cloud Run has it configured. It does not change providers or billing. See `docs/game-engine/procedural-objects.md`.
+
 ## 2026-11-17 — Pro builder: Qubax third on Weak, DiscountedTokens before Sonnet on Normal/Strong (owner: "apke sabhi suggestion approved")
 
 - **Weak** is now Surplus → Router One → **Qubax (`ENGINE_QX`)** → BluesMinds → Moyi → the tier ladder. Qubax uses the existing builder adapter (`proChainV2/qubaxBuilder.ts`): `QUBAX_API_KEY` (already set for chat), models from `QUBAX_BUILDER_MODELS` or its tool-capable defaults, its own catalogue price or a labelled estimate. `PRO_CHAIN_V2_QUBAX=off` removes it.
 - **Normal and Strong**: **DiscountedTokens (`ENGINE_DT`)** sits right before the first Sonnet/Opus rung (`discountedTokensBuilder.ts`), with up to three models (owner's order in `DISCOUNTEDTOKENS_MODEL`, else gpt-6-sol then the key's own list). It needs `DISCOUNTEDTOKENS_API_KEY` **and** `DISCOUNTEDTOKENS_BUILDER_RATE_IN/_OUT`; until the rates are set it does not run. Never on Weak.
 - Both labels are admin-only: redaction, brand scrub (Moyi was missing there since #4276 and is added too) and the off-ladder census know them.
 
+### `AGENTV3_TRAFFIC_HEALTH` — live provider health
+
+Default on; `off`, `false` or `0` disables the additional in-process health recording and skip. The existing router/builder/vision ladders retain their own admission, billing, cooldown and maintenance checks. A suspended credential or three consecutive timeout/invalid outcomes opens a five-minute recovery window. Pool credentials retain separate identities. A recovery lease is bounded and a tracked physical call keeps ownership until it settles. State is bounded to 256 account labels with 40 samples each and is local to each server; it is not a fleet-wide health database. App image integrations are catalogued only, because their generated clients run outside this server. Providers with no recorded outcomes are displayed as not measured.

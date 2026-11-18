@@ -4,6 +4,7 @@ import { noteQubaxModelSwitch, qubaxModelOverride, qubaxRequestCeilingNanoUsd, q
 import { qubaxReplyMatchesUser } from './qubaxLanguage';
 import { getQubaxSelection, type QubaxSelection, type QubaxWorkload } from './qubaxSelector';
 import { qubaxSwitchOn } from './alwaysOnSuppliers';
+import { noteProviderCall } from '../AI/ProviderHealth/trafficHealth';
 
 /** A silent Qubax try must not hold the user. The next model, then the next provider, gets the same history. */
 export const QUBAX_FIRST_BYTE_MS = 8_000;
@@ -282,8 +283,10 @@ export async function runApprovedQubaxChat(options: QubaxChatOptions, env: Env =
     if (!finished || !content.trim()) throw new QubaxError('QUBAX_INCOMPLETE_STREAM');
     if (market && !qubaxReplyMatchesUser(body.messages as { role?: string; content?: string }[], content)) throw new QubaxError('QUBAX_LANGUAGE_MISMATCH');
     attemptSignal.throwIfAborted(); await bounded(Promise.resolve().then(() => options.onChunk?.(content))); attemptSignal.throwIfAborted();
+    noteProviderCall({ provider: 'QUBAX', model: selection.modelId, surface: 'qubax', ok: true, totalMs: Math.max(0, Date.now() - attemptStarted) });
     return { kind: 'response', content, model: selection.modelId, ...(usage ? { usage } : {}) };
     } catch (error) {
+      noteProviderCall({ provider: 'QUBAX', model: market?.modelId ?? selection.modelId, surface: 'qubax', ok: false, totalMs: Math.max(0, Date.now() - attemptStarted), error });
       if (options.onAttemptError) {
         try {
           const model = market?.modelId ?? selection.modelId;

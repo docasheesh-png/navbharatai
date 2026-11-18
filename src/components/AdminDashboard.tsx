@@ -62,6 +62,7 @@ import { LoadBoard } from './admin/LoadBoard';
 import { AudienceCard } from './admin/AudienceCard';
 import { ReportExportButtons } from './admin/ReportExportButtons';
 import { EngineReportsPanel } from './admin/EngineReportsPanel';
+import { TrafficHealthPanel } from './admin/TrafficHealthPanel';
 import { UnusedCardMark } from './admin/UnusedCardMark';
 import { BuildCostCard } from './admin/BuildCostCard';
 import { ReferralCostCard } from './admin/ReferralCostCard';
@@ -2725,6 +2726,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   </div>
                 )}
               </div>
+
+              <TrafficHealthPanel traffic={engines?.traffic} />
 
               {/* ── CHAT ROUTER — kept, but labelled for what it actually is ─────────────────── */}
               <div className="space-y-2">

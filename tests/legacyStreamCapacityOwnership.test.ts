@@ -5,7 +5,7 @@ vi.mock('../src/server/lib/ProviderCooldownStore', () => ({ providerCooldownStor
 import { AIRouter, getProviderStats } from '../src/server/AI/Router/AIRouter';
 import { resetAllBreakers } from '../src/server/AI/Router/CircuitBreaker';
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
-beforeEach(() => { vi.useFakeTimers(); resetAllBreakers(); vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'off'); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'off'); vi.stubEnv('CHAT_STREAM_WATCHDOG', 'on'); vi.stubEnv('CHAT_STREAM_FIRST_TOKEN_MS', '5000'); });
+beforeEach(() => { vi.useFakeTimers(); resetAllBreakers(); /* Isolate the physical slot cap from the independent health breaker. */ vi.stubEnv('AGENTV3_TRAFFIC_HEALTH', 'off'); vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'off'); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'off'); vi.stubEnv('CHAT_STREAM_WATCHDOG', 'on'); vi.stubEnv('CHAT_STREAM_FIRST_TOKEN_MS', '5000'); });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 describe('sequential stream physical ownership', () => {
   it('watchdog aborts the attempt but retains an uncooperative SDK slot until actual settlement', async () => {

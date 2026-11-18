@@ -7,6 +7,7 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts', 'src/**/*.test.{ts,tsx}'],
     environment: 'node',
+    setupFiles: ['tests/setup/trafficHealth.ts'],
     // The image route probes the free provider before handing out a link (freeProviderDoor.ts). A
     // test must never make that network call, so the probe is off for the suite; the door's own
     // tests pass their env and fetch explicitly.

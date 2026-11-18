@@ -5127,7 +5127,7 @@ One module owns their env: `src/server/lib/resellerGateways.ts`. Key VALUES are 
 | `DISCOUNTEDTOKENS_API_KEY` | Secret, unset. Prepaid account (minimum US$5). |
 | `DISCOUNTEDTOKENS_BASE_URL` | Optional; default `https://discountedtokens.com/v1` (their public API listing). Must stay on `discountedtokens.com`. |
 | `DISCOUNTEDTOKENS_MODEL` | Optional; default `gpt-6-sol` (callable on their pricing page, 2026-11-16). They sell OpenAI models only. **Since 2026-11-17 a comma list is the gateway's own fallback order** (owner: *"sabse pahle sasta aur accha, response na aaye to 2nd, fail to 3rd"*): put the cheapest good coding model first. Up to three are tried; gaps are filled from the key's `/models` list. The same applies to `MOYI_MODEL` and `MIRAPI_MODEL` in the Test Chat Bot. |
-| `DISCOUNTEDTOKENS_BUILDER_RATE_IN` / `_OUT` | **Required for the Pro builder rung** (added 2026-11-17, NOT yet set): the real USD per 1M tokens the owner's account pays. Without both, there is no DiscountedTokens builder rung — a cost is never invented. Read them from DiscountedTokens' price page for the models listed in `DISCOUNTEDTOKENS_MODEL`. |
+| `DISCOUNTEDTOKENS_BUILDER_RATE_IN` / `_OUT` | Optional (since 2026-11-18). The owner's account rate, USD per 1M tokens; when set it prices every DiscountedTokens builder model. Unset ⇒ each model is billed at DiscountedTokens' own published price (`DISCOUNTEDTOKENS_PUBLISHED_RATES` in `discountedTokensBuilder.ts`, copied from its rates page by the owner on 2026-11-18). A model with neither is never run. |
 | `DISCOUNTEDTOKENS_BUILDER_ENABLED` | Optional; default ON. Only `off`/`false`/`0`/`no` removes the builder rung. |
 | `MIRAPI_API_KEY` | Secret, unset. |
 | `MIRAPI_BASE_URL` | **Required, no default.** Must be https on `mirapi.ai` or a subdomain. |
@@ -5214,4 +5214,10 @@ Two more properties:
 An owner-written model list (e.g. `QUBAX_BUILDER_MODELS`, `MOYI_BUILDER_MODEL`, `DISCOUNTEDTOKENS_MODEL`) is always used as written.
 
 Gateways with no per-model price (BluesMinds, DiscountedTokens, Mitrify) run only their owner or default models in the BUILDER, because their one rate prices those models. A list model could cost more and be billed below its real cost. In the Test Chat Bot their key lists are ordered by strength.
+
+**2026-11-18, DiscountedTokens prices:** the owner supplied its "Compare model rates" page.
+- `discountedTokensBuilder.ts` now holds the callable models' prices.
+- The builder rung needs only `DISCOUNTEDTOKENS_API_KEY`.
+- With no `DISCOUNTEDTOKENS_MODEL`, the shared model rule picks the cheapest strong coding models: gpt-6-sol, gpt-6.1-sol, then gpt-5.6-terra.
+- Billing = that real price + the tier markup.
 

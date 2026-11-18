@@ -250,7 +250,7 @@ export function realRateFor(provider: string, model?: string): TokenRate {
   // DiscountedTokens builder rung (owner 2026-11-17): only ever the owner's configured real rate — the rung does not
   // exist without one (discountedTokensBuilder.ts), so an absent rate here falls to the conservative rules below.
   if (isDiscountedTokensBuilderLabel(provider)) {
-    const dt = discountedTokensBuilderRate();
+    const dt = discountedTokensBuilderRate(process.env, model);
     if (dt) return dt;
   }
   // Moyi builder rung (owner 2026-11-17): the owner-configured rate, else Moyi's published price for that model.

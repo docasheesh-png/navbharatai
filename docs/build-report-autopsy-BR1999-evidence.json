@@ -1,0 +1,20 @@
+{
+  "evidenceType": "synthetic-fixtures-and-source-pins",
+  "privateReportPayloadIncluded": false,
+  "reportRetained": true,
+  "truncationComplete": true,
+  "cases": [
+    "free Weak new game build, Surplus every turn, not charged, succeeded with RELEASE_GATE GREEN and a game playtest of 94/100",
+    "SANDBOX_UNAVAILABLE at about 0.6 s (E2B cap of 20); SANDBOX_RECOVERED at the end",
+    "GAME_KIT_SEEDED listed three recipes with 0 files and told the builder the kit was on disk; the builder wrote its own src/game/core, src/game/fx and src/audio files",
+    "READY_BEFORE_END: judged finished at step 20 (100/100), then 31 more steps over 601 s",
+    "RELEASE_GATE NOT-established text ended '... in src/game/GameManager.js), and its settings  (not a defect)' because the gate sliced the derivation's sentence at 200 characters",
+    "the game sentence named 'a sound switch, a speed slider' as this game's settings; the game had neither"
+  ],
+  "fixes": {
+    "F1": "src/server/AgentV3/releaseGate.ts clipReason + JOURNEY_NONE_WHY_MAX 480 + JOURNEY_UNREACHABLE_WHY_MAX 200",
+    "F2": "src/server/AgentV3/journeyDerivation.ts gameNoJourneyReason wording"
+  },
+  "lockedClosures": ["BR1955 datastoreWriteEvidence", "BR1977 downgradeEmptyKitSeedSuccesses", "BR1958 prepareGameSeedWorkspace", "#4146 setup note"],
+  "test": "tests/br1999Autopsy.test.ts"
+}

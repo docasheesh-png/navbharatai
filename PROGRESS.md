@@ -102101,6 +102101,16 @@ Owner: *"jab bhi koi racing game bane, to hamesa (100%) navbharatai me library s
 - **Honest limit:** the model still writes the game; the platform states the rule, checks the code and notes the exact repair, but a note does not fail a build. Watch the next racing build report for `RACE_COURSE_ENDLESS` and whether the note fired.
 - **Same day, owner correction:** *"12 par takna nahi hai … user jab chahe map ko badlao karwa sake, flexibility maximum ho, kuch bhi hard-core nahi"*. The twelve pieces are now only the STARTING course: the handoff tells the builder to keep the course in the game's own `src/game/<game>/trackPlan.ts` (any number of pieces, any order, any loop mode), and `createTrackStream` gained `stream.setPlan(plan, { now })` — a new course while the game runs, continuing seamlessly from the road already laid (`now` also replaces the pieces ahead; never the one under the car). Width, land seed and stream distance stay as created (they keep joins exact); an ended course is not reopened (returns false). Tests: live swap to 2 and 20 pieces, seamless joins and distance, refusal cases; reversion of the replace-ahead step → fails.
 
+## 2026-11-18 — BR1999 autopsy (a gun game's release-gate line was cut mid-sentence): a reason is never cut in half
+
+Owner t311u sequential audit, BR1999 only (boundary 1951..2105 frozen). Branched from origin/main `58fa9a6` (#4292). BR1998 is merged. A free Weak new-game build succeeded GREEN and was not charged.
+
+- F1: `releaseGate.ts` no longer takes `.slice(0, 200)` of the journey derivation's sentence. The game sentence is about 330 characters, so every canvas game's RELEASE_GATE read "… and its settings  (not a defect)". New `clipReason` (clause-safe, never inside an open parenthesis, ends with "…"), `JOURNEY_NONE_WHY_MAX` 480 (fits every sentence `noJourneyReason` returns, checked by a census), and the sibling `journeyUnreachableWhy` (160 → 200, clause-safe).
+- F2: `gameNoJourneyReason` names settings as examples ("settings such as a sound switch or a speed slider"), not as facts about this game.
+- Locked closures that landed after this build ran: BR1955 (".update()" is not a database write), BR1977 (0-file kit claim), BR1958 (empty-workspace seed), #4146 (setup note).
+- Queue: opens Q-2753 (three different file counts); Q-2621 gains BR1999 evidence.
+- Reversion: the old slice fails the report-shape test and the source guard; the old wording fails the F2 test.
+- Docs: `docs/build-report-autopsy-BR1999.md`, its evidence JSON, and `tests/br1999Autopsy.test.ts`.
 ## 2026-11-18 — App Mart "Manage apps" tab restored for the owner (two admin lists drifted apart)
 
 - **Problem (owner screenshot):** App Mart showed Browse / Publish / My apps and no admin tab, while the profile menu showed
@@ -102124,10 +102134,10 @@ Owner: *"jab bhi koi racing game bane, to hamesa (100%) navbharatai me library s
 
 ## 2026-11-18 — Autopsy of the admin Home page copy (18:26Z)
 
-- Q-2753 ✅(PR) "Nearly full" from a rate tile → chip says "Needs attention" when only rate tiles are worst.
-- Q-2754 ✅(PR) "+465 today" counted wallets WRITTEN today (`updatedAt || createdAt`); creation only now, sibling in
+- Q-2754 ✅(PR) "Nearly full" from a rate tile → chip says "Needs attention" when only rate tiles are worst.
+- Q-2755 ✅(PR) "+465 today" counted wallets WRITTEN today (`updatedAt || createdAt`); creation only now, sibling in
   the users list fixed, source guard against the pattern.
-- Q-2755 ✅(PR) "vs 0 yesterday" on a 54-minute-old server → unknown unless the process ran all of yesterday.
-- OPEN/BLOCKED: Q-2756…Q-2763 — UTC "today", per-instance hit counters, Reliability 0 from the legacy sample, 3 idle
+- Q-2756 ✅(PR) "vs 0 yesterday" on a 54-minute-old server → unknown unless the process ran all of yesterday.
+- OPEN/BLOCKED: Q-2757…Q-2764 — UTC "today", per-instance hit counters, Reliability 0 from the legacy sample, 3 idle
   billed sandboxes, the −₹16,102 margin (admin decision), BUILD_BLOCKED_NO_CREDITS on new users, two reason-less log
   lines, the Grievance Officer env.

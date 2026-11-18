@@ -595,3 +595,46 @@ describe('control-store gate (Traffic Manager V2, P2)', () => {
     expect(JSON.stringify(planInference(c.input))).toBe(JSON.stringify(planInference({ ...c.input, controlGate: () => null })));
   });
 });
+
+// Traffic Manager V2, P5: after a provider-side failure, the next pick prefers an independent upstream.
+describe('upstream diversity after a failure (P5, off unless supplied)', () => {
+  const failedOn = (profileId: string, failureClass: 'retryable-provider-failure' | 'safety-refusal' = 'retryable-provider-failure') =>
+    ({ physicalAttemptId: 'physical-0', profileId, outputVisible: false, outcome: 'definite-failure' as const, failureClass });
+  const deps: Record<string, string[]> = { 'deepseek-direct': ['deepseek'], 'deepseek-resold': ['reseller:x', 'deepseek'], 'groq-a': ['groq'], 'mystery': ['reseller:y', 'unknown'] };
+  const dependsOn = (p: ProviderProfile) => deps[p.providerId] ?? ['unknown'];
+  // Quota scopes name the provider, so a test provider id carries its own quota dimensions.
+  const as = (providerId: string): Partial<ProviderProfile> => ({ providerId, quotaDimensions: [
+    { scope: { providerId, kind: 'organization', id: `${providerId}-org` }, meter: 'requests/day' }] });
+  function setup(attempts: ReturnType<typeof failedOn>[], extra: Array<[string, string, boolean?]> = []) {
+    const r = request({ attempts, nextPhysicalAttemptId: 'physical-1' });
+    const list = [['a-deepseek', 'deepseek-direct'], ['b-resold', 'deepseek-resold'], ['c-groq', 'groq-a'], ...extra.map(([i, p]) => [i, p])] as Array<[string, string]>;
+    const paid = new Map(extra.map(([i, , pd]) => [i, !!pd]));
+    return context(r, list.map(([id, provider]) => candidate(r, id, paid.get(id) ?? false, as(provider))));
+  }
+  it('without the hook, the order is exactly as before', () => {
+    const c = setup([failedOn('a-deepseek')]);
+    expect(plan(planInference(c.input)).profileId).toBe('a-deepseek');
+  });
+  it('a DeepSeek failure skips the DeepSeek reseller and goes to the independent provider', () => {
+    const c = setup([failedOn('a-deepseek')]);
+    expect(plan(planInference({ ...c.input, dependsOn })).profileId).toBe('c-groq');
+  });
+  it('the first candidate is kept when it is already independent', () => {
+    const c = setup([failedOn('c-groq')]);
+    expect(plan(planInference({ ...c.input, dependsOn })).profileId).toBe('a-deepseek');
+  });
+  it('a non-provider failure (safety refusal) ends the request exactly as before; diversity changes nothing', () => {
+    const c = setup([failedOn('a-deepseek', 'safety-refusal')]);
+    expect(JSON.stringify(planInference({ ...c.input, dependsOn }))).toBe(JSON.stringify(planInference(c.input)));
+  });
+  it('an unknown upstream is never treated as independent', () => {
+    const c = setup([failedOn('a-deepseek')], [['0-mystery', 'mystery']]);
+    expect(plan(planInference({ ...c.input, dependsOn })).profileId).toBe('c-groq');
+  });
+  it('free is never jumped by paid: with no independent FREE candidate, the order stands', () => {
+    const r = request({ attempts: [failedOn('a-deepseek')] });
+    const c = context(r, [candidate(r, 'a-deepseek', false, as('deepseek-direct')), candidate(r, 'b-resold', false, as('deepseek-resold')),
+      candidate(r, 'paid-a', true, as('groq-a'))]);
+    expect(plan(planInference({ ...c.input, dependsOn })).profileId).toBe('a-deepseek');
+  });
+});

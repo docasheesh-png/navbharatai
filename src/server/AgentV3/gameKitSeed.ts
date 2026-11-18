@@ -49,6 +49,7 @@
 //
 // PURE — no I/O. The route supplies the outcomes; this module plans the run and words the handoff.
 
+import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
 import { hardConstraintLines } from '../lib/megaRoadmap';
 import { buildGameContract, gameContractBlock, gameScopeContractEnabled, type GameScopeContract } from './gameIntent';
 import { kitTypeContract, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
@@ -198,7 +199,7 @@ export function compactRecipeResult(content: string): string {
  * 3D, and how to add the 3D recipes itself if the game truly needs them — never "this is 2D" as a fact the
  * platform does not have.
  */
-export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts: { flat?: boolean; contract?: string } = {}): string {
+export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts: { flat?: boolean; contract?: string; endlessRaceCourse?: boolean } = {}): string {
   const done = results.filter((r) => r.ok);
   if (done.length === 0) return '';
   const failed = results.filter((r) => !r.ok);
@@ -249,6 +250,9 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
             + ' trunks block, low steps climb and roofs stop jumps.'
           : '')
       : twoD,
+    // A race whose course the request did not describe runs on the kit's endless track (endlessRaceCourse.ts):
+    // said only when the 3D layer that holds createTrackStream is really on disk.
+    opts.endlessRaceCourse && has('generate_game_3d') ? ENDLESS_RACE_COURSE_RULE : '',
     failed.length > 0
       ? `NOT laid down: ${failed.map((r) => r.recipe).join(', ')} — if the game needs ${failed.length === 1 ? 'it' : 'them'}, run`
         + ` ${failed.map((r) => `run_recipe({ name: "${r.recipe}" })`).join(' and ')} yourself before you use anything from ${failed.length === 1 ? 'it' : 'them'}.`

@@ -613,7 +613,7 @@ export const OFFERED_THROUGH: Readonly<Record<string, string>> = {
 const NEVER_SUGGEST = new Set([
   'BUILD_OFFER_ACCEPTED', 'ATTACHMENT_RECALLED',
   'GOLDEN_SCAFFOLD_SKIPPED', 'LLM_CALL_STOPPED', 'SIMPLE_BUILD_STOPPED', 'DOMAIN_KNOWLEDGE', 'DURABLE_HOLDS_ONLY_STARTER', // autopsy 31254f9a — engine facts
-  'GAME_KIT_SEEDED', 'GAME_KIT_NOT_SEEDED', 'GAME_CONTRACT', 'GAME_SCOPE_OK', 'GAME_SCOPE_GAP', 'GAME_DEFECTS', 'GAME_REPAIR_SKIPPED', 'GAME_REPAIRED', // whether OUR game-kit seed ran (gameKitSeed.ts, build 46e2d74b) — engine facts
+  'GAME_KIT_SEEDED', 'RACE_COURSE_ENDLESS', 'GAME_KIT_NOT_SEEDED', 'GAME_CONTRACT', 'GAME_SCOPE_OK', 'GAME_SCOPE_GAP', 'GAME_DEFECTS', 'GAME_REPAIR_SKIPPED', 'GAME_REPAIRED', // whether OUR game-kit seed ran (gameKitSeed.ts, build 46e2d74b) — engine facts
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_MODULE_FILES_UNDELIVERED', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
   'CHECKPOINT_SIGNAL', // our checkpoint heuristic, never a finding (autopsy SignBridge, 2026-09-26)
   'REVIEW_SUGGESTIONS_NOT_READY', // a suggest-only review that ran out of time — nothing for the user to do

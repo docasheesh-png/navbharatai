@@ -115,6 +115,7 @@ const KNOWN_UNREACHABLE = new Set([
   // scripts/loadTest.mjs runs this logic INLINE and names this file as its unit-tested source, so
   // its test is the only coverage the running logic has.
   'src/server/lib/loadTestStats.ts',
+  // (Traffic Manager V2 P1's registry snapshot sat here until P2's control store and its admin route imported it.)
   // (The unused UI kit that sat here — Badge, Card, Tabs, Tooltip, Drawer, BottomSheet and the
   // barrel — was removed on 2026-08-24 once its two tests were trimmed of the dead cases. The
   // allowlist is meant to shrink; the staleness test below is what keeps it honest.)

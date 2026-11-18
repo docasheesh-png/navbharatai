@@ -232,10 +232,19 @@ export interface PlanningInput {
   readonly candidates: readonly Candidate[];
   readonly budget?: BudgetAuthorization;
   readonly authority: EvidenceAuthority;
+  /**
+   * Optional control-store gate (Traffic Manager V2, P2). Supplied only where a NEW attempt is planned, never on the
+   * ledger's re-check of an already-selected attempt, so a change can stop new work but never strand started work.
+   */
+  readonly controlGate?: (profile: ProviderProfile, request: RoutingRequest) => 'control' | 'admission' | null;
 }
 export type RejectionReason = 'malformed' | 'evidence' | 'profile-ineligible' | 'surface'
   | 'capability' | 'quality' | 'privacy' | 'payer' | 'quota' | 'cooldown' | 'deadline'
-  | 'strict-free' | 'price' | 'budget' | 'fixed-chain';
+  | 'strict-free' | 'price' | 'budget' | 'fixed-chain'
+  /** Traffic Manager V2 control store: the provider/model is disabled, draining, or outside its traffic cap. */
+  | 'control'
+  /** The model's production admission evidence is required and incomplete or expired. */
+  | 'admission';
 export interface CandidateRejection { readonly profileId: string; readonly reason: RejectionReason; }
 export interface SelectionPlan {
   readonly kind: 'plan';

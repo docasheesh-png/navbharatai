@@ -15,6 +15,9 @@ const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 
 const store = readFileSync(join(process.cwd(), 'src/server/AgentV3/SandboxStore.ts'), 'utf8');
 const deployment = readFileSync(join(process.cwd(), 'src/server/AgentV3/Deployment.ts'), 'utf8');
 const surface = readFileSync(join(process.cwd(), 'src/components/agentv3/PreviewSurface.tsx'), 'utf8');
+// The copy itself moved into failedBuildCopy.ts (takeBuildCopy) on 2026-11-17, shared by the gate and the
+// failed-build path; the route decides WHEN and keeps what it returns.
+const copy = readFileSync(join(process.cwd(), 'src/server/AgentV3/failedBuildCopy.ts'), 'utf8');
 
 describe('1. the copy is taken only from a build that PROVED it packages', () => {
   it('rides the production build gate’s success, reusing the dist it just produced', () => {
@@ -22,10 +25,11 @@ describe('1. the copy is taken only from a build that PROVED it packages', () =>
   });
 
   it('is bounded at both steps — a copy must never eat the advisory window', () => {
-    const i = route.indexOf('previewSnapshotEnabled() && snapshotSuitable(pkgRaw, {');
-    const block = route.slice(i, i + 1800);
+    const i = copy.indexOf('export async function takeBuildCopy(');
+    const block = copy.slice(i, i + 1800);
     expect(block).toContain("'snapshot-dist'");
     expect(block).toContain("'snapshot-deploy'");
+    expect(route).toContain('const taken = await takeBuildCopy({ actuator, workspaceId');
   });
 
   it('every failure inside it is swallowed', () => {
@@ -35,13 +39,15 @@ describe('1. the copy is taken only from a build that PROVED it packages', () =>
     const end = route.indexOf('vaccineEnabled(workspaceId)', i);
     expect(i).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(i);
-    expect(route.slice(i, end)).toContain('must never be able to affect the build it is copying');
+    expect(route.slice(i, end)).toContain('await takePreviewCopy();');
+    // Both copy paths swallow every failure of their own.
+    expect(copy.split('must never be able to affect the build it is copying').length - 1).toBeGreaterThanOrEqual(2);
   });
 });
 
 describe('2. it can never overwrite what somebody deliberately published', () => {
   it('deploys to the SNAPSHOT channel, explicitly', () => {
-    expect(route).toContain('deployStatic(workspaceId, withPreviewAiRelay(dist), snapshotChannelId(workspaceId))');
+    expect(copy).toContain('deployStatic(workspaceId, withPreviewAiRelay(dist as never), snapshotChannelId(workspaceId))');
   });
 
   it('and the two channels genuinely differ', () => {
@@ -80,7 +86,9 @@ describe('4. the user is told WHICH version they are looking at', () => {
     // REPOINTED (2026-09-08): there are now TWO situations and two notes — an EXPIRED machine and one
     // that is STARTING UP — so the payload picks between them instead of always sending SNAPSHOT_NOTE.
     // What this test protects is unchanged: whenever a copy is framed, the user is told so.
-    expect(route).toContain('snapshotServing: true, snapshotNote: snapshotWaking ? SNAPSHOT_WAKING_NOTE : SNAPSHOT_NOTE');
+    // REPOINTED AGAIN (2026-11-17): a third situation — an OLDER copy standing in for a starting preview
+    // (snapshotStandIn) — so the note comes from the one table that maps each stand-in to its words.
+    expect(route).toContain('snapshotServing: true, snapshotNote: snapshotStandInNote(snapshotKind)');
   });
 
   it('🔒 the health verdict is the DOOR\'S OWN rule, not a second copy of it', () => {
@@ -91,9 +99,13 @@ describe('4. the user is told WHICH version they are looking at', () => {
     expect(at).toBeGreaterThan(-1);
     const block = route.slice(at, at + 1600);
     expect(block).toContain("const doorState = sandboxGone ? 'asleep' as const : 'starting' as const;");
-    expect(block).toContain('shouldServeSnapshot({');
+    expect(block).toContain('snapshotStandIn({');
     expect(block).toContain('workspaceFilesSavedAt(workspaceId)');
-    expect(block).toContain("snapshotWaking = doorState === 'starting'");
+    expect(block).toContain('snapshotKind = standIn;');
+    // And the door's 'starting' branch asks the SAME function with the same build guard (2026-11-17).
+    const door = route.slice(route.indexOf('startingSnapshot = () => {'), route.indexOf('startingSnapshot = () => {') + 900);
+    expect(door).toContain('snapshotStandIn({');
+    expect(door).toContain('buildRunning: isBuildRunningFor(ws)');
   });
 
   it('🔒 and the frame returns to the live app by itself, exactly once, on the edge', () => {

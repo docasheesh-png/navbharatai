@@ -194,13 +194,15 @@ describe('wiring — the saved copy is raised by the route, cleared by every wri
   });
 
   it('the route raises the flag right where the copy is saved, and records what the copy was built from', () => {
-    const at = routes.indexOf("code: 'PREVIEW_SNAPSHOT_SAVED'");
-    const block = routes.slice(at - 1500, at);
+    // MOVED (2026-11-17) into failedBuildCopy.ts's takeBuildCopy, shared by the gate and the failed-build path;
+    // the route keeps what it returns. The facts asserted are unchanged.
+    const copy = read('../src/server/AgentV3/failedBuildCopy.ts');
+    const at = copy.indexOf("code: 'PREVIEW_SNAPSHOT_SAVED'");
+    const block = copy.slice(at - 1500, at);
     expect(block).toContain('actuator.noteSnapshotCurrent?.(workspaceId, true)');
     expect(block).toContain('sandboxStore.saveSnapshot(workspaceId, url, at, filesHash)');
-    // What the copy records, not how the object literal is spelled — it gained `filePaths` on
-    // 2026-09-20 so a mismatch can name which side holds what, and this assertion moved with it.
-    expect(block).toMatch(/snapshotTaken = \{ url, filesHash/);
+    expect(copy).toMatch(/return \{ url, filesHash/);
+    expect(routes).toContain('if (taken) snapshotTaken = taken;');
   });
 
   it('🔒 the snapshot event is emitted at the FINAL durable save, only once the copy is proven current (snapshotIdentity.ts)', () => {

@@ -13,6 +13,7 @@ import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
 import { registerSurplusRegistryAdminRoutes } from './surplusRegistryAdmin';
 import { registerApiProvidersAdminRoutes } from './apiProvidersAdmin';
 import { registerProviderSwitchesAdminRoutes } from './providerSwitchesAdmin';
+import { registerTrafficControlAdminRoutes } from './trafficControlAdmin';
 import { registerGameAssetsAdminRoutes } from './gameAssetsAdmin';
 import { sendAdminOwnerApps } from './adminOwnerApps';
 import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
@@ -164,6 +165,8 @@ import { loadBoard, worstLevel, AI_MIN_SAMPLE, type LoadReadings } from '../lib/
 import { tierLadder, availableRungs, rungHasKey, tierDisplayName, tierEngineAvailable } from '../AgentV3/tierLadder';
 import { testChatStatus } from '../lib/testChatBot';
 import { buildTrafficBoard } from '../AI/ProviderHealth/trafficBoard';
+import { aggregateEngineHealth, ENGINE_DISPLAY_NAMES } from '../AgentV3/engineHealth';
+import { weakLeadEngines } from '../AgentV3/weakLeadEngines';
 import { readEngineUse, engineUseDayKey } from '../AgentV3/engineUseStore';
 import { reportStatus, openReportCount } from '../AgentV3/reportTriage';
 import { listReports } from '../lib/userReportStore';
@@ -226,6 +229,8 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'admin_api_provider_accounts',
   // The AI provider on/off switches: one state doc with a bounded change history (RETAINED_INDEFINITELY).
   'admin_provider_switches',
+  // Traffic Manager V2 control store: one current doc plus revision and audit rows (RETAINED_INDEFINITELY).
+  'admin_traffic_control', 'admin_traffic_control_revisions', 'admin_traffic_control_audit',
   'hosting_billing', 'hosting_period_usage',
   // Already on clocks, and absent from this inventory for the same reason the eleven above were.
   'takedown_records', 'safety_flags', 'admin_audit_log', 'build_jobs', 'build_failures',
@@ -464,6 +469,14 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   registerDeepinfraComparisonRoutes(app, verifyAdminToken);
   registerTestChatBotRoutes(app, verifyAdminToken);
   registerInferenceGatewayAdminRoutes(app, verifyAdminToken);
+  // Traffic Manager V2 control store. Writes need a FRESH authenticator code on top of the session, because login
+  // MFA is optional here; with no MFA enrolled the writes refuse (reads still work).
+  registerTrafficControlAdminRoutes(app, verifyAdminToken, async (code) => {
+    const mfa = await getAdminMfa();
+    if (!mfa.available) return 'unavailable';
+    if (!mfa.enabled || !mfa.secret) return 'not-enrolled';
+    return verifyTotp(mfa.secret, code) ? 'ok' : 'invalid';
+  });
   registerAiMaintenanceRoutes(app, verifyAdminToken);
   registerFreeProgramRoutes(app, verifyAdminToken);
 
@@ -2206,6 +2219,26 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         };
       });
     } catch { /* unmeasured ⇒ the client shows "could not read", never an empty ladder */ }
+
+    // THE WHOLE CHAIN, not only the ladder (owner 2026-11-17): the engines a build of each tier would try now, in
+    // order — for Weak, the leads in front of the ladder (Surplus, Router One, BluesMinds, Moyi; weakLeadEngines.ts,
+    // pinned to the real chain by tests/weakLeadEnginesMatchTheChain.test.ts), then the keyed ladder rungs.
+    try {
+      out.chains = Object.fromEntries((['weak', 'off', 'mini'] as const).map((level) => {
+        const leads = level === 'weak' ? weakLeadEngines().map((e) => ({ name: e.name, model: e.models.join(', ') || null })) : [];
+        const ladder = availableRungs(tierLadder(level).rungs).map((r) => ({ name: r.provider, model: r.model }));
+        return [level, [...leads, ...ladder]];
+      }));
+      out.engineNames = ENGINE_DISPLAY_NAMES;
+    } catch { /* unmeasured ⇒ the client falls back to the ladder above */ }
+
+    // WHICH ENGINE IS FAILING, AND WHY — from the latest build of every project saved in the last 24 hours, across
+    // all servers (each report records turns delivered and failures by cause). `null` means it could not be read.
+    try {
+      const windowHours = 24;
+      const recent = await listAllDiagnostics(300, Date.now() - windowHours * 3_600_000);
+      out.health = aggregateEngineHealth(recent, windowHours);
+    } catch { out.health = null; }
 
     // WHAT REALLY SERVED TODAY. `null` is "could not read" and the screen says so; `{}` is the real
     // answer "nothing has built today yet".

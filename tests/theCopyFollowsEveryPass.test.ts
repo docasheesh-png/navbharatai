@@ -40,7 +40,9 @@ describe('the end-of-build refresh', () => {
   });
 
   it('the explorer repair runs BEFORE the copy is taken, so it cannot leave it stale', () => {
-    expect(route.indexOf('await runExplorerRepair(')).toBeLessThan(route.indexOf("new FirebaseHostingDeployer().deployStatic(workspaceId, withPreviewAiRelay(dist), snapshotChannelId(workspaceId))"));
+    // The copy itself moved into failedBuildCopy.ts (2026-11-17); the route TAKES it at these two calls.
+    expect(route.indexOf('await runExplorerRepair(')).toBeLessThan(route.indexOf('              await takePreviewCopy();'));
+    expect(route.indexOf('await runExplorerRepair(')).toBeLessThan(route.indexOf('await keepFailedBuildCopy('));
   });
 
   it('fires only when the copy no longer matches what is about to be persisted', () => {

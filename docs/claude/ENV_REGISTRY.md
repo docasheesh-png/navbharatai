@@ -5126,7 +5126,7 @@ One module owns their env: `src/server/lib/resellerGateways.ts`. Key VALUES are 
 | `MOYI_MODEL` | Optional model id. Unset ⇒ a chat model from the key's own `GET /models` list. |
 | `DISCOUNTEDTOKENS_API_KEY` | Secret, unset. Prepaid account (minimum US$5). |
 | `DISCOUNTEDTOKENS_BASE_URL` | Optional; default `https://discountedtokens.com/v1` (their public API listing). Must stay on `discountedtokens.com`. |
-| `DISCOUNTEDTOKENS_MODEL` | Optional; default `gpt-6-sol` (callable on their pricing page, 2026-11-16). They sell OpenAI models only. |
+| `DISCOUNTEDTOKENS_MODEL` | Optional; default `gpt-6-sol` (callable on their pricing page, 2026-11-16). They sell OpenAI models only. **Since 2026-11-17 a comma list is the gateway's own fallback order** (owner: *"sabse pahle sasta aur accha, response na aaye to 2nd, fail to 3rd"*): put the cheapest good coding model first. Up to three are tried; gaps are filled from the key's `/models` list. The same applies to `MOYI_MODEL` and `MIRAPI_MODEL` in the Test Chat Bot. |
 | `MIRAPI_API_KEY` | Secret, unset. |
 | `MIRAPI_BASE_URL` | **Required, no default.** Must be https on `mirapi.ai` or a subdomain. |
 | `MIRAPI_MODEL` | Optional model id. Unset ⇒ a chat model from the key's own list. |

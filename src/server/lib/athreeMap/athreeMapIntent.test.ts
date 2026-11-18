@@ -118,3 +118,12 @@ describe('never throws, and the library has the map it names', () => {
     expect(ATHREE_MAP.recipe).toBe('generate_athree_map');
   });
 });
+
+// Negative module intent must not be mistaken for rejecting the whole named map.
+describe('component exclusions are not map refusal',()=>{
+ it.each(['Athree open world with no cars','Athree map without trees','Athree map no roads','अथ्री ओपन वर्ल्ड में पेड़ नहीं'])('%s',prompt=>{expect(athreeMapIntent({prompt})).not.toMatchObject({via:'declined'});});
+});
+
+describe('target-local map refusals remain supported',()=>{
+ it.each(['do not generate athree','do not want athree','athree map ko use nahi karo',"I do not want to use the Athree map",'अथ्री मैप नहीं चाहिए'])('%s',phrase=>expect(athreeMapIntent({prompt:'3D racing game, '+phrase})).toMatchObject({use:false,via:'declined'}));
+});

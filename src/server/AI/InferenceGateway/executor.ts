@@ -8,6 +8,8 @@ import { FIXED_TEXT_CHAIN_MAX_ATTEMPTS } from '../fixedTextChain';
  */
 import { isCount, isIdentifier, isPositiveCount } from './capabilities';
 import { planInference } from './policy';
+import { candidateVerdict } from '../TrafficRegistry/controlDecision';
+import { currentTrafficControl } from '../TrafficRegistry/controlSync';
 import { evidenceBinding, withoutEvidence } from './profiles';
 import type { AttemptRecord, BudgetAuthorization, Candidate, EvidenceAuthority, Payer,
   PlanningResult, RoutingRequest, SelectionPlan } from './types';
@@ -367,7 +369,14 @@ export function createInferenceExecutor(ports: ExecutionPorts) {
     if (incompatible || (r.surface === 'chat' && r.maxQueueWaitMs > 5000)
       || ((scope.kind === 'platform-free-fallback' || scope.kind === 'existing-professional') && b && ((scope.kind === 'platform-free-fallback' && b.periodLimitNanoUsd > PLATFORM_FREE_DAILY_LIMIT_NANO_USD)
         || b.periodEndsAtMs - b.periodStartsAtMs !== DAY_MS))) return { kind: 'blocked', reason: 'budget', rejected: [] };
-    return planInference({ ...snapshot, authority: ports.evidence, nowMs: ports.clock.now() });
+    const nowMs = ports.clock.now();
+    // One control snapshot per planned attempt: a disabled/draining provider or model gets no NEW attempt.
+    const control = currentTrafficControl();
+    return planInference({ ...snapshot, authority: ports.evidence, nowMs,
+      controlGate: (profile, request) => {
+        const v = candidateVerdict(control, profile.providerId, profile.modelId, request.logicalRequestId, nowMs);
+        return v.allowed ? null : v.reason;
+      } });
   }
   async function release(reservation: Reservation, reason: string, id: string): Promise<ExecutionResult> {
     try { await control(() => ports.ledger.releaseUndispatched(reservation, reason)); return stopped(reason); }

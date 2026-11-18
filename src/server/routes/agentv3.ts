@@ -526,6 +526,7 @@ import { moyiBuilderEnabled, moyiBuilderRungs } from '../AgentV3/moyiBuilder';
 import { qubaxBuilderRungs } from '../AgentV3/proChainV2/builderAdapters';
 import { qubaxBuilderEnabled } from '../AgentV3/proChainV2/qubaxBuilder';
 import { beforeFirstClaudeRung, discountedTokensBuilderEnabled, discountedTokensBuilderRungs } from '../AgentV3/discountedTokensBuilder';
+import { independentModelRungs } from '../AgentV3/gatewayModelRungs';
 import { ROUTER_ONE_LABEL, ROUTER_ONE_NOT_CONFIGURED, routerOneApiKey, routerOneBaseUrl, routerOneModels, routerOnePinnedForTier, routerOneWeakFallbackEnabled } from '../AI/RouterOne/routerOne';
 import { ProChainV2Build, proChainV2Decision, proChainV2ScopeAsk, proChainV2RedactSecrets, roleForRunnerOpts } from '../AgentV3/proChainV2';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
@@ -2785,6 +2786,15 @@ export function openAiCompatRunners(
   return out;
 }
 
+/**
+ * The rungs of a MULTI-MODEL GATEWAY (Router One, Qubax, BluesMinds, Moyi, DiscountedTokens): one per model, each failing
+ * alone, so the gateway's 2nd and 3rd models really are tried when its 1st times out or is rate-limited
+ * (gatewayModelRungs.ts). Same runner as `openAiCompatRunners`, same key pool.
+ */
+export function gatewayRunners(label: string, apiKeyRaw: string | undefined, baseURL: string, models: string[]): NamedRunner[] {
+  return independentModelRungs(label, models, (model) => openAiCompatRunners(label, apiKeyRaw, baseURL, [model]));
+}
+
 // ⚠️ Not consulted by the build chain since 2026-09-14 — see the banner above healRunnerRoutingOpts.
 export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: boolean; healLadder?: boolean }): NamedRunner[] {
   // DEFAULT = 'on' (admin 2026-07-12, "1st call claude nahi chahiye — jaisa CLAUDE.md me save hai"):
@@ -3571,7 +3581,7 @@ export function weakGlmFirst(rungs: readonly LadderRung[]): LadderRung[] {
 
 function routerOneTurnRunner(opts: Parameters<typeof buildTurnRunner>[0], mode: { pinned: boolean }): TurnRunner {
   const key = routerOneApiKey();
-  const runners = key ? openAiCompatRunners(ROUTER_ONE_LABEL, key, routerOneBaseUrl(), routerOneModels()) : [];
+  const runners = key ? gatewayRunners(ROUTER_ONE_LABEL, key, routerOneBaseUrl(), routerOneModels()) : [];
   if (runners.length === 0) {
     return {
       plannedModel: NO_ENGINE_CONFIGURED,
@@ -3628,9 +3638,9 @@ function proChainV2TurnRunner(opts: Parameters<typeof buildTurnRunner>[0], v2: P
   return v2.agentRunner({
     role: roleForRunnerOpts(opts),
     ...(surplus ? { surplus } : {}),
-    routerOne: routerOneWeakFallbackEnabled() ? openAiCompatRunners(ROUTER_ONE_LABEL, r1Key, routerOneBaseUrl(), routerOneModels()) : [],
+    routerOne: routerOneWeakFallbackEnabled() ? gatewayRunners(ROUTER_ONE_LABEL, r1Key, routerOneBaseUrl(), routerOneModels()) : [],
     routerOneSecrets: r1Key.split(/[\s,]+/),
-    rungFactory: (label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models),
+    rungFactory: (label, key, baseURL, models) => gatewayRunners(label, key, baseURL, models),
     makeChain: (rungs, hooks) => makeMultiProviderTurnRunner(rungs, {
       onProviderUsed: (used, from) => {
         hooks.onUsed(used);
@@ -3808,14 +3818,14 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
   // its tool calling is checked against its own catalogue and its price is its own (proChainV2/qubaxBuilder.ts).
   const runners = [
     ...(level === 'weak' && routerOneWeakFallbackEnabled()
-      ? openAiCompatRunners(ROUTER_ONE_LABEL, routerOneApiKey(), routerOneBaseUrl(), routerOneModels()) : []),
-    ...(level === 'weak' ? qubaxBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models)) : []),
-    ...(level === 'weak' ? bluesmindsBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models)) : []),
-    ...(level === 'weak' ? moyiBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models)) : []),
+      ? gatewayRunners(ROUTER_ONE_LABEL, routerOneApiKey(), routerOneBaseUrl(), routerOneModels()) : []),
+    ...(level === 'weak' ? qubaxBuilderRungs(gatewayRunners) : []),
+    ...(level === 'weak' ? bluesmindsBuilderRungs(gatewayRunners) : []),
+    ...(level === 'weak' ? moyiBuilderRungs(gatewayRunners) : []),
     // Owner 2026-11-17: on Normal and Strong, DiscountedTokens (up to three of its models) sits right before the first
     // Sonnet/Opus rung (discountedTokensBuilder.ts). Weak never gets it.
     ...ladderRunners(level === 'weak' ? rungs : rungs.slice(0, beforeFirstClaudeRung(rungs))),
-    ...(level === 'weak' ? [] : discountedTokensBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models))),
+    ...(level === 'weak' ? [] : discountedTokensBuilderRungs(gatewayRunners)),
     ...(level === 'weak' ? [] : ladderRunners(rungs.slice(beforeFirstClaudeRung(rungs)))),
   ];
   if (runners.length === 0) {

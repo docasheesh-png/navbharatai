@@ -122,9 +122,10 @@ describe('WIRING — the cost is measured from the call that paid it', () => {
 
   it('the measured cost reaches BOTH the per-key and the pool bench', () => {
     // A pool bench shorter than the timeout would let the next KEY of the same saturated service burn
-    // a full timeout window — the identical defect, one level up.
+    // a full timeout window — the identical defect, one level up. (`family` = the pool's service: the provider family,
+    // or one gateway model — NamedRunner.familyKey, 2026-11-18.)
     expect(src).toContain('cooldowns.strike(name, now(), costMs);');
-    expect(src).toContain('cooldowns.strike(`pool:${reportName}`, now(), costMs);');
+    expect(src).toContain('cooldowns.strike(`pool:${family}`, now(), costMs);');
   });
 
   it('it applies to the TIMEOUT class, which is the expensive one', () => {

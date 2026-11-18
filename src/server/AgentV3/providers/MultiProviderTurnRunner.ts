@@ -61,6 +61,25 @@ export interface NamedRunner {
    * block in the run loop for why those two scopes are genuinely different.
    */
   modelId?: string;
+  /**
+   * The scope a SERVICE-level failure (a timeout, an "overloaded" 429) is shared over. Defaults to the provider
+   * family (`reportAs ?? name`): every key of GLM sees the same slow GLM service, so one family streak is right.
+   *
+   * 🔴 A MULTI-MODEL GATEWAY IS NOT ONE SERVICE (owner 2026-11-18: "pahle sasta aur accha call ho, fail hone par 2nd,
+   * 2nd fail to 3rd, 3rd bhi fail to aage badho"). DiscountedTokens, Router One, Qubax, BluesMinds and Moyi route each
+   * model to a DIFFERENT upstream, so a timeout on one model is a fact about that model. Under the family scope one
+   * timeout on the first model pool-struck the gateway and its other two models were never tried — the build fell
+   * straight to Claude (`tests/aGatewayModelFailsAloneNotItsSiblings.test.ts`). Gateway rungs set this to
+   * `<label>::<model>`.
+   */
+  familyKey?: string;
+  /**
+   * The credential this rung calls with, when several rungs share one (the models of one gateway key). An ACCOUNT
+   * fact — an empty balance, a revoked key, a spend lock held by an unresolved call — is retired on this scope, so
+   * splitting a gateway into independent models never makes each model re-prove the same dead account. Defaults to
+   * `name` (one rung, one key).
+   */
+  accountKey?: string;
 }
 
 export interface MultiProviderOptions {
@@ -680,7 +699,7 @@ export function makeMultiProviderTurnRunner(
    * per call into a build with no Kimi at all.
    */
   const deadKeyFor = (entry: NamedRunner, err: unknown): string => {
-    if (!entry.modelId) return entry.name;
+    if (!entry.modelId) return entry.accountKey ?? entry.name;
     // 🔴 A STARVATION IS A FACT ABOUT THE MODEL AT THIS ASK — NEVER ABOUT THE KEY THAT CARRIED IT
     // (autopsy 57875eb3, 2026-09-17). Keyed on `name`, every key of a pool has a DISTINCT name
     // ('GLM', 'GLM#2', …), so a ~50-key `glm-5.3` pool re-proved the identical starvation on key
@@ -697,7 +716,7 @@ export function makeMultiProviderTurnRunner(
     if (isStarvedBudgetError(err)) return starvedKeyFor(entry);
     // A model-not-found stays keyed on the KEY that saw it: a pool may span accounts whose model
     // access differs, and re-proving a 404 costs one round-trip, not two minutes of reasoning.
-    return isModelUnavailableError(err) ? `${entry.name}::${entry.modelId}` : entry.name;
+    return isModelUnavailableError(err) ? `${entry.name}::${entry.modelId}` : entry.accountKey ?? entry.name;
   };
   /** The retirement key for a starved rung: provider FAMILY + model. See `deadKeyFor`. */
   const starvedKeyFor = (entry: NamedRunner): string => `${entry.reportAs ?? entry.name}::${entry.modelId ?? ''}`;
@@ -741,11 +760,13 @@ export function makeMultiProviderTurnRunner(
   // Pool strikes live under a separate `pool:<base>` cooldown key so a per-key quota 429 on one key
   // can never bench its siblings (key rotation must keep working for genuine per-key limits).
   const poolSizes = new Map<string, number>();
+  /** The service a timeout / overload is shared across — the family, or one gateway model (see `familyKey`). */
+  const familyOf = (entry: NamedRunner): string => entry.familyKey ?? entry.reportAs ?? entry.name;
   for (const e of chain) {
-    const base = e.reportAs ?? e.name;
+    const base = familyOf(e);
     poolSizes.set(base, (poolSizes.get(base) ?? 0) + 1);
   }
-  const isPoolMember = (entry: NamedRunner): boolean => (poolSizes.get(entry.reportAs ?? entry.name) ?? 0) >= 2;
+  const isPoolMember = (entry: NamedRunner): boolean => (poolSizes.get(familyOf(entry)) ?? 0) >= 2;
   /**
    * 🔴 THE BENCH FOR A RUNG THAT ANSWERS TOO SLOWLY TO BE WORTH WAITING FOR (autopsy dd1f5f60).
    *
@@ -795,6 +816,7 @@ export function makeMultiProviderTurnRunner(
         throwIfStopped(params.signal);
         const { name, runner } = chain[i];
         const reportName = chain[i].reportAs ?? name; // normalized label for telemetry/delivery (key-pool)
+        const family = familyOf(chain[i]); // the scope of a service-level failure (see NamedRunner.familyKey)
         // The fast lane stops HERE rather than walk onto a rung that reasons before every answer — see
         // `RunTurnParams.stopAtReasoningRung`. Not the opener (a lane whose opener reasons is never
         // started), and not a failure of this rung: nothing is benched, struck or recorded against it.
@@ -809,7 +831,7 @@ export function makeMultiProviderTurnRunner(
         // the rest of this build". A late answer from a call the bench already judged slow is evidence
         // of the slowness, not of a recovery; `benchedFamilies` is what the report promised, so it is
         // what the skip reads.
-        if (benchedFamilies.has(reportName) || (timeoutStreak.get(reportName) ?? 0) >= TIMEOUT_BENCH_AFTER) {
+        if (benchedFamilies.has(family) || (timeoutStreak.get(family) ?? 0) >= TIMEOUT_BENCH_AFTER) {
           fellBackFrom.push(name); // the FAMILY is benched — skip every remaining key without spending another timeout window
           continue;
         }
@@ -821,7 +843,7 @@ export function makeMultiProviderTurnRunner(
           fellBackFrom.push(name); // SHARED cooldown — another turn/instance already proved it saturated
           continue;
         }
-        if (isPoolMember(chain[i]) && cooldowns.until(`pool:${reportName}`) > now()) {
+        if (isPoolMember(chain[i]) && cooldowns.until(`pool:${family}`) > now()) {
           fellBackFrom.push(name); // POOL cooldown — the provider SERVICE is saturated; every key skips
           continue;
         }
@@ -857,7 +879,7 @@ export function makeMultiProviderTurnRunner(
         // Retired earlier this run — either the whole provider (account fatal) or just this one model
         // (a rung whose id this account cannot reach). Checked in that order; both mean "do not spend
         // another round-trip re-proving an answer that cannot change".
-        const fatalReason = deadForRun.get(name)
+        const fatalReason = deadForRun.get(chain[i].accountKey ?? name)
           ?? (chain[i].modelId ? deadForRun.get(`${name}::${chain[i].modelId}`) : undefined)
           // …or this MODEL starved on ANY key of this family earlier in the run (see `deadKeyFor`).
           ?? (chain[i].modelId ? deadForRun.get(starvedKeyFor(chain[i])) : undefined);
@@ -944,10 +966,10 @@ export function makeMultiProviderTurnRunner(
           /** This rung's own time — not the rungs tried, skipped or abandoned before it (see TurnResult.attemptMs). */
           const answeredInMs = Math.max(0, now() - attemptStartedAt);
           try { opts.silenceMemory?.clear(benchKey, now()); } catch { /* best-effort */ }
-          timeoutStreak.delete(reportName); // a success resets the family's consecutive-timeout streak
+          timeoutStreak.delete(family); // a success resets the family's consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone
-          if (isPoolMember(chain[i])) cooldowns.clear(`pool:${reportName}`); // …and the POOL cooldown (service recovered)
+          if (isPoolMember(chain[i])) cooldowns.clear(`pool:${family}`); // …and the POOL cooldown (service recovered)
           opts.onProviderUsed?.(reportName, [...fellBackFrom]);
           if (opts.sticky) {
             try { recordStickySuccess(bench.sticky ??= createStickyState(), chain, i, opts.sticky.remember); } catch { /* bookkeeping only */ }
@@ -1055,8 +1077,8 @@ export function makeMultiProviderTurnRunner(
           // by an earlier unresolved call) is retired on its FIRST refusal — keyed on this rung's `name`
           // (one key), never its family, another provider, or another build. The 28 identical refusals
           // that build logged become one. Every other error keeps exactly the handling below.
-          if (isRestOfBuildSkip(err) && !deadForRun.has(name)) {
-            deadForRun.set(name, err instanceof Error ? err.message : String(err));
+          if (isRestOfBuildSkip(err) && !deadForRun.has(chain[i].accountKey ?? name)) {
+            deadForRun.set(chain[i].accountKey ?? name, err instanceof Error ? err.message : String(err));
             try {
               opts.onProviderBenched?.(reportName, `${chain[i].modelId ? `${chain[i].modelId} ` : ''}cannot be used again in this build (an earlier call on this key is still unresolved) — this key is skipped for the rest of this build`);
             } catch { /* telemetry only */ }
@@ -1232,10 +1254,10 @@ export function makeMultiProviderTurnRunner(
             // consecutive timeouts", and every GLM rung — glm-5.3 included, which never crawled — was benched
             // for the rest of the build, while the crawl bench above had just said "skipped for 180s, then
             // tried once more". The crawl bench (crawlBench.ts) owns a crawl: weather, one rung, a window.
-            const familyStreak = (timeoutStreak.get(reportName) ?? 0) + 1;
-            timeoutStreak.set(reportName, familyStreak); // bench the FAMILY after 2 in a row, across any of its keys
-            if (familyStreak >= TIMEOUT_BENCH_AFTER && !benchedFamilies.has(reportName)) {
-              benchedFamilies.add(reportName);
+            const familyStreak = (timeoutStreak.get(family) ?? 0) + 1;
+            timeoutStreak.set(family, familyStreak); // bench the FAMILY after 2 in a row, across any of its keys
+            if (familyStreak >= TIMEOUT_BENCH_AFTER && !benchedFamilies.has(family)) {
+              benchedFamilies.add(family);
               try { opts.onProviderBenched?.(reportName, `${familyStreak} consecutive timeouts — every remaining ${reportName} key is skipped for the rest of this run so the ladder can reach the next provider`); } catch { /* telemetry only */ }
             }
             // TaskFlow autopsy 2026-07-17: 212 GLM TIMEOUTS in one build — the same cross-instance
@@ -1251,14 +1273,14 @@ export function makeMultiProviderTurnRunner(
             // Quiz-app autopsy 2026-07-17: a timeout is SERVICE saturation, not one key's quota — strike
             // the POOL too, so 2 service-level failures across ANY keys bench the whole provider for the
             // cooldown window (soft — the same registry recovery brings it back automatically).
-            if (isPoolMember(chain[i])) cooldowns.strike(`pool:${reportName}`, now(), costMs);
+            if (isPoolMember(chain[i])) cooldowns.strike(`pool:${family}`, now(), costMs);
           } else if (isRateLimitProviderError(err)) {
             rateLimitStreak.set(name, (rateLimitStreak.get(name) ?? 0) + 1); // bench after 2 consecutive 429s
             cooldowns.strike(name, now()); // shared memory — concurrent turns/instances stop hammering too
             // A "service overloaded" 429 is service-wide (every key sees the same saturated backend) —
             // pool-strike it like a timeout. A per-key quota 429 ("rate limit reached for requests") is
             // NOT pool-struck: the next key genuinely may have quota left, so rotation must keep working.
-            if (isPoolMember(chain[i]) && isServiceOverloadedError(err)) cooldowns.strike(`pool:${reportName}`, now());
+            if (isPoolMember(chain[i]) && isServiceOverloadedError(err)) cooldowns.strike(`pool:${family}`, now());
           } else if (isHopelesslyOversizedError(err)) {
             // The PROMPT exceeds every window in the fleet — no later provider can save this turn.
             // Abort now instead of replaying the same doomed multi-megabyte request down the chain.

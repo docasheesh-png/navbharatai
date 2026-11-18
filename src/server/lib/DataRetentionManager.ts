@@ -559,6 +559,9 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
    * nothing for ever, which is exactly the defect that made this field required.
    */
   { collection: 'takedown_records', ttlDays: 180, timestampField: 'removedAt', timestampKind: 'epochMs' },
+  // Traffic Manager V2 P4 (owner decision 4): routing decision records, 30 days; per-instance daily SLO counters, 35 days.
+  { collection: 'routing_decisions', ttlDays: 30, timestampField: 'atMs', timestampKind: 'epochMs' },
+  { collection: 'routing_slo_daily', ttlDays: 35, timestampField: 'dayStartMs', timestampKind: 'epochMs' },
   /**
    * One record per server deploy attempt (hostedDeployments.ts, 2026-10-06): its states and a failure
    * category, no secret and no provider text. Useful while a deploy is recent; history older than 180 days

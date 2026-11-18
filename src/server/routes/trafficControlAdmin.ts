@@ -26,6 +26,7 @@ import { LEGACY_PATHS } from '../AI/TrafficRegistry/legacyControl';
 import { sharedHealthStatus } from '../AI/ProviderHealth/healthShare';
 import { suspectedFamilyOutages, type HealthObservation } from '../AI/ProviderHealth/familyHealth';
 import { trafficProviderViews } from '../AI/ProviderHealth/trafficHealth';
+import { computeSlo, decisionSinkStatus, flushCounters, recentFailures } from '../AI/TrafficRegistry/decisionRecords';
 
 export type StepUpResult = 'ok' | 'invalid' | 'not-enrolled' | 'unavailable';
 export type StepUpVerifier = (code: string) => Promise<StepUpResult>;
@@ -98,6 +99,19 @@ export function registerTrafficControlAdminRoutes(app: Express, verifyAdminToken
       });
     } catch {
       res.status(503).json({ error: 'The traffic controls could not be read. Nothing is confirmed on or off.' });
+    }
+  });
+
+  // P4: reliability from the COMPLETE counters (never the sampled records), with denominators and a 95% interval.
+  app.get('/api/admin/traffic-control/slo', verifyAdminToken, reads, async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      await flushCounters().catch(() => 0); // this instance's latest minute counts, so the page is not a minute behind
+      const recent = (await recentFailures(20)).map(r => ({ atMs: r.atMs, surface: r.surface, path: r.path, outcome: r.outcome, failure: r.failure,
+        provider: r.provider, model: r.model, attempts: r.attempts.length }));
+      res.json({ slo: await computeSlo(undefined, 7), recentFailures: recent, sink: decisionSinkStatus() });
+    } catch {
+      res.status(503).json({ error: 'Reliability numbers could not be read right now.' });
     }
   });
 

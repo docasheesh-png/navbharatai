@@ -102131,3 +102131,13 @@ Owner t311u sequential audit, BR1999 only (boundary 1951..2105 frozen). Branched
   apps tab (lazy-loaded, the same component — not a second review screen). The old copy "It opens as the signed-in store
   admin account, not with this panel's login" was the very drift fixed above and is replaced. Locked in
   `tests/theAdminMenuHasNineTabs.test.ts`.
+
+## 2026-11-18 — Autopsy of the admin Home page copy (18:26Z)
+
+- Q-2754 ✅(PR) "Nearly full" from a rate tile → chip says "Needs attention" when only rate tiles are worst.
+- Q-2755 ✅(PR) "+465 today" counted wallets WRITTEN today (`updatedAt || createdAt`); creation only now, sibling in
+  the users list fixed, source guard against the pattern.
+- Q-2756 ✅(PR) "vs 0 yesterday" on a 54-minute-old server → unknown unless the process ran all of yesterday.
+- OPEN/BLOCKED: Q-2757…Q-2764 — UTC "today", per-instance hit counters, Reliability 0 from the legacy sample, 3 idle
+  billed sandboxes, the −₹16,102 margin (admin decision), BUILD_BLOCKED_NO_CREDITS on new users, two reason-less log
+  lines, the Grievance Officer env.

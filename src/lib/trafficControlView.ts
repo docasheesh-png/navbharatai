@@ -83,3 +83,21 @@ export function saveProblem(reason: string, totp: string): string | null {
   if (!/^\d{6}$/.test(totp.trim())) return 'Enter the current 6-digit code from your authenticator app.';
   return null;
 }
+
+/** /api/admin/traffic-control/slo — reliability from complete counters. */
+export interface SloView {
+  slo: Array<{ surface: string; days: number; eligible: number; successes: number; refused: number; cancelled: number; rate: number | null; ci95: { low: number; high: number } | null; target: number | null }>;
+  recentFailures: Array<{ atMs: number; surface: string; path: string; outcome: string; failure: string | null; provider: string; model: string; attempts: number }>;
+  sink: { enabled: boolean; buffered: number; dropped: number };
+}
+export function isSloView(v: unknown): v is SloView {
+  if (!rec(v) || !Array.isArray(v.slo) || !Array.isArray(v.recentFailures) || !rec(v.sink)) return false;
+  return v.slo.every(r => rec(r) && str(r.surface) && int(r.eligible) && int(r.successes) && (r.rate === null || typeof r.rate === 'number'))
+    && v.recentFailures.every(f => rec(f) && int(f.atMs) && str(f.surface) && str(f.outcome) && str(f.provider));
+}
+/** "99.62% (99.41–99.76%, n = 12,034)" — the rate with its honest uncertainty and denominator. */
+export function sloText(r: SloView['slo'][number]): string {
+  if (!r.eligible || r.rate === null) return 'No eligible requests yet.';
+  const pct = (x: number) => `${(x * 100).toFixed(2)}%`;
+  return `${pct(r.rate)}${r.ci95 ? ` (95%: ${pct(r.ci95.low)}–${pct(r.ci95.high)})` : ''} of ${r.eligible.toLocaleString('en-IN')} eligible requests`;
+}

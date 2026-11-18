@@ -18,7 +18,8 @@ describe('automatic pause stops the real provider ladder', () => {
     let state = maintenanceState({});
     injected.store = new AiMaintenanceStore(() => ({ read: async () => state, change: async fn => { state = fn(state); return state; } }));
     // Exercise the production error observer without any real provider or credentials.
-    vi.stubEnv('VITEST', ''); vi.stubEnv('NODE_ENV', 'production'); vi.stubEnv('AGENTV3_BUILD_STREAM', 'off');
+    // This fixture isolates the maintenance threshold; health skipping has its own cross-build tests.
+    vi.stubEnv('AGENTV3_TRAFFIC_HEALTH', 'off'); vi.stubEnv('VITEST', ''); vi.stubEnv('NODE_ENV', 'production'); vi.stubEnv('AGENTV3_BUILD_STREAM', 'off');
     const create = vi.fn().mockRejectedValue(new Error('insufficient_quota: out of tokens'));
     const kimi = new OpenAiToolRunner({ chat: { completions: { create } } }, { model: 'kimi-k2.6' });
     const result: TurnResult = { text: 'paid answer', toolUses: [], stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }, rawContent: [] };

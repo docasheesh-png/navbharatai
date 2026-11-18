@@ -1,7 +1,8 @@
 import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import OpenAI from 'openai';
 import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
-import { nextPoolKey, parseKeyPool } from '../../../lib/keyPool';
+import { nextPoolKeyEntry, parseKeyPool } from '../../../lib/keyPool';
+import { noteProviderCall, providerInFlight, providerPoolSlot, shouldSkipProvider } from '../../ProviderHealth/trafficHealth';
 
 /**
  * GLM (Z.AI) provider — used as a FREE, fast top-of-chain option for Free Chat.
@@ -20,6 +21,7 @@ import { nextPoolKey, parseKeyPool } from '../../../lib/keyPool';
  */
 export class GlmProvider implements AIProvider {
   name: 'GLM' = 'GLM';
+  readonly managesTrafficHealth = true;
   priority = 0; // FREE chain leader — tried before the paid providers.
 
   private static model(): string {
@@ -46,8 +48,7 @@ export class GlmProvider implements AIProvider {
   // model and fell through to a PAID rung (admin Diagnostics: "GLM 8 requests · 8 errors", "0% of
   // assistant turns were served by the free model"). See lib/keyPool.ts.
   private readonly _clients = new Map<string, OpenAI>();
-  private get client(): OpenAI {
-    const key = nextPoolKey(process.env.GLM_API_KEY) || 'missing-key';
+  private clientForKey(key: string): OpenAI {
     let c = this._clients.get(key);
     if (!c) {
       c = new OpenAI({
@@ -59,6 +60,26 @@ export class GlmProvider implements AIProvider {
       this._clients.set(key, c);
     }
     return c;
+  }
+
+  private async withClient<T>(model: string, signal: AbortSignal | undefined, run: (client: OpenAI) => Promise<T>): Promise<T> {
+    signal?.throwIfAborted();
+    const pool = process.env.GLM_API_KEY;
+    const selected = nextPoolKeyEntry(pool, index => !shouldSkipProvider(providerPoolSlot('GLM', index)));
+    if (!selected && parseKeyPool(pool).length) throw new Error('GLM pool has no available credential');
+    const healthProvider = providerPoolSlot('GLM', selected?.index ?? 0);
+    const client = this.clientForKey(selected?.key ?? 'missing-key');
+    const started = Date.now();
+    providerInFlight(healthProvider, 1);
+    try {
+      const result = await run(client);
+      signal?.throwIfAborted();
+      noteProviderCall({ provider: healthProvider, model, surface: 'chat', ok: true, totalMs: Date.now() - started });
+      return result;
+    } catch (error) {
+      if (!signal?.aborted) noteProviderCall({ provider: healthProvider, model, surface: 'chat', ok: false, totalMs: Date.now() - started, error });
+      throw error;
+    } finally { providerInFlight(healthProvider, -1); }
   }
 
   async execute(prompt: string, _schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[], signal?: AbortSignal): Promise<AIProviderResponse> {
@@ -77,21 +98,23 @@ export class GlmProvider implements AIProvider {
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     messages.push({ role: 'user', content: prompt });
 
-    const response = await this.client.chat.completions.create({ model, messages, max_tokens: 8000 }, signal ? { signal } : undefined);
+    return this.withClient(model, signal, async client => {
+      const response = await client.chat.completions.create({ model, messages, max_tokens: 8000 }, signal ? { signal } : undefined);
 
-    // Rock-solid: an HTTP-200 with EMPTY content is NOT an answer (free tiers do this when
-    // rate-limited/overloaded). Throw at the provider level so EVERY caller — current router
-    // (which also guards) or any future one — falls through instead of showing a blank reply.
-    const content = response.choices[0]?.message?.content?.trim();
-    if (!content) throw new Error('GLM returned an empty reply — deferring to the next provider');
+      // Rock-solid: an HTTP-200 with EMPTY content is NOT an answer (free tiers do this when
+      // rate-limited/overloaded). Throw at the provider level so EVERY caller — current router
+      // (which also guards) or any future one — falls through instead of showing a blank reply.
+      const content = response.choices[0]?.message?.content?.trim();
+      if (!content) throw new Error('GLM returned an empty reply — deferring to the next provider');
 
-    return {
-      content,
-      latencyMs: Date.now() - startTime,
-      provider: 'GLM',
-      model,
-      usage: readProviderUsage(response.usage),
-    };
+      return {
+        content,
+        latencyMs: Date.now() - startTime,
+        provider: 'GLM',
+        model,
+        usage: readProviderUsage(response.usage),
+      };
+    });
   }
 
   async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string> {
@@ -101,26 +124,28 @@ export class GlmProvider implements AIProvider {
     messages.push({ role: 'user', content: prompt });
     // `{ signal }` is the whole point: it aborts the HTTP request, so an abandoned turn stops
     // costing instead of merely stopping being displayed (Q-621).
-    const stream = await this.client.chat.completions.create({
-      model: model || GlmProvider.model(),
-      messages,
-      max_tokens: 8000,
-      stream: true,
-    }, signal ? { signal } : undefined);
-    let full = '';
-    for await (const chunk of stream) {
-      // The client left: stop consuming AND stop paying. The SDK abort above tears the socket down,
-      // so this loop normally ends by throwing; the check is the belt to that braces, for an SDK
-      // version that resolves the stream instead of rejecting it (Q-621).
-      if (signal?.aborted) break;
-      const text = chunk.choices[0]?.delta?.content || '';
-      if (text) { full += text; onChunk(text); }
-    }
-    // Rock-solid: a stream that completed without ONE chunk is a silent failure, not a success —
-    // returning '' quietly would leave the user staring at nothing. Throw so the router's catch
-    // path (cooldown + fallback/honest busy message) takes over.
-    if (!full.trim()) throw new Error('GLM stream produced no content — deferring to the next provider');
-    return full;
+    return this.withClient(model || GlmProvider.model(), signal, async client => {
+      const stream = await client.chat.completions.create({
+        model: model || GlmProvider.model(),
+        messages,
+        max_tokens: 8000,
+        stream: true,
+      }, signal ? { signal } : undefined);
+      let full = '';
+      for await (const chunk of stream) {
+        // The client left: stop consuming AND stop paying. The SDK abort above tears the socket down,
+        // so this loop normally ends by throwing; the check is the belt to that braces, for an SDK
+        // version that resolves the stream instead of rejecting it (Q-621).
+        if (signal?.aborted) break;
+        const text = chunk.choices[0]?.delta?.content || '';
+        if (text) { full += text; onChunk(text); }
+      }
+      // Rock-solid: a stream that completed without ONE chunk is a silent failure, not a success —
+      // returning '' quietly would leave the user staring at nothing. Throw so the router's catch
+      // path (cooldown + fallback/honest busy message) takes over.
+      if (!full.trim()) throw new Error('GLM stream produced no content — deferring to the next provider');
+      return full;
+    });
   }
 
   async healthCheck(): Promise<boolean> {

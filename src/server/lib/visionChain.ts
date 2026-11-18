@@ -22,9 +22,10 @@ import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 
 import { claudeVisionAnswerModel, glmVisionModels, grokVisionModels, geminiVisionModels, vertexVisionModels, type VisionTier } from './visionModels';
 import { dispatchWithFreeTierPaidHold, estimateTextTokens, geminiUsage, reserveFreeTierPaid, settleFreeTierPaid, FREE_TIER_PAID_OUTPUT_QUOTE } from './freeTierPaidCap';
-import { nextPoolKey } from './keyPool';
+import { nextPoolKeyEntry } from './keyPool';
 import { vertexGenAI } from './vertexGenAI';
 import { tryCheaperInferenceVision, tryQubaxVision } from './visionSuppliers';
+import { noteProviderCall, providerInFlight, providerPoolSlot, shouldSkipProvider } from '../AI/ProviderHealth/trafficHealth';
 
 export interface VisionAttachment {
   name: string;
@@ -111,10 +112,13 @@ async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise
  */
 async function tryGlm(atts: VisionAttachment[], o: VisionOptions): Promise<string | null> {
   // A POOL, not one key (lib/keyPool.ts): the whole comma string used to go out as one bearer token.
-  const key = nextPoolKey(process.env.GLM_API_KEY);
   const images = atts.filter((f) => f.type.startsWith('image/'));
-  if (!key || images.length === 0) return null;
+  if (images.length === 0) return null;
   if (images.length !== atts.length) return null; // a PDF in the batch → defer to Vertex/Gemini (they read both)
+  const selected = nextPoolKeyEntry(process.env.GLM_API_KEY, index => !shouldSkipProvider(providerPoolSlot('GLM', index)));
+  if (!selected) return null;
+  const { key } = selected;
+  const healthProvider = providerPoolSlot('GLM', selected.index);
   const OpenAI = (await import('openai')).default;
   const glm = new OpenAI({ apiKey: key, baseURL: process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', maxRetries: 0 });
   const content: any[] = [
@@ -127,16 +131,30 @@ async function tryGlm(atts: VisionAttachment[], o: VisionOptions): Promise<strin
   ];
   for (const model of glmVisionModels(visionTier(o))) {
     o.signal?.throwIfAborted();
+    const started = Date.now();
+    providerInFlight(healthProvider, 1);
+    // Physical transport owns occupancy, even if the timeout observer finishes first.
+    const transport = Promise.resolve().then(() => {
+      o.signal?.throwIfAborted();
+      return glm.chat.completions.create({ model, messages, max_tokens: 1500 }, ...(o.signal ? [{ signal:o.signal }] : []));
+    });
+    void transport.then(() => providerInFlight(healthProvider, -1), () => providerInFlight(healthProvider, -1));
     try {
       const r: any = await withTimeout(
-        glm.chat.completions.create({ model, messages, max_tokens: 1500 }, ...(o.signal ? [{ signal:o.signal }] : [])),
+        transport,
         o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         `GLM vision (${model})`,
       );
       const text = r?.choices?.[0]?.message?.content?.trim();
-      if (text) return text;
+      if (!text) throw new Error('GLM vision returned an empty reply');
+      o.signal?.throwIfAborted();
+      noteProviderCall({ provider: healthProvider, model, surface: 'vision', ok: true, totalMs: Date.now() - started });
+      return text;
     } catch (err: any) {
+      if (!o.signal?.aborted) noteProviderCall({ provider: healthProvider, model, surface: 'vision', ok: false, totalMs: Date.now() - started, error: err });
       console.warn(`[VISION_CHAIN] GLM ${model} failed: ${err?.message || err}`);
+      // An account refusal applies to every model on this credential, not its funded neighbours.
+      if (o.signal?.aborted || shouldSkipProvider(healthProvider)) return null;
     }
   }
   return null;
@@ -332,11 +350,22 @@ export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions)
   };
   for (const provider of visionProviderOrder(o.allowClaude, visionTier(o), o.alwaysOnSuppliers === true)) {
     o.signal?.throwIfAborted();
+    // GLM rotates credentials internally: admission and outcomes belong to its selected slot.
+    const managedHealth = provider === 'GLM';
+    if (!managedHealth && shouldSkipProvider(provider)) continue;
+    const started = Date.now();
+    if (!managedHealth) providerInFlight(provider, 1);
     try {
       const text = await runners[provider](atts, o);
-      if (text) return { text, provider };
+      if (text) {
+        if (!managedHealth) noteProviderCall({ provider, surface: 'vision', ok: true, totalMs: Date.now() - started });
+        return { text, provider };
+      }
     } catch (err: any) {
+      if (!managedHealth && !o.signal?.aborted) noteProviderCall({ provider, surface: 'vision', ok: false, totalMs: Date.now() - started, error: err });
       console.warn(`[VISION_CHAIN] ${provider} failed: ${err?.message || err}`);
+    } finally {
+      if (!managedHealth) providerInFlight(provider, -1);
     }
   }
   return null;

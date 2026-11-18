@@ -2271,16 +2271,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             items: { type: 'string' },
             description: 'Optional subset: combat, ai, projectile, spawner, weapon, director. Default = all.',
           },
-          archetype: {
-            type: 'string',
-            description: 'The kind of land: continental, plains, hills, alpine, desert, tundra, jungle, savanna, archipelago, island, wetland, coast. Default: read from the user\'s words (registan -> desert, pahad -> alpine, dweep -> island).',
-          },
-          size_km: {
-            type: 'number',
-            description: 'How big the map is, 1 to 1000 km (a seamless loop; an island is that many km across). Default: read from the user\'s words ("5 km", "chhota", "huge"); none = 100.',
-          },
         },
       },
+    },
+    {
+      name: 'generate_procedural_object',
+      description: 'Optional bounded procedural geometry recipe. The existing admitted architect API turn designs an original declarative JSON plan from the user request; object names are not a preset whitelist. Compose new shapes from semantic parts rather than substituting an unrelated catalog object. No additional provider call. If the bounded geometry vocabulary cannot express the request, disclose the unsupported capability instead of claiming a complete object. Writes trusted geometry runtime and an additive object factory, NOT an automatically mounted game. Requires reviewed Three.js 0.180.0 and AGENTV3_PROCEDURAL_OBJECTS on; otherwise unavailable. Call through run_recipe. Plan version1 fields: label and parts (phone max24/12000 triangles, desktop64/60000). Each part: id, geometry, position xyz, rotation radians xyz, color #RRGGBB, roughness0..1, metalness0..1. Geometry kinds box(size xyz), sphere(radius,segments,rings), cylinder(top,bottom,height,segments), lathe(points radius/y strictly increasing y,segments). No executable code, textures, URLs or hierarchy. No automatic collision, rigging or realism guarantee. Integrate returned factory using existing guarded edits and verify the preview.',
+      input_schema: {type:'object',required:['id','quality','plan_json'],properties:{
+        id:{type:'string',pattern:'^[a-z][a-z0-9-]{0,31}$'},quality:{type:'string',enum:['phone','desktop']},
+        plan_json:{type:'string',maxLength:32768,description:'Strict JSON geometry plan, not code. Version1, label, parts. Numeric limits validated at runtime; rejection is not success.'}
+      }},
     },
     {
       name: 'generate_athree_map',
@@ -2293,6 +2293,14 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'Hand-writing a terrain for such a game is wrong. Pass include to take only some modules of it.',
       input_schema: { type: 'object', properties: {
         include: { type: 'array', items: { type: 'string' }, description: 'Optional modules: sea, plants, rivers, sky, roads, vehicles. Default: chosen from the request (none named = all).' },
+        archetype: {
+          type: 'string',
+          description: 'The kind of land: continental, plains, hills, alpine, desert, tundra, jungle, savanna, archipelago, island, wetland, coast. Default: read from the user\'s words (registan -> desert, pahad -> alpine, dweep -> island).',
+        },
+        size_km: {
+          type: 'number',
+          description: 'How big the map is, 1 to 1000 km (a seamless loop; an island is that many km across). Default: read from the user\'s words ("5 km", "chhota", "huge"); none = 100.',
+        },
         composition: { type: 'object', description: 'Optional explicit user-shaped runtime world. Additive only; refuses replacing existing source. Procedural visual modules, not NPC AI or driving. Width 1–100km, mobile performance unverified.', additionalProperties: false,
           required: ['seed','profile','widthKm','quality','rivers','vegetation','objects'],
           properties: {
@@ -2326,9 +2334,9 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'torus, lathe, loft, extrude, tube; a transform tree with pivots, mirror and repeat; materials; animation clips such as walk and idle) and '
         + 'the Forge CHECKS it, MEASURES it (triangles, size in metres, parts that float free, a clip that tears it apart) and DRAWS it back to you '
         + 'as FRONT / SIDE / TOP text silhouettes, so you can see it and fix it before it ships. It writes src/game/forge/forge.ts and '
-        + 'src/game/objects/<id>.ts, and the game makes the object with createX(THREE). EASIEST: call it with { describe: "a lighthouse with a '
-        + 'spiral stair" } and the Forge MAKES IT ITSELF (it asks a model for the spec, checks it, shows the model its own drawing and has it '
-        + 'correct it, a few rounds) — you write no spec. Or call it with no arguments to read the guide, with '
+        + 'src/game/objects/<id>.ts using atomic exclusive creation, and the game makes the object with createX(THREE). Supply the spec in this admitted turn; '
+        + 'describe-only sidecalls are unavailable pending accounting and cancellation integration. Existing-object changes require genuine atomic replacement, '
+        + 'currently unavailable on the production actuator. Preserve the source and report any refusal. Call it with no arguments to read the guide, with '
         + '{ example: "person" } for a worked spec to adapt (person, quadruped, house, tree, sword, train, car, bike, plane, boat), or with { spec } to build. Use it when the '
         + 'library has no match; never hand-write vertices or stacks of boxes for an object in game code. The result is stylised low-poly '
         + '(not photoreal): say so.',
@@ -2340,8 +2348,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           customise: { type: 'string', description: 'CHANGE an object that exists, in the user\'s own words (English, Hinglish or Hindi): "dress ka rang neela karo, baal bade karo, thoda lamba". Needs target. Colours of named parts, size, and for the Forge person: gender, hair length, a dress, build.' },
           target: { type: 'string', description: 'With customise: the id of the object to change (see src/game/objects/).' },
           base: { type: 'string', enum: ['person'], description: 'With customise: when the target does not exist yet, start from the Forge person.' },
-          describe: { type: 'string', description: 'The object in words (what it is, roughly how big, what matters). The Forge makes it itself and writes it.' },
-          id: { type: 'string', description: 'With describe: the id to save it under (lowercase letters, digits, -). Default: made from the description.' },
+          describe: { type: 'string', description: 'Describe-only generation is currently unavailable. Supply spec from the admitted architect turn instead.' },
+          id: { type: 'string', description: 'Reserved for describe-only generation, which is currently unavailable. Put a new object id inside spec.' },
         },
       },
     },
@@ -3676,6 +3684,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_i18n',
   'request_secrets',
   'generate_game_systems',
+  'generate_procedural_object',
   'generate_athree_map',
   'author_object',
   'generate_game_shell',
@@ -3900,6 +3909,7 @@ export const RECIPE_TOOLS = [
   'generate_game_3d',
   'generate_game_controller',
   'generate_game_runtime',
+  'generate_procedural_object',
   'generate_athree_map',
   'author_object',
   'generate_game_shell',

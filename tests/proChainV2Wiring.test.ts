@@ -49,8 +49,14 @@ describe('flag OFF (everyone but z@) — nothing changes', () => {
     const withHooks = chainFor({ tier: 'weak', noClaude: true, surplusPreWriteFailOpen: hooksFor('public@user.in') });
     const without = chainFor({ tier: 'weak', noClaude: true });
     expect(withHooks).toEqual(without);
-    expect(without.length).toBe(TIER_LADDERS.weak.length);
-    expect(without.some((n) => /ENGINE_(QX|MF)/.test(n))).toBe(false);
+    // REPOINTED (owner 2026-11-17, "apke sabhi suggestion approved"): Qubax is now a default Weak engine for every
+    // user, third after Router One — by the owner's order, not by Pro Chain V2. So the chain is the ladder plus the
+    // Qubax rungs; Mitrify (a v2-only supplier) still never appears, and v2 hooks still change nothing.
+    expect(without.length).toBe(TIER_LADDERS.weak.length + without.filter((n) => /ENGINE_QX/.test(n)).length);
+    // One rung per Qubax builder model (qubaxBuilder.ts), all together, right at the front of the ladder.
+    const qx = without.map((n, i) => (/ENGINE_QX/.test(n) ? i : -1)).filter((i) => i >= 0);
+    expect(qx).toEqual(qx.map((_, k) => qx[0] + k));
+    expect(without.some((n) => /ENGINE_MF/.test(n))).toBe(false);
   });
   it('z@ on another band is untouched', () => {
     expect(proChainV2ForBuild('off', 'z@gmail.com', null)).toBeUndefined();

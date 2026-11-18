@@ -21,9 +21,12 @@ import {
   bucketOnlyPublishUsable,
   bucketOnlyPublishedUrl,
   bucketOnlySubdomain,
+  publishedAppDomain,
   snapshotBucketEnabled,
   snapshotSubdomain,
 } from './bucketOnlyPublish';
+import { planRepublish, type RepublishPlan } from './republishTarget';
+import { upgradeShippedServiceWorker } from './appDefaults';
 import { snapshotChannelId } from './previewSnapshot';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
@@ -118,6 +121,52 @@ export class FirebaseHostingDeployer {
       throw new Error('No files to deploy. Ensure "npm run build" produced a dist/ directory.');
     }
 
+    // OUR OWN v1 service worker cached every GET, including the page, so a republish never reached
+    // anyone who had already opened the app. Replaced here, in the bytes that are about to ship —
+    // the source file is often already gone from the build output's perspective. A worker the user
+    // wrote is left alone (upgradeShippedServiceWorker matches the exact generated text).
+    upgradeShippedServiceWorker(files);
+
+    // SAME ADDRESS ON THE SECOND PRESS. Read before any upload so a later write cannot change the
+    // answer. An unreadable registry must stop publication; treating it as empty could abandon
+    // an existing address and publish to a different host.
+    const pinned = await this.republishPlanFor(workspaceId, channelId);
+
+    if (pinned.kind === 'bucket') {
+      const mirror = await mirrorPublishToBucket(pinned.sub, files).catch((err) => ({
+        attempted: true, bucket: '', uploaded: 0, failed: files.size, error: String((err as Error)?.message ?? err),
+      }));
+      if (bucketOnlyPublishUsable(mirror)) return pinned.url;
+      // Do NOT delete this prefix and do NOT fall through to a new Firebase channel. The prefix is
+      // the live site. A partial write is repaired by the next successful publish; a new URL is the
+      // bug this branch exists to stop.
+      console.warn(
+        `[PUBLISH-BUCKET-ONLY] ${pinned.sub}: republish did not complete — ${mirror.uploaded} uploaded, `
+        + `${mirror.failed} failed${mirror.error ? ` — ${mirror.error}` : ''}. Existing URL kept.`,
+      );
+      throw new Error(
+        'Your live app update did not complete. Some files may have changed at the existing address. '
+        + 'Nothing was moved to a new address. Please publish again in a moment.',
+      );
+    }
+
+    // Branded hosts are served from the bucket first. Writing THIS subdomain (the one in the URL
+    // people already have) is what updates the old page. Skipping it and returning `a-<hash>` was
+    // the new page.
+    if (pinned.kind === 'channel' && pinned.viaEdge) {
+      const mirror = await mirrorPublishToBucket(pinned.sub, files).catch((err) => ({
+        attempted: true, bucket: '', uploaded: 0, failed: files.size, error: String((err as Error)?.message ?? err),
+      }));
+      if (bucketOnlyPublishUsable(mirror)) return pinned.url;
+      // This prefix is already live. Removing it can erase the last successful publication, and
+      // falling through can mint a different Firebase host if the old channel has expired.
+      console.warn(`[PUBLISH-BUCKET-ONLY] ${pinned.sub}: edge republish incomplete; existing address retained.`);
+      throw new Error(
+        'Your live app update did not complete. Some files may have changed at the existing address. '
+        + 'Nothing was moved to a new address. Please publish again in a moment.',
+      );
+    }
+
     // ═══ THE CEILING FIX (ROADMAP §10.3) — publish WITHOUT consuming a Hosting channel ═══
     //
     // The channel POOL is what runs out, so the only fix that removes the ceiling is to stop drawing
@@ -142,7 +191,7 @@ export class FirebaseHostingDeployer {
     // ONE branch for both, deliberately: a second copy of this block is how the two would drift, and
     // the method's own docblock already says that is why `channelId` is a parameter rather than a
     // second method. `sub` is the only thing that differs, and the namespaces cannot overlap.
-    const bucketSub = channelId === makeChannelId(workspaceId) && bucketOnlyPublishEnabled()
+    const bucketSub = pinned.kind === 'none' && channelId === makeChannelId(workspaceId) && bucketOnlyPublishEnabled()
       ? bucketOnlySubdomain(workspaceId)
       : channelId === snapshotChannelId(workspaceId) && snapshotBucketEnabled()
         ? snapshotSubdomain(workspaceId)
@@ -169,7 +218,9 @@ export class FirebaseHostingDeployer {
     const site = FIREBASE_PROJECT;
 
     // The REAL channel URL, from Firebase — see ensureChannel for why it can never be constructed.
-    const channelUrl = await this.ensureChannel(site, channelId, headers);
+    const channelUrl = pinned.kind === 'channel'
+      ? await this.existingRepublishChannel(site, channelId, pinned.sub, headers)
+      : await this.ensureChannel(site, channelId, headers);
     const versionName = await this.publishVersion(site, files, token, headers, await this.versionConfigFor(workspaceId, files));
     await this.hostingCall('release', () =>
       axios.post(
@@ -203,7 +254,10 @@ export class FirebaseHostingDeployer {
         }
       }
     }
-    return publishedAppUrl(channelUrl, site);
+    const fresh = publishedAppUrl(channelUrl, site);
+    // The address already shared wins over a freshly branded spelling of the same channel.
+    if (pinned.kind === 'channel') return pinned.url;
+    return fresh;
   }
 
   /**
@@ -545,6 +599,29 @@ export class FirebaseHostingDeployer {
     }
     // A token still in hand means the loop stopped on its own bound, not on the end of the list.
     return { channels: out, complete: !pageToken };
+  }
+
+  /**
+   * Where a republish of this workspace must land. Snapshots have a separate channel and do not
+   * read the published-app registry. Read failures are not evidence that a workspace is unpublished.
+   */
+  private async republishPlanFor(workspaceId: string, channelId: string): Promise<RepublishPlan> {
+    if (channelId !== makeChannelId(workspaceId)) return { kind: 'none' };
+    const { readDeploymentForPublish, isLiveDeployment } = await import('./DeploymentStore');
+    const rec = await readDeploymentForPublish(workspaceId);
+    const url = isLiveDeployment(rec) ? String(rec?.url ?? '') : '';
+    return planRepublish({ workspaceId, priorUrl: url, domain: publishedAppDomain(), site: FIREBASE_PROJECT });
+  }
+
+  /** Never recreate an expired channel and report its obsolete URL as a successful republish. */
+  private async existingRepublishChannel(site: string, channelId: string, sub: string, headers: Record<string, string>): Promise<string> {
+    const existing = await this.hostingCall('channel lookup', () =>
+      axios.get<{ url?: string }>(`${HOSTING_API}/sites/${site}/channels/${channelId}`, { headers }));
+    const url = typeof existing.data?.url === 'string' ? existing.data.url : '';
+    if (channelSubdomain(url, site) !== sub) {
+      throw new Error('The existing published address could not be verified. No new version was released; please try again.');
+    }
+    return url;
   }
 
   /**

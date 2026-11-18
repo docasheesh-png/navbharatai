@@ -7,7 +7,8 @@ import { AgentRunner } from '../../AgentV3/AgentRunner';
 import { ToolDispatcher, type ActuatorPort } from '../../AgentV3/ToolDispatcher';
 import { WorkspaceState } from '../../AgentV3/WorkspaceState';
 import { AgentEventStream } from '../../AgentV3/AgentEventStream';
-import { defaultToolCatalog } from '../../AgentV3/ToolCatalog';
+import { catalogForTools } from '../../AgentV3/ToolCatalog';
+import { roleConfig } from '../../AgentV3/AgentRegistry';
 import { judgeBuild, judgeActuallyRan } from '../../AgentV3/BuildJudge';
 import { createProviderUsageLedger } from '../../AgentV3/ProviderUsageLedger';
 import { isBuildReviewProviderEligible } from '../../AgentV3/surplusReviewEligibility';
@@ -86,7 +87,9 @@ async function setup(costMicro = '1', signal?: AbortSignal, maxSteps = 4) {
   const workspace = new WorkspaceState(stream);
   const runner = new AgentRunner({ client, dispatcher: new ToolDispatcher(actuator, 'hello-workspace', workspace, stream),
     state: workspace, events: stream, model: session.model, system: 'Build the requested page.',
-    tools: defaultToolCatalog(), maxSteps, maxTokensPerTurn: 8192, signal });
+    // Match production's role-scoped tools (routes/agentv3.ts). The complete recipe catalogue is
+    // not a provider request: adding a recipe must not inflate this fixture past its reviewed context.
+    tools: catalogForTools(roleConfig('architect').tools), maxSteps, maxTokensPerTurn: 8192, signal });
   return { runner, actuator, workspace, events, requests, permits, adapter, ledger,
     judge: async () => {
       const provider = ledger.entries().at(-1)?.provider;
@@ -107,6 +110,7 @@ describe('reviewed Surplus native builder loop through judged completion', () =>
     const h = await setup(micro);
     const result = await h.runner.run('Build a page saying Hello Bharat');
     expect(result).toMatchObject({ ok: true, steps: 2 });
+    expect(h.requests[0].tools).toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: 'write_file' }) })]));
     expect(h.actuator.files.get('index.html')).toBe(html);
     expect(h.workspace.snapshot().files).toEqual([{ path: 'index.html', kind: 'create' }]);
     expect(h.events).toContainEqual(expect.objectContaining({ type: 'tool_result', ok: true }));

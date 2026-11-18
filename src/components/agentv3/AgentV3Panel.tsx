@@ -3337,6 +3337,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const [celebration, setCelebration] = useState<{ kind: CelebrationKind; url: string; firstPublish: boolean; rateAfter: boolean } | null>(null);
   // Hosting Phase 1 — the "Publish" chooser (host on NavBharatAI vs bring-your-own), opened from Deploy.
   const [showHostingChooser, setShowHostingChooser] = useState(false);
+  /** `myapps` when the 3-dot menu asked for the list; Publish itself always opens the choices. */
+  const [hostingChooserView, setHostingChooserView] = useState<'choose' | 'myapps'>('choose');
+  const openHostingChooser = (view: 'choose' | 'myapps' = 'choose') => {
+    setHostingChooserView(view);
+    setShowHostingChooser(true);
+  };
   /**
    * REOPEN PUBLISH AFTER THE GITHUB ROUND TRIP (admin 2026-09-12).
    *
@@ -3353,7 +3359,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
    */
   useEffect(() => {
     if (!state.workspaceId) return;
-    if (takePublishIntent(browserIntentStore(), state.workspaceId)) setShowHostingChooser(true);
+    if (takePublishIntent(browserIntentStore(), state.workspaceId)) openHostingChooser('choose');
   }, [state.workspaceId]);
   // The verify-number sheet, opened by an import the server refused for a missing verified number.
   const [verifyPhoneOpen, setVerifyPhoneOpen] = useState(false);
@@ -4534,6 +4540,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           onRepoPushed={(r) => { if (r.owner && r.repo) setPushedRepo(r); }}
           backendKeySource={publishRefusal.keySource}
           workspaceId={state.workspaceId}
+          initialView={hostingChooserView}
           // Gates the Unpublish control: null unless this app is genuinely live (the server returns a
           // URL only for an ACTIVE deployment), so it never offers to remove something that is not there.
           liveUrl={liveUrl}
@@ -4782,7 +4789,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           {/* R5 §5.1 + Hosting Phase 1 — one "Publish" button opens the Hosting chooser: host on
               NavBharatAI (our free one-click hosting) OR bring your own provider (no lock-in). */}
           <button
-            onClick={() => setShowHostingChooser(true)}
+            onClick={() => openHostingChooser('choose')}
             data-tour="deploy"
             disabled={running || !state.workspaceId}
             title="Publish your app to a permanent public live URL (it stays online after the sandbox stops)"
@@ -4791,6 +4798,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             <Rocket className="w-3.5 h-3.5" />
             Publish
             <ActionDot tone={publishDotTone} label={publishDotLabel} size="sm" />
+          </button>
+          <button
+            onClick={() => openHostingChooser('myapps')}
+            title="Apps and games you have published on NavBharatAI"
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-line text-muted hover:text-ink hover:border-line transition-colors"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            Published apps
           </button>
           {liveUrl && (
             <a
@@ -4830,7 +4845,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             }}
             onGo={(target) => {
               if (target === 'tray') userActions.setTrayOpen(true);
-              else if (target === 'publish') setShowHostingChooser(true);
+              else if (target === 'publish') openHostingChooser('choose');
               else if (target === 'report') askForReportNote();
               else if (target === 'database') window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'settings', settingsScreen: 'database' } }));
             }}
@@ -6911,13 +6926,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   </a>
                 )}
                 <button
-                  onClick={() => { setMobileSheet(null); setShowHostingChooser(true); }}
+                  onClick={() => { setMobileSheet(null); openHostingChooser('choose'); }}
                   disabled={running || !state.workspaceId}
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-success hover:bg-raised disabled:opacity-40 touch-manipulation"
                 >
                   <Rocket className="w-4 h-4 shrink-0" />
                   <span className="flex-1 text-left">Publish — host on NavBharatAI or your own provider</span>
                   <ActionDot tone={badgeAt(navActions, ['more', 'publish'])} label={badgeLabelAt(navActions, ['more', 'publish'])} />
+                </button>
+                <button
+                  onClick={() => { setMobileSheet(null); openHostingChooser('myapps'); }}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-body hover:bg-raised touch-manipulation"
+                >
+                  <Globe className="w-4 h-4 shrink-0 text-success" />
+                  <span className="flex-1 text-left">
+                    Published apps
+                    <span className="block text-[11px] text-faint leading-snug">Apps and games you have live on NavBharatAI</span>
+                  </span>
                 </button>
                 {liveUrl && (
                   <a

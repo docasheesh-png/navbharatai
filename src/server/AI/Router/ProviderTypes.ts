@@ -69,6 +69,8 @@ export interface ProviderTelemetry {
 export interface AIProvider {
   name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI' | 'OPENROUTER' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'NVIDIA' | 'MODELSCOPE' | 'LLM7' | 'BLUESMINDS' | 'REQUESTY' | 'DEEPINFRA' | 'CHEAPERINFERENCE' | 'MITRIFY';
   priority: number;
+  /** Adapter admits and records its selected pool credential; router must not attribute it to the family. */
+  managesTrafficHealth?: boolean;
   /**
    * When true, this provider is a LAST-RESORT fallback: in a raced router
    * (see AIRouter.routeRaced) it is tried sequentially ONLY after every

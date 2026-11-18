@@ -28,6 +28,9 @@ export const QUBAX_CATALOG_TTL_MS = 10 * 60_000;
 const CATALOG_TIMEOUT_MS = 8_000;
 const CATALOG_MAX_BYTES = 6_000_000;
 const MIN_CONTEXT = 64_000;
+// Weak's final guard sees ENGINE_QX rather than the underlying model. Enforce the
+// no-Claude-through-a-reseller policy before an opaque supplier rung is created.
+const CLAUDE_FAMILY = /claude|anthropic|sonnet|opus|haiku|fable/i;
 
 export interface QubaxCatalogEntry {
   id: string;
@@ -46,7 +49,7 @@ export function qubaxBuilderApiKey(env: NodeJS.ProcessEnv = process.env): string
   return String(env.QUBAX_API_KEY ?? '').trim();
 }
 export function qubaxBuilderEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return parseEnvFlag(env.PRO_CHAIN_V2_QUBAX) !== false && qubaxBuilderApiKey(env) !== '';
+  return parseEnvFlag(env.PRO_CHAIN_V2_QUBAX) !== false && qubaxBuilderApiKey(env) !== '' && qubaxBuilderModels(env).models.length > 0;
 }
 
 function perMTok(raw: unknown): number | undefined {
@@ -147,7 +150,7 @@ function usable(e: QubaxCatalogEntry | undefined): boolean {
  */
 export function qubaxBuilderModels(env: NodeJS.ProcessEnv = process.env): { models: string[]; verifiedByCatalog: boolean } {
   const configured = String(env.QUBAX_BUILDER_MODELS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  const list = configured.length ? configured : [...QUBAX_BUILDER_DEFAULT_MODELS];
+  const list = (configured.length ? configured : [...QUBAX_BUILDER_DEFAULT_MODELS]).filter((model) => !CLAUDE_FAMILY.test(model));
   if (!cache) return { models: list, verifiedByCatalog: false };
   const kept = list.filter((m) => usable(cache!.entries.get(m)));
   return kept.length ? { models: kept, verifiedByCatalog: true } : { models: list, verifiedByCatalog: false };

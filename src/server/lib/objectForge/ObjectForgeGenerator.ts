@@ -87,12 +87,13 @@ export const FORGE_GUIDE = [
   '  2. Make every part touch its neighbour: a limb ends INSIDE the body, not next to it. The report warns about parts that float free.',
   '  3. Give living things pivots at the joints (shoulder, elbow, hip, knee, neck, tail root) and one "walk" clip; add "idle".',
   '  4. Fewer, well-placed shapes beat many: a phone game wants under 3000 triangles per object (seg 8 to 14 is plenty).',
-  '  5. Call author_object, LOOK at the FRONT / SIDE / TOP drawings and the warnings, fix them, call again with the same id.',
+  '  5. Call author_object, LOOK at the FRONT / SIDE / TOP drawings and warnings. A new spec must use a new id; existing objects need an explicit customise target.',
   '',
   'HONEST CEILING: this builds stylised, low-poly figures from primitives. It does not make photoreal faces, clothing folds, fur or a',
   'scanned model. Describe the result to the user as stylised; never call it realistic. A real sculpted model is a library asset, not this.',
   '',
-  'EASIEST: author_object({ describe: "a lighthouse with a spiral stair" }) — the Forge makes the object itself from your words (no spec needed).',
+  'Supply { spec } from the existing admitted architect turn. Describe-only sidecalls are unavailable until provider accounting and cancellation are integrated.',
+  'New source requires atomic exclusive creation. Existing-object customisation requires genuine atomic expected-content replacement, currently unavailable on the production actuator.',
   'EXAMPLES you can fetch and adapt: ' + FORGE_EXAMPLE_IDS.join(', ') + ' — author_object({ example: "person" }) returns the full spec and its drawing.',
 ].join('\n');
 
@@ -107,6 +108,6 @@ export function forgeUsage(id: string, create: string): string {
     '  // moves: const mover = behaveX(obj, { heightAt: world.heightAt });  then each frame mover.update(dt, { throttle, steer }) (input only for a drive behaviour).',
     '  //        mover.update ALSO advances the animation, so with a behaviour call it INSTEAD of obj.update, not as well.',
     '  // obj.nodes.head is the named node (attach a weapon to obj.nodes.hand, turn a head toward a target); obj.dispose() frees it.',
-    'To change the object, call author_object again with the same id (the file is replaced). Do not hand-write geometry for it in game code.',
+    'To change an existing object, use an explicit author_object({ customise, target }) call. If atomic replacement is unavailable, preserve the file and report the limitation; a new spec with the same id cannot replace it.',
   ].join('\n');
 }

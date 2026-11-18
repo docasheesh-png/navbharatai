@@ -101689,6 +101689,27 @@ The review failed the first version under audit P0-C: up to 60 sequential reads 
 - The note is kept out of the user's terminal and the `tool_result` summary.
 - 38 tests; 21 round-2 mutations, all caught (one after an added test).
 
+## 2026-11-17 — BR1998 autopsy (pasted source code was told "I could not find @override"): annotations in pasted code are not missing files
+
+Owner t311u sequential audit, BR1998 only (boundary 1951..2105 frozen). Branched from origin/main `8e5fec7b` (BR1997, #4274). A free Weak edit build succeeded and was not charged.
+
+- F1: `parseFileMentions` no longer reports an unresolved bare identifier that is the first thing on its line in a message that looks like pasted code (3+ lines ending in `{`, `}` or `;`). Everything else is byte-identical. Pure, no I/O.
+- No new queue row (USAGE_NOT_REPORTED is Q-2414).
+- 9 mutations, all caught (plus one comment-only control).
+- Docs: `docs/build-report-autopsy-BR1998.md`, its evidence JSON, and `tests/br1998Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-17 — BR1998 rework after review (a short request plus a snippet dropped real warnings)
+
+The review failed the first version: the pasted-code test looked at the whole message, so a short request plus a 3-line snippet dropped real missing-file warnings. Reworked with ordinary commits on the same branch: the message must be mostly code (3+ lines ending in `{ } ;`, and code-shaped lines at least half the non-empty lines); well-known extensionless names (Dockerfile, Makefile, LICENSE, README, …) are never dropped; the token's own line must read as an annotation and sit between code lines. Every review probe keeps its warning; whole Dart, Java, Kotlin and TS pastes are still silenced. 28 tests; 19 round-2 mutations, all caught (six after added tests).
+
+## 2026-11-17 — BR1998 second rework (a neighbour ending in , or ) counted as code)
+
+The second review found that the neighbour rule counted a line ending in `,` or `)` as code, so a lone `@Header` after a prose line, a `- item,` list or a numbered `(1)`…`(5)` list, plus a short snippet, lost its warning. Now a neighbour counts as code only when it ends in `{ } ;`, or is an annotation line that leads (within 8) to such a line; the wider set stays only in the half-of-lines test. The report's `@override` and the Dart, Java, Kotlin and TS pastes still match. 36 tests; 30 mutations rerun, all caught.
+
+## 2026-11-17 — BR1998 third rework (the strict belt for a lone @Name)
+
+The third review found that a lone `@Header` or `@Login` sandwiched between code lines (three `const` lines, then the token, then a function), with or without an intro line, was still dropped. Took the strict belt: a lone token is dropped only when its name is on a conservative, case-insensitive allowlist of real Dart, Java, Kotlin, TS/Angular, Spring/JPA and JUnit annotations (no app-file or screen names), and the very next line, with no blank line between, ends in `{ } ;` or is another known annotation. Tokens with code after them on their line keep the earlier rules. The report's `@override` and the Java, Kotlin, TS and Spring fixtures are still silenced. Added 13 tests (49 in the file); all earlier probes still warn; mutation round 4 (40 mutants) ends with every behavioural mutant caught.
+
 ## 2026-11-17 — Surplus Pro builder is default ON
 
 Owner: "surplus ko bhi default on karo". `AGENTV3_SURPLUS_BUILDER` is now ON unless explicitly off, matching
@@ -101734,6 +101755,13 @@ The existing pre-start block (no positive balance, billing on, not a free-list a
 
 Owner override: a balance of 0, or below the pre-flight estimate, does not start a build at all, including the weak ladder. The same sentence stops a build whose running bill passes that balance; files already written are kept. Admin free-list and the z test account stay exempt. Prices, chat quotas, gift and referral rules are unchanged. An unreadable balance is still not treated as zero.
 
+## 2026-11-17 — BR1998 fourth rework (colliding names and a stack with no declaration)
+
+The fourth review found that the allowlist still contained names that are also plausible app files or components (`Input`, `Preview`, `Test`, `Component`, and others), so a tight sandwich such as three `const` lines, then `@Preview`, then `function Preview() {` dropped the warning; and that a following known annotation was enough even when no declaration followed, so `@Input` then `@Component` then a request, or `@Input` then `@Override` at EOF, also dropped the warning. Removed every colliding name (input, output, component, test, entity, directive, id, required, immutable, protected, preview, inject; the rest of the list was audited). A following known annotation now counts only if a no-blank walk (cap 8 hops) actually reaches a line ending in `{ } ;`. Annotations with arguments (`@Input()`, `@Component({`, `@Test()`) still drop through the unchanged non-lone path. Accepted residual: a paren-less Compose `@Preview` above `fun Foo()` warns again (fail-safe). 55 tests; all 49 earlier tests still pass; the three earlier FAIL probes still warn.
+## 2026-11-17 — Admin panel copy (Builds · Reports): the failure panel's two numbers
+- **"Worked, called failed 44" and "User got a working app 97%":** an app that rendered was taken as proof the request was delivered. 21 of the 58 failures carry an engine / sandbox / account / cap outcome code; they are now their own line (`renderedButUnfinished`) and earn no delivered credit — 92.4%, not 97% (the page's own counts reproduce both: tests fixture). Content verdicts a render contradicts (the cases of autopsies 697b38ee / 4efab9d7) are unchanged.
+- **"12.6% of 497 settled builds":** the rate is 58 ÷ 460 judged (the 37 the user stopped are in neither half); the note now says so.
+- Other findings on the page are queue rows Q-2721…Q-2725 (unexplained outcomes, a first-pass measure that cannot move, a fake login in a password manager, phone-size overflow ×3, save-then-lose ×2).
 ## 2026-11-17 — A published 3D game opened to an empty page: the game loop ran only from start()
 
 Admin: the battle royale's published link (`a-6b8ad5b4e2f4ce94b8a8d7df.mitrify.in`) "open nahi ho raha"; *"mai chahta hu har baar pura game open ho"*.
@@ -101950,3 +101978,50 @@ Tests:
 - `control.test.ts`, `trafficControlAdmin.test.ts`, `policy.test.ts` (gate), and `tests/trafficControlNeverStrandsStartedWork.test.ts` (source guards and behaviour).
 - 8 reversions each caught: mid-request recheck reading live control, global switch ignored, planner ignoring the gate, no revision check, no replay guard, LKG dropped, older revision adopted, admission gate off.
 - The P1 `KNOWN_UNREACHABLE` entries were removed, since the route now reads the snapshot. The three new collections are classified as kept for ever, with reasons.
+
+
+## 2026-11-18 — PR #4287 republish review corrections
+
+- Synced current main, including its existing audited dependency triage; the original PR CI failure stopped at the dependency audit gate.
+- Republish now uses the existing strict, bounded registry reader. A missing record permits first publish; a read outage cannot silently choose a new address. Tests exercise the production planning path instead of bypassing it under VITEST.
+- A partial overwrite of a live bucket prefix is not swept away or called unchanged. It reports that some files may have changed and keeps the existing address for a retry. Branded channel republishes require a complete bucket update, so a failed update cannot delete the live copy or fall through to a newly recreated channel.
+- Raw Firebase channel republishes look up and verify the existing channel URL before uploading/releasing. Expired or mismatched channels fail without claiming the old address was updated.
+- Added behavioral regressions for same-address updates, partial failure preservation, unavailable registry, stale/deleted channels, snapshot isolation and shipped service-worker upgrades. Focused checks and full validation results are recorded separately; this entry is not a full CI or deployment claim.
+- Cloudflare worker source still requires its separate deployment to serve the new cache policy; merging server code does not deploy the Worker. Bucket writes remain per-file, not an atomic whole-site transaction; failure messages now state that limitation honestly.
+## 2026-11-18 — reconcile #4228 Forge preservation with current main
+
+Owner requested errors fixed before merging all open PRs. Kept #4225's exclusive-create path and Forge's preservation guards together. Updated the catalogue, prompt and tests to state real behavior: admitted architect specs can create new objects; describe-only sidecalls remain held, and existing-object customization is refused without genuine atomic expected-content replacement. The optional replacement interface now passes cancellation/authorization and durable recording. Added preservation/race tests and Unicode/project-cache isolation cases. The production actuator still has no CAS implementation; none is simulated or claimed. Final integration CI is tracked by the merge session; no live E2B or browser acceptance claimed here.
+## 2026-11-17 — Owner approved every suggestion ("apke sabhi suggestion approved, build karo")
+
+- **Qubax is the third Pro Weak engine:** Surplus → Router One → Qubax → BluesMinds → Moyi → ladder. It uses the existing Qubax builder adapter (catalogue-checked tools, own price or a labelled estimate, `ENGINE_QX`). Test: `weakQubaxThirdOrder`. `proChainV2Wiring` was repointed, because Qubax now comes from the owner's order and not from v2.
+- **DiscountedTokens on Normal and Strong, right before Sonnet/Opus** (`discountedTokensBuilder.ts`, `ENGINE_DT`). It tries up to three of its models (the owner's order, else gpt-6-sol, then the key's list), one runner each, and then hands over to Claude. It is never on Weak. It is billed only at `DISCOUNTEDTOKENS_BUILDER_RATE_IN/_OUT`, and **it does not run until the owner sets those two rates**. The brand scrub now also knows Moyi, which #4276 missed. Test: `normalStrongDiscountedTokensBeforeSonnet`.
+- **Q-2715 resolved, differently from the approved option:** the deletion was rejected on evidence. The builder's prompt promises the kit's modules, so deleting an unused kit file would break a later edit that imports it, and an unused module is not bundled anyway. The actual defect was the false attribution "your existing code … never used". An untouched kit file (`isKnownKitVersion`) now gets a kit note. Test: `anUnusedKitFileIsNotTheUsersCode`.
+- **Q-2716 closed as not-a-defect,** with the owner's agreement: it was the workspace's fastest build so far, and the ETA learns from history.
+
+Every new test was proven by reversion.
+
+
+## 2026-11-18 — PR #4288 merge review: admission follows the configured chain; Weak supplier IDs cannot bypass its guard
+
+Reconciled with main without dropping the existing composition changes. Fixed the pre-flight availability check so Normal and Strong can start when their only configured runner is DiscountedTokens; its missing-rate and off-switch rules still refuse it, and Weak never borrows it. Qubax model selection now excludes Claude-family IDs before they acquire the neutral ENGINE_QX name: the final Weak guard cannot recognize an underlying model from that neutral name. A configuration containing only excluded models makes the rung unavailable instead of admitting an empty chain. Regression cases cover the constructed chain, missing rates, explicit disable, catalogue and no-catalogue model filtering. Full integration validation is coordinated by the merge task; focused results are recorded separately and are not a full CI claim.
+## 2026-11-18 — PR #4282 reconciliation and health regression fixes
+
+Merged current main while retaining both live-health and traffic-control/engine-history admin features. Fixed the generated image client referencing server-only `noteProviderCall`; generated client source is again standalone, and the health board explicitly labels app image integrations as catalog-only. Provider health now uses bounded storage, retains separate pool credential identities, aliases Qubax/ENGINE_QX, records the supplied builder clock, and prevents cancelled or failed recovery probes from being stuck forever. Router admission claims recovery at dispatch and tracks physical occupancy; vision cancellation does not count as provider failure. Unmeasured providers show “not measured”. Each test starts fresh process-health state; physical-capacity/maintenance-threshold fixtures explicitly isolate their own independent gates.
+
+Validation on Node 22.23.4: 12 historical-failure suites passed (287 tests); six router/vision/health suites passed (51 tests); final recovery/account/capability suite passed (10 tests); strict server TypeScript passed. Full combined coverage, remaining CI gates and emulator drills are being handled by the integration coordinator. No full-CI or merge completion is claimed by this entry.
+
+
+## 2026-11-18 — PR #4282 cross-surface pool attribution repair
+
+Combined review found that vision and legacy chat rotate `GLM_API_KEY` internally while generic health had treated every result as the builder's first GLM credential. Admission and outcomes now use the selected pool slot (`GLM`, `GLM#2`, …), including failures previously swallowed by the vision model loop. GLM's adapter owns this health accounting and the router/slot wrapper preserves that ownership instead of recording a second family outcome. The same pool parser/picker remains authoritative. Unconfigured/unsupported vision makes no health observation. A timed-out vision observer leaves physical occupancy with its SDK promise and a late success cannot replace the timeout record.
+
+Validation: eight relevant suites / 87 tests passed, six final routing/pool suites / 60 tests passed, strict server TypeScript passed. New regressions cover funded second-key success, second-key failure, normal and streamed router paths, missing keys/PDFs, and late physical settlement. Full combined CI remains the coordinator's gate.
+
+
+## 2026-11-18 — Surplus builder-loop fixture matches production tool scope
+
+Full combined coverage correctly refused the fixture's oversized request: the complete catalogue grew to 217 definitions, yielding a conservative input of 192286 plus 8192 output against its reviewed 200000 context. Production uses the architect role catalogue; the test had incorrectly passed every recipe. The fixture now uses the same `catalogForTools(roleConfig('architect').tools)` path (56 definitions, 54584 serialized bytes), explicitly checks that `write_file` reaches the native provider request, and retains real authorization, dispatch, receipt, judge and billing assertions. No production admission limit changed. Builder-loop plus build-session focused validation: 24 tests passed, including context-evidence refusal.
+
+## 2026-11-18 — Restore Athree map options to their own tool schema
+
+The #4225 composition integration moved `archetype` and `size_km` into `generate_game_systems`, while the dispatcher still reads them only for `generate_athree_map`. The existing map-kind wiring test reproduced the failure on combined head dbd1137a. Moved both properties back to the map schema; preserved gameplay `include` and the new map `composition` schema. Added a tool-scoped regression so matching property names elsewhere cannot pass the check. Four focused suites (map-kind wiring, catalogue, composition dispatch, gameplay systems): 94 tests passed on Node 22.23.4. Combined full local and remote CI remain required before merge.

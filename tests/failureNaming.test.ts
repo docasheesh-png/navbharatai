@@ -164,11 +164,11 @@ describe('Phase 1 — a failure rate split into what can actually be fixed', () 
     const rows = [build('a', false, true), build('b', false, false), build('c', false, undefined),
       build('d', true, true), build('e', null, null)];
     const r = categorizeBuildFailures(rows);
-    const { engineFailed, builtButJudgedFailed, evidenceUnknown, succeeded, unjudged } = r.verdictSplit;
-    expect(engineFailed + builtButJudgedFailed + evidenceUnknown).toBe(r.failed);
+    const { engineFailed, builtButJudgedFailed, renderedButUnfinished, evidenceUnknown, succeeded, unjudged } = r.verdictSplit;
+    expect(engineFailed + builtButJudgedFailed + renderedButUnfinished + evidenceUnknown).toBe(r.failed);
     expect(succeeded).toBe(r.ok);
     expect(unjudged).toBe(r.unjudged);
-    expect(engineFailed + builtButJudgedFailed + evidenceUnknown + succeeded + unjudged).toBe(r.totalBuilds);
+    expect(engineFailed + builtButJudgedFailed + renderedButUnfinished + evidenceUnknown + succeeded + unjudged).toBe(r.totalBuilds);
   });
 
   it('the admin card actually shows it — a split nobody can see changes nothing', () => {

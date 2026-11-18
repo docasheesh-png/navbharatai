@@ -101689,6 +101689,27 @@ The review failed the first version under audit P0-C: up to 60 sequential reads 
 - The note is kept out of the user's terminal and the `tool_result` summary.
 - 38 tests; 21 round-2 mutations, all caught (one after an added test).
 
+## 2026-11-17 — BR1998 autopsy (pasted source code was told "I could not find @override"): annotations in pasted code are not missing files
+
+Owner t311u sequential audit, BR1998 only (boundary 1951..2105 frozen). Branched from origin/main `8e5fec7b` (BR1997, #4274). A free Weak edit build succeeded and was not charged.
+
+- F1: `parseFileMentions` no longer reports an unresolved bare identifier that is the first thing on its line in a message that looks like pasted code (3+ lines ending in `{`, `}` or `;`). Everything else is byte-identical. Pure, no I/O.
+- No new queue row (USAGE_NOT_REPORTED is Q-2414).
+- 9 mutations, all caught (plus one comment-only control).
+- Docs: `docs/build-report-autopsy-BR1998.md`, its evidence JSON, and `tests/br1998Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-17 — BR1998 rework after review (a short request plus a snippet dropped real warnings)
+
+The review failed the first version: the pasted-code test looked at the whole message, so a short request plus a 3-line snippet dropped real missing-file warnings. Reworked with ordinary commits on the same branch: the message must be mostly code (3+ lines ending in `{ } ;`, and code-shaped lines at least half the non-empty lines); well-known extensionless names (Dockerfile, Makefile, LICENSE, README, …) are never dropped; the token's own line must read as an annotation and sit between code lines. Every review probe keeps its warning; whole Dart, Java, Kotlin and TS pastes are still silenced. 28 tests; 19 round-2 mutations, all caught (six after added tests).
+
+## 2026-11-17 — BR1998 second rework (a neighbour ending in , or ) counted as code)
+
+The second review found that the neighbour rule counted a line ending in `,` or `)` as code, so a lone `@Header` after a prose line, a `- item,` list or a numbered `(1)`…`(5)` list, plus a short snippet, lost its warning. Now a neighbour counts as code only when it ends in `{ } ;`, or is an annotation line that leads (within 8) to such a line; the wider set stays only in the half-of-lines test. The report's `@override` and the Dart, Java, Kotlin and TS pastes still match. 36 tests; 30 mutations rerun, all caught.
+
+## 2026-11-17 — BR1998 third rework (the strict belt for a lone @Name)
+
+The third review found that a lone `@Header` or `@Login` sandwiched between code lines (three `const` lines, then the token, then a function), with or without an intro line, was still dropped. Took the strict belt: a lone token is dropped only when its name is on a conservative, case-insensitive allowlist of real Dart, Java, Kotlin, TS/Angular, Spring/JPA and JUnit annotations (no app-file or screen names), and the very next line, with no blank line between, ends in `{ } ;` or is another known annotation. Tokens with code after them on their line keep the earlier rules. The report's `@override` and the Java, Kotlin, TS and Spring fixtures are still silenced. Added 13 tests (49 in the file); all earlier probes still warn; mutation round 4 (40 mutants) ends with every behavioural mutant caught.
+
 ## 2026-11-17 — Surplus Pro builder is default ON
 
 Owner: "surplus ko bhi default on karo". `AGENTV3_SURPLUS_BUILDER` is now ON unless explicitly off, matching
@@ -101734,6 +101755,9 @@ The existing pre-start block (no positive balance, billing on, not a free-list a
 
 Owner override: a balance of 0, or below the pre-flight estimate, does not start a build at all, including the weak ladder. The same sentence stops a build whose running bill passes that balance; files already written are kept. Admin free-list and the z test account stay exempt. Prices, chat quotas, gift and referral rules are unchanged. An unreadable balance is still not treated as zero.
 
+## 2026-11-17 — BR1998 fourth rework (colliding names and a stack with no declaration)
+
+The fourth review found that the allowlist still contained names that are also plausible app files or components (`Input`, `Preview`, `Test`, `Component`, and others), so a tight sandwich such as three `const` lines, then `@Preview`, then `function Preview() {` dropped the warning; and that a following known annotation was enough even when no declaration followed, so `@Input` then `@Component` then a request, or `@Input` then `@Override` at EOF, also dropped the warning. Removed every colliding name (input, output, component, test, entity, directive, id, required, immutable, protected, preview, inject; the rest of the list was audited). A following known annotation now counts only if a no-blank walk (cap 8 hops) actually reaches a line ending in `{ } ;`. Annotations with arguments (`@Input()`, `@Component({`, `@Test()`) still drop through the unchanged non-lone path. Accepted residual: a paren-less Compose `@Preview` above `fun Foo()` warns again (fail-safe). 55 tests; all 49 earlier tests still pass; the three earlier FAIL probes still warn.
 ## 2026-11-17 — A published 3D game opened to an empty page: the game loop ran only from start()
 
 Admin: the battle royale's published link (`a-6b8ad5b4e2f4ce94b8a8d7df.mitrify.in`) "open nahi ho raha"; *"mai chahta hu har baar pura game open ho"*.

@@ -894,7 +894,7 @@ export function chooseAthreeModules(include?: readonly string[]): { chosen: stri
 }
 
 /** The index of a build: the facade, written for exactly the modules chosen (a module that is not there has no member, no import and no option). */
-export function athreeIndexSource(chosen: readonly string[]): string {
+export function athreeIndexSource(chosen: readonly string[], excludedModules: readonly string[] = []): string {
   const has = (m: string): boolean => chosen.includes(m);
   const everything = Object.keys(ATHREE_OPTIONAL_MODULES).every(has);
   const L: string[] = [];
@@ -957,10 +957,12 @@ export function athreeIndexSource(chosen: readonly string[]): string {
     '}',
     '',
     'export function createAthreeMap(options: AthreeMapOptions = {}): AthreeMap {',
-    '  const world = createAthreeWorld({ ...MAP_OPTIONS, ...options });',
+    excludedModules.some(m => m === 'roads' || m === 'rivers')
+      ? '  const world = createAthreeWorld({ ...MAP_OPTIONS, ...options' + (excludedModules.includes('roads') ? ', roads: false' : '') + (excludedModules.includes('rivers') ? ', rivers: false' : '') + ' });'
+      : '  const world = createAthreeWorld({ ...MAP_OPTIONS, ...options });',
     "  const quality = options.quality ?? 'mid';",
-    // Without the sea module the terrain draws its own flat sea plane, so a map is never seen without water.
-    `  const chunks = options.three ? createChunkManager(options.three, world, quality, 3000, ${has('sea') ? 'false' : 'true'}) : null;`,
+    // Ordinary sea-module omission retains the legacy flat plane; an explicit sea exclusion suppresses it.
+    `  const chunks = options.three ? createChunkManager(options.three, world, quality, 3000, ${has('sea') || excludedModules.includes('sea') ? 'false' : 'true'}) : null;`,
   );
   if (has('sea')) add('  const ocean = options.three ? createOcean(options.three, world, quality) : null;', '  if (chunks && ocean) chunks.group.add(ocean.mesh);');
   if (has('plants')) add('  const vegetation = options.three && options.vegetation !== false ? createVegetation(options.three, world, quality) : null;', '  if (chunks && vegetation) chunks.group.add(vegetation.group);');
@@ -1001,21 +1003,20 @@ export function athreeIndexSource(chosen: readonly string[]): string {
 }
 
 /** Every file of a build for the modules chosen. */
-/** The tail of config.ts that records which map this project is (its kind and size); empty is the default world. */
 export function mapOptionsSource(choice?: MapChoice | null): string {
   const o = choice ? mapOptionsFor(choice) : null;
   const body = o ? JSON.stringify({ mode: o.mode, sizeMeters: o.sizeMeters, style: o.style }, null, 2) : '{}';
   return '\n/** ' + (choice ? describeMap(choice).replace(/\*\//g, '') : 'The default world (a 100 km loop).') + ' */\nexport const MAP_OPTIONS: MapOptions = ' + body + ';\n';
 }
 
-export function athreeFiles(chosen: readonly string[], choice?: MapChoice | null): Record<string, string> {
+export function athreeFiles(chosen: readonly string[], excludedModules: readonly string[] = [], choice?: MapChoice | null): Record<string, string> {
   const files: Record<string, string> = {};
   const names = new Set<string>(ATHREE_CORE_MODULES.filter((m) => m !== 'index'));
   for (const m of chosen) for (const f of ATHREE_OPTIONAL_MODULES[m].files) names.add(f);
   if (Object.keys(ATHREE_OPTIONAL_MODULES).every((m) => chosen.includes(m))) names.add('budget');
   for (const name of ATHREE_MAP_MODULES) if (names.has(name)) files[`${DIR}/${name}.ts`] = SOURCES[name];
   files[`${DIR}/config.ts`] = SOURCES.config + mapOptionsSource(choice);
-  files[`${DIR}/index.ts`] = athreeIndexSource(chosen);
+  files[`${DIR}/index.ts`] = athreeIndexSource(chosen, excludedModules);
   return files;
 }
 
@@ -1062,20 +1063,24 @@ function exampleSource(chosen: readonly string[]): string {
   return L.join('\n');
 }
 
-export function generateAthreeMap(include?: string[], choice?: MapChoice | null): AthreeMapResult {
-  const { chosen, unknown } = chooseAthreeModules(include);
-  const files = athreeFiles(chosen, choice);
+export function generateAthreeMap(include?: string[], choiceOrExclusions?: MapChoice | null | readonly string[], exclusions: readonly string[] = []): AthreeMapResult {
+  const excludedModules: readonly string[] = Array.isArray(choiceOrExclusions) ? choiceOrExclusions : exclusions;
+  const choice = Array.isArray(choiceOrExclusions) ? null : choiceOrExclusions as MapChoice | null | undefined;
+  const { chosen: requested, unknown } = chooseAthreeModules(include);
+  const chosen = requested.filter(m => !excludedModules.includes(m));
+  const files = athreeFiles(chosen, excludedModules, choice);
   const left = Object.keys(ATHREE_OPTIONAL_MODULES).filter((m) => !chosen.includes(m));
   const what = chosen.map((m) => ATHREE_OPTIONAL_MODULES[m].what);
   return {
     files,
     dependencies: [{ name: 'three', version: '0.180.0' }],
     instructions:
-      (choice ? `THE MAP CHOSEN FOR THIS GAME: ${describeMap(choice)}. It is recorded as MAP_OPTIONS in config.ts and createAthreeMap applies it; do not pass your own size or mode.\n` : '') +
+      (choice ? `THE MAP CHOSEN FOR THIS GAME: ${describeMap(choice)}. Recorded in MAP_OPTIONS; retain it unless explicitly changing the map.\n` : '') +
       `Added the Athree map (${Object.keys(files).length} files under ${DIR}). It is the world to stand on: seeded terrain that streams in around the camera, a 100 km seamless loop or a bounded island, shared height/biome/wind/spawn functions, desert dunes, rivers, roads and heightfield data for physics` + (what.length ? `, and the modules you chose: ${what.join('; ')}` : '') + '.\n' +
       (left.length ? `Modules NOT in this build (ask for them, and add them, if the game needs them): ${left.map((m) => m + ' (' + ATHREE_OPTIONAL_MODULES[m].what + ')').join('; ')}.\n` : '') +
       (unknown.length ? `Unknown module names ignored: ${unknown.join(', ')}. The names are: ${Object.keys(ATHREE_OPTIONAL_MODULES).join(', ')}.\n` : '') +
       '```ts\n' + exampleSource(chosen) + '\n```\n' +
-      RULE_CORE + ' ' + chosen.map((m) => RULE_BY_MODULE[m]).join(' ') + (chosen.includes('sky') ? '' : ' No sky is in this build, so bring your own lights (a DirectionalLight for the sun and a HemisphereLight) and your own background colour.') + ' ' + NOT_BUILT,
+      (excludedModules.includes('sea') ? 'Sea visuals, including the fallback water plane, are disabled. Terrain still retains sea-level biome data; this is not a certified dry-land-only world. ' : '') +
+      (excludedModules.some(m => m === 'roads' || m === 'rivers') ? 'Explicit request exclusions: ' + excludedModules.filter(m => m === 'roads' || m === 'rivers').join(', ') + ' are disabled in world data as well as rendering; do not re-enable them. ' : '') + RULE_CORE + ' ' + chosen.map((m) => RULE_BY_MODULE[m]).join(' ') + (chosen.includes('sky') ? '' : ' No sky is in this build, so bring your own lights (a DirectionalLight for the sun and a HemisphereLight) and your own background colour.') + ' ' + NOT_BUILT,
   };
 }

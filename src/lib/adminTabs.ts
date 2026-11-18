@@ -54,7 +54,9 @@ export const ADMIN_TABS: readonly AdminTabDef[] = [
   { id: 'apps', label: 'Apps', pages: [
     { id: 'apps', label: 'All apps' },
     { id: 'publishing', label: 'Publishing' },
-    { id: 'review', label: 'Review' },
+    // App Mart (owner 2026-11-18: "admin penal ke andar alag 'app mart' button bana do, waha sab dikhe") — the store's own
+    // Manage apps screen, embedded. Page id kept as 'review' so saved links and the old Review entry still land here.
+    { id: 'review', label: 'App Mart' },
     // Who built which hosted chat bot (admin 2026-10-05): "kis kis user ne bot banaye hai, uska bhi hisab
     // admin panel me rakho". Under Apps because a bot is a thing a user built and NavBharatAI hosts.
     { id: 'bots', label: 'Bots' },

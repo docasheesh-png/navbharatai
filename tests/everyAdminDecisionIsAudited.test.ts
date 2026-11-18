@@ -2,13 +2,13 @@
 //
 // `adminActionsNeedAReason.test.ts` (PR 1) holds that rule for the `/api/admin` routes in admin.ts. The
 // admin decisions that matter just as much live elsewhere and are guarded differently — by the store
-// admin's Firebase identity (`isStoreAdmin`) rather than the admin panel token: approving an app into the
+// admin's Firebase identity (`isStoreAdmin`, asked through `storeAdminRequest` since 2026-11-18) rather than the admin panel token: approving an app into the
 // community gallery, approving or removing an App Mart APK, listing or removing an App Mart web app,
 // removing somebody's comment. Each of those made something public or deleted a person's work, and none
 // of them wrote an audit line.
 //
 // THE CENSUS: across every route file, a mutating route whose body checks an admin identity
-// (`verifyAdminToken`, `requireAdmin`, `isStoreAdmin`) must call `audit(` — or be listed below with the
+// (`verifyAdminToken`, `requireAdmin`, `isStoreAdmin`, `storeAdminRequest`) must call `audit(` — or be listed below with the
 // reason it changes nothing worth recording. A NEW admin route fails here until someone decides.
 
 import { describe, it, expect } from 'vitest';
@@ -29,7 +29,7 @@ const NO_AUDIT_NEEDED: Record<string, string> = {
   'post /api/admin/all-builds/:workspaceId/mark': "a triage label on the admin's own inbox; reversible, no user affected",
   'post /api/admin/build-reports/:id/mark': "a triage label on the admin's own inbox; reversible, no user affected",
   'post /api/admin/apk-reports/:id/mark': "a triage label on the admin's own inbox; reversible, no user affected",
-  'post /api/app-mart/social/comments': 'a person posting their own comment; isStoreAdmin only decides how it is displayed',
+  'post /api/app-mart/social/comments': 'a person posting their own comment; storeAdminRequest only decides how it is displayed',
 };
 
 interface Route { file: string; key: string; body: string }
@@ -45,7 +45,7 @@ function adminGuardedWrites(): Route[] {
       const rest = s.slice(re.lastIndex);
       const next = rest.search(/\n  app\.(get|post|put|patch|delete|use)\(/);
       const body = s.slice(m.index, re.lastIndex + (next >= 0 ? next : 4000));
-      if (!/\b(verifyAdminToken|requireAdmin|isStoreAdmin)\b/.test(body)) continue;
+      if (!/\b(verifyAdminToken|requireAdmin|isStoreAdmin|storeAdminRequest)\b/.test(body)) continue;
       out.push({ file, key: `${m[1]} ${m[2]}`, body });
     }
   }

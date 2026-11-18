@@ -102111,3 +102111,23 @@ Owner t311u sequential audit, BR1999 only (boundary 1951..2105 frozen). Branched
 - Queue: opens Q-2753 (three different file counts); Q-2621 gains BR1999 evidence.
 - Reversion: the old slice fails the report-shape test and the source guard; the old wording fails the F2 test.
 - Docs: `docs/build-report-autopsy-BR1999.md`, its evidence JSON, and `tests/br1999Autopsy.test.ts`.
+## 2026-11-18 — App Mart "Manage apps" tab restored for the owner (two admin lists drifted apart)
+
+- **Problem (owner screenshot):** App Mart showed Browse / Publish / My apps and no admin tab, while the profile menu showed
+  Admin Panel — "yeh system pahle tha, ab band ho gaya".
+- **Root cause:** the Review tab and every App Mart moderation route asked only `NAV_STORE_ADMINS` (a verified email list);
+  the platform's admin is the signed admin session (password + MFA) behind Admin Panel. #4191 correctly removed the
+  `AGENTV3_FREE_LIST` fallback, after which an owner signed in with an account outside that one list lost the tab.
+- **Class:** two admin authorities that drift. **Fix:** one decision, `storeAdminRequest(req, email)` in
+  `storeAdminPermission.ts` = the admin session OR the explicit allowlist — never a free-build grant. Wired into every
+  store (6), social (5) and gallery (3) admin check; the client sends `x-admin-token` to the store only when a session
+  exists (`storeAdminHeaders.ts`: App Mart, its social client, the gallery queue). Tab renamed "Manage apps" as asked.
+- **Locked by:** `tests/theOwnerCanAlwaysModerateTheAppMart.test.ts` (the screenshot case, reviewer, free-grant/forged/
+  expired denied, client header, census of all three route files). Reversion: session ignored → the screenshot case fails.
+- **Owner action:** sign in to Admin Panel once on the device (the tab follows that session); a frontend change reaches the
+  phone apps only with the next store build.
+- **Same day, owner follow-up ("admin penal ke andar alag 'app mart' button bana do, waha sab dikhe"):** Admin Panel →
+  Apps → the page formerly called "Review" is now **"App Mart"** and embeds the store's own `NavAppStore` on its Manage
+  apps tab (lazy-loaded, the same component — not a second review screen). The old copy "It opens as the signed-in store
+  admin account, not with this panel's login" was the very drift fixed above and is replaced. Locked in
+  `tests/theAdminMenuHasNineTabs.test.ts`.

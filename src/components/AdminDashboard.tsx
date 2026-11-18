@@ -13,7 +13,7 @@ import { UserBuiltApps } from './admin/UserBuiltApps';
 import { WalletCreditReview } from './admin/WalletCreditReview';
 import { TokenAdjustmentReceiptReview } from './admin/TokenAdjustmentReceiptReview';
 import type { AdminTokenAdjustmentReceiptResponse } from '../lib/adminTokenAdjustmentReceipt';
-import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight} from 'lucide-react';
 import { effectiveDirection } from '../lib/adminUserSort';
 import { TirangaLoader } from './ui/TirangaLoader';
@@ -131,6 +131,13 @@ const TAB_ICONS: Record<AdminTabId, React.ComponentType<any>> = {
 /** The nine tabs as the header strip and the phone's bottom bar draw them. */
 const TABS: { id: AdminTabId; label: string; icon: React.ComponentType<any> }[] =
   ADMIN_TABS.map((t) => ({ id: t.id, label: t.label, icon: TAB_ICONS[t.id] }));
+
+/**
+ * The App Mart itself, opened on its Manage apps tab inside Apps → App Mart (owner 2026-11-18: "waha sab dikhe"). The SAME
+ * component users open — never a second review screen — loaded only when the page is opened. The store recognises this
+ * panel's admin session (storeAdminPermission.ts), so it opens as an admin here.
+ */
+const EmbeddedAppMart = lazy(() => import('./ide/NavAppStore').then((m) => ({ default: m.NavAppStore })));
 
 type ReportTier = 'paid' | 'free' | 'admin' | 'unknown';
 
@@ -5311,14 +5318,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {activeTab === 'review' && (
             <div className="space-y-6">
               <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-3">
-                <h3 className="text-sm font-black text-ink uppercase tracking-tight">App Mart review</h3>
-                <p className="text-[11px] text-muted">Android apps, instant web apps waiting for a store listing, and reported comments are reviewed inside App Mart. It opens as the signed-in store admin account, not with this panel's login.</p>
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight">App Mart</h3>
+                <p className="text-[11px] text-muted">Every app waiting for the store, every app already on it, and reported comments — approve, reject or remove here. This panel's admin login is enough.</p>
+                <div className="rounded-xl border border-line overflow-hidden h-[75vh] min-h-[480px] bg-surface">
+                  <Suspense fallback={<p className="p-4 text-[11px] text-muted">Loading App Mart…</p>}>
+                    <EmbeddedAppMart initialTab="review" />
+                  </Suspense>
+                </div>
                 <button
                   type="button"
                   onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'appstore', storeTab: 'review' } }))}
                   className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-[11px] font-black uppercase tracking-wider text-on-accent"
                 >
-                  Open App Mart review
+                  Open App Mart full screen
                 </button>
               </div>
               {/* The gallery's review queue lives inside the Gallery screen (GalleryReviewQueue.tsx), the same
@@ -5326,7 +5338,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   shipped — a screen telling the admin a working feature did not exist (admin panel audit, PR 3). */}
               <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-3">
                 <h3 className="text-sm font-black text-ink uppercase tracking-tight">Community gallery review</h3>
-                <p className="text-[11px] text-muted">Apps people send to the community gallery wait here as pending and stay private until approved. Read the code, then approve, reject or remove. It opens as the signed-in store admin account, not with this panel's login.</p>
+                <p className="text-[11px] text-muted">Apps people send to the community gallery wait here as pending and stay private until approved. Read the code, then approve, reject or remove. This panel's admin login is enough.</p>
                 <button
                   type="button"
                   onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'gallery' } }))}

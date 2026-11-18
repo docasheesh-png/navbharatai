@@ -19,8 +19,9 @@
  *   1. CONTENT TYPES. Firebase inferred them. GCS serves whatever was set at upload — miss it and the
  *      browser treats the stylesheet as text and renders an unstyled page. `contentTypeFor` is that.
  *   2. CACHE HEADERS. Set per object at upload here, matching the rules the Worker already documents:
- *      a fingerprinted asset can never mean anything else, so it is immutable for a year; HTML is 60
- *      seconds, so a republish is visible within a minute instead of people seeing yesterday's app.
+ *      a fingerprinted asset can never mean anything else, so it is immutable for a year; HTML and our
+ *      service worker are `no-cache`, so a republish is what the next load shows instead of yesterday's
+ *      app (a 60s edge hold was long enough that the old page looked like it had not been updated).
  * The third — SPA fallback for a deep link — belongs to the Worker, because it is a decision about a
  * request that found nothing, and only the thing serving the request can make it.
  */
@@ -126,8 +127,9 @@ export function isFingerprinted(path: string): boolean {
  */
 export function cacheControlFor(path: string): string {
   const clean = String(path || '').toLowerCase();
-  // HTML is the entry point: a republish has to be visible quickly or people keep seeing the old app.
-  if (clean.endsWith('.html') || clean.endsWith('.htm')) return 'public, max-age=60';
+  // HTML is the entry point and sw.js decides whether the next visit even asks for a new one.
+  // `no-cache` so a republish is the next load, not a second address while the old page stays put.
+  if (clean.endsWith('.html') || clean.endsWith('.htm') || /(^|\/)sw\.js$/i.test(clean)) return 'no-cache';
   if (isFingerprinted(clean)) return 'public, max-age=31536000, immutable';
   return 'public, max-age=3600';
 }

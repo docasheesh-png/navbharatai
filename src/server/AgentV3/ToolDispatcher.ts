@@ -1,4 +1,4 @@
-import { splitSeedOrphans, seedOrphanObservation } from './seedOrphanOwnership';
+import { splitSeedOrphans, seedOrphanObservation, kitOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
 import { ASSET_MODELS_PATH, localModelSubjects, readyModelFor, localModelLead } from './gameAssets/localModelNote';
@@ -132,6 +132,7 @@ import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { isBareManifestInstall, manifestRangeRepairEnabled, repairUnavailableRanges, manifestRepairNote } from './manifestRangeRepair';
 import { shellMayWriteOpaquely, markCommand, changedFilesCommand, parseChangedFiles } from './shellWriteReconcile';
 import { isScratchCapture } from './scratchCapture';
+import { isKnownKitVersion } from '../lib/gameRecipeLayers';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, shadowKeptToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames, mistypedImport } from './tscErrorCause';
 import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
@@ -7153,8 +7154,15 @@ export class ToolDispatcher {
             // (autopsy 8257ca59) — said as such, at warning weight, never as "your existing code".
             const orphanedHere = split.preExisting.filter((o) => this._droppedImportStems.has(importStem(o.file)));
             const seedOwnership = splitSeedOrphans(split.preExisting.filter((o) => !orphanedHere.includes(o)), this.platformSeedFiles?.() ?? []);
-            const reallyOld = seedOwnership.preExisting;
+            // Q-2715: an UNTOUCHED game-kit file (byte-identical to a kit version) is library code, not the user's component.
+            const kitPaths: string[] = [];
+            for (const o of seedOwnership.preExisting) {
+              try { if (isKnownKitVersion(o.file, await this.actuator.readFile(this.workspaceId, o.file))) kitPaths.push(o.file); } catch { /* unreadable: stays the user's */ }
+            }
+            const kitOwnership = splitSeedOrphans(seedOwnership.preExisting, kitPaths);
+            const reallyOld = kitOwnership.preExisting;
             if (seedOwnership.platform.length > 0) extra.push({ severity: 'observation', label: seedOrphanObservation(seedOwnership.platform.map((o) => o.label)) });
+            if (kitOwnership.platform.length > 0) extra.push({ severity: 'observation', label: kitOrphanObservation(kitOwnership.platform.map((o) => o.label)) });
             if (orphanedHere.length > 0) extra.push({ severity: 'medium', label: droppedImportOrphanLabel(orphanedHere.map((o) => o.label)) });
             if (reallyOld.length > 0) {
               extra.push({

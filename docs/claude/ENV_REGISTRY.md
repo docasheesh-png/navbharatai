@@ -5187,6 +5187,24 @@ unchanged. Module: `src/server/AgentV3/moyiBuilder.ts` (same shape as `bluesmind
 - **Normal and Strong**: **DiscountedTokens (`ENGINE_DT`)** sits right before the first Sonnet/Opus rung (`discountedTokensBuilder.ts`), with up to three models (owner's order in `DISCOUNTEDTOKENS_MODEL`, else gpt-6-sol then the key's own list). It needs `DISCOUNTEDTOKENS_API_KEY` **and** `DISCOUNTEDTOKENS_BUILDER_RATE_IN/_OUT`; until the rates are set it does not run. Never on Weak.
 - Both labels are admin-only: redaction, brand scrub (Moyi was missing there since #4276 and is added too) and the off-ladder census know them.
 
+### `ROUTING_DECISIONS` — routing decision records and SLO counters (Traffic Manager V2, P4)
+
+Default ON. `off` / `false` / `0` stops both writers.
+- **Decision records:** `routing_decisions`, kept 30 days. Every failure and critical event is kept, plus 10% of successes (deterministic, weighted ×10). Fixed fields only: no prompt, answer, uid, key or provider text.
+- **SLO counters:** `routing_slo_daily`, kept 35 days. Each instance writes its own per-day, per-surface absolute totals once a minute.
+
+The SLO on Admin → AI Engines → Traffic control is computed only from the counters. Observation only: no route changes.
+
+### `TRAFFIC_HEALTH_SHARE` — provider health shared across instances (Traffic Manager V2, P3)
+
+| Value | Meaning |
+|---|---|
+| unset / `observe` (default) | Each instance publishes a provider's state change and reads the others' (`provider_health_shared`: one doc per provider, ≤1 write per provider per 20 s, one bounded read every 20–60 s, jittered). Shown on Admin → AI Engines → Traffic control → Shared provider health. **No ladder acts on it.** |
+| `on` | Also adopts a NEWER shared state, so a provider one instance found suspended or down is skipped on every instance until it recovers. The owner turns this on after observing it. |
+| `off` | Nothing is published or read. |
+
+Only the state, failure kind, recovery time and model id are shared: never a provider message, key or prompt.
+
 ### `AGENTV3_TRAFFIC_HEALTH` — live provider health
 
 Default on; `off`, `false` or `0` disables the additional in-process health recording and skip. The existing router/builder/vision ladders retain their own admission, billing, cooldown and maintenance checks. A suspended credential or three consecutive timeout/invalid outcomes opens a five-minute recovery window. Pool credentials retain separate identities. A recovery lease is bounded and a tracked physical call keeps ownership until it settles. State is bounded to 256 account labels with 40 samples each and is local to each server; it is not a fleet-wide health database. App image integrations are catalogued only, because their generated clients run outside this server. Providers with no recorded outcomes are displayed as not measured.

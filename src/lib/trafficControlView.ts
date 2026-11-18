@@ -12,6 +12,14 @@ export interface ControlBodyView {
   surfaces: Record<string, SurfaceMode>;
   providers: Record<string, RouteControlView>;
   models: Record<string, ModelControlView>;
+  /** P3: older routing paths that also obey provider drain/disable. */
+  coverage?: Record<string, boolean>;
+}
+export interface SharedHealthView {
+  mode: 'off' | 'observe' | 'on';
+  lastPullAtMs: number | null; lastPullOk: boolean; intervalMs: number; writes: number; adopted: number;
+  reported: Array<{ provider: string; state: string; kind: string; atMs: number }>;
+  families: Array<{ domain: string; providers: string[]; since: number }>;
 }
 export interface ControlDocView extends ControlBodyView { revision: number; updatedAtMs: number; actor: string; reason: string }
 export interface TrafficControlView {
@@ -21,6 +29,8 @@ export interface TrafficControlView {
   providers: Array<{ id: string; name: string; kind: string; family: string }>;
   models: Array<{ key: string; surfaces: string[]; dependsOn: string[] }>;
   admission: Record<string, { required: boolean; gaps: string[] }>;
+  paths?: string[];
+  sharedHealth?: SharedHealthView;
   history: {
     revisions: Array<{ revision: number; updatedAtMs: number; actor: string; reason: string }>;
     audit: Array<{ atMs: number; actor: string; reason: string; kind: string; fromRevision: number; toRevision: number; changes: string[] }>;
@@ -49,6 +59,11 @@ export function isTrafficControlView(v: unknown): v is TrafficControlView {
   if (!v.providers.every(p => rec(p) && str(p.id) && str(p.name) && str(p.kind) && str(p.family))) return false;
   if (!v.models.every(m => rec(m) && str(m.key) && strs(m.surfaces) && strs(m.dependsOn))) return false;
   const h = v.history;
+  if (v.paths !== undefined && !strs(v.paths)) return false;
+  const sh = v.sharedHealth;
+  if (sh !== undefined && !(rec(sh) && ['off', 'observe', 'on'].includes(sh.mode as string) && Array.isArray(sh.reported) && Array.isArray(sh.families)
+    && sh.reported.every(r => rec(r) && str(r.provider) && str(r.state) && str(r.kind) && int(r.atMs))
+    && sh.families.every(f => rec(f) && str(f.domain) && strs(f.providers)))) return false;
   return Array.isArray(h.revisions) && h.revisions.every(r => rec(r) && int(r.revision) && int(r.updatedAtMs) && str(r.actor) && str(r.reason))
     && Array.isArray(h.audit) && h.audit.every(a => rec(a) && int(a.atMs) && str(a.actor) && str(a.reason) && int(a.fromRevision) && int(a.toRevision) && strs(a.changes));
 }
@@ -56,7 +71,7 @@ export function isTrafficControlView(v: unknown): v is TrafficControlView {
 /** The body to edit: the saved one, or today's defaults (nothing narrowed). */
 export function editableBody(v: TrafficControlView): ControlBodyView {
   const c = v.current;
-  return c ? { global: { ...c.global }, surfaces: { ...c.surfaces }, providers: { ...c.providers }, models: { ...c.models } }
+  return c ? { global: { ...c.global }, surfaces: { ...c.surfaces }, providers: { ...c.providers }, models: { ...c.models }, ...(c.coverage ? { coverage: { ...c.coverage } } : {}) }
     : { global: { gateway: 'on' }, surfaces: {}, providers: {}, models: {} };
 }
 
@@ -67,4 +82,22 @@ export function saveProblem(reason: string, totp: string): string | null {
   if (n > 300) return 'The reason is too long. Keep it under 300 characters.';
   if (!/^\d{6}$/.test(totp.trim())) return 'Enter the current 6-digit code from your authenticator app.';
   return null;
+}
+
+/** /api/admin/traffic-control/slo — reliability from complete counters. */
+export interface SloView {
+  slo: Array<{ surface: string; days: number; eligible: number; successes: number; refused: number; cancelled: number; rate: number | null; ci95: { low: number; high: number } | null; target: number | null }>;
+  recentFailures: Array<{ atMs: number; surface: string; path: string; outcome: string; failure: string | null; provider: string; model: string; attempts: number }>;
+  sink: { enabled: boolean; buffered: number; dropped: number };
+}
+export function isSloView(v: unknown): v is SloView {
+  if (!rec(v) || !Array.isArray(v.slo) || !Array.isArray(v.recentFailures) || !rec(v.sink)) return false;
+  return v.slo.every(r => rec(r) && str(r.surface) && int(r.eligible) && int(r.successes) && (r.rate === null || typeof r.rate === 'number'))
+    && v.recentFailures.every(f => rec(f) && int(f.atMs) && str(f.surface) && str(f.outcome) && str(f.provider));
+}
+/** "99.62% (99.41–99.76%, n = 12,034)" — the rate with its honest uncertainty and denominator. */
+export function sloText(r: SloView['slo'][number]): string {
+  if (!r.eligible || r.rate === null) return 'No eligible requests yet.';
+  const pct = (x: number) => `${(x * 100).toFixed(2)}%`;
+  return `${pct(r.rate)}${r.ci95 ? ` (95%: ${pct(r.ci95.low)}–${pct(r.ci95.high)})` : ''} of ${r.eligible.toLocaleString('en-IN')} eligible requests`;
 }

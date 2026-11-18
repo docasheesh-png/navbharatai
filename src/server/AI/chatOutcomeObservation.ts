@@ -1,4 +1,5 @@
 import { BoundedCache } from '../lib/boundedCache';
+import { recordDecision, type DecisionPath } from './TrafficRegistry/decisionRecords';
 /** Process-local terminal observations, never a quality score or an all-instance SLO.
  * No messages, user IDs, provider error text or credentials are retained. */
 export type ChatOutcome = 'complete' | 'partial' | 'refused' | 'cancelled' | 'failed';
@@ -50,18 +51,43 @@ export function resetChatOutcomeObservationForTests() { buckets.clear(); }
 /** Observe all route selections at one boundary; preserve returns/errors and never retry. */
 export async function observeChatOutcome<T extends { ok: boolean; reason?: string; content?: string }>(
   surface: string, signal: AbortSignal | undefined, run: () => Promise<T>, visibleText?: () => boolean,
+  path?: () => DecisionPath,
 ): Promise<T> {
+  const startedAt = Date.now();
   try {
     const result = await run();
     const visible = visibleText ? visibleText() : !!result.content?.trim();
     const state: ChatOutcome = signal?.aborted || result.reason === 'aborted' ? 'cancelled'
       : result.reason === 'stalled' ? visible ? 'partial' : 'failed'
       : result.ok && visible ? 'complete' : visibleText && visible ? 'partial' : 'failed';
-    record(surface, state, state === 'partial' ? 'interrupted' : state === 'failed' ? result.reason === 'no-provider' ? 'unavailable' : 'unknown' : undefined); return result;
+    const reason: FailureReason | undefined = state === 'partial' ? 'interrupted' : state === 'failed' ? result.reason === 'no-provider' ? 'unavailable' : 'unknown' : undefined;
+    record(surface, state, reason);
+    decide(surface, state, reason ?? null, result, startedAt, path);
+    return result;
   } catch (error) {
     const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
     const refused = typeof code === 'string' && ['SAFETY_REFUSAL', 'POLICY_BLOCKED', 'STRICT_FREE_CAPABILITY_UNAVAILABLE'].includes(code);
-    record(surface, signal?.aborted ? 'cancelled' : visibleText?.() ? 'partial' : refused ? 'refused' : 'failed', signal?.aborted ? undefined : refused ? 'policy' : failureReason(error));
+    const state: ChatOutcome = signal?.aborted ? 'cancelled' : visibleText?.() ? 'partial' : refused ? 'refused' : 'failed';
+    const reason = signal?.aborted ? undefined : refused ? 'policy' : failureReason(error);
+    record(surface, state, reason);
+    decide(surface, state, reason ?? null, null, startedAt, path);
     throw error;
   }
+}
+
+/**
+ * Traffic Manager V2 P4: the same terminal observation, as a decision record + a complete SLO count. Observation
+ * only: it reads fixed fields of the result (provider label, model id, latency, reported tokens, skip reasons) and
+ * never the prompt or the answer; it can never throw into the request.
+ */
+function decide(surface: string, outcome: ChatOutcome, failure: string | null, result: unknown, startedAt: number, path?: () => DecisionPath): void {
+  try {
+    const r = (result && typeof result === 'object' ? result : {}) as { provider?: unknown; model?: unknown; latencyMs?: unknown;
+      usage?: { inputTokens?: number; outputTokens?: number }; freeChain?: { attempts?: Array<{ provider?: unknown; reason?: unknown; entered?: unknown }> } };
+    recordDecision({ surface, path: path ? path() : 'legacy', outcome, failure,
+      provider: typeof r.provider === 'string' ? r.provider : undefined, model: typeof r.model === 'string' ? r.model : undefined,
+      latencyMs: typeof r.latencyMs === 'number' && r.latencyMs > 0 ? r.latencyMs : Date.now() - startedAt,
+      usage: r.usage, attempts: Array.isArray(r.freeChain?.attempts) ? r.freeChain!.attempts : undefined,
+      critical: outcome === 'failed' && failure === 'unavailable' });
+  } catch { /* observation never affects the answer */ }
 }

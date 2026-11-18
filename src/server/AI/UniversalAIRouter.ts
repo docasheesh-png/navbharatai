@@ -51,6 +51,9 @@ export interface RoutedCall {
   gatewayPricingProof?: import('./Router/ProviderTypes').AIProviderResponse['gatewayPricingProof'];
 }
 
+/** Which path answered, for the P4 decision record (read at the end of the call, inside its own context). */
+const decisionPath = (): 'gateway' | 'legacy' => (isGatewayRouteSelected() ? 'gateway' : 'legacy');
+
 export class UniversalAIRouter {
   private readonly TIMEOUT_MS = 90000;
 
@@ -83,7 +86,8 @@ export class UniversalAIRouter {
     const quotaSignal = currentFreeAnswerSignal();
     const observedSignal = signal && quotaSignal ? AbortSignal.any([signal, quotaSignal]) : signal ?? quotaSignal;
     return observeChatOutcome(tier, observedSignal, () =>
-      this.routeDetailedInner(message, history, tier, _traceContext, systemPrompt, allowFreeChatHedge, signal, freeChainContext));
+      this.routeDetailedInner(message, history, tier, _traceContext, systemPrompt, allowFreeChatHedge, signal, freeChainContext),
+      undefined, decisionPath);
   }
 
   private async routeDetailedInner(
@@ -179,7 +183,7 @@ export class UniversalAIRouter {
       this.routeStreamInner(message, history, tier, systemPrompt, (text, ...source) => {
         if (source[0] !== 'notice' && text.trim()) visible = true;
         onChunk(text, ...source);
-      }, signal, allowFreeChatHedge, freeChainContext), () => visible);
+      }, signal, allowFreeChatHedge, freeChainContext), () => visible, decisionPath);
   }
 
   private async routeStreamInner(

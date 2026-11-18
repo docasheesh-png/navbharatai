@@ -81,7 +81,9 @@ export const API_PROVIDERS: readonly ApiProviderEntry[] = [
   { id: 'modelscope', name: 'ModelScope', group: 'registered', envKeys: ['FREE_CHAIN_MODELSCOPE_API_KEY'], usedFor: ['Free Chat (free-chat chain), when enabled'], billingUrl: 'https://modelscope.cn/', billingHint: 'Platform → account' },
   { id: 'llm7', name: 'LLM7', group: 'registered', envKeys: ['FREE_CHAIN_LLM7_API_KEY'], usedFor: ['Free Chat (free-chat chain), when enabled'], billingUrl: 'https://llm7.io/', billingHint: 'Official website' },
   { id: 'bluesminds', name: 'BluesMinds', group: 'registered', envKeys: ['FREE_CHAIN_BLUESMINDS_API_KEY'], usedFor: ['Free Chat (free-chat chain), when enabled'], billingUrl: 'https://api.bluesminds.com/', billingHint: 'API platform' },
-  { id: 'requesty', name: 'Requesty', group: 'registered', envKeys: ['FREE_CHAIN_REQUESTY_API_KEY'], usedFor: ['Free Chat (free-chat chain), when enabled'], billingUrl: 'https://app.requesty.ai/', billingHint: 'Dashboard → credits' },
+  { id: 'requesty', name: 'Requesty', group: 'registered', envKeys: ['FREE_CHAIN_REQUESTY_API_KEY'], usedFor: ['Free Chat (free-chat chain), when enabled'], billingUrl: 'https://app.requesty.ai/', billingHint: 'Dashboard → credits' },  { id: 'moyi', name: 'Moyi API', group: 'registered', envKeys: ['MOYI_API_KEY'], usedFor: ['Pro app builder, Weak tier (after BluesMinds), once its model and rate are set', 'Admin Test Chat Bot'], billingUrl: 'https://moyi-api.com/', billingHint: 'Prepaid balance on the provider’s site' },
+  { id: 'discountedtokens', name: 'DiscountedTokens', group: 'registered', envKeys: ['DISCOUNTEDTOKENS_API_KEY'], usedFor: ['Admin Test Chat Bot only (reseller under evaluation)'], billingUrl: 'https://discountedtokens.com/', billingHint: 'Prepaid credit (minimum US$5)' },
+  { id: 'mirapi', name: 'MirAPI', group: 'registered', envKeys: ['MIRAPI_API_KEY'], usedFor: ['Admin Test Chat Bot only (reseller under evaluation)'], billingUrl: 'https://mirapi.ai/', billingHint: 'Prepaid balance on the provider’s site' },
 ];
 
 /** Billing pages for the image providers IMAGE_PROVIDER can name (its value is a provider name, not a secret). */

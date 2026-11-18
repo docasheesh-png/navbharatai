@@ -31,6 +31,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
+import { buildDiscountLine } from '../../lib/buildDiscountLine';
 
 /** The highest percentage the admin panel accepts. A ceiling, not a suggestion: see rule 2. */
 export const BUILD_DISCOUNT_MAX_PCT = 50;
@@ -180,8 +181,6 @@ export const buildDiscountStore = new BuildDiscountStore();
 /**
  * The one line the user reads under a discounted build. Branded, names no cost and no vendor. PURE.
  * Empty when nothing was taken off, so a 0% build reads exactly as it does today.
+ * BR1996: the text lives in `src/lib/buildDiscountLine.ts` so the panel renders the same line.
  */
-export function buildDiscountLine(d: { listInr: number; discountInr: number; payInr: number; pct: number }): string {
-  if (!(d.discountInr > 0) || !(d.pct > 0)) return '';
-  return `Build price ₹${d.listInr.toFixed(2)} · Discount ${d.pct}% (−₹${d.discountInr.toFixed(2)}) · You pay ₹${d.payInr.toFixed(2)}`;
-}
+export { buildDiscountLine };

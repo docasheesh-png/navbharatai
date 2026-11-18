@@ -7,6 +7,7 @@ import {
   CHEAPERINFERENCE_PAID_FIRST_TOKEN_MS,
   cheaperInferenceAdminStatus,
   cheaperInferenceApiKeyConfigured,
+  cheaperInferenceConfiguredMode,
   cheaperInferenceExclusiveAdmin,
   cheaperInferenceMode,
   cheaperInferencePaidRungEnabled,
@@ -19,35 +20,39 @@ const adminMail = grantEmail('doc.asheesh@icloud.com', true);
 const otherMail = grantEmail('someone@example.com', true);
 
 describe('cheaperInferencePolicy (simple mode)', () => {
-  it('defaults to off and never claims production activation is safe', () => {
-    expect(cheaperInferenceMode({})).toBe('off');
-    expect(cheaperInferencePaidRungEnabled({})).toBe(false);
+  // Owner t357u (2026-11-16): default ON for all users; only an explicit off value is the kill switch.
+  it('defaults to all and still never claims production activation is safe', () => {
+    expect(cheaperInferenceMode({})).toBe('all');
+    expect(cheaperInferencePaidRungEnabled({})).toBe(false); // no key, nothing to call
+    expect(cheaperInferencePaidRungEnabled({ CHEAPERINFERENCE_API_KEY: 'ci_live_test' })).toBe(true);
     expect(cheaperInferenceExclusiveAdmin(adminMail, {})).toBe(false);
     expect(cheaperInferenceAdminStatus({}).activationSafe).toBe(false);
     expect(cheaperInferenceAdminStatus({}).baseUrl).toBe(CHEAPERINFERENCE_BASE_URL);
   });
 
-  it('accepts CHEAPERINFERENCE and CheaperInference spellings; unknown → off', () => {
+  it('accepts CHEAPERINFERENCE and CheaperInference spellings; unknown → all; off values → off', () => {
     expect(cheaperInferenceMode({ CHEAPERINFERENCE: 'admin' })).toBe('admin');
     expect(cheaperInferenceMode({ CheaperInference: 'all' })).toBe('all');
-    expect(cheaperInferenceMode({ CHEAPERINFERENCE: 'canary' })).toBe('off');
+    expect(cheaperInferenceMode({ CHEAPERINFERENCE: 'canary' })).toBe('all');
+    for (const off of ['off', 'false', '0', 'no']) expect(cheaperInferenceMode({ CHEAPERINFERENCE: off })).toBe('off');
+    expect(cheaperInferenceConfiguredMode({})).toBe('off');
+    expect(cheaperInferenceConfiguredMode({ CHEAPERINFERENCE: 'admin' })).toBe('admin');
   });
 
-  it('admin mode is exclusive to verified admin emails and needs a key', () => {
+  it('admin mode keeps its exclusive admin path but no longer hides the rung from users', () => {
     const env = { CHEAPERINFERENCE: 'admin', CHEAPERINFERENCE_API_KEY: 'ci_live_test' };
     expect(isCheaperInferenceAdmin(adminMail)).toBe(true);
     expect(isCheaperInferenceAdmin(otherMail)).toBe(false);
     expect(cheaperInferenceExclusiveAdmin(adminMail, env)).toBe(true);
     expect(cheaperInferenceExclusiveAdmin(otherMail, env)).toBe(false);
     expect(cheaperInferenceExclusiveAdmin(adminMail, { CHEAPERINFERENCE: 'admin' })).toBe(false);
-    expect(cheaperInferencePaidRungEnabled(env)).toBe(false);
+    expect(cheaperInferencePaidRungEnabled(env)).toBe(true);
   });
 
-  it('all mode does not serve other users without Keak written permission', () => {
+  it('all mode serves every user without the Keak written-permission gate', () => {
     const env = { CHEAPERINFERENCE: 'all', CHEAPERINFERENCE_API_KEY: 'ci_live_test' };
-    expect(cheaperInferenceSharedAccessPermitted(env)).toBe(false);
-    expect(cheaperInferencePaidRungEnabled(env)).toBe(false);
-    expect(cheaperInferencePaidRungEnabled({ ...env, CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION: 'on' })).toBe(true);
+    expect(cheaperInferenceSharedAccessPermitted(env)).toBe(false); // still reported, no longer a gate
+    expect(cheaperInferencePaidRungEnabled(env)).toBe(true);
     expect(cheaperInferenceExclusiveAdmin(adminMail, env)).toBe(false);
     expect(cheaperInferenceApiKeyConfigured({ CHEAPERINFERENCE_API_KEY: 'a,b' })).toBe(false);
   });

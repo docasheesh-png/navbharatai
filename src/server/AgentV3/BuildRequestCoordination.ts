@@ -5,6 +5,7 @@ import { abortBuild } from './buildAbortCause';
 import { hasBuildBodyExitHold } from './stoppingBuild';
 import { SandboxRecoveryUnavailableError, isSandboxRecoveryUnavailable } from './SandboxRecoveryError';
 import { redactProvidersText } from '../lib/providerRedaction';
+import { userResultEvent } from './userChargeView';
 // Per-accepted-request coordination. This owns queue/receipt identity, not runtime/source fencing.
 import { loadQueue, bindQueuedBuild, settleQueuedBuild, proposeQueuedContinuation, retireQueuedContinuation, cancelQueuedContinuation, QueueClaimConflictError, type QueueBuildBinding } from './BuildQueueStore';
 import type { QueueContinuation } from './BuildQueue';
@@ -22,11 +23,15 @@ export function buildRequestInputRejection(input: { requestId?: unknown; session
 /** A known setup refusal ends this attempt before the builder can run or retry on an empty VM. */
 class BuildSetupRecoveryUnavailableError extends SandboxRecoveryUnavailableError {}
 
-export function rethrowBuildSetupRecoveryUnavailable(error: unknown): void {
-  if (isSandboxRecoveryUnavailable(error)) throw new BuildSetupRecoveryUnavailableError();
+export function rethrowBuildSetupRecoveryUnavailable(error: unknown, opts?: { repeated?: boolean }): void {
+  if (isSandboxRecoveryUnavailable(error)) {
+    throw new BuildSetupRecoveryUnavailableError(error.reason, {
+      repeated: opts?.repeated === true || error.repeated === true,
+    });
+  }
 }
 
-export function buildExceptionDetails(error: unknown): { message: string; phase: 'sandbox' | 'build'; code: string; summary: string } {
+export function buildExceptionDetails(error: unknown): { message: string; phase: 'sandbox' | 'build'; code: string; summary: string; adminDetail?: string } {
   const message = error instanceof Error ? error.message : String(error);
   const recovery = isSandboxRecoveryUnavailable(error);
   return {
@@ -34,6 +39,7 @@ export function buildExceptionDetails(error: unknown): { message: string; phase:
     phase: recovery ? 'sandbox' : 'build',
     code: recovery ? error.code : 'BUILD_EXCEPTION',
     summary: (recovery ? message : `Build stopped — an unexpected error occurred: ${message}`).slice(0, 500),
+    ...(recovery && error.reason ? { adminDetail: error.reason } : {}),
   };
 }
 
@@ -41,7 +47,7 @@ export function buildExceptionDetails(error: unknown): { message: string; phase:
 export function publishBuildException(error: unknown, diagnostics: unknown, emit: (event: unknown) => void): void {
   const { message } = buildExceptionDetails(error);
   emit({ type: 'error', message: redactProvidersText(message), ts: Date.now(),
-    ...(isSandboxRecoveryUnavailable(error) ? { code: error.code, retryable: true } : {}),
+    ...(isSandboxRecoveryUnavailable(error) ? { code: error.code, retryable: error.retryable } : {}),
     ...(diagnostics ? { diagnostics } : {}),
   });
   if (error instanceof BuildSetupRecoveryUnavailableError) {
@@ -263,7 +269,7 @@ export function createBuildPreflightStream(res: PreflightResponse, publish: (eve
   const cancel = () => { if (timer) clearTimeout(timer); timer = undefined; };
   const send = (event: unknown): void => {
     if (!opened) { buffered.push(event); return; }
-    publish(event, (value) => { if (!res.writableEnded) res.write(JSON.stringify(value) + '\n'); });
+    publish(event, (value) => { if (!res.writableEnded) res.write(JSON.stringify(userResultEvent(value)) + '\n'); });
   };
   const open = (): void => {
     cancel();
@@ -283,7 +289,7 @@ export function createBuildPreflightStream(res: PreflightResponse, publish: (eve
       if (!res.headersSent) { res.setHeader('Retry-After', '2'); res.status(status).json(payload); return; }
       if (!res.writableEnded) {
         res.write(JSON.stringify({ type: 'error', message: payload.error, code: payload.code, requestState: payload.requestState, retryable: payload.retryable === true }) + '\n');
-        res.write(JSON.stringify({ type: 'result', ok: false, summary: payload.error, steps: 0, billedUsd: 0, billedInr: 0 }) + '\n');
+        res.write(JSON.stringify({ type: 'result', ok: false, summary: payload.error, steps: 0, billedInr: 0 }) + '\n');
         res.end();
       }
     },
@@ -352,3 +358,4 @@ export function startBuildLeaseHeartbeat(opts: {
   timer.unref?.();
   return timer;
 }
+

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { makeMultiProviderTurnRunner, forceModelRunner, pacedRunner, isFatalProviderError, fatalProviderHint, isServiceOverloadedError, createRateLimitCooldowns, sharedRateLimitCooldowns, rateLimitBenchAfter, type NamedRunner } from './MultiProviderTurnRunner';
+import { BUDGET_REACHED_MESSAGE } from '../turnDeadline';
 import { _resetSharedPacers } from '../RateLimitPacer';
 
 // The shared 429-cooldown singleton persists across runner instances BY DESIGN — reset it between
@@ -885,6 +886,35 @@ describe('🔴 the timeout bench is keyed by provider FAMILY (autopsy 4efab9d7, 
     );
     await runner.runTurn(PARAMS); await runner.runTurn(PARAMS); await runner.runTurn(PARAMS);
     expect((key2.runTurn as ReturnType<typeof vi.fn>).mock.calls.length).toBe(3);
+  });
+
+  it('a hung first rung that was given only a slice does not skip the next rung (#2428)', async () => {
+    const step = Date.now() + 90_000;
+    const first = {
+      runTurn: vi.fn().mockImplementation(async (p: RunTurnParams) => {
+        expect(typeof p.deadlineAt).toBe('number');
+        expect(p.deadlineAt as number).toBeLessThan(step - 40_000);
+        throw new Error(BUDGET_REACHED_MESSAGE);
+      }),
+    };
+    const second = runnerOk('planned');
+    const runner = makeMultiProviderTurnRunner(
+      [{ name: 'SURPLUS', runner: first }, { name: 'ENGINE_R1', runner: second }],
+      {},
+    );
+    const res = await runner.runTurn({ ...PARAMS, deadlineAt: step, reserveFallbackBudget: true });
+    expect(res.text).toBe('planned');
+    expect(second.runTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('a budget error still aborts the chain when the caller did not reserve fallback time', async () => {
+    const second = runnerOk('should-not-run');
+    const runner = makeMultiProviderTurnRunner(
+      [{ name: 'SURPLUS', runner: runnerFail(BUDGET_REACHED_MESSAGE) }, { name: 'ENGINE_R1', runner: second }],
+      {},
+    );
+    await expect(runner.runTurn({ ...PARAMS, deadlineAt: Date.now() + 90_000 })).rejects.toThrow(/time allowed for this step/);
+    expect(second.runTurn).not.toHaveBeenCalled();
   });
 
   it('a non-pool rung is its own family — nothing changes for a single-key provider', async () => {

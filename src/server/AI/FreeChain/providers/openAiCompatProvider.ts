@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { assertLegacyInferenceAllowed, StrictFreeCapabilityError } from '../../inferencePolicy';
 import type { AIProvider, AIProviderResponse, ProviderUsage } from '../../Router/ProviderTypes';
+import { isAccountQuotaSignal } from '../../../lib/providerAccountQuota';
 
 export type AdapterConfig = {
   provider: 'GLM' | 'GEMINI' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'OPENAI' | 'DEEPINFRA' | 'NVIDIA' | 'MODELSCOPE' | 'LLM7' | 'BLUESMINDS' | 'REQUESTY' | 'CHEAPERINFERENCE';
@@ -227,7 +228,8 @@ function sanitizeError(error: unknown, signal: AbortSignal | undefined, credenti
   let code: FreeChainErrorCode;
   if (source?.name === 'AbortError' || source?.name === 'APIUserAbortError') code = 'ABORTED';
   else if (has('content_filter', 'content_policy_violation', 'safety', 'safety_refusal', 'prohibited_content') || glmCode('1301') || source?.name === 'ContentFilterFinishReasonError') code = 'SAFETY_REFUSAL';
-  else if (has('insufficient_quota', 'quota_exceeded', 'quota_exhausted', 'billing_hard_limit_reached', 'insufficient_balance') || glmCode('1113', '1308', '1310', '1313') || ((provider === 'DEEPSEEK' || provider === 'CHEAPERINFERENCE') && status === 402)) code = 'QUOTA_EXHAUSTED';
+  // An empty or spent account, on any rung (402 included): the shared recognition, never a provider-only copy.
+  else if (isAccountQuotaSignal({ provider, status, codes: rawCode })) code = 'QUOTA_EXHAUSTED';
   else if (glmCode('1305')) code = 'SERVER';
   else if (status === 401 || status === 403 || has('invalid_api_key', 'authentication_error', 'permission_denied')) code = 'AUTH';
   else if (status === 429 || has('rate_limit_exceeded', 'resource_exhausted') || glmCode('1302')) code = 'RATE_LIMIT';

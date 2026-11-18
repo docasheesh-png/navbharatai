@@ -19,3 +19,9 @@ The existing admitted builder model/API turn can design a previously uncatalogue
 This is a first bounded generation route, not an unlimited asset API. Version1 supports primitives and monotone lathe surfaces; it does not generate arbitrary topology, scanned humans, rigs, textures, sound, skeletal animation or automatic physics. When a request requires unsupported geometry or behavior, report that gap and use the existing authorized builder workflow where appropriate rather than mislabelling a placeholder as the requested asset. Higher fidelity mesh/texture providers need a separately reviewed integration, licensing and quota/accounting before activation.
 
 Publication note: testing was stopped at the owner's request. The final stacked draft, including this API-discoverability guidance, has not been retested. Prior isolated evidence does not establish final-head CI, E2B compatibility or browser/mobile acceptance. Keep disabled and do not merge on that evidence alone.
+
+## 2026-11-18 reconciliation
+
+The parent composition PR #4225 is now merged, so this PR targets main. Reconciliation retains main's current world sizing, intent exclusions, Forge, and exclusive-creation implementation, and applies only the procedural-object additions. An interrupted multi-file installation now explicitly reports possible earlier additions; it never rolls back paths that may contain a concurrent user edit. The exclusive-create race regression verifies that both the added runtime and the competing user's object survive without an installation claim.
+
+Focused validation on Node 22.23.4: seven compiler, runtime, dispatcher, exclusive-creation/recording and composition suites passed (82 tests). Full combined-tree CI is coordinated separately; these focused results do not replace that gate. The feature remains default disabled. Dedicated real E2B and visual/mobile acceptance are still required before enabling it.

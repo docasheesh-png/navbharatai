@@ -45,6 +45,8 @@ describe('Free vision model allowlist (env cannot widen it)', () => {
   it('Free vision order is GLM → Vertex → Gemini, no Grok/Claude; non-Claude callers count as Free', () => {
     expect(visionProviderOrder(false)).toEqual(['GLM', 'VERTEX', 'GEMINI']);
     expect(visionProviderOrder(true, 'free')).toEqual(['GLM', 'VERTEX', 'GEMINI']);
+    // Owner t359u, chat photo analysis only (opt-in): the always-on suppliers lead, each under the shared Free cap.
+    expect(visionProviderOrder(false, 'free', true)).toEqual(['QUBAX', 'CHEAPERINFERENCE', 'GLM', 'VERTEX', 'GEMINI']);
     expect(visionTier({ allowClaude: false })).toBe('free');
     expect(visionTier({ allowClaude: true, tier: 'free' })).toBe('free');
     expect(visionTier({ allowClaude: true })).toBe('paid');

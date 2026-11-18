@@ -1,6 +1,6 @@
 // Synthetic unit-test evidence only. Never imported by production code.
 import { createHash } from 'node:crypto';
-import { parseEnvFlag } from '../../src/server/lib/envFlag';
+import { surplusBuilderSwitchOn } from '../../src/server/lib/alwaysOnSuppliers';
 import { SURPLUS_MIN90_BASE_URL } from '../../src/server/lib/surplusClient';
 import type { SurplusCapabilityReview } from '../../src/server/AI/SurplusRegistry/buildSession';
 import type { SurplusOfficialTariff } from '../../src/server/AI/SurplusRegistry/receiptPolicy';
@@ -20,7 +20,7 @@ export function syntheticTestReviews(
 ): LiveProductionReviews {
   const key = surplusLiveKey(env);
   if (!key) throw new Error('Surplus API key missing or invalid for live builder');
-  if (parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) !== true) throw new Error('Surplus builder is disabled');
+  if (!surplusBuilderSwitchOn(env)) throw new Error('Surplus builder is disabled');
 
   const expiresAt = now + EVIDENCE_TTL_MS;
   const reviewedAt = Math.max(0, now - 1_000);

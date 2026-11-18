@@ -4515,8 +4515,8 @@ or protect against upgrades/external account traffic.
 | Name | Code default / interpretation |
 | --- | --- |
 | `FREE_CHAIN_ENABLED` | ON when absent (owner default, 2026-11-04). Deployment gate; saved admin controls cannot override OFF. |
-| `CHEAPERINFERENCE` (alias `CheaperInference`) | `off` (default) \| `admin` \| `all`. `admin` = ONLY verified admin Free Chat replies, from Beam with `reasoning_effort=low` and a 2048-token cap (Beam's card allows low\|medium\|high\|xhigh\|max; `none` is not valid and can 400). `all` does not dispatch unless `CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION=on` (Keak terms §6: no shared access to the key without written permission). |
-| `CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION` | OFF. Set `on` only after Keak AI, Inc. has permitted this product to serve the key to end users (terms §6). Without it, `CHEAPERINFERENCE=all` stays closed. Admin-only mode does not need this flag. |
+| `CHEAPERINFERENCE` (alias `CheaperInference`) | **Default ON (`all`) since 2026-11-16 (owner t357u).** Unset, empty or unknown = `all`; only `off`/`false`/`0`/`no` turns it off (kill switch). `admin` keeps its exclusive verified-admin path (Beam, `reasoning_effort=low`, 2048-token cap) and no longer hides the rung from users. `CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION` is still reported but is NO LONGER a dispatch gate (owner directive; see the 2026-11-16 always-on section). |
+| `CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION` | **Informational only since 2026-11-16 (owner t357u/t365u).** No longer gates FreeChain or the Inference Gateway; CheaperInference serves all users unless `CHEAPERINFERENCE=off`. The owner accepts the terms §6 risk. |
 | `CHEAPERINFERENCE_API_KEY` | Secret, unset. One server-side key (`ci_live_…`). Comma lists rejected. Never put in the frontend. Required for `admin` and `all`. **OWNER:** CheaperInference dashboard login is `aashishcpmt093@gmail.com` (platform.cheaperinference.com). Do not invent another account. |
 | `CHEAPERINFERENCE_MODEL` | `beam` default; allow-list `beam`, `beam-1.0-501b-a23b`, `deepseek-v4.1-flash-1017`. Beam is a reasoning model — exclusive `CHEAPERINFERENCE=admin` uses a 60s first-content grace (paid/all path 30s floor), and reasoning stream deltas pulse the watchdog without delivering text. Admin diagnostic shows `waitMs`, `ttftCapMs`, and `timeout:first-token:…ms`. |
 | `FREE_CHAIN_CHEAPINF_PRICE_IN_PER_MTOK` / `_PRICE_OUT_PER_MTOK` | Indicative Beam defaults 0.006 / 0.022 USD per 1M tokens (owner brief). Env may RAISE, never lower, the reservation floor. Shares the Free Chat $10/day IST paid cap. |
@@ -4779,9 +4779,21 @@ selection remains non-dispatchable. The separate opt-in Builder adapter below co
 reviewed observations and honors exclusions; neither flag is activated by this change.
 See `docs/SURPLUS_REGISTRY.md` for the bounded candidate list and honest activation blockers.
 
-## Surplus Pro tool-loop integration (2026-10-24; default OFF)
+## Surplus Pro tool-loop integration (2026-10-24; default OFF until 2026-11-17, now default ON)
+
+🔴 **DEFAULT ON since 2026-11-17 (owner, verbatim: "surplus ko bhi default on karo").** `AGENTV3_SURPLUS_BUILDER`
+unset, empty or unrecognised = ON; only `off` / `false` / `0` / `no` turns it off (the emergency kill switch).
+One function reads it: `surplusBuilderSwitchOn` in `src/server/lib/alwaysOnSuppliers.ts`
+(`tests/surplusBuilderDefaultOn.test.ts` fails if another file reads the flag itself). Surplus serves a Weak
+build only when a usable `SURPLUS_API_KEY` is also set (`surplusBuilderLive`); with no key the build runs on
+its tier ladder with no Surplus I/O, exactly as the old default-OFF did. Cloud Run already had the flag `on`
+(owner-reported 2026-10-25, below), so this changes nothing in production today: it removes the dependence on
+that variable staying set. Everything else in this section (Weak only, `/min90/v1`, admission, billing) is unchanged.
+The paragraph below is the original 2026-10-24 text and describes the explicit-off path.
 
 `AGENTV3_SURPLUS_BUILDER=false`: opt-in only. OFF bypasses new registry/review/receipt I/O and leaves existing Weak/Normal/Strong ladders and billing unchanged. ON requires independent server account/credential/pilot, quality, capability, official tariff and usage reviews before any Surplus HTTP. No defaults grant a live pilot. Main build inference uses fixed `/min90/v1`, provider-family allowlist and price objective; no ordinary paid fallback. Plain chat, Doctor, media and VM pricing are separate and unchanged. Full scope, concurrency, retention and honest activation blockers: `docs/SURPLUS_BUILDER.md`. Earlier observer-only notes describe Phase 1; this later opt-in caller does not turn it on.
+
+`SURPLUS_PARALLEL_CALLS_PER_BUILD` (optional, added 2026-11-16, NOT set in Cloud Run): how many Surplus model calls of ONE build may be in flight at once. Unset = 128; a positive integer up to 1024 is honoured; `1` restores the old strict one-at-a-time order (the kill switch if Surplus starts rate-limiting). Owner order: *"ek bar me ek call wali limit hatao, 100+ call ek saath"*. Since the same change, live-pilot calls no longer touch the shared `surplus_pilot_admissions` document (a Firestore hotspot). Details: `docs/SURPLUS_BUILDER.md`.
 
 ### Owner-reported Cloud Run configuration (current as of 2026-10-25 Asia/Calcutta)
 
@@ -4945,7 +4957,7 @@ Public chat and the admin Test Chat Bot call Qubax when `QUBAX_ENABLED=1` and `Q
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
-| `QUBAX_ENABLED` | `1` allows calls | disabled |
+| `QUBAX_ENABLED` | **Default ON since 2026-11-16 (owner t357u).** Unset/empty/unknown = on; only `off`/`false`/`0`/`no` stops it (kill switch). A missing `QUBAX_API_KEY` still skips it. | on |
 | `QUBAX_API_KEY` | Server-only Qubax credential | missing |
 | `QUBAX_PRICE_FEED_ENABLED` | `0` turns the public price feed off | on |
 | `QUBAX_MODEL` | Backup model id, used only when no model clears a 90% Qubax discount | automatic |
@@ -5029,6 +5041,139 @@ The earlier July entry says `NAV_STORE_ADMINS` falls back to `AGENTV3_FREE_LIST`
 
 - **`AGENTV3_ATHREE_MAP`** (NOT set; default OFF; `on` / `1` / `true` / `yes` enables). The Athree map (admin order 2026-11-14; `docs/game-engine/athree-map-plan.md`). OFF: the `generate_athree_map` recipe refuses honestly ("not switched on") and writes nothing, and the game library does not list the map. ON: the recipe writes `src/game/athree/` (phase 1: terrain, biomes, wind, spawns, collider data, quality tiers) when the request really needs a world (`athreeMapIntent`: named + needed, or needed and the librarian picks it); a project that already has `src/game/athree/index.ts` keeps it on later edits. Built: phase 1 (world), phase 2a (ocean) and phase 3 (grass and trees: `vegetation.ts` + `plants.ts`, wind from the shared `windAt`, per-tier triangle budget tested against what terrain + sea leave; trees have NO collider yet). and phase 2b (rivers and lakes: `rivers.ts` + `riverwater.ts`, terrain carved along traced paths, `world.waterAt`). and phase 4 (desert dunes `dunes.ts`; sky, clouds, day and night, weather, rain, fog, lights and ambience levels `sky.ts`; one sun drives plants, sea and rivers). and phase 5a (roads, race circuit, runways, plazas, bridges: `roads.ts` + `roadmesh.ts`, generated per 12.5 km region on demand). and phase 5b (sports car and bike with their own driving physics: `vehicles.ts`, `world.surfaceAt`). The recipe takes an `include` list (sea, plants, rivers, sky, roads, vehicles; default chosen from the request by `athreeModulesFor`, no feature named = all); the core (terrain, world, rivers/dunes/roads data) always comes, and `budget.ts` only with every module. NOT built: buildings, aircraft, animals, birds, people, sand ripples/heat haze, roads and racing, aircraft and life, auto-selection polish.
 
+## Original royale practice experiment (2026-11-15)
+
+- **`AGENTV3_ORIGINAL_ROYALE`**: NOT reported configured. Default OFF; the shared boolean flag parser accepts explicit enabled values to enable the explicit `generate_game_royale` recipe. Original bounded offline practice prototype, not multiplayer or photorealistic templates. Requires a verified empty user-owned source snapshot and a royale-style request; existing or imported projects and named/stored Athree worlds are not replaced. No pricing, billing, or artificial delay. Production acceptance and visual/mobile testing remain separate gates.
+- **`AGENTV3_OBJECT_FORGE`** (NOT set; default ON; `off` / `0` / `false` / `no` disables). The Object Forge (admin order 2026-11-15: "NavBharatAI should be able to make ANY object or subject, not depend on the modules somebody built"). The `author_object` recipe (reached through `run_recipe`) lets the builder describe an object as a JSON spec (primitives box, sphere, cylinder, capsule, torus, lathe, loft, extrude, tube; a transform tree with pivots, mirror and repeat; materials; animation clips). The server validates it, measures it with the SAME engine the game runs (`src/server/lib/objectForge/forgeEngineSource.ts` is both what a game receives as `src/game/forge/forge.ts` and what the server evaluates) and draws it back as FRONT/SIDE/TOP text with warnings (parts floating free, a clip that tears the object, base off the ground); only a valid spec is written, as `src/game/objects/<id>.ts` (replaced when the same id is authored again). SELF-AUTHORING (`author_object({ describe })`): the Forge asks a model for the spec through `aiRouter.routeDetailed(…, 'navbharat', …)` (the FREE namespace, never Claude), up to 4 correction rounds, each shown the Forge's own measurements and FRONT/SIDE/TOP drawings; the same description is reused from a bounded cache. It is a KILL SWITCH, not a gate: OFF refuses honestly ("switched off") and writes nothing. Honest ceiling: stylised low-poly figures from primitives, never photoreal; the tool, the guide and the prompt all say so. Limits (`FORGE_LIMITS` in `forgeCheckSource.ts`): 400 nodes after mirrors and repeats, 24000 triangles, depth 8, 32 materials, 12 clips.
+- **`AGENTV3_ATHREE_MAP` — MAP KINDS AND SIZES (admin 2026-11-15, "100+ type ke maps, 1 km se 1000 km").** The recipe takes `archetype` (continental, plains, hills, alpine, desert, tundra, jungle, savanna, archipelago, island, wetland, coast) and `size_km` (1 to 1000), or reads them from the user's words (`athreeMapKinds.ts`: `mapChoiceFor`, English and Hinglish); 12 x 10 size classes = 120 kinds, each seeded. The choice is written into `config.ts` as `MAP_OPTIONS` and `createAthreeMap` spreads it into the world. A world of ANY size is the reference world (a 100 km loop, an 8 km island) stretched by k = reference/size, heights by heightStretch(k) (k^-0.9 on a smaller map, k^-0.75 on a bigger one, so slopes never grow more than 1.7 times), rivers/lakes/dunes converted to the game's metres; at the reference size k = 1 and every number is byte-for-byte what it was (tested). A kind of land is five numbers (relief, seaShift, aridity, warmth, rivers). Roads default OFF under 20 km (loop) or 6 km (island): a road region is 12.5 km, a runway 900 m. Spawn reach and the land-height thresholds scale with the map. NOT built: a different terrain ALGORITHM per kind (canyons, volcanoes, karst), roads that fit a map of 1 to 5 km.
+
+## 2026-11-16 — AI provider key census (names only, never values)
+
+**Owner report:** `FREE_CHAIN_BLUESMINDS_API_KEY` is now **set** in Cloud Run (admin 2026-11-16). BluesMinds stays OFF for user chat
+(`terms-unverified`) until `FREE_CHAIN_BLUESMINDS_WRITTEN_APPROVAL=on`; the admin Test Chat Bot can call it (#4243 follow-up).
+
+**Census (admin asked: "ENV_REGISTRY me jo AI provider darj hain aur NavBharatAI me jo use ho rahe hain, sab match hai?").**
+Every one of the 25 provider families in `src/server/lib/providerSwitches.ts` (`PROVIDER_FAMILIES`) was already named here.
+These key names the code reads for those families were NOT, and are recorded now. **Status:** the owner confirmed four as set in Cloud Run on 2026-11-16 (marked **set**); the rest are UNKNOWN — confirm in the
+console before relying on one. An env value always beats a code
+default, so a stale alias left set here silently wins.
+
+| Key name | Provider family | Read by | Status |
+|---|---|---|---|
+| `BEDROCK_API_KEY` | AWS Bedrock (builder cheap-floor GLM rung, Nova Sonic voice) | `routes/agentv3.ts` (with `BEDROCK_REGION`, default `us-west-2`, and `BEDROCK_GLM_MODEL`, default `zai.glm-5`), `sonic/SonicBridge.ts`, Test Chat Bot | **set** (owner, 2026-11-16) |
+| `CLAUDE_API_KEY` | Anthropic | alias of `ANTHROPIC_API_KEY` | **set** (owner, 2026-11-16) |
+| `VITE_ANTHROPIC_API_KEY`, `VITE_CLAUDE_API_KEY` | Anthropic | legacy client-build aliases the switch board withdraws | unknown |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Google Gemini API | alias of `GEMINI_API_KEY` | **set** (owner, 2026-11-16) |
+| `VITE_GEMINI_API_KEY` | Google Gemini API | legacy client-build alias | unknown |
+| `FREE_CHAIN_GEMINIPAID_API_KEY` | Google Gemini API | Free Chat paid Gemini rung | unknown |
+| `FREE_CHAIN_OPENROUTER_API_KEY` | OpenRouter | Free Chat OpenRouter rung alias | unknown |
+| `DEEPINFRA_TOKEN` | DeepInfra | alias of `DEEPINFRA_API_KEY` | **set** (owner, 2026-11-16) |
+| `FREE_CHAIN_CHEAPINF_API_KEY` | CheaperInference | alias of `CHEAPERINFERENCE_API_KEY` | unknown |
+| `FREE_CHAIN_CF_API_KEY` | Cloudflare Workers AI | Free Chat Cloudflare rung alias | unknown |
+
+**Alias order (checked 2026-11-16):** every code path reads the primary name first — `ANTHROPIC_API_KEY` before
+`CLAUDE_API_KEY`, `GEMINI_API_KEY` before `GOOGLE_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY`, `DEEPINFRA_API_KEY` before
+`DEEPINFRA_TOKEN` — so with both set the alias is unused; if the two values differ, the primary wins everywhere.
+**`GOOGLE_API_KEY`** is a Gemini alias read by `GeminiProvider`, `aiClients`, `imageEditRun` and memory embeddings. It was
+missing from the Gemini switch family, so switching Gemini off did not withdraw it (the network host block still stopped
+the call); it is now in the family, and switching Gemini off withdraws it too.
+
+Google Vertex AI has no key (server identity: `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_REGION`). Stability AI appears only in
+`ImageAiGenerator.ts`, which is generated INTO users' apps for their own key — it is not a NavBharatAI provider.
+`tests/everyAiProviderKeyIsInTheRegistry.test.ts` now fails when a provider family's key name is missing from this file.
+
+## 2026-11-16 — Always-on suppliers and provider order (owner t357u, order approved t359u)
+
+Code defaults only; no Cloud Run variable is required. Every switch below is ON when unset; only an explicit off value (`off` / `false` / `0` / `no`) is the emergency kill switch. A missing API key still skips that supplier.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `MITRIFY_CHAIN_ENABLED` | on | Chat Mitrify rung (first in Chat). Default-on calls need no Firestore approval doc; each holds `MITRIFY_MAX_USD_PER_REQUEST` (default $0.02) against the shared owner paid budget. |
+| `QUBAX_ENABLED` | on | Chat Qubax rung (second in Chat) and image analysis (Qubax vision). |
+| `CHEAPERINFERENCE` | `all` | Chat rung after OpenRouter free, for all users, private/health turns included; and image analysis. A failure benches it for at most 30 s. |
+| `BLUESMINDS_BUILDER_ENABLED` | on | Pro Weak builder rung `ENGINE_BM` after Router One. Key: `FREE_CHAIN_BLUESMINDS_API_KEY`. |
+| `BLUESMINDS_BUILDER_MODEL` | `openai/gpt-oss-20b` | Comma list of builder models. |
+| `BLUESMINDS_BUILDER_RATE_IN` / `_OUT` | unset | Real USD per 1M tokens. Unset = estimate from BluesMinds' published ratios ($0.06 in / $0.24 out, dearer reading). |
+
+**Chat order:** Mitrify → Qubax → GLM-4.5 Flash → GLM-4.7 Flash → Groq gpt-oss-120b → Cloudflare Llama 3.3 70B → OpenRouter free → CheaperInference → DeepInfra Llama 8B → DeepInfra DeepSeek V4 Flash → GPT-5 Nano → GLM-4.7 FlashX → Gemini Flash-Lite. A supplier that fails without showing anything hands the same turn to the next one.
+
+**Photo/image order (legacy vision chain):** Qubax (live MULTIMODAL rows from documented image-reading families only) → CheaperInference (catalog rows with `capabilities.vision=true` only) → GLM-4.6V Flash → Gemini Flash-Lite → Gemini Flash (paid tiers then Grok, Claude as before). PDFs skip the two suppliers. Mitrify is NOT in vision: it has no image-capable transport or public model catalog. The Inference Gateway vision path is unchanged.
+
+**Pro order (Weak):** Surplus → Router One → BluesMinds → Weak tier ladder. Normal and Strong ladders are unchanged (Surplus and Router One are Weak-only there too).
+
+**Brand:** users never see a supplier name; server labels stay in logs and admin views (`ENGINE_BM` for BluesMinds).
+
+**Risk recorded:** CheaperInference's terms (§6) restrict shared key access without Keak's written permission; the owner directed default-on for all users anyway.
+
+
+## 2026-11-16 — Discount reseller gateways: Moyi API, DiscountedTokens, MirAPI (admin Test Chat Bot ONLY)
+
+🔴 **CORRECTED 2026-11-17: Moyi is no longer Test-Chat-Bot-only.** The owner tested it ("its working") and ordered
+*"moyi api ko bhi bluesminds ke baad lagao"*: Moyi is now a Pro Weak builder rung. See the 2026-11-17 entry below.
+DiscountedTokens and MirAPI are still Test Chat Bot only.
+
+Owner, verbatim: *"Moyi API, DiscountedTokens aur mir api se shuru karo! abhi bas 'test chat bot' me add karo"*.
+Three OpenAI-compatible resellers under evaluation as low-cost suppliers until NavBharatAI contracts with the
+model makers directly. **They are called from Admin → AI Engines → Test Chat Bot and nowhere else**: not user
+chat, not the builder, not any tier ladder. Wiring one into a user path is a separate, owner-approved change.
+One module owns their env: `src/server/lib/resellerGateways.ts`. Key VALUES are not recorded and not yet reported set.
+
+| Key | Meaning |
+|---|---|
+| `MOYI_API_KEY` | Secret, unset. One server-side key. Comma lists rejected. |
+| `MOYI_BASE_URL` | Optional; default `https://api.moyi-api.com/v1` — the OpenAI-compatible endpoint shown on moyi-api.com's home page (owner's screenshot, 2026-11-16). **Include `/v1`** if set: the value is used as written. Must be https on `moyi-api.com` or a subdomain, no port/credentials/query. |
+| `MOYI_ANTHROPIC_BASE_URL` | Optional; default `https://api.moyi-api.com` — the endpoint Moyi's site labels "Anthropic API". Owner 2026-11-16: *"api.moyi-api.com/v1 = only for open ai, api.moyi-api.com = for all other"*. An OpenAI model id (`gpt-…`, `o3…`, `codex…`) is sent to `MOYI_BASE_URL` in OpenAI format; every other model is sent here in Anthropic Messages format. Must stay on `moyi-api.com`. Not yet confirmed by a live call for non-Claude models. |
+| `MOYI_MODEL` | Optional model id. Unset ⇒ a chat model from the key's own `GET /models` list. |
+| `DISCOUNTEDTOKENS_API_KEY` | Secret, unset. Prepaid account (minimum US$5). |
+| `DISCOUNTEDTOKENS_BASE_URL` | Optional; default `https://discountedtokens.com/v1` (their public API listing). Must stay on `discountedtokens.com`. |
+| `DISCOUNTEDTOKENS_MODEL` | Optional; default `gpt-6-sol` (callable on their pricing page, 2026-11-16). They sell OpenAI models only. **Since 2026-11-17 a comma list is the gateway's own fallback order** (owner: *"sabse pahle sasta aur accha, response na aaye to 2nd, fail to 3rd"*): put the cheapest good coding model first. Up to three are tried; gaps are filled from the key's `/models` list. The same applies to `MOYI_MODEL` and `MIRAPI_MODEL` in the Test Chat Bot. |
+| `MIRAPI_API_KEY` | Secret, unset. |
+| `MIRAPI_BASE_URL` | **Required, no default.** Must be https on `mirapi.ai` or a subdomain. |
+| `MIRAPI_MODEL` | Optional model id. Unset ⇒ a chat model from the key's own list. |
+
+- **Spending ceiling:** the test reserves the dearest official LIST price among the models these gateways sell
+  (USD 10 / 50 per 1M tokens, GPT-6 Astra) against the shared paid budget. It is a ceiling, not the bill.
+- **Switch board:** each is a provider family (`moyi`, `discountedtokens`, `mirapi`); switching one off withdraws
+  its key and refuses every request to its registered domain.
+- **Known open risks, from the pages the owner supplied (2026-11-16) — re-read before any user-path wiring:**
+  DiscountedTokens states that "availability and model identity are not independently guaranteed"; MirAPI shows
+  no uptime, latency or upstream and its "Why so cheap?" page is unread; none of the three published a rate limit
+  on the reviewed pages; Moyi's upstream names and "No training" label are its own claims. The model id a reply
+  reports is the provider's claim, not proof of which model answered.
+- **MirAPI Terms of Use (last updated 2026-09-20, text supplied by the owner 2026-11-16):** operator is Benxi
+  HengFeng Network Technology Co., Ltd. (China; PRC law, Benxi court). §6.4: inputs and outputs are not stored
+  beyond temporary processing and are not used for training, but §6.3 leaves each model provider's own retention
+  and training outside MirAPI's control. §5.6: reselling API access or running a downstream relay needs MirAPI's
+  prior written authorization; §4.1 allows building the service into one's own product, with §4.2 making us
+  responsible for our users' compliance with each model's terms — get written confirmation before any user path.
+  §5.8: rate limits exist but are published only in the dashboard/docs. §1.3/§4.4/§4.5: models are as-available
+  and can be withdrawn at once. §3.2: unused credits refundable within 7 days, crypto payments never. §3.3: a
+  USD 10/month fee after 365 days without a purchase. §11.3: liability capped at USD 100 or 12 months' payments.
+  The Terms do not say where the discount comes from.
+- **Claude through any of these is NOT approved.** NavBharatAI Pro v3.0 runs Claude on NavBharatAI's own
+  Anthropic account (CLAUDE.md); a reseller Claude route needs separate owner sign-off.
+- **Reviewed and NOT added:** OpenCheese (buys third-party API credits and keys; sells safety-removed
+  "abliterated" models) is rejected. CloseRouter (anonymised upstreams, inverted prices) and faborapi
+  (prepaid credit packs, site unread) are not added. Infron, MaxonForge, APInex and relay.fast were not reviewed.
+
+
+## 2026-11-17 — Moyi API as a Pro Weak builder rung (owner: "moyi api ko bhi bluesminds ke baad lagao, its working")
+
+**Pro order (Weak) is now:** Surplus → Router One → BluesMinds → **Moyi** → Weak tier ladder. Normal and Strong are
+unchanged. Module: `src/server/AgentV3/moyiBuilder.ts` (same shape as `bluesmindsBuilder.ts`). Neutral label `ENGINE_MY`.
+
+| Key | Meaning |
+|---|---|
+| `MOYI_API_KEY` | Required (shared with the Test Chat Bot). No key ⇒ no rung. **With the key alone the rung is ON for every Weak user** (2026-11-17). Owner reports Moyi working on 2026-11-17; value not recorded. |
+| `MOYI_BUILDER_MODEL` | **Optional since 2026-11-17 (owner: "moyi ai ko sabhi user ke liye default on kar do").** Unset ⇒ the model ids are read from Moyi's own `GET /models` for the key (cached 6 h, refreshed in the background, retried after 60 s on failure), and up to two that match a priced row of `MOYI_PUBLISHED_RATES` (`moyiBuilder.ts`) are used, in that order: Grok 4.7, GPT-6.1 Terra, Grok 4.6, GPT-5.6 Terra, DeepSeek V4.1 Flash. "Fast" variants are skipped. No id is guessed: until the list has been read once (the first Weak build after a deploy starts the read), a build runs without the rung. When set, the listed ids are used. Any id naming a Claude family (`claude`, `anthropic`, `sonnet`, `opus`, `haiku`, `fable`) is dropped either way. |
+| `MOYI_BUILDER_RATE_IN` / `MOYI_BUILDER_RATE_OUT` | **Optional since 2026-11-17.** When set, they price every Moyi model (the owner's real account rate wins). Unset ⇒ each model is priced from `MOYI_PUBLISHED_RATES`: Moyi's own discounted prices from the model page the owner supplied on 2026-11-16 (Grok 4.7/4.6 $0.30/$0.90, GPT-6.1 Terra $0.171/$0.855, GPT-5.6 Terra $0.342/$2.052, DeepSeek V4.1 Flash $0.1275/$0.51 per 1M). Base context tier only; Moyi marks some rows context-tiered, so set these keys if long builds are billed higher. A model with neither price is not run. |
+| `MOYI_BUILDER_ENABLED` | Default ON. Only `off`/`false`/`0`/`no` removes the rung (kill switch). |
+| `MOYI_BASE_URL` | As above; the builder always uses this OpenAI-format endpoint (default `https://api.moyi-api.com/v1`), never the Anthropic-format one. |
+
+- **Not verified from here:** whether the chosen Moyi model honours tool calling, which the builder needs. A turn it
+  cannot do fails and the chain moves to the next rung; the build report will show `ENGINE_MY` failures if so.
+- **Owner's recorded risk:** users' prompts and code on Weak builds now pass through Moyi, a reseller whose upstream
+  and "No training" label are its own claims and whose rate limits were not published on the reviewed page.
 
 ## Optional staged procedural-object flag (not reported configured)
 

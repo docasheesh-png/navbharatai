@@ -132,6 +132,7 @@ import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemo
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { isBareManifestInstall, manifestRangeRepairEnabled, repairUnavailableRanges, manifestRepairNote } from './manifestRangeRepair';
 import { shellMayWriteOpaquely, markCommand, changedFilesCommand, parseChangedFiles } from './shellWriteReconcile';
+import { isScratchCapture } from './scratchCapture';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, shadowKeptToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames, mistypedImport } from './tscErrorCause';
 import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
@@ -178,7 +179,8 @@ import { dependencyMutationGuard, dependencyMutationGuardMessage } from './Depen
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
 
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
-import { ensureTsconfigBaseUrl } from './TsconfigGuard';
+import { ensureTsconfigBaseUrl, ensureTsconfigJsx, healTsconfigConflictTail, type TsconfigJsxContext } from './TsconfigGuard';
+import { conflictMarkerRefusal, writeConflictGuardEnabled } from './conflictMarkerGuard';
 import { applyFullStackGuards, dedupeSameModuleImports } from './FullStackGuards';
 import { duplicateModuleTarget, dedupeStylesheetImports, isAppWideStylesheet } from './ProjectIntegrityChecks';
 import { writesAreUnread } from './unreadWrites';
@@ -188,8 +190,8 @@ import { writesAreUnread } from './unreadWrites';
  * Vite preview-host allowance, the dep-free `@`→/src alias, and tsconfig baseUrl/paths restoration — so a
  * model rewrite of vite.config/tsconfig can never silently re-break the preview or baseUrl-"src" resolution.
  */
-function guardConfigContent(path: string, content: string): string {
-  return applyFullStackGuards(path, ensureTsconfigBaseUrl(path, ensureViteResolveAlias(path, ensureViteAllowedHosts(path, content))));
+function guardConfigContent(path: string, content: string, ctx: TsconfigJsxContext = {}): string {
+  return applyFullStackGuards(path, ensureTsconfigBaseUrl(path, ensureTsconfigJsx(path, healTsconfigConflictTail(path, ensureViteResolveAlias(path, ensureViteAllowedHosts(path, content))), ctx)));
 }
 import { ViteReactProvider } from './sandbox/AppMakerLab/generator/templates/ViteReactProvider';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
@@ -227,6 +229,7 @@ import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, dropped
 import { loadedMissingPackageUses, notInstalledBlockerLabel, undeclaredInstalledLabel, type MissingPackageUse } from './missingPackageBlockers';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
+import { importsOfDeletedFiles, danglingImportNote, deletedImportNoteEnabled, orderImportCandidates, readSourcesWithinBudget, withoutDeletedImportNote } from './deletedImportNote';
 import { filesOutsideTheApp, outsideAppMatcher, outsideTheAppNote } from './outsideTheApp';
 import { userFileGuardEnabled, unaskedUserFileRemovals, userFileRemovalMessage } from './userFileGuard';
 import { prunableGraphPaths, pruneWasRefused, pruneRefusedMessage } from './graphReconcile';
@@ -363,10 +366,17 @@ import { generateGame3D } from '../lib/Game3DGenerator';
 import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
+import { generateGameRoyale } from '../lib/GameRoyaleGenerator';
+import { objectForgeEnabled, FORGE_GUIDE, forgeUsage } from '../lib/objectForge/ObjectForgeGenerator';
+import { authorObject, pascal, OBJECTS_DIR } from '../lib/objectForge/forgeRuntime';
+import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamples';
+import { selfAuthorObject, madeCache } from '../lib/objectForge/forgeSelfAuthor';
+import { parseCustomisation, applyEdits, customiseSummary, nodeNamesOf, specFromObjectFile, personSpecFor } from '../lib/objectForge/forgeCustomise';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
 import { generateRequestedAthreeWorld } from '../lib/athreeMap/compositionRequest';
 import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from '../lib/athreeMap/athreeMapIntent';
+import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
@@ -469,7 +479,7 @@ import { isSecretFilePath, maskSecretFile, SECRET_MASK, secretPlaceholderWriteMe
 // primitive; see lib/browseTarget.ts.
 import { classifyBrowseTarget } from '../lib/browseTarget';
 import { formatUiFindings, type ScannedElement } from './UiElementFinder';
-import { envKillSwitch } from '../lib/envFlag';
+import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
 import { isNotFoundError } from './fsErrors';
@@ -536,6 +546,11 @@ export type BrowserActionName = (typeof BROWSER_ACTIONS)[number];
  */
 export interface ActuatorPort {
   readFile(workspaceId: string, filePath: string): Promise<string>;
+  /**
+   * BR1997: an ADVISORY read, bounded by `timeoutMs`, whose timeout never drops the cached sandbox
+   * (E2BActuator). Optional; without it the caller races a plain `readFile`.
+   */
+  readFileAdvisory?(workspaceId: string, filePath: string, timeoutMs?: number): Promise<string>;
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
   /** Atomic exclusive creation, never replace an existing path. Required by new procedural recipes. */
   createFileExclusive?(workspaceId: string, filePath: string, content: string): Promise<void>;
@@ -900,7 +915,8 @@ export class ToolDispatcher {
         this.kitCurrentPaths.delete(path);
         try {
           const content = await this.actuator.readFile(this.workspaceId, path);
-          if (typeof content === 'string') this.onFileWrite(path, content);
+          // A tool's output redirected into a file is scratch, not the app (scratchCapture.ts, Q-2713).
+          if (typeof content === 'string' && !isScratchCapture(path, content)) this.onFileWrite(path, content);
         } catch { /* removed or unreadable — nothing to record */ }
       }
     } catch { /* reconciliation is best-effort — the parser's own read-back already ran */ }
@@ -947,7 +963,7 @@ export class ToolDispatcher {
       this.kitCurrentPaths.delete(path); // a shell write is not the kit's current content any more (Q-863)
       try {
         const content = await this.actuator.readFile(this.workspaceId, path);
-        if (typeof content === 'string') this.onFileWrite(path, content);
+        if (typeof content === 'string' && !isScratchCapture(path, content)) this.onFileWrite(path, content);
       } catch { /* removed or unreadable — nothing to record */ }
     }
   }
@@ -1155,8 +1171,13 @@ export class ToolDispatcher {
    * by default, which protects nothing — exactly the behaviour before this existed.
    */
   private userOwned: string[] = [];
+  private userOwnedSnapshotKnown = false;
+  private royaleNewProject = false;
+  /** Only the composition root may grant this after verified lifecycle/source inventory. */
+  setRoyaleNewProjectAllowed(allowed: boolean): void { this.royaleNewProject = allowed === true; }
   private userRequest: string | null = null;
   setUserOwnedFiles(paths: readonly string[], request: string | null): void {
+    this.userOwnedSnapshotKnown = true;
     this.userOwned = (paths ?? []).filter((p): p is string => typeof p === 'string' && p.length > 0);
     this.userRequest = typeof request === 'string' ? request : null;
   }
@@ -1264,8 +1285,8 @@ export class ToolDispatcher {
    * Sequential on purpose: a delete command names one or two files, so the probe is two round trips
    * in the rare case an `rm` ran at all, and never anything on a normal build.
    */
-  private async reconcileDeletions(paths: readonly string[]): Promise<void> {
-    if (!paths.length) return;
+  private async reconcileDeletions(paths: readonly string[]): Promise<string[]> {
+    if (!paths.length) return [];
     const gone: string[] = [];
     for (const path of paths) {
       let stillThere = false;
@@ -1274,12 +1295,34 @@ export class ToolDispatcher {
       try { getWorkspaceMemory(this.workspaceId).removeFile(path); } catch { /* graph best-effort */ }
       gone.push(path);
     }
-    if (!gone.length) return;
+    if (!gone.length) return gone;
     try { this.fileDeletionSink?.(gone); } catch { /* the sink is best-effort — the graph is already correct */ }
     try {
       getWorkspaceMemory(this.workspaceId).recordAudit(`[DELETED] dropped from the project map: ${gone.join(', ')}`);
     } catch { /* audit best-effort */ }
     this.state?.appendTerminal(deletionReconciledMessage(gone));
+    // BR1997: the confirmed-gone list, for the bash path's dangling-import note. Other callers ignore it.
+    return gone;
+  }
+
+  /**
+   * BR1997: after a shell delete, name any module whose CURRENT sandbox text still imports a deleted
+   * file (`deletedImportNote.ts`). The project graph keeps only `from` imports, so a side-effect
+   * `import './x.css'` is invisible to it; the build's recorded source files are read fresh instead.
+   * This is on the bash critical path (audit P0-C), so: entry modules first, at most 60 files, 12 at a
+   * time, 5 s each, 8 s in all, using whatever was read by then. The read is the actuator's advisory
+   * read where it has one, so a slow read never drops the sandbox. Advisory only: '' when unsure.
+   */
+  private async deletedImportNoteFor(gone: readonly string[]): Promise<string> {
+    const act = this.actuator;
+    const candidates = orderImportCandidates(
+      [...(this.recordedPaths?.() ?? [])].filter((p) => /\.(tsx?|jsx?|mjs|cjs)$/i.test(p) && !gone.includes(p)),
+    ).slice(0, 60);
+    const read = (p: string): Promise<string> => (typeof act.readFileAdvisory === 'function'
+      ? act.readFileAdvisory(this.workspaceId, p, 5_000)
+      : act.readFile(this.workspaceId, p));
+    const sources = await readSourcesWithinBudget(candidates, read);
+    return danglingImportNote(importsOfDeletedFiles(gone, sources));
   }
 
   /**
@@ -1330,7 +1373,7 @@ export class ToolDispatcher {
     const rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT);
     this.assertWritable(rel);
     this.assertTextWritable(rel);
-    content = guardConfigContent(rel, this.applyPostgresProviderLock(rel, content));
+    content = guardConfigContent(rel, this.applyPostgresProviderLock(rel, content), { framework: this.framework });
     content = withoutPreviewBridge(rel, content);
     let kind: 'create' | 'modify' = 'create';
     let existingContent = '';
@@ -2540,8 +2583,19 @@ export class ToolDispatcher {
   }
 
   private async parseGuardRejection(path: string, oldContent: string, newContent: string): Promise<string | null> {
-    if (!writeParseGuardEnabled()) return null;
     try {
+      // Independent of the syntax parse guard (and of its kill switch): leftover apply-patch /
+      // merge-conflict markers in config files the syntax gate skips (tsconfig / JSON / JSONC)
+      // are refused here (BR1982). JS/TS, Markdown, and patch files are not. A tsconfig whose
+      // prefix is parseable is healed earlier in guardConfigContent.
+      if (writeConflictGuardEnabled()) {
+        const conflict = conflictMarkerRefusal(path, newContent, oldContent, true);
+        if (conflict) {
+          try { getWorkspaceMemory(this.workspaceId).recordError(`[BLOCKED-CONFLICT-MARKUP] refused write that would leave markers in ${path}`); } catch { /* audit best-effort */ }
+          return conflict;
+        }
+      }
+      if (!writeParseGuardEnabled()) return null;
       const errNew = await firstSyntaxError(path, newContent);
       if (!errNew) return null; // parses clean → nothing to block (skips the second parse in the common case)
       const errOld = await firstSyntaxError(path, oldContent);
@@ -4283,7 +4337,7 @@ export class ToolDispatcher {
         agent,
         callId: call.id,
         ok: !visual?.isError,
-        summary: redactSecrets(summarize(content)),
+        summary: redactSecrets(summarize(withoutDeletedImportNote(content))),
         ts: Date.now(),
       });
       return { tool_use_id: call.id, content, is_error: visual?.isError ?? false, image: visual?.image };
@@ -5781,7 +5835,7 @@ export class ToolDispatcher {
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
         const { updated: edited, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
-        const deduped = this.dedupeImportsForSource(path, guardConfigContent(path, this.applyPostgresProviderLock(path, edited)), agent);
+        const deduped = this.dedupeImportsForSource(path, guardConfigContent(path, this.applyPostgresProviderLock(path, edited), { framework: this.framework }), agent);
         // Parity with write_file: an edit that cuts design-kit rules out of the stylesheet keeps them
         // (autopsy e725e002 — this door was the one left open by the write-door guard).
         const editKit = this.keepDesignKit(path, deduped, existing);
@@ -6291,13 +6345,14 @@ export class ToolDispatcher {
         // …AND EVERYTHING ELSE A SHELL TOOK OUT (queue Q-246): a stylesheet, a folder, a glob, the source
         // of a `mv`. Only recorded paths are named, and each is confirmed gone in the sandbox first.
         let removedRecorded: string[] = [];
+        let shellDeleted: string[] = [];
         if (exitCode === 0 && this.recordedPaths) {
           try { removedRecorded = removedRecordedPaths(shellRemovedOperands(command), this.recordedPaths()); }
           catch { removedRecorded = []; }
         }
         if (deleteTargets.length > 0 || removedRecorded.length > 0) {
           const candidates = [...new Set([...deletionCandidates(deleteTargets, exitCode), ...removedRecorded])];
-          try { await this.reconcileDeletions(candidates); }
+          try { shellDeleted = await this.reconcileDeletions(candidates); }
           catch { /* reconciliation is best-effort — a failure simply keeps today's stale entry */ }
         }
         /**
@@ -6465,6 +6520,12 @@ export class ToolDispatcher {
           if (notice) { out = `${notice}${out}`; this._readLoopStops.n++; }
         } catch { /* the breaker is advisory — the output is still returned */ }
         this.state?.appendTerminal(out);
+        // BR1997: a file this command deleted that another module still imports (deletedImportNote.ts).
+        // Added AFTER the terminal line, so it reaches the builder only, not the user's terminal.
+        if (shellDeleted.length > 0 && deletedImportNoteEnabled()) {
+          try { const dangling = await this.deletedImportNoteFor(shellDeleted); if (dangling) out = `${out}\n\n${dangling}`; }
+          catch { /* advisory — the command's own output is still returned */ }
+        }
         // Remember real failures so the team can recall what went wrong (error memory) — redacted, since
         // recalled lessons are shown back to the model/user later.
         if (exitCode !== 0) {
@@ -9644,9 +9705,17 @@ export class ToolDispatcher {
           try { const prior = await this.actuator.readFile(this.workspaceId, path); if (prior !== content) refuse('Generated object conflicts with existing source at ' + path + '. Preserve it.'); }
           catch (error) { if (!isNotFoundError(error)) throw error; }
         }
-        const written = await this.writeRecipeFiles(generated.files, agent, true, true);
-        for (const [path, content] of Object.entries(generated.files)) {
-          if (await this.actuator.readFile(this.workspaceId, path) !== content) refuse('Generated object source was not verified at ' + path + '; do not claim installation. Earlier new files may exist.');
+        let written: string[];
+        try {
+          written = await this.writeRecipeFiles(generated.files, agent, true, true);
+          for (const [path, content] of Object.entries(generated.files)) {
+            if (await this.actuator.readFile(this.workspaceId, path) !== content) refuse('Generated object source was not verified at ' + path + '; do not claim installation.');
+          }
+        } catch (error) {
+          // The runtime can be added before an object loses an exclusive-create race or readback fails.
+          // Do not erase either file in cleanup: a concurrent user edit may now own that path.
+          throw new Error('Generated object installation did not finish. Earlier new files may exist; inspect before retry. '
+            + (error instanceof Error ? error.message : String(error)));
         }
         this.scheduleCheckpoint('procedural object source');
         return JSON.stringify({stage:'source_installed', semanticVerification:'unverified', id:generated.id, files:written, triangles:generated.triangles, drawCalls:generated.drawCalls,
@@ -9666,7 +9735,19 @@ export class ToolDispatcher {
         const athSelection = athreeModulesFor(this.coverageRequest ?? this.userRequest ?? '');
         const athPick = athModules ? enforceAthreeModuleExclusions(athModules, athSelection) : athSelection.modules;
         const composition = athRec.composition;
-        const ath = composition === undefined ? generateAthreeMap(athPick, athSelection.excluded) : generateRequestedAthreeWorld(composition, athPick, athSelection.excluded);
+        const athArchetype = typeof athRec.archetype === 'string' ? athRec.archetype.trim().toLowerCase() : '';
+        const athSize = typeof athRec.size_km === 'number' && Number.isFinite(athRec.size_km) ? athRec.size_km : null;
+        if (athArchetype && !(athArchetype in ARCHETYPES)) refuse(`Unknown map kind "${athArchetype}". The kinds are: ${ARCHETYPE_IDS.join(', ')}.`);
+        let athChoice = athArchetype || athSize !== null ? { archetype: (athArchetype || 'continental') as Archetype, sizeKm: athSize ?? 100 } : mapChoiceFor(this.coverageRequest ?? this.userRequest ?? '');
+        if (athChoice) athChoice = { archetype: athChoice.archetype, sizeKm: clampSizeKm(athChoice.sizeKm) };
+        if (composition !== undefined) {
+          const promptSize = sizeKmIn(this.coverageRequest ?? this.userRequest ?? '');
+          const requestedSizes = [athSize, promptSize].filter((size): size is number => size !== null);
+          const width = (composition as {widthKm?:unknown})?.widthKm;
+          if (requestedSizes.some(size => width !== size)) refuse('Requested map size and composition widthKm must agree; composition supports only 1–100 km. No map was installed.');
+          if (athChoice && typeof width === 'number') athChoice = {...athChoice,sizeKm:width};
+        }
+        const ath = composition === undefined ? generateAthreeMap(athPick, athChoice, athSelection.excluded) : generateRequestedAthreeWorld(composition, athPick, athSelection.excluded, athChoice);
         // Additive only: a read failure is not a missing file, and custom project source must not be replaced.
         if (composition !== undefined) {
           if (!this.actuator.createFileExclusive) refuse('World composition requires atomic exclusive source creation; this backend is unavailable. No source was installed.');
@@ -9699,6 +9780,97 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('athree map');
         return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${ath.instructions}${athLayers}`;
+      }
+
+      case 'generate_game_royale': {
+        if (!envFlag('AGENTV3_ORIGINAL_ROYALE')) refuse('The experimental original royale starter is unavailable. Do not promise it is installed or active.');
+        if (!this.royaleNewProject || !this.userOwnedSnapshotKnown || this.userOwned.length > 0) refuse('The royale starter requires a verified new project. Preserve existing or imported source; do not replace it with a template.');
+        const request = this.coverageRequest ?? this.userRequest ?? '';
+        if (!/battle\s*royale|pubg|bgmi|free\s*fire|firefree|battlefield|पबजी|बैटल\s*रॉयल|फ्री\s*फायर/i.test(request)) refuse('The request does not ask for a royale-style game. Do not add this starter.');
+        const requestedMap = athreeMapIntent({ prompt: request, seedKey: this.workspaceId });
+        if (requestedMap.via === 'named' || requestedMap.via === 'other-map') refuse('The request names a different world. The bounded royale starter must not replace that choice.');
+        // A failed workspace read is NOT evidence that no map exists. Preserve existing worlds.
+        let hasAthree = false;
+        try { await this.actuator.readFile(this.workspaceId, 'src/game/athree/index.ts'); hasAthree = true; }
+        catch (error) { if (!isNotFoundError(error)) throw error; }
+        if (hasAthree) refuse('This project already has an Athree map. The bounded royale starter has no Athree adapter; preserve the current world.');
+        const royale = generateGameRoyale();
+        const written = await this.writeRecipeFiles(royale.files, agent);
+        const layers = await this.addMissingRecipeLayers(royale.files, agent);
+        this.scheduleCheckpoint('original royale practice');
+        return `Original offline practice recipe results:\n${written.join('\n')}\n\n${royale.instructions}${layers}`;
+      }
+
+      case 'author_object': {
+        // THE OBJECT FORGE (admin 2026-11-15: "NavBharatAI should make ANY object itself, not depend on the modules somebody built").
+        // The builder writes a SPEC; the Forge validates it, measures it with the same engine the game runs, and draws it back as text.
+        // A spec that fails is feedback, not a crash: the reasons come back as the tool result so the builder fixes and calls again.
+        if (!objectForgeEnabled()) refuse('The Object Forge is switched off for this build, so it cannot be used. Build the object another way and say so plainly in the summary.');
+        const forgeRec = (input as Record<string, unknown>) || {};
+        if (typeof forgeRec.example === 'string' && forgeRec.example.length > 0) {
+          const example = FORGE_EXAMPLES[forgeRec.example];
+          if (!example) return `There is no example called "${forgeRec.example}". Examples: ${FORGE_EXAMPLE_IDS.join(', ')}.`;
+          const shown = authorObject(example.spec);
+          return `${example.what}\n\nThe spec (copy it, change the id and what you need, and pass it as spec):\n${JSON.stringify(example.spec)}\n\nWhat it builds:\n${shown.text}`;
+        }
+        let forgeSpec: unknown = forgeRec.spec;
+        let madeNote = '';
+        // CUSTOMISE (admin 2026-11-15, "user ke bolte bhar se jo chahe edit ho jaye"): the user's words change an object that already exists
+        // here. Colours of named parts, size, and — for the Forge person — gender, hair length, a dress, build. What cannot be done is
+        // said, never skipped; what was not understood is returned for the builder to ask.
+        if ((forgeSpec === undefined || forgeSpec === null) && typeof forgeRec.customise === 'string' && forgeRec.customise.trim().length > 0) {
+          const targetId = typeof forgeRec.target === 'string' ? forgeRec.target.trim() : '';
+          const here = (await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[])).map((f) => String(f).replace(/^\.?\//, '')).filter((f) => f.startsWith(OBJECTS_DIR) && f.endsWith('.ts')).map((f) => f.slice(OBJECTS_DIR.length, -3));
+          if (!/^[a-z][a-z0-9-]{1,39}$/.test(targetId)) return `Say which object to change (target). Objects in this project: ${here.join(', ') || 'none yet'}.`;
+          const current = await this.actuator.readFile(this.workspaceId, `${OBJECTS_DIR}${targetId}.ts`).then(specFromObjectFile, () => null)
+            ?? (forgeRec.base === 'person' ? { ...personSpecFor(), id: targetId, name: 'Person' } : null);
+          if (!current) return `There is no Forge object called "${targetId}" here (objects: ${here.join(', ') || 'none yet'}). To start from a person, pass base: "person".`;
+          const wished = parseCustomisation(forgeRec.customise.trim().slice(0, 600), { materialKeys: Object.keys((current.materials as Record<string, unknown>) ?? {}), nodeNames: nodeNamesOf(current.nodes) });
+          const changed = applyEdits(current, wished.edits);
+          const summary = customiseSummary(changed, wished.unparsed);
+          if (changed.applied.length === 0) return summary;
+          forgeSpec = changed.spec;
+          madeNote = summary;
+        }
+        // SELF-AUTHORING (admin 2026-11-15, "atma nirbhar"): the user's words in, an object out. The Forge asks a model for a spec, checks it,
+        // shows the model its own drawing and has it correct, a few rounds. The FREE router namespace (never Claude, never NavBharatAI money).
+        if ((forgeSpec === undefined || forgeSpec === null) && typeof forgeRec.describe === 'string' && forgeRec.describe.trim().length > 0) {
+          const wantedObject = forgeRec.describe.trim().slice(0, 300);
+          const hit = madeCache.get(wantedObject);
+          if (hit) { forgeSpec = hit; madeNote = 'Made earlier from the same description (reused, no new model call).'; }
+          else {
+            const known = findInCatalog(wantedObject);
+            const made = await selfAuthorObject(wantedObject, {
+              ask: async (prompt, system) => {
+                try { const r = await aiRouter.routeDetailed(prompt, [], 'navbharat', undefined, system); return r.ok ? r.content : null; }
+                catch { return null; }
+              },
+              groundTruth: known ? `${known.name}: ${known.dims}. Must have: ${known.parts.join('; ')}. The tell: ${known.tell}` : undefined,
+              id: typeof forgeRec.id === 'string' && /^[a-z][a-z0-9-]{1,39}$/.test(forgeRec.id) ? forgeRec.id : undefined,
+            });
+            if (!made.ok || !made.spec) return made.text;
+            forgeSpec = made.spec;
+            madeCache.set(wantedObject, made.spec);
+            madeNote = `Made by the Forge from the description in ${made.attempts.length} round(s)` + (made.remainingWarnings.length ? `, with ${made.remainingWarnings.length} warning(s) it could not clear (below).` : ', clean.');
+          }
+        }
+        if (forgeSpec === undefined || forgeSpec === null) return FORGE_GUIDE;
+        if (typeof forgeSpec === 'string') {
+          if (forgeSpec.length > 400_000) return 'The spec is too large (over 400 KB). An object is a few dozen nodes: simplify it.';
+          try { forgeSpec = JSON.parse(forgeSpec); }
+          catch (err) { return `The spec is not valid JSON (${err instanceof Error ? err.message : String(err)}). Pass it as an object.`; }
+        }
+        const forged = authorObject(forgeSpec);
+        if (!forged.ok || !forged.files || !forged.id) return forged.text;
+        const forgeKit = Object.entries(forged.files).filter(([path]) => !path.startsWith(OBJECTS_DIR));
+        const forgeWritten = await this.writeRecipeFiles(Object.fromEntries(forgeKit), agent);
+        // The object file is REPLACED on purpose when the builder calls again with the same id (that is how it fixes what the drawing showed).
+        const objectPath = `${OBJECTS_DIR}${forged.id}.ts`;
+        const wroteObject = await this.guardedWrite(objectPath, forged.files[objectPath], { agent, source: 'author_object', allowOverwrite: true });
+        this.state?.recordFileChange({ path: objectPath, kind: wroteObject.kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(objectPath, wroteObject.content);
+        this.scheduleCheckpoint('object forge');
+        return `${wroteObject.kind === 'create' ? 'Created' : 'Replaced'} ${objectPath}\n${forgeWritten.join('\n')}\n${madeNote ? madeNote + '\n' : ''}\n${forged.text}\n\n${forgeUsage(forged.id, 'create' + pascal(forged.id))}`;
       }
 
       case 'generate_game_shell': {

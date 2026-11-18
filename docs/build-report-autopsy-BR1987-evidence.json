@@ -1,0 +1,37 @@
+{
+  "evidenceType": "synthetic-regression-cases",
+  "privateReportPayloadIncluded": false,
+  "cases": [
+    "a Spring Boot app with pom.xml, no package.json, and no JS/TS app source starts with Maven on 8080, not npm",
+    "a Go app with go.mod or main.go, no package.json, and no JS/TS app source starts with go run on 8080, not npm",
+    "a package.json still wins the Node install, start, and main's port even when a pom.xml is also present",
+    "Spring Boot or Go with package.json uses npm and probes 5173, which is main's oneShotDevPort, not the registry 8080",
+    "the npm plan matches main's install command, start command, and oneShotDevPort for every registered framework",
+    "a Spring Boot label without a POM does not invent a Maven start and keeps main's Node path on 5173",
+    "a Vite tree with src/App.tsx, index.html, and no package.json keeps main's npm path and typecheck",
+    "Java static JS under src/main/resources is not JS/TS app source, so a Spring starter stays on Maven",
+    "a bare HTML page with no package.json keeps main's Node install in the fast lane; platform preview still skips (Q-2662)",
+    "a Node tree with package.json still attempts the platform preview; a Vite tree with app source and no package.json does not",
+    "independently written English and Hindi battle-royale map-game file lists that hold only a Spring Boot starter stay on Maven",
+    "Flask's one-shot port stays 8000, and oneShotDevPort for Spring Boot and Go matches main at 5173",
+    "a unique temporary directory with no package.json does not echo STALE from the deps check; a Node tree still does",
+    "mvn spring-boot:run and go run main.go are long-running dev servers; mvn package and go test are not",
+    "the missing-manifest shipping exclusion checks the tree: it fires only for a clearly non-Node tree with no package.json; error text alone, a nested frontend/package.json, a Vite tree with src/App.tsx, and a call with no tree evidence stay failures",
+    "a JS app missing package.json is a SANDBOX_CMD_FAILED shipping error, the release gate is RED, ok is flipped, and zeroBillForFailedBuild is ₹0, matching main",
+    "a real ERESOLVE still ships as a failure",
+    "a missing Maven or Go binary is not a shipping error; a Maven compile error from a present toolchain still is",
+    "fastVerifyOnce skips sandbox tsc only when the plan is framework; the Node path still reconciles before tsc",
+    "an unterminated PNG tail is dropped, finished text files are kept, the continuation prompt does not name the PNG, and a truncated TypeScript file still continues; a truncated binary-only reply still throws",
+    "reversion of the npm-plan port, the missing-manifest Node fallback, and the tree-aware shipping exclusion each fail the matching tests; all three sources were restored from unique mktemp backups"
+  ],
+  "limitations": [
+    "not a replay of a customer build",
+    "not production or deployment validation",
+    "starting Maven or Go depends on those binaries being present on the sandbox image; a missing binary stays infrastructure and unproven, at real cost without markup, and is not counted as an app defect",
+    "the framework pick is not auto-switched away from Spring Boot",
+    "oneShotDevPort is unchanged from main; a Maven or Go start gets 8080 from the launch plan, not from oneShotDevPort",
+    "a bare HTML page with no package.json is still not statically served or browser-proved (Q-2662)",
+    "other preview-revive paths that still hard-code npm run dev were left unchanged; only the platform-preview start path uses the launch plan",
+    "full exact-tree CI remains required"
+  ]
+}

@@ -15,10 +15,16 @@
 // PURE, dependency-free, and deliberately a leaf module: BuildDiagnostics and the provider chain both
 // import it, so it must never import either.
 
-/** Account funding is a permanent credential failure, even when a provider uses HTTP 429 for it. */
+import { isAccountBalanceFailure } from '../lib/providerAccountQuota';
+
+/**
+ * Account funding is a permanent credential failure, even when a provider uses HTTP 429 for it.
+ * The recognition is shared with every router (`lib/providerAccountQuota.ts`): it reads the status and the error's
+ * own codes as well as its words, so GLM's 429 + code 1113 ("余额不足") and OpenAI's `insufficient_quota` code are
+ * caught, not read as a rate limit.
+ */
 export function isProviderBalanceError(reason: unknown): boolean {
-  const text = reason instanceof Error ? reason.message : String(reason ?? '');
-  return /credit balance is too low|\binsufficient[ _-](?:balance|credits?|funds)\b|\binsufficient_quota\b/i.test(text);
+  return isAccountBalanceFailure(reason);
 }
 
 const FATAL_PROVIDER_PATTERNS: readonly RegExp[] = [
@@ -60,3 +66,21 @@ export function isModelUnavailableError(reason: unknown): boolean {
   if (!text) return false;
   return /\bmodel[_ ]?not[_ ]?found\b|not found the model|\bno such model\b|does not exist|unknown model|model.{0,20}(?:unavailable|deprecated|retired)|permission denied/.test(text);
 }
+
+import { isRouterOneAccountingRefusal, routerOneRefusalReason } from '../AI/RouterOne/accounting';
+
+/**
+ * ONE detail line for a provider fallback, for the ADMIN report: the message, plus — when our own accounting fence
+ * refused a Router One call — WHICH fence. The public wording alone made a self-inflicted refusal read as an outage.
+ */
+export function fallbackDetail(error: unknown, max = 300): string {
+  const text = error instanceof Error ? error.message : String(error ?? '');
+  const why = routerOneRefusalReason(error);
+  return (why ? `${text} · our-accounting-refused:${why}` : text).slice(0, max);
+}
+
+/** A refusal by OUR accounting fence is deterministic for the run: the same fence refuses the next call too. */
+export function isAccountingRefusalError(error: unknown): boolean {
+  return isRouterOneAccountingRefusal(error);
+}
+

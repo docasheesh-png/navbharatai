@@ -2,7 +2,7 @@ import { executeGatewayQubax } from './qubaxTransport';
 import { qubaxConfig } from '../../lib/qubax';
 import { executeGatewayMitrify } from './mitrifyTransport';
 import { mitrifyConfig } from '../../lib/mitrify';
-import { cheaperInferenceMode, cheaperInferenceSharedAccessPermitted } from '../../lib/cheaperInferencePolicy';
+import { cheaperInferenceMode } from '../../lib/cheaperInferencePolicy';
 /**
  * Server-only, single-dispatch text transport. This is NOT a public router or an
  * admission authority. Its caller must authenticate the exact durable claim and
@@ -11,6 +11,7 @@ import { cheaperInferenceMode, cheaperInferenceSharedAccessPermitted } from '../
  */
 import { createHash } from 'node:crypto';
 import { realRateFor } from '../../AgentV3/providerRates';
+import { isAccountQuotaSignal } from '../../lib/providerAccountQuota';
 import { CHAT_INPUT_WEIGHT } from '../freeTierCostCeiling';
 import { maximumCostNanoUsd, usdToNanoUsd } from '../FreeChain/spendCap';
 import type { AIProviderResponse, ProviderUsage } from '../Router/ProviderTypes';
@@ -256,7 +257,8 @@ function validRates(transport: GatewayTextTransportConfig, profile: ProviderProf
       CHEAPERINFERENCE: ['beam', 'beam-1.0-501b-a23b'] };
     if (!paidModels[transport.provider]?.includes(transport.model) || rate.supplierPerHttpRequestCeilingNanoUsd !== undefined) return false;
     if (transport.provider === 'CHEAPERINFERENCE') {
-      if (cheaperInferenceMode() !== 'all' || !cheaperInferenceSharedAccessPermitted()
+      // Owner t357u/t365u: default ON for every user; only an explicit CHEAPERINFERENCE=off disables it.
+      if (cheaperInferenceMode() === 'off'
         || typeof rate.minimumDiscountBasisPoints !== 'number' || !isCount(rate.minimumDiscountBasisPoints) || rate.minimumDiscountBasisPoints > 9999
         || typeof rate.supplierListInputNanoUsdPerMillion !== 'number' || !isPositiveCount(rate.supplierListInputNanoUsdPerMillion)
         || typeof rate.supplierListOutputNanoUsdPerMillion !== 'number' || !isPositiveCount(rate.supplierListOutputNanoUsdPerMillion)) return false;
@@ -406,8 +408,7 @@ function remoteError(value: unknown, provider: GatewayTextProvider, status?: num
       || (typeof reason === 'string' && SAFETY_REASONS.has(reason.toLowerCase()));
   })));
   if (typedRefusal || has('content_filter', 'content_policy_violation', 'safety', 'safety_refusal', 'prohibited_content') || (provider === 'GLM' && has('1301'))) code = 'SAFETY_REFUSAL';
-  else if (has('insufficient_quota', 'quota_exceeded', 'quota_exhausted', 'billing_hard_limit_reached')
-    || (provider === 'GLM' && has('1113', '1308', '1310', '1313')) || (provider === 'DEEPSEEK' && status === 402)) code = 'QUOTA_EXHAUSTED';
+  else if (isAccountQuotaSignal({ provider, status, codes: enums })) code = 'QUOTA_EXHAUSTED';
   else if (status === 401 || status === 403) code = 'AUTH';
   else if (status === 429 || has('rate_limit_exceeded', 'resource_exhausted') || (provider === 'GLM' && has('1302'))) code = 'RATE_LIMIT';
   else if (status === 404 || has('model_not_found', 'model_not_available')) code = 'MODEL_UNAVAILABLE';

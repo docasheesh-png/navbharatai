@@ -1,0 +1,17 @@
+{
+  "evidenceType": "synthetic-regression-cases",
+  "privateReportPayloadIncluded": false,
+  "cases": [
+    "invalid JSONC conflict tail is rejected or salvaged only from a parseable prefix",
+    "valid source template strings and JSONC comments remain writable",
+    "a valid old marker example does not exempt a corrupt replacement",
+    "explicit supported React framework context or React package evidence may restore an absent JSX setting in eligible DOM/app configurations",
+    "inherited and custom JSX runtimes remain unchanged",
+    "quoted JSONC globs and URLs survive parsing"
+  ],
+  "limitations": [
+    "not a replay of a customer build",
+    "not production or deployment validation",
+    "full exact-tree CI remains required"
+  ]
+}

@@ -41,6 +41,7 @@ export type AbortCause =
   | 'authority-unavailable' // the store could not confirm this build still owns its lease
   | 'reaper'         // the zombie reaper cleaned up a build that stopped reporting
   | 'cost-cap'       // the build spent past its cost ceiling (buildCostCeiling.ts)
+  | 'wallet-empty'   // the user's own wallet can no longer cover the build (files already written are kept)
   | 'futile'         // the build produced nothing for the whole window (futilityBreaker.ts)
   | 'review-budget'  // a post-build review's own time budget ended (a pass's signal, never the build's)
   | 'recheck-budget' // the post-fix recheck review's own time budget ended (a pass's signal)
@@ -53,7 +54,7 @@ export type AbortCause =
  */
 const EVERY_CAUSE: Readonly<Record<AbortCause, true>> = Object.freeze({
   'user-stop': true, watchdog: true, 'advisory-cap': true, 'deploy-drain': true, 'lock-reclaimed': true, 'authority-unavailable': true,
-  reaper: true, 'cost-cap': true, futile: true, 'review-budget': true, 'recheck-budget': true,
+  reaper: true, 'cost-cap': true, 'wallet-empty': true, futile: true, 'review-budget': true, 'recheck-budget': true,
   'repair-budget': true, unknown: true,
 });
 export const ALL_ABORT_CAUSES: readonly AbortCause[] = Object.freeze(Object.keys(EVERY_CAUSE) as AbortCause[]);
@@ -153,6 +154,26 @@ function engineFaultEnding(saved: boolean, seedKept: string): string {
   return providerDegradedMessage();
 }
 
+/**
+ * BR1994 — the minutes a wall-clock ending quotes ("I stopped after about N min"): the time the build has
+ * actually run, on the BUILD's clock. PURE.
+ *
+ * Main quoted the runner's `maxBuildMs`, which is the generation budget REMAINING when that runner started
+ * (the cap, less the correction reserve, less everything before it). The full builder of report BR1994
+ * began after the fast lane with a budget of about 22 minutes; the cap ended the build at 25 minutes, and
+ * the user, who had waited all 25, was told "I stopped after about 22 min". When the build's start is known
+ * (the event stream's own start, the request's arrival) the figure is the elapsed time since then. With no
+ * cap the sentence names no number, as on main; with an unknown or future start it keeps main's figure.
+ */
+export function buildClockMinutes(maxBuildMs: number | undefined, nowMs: number, buildStartedAt: unknown): number | undefined {
+  if (!maxBuildMs) return undefined;
+  const runnerMinutes = Math.round(maxBuildMs / 60000);
+  if (typeof buildStartedAt !== 'number' || !Number.isFinite(buildStartedAt) || buildStartedAt <= 0 || !Number.isFinite(nowMs)) return runnerMinutes;
+  const elapsed = nowMs - buildStartedAt;
+  const minutes = Math.round(elapsed / 60000);
+  return minutes > 0 ? minutes : runnerMinutes;
+}
+
 export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): string {
   const mins = typeof ctx.minutes === 'number' && ctx.minutes > 0 ? ctx.minutes : null;
   const saved = ctx.builtSomething === true;
@@ -198,6 +219,10 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
       return 'Build ownership could not be confirmed, so I stopped this attempt to protect your app. Wait for it to finish stopping before retrying.';
     case 'reaper':
       return `This build stopped responding and was cleaned up.${resume}`;
+    case 'wallet-empty':
+      return saved
+        ? 'Your balance is not enough for this build, please recharge! Your files so far are saved.'
+        : 'Your balance is not enough for this build, please recharge!';
     case 'cost-cap':
       // NOT a failure of the user's app, and NOT the user's doing — so neither is implied. The White-
       // Label Law's billing half applies: the user learns that a limit was reached and that their work
@@ -286,6 +311,7 @@ export function stoppedCallOwner(cause: AbortCause): StoppedCallOwner {
     case 'watchdog':
     case 'advisory-cap':
     case 'cost-cap':
+    case 'wallet-empty':
     case 'futile':
     case 'review-budget':
     case 'recheck-budget':
@@ -310,6 +336,7 @@ const OUR_CLOCK_WORDS: Readonly<Record<string, string>> = Object.freeze({
   watchdog: "the build's wall-clock cap",
   'advisory-cap': 'the advisory cap on the post-build checks',
   'cost-cap': "the build's cost ceiling",
+  'wallet-empty': "the user's wallet could not cover the rest of the build",
   futile: 'the futility breaker (no progress for its whole window)',
   'review-budget': "the post-build review's own time budget",
   'recheck-budget': "the post-fix recheck review's own time budget",
@@ -475,6 +502,9 @@ export function interruptedBeforeAnyVerdict(cause: AbortCause): boolean {
     case 'watchdog':
     case 'futile':
     case 'cost-cap':
+      return false;
+    case 'wallet-empty':
+      return true;
     case 'advisory-cap':
       return false;
     // A pass's own budget never reaches the build's signal, so never the upsell; FALSE for the same

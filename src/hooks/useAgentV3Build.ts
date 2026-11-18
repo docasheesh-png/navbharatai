@@ -327,9 +327,12 @@ export function serverBuildNeedsAttention(opts: {
   return opts.polledWorkspaceId !== opts.resultWorkspaceId;
 }
 
-export function stallWatchdogAction(opts: { alive: boolean; sawResult: boolean }): 'reconnect' | 'finish' | 'error' {
+export function stallWatchdogAction(opts: { alive: boolean; heldElsewhere?: boolean; sawResult: boolean }): 'reconnect' | 'wait' | 'finish' | 'error' {
   if (opts.alive) return 'reconnect';
   if (opts.sawResult) return 'finish';
+  // The build is heartbeating on another instance. It has not finished and it has not exhausted
+  // its engines. Keep the spinner; do not tell the user it stopped.
+  if (opts.heldElsewhere) return 'wait';
   return 'error';
 }
 
@@ -364,6 +367,11 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
   // Paid-public (billing PR 5): set when a build is refused pre-start with HTTP 402 INSUFFICIENT_CREDITS.
   // Drives a dedicated "Add credits" screen instead of a bare error banner. Null unless credits ran out.
   const [billingBlock, setBillingBlock] = useState<BillingBlock | null>(null);
+  const billingBlockRef = useRef<BillingBlock | null>(null);
+  const showBillingBlock = useCallback((block: BillingBlock | null) => {
+    billingBlockRef.current = block;
+    setBillingBlock(block);
+  }, []);
   const abortRef = useRef<AbortController | null>(null);
   const userIdRef = useRef<string | undefined>(undefined);
   const emailRef = useRef<string | undefined>(undefined);
@@ -438,8 +446,8 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
     setState(initialAgentV3State());
     setError(null);
     setErrorBeforeBuildStarted(false);
-    setBillingBlock(null);
-  }, []);
+    showBillingBlock(null);
+  }, [showBillingBlock]);
 
   const stop = useCallback((workspaceId?: string) => {
     generationRef.current += 1; // invalidate any in-flight resume()/subscribeLive() from this point on
@@ -1431,7 +1439,7 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
       }));
       setError(null);
     setErrorBeforeBuildStarted(false);
-      setBillingBlock(null); // a fresh send clears any prior add-credits screen.
+      showBillingBlock(null); // a fresh send clears any prior recharge screen.
       setRunning(true);
       // WATCHDOG — begin the silence window at build start (not stale mount time), so the
       // stall detector measures THIS build and never fires before the first event arrives.
@@ -1532,7 +1540,7 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
           // POWER_MODE_PAID_ONLY (Slice F): power mode requested by a not-yet-paying account — same
           // actionable add-credits card, with the server's specific power-mode message as the notice.
           if (res.status === 402 && (body.code === 'INSUFFICIENT_CREDITS' || body.code === 'POWER_MODE_PAID_ONLY' || body.code === 'free_trial_ended')) {
-            setBillingBlock({
+            showBillingBlock({
               notice: msg,
               balanceInr: typeof body.balanceInr === 'number' ? body.balanceInr : undefined,
               estimateInr: typeof body.estimateInr === 'number' ? body.estimateInr : undefined,
@@ -1633,6 +1641,19 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
             // `done`, so `done` is not build-terminal. Further events still render; `running` clears as
             // soon as the result is known. A resumable (deadline-paused) result clears running too — the
             // bounded auto-continue re-arms it via state.resumable.
+            if (event.type === 'error' && (event as { code?: unknown }).code === 'INSUFFICIENT_CREDITS') {
+              const message = typeof (event as { message?: unknown }).message === 'string'
+                ? (event as { message: string }).message
+                : 'Your balance is not enough for this build, please recharge!';
+              showBillingBlock({ notice: message });
+              setError(null);
+              setErrorBeforeBuildStarted(true);
+              sawResult = true;
+              sawResultRef.current = true;
+              setRunning(false);
+              setServerBuildRunning(false);
+              continue;
+            }
             if (event.type === 'error' && typeof (event as { code?: unknown }).code === 'string'
               && String((event as { code?: unknown }).code).startsWith('BUILD_REQUEST_')) {
               receiptRefused = true;
@@ -1764,7 +1785,8 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
           const r = await fetch(`/api/agentv3/status?${params.toString()}`, { signal: AbortSignal.timeout(15_000) });
           const j = await r.json().catch(() => ({}));
           const alive = workspaceIdRef.current ? j?.buildRunningHere === true : j?.buildRunning === true;
-          const action = stallWatchdogAction({ alive, sawResult: sawResultRef.current });
+          const action = stallWatchdogAction({ alive, heldElsewhere: j?.buildHeldElsewhere === true, sawResult: sawResultRef.current });
+          if (action === 'wait') return;
           if (action === 'reconnect') {
             // The build is alive but OUR stream went quiet — reconnect and keep going.
             abortRef.current?.abort();
@@ -1789,6 +1811,8 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
                 setError(null);
     setErrorBeforeBuildStarted(false);
                 setTimeout(() => { autoStartRef.current = true; void start('please continue', last.opts); }, 400);
+              } else if (billingBlockRef.current) {
+                // A balance refusal already has the recharge card. Do not cover it with a stall.
               } else {
                 setError(lastStartRef.current?.opts.queueItemId
                   ? "This queued step's progress could not be confirmed. Refresh and review it before continuing."
@@ -1802,7 +1826,7 @@ export function useAgentV3Build(owner?: string): UseAgentV3Build {
     return () => clearInterval(id);
   }, [running, resume, start]);
 
-  const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
+  const clearBillingBlock = useCallback(() => showBillingBlock(null), [showBillingBlock]);
 
   return {
     isBusy, markUserMessage, state, running, error, errorBeforeBuildStarted, start, respond, restore, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueState, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };

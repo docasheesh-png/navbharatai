@@ -153,7 +153,7 @@ export function redactReportSecrets(report: BuildDiagnosticsReport): BuildDiagno
     issues: report.issues?.map((i) => ({ ...i, message: redactSecrets(i.message), detail: rs(i.detail) })),
     problems: report.problems?.map((i) => ({ ...i, message: redactSecrets(i.message), detail: rs(i.detail) })),
     commands: report.commands?.map((c) => ({ ...c, command: redactSecrets(c.command), stdout: redactSecrets(c.stdout), stderr: redactSecrets(c.stderr) })),
-    llmCalls: report.llmCalls?.map((c) => ({ ...c, promptPreview: rs(c.promptPreview), responsePreview: rs(c.responsePreview) })),
+    llmCalls: report.llmCalls?.map((c) => ({ ...c, promptPreview: rs(c.promptPreview), responsePreview: rs(c.responsePreview), error: rs(c.error) })),
     errors: report.errors?.map((e) => ({ ...e, message: redactSecrets(e.message), stack: rs(e.stack) })),
     generatedFiles: report.generatedFiles?.map((f) => ({ ...f, content: redactSecrets(f.content) })),
     previewErrors: report.previewErrors?.map((p) => ({ ...p, message: redactSecrets(p.message) })),
@@ -333,7 +333,14 @@ export function compactReportForRecord(reportIn: BuildDiagnosticsReport): BuildD
   const report = redactReportSecrets(reportIn); // SECURITY 2.1 — the embedded copy is redacted too
   const prior = report.truncation;
   const trimmed = trimChannel(report.issues, EMBED_MAX_ISSUES, prior?.channels?.issues);
-  const issues = (trimmed.list ?? []).map((i) => ({ ...i, message: cap(i.message, 400) ?? '' }));
+  // This compact copy is stored on the conversation record and returned unsanitized by
+  // GET /api/agentv3/conversations/:id, then rehydrated into client state. Drop the
+  // admin-only reason here. Do not strip other issue fields. The full report, including
+  // adminDetail, remains in lastDiagnostics / workspace_diagnostics / renderDiagnosticsText.
+  const issues = (trimmed.list ?? []).map((i) => {
+    const { adminDetail: _adminOnly, ...rest } = i;
+    return { ...rest, message: cap(i.message, 400) ?? '' };
+  });
   // 🔒 THE DELIBERATE DROPS ARE DECLARED TOO, and that is not pedantry. This copy omits the forensic
   // channels ON PURPOSE (they live in workspace_diagnostics_v3), but a reader holding only this copy
   // cannot tell "omitted by design" from "the build made none" — the same ambiguity the storage caps

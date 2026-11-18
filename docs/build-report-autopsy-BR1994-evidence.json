@@ -1,0 +1,23 @@
+{
+  "evidenceType": "synthetic-fixtures-and-source-pins",
+  "privateReportPayloadIncluded": false,
+  "reportRetained": true,
+  "cases": [
+    "free Weak first build, LARGE scope, Surplus delivered all builder turns; not charged; stopped by the 25-min wall-clock cap, not the user",
+    "fast lane handed over on a typecheck failure; full builder rendered the app at about 416 s",
+    "unfinished-app resume 1 with 'I am continuing'; then the final budget line 'Out of time — saving your app'; then resume 2 with the same 'I am continuing' 19 s later (F1)",
+    "ending sentence quoted about 22 min (the full builder's remaining generation budget) after a build of about 25 min (F2)",
+    "the resume-2 call stopped by the cap is labelled claude-sonnet-4-6 (already closed by BR1992 F1)",
+    "release gate lists a failed npm install although the same command later exited 0 (Q-2707)",
+    "F1: handBackNotice returns null for both kinds only when outOfTime === true; AgentRunner run with the final stage said emits no 'I am continuing'; with only 'wrapping' it does",
+    "F2: buildClockMinutes quotes elapsed minutes since a known, past build start; unknown, zero or future start, or under half a minute, keeps the runner figure; no cap gives no number",
+    "mutation checks (unique mktemp backups, restored): M1 flag ignored 2 fail; M2 silent unless false 2 fail; M3 unfinished site unwired 3 fail; M4 any stage silences 3 fail; M5 runner minutes 3 fail; M6 unknown-start guard removed 1 fail; M8 abort ending unwired 1 fail; M9 zero not replaced 2 fail; M7 survived and exposed a redundant guard, which was removed"
+  ],
+  "limitations": [
+    "D4 (a resume in the final budget stage) is queued as Q-2706, not changed",
+    "D5 (a superseded failed command counted on a failed build's gate) is money-adjacent and queued as Q-2707, not changed",
+    "the elapsed minutes are measured from the request's arrival (the event stream's start), so a build that waited before starting quotes that wait too",
+    "BR1992 review residual (recordModel read at run start) is not on this report's path",
+    "focused local tests and server/root typecheck only; no full local suite was run (box memory)"
+  ]
+}

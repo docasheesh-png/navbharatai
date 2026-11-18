@@ -18,9 +18,13 @@ export type HandBackKind = 'style' | 'unfinished';
 export function handBackNotice(
   kind: HandBackKind,
   shownText: string | null | undefined,
-  opts: { previewLive?: boolean; env?: NodeJS.ProcessEnv } = {},
+  opts: { previewLive?: boolean; env?: NodeJS.ProcessEnv; outOfTime?: boolean } = {},
 ): string | null {
   if (!String(shownText ?? '').trim()) return null; // nothing was claimed, so there is nothing to correct
+  // BR1994: once the build has told the user "⏳ Out of time — saving your app and summarising what was done.",
+  // a line promising more work ("I am continuing. Please keep this open.") contradicts it seconds later. Only a
+  // positive `true` (the build-wide final stage was SAID) silences it; unknown keeps main's line.
+  if (opts.outOfTime === true) return null;
   // 🔴 r6–r10 autopsy: the preview was ALREADY open when this said "before the preview opens". When it is
   // live, say what is true — the app is open and the styling pass will refresh it. AGENTV3_STYLE_NOTICE_LIVE=off
   // restores the old single sentence.

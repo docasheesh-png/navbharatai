@@ -95,6 +95,7 @@ describe('canary physical transport census', () => {
       'src/server/AgentV3/ClaudeClient.ts:Anthropic',
       'src/server/AgentV3/EmbeddingSearch.ts:Cls',
       'src/server/AgentV3/clarityJudgeAsk.ts:OpenAI',
+      'src/server/AgentV3/proChainV2/scopeAsk.ts:OpenAI', // reviewed t350u: v2 scope classifier (Qubax → Mitrify), canaryFetch, maxRetries 0, flagged (z@ only)
       'src/server/AgentV3/weakBuildAdmissionAsk.ts:OpenAI',
       'src/server/routes/agentv3.ts:OpenAI',
       'src/server/routes/agentv3.ts:OpenAI', // reviewed Router One scope classifier; guarded, no hidden retries

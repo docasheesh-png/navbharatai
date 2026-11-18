@@ -2,7 +2,7 @@ import { PublicBuildEngineError, publicBuildEngineError, publicBuildEngineSafeRe
 import { AiMaintenanceError } from '../../lib/aiMaintenance';
 import { BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../../AgentV3/turnDeadline';
 import { randomUUID } from 'node:crypto';
-import { parseEnvFlag } from '../../lib/envFlag';
+import { surplusBuilderLive } from './liveAdmission';
 import { SURPLUS_MIN90_BASE_URL } from '../../lib/surplusClient';
 import { BuildStoppedError, raceStop, throwIfStopped } from '../../AgentV3/stopSignal';
 import type { RunTurnParams, TurnResult, TurnUsage } from '../../AgentV3/ClaudeClient';
@@ -14,8 +14,12 @@ import { createProductionSurplusAdapter } from './productionAdapter';
 import type { Reviews, Snapshot, Workload } from './types';
 
 export const SURPLUS_BUILD_POLICY = 'surplus-build-10x-official-cap-v1';
+/**
+ * Default ON (owner 2026-11-17). True when the switch is not explicitly off AND a usable SURPLUS_API_KEY is set.
+ * Without a key this is false, so a keyless server takes the same no-I/O path the old default-OFF took.
+ */
 export function surplusBuilderEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) === true;
+  return surplusBuilderLive(env);
 }
 const SAFE_ADMISSION_REASONS = new Set([
   'reviewed_capability_or_exact_route_contract_missing', 'invalid_build_scope', 'weak_model_not_authorized',
@@ -86,7 +90,7 @@ export function isSurplusReasoningModel(model: string): boolean {
   if (/flash|instruct|chat|non-?reason|turbo/.test(m)) return false;
   return /(^|\/)(gpt-5|o[1-9])|-(sol|terra)\b|think|reason|\br1\b/.test(m);
 }
-/** Default OFF is a strict no-I/O path. ON with SURPLUS_API_KEY uses live key+flag admission (no Firestore review seed). */
+/** Switched off or keyless is a strict no-I/O path. A key with the switch not off uses live admission (no Firestore review seed). */
 export async function createSurplusBuildSession(options: {
   buildId: string; tier: string; initialWorkload?: Workload; enabled?: boolean; adapter?: SurplusReviewedAdapter; now?: () => number;
 }): Promise<SurplusBuildSession | undefined> {
@@ -118,18 +122,17 @@ export async function createSurplusBuildSession(options: {
   // session, and the next turn moves to another Surplus-internal model (AI2/AI3) — never Weak.
   const benchedModels = new Set<string>();
   let terminalPolicyFailure: PublicBuildEngineError | undefined;
-  // Serialize inference across ALL runners of this build. Parallel tool execution is unchanged.
-  // A queued call may be cancelled before spending; only durably resolved safe failures can get a new attempt.
-  let queue: Promise<void> = Promise.resolve();
-  let turnQueue: Promise<void> = Promise.resolve();
+  // Owner 2026-11-16 ("ek bar me ek call wali limit hatao, 100+ call ek saath"): model calls of one build
+  // used to be fully serialized here, so a build's agents waited on each other. They now run in parallel up
+  // to `SURPLUS_PARALLEL_CALLS_PER_BUILD` (default 128; `1` restores the old one-at-a-time order). A queued
+  // call may still be cancelled before spending; only durably resolved safe failures get a new attempt.
+  const parallel = surplusParallelCallsPerBuild();
+  const callSlots = createSurplusSlots(parallel);
+  const turnSlots = createSurplusSlots(parallel);
   const activePermits = new Map<string, SurplusTurnPermit>();
   const releases = new WeakMap<object, () => void>();
   async function acquire(permit: SurplusTurnPermit, signal: AbortSignal) {
-    const previous = queue; let release!: () => void;
-    const slot = new Promise<void>(resolve => { release = resolve; });
-    queue = previous.then(() => slot);
-    try { await raceStop(previous, signal); throwIfStopped(signal); }
-    catch (error) { release(); throw error; }
+    const release = await callSlots.acquire(signal);
     releases.set(permit, release); activePermits.set(permit.callId, permit);
   }
   function release(permit: SurplusTurnPermit) { releases.get(permit)?.(); releases.delete(permit); activePermits.delete(permit.callId); }
@@ -272,18 +275,18 @@ export async function createSurplusBuildSession(options: {
           } }
         },
       });
-      return { async runTurn(params: RunTurnParams) {
+      return {
+        // BR1992: what this Surplus session will call next, for RECORDS only (TurnRunner.plannedModel). Without it a
+        // Surplus call stopped by the build's clock was filed under the request's Claude default
+        // (`claude-sonnet-4-6`) on a Weak build that can never call Claude. Never sent to any provider.
+        get plannedModel() { return model; },
+        async runTurn(params: RunTurnParams) {
         // Queue the complete failed-turn boundary, not individual HTTP attempts. A normal
         // concurrent turn must authorize AFTER the prior fallback winner becomes sticky.
-        const previous = turnQueue;
-        let releaseTurn!: () => void;
-        const slot = new Promise<void>(resolve => { releaseTurn = resolve; });
-        turnQueue = previous.then(() => slot);
+        // Waiting for a free slot behind other turns of the SAME build is not a Surplus failure: never time
+        // it out into "engine unavailable" — each running turn is itself bounded by its own deadline.
+        const releaseTurn = await turnSlots.acquire(params.signal);
         try {
-          // Waiting behind another turn of the SAME build is not a Surplus failure: never time it out
-          // into "engine unavailable" — the previous turn is itself bounded by its own deadline.
-          await raceStop(previous, params.signal);
-          throwIfStopped(params.signal);
           // DNA (failedbr A–C 2026-10-31, owner: "Surplus marna nahi chahiye"): a single transient
           // turn failure (timeout / transport / empty / unsettled) used to end the whole game build with
           // ENGINE_UNAVAILABLE after files were half-written. Keep the SAME Surplus session alive:
@@ -316,6 +319,47 @@ export async function createSurplusBuildSession(options: {
       } };
     },
   });
+}
+
+export const SURPLUS_PARALLEL_CALLS_DEFAULT = 128;
+export const SURPLUS_PARALLEL_CALLS_MAX = 1024;
+/** How many model calls of ONE build may be in flight at once. `1` = the old strict one-at-a-time order. */
+export function surplusParallelCallsPerBuild(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.SURPLUS_PARALLEL_CALLS_PER_BUILD?.trim();
+  const n = Number(raw);
+  return raw && Number.isInteger(n) && n >= 1 ? Math.min(n, SURPLUS_PARALLEL_CALLS_MAX) : SURPLUS_PARALLEL_CALLS_DEFAULT;
+}
+
+/** A counting semaphore: at most `limit` holders, FIFO, Stop-aware. A waiter that is stopped leaves the line
+ * without taking a slot; every release is idempotent so a double release can never admit an extra caller. */
+export function createSurplusSlots(limit: number) {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  const next = () => {
+    while (active < limit && waiting.length) { active++; waiting.shift()!(); }
+  };
+  const releaser = () => { let done = false; return () => { if (done) return; done = true; active--; next(); }; };
+  return {
+    get active() { return active; },
+    get waiting() { return waiting.length; },
+    async acquire(signal?: AbortSignal): Promise<() => void> {
+      throwIfStopped(signal);
+      if (active < limit && waiting.length === 0) { active++; return releaser(); }
+      let admit!: () => void;
+      const admitted = new Promise<void>(resolve => { admit = resolve; });
+      let granted = false;
+      const entry = () => { granted = true; admit(); };
+      waiting.push(entry);
+      try { await raceStop(admitted, signal); throwIfStopped(signal); }
+      catch (error) {
+        const at = waiting.indexOf(entry);
+        if (at >= 0) waiting.splice(at, 1);
+        else if (granted) { active--; next(); }
+        throw error;
+      }
+      return releaser();
+    },
+  };
 }
 
 /** Owner 2026-10-31: one Surplus run finishes the whole build. Env-tunable, safe defaults. */

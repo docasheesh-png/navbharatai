@@ -1,3 +1,5 @@
+import { controlAllowsGateway } from '../TrafficRegistry/controlDecision';
+import { currentTrafficControl } from '../TrafficRegistry/controlSync';
 import { apiKeyStore } from '../../lib/ApiKeyStore';
 import { extractApiKey, hashApiKey, hasScope, type ApiScope } from '../../lib/ApiKeyManager';
 import { fixedTextChainEnabled, fixedTextChainScopeAllowed } from '../fixedTextChain';
@@ -71,12 +73,21 @@ const privacyRank = { public: 0, personal: 1, confidential: 2, health: 3 };
 const qualityRank = { weak: 0, standard: 1, normal: 2, strong: 3, professional: 4, clinical: 5 };
 const FREE_SURFACES = new Set<Surface>(['chat', 'professional']);
 const CONVERSATIONAL_SURFACES = new Set<Surface>(['chat', 'professional', 'doctor', 'sda', 'developer-api']);
-function fixedConversation(surface?: Surface) { return fixedTextChainScopeAllowed() && fixedTextChainEnabled() && (!surface || CONVERSATIONAL_SURFACES.has(surface)); }
-/** Master OFF is the deployment default. An invalid ON configuration never silently falls back. */
+function envFixedConversation(surface?: Surface) { return fixedTextChainScopeAllowed() && fixedTextChainEnabled() && (!surface || CONVERSATIONAL_SURFACES.has(surface)); }
+function fixedConversation(surface?: Surface) { return envFixedConversation(surface) && controlAllowsGateway(currentTrafficControl(), surface); }
+/**
+ * Master OFF is the deployment default. An invalid ON configuration never silently falls back.
+ * The control store (Traffic Manager V2, P2) can only NARROW this: its global emergency OFF or a surface's
+ * `legacy` switch sends a request down the legacy path at ingress, before any provider is called.
+ */
 export function inferenceGatewayEnabled(surface?: Surface): boolean {
+  return envGatewayEnabled(surface) && controlAllowsGateway(currentTrafficControl(), surface);
+}
+/** The deployment env's answer alone, exactly as before the control store existed. */
+function envGatewayEnabled(surface?: Surface): boolean {
   if (parseEnvFlag(process.env.INFERENCE_GATEWAY_ENABLED) !== true) return false;
   if (!surface) return true;
-  if (fixedConversation(surface)) return true;
+  if (envFixedConversation(surface)) return true;
   if (!FREE_SURFACES.has(surface)) return false;
   const configured = process.env.INFERENCE_GATEWAY_SURFACES;
   return !configured?.trim() || configured.split(',').map(s => s.trim()).includes(surface);
@@ -84,13 +95,20 @@ export function inferenceGatewayEnabled(surface?: Surface): boolean {
 /** Verify the actual ingress token; a plain UID, req.body field or context is never an identity proof. */
 export async function runWithAuthenticatedInferenceGatewayRequest<T>(req: Request, fn: (uid: string | null, guest?: GatewayGuestContext) => T): Promise<Awaited<T>> {
   const selectedGuest = wasGatewayGuestSelected(req);
-  if (!inferenceGatewayEnabled() && !selectedGuest && !fixedConversation()) return await fn(null);
+  // ONE control snapshot per request, decided here at ingress before any provider is called, so a switch flipped
+  // mid-request never changes this request's path. A guest already admitted to the gateway's quota a moment ago
+  // keeps that decision for this one request, so its quota is neither double-counted nor stranded.
+  const control = currentTrafficControl();
+  const allows = (surface?: Surface) => selectedGuest || controlAllowsGateway(control, surface);
+  const fixed = envFixedConversation() && allows();
+  if (!(envGatewayEnabled() && allows()) && !selectedGuest && !fixed) return await fn(null);
   const cohort = gatewayRollout();
-  const surfaces = Object.freeze(fixedConversation() ? [...CONVERSATIONAL_SURFACES] : [...FREE_SURFACES].filter(surface => inferenceGatewayEnabled(surface)));
+  const surfaces = Object.freeze(fixed ? [...CONVERSATIONAL_SURFACES].filter(surface => allows(surface))
+    : [...FREE_SURFACES].filter(surface => envGatewayEnabled(surface) && allows(surface)));
   const uid = await verifyFirebaseToken(req);
   const guest = uid ? null : takeGuestInferenceAdmission(req);
   const view = guest ? Object.freeze({ kind: guest.kind, principalId: guest.principalId, expiresAtMs: guest.expiresAtMs }) : undefined;
-  return await identities.run(Object.freeze({ uid, payloadBytes: admissionPayloadBytes(req.body), selectedGuest, surfaces, cohortSelected: fixedConversation() || gatewayRolloutAllowsUid(cohort, uid), ...(guest ? { guest } : {}) }), () => fn(uid, view));
+  return await identities.run(Object.freeze({ uid, payloadBytes: admissionPayloadBytes(req.body), selectedGuest, surfaces, cohortSelected: fixed || gatewayRolloutAllowsUid(cohort, uid), ...(guest ? { guest } : {}) }), () => fn(uid, view));
 }
 /** Independent developer-key authentication; a Firebase UID/body label cannot mint this boundary.
  * Scopes/key identity are re-read after the existing API spend gate. Customer wallet charging
@@ -130,9 +148,14 @@ export function runWithInferenceGatewayContext<T>(context: InferenceGatewayConte
 export function currentInferenceGatewayContext(): InferenceGatewayContext | undefined { return contexts.getStore()?.context; }
 export function isGatewayRouteSelected(): boolean { return contexts.getStore()?.selected === true; }
 
+/**
+ * Re-checked right up to dispatch. Deliberately the ENV answer only: a control-store change applies to NEW requests
+ * at ingress, while a request already selected finishes on the path it started (no re-run, no second charge, no
+ * legacy escape mid-request — owner requirement 10). The env OFF still stops it here, exactly as before.
+ */
 function selectedCohortCurrent(state: ContextState): boolean {
-  return inferenceGatewayEnabled(state.context.surface)
-    && (fixedConversation(state.context.surface) || gatewayRolloutAllowsUid(gatewayRollout(), state.identity?.uid));
+  return envGatewayEnabled(state.context.surface)
+    && (envFixedConversation(state.context.surface) || gatewayRolloutAllowsUid(gatewayRollout(), state.identity?.uid));
 }
 
 function verifiedPrincipal(state: ContextState): string | undefined {
@@ -141,7 +164,7 @@ function verifiedPrincipal(state: ContextState): string | undefined {
   const guest = identity?.guest;
   if (!identity?.uid && isGuestInferenceAdmission(guest)
     && ((context.surface === 'chat' && (guest.surface ?? 'chat') === 'chat' && /^chat:text(?::(?:embedding|grounding|vision-image|vision-pdf))?$/.test(context.policyKey))
-      || (fixedConversation('professional') && context.surface === 'professional' && guest.surface === 'repo-analyst' && /^mode:repo-analyst:(?:chat|generate)$/.test(context.policyKey)))
+      || (envFixedConversation('professional') && context.surface === 'professional' && guest.surface === 'repo-analyst' && /^mode:repo-analyst:(?:chat|generate)$/.test(context.policyKey)))
     && context.funding === 'platform-free-fallback' && context.principalId === guest.principalId && context.tenantId === guest.principalId
     && context.deadlineAtMs <= guest.expiresAtMs) return guest.principalId;
   return undefined;

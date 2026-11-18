@@ -256,6 +256,17 @@ export interface RunTurnParams {
    */
   deadlineAt?: number;
   /**
+   * Share `deadlineAt` across the chain (the fast lane's plan call). Each rung but the last is
+   * given only a slice (`deadlineLeavingFallback`), and a slice that runs out does not abort the
+   * rungs still inside the step. Absent → the step deadline is handed to every rung unchanged.
+   */
+  reserveFallbackBudget?: boolean;
+  /**
+   * Set by the one reasoning continuation so a starved continuation cannot start another.
+   * Absent → a starved reasoning trace may be used or continued once.
+   */
+  reasoningContinuation?: boolean;
+  /**
    * The BUILD's own stop signal (Stop, Unsend, a lease stop). When it aborts, the provider chain stops
    * waiting at once, closes a stream it can close, and throws `BuildStoppedError` — which no rung is
    * benched for and no fallback follows (stopSignal.ts, autopsy 2720e553). Omitted → today's

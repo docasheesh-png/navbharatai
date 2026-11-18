@@ -1,3 +1,4 @@
+import type { MapChoice } from './athreeMapKinds';
 import { generateAthreeMap } from './AthreeMapGenerator';
 import { generateGame3D } from '../Game3DGenerator';
 import { composeAthreeRecipe } from './composeAthreeRecipe';
@@ -26,10 +27,11 @@ export function parseCompositionRequest(raw:unknown):CompositionRequest {
  if(count>budget)throw new Error('Object request exceeds active quality budget.');
  return {seed:r.seed,profile:r.profile as CompositionRequest['profile'],widthKm:r.widthKm,quality:r.quality as CompositionRequest['quality'],rivers:r.rivers,vegetation:r.vegetation,objects:r.objects.map(x=>({kind:x.kind,count:x.count}))};
 }
-export function generateRequestedAthreeWorld(raw:unknown, include?:string[], excludedModules: readonly string[] = []) {
+export function generateRequestedAthreeWorld(raw:unknown, include?:string[], excludedModules: readonly string[] = [], choice?: MapChoice | null) {
  const request=parseCompositionRequest(raw);
+ if(choice && choice.sizeKm!==request.widthKm)throw new Error('Map choice size and composition widthKm must agree; no silent resizing.');
  if(excludedModules.includes('vehicles') && request.objects.some(o=>o.kind==='car'||o.kind==='motorcycle'))throw new Error('User excluded vehicles; visual vehicle objects are not allowed.');
- const world=generateAthreeMap(include, excludedModules);
+ const world=generateAthreeMap(include, choice, excludedModules);
  // Native module selection is authoritative: never silently restore omitted renderers.
  if(request.vegetation && !world.files['src/game/athree/plants.ts'])throw new Error('Vegetation requested but plants module is not selected.');
  if(request.rivers && !world.files['src/game/athree/riverwater.ts'])throw new Error('Visible rivers requested but rivers module is not selected.');

@@ -1,0 +1,21 @@
+{
+  "evidenceType": "synthetic-fixtures-and-source-pins",
+  "privateReportPayloadIncluded": false,
+  "reportRetained": true,
+  "cases": [
+    "free Weak build whose request was the Fix-with-AI template around our own first reconnect-refusal sentence; same workspace as BR1993, about 2 min after it",
+    "pre-build Surplus scope-admission call (about 2.5 s) recorded after the diagnostics timer started; TIME_TO_FIRST_CALL said 0s (already closed by BR1958)",
+    "rough ETA shown at about 5.3 s, then setup refused again with the first-refusal wording and no admin reason at about 5.6 s (already closed by BR1984 #4254 and BR1983 #4251)",
+    "F1: errorCanBeFixedByEditingTheApp is false for the exact first or repeat refusal sentence (trimmed); seven neighbours (an app syntax error, a shorter variant, a lower-case copy, the sentence followed by an app error, an app error quoting it, a Hindi message, the setup-failure sentence) keep the button",
+    "the two sentences moved byte-identically to src/lib/sandboxRecoveryMessages.ts and are re-exported by SandboxRecoveryError.ts",
+    "mutation checks (unique mktemp backups, restored): M1 unwired 3 fail; M2 substring match 1 fail; M3 no trim 1 fail; M4 first sentence only 2 fail; M5 case-insensitive 3 fail; M6 reworded sentence 1 fail; M7 always hide 2 fail",
+    "BR1994 doc correction: SubAgent childEvents = Object.create(parent) inherits budgetStagesSaid; pinned by a probe and a source line"
+  ],
+  "limitations": [
+    "D5 (an unexplained 5.3 s Routing and ETA window) is queued as Q-2708, not changed",
+    "D6 (other in-stream infrastructure endings) is queued as Q-2709, not changed",
+    "the ETA before setup on a first attempt stays Q-2705",
+    "BR1992 review residual (recordModel read at run start) is not on this report's path",
+    "focused local tests and server/root typecheck only; no full local suite was run (box memory)"
+  ]
+}

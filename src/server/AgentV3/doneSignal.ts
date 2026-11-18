@@ -35,6 +35,7 @@
  */
 import type { ReadinessReport } from './Readiness';
 import { envFlag } from '../lib/envFlag';
+import type { AbortCause } from './buildAbortCause';
 
 /**
  * The score a build must clear to be called FINISHED — deliberately far above `MIN_READY_SCORE`.
@@ -264,4 +265,29 @@ export function endOfTurnReadyMark(p: {
   if (p.typeErrors !== null && p.typeErrors > 0) return null;
   if (!appIsDone(p.readiness) || !p.readiness) return null;
   return { step: p.step, elapsedMs: p.elapsedMs, score: p.readiness.score, ...(typeof p.at === 'number' ? { at: p.at } : {}) };
+}
+
+/**
+ * BR1988 — did the USER'S OWN Stop end this run before the readiness check, which was eligible on this
+ * turn, ever judged the app finished? PURE, and fail-closed: anything other than exactly that is `false`.
+ *
+ * Eligible means the same carve-outs as `shouldCheckDone` / `endOfTurnReadyMark`: the done signal is on,
+ * the turn is not an edit of an existing app, and it is not a project-module turn. On those turns no
+ * mark is ever recorded, so "no mark" there says nothing about whether the app was finished — and the
+ * answer must be `false`. Every engine cause (watchdog, advisory-cap, cost-cap, futile, deploy-drain,
+ * lock-reclaimed, reaper, budgets, unknown) is `false`: only the user's Stop counts.
+ */
+export function userStoppedBeforeReady(p: {
+  cause: AbortCause;
+  readyMarked: boolean;
+  doneSignalEnabled: boolean;
+  editingExistingApp: boolean;
+  projectModule?: string | null;
+}): boolean {
+  if (p.cause !== 'user-stop') return false;
+  if (p.readyMarked !== false) return false;
+  if (p.doneSignalEnabled !== true) return false;
+  if (p.editingExistingApp !== false) return false;
+  if (p.projectModule != null && String(p.projectModule).trim() !== '') return false;
+  return true;
 }

@@ -1,0 +1,19 @@
+{
+  "evidenceType": "source-invariant-pins",
+  "privateReportPayloadIncluded": false,
+  "reportRetained": false,
+  "cases": [
+    "registry lists the number with outcome stopped, retained false, no build id and no digest; every report reader answers not found in retained storage; scope failures empty",
+    "neighbouring numbers are retained; the audit's starting inventory already showed this number as not retained",
+    "E1: commitDiagnosticsHistory writes the registry row and the history document in one transaction (registry plan applied inside the transaction, before the history write)",
+    "E2: purgeWorkspace calls deleteDiagnostics with the same workspace id after removing the conversation; the conversation DELETE route wires the real deleteDiagnostics; deleteDiagnostics deletes history documents and the latest-report document and not the registry row",
+    "E3: the workspace history retention policy is 180 days on savedAt (epoch ms); workspace-store account erasure refuses every uid",
+    "mutation checks (unique mktemp backups, restored): purge skips diagnostics 1 fail; route not wired 1 fail; history TTL 7 days 1 fail; erase allowed 1 fail; registry write outside the transaction 1 fail"
+  ],
+  "limitations": [
+    "the report bytes are not retained, so the build's own defects, request, engine path and bill are not established and not reconstructed",
+    "the user's own chat deletion is the most likely cause but is not proven; confirming it needs an admin production read (Q-2703)",
+    "no product code changed; the pins only lock the facts the explanation rests on",
+    "focused local tests and server/root typecheck only; no full local suite was run (box memory)"
+  ]
+}

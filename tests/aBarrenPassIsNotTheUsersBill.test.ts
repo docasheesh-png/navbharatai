@@ -274,7 +274,8 @@ describe('REVERSION GUARDS — the wiring lives in a 20k-line route no unit test
     // reads realCostRemainder for the admin ledger. It does not set the user bill.
     // Fifth: the Surplus-only partition delegates unchanged legacy+VM pricing with the same verdict.
     // Sixth: the unavailable Router One partition preserves that verdict for all remaining spend.
-    expect(route.match(/decideBuildBilledUsd\([\s\S]{0,220}?barrenPhases\)/g) ?? []).toHaveLength(6);
+    // Seventh: the mid-build wallet stop prices the same ledger before it decides the balance is spent.
+    expect(route.match(/decideBuildBilledUsd\([\s\S]{0,220}?barrenPhases\)/g) ?? []).toHaveLength(7);
     expect(route).toContain('decideBuildBilledUsd(remaining, subtract(sinkTotal), powerLevel, userId, email, sandboxUsd, barrenPhases)');
     expect(route).toContain('decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, vm.usd, barrenPhases)');
     expect(route).toContain('decideBuildBilledUsd(ledger, sink, powerLevelReqEffective, userId ?? undefined, email, sandboxUsd, barrenPhases).realCostRemainder');

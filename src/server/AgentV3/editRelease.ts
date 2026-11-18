@@ -29,6 +29,13 @@ export interface ReleaseInput {
   base: BaseVerification;
   /** The edit was built on the project's instructions (false = they could not be recovered). */
   requirementsOk: boolean;
+  /**
+   * The build itself finished OK. 🔴 Autopsy 57604006 (build 9ed80cc9): the engine ran out of providers mid-edit, the
+   * release gate said RED and the build was recorded as failed — yet the half-finished candidate rendered, and with
+   * nothing else to stop it, it would have become the project's VERIFIED version. A build that did not finish never
+   * moves the verified head; its files stay saved as the user's editable project.
+   */
+  buildOk: boolean;
 }
 
 export interface ReleaseDecision {
@@ -41,6 +48,7 @@ export function decideRelease(i: ReleaseInput): ReleaseDecision {
     return { action: 'hold', reasons: ['edit-gate: the candidate replaces the project instead of editing it', ...i.gate.reasons.map((r) => `${r.rule}: ${r.detail}`)] };
   }
   if (i.provenBroken) return { action: 'hold', reasons: ['preview: the candidate was observed broken'] };
+  if (!i.buildOk) return { action: 'keep-unverified', reasons: ['build: the build did not finish OK, so its result is not a verified version'] };
   if (!i.requirementsOk) return { action: 'keep-unverified', reasons: ['requirements: the project\'s saved instructions could not be recovered'] };
   if (!i.previewGreen) return { action: 'keep-unverified', reasons: ['preview: the candidate could not be opened to verify it'] };
   if (i.base.state === 'stale') return { action: 'keep-unverified', reasons: ['base: the workspace differed from the head revision, so this edit is not a verified successor'] };
@@ -57,4 +65,22 @@ export function candidateReplacesBase(base: Readonly<Record<string, string>> | n
 /** `AGENTV3_EDIT_PROMOTION=off` is the kill switch for the edit gate and the stop-without-instructions rule. Default ON. */
 export function editPromotionEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_EDIT_PROMOTION ?? '').trim().toLowerCase() !== 'off';
+}
+
+/**
+ * Has the server's own browser seen THIS tree render? Either the turn-end check did, or the in-build proof did and
+ * NOTHING was written after it (so the tree that rendered is the tree being saved). 🔴 Autopsy 57604006: the report
+ * said "the app rendered in a real browser 686 s in" and, one second later, "I could not open your app to confirm
+ * it works" — the turn-end flag was false while the in-build proof was true, and the user was told the second one.
+ * PURE.
+ */
+export function renderEvidence(previewGreen: boolean, inBuildGreenAt: number, writesAfterInBuildProof: number): boolean {
+  return previewGreen === true || renderedInBuildUnchanged(inBuildGreenAt, writesAfterInBuildProof);
+}
+export function renderedInBuildUnchanged(inBuildGreenAt: number, writesAfterInBuildProof: number): boolean {
+  return Number.isFinite(inBuildGreenAt) && inBuildGreenAt > 0 && writesAfterInBuildProof === 0;
+}
+/** `result.ok` of a run that may not have produced a result. */
+export function buildOkOf(result: { ok?: unknown } | null | undefined): boolean {
+  return result?.ok === true;
 }

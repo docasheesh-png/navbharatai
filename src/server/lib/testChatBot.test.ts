@@ -6,7 +6,16 @@ const fake = vi.hoisted(() => ({ run: vi.fn(), config: vi.fn(), db: vi.fn(), mai
   marketPlan: undefined as undefined | ((...args: unknown[]) => unknown),
   feedSummary: undefined as undefined | ((...args: unknown[]) => unknown),
   catalogJson: undefined as undefined | ((...args: unknown[]) => unknown),
-  mitrifyCatalog: undefined as undefined | ((url: string, init?: RequestInit) => Promise<unknown>) }));
+  mitrifyCatalog: undefined as undefined | ((url: string, init?: RequestInit) => Promise<unknown>),
+  routerOnePrice: vi.fn(), officialVertex: vi.fn() }));
+vi.mock('./vertexGenAI', () => ({
+  vertexGenAI: () => ({ synthetic: 'vertex-client' }),
+  vertexProjectId: () => (process.env.GOOGLE_CLOUD_PROJECT ?? '').trim() || null,
+}));
+vi.mock('../AI/RouterOne/publicPriceSource', async importOriginal => {
+  const actual = await importOriginal<typeof import('../AI/RouterOne/publicPriceSource')>();
+  return { ...actual, routerOnePublicPrices: { snapshot: (...args: unknown[]) => fake.routerOnePrice(...args) } };
+});
 vi.mock('./qubax', () => ({ runApprovedQubaxChat: fake.run, qubaxConfig: fake.config,
   QubaxError: class extends Error { constructor(readonly code: string, readonly status = 0) { super(code); } } }));
 vi.mock('./qubaxPriceFeedRuntime', () => ({ refreshQubaxPriceFeed: (...args: unknown[]) => fake.refresh(...args) }));
@@ -47,6 +56,7 @@ vi.mock('./testChatBotOfficial', async importOriginal => {
     ...actual,
     runOfficialOpenAiCompatTest: (...args: unknown[]) => fake.officialOpenAi(...args),
     runOfficialAnthropicTest: (...args: unknown[]) => fake.officialAnthropic(...args),
+    runOfficialVertexTest: (...args: unknown[]) => fake.officialVertex(...args),
   };
 });
 vi.mock('./serverDb', () => ({ getServerDb: fake.db }));
@@ -69,7 +79,7 @@ vi.mock('../AI/FreeChain/providers/openAiCompatProvider', async importOriginal =
   };
 });
 import { isTestChatStatus, readPartialTestChatStatus, TEST_CHAT_MAX_OUTPUT_TOKENS, TEST_CHAT_PROVIDER_IDS, type TestChatAction } from '../../lib/testChatBot';
-import { loadTestChatStatus, runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
+import { BUILDER_TEST_MAX_TOKENS, loadTestChatStatus, ROUTER_ONE_PRICE_UNAVAILABLE, ROUTER_ONE_TEST_CHAT_URL, ROUTER_ONE_TEST_MAX_TOKENS, routerOneTariffCeilingNanoUsd, runTestChat, testChatStatus, TestChatUnavailable } from './testChatBot';
 import { maximumCostNanoUsd, usdToNanoUsd } from '../AI/FreeChain/spendCap';
 import { QubaxError } from './qubax';
 import { MitrifyError } from './mitrify';
@@ -248,13 +258,12 @@ describe('test chat provider isolation and admission', () => {
     }));
     expect(fake.compatTurn.mock.calls[0]?.[0]).toMatchObject({ prompt: action.messages[0].content, messages: action.messages });
   });
-  it('does not invent a Surplus or Router One dispatch when those entries are selected', async () => {
-    expect(testChatStatus().providers.find(item => item.id === 'surplus')?.enabled).toBe(false);
-    expect(testChatStatus().providers.find(item => item.id === 'router-one')?.enabled).toBe(false);
+  it('keeps Surplus disabled with the honest reason while its key is missing', async () => {
+    expect(testChatStatus().providers.find(item => item.id === 'surplus')).toMatchObject({ enabled: false, unavailableReason: 'No API credential is set on the server.' });
     await expect(runTestChat({ ...action, provider: 'surplus' }, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'disabled' });
-    await expect(runTestChat({ ...action, provider: 'router-one' }, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'disabled' });
     expect(fake.run).not.toHaveBeenCalled();
     expect(fake.compatTurn).not.toHaveBeenCalled();
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
   });
   it('does not invent a paid reservation for free groq and still fail-closes Qubax when the paid cap is unconfigured', async () => {
     fake.budgetConfig.mockReturnValue(budget({ errors: ['FREE_CHAIN_PAID_DAILY_CAP_USD'], rungs: [groqRung] }));
@@ -841,3 +850,621 @@ describe('test chat provider isolation and admission', () => {
   });
 });
 
+
+describe('Router One in the admin Test Chat Bot (admin 2026-11-15)', () => {
+  const routerOneHold = (priceIn: number, priceOut: number) => {
+    const inputTokens = Buffer.byteLength(JSON.stringify(action.messages), 'utf8') + 256;
+    return maximumCostNanoUsd(inputTokens, ROUTER_ONE_TEST_MAX_TOKENS, usdToNanoUsd(priceIn), usdToNanoUsd(priceOut));
+  };
+  const band = (above: number, input: string, output: string) => ({
+    aboveInputTokens: above, inputUsdPerMillion: input, outputUsdPerMillion: output, cacheReadUsdPerMillion: '0', cacheWriteUsdPerMillion: '0',
+  });
+  const tariff = (bands: ReturnType<typeof band>[]) => ({
+    kind: 'posted-wallet-token-tariff', provider: 'ENGINE_R1', model: 'deepseek-v4.1-flash', currency: 'USD',
+    unit: 'USD/1000000-tokens', source: 'https://router.one/models/deepseek-v4-1-flash', fetchedAt: 1, bands,
+  });
+  const routerOne = { ...action, provider: 'router-one' as const };
+
+  it('is unavailable with an honest reason when the server has no Router One key', () => {
+    const status = testChatStatus().providers.find(item => item.id === 'router-one');
+    expect(status).toMatchObject({ configured: false, enabled: false, billed: true, unavailableReason: 'No API credential is set on the server.' });
+  });
+
+  it('is selectable like the other providers once the key is set, on the first priced model', () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    const status = testChatStatus().providers.find(item => item.id === 'router-one');
+    expect(status).toMatchObject({ configured: true, enabled: true, billed: true, model: 'deepseek-v4.1-flash', internalRouting: true });
+    expect(status?.unavailableReason).toBeUndefined();
+    expect(status?.note).toContain('posted public price');
+  });
+
+  it('never picks Router One’s unpriced "auto" router as the test model', () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    vi.stubEnv('ROUTER_ONE_MODEL_MODE', 'auto');
+    expect(testChatStatus().providers.find(item => item.id === 'router-one')?.model).toBe('deepseek-v4.1-flash');
+  });
+
+  it('only calls the official endpoint — a custom base URL stays disabled', () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    vi.stubEnv('ROUTER_ONE_BASE_URL', 'https://proxy.example.invalid/v1');
+    const status = testChatStatus().providers.find(item => item.id === 'router-one');
+    expect(status).toMatchObject({ configured: true, enabled: false, unavailableReason: 'This test page only calls the official Router One endpoint.' });
+  });
+
+  it('reserves the highest posted band, then makes exactly one official call and returns the real reply', async () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    fake.routerOnePrice.mockResolvedValue(tariff([band(-1, '0.2', '0.8'), band(128_000, '0.4', '1.6')]));
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hello from Router One', model: 'deepseek-v4.1-flash', usage: { inputTokens: 5, outputTokens: 6 } });
+    const result = await runTestChat(routerOne, 'operator@example.invalid', new AbortController().signal);
+    expect(result).toMatchObject({ provider: 'router-one', content: 'Hello from Router One', model: 'deepseek-v4.1-flash', noFallback: true, usage: { inputTokens: 5, outputTokens: 6 } });
+    expect(fake.routerOnePrice).toHaveBeenCalledWith('deepseek-v4.1-flash');
+    expect(fake.reserve).toHaveBeenCalledOnce();
+    // Reserved for the reasoning-model bound, not the page's 1,024 (deepseek-v4.1-flash answered empty at 1,024).
+    expect(ROUTER_ONE_TEST_MAX_TOKENS).toBeGreaterThan(TEST_CHAT_MAX_OUTPUT_TOKENS);
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: routerOneHold(0.4, 1.6) }));
+    expect(fake.officialOpenAi).toHaveBeenCalledOnce();
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({
+      url: ROUTER_ONE_TEST_CHAT_URL, apiKey: 'synthetic-router-one-key', model: 'deepseek-v4.1-flash', messages: routerOne.messages,
+      stream: true, maxTokens: ROUTER_ONE_TEST_MAX_TOKENS,
+    }));
+    expect(fake.run).not.toHaveBeenCalled();
+    expect(fake.compatTurn).not.toHaveBeenCalled();
+  });
+
+  it('prices a typed model on its own posted tariff and calls that model', async () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    fake.routerOnePrice.mockResolvedValue(tariff([band(-1, '1', '2')]));
+    fake.officialOpenAi.mockResolvedValue({ content: 'typed reply', model: 'qwen3-coder' });
+    await runTestChat({ ...routerOne, model: 'qwen3-coder' }, 'actor', new AbortController().signal);
+    expect(fake.routerOnePrice).toHaveBeenCalledWith('qwen3-coder');
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ model: 'qwen3-coder' }));
+  });
+
+  it('does not call Router One, and says why, when no posted price can be read', async () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    fake.routerOnePrice.mockRejectedValue(new Error('router.one unreachable'));
+    const error = await runTestChat(routerOne, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error).toBeInstanceOf(TestChatUnavailable);
+    expect(error.reason).toBe('budget');
+    expect(error.diagnostic).toMatchObject({ providerCode: 'ROUTER_ONE_PRICE_UNAVAILABLE', providerMessage: ROUTER_ONE_PRICE_UNAVAILABLE, model: 'deepseek-v4.1-flash' });
+    expect(fake.reserve).not.toHaveBeenCalled();
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on a budget refusal without calling the provider', async () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    fake.routerOnePrice.mockResolvedValue(tariff([band(-1, '0.2', '0.8')]));
+    fake.reserve.mockResolvedValue(null);
+    await expect(runTestChat(routerOne, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'budget' });
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+  });
+
+  it('shows the provider’s real error, with the key redacted, when the call fails', async () => {
+    vi.stubEnv('ROUTER_ONE_API_KEY', 'synthetic-router-one-key');
+    fake.routerOnePrice.mockResolvedValue(tariff([band(-1, '0.2', '0.8')]));
+    fake.officialOpenAi.mockRejectedValue(new OfficialTestChatError('auth', 401, 'invalid_api_key', 'auth_error', 'req-r1', 'bad key synthetic-router-one-key', '{"error":"bad key synthetic-router-one-key"}'));
+    const error = await runTestChat(routerOne, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('unconfirmed');
+    expect(error.diagnostic).toMatchObject({ httpStatus: 401, providerCode: 'invalid_api_key', providerRequestId: 'req-r1' });
+    expect(JSON.stringify(error.diagnostic)).not.toContain('synthetic-router-one-key');
+  });
+
+  it('never quotes a zero or missing tariff as a ceiling', () => {
+    expect(routerOneTariffCeilingNanoUsd(action.messages, [])).toBe(0);
+    expect(routerOneTariffCeilingNanoUsd(action.messages, [band(-1, '0', '0')])).toBe(0);
+    expect(routerOneTariffCeilingNanoUsd(action.messages, [band(-1, '0.2', '0.8')])).toBe(routerOneHold(0.2, 0.8));
+  });
+});
+
+
+describe('every AI provider NavBharatAI uses is in the Test Chat Bot list (admin 2026-11-15)', () => {
+  const quote = (priceIn: number, priceOut: number, outputTokens = TEST_CHAT_MAX_OUTPUT_TOKENS) => {
+    const inputTokens = Buffer.byteLength(JSON.stringify(action.messages), 'utf8') + 256;
+    return maximumCostNanoUsd(inputTokens, outputTokens, usdToNanoUsd(priceIn), usdToNanoUsd(priceOut));
+  };
+  const okReply = (model: string) => ({ content: `Hello from ${model}`, model, usage: { inputTokens: 2, outputTokens: 3 } });
+
+  it('maps every provider family the switch board knows to a Test Chat Bot entry (fails when a new provider is added without one)', async () => {
+    const { PROVIDER_FAMILIES } = await import('./providerSwitches');
+    const COVERAGE: Record<string, readonly string[]> = {
+      sarvam: ['sarvam-speech'], surplus: ['surplus'], 'router-one': ['router-one'],
+      glm: ['glm-4.5-flash', 'glm-4.7-flash', 'glm-4.7-flashx', 'glm-4.6v-flash', 'glm-builder'],
+      kimi: ['kimi'], anthropic: ['anthropic-claude'],
+      gemini: ['gemini-2.5-flash-lite-paid', 'gemini-2.5-flash-lite-free', 'gemini-2.5-flash'],
+      vertex: ['vertex-gemini'], openai: ['openai-gpt-5-nano'], xai: ['xai-grok'],
+      openrouter: ['openrouter-verified-free', 'nemotron'],
+      deepinfra: ['deepinfra-llama-3.1-8b-turbo', 'deepinfra-deepseek-v4-flash'],
+      qubax: ['qubax'], mitrify: ['mitrify'], cheaperinference: ['cheaperinference-beam'], groq: ['groq'],
+      deepseek: ['deepseek-flash'], cloudflare: ['cloudflare-workers-ai'], pollinations: ['pollinations-image'],
+      bedrock: ['bedrock-glm'], nvidia: ['nvidia-nemotron'], modelscope: ['modelscope'], llm7: ['llm7'],
+      bluesminds: ['bluesminds'], requesty: ['requesty'],
+      moyi: ['moyi'], discountedtokens: ['discountedtokens'], mirapi: ['mirapi'],
+    };
+    const families = PROVIDER_FAMILIES.map(f => f.id);
+    expect(families.filter(id => !COVERAGE[id])).toEqual([]);
+    for (const ids of Object.values(COVERAGE)) for (const id of ids) expect(TEST_CHAT_PROVIDER_IDS).toContain(id);
+    const listed = new Set(testChatStatus().providers.map(p => p.id));
+    for (const id of TEST_CHAT_PROVIDER_IDS) expect(listed.has(id)).toBe(true);
+  });
+
+  it('lists the speech-only and image-only services disabled, naming what they do — never as a working chat', async () => {
+    vi.stubEnv('SARVAM_API_KEY', 'synthetic-sarvam-key');
+    const providers = testChatStatus().providers;
+    expect(providers.find(p => p.id === 'sarvam-speech')).toMatchObject({ configured: true, enabled: false, billed: false });
+    expect(providers.find(p => p.id === 'sarvam-speech')?.unavailableReason).toContain('text-to-speech');
+    expect(providers.find(p => p.id === 'pollinations-image')?.unavailableReason).toContain('image generation');
+    await expect(runTestChat({ ...action, provider: 'sarvam-speech' }, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'disabled' });
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+  });
+
+  it('enables Kimi on the builder’s own Kimi Code host and calls it with a typed model priced from the rate card', async () => {
+    vi.stubEnv('KIMI_API_KEY', 'synthetic-kimi-key-value');
+    vi.stubEnv('KIMI_BASE_URL', 'https://api.kimi.com/coding/v1/');
+    vi.stubEnv('KIMI_MODEL', 'kimi-k2.7-code,kimi-k2.6');
+    expect(testChatStatus().providers.find(p => p.id === 'kimi')).toMatchObject({ enabled: true, model: 'kimi-k2.7-code' });
+    fake.officialOpenAi.mockResolvedValue(okReply('kimi-k3'));
+    await runTestChat({ ...action, provider: 'kimi', model: 'kimi-k3' }, 'actor', new AbortController().signal);
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://api.kimi.com/coding/v1/chat/completions', model: 'kimi-k3' }));
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(3, 15, BUILDER_TEST_MAX_TOKENS) }));
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ stream: true, maxTokens: BUILDER_TEST_MAX_TOKENS }));
+  });
+
+  it('keeps Kimi disabled on a non-official proxy URL', () => {
+    vi.stubEnv('KIMI_API_KEY', 'synthetic-kimi-key-value');
+    vi.stubEnv('KIMI_BASE_URL', 'https://kimi-proxy.example.invalid/v1');
+    expect(testChatStatus().providers.find(p => p.id === 'kimi')).toMatchObject({ enabled: false, unavailableReason: 'This test page only calls the official Kimi / Moonshot endpoints.' });
+  });
+
+  it('honours a typed Claude model (Opus) and reserves at the Opus rate', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'synthetic-anthropic-key-value');
+    fake.officialAnthropic.mockResolvedValue(okReply('claude-opus-4-6'));
+    await runTestChat({ ...action, provider: 'anthropic-claude', model: 'claude-opus-4-6' }, 'actor', new AbortController().signal);
+    expect(fake.officialAnthropic).toHaveBeenCalledWith(expect.objectContaining({ model: 'claude-opus-4-6' }));
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(5, 25) }));
+  });
+
+  it('calls the builder GLM key and Z.AI endpoint with glm-5.3 by default', async () => {
+    vi.stubEnv('GLM_API_KEY', 'synthetic-glm-key-value');
+    expect(testChatStatus().providers.find(p => p.id === 'glm-builder')).toMatchObject({ enabled: true, model: 'glm-5.3' });
+    fake.officialOpenAi.mockResolvedValue(okReply('glm-5.3'));
+    const result = await runTestChat({ ...action, provider: 'glm-builder' }, 'actor', new AbortController().signal);
+    expect(result).toMatchObject({ provider: 'glm-builder', content: 'Hello from glm-5.3', noFallback: true });
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://api.z.ai/api/paas/v4/chat/completions', apiKey: 'synthetic-glm-key-value', model: 'glm-5.3' }));
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(1.4, 4.4, BUILDER_TEST_MAX_TOKENS) }));
+  });
+
+  it('calls Nemotron on its paid host with the price guard lifted only for that reserved call', async () => {
+    vi.stubEnv('NEMOTRON_API_KEY', 'synthetic-nemotron-key');
+    fake.officialOpenAi.mockResolvedValue(okReply('nvidia/nemotron-3-super-120b-a12b'));
+    await runTestChat({ ...action, provider: 'nemotron' }, 'actor', new AbortController().signal);
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'https://openrouter.ai/api/v1/chat/completions', model: 'nvidia/nemotron-3-super-120b-a12b', allowPaid: true,
+    }));
+    expect(fake.reserve).toHaveBeenCalledOnce();
+  });
+
+  it('never lifts the OpenRouter price guard for the verified-free entry', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'synthetic-openrouter-key');
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [{ id: 'openrouter', configured: true, key: 'synthetic-openrouter-key', model: 'm', baseURL: 'https://openrouter.ai/api/v1', priceIn: 0, priceOut: 0 }] }));
+    fake.catalogJson = async () => ({ data: [{ id: 'alpha/free:free', pricing: { prompt: '0', completion: '0' }, architecture: { modality: 'text->text' } }] });
+    fake.officialOpenAi.mockResolvedValue(okReply('alpha/free:free'));
+    await runTestChat({ ...action, provider: 'openrouter-verified-free' }, 'actor', new AbortController().signal).catch(() => undefined);
+    for (const call of fake.officialOpenAi.mock.calls) expect((call[0] as { allowPaid?: boolean }).allowPaid).toBeUndefined();
+  });
+
+  it('calls Bedrock GLM in the configured region', async () => {
+    vi.stubEnv('BEDROCK_API_KEY', 'synthetic-bedrock-key');
+    vi.stubEnv('BEDROCK_REGION', 'ap-south-1');
+    fake.officialOpenAi.mockResolvedValue(okReply('zai.glm-5'));
+    await runTestChat({ ...action, provider: 'bedrock-glm' }, 'actor', new AbortController().signal);
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'https://bedrock-runtime.ap-south-1.amazonaws.com/openai/v1/chat/completions', model: 'zai.glm-5', apiKey: 'synthetic-bedrock-key',
+    }));
+  });
+
+  it('keeps Bedrock disabled when the region is not a real AWS region name', () => {
+    vi.stubEnv('BEDROCK_API_KEY', 'synthetic-bedrock-key');
+    vi.stubEnv('BEDROCK_REGION', 'evil.example/x');
+    expect(testChatStatus().providers.find(p => p.id === 'bedrock-glm')?.enabled).toBe(false);
+  });
+
+  it('calls Vertex through the server identity, with a typed model', async () => {
+    expect(testChatStatus().providers.find(p => p.id === 'vertex-gemini')).toMatchObject({ enabled: false, unavailableReason: 'No Google Cloud project is configured on the server.' });
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'synthetic-project');
+    fake.officialVertex.mockResolvedValue(okReply('gemini-2.5-flash'));
+    await runTestChat({ ...action, provider: 'vertex-gemini', model: 'gemini-2.5-flash' }, 'actor', new AbortController().signal);
+    expect(fake.officialVertex).toHaveBeenCalledWith(expect.objectContaining({ model: 'gemini-2.5-flash', client: { synthetic: 'vertex-client' } }));
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(0.3, 2.5) }));
+  });
+
+  it('calls Surplus once on its min90 price route, never the retrying builder transport, reserved at the Sonnet ceiling', async () => {
+    vi.stubEnv('SURPLUS_API_KEY', 'synthetic-surplus-key');
+    expect(testChatStatus().providers.find(p => p.id === 'surplus')).toMatchObject({ enabled: true, model: 'deepseek-v4.1-flash' });
+    fake.officialOpenAi.mockResolvedValue(okReply('deepseek-v4.1-flash'));
+    await runTestChat({ ...action, provider: 'surplus' }, 'actor', new AbortController().signal);
+    expect(fake.officialOpenAi).toHaveBeenCalledOnce();
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'https://api.surplusintelligence.ai/min90/v1/chat/completions', model: 'deepseek-v4.1-flash',
+      extraBody: { si_route: { objective: 'price' } },
+    }));
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(3, 15) }));
+  });
+
+  it('redacts every new provider key from an error diagnostic', async () => {
+    vi.stubEnv('GLM_API_KEY', 'synthetic-glm-secret-value');
+    fake.officialOpenAi.mockRejectedValue(new OfficialTestChatError('auth', 401, 'invalid_key', null, null, 'bad synthetic-glm-secret-value', 'bad synthetic-glm-secret-value'));
+    const error = await runTestChat({ ...action, provider: 'glm-builder' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.reason).toBe('unconfirmed');
+    expect(JSON.stringify(error.diagnostic)).not.toContain('synthetic-glm-secret-value');
+  });
+});
+
+describe('user-chat policy gates do not block an admin test (admin 2026-11-16: BluesMinds "pahle test kar lu, fir fix karna")', () => {
+  const bluesRung = (overrides: Record<string, unknown> = {}) => ({
+    id: 'bluesminds', configured: true, key: 'synthetic-blues-key', keyEnv: 'FREE_CHAIN_BLUESMINDS_API_KEY',
+    model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1', reason: 'terms-unverified',
+    streamUsage: false, priceIn: 0, priceOut: 0, ...overrides,
+  });
+
+  it('the real config keeps BluesMinds OFF for user chat until written approval — that is the gate this page now looks past', async () => {
+    const { freeChainConfig: real } = await vi.importActual<typeof import('../AI/FreeChain/config')>('../AI/FreeChain/config');
+    const rung = real({ FREE_CHAIN_BLUESMINDS_API_KEY: 'synthetic-blues-key' } as NodeJS.ProcessEnv).rungs.find(r => r.id === 'bluesminds');
+    expect(rung).toMatchObject({ configured: true, reason: 'terms-unverified', model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1' });
+  });
+
+  it('lists BluesMinds as testable when its key is set, saying user chat keeps it off, and calls api.bluesminds.com', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung()] }));
+    const status = testChatStatus().providers.find(p => p.id === 'bluesminds');
+    expect(status).toMatchObject({ configured: true, enabled: true, model: 'openai/gpt-oss-20b' });
+    expect(status?.note).toContain('User chat keeps this provider off');
+    fake.compatTurn.mockResolvedValue({ content: 'Hello from BluesMinds', model: 'openai/gpt-oss-20b' });
+    (await import('./providerModelPicker')).__resetProviderModelCache();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [{ id: 'openai/gpt-oss-20b' }] }), { status: 200 })));
+    const result = await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal);
+    expect(result).toMatchObject({ provider: 'bluesminds', content: 'Hello from BluesMinds', noFallback: true });
+    expect(fake.compatCtor).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'BLUESMINDS', key: 'synthetic-blues-key', baseURL: 'https://api.bluesminds.com/v1', model: 'openai/gpt-oss-20b',
+    }));
+    expect(fake.compatTurn).toHaveBeenCalledOnce();
+  });
+
+  it.each(['terms-non-production', 'terms-shared-access', 'disabled'])('a %s rung is testable too', reason => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung({ reason })] }));
+    expect(testChatStatus().providers.find(p => p.id === 'bluesminds')?.enabled).toBe(true);
+  });
+
+  it('still refuses a rung whose model is not on the allowlist, naming that — never hidden behind the terms reason', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung({ model: '' })] }));
+    expect(testChatStatus().providers.find(p => p.id === 'bluesminds')).toMatchObject({ enabled: false, unavailableReason: 'The configured model is not on the server allowlist.' });
+    await expect(runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal)).rejects.toMatchObject({ reason: 'disabled' });
+    expect(fake.compatTurn).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a missing key, a missing account and an unverified paid rate card', () => {
+    for (const rung of [bluesRung({ configured: false, key: '', reason: 'unconfigured' }), bluesRung({ reason: 'account-unconfigured' }), bluesRung({ reason: 'rate-card-unverified' })]) {
+      fake.budgetConfig.mockReturnValue(budget({ rungs: [rung] }));
+      expect(testChatStatus().providers.find(p => p.id === 'bluesminds')?.enabled).toBe(false);
+    }
+  });
+});
+
+
+describe('the test page streams every provider the builder or user chat streams (admin report 2026-11-16: BluesMinds timed out at 60,142 ms)', () => {
+  const bluesRung = { id: 'bluesminds', configured: true, key: 'synthetic-blues-key', keyEnv: 'FREE_CHAIN_BLUESMINDS_API_KEY',
+    model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1', reason: 'terms-unverified', streamUsage: false, priceIn: 0, priceOut: 0 };
+
+  it('calls a Free Chat rung with onChunk, as user chat does — never a non-streamed wait for the whole answer', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    fake.compatTurn.mockResolvedValue({ content: 'streamed reply', model: 'openai/gpt-oss-20b' });
+    await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal);
+    expect(fake.compatTurn.mock.calls[0]?.[0]).toMatchObject({ onChunk: expect.any(Function) });
+  });
+
+  it.each([
+    ['xai-grok', 'XAI_API_KEY', undefined],
+    ['glm-builder', 'GLM_API_KEY', BUILDER_TEST_MAX_TOKENS],
+    ['nemotron', 'NEMOTRON_API_KEY', BUILDER_TEST_MAX_TOKENS],
+    ['bedrock-glm', 'BEDROCK_API_KEY', BUILDER_TEST_MAX_TOKENS],
+  ] as const)('streams %s', async (provider, keyEnv, maxTokens) => {
+    vi.stubEnv(keyEnv, 'synthetic-key-value');
+    fake.officialOpenAi.mockResolvedValue({ content: 'ok', model: 'm' });
+    await runTestChat({ ...action, provider }, 'actor', new AbortController().signal);
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ stream: true }));
+    if (maxTokens) expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ maxTokens }));
+  });
+
+  it('keeps Surplus non-streamed, as the builder’s dedicated Surplus runner is', async () => {
+    vi.stubEnv('SURPLUS_API_KEY', 'synthetic-surplus-key');
+    fake.officialOpenAi.mockResolvedValue({ content: 'ok', model: 'deepseek-v4.1-flash' });
+    await runTestChat({ ...action, provider: 'surplus' }, 'actor', new AbortController().signal);
+    expect((fake.officialOpenAi.mock.calls[0]?.[0] as { stream?: boolean }).stream).toBeUndefined();
+  });
+});
+
+
+describe('a network failure says whether this server can reach the provider (admin report 2026-11-16)', () => {
+  const bluesRung = { id: 'bluesminds', configured: true, key: 'synthetic-blues-key', keyEnv: 'FREE_CHAIN_BLUESMINDS_API_KEY',
+    model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1', reason: 'terms-unverified', streamUsage: false, priceIn: 0, priceOut: 0 };
+
+  it('the exact BluesMinds failure (NETWORK, no HTTP status) gets a keyless /models check in its message, and the typed model', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    fake.compatTurn.mockRejectedValue(new FreeChainProviderError('NETWORK'));
+    const probe = vi.fn(async () => new Response('{"error":{"message":"Invalid token"}}', { status: 401 }));
+    vi.stubGlobal('fetch', probe);
+    const error = await runTestChat({ ...action, provider: 'bluesminds', model: 'z-ai/glm4.7' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.diagnostic?.providerMessage).toContain('Reachability check');
+    expect(error.diagnostic?.providerMessage).toContain('HTTP 401');
+    expect(error.diagnostic?.model).toBe('z-ai/glm4.7');
+    const [url, init] = probe.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://api.bluesminds.com/v1/models');
+    expect(JSON.stringify(init?.headers ?? {})).not.toContain('synthetic-blues-key');
+  });
+
+  it('does not probe when the provider did answer with an HTTP status', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    fake.compatTurn.mockRejectedValue(new FreeChainProviderError('NETWORK', { status: 502 }));
+    const probe = vi.fn();
+    vi.stubGlobal('fetch', probe);
+    await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal).catch(() => undefined);
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it('an official provider network failure is checked against the endpoint it was sent to', async () => {
+    vi.stubEnv('GLM_API_KEY', 'synthetic-glm-key-value');
+    fake.officialOpenAi.mockRejectedValue(new OfficialTestChatError('timeout', null, 'TimeoutError', null, null, null, null));
+    const probe = vi.fn(async () => { throw Object.assign(new Error('t'), { name: 'TimeoutError' }); });
+    vi.stubGlobal('fetch', probe);
+    const error = await runTestChat({ ...action, provider: 'glm-builder' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect((probe.mock.calls[0] as unknown as [string])[0]).toBe('https://api.z.ai/api/paas/v4/models');
+    expect(error.diagnostic?.providerMessage).toContain('cannot reach the host');
+  });
+});
+
+describe('the exact BluesMinds model_not_found answer lists the models the key can use', () => {
+  it('appends the key-visible model list to the diagnostic', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [{ id: 'bluesminds', configured: true, key: 'synthetic-blues-key', keyEnv: 'FREE_CHAIN_BLUESMINDS_API_KEY',
+      model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1', reason: 'terms-unverified', streamUsage: false, priceIn: 0, priceOut: 0 }] }));
+    fake.compatCtor.mockImplementation((config: { adminErrorDetail?: (d: unknown) => void }) => {
+      fake.compatTurn.mockImplementation(async () => {
+        config.adminErrorDetail?.({ httpStatus: 503, providerCode: 'model_not_found', providerType: 'new_api_error',
+          providerMessage: 'No available channel for model z-ai/glm4.7 under group default (distributor)', rawErrorBody: null, requestId: null });
+        throw new FreeChainProviderError('SERVER', { status: 503 });
+      });
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [{ id: 'deepseek-v4-flash' }, { id: 'qwen/qwen3-coder' }] }), { status: 200 })));
+    const error = await runTestChat({ ...action, provider: 'bluesminds', model: 'z-ai/glm4.7' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.diagnostic?.providerMessage).toContain('Models this key can use');
+    expect(error.diagnostic?.providerMessage).toContain('deepseek-v4-flash');
+    expect(JSON.stringify(error.diagnostic)).not.toContain('synthetic-blues-key');
+  });
+});
+
+describe('BluesMinds picks models from the key\'s own list and tries the next on failure (admin 2026-11-16)', () => {
+  const bluesRung = { id: 'bluesminds', configured: true, key: 'synthetic-blues-key', keyEnv: 'FREE_CHAIN_BLUESMINDS_API_KEY',
+    model: 'openai/gpt-oss-20b', baseURL: 'https://api.bluesminds.com/v1', reason: 'terms-unverified', streamUsage: false, priceIn: 0, priceOut: 0 };
+  const listOf = (ids: string[]) => vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: ids.map(id => ({ id })) }), { status: 200 })));
+
+  beforeEach(async () => { (await import('./providerModelPicker')).__resetProviderModelCache(); });
+
+  it('when the first model is missing for the key, tries the second and returns its answer', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    listOf(['deepseek-v4-flash', 'qwen/qwen3-coder', 'moonshotai/kimi-k2.6']);
+    const models: string[] = [];
+    fake.compatCtor.mockImplementation((config: { model: string; timeoutMs: number }) => { models.push(config.model); });
+    fake.compatTurn
+      .mockRejectedValueOnce(new FreeChainProviderError('SERVER', { status: 503 }))
+      .mockResolvedValueOnce({ content: 'Hello from the second model', model: 'qwen/qwen3-coder' });
+    const result = await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal);
+    expect(result).toMatchObject({ content: 'Hello from the second model', model: 'qwen/qwen3-coder' });
+    expect(models).toEqual(['deepseek-v4-flash', 'qwen/qwen3-coder']);
+    // The reply names every try, including the one that failed before the answer (admin 2026-11-16).
+    expect(result.tries?.map(t => [t.model, t.outcome])).toEqual([['deepseek-v4-flash', 'HTTP 503 SERVER'], ['qwen/qwen3-coder', 'answered']]);
+  });
+
+  it('reports every attempt when all three fail, and stops at once on a refused key', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    listOf(['deepseek-v4-flash', 'qwen/qwen3-coder', 'moonshotai/kimi-k2.6']);
+    fake.compatTurn.mockRejectedValue(new FreeChainProviderError('TIMEOUT'));
+    const error = await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(error.diagnostic).toMatchObject({ providerCode: 'ALL_MODELS_FAILED', finalOutcome: 'all-models-failed' });
+    expect(error.diagnostic?.attempts?.map(a => a.model)).toEqual(['deepseek-v4-flash', 'qwen/qwen3-coder', 'moonshotai/kimi-k2.6']);
+    expect(error.diagnostic?.providerMessage).toContain("key's own model list");
+
+    fake.compatTurn.mockReset();
+    fake.compatTurn.mockRejectedValue(new FreeChainProviderError('AUTH', { status: 401 }));
+    const refused = await runTestChat({ ...action, provider: 'bluesminds' }, 'actor', new AbortController().signal).catch(value => value) as TestChatUnavailable;
+    expect(refused.diagnostic?.attempts).toHaveLength(1);
+  });
+
+  it('a typed model is the only model tried', async () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    const listing = vi.fn();
+    vi.stubGlobal('fetch', listing);
+    fake.compatTurn.mockResolvedValue({ content: 'typed', model: 'moonshotai/kimi-k2.6' });
+    await runTestChat({ ...action, provider: 'bluesminds', model: 'moonshotai/kimi-k2.6' }, 'actor', new AbortController().signal);
+    expect(listing).not.toHaveBeenCalled();
+    expect(fake.compatTurn).toHaveBeenCalledOnce();
+  });
+
+  it('says so on the entry', () => {
+    fake.budgetConfig.mockReturnValue(budget({ rungs: [bluesRung] }));
+    expect(testChatStatus().providers.find(p => p.id === 'bluesminds')?.note).toContain('tries them in turn');
+  });
+});
+
+describe('discount reseller gateways are testable here and nowhere else (owner 2026-11-16)', () => {
+  const quote = (priceIn: number, priceOut: number) => {
+    const inputTokens = Buffer.byteLength(JSON.stringify(action.messages), 'utf8') + 256;
+    return maximumCostNanoUsd(inputTokens, TEST_CHAT_MAX_OUTPUT_TOKENS, usdToNanoUsd(priceIn), usdToNanoUsd(priceOut));
+  };
+  const row = (id: string) => testChatStatus().providers.find(p => p.id === id);
+  const run = (provider: 'moyi' | 'discountedtokens' | 'mirapi', model?: string) =>
+    runTestChat({ ...action, provider, ...(model ? { model } : {}) }, 'actor', new AbortController().signal);
+  beforeEach(async () => { (await import('./providerModelPicker')).__resetProviderModelCache(); });
+
+  it('all three are listed, and disabled with the missing key named until a key is set', () => {
+    for (const [id, keyEnv] of [['moyi', 'MOYI_API_KEY'], ['discountedtokens', 'DISCOUNTEDTOKENS_API_KEY'], ['mirapi', 'MIRAPI_API_KEY']]) {
+      expect(row(id)).toMatchObject({ configured: false, enabled: false, billed: true });
+      expect(row(id)?.unavailableReason).toContain(keyEnv);
+    }
+  });
+
+  it('DiscountedTokens calls its published endpoint and model, reserving the list-price ceiling, in one streamed call', async () => {
+    vi.stubEnv('DISCOUNTEDTOKENS_API_KEY', 'synthetic-dt-key-value');
+    expect(row('discountedtokens')).toMatchObject({ configured: true, enabled: true, model: 'gpt-6-sol' });
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hello', model: 'gpt-6-sol', usage: { inputTokens: 2, outputTokens: 3 } });
+    await expect(run('discountedtokens')).resolves.toMatchObject({ content: 'Hello', model: 'gpt-6-sol', noFallback: true });
+    expect(fake.officialOpenAi).toHaveBeenCalledTimes(1);
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'https://discountedtokens.com/v1/chat/completions', apiKey: 'synthetic-dt-key-value', model: 'gpt-6-sol', stream: true }));
+    expect(fake.reserve).toHaveBeenCalledWith(expect.objectContaining({ maxCostNanoUsd: quote(10, 50) }));
+  });
+
+  it('MirAPI has no invented endpoint: a key alone leaves it disabled, asking for the base URL', async () => {
+    vi.stubEnv('MIRAPI_API_KEY', 'synthetic-mir-key-value');
+    expect(row('mirapi')).toMatchObject({ configured: true, enabled: false });
+    expect(row('mirapi')?.unavailableReason).toContain('MIRAPI_BASE_URL');
+    await expect(run('mirapi')).rejects.toMatchObject({ reason: 'disabled' });
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+  });
+
+  it('Moyi with a key alone: an OpenAI model goes to its /v1 endpoint, every other model to its Anthropic-format endpoint', async () => {
+    vi.stubEnv('MOYI_API_KEY', 'synthetic-moyi-key-value');
+    expect(row('moyi')).toMatchObject({ configured: true, enabled: true });
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hi', model: 'gpt-6-sol' });
+    fake.officialAnthropic.mockResolvedValue({ content: 'Hi', model: 'grok-4.7' });
+    for (const model of ['gpt-6-sol', 'openai/gpt-5.6-terra', 'o3-mini']) {
+      await run('moyi', model);
+      expect(fake.officialOpenAi).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'https://api.moyi-api.com/v1/chat/completions', apiKey: 'synthetic-moyi-key-value', model }));
+    }
+    expect(fake.officialAnthropic).not.toHaveBeenCalled();
+    fake.officialOpenAi.mockClear();
+    for (const model of ['grok-4.7', 'claude-haiku-5-5', 'deepseek-v4.1-flash', 'gemini-3.8-flash']) {
+      await run('moyi', model);
+      expect(fake.officialAnthropic).toHaveBeenLastCalledWith(expect.objectContaining({ baseURL: 'https://api.moyi-api.com', apiKey: 'synthetic-moyi-key-value', model }));
+    }
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+    expect(fake.reserve).toHaveBeenCalledTimes(7);
+  });
+
+  it('only Moyi has a second endpoint: DiscountedTokens sends a non-OpenAI model id to its one OpenAI-format endpoint', async () => {
+    vi.stubEnv('DISCOUNTEDTOKENS_API_KEY', 'synthetic-dt-key-value');
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hi', model: 'codex-auto-review' });
+    await run('discountedtokens', 'grok-4.7');
+    expect(fake.officialOpenAi).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://discountedtokens.com/v1/chat/completions', model: 'grok-4.7' }));
+    expect(fake.officialAnthropic).not.toHaveBeenCalled();
+  });
+
+  it('Moyi’s Anthropic-format endpoint must also be on its own domain', () => {
+    vi.stubEnv('MOYI_API_KEY', 'synthetic-moyi-key-value');
+    vi.stubEnv('MOYI_ANTHROPIC_BASE_URL', 'https://api.moyi-api.com.evil.example');
+    expect(row('moyi')).toMatchObject({ enabled: false });
+    expect(row('moyi')?.unavailableReason).toContain('MOYI_ANTHROPIC_BASE_URL');
+  });
+
+  it.each([
+    'http://api.moyi-api.com/v1', 'https://moyi-api.com.evil.example/v1', 'https://evilmoyi-api.com/v1',
+    'https://api.moyi-api.com:8443/v1', 'https://user:pw@api.moyi-api.com/v1', 'https://api.moyi-api.com/v1?x=1', 'https://api.mirapi.ai/v1',
+  ])('the key is never sent off the provider’s own domain: %s is refused', async baseUrl => {
+    vi.stubEnv('MOYI_API_KEY', 'synthetic-moyi-key-value');
+    vi.stubEnv('MOYI_BASE_URL', baseUrl);
+    expect(row('moyi')).toMatchObject({ enabled: false });
+    await expect(run('moyi')).rejects.toMatchObject({ reason: 'disabled' });
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('with no model configured it uses a chat model from the key’s own list; a typed model wins without reading the list', async () => {
+    vi.stubEnv('MIRAPI_API_KEY', 'synthetic-mir-key-value');
+    vi.stubEnv('MIRAPI_BASE_URL', 'https://api.mirapi.ai/v1/');
+    const list = vi.fn(async () => new Response(JSON.stringify({ data: [{ id: 'gpt-image-2' }, { id: 'gpt-6-luna' }] }), { status: 200 }));
+    vi.stubGlobal('fetch', list);
+    fake.officialOpenAi.mockResolvedValue({ content: 'Hi', model: 'gpt-6-luna' });
+    await run('mirapi');
+    expect(list).toHaveBeenCalledWith('https://api.mirapi.ai/v1/models', expect.anything());
+    expect(fake.officialOpenAi).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'https://api.mirapi.ai/v1/chat/completions', model: 'gpt-6-luna' }));
+    list.mockClear();
+    await run('mirapi', 'claude-haiku-5-5');
+    expect(list).not.toHaveBeenCalled();
+    expect(fake.officialOpenAi).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'claude-haiku-5-5' }));
+  });
+
+  it('no listed model and none typed means no call and no reserve; a refused budget means no call', async () => {
+    vi.stubEnv('MOYI_API_KEY', 'synthetic-moyi-key-value');
+    vi.stubEnv('MOYI_BASE_URL', 'https://api.moyi-api.com/v1');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"data":[]}', { status: 200 })));
+    await expect(run('moyi')).rejects.toMatchObject({ reason: 'no-model' });
+    expect(fake.reserve).not.toHaveBeenCalled();
+    fake.reserve.mockResolvedValue(null);
+    await expect(run('moyi', 'grok-4.7')).rejects.toMatchObject({ reason: 'budget' });
+    expect(fake.officialOpenAi).not.toHaveBeenCalled();
+  });
+  // Owner 2026-11-17 (DiscountedTokens): "sabse pahle sasta aur accha call ho, response na aaye to 2nd, fail hone par
+  // 3rd (last try), 3rd bhi fail to discounted token chhod ke aage badho".
+  describe("the gateway's own three-model fallback", () => {
+    const listing = (ids: string[]) => vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: ids.map(id => ({ id })) }), { status: 200 })));
+    const models = () => fake.officialOpenAi.mock.calls.map(c => (c[0] as { model: string }).model);
+    const refused = (status: number) => new OfficialTestChatError('http', status, `E${status}`, null, null, 'refused', null);
+    beforeEach(() => { vi.stubEnv('DISCOUNTEDTOKENS_API_KEY', 'synthetic-dt-key-value'); });
+
+    it('tries the owner-listed models in order, then fills from the key list; the second answers', async () => {
+      vi.stubEnv('DISCOUNTEDTOKENS_MODEL', 'gpt-6-luna,gpt-6-sol');
+      listing(['gpt-6-sol', 'gpt-6-astra', 'text-embedding-4']);
+      fake.officialOpenAi.mockRejectedValueOnce(refused(503)).mockResolvedValueOnce({ content: 'Hello from sol', model: 'gpt-6-sol' });
+      const result = await run('discountedtokens');
+      expect(result).toMatchObject({ content: 'Hello from sol', model: 'gpt-6-sol' });
+      expect(models()).toEqual(['gpt-6-luna', 'gpt-6-sol']);
+      expect(result.tries?.map(t => [t.model, t.outcome])).toEqual([['gpt-6-luna', expect.stringContaining('503')], ['gpt-6-sol', 'answered']]);
+      // Each try holds its own budget reservation, so one test never spends past its ceiling twice on one hold.
+      const ids = fake.reserve.mock.calls.map(c => (c[0] as { requestId: string }).requestId);
+      expect(new Set(ids).size).toBe(2);
+    });
+
+    it('all three fail: every attempt is reported, a fourth model is never tried', async () => {
+      listing(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna', 'gpt-6-nova']);
+      fake.officialOpenAi.mockRejectedValue(refused(500));
+      const error = await run('discountedtokens').catch(value => value) as TestChatUnavailable;
+      expect(error.diagnostic).toMatchObject({ providerCode: 'ALL_MODELS_FAILED', finalOutcome: 'all-models-failed' });
+      expect(models()).toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna']);
+      expect(error.diagnostic?.attempts?.map(a => a.model)).toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna']);
+    });
+
+    it('a refused key stops at once', async () => {
+      listing(['gpt-6-sol', 'gpt-6-astra']);
+      fake.officialOpenAi.mockRejectedValue(refused(401));
+      const error = await run('discountedtokens').catch(value => value) as TestChatUnavailable;
+      expect(error.diagnostic?.attempts).toHaveLength(1);
+      expect(models()).toEqual(['gpt-6-sol']);
+    });
+
+    it('no response within 45 s moves on; a model that is answering keeps its time (the 90,001 ms coding cut)', async () => {
+      vi.useFakeTimers();
+      try {
+        listing(['gpt-6-sol', 'gpt-6-astra']);
+        // First model: silent until its signal aborts. Second: starts streaming at once, finishes after 100 s.
+        fake.officialOpenAi
+          .mockImplementationOnce(({ signal }: { signal: AbortSignal }) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(new OfficialTestChatError('cancelled', null, 'aborted', null, null, null, null)))))
+          .mockImplementationOnce(({ onActivity }: { onActivity: () => void }) => { onActivity(); return new Promise(resolve => setTimeout(() => resolve({ content: 'function add(a, b) { return a + b; }', model: 'gpt-6-astra' }), 100_000)); });
+        const pending = run('discountedtokens');
+        await vi.advanceTimersByTimeAsync(45_000);
+        await vi.advanceTimersByTimeAsync(100_000);
+        const result = await pending;
+        expect(result).toMatchObject({ model: 'gpt-6-astra' });
+        expect(result.tries?.[0]).toMatchObject({ model: 'gpt-6-sol', outcome: expect.stringMatching(/timeout|NO_RESPONSE/i) });
+      } finally { vi.useRealTimers(); }
+    });
+
+    it('a typed model is the only one tried, and the whole test may take up to 4 minutes', async () => {
+      listing(['gpt-6-sol', 'gpt-6-astra']);
+      fake.officialOpenAi.mockRejectedValue(refused(500));
+      await expect(run('discountedtokens', 'gpt-6-astra')).rejects.toBeDefined();
+      expect(models()).toEqual(['gpt-6-astra']);
+      const { RESELLER_TEST_BUDGET_MS, RESELLER_FIRST_RESPONSE_MS } = await import('./testChatBot');
+      expect([RESELLER_TEST_BUDGET_MS, RESELLER_FIRST_RESPONSE_MS]).toEqual([240_000, 45_000]);
+    });
+
+    it('the entry says it tries up to three models', () => {
+      expect(row('discountedtokens')?.note).toContain('tries up to three');
+    });
+  });
+});

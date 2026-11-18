@@ -9,19 +9,15 @@ import type { BuildPhase } from './previewReloadPolicy';
 import type { QueueContinuationTicket } from '../../lib/queueContinuation';
 
 /**
- * User-facing cost breakdown — mirrors the server's UserCostBreakdown (routes/agentv3.ts).
- * ANONYMIZED by design (admin rule 2026-07-15): tokens + the real bill + the user's tier, branded
- * NavBharatAI. It NEVER carries a provider/model name or our internal cost/markup — the user must
- * always feel NavBharatAI did the work, not any backend AI.
+ * User-facing charge — mirrors the server's `UserCharge` (src/server/AgentV3/userChargeView.ts), which
+ * arrives on the `result` event as `charge`. Owner t362u (2026-11-16): a user sees only rupees — never
+ * token counts, a USD amount or the USD→INR rate. ANONYMIZED too (admin rule 2026-07-15): never a
+ * provider/model name or our internal cost/markup.
  */
 export interface CostBreakdown {
-  inputTokens: number;
-  outputTokens: number;
-  billedUsd: number;
   billedInr: number;
-  usdInrRate: number;
-  tier: string;
-  engine: string;
+  tier?: string;
+  engine?: string;
   /**
    * Live-preview time charged on this build, and its ₹ (admin 2026-08-22). Both 0 when nothing was
    * charged — the honest answer when the build never held a live server. OPTIONAL because an older
@@ -173,7 +169,7 @@ export type AgentV3WireEvent =
    * which opens the verify sheet instead of leaving the user reading a sentence with nowhere to go.
    */
   | { type: 'error'; message: string; ts: number; code?: string; diagnostics?: unknown }
-  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; queueContinuation?: QueueContinuationTicket; budgetReached?: boolean; tokens?: number; planRemaining?: number; filesWritten?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string; appRendered?: boolean; /** Weak scope guidance — Switch module, not Fix with AI. */ code?: string };
+  | { type: 'result'; ok: boolean; summary: string; steps: number; /** Older servers only; never shown. */ billedUsd?: number; billedInr?: number; charge?: CostBreakdown; /** Older servers only; read through `rupeeCharge`, never rendered as is. */ costBreakdown?: unknown; diagnostics?: unknown; resumable?: boolean; queueContinuation?: QueueContinuationTicket; budgetReached?: boolean; tokens?: number; planRemaining?: number; filesWritten?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string; appRendered?: boolean; /** Weak scope guidance — Switch module, not Fix with AI. */ code?: string };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
 export interface AgentCard {
@@ -321,10 +317,11 @@ export interface AgentV3ClientState {
   done: boolean;
   ok?: boolean;
   summary?: string;
+  /** Never set from the wire any more (owner t362u); kept so older code paths still type-check. */
   billedUsd?: number;
-  /** Customer-facing bill in INR (billedUsd × the real-time USD→INR rate). */
+  /** Customer-facing bill in INR — the only amount a user sees. */
   billedInr?: number;
-  /** T1-cost-transparency — the "why this build cost ₹X" breakdown (token split, tier, markup, base). */
+  /** The rupee-only "why this build cost ₹X" breakdown (never tokens, USD or a rate). */
   costBreakdown?: CostBreakdown;
   /** T1-budget-ux — the build paused ONLY because it hit the per-build budget cap (work saved, resumable). */
   /**

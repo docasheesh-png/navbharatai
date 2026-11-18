@@ -190,6 +190,7 @@ export class Game {
   constructor(options: GameOptions) {
     this.options = options;
 
+    try {
     this.canvas = document.createElement('canvas');
     this.canvas.style.display = 'block';
     this.canvas.style.width = '100%';
@@ -298,6 +299,21 @@ export class Game {
       (delta) => this.fixedUpdate(delta),
       (alpha, frameDelta) => this.render(alpha, frameDelta),
     );
+
+    // THE LOOP FOLLOWS THE STATUS, WHOEVER SETS IT (autopsy 2026-11-17, a published battle royale). The
+    // game's own setup() called setStatus('playing') itself, so the HUD showed a running game and hid the
+    // Play menu, while start() — the only thing that ran the loop — was never called. Not one frame was
+    // drawn: an empty page behind the HUD, every control ignored. Now 'playing' from anywhere runs the loop.
+    const follow = () => { if (!this.disposed && state.status === 'playing') this.loop.start(); };
+    this.disposers.push(events.on('GAME_STARTED', follow), events.on('GAME_RESUMED', follow));
+    follow();
+    // One frame now, so the world shows behind the menu instead of an empty page. The loop draws the rest.
+    try { this.render(0, 0); } catch { /* the loop reports a render that keeps failing */ }
+    } catch (error) {
+      // A constructor can fail before its caller receives the instance. Roll back here.
+      this.dispose();
+      throw error;
+    }
   }
 
   /**
@@ -479,23 +495,23 @@ export class Game {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.loop.stop();
-    for (const off of this.disposers) { try { off(); } catch { /* teardown must never throw */ } }
-    this.input.dispose();
-    audio.stopAll();
-    this.particles.dispose();
-    this.hero?.dispose();
-    this.scene.traverse((obj) => {
+    // Partial construction is valid here; one broken cleanup must not strand later resources.
+    const safe = (release: () => void) => { try { release(); } catch { /* teardown must never throw */ } };
+    if (this.loop) safe(() => this.loop.stop());
+    for (const off of this.disposers.splice(0).reverse()) safe(off);
+    if (this.input) safe(() => this.input.dispose());
+    safe(() => audio.stopAll());
+    safe(() => this.particles.dispose());
+    safe(() => this.hero?.dispose());
+    this.scene.traverse((obj: THREE.Object3D) => {
       const mesh = obj as THREE.Mesh;
-      if (mesh.geometry) mesh.geometry.dispose();
+      if (mesh.geometry) safe(() => mesh.geometry.dispose());
     });
-    disposeMaterials();
-    this.renderer.dispose();
-    this.canvas.parentElement?.removeChild(this.canvas);
-    // This is the GAME's bus (src/game/core/events), not the app's. Clearing it is what stops handlers
-    // registered in setup() from stacking up every time the player re-enters the game route — by the
-    // third visit every hit would fire three sounds.
-    events.clear();
+    safe(() => disposeMaterials());
+    if (this.renderer) safe(() => this.renderer.dispose());
+    if (this.canvas) safe(() => this.canvas.parentElement?.removeChild(this.canvas));
+    // This is the game's bus, not the app's. Remove setup handlers on failed construction too.
+    safe(() => events.clear());
   }
 }
 `;

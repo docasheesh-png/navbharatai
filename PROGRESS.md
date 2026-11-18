@@ -101402,12 +101402,25 @@ Admin: "build karo" on the approved plan. Built: `src/server/lib/athreeMap/` —
 **Proof:** 35 new tests + census; nine reversions each caught by the right test (island, loop wrap, steep ground, desert, budget, wind uniform, cell-owned scatter, rooted trunks, tree cap). Two of my first tests were vacuous (tested a patch of sea) — the reversions exposed it and they now require non-empty results. Headless Chromium (software GL): shaders compile, glError 0; 14 percent of pixels change between two times at one camera.
 **NOT proven / ceilings:** phone frame rate (budgets only); trees have no collider; a far forest ends at the tier radius (a far impostor is the real fix); broadleaf trunks are stubby; the look is judged by the admin's eyes.
 
+## 2026-11-15 — Fresh original royale practice rebuild (not release-ready)
+
+Recovered a clean current-main checkout by verifying all 6,716 GitHub blob hashes at 2667850. Old unmerged prototype source/logs were unavailable; this is newly written code, not recovery of that tested tree. Added an experimental bounded offline recipe and guarded dispatcher/catalog/dependency integration. Default OFF; no billing, fake delays, overwrite of existing/imported source or Athree world replacement. First integration test run found a missing generated terrain import; repair and complete exact-tree validation are required. No merge/deployment or visual acceptance claimed. See docs/game-engine/original-royale-practice.md.
+
+### Original royale reconciliation with 7948bef (#4208)
+
+Preserved upstream edit promotion, verified revisions and durable requirements. Optional royale admission now additionally refuses an existing verified head, unreadable hydration/revision check, or non-starter hydrated source. Extended security census context so the default-OFF recipe is actually enabled and scanned through the real dispatcher; scan rules/assertions/callability thresholds remain unchanged. The old-main coverage run is obsolete and did not pass; final combined-tree gates and browser acceptance remain required.
+
 ## 2026-11-15 — Athree map PHASE 2b (rivers and lakes) built, default OFF
 
 Admin: "baaki sab Athree phases poore karo" — phase by phase, each its own PR. `rivers.ts` (pure) + `riverwater.ts` (three.js), emitted from `athreeRiverSource.ts`. **Network:** sources hashed in the highlands; each river traced down the steepest descent of the terrain WITHOUT rivers (three scales of slope, so a flat plain still drains to the sea; a meander on gentle ground); a trace that meets another joins it (flow adds up, width grows); a pit fills into a lake up to just under its lowest rim and an outlet river leaves from the rim; a river that finds no way out after six breaches (or runs out of length) ends in a dug terminal lake. **Every river ends in the sea, a lake or another river (0 abandoned of 639 on 10 seeds + 12 islands).** Water level only ever goes down, never above the ground 40 m out on either bank, ends at the shore of its lake. **Carve:** `heightAt` = base height minus the MINIMUM of what every segment and lake asks (a minimum of continuous functions is continuous: no cliff where two rivers meet), banks as wide as the cut is deep (slope at most 45 degrees). `world.waterAt`, `world.waterBodies()`, `world.baseHeightAt`; trees, grass and ground spawns skip water. **Draw:** ribbons (4 triangles per segment) and lake fans, built per tile, a flowing-water shader (layered noise scrolled along the flow, depth from the middle to the banks, foam), `riverWater.floatAt` for boats. Budgets tested per tier against what terrain, sea and plants leave; water drawn only where the terrain mesh can hold a bed (400 / 700 / 1300 m).
 **Defects found while building, fixed:** rivers silently written off as "limit" when they looped in a basin (class: a river that just stops) — now a pit; a carve that picked ONE nearest segment made a 10 m cliff where rivers met; the water level could stand 9 m above the bank after smoothing; `waterAt` called a lake centre a river; ribbons could open a hairline crack at tile joints (25 cm overlap now); **a 123 m cliff** where the spatial grid listed a river only 40 m out while a gorge bank reaches 100 m (a candidate popped in at a grid edge: the bank is now capped at 90 m and the grid pad covers it), and rivers that cut straight through ridges (water now treats more than 15 m of climb as a rim: lake or breach); rivers that looped or kinked on flat coasts (far-slope guidance 1 km and 4 km, momentum on gentle ground, no turning back when breaching).
 **Proof:** 28 new tests + census; 14 reversions each caught by the right test (monotone level, nearest-only carve, loop wrap, lake priority, lake under rim, tree in water, abandoned river, bank limit, budget, confluence widening, shore cut, grid pad, ridge climb, bend guidance) — five needed a stronger test first; one guard I had added (join only at the same height) no test could tell from its absence, so it was removed.
 **NOT proven / ceilings:** phone frame rate; no bridges (roads phase); no boat model; the look is judged by the admin's eyes.
+
+
+## 2026-11-15 — Preserve tree scatter while avoiding rejected-candidate terrain work
+
+The intact Athree vegetation suite exceeded its existing 20-second test limit after river-carved terrain queries were added. Reordered only pure candidate queries: reject rolls above every biome's maximum probability and ineligible biomes early, defer water/slope/species work until the candidate passes density. Random-number consumption and admitted TreeSpec attributes are unchanged; water exclusion remains mandatory. Added an independent frozen pre-optimization tree-scatter oracle and exact-output checks across real worlds, biome/slope/water boundaries, plus query-count reduction proof. Existing assertions, timeouts, scan scope and coverage thresholds remain unchanged. Focused instrumented 41 tests passed; that focused command correctly fails repository-wide coverage thresholds and is not a full CI pass. Full combined-tree validation remains required; no rollout, billing or deployment is activated by this repair.
 
 ## 2026-11-15 — Athree map PHASE 4 (desert dunes, sky, day and night, weather) built, default OFF
 
@@ -101439,3 +101452,501 @@ Admin: *"navbharatai ko module banana sikhao... user jo bole woh module user ki 
 Admin: *"SimpleBuilder.test.ts ka ek test asli timer par tikka hai, load mein kabhi bigad sakta hai. Pahle isko theek karo, bina kuch bigade!"* **Root cause (reproduced):** "a slow PLAN shrinks the contract phase" gave the plan 380 ms inside a 400 ms share of a 1000 ms lane on REAL timers, i.e. 20 ms of slack; making the plan 410 ms reproduced the exact CI failure ("expected 0 to be greater than 0"), so a 30 ms timer delay on a loaded machine failed it. **Class:** a budget test that reads the wall clock. **Fix (tests only, production code untouched):** `onFakeClock` runs the build on vitest's fake clock (Date and every timer) advanced 10 ms at a time until it settles, so a "380 ms plan" takes exactly 380 ms whatever the machine is doing; "bails FAST on a slow PLAN" got the same treatment and now asserts the real property (it waited for the 40 ms plan cap and bailed on it, before the 400 ms plan call). **Found while doing it (a pre-existing gap):** putting the OLD independent 900 ms contract cap back changed NO test result, because a contract runs only if `contractCap > 0` AND `canAffordSharedContract` agrees and on that scenario the second says no whatever the first says. Two new WIRING tests run a COMPLEX lane (which skips the second check): a slow plan leaves the contract a sliver and it is cut; a fast plan leaves room and the contract reaches every file prompt. A third test stalls the real thread 250 ms inside every call (`Atomics.wait`: Date, performance and process.hrtime are all faked by vitest) and expects the same observable.
 **Proof:** 3 reversions of `SimpleBuilder.ts` each caught (independent contract cap: the new wiring test; contract never runs: 4 tests; plan cap ignored: the bails-fast test); the whole file passes 3 of 3 under 12 busy loops on 4 cores. **Siblings hunted:** every other test in `src/server/AgentV3` that uses real timers either has a margin of an order of magnitude (a 40 ms budget against a 2000 ms ceiling) or depends on the ORDER of two timers, which load does not change; this was the only one with 5 percent slack.
 
+## 2026-11-15 — THE OBJECT FORGE: NavBharatAI makes any object itself (Q-2672 open)
+
+Admin: *"navbharatai koi bhi object/subject bana paye, aisa bana do!!"* and *"jo module library me na ho, NavBharatAI user ki maang ke anusar khud banaye aur game me jode"*. The library and the Athree modules are things already made; this is the other half. **What exists now:** the builder calls `run_recipe({ name: "author_object", input: { spec } })`. A spec is a JSON tree: ten primitives (box, sphere/ellipsoid, cylinder/cone, capsule, torus, lathe, loft, extrude, tube, plane), pivots, `mirror` (a reflected copy, clips reflected too, `mirrorPhase` for a walk), `repeat` (step or around), materials, animation clips. `src/server/lib/objectForge/`: `forgeEngineSource.ts` (the engine; written into the game as `src/game/forge/forge.ts` AND evaluated by the server, so there is no second implementation to drift), `forgeCheckSource.ts` (validate, measure, draw), `forgeRuntime.ts`, `ObjectForgeGenerator.ts` (kit recipe, guide, kill switch `AGENTV3_OBJECT_FORGE`, default ON), `forgeExamples.ts` (person, quadruped, house, tree, sword). **The loop that makes a model's blind spec good:** validation names the exact path and fix for each mistake (a bow-tie outline, a tube radius list of the wrong length, a repeat that stacks its copies); measurement reports triangles, size in metres, base height, centring, PARTS FLOATING FREE of the body, a clip that drives the object under the floor or blows it up; and the object is DRAWN back as FRONT / SIDE / TOP text silhouettes with one symbol per material, nearer surfaces over farther. The builder reads, fixes, calls again with the same id (the object file is replaced). **Verified in a real browser** (three 0.180 + chromium): all five examples render correctly and the person and animal walk with opposite-limb swing.
+**Defects found and fixed while building it (each locked by a test proven by reversion):** wall winding of loft/tube/lathe/cylinder/pole fans (each reversion fails its shape's tests; the lathe rule was first masked by a volume test that is origin-dependent for an open wall, so a flared lathe far from the origin now pins it, and a watertight/consistent-edge check pins the pole fans); mirrored copies flipping winding (negative scale); repeat copies each rebuilding their own geometry; the top view drawing the face at the bottom while labelled top. 14 reversions of the engine, checker and dispatcher each fail the test that names them.
+**Honest ceiling (stated to the user by the tool, the guide and the prompt):** stylised low-poly figures from primitives, not photoreal faces, clothing, fur or scanned models. **Open (Q-2672):** no live model has authored through it yet; humans/animals as a larger preset set, texture patterns, skinned meshes and collision shapes from a spec are not built.
+
+## 2026-11-15 (later) — Object Forge: SELF-AUTHORING, and what the first local CI run found (4 sibling censuses)
+Admin: *"asli insaan ya koi bhi cheez apne-aap bane, api call se"* / *"atma nirbhar banao"*. **Built:** `author_object({ describe: "a lighthouse with a spiral stair" })` — `forgeSelfAuthor.ts` asks a model for a spec (free router namespace, never Claude, never NavBharatAI money), runs the Forge on it, and when it comes back with errors or warnings hands the model THE FORGE'S OWN REPORT (the numbers and the FRONT/SIDE/TOP drawings, its previous spec) and asks for the corrected whole spec; up to 4 rounds; best result by `warningScore` (two detached groups are worse than one); the id is the Forge's, not the model's; a catalogue entry's real size and parts ride along as ground truth; the same description twice is one model call (bounded cache); a model that is down or talks nonsense writes NOTHING and points the builder at the spec route. 24 tests, 8 reversions each caught.
+**The first local CI run was RED (4 tests of 51423) and every one was a sibling census I had not hunted:** (1) `toolWork.ts` did not classify `author_object` — a tool that writes files would have counted as "no work" for the plan-only-turn check → now in `PRODUCES_WORK_TOOLS`; (2) `aPromiseToTheUserHasAHandler` read my prompt sentence `say "stylised"` as an instruction to the user to type a phrase → reworded (class: a sentence that tells the user to say X); (3) `aRecipeExampleCompiles` requires every game recipe to carry a compiled code example → the Forge recipe now ships one, typechecked against the real `forge.ts`; (4) `gameKitHistoryCommand` copies the generator folders it bundles → now loops over `athreeMap` and `objectForge`. Also `scripts/gameKitHistory.mjs` lists the new generator.
+**NOT built, honestly:** photoreal humans and scanned or sculpted models need a text-to-3D mesh service (real cost per object, 30–120 s, a mesh to host and license; declined by the admin on 2026-09-14 in `objectSpecProvider.ts`; no provider key is set). Recommendation: first see what self-authoring produces in a real build; if stylised is not enough, the admin decides the key and the cost, and an adapter goes behind the key with an honest "not available" while it is unset. A complete game MODULE is code the builder already writes; the Forge covers 3D objects only.
+**Second local CI run: RED on a 5th sibling census (1 of 51446).** `tests/boundedCaches.test.ts` found a raw module-level `Map` in `forgeSelfAuthor.ts` (bounded by hand-written eviction): class = per-instance state that must be a `BoundedCache`. Now one, and the census passes. No other raw module-level Map/Set was added by the Forge.
+
+## 2026-11-15 (later still) — THE AUTO-CUSTOMISER: the user's words change the object
+Admin: *"auto customiser banao — user ke bas bolte bhar se jo chahe edit ho jaye."* `author_object({ customise: "dress ka rang neela, baal bade, thoda lamba", target: "<id>" })`. `forgeCustomise.ts`: (1) a parser for English, Hinglish and Hindi script (colours with their inflections and dark/light, roles dress/hair/shoes/skin/clothes/pants/eyes/hat, sizes, gender, hair length, wearing a dress, a named part of the object) that RETURNS what it could not read; (2) `applyEdits`: a recolour edits a material, or splits one off for a single named part so the door does not repaint every wooden thing; a scale wraps the object once with its base on the ground; (3) the PERSON is regenerated from parameters (`personSpecFor`: gender, hair length, dress, height, build, six colours), so a later edit keeps the earlier ones; (4) anything an object has no part for is reported CANNOT-be-done with the materials it does have, never skipped; (5) a new kit file `src/game/forge/customise.ts` (`customiseModel`) recolours a LOADED model by material name or role and scales it, leaves a textured material (a face photo) alone and says so, and clones materials per instance. **Honest limit, stated in the tool result and the prompt:** a loaded model keeps its shape — hair length, gender, face and body of the #4218 humans cannot change by words; that needs another model or the Forge person (stylised).
+**Defects the tests found in my own first draft:** inflected colour words were missing ("kaale", "neele", "hare"…); "dress pehna do" has to be a wish while "dress ka rang" is a colour; a hair length is not a triangle count (a capsule has the same triangles however long) so the test measures the lowest point instead. Three guards were unproven until a test was written for them (a shared material split, bare legs under a dress, writing nothing when nothing changed); 14 reversions each fail the test that names them.
+
+
+## 2026-11-15 — Autopsy 57604006 (4-build battle-royale session on the build that ships edit promotion)
+Ledger in `BUILD_REPORT_QUEUE.md` Q-2690…Q-2701. Tally: 4 builds, 3 ok + 1 failed (ENGINE_UNAVAILABLE); 3 yellow gates (game never played), 1 red. Self-healed 15 (8+4+3+0 autoResolved) · workarounds 84 (45+5 ENGINE_R1/GLM fallbacks in build 0, 32 in build 3) · ❌ shipped imperfect: the ⚙ button covered (build 2), the brief never recorded (all four) · 🥵 struggles: Surplus glm-5.3 failing twice, 8 stale edit_file calls, a 22-minute edit.
+**Fixed in this change (from the report's own facts):** the brief chosen by content (my own defect in #4208); a failed build can no longer become the verified version; one verdict about whether the app rendered; Router One refusals by our own accounting are named and retired. Everything else is a queue row with its state.
+## 2026-11-15 (evening) — ATHREE MAP KINDS AND SIZES: 12 kinds x 10 sizes = 120 maps, 1 km to 1000 km
+Admin: *"100+ type ke maps (1 km se 1000 km)"* — as a SPACE, not 100 hand-written presets. **How:** `createAthreeWorld` now treats any size as the reference world stretched (`k = reference / size`; ground and water widths stretch with the plan, heights by k^-0.75 so a map 100 times narrower has slopes 3 times steeper, not 30). Rivers are traced once in the reference world and converted to the game's metres (points, widths, levels, lakes); dunes likewise; roads work in game space. A KIND of land is five numbers (`relief`, `seaShift`, `aridity`, `warmth`, `rivers`) the world already used internally: `athreeMapKinds.ts` holds 12 and reads a user's words (English, Hinglish, Devanagari). `generate_athree_map` takes `archetype` and `size_km`; the choice becomes `MAP_OPTIONS` in the project's `config.ts`.
+**Proof (the real emitted code):** a default-size neutral world is byte-for-byte the old one (heights, biomes, river count); the stretched ground equals the reference ground at (x*k, z*k) times k^-0.75; every size 1 to 1000 km is finite, its loop closes, a player can be put on dry land; at every size every river point is in water, below its surface, with matching width and level; roads exist only from 20 km; each kind IS what it says (desert dunes and no forest, jungle forest and rivers, tundra snow, archipelago sea, plains lower than alpine...). 17 reversions each caught.
+**Defects found by those tests and fixed at the root:** the spawn height rule (4 m) rejected ALL land on a map stretched flat; the spawn search (20 km from the origin) found no land on a continent 1000 km wide whose origin was sea; tundra had snow only on mountains (a frozen map must be white at sea level); Devanagari "किमी" and the phrase "bahut bada" were not read; "snowy mountains" was read as tundra. A guard on the water width at a point had no test until the proof loop found it.
+**Honest limits:** 1 to 5 km maps have no roads and no runway (a road region is 12.5 km); a map of 250 km and up is mostly empty land; the kinds differ by numbers, not by a different terrain algorithm (no canyons or volcanoes yet).
+
+
+## 2026-11-15 — BR1978 autopsy ("Build one game", succeeded, charged ₹5.55): lock three closures against an empty-sandbox game build
+
+Owner t311u sequential audit, BR1978 only (boundary 1951..2105 frozen). Branched from origin/main `55dcc3e20` (#4229); BR1977 (#4170) is merged. Under SANDBOX_UNAVAILABLE the workspace was empty, yet GAME_KIT_SEEDED claimed three recipes with 0 files and told the builder the kit was on disk; the builder rebuilt the Vite project by hand and WRITE_TIME_TYPECHECK stayed off for 20 TS writes although it had written tsconfig.json. The result was a real playable "Color Rush" DOM game (explore passed, phone OK, YELLOW gate). Ledger: [autopsy](docs/build-report-autopsy-BR1978.md), [evidence](docs/build-report-autopsy-BR1978-evidence.json).
+- All three defects are already closed on main (BR1958 #4132 seed preflight, BR1977 #4170 empty-seed downgrade, BR1951 tsconfig re-arm). This PR ships no production change; `tests/br1978Autopsy.test.ts` locks each against this report's exact shape with two-sided neighbours.
+- "Build one game" is still buildable / explicit-order on main; making it ask is an admin product decision. Q-2653 and Q-2654 gain this evidence and stay open.
+
+Queue: this commit closes no row and opens no row. Q-2649..Q-2654 and earlier blockers stay open.
+
+## 2026-11-15 — BR1979 autopsy ("ake app banane jisse free mein I video Bani", succeeded, charged ₹5.15): strip a dangling tsconfig.node.json reference so the fast lane can finish
+
+Owner t311u sequential audit, BR1979 only (boundary 1951..2105 frozen). Branched from origin/main `08a37a81c` (#4231); BR1978 (#4230) is merged. Ordinary-merged origin/main `dafaf4061` (#4233), then later `a79cb1861` (#4237, also bringing #4235 and #4232), no rebase, no force. Under SANDBOX_UNAVAILABLE the workspace was empty; the fast lane still ran, refused 6 of 13 writes, and failed verify with TS6053 because the generated tsconfig.json referenced `./tsconfig.node.json` and that file was never written. The full builder finished a working Free Video Maker (YELLOW gate: the headless preview has no camera). Ledger: [autopsy](docs/build-report-autopsy-BR1979.md), [evidence](docs/build-report-autopsy-BR1979-evidence.json).
+- D1 (retry-goodbye) and D2 (fast lane against a failed setup) are already closed on main (BR1961 F2 #4146, BR1952 #4124). `tests/br1979Autopsy.test.ts` locks each against this report's exact shape.
+- D3 is new: `sanitizeTsconfigReferences` drops only a missing `tsconfig.node.json` project reference when the tsconfig already has `include`/`files`. Wired before the fast lane writes and verifies, again before tsc, and on preview restore. Vite 5 solution-style configs and a present sibling are left alone.
+
+Queue: this commit closes no row and opens no row. Q-2621 gains this report's evidence and stays open. Q-2649..Q-2654 and earlier blockers stay open.
+## 2026-11-15 (night) — ROCK-SOLID pass on the map kinds and sizes (what a sweep found that the examples did not)
+Admin: *"isi ko aur improvement karo aur rocksolid karo."* A sweep of every kind at free sizes and seeds, measuring the steepest 10 m slope, found WALLS: alpine reached slope 5.0 (79 degrees) at 1 to 19 km, continental 3.3 at 5 km, even the 100 km alpine 2.7 (the reference world's own steepest ridge is 1.3). **Root cause:** a map stretched narrower had its heights shrunk by k^-0.75 but its lengths by k, so slopes grew by k^0.25 (3.2x at 1 km); and my `alpine` relief of 1.8 was too steep at any size. **Fixed:** `heightStretch(k)` (k^-0.9 on a smaller map, k^-0.75 on a bigger one) so slopes never grow more than 1.7x (a property test over every size), alpine relief 1.3. **Also fixed:** an invalid `mode` (`'sphere'`) produced a world with no ground (now only loop or bounded); every size and style number is held inside the range the terrain is tested for (a NaN, a negative, an Infinity, a text, 1e12, a relief of 50 can no longer make a hole or a wall) and style values past the edge share ONE river-cache entry (so a loop of odd numbers cannot evict legitimate worlds).
+**New tests:** 15 hostile option cases; 112 random kind x size x seed worlds (finite, loop closes, steepest slope under 2.6, a player can start, dry, above sea); road edges at 20/21/25 km and 6/7/8 km islands; a bigger map is not slower to ask; the dispatcher path (words choose the map, the builder's archetype and size_km win, a bad kind is refused with the real list, a size past the range is held) which had NO test before. 21 reversions each caught (one guard, the river clamp, had no test until the proof loop found it).
+
+## 2026-11-16 — ANY SUBJECT FROM DATA ONLY: spinning wheels, subject-aware help, train / car / bike, and an engine naming bug
+Admin: *"pura code AI ko nahi bhejna — user ko jo subject/object chahiye (train, tree, car, bike, animal...) bas woh api call se bana ke"* — and my own `author_module` plan (an AI writing code that the server would run) was dropped: node's vm is not a security wall (a constructor chain reaches process, and a Cloud Run server can read its own metadata token), so **no program written by an AI is run anywhere**. The Forge already works from DATA: the model returns a spec, the validator names every fault, and the Forge's own engine builds it. This pass makes that good for ANY subject. **(1) `spin: true`** on a rotation turns for ever (wheels, propellers, fans, windmills; a swing could not); mirrored it rolls the same way about the axle. **(2) Subjects** (`forgeSubjects.ts`): 11 kinds (rail, road, bike, air, water, animal, bird, plant, building, person, prop) read from English and Hinglish; the model's first prompt carries the worked example CLOSEST to the subject and a checklist of what that kind must have (sizes in metres, wheels on the ground, legs under the body...). **(3) Examples train, car, bike** (wheels roll; the carriage is built once and repeated), rendered in a real browser. **(4) An engine defect the new examples exposed:** a repeat inside a repeated parent gave two nodes the same name (`window_1`), so a node map would silently lose one; the validator caught it. Children now inherit a "p"-tagged context from a repeated parent (`window_1p`) and a mirror adds nothing, so `knee_mirror` is still `knee_mirror`. Geometry is now shared by SHAPE, so a longer train costs no more shapes. **(5)** The checker also caught MY train: the second carriage floated 0.5 m from the first (no coupler); fixed in the example. 11 reversions each caught.
+**Not built (agreed next):** BEHAVIOUR as data (a train that follows rails, an animal that wanders, a car that drives) from a small set of fixed behaviours in the kit whose parameters the model gives as data; air and water have a checklist but no worked example yet.
+
+## 2026-11-16 (later) — BEHAVIOUR AS DATA: a train follows its rails, an animal wanders, a car is driven, a plane circles — and no movement code is ever generated
+The remaining item from the subjects pass. A spec may carry `behaviour`, one of FIVE fixed movements the kit runs (`src/game/forge/behave.ts`, written once by us and tested) with numbers the spec gives: **rails** (a polyline, a speed, loop or stop at the end: a train, a guard), **wander** (a circle, a speed, pauses, a seed: an animal, a villager), **drive** (a top speed, the player's throttle and steer: a car, a bike, a boat; the wheels roll at v / 2 pi r times the clip's own spin), **orbit** (radius, altitude, speed, bank: a plane, a bird) and **static**. A model picks one and sets numbers; the validator bounds every number and requires every clip it names to exist on the object. `mover.update(dt)` moves the object AND advances its animation (one call a frame); `heightAt` lays the object on the world and tilts it with the slope. New worked examples **plane** (a propeller that spins, swept wings from an extruded outline, landing gear; it circles) and **boat** (keel at y = 0, hull loft, mast and sail; driven), and every earlier example now carries its behaviour. The object file gains `behaveX(obj, options)`.
+**Defects my own tests found in the first draft (fixed at the root, each locked):** a wanderer whose pause is [0, 0] never picked a first target and stood still for ever; a fast wanderer could step out of its circle (a large step taken a little off the line), so the place it arrives at is now held to the circle; the clip of a driven vehicle was restarted every frame in a draft path, which would have frozen the wheels at their first pose. 23 reversions each caught (two guards that no test could tell from their absence were removed or given a test: the redundant first pick, and the overshoot onto a target).
+**Honest limits:** a rigid train cuts a tight curve (a 30 m train round a 60 m radius is fine, round 10 m it is not); a drive behaviour is arcade, not physics (the Athree vehicles have the real model); wander has no obstacle avoidance; air and water examples are single craft.
+
+
+## 2026-11-16 — BR1980 autopsy (indoor exploration game, succeeded, free / not charged): lock three closures against an empty-sandbox specified game
+
+Owner t311u sequential audit, BR1980 only (boundary 1951..2105 frozen). Branched from origin/main `b72071ca3` (#4241); BR1979 is merged. Under SANDBOX_UNAVAILABLE (E2B cap of 20, during the same cap incident as BR1978) the workspace was empty, yet GAME_KIT_SEEDED claimed three recipes with 0 files in 17.9 s and FAST_LANE_SKIPPED_GAME told the builder the kit was on disk; the builder rebuilt the Vite project by hand and WRITE_TIME_TYPECHECK stayed off for 34 TS writes although tsconfig.json had already been written. The result was a working indoor exploration game (READY 84/100 after the 80-step cap, explore passed, phone OK, YELLOW gate for leftover dependency vulnerabilities, 21.0 min / 2.1× the ETA midpoint). Ledger: [autopsy](docs/build-report-autopsy-BR1980.md), [evidence](docs/build-report-autopsy-BR1980-evidence.json).
+- All three defects are already closed on main (BR1958 #4132 seed preflight, BR1961 F2 #4146 goodbye, BR1977 #4170 empty-seed downgrade, BR1951 tsconfig re-arm). This PR ships no production change; `tests/br1980Autopsy.test.ts` locks each against this report's exact shape with two-sided neighbours.
+- Q-1068's "repeat after hand-back" trigger fired on this Weak/Surplus report (1 of 2 plan-only turns). A generation-behavior change is not shipped: Q-2375 still needs a full transcript, and a forced productive write would be a new problem (t311u).
+
+Queue: this commit closes no row and opens no row. Q-2621, Q-1068, Q-2375 and Q-2414 gain this report's evidence and stay open. Q-2649..Q-2654, Q-2662..Q-2672 and earlier blockers stay open.
+
+## 2026-11-16 — BR1981 autopsy (attachment-specified study/quiz app, failed, free / not charged): do not call a zero-file fast-lane pass a success
+
+Owner t311u sequential audit, BR1981 only (boundary 1951..2105 frozen). Branched from origin/main `af1379506` (BR1980 ledger privacy cleanup). Under SANDBOX_UNAVAILABLE (E2B cap of 20) the workspace listed 0 paths, yet the text-only fast lane still planned and generated for about 3 minutes (14 Surplus calls). Progress ticks claimed files were built; every write was then refused ("could not read the existing file safely — not overwriting it"); the lane logged "Built your app — 0 file(s)" and recorded SIMPLE_BUILD_SUCCESS. A type-check note said the files were being shipped unverified. The free-tier path invited credits for a stronger engine. The sandbox never recovered. 0 files landed; the user was not charged. Ledger: [autopsy](docs/build-report-autopsy-BR1981.md), [evidence](docs/build-report-autopsy-BR1981-evidence.json).
+- D1–D4 are already closed on main (BR1952 #4124 fast-lane skip, BR1961 F2 #4146 goodbye, BR1952 upsell gate, "Generated … — not saved yet"). `tests/br1981Autopsy.test.ts` locks each against this report's shape.
+- D5 is new: a plan with no App.tsx / app/page can have every write refused and still return ok:true, because `unwrittenEntries` only watches those roots. `runSimpleBuild` now returns ok:false (`nothing_landed`) when no file landed, before the success log, verify, or preview. A plan that did land files is unchanged. The write-refusal guard itself is not loosened (t311u). Neighbour tests lock the App.tsx root hand-off (not `nothing_landed`), a one-file landing, and `unwrittenEntries` still ignoring `index.html`. The OneShot sibling was already closed (Q-982) and is locked in the same file.
+
+Queue: this commit closes no row and opens no row. Q-2621 gains this report's evidence and stays open. Q-2649..Q-2654, Q-2662..Q-2672 and earlier blockers stay open.
+
+## 2026-11-16 — BR1982 autopsy (weather-app request, succeeded, charged a small free-tier amount): refuse leftover apply-patch markup and restore a missing JSX flag
+
+Owner t311u sequential audit, BR1982 only (boundary 1951..2105 frozen). Branched from origin/main `faec01267` (BR1981 zero-file fast-lane success guard). Setup hit the E2B concurrent-sandbox cap of 20; the sandbox later served the build. The text-only fast lane still ran. A generated TypeScript file with leftover apply-patch markup was correctly refused (`Unexpected "<<"`). The same class landed in `tsconfig.json` because that file is treated as JSONC and skipped by the syntax gate. Fast-lane verify had already failed TS6053 on a dangling `tsconfig.node.json` reference. The full builder then hit TS17004 because the model-written tsconfig had a DOM lib but no jsx flag. The app eventually rendered and a journey passed; release gate YELLOW for remaining dependency advisories that need a major upgrade. Duration about 16 min (2.8× the ETA midpoint). Ledger: [autopsy](docs/build-report-autopsy-BR1982.md), [evidence](docs/build-report-autopsy-BR1982-evidence.json).
+- D1–D4 are already closed on main (BR1952 #4124 fast-lane skip, BR1961 F2 #4146 goodbye, BR1979 #4241 dangling tsconfig reference, write-time syntax gate for TypeScript). `tests/br1982Autopsy.test.ts` locks each against this report's shape.
+- D5 is new: leftover apply-patch / merge markers are refused on a clean write of config files the syntax gate skips (tsconfig, `*.json`, `*.jsonc`), and a parseable tsconfig whose only fault is a trailing marker block is salvaged. JS/TS that still parses, Markdown, and `.diff`/`.patch` are not refused (narrowed after the t311u review below).
+- D6 is new: a clearly-React DOM/app tsconfig missing a jsx flag gains `"jsx": "react-jsx"` by insertion (comments kept). Next / Vue / Solid / Preact / `extends` / any `jsxImportSource` are left alone (narrowed after the t311u review below).
+
+Queue: this commit closes no row and opens no row. Q-2621, Q-2362 and Q-2367 gain this report's evidence and stay open. Q-2649..Q-2654, Q-2662..Q-2672 and earlier blockers stay open.
+
+## 2026-11-16 — BR1982 t311u review: narrow the conflict-marker guard and the jsx heal
+
+Independent review of PR #4250 (`14193bac6`) failed under t311u. The conflict-marker guard had refused legitimate README fences, a clean-parsing TypeScript template literal with markers at column 0, and `.diff`/`.patch` files; after salvage it now refuses only config-like files the syntax gate skips (tsconfig, `*.json`, `*.jsonc`). The jsx heal had rewritten Next / Vue / Solid / Preact / `extends` tsconfigs and dropped JSONC comments via `JSON.stringify`; it now inserts `"jsx": "react-jsx"` only when the app is clearly React, and leaves comments alone so `ensureTsconfigBaseUrl`'s commented-tsconfig contract stays intact. Salvage was judged sound and is unchanged. Ordinary commits on `fix/br1982-autopsy` (no rebase or force-push). Ledger: [autopsy](docs/build-report-autopsy-BR1982.md), [evidence](docs/build-report-autopsy-BR1982-evidence.json). Not merged; BR1983 was not started.
+
+## 2026-11-16 — BR1983 autopsy (short follow-up on an existing app, failed, not charged): a proven cap during reconnect must not abort as an unsafe reconnect
+
+Owner t311u sequential audit, BR1983 only (boundary 1951..2105 frozen). Branched from origin/main `0fade3ca0` (BR1982 leftover apply-patch markup / missing JSX flag). Setup ended in under a second with SANDBOX_RECOVERY_UNAVAILABLE and a goodbye that invited a retry. The retained report has no vendor detail, so this ledger does not claim the E2B cap for this report. A proven concurrent-cap refusal during resume/reconnect was nevertheless wrapped as that generic refusal, so the build never took the create-time SANDBOX_UNAVAILABLE path (F2 notice; the tool-capable builder can wait for a slot). This PR unwraps only the exact cap message, still never replaces the recorded machine, and records an admin-only reason on remaining recovery refusals. Auto-retry and raising the cap are not shipped (Q-2621 stays blocked on ops). Ledger: [autopsy](docs/build-report-autopsy-BR1983.md), [evidence](docs/build-report-autopsy-BR1983-evidence.json).
+
+
+
+
+## 2026-11-16 — BR1984 autopsy (subsequent request on an existing app, failed, not charged): a second reconnect refusal must not invite an immediate retry
+
+Owner t311u sequential audit, BR1984 only (boundary 1951..2105 frozen). Branched from origin/main `23e11c2f3` (BR1983 proven reconnect capacity refusal). Setup ended in under a second with SANDBOX_RECOVERY_UNAVAILABLE, shortly after a previous attempt on the same app had already ended with a goodbye that invited a retry. The retained report has no vendor detail, so this ledger does not claim the E2B cap for this report. The opening estimate was shown before the workspace was proved reachable. This PR changes only a second consecutive settled reconnect refusal (no immediate-retry invite, not retryable) and withholds that estimate until the workspace is up. The first refusal, the BR1983 cap unwrap, and the admin-only reason paths are unchanged and locked with tests. Auto-retry and raising the cap are not shipped (Q-2621 stays blocked on ops). Ledger: [autopsy](docs/build-report-autopsy-BR1984.md), [evidence](docs/build-report-autopsy-BR1984-evidence.json). Hosted CI on the first head failed three existing ETA wiring guards that still expected the route to always record "Shown to the user" and to emit the line immediately; those guards now pin openingEtaShownNote and the same etaShown binding, including the module-turn skip.
+
+
+
+## 2026-11-16 — BR1985 autopsy (new large game request, stopped by the user, not charged): do not treat Hindi "log" (people) as a fintech audit log
+
+Owner t311u sequential audit, BR1985 only (boundary 1951..2105 frozen). Branched from origin/main `60a6d0ede` (BR1984 second reconnect refusal). Requirement analysis named domain=fintech and asked KYC / 2FA questions for a game, because a bare `/log/` audit-log feature matched Hindi "log" (people) and beat a zero-scoring game domain. The user stopped before any app file was written and was not charged. This PR tightens audit-log features and strips Hindi people-log constructions; that alone restores the original class, because the request's own game headlines already outnumber a single bank headline once the false score is gone. A game-as-product tie-break was drafted, then removed after independent review of #4255 (t311u): its Hindi `chahiye` / `mujhe` branches, and a narrow English stand-down, classified bank, gym, school, education, and some real-money requests as games and dropped KYC guidance. Mixed or ambiguous ties stay on the earlier-domain behaviour, locked with Hindi and English neighbour tests. Independently written paraphrases replaced any shortened extracts of the customer request. The BR1952 binary-generation hand-off, the BR1981 unsaved-progress wording, the BR1958 first-call window mismatch, and the BR1983 admin-only reason paths are unchanged and locked with tests. Preferring a game over a higher fintech feature score (a tycoon-style game that names a ledger) is not shipped (Q-2702). An explicit Spring Boot account pick is not overridden. Ledger: [autopsy](docs/build-report-autopsy-BR1985.md), [evidence](docs/build-report-autopsy-BR1985-evidence.json).
+
+
+## 2026-11-16 — BR1986 autopsy (first reconnect refusal on a phone-comfort follow-up, not charged): do not score a setup failure as an early delivery, and do not treat "the whole app" as a new complete product
+
+Owner t311u sequential audit, BR1986 only (boundary 1951..2105 frozen). Branched from origin/main `ea4ba07c6` (BR1985 Hindi "log" / audit-log tightening). Setup ended in a little over a second with SANDBOX_RECOVERY_UNAVAILABLE on a first refusal (no prior failed builds). The retained report has no vendor detail, so this ledger does not claim the E2B cap for this report. The user was shown a several-minute estimate, and the serialized report scored the one-second setup failure as UNDER the band. This PR marks sandbox and engine infrastructure outcomes untested inside the promised band (the same over-band lower-bound miss already used for aborts). It also stops `isExplicitCompleteBuild` from treating a definite bare phrase ("the whole app") as a request for a new complete product, so an existing-app edit downgrade is not blocked when durable files are present. Independently written English and Hindi paraphrases, and opposite-class new-product neighbours, lock both sides. The first-refusal goodbye, the pre-setup estimate on a first attempt, the BR1958 first-call window mismatch, and the BR1983 admin-only reason paths are unchanged and locked with tests. Auto-retry, raising the cap, and holding the estimate until setup on every first attempt are not shipped (Q-2621 stays blocked on ops). Ledger: [autopsy](docs/build-report-autopsy-BR1986.md), [evidence](docs/build-report-autopsy-BR1986-evidence.json).
+
+## 2026-11-16 — BR1987 autopsy (battle-royale style map game in a Spring Boot workspace, failed, not charged): do not run the Node toolchain on a Spring Boot or other non-Node app
+
+Owner t311u sequential audit, BR1987 only (boundary 1951..2105 frozen). Branched from origin/main `f5ed48ddc` (BR1986 setup-failure scoring / complete-build matcher). A battle-royale style map game with a login screen and a world map was built into a Spring Boot workspace that held only the starter POM and Java files, with no package.json. The fast lane ran npm install and npm run dev, then probed the Vite port. The install failed because there was no package.json, the release gate counted that as a defect of the app, and a success verdict was flipped to not ok. The user was not charged, and markup was waived because a preview never came up. This PR starts Spring Boot or Go from the registry command when the start file is present, skips npm on a tree with no package.json, does not count a missing-manifest npm failure or a missing Maven or Go binary as an app blocker, skips sandbox typecheck on a non-Node tree, and drops an unterminated binary tail instead of continuing it as text. A Node app with package.json, Flask's port, and a bare HTML skip are unchanged. The framework pick is not auto-switched. A bare HTML page is still not statically served (Q-2662 stays blocked). Ledger: [autopsy](docs/build-report-autopsy-BR1987.md), [evidence](docs/build-report-autopsy-BR1987-evidence.json).
+
+## 2026-11-16 — BR1987 review: keep main's Node port, and keep a missing JS manifest as a shipping defect
+
+Independent review of the BR1987 launch plan (t311u). `oneShotDevPort` no longer falls through to the registry, so a Spring Boot or Go app that has a package.json keeps main's Node port (5173), not 8080. npm is skipped only when the tree is clearly a non-Node app (declared Spring Boot or Go, its start file, no JS/TS app source). A Vite tree with `src/App.tsx` and no package.json keeps main's npm install, typecheck, RED gate, and ₹0 bill. The shipping exclusion checks the tree, not just the error text, so a nested `frontend/package.json` is not ignored. Platform preview still skips a no-package.json page that is not clearly non-Node (Q-2662). Ledger and evidence updated in place.
+
+## 2026-11-16 — BR1988 autopsy (invoice-style form app, user-stopped, files saved, not debited): do not treat missing styles on an unfinished Stop as a leftover app defect
+
+Owner t311u sequential audit, BR1988 only (boundary 1951..2105 frozen). Branched from origin/main `f7040b78b` (BR1987 non-Node launch plan). A one-shot form app was mid-generation on the Weak Surplus path when the user stopped it. The files written so far were saved, the app was never judged finished, markup was waived, and the wallet was not debited. The post-answer integrity pass still recorded `CSS_CLASSES_UNDEFINED` as an unresolved app warning and opened it in the issue queue, even though the CSS heal correctly did not run after the abort. This PR records that mismatch as info only for the user's own Stop mid-generation on a fresh build (exact conditions in the review entry below), and keeps main's Universal Remote warning in every other case. The heal gate is unchanged. Surplus streamed usage (`USAGE_NOT_REPORTED`) stays Q-2414. Ledger: [autopsy](docs/build-report-autopsy-BR1988.md), [evidence](docs/build-report-autopsy-BR1988-evidence.json).
+
+## 2026-11-16 — BR1988 review: only the user's own Stop, mid-generation on a fresh build, is an unfinished tree
+
+Independent review FAIL on the first BR1988 version (t311u): it keyed on `abort.signal.aborted` and a missing `readyAt`, so engine aborts would have been worded as a user stop and edit / module turns (where `readyAt` is never set) would have lost a real warning. Now the info line needs the typed cause `user-stop`, the runner's own `userStoppedBeforeReady` mark (set only in its aborted ending, with the done signal on, not an edit, not a module turn, and no ready mark), `ok === false`, no `readyAt`, and a fresh build. Everything else writes main's warning with main's own fields; any fault falls back to main. Heal gate and billing unchanged. Design-consistency findings on a stopped tree are left as they are. Ledger and evidence corrected in place.
+
+## 2026-11-16 — Surplus: the one-call-at-a-time limit is removed (owner: "ek bar me ek call wali limit hatao, 100+ call ek saath")
+
+Two serial points were found in code. The earlier claim that Surplus was "globally serial across builds" was stale: the cross-build lock had already been lifted for the live pilot on 2026-10-25.
+1. **Inside a build** (`buildSession.ts`), the two promise queues (`queue`, `turnQueue`) serialized every model call and every turn of all the build's agents. They are now a Stop-aware FIFO slot pool, `createSurplusSlots`, capped by `SURPLUS_PARALLEL_CALLS_PER_BUILD` (default 128, max 1024; `1` = the old order).
+2. **Across builds** (`receiptStore.ts`), every live call read and rewrote the ONE shared `surplus_pilot_admissions` document twice: once at reservation, once at settlement. Firestore sustains about one write per second per document, so this was the scale ceiling. Its limits also protected nothing: the budget is effectively unlimited, and the 1,000,000-call cap would have turned Surplus off for good. Live calls now touch only their own receipt document (`authorityId` stamped on it). Replay refusal, the pending/unknown state, the exact cost and the quarantine reason all stay per receipt. A live receipt reserved before this change still settles through the pilot document. Reviewed pilots are unchanged.
+
+Tests (all proven by reversion):
+- `surplusSlots.test.ts`: limit, FIFO, double release, Stop in line, 150 callers on 128 slots.
+- `buildSession.test.ts`: 120 parallel turns, and the env bound plus `1`.
+- `livePilotUnjam.test.ts`: 150 concurrent reserve+settle with zero pilot-document I/O, the 1M cap, replay/unknown/absorb on a live receipt, and a pre-change live receipt.
+
+Not proven: Surplus's own per-key concurrency limit. That needs the owner's live test.
+## 2026-11-16 — BR1989 autopsy (small learning-themed app, succeeded): a short file header dropped a component, and an added helper file sat beside a same-named folder
+
+Owner t311u sequential audit, BR1989 only (boundary 1951..2105 frozen). Branched from origin/main `eef10a4a3` (BR1988). The Weak Surplus fast lane built the app and it rendered, but two avoidable defects cost a repair round and shipped a duplicate file. (1) A per-file answer used `<<<FILE path>>` and the parser only knew `>>>`, so a paid-for component was silently dropped. The header now accepts `>{1,3}` through one shared definition (`FILE_HEADER_CLOSE`, `fileHeaderPath`) used by the parser and every FastLaneContinuation header reader, so a truncated file behind a short header is still treated as cut off. (2) With no planned helper owner, the lane added `src/utils.ts` beside a planned `src/utils/` folder; a module in the folder imported `./utils` and the repair shipped a duplicate `src/utils/utils.ts`. An added helper home now goes inside such a folder (`src/utils/helpers.ts`); every other case keeps main's path, and the constants home is unchanged. The binary placeholder and the package.json fold were already closed by BR1952 (#4124). Contract-beside-types-folder, ETA calibration and the embedded icon question are recorded as unchanged candidates. Evidence: `docs/build-report-autopsy-BR1989.md`, `tests/br1989Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-16 — BR1989 review: a short file header is accepted only as a real header line
+
+Independent review FAIL on D1 (t311u); D2 passed. The first version widened the header to `>{1,3}` anywhere, so prose, Markdown and template-literal lines (`<<<FILE src/a.tsx> // …`, `<<<FILE path>`, `<<<FILE ${p}>`) became phantom files main ignored, which the one-shot lane and the repairs could write. Now `normalizeShortFileHeaders` rewrites a one- or two-bracket header to `>>>` only at a line start, with nothing but whitespace after the brackets, and a path with no whitespace or `< > $ { }` that has a slash or an extension. Every other byte is untouched; the parser and every FastLaneContinuation reader keep main's own `>>>` patterns, so `>>>` behaviour (including `>>>>`) is exactly main's. The reviewer's four inputs and twelve main spellings are pinned against a verbatim copy of main's parser on the one-shot, truncation and per-file paths.
+
+## 2026-11-16 — BR1990 autopsy (simple calling-style app, succeeded with type errors left): a folded component's code was saved under its host file's path
+
+Owner t311u sequential audit, BR1990 only (boundary 1951..2105 frozen). Branched from origin/main `a04d026ba` (BR1989). The budget fold told one planned file to also include a folded component; that file's per-file call answered with only the folded component's block, and the first-block fallback in `pickGeneratedFile` saved it under the host's path (refused here because the host was a binary asset; with a JS host it would compile and render the wrong component). Now, only when a fold happened and the reply has no block for the asked-for path, a first block naming a folded path is refused like an empty reply; every other reply keeps main's selection exactly (a draft that also refused other planned files was withdrawn after `tests/fastLaneWaste.test.ts` showed the side effect). The binary fold host and planned binary asset were already closed by BR1952 (#4124); the fast lane against an unavailable workspace and the user notice by BR1961 (#4146). Q-2621 (sandbox cap) gains evidence and stays blocked. Remaining type errors after the full builder's repair are not established from the retained report. Evidence: `docs/build-report-autopsy-BR1990.md`, `tests/br1990Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-16 — BR1990 review: a usable host reply under the folded header is kept
+
+Independent review FAIL on the first BR1990 version (t311u): refusing every folded-header first block also dropped a usable but mislabelled host reply (the host's component plus the folded one under the folded header), which main saves correctly; the host went missing and a paid repair followed. Now the refusal applies only when the content does not declare or export the host's own name (`hostComponentName`, `declaresName`); a combined reply, and any host whose name cannot be derived, keep main's fallback. Pinned by kept/refused neighbour tables, a real lane run with a combined reply, and the reviewer's probe.
+
+## 2026-11-16 — BR1990 second review: fail-safe inversion of the folded-header refusal
+
+Second independent review FAIL (t311u): the host-name check still refused usable combined replies (lowercase `header.tsx` declaring `Header`, `.ts` utility and types hosts, a camelCase export from a kebab file, an anonymous default export). Replaced it with the reviewer's option (b): `pickGeneratedFile` refuses a folded-header first block only when `looksLikeOnlyFile` positively reads the content as the folded file alone (its own name declared or exported, no other top-level declaration or export); anything unclear keeps main's fallback. Host-name derivation removed. Pinned by 16 kept / 7 refused shape tables, unit cases, a real lane run, both reviewer probes and mutation checks.
+
+## 2026-11-16 — Discount reseller gateways: Moyi API, DiscountedTokens and MirAPI in the admin Test Chat Bot
+
+Owner asked for the three gateways in Admin → AI Engines → Test Chat Bot, and also on `z@gmail.com`'s Pro builder.
+
+**Done (admin Test Chat Bot only):** `src/server/lib/resellerGateways.ts` owns each gateway's key, endpoint and model.
+A base URL is accepted only on the provider's own registered domain. DiscountedTokens uses its published
+`https://discountedtokens.com/v1` and `gpt-6-sol`; Moyi uses `https://api.moyi-api.com/v1` (shown on its home page, owner's
+screenshot); MirAPI has no default endpoint because its could not be read, so the owner sets `MIRAPI_BASE_URL`. One streamed call, no retry,
+reserved at the dearest official list price (USD 10 / 50 per 1M). Each is a switch-board family and an API-providers row.
+Env names and the known risks are in `docs/claude/ENV_REGISTRY.md` (2026-11-16 entry).
+
+Tests: `src/server/lib/testChatBot.test.ts` ("discount reseller gateways…"). The own-domain guard was proven by
+reversion (a substring host check let `moyi-api.com.evil.example` and `evilmoyi-api.com` through; the tests failed).
+
+**OPEN — NOT DONE: the three gateways on `z@gmail.com`'s Pro builder.** Not built, deliberately, because the facts a
+builder rung needs are unknown until a real call answers: Moyi's and MirAPI's API endpoint and model ids, whether each
+gateway honours tool calling (the builder cannot run without it), and the real price per model for honest billing.
+Needs: the owner sets the keys (and the two base URLs), runs each in the Test Chat Bot, and reports which model
+answered. Then the rung is written the way `bluesmindsBuilder.ts` is (neutral label, own rate, brand-neutral errors,
+off-ladder census), gated to the z test account. Claude models through a reseller stay out without separate sign-off.
+## 2026-11-16 — BR1991 autopsy (stopped build, report not retained): nothing to fix, evidence pinned
+
+Owner t311u sequential audit, BR1991 only (boundary 1951..2105 frozen). Branched from origin/main `a5e23403` (BR1990, #4265). The registry lists #1991 as stopped with `retained: false`; every read-only report tool answers "not found in retained storage", and the audit's starting inventory already showed it unretained, so the build's own defects cannot be read and were not reconstructed. From source: a numbered report always had saved bytes (registry row and history document are written in one transaction); the only in-repo path that removes a recent report is the user deleting that build's chat (GA-1 `purgeWorkspace` → `deleteDiagnostics`, registry row kept by design); 180-day retention and the refusing account erasure cannot explain it. Most likely an expected user deletion, not proven: Q-2703 (BLOCKED, needs one admin production read). No product code changed; `tests/br1991Autopsy.test.ts` pins the facts (5 mutations, each caught). Docs: `docs/build-report-autopsy-BR1991.md` and its evidence JSON.
+
+
+## 2026-11-16 — BR1992 autopsy (Weak/Surplus edit turn, stopped by the 25-min cap): stopped Surplus call named by Surplus; "final checks" ends on a new pickup
+
+Owner t311u sequential audit, BR1992 only (boundary 1951..2105 frozen). Branched from origin/main `a5e23403`, with #4267 merged in normally. F1: the Surplus session runner and its fail-open wrapper had no `TurnRunner.plannedModel`, so a Surplus call stopped by the build's clock was recorded as `claude-sonnet-4-6` on a `noClaude` Weak build. It is now named by the session's sticky model; the wrapper answers `undefined` (main's fallback) when unclear. Records only. F2: the live ETA said "running the final checks" for minutes while the integrity pass built newly sent requests. The phase is now an epoch, and a pickup strictly after it began ends it. No statement was added to the chat handler (TS2563). Pins in five existing test files were updated deliberately. Q-2704 (BLOCKED): repair passes absorbing new requests is an owner decision. D4–D6 were not changed. 8 mutations were run, and each was caught. Docs: `docs/build-report-autopsy-BR1992.md`, its evidence JSON, and `tests/br1992Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-16 — BR1993 autopsy (large-app first build, setup refused to reconnect): already closed on main; order residual queued
+
+Owner t311u sequential audit, BR1993 only (boundary 1951..2105 frozen). Branched from origin/main `d6a417f2` (BR1992, #4269). A free Weak/Surplus large-app first build ran the scope classifier and the roadmap planner, showed the roadmap message and a rough ETA, then failed setup within about a second with SANDBOX_RECOVERY_UNAVAILABLE, in about 19 s, with no files written. The report was written by code deployed before BR1983 (#4251) and BR1984 (#4254), which already closed its defects on main: an admin-only refusal reason, outcome phase normalisation, and a non-retryable repeat after a settled refusal. `tests/br1993Autopsy.test.ts` pins those facts on this report's shape (12 tests; 6 mutations, each caught). New Q-2705 (BLOCKED): planner, message and ETA run before setup on a first attempt. The BR1992 review residual (`recordModel` read at run start) is not on this path and is not changed. No product code changed. Docs: `docs/build-report-autopsy-BR1993.md` and its evidence JSON.
+
+## 2026-11-17 — BR1994 autopsy (large-app first build stopped by the 25-min cap): no "I am continuing" after "Out of time"; the ending quotes the build's minutes
+
+Owner t311u sequential audit, BR1994 only (boundary 1951..2105 frozen). Branched from origin/main `f631a04e` (BR1993, #4270). A free Weak/Surplus build rendered at about 416 s and was stopped by the 25-min cap during an unfinished-app resume.
+- F1: the user was told "Out of time — saving your app", then 19 s later "I am continuing. Please keep this open." The hand-back notice is now silent once the build-wide final stage was said (`outOfTime === true` only; the resume itself is unchanged).
+- F2: the ending said "about 22 min" (the full builder's remaining budget) after about 25 min. `buildClockMinutes` now quotes the minutes elapsed since the request arrived when that start is known, and main's figure otherwise.
+- The `claude-sonnet-4-6` label on the stopped call was already closed by BR1992 F1.
+- Q-2706 (BLOCKED): a resume in the final stage. Q-2707 (BLOCKED, money-adjacent): a superseded failed command counted on a failed build's gate.
+- Two existing source pins were updated deliberately. 9 mutations were run: 8 were caught, and the one that survived exposed a redundant guard, which was removed.
+- Docs: `docs/build-report-autopsy-BR1994.md`, its evidence JSON, and `tests/br1994Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-17 — BR1995 autopsy ("Fix with AI" under our own reconnect refusal): the button stands down for the exact refusal sentence
+
+Owner t311u sequential audit, BR1995 only (boundary 1951..2105 frozen). Branched from origin/main `d167b888` (BR1994, #4271). The user pressed "Fix with AI" under BR1993's reconnect refusal, so this build's request was our own infrastructure sentence. Setup refused again after about 5.6 s.
+- F1: `errorCanBeFixedByEditingTheApp` now returns false for the exact first or repeat reconnect-refusal sentence. The sentences moved byte-identically to `src/lib/sandboxRecoveryMessages.ts`. Any other text keeps today's button.
+- Already closed on main: the repeat refusal's wording and its held-back ETA (BR1984, #4254), the admin reason (BR1983, #4251), and the "0s of preparation" line for a pre-build call (BR1958).
+- Q-2705 is referenced for the ETA before setup.
+- Q-2708 (BLOCKED): a 5.3 s "Routing and ETA" window with no named steps. Q-2709 (BLOCKED): other in-stream infrastructure endings.
+- BR1994 doc correction: a specialist's `childEvents` (`Object.create(parent)`) inherits `budgetStagesSaid`, so it is silenced after "Out of time" too. Pinned.
+- 7 mutations, all caught.
+- Docs: `docs/build-report-autopsy-BR1995.md`, its evidence JSON, and `tests/br1995Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-17 — BR1996 autopsy (discounted build's green line did not add up): show only the discount and the total when the line would not reconcile
+
+Owner t311u sequential audit, BR1996 only (boundary 1951..2105 frozen). Branched from origin/main `81a1e0ff` (BR1995, #4272). A free Weak build succeeded and was charged.
+- F1: the green discount line showed "Build price ₹2.99 · Discount 10% (−₹0.30) · You pay ₹2.76", because the settle adds to the bill after the discount. When price − discount is more than one paisa from "You pay", the line now shows only "Discount 10% (−₹0.30) · You pay ₹2.76". It is one shared function (`src/lib/buildDiscountLine.ts`) for the summary and the panel.
+- Reworked after review under owner rule t362u: the first version named the fee, which is admin-only. No fee, rate or subtotal is named now.
+- A reconciling line is byte-identical to main. No amount, debit, floor or fee changed.
+- Already closed on main: `package.json` folded into `tsconfig.json` and the fast lane run against a failed setup (BR1952, #4124); "try building again" on a setup failure (BR1961, #4146); "0s of preparation" (BR1958, #4132).
+- Q-2710 (BLOCKED): the builder calls a new app a "fix" after a fast-lane hand-over. Q-2711 (BLOCKED): the pre-existing user-visible fee lines conflict with t362u.
+- 10 mutations, all caught.
+- Docs: `docs/build-report-autopsy-BR1996.md`, its evidence JSON, and `tests/br1996Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-17 — BR1997 autopsy (a shell rm deleted a stylesheet the entry still imported): name any module that still imports a deleted file
+
+Owner t311u sequential audit, BR1997 only (boundary 1951..2105 frozen). Branched from origin/main `2c66e533` (BR1996, #4273). A free Weak build succeeded and was not charged.
+
+- F1: after a confirmed shell delete, the bash result names each recorded JS/TS module whose current text still imports a deleted file (`src/server/AgentV3/deletedImportNote.ts`, wired in `ToolDispatcher`). Advisory only; no importer means byte-identical output. Kill switch `AGENTV3_DELETED_IMPORT_NOTE=off`.
+- Q-2712 (BLOCKED): the post-green recheck said OK while the dev server could not compile the entry module.
+- 11 mutations, all caught (one after an added test).
+- Docs: `docs/build-report-autopsy-BR1997.md`, its evidence JSON, and `tests/br1997Autopsy.test.ts`. Not live until a Console Run.
+
+## 2026-11-17 — BR1997 rework after review (bounded reads on the bash critical path)
+
+The review failed the first version under audit P0-C: up to 60 sequential reads on the bash path, each bounded only by `fileOp`'s 30 s, whose timeout also drops the sandbox. Reworked with ordinary commits on the same branch:
+- Reads: entry modules first, at most 60, 12 at a time, 5 s each, an 8 s overall budget (`readSourcesWithinBudget`). They use the new `E2BActuator.readFileAdvisory`, whose timeout does not drop the cached sandbox; `readFile` is unchanged.
+- Precision: a comment-, string- and template-aware tokenizer; only relative, extensioned specifiers that join to exactly a deleted path are named, so a remaining sibling never draws a note.
+- The note is kept out of the user's terminal and the `tool_result` summary.
+- 38 tests; 21 round-2 mutations, all caught (one after an added test).
+
+## 2026-11-17 — Surplus Pro builder is default ON
+
+Owner: "surplus ko bhi default on karo". `AGENTV3_SURPLUS_BUILDER` is now ON unless explicitly off, matching
+Mitrify, Qubax, CheaperInference and BluesMinds. The switch moved to `surplusBuilderSwitchOn` in
+`alwaysOnSuppliers.ts`; the eight places that each compared the flag to `true` (buildSession, liveAdmission x2,
+productionAdapter, transport x2, the route via `surplusBuilderEnabled`, one test fixture) now read it there.
+`surplusBuilderEnabled` additionally requires a usable `SURPLUS_API_KEY`, so a keyless server (CI, local) takes the
+same no-I/O ladder path as before. Production already had the flag `on` (owner-reported 2026-10-25), so behaviour
+there does not change. Tests: `tests/surplusBuilderDefaultOn.test.ts` (default, kill switch, keyless, and a census
+that fails when another file reads the flag; proven by putting a raw reader back in `productionAdapter.ts`).
+Not verified: a live Surplus build; this session cannot read Cloud Run's env or reach Surplus.
+
+## 2026-11-17 — Moyi API is a Pro Weak builder rung, after BluesMinds
+
+Owner: "moyi api ko bhi bluesminds ke baad lagao, its working". Weak order: Surplus → Router One → BluesMinds → Moyi →
+tier ladder. `src/server/AgentV3/moyiBuilder.ts` mirrors `bluesmindsBuilder.ts`: neutral label `ENGINE_MY`, brand-neutral
+errors, off-ladder census, label and name added to the redaction lists. The rung exists only when `MOYI_API_KEY`,
+`MOYI_BUILDER_MODEL` and `MOYI_BUILDER_RATE_IN/_OUT` are all set: no model id is guessed and no price is invented.
+Claude-family model ids are dropped from the list. Tests: `tests/weakMoyiOrder.test.ts` (order in every lane, each
+missing key removes the rung and leaves the old chain, own-domain endpoint, rate, brand; the no-Claude filter was
+proven by reversion). This closes the 2026-11-16 open item for Moyi, for all Weak users rather than only the
+z test account, by the owner's new order. DiscountedTokens and MirAPI remain Test Chat Bot only.
+OPEN: tool calling on the chosen Moyi model is unverified until a real Weak build runs through `ENGINE_MY`.
+
+## 2026-11-17 — Moyi builder rung works with the key alone, for every Weak user
+
+Owner: "moyi ai ko sabhi user ke liye default on kar do". `MOYI_BUILDER_MODEL` and `MOYI_BUILDER_RATE_IN/_OUT` are now
+optional. With only `MOYI_API_KEY`, the rung reads Moyi's own `/models` list (cached 6 h, background refresh) and runs up
+to two listed models that have a published price, priced from `MOYI_PUBLISHED_RATES` (Moyi's own page, owner-supplied
+2026-11-16). No model id is guessed: until the list has been read, a build runs without the rung (proven by reversion:
+returning a guessed id on an empty list failed 3 tests). Owner-set model/rate keys still win. Not verified live: whether
+Moyi's ids match the table's patterns, and whether the chosen model honours tool calling; the first Weak build reports
+will show `ENGINE_MY` turns or failures.
+## 2026-11-17 — builder fallthrough after phone drop (t400u)
+
+#2407 and #2408 failed ENGINE_UNAVAILABLE. Router One was marked stopped when the viewer's HTTP response closed, so a phone disconnect refused that rung before any request (`scope_stopped`). The stall banner treated "not in this process's memory" as the build being dead even when the workspace lease was still heartbeating. A build now keeps Router One until its own abort, status reports `buildHeldElsewhere` while the lease is live, and a BUILD_STARTED row is saved as soon as the report object exists. Account keys with an `ak-` prefix are redacted from stored reports and user-facing errors. Quotas, billing, referral, and white-label rules are unchanged. The wallet chip showing 0 tokens is the real token balance; it does not select the weak ladder by itself, and a paid refusal is still the 402 credits card.
+
+## 2026-11-17 — recharge sentence when the wallet cannot cover a build (t402u)
+
+The existing pre-start block (no positive balance, billing on, not a free-list account) now says the owner's sentence: Hindi when the request is Hindi, English otherwise, with a Recharge button. A stream error with that code uses the same card, not the stall banner. The step clock ("build budget exhausted") and a supplier account with no balance are not the user's wallet and do not show this sentence. Who is allowed to start is unchanged, including a free weak-ladder build the gate already allows.
+
+## 2026-11-17 — no build when the wallet cannot cover it (t403u)
+
+Owner override: a balance of 0, or below the pre-flight estimate, does not start a build at all, including the weak ladder. The same sentence stops a build whose running bill passes that balance; files already written are kept. Admin free-list and the z test account stay exempt. Prices, chat quotas, gift and referral rules are unchanged. An unreadable balance is still not treated as zero.
+
+## 2026-11-17 — A published 3D game opened to an empty page: the game loop ran only from start()
+
+Admin: the battle royale's published link (`a-6b8ad5b4e2f4ce94b8a8d7df.mitrify.in`) "open nahi ho raha"; *"mai chahta hu har baar pura game open ho"*.
+
+Evidence: every published file is in the bucket (index, the 797 KB bundle, CSS, icon, manifest, service worker, all HTTP 200). Loaded in a real browser, the HUD renders (Score 0 · Enemies left 19 · ⏸), but the WebGL canvas holds zero drawn pixels and records zero draw calls. In the bundle, the game's own `setupBattleRoyale` calls `setStatus('playing')`, which hides the Play menu. The shell's `GameLoop` started only from `Game.start()`, and nothing called that. The build's playtest had already measured the result ("input ignored · no canvas large enough to measure", Controls 0).
+
+Class: the loop was tied to one caller (`start()`) instead of to the state it represents.
+
+Fix (`GameShellGenerator.ts`, the shared shell):
+- the loop follows the status: `GAME_STARTED` / `GAME_RESUMED`, plus a check right after setup;
+- one frame is drawn after setup, so a menu game shows its world behind the menu;
+- a disposed game never restarts.
+
+`gameKitHistory.ts` was regenerated, so an existing game whose `Game.ts` is untouched kit code receives the fix on its next edit.
+
+Test: `tests/aGameRunsWhenItSaysItIsPlaying.test.ts` runs the REAL generated `Game.ts` and `core/state.ts`. It covers setup setting 'playing', the menu first frame, a later 'playing' from game code, and a disposed game. Reverting the shell fails 3 of the 4 tests. All 693 game-shell tests pass.
+
+Still open from this report: the build that said "100/100, fully shippable" while the release gate was RED (autopsy item), and the preview that would not wake 3 days after a failed build.
+## 2026-11-17 — AI Engines page shows the engines that really run, live, and why each fails
+
+Owner: "jo ai/provider use ho rahe hai, wahi dikhen chahiye, aur yeh live rahe, kon se provider fail ho raha kyu fail ho
+raha likh kar aye, admin ko saf dikhe". The page showed Weak as GLM → KIMI → GLM while its own footer said "Calls today:
+ENGINE_R1 581 · SURPLUS 514": the engines doing most Weak work were missing, nothing said why an engine failed, and
+13 keyless providers were listed as if in use.
+
+- Build Engines now draws the whole chain per tier: for Weak, the leads from `weakLeadEngines.ts` (Surplus when a Weak build
+  opens its session, Router One, BluesMinds, Moyi), then the keyed ladder rungs; each chip marked with its 24-hour failures.
+  The admin route may not import the build route, so the leads live in their own module, and
+  `tests/weakLeadEnginesMatchTheChain.test.ts` builds the real chain and fails if the two ever disagree (proven by
+  reversion). A first version imported the build route into admin.ts and failed three censuses.
+- New "Engine health — last 24 hours" (`engineHealth.ts`): per engine, turns delivered, failed calls, causes in plain
+  words (from `classifyProviderFailure` buckets), last failure time, from the latest build of every project saved in the
+  window on every server. An engine with no recorded use is "No recent use", never "Working"; an unreadable window says so.
+- The tab refreshes engines every minute while open.
+- Provider switches: providers with a key first; keyless ones in a closed "Not set up on this server (N)" list.
+- Tests: `tests/aiEnginesShowWhatRunsAndWhyItFails.test.ts` (server half) and `src/components/admin/BuildEngineHealth.test.tsx`
+  (render half, no server imports: the first version imported server routes into a src test and the frontend typecheck
+  failed with 5,539 errors, the 2026-09-08 class), proven by reversion (idle shown as working; chain without
+  the leads). Not verified: the page against live production data.
+## 2026-11-17 — an empty provider account is recognised by every router (owner: "jis provider ka balance khatam hoga, woh khud hi band ho jayega"; "user ko 100% response mile, jaldi bhi mile")
+
+Class: "has this provider account run out?" was answered by four private copies that had drifted. One shared, pure module now answers it: `src/server/lib/providerAccountQuota.ts`.
+
+What was wrong, per copy:
+- **Free Chat chain** (`openAiCompatProvider.ts`): a 402 was recognised from DeepSeek and CheaperInference only. A 402 from any other rung (Groq, DeepInfra, OpenAI, Cloudflare, GLM, …) became `INVALID_REQUEST`, and the chain **stops** on that code. The user got no answer, the empty account was never cooled down, and the next user hit it again.
+- **Gateway text transport**: `insufficient_balance` was missing, and a 402 was recognised from DeepSeek only.
+- **Gateway vision transport**: GLM codes only, and only on a 429.
+- **Builder predicate** `isProviderBalanceError` (also read by the shared live-health layer in #4282): English phrases only. GLM, the lead rung of every ladder, reports an empty balance as HTTP 429, code 1113, with a Chinese message, so it was read as a rate limit and retried. OpenAI's `insufficient_quota` lives in the error code, not the message.
+
+Fix:
+- `isAccountQuotaSignal` checks status and exact enums only, keeping the no-message-parsing rule of the Free chain and the gateway. A 402 counts on any provider. GLM quota codes count only on GLM.
+- `isAccountBalanceFailure` checks status, codes on the error and its nested body, and a narrow set of phrases (including 余额不足 and Vertex "requires billing to be enabled").
+- Deliberately NOT matched: Gemini's per-minute "You exceeded your current quota…" (status RESOURCE_EXHAUSTED), so a healthy free rung is not benched for a per-minute limit. GLM 1308/1310/1313 are quota (they reset), not "needs recharge".
+
+Tests:
+- `providerAccountQuota.test.ts`: real error shapes, both positive and negative, plus a source census that fails when any other file keeps its own copy of the list.
+- 402 cases for five Free-chain rungs.
+- Each site was reverted and its test watched fail.
+
+Live effect to watch: once #4282 (shared live health) merges, an empty GLM or OpenAI account is marked suspended there and skipped by every ladder, instead of retried as a rate limit.
+
+Not changed: no price or spend cap was added or removed. The existing Free Chat paid cap (`FREE_CHAIN_PAID_DAILY_CAP_USD`) is untouched, pending the owner's answer on whether "price cap na lagao" includes it.
+## 2026-11-17 — DiscountedTokens tries up to three of its own models (owner: "sabse pahle sasta aur accha, response na aaye to 2nd, fail to 3rd, phir aage badho")
+
+Owner report: a DiscountedTokens chat answered (gpt-6-sol, 24 s) but a coding message died as `cancelled`, HTTP status not reported, at **90,001 ms**. That was not the model failing. The admin test page aborts every call at 90 s, and a reasoning model writing code takes longer, so the page cut the reply while it was still being written. The page also called one fixed model only.
+
+Fix (admin Test Chat Bot, all three reseller gateways; the shared class is "a gateway called with one fixed model and one fixed short bound"):
+- `resellerModelLadder` (`resellerGateways.ts`): at most three models, in this order:
+  1. the owner's comma list in `DISCOUNTEDTOKENS_MODEL` / `MOYI_MODEL` / `MIRAPI_MODEL`, in that order;
+  2. else the gateway's default model;
+  3. then the gaps, filled from the key's own `/models` list.
+- `testChatBot.ts` tries the models in order:
+  - Each try reserves its own budget hold.
+  - A model showing no response within **45 s** is given up and the next is tried. Activity is reported by `onActivity`, which fires on every stream event, reasoning included.
+  - A model that IS answering keeps going until the test's **240 s** budget.
+  - A 401/403 stops at once, because a refused key fails every model.
+  - A typed model is the only one tried.
+  - The reply lists every model tried.
+  - When all models fail, the result is `ALL_MODELS_FAILED`, with each attempt shown.
+- The client wait was raised from 100 s to 250 s, so the server bound (90 s, or 240 s for a reseller) decides when a test ends.
+
+Tests:
+- `resellerModelLadder.test.ts`
+- `testChatBot.test.ts`, "the gateway's own three-model fallback". It covers: order, the second model answering, all three failing with no fourth try, a refused key, the 45 s quiet cut versus a 100 s answer that streams, and a typed model.
+- `testChatBotOfficial.test.ts`: activity on reasoning events.
+
+Every new test was proven by reversion.
+
+NOT done: DiscountedTokens in the Pro builder. The tier and position are the owner's call. My recommendation is Normal and Strong, before Sonnet. The same ladder function is ready for a builder rung. Also not done: the "cheapest and good" order. This environment cannot read DiscountedTokens' pricing page, so the order is the owner's list in `DISCOUNTEDTOKENS_MODEL`.
+
+## 2026-11-17 — main red after #4218: a game-asset test fixture skipped the Stop signal
+
+#4218 (merged 12:36 UTC) added `options.signal.throwIfAborted()` to `prepareGameAssets`. Its only production caller (`agentv3.ts`) always passes `abort.signal`. But `assetRolloutGate.test.ts` built its options with `as never` and no `signal`, so CI failed with `Cannot read properties of undefined (reading 'throwIfAborted')`. That fails every PR rebased on main.
+
+The production code is right. The fixture now passes a signal, and its outer `as never` is gone, so the type checks the options. Every other test caller of `prepareGameAssets` was checked: all of them already pass a signal.
+
+## 2026-11-17 — Traffic Manager V2, P1: read-only registry snapshot and upstream families (owner-approved plan)
+
+The owner approved the V2 plan with five improvements: shared-health safety, Firestore efficiency, safe rollback, accurate SLO measurement, and spending controls. They authorised P1 only, and P2 waits for the P1 report.
+
+New in `src/server/AI/TrafficRegistry/`:
+- `types.ts`: the snapshot shapes.
+- `upstreamFamilies.ts`: each provider's own outage domain, plus the domains each route (provider + model) may share. Two routes are independent fallbacks only when their dependency sets are disjoint and neither is `unknown`. A reseller with an unverified host is assumed to share the model maker's domain. Unproven independence counts as shared.
+- `snapshot.ts`: `buildRegistrySnapshot(env)`. It READS the kill-switch families, the API directory, `freeChainConfig(env)` (with each rung's price kept as its own offer), the builder ladders in force (`tierLadder(level, env)`, env overrides included) plus `PLAN_RUNG`, and the reseller gateways. It calls no provider, reads no secret value, and writes nothing.
+
+Nothing reads the snapshot to route yet. It is in `tests/deadCodeGuard.test.ts`'s `KNOWN_UNREACHABLE` with "remove in P2", following the repository's building-block precedent.
+
+Findings the snapshot makes visible (no routing change):
+- The builder `NEMOTRON` rung is served through OpenRouter by default (`NEMOTRON_BASE_URL_DEFAULT`), so it is not independent of other OpenRouter traffic.
+- The three GLM Free Chat rungs share one domain (zhipu).
+- The two DeepInfra paid fallbacks (Llama 8B, DeepSeek V4 Flash) share one domain.
+- CheaperInference `beam` and LLM7 `default` have unknown makers, so they are independent of nothing.
+
+Census tests (`snapshot.test.ts`, `upstreamFamilies.test.ts`, 33 in total) fail when any of these is missing from the registry: a kill-switch family, a directory row, a Free Chat rung, or a builder rung. Five reversions were each caught: an unclassified family, `unknown` treated as independent, Vertex split from Google, the builder ladder not read, and the Requesty route host ignored.
+
+Not in P1, by design: runtime catalogs (the gateway's reviewed Firestore catalog, the live OpenRouter free list, Surplus offers). They join in P2 with the control store.
+
+## 2026-11-17 — A preview is never blank: the three layers (admin: "iska koi permanent solution dhundo … han bilkul banao")
+
+Report: the admin opened a three-day-old battle royale to edit it, and the preview "1 second bhi nahi chala". This is the same class as 2026-09-08 ("2-3 din bad preview band"). The earlier fix (`previewWake.ts`) never covered the state a FAILED build leaves behind.
+
+The chain:
+- Build 3 ended ENGINE_UNAVAILABLE after changing files, and after its app had rendered.
+- The VM-free copy is taken only inside the production-build gate, which needs `result.ok`. So no copy was taken.
+- The copy from build 2 became "not current". The door refused it for a 'starting' machine.
+- The machine did not answer.
+- The result was an endless waiting page over an app we held a working copy of.
+
+The fix:
+1. **A failed build that rendered still leaves a copy** (`failedBuildCopy.ts`, `keepFailedBuildCopy`). This runs only for a failed turn that rendered, took no copy, was not stopped and has 90 s left. It runs the same production build and, only if that passes, takes the same copy. It changes no verdict, outcome or charge. It reports FAILED_BUILD_COPY_KEPT / _NOT_KEPT. The copy-taking itself moved out of the route into `takeBuildCopy`, so the gate and this path share one definition.
+2. **A starting preview shows the last working version, labelled** (`snapshotStandIn` in `previewSnapshot.ts`). An OLDER copy stands in, with SNAPSHOT_OLDER_NOTE ("changes made after it are not in this copy yet"). It never does so while a build runs, and never within 10 minutes of the last write, so a fresh edit is never hidden. The door and preview-health ask the same function, and the live app still replaces the copy by itself.
+3. **Every wake-up is recorded** (`previewWakeLog.ts`). Each preview-diagnose finish appends {at, ok, last stage, reason, seconds} to a bounded five-entry log on the sandbox record, with URLs and keys stripped. The next build writes the not-yet-reported failures into its report as PREVIEW_WAKE_HISTORY.
+
+Constraint found: the build function in `agentv3.ts` sits exactly at TypeScript's control-flow-analysis limit (TS2563). Even a three-line `if` tipped it over and broke typechecking across the whole server. New logic therefore lives in modules, and the route keeps one branch-free call. Record this before adding anything to that function.
+
+Tests (each proven by reversion):
+- `aPreviewIsNeverBlank.test.ts`
+- `failedBuildCopy.test.ts`
+- `previewWakeLog.test.ts`, including a wiring guard
+
+Five source guards were repointed to the moved copy code: `previewSnapshotWiring`, `sandboxLifetime`, `snapshotIdentity`, `theCopyFollowsEveryPass`, `theSearchBoxWasInHindi`.
+
+Not proven: why that day's wake did not bring the machine back. No record of it existed; layer 3 makes the next one visible.
+
+## 2026-11-17 — Autopsy 57604006, builds 969740df and 1712adfa (the battle royale): ledger
+
+Builds 5e558cb2, 7dc42243, d0c5a371 and 9ed80cc9 of the same session were autopsied by another session (Q-2690–Q-2701, branch `claude/practical-dijkstra-e7o2hc`), and were not redone here.
+
+Tally:
+- ✅ self-heal: 2 (the write-time syntax guard; type errors left by failed build 9ed80cc9, healed in 969740df)
+- 🔀 workaround: 0
+- ⏭️ skip: 1 (an invented restart)
+- ❌ shipped imperfect: 3 (a blank, uncontrollable game; "working / fully shippable" over a RED gate; a scratch file in the project)
+- 🥵 struggle: 3 (a `cat .env` attempt blocked; an unused kit canvas; an over-estimated ETA)
+
+Plus the session-level preview that would not wake.
+
+Missing system: the model's closing message was not reconciled with the platform's own verdict. The claim audit existed, but its vocabulary missed every sentence these builds used.
+
+| Item | Root cause → class | Fix | Lock |
+|---|---|---|---|
+| Blank canvas, Controls 0, published link "not opening" | setup() set 'playing'; the loop ran only from start() → the loop is tied to one caller, not to the state | Shell loop follows the status, plus a first frame; kit history regenerated (#4286) | `aGameRunsWhenItSaysItIsPlaying` (reverted: 3 fail) |
+| "Verified working / fully healthy / fully shippable / kaam kar raha hai" over RED | Claim vocabulary too narrow → verdicts phrased outside a fixed word list | Vocabulary widened (EN + Hinglish); a whole-app verdict counts when the game failed | `aGameThatIgnoresInputIsNotCalledWorking` (reverted: 3 fail) |
+| "Preview not running … now restarted" (Q-2714) | No fact for a restart → a claimed action that no command performed | `devServerLaunchEvidence()` from the command log, plus a `restart-claimed` rule | `aRestartNobodyPerformedIsCorrected` (reverted: 1 fail) |
+| `typecheck_output.txt` saved with the app (Q-2713) | The ledger adopts every shell write → a tool-output capture treated as source | `isScratchCapture` (name AND content) in the ledger and both collectors | `aToolOutputCaptureIsNotTheApp` (reverted: 1 fail) |
+| Preview dead 3 days after a failed build | No copy on a failed turn; an older copy refused; wakes unrecorded | Layers 1–3 (#4286) | `failedBuildCopy`, `aPreviewIsNeverBlank`, `previewWakeLog` |
+| Type errors and `edit_file` misses after the failed build | Belongs to Q-2691 / Q-2697 (other session) | — | — |
+| `cat .env` blocked | Not a defect: the governance guard did its job | — | — |
+| USAGE_NOT_REPORTED (Surplus) | Already Q-2414 🟡 | — | — |
+| Unused kit `GameCanvas.tsx` (Q-2715) | Dead-file removal skips a green-latched app | 🟡 BLOCKED: admin decision | — |
+| ETA under the band (Q-2716) | The fastest build of this workspace so far; the band low sat below every earlier build | 🟡 BLOCKED: close as not-a-defect, pending agreement | — |
+| Why that day's wake failed (Q-2717) | No record existed | 🟡 BLOCKED: needs the next PREVIEW_WAKE_HISTORY | — |
+## 2026-11-17 — Traffic Manager V2, P2: the control store (owner-approved; STOP after P2)
+
+What it is: a versioned, atomic, audited Firestore control store, plus an admin screen (AI Engines → Traffic control).
+- **Global emergency OFF**: every gateway surface goes to its legacy path.
+- **Per-surface switches**: `env` or `legacy`.
+- **Per provider or model**: `enabled`, `draining`, `disabled`, plus a traffic cap of 0–100%.
+- **Admission evidence per model**: capability test, price check, security review and ops test, with a reviewer and an expiry.
+
+Files:
+- `src/server/AI/TrafficRegistry/controlTypes.ts`: strict schema and validation.
+- `controlDecision.ts`: the pure gates.
+- `controlStore.ts`: one transaction writes the `admin_traffic_control/current` doc, CREATEs the immutable `admin_traffic_control_revisions/{rev}` copy, and creates the `admin_traffic_control_audit` row. It checks the revision before writing. A rollback is a new revision.
+- `controlSync.ts`: keeps the last-known-good doc and only ever moves to a higher revision. It reads one doc per instance on an adaptive 15→60 s interval with ±20% jitter.
+- `routes/trafficControlAdmin.ts`, `components/admin/TrafficControlPanel.tsx`, `lib/trafficControlView.ts`.
+
+Safety design (owner requirements 9 and 10):
+- **It can only NARROW.** No mode widens what the env enables. An empty store is exactly today's routing, so nothing changes in production until an admin turns something off.
+- **Ingress decides.** Ingress (`runWithAuthenticatedInferenceGatewayRequest`, `inferenceGatewayEnabled`) takes one control snapshot per request, before any provider call.
+- **The planner gate applies only to new attempts.** It is supplied only where a NEW attempt is planned (`executor.ts`), never on the ledger's re-check of an already-selected attempt.
+- **Mid-request checks are env-only.** `selectedCohortCurrent` and `verifiedPrincipal` stay env-only, so a switch flipped mid-request never strands, re-runs or double-charges a request.
+- **Guest quota is never double-counted.** A guest already admitted to the gateway quota keeps that decision for the request, and the guest-selection step consults the store.
+- **The env OFF still beats everything.**
+
+**DEVIATION from the approved plan text, stated plainly:**
+- The plan said "legacy until the first read". That would move every cold start off the gateway, which is a production change P2 must not make.
+- So before the first read the instance enforces nothing extra, which is exactly today's routing.
+- The first read starts at boot, and the env OFF remains the instant backstop.
+
+**MFA finding:**
+- Admin login MFA is optional in this codebase. With nothing enrolled, login is password-only.
+- So writes also need a fresh 6-digit TOTP code, accepted once per instance, and are refused until MFA is enrolled.
+
+**Admission:**
+- `required: false` means observe only: the gaps are shown and nothing is blocked. That way models serving today are unaffected.
+- `required: true` means the planner refuses the model until all checks are present and unexpired.
+
+Scope limits (P3+):
+- Provider and model drain, disable and caps are enforced on the GATEWAY path.
+- The legacy ladders (FreeChain, AIRouter, builder) still honour the kill switch only. They gain drain and skip through the shared health layer in P3.
+
+Tests:
+- `control.test.ts`, `trafficControlAdmin.test.ts`, `policy.test.ts` (gate), and `tests/trafficControlNeverStrandsStartedWork.test.ts` (source guards and behaviour).
+- 8 reversions each caught: mid-request recheck reading live control, global switch ignored, planner ignoring the gate, no revision check, no replay guard, LKG dropped, older revision adopted, admission gate off.
+- The P1 `KNOWN_UNREACHABLE` entries were removed, since the route now reads the snapshot. The three new collections are classified as kept for ever, with reasons.

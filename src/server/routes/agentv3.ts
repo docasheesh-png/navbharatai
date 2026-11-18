@@ -1,3 +1,5 @@
+import { inspectWorkspaceFilePaths } from '../AgentV3/WorkspaceFileStore';
+import { royaleNewProjectAllowed } from '../AgentV3/royaleProjectEligibility';
 import { completedAppReviewEligible } from '../AgentV3/optionalBugHunt';
 import { readSummaryManifest } from '../AgentV3/ProjectSummary';
 import { compilerNeedsPackageSetup, compilerRepairProven, PACKAGE_SETUP_REQUIRED } from '../AgentV3/compilerSetupBoundary';
@@ -5,7 +7,7 @@ import { prepareGameSeedWorkspace } from '../AgentV3/gameSeedWorkspace';
 import { withReplyLanguage, replyVoiceForRequest } from '../AgentV3/replyLanguageBinding';
 import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
 import { createSandboxAdmissionBudget, sandboxAdmissionActuator } from '../AgentV3/sandboxAdmissionBudget';
-import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges } from '../AI/RouterOne/catalogueAccounting';
+import { routerOneAccountingScope, bindRouterOneAccountingScope, routerOneAbortController, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges, recordRouterOneEstimatedBill } from '../AI/RouterOne/catalogueAccounting';
 import { planKitRefresh } from '../lib/gameRecipeLayers';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
 import { PRO_SANDBOX_FEE_PCT, proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../AgentV3/proSandboxFee';
@@ -25,6 +27,7 @@ import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, asse
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
 import { surplusFallbackDisabledFor, surplusFallbackDisabledForTier, surplusRawErrorReporter } from '../AI/SurplusRegistry/surplusNoFallback';
 import { rawErrorText } from '../AgentV3/rawErrorDetail';
+import { withEngineSafeDiag, stripEngineSafeDiag } from '../lib/engineSafeDiag';
 import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
 import { wrapSurplusRunnerPreWriteFailOpen, tryConsumeSurplusPreWriteFailOpen, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason, surplusFallbackMessage } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
@@ -86,7 +89,7 @@ import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAutho
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, foldPlanToBudget, fileBudgetReport } from '../AgentV3/fileBudget';
-import { firstEtaLine, formatEtaRange, fleetEtaLine, etaTickLine, etaPhaseLine, etaAppExists } from '../AgentV3/progressEta';
+import { firstEtaLine, formatEtaRange, fleetEtaLine, etaTickLine, etaPhaseLine, etaAppExists, finalChecksAfterSteer } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity } from '../AgentV3/complexityRouting';
 import { isPortTurn, collectPortSources, portDigest, foreignSourcePaths } from '../AgentV3/portDigest';
@@ -215,6 +218,7 @@ import {
   readWalletBalanceInr,
   firestoreWalletReader,
   decidePaidGate,
+  balanceRechargeNotice,
   identityGrantEmail,
   type GrantEmail,
 } from '../AgentV3';
@@ -226,6 +230,8 @@ import {
   claimWorkspaceBuild, claimWorkspaceBuildAwaitingRelease, releaseWorkspaceBuild, workspaceBuildIsLive,
   BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
 } from '../AgentV3/workspaceBuildLease';
+import { zTestFreeBilling } from '../lib/zTestAccount';
+import { shouldRefuseBuildForBalance } from '../AgentV3/balanceRechargeNotice';
 import { getConnection } from '../lib/supabaseConnectionStore';
 import { provisionDatabaseForUser, freshAccessToken, databaseReadyNarration, connectedDatabaseAsleepNote } from '../lib/supabaseProvisionFlow';
 import { setupSupabasePayments, supabasePaymentsEnabled, PAYMENT_SECRET_NAMES } from '../lib/supabasePayments';
@@ -270,7 +276,8 @@ import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote, strictReveri
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { createBuildRequestCoordination, createBuildPreflightStream, buildRequestInputRejection, withBuildRequestCleanup, startBuildLeaseHeartbeat, rethrowBuildSetupRecoveryUnavailable, buildExceptionDetails, publishBuildException, normalQueuedModuleRetirementAllowed, queuedContinuationBusyFields } from '../AgentV3/BuildRequestCoordination';
-import { isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable } from '../AgentV3/SandboxRecoveryError';
+import { isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable, latestSettledAttemptWasSandboxRecoveryUnavailable } from '../AgentV3/SandboxRecoveryError';
+import { openingEtaShownNote, recordOrEmitOpeningEta, emitPendingOpeningEta, sandboxRecoveryRepeatOpts } from '../AgentV3/sandboxOpeningEta';
 import { createBuildSourcePublication } from '../AgentV3/BuildSourcePublication';
 import { loadQueue, mutateQueue, mutateQueueWithResult, claimQueuedCommand, recoverQueuedCommand, stopWorkspaceQueueAndLease, QueueStoreUnavailableError, QueueClaimConflictError } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext, plannerDomainBrief } from '../AgentV3/RoleChats';
@@ -514,13 +521,17 @@ import {
 } from '../AgentV3/ProviderUsageLedger';
 import OpenAI from 'openai';
 import { routerOneCatalogStatus, startRouterOneCatalogSync, syncRouterOneCatalog } from '../AI/RouterOne/routerOneCatalog';
+import { bluesmindsBuilderEnabled, bluesmindsBuilderRungs } from '../AgentV3/bluesmindsBuilder';
+import { moyiBuilderEnabled, moyiBuilderRungs } from '../AgentV3/moyiBuilder';
 import { ROUTER_ONE_LABEL, ROUTER_ONE_NOT_CONFIGURED, routerOneApiKey, routerOneBaseUrl, routerOneModels, routerOnePinnedForTier, routerOneWeakFallbackEnabled } from '../AI/RouterOne/routerOne';
+import { ProChainV2Build, proChainV2Decision, proChainV2ScopeAsk, proChainV2RedactSecrets, roleForRunnerOpts } from '../AgentV3/proChainV2';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { withStopSignal } from '../AgentV3/stopSignal';
 import { withAnswerNotDeliberation } from '../AgentV3/answerNotDeliberate';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { redactPII, redactEventForUser } from '../AgentV3/SourceSecretRedactor';
+import { userConversationView, userResultEvent } from '../AgentV3/userChargeView';
 import { audit } from '../lib/audit';
 import { persistenceHealth } from '../lib/persistenceHealth';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
@@ -589,7 +600,8 @@ import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage
 import { previewKeepAliveEnabled, isTopLevelNavigation } from '../AgentV3/previewKeepAlive';
 import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
-import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE, PREVIEW_COPY_REFRESH_MS } from '../AgentV3/previewSnapshot';
+import { keepFailedBuildCopy, takeBuildCopy } from '../AgentV3/failedBuildCopy';
+import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, snapshotStandIn, snapshotStandInNote, PREVIEW_COPY_REFRESH_MS } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
 import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, fileContentHashes, savedDivergesFromSandbox, type SnapshotTaken, describeDivergence } from '../AgentV3/snapshotIdentity';
@@ -643,7 +655,7 @@ import { userAuthContext } from '../AgentV3/userAuthContext';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { phantomAliasDependencies, removeDependenciesFromPackageJson } from '../AgentV3/DependencyReconciler';
 import { fastLaneDependencyPlan, fastLaneDependencyInstallCommand, fastLaneDependencyNote } from '../AgentV3/fastLaneDependencies';
-import { foundationFilesStillAbsent, ensureViteReactFoundation, ensureStaticSiteFoundation, isStaticSiteProject, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
+import { foundationFilesStillAbsent, ensureViteReactFoundation, ensureStaticSiteFoundation, isStaticSiteProject, sanitizeTsconfigExtends, sanitizeTsconfigReferences } from '../AgentV3/FrameworkFoundation';
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
 import { wakePublicState, sanitizeWakeError, type TerminalWakeState } from '../AgentV3/terminalWake';
@@ -656,10 +668,11 @@ import { placePlatformContext } from '../lib/platformContext';
 import { previewAutoRepairEnabled, autoRepairPrecheck, autoRepairDecision, autoRepairPrompt, claimAutoRepair } from '../AgentV3/previewAutoRepair';
 import { clearPreviewGaveUp } from '../AgentV3/previewGiveUp';
 import { buildConfirmation, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
-import { loadProjectMemoryForTurn, memoryStopMessage, recordUserMessage, transcriptOf } from '../AgentV3/projectMemoryTurn';
+import { loadProjectMemoryForTurn, memoryStopMessage, recordUserMessage, transcriptOf, asksForTheApp, memoryMessageFor } from '../AgentV3/projectMemoryTurn';
 import { assessEditCandidate, rejectionMessage, type GateVerdict as EditGateVerdict } from '../AgentV3/editPromotionGate';
-import { decideRelease, candidateReplacesBase, editPromotionEnabled } from '../AgentV3/editRelease';
+import { decideRelease, candidateReplacesBase, editPromotionEnabled, renderEvidence, renderedInBuildUnchanged, buildOkOf } from '../AgentV3/editRelease';
 import { checkEditBaseForTurn, editIdFor } from '../AgentV3/editBase';
+import { fallbackDetail } from '../AgentV3/providerErrorClass';
 import { settleEditRevision, holdReplacementIfAny, billAfterHold, summaryAfterHold, recordRestoreRevision, pathsOf, persistedAfterHold } from '../AgentV3/editPromotion';
 import { messageIdFor } from '../AgentV3/projectRequirements';
 import { getRevisionStore, buildRevision, verifyBase, promoteWithRebase, type BaseVerification, type RevisionRecord } from '../AgentV3/projectRevisions';
@@ -760,11 +773,12 @@ import { entryIsStillTheStarter, starterRenderNote, importNeverTheStarter } from
 import { readProjectElsewhere, shouldAnswerProjectElsewhere, projectElsewhereSteer, projectElsewhereFallback } from '../AgentV3/projectElsewhere';
 import { runProvenApp, verdictHeldMessage, type ProdBuildOutcome, type LateFlip } from '../AgentV3/runProvenApp';
 import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
+import { devServerLaunchPlan, startFilesFromPaths } from '../AgentV3/devServerLaunchPlan';
 import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { attachedBytesNote } from '../AgentV3/attachedFileBytes';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
-import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
+import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, cssStoppedUnfinishedRecord, cssClassesUndefinedFields, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
 import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../AgentV3/spacingSnap';
 import { filesANoteStillFlags } from '../AgentV3/writeTimeQualityCheck';
@@ -1918,6 +1932,9 @@ export function decideBuildBilledUsd(
    * 2026-11-11 Weak/Surplus stop token floor reads this later; it does not change this function's bill.
    */
   surplusUnsettledAbsorbed?: true;
+  /** Owner 2026-11-15 (BR2388): the Router One share priced by ESTIMATE, with its label. Absent unless
+   * an estimated receipt was billed, so every existing equality test stays unchanged. */
+  routerOneEstimated?: { calls: number; costUsd: number; billedUsd: number; label: string };
 } {
   const routerOneEntries = providerLedger.entries().filter(e => isRouterOneAccountingProvider(e.provider));
   if (routerOneEntries.length) {
@@ -1939,7 +1956,8 @@ export function decideBuildBilledUsd(
     const catalogue = routerOneCatalogueBuildCharges(routerOneEntries, barrenPhases);
     return { ...priced, effectiveBilledUsd: priced.effectiveBilledUsd + catalogue.billedUsd,
       realCostUsd: priced.realCostUsd + catalogue.costUsd, absorbedUnbilledUsd: priced.absorbedUnbilledUsd + catalogue.absorbedUsd,
-      reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal) };
+      reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal),
+      ...(catalogue.estimated ? { routerOneEstimated: catalogue.estimated } : {}) };
   }
   const surplusEntries = providerLedger.entries().filter(e => e.provider.toUpperCase() === 'SURPLUS');
   if (surplusEntries.length) {
@@ -2215,7 +2233,11 @@ export const MCP_CHECK_COOLDOWN_MS = 10_000;
 const mcpCheckCooldown = new Map<string, number>();
 
 /** Push an event into a build's replay buffer and fan it out to every subscriber. */
-function broadcastBuild(rb: RunningBuild, e: unknown): void {
+function broadcastBuild(rb: RunningBuild, eIn: unknown): void {
+  // Owner t362u: every copy a browser can receive (live subscribers, the replay buffer, the cross-device
+  // channel) is the user's view — ₹ total only, the user's build report, no adminDetail. The session
+  // timeline (persisted, admin-readable) records the full event before this point.
+  const e = userResultEvent(eIn);
   // Liveness stamp — the input to isSilentlyStale(). A build that emits is alive; a registry entry
   // that stops emitting is how a Resume button ends up pointing at a corpse (admin 2026-08-17).
   rb.lastEventTs = Date.now();
@@ -2745,7 +2767,7 @@ export function openAiCompatRunners(
         const sdkTimeoutMs = buildStreamingEnabled() ? Math.max(timeoutMs, streamHardCapMs()) : timeoutMs;
         const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0,
           fetch: isRouterOneAccountingProvider(name)
-            ? routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId); audit('ROUTER_ONE_REQUEST', trace); }) : canaryFetch() });
+            ? routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId, trace.status); audit('ROUTER_ONE_REQUEST', trace); }) : canaryFetch() });
         const pricedClient = isRouterOneAccountingProvider(name)
           ? cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, apiKey, { maxDurationMs: sdkTimeoutMs }) : client as unknown as OpenAiChatClient;
         const turnRunner = new OpenAiToolRunner(pricedClient, { model, ...runnerOpts, timeoutMs });
@@ -3531,7 +3553,7 @@ export function ladderRunners(rungs: readonly LadderRung[]): NamedRunner[] {
  * pin on non-Weak bands. Weak Router One models share the ordinary guarded chain below.
  */
 function buildTierEngineAvailable(tier: PowerLevel): boolean {
-  return (tier === 'weak' && routerOneWeakFallbackEnabled()) || tierEngineAvailable(tier);
+  return (tier === 'weak' && (routerOneWeakFallbackEnabled() || bluesmindsBuilderEnabled() || moyiBuilderEnabled())) || tierEngineAvailable(tier);
 }
 
 /** Preserve configured models and tail order; move only the first GLM rung to the front. */
@@ -3575,7 +3597,7 @@ function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSigna
     for (const model of routerOneModels()) {
       try {
         const client = new OpenAI({ apiKey: key, baseURL: routerOneBaseUrl(), timeout: 60_000, maxRetries: 0,
-          fetch: routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId); audit('ROUTER_ONE_REQUEST', trace); }) });
+          fetch: routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId, trace.status); audit('ROUTER_ONE_REQUEST', trace); }) });
         const r = await cataloguePricedRouterOneText(() => cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, key, { maxDurationMs: 60000 }).chat.completions.create({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1024 }, { signal }));
         if (!('choices' in r)) throw new Error(ROUTER_ONE_NOT_CONFIGURED);
         return { text: String(r.choices?.[0]?.message?.content ?? '') };
@@ -3583,6 +3605,93 @@ function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSigna
     }
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   };
+}
+
+/**
+ * PRO CHAIN V2 — one agent's runner: its own Surplus runner (when the build admitted one), then Router One
+ * (its existing builder entry point, same eligibility as the Weak chain), Qubax and Mitrify — NOTHING else.
+ * The tail is the ordinary multi-provider runner with the caller's billing/report callbacks; the agent's
+ * bench is its own (independence), the build's fatal dead-rung memory is shared (a revoked key is revoked
+ * for every agent). See AgentV3/proChainV2/agentRunner.ts.
+ */
+function proChainV2TurnRunner(opts: Parameters<typeof buildTurnRunner>[0], v2: ProChainV2Build): TurnRunner {
+  const surplus = opts.surplusSession?.runner({
+    onProviderUsed: () => opts.onProviderUsed?.('SURPLUS', []),
+    onTurnComplete: (result) => opts.onTurnComplete?.('SURPLUS', result.usage, result.model, result.usage.cacheReadInputTokens),
+  });
+  const r1Key = routerOneApiKey();
+  return v2.agentRunner({
+    role: roleForRunnerOpts(opts),
+    ...(surplus ? { surplus } : {}),
+    routerOne: routerOneWeakFallbackEnabled() ? openAiCompatRunners(ROUTER_ONE_LABEL, r1Key, routerOneBaseUrl(), routerOneModels()) : [],
+    routerOneSecrets: r1Key.split(/[\s,]+/),
+    rungFactory: (label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models),
+    makeChain: (rungs, hooks) => makeMultiProviderTurnRunner(rungs, {
+      onProviderUsed: (used, from) => {
+        hooks.onUsed(used);
+        if (from.length) console.log(`[AGENTV3] v2 build turn via ${used} (after ${from.join(' → ')})`);
+        opts.onProviderUsed?.(used, from);
+      },
+      onProviderError: (name, err) => {
+        hooks.onFailed(name, err);
+        console.log(`[AGENTV3] v2 build ${name} failed: ${proChainV2RedactSecrets(err instanceof Error ? err.message : String(err), [r1Key, process.env.QUBAX_API_KEY ?? '', process.env.MITRIFY_API_KEY ?? ''])}`);
+        opts.onProviderError?.(name, err);
+      },
+      ...(opts.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {}),
+      ...(opts.onProviderBenched ? { onProviderBenched: opts.onProviderBenched } : {}),
+      ...(opts.onAttemptWasted ? { onAttemptWasted: opts.onAttemptWasted } : {}),
+      ...(opts.deadRungs ? { deadRungs: opts.deadRungs } : {}),
+    }),
+    ...(opts.surplusPreWriteFailOpen?.onSurplusError ? { onSurplusError: opts.surplusPreWriteFailOpen.onSurplusError } : {}),
+    ...(opts.onChain ? { onChain: (rungs) => opts.onChain?.(rungs as unknown as ChainRung[]) } : {}),
+  });
+}
+
+/** The v2 context for this build, or undefined (every pre-v2 path). Kept out of the chat handler (Q-979). */
+export function proChainV2ForBuild(tier: unknown, email: string | null | undefined, uid: string | null | undefined): ProChainV2Build | undefined {
+  const d = proChainV2Decision(String(tier ?? ''), email, uid);
+  return d.enabled ? new ProChainV2Build(d.reason) : undefined;
+}
+
+/** v2: the scope classifier's last step is Qubax → Mitrify, never GLM; otherwise the GLM classifier. */
+export function scopeFinalAsk(v2: ProChainV2Build | undefined, glm: typeof weakBuildAdmissionAsk): typeof weakBuildAdmissionAsk {
+  if (!v2) return glm;
+  return proChainV2ScopeAsk({
+    buffer: v2.scopeUsage,
+    onFailure: (provider, detail) => v2.report({ phase: 'provider', severity: 'warning', code: 'PRO_CHAIN_V2_SCOPE_FAILED', autoResolved: true, message: `[v2] scope classifier: ${provider} failed`, detail }),
+  }) as unknown as typeof weakBuildAdmissionAsk;
+}
+
+/** v2: a Surplus scope failure does NOT drop Surplus for the whole build — each agent decides for itself. */
+export function scopeDropSurplus(v2: ProChainV2Build | undefined, drop: () => void): () => void {
+  return v2 ? () => { v2.report({ phase: 'provider', severity: 'info', code: 'PRO_CHAIN_V2_SCOPE_PRIMARY', autoResolved: true, message: '[v2] SURPLUS failed the scope call — agents still start on it and leave it one by one' }); } : drop;
+}
+
+/** The early scope exception drops Surplus build-wide on the pre-v2 path only (v2 agents decide per agent). */
+export function consumeEarlySurplusFailure(hooks: SurplusPreWriteFailOpenHooks, error: unknown): void {
+  if (hooks.proChainV2) return;
+  tryConsumeSurplusPreWriteFailOpen(hooks, error);
+}
+
+/** Does the planner run on the build's own runner factory (Surplus session or the v2 chain)? */
+export function plansOnBuildRunner(surplusSession: unknown, hooks: SurplusPreWriteFailOpenHooks): boolean {
+  return !!surplusSession || !!hooks.proChainV2;
+}
+
+/** v2: attach the report sink, the live tally, the activation line, and the scope classifier's usage. */
+export function attachProChainV2(v2: ProChainV2Build | undefined, diag: BuildDiagnostics, ledger: { add: (provider: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void }): void {
+  if (!v2) return;
+  try {
+    v2.attachReport((line) => diag.record(line));
+    diag.setProChainV2(v2.summary);
+    v2.report({ phase: 'provider', severity: 'info', code: 'PRO_CHAIN_V2_ACTIVE', autoResolved: true,
+      message: `[v2] Pro Chain V2 active (${v2.reason}): SURPLUS → ENGINE_R1 → ENGINE_QX → ENGINE_MF, per agent; no ladder tail` });
+    for (const row of v2.scopeUsage.splice(0)) {
+      ledger.add(row.provider, row.usage, row.model);
+      if (row.estimated) v2.report({ phase: 'provider', severity: 'warning', code: 'PRO_CHAIN_V2_USAGE_ESTIMATED', autoResolved: true,
+        message: `[v2] ${row.provider} (${row.model}) scope call returned no usage — its tokens are ESTIMATED` });
+    }
+  } catch { /* diagnostics are best-effort — never affects a build */ }
 }
 
 function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKeys: string[]): TurnRunner {
@@ -3637,6 +3746,8 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
    */
   surplusPreWriteFailOpen?: SurplusPreWriteFailOpenHooks;
 }): TurnRunner {
+  // Pro Chain V2 (owner t350u): only a build that carries a v2 context (z@ by default) — every agent its own chain.
+  if (opts.surplusPreWriteFailOpen?.proChainV2 && toPowerLevel(opts.tier) === 'weak') return proChainV2TurnRunner(opts, opts.surplusPreWriteFailOpen.proChainV2);
   // The earlier profile pin survives only on other bands; Weak always uses the confirmed order.
   if (toPowerLevel(opts.tier) !== 'weak' && opts.surplusPreWriteFailOpen?.routerOneOnly) return routerOneTurnRunner(opts, { pinned: true });
   if (opts.surplusSession) {
@@ -3686,9 +3797,13 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
   // Owner Weak order applies to main, plan, heal and complex lanes; explicit retry/escalation
   // may advance past a failed rung. Other bands retain their existing transformations.
   if (level === 'weak' && !opts.afterLeadRung && !opts.fromProvider) rungs = weakGlmFirst(rungs);
+  // Owner t357u + t359u: Weak is Surplus (above) → Router One → BluesMinds → the tier ladder, all default on.
+  // Owner 2026-11-17: Moyi sits right after BluesMinds (moyiBuilder.ts; present once its key, model and rate are set).
   const runners = [
     ...(level === 'weak' && routerOneWeakFallbackEnabled()
       ? openAiCompatRunners(ROUTER_ONE_LABEL, routerOneApiKey(), routerOneBaseUrl(), routerOneModels()) : []),
+    ...(level === 'weak' ? bluesmindsBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models)) : []),
+    ...(level === 'weak' ? moyiBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models)) : []),
     ...ladderRunners(rungs),
   ];
   if (runners.length === 0) {
@@ -3735,7 +3850,7 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
  * checks it against the constructed chain on every tier. PURE (reads the same env the chain does).
  */
 export function buildChainOpensPastOpener(tier: PowerLevel | string | boolean | null | undefined, complex: boolean): boolean {
-  if (toPowerLevel(tier) === 'weak' && routerOneWeakFallbackEnabled()) return false;
+  if (toPowerLevel(tier) === 'weak' && (routerOneWeakFallbackEnabled() || bluesmindsBuilderEnabled() || moyiBuilderEnabled())) return false;
   return openingRung(tierLadder(toPowerLevel(tier as PowerLevel | boolean | string | undefined | null)).rungs, { complex }) > 1;
 }
 
@@ -3871,6 +3986,17 @@ export function sanitizeSteerMessage(raw: unknown): string | null {
   const t = raw.trim();
   if (!t) return null;
   return t.length > 2000 ? t.slice(0, 2000) : t;
+}
+
+/** A report row from the moment the diagnostics object exists, so a drop before the first model call still leaves one. */
+function noteBuildAccepted(diag: BuildDiagnostics): BuildDiagnostics {
+  try {
+    diag.record({
+      phase: 'build', severity: 'info', code: 'BUILD_STARTED', autoResolved: true,
+      message: 'Build accepted. This report is saved from here on, including when the connection drops before the build finishes.',
+    });
+  } catch { /* a start line must never stop the build */ }
+  return diag;
 }
 
 /**
@@ -4160,11 +4286,51 @@ function respondBuilderEngineUnavailable(res: Response, tier: PowerLevel, debugD
 
 // Explicit admission context keeps the route's flow graph bounded. Policy is shared verbatim
 // between default routing and opt-in routing; only the timing/estimate differs.
-export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res, release, onFreeTier, onEconomy }: {
+export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res, release, onFreeTier, onEconomy, onSpendable }: {
   userId: string | null; email: GrantEmail | null; onlyOpus: boolean; prompt: string;
   powerLevelReqEffective: PowerLevel; surplusSession?: SurplusBuildSession; res: Response;
   release: () => void; onFreeTier: (free: boolean) => void; onEconomy: (notice: string) => void;
+  onSpendable?: (balanceInr: number | null) => void;
 }): Promise<boolean> {
+    // Owner t403u: a wallet that cannot cover the estimate does not start a build, including the
+    // free weak ladder. Admin free-list and the z test account stay exempt. An unreadable balance
+    // is not treated as zero. This runs even when the paid-public flag is off, because that flag
+    // was what let a 0-balance account build on the weak ladder.
+    const balanceExempt = isAgentV3FreeUser(userId, email) || zTestFreeBilling(email, userId);
+    if (!balanceExempt && userId) {
+      const walletDoc = await firestoreWalletReader(getDb())(userId).catch(() => null);
+      const balanceInr = await readWalletBalanceInr(async () => walletDoc, userId, powerLevelReqEffective === 'weak' ? 'build' : 'usage');
+      onSpendable?.(balanceInr);
+      if (userId) onFreeTier(isFreeTierUser(walletDoc));
+      // Power mode is refused before any cost estimate, exactly as before. A never-paid account
+      // asking for it never reaches the balance math.
+      if (billingAppliesTo(userId, email) && powerModeBlockedForFreeUser(onlyOpus, walletDoc)) {
+        release();
+        audit('AGENTV3_POWER_MODE_BLOCKED_FREE_USER', { userId }, 'info');
+        res.status(402).json({
+          error: powerModePaidOnlyMessage(),
+          code: 'POWER_MODE_PAID_ONLY',
+          ...(typeof balanceInr === 'number' ? { balanceInr, balanceTokens: inrToWalletTokens(balanceInr) } : {}),
+        });
+        return false;
+      }
+      const estimate = surplusSession
+        ? { inr: Number(surplusSession.estimatedMicroUsd) / 1_000_000 * 10 * usdInrRate(), usd: Number(surplusSession.estimatedMicroUsd) / 1_000_000 * 10 }
+        : estimateBuildCost(prompt, powerLevelReqEffective, usdInrRate());
+      if (shouldRefuseBuildForBalance({ exempt: false, balanceInr, estimateInr: estimate.inr })) {
+        release();
+        audit('AGENTV3_BUILD_BLOCKED_NO_CREDITS', { userId, balanceInr, estimateInr: estimate.inr }, 'warn');
+        void warnAboutBalance(userId, email, 'blocked');
+        res.status(402).json({
+          error: balanceRechargeNotice(prompt),
+          code: 'INSUFFICIENT_CREDITS',
+          balanceInr,
+          ...(typeof balanceInr === 'number' ? { balanceTokens: inrToWalletTokens(balanceInr) } : {}),
+          ...(surplusSession ? { billingBasis: 'usage-based' } : { estimateInr: estimate.inr, estimateTokens: inrToWalletTokens(estimate.inr) }),
+        });
+        return false;
+      }
+    }
     if (billingAppliesTo(userId, email)) {
       // ONE wallet read serves the whole paid-surface gate: the power-mode paid-only check (doc's
       // totalMoneySpent) AND the balance math below (doc's remaining_balance via the same pure reader).
@@ -4208,7 +4374,11 @@ export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, promp
         // notification, which is the thing that used to arrive five times.
         void warnAboutBalance(userId, email, 'blocked');
         res.status(402).json({
-          error: surplusSession ? 'Your credits are used up. Add credits to start a new build. Charges are based on actual usage, not a fixed build quote.' : gate.notice || 'Your credits are used up. Add credits to start a new build.',
+          // Owner t402u: one sentence, in the language of the request, before any build starts.
+          // This is the existing block only (no positive balance). A free weak-ladder build is one
+          // this gate already allows — billing off, a free-list account, an unreadable balance, or
+          // a positive balance — and that path is unchanged.
+          error: balanceRechargeNotice(prompt),
           code: 'INSUFFICIENT_CREDITS',
           balanceInr,
           // Billing Phase 2 — token-first display: the same numbers in the wallet's primary unit,
@@ -4318,6 +4488,15 @@ export function registerAgentV3Routes(app: Express): void {
     const buildRunningHere = !!findAttachableBuild((k: string) => runningBuilds.get(k), {
       verifiedUid: statusVerifiedUid, workspaceId, perWorkspace: perWs,
     });
+    // A phone's status poll often lands on a DIFFERENT instance from the one holding the build.
+    // Memory says "not running" there, and the client's stall watchdog then shows "stopped
+    // responding" while the build is still heartbeating its workspace lease. The lease is the
+    // cross-instance fact. Unknown (store unreachable) stays false — a doubt must not hide a
+    // build that really ended.
+    let buildHeldElsewhere = false;
+    if (!buildRunningHere && workspaceId && workspaceLeaseEnabled()) {
+      buildHeldElsewhere = (await workspaceBuildIsLive(getDb() as unknown as BuildLeaseStore, workspaceId)) === true;
+    }
     // T0-9 SECURITY (2026-07-14): `billed`/`powerUnlocked` are MONEY/entitlement facts and were computed
     // from the CLAIMED `?userId`/`?email` — so `?userId=<victim>` leaked whether that account had ever
     // purchased (its wallet's paid status). They are now derived from the VERIFIED token only (the client
@@ -4332,6 +4511,7 @@ export function registerAgentV3Routes(app: Express): void {
       ...statusEntitlement(verified, wallet),
       buildRunning,
       buildRunningHere,
+      buildHeldElsewhere,
       ...agentV3Status(),
       team: agentLifecycle.snapshot(),
     });
@@ -4378,7 +4558,7 @@ export function registerAgentV3Routes(app: Express): void {
             // the surest way to get "everywhere" right is to leave nothing to update. `appName` rides
             // along separately so a caller can still tell a chosen name from a derived one.
             id: c.id, title: effectiveAppName(c), status: c.status, workspaceId: c.workspaceId,
-            billedUsd: c.billedUsd, createdAt: c.createdAt, updatedAt: c.updatedAt,
+            createdAt: c.createdAt, updatedAt: c.updatedAt, // owner t362u: no USD bill in the user's list
             ...(c.appName ? { appName: c.appName } : {}),
             ...(c.pinned ? { pinned: true } : {}),
             ...(live ? { live: true, liveUrl: dep!.url } : {}),
@@ -4438,7 +4618,9 @@ export function registerAgentV3Routes(app: Express): void {
           if (todos.length > 0) workspaceState = { todos };
         }
       } catch { /* plan restore is best-effort — never blocks resume */ }
-      res.json({ conversation: rec, workspaceState });
+      // Owner t362u: the owner's copy shows the ₹ total only — the USD bill, token usage, the full build
+      // report and adminDetail stay on the server record for admin views.
+      res.json({ conversation: userConversationView(rec), workspaceState });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -5166,7 +5348,7 @@ async function noteBuildOutcome(
       // non-admin gets those scrubbed (the full report is anonymized separately when fetched by id).
       const historyOut = showProviderDetail
         ? history
-        : history.map((h) => ({ ...h, summary: h.summary === undefined ? undefined : redactProviderError(h.summary), rootCause: h.rootCause === undefined ? undefined : redactProviderError(h.rootCause) }));
+        : history.map((h) => ({ ...h, summary: h.summary === undefined ? undefined : redactProviderError(stripEngineSafeDiag(h.summary)), rootCause: h.rootCause === undefined ? undefined : redactProviderError(stripEngineSafeDiag(h.rootCause)) }));
       res.json({ history: historyOut });
       return;
     }
@@ -6031,10 +6213,18 @@ async function noteBuildOutcome(
     // the JSON mode returns. Non-stream callers keep the original single-JSON contract.
     const wantsStream = req.body?.stream === true;
     let streaming = false;
+    // Every wake leaves a record (previewWakeLog.ts): the last stage it reached and how it ended.
+    const wakeStartedAt = Date.now();
+    let lastWakeStage = '';
     const sendStage = (label: string, pct: number): void => {
+      lastWakeStage = label;
       if (streaming && !res.writableEnded) res.write(JSON.stringify({ type: 'stage', label, pct }) + '\n');
     };
     const finish = (payload: Record<string, unknown>, status = 200): void => {
+      void sandboxStore.recordWakeAttempt(workspaceId, {
+        at: Date.now(), ok: payload.ok === true, stage: lastWakeStage,
+        reason: typeof payload.reason === 'string' ? payload.reason : '', seconds: (Date.now() - wakeStartedAt) / 1000,
+      }).catch(() => {});
       if (streaming) {
         if (!res.writableEnded) {
           res.write(JSON.stringify({ type: 'result', ...payload }) + '\n');
@@ -6129,6 +6319,13 @@ async function noteBuildOutcome(
                 await mergeWorkspaceFiles(workspaceId, ts.patch).catch(() => {});
               }
             } catch { /* best-effort — a bad tsconfig extends just falls through as before */ }
+            try {
+              const refs = sanitizeTsconfigReferences(saved, Object.keys(saved));
+              if (refs.fixes.length > 0 || (refs.stripped?.length ?? 0) > 0) {
+                Object.assign(saved, refs.patch);
+                await mergeWorkspaceFiles(workspaceId, refs.patch).catch(() => {});
+              }
+            } catch { /* best-effort — a dangling tsconfig reference just falls through as before */ }
           }
           // Named as the restore it is (greenFreeze.ts ALLOWED_PASSES): copying the app's OWN saved bytes
           // back alters nothing. Unnamed, a verified-green app refused every file of its own restore, one
@@ -6505,12 +6702,16 @@ async function noteBuildOutcome(
         ? await raceTimeout(workspaceFilesSavedAt(ws), 3_000, 'doorLastChange').catch(() => null)
         : null;
       startingSnapshot = () => {
-        if (!shouldServeSnapshot({
+        // A current copy, or an OLDER one once nobody is waiting for a fresh edit (snapshotStandIn): the
+        // panel says which, from the same decision (preview-health below).
+        if (!snapshotStandIn({
           enabled: previewSnapshotEnabled(),
           doorState: 'starting',
           snapshotUrl: doorRecord?.snapshotUrl,
           snapshotAt: doorRecord?.snapshotAt,
           lastChangeAt,
+          buildRunning: isBuildRunningFor(ws),
+          now: Date.now(),
         })) return false;
         res.redirect(302, String(doorRecord!.snapshotUrl));
         return true;
@@ -6746,7 +6947,7 @@ async function noteBuildOutcome(
       // move together, from one shared function, or neither should move.
       let snapshotServing = false;
       let snapshotTakenAt: number | null = null;
-      let snapshotWaking = false;
+      let snapshotKind: 'expired' | 'current' | 'older' = 'expired';
       try {
         if (previewSnapshotEnabled() && livePortUp !== true) {
           const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'healthSnapshot').catch(() => null);
@@ -6759,15 +6960,18 @@ async function noteBuildOutcome(
             ? null
             : await raceTimeout(workspaceFilesSavedAt(workspaceId), 3_000, 'healthLastChange').catch(() => null);
           const doorState = sandboxGone ? 'asleep' as const : 'starting' as const;
-          if (shouldServeSnapshot({
+          const standIn = snapshotStandIn({
             enabled: true,
             doorState,
             snapshotUrl: rec?.snapshotUrl,
             snapshotAt: rec?.snapshotAt,
             lastChangeAt,
-          })) {
+            buildRunning: isBuildRunningFor(workspaceId),
+            now: Date.now(),
+          });
+          if (standIn) {
             snapshotServing = true;
-            snapshotWaking = doorState === 'starting';
+            snapshotKind = standIn;
             snapshotTakenAt = typeof rec?.snapshotAt === 'number' ? rec.snapshotAt : null;
           }
         }
@@ -6813,7 +7017,7 @@ async function noteBuildOutcome(
         // Two situations, two notes: an EXPIRED machine (the user may want to bring it back) and one
         // that is STARTING (nothing is wrong and they need do nothing). One note for both would be
         // wrong for one of them every time.
-        ...(snapshotServing ? { snapshotServing: true, snapshotNote: snapshotWaking ? SNAPSHOT_WAKING_NOTE : SNAPSHOT_NOTE, snapshotAt: snapshotTakenAt } : {}),
+        ...(snapshotServing ? { snapshotServing: true, snapshotNote: snapshotStandInNote(snapshotKind), snapshotAt: snapshotTakenAt } : {}),
         // The machine is deliberately asleep and the saved copy is answering for the app. Distinct from
         // `snapshotServing` above, which means the machine is GONE — here it is alive and we are simply
         // not waking it. The client frames the copy and says so; nothing is broken and nothing is lost.
@@ -10539,7 +10743,7 @@ async function noteBuildOutcome(
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders();
-      const sendLine = (e: unknown) => { if (!res.writableEnded) res.write(JSON.stringify(honestResultEvent(e)) + '\n'); };
+      const sendLine = (e: unknown) => { if (!res.writableEnded) res.write(JSON.stringify(userResultEvent(honestResultEvent(e))) + '\n'); };
       const roleWorkspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
       try {
         // Ground the role in the REAL project: durable files → tree + relevance-picked contents.
@@ -10737,13 +10941,15 @@ async function noteBuildOutcome(
     // purchased) — used to emit the localized "you are on the free Weak engine, recharge unlocks all
     // tiers" narration once the stream opens. Stays null when billing is off / no wallet read happened.
     let callerIsFreeTier: boolean | null = null;
+    let spendableBalanceInr: number | null = null;
     // The affordability gate runs when EITHER the full paid-public switch OR the decoupled credit gate
     // (AGENTV3_CREDIT_GATE) is on. The credit gate lets ₹0-balance accounts be blocked from spending
     // NavBharatAI's model budget without turning on the rest of paid-public (which stays OFF during the
     // security migration). Free-list users (admin/testers) always bypass it.
     const checkPaidBuildAdmission = () => checkBuilderPaidAdmission({ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res,
-      release: () => releaseBuildLock(buildKey, buildLockToken), onFreeTier: value => { callerIsFreeTier = value; }, onEconomy: value => { paidEconomyNotice = value; } });
-    if (!surplusBuilderEnabled() && !(await checkPaidBuildAdmission())) return;
+      release: () => releaseBuildLock(buildKey, buildLockToken), onFreeTier: value => { callerIsFreeTier = value; }, onEconomy: value => { paidEconomyNotice = value; },
+      onSpendable: (balance) => { if (typeof balance === 'number') spendableBalanceInr = balance; } });
+    if (!(await checkPaidBuildAdmission())) return;
 
     // FREE-TIER cheap-only routing (admin 2026-07-10) — DORMANT unless AGENTV3_FREE_TIER_CHEAP=true.
     // A not-yet-paying public user's build runs on the cheap floor (GLM/Kimi) ALONE — never Claude —
@@ -11624,6 +11830,8 @@ async function noteBuildOutcome(
     // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders. Branches live in surplusChatAdmission.
     // Weak uses the shared order for every profile; the legacy pin remains only on other bands.
     const routerOnePinned = routerOnePinnedForTier(powerLevelReqEffective, email, userId);
+    // Pro Chain V2 (owner t350u) — undefined for everyone outside its allowlist (z@ by default).
+    const proChainV2 = proChainV2ForBuild(powerLevelReqEffective, email, userId);
     const surplusAdmitGate = await admitWithRouterOnePin(routerOnePinned, () => runWeakSurplusAdmissionForChat({
       powerLevel: powerLevelReqEffective,
       intent,
@@ -11649,10 +11857,10 @@ async function noteBuildOutcome(
     const weakAdmission = await weakAdmissionForTurn({ prompt, intent, importing: hasImportIntent, tier: powerLevelReqEffective },
       scopeAskWithRouterOnePin(routerOnePinned, routerOneScopeAsk, () => weakScopeAsk(createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', scopeCallAudit(scopeRequestId, intentWorkspaceId, row), 'info');
-      }, error => { earlySurplusFailure = error; }), eligibleRouterOneScopeAsk(), weakBuildAdmissionAsk, () => {
+      }, error => { earlySurplusFailure = error; }), eligibleRouterOneScopeAsk(), scopeFinalAsk(proChainV2, weakBuildAdmissionAsk), scopeDropSurplus(proChainV2, () => {
         setAdmittedSurplusScope(surplusSession, false);
         surplusSession = undefined;
-      })),
+      }))),
       surplusScopeTimeoutOpts(surplusSession));
     recordScopeFailure(scopeRequestId, intentWorkspaceId, weakAdmission, audit);
     const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
@@ -11877,7 +12085,7 @@ async function noteBuildOutcome(
           if (clarifyChips) { if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, 'clarify'); }
           else if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, askFramework ? 'framework' : answerThenOffer ? 'offer' : 'chat');
           // A lasting instruction said in CHAT ("always keep first-person controls") is the project's too.
-          await recordUserMessage(chatWsId, typedPrompt, false, echoesPlatformNotice);
+          await recordUserMessage(chatWsId, typedPrompt, asksForTheApp('chat', false, typedPrompt), echoesPlatformNotice);
           // Hydration at intent-time is a 3-second RACE, so it can be marked done while the read never
           // landed — `saveWorkspaceMemoryFor` checks the read itself, not the re-entrancy flag.
           void saveWorkspaceMemoryFor(chatWsId, chatMem).catch(() => {});
@@ -11960,7 +12168,7 @@ async function noteBuildOutcome(
     // Register this build so it can be STOPPED and RE-ATTACHED to ("Resume") after the
     // original connection is lost. The client's response is the first subscriber; if it
     // disconnects we keep the build alive (still buffering) so the user can resume it.
-    const abort = new AbortController();
+    const abort = routerOneAbortController(new AbortController());
     // intentWorkspaceId was already derived above (deriveWorkspaceId(userId, req.body?.sessionId)) for
     // intent classification — reuse it so the running-build registry knows which session owns this
     // build, instead of computing it twice from the same (userId, sessionId) pair.
@@ -12989,6 +13197,7 @@ async function noteBuildOutcome(
     let sessionHistoryForSummary:
       | { history: Awaited<ReturnType<typeof listDiagnosticsHistory>>; startedAt: number }
       | null = null;
+    let priorHistoryEntries: Awaited<ReturnType<typeof listDiagnosticsHistory>> | undefined;
     // The latest live preview URL the build published — used by the post-build PREVIEW SELF-CHECK to
     // actually open the running app in a browser and verify it rendered.
     let lastPreviewUrl = '';
@@ -13042,6 +13251,9 @@ async function noteBuildOutcome(
     // edit-file-tree reconcile further down — one durable read, no duplication.
     let durableFilePaths: string[] = [];
     try { durableFilePaths = await listWorkspaceFilePaths(workspaceId); } catch { durableFilePaths = []; }
+    const royaleStrictPaths = envFlag('AGENTV3_ORIGINAL_ROYALE') ? await inspectWorkspaceFilePaths(workspaceId) : null;
+    const royaleInventoryRead = royaleStrictPaths !== null && royaleStrictPaths.length === durableFilePaths.length
+      && royaleStrictPaths.every((path) => durableFilePaths.includes(path));
     // FAIL-SAFE INTENT RE-CHECK (Fix 27 — report 2026-07-07: "isne pura app wapas banaya"): the intent
     // probe above (countWorkspaceFiles) FAILS OPEN — a transient Firestore timeout/error returns 0, so
     // "add a share button" on a 46-file imported app classified as a FRESH build and the complete-app
@@ -13186,12 +13398,12 @@ async function noteBuildOutcome(
      * its own project). When neither can be read, an EDIT stops before it mutates anything (see below).
      */
     /** What the user said this turn — the text the project's memory, the edit gate and the revision record all use. */
-    const turnMessage = typedPrompt || prompt;
+    const turnMessage = memoryMessageFor(typedPrompt, prompt, offerAccepted);
     const projectMemory = await loadProjectMemoryForTurn({
       skip: hasImportIntent,
       projectId: workspaceId,
       message: turnMessage,
-      isBuildRequest: intent === 'new_build' || offerAccepted,
+      isBuildRequest: asksForTheApp(intent, offerAccepted, turnMessage),
       replace: userApprovedReplace,
       readTranscript: async () => {
         return transcriptOf(await getConversationStore().get(conversationIdForWorkspace(workspaceId)));
@@ -13887,6 +14099,7 @@ async function noteBuildOutcome(
      * exactly as it behaves today.
      */
     let projectFilesAtTurnStart: Record<string, string> | null = null;
+    let royaleHydrationVerified = false;
     /**
      * 🧬 THE VERIFIED BASE OF THIS EDIT (editPromotionGate.ts, projectRevisions.ts). The head revision says what the
      * project IS; the hydrated workspace is only what was read back. `editBaseCheck` records whether the second is
@@ -13915,6 +14128,8 @@ async function noteBuildOutcome(
     // its answer is the platform's figure, not a number of its own (autopsy 68f0a486: "2-3 min" while the
     // line said ~4).
     let lastEtaShown: string | null = null;
+    // Held back until sandbox setup succeeds when the previous settled attempt failed to reconnect.
+    let pendingEtaShown: string | null = null;
     // Every ETA line carries the id 'eta-live'; one listener remembers the latest, so no emit site can forget.
     events.subscribe((e) => {
       if (e.type === 'narration' && (e as { id?: string }).id === 'eta-live' && typeof e.text === 'string') lastEtaShown = e.text;
@@ -14001,10 +14216,10 @@ async function noteBuildOutcome(
      * 🔴 And, since autopsy 9c612cdb, also the moment the runner's final result settles: the integrity
      * pass starts later still, and a tick that fell between the two promised "about 3 min more".
      */
-    let etaFinalChecks = false;
+    let etaFinalChecksAt = 0; // BR1992: epoch ms the phase began (0 = not yet) — a later pickup of a user message ends it
     /**
      * Epoch ms the app was first PROVEN rendered in a real browser and saved as the working version (the
-     * in-build green). 0 until then. Hoisted here, beside `etaFinalChecks`, because the green's own
+     * in-build green). 0 until then. Hoisted here, beside `etaFinalChecksAt`, because the green's own
      * `inBuildGreenAt` is block-scoped where the heartbeat cannot see it (autopsy 9c612cdb: rendered at
      * 350.0 s; the 361.4 s tick still said "about 3 min more to go").
      */
@@ -14027,7 +14242,7 @@ async function noteBuildOutcome(
         // file count when the caller has it (it is passed in, not closed over, because this helper runs
         // before `builderWroteCount` exists); without it the rendered fact still answers, and when
         // neither can the line reports the phase and claims nothing.
-        const line = etaPhaseLine({ elapsedMs: now - etaStartMs, finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt, appExists: etaAppExists(only?.wrote?.() ?? 0, etaLoopFailed) });
+        const line = etaPhaseLine({ elapsedMs: now - etaStartMs, finalChecks: finalChecksAfterSteer(etaFinalChecksAt, steeringHandoff.lastTakenAt()), appRenderedAt: etaAppRenderedAt, appExists: etaAppExists(only?.wrote?.() ?? 0, etaLoopFailed) });
         if (line && line !== lastEtaShown) events.emit({ type: 'narration', agent: 'architect', text: line, ts: now, id: 'eta-live' });
       } catch { /* the live line is best-effort — it must never affect a build */ }
     };
@@ -14166,7 +14381,7 @@ async function noteBuildOutcome(
           const etaFilesDone = Math.max(0, writtenFiles.size - etaPlatformSeededFiles);
           const decision = etaTickLine({
             elapsedMs, now,
-            finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt,
+            finalChecks: finalChecksAfterSteer(etaFinalChecksAt, steeringHandoff.lastTakenAt()), appRenderedAt: etaAppRenderedAt,
             // Q-1024: the heartbeat tick had no "is there an app?" guard, so it told a stopped or empty
             // build "your app is built". `etaFilesDone` is the builder's OWN files (our seed subtracted).
             appExists: etaAppExists(etaFilesDone, etaLoopFailed),
@@ -14387,7 +14602,7 @@ async function noteBuildOutcome(
             + (starterEditReadAsBuild ? ' The request had been read as an edit; it runs as a fresh build instead.' : ''),
         });
       }
-      buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
+      buildDiagRef = noteBuildAccepted(buildDiag); // expose to the outer catch so a build crash is captured too
       // Q-200 / Q-201: decided before this report existed, so carried here.
       if (offerAccepted) {
         try {
@@ -14593,6 +14808,7 @@ async function noteBuildOutcome(
           //
           // The history `h` is what the read was for and it is correct — only the clock was wrong — so we
           // keep the rows and re-summarize at the end against the real end time.
+          priorHistoryEntries = h;
           sessionHistoryForSummary = { history: h, startedAt: buildStartedAt };
         })
         .catch(() => { /* history read is best-effort */ });
@@ -14614,6 +14830,7 @@ async function noteBuildOutcome(
       /** The cost ceiling fires at most once per build — see captureTurnUsage below. */
       let costUnconfirmedNoted = false;
       let costCeilingFired = false;
+      let walletStopFired = false;
       /**
        * The "this provider reported no tokens" notice fires at most once per build, same reasoning as
        * the ceiling: a report that says the same thing on every turn reads like many events.
@@ -14633,6 +14850,7 @@ async function noteBuildOutcome(
        */
       recordWeakAdmissionUsage(weakAdmission, (usage) => providerLedger.add('GLM', usage, WEAK_SCOPE_MODEL));
       recordRouterOneScopeUsage(providerLedger);
+      attachProChainV2(proChainV2, buildDiag, providerLedger);
       const shadowFastLaneLedger = createProviderUsageLedger();
       const captureShadowUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string): void => {
         shadowFastLaneLedger.add(used, usage, model);
@@ -14656,8 +14874,8 @@ async function noteBuildOutcome(
         if (routerOneCostUnconfirmed(used, usage.routerOneReceipt) && !costUnconfirmedNoted) {
           costUnconfirmedNoted = true;
           try { buildDiag.record({ phase: 'build', severity: 'info', code: 'DISCOUNT_COST_UNCONFIRMED', autoResolved: true,
-            message: 'Engine usage accounting is pending; this portion is excluded from the wallet charge and further requests on the key are blocked.',
-            detail: 'ENGINE_R1 catalogue pricing or complete usage could not be verified. The unresolved attempt is retained; unknown cost is not measured zero. Verified calls use official posted tariffs, not a supplier-settled wallet debit. Reconciliation is required before reopening a blocked key.' }); } catch { /* observation only */ }
+            message: 'Engine usage for this turn could not be tied to one priced call; this portion is excluded from the wallet charge.',
+            detail: 'ENGINE_R1 usage for this turn had no single issued receipt. Each physical call is still settled in the accounting store (exact from the posted tariff, or by a labelled estimate when its usage was incomplete) and its key released; unknown cost is not measured zero. Verified calls use official posted tariffs, not a supplier-settled wallet debit.' }); } catch { /* observation only */ }
         }
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
@@ -14764,6 +14982,32 @@ async function noteBuildOutcome(
             // A ceiling we could not evaluate must never end somebody's build. Failing OPEN here is
             // the same call the affordability gate makes on an unreadable balance.
           }
+        }
+        // Owner t403u: once the running bill passes the balance this build was allowed to spend,
+        // stop. Files already written stay. Admin and the z test account never reach a numeric
+        // spendable balance here, because they were exempt at admission.
+        if (!walletStopFired && typeof spendableBalanceInr === 'number') {
+          try {
+            const vm = billableSandboxDetail(actuator, workspaceId, buildStartedAt);
+            const d = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, vm.usd, barrenPhases);
+            const inr = liveCostInr({
+              charged: true, onboardingFreeBuildPossible: false,
+              billedUsd: d.effectiveBilledUsd, floorUsd: d.realCostUsd,
+              discountPct: liveCostDiscountPct ?? 0, usdInr: usdInrRate(),
+            });
+            if (inr !== null && inr > spendableBalanceInr) {
+              walletStopFired = true;
+              const notice = balanceRechargeNotice(prompt);
+              emit({ type: 'error', message: notice, code: 'INSUFFICIENT_CREDITS', ts: Date.now() });
+              try {
+                buildDiag.record({
+                  phase: 'build', severity: 'warning', code: 'WALLET_BALANCE_EXHAUSTED', autoResolved: false,
+                  message: notice,
+                });
+              } catch { /* a note must not replace the stop */ }
+              abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'wallet-empty');
+            }
+          } catch { /* a bill we could not price must not stop a build that was allowed to start */ }
         }
         // THE LIVE ₹ FIGURE. Priced by `decideBuildBilledUsd` — the function the final bill uses — over
         // this same ledger, with the same sandbox measure and the same discount. Throttled BEFORE it is
@@ -14872,7 +15116,7 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
             message: `A call to the ${name} engine was stopped by one of our own clocks, not by anything the engine did — the step it belonged to had run out of its time`,
-            autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+            autoResolved: true, detail: fallbackDetail(err),
           });
           return;
         }
@@ -14882,7 +15126,8 @@ async function noteBuildOutcome(
         buildDiag.record({
           phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
           message: `Provider ${name} failed — falling back to the next provider`,
-          autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+          // BR2388: a supplier-free gate/stage marker after the unchanged text (admin report only).
+          autoResolved: true, detail: withEngineSafeDiag(err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300), err),
         });
       };
       // Unified TEXT-generation runner for the FAST lane + up-front aux steps (blueprint / project
@@ -14926,21 +15171,23 @@ async function noteBuildOutcome(
         state: { dropped: false },
         noFallback: surplusFallbackDisabledForTier(powerLevelReqEffective, email, userId),
         routerOneOnly: routerOnePinnedForTier(powerLevelReqEffective, email, userId),
+        proChainV2,
         onSurplusError: surplusRawErrorReporter(email, (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }), userId),
         userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
-        onFailOpen: (reason) => {
+        onFailOpen: (reason, diag) => {
           const dropped = surplusSession;
           surplusSession = undefined;
           if (dropped) setAdmittedSurplusScope(dropped, false);
           const safe = asSafeSurplusAdmissionReason(reason);
           try {
             audit('AGENTV3_SURPLUS_FALLBACK_TO_WEAK', { reason: safe, phase: 'mid_build_pre_write' }, 'warn');
-            console.warn(`[AGENT_STEP] Surplus mid-build unavailable (${safe}); continuing on Weak/CHEAP_FLOOR ladder.`);
+            console.warn(`[AGENT_STEP] Surplus mid-build unavailable (${safe})${diag ? ` ${diag}` : ''}; continuing on Weak/CHEAP_FLOOR ladder.`);
             buildDiag.record({
               phase: 'provider', severity: 'warning', code: 'SURPLUS_FALLBACK', autoResolved: true,
               // #4050 made this fire AFTER writes too; the line said "before any user file" either way (8cdb4817).
               message: surplusFallbackMessage(reason),
-              detail: String(safe),
+              // BR2388: the stage/reason/HTTP status behind the fold, admin report only (stripped for users).
+              detail: diag ? `${String(safe)} ${diag}` : String(safe),
             });
           } catch { /* audit/diagnostics must never block fail-open */ }
         },
@@ -14952,7 +15199,7 @@ async function noteBuildOutcome(
       // eligible exception, never infer availability from a sanitized failed row.
       if (earlySurplusFailure !== undefined) surplusPreWriteFailOpen.onSurplusError?.(earlySurplusFailure);
       if (surplusSession && !abort.signal.aborted) {
-        tryConsumeSurplusPreWriteFailOpen(surplusPreWriteFailOpen, earlySurplusFailure);
+        consumeEarlySurplusFailure(surplusPreWriteFailOpen, earlySurplusFailure);
       }
       const fastLaneDeadRungs = new Map<string, string>();
       // 🔴 THE FLAG THAT WENT NOWHERE (autopsy e706e068, School ERP). `buildIsComplex` was computed,
@@ -15404,7 +15651,7 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
             message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: `${etaBasis} ${etaEvidenceNote(est, etaSource === 'platform' ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
+            detail: `${etaBasis} ${etaEvidenceNote(est, etaSource === 'platform' ? 'platform' : 'workspace')} ${openingEtaShownNote(etaSkippedForModule, latestSettledAttemptWasSandboxRecoveryUnavailable(priorHistoryEntries), etaShown)}`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
@@ -15419,7 +15666,9 @@ async function noteBuildOutcome(
             buildDiag.record({ phase: 'plan', severity: 'info', code: 'ETA_SKIPPED_MODULE_TURN', autoResolved: true,
               message: 'Opening ETA not shown: this "continue" builds the next module of a stored project plan, and the estimate describes the whole app.' });
           } else {
-            events.emit({ type: 'narration', agent: 'architect', text: etaShown, ts: Date.now(), id: 'eta-live' });
+            pendingEtaShown = recordOrEmitOpeningEta(etaShown, priorHistoryEntries, (text) => {
+              events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now(), id: 'eta-live' });
+            });
           }
         } catch { /* ETA is best-effort — never affects the build */ }
       }
@@ -15501,7 +15750,15 @@ async function noteBuildOutcome(
         const ensureT0 = Date.now();
         // An import turn's workspace is the user's project, never our starter plus theirs (build d62bf22d).
         await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId, hasImportIntent ? { seedStarter: false } : undefined);
+        pendingEtaShown = emitPendingOpeningEta(pendingEtaShown, (text) => {
+          events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now(), id: 'eta-live' });
+        });
         const ensureWorkspaceMs = Date.now() - ensureT0;
+        // A preview that would not wake between builds is answered here, in this build's report, from the
+        // attempts' own records (previewWakeLog.ts). Off the critical path; a read failure just says nothing.
+        void sandboxStore.takeUnreportedWakeFailures(workspaceId).then((line) => {
+          if (line) buildDiag.record({ phase: 'build', severity: 'warning', code: 'PREVIEW_WAKE_HISTORY', message: line, autoResolved: true });
+        }).catch(() => {});
         try {
           buildDiag.recordSetupTiming({
             startMs: setupT0,
@@ -16014,6 +16271,8 @@ async function noteBuildOutcome(
           // 🧬 IS WHAT WAS READ BACK THE PROJECT'S VERIFIED HEAD, COMPLETE? (projectRevisions.ts) A partial
           // hydration is the one case where an edit would be built over — and compared with — a fragment.
           const baseResult = await checkEditBaseForTurn({ workspaceId, hydrated: saved, store: getRevisionStore(), loadVerifiedCopy: () => loadWorkspaceFiles(greenWorkspaceKey(workspaceId)), withTimeout, isImportTurn, hasImportIntent, durableUnreadable: durable.status === 'unreadable' });
+          royaleHydrationVerified = durable.status !== 'unreadable' && baseResult.finding?.code !== 'EDIT_BASE_UNCHECKED'
+            && (Object.keys(saved).length === 0 || holdsOnlyOurStarter(saved));
           editHeadAtStart = baseResult.head;
           editBaseCheck = baseResult.check;
           editVerifiedBase = baseResult.verifiedBase;
@@ -16236,7 +16495,7 @@ async function noteBuildOutcome(
         registerSession(workspaceId, git, userId ?? undefined, actuator);
         events.emit({ type: 'workspace', workspaceId, ts: Date.now() });
       } catch (setupErr) {
-        rethrowBuildSetupRecoveryUnavailable(setupErr);
+        rethrowBuildSetupRecoveryUnavailable(setupErr, sandboxRecoveryRepeatOpts(priorHistoryEntries));
         const m = setupErr instanceof Error ? setupErr.message : String(setupErr);
         git = undefined;
         sandboxUnavailable = true;
@@ -16708,6 +16967,14 @@ async function noteBuildOutcome(
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
+      dispatcher.setRoyaleNewProjectAllowed(royaleNewProjectAllowed({
+        inventoryRead: royaleInventoryRead, intent, editing: isEditMode,
+        hasVerifiedRevision: editHeadAtStart !== null,
+        hydratedSourceIsNew: royaleHydrationVerified,
+        importing: isImportTurn, importRequested: hasImportIntent,
+        durablePathCount: durableFilePaths.length, durableSourceCount,
+        verifiedStarterSourceCount: durableStarterOnlyCount,
+      }));
       pathsReadNow = () => {
         try { return dispatcher.sharedReadLedger().size; } catch { return 0; }
       };
@@ -17731,6 +17998,7 @@ async function noteBuildOutcome(
         // runner that spreads baseRunnerOpts (escalation/retry/heal/fix/critFix) so all their tokens
         // are billed even when their `result` is later discarded.
         usageSink: buildUsage,
+        balanceEmptyNotice: () => balanceRechargeNotice(prompt),
         // 🧠 A complex app skips the cheap flash opener, so KIMI writes its first file (admin
         // 2026-09-17). Spread into every runner that shares these opts, so an escalation or heal
         // pass inherits the same judgement instead of re-deriving it.
@@ -18503,7 +18771,7 @@ async function noteBuildOutcome(
         // Opus for a Sonnet-pinned tier would be exactly the cross-tier call the admin forbade.
         // Plan on the tier's plan ladder (admin-approved table 2026-09-14). `planGrok` keeps its name
         // for the lines below; it is no longer Grok — Grok judges.
-        const planGrok = surplusSession ? makePlanTextRunner() : tierPlanRunner(powerLevelReqEffective, noClaudeBuild, buildBench, recordProviderBenched);
+        const planGrok = plansOnBuildRunner(surplusSession, surplusPreWriteFailOpen) ? makePlanTextRunner() : tierPlanRunner(powerLevelReqEffective, noClaudeBuild, buildBench, recordProviderBenched);
         const planRunner = new AgentRunner({
           replyVoice: () => rb.replyVoice ?? voiceOf(originalPrompt),
           client: planGrok ?? client,
@@ -19249,7 +19517,7 @@ async function noteBuildOutcome(
         /** Q-926: the per-file calls a reasoning rung answered while the lane stayed on it — the measurement. */
         const laneReasoningStays: Array<{ model: string; ms: number }> = [];
         steeringHandoff.beginLane();
-        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number, mayReason = false, heal = false): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
+        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number, mayReason = false, heal = false, reserveFallback = false): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
           if (steeringHandoff.pending()) throw new Error(STEERING_YIELD_REASON);
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
@@ -19288,6 +19556,7 @@ async function noteBuildOutcome(
               // outlive the wait (turnDeadline.ts). Undefined for every caller that does not set one,
               // which is every lane except the fast lane's plan and contract calls today.
               deadlineAt,
+              ...(reserveFallback ? { reserveFallbackBudget: true as const } : {}),
               // The walk stops BEFORE a rung that reasons before every answer, rather than spending the
               // lane's clock inside one (autopsy 33812996: 497 s of one repair call on two such rungs).
               // …except a per-file call the lane decided may carry on there (Q-926, FastLaneBudget.mayStayOnReasoningRung).
@@ -19355,11 +19624,12 @@ async function noteBuildOutcome(
         // on text we discarded. Continuing is provider-cap-agnostic (raising max_tokens only moves the
         // ceiling and can 400 on a provider whose real cap is lower), bounded to MAX_CONTINUATIONS, and
         // a continuation that FAILS never loses the work already produced — we keep what we have.
-        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number; mayReason?: boolean; repair?: boolean }): Promise<string> => {
-          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt, genOpts?.mayReason === true, genOpts?.repair === true);
+        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number; mayReason?: boolean; repair?: boolean; reserveFallbackBudget?: boolean }): Promise<string> => {
+          const reserve = genOpts?.reserveFallbackBudget === true;
+          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt, genOpts?.mayReason === true, genOpts?.repair === true, reserve);
           const generation = await continueFastLaneGeneration(first, {
             // A continuation faces the same deadline as its first call, including the mayReason gate.
-            generate: (prompt) => fastGenerateOnce(system, prompt, genOpts?.deadlineAt, genOpts?.mayReason === true, genOpts?.repair === true),
+            generate: (prompt) => fastGenerateOnce(system, prompt, genOpts?.deadlineAt, genOpts?.mayReason === true, genOpts?.repair === true, reserve),
             onAttempt: (attempt) => events.emit({ type: 'narration', agent: 'architect', text: `✍️ That file list was longer than one response allows — continuing it (${attempt}/${MAX_CONTINUATIONS}) so nothing is left half-written…`, ts: Date.now() }),
             // HONESTY (rule 5): when the model re-opened the cut file's own header and carried on
             // inside it, the two halves are WELDED rather than the second replacing the first — say
@@ -19523,27 +19793,84 @@ async function noteBuildOutcome(
                 }
               }
             } catch { /* best-effort — a bad tsconfig extends just falls through to the install as before */ }
+            try {
+              const refs = sanitizeTsconfigReferences(Object.fromEntries(writtenFiles), scaffold);
+              if (refs.fixes.length > 0 || (refs.stripped?.length ?? 0) > 0) {
+                const patch = Object.entries(refs.patch).map(([path, content]) => ({ path, content }));
+                const { landed } = readWriteOutcomes(patch, await inPlatformPass('fast-lane-foundation', () => writePlatform(patch, 'fast-tsconfig-refs-', 4)));
+                const done = new Set(landed.map((f) => f.path));
+                const repaired = refs.fixes.filter((f) => done.has(f.file));
+                if (repaired.length > 0) {
+                  fastLog(`🩹 Removed an unresolvable tsconfig project reference so the compiler can run: ${repaired.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`);
+                  try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_REFERENCES_REPAIRED', message: `Removed an unresolvable tsconfig reference: ${repaired.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
+                }
+                const cleaned = (refs.stripped ?? []).filter((f) => done.has(f));
+                if (cleaned.length > 0) {
+                  fastLog(`🩹 Removed leftover apply-patch markup from ${cleaned.join(', ')} so the compiler can parse the tsconfig.`);
+                  try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_MARKUP_REPAIRED', message: `Removed leftover apply-patch markup from ${cleaned.join(', ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
+                }
+              }
+            } catch { /* best-effort — a dangling tsconfig reference just falls through to the install as before */ }
           }
-          // ALWAYS run a real install — a build that just (re)wrote package.json MUST have its FULL
-          // dependency tree installed. The old `… else echo "deps present"` skip trusted a pre-baked/
-          // partial node_modules (the E2B base image ships one), which left a transitive babel/
-          // browserslist dep (caniuse-lite/dist/unpacker/agents) missing → the dev server "came up" but
-          // crashed every transform with "[plugin:vite:react-babel] Cannot find module 'caniuse-lite/…'"
-          // (build report 2026-07-06). `npm install` is idempotent + fast when already satisfied, so
-          // always reconciling is correct and cheap — it also covers the earlier "Cannot find module
-          // 'tailwindcss'" case the skip caused. (buildBuildInstallCommand: pure, unit-tested.)
-          await dispatcher.dispatch({ id: 'fast-install', name: 'bash', input: { command: buildBuildInstallCommand() } }, 'frontend');
-          // DEPENDENCY RECONCILE (real fix for the broken preview): the AI sometimes imports a package
-          // it forgot to add to package.json (real report: `@dnd-kit/modifiers` imported by TodoList.tsx
-          // but never declared) → `npm install` never fetched it → Vite "could not be resolved" → the
-          // dev server's port is up but the app can't load. Scan the generated files for imported-but-
-          // undeclared packages and install exactly those BEFORE starting the dev server. Bounded + safe:
-          // each name is shell-quote-validated, capped, and this only ADDS missing deps (never removes).
-          // The manifest is the one the lane wrote, else the one ON DISK (autopsy BR1959: read from the lane's
-          // writes alone, a lane that never wrote package.json counted `react` itself as undeclared).
-          await fastReconcileDependencies('preview');
-          await dispatcher.dispatch({ id: 'fast-dev', name: 'bash', input: { command: 'npm run dev' } }, 'frontend');
-          await dispatcher.dispatch({ id: 'fast-preview', name: 'update_preview', input: { port: oneShotDevPort(framework) } }, 'frontend');
+          // Start the app with the toolchain it actually has (autopsy BR1987). A package.json still
+          // always gets a real install. A clearly non-Node Spring Boot or Go tree is started with
+          // its registry command; a JS/TS app missing package.json keeps main's Node install.
+          const previewPaths = [
+            ...writtenFiles.keys(),
+            ...scaffold,
+          ];
+          try {
+            if (!previewPaths.some((p) => /(^|\/)package\.json$/.test(String(p)))) {
+              const diskPkg = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
+              if (typeof diskPkg === 'string') previewPaths.push('package.json');
+            }
+            if (!previewPaths.some((p) => /(^|\/)pom\.xml$/.test(String(p)))) {
+              const diskPom = await actuator.readFile(workspaceId, 'pom.xml').catch(() => null);
+              if (typeof diskPom === 'string') previewPaths.push('pom.xml');
+            }
+            if (!previewPaths.some((p) => /(^|\/)(go\.mod|main\.go)$/.test(String(p)))) {
+              const diskGo = await actuator.readFile(workspaceId, 'go.mod').catch(() => null)
+                ?? await actuator.readFile(workspaceId, 'main.go').catch(() => null);
+              if (typeof diskGo === 'string') previewPaths.push('go.mod');
+            }
+          } catch { /* disk hints are best-effort — the plan still reads what we already have */ }
+          const launch = devServerLaunchPlan(buildDiag.setWorkspaceTree({
+            framework,
+            ...startFilesFromPaths(previewPaths),
+            nodePort: oneShotDevPort(framework),
+          }));
+          if (launch.kind === 'none' || !launch.startCommand) {
+            try {
+              buildDiag.record({
+                phase: 'preview', severity: 'info', code: 'FASTLANE_PREVIEW_SKIPPED_NON_NODE', autoResolved: true,
+                message: `The fast lane did not run npm install or npm run dev: ${launch.reason}.`,
+              });
+            } catch { /* diagnostics are best-effort */ }
+            return;
+          }
+          if (launch.installCommand) {
+            // ALWAYS run a real install when this is a Node app — a build that just (re)wrote
+            // package.json MUST have its FULL dependency tree installed. The old `… else echo
+            // "deps present"` skip trusted a pre-baked/partial node_modules (the E2B base image
+            // ships one), which left a transitive babel/browserslist dep
+            // (caniuse-lite/dist/unpacker/agents) missing → the dev server "came up" but crashed
+            // every transform with "[plugin:vite:react-babel] Cannot find module 'caniuse-lite/…'"
+            // (build report 2026-07-06). `npm install` is idempotent + fast when already satisfied,
+            // so always reconciling is correct and cheap — it also covers the earlier "Cannot find
+            // module 'tailwindcss'" case the skip caused. (buildBuildInstallCommand: pure, unit-tested.)
+            await dispatcher.dispatch({ id: 'fast-install', name: 'bash', input: { command: launch.installCommand } }, 'frontend');
+            // DEPENDENCY RECONCILE (real fix for the broken preview): the AI sometimes imports a package
+            // it forgot to add to package.json (real report: `@dnd-kit/modifiers` imported by TodoList.tsx
+            // but never declared) → `npm install` never fetched it → Vite "could not be resolved" → the
+            // dev server's port is up but the app can't load. Scan the generated files for imported-but-
+            // undeclared packages and install exactly those BEFORE starting the dev server. Bounded + safe:
+            // each name is shell-quote-validated, capped, and this only ADDS missing deps (never removes).
+            // The manifest is the one the lane wrote, else the one ON DISK (autopsy BR1959: read from the lane's
+            // writes alone, a lane that never wrote package.json counted `react` itself as undeclared).
+            await fastReconcileDependencies('preview');
+          }
+          await dispatcher.dispatch({ id: 'fast-dev', name: 'bash', input: { command: launch.startCommand } }, 'frontend');
+          await dispatcher.dispatch({ id: 'fast-preview', name: 'update_preview', input: { port: launch.port ?? oneShotDevPort(framework) } }, 'frontend');
         };
         // A — real compile check: install deps (idempotent) then type-check. tsc surfaces the exact
         // contract mismatch (e.g. a hook that doesn't return what a component destructures) that
@@ -19632,8 +19959,32 @@ async function noteBuildOutcome(
             // Fix 38b — zero diagnostics alone is not verification. The marker records executable
             // exit zero, not compiler identity; require both canonical output evidence and the marker.
             // A missing marker remains unverified even when no diagnostic was printed.
+            // BR1979: a tsconfig that already includes `src` must not also reference a missing
+            // tsconfig.node.json (TS6053) — heal it here so a repair round that reintroduces the
+            // reference cannot fail the same verify a second time.
+            if (process.env.AGENTV3_TSCONFIG_SANITIZE !== 'off') {
+              try {
+                const refs = sanitizeTsconfigReferences(Object.fromEntries(writtenFiles), scaffold);
+                if (refs.fixes.length > 0 || (refs.stripped?.length ?? 0) > 0) {
+                  const patch = Object.entries(refs.patch).map(([path, content]) => ({ path, content }));
+                  const { landed } = readWriteOutcomes(patch, await fastWrite(patch));
+                  for (const w of landed) writtenFiles.set(w.path, w.content);
+                }
+              } catch { /* best-effort — tsc below still runs and reports TS6053 honestly */ }
+            }
             // 📦 Declared-and-installed BEFORE the compile check (autopsy BR1959): TS2307 for a package nobody
             // declared is not a code error, and a repair round cannot install a package.
+            // A Spring Boot / Go / bare-HTML tree has no package.json to type-check with tsc
+            // (autopsy BR1987): the in-process syntax / import / CSS gates above still ran; the
+            // sandbox tsc command is skipped rather than failing ENOENT and becoming VERIFY_DID_NOT_RUN.
+            const verifyLaunch = devServerLaunchPlan(buildDiag.setWorkspaceTree({
+              framework,
+              ...startFilesFromPaths([...writtenFiles.keys(), ...scaffold]),
+              nodePort: oneShotDevPort(framework),
+            }));
+            if (verifyLaunch.kind === 'framework') {
+              return { ok: true, errors: '', ran: false };
+            }
             await fastReconcileDependencies('verify');
             const r = await actuator.runCommand(workspaceId, `${TSC_ENSURE}; if ${TSC_BIN} --noEmit > /tmp/nb_tsc.log 2>&1; then echo __TSC_CLEAN__; fi; tail -200 /tmp/nb_tsc.log 2>/dev/null || true`);
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
@@ -20510,7 +20861,7 @@ async function noteBuildOutcome(
       // The builder's loop is over here, so the live ETA stops promising minutes now — the integrity pass,
       // where this used to be set first, starts later (9c612cdb: a tick fell in between). The line is
       // announced at once only over an app that exists: a stopped or empty build is never told "your app is built".
-      etaFinalChecks = true;
+      etaFinalChecksAt = Date.now();
       etaLoopFailed = !result.ok;
       emitEtaPhaseNow({ unlessStopped: abort.signal, wrote: builderWroteCount });
       try {
@@ -21086,7 +21437,7 @@ async function noteBuildOutcome(
         // just closed on the import-boot path. Cutting on a guess is how a confident wrong fix ships.
         // So the next report will say where the time actually goes, and THEN it can be fixed with evidence.
         const integrityStartedAt = Date.now();
-        etaFinalChecks = true; // the app's turn is over — the ETA line says so instead of promising minutes
+        etaFinalChecksAt = Date.now(); // the app's turn is over — the ETA line says so instead of promising minutes
         const storeFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
         const storeLoadMs = Date.now() - integrityStartedAt;
         const integrityFiles: Record<string, string> = { ...storeFiles, ...Object.fromEntries(writtenFiles) };
@@ -21880,9 +22231,15 @@ async function noteBuildOutcome(
           const projectForCss = { ...integrityFiles, ...Object.fromEntries(writtenFiles) };
           const cssErr = (() => { try { return cssConsistencyError(projectForCss); } catch { return null; } })();
           if (cssErr) {
+            // BR1988: ONLY the user's own Stop, mid-generation on a fresh build (the runner's own
+            // `userStoppedBeforeReady` mark, no readyAt, not ok, not an edit or module turn), is recorded
+            // as an unfinished tree (info). Everything else — and any doubt — is main's warning, unchanged.
             buildDiag.record({
-              phase: 'build', severity: 'warning', code: 'CSS_CLASSES_UNDEFINED',
-              ...obs(undefinedClassesNote(findUndefinedClasses(projectForCss))),
+              phase: 'build', code: 'CSS_CLASSES_UNDEFINED',
+              ...cssClassesUndefinedFields(
+                cssStoppedUnfinishedRecord(projectForCss, { abortCause: abortCauseOf(abort.signal), result, editingExistingApp: isEditMode, projectModule: projectModuleRef }),
+                () => obs(undefinedClassesNote(findUndefinedClasses(projectForCss))),
+              ),
             });
           }
           const cssRepair = !!cssErr && cssHealEnabled() && result.ok && expectsArtifacts && !abort.signal.aborted;
@@ -22719,13 +23076,23 @@ async function noteBuildOutcome(
         const presentFiles = (!lastPreviewUrl && !abort.signal.aborted && expectsArtifacts && !isImportTurn && !answerOnlyNow())
           ? await withTimeout(actuator.listFiles(workspaceId), 15_000, 'platform-preview-list').catch(() => [] as string[])
           : [];
+        const presentStart = startFilesFromPaths(presentFiles);
+        const platformLaunch = devServerLaunchPlan(buildDiag.setWorkspaceTree({
+          framework,
+          ...presentStart,
+          nodePort: oneShotDevPort(framework),
+        }));
         const proofDecision = shouldAttemptPlatformPreview({
           expectsArtifacts: expectsArtifacts && !answerOnlyNow(),
           hasPreviewUrl: Boolean(lastPreviewUrl),
           aborted: abort.signal.aborted,
           isImportTurn,
           appFiles: presentFiles.length,
-          hasPackageJson: presentFiles.some((f) => /(^|\/)package\.json$/.test(String(f))),
+          hasPackageJson: presentStart.hasPackageJson,
+          framework,
+          hasPomXml: presentStart.hasPomXml,
+          hasGoModule: presentStart.hasGoModule,
+          hasJsTsAppSource: presentStart.hasJsTsAppSource,
           remainingMs: remainingForProof,
           // 🔒 DELIBERATELY THE RAW PREDICTION, not `awaitsShellNow()`. This decides whether the PLATFORM
           // starts the app itself; a module turn was told not to publish one, and forcing a preview it was
@@ -22738,14 +23105,14 @@ async function noteBuildOutcome(
           const budget = platformPreviewBudgetMs(remainingForProof, previewWakeBudgetMs());
           const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'platform-preview-record').catch(() => null);
           const recipe = await raceTimeout(sandboxStore.getRecipe(workspaceId), 3_000, 'platform-preview-recipe').catch(() => null);
-          const port = platformPreviewPort(recipe?.port, rec?.declaredPort, oneShotDevPort(framework));
+          const port = platformPreviewPort(recipe?.port, rec?.declaredPort, platformLaunch.port ?? oneShotDevPort(framework));
           events.emit({ type: 'narration', agent: 'architect', text: '🔎 Starting your app to check that it runs…', ts: Date.now() });
           const startedAt = Date.now();
-          // The health-check wrapper in devServerHost recognises this command, installs stale deps and
-          // waits for the port — the same single call the revive path below trusts.
-          // Bounded by the same remaining-build budget the front end's start gets.
+          // The health-check wrapper recognises the start command, waits for the port, and — only
+          // when a package.json exists — installs stale Node deps. Bounded by the same remaining-
+          // build budget the front end's start gets.
           await startPythonBackendFirst('platform-preview', budget);
-          const started = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), budget, 'platform-preview-start')
+          const started = await withTimeout(actuator.runCommand(workspaceId, platformLaunch.startCommand ?? 'npm run dev'), budget, 'platform-preview-start')
             .catch((e) => ({ stdout: '', stderr: e instanceof Error ? e.message : String(e), exitCode: -1 }));
           const health = parseDevServerHealthLine(`${started.stdout}\n${started.stderr}`);
           const servingPort = health?.up && health.port ? health.port : port;
@@ -24453,6 +24820,14 @@ async function noteBuildOutcome(
       // block or fail a build, and it does NOT feed classifyBuildOutcome — a green, rendering app whose
       // production build is broken is a working app with a shipping problem, not a failed build, and
       // calling it BUILD_FAILED would both lie to the user and change what they are charged.
+      // ONE definition of "take the copy" (buildCopy in failedBuildCopy.ts): after a passing production build,
+      // after a kept repair (refreshPreviewCopy), and after a FAILED build whose app rendered.
+      const takePreviewCopy = async (): Promise<boolean> => {
+        const taken = await takeBuildCopy({ actuator, workspaceId, record: (e) => buildDiag.record(e) });
+        if (taken) snapshotTaken = taken;
+        return taken !== null;
+      };
+
       if (
         prodBuildGateEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
@@ -24543,53 +24918,6 @@ async function noteBuildOutcome(
               ...(await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>))),
               ...Object.fromEntries(writtenFiles),
             })) {
-              // ONE definition of "take the copy", run here and again after a kept repair (refreshPreviewCopy).
-              const takePreviewCopy = async (): Promise<boolean> => {
-                if (!actuator.downloadDistFiles) return false;
-                try {
-                  const dist = await withTimeout(actuator.downloadDistFiles(workspaceId), 60_000, 'snapshot-dist');
-                  if (dist && dist.size > 0) {
-                    const url = await withTimeout(
-                      new FirebaseHostingDeployer().deployStatic(workspaceId, withPreviewAiRelay(dist), snapshotChannelId(workspaceId)),
-                      90_000, 'snapshot-deploy',
-                    );
-                    if (url) {
-                      const at = Date.now();
-                      // WHAT THE COPY WAS BUILT FROM. Read now, from the same tree `npm run build` just
-                      // consumed — nothing writes between the two. The final durable save compares this
-                      // with what it persists; a copy whose source could not be read is never promoted.
-                      const source = await withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')
-                        .then((c) => c.files as Record<string, string>).catch(() => null);
-                      // The SANDBOX copy of index.html carries our preview bridge the moment a dev server
-                      // has run; the durable copy never does. Hash the APP, not our console mirror —
-                      // see identitySource (autopsy Study-Racer, 2026-09-25: PREVIEW_SNAPSHOT_STALE on a
-                      // build where nothing had written after the copy).
-                      const filesHash = source ? workspaceContentHash(identitySource(source)) : null;
-                      await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
-                      // The paths travel with the copy for THIS build only, so a mismatch can say which
-                      // side holds what — see staleDetail. The hash is still what decides.
-                      snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(identitySource(source)) : undefined, fileHashes: source ? fileContentHashes(identitySource(source)) : undefined };
-                      // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
-                      // Raising the flag lets the idle sweep use the shorter snapshot window; the event
-                      // lets the frame move to the real build output the moment the build settles,
-                      // instead of on the next 150-second poll. The actuator clears the flag by itself
-                      // on the next write, so a later heal pass that changes a file cannot leave a
-                      // stale copy counted as current.
-                      try { actuator.noteSnapshotCurrent?.(workspaceId, true); } catch { /* advisory */ }
-                      // The `snapshot` event is emitted at the FINAL durable save, once the copy is
-                      // proven to match what was persisted — the surface only applies it after the
-                      // build ends anyway, so nothing is lost and nothing stale is ever announced.
-                      buildDiag.record({
-                        phase: 'readiness', severity: 'info', code: 'PREVIEW_SNAPSHOT_SAVED',
-                        message: 'Kept a permanent copy of this build, so the preview still works after its live server expires.',
-                        autoResolved: true,
-                      });
-                      return true;
-                    }
-                  }
-                } catch { /* a fallback copy must never be able to affect the build it is copying */ }
-                return false;
-              };
               await takePreviewCopy();
               refreshPreviewCopy = async () => {
                 // The copy is the output of `npm run build`, so a changed source needs a new build first;
@@ -24605,6 +24933,10 @@ async function noteBuildOutcome(
           }
         } catch { /* the detector must never affect a build it is only observing */ }
       }
+
+      // A FAILED build whose app rendered still leaves a copy (failedBuildCopy.ts decides; the route only reports).
+      await keepFailedBuildCopy({ actuator, workspaceId, writtenFiles, takeCopy: takePreviewCopy, record: (e) => buildDiag.record(e),
+        turn: { ok: result.ok, rendered: previewGreen, copyTaken: snapshotTaken, expectsArtifacts, aborted: abort.signal.aborted, startedAt: buildStartedAt, maxSeconds: effectiveBuildSeconds } });
 
       // APP HEALTH CULTURE — VACCINE (Immune System Phase 2, opt-in AGENTV3_VACCINE=on): run_tests is a
       // TOOL the agent MAY skip; the vaccine makes it a SYSTEM reflex. If the built project ships a real
@@ -25432,6 +25764,7 @@ async function noteBuildOutcome(
           phoneLayout: phoneProof,
           // "complete and working properly" stands for a canvas game only when the playtest PASSED (autopsy 61279465).
           gamePlayed: gateEvidence.game,
+          devServerLaunch: buildDiag.devServerLaunchEvidence(),
           persistence: persistenceProof,
           journeyOutcome: gateEvidence.journeys === 'passed' ? 'passed' : gateEvidence.journeys === 'failed' ? 'failed' : 'not-run',
           screenshotTaken: buildDiag.toolWasUsed('screenshot'),
@@ -27003,7 +27336,7 @@ async function noteBuildOutcome(
                   ? chooseRestoreBase({ snapshot: greenFiles, turnStart: projectFilesAtTurnStart, snapshotFromThisBuild: fromThisBuild })
                   : { base: greenFiles, kind: 'green-snapshot' as const };
                 if (!chosen) {
-                  if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })) {
+                  if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop', renderedInBuild: renderedInBuildUnchanged(inBuildGreenAt, postGreenWrites.length) })) {
                     events.emit({ type: 'narration', agent: 'architect', text: greenGuardUnverifiedMessage(), ts: Date.now() });
                     buildDiag.record({
                       phase: 'build', severity: 'warning', code: 'GREEN_GUARD_UNVERIFIED',
@@ -27043,7 +27376,7 @@ async function noteBuildOutcome(
                   buildDiag.record({ phase: 'build', severity: 'warning', code: 'GREEN_GUARD_RESTORE_INCOMPLETE', autoResolved: false, message: 'The automatic restore could not be fully confirmed in the sandbox and durable store; the final save follows only the changes confirmed in the sandbox.', detail: snapshotRestoreDetail(outcome) });
                 }
                 }
-              } else if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })) {
+              } else if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop', renderedInBuild: renderedInBuildUnchanged(inBuildGreenAt, postGreenWrites.length) })) {
                 // KEPT, BUT UNCHECKED — and the user hears so. This is the branch that used to be a
                 // silent rollback. Saying nothing here would replace one dishonest outcome with a
                 // quieter one; the change is theirs, it stayed, and we could not confirm it.
@@ -27169,8 +27502,8 @@ async function noteBuildOutcome(
             await finalSave;
             const settled = await settleEditRevision({
               store: getRevisionStore(), projectId: workspaceId, editId, headAtStart: editHeadAtStart, startFiles: projectFilesAtTurnStart,
-              persisted, base: editGateBase(), previewGreen, provenBroken: previewProvenBroken, baseCheck: editBaseCheck,
-              requirementsOk: projectMemory.status !== 'unrecoverable', userMessage: turnMessage,
+              persisted, base: editGateBase(), previewGreen: renderEvidence(previewGreen, inBuildGreenAt, postGreenWrites.length), provenBroken: previewProvenBroken, baseCheck: editBaseCheck,
+              requirementsOk: projectMemory.status !== 'unrecoverable', buildOk: buildOkOf(result), userMessage: turnMessage,
               messageId: messageIdFor(0, turnMessage), messageText: turnMessage, artifactDigest: snapshotDigest(), now: Date.now(),
             });
             buildDiag.record(settled.finding);
@@ -27276,7 +27609,9 @@ async function noteBuildOutcome(
         // the admin cannot account for is the same problem as a number that is wrong.
         absorbedUnbilledUsd: decidedAbsorbedUsd,
         surplusUnsettledAbsorbed,
+        routerOneEstimated,
       } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd, barrenPhases);
+      recordRouterOneEstimatedBill(buildDiag, routerOneEstimated);
       let decidedRealCostUsd = decidedRealCostUsdIn;
       // A VERSION THE USER CAN GO BACK TO (2026-09-20). The Time Machine reads `build_history`, which
       // until today only the LEGACY builder ever wrote — so it showed "No saved versions yet" for every
@@ -28594,7 +28929,7 @@ async function noteBuildOutcome(
       // emit at the end of this catch) — a bare error message never told the user WHAT went wrong.
       let crashReportForClient: unknown = undefined;
       try {
-        buildDiagRef?.record({ phase: crash.phase, severity: 'error', code: crash.code, message: errMsg, autoResolved: false });
+        buildDiagRef?.record({ phase: crash.phase, severity: 'error', code: crash.code, message: errMsg, autoResolved: false, ...(crash.adminDetail ? { adminDetail: crash.adminDetail } : {}) });
         // A preserved initial answer cannot mask a later failure while finalizing that answer.
         // All older outcomes keep their existing precedence; only this new informational one yields.
         if (outcomeCodeOf(buildDiagRef?.report()?.issues ?? []) === 'OUTCOME_INITIAL_DECLINED') {

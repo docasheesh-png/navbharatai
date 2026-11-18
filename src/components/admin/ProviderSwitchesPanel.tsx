@@ -97,8 +97,10 @@ export function ProviderSwitchesBody(props: {
               ? `This server applied the current state (${fmt(data.thisInstance.at)}). Other servers apply it within ${Math.round(data.syncMs / 1000)} seconds.`
               : `This server has not applied the latest change yet (last sync ${fmt(data.thisInstance.at)}${data.thisInstance.ok ? '' : ', the last read failed'}). It retries every ${Math.round(data.syncMs / 1000)} seconds.`}
           </p>
-          <ul className="divide-y divide-line rounded-md border border-line">
-            {data.providers.map((p) => (
+          {/* Owner 2026-11-17: "jo ai/provider use ho rahe hai, wahi dikhen". Providers with a key on this server are
+              listed first; the ones with no key cannot run anything, so they sit in a closed list below. */}
+          {(() => {
+            const switchRow = (p: (typeof data.providers)[number]) => (
               <li key={p.id} className="p-2" data-testid={`provider-switch-${p.id}`}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
@@ -138,8 +140,25 @@ export function ProviderSwitchesBody(props: {
                   </form>
                 )}
               </li>
-            ))}
-          </ul>
+            );
+            const inUse = data.providers.filter((p) => p.hasKey !== false);
+            const noKey = data.providers.filter((p) => p.hasKey === false);
+            return (
+              <>
+                <ul className="divide-y divide-line rounded-md border border-line" data-testid="provider-switches-in-use">
+                  {inUse.map(switchRow)}
+                </ul>
+                {noKey.length > 0 && (
+                  <details data-testid="provider-switches-no-key">
+                    <summary className="cursor-pointer text-xs text-muted">Not set up on this server ({noKey.length}) — no key, so they run nothing</summary>
+                    <ul className="mt-2 divide-y divide-line rounded-md border border-line">
+                      {noKey.map(switchRow)}
+                    </ul>
+                  </details>
+                )}
+              </>
+            );
+          })()}
           {data.history.length > 0 && (
             <details>
               <summary className="cursor-pointer text-sm text-ink">Change history ({data.history.length})</summary>

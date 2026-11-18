@@ -21,6 +21,8 @@ SURPLUS_REGISTRY_INTERVAL_MS=300000
 AGENTV3_SURPLUS_BUILDER=false
 ```
 
+(2026-11-17: `AGENTV3_SURPLUS_BUILDER` is now ON by default; the line above is the explicit kill switch, no longer the default. See `docs/SURPLUS_BUILDER.md`.)
+
 `SURPLUS_REGISTRY_INTERVAL_MS` remains accepted for old deployment configuration, but all
 values normalize to the fixed five-minute cadence. A legacy ten-minute value does not leave
 an intentional stale gap. This implementation does not change deployment environment values.

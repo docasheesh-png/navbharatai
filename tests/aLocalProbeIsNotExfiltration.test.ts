@@ -4,7 +4,11 @@
 import { describe, expect, it } from 'vitest';
 import { classifyCommandRisk, onlyLoopbackNetwork } from '../src/server/AgentV3/CommandGovernance';
 
-const LOOPBACK_PROBE = `printf '%s\\n' '--- running preview response ---'; curl -sS -D /tmp/game-headers http://127.0.0.1:5173/src/game/Game.ts -o /tmp/Game.js; cat /tmp/game-headers; printf '%s\\n' '--- exports ---'; grep -n "export.*Game" /tmp/Game.js | tail -n 5; printf '%s\\n' '--- tail ---'; tail -n 12 /tmp/Game.js`;
+const LOOPBACK_PROBE = `printf '%s\\n' '--- running preview response ---'; curl -sS -D /tmp/game-headers http://127.0.0.1:5173/src/game/Game.ts -o /tmp/Game.js; cat /tmp/game-headers; printf '%s\\n' '--- exports ---'; grep -n "export.*Game" /tmp/Game.js | tail -n 5; printf '%s\\n' '--- tail ---'; tail -n 12 /tmp/Game.js; printf '%s\\n' '--- importer ---'; curl -sS http://127.0.0.1:5173/src/game/GameCanvas.tsx | head -n 8`;
+// ⚠️ The report keeps this command only up to "…tail -n 12 /tmp/Game.js; prin…". The tail above it (a second
+// loopback curl reading the importer) is a RECONSTRUCTION: the kept part alone does not match the rule, so the
+// refusal was decided by text the report dropped — and `cat … | … curl` across separate commands is the only way
+// the rule can fire on a command of this shape.
 const TMP_DELETE = `rm -rf /tmp/nav-transform && mkdir -p /tmp/nav-transform && cp src/game/Game.ts /tmp/nav-transform/`;
 
 describe('a local probe is not exfiltration, a /tmp scratch dir is not root', () => {

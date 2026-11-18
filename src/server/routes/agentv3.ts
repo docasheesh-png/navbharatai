@@ -452,6 +452,7 @@ import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets } from '../AgentV3/gameAssets/assetSeed';
 import { gameLibraryPlanningHandoff } from '../AgentV3/gameAssets/gameLibrarySelection';
 import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
+import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
 import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
@@ -19391,7 +19392,15 @@ async function noteBuildOutcome(
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_KIT_SEEDED', autoResolved: true, message: gameKitSeededMessage(kitResults, kitFiles, Date.now() - kitStartedAt),
                   detail: `recipes ${(kitRecipesMs / 1000).toFixed(1)} s` + (kitAssetsMs != null ? ` · 3D assets ${(kitAssetsMs / 1000).toFixed(1)} s (${kitAssetsStatus || 'unknown'})` : ' · 3D assets not prepared') });
                 if (localGameAssetHandoff) buildPrompt = `${localGameAssetHandoff}\n\n${buildPrompt}`;
-                buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(gameTurnRequest(prompt, milestoneRequest)) })}\n\n---\n\n${buildPrompt}`;
+                // A race whose course the request does not describe runs on the kit's endless 12-piece track
+                // (endlessRaceCourse.ts, owner 2026-11-18): said in the handoff, and the builder's code is checked for it.
+                const endlessRace = gameKitSeeded.includes('generate_game_3d') && wantsEndlessRaceCourse(gameTurnRequest(prompt, milestoneRequest));
+                if (endlessRace) {
+                  dispatcher.requireEndlessRaceCourse();
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'RACE_COURSE_ENDLESS', autoResolved: true,
+                    message: 'The request is a race and says nothing about its course, so it runs on NavBharatAI\'s endless 12-piece track (createTrackStream with DEFAULT_TRACK_PLAN).' });
+                }
+                buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(gameTurnRequest(prompt, milestoneRequest)), endlessRaceCourse: endlessRace })}\n\n---\n\n${buildPrompt}`;
               } else {
                 gameKitSeedFailed = kitResults.length > 0;
                 gameKitSkipReason = kitResults.length > 0

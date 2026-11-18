@@ -102087,3 +102087,13 @@ made rock-solid). Ledger:
   `gatewayRunners`. Proven by reversion (familyKey ignored → 2 fail; accountKey ignored → 1 fail).
 - **Trade-off stated honestly:** a gateway now spends up to three model attempts per turn before moving on, as the owner
   specified; each timed-out model is still cooled down on its own, so the next turn does not re-wait it.
+
+## 2026-11-18 — A race the user did not describe never runs out of road (owner request)
+
+Owner: *"jab bhi koi racing game bane, to hamesa (100%) navbharatai me library se road map liye jaye (agar user kuch na kahe road ke bare me to!) … race bas 10-12 second ke baad track khatam ho jata hai … 10-12 road track … 1-2-3-…→1-2-3 cycle … hamesa infinity road"*.
+
+- **Root cause:** the 3D layer already had the endless streamed track (`createTrackStream` + `DEFAULT_TRACK_PLAN`, 2026-11-02), but using it was one sentence in a long recipe instruction. Builders reached for `createRoad()`, whose default is a 300 m straight — about ten seconds at racing speed.
+- **Class:** a capability the platform knows a build needs, left to the model's optional choice (same class as the game kit itself, build 46e2d74b).
+- **Fix:** `src/server/AgentV3/endlessRaceCourse.ts` is the one reading of "a race whose course the request did not describe" (shape / scenery / length / end words; bare "road"/"track" describe nothing). When it holds and the 3D layer is seeded: a mandatory line in the kit handoff (`gameKitHandoffBlock`), a `RACE_COURSE_ENDLESS` info diagnostic, and a once-per-build code check in `ToolDispatcher` that notes a game driving a vehicle with no `createTrackStream()` (naming any `createRoad()` file). `DEFAULT_TRACK_PLAN` grew from 9 to 12 pieces (A..L), turns cancelling over one loop. The 3D instruction now forbids one `createRoad()` for a race.
+- **Tests:** `tests/aRaceTheUserDidNotDescribeNeverEnds.test.ts` (prompt reading, handoff, code check, 12-piece plan) + the real 3-loop drive in `tests/theTrackIsWhatTheUserDescribed.test.ts`; reverted fix → 4 failures.
+- **Honest limit:** the model still writes the game; the platform states the rule, checks the code and notes the exact repair, but a note does not fail a build. Watch the next racing build report for `RACE_COURSE_ENDLESS` and whether the note fired.

@@ -1,6 +1,6 @@
 import { indexedRaycast } from './helpers/indexedRaycast';
 // THE TRACK IS WHAT THE USER DESCRIBED (admin 2026-11-02, t315u): curved and closed roads drape on the land,
-// a road crossing a rail is a LEVEL crossing, and a streamed track plan loops A..I for ever — or ends where
+// a road crossing a rail is a LEVEL crossing, and a streamed track plan loops A..L for ever — or ends where
 // the user said (a barrier, a lake) — with seamless joins, bounded memory and a car that never sinks.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -105,7 +105,7 @@ describe('createTrackStream — a plan streamed for ever, or ended where the use
     return last;
   };
 
-  it('3 infinite loops of A..I: never sinks, joins seamless, memory bounded, laps counted, pieces vary per loop', () => {
+  it('3 infinite loops of A..L: never sinks, joins seamless, memory bounded, laps counted, pieces vary per loop', () => {
     const stream = O.createTrackStream(O.DEFAULT_TRACK_PLAN, { detail: 'lite' });
     const scene = new THREE.Scene(); scene.add(stream.root);
     const car = O.createCar(); scene.add(car);
@@ -131,10 +131,10 @@ describe('createTrackStream — a plan streamed for ever, or ended where the use
     expect(status.distance).toBeGreaterThan(loopLen * 3);
     expect(minGap).toBeGreaterThanOrEqual(-1e-6);
     expect(maxAlive).toBeLessThanOrEqual(6);                 // 1 behind + current + 3 ahead (+ spawn slack)
-    expect(stream.stats().created).toBeGreaterThan(27);       // 3 × 9 pieces were streamed and recycled
+    expect(stream.stats().created).toBeGreaterThan(36);       // 3 × 12 pieces were streamed and recycled
     // Floating origin: ~3.5 km driven, yet the car is still within the rebase radius of 0.
     expect(Math.hypot(car.position.x, car.position.z)).toBeLessThan(1000);
-    // I -> A join: the stream kept going past the end of the plan (index 8 then 0 in the next loop).
+    // L -> A join: the stream kept going past the end of the plan (index 11 then 0 in the next loop).
     expect(stream.segments.some((s: any) => s.loop >= 3)).toBe(true);
     const cones = (l: number) => stream.segments.filter((s: any) => s.loop === l);
     void cones;

@@ -2271,14 +2271,6 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             items: { type: 'string' },
             description: 'Optional subset: combat, ai, projectile, spawner, weapon, director. Default = all.',
           },
-          archetype: {
-            type: 'string',
-            description: 'The kind of land: continental, plains, hills, alpine, desert, tundra, jungle, savanna, archipelago, island, wetland, coast. Default: read from the user\'s words (registan -> desert, pahad -> alpine, dweep -> island).',
-          },
-          size_km: {
-            type: 'number',
-            description: 'How big the map is, 1 to 1000 km (a seamless loop; an island is that many km across). Default: read from the user\'s words ("5 km", "chhota", "huge"); none = 100.',
-          },
         },
       },
     },
@@ -2301,6 +2293,14 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'Hand-writing a terrain for such a game is wrong. Pass include to take only some modules of it.',
       input_schema: { type: 'object', properties: {
         include: { type: 'array', items: { type: 'string' }, description: 'Optional modules: sea, plants, rivers, sky, roads, vehicles. Default: chosen from the request (none named = all).' },
+        archetype: {
+          type: 'string',
+          description: 'The kind of land: continental, plains, hills, alpine, desert, tundra, jungle, savanna, archipelago, island, wetland, coast. Default: read from the user\'s words (registan -> desert, pahad -> alpine, dweep -> island).',
+        },
+        size_km: {
+          type: 'number',
+          description: 'How big the map is, 1 to 1000 km (a seamless loop; an island is that many km across). Default: read from the user\'s words ("5 km", "chhota", "huge"); none = 100.',
+        },
         composition: { type: 'object', description: 'Optional explicit user-shaped runtime world. Additive only; refuses replacing existing source. Procedural visual modules, not NPC AI or driving. Width 1–100km, mobile performance unverified.', additionalProperties: false,
           required: ['seed','profile','widthKm','quality','rivers','vegetation','objects'],
           properties: {

@@ -38,6 +38,18 @@ describe('the tool and the prompt offer the choice', () => {
     for (const k of ARCHETYPE_IDS) expect(props.archetype.description).toContain(k);
     expect(props.size_km.description).toMatch(/1 to 1000/);
   });
+  it('keeps map options on the map tool and gameplay options on the systems tool', () => {
+    const catalog = defaultToolCatalog();
+    const map = catalog.find((tool) => tool.name === 'generate_athree_map')!.input_schema.properties as any;
+    const systems = catalog.find((tool) => tool.name === 'generate_game_systems')!.input_schema.properties as any;
+    expect(map.include.items.type).toBe('string');
+    expect(map.composition.properties.widthKm).toMatchObject({ type: 'number', minimum: 1, maximum: 100 });
+    expect(systems.include).toMatchObject({ type: 'array', items: { type: 'string' } });
+    expect(systems.include.description).toContain('combat, ai, projectile, spawner, weapon, director');
+    expect(systems).not.toHaveProperty('archetype');
+    expect(systems).not.toHaveProperty('size_km');
+    expect(systems).not.toHaveProperty('composition');
+  });
   it('the architect prompt names the 12 kinds, the 1 to 1000 km range and the road limit', () => {
     const p = architectSystemPrompt();
     expect(p).toMatch(/12 kinds/); expect(p).toMatch(/1 to 1000 km/); expect(p).toMatch(/under 20 km has no roads/);

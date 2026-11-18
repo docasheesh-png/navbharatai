@@ -33,7 +33,10 @@ export const VENDOR_BRAND_PATTERNS: readonly RegExp[] = [
   /\bqubax(?:\.ai)?\b/gi,
   /\bmitrify(?:\.com)?\b(?!\.[a-z])/gi,
   /\b(?:api\.)?blu(?:e|sh)s?minds?(?:\.com)?\b/gi,
-  /\bENGINE_(?:R1|BM|MY|QX|MF)\b/g,
+  // Owner 2026-11-17: the reseller builder rungs. Moyi was left out when its rung shipped (#4276) — fixed with DiscountedTokens.
+  /\b(?:api\.)?moyi(?:-api)?(?:\.com)?\b/gi,
+  /\bdiscounted\s?tokens(?:\.com)?\b/gi,
+  /\bENGINE_(?:R1|BM|MY|DT|QX|MF)\b/g,
   /\bsurplus\b/gi,
   /\b(?:aws\s+)?bedrock\b/gi,
   /\b(?:amazon\s+nova|nova\s+sonic)\b/gi,

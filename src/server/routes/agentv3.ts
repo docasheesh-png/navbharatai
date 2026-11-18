@@ -525,6 +525,7 @@ import { bluesmindsBuilderEnabled, bluesmindsBuilderRungs } from '../AgentV3/blu
 import { moyiBuilderEnabled, moyiBuilderRungs } from '../AgentV3/moyiBuilder';
 import { qubaxBuilderRungs } from '../AgentV3/proChainV2/builderAdapters';
 import { qubaxBuilderEnabled } from '../AgentV3/proChainV2/qubaxBuilder';
+import { beforeFirstClaudeRung, discountedTokensBuilderRungs } from '../AgentV3/discountedTokensBuilder';
 import { ROUTER_ONE_LABEL, ROUTER_ONE_NOT_CONFIGURED, routerOneApiKey, routerOneBaseUrl, routerOneModels, routerOnePinnedForTier, routerOneWeakFallbackEnabled } from '../AI/RouterOne/routerOne';
 import { ProChainV2Build, proChainV2Decision, proChainV2ScopeAsk, proChainV2RedactSecrets, roleForRunnerOpts } from '../AgentV3/proChainV2';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
@@ -3809,7 +3810,11 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
     ...(level === 'weak' ? qubaxBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models)) : []),
     ...(level === 'weak' ? bluesmindsBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models)) : []),
     ...(level === 'weak' ? moyiBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models)) : []),
-    ...ladderRunners(rungs),
+    // Owner 2026-11-17: on Normal and Strong, DiscountedTokens (up to three of its models) sits right before the first
+    // Sonnet/Opus rung (discountedTokensBuilder.ts). Weak never gets it.
+    ...ladderRunners(level === 'weak' ? rungs : rungs.slice(0, beforeFirstClaudeRung(rungs))),
+    ...(level === 'weak' ? [] : discountedTokensBuilderRungs((label, key, baseURL, models) => openAiCompatRunners(label, key, baseURL, models))),
+    ...(level === 'weak' ? [] : ladderRunners(rungs.slice(beforeFirstClaudeRung(rungs)))),
   ];
   if (runners.length === 0) {
     const missing = [...new Set(rungs.map((r) => keyEnvFor(r.provider)))].filter((k) => !(process.env[k] && String(process.env[k]).trim()));

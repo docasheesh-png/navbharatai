@@ -51,3 +51,18 @@ export async function pickProviderModels(baseURL: string, apiKey: string, config
 
 /** TEST ONLY. */
 export function __resetProviderModelCache(): void { cache.clear(); }
+
+/**
+ * The ranked models already cached for this key, synchronously, and a background refresh when there are none —
+ * for a caller that must build its chain without waiting (a builder rung). Never throws; [] when nothing is known.
+ */
+export function cachedProviderModels(baseURL: string, apiKey: string, max = 3, fetchImpl: typeof fetch = fetch, now: () => number = Date.now): string[] {
+  try {
+    const slot = createHash('sha256').update(`${baseURL}|${apiKey}`).digest('hex');
+    const ids = cache.get(slot, now());
+    if (ids) return rankChatModels(ids, null).slice(0, Math.max(1, max));
+    void pickProviderModels(baseURL, apiKey, null, max, fetchImpl, now).catch(() => {});
+  } catch { /* a cache that cannot be read is an empty one */ }
+  return [];
+}
+

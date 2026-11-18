@@ -96,14 +96,14 @@ describe('🔒 only approved apps are ever public', () => {
 describe('🔒 the admin routes are the only path to approved', () => {
   const review = handlerOf('post', '/api/gallery/admin/:id/review');
 
-  it('every admin route checks isStoreAdmin and 403s', () => {
+  it('every admin route checks store authority (storeAdminRequest) and 403s', () => {
     for (const [method, path] of [
       ['get', '/api/gallery/admin/pending'],
       ['get', '/api/gallery/admin/:id/source'],
       ['post', '/api/gallery/admin/:id/review'],
     ] as const) {
       const h = handlerOf(method, path);
-      expect(h, path).toContain('isStoreAdmin');
+      expect(h, path).toContain('storeAdminRequest(req, ');
       expect(h, path).toContain('res.status(403)');
     }
   });

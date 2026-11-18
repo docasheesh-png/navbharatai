@@ -102100,3 +102100,24 @@ Owner: *"jab bhi koi racing game bane, to hamesa (100%) navbharatai me library s
 - **Tests:** `tests/aRaceTheUserDidNotDescribeNeverEnds.test.ts` (prompt reading, handoff, code check, 12-piece plan) + the real 3-loop drive in `tests/theTrackIsWhatTheUserDescribed.test.ts`; reverted fix → 4 failures.
 - **Honest limit:** the model still writes the game; the platform states the rule, checks the code and notes the exact repair, but a note does not fail a build. Watch the next racing build report for `RACE_COURSE_ENDLESS` and whether the note fired.
 - **Same day, owner correction:** *"12 par takna nahi hai … user jab chahe map ko badlao karwa sake, flexibility maximum ho, kuch bhi hard-core nahi"*. The twelve pieces are now only the STARTING course: the handoff tells the builder to keep the course in the game's own `src/game/<game>/trackPlan.ts` (any number of pieces, any order, any loop mode), and `createTrackStream` gained `stream.setPlan(plan, { now })` — a new course while the game runs, continuing seamlessly from the road already laid (`now` also replaces the pieces ahead; never the one under the car). Width, land seed and stream distance stay as created (they keep joins exact); an ended course is not reopened (returns false). Tests: live swap to 2 and 20 pieces, seamless joins and distance, refusal cases; reversion of the replace-ahead step → fails.
+
+## 2026-11-18 — App Mart "Manage apps" tab restored for the owner (two admin lists drifted apart)
+
+- **Problem (owner screenshot):** App Mart showed Browse / Publish / My apps and no admin tab, while the profile menu showed
+  Admin Panel — "yeh system pahle tha, ab band ho gaya".
+- **Root cause:** the Review tab and every App Mart moderation route asked only `NAV_STORE_ADMINS` (a verified email list);
+  the platform's admin is the signed admin session (password + MFA) behind Admin Panel. #4191 correctly removed the
+  `AGENTV3_FREE_LIST` fallback, after which an owner signed in with an account outside that one list lost the tab.
+- **Class:** two admin authorities that drift. **Fix:** one decision, `storeAdminRequest(req, email)` in
+  `storeAdminPermission.ts` = the admin session OR the explicit allowlist — never a free-build grant. Wired into every
+  store (6), social (5) and gallery (3) admin check; the client sends `x-admin-token` to the store only when a session
+  exists (`storeAdminHeaders.ts`: App Mart, its social client, the gallery queue). Tab renamed "Manage apps" as asked.
+- **Locked by:** `tests/theOwnerCanAlwaysModerateTheAppMart.test.ts` (the screenshot case, reviewer, free-grant/forged/
+  expired denied, client header, census of all three route files). Reversion: session ignored → the screenshot case fails.
+- **Owner action:** sign in to Admin Panel once on the device (the tab follows that session); a frontend change reaches the
+  phone apps only with the next store build.
+- **Same day, owner follow-up ("admin penal ke andar alag 'app mart' button bana do, waha sab dikhe"):** Admin Panel →
+  Apps → the page formerly called "Review" is now **"App Mart"** and embeds the store's own `NavAppStore` on its Manage
+  apps tab (lazy-loaded, the same component — not a second review screen). The old copy "It opens as the signed-in store
+  admin account, not with this panel's login" was the very drift fixed above and is replaced. Locked in
+  `tests/theAdminMenuHasNineTabs.test.ts`.

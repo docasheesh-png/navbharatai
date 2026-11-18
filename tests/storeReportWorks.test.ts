@@ -75,7 +75,7 @@ describe('THE REAL DEFECT: a report nobody could ever read', () => {
 
   it('the list is admin-only', () => {
     const at = route.indexOf("app.get('/api/nav-store/web/admin/reports'");
-    expect(route.slice(at, at + 400)).toContain('isStoreAdmin');
+    expect(route.slice(at, at + 400)).toContain('storeAdminRequest(req, ');
   });
 
   it('a human actually sees them, with the app and a way to act', () => {

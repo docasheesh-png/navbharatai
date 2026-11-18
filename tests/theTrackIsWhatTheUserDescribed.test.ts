@@ -179,4 +179,52 @@ describe('createTrackStream — a plan streamed for ever, or ended where the use
     expect(Math.hypot(last.end.x - segs[0].start.x, last.end.z - segs[0].start.z)).toBeLessThan(1e-6);
     c.dispose();
   });
+
+  // Owner 2026-11-18: "12 par takna nahi hai … user jab chahe map ko badlao karwa sake … kuch bhi hard-core nahi".
+  const seamless = (segs: any[]) => {
+    for (let i = 1; i < segs.length; i++) {
+      expect(Math.hypot(segs[i].start.x - segs[i - 1].end.x, segs[i].start.z - segs[i - 1].end.z)).toBeLessThan(1e-6);
+      expect(Math.abs(segs[i].start.heading - segs[i - 1].end.heading)).toBeLessThan(1e-9);
+      expect(Math.abs(segs[i].start.y - segs[i - 1].end.y)).toBeLessThan(1e-9);
+      expect(segs[i].startDistance).toBeCloseTo(segs[i - 1].startDistance + segs[i - 1].length, 6);
+    }
+  };
+
+  it('the course changes while the game runs: any number of pieces, seamless, the piece under the car kept', () => {
+    const stream = O.createTrackStream(O.DEFAULT_TRACK_PLAN, { detail: 'lite' });
+    const car = O.createCar();
+    drive(stream, car, 300);
+    const under = stream.update(car).segment;
+    // A two-piece desert course, swapped in NOW: everything ahead of the car is replaced.
+    const desert = { loop: 'infinite', pieces: [{ kind: 'straight', length: 90, scenery: 'desert', name: 'dune straight' }, { kind: 'curve', angle: -0.5, length: 100, scenery: 'desert', name: 'dune bend' }] };
+    expect(stream.setPlan(desert, { now: true })).toBe(true);
+    expect(stream.segments.some((s: any) => s === under)).toBe(true);
+    expect(stream.segments.filter((s: any) => s.serial > under.serial)).toHaveLength(0);
+    expect(stream.plan.pieces).toHaveLength(2);
+    drive(stream, car, 1200);
+    const names = stream.segments.map((s: any) => s.piece.name).filter((n: string) => n.startsWith('dune'));
+    expect(names.length).toBeGreaterThan(1);
+    expect(stream.segments.every((s: any) => s.piece.name.startsWith('dune') || s.serial <= under.serial)).toBe(true);
+    seamless(stream.segments);
+    // And a twenty-piece course, swapped in at the NEXT join (the road already laid ahead stays).
+    const twenty = { loop: 'infinite', pieces: Array.from({ length: 20 }, (_, i) => ({ kind: i % 2 ? 'curve' : 'straight', angle: i % 4 === 1 ? 0.3 : -0.3, length: 60, name: `p${i + 1}` })) };
+    const before = stream.segments.map((s: any) => s.serial);
+    expect(stream.setPlan(twenty)).toBe(true);
+    for (const sv of before) expect(stream.segments.some((s: any) => s.serial === sv) || sv < stream.segments[0].serial).toBe(true);
+    drive(stream, car, 1500);
+    expect(stream.segments.some((s: any) => /^p\d+$/.test(s.piece.name))).toBe(true);
+    seamless(stream.segments);
+    stream.dispose();
+  });
+
+  it('an empty plan or an ended course is refused and changes nothing', () => {
+    const stream = O.createTrackStream(O.DEFAULT_TRACK_PLAN, { detail: 'lite' });
+    expect(stream.setPlan({ pieces: [] })).toBe(false);
+    expect(stream.plan.pieces).toHaveLength(12);
+    stream.dispose();
+    const fin = O.createTrackStream({ loop: 'none', pieces: [{ kind: 'straight', length: 60 }, { kind: 'end' }] }, { detail: 'lite' });
+    drive(fin, O.createCar(), 10000);
+    expect(fin.setPlan(O.DEFAULT_TRACK_PLAN)).toBe(false);
+    fin.dispose();
+  });
 });

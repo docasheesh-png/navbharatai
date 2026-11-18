@@ -59,15 +59,25 @@ export function wantsEndlessRaceCourse(prompt: string | null | undefined): boole
   return !COURSE_DESCRIBED.test(text.replace(ENDLESS_WORDS, ' '));
 }
 
-/** The mandatory handoff line for that race. Names the exact calls, so there is nothing to work out. */
+/**
+ * The mandatory handoff line for that race. Names the exact calls, so there is nothing to work out. The twelve
+ * pieces are only the STARTING course (owner 2026-11-18: "12 par takna nahi hai … user jab chahe map ko badlao
+ * karwa sake … kuch bhi hard-core nahi"): the course lives in one file of the game's own, so any later change is
+ * an edit to that file, and stream.setPlan swaps it while the game runs.
+ */
 export const ENDLESS_RACE_COURSE_RULE = [
-  '🛣️ THE RACE COURSE IS MANDATORY AND ALREADY WRITTEN: the request says nothing about the road, so this race runs',
-  'on NavBharatAI\'s own endless course — `const stream = createTrackStream(DEFAULT_TRACK_PLAN)` from',
-  'src/game/three/objects.ts (twelve different pieces A..L, looped A..L→A..L for ever, every join seamless),',
-  '`scene.add(stream.root)` in setup(), the car placed at `stream.startPose` (x, y, z and heading), and',
-  '`stream.update(car)` every frame (it streams pieces ahead, recycles the ones behind and rebases the origin;',
-  'use its { distance, lap } for the HUD). NEVER build the race course with createRoad() or a PlaneGeometry:',
-  'createRoad\'s default is 300 m, which ends after about ten seconds of racing.',
+  '🛣️ THE RACE COURSE: the request says nothing about the road, so the race STARTS on NavBharatAI\'s endless course,',
+  'and nothing about it is fixed. Keep the course in ONE file of the game\'s own, src/game/<your-game>/trackPlan.ts:',
+  '`export const TRACK_PLAN: TrackPlan = { loop: \'infinite\', pieces: [ … ] }`, with the twelve pieces of',
+  'DEFAULT_TRACK_PLAN (src/game/three/objects.ts, A..L) written out as its starting list — any number of pieces',
+  'in any order is valid, so when the user later asks for more or fewer stretches, other scenery, a course that',
+  'ends at a lake or a closed circuit, that is an edit to this one file. Build it with',
+  '`const stream = createTrackStream(TRACK_PLAN)`, `scene.add(stream.root)` in setup(), the car at',
+  '`stream.startPose` (x, y, z and heading), and `stream.update(car)` every frame (it streams pieces ahead,',
+  'recycles the ones behind and rebases the origin; use its { distance, lap } for the HUD).',
+  '`stream.setPlan(plan, { now: true })` changes the course while the game runs (a track picker, a new stage),',
+  'continuing seamlessly from the road already laid. NEVER build the race course with createRoad() or a',
+  'PlaneGeometry: createRoad\'s default is 300 m, which ends after about ten seconds of racing.',
 ].join(' ');
 
 export interface RaceCourseHalves {

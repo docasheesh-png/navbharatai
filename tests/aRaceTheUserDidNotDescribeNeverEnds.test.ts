@@ -51,7 +51,10 @@ describe('the kit handoff makes the course mandatory', () => {
   it('a race with the 3D layer on disk carries the rule, with the exact calls', () => {
     const block = gameKitHandoffBlock(threeD, { endlessRaceCourse: true });
     expect(block).toContain(ENDLESS_RACE_COURSE_RULE);
-    expect(block).toMatch(/createTrackStream\(DEFAULT_TRACK_PLAN\)/);
+    expect(block).toMatch(/createTrackStream\(TRACK_PLAN\)/);
+    expect(block).toMatch(/src\/game\/<your-game>\/trackPlan\.ts/);
+    expect(block).toMatch(/any number of pieces\s+in any order is valid/);
+    expect(block).toMatch(/stream\.setPlan\(plan, \{ now: true \}\)/);
     expect(block).toMatch(/stream\.update\(car\)/);
     expect(block).toMatch(/NEVER build the race course with createRoad\(\)/);
   });
@@ -128,9 +131,11 @@ describe('the library course: twelve different pieces that cycle and never end',
     expect(Math.abs(angles.reduce((a, b) => a + b, 0))).toBeLessThan(1e-12);
   });
 
-  it('the builder instruction names twelve pieces and forbids one createRoad() for a race', () => {
+  it('the builder instruction names twelve STARTING pieces, says nothing is fixed, and forbids one createRoad() for a race', () => {
     const g = generateGame3D();
-    expect(g.instructions).toMatch(/DEFAULT_TRACK_PLAN \(twelve different pieces, A\.\.L, looped for ever\)/);
+    expect(g.instructions).toMatch(/DEFAULT_TRACK_PLAN \(twelve different pieces, A\.\.L, looped for ever\) as the STARTING list/);
+    expect(g.instructions).toMatch(/Nothing is fixed: any number of pieces, any order/);
+    expect(g.instructions).toMatch(/stream\.setPlan\(plan, \{ now: true \}\)/);
     expect(g.instructions).toMatch(/A RACE is never one createRoad\(\)/);
   });
 });

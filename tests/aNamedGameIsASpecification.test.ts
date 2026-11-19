@@ -15,6 +15,8 @@ import { asksForBattleRoyale, buildGameContract, gameContractBlock, namedGameRef
 import { opensGameSession, startLabelRank, startLabelsFromExplore } from '../src/server/AgentV3/gamePlaytest';
 import { mapProfileFor } from '../src/server/lib/athreeMap/athreeMapIntent';
 import { sceneryFor } from '../src/server/AgentV3/gameAssets/worldDressing';
+import { needsHumanCharacter } from '../src/server/AgentV3/gameAssets/humanPack';
+import { gameKitWants3D } from '../src/server/AgentV3/gameKitSeed';
 
 /** The report's own words, verbatim. */
 const REAL_PROMPT = 'mujhe pubg/bgmi jaisa game chahiye. jahan ham character ko joystick se move kare! \napne pata nahi kya photo bana diya hai,';
@@ -74,16 +76,26 @@ describe('one reader for "a royale-style game" — every consumer agrees', () =>
     expect(sceneryFor('make a shooting game with targets')?.layout).toBe('range');
   });
 
+  it('a prompt that names only BGMI gets the 3D kit and human characters (both private lists lacked "bgmi")', () => {
+    const bgmiOnly = 'mujhe bgmi jaisa game chahiye';
+    expect(gameKitWants3D(bgmiOnly)).toBe(true);
+    expect(needsHumanCharacter({ prompt: bgmiOnly })).toBe(true);
+    expect(gameKitWants3D(REAL_PROMPT)).toBe(true);
+  });
+
   it('no module keeps a private royale regex any more (census — a new copy fails here)', () => {
     const files = [
       'src/server/lib/athreeMap/athreeMapIntent.ts',
       'src/server/AgentV3/ToolDispatcher.ts',
       'src/server/AgentV3/gameAssets/worldDressing.ts',
+      'src/server/AgentV3/gameAssets/humanPack.ts',
+      'src/server/AgentV3/gameKitSeed.ts',
     ];
     for (const f of files) {
       const src = readFileSync(join(__dirname, '..', f), 'utf8');
       expect(src, f).not.toMatch(/battle\\s\*royale\|/);
       expect(src, f).not.toMatch(/\\bpubg\\b\|\\bbgmi/);
+      expect(src, f).not.toMatch(/\|pubg\||free\\s\*-\?\\s\*fire\|battle/);
     }
   });
 });

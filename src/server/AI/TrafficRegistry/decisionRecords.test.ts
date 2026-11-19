@@ -109,3 +109,57 @@ describe('bounded and never in the way', () => {
     expect(__decisionBufferForTests()[0]).toMatchObject({ surface: 'professional', outcome: 'failed', failure: 'upstream', path: 'legacy' });
   });
 });
+
+// Proposal only: source written, NOT executed. Exercises actual async interleaving.
+describe('counter snapshots cannot erase observations or overtake each other', () => {
+  function heldWrite() {
+    let release!: () => void;
+    const wait = new Promise<void>(resolve => { release = resolve; });
+    return { wait, release };
+  }
+
+  it('keeps an outcome arriving during a write dirty for the next flush', async () => {
+    const m = memoryStore(); const hold = heldWrite();
+    const write = vi.fn(async (id: string, value: Parameters<DecisionStore['writeCounter']>[1]) => {
+      await hold.wait;
+      await m.store.writeCounter(id, value);
+    });
+    countOutcome('free', 'complete', NOW);
+    const first = flushCounters({ ...m.store, writeCounter: write }, NOW);
+    countOutcome('free', 'failed', NOW);
+    hold.release(); await first;
+    expect((await computeSlo(m.store, 7, NOW))[0].eligible).toBe(1);
+    await flushCounters(m.store, NOW);
+    expect((await computeSlo(m.store, 7, NOW))[0]).toMatchObject({ eligible: 2, successes: 1 });
+  });
+
+  it('coalesces overlapping timer/admin flushes instead of writing out of order', async () => {
+    const m = memoryStore(); const hold = heldWrite();
+    const write = vi.fn(async (id: string, value: Parameters<DecisionStore['writeCounter']>[1]) => {
+      await hold.wait;
+      await m.store.writeCounter(id, value);
+    });
+    const store = { ...m.store, writeCounter: write };
+    countOutcome('free', 'complete', NOW);
+    const timer = flushCounters(store, NOW);
+    countOutcome('free', 'failed', NOW);
+    const admin = flushCounters(store, NOW + 1);
+    expect(write).toHaveBeenCalledTimes(1);
+    hold.release(); await Promise.all([timer, admin]);
+    await flushCounters(store, NOW + 2);
+    expect(write).toHaveBeenCalledTimes(2);
+    expect((await computeSlo(m.store, 7, NOW))[0]).toMatchObject({ eligible: 2, successes: 1 });
+  });
+
+  it('retries all absolute counts after a failed write, including concurrent arrivals', async () => {
+    const m = memoryStore(); const hold = heldWrite();
+    countOutcome('free', 'complete', NOW);
+    const first = flushCounters({ ...m.store, writeCounter: async () => {
+      await hold.wait; throw new Error('offline');
+    } }, NOW);
+    countOutcome('free', 'failed', NOW);
+    hold.release(); expect(await first).toBe(0);
+    expect(await flushCounters(m.store, NOW + 1)).toBe(1);
+    expect((await computeSlo(m.store, 7, NOW))[0]).toMatchObject({ eligible: 2, successes: 1 });
+  });
+});

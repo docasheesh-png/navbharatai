@@ -35,6 +35,8 @@ describe('which race gets the endless course', () => {
     'pahad aur nadi wala racing game',
     'रेगिस्तान में कार रेसिंग गेम',
     'a 5 km drag race',
+    'car racing game on a straight road',
+    'seedha road racing game',
   ])('a race whose course the user described keeps the user\'s course: %s', (prompt) => {
     expect(wantsEndlessRaceCourse(prompt)).toBe(false);
   });
@@ -99,6 +101,8 @@ describe('the builder\'s code is checked for the endless course', () => {
   });
 
   it('kit files, tests and comments never count', () => {
+    expect(raceCourseHalves('src/game/RacingRoadGame.tsx', 'createCar(); createTrackStream();').streams).toBe(false);
+    expect(raceCourseHalves('src/App.tsx', 'return <RacingRoadGame />').streams).toBe(true);
     expect(raceCourseHalves('src/game/three/objects.ts', 'export function createCar() {} createRoad();').drives).toBe(false);
     expect(raceCourseHalves('src/game/race/race.test.ts', 'createCar(); createRoad();').drives).toBe(false);
     expect(raceCourseHalves('src/game/race/a.ts', '// createTrackStream(DEFAULT_TRACK_PLAN)\ncreateCar();')).toEqual({ drives: true, streams: false, finiteRoad: false });
@@ -113,27 +117,21 @@ describe('the builder\'s code is checked for the endless course', () => {
   });
 });
 
-describe('the library course: twelve different pieces that cycle and never end', () => {
-  // The track source is written into the user's project, so its plan is read from the generated objects.ts.
+describe('the library starts with twelve long maps, while custom plans stay editable', () => {
   const objects = generateGame3D().files['src/game/three/objects.ts'];
-  const planSrc = objects.slice(objects.indexOf('export const DEFAULT_TRACK_PLAN'), objects.indexOf('export interface TrackPose'));
-
-  it('twelve pieces, A..L, every name different, looped for ever', () => {
-    const names = [...planSrc.matchAll(/name: '([A-L]) [^']+'/g)].map((m) => m[1]);
-    expect(names).toEqual(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']);
-    expect(planSrc).toMatch(/loop: 'infinite'/);
-    expect(planSrc).not.toMatch(/kind: '(?:end|water|finish)'/);
+  const catalog = objects.slice(objects.indexOf('export const RACING_ROAD_MAPS'), objects.indexOf('export const RACING_ROAD_CHUNK_METRES'));
+  it('twelve default map identities with road lengths10–100km, streamed as bounded chunks', () => {
+    const entries = [...catalog.matchAll(/id: (\d+), name: '([^']+)', lengthKm: (\d+)/g)];
+    expect(entries.map(m => Number(m[1]))).toEqual(Array.from({ length: 12 }, (_, i) => i + 1));
+    expect(new Set(entries.map(m => m[2])).size).toBe(12);
+    expect(entries.every(m => Number(m[3]) >= 10 && Number(m[3]) <= 100)).toBe(true);
+    expect(objects).toContain('export const DEFAULT_TRACK_PLAN: TrackPlan = createRacingRoadPlan()');
+    expect(objects).toContain('RACING_ROAD_CHUNK_METRES = 200');
   });
-
-  it('the turns cancel over one loop, so the course winds but never spirals over itself', () => {
-    const angles = [...planSrc.matchAll(/angle: (-?)Math\.PI \/ (\d+)/g)].map((m) => (m[1] ? -1 : 1) * Math.PI / Number(m[2]));
-    expect(angles.length).toBeGreaterThanOrEqual(4);
-    expect(Math.abs(angles.reduce((a, b) => a + b, 0))).toBeLessThan(1e-12);
-  });
-
-  it('the builder instruction names twelve STARTING pieces, says nothing is fixed, and forbids one createRoad() for a race', () => {
+  it('handoff and generator preserve arbitrary course counts, live edits and user plans', () => {
     const g = generateGame3D();
-    expect(g.instructions).toMatch(/DEFAULT_TRACK_PLAN \(twelve different pieces, A\.\.L, looped for ever\) as the STARTING list/);
+    expect(ENDLESS_RACE_COURSE_RULE).toContain('createRacingRoadPlan()');
+    expect(ENDLESS_RACE_COURSE_RULE).toContain('10–100 km maps');
     expect(g.instructions).toMatch(/Nothing is fixed: any number of pieces, any order/);
     expect(g.instructions).toMatch(/stream\.setPlan\(plan, \{ now: true \}\)/);
     expect(g.instructions).toMatch(/A RACE is never one createRoad\(\)/);

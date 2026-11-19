@@ -140,16 +140,31 @@ export async function flushDecisions(store: DecisionStore | null = firestoreStor
   catch { return 0; } // kept for the next flush (bounded by MAX_BUFFER)
 }
 
-export async function flushCounters(store: DecisionStore | null = firestoreStore(), now = Date.now()): Promise<number> {
-  if (!store) return 0;
+// Serialize absolute snapshots: timer and admin reads may request a flush concurrently.
+// This avoids an older snapshot overwriting a newer one. It is NOT durable accounting:
+// an abrupt process exit can still lose observations not yet persisted.
+let counterFlush: Promise<number> | null = null;
+export function flushCounters(store: DecisionStore | null = firestoreStore(), now = Date.now()): Promise<number> {
+  if (counterFlush) return counterFlush;
+  if (!store) return Promise.resolve(0);
+  const pending = writeDirtyCounters(store, now);
+  counterFlush = pending;
+  return pending.finally(() => { counterFlush = null; });
+}
+
+async function writeDirtyCounters(store: DecisionStore, now: number): Promise<number> {
   let written = 0;
   for (const [, c] of counters.entries(now)) {
     if (!c.dirty) continue;
+    const snapshot = { ...c.counts };
+    // Clear BEFORE the await. New observations during the write mark it dirty again,
+    // and a failed write restores dirty so the absolute total is retried.
+    c.dirty = false;
     try {
-      await store.writeCounter(`${c.day}_${c.surface}_${INSTANCE}`, { day: c.day, surface: c.surface, instance: INSTANCE, counts: { ...c.counts },
+      await store.writeCounter(`${c.day}_${c.surface}_${INSTANCE}`, { day: c.day, surface: c.surface, instance: INSTANCE, counts: snapshot,
         updatedAtMs: now, dayStartMs: Date.parse(`${c.day}T00:00:00Z`) });
-      c.dirty = false; written++;
-    } catch { /* stays dirty; the next flush writes the same absolute totals */ }
+      written++;
+    } catch { c.dirty = true; }
   }
   return written;
 }

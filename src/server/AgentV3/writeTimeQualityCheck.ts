@@ -228,3 +228,30 @@ export function qualityNote(
     ...lines,
   ].join('\n');
 }
+
+/**
+ * 🔴 SALVAGED FILES GET THE SAME NOTES AS EVERY OTHER WRITE (Q-2924, failedbr #2466 a360bc2c, 2026-11-19).
+ * The fast lane salvaged 26 files and handed them to the full builder with the compiler's errors — and nothing
+ * else. Every other write is followed by `qualityNote`; these never were, so the report ended with
+ * "3 file(s) still flagged, 3 never got a note" and a PERSISTED_STATE_BOUNDARY on `src/hooks/useLocalStorage.ts`,
+ * all in salvaged files. The class: a write door that bypasses the write-time check. This is the same notes,
+ * once, for the files the lane wrote, carried in the hand-off. At most `maxFiles` files, so the hand-off stays
+ * readable; `''` when none is flagged or the check is switched off. PURE.
+ */
+export function salvageQualityNotes(
+  files: Record<string, string>,
+  salvaged: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+  maxFiles = 6,
+): string {
+  if (!writeQualityEnabled(env)) return '';
+  const notes: string[] = [];
+  for (const path of salvaged ?? []) {
+    const content = files?.[path];
+    if (typeof content !== 'string') continue;
+    const note = qualityNote(path, content, env);
+    if (note) notes.push(note.trim());
+    if (notes.length >= maxFiles) break;
+  }
+  return notes.length ? `The write-time quality check on those files (fix each while you have it open):\n${notes.join('\n')}\n` : '';
+}

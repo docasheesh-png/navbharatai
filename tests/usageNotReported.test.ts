@@ -123,11 +123,16 @@ describe('the wiring — the fact must REACH the report, or the flag is decorati
   });
 
   it('🔒 a diagnostics throw can never disturb a build', () => {
-    const start = route.indexOf('if (usage.measured === false && !usageUnreportedFired)');
+    // Since Q-2920 the condition also excludes a failed, retried attempt (failedAttemptCostVerdict).
+    const start = route.indexOf('if (failedAttemptVerdict === null && usage.measured === false && !usageUnreportedFired)');
     expect(start).toBeGreaterThan(0);
     const block = route.slice(start, start + 1600);
     expect(block).toMatch(/try\s*\{/);
     expect(block).toMatch(/\}\s*catch\s*\{/);
+    // …and the failed-attempt record is guarded the same way.
+    const fa = route.indexOf("if (failedAttemptVerdict === 'unknown' && !failedAttemptUnknownFired)");
+    expect(fa).toBeGreaterThan(0);
+    expect(route.slice(fa, fa + 900)).toMatch(/try\s*\{[\s\S]*\}\s*catch\s*\{/);
   });
 
   it('the notice names the flag to unset, so the admin can act without reading code', () => {

@@ -50,10 +50,9 @@ jobs:
           assert.equal(createHash('sha256').update(bytes).digest('hex'), firestore.expectedChecksumSHA256);
           NODE
       - name: Real database and multiprocess queue/retry drills
-        env:
-          TZ: UTC
-          FIRESTORE_EMULATOR_HOST: 127.0.0.1:18781
+        shell: bash scripts/ci-loopback-only.sh bash -eo pipefail {0}
         run: |
+          export TZ=UTC FIRESTORE_EMULATOR_HOST=127.0.0.1:18781
           java -Xmx512m -jar "$RUNNER_TEMP/phase2-safety/firestore.jar" --host 127.0.0.1 --port 18781 --project_id demo-navbharatai-phase2 --single_project_mode true --single_project_mode_error true > "$RUNNER_TEMP/phase2-safety/firestore.log" 2>&1 &
           emulator_pid=$!
           trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
@@ -174,7 +173,7 @@ jobs:
         run: node --experimental-strip-types scripts/failedReportOAuth.check.mjs
 
       - name: Mitrify offline transport and privacy checks
-        run: npm run test:mitrify
+        run: bash scripts/ci-loopback-only.sh npm run test:mitrify
 
       - name: Offline answer-quality evaluator self-check (no model calls)
         run: node scripts/chatAnswerQuality.check.mjs
@@ -192,14 +191,7 @@ jobs:
       - name: Test + coverage gate (P-TQA.1 — runs the suite once; BLOCKS on a real coverage regression)
         # Start the suite and all its child processes with loopback only. Provider mocks
         # may be missing, but no test can reach a live provider. No fallback to host networking.
-        run: |
-          sudo -- unshare --net -- /bin/bash -euc '
-            /usr/sbin/ip link set lo up
-            exec /usr/bin/setpriv --reuid="$1" --regid="$2" --init-groups \
-              --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all \
-              -- /usr/bin/env PATH="$3" HOME="$4" CI=true GITHUB_ACTIONS=true \
-                GITHUB_WORKSPACE="$5" RUNNER_TEMP="$6" npm run test:coverage
-          ' coverage "$(id -u)" "$(id -g)" "$PATH" "$HOME" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+        run: bash scripts/ci-loopback-only.sh npm run test:coverage
 
       - name: Build (frontend bundle + server bundle — catches build-only breaks)
         run: npm run build
@@ -208,7 +200,7 @@ jobs:
         run: npm run test:bundle
 
       - name: Boot smoke-check (server starts without crash)
-        run: npm run boot:check
+        run: bash scripts/ci-loopback-only.sh npm run boot:check
 
       # 🔴 THE BOOT SMOKE-CHECK ABOVE RUNS AGAINST THE FULL, UNPRUNED node_modules — devDependencies
       # included — so it cannot see the class of bug that took production down on 2026-09-16: a

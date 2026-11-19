@@ -6,6 +6,8 @@ import { E2BActuator } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/
 import { sandboxLifetimeMs } from '../src/server/AgentV3/sandboxLifetime';
 import { sandboxStore } from '../src/server/AgentV3/SandboxStore';
 import { SandboxRecoveryUnavailableError, isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable } from '../src/server/AgentV3/SandboxRecoveryError';
+import * as workspaceFiles from '../src/server/AgentV3/WorkspaceFileStore';
+import * as workspaceAssets from '../src/server/AgentV3/WorkspaceAssetStore';
 
 const WS = 'agentv3-owner-stateful';
 const OLD = 'existing-machine';
@@ -14,7 +16,7 @@ function machine(sandboxId = OLD) {
   return {
     sandboxId,
     setTimeout: vi.fn().mockResolvedValue(undefined),
-    files: { read: vi.fn().mockResolvedValue('existing data'), exists: vi.fn().mockResolvedValue(true) },
+    files: { read: vi.fn().mockResolvedValue('existing data'), exists: vi.fn().mockResolvedValue(true), write: vi.fn(async (_path: string, _content: string | Uint8Array) => {}) },
     commands: { run: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) },
     pty: { kill: vi.fn().mockResolvedValue(true) },
   };
@@ -161,6 +163,35 @@ describe('unknown workspace recovery preserves its recorded machine', () => {
 });
 
 describe('known recovery behavior remains available', () => {
+  it('a missing sandbox gets the latest saved project and assets through the real import writer', async () => {
+    const f = fixture();
+    const saved = {
+      'package.json': '{"scripts":{"dev":"vite --host 0.0.0.0"}}',
+      'index.html': '<html><body>Latest edit after GitHub import</body></html>',
+      'src/game.ts': 'export const score = 42;',
+      '.env': 'PRIVATE_VALUE=must-not-be-restored',
+    };
+    vi.spyOn(workspaceFiles, 'loadWorkspaceFiles').mockResolvedValue(saved);
+    vi.spyOn(workspaceAssets, 'restoreWorkspaceAssets').mockImplementation(async (sink, workspaceId) => {
+      await sink.writeBinaryFile!(workspaceId, 'public/player.png', Buffer.from([1, 2, 3]).toString('base64'));
+      return 1;
+    });
+    f.connect.mockRejectedValue(new SandboxNotFoundError('The recorded sandbox no longer exists'));
+    f.restore.mockRestore(); // Exercise the real durable restore and shared file writer.
+
+    await f.act.ensureWorkspace(WS, 'import');
+
+    expect(f.create).toHaveBeenCalledTimes(1);
+    expect(f.create).toHaveBeenCalledWith(expect.objectContaining({ lifecycle: { onTimeout: 'pause' } }));
+    const written = new Map(f.fresh.files.write.mock.calls.map(([path, content]) => [path, content]));
+    for (const [path, content] of Object.entries(saved).filter(([path]) => path !== '.env')) {
+      expect(written.get(`/home/user/workspace/${path}`)).toBe(content);
+    }
+    expect(written.has('/home/user/workspace/.env')).toBe(false);
+    expect(written.get('/home/user/workspace/public/player.png')).toEqual(new Uint8Array([1, 2, 3]));
+    expect(f.act.sandboxRestore(WS)).toMatchObject({ durable: 4, restored: 3, skipped: 1, assets: 1 });
+  });
+
   it('a recorded live machine keeps its id and existing file contents', async () => {
     const f = fixture();
     await expect(f.act.readFile(WS, 'data.db')).resolves.toBe('existing data');

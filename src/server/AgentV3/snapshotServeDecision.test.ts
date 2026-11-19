@@ -16,6 +16,19 @@ describe('the lever this exists for', () => {
     // an open preview tab bills for as long as it is open. This is what lets the sweep finally win.
     expect(canServeFromSnapshot(ok)).toBe(true);
   });
+
+  it.each([4, 5, 10, 365])('keeps the real build after %i idle days when its source still matches', (days) => {
+    expect(canServeFromSnapshot({ ...ok, snapshotAt: NOW - days * 86_400_000, contentMatches: true })).toBe(true);
+  });
+
+  it('rejects a known content mismatch even inside the old trust window', () => {
+    expect(canServeFromSnapshot({ ...ok, contentMatches: false })).toBe(false);
+  });
+
+  it('a content match does not authorize replacing an active build or trusting a future timestamp', () => {
+    expect(canServeFromSnapshot({ ...ok, contentMatches: true, buildRunning: true })).toBe(false);
+    expect(canServeFromSnapshot({ ...ok, contentMatches: true, snapshotAt: NOW + 1 })).toBe(false);
+  });
 });
 
 describe('every condition is a reason NOT to — the default stays today’s behaviour', () => {

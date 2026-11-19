@@ -32,7 +32,7 @@ describe('the probe stands down when the saved copy can answer', () => {
     // A global "is any build running" would stand the probe down on one user's idle app because a
     // different user was building — and, worse, keep it up on this one for the same reason.
     // A proven content match outranks the flag (the client owns "during a build"); otherwise it is asked per workspace.
-    expect(route).toContain('buildRunning: byContent === true ? false : isBuildRunningFor(workspaceId)');
+    expect(route).toContain('buildRunning: byContent === true && !!currentFilesHash ? false : isBuildRunningFor(workspaceId)');
     expect(route).toContain('function isBuildRunningFor(workspaceId: string | null | undefined): boolean');
   });
 

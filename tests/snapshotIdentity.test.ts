@@ -155,12 +155,14 @@ describe('wiring — the build records the identity, the final save confirms it,
 
   it('one helper serves the health probe AND the in-browser preview, by content first and clock second', () => {
     expect(route).toContain('const idleServe = await currentSnapshotFor(workspaceId);');
-    expect(route).toContain('const copy = await currentSnapshotFor(workspaceId, filesHash);');
+    expect(route).toContain('const copy = await currentSnapshotFor(workspaceId, workspaceContentHash(identitySource(files)));');
+    expect(route).toContain('workspaceContentHash(identitySource(durable.files))');
     const i = route.indexOf('async function currentSnapshotFor(');
     const helper = route.slice(i, route.indexOf('\n}\n', i));
     expect(helper).toContain('snapshotMatchesFiles(rec.snapshotFilesHash, currentFilesHash)');
     expect(helper).toContain('if (byContent === false) return null;');
-    expect(helper).toContain('buildRunning: byContent === true ? false : isBuildRunningFor(workspaceId)');
+    expect(helper).toContain('buildRunning: byContent === true && !!currentFilesHash ? false : isBuildRunningFor(workspaceId)');
+    expect(helper).toContain('contentMatches: byContent');
   });
 
   it('the in-browser preview hashes the same way the identity was recorded, and answers with explicit nulls', () => {

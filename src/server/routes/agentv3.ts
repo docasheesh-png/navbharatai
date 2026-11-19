@@ -2345,7 +2345,14 @@ async function currentSnapshotFor(
     if (!previewSnapshotEnabled()) return null;
     const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'snapshotRecord').catch(() => null);
     if (!rec?.snapshotUrl) return null;
-    const byContent = snapshotMatchesFiles(rec.snapshotFilesHash, currentFilesHash);
+    let byContent = snapshotMatchesFiles(rec.snapshotFilesHash, currentFilesHash);
+    // The health poll has no source hash in hand. Prove identity from durable files rather than
+    // rejecting a ten-day-old unchanged app, or trusting a save timestamp that follows its build.
+    if (byContent === undefined && rec.snapshotFilesHash && !currentFilesHash) {
+      const durable = await raceTimeout(loadWorkspaceFilesWithStatus(workspaceId), 3_000, 'snapshotSource').catch(() => null);
+      if (durable?.status !== 'ok') return null; // an unreadable/empty store is not a content match
+      byContent = snapshotMatchesFiles(rec.snapshotFilesHash, workspaceContentHash(identitySource(durable.files)));
+    }
     if (byContent === false) return null; // the source in hand is provably not what the copy was built from
     const lastChangeAt = byContent === true
       ? null // content already proved it; the clock cannot overrule a byte-for-byte match
@@ -2357,11 +2364,14 @@ async function currentSnapshotFor(
       // — the post-build reload can reach this route before the finished build has left the registry,
       // and un-framing the copy the build just confirmed would leave the pane on the approximation
       // until the next file change. Whether to show the copy DURING a build is the client's rule.
-      buildRunning: byContent === true ? false : isBuildRunningFor(workspaceId),
+      // Only a caller holding the rendered source may override the in-flight flag. A health read of
+      // yesterday's durable files must not hide a build whose new writes have not been saved yet.
+      buildRunning: byContent === true && !!currentFilesHash ? false : isBuildRunningFor(workspaceId),
       snapshotUrl: rec.snapshotUrl,
       snapshotAt: rec.snapshotAt,
       now: Date.now(),
       lastChangeAt,
+      contentMatches: byContent,
     })) return null;
     return { url: String(rec.snapshotUrl), at: Number(rec.snapshotAt) };
   } catch { return null; }
@@ -6941,7 +6951,9 @@ async function noteBuildOutcome(
       let currentPreviewUrl = '';
       try {
         const urlActuator = buildActuator();
-        if (urlActuator.getPortUrl) {
+        // getPortUrl calls getSandbox: even URL resolution resumes a paused machine. A confirmed
+        // saved copy needs no live URL and must leave the machine paused throughout this request.
+        if (!idleServe && urlActuator.getPortUrl) {
           // The SAME port the probe used, for the same reason — a url built on the wrong port would
           // simply move the problem rather than fix it.
           const proven = (await raceTimeout(sandboxStore.getRecipe(workspaceId), 3_000, 'previewUrlRecipe').catch(() => null))?.port;
@@ -6972,7 +6984,7 @@ async function noteBuildOutcome(
       let snapshotTakenAt: number | null = null;
       let snapshotKind: 'expired' | 'current' | 'older' = 'expired';
       try {
-        if (previewSnapshotEnabled() && livePortUp !== true) {
+        if (!idleServe && previewSnapshotEnabled() && livePortUp !== true) {
           const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'healthSnapshot').catch(() => null);
           const sandboxGone = !(await raceTimeout(
             buildActuator().getSandboxId ? buildActuator().getSandboxId!(workspaceId) : Promise.resolve(null),
@@ -10121,7 +10133,7 @@ async function noteBuildOutcome(
       // build in place of the bundler's approximation — but only when that copy was built from exactly
       // these files (currentSnapshotFor). Sent as explicit nulls otherwise, so the client un-frames a
       // copy it learnt of earlier rather than keeping a stale one on screen.
-      const copy = await currentSnapshotFor(workspaceId, filesHash);
+      const copy = await currentSnapshotFor(workspaceId, workspaceContentHash(identitySource(files)));
       const copyFields = { snapshotUrl: copy?.url ?? null, snapshotAt: copy?.at ?? null, snapshotNote: copy ? SNAPSHOT_IDLE_NOTE : null };
       // DEEP REFRESH (`fresh: true`): the client's "Fix with AI" on a broken preview first asks for a
       // cache-bypassing recompile — a blank/failed preview is often just a stale cached render, so

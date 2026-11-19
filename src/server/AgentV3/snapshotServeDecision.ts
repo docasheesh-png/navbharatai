@@ -41,14 +41,16 @@ export interface SnapshotServeInput {
    * A snapshot older than the user's latest edit is the WRONG app to show, however cheap it is.
    */
   lastChangeAt?: number | null;
+  /** A comparison with the actual current source. Unknown keeps the conservative clock policy. */
+  contentMatches?: boolean;
 }
 
 /**
  * How long a snapshot may be trusted as "this is the app".
  *
- * Not a correctness bound — a snapshot does not rot — but a HONESTY bound. Past a day the odds that the
- * workspace moved on in some way we did not record grow faster than the saving is worth, and falling
- * back to the live machine is always safe. Cheap insurance against a stale copy being shown as current.
+ * Only for legacy copies whose source identity is unknown. A copy proven to match the current source
+ * does not become a different app after a day; rejecting it made returning users lose the real build
+ * and depend on a different renderer. A known mismatch is never made current by a recent timestamp.
  */
 export const SNAPSHOT_TRUST_MS = 24 * 60 * 60_000;
 
@@ -65,8 +67,9 @@ export function canServeFromSnapshot(i: SnapshotServeInput): boolean {
   const at = Number(i?.snapshotAt);
   const now = Number(i?.now);
   if (!Number.isFinite(at) || at <= 0 || !Number.isFinite(now)) return false;
-  if (now - at > SNAPSHOT_TRUST_MS) return false;      // too old to speak for the app
   if (now < at) return false;                          // clock went backwards — trust nothing
+  if (typeof i.contentMatches === 'boolean') return i.contentMatches;
+  if (now - at > SNAPSHOT_TRUST_MS) return false;      // no content proof: keep the legacy trust bound
   // A change AFTER the snapshot means the snapshot is not this app any more.
   const changed = Number(i?.lastChangeAt);
   if (Number.isFinite(changed) && changed > at) return false;

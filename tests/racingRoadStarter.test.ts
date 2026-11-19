@@ -42,7 +42,10 @@ function mountStarter(props: Record<string, unknown> = {}) {
     if (!(name in modules)) throw new Error(`Unexpected import ${name}`);
     return modules[name];
   }, exports);
-  const tree = exports.RacingRoadGame(props); refs[0].current = {}; refs[1].current = { textContent: '' };
+  const canvas = { focus: vi.fn() };
+  const tree = exports.RacingRoadGame(props);
+  refs[0].current = { querySelector: (selector: string) => selector === 'canvas' ? canvas : null };
+  refs[1].current = { textContent: '' };
   let cleanup = effect!();
   const rerender = (nextProps: Record<string, unknown>) => {
     const previous = deps; refIndex = 0; setterIndex = 0;
@@ -50,7 +53,7 @@ function mountStarter(props: Record<string, unknown> = {}) {
     if (deps.some((dep, i) => !Object.is(dep, previous[i]))) { cleanup(); cleanup = effect!(); }
   };
   const dispose = () => cleanup();
-  return { rerender, tree, state, handlers, setters, refs, options, context, stream, create, game, dispose };
+  return { rerender, tree, state, handlers, setters, refs, options, context, stream, create, game, canvas, dispose };
 }
 
 describe('generated racing starter actually consumes the reusable library', () => {
@@ -99,6 +102,22 @@ describe('generated racing starter actually consumes the reusable library', () =
   expect(m.setters[1]).toHaveBeenLastCalledWith(false);
   m.dispose(); expect(m.handlers.size).toBe(0);
  });
+
+it('returns keyboard focus to the driving canvas after activating Resume', () => {
+  const m = mountStarter();
+  const button = m.tree.props.children.find((child: any) => child?.type === 'button');
+  button.props.onClick();
+  expect(m.game.pause).toHaveBeenCalledOnce();
+  expect(m.canvas.focus).not.toHaveBeenCalled();
+  m.state.status = 'paused';
+  // Both pointer clicks and keyboard activation reach this emitted React handler.
+  button.props.onClick();
+  expect(m.game.resume).toHaveBeenCalledOnce();
+  expect(m.canvas.focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+  m.dispose();
+  button.props.onClick();
+  expect(m.canvas.focus).toHaveBeenCalledOnce();
+});
 
 it('starter accepts arbitrary custom plans and exposes the live editable stream', () => {
   const plan = { loop: 'infinite', pieces: [{ kind: 'straight', length: 70, name: 'My road' }] };

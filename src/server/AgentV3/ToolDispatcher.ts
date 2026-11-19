@@ -378,6 +378,9 @@ import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamp
 import { parseCustomisation, applyEdits, customiseSummary, nodeNamesOf, specFromObjectFile, personSpecFor } from '../lib/objectForge/forgeCustomise';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
+import { generateWorld2D, world2dEnabled, WORLD2D_DIR } from '../lib/world2d/World2DGenerator';
+import { world2dIntent } from './world2dIntent';
+import { gameKitWants3D } from './gameKitSeed';
 import { generateRequestedAthreeWorld } from '../lib/athreeMap/compositionRequest';
 import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from '../lib/athreeMap/athreeMapIntent';
 import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
@@ -9947,6 +9950,24 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('athree map');
         return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${ath.instructions}${athLayers}`;
+      }
+
+      case 'generate_world_2d': {
+        // THE 2D WORLD (admin 2026-11-19: "bada map … sample bane rakhe ho … perfect add hon ki ek hi lage"). The recipe decides
+        // from the REQUEST — the user's wish, not one word (world2dIntent → largeWorldIntent) — so a big map is never put under
+        // an app with no world, a 3D game (the Athree map serves those) or a board/card/puzzle/quiz game.
+        if (!world2dEnabled()) refuse('The 2D world is switched off for this build, so it cannot be added. Build the game without it and say so plainly in the summary.');
+        const w2dRequest = this.coverageRequest ?? this.userRequest ?? '';
+        let w2dStored = false;
+        try { await this.actuator.readFile(this.workspaceId, `${WORLD2D_DIR}/index.ts`); w2dStored = true; }
+        catch (error) { if (!isNotFoundError(error)) throw error; }
+        const w2dDecision = world2dIntent({ prompt: w2dRequest, drawnIn3D: gameKitWants3D(w2dRequest), stored: w2dStored });
+        if (!w2dDecision.use) refuse(`The 2D world is not used here: ${w2dDecision.reason} Build without it.`);
+        const w2d = generateWorld2D();
+        const w2dWritten = await this.writeRecipeFiles(w2d.files, agent);
+        const w2dLayers = await this.addMissingRecipeLayers(w2d.files, agent);
+        this.scheduleCheckpoint('2d world');
+        return `Added the 2D world (${w2dDecision.reason}):\n${w2dWritten.join('\n')}\n\n${w2d.instructions}${w2dLayers}`;
       }
 
       case 'generate_game_royale': {

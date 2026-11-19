@@ -1,5 +1,3 @@
-import React from 'react';
-
 /** Review never presents an empty body while server authority is unknown or refused. */
 export function StoreReviewAccess({ loading, isAdmin, problem, onRetry, onAdminLogin }: {
   loading: boolean; isAdmin: boolean; problem: string | null; onRetry: () => void; onAdminLogin: () => void;

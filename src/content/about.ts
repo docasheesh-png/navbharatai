@@ -62,6 +62,8 @@ export interface AboutContent {
   honesty: string;
   contactHeading: string;
   contactEmail: string;
+  contactIntroduction?: string;
+  copyright?: string;
   ctaLabel: string;
 }
 
@@ -77,31 +79,31 @@ export const ABOUT_FIELD_LIMITS: Record<keyof AboutOverrides, number> = {
 
 export const DEFAULT_ABOUT: AboutContent = {
   logoUrl: '',
-  headline: 'Bharat Ka Apna AI',
+  headline: 'About NavBharatAI',
 
-  // What it IS, in one line. The old description said "a mission to empower every Indian with the
-  // power of Artificial Intelligence" — true in spirit and useless in practice: it never says what
-  // the app does.
-  tagline: 'Describe your app. NavBharatAI builds it.',
+  // Company information and wording supplied by the owner on 18 November 2026.
+  // Kept in the existing field shape so installed native clients also receive the facts.
+  tagline: 'Empowering Ideas with Artificial Intelligence',
   description:
-    'NavBharatAI is India\'s own AI app builder. Tell it what you want in Hindi or English — '
-    + 'a shop billing app, a clinic appointment book, a school fee register — and a working app is '
-    + 'built, shown to you running, and published on a real link. No coding, no setup, no laptop needed.',
+    'NavBharatAI is an Indian artificial intelligence platform operated by NAVBHARATAI PRIVATE LIMITED, a company incorporated under the Companies Act, 2013.\n\n'
+    + 'Founded with a vision to make advanced AI technology accessible, practical, and affordable, NavBharatAI brings powerful AI capabilities together in one platform.',
 
-  whatWeBuildHeading: 'What you can do here',
+  whatWeBuildHeading: 'What We Offer',
   whatWeBuild: [
-    'Build a working app from a plain description, in Hindi, Hinglish or English.',
-    'See it running in a live preview, then publish it on its own link in one tap.',
-    'Get the code itself — export your project whenever you want, it is yours.',
-    'Ask our professional assistants for help: Doctor AI, Engineer AI, and more.',
+    'AI Chat: AI-powered assistance for everyday questions, learning, writing, research, and productivity.',
+    'Professional AI: Specialized AI assistants designed to support professional workflows.',
+    'NavBharatAI Pro: An AI-powered app builder that helps users transform ideas into applications, websites, and interactive experiences.',
+    'AI-Powered Development: Tools for coding, application development, and creative projects.',
   ],
 
-  indiaFirstHeading: 'Built for India, not translated for it',
+  indiaFirstHeading: 'Company Information',
   indiaFirst: [
-    'Speaks the way India types. "Ek billing app banao" is a valid instruction here.',
-    'Pays the way India pays. Top up with UPI or a card, in rupees, to an Indian account.',
-    'Builds what India actually runs — shops, clinics, schools, invoices, GST, appointments.',
-    'Answers to Indian law, with a named Grievance Officer you can write to.',
+    'Legal Name: NAVBHARATAI PRIVATE LIMITED',
+    'Brand: NavBharatAI',
+    'Incorporated: 18 November 2026',
+    'CIN: U62010UP2026PTC254952',
+    'Registered Office: Ektanagar, Budaun City, Budaun – 243601, Uttar Pradesh, India',
+    'Country: India',
   ],
 
   teamHeading: 'Who builds it',
@@ -111,11 +113,9 @@ export const DEFAULT_ABOUT: AboutContent = {
     + 'through sheer hard work — because India deserved an AI app builder made for India, not a '
     + 'translated copy of a tool built somewhere else. It is still built with that same care, in India.',
 
-  visionHeading: 'Where we are going',
+  visionHeading: 'Our Mission',
   vision:
-    'That one day NavBharatAI is the most powerful, most intelligent and most useful AI app builder — '
-    + 'not only in India, but in the world. And that a person with an idea and no technical background '
-    + 'can turn it into a real, working app in minutes.',
+    'To empower individuals, students, professionals, developers, startups, and businesses through accessible and innovative artificial intelligence.',
 
   promisesHeading: 'What we promise you',
   promises: [
@@ -143,7 +143,9 @@ export const DEFAULT_ABOUT: AboutContent = {
     + 'does not work we would rather tell you plainly than hide it behind a green tick. If a build '
     + 'struggles, the app says so — and we fix the cause, not the message.',
 
-  contactHeading: 'Reach us',
+  contactHeading: 'Contact & Support',
+  contactIntroduction: 'For assistance, business inquiries, or grievances, please contact our official support team through the contact details provided on our website.',
+  copyright: '© 2026 NAVBHARATAI PRIVATE LIMITED. All rights reserved.',
   // ⚠️ THE ADDRESS THE PRODUCT ALREADY PUBLISHES, not a new one. The first draft of this file invented
   // `support@navbharatai.com`; a grep of the legal pages shows `info@navbharatai.com` in fourteen
   // places and that one nowhere. An About page carrying a mailbox nobody reads is worse than no

@@ -145,8 +145,9 @@ export function renderAboutPage(origin: string, overrides?: AboutOverrides | nul
   const email = escapeHtml(a.contactEmail);
   const body = [
     `<h1>About NavBharatAI</h1>`,
-    `<p><strong>${md(a.headline)}.</strong> ${md(a.tagline)}</p>`,
-    `<p>${md(a.description)}</p>`,
+    ...(a.headline !== 'About NavBharatAI' ? [`<p><strong>${md(a.headline)}</strong></p>`] : []),
+    `<p><strong>${md(a.tagline)}</strong></p>`,
+    ...a.description.split(/\n\s*\n/).map((paragraph) => `<p>${md(paragraph)}</p>`),
     `<h2>${md(a.whatWeBuildHeading)}</h2>\n<ul>\n${a.whatWeBuild.map((x) => `<li>${md(x)}</li>`).join('\n')}\n</ul>`,
     `<p>Read more: <a href="${AI_APP_BUILDER_PATH}">the AI app builder</a> · <a href="${INDIAN_AI_ASSISTANT_PATH}">the AI assistant</a> · <a href="${HINDI_AI_ASSISTANT_PATH}">chatting in Hindi and Hinglish</a> · <a href="/store">App Mart</a>.</p>`,
     `<h2>${md(a.indiaFirstHeading)}</h2>\n<ul>\n${a.indiaFirst.map((x) => `<li>${md(x)}</li>`).join('\n')}\n</ul>`,
@@ -156,9 +157,12 @@ export function renderAboutPage(origin: string, overrides?: AboutOverrides | nul
     `<h2>${md(a.promisesHeading)}</h2>\n${a.promises.map((p) => `<h3>${md(p.title)}</h3>\n<p>${md(p.body)}</p>`).join('\n')}`,
     `<h2>Pricing</h2>\n<p>Chat has a daily allowance, with eligible additional use paid from the wallet. Building is paid from the same rupee wallet, and hosting plans are optional. The details are on the <a href="${PRICING_PATH}">Pricing</a> page.</p>`,
     `<h2>${md(a.honestyHeading)}</h2>\n<p>${md(a.honesty)}</p>`,
-    `<h2>${md(a.contactHeading)}</h2>\n<p>Email <a href="mailto:${email}">${email}</a> — in English or Hindi. See <a href="/contact">Contact</a> for what to write about and how quickly we answer, and <a href="/grievance">Grievance Redressal</a> for formal complaints.</p>`,
+    `<h2>${md(a.contactHeading)}</h2>`,
+    ...(a.contactIntroduction ? [`<p>${md(a.contactIntroduction)}</p>`] : []),
+    `<p>Email <a href="mailto:${email}">${email}</a> — in English or Hindi. See <a href="/contact">Contact</a> for what to write about and how quickly we answer, and <a href="/grievance">Grievance Redressal</a> for formal complaints.</p>`,
     `<h2>Official links</h2>\n<ul>\n${officialLinks.join('\n')}\n</ul>`,
     `<p><a class="cta" href="/">${escapeHtml(a.ctaLabel)}</a></p>`,
+    ...(a.copyright ? [`<p>${md(a.copyright)}</p>`] : []),
   ];
   return pageShell({
     origin, path: ABOUT_PATH, title: ABOUT_TITLE, description: ABOUT_DESCRIPTION,

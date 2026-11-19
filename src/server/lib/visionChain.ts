@@ -1,4 +1,5 @@
 import type { AIProviderResponse } from '../AI/Router/ProviderTypes';
+import { familyOfEngineName, legacyPathAllows } from '../AI/TrafficRegistry/legacyControl';
 import { maybeGatewayVision, isGatewayRouteSelected, InferenceGatewayTerminalError } from '../AI/InferenceGateway/runtime';
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 // Vision chain — reads images + PDFs for the chat handler across ALL provider
@@ -353,6 +354,9 @@ export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions)
     // GLM rotates credentials internally: admission and outcomes belong to its selected slot.
     const managedHealth = provider === 'GLM';
     if (!managedHealth && shouldSkipProvider(provider)) continue;
+    // Traffic Manager V2 (P8): skip a provider the admin drained or disabled — only when the control store covers
+    // the vision path (off by default). Skip only; the order is unchanged.
+    if (!legacyPathAllows('vision', familyOfEngineName(provider))) continue;
     const started = Date.now();
     if (!managedHealth) providerInFlight(provider, 1);
     try {

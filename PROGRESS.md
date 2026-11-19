@@ -102334,3 +102334,14 @@ Owner t311u sequential audit, BR2003 only. Branched from origin/main `e8c45ef` (
 Published PR #4303 at `c172ee3` after all 27 required local CI checks plus package signatures passed. Local coverage: 53,817 passed/89 skipped; all 11 emulator drills passed. GitHub run `44407511896` passed build/test and drills on that same head (53,811 passed/95 skipped); its artifact uploads succeeded and the asset-only conditional job was inapplicable. The six-test difference matched built-CSS/JS availability: local coverage had prior-build artifacts, while CI ran coverage before building. A separate check against the completed final8 build passed 12 tests/1 skipped, including all six actual built-asset checks; no earlier artifact-freshness claim was invented.
 
 During remote CI, main advanced to `a5b136d` (#4302 Traffic Manager P4). GitHub subsequently reported PR mergeability as dirty; the local merge completed automatically without manual source conflicts, preserving both progress histories. The complete gate must now verify this newly combined tree before updating the PR branch. The previous head's successful checks remain valid historical evidence, not a substitute for the new combined run. The generated prior `dist` is archived outside the repository before the next coverage run so local built-asset availability matches CI's fresh checkout; fresh output will be checked after the build as a separate supplemental test. No production gate, coverage threshold or test selection changed. No merge to main is authorized.
+## 2026-11-18 — Traffic Manager V2, P8/P9: image reading (vision) and image generation obey drain/disable per path (off by default)
+
+What changed:
+- `COVERED_PATHS` / `LEGACY_PATHS` gain `vision` and `image`.
+- `visionChain.ts` skips a drained or disabled provider next to its existing health skip.
+- `navbharatImageEngine.ts` skips a drained or disabled engine (cloudflare, pollinations, grok → xai) before calling it.
+- Skip only. Order, image holds, quotas and the word-ban guard are unchanged. Off until an admin covers the path.
+
+Deliberately NOT done: recording image-engine health. The image engine shares provider labels with chat (GROK). An image failure would make chat skip that provider, which is a cross-surface routing change nobody approved. That needs separate image labels first.
+
+Tests: `visionImageCoverage.test.ts` covers the census, the source guard, and the image engine with coverage off (still tried) and on (skipped, next engine tried). Reversion of each hook was caught.

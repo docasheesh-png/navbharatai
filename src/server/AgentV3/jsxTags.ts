@@ -270,3 +270,16 @@ function countOccurrences(s: string, re: RegExp): number {
   return (s.match(re) || []).length;
 }
 
+
+/**
+ * 🔴 A PRIMITIVE THAT FORWARDS ITS CALLER'S PROPS IS LABELLED BY ITS CALLER (failedbr #2466, a360bc2c, 2026-11-19).
+ * The report scored 76/100 with "3 form field(s) with no label", two of them `src/components/ui/select.tsx` and
+ * `src/components/ui/textarea.tsx` — design-system primitives whose `<textarea {...props} />` passes through
+ * whatever `aria-label` / `id` the screen that USES it gives. Judging the primitive alone is the same false
+ * finding as judging `<Select label=…/>` by HTML rules (autopsy 8a92e5ed): the name lives at the call site.
+ * Only a spread of the component's own props object counts — `{...register('x')}` and `{...field}` carry no
+ * label and are still judged. ONE definition, read by both accessibility analyzers. PURE.
+ */
+export function forwardsCallerProps(tag: string): boolean {
+  return /\{\s*\.\.\.\s*(?:props|rest|restProps|others|otherProps|delegated|inputProps|textareaProps|selectProps)\s*\}/.test(String(tag ?? ''));
+}

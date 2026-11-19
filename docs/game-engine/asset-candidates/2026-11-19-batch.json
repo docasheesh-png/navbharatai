@@ -1,0 +1,502 @@
+[
+  {
+    "id": "lib2-motorcycle",
+    "file": "vehicle-motorcycle.glb",
+    "sourceBytes": 97172,
+    "bytes": 96184,
+    "triangles": 960,
+    "animations": 0,
+    "licenseFileSha256": "db2c350e96739247706b6b395aae08ac335395eda9cfe2bc80b79636934ecdc2",
+    "license": "MIT"
+  },
+  {
+    "id": "lib2-truck-red",
+    "file": "vehicle-truck-red.glb",
+    "sourceBytes": 92436,
+    "bytes": 102432,
+    "triangles": 946,
+    "animations": 0,
+    "licenseFileSha256": "db2c350e96739247706b6b395aae08ac335395eda9cfe2bc80b79636934ecdc2",
+    "license": "MIT"
+  },
+  {
+    "id": "lib2-truck-green",
+    "file": "vehicle-truck-green.glb",
+    "sourceBytes": 104228,
+    "bytes": 114236,
+    "triangles": 1104,
+    "animations": 0,
+    "licenseFileSha256": "db2c350e96739247706b6b395aae08ac335395eda9cfe2bc80b79636934ecdc2",
+    "license": "MIT"
+  },
+  {
+    "id": "lib2-truck-yellow",
+    "file": "vehicle-truck-yellow.glb",
+    "sourceBytes": 93480,
+    "bytes": 103480,
+    "triangles": 989,
+    "animations": 0,
+    "licenseFileSha256": "db2c350e96739247706b6b395aae08ac335395eda9cfe2bc80b79636934ecdc2",
+    "license": "MIT"
+  },
+  {
+    "id": "lib2-road-junction",
+    "file": "road_junction.gltf",
+    "sourceBytes": 2992,
+    "bytes": 30944,
+    "triangles": 170,
+    "animations": 0,
+    "licenseFileSha256": "b076d86beec660e1550e00796ca24a8b70d7b2187d79954b2e29722b666dce93",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-road-tsplit",
+    "file": "road_tsplit.gltf",
+    "sourceBytes": 2971,
+    "bytes": 28748,
+    "triangles": 138,
+    "animations": 0,
+    "licenseFileSha256": "b076d86beec660e1550e00796ca24a8b70d7b2187d79954b2e29722b666dce93",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-road-crossing",
+    "file": "road_straight_crossing.gltf",
+    "sourceBytes": 2992,
+    "bytes": 25304,
+    "triangles": 64,
+    "animations": 0,
+    "licenseFileSha256": "b076d86beec660e1550e00796ca24a8b70d7b2187d79954b2e29722b666dce93",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-road-curve",
+    "file": "road_corner_curved.gltf",
+    "sourceBytes": 2986,
+    "bytes": 29184,
+    "triangles": 172,
+    "animations": 0,
+    "licenseFileSha256": "b076d86beec660e1550e00796ca24a8b70d7b2187d79954b2e29722b666dce93",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-track-straight",
+    "file": "track-straight.glb",
+    "sourceBytes": 11080,
+    "bytes": 21236,
+    "triangles": 106,
+    "animations": 0,
+    "licenseFileSha256": "db2c350e96739247706b6b395aae08ac335395eda9cfe2bc80b79636934ecdc2",
+    "license": "MIT"
+  },
+  {
+    "id": "lib2-track-corner",
+    "file": "track-corner.glb",
+    "sourceBytes": 103480,
+    "bytes": 113636,
+    "triangles": 1136,
+    "animations": 0,
+    "licenseFileSha256": "db2c350e96739247706b6b395aae08ac335395eda9cfe2bc80b79636934ecdc2",
+    "license": "MIT"
+  },
+  {
+    "id": "lib2-track-finish",
+    "file": "track-finish.glb",
+    "sourceBytes": 24544,
+    "bytes": 34704,
+    "triangles": 274,
+    "animations": 0,
+    "licenseFileSha256": "db2c350e96739247706b6b395aae08ac335395eda9cfe2bc80b79636934ecdc2",
+    "license": "MIT"
+  },
+  {
+    "id": "lib2-skeleton-warrior",
+    "file": "Skeleton_Warrior.glb",
+    "sourceBytes": 4863620,
+    "bytes": 495452,
+    "triangles": 5934,
+    "animations": 3,
+    "licenseFileSha256": "5d822abca4e08c5a91d329e5372b3dc605cba8d994f752cb0f7dfdb7a0a79954",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-skeleton-minion",
+    "file": "Skeleton_Minion.glb",
+    "sourceBytes": 4814296,
+    "bytes": 446484,
+    "triangles": 5288,
+    "animations": 3,
+    "licenseFileSha256": "5d822abca4e08c5a91d329e5372b3dc605cba8d994f752cb0f7dfdb7a0a79954",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-skeleton-mage",
+    "file": "Skeleton_Mage.glb",
+    "sourceBytes": 4761048,
+    "bytes": 393632,
+    "triangles": 4588,
+    "animations": 3,
+    "licenseFileSha256": "5d822abca4e08c5a91d329e5372b3dc605cba8d994f752cb0f7dfdb7a0a79954",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-skeleton-rogue",
+    "file": "Skeleton_Rogue.glb",
+    "sourceBytes": 4827024,
+    "bytes": 459144,
+    "triangles": 5278,
+    "animations": 3,
+    "licenseFileSha256": "5d822abca4e08c5a91d329e5372b3dc605cba8d994f752cb0f7dfdb7a0a79954",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-axe",
+    "file": "Skeleton_Axe.gltf",
+    "sourceBytes": 3045,
+    "bytes": 43772,
+    "triangles": 534,
+    "animations": 0,
+    "licenseFileSha256": "5d822abca4e08c5a91d329e5372b3dc605cba8d994f752cb0f7dfdb7a0a79954",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-crossbow",
+    "file": "Skeleton_Crossbow.gltf",
+    "sourceBytes": 3052,
+    "bytes": 47052,
+    "triangles": 584,
+    "animations": 0,
+    "licenseFileSha256": "5d822abca4e08c5a91d329e5372b3dc605cba8d994f752cb0f7dfdb7a0a79954",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-blade",
+    "file": "Skeleton_Blade.gltf",
+    "sourceBytes": 3047,
+    "bytes": 38480,
+    "triangles": 457,
+    "animations": 0,
+    "licenseFileSha256": "5d822abca4e08c5a91d329e5372b3dc605cba8d994f752cb0f7dfdb7a0a79954",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-shield",
+    "file": "Skeleton_Shield_Large_A.gltf",
+    "sourceBytes": 3071,
+    "bytes": 51732,
+    "triangles": 626,
+    "animations": 0,
+    "licenseFileSha256": "5d822abca4e08c5a91d329e5372b3dc605cba8d994f752cb0f7dfdb7a0a79954",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-blaster",
+    "file": "blaster.glb",
+    "sourceBytes": 59552,
+    "bytes": 68768,
+    "triangles": 624,
+    "animations": 0,
+    "licenseFileSha256": "8e99e4045f71bb96d77a1765c815511c63c9f9185bfada2b8917e041ced00754",
+    "license": "MIT"
+  },
+  {
+    "id": "lib2-blaster-repeater",
+    "file": "blaster-repeater.glb",
+    "sourceBytes": 66288,
+    "bytes": 75480,
+    "triangles": 700,
+    "animations": 0,
+    "licenseFileSha256": "8e99e4045f71bb96d77a1765c815511c63c9f9185bfada2b8917e041ced00754",
+    "license": "MIT"
+  },
+  {
+    "id": "lib2-coin",
+    "file": "coin.glb",
+    "sourceBytes": 22124,
+    "bytes": 32176,
+    "triangles": 252,
+    "animations": 0,
+    "licenseFileSha256": "f755bf8f21002f8d5baedaf75564141d363971f3f7bc8c4062956b0b15a6f04f",
+    "license": "MIT"
+  },
+  {
+    "id": "lib2-coin-block",
+    "file": "block-coin.glb",
+    "sourceBytes": 66092,
+    "bytes": 76148,
+    "triangles": 788,
+    "animations": 0,
+    "licenseFileSha256": "f755bf8f21002f8d5baedaf75564141d363971f3f7bc8c4062956b0b15a6f04f",
+    "license": "MIT"
+  },
+  {
+    "id": "lib2-coin-gold",
+    "file": "Coin_A.gltf",
+    "sourceBytes": 2999,
+    "bytes": 40708,
+    "triangles": 236,
+    "animations": 0,
+    "licenseFileSha256": "1706d3369ecd7676320c03c25a898cc29fd1bb83bd3136646c45e6f400058887",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-flag",
+    "file": "flag.glb",
+    "sourceBytes": 13276,
+    "bytes": 23324,
+    "triangles": 132,
+    "animations": 0,
+    "licenseFileSha256": "f755bf8f21002f8d5baedaf75564141d363971f3f7bc8c4062956b0b15a6f04f",
+    "license": "MIT"
+  },
+  {
+    "id": "lib2-flying-enemy",
+    "file": "enemy-flying.glb",
+    "sourceBytes": 57828,
+    "bytes": 66944,
+    "triangles": 544,
+    "animations": 0,
+    "licenseFileSha256": "8e99e4045f71bb96d77a1765c815511c63c9f9185bfada2b8917e041ced00754",
+    "license": "MIT"
+  },
+  {
+    "id": "lib2-bed",
+    "file": "bed_double_A.gltf",
+    "sourceBytes": 3011,
+    "bytes": 41600,
+    "triangles": 540,
+    "animations": 0,
+    "licenseFileSha256": "cd675f2adc31eb5fedaedc1072d8ddc27b917f523682f0561837c03dc56393cb",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-sofa",
+    "file": "couch.gltf",
+    "sourceBytes": 3014,
+    "bytes": 38380,
+    "triangles": 636,
+    "animations": 0,
+    "licenseFileSha256": "cd675f2adc31eb5fedaedc1072d8ddc27b917f523682f0561837c03dc56393cb",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-armchair",
+    "file": "armchair.gltf",
+    "sourceBytes": 3019,
+    "bytes": 34276,
+    "triangles": 528,
+    "animations": 0,
+    "licenseFileSha256": "cd675f2adc31eb5fedaedc1072d8ddc27b917f523682f0561837c03dc56393cb",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-chair",
+    "file": "chair_A.gltf",
+    "sourceBytes": 3022,
+    "bytes": 33472,
+    "triangles": 308,
+    "animations": 0,
+    "licenseFileSha256": "cd675f2adc31eb5fedaedc1072d8ddc27b917f523682f0561837c03dc56393cb",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-stool",
+    "file": "chair_stool.gltf",
+    "sourceBytes": 3042,
+    "bytes": 27816,
+    "triangles": 216,
+    "animations": 0,
+    "licenseFileSha256": "cd675f2adc31eb5fedaedc1072d8ddc27b917f523682f0561837c03dc56393cb",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-table",
+    "file": "table_medium.gltf",
+    "sourceBytes": 2973,
+    "bytes": 26244,
+    "triangles": 168,
+    "animations": 0,
+    "licenseFileSha256": "cd675f2adc31eb5fedaedc1072d8ddc27b917f523682f0561837c03dc56393cb",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-lamp",
+    "file": "lamp_standing.gltf",
+    "sourceBytes": 3034,
+    "bytes": 28624,
+    "triangles": 320,
+    "animations": 0,
+    "licenseFileSha256": "cd675f2adc31eb5fedaedc1072d8ddc27b917f523682f0561837c03dc56393cb",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-cabinet",
+    "file": "cabinet_medium.gltf",
+    "sourceBytes": 3000,
+    "bytes": 40244,
+    "triangles": 428,
+    "animations": 0,
+    "licenseFileSha256": "cd675f2adc31eb5fedaedc1072d8ddc27b917f523682f0561837c03dc56393cb",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-shelf",
+    "file": "shelf_A_big.gltf",
+    "sourceBytes": 3025,
+    "bytes": 27072,
+    "triangles": 212,
+    "animations": 0,
+    "licenseFileSha256": "cd675f2adc31eb5fedaedc1072d8ddc27b917f523682f0561837c03dc56393cb",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-cactus",
+    "file": "cactus_medium_A.gltf",
+    "sourceBytes": 3072,
+    "bytes": 34548,
+    "triangles": 448,
+    "animations": 0,
+    "licenseFileSha256": "cd675f2adc31eb5fedaedc1072d8ddc27b917f523682f0561837c03dc56393cb",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-castle",
+    "file": "building_castle_blue.gltf",
+    "sourceBytes": 3072,
+    "bytes": 334920,
+    "triangles": 5659,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-market",
+    "file": "building_market_red.gltf",
+    "sourceBytes": 3088,
+    "bytes": 169364,
+    "triangles": 3125,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-tavern",
+    "file": "building_tavern_yellow.gltf",
+    "sourceBytes": 3099,
+    "bytes": 188064,
+    "triangles": 2992,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-church",
+    "file": "building_church_green.gltf",
+    "sourceBytes": 3092,
+    "bytes": 106944,
+    "triangles": 1601,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-watermill",
+    "file": "building_watermill_blue.gltf",
+    "sourceBytes": 5235,
+    "bytes": 129464,
+    "triangles": 1921,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-tower",
+    "file": "building_tower_A_red.gltf",
+    "sourceBytes": 5042,
+    "bytes": 130876,
+    "triangles": 2138,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-barracks",
+    "file": "building_barracks_green.gltf",
+    "sourceBytes": 3081,
+    "bytes": 246868,
+    "triangles": 4007,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-bridge",
+    "file": "building_bridge_A.gltf",
+    "sourceBytes": 3039,
+    "bytes": 42732,
+    "triangles": 604,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-mountain-b",
+    "file": "mountain_B_grass_trees.gltf",
+    "sourceBytes": 3089,
+    "bytes": 50372,
+    "triangles": 558,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-hill-single",
+    "file": "hill_single_A.gltf",
+    "sourceBytes": 3032,
+    "bytes": 20360,
+    "triangles": 60,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-forest-grove",
+    "file": "trees_A_large.gltf",
+    "sourceBytes": 3066,
+    "bytes": 74212,
+    "triangles": 864,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-fence",
+    "file": "fence_wood_straight.gltf",
+    "sourceBytes": 3061,
+    "bytes": 32208,
+    "triangles": 212,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-bench",
+    "file": "bench.gltf",
+    "sourceBytes": 3024,
+    "bytes": 24084,
+    "triangles": 44,
+    "animations": 0,
+    "licenseFileSha256": "b076d86beec660e1550e00796ca24a8b70d7b2187d79954b2e29722b666dce93",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib2-dustbin",
+    "file": "trash_A.gltf",
+    "sourceBytes": 3029,
+    "bytes": 21880,
+    "triangles": 18,
+    "animations": 0,
+    "licenseFileSha256": "b076d86beec660e1550e00796ca24a8b70d7b2187d79954b2e29722b666dce93",
+    "license": "CC0-1.0"
+  }
+]

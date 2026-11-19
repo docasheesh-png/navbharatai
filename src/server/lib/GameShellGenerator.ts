@@ -247,6 +247,7 @@ export class Game {
   private readonly perf = createPerfGovernor();
   private chosenQuality: GameSettings['quality'] = 'high';
   private autoQuality = true;
+  private reduceMotion = false;
   private effectiveQuality: GameSettings['quality'] = 'high';
   /** Look speed from the player's settings. */
   private lookSensitivity = 1;
@@ -631,7 +632,8 @@ export class Game {
     else this.rig.update(p, frameDelta);
     // Defaults, NOT small 3D-looking numbers: applyShake already scales the offset into world units
     // (×0.02). Passing 0.35 here would produce a 0.007-unit shake — mathematically present, invisible.
-    this.rig.applyShake(this.feel.shake());
+    // Reduce motion (Settings, or the device's own setting on a first visit): the camera never shakes.
+    this.rig.applyShake(this.reduceMotion ? { x: 0, y: 0, roll: 0 } : this.feel.shake());
     // Shadows follow the player, or they blur out as soon as they walk away on a large map.
     followShadow(this.lights.key, p);
     audio.setListener(p.x, p.y, p.z);
@@ -772,6 +774,7 @@ export class Game {
     this.autoQuality = s.autoQuality;
     this.applyQuality();
     this.lookSensitivity = s.lookSensitivity;
+    this.reduceMotion = s.reduceMotion === true;
   }
 
   /**
@@ -928,7 +931,7 @@ import { meta, combo, summaryLines } from '../core/meta';
 import type { Game } from '../Game';
 import { settings, type GameSettings } from '../core/settings';
 import { loading, type LoadingState } from '../core/loading';
-import { t } from '../core/strings';
+import { t, type StringKey } from '../core/strings';
 import { lastRaceResults } from '../three/race';
 import { levels } from '../core/levels';
 import { objectives, type Objective } from '../core/quests';
@@ -1202,6 +1205,11 @@ export function minimapPoint(view: { x: number; z: number; forward: { x: number;
 }
 
 const MARKER_COLOUR: Record<string, string> = { enemy: '#f87171', goal: '#fde047', pickup: '#4ade80', friend: '#60a5fa' };
+/** The Okabe–Ito palette: told apart by every common kind of colour blindness (Settings → Colour-blind colours). */
+const MARKER_COLOUR_SAFE: Record<string, string> = { enemy: '#e69f00', goal: '#f0e442', pickup: '#56b4e9', friend: '#ffffff' };
+export const HEALTH_COLOURS = { ok: '#4ade80', low: '#f87171' } as const;
+export const HEALTH_COLOURS_SAFE = { ok: '#56b4e9', low: '#e69f00' } as const;
+export function markerColour(kind: string, safe: boolean): string { return (safe ? MARKER_COLOUR_SAFE : MARKER_COLOUR)[kind] ?? '#fff'; }
 
 /** The round minimap: the player's arrow in the middle, markers around it, turning with the camera. */
 export function Minimap({ game }: { game: Game }) {
@@ -1220,7 +1228,7 @@ export function Minimap({ game }: { game: Game }) {
       c.strokeStyle = 'rgba(255,255,255,0.6)'; c.lineWidth = 2; c.stroke();
       for (const m of view.markers) {
         const at = minimapPoint(view, m, radius, size);
-        c.fillStyle = MARKER_COLOUR[m.kind] ?? '#fff';
+        c.fillStyle = markerColour(m.kind, settings.get().colourSafe);
         c.beginPath(); c.arc(at.x, at.y, at.edge ? 3 : 4, 0, Math.PI * 2); c.fill();
       }
       // The player's arrow, pointing where they face (relative to the camera).
@@ -1417,6 +1425,33 @@ export function PowerUpBar() {
   );
 }
 
+/** Which events get a caption, and the words (Settings → Captions). */
+export const CAPTIONED: Readonly<Record<string, StringKey>> = {
+  PLAYER_DAMAGED: 'capHit', ENEMY_DIED: 'capEnemyDown', ITEM_COLLECTED: 'capPickup', WEAPON_RELOADING: 'capReload',
+  WEAPON_EMPTY: 'capEmpty', BOSS_SPAWNED: 'capBoss', BOSS_DEFEATED: 'capBossDown', LEVEL_UP: 'capLevelUp',
+  GOAL_COMPLETED: 'capCoin', ENEMY_ALERTED: 'capDanger',
+};
+
+/** Captions: the last two important sounds as words, each for a moment. */
+export function CaptionBar() {
+  const [lines, setLines] = useState<Array<{ id: number; text: string }>>([]);
+  useEffect(() => {
+    let n = 0;
+    const offs = Object.entries(CAPTIONED).map(([event, key]) => events.on(event, () => {
+      const id = ++n;
+      setLines((cur) => [...cur.filter((l) => l.text !== t(key)), { id, text: t(key) }].slice(-2));
+      setTimeout(() => setLines((cur) => cur.filter((l) => l.id !== id)), 1600);
+    }));
+    return () => offs.forEach((o) => o());
+  }, []);
+  if (lines.length === 0) return null;
+  return (
+    <div role="status" aria-live="polite" style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', bottom: 'max(170px, calc(env(safe-area-inset-bottom) + 160px))', display: 'grid', gap: 4, justifyItems: 'center', pointerEvents: 'none', zIndex: 6 }}>
+      {lines.map((l) => <span key={l.id} style={{ padding: '3px 10px', borderRadius: 6, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 15 }}>{'[' + l.text + ']'}</span>)}
+    </div>
+  );
+}
+
 /** Re-render on every coin or shop change. */
 function useShop(): { coins: number; list: ShopEntry[] } {
   const read = () => ({ coins: economy.coins, list: economy.list });
@@ -1541,6 +1576,10 @@ function SettingsPanel({ onBack }: { onBack: () => void }) {
       <Toggle label={t('vibration')} on={s.vibration} onChange={(v) => settings.set({ vibration: v })} />
       <Toggle label={t('autoQuality')} on={s.autoQuality} onChange={(v) => settings.set({ autoQuality: v })} />
       <Toggle label={t('fpsCounter')} on={s.showFps} onChange={(v) => settings.set({ showFps: v })} />
+      <Toggle label={t('reduceMotion')} on={s.reduceMotion} onChange={(v) => settings.set({ reduceMotion: v })} />
+      <Toggle label={t('largeText')} on={s.largeText} onChange={(v) => settings.set({ largeText: v })} />
+      <Toggle label={t('colourSafe')} on={s.colourSafe} onChange={(v) => settings.set({ colourSafe: v })} />
+      <Toggle label={t('captions')} on={s.captions} onChange={(v) => settings.set({ captions: v })} />
       <div style={row}>
         <span>{t('difficulty')}</span>
         <div role="radiogroup" aria-label={t('difficulty')} style={{ display: 'flex', gap: 6 }}>
@@ -1560,6 +1599,8 @@ function SettingsPanel({ onBack }: { onBack: () => void }) {
 export function Hud({ game }: { game: Game }) {
   const s = useGameState();
   const prefs = useSettings();
+  // Large text (Settings): the menus and the top bar drawn a quarter bigger.
+  const zoom = prefs.largeText ? 1.25 : 1;
   const load = useLoading();
   const fullscreen = useFullscreen(game);
   useLevels();
@@ -1622,14 +1663,14 @@ export function Hud({ game }: { game: Game }) {
   }, [game, s.status, panel]);
 
   const settingsOrScreen = (screen: React.ReactNode) => (
-    <div style={overlay}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : panel === 'inventory' ? <InventoryPanel onBack={() => { setPanel(null); game.resume(); }} /> : panel === 'shop' ? <ShopPanel onBack={() => setPanel(null)} /> : screen}</div>
+    <div style={overlay}><div style={{ zoom }}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : panel === 'inventory' ? <InventoryPanel onBack={() => { setPanel(null); game.resume(); }} /> : panel === 'shop' ? <ShopPanel onBack={() => setPanel(null)} /> : screen}</div></div>
   );
 
   return (
     <>
       {/* pointerEvents none, or the HUD silently eats clicks meant for the game */}
       {s.status !== 'menu' ? (
-        <div style={{ position: 'absolute', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', right: 'max(12px, env(safe-area-inset-right))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff', pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,0.8)', zIndex: 5 }}>
+        <div style={{ position: 'absolute', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', right: 'max(12px, env(safe-area-inset-right))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff', pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,0.8)', zIndex: 5, zoom }}>
           <div style={{ fontWeight: 700, fontSize: 18 }}>
             {t('score')} {s.score}
             <span style={{ opacity: 0.7, fontSize: 13, marginLeft: 10 }}>{t('best')} {s.highScore}</span>
@@ -1640,7 +1681,7 @@ export function Hud({ game }: { game: Game }) {
             <div style={{ width: 120, height: 10, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden' }}>
               {/* health is an ABSOLUTE value, not a percentage — a game with 250 max HP would peg the
                   bar at full for the first 150 damage if this divided by 100 instead of maxHealth. */}
-              <div style={{ width: \`\${Math.max(0, Math.min(100, (s.health / Math.max(1, s.maxHealth)) * 100))}%\`, height: '100%', background: s.health > s.maxHealth * 0.3 ? '#4ade80' : '#f87171', transition: 'width 160ms ease-out' }} />
+              <div style={{ width: \`\${Math.max(0, Math.min(100, (s.health / Math.max(1, s.maxHealth)) * 100))}%\`, height: '100%', background: (prefs.colourSafe ? HEALTH_COLOURS_SAFE : HEALTH_COLOURS)[s.health > s.maxHealth * 0.3 ? 'ok' : 'low'], transition: 'width 160ms ease-out' }} />
             </div>
             <div style={{ fontWeight: 700 }}>x{s.lives}</div>
             {game.canFullscreen ? (
@@ -1672,6 +1713,7 @@ export function Hud({ game }: { game: Game }) {
       <ShooterOverlay game={game} playing={s.status === 'playing'} />
       {s.status === 'playing' ? <DialogueBox /> : null}
       {s.status === 'playing' || s.status === 'paused' ? <PowerUpBar /> : null}
+      {prefs.captions && s.status === 'playing' ? <CaptionBar /> : null}
       {s.status === 'playing' || s.status === 'paused' ? <RaceOverlay /> : null}
 
       {s.status === 'menu' && info ? settingsOrScreen(

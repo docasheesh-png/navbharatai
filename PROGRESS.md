@@ -102704,3 +102704,9 @@ The first exactly-one-lease assertion in the phase-2 handoff race now includes o
   five, this round highlighted) and ShareButton (`shareScore`: Web Share → clipboard → hidden), EN/HI strings.
 - Honest by design: labelled "on this device"; the prompt forbids claiming a worldwide board without an online service.
 - Locked by `tests/theScoreCanBeSharedAndClimbed.test.ts` (reversion: the shell not recording rounds → fails).
+
+## 2026-11-19 — Game gap P2: accessibility (branch `claude/game-accessibility`)
+- Settings gain Reduce motion (no camera shake; on by itself on a first visit when the device prefers reduced motion), Large
+  text (menus and top bar at zoom 1.25), Colour-blind colours (Okabe–Ito palette for the health bar and minimap markers) and
+  Captions (CaptionBar: words for important sounds — hit, enemy down, pickup, reload, empty, boss, level up…, EN/HI).
+- Locked by `tests/everyPlayerCanPlay.test.ts` (reversion: the shake ignoring Reduce motion → fails).

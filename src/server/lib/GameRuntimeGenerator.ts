@@ -612,6 +612,8 @@ const EN = {
   level: 'Level', levels: 'Levels', levelComplete: 'Level complete', nextLevel: 'Next level', locked: 'Locked',
   difficulty: 'Difficulty', easy: 'Easy', normal: 'Normal', hard: 'Hard', checkpoint: 'Checkpoint',
   continue: 'Continue', inventory: 'Bag', inventoryEmpty: 'Your bag is empty', close: 'Close', needs: 'Needs {name}',
+  reduceMotion: 'Reduce motion', largeText: 'Large text', colourSafe: 'Colour-blind colours', captions: 'Captions',
+  capHit: 'You were hit', capEnemyDown: 'Enemy down', capPickup: 'Picked up', capReload: 'Reloading', capEmpty: 'Out of ammo', capBoss: 'A boss appears', capBossDown: 'Boss defeated', capLevelUp: 'Level up', capCoin: 'Coin', capDanger: 'Enemy spotted you',
   share: 'Share', copied: 'Copied!', shareText: 'I scored {score} in {game}! Can you beat it?', bestOnDevice: 'Best on this device',
   autoQuality: 'Auto quality', fpsCounter: 'FPS counter',
   shop: 'Shop', coins: 'Coins', buy: 'Buy', equip: 'Use', equipped: 'In use', owned: 'Owned', maxed: 'Max', levelShort: 'Lv {n}',
@@ -637,6 +639,8 @@ const HI: Record<StringKey, string> = {
   level: 'लेवल', levels: 'लेवल', levelComplete: 'लेवल पूरा', nextLevel: 'अगला लेवल', locked: 'बंद',
   difficulty: 'कठिनाई', easy: 'आसान', normal: 'सामान्य', hard: 'कठिन', checkpoint: 'चेकपॉइंट',
   continue: 'आगे', inventory: 'थैला', inventoryEmpty: 'थैला खाली है', close: 'बंद करें', needs: '{name} चाहिए',
+  reduceMotion: 'कम हलचल', largeText: 'बड़े अक्षर', colourSafe: 'कलर-ब्लाइंड रंग', captions: 'कैप्शन',
+  capHit: 'आपको चोट लगी', capEnemyDown: 'दुश्मन गिरा', capPickup: 'उठाया', capReload: 'रीलोड', capEmpty: 'गोलियाँ ख़त्म', capBoss: 'बॉस आ गया', capBossDown: 'बॉस हारा', capLevelUp: 'लेवल अप', capCoin: 'सिक्का', capDanger: 'दुश्मन ने देख लिया',
   share: 'शेयर करें', copied: 'कॉपी हो गया!', shareText: 'मैंने {game} में {score} स्कोर किया! क्या आप इसे हरा सकते हैं?', bestOnDevice: 'इस फ़ोन पर सबसे अच्छे',
   autoQuality: 'ऑटो क्वालिटी', fpsCounter: 'FPS काउंटर',
   shop: 'दुकान', coins: 'सिक्के', buy: 'खरीदें', equip: 'चुनें', equipped: 'चुना हुआ', owned: 'आपका', maxed: 'पूरा', levelShort: 'लेवल {n}',
@@ -1471,6 +1475,14 @@ export interface GameSettings {
   autoQuality: boolean;
   /** Show the frames-per-second counter. */
   showFps: boolean;
+  /** No camera shake. On by itself when the device asks for reduced motion. */
+  reduceMotion: boolean;
+  /** Menus and the HUD drawn larger. */
+  largeText: boolean;
+  /** Colours that colour-blind players can tell apart (health bar, minimap). */
+  colourSafe: boolean;
+  /** Short text for important sounds (a hit, an enemy down, a boss…). */
+  captions: boolean;
 }
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -1487,7 +1499,7 @@ export function difficultyScale(d: Difficulty = current.difficulty): { enemyDama
 }
 
 export const DEFAULT_SETTINGS: Readonly<GameSettings> = {
-  masterVolume: 0.9, musicVolume: 0.6, sfxVolume: 0.8, muted: false, quality: 'high', lookSensitivity: 1, vibration: true, difficulty: 'normal', autoQuality: true, showFps: false,
+  masterVolume: 0.9, musicVolume: 0.6, sfxVolume: 0.8, muted: false, quality: 'high', lookSensitivity: 1, vibration: true, difficulty: 'normal', autoQuality: true, showFps: false, reduceMotion: false, largeText: false, colourSafe: false, captions: false,
 };
 
 const KEY = 'nb-game-settings-v1';
@@ -1508,6 +1520,10 @@ export function sanitizeSettings(raw: unknown): GameSettings {
     difficulty: r.difficulty === 'easy' || r.difficulty === 'normal' || r.difficulty === 'hard' ? r.difficulty : DEFAULT_SETTINGS.difficulty,
     autoQuality: typeof r.autoQuality === 'boolean' ? r.autoQuality : DEFAULT_SETTINGS.autoQuality,
     showFps: typeof r.showFps === 'boolean' ? r.showFps : DEFAULT_SETTINGS.showFps,
+    reduceMotion: typeof r.reduceMotion === 'boolean' ? r.reduceMotion : DEFAULT_SETTINGS.reduceMotion,
+    largeText: typeof r.largeText === 'boolean' ? r.largeText : DEFAULT_SETTINGS.largeText,
+    colourSafe: typeof r.colourSafe === 'boolean' ? r.colourSafe : DEFAULT_SETTINGS.colourSafe,
+    captions: typeof r.captions === 'boolean' ? r.captions : DEFAULT_SETTINGS.captions,
   };
 }
 
@@ -1518,7 +1534,10 @@ function read(): GameSettings {
       if (raw) return sanitizeSettings(JSON.parse(raw));
     }
   } catch { /* private mode or a corrupt value: the defaults */ }
-  return { ...DEFAULT_SETTINGS };
+  // A first visit follows the device: someone who asked their phone for reduced motion gets no camera shake.
+  let reduce = false;
+  try { reduce = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { /* no media queries */ }
+  return { ...DEFAULT_SETTINGS, reduceMotion: reduce };
 }
 
 let current: GameSettings = read();

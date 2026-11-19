@@ -101,6 +101,7 @@ export const NOT_A_REPAIR_CODES: ReadonlySet<string> = new Set([
   'FAILED_BUILD_COPY_NOT_KEPT', // a failed build's copy could not be kept (failedBuildCopy.ts) — the older copy stands in, nothing was repaired
   'PREVIEW_WAKE_HISTORY', // failed wake-ups BETWEEN builds, reported as evidence (previewWakeLog.ts) — nothing was repaired
   'USAGE_NOT_REPORTED',
+  'FAILED_ATTEMPT_COST_UNKNOWN', // Q-2920: a failed attempt's cost is unknown — reported, nothing repaired
   'CHEAP_REVIEW_NOT_RUN',
   // A repair that was UNDONE: the defect it targeted is still there.
   'RUNTIME_FIX_REGRESSED',

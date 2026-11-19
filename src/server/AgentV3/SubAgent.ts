@@ -1,3 +1,4 @@
+import { childStopSignal } from './runnerSignal';
 import { collectHandoff, handoffBlock } from './taskHandoff';
 import { parallelHelperScopeNote } from './parallelHelperScope';
 import { withoutPreviewBridge } from './previewBridge';
@@ -15,7 +16,7 @@ import { agentLifecycle } from './AgentLifecycle';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { DESIGN_KIT_BRIEF, GAME_KIT_RULE } from './systemPrompt';
 import { shellEarlyRule, writesTheEntry } from './earlyPreview';
-import { NO_EVAL_RULE, NO_FAKED_RESULT_RULE, NO_FAKE_FEATURE_RULE, LIGHT_THEME_BY_DEFAULT_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, NO_FAKED_RESULT_RULE, NO_FAKE_FEATURE_RULE, LIGHT_THEME_BY_DEFAULT_RULE, PERSISTED_STATE_RULE, AI_AUDIO_RULE } from './noEvalRule';
 import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
 import { packageChoiceRule } from '../lib/unfixablePackages';
 import { stylesheetCarriesKit } from './kitRestore';
@@ -394,7 +395,10 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       onTodoOnlyTurn: deps.onTodoOnlyTurn,
       // Stop / the mid-build cost ceiling can finally end a delegated run. `AgentRunner` ends BETWEEN
       // turns, so this cancels nothing in flight and loses no written file — it stops the next call.
-      signal: deps.signal,
+      // …and since autopsy aba63ead (failedbr #2475) also when the RUNNER THAT SPAWNED IT stops: a repair pass
+      // whose budget ended used to leave its specialist writing for 68 s after the pass was undone, and those
+      // unchecked edits were saved as the verified version. `childStopSignal` joins the two (runnerSignal.ts).
+      signal: childStopSignal(deps.signal),
       // The REMAINING build time, read now (see `remainingBuildMs`). A non-positive answer is omitted
       // rather than passed as 0 — `buildTimedOut` treats 0 as "no deadline", so passing it would read
       // as unlimited, which is the opposite of what an exhausted budget means.
@@ -466,7 +470,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     // feature code the architect would, so it gets them too (autopsy a9f8d186: a faked recogniser).
     // NO FAKE BUTTON (admin 2026-10-04): a writing specialist builds the login/payment screens as often
     // as the architect does, and until this line only the architect's prompt carried the rule.
-    if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(`${NO_EVAL_RULE}\n${NO_FAKED_RESULT_RULE}\n${NO_FAKE_FEATURE_RULE}\n${LIGHT_THEME_BY_DEFAULT_RULE}`);
+    if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(`${NO_EVAL_RULE}\n${NO_FAKED_RESULT_RULE}\n${NO_FAKE_FEATURE_RULE}\n${LIGHT_THEME_BY_DEFAULT_RULE}\n${PERSISTED_STATE_RULE}\n${AI_AUDIO_RULE}`);
     // 🖥️ THE ENTRY FIRST (earlyPreview.ts): a specialist that writes the UI is the one that writes the
     // entry, so it is told the same order the architect is — the user's live preview has nothing to
     // show until the entry renders.

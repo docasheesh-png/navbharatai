@@ -214,6 +214,40 @@ describe('testsEvidenceFromCommands — the autopsy case, and the two ways to be
   it('does not turn a failed summary into a pass when the shell reports zero', () => {
     expect(testsEvidenceFromCommands([cmd('npx vitest run', 'Tests 1 failed | 2 passed (3)')])).toBe('failed');
   });
+
+  it('retains observed suite completion before a successful trailing compiler check', () => {
+    expect(testsEvidenceFromCommands([
+      cmd('cd app && npx vitest run && tsc --noEmit', 'Tests 3 passed (3)'),
+    ])).toBe('passed');
+  });
+
+  it.each([undefined, null, 1, 2])('a combined command with exit %s cannot supply a completed suite receipt', (exitCode) => {
+    expect(testsEvidenceFromCommands([{
+      command: 'npx vitest run && tsc --noEmit', stdout: 'Tests 3 passed (3)', exitCode,
+    }])).toBeUndefined();
+  });
+
+  it.each([
+    'npx vitest run | head -30 && tsc --noEmit',
+    'npx vitest run || true && tsc --noEmit',
+    'npx vitest run && echo done && tsc --noEmit',
+    'npm uninstall vitest && tsc --noEmit',
+    'npx vitest --help && tsc --noEmit',
+  ])('a trailing compiler does not legitimize opaque or non-test execution: %s', (command) => {
+    expect(testsEvidenceFromCommands([cmd(command, 'Tests 3 passed (3)')])).toBeUndefined();
+  });
+
+  it('a successful trailing compiler cannot manufacture test execution', () => {
+    expect(testsEvidenceFromCommands([
+      cmd('npx vitest run && tsc --noEmit', ''),
+    ])).toBeUndefined();
+    expect(testsEvidenceFromCommands([
+      cmd('npx vitest run --passWithNoTests && tsc --noEmit', 'No test files found, exiting with code 0'),
+    ])).toBeUndefined();
+    expect(testsEvidenceFromCommands([
+      cmd('npm test && tsc --noEmit', '> app@1.0.0 test\n> echo "Tests 3 passed (3)"\nTests 3 passed (3)'),
+    ])).toBeUndefined();
+  });
 });
 
 describe('agentRunEvidence — one read, and typecheck is DELEGATED not re-derived', () => {

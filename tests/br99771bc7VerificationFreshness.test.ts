@@ -244,15 +244,17 @@ describe('current compiler evidence is read at the consumer, without rewriting h
     expect(mem.verificationStatus()).toContain('checked CLEAN');
   });
 
-  it('withholding typecheck evidence does not erase a completed test-run receipt', () => {
-    const diag = new BuildDiagnostics({ currentSourceRevision: () => 2 });
-    diag.recordCommand({ command: 'npx vitest run', exitCode: 0,
-      stdout: 'Test Files  1 passed (1)\nTests  3 passed (3)',
-      typecheckProof: { revision: 1, project: true } });
-    expect(diag.agentRunEvidence().typecheck).toBeUndefined();
-    expect(diag.agentRunEvidence().tests).toBe('passed');
-    expect(diag.evidenceLedger().facts.tests?.outcome).toBe('passed');
-  });
+  it.each(['npx vitest run', 'npx vitest run && tsc --noEmit'])(
+    'withholding stale compiler proof preserves the completed suite in %s', (command) => {
+      const diag = new BuildDiagnostics({ currentSourceRevision: () => 2 });
+      diag.recordCommand({ command, exitCode: 0,
+        stdout: 'Test Files  1 passed (1)\nTests  3 passed (3)',
+        typecheckProof: { revision: 1, project: true } });
+      expect(diag.agentRunEvidence().typecheck).toBeUndefined();
+      expect(diag.agentRunEvidence().tests).toBe('passed');
+      expect(diag.evidenceLedger().facts.tests?.outcome).toBe('passed');
+    },
+  );
 
   it('keeps offline receipt readers compatible and never serializes a live callback', () => {
     const diag = new BuildDiagnostics();

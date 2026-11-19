@@ -102389,3 +102389,33 @@ Tests: `visionImageCoverage.test.ts` covers the census, the source guard, and th
 **Current tally after D21–D22:**22 source/implementation findings;94 queue rows through Q-2880 (58 IN PROGRESS/36 BLOCKED). The earlier76 historical classifications,81 E references, nine accepted/evidence-only dispositions and three unallocated draft IDs are unchanged. Earlier validation failures remain recorded and are not relabelled passed.
 
 **D21 diagnostic batch and D22 proof:**the predetermined ten-case batch completed10/10, exit0,36.69s, with no case retry or early stop. Each fresh-wallet race produced one500-token debit and one zero-debit replay,9,500-token/₹95 balance, one operation/immutable ledger record and a valid chain; raw outcomes and read-only audits were retained. This does not reproduce or explain the original failed case, so D21 remains BLOCKED and no wallet logic, retry, timeout or invariant change is justified. D22’s one-line raw-result assertion message passes Node22 syntax checking and leaves the predicate unchanged. The new commit requires all applicable checks again; successful b34 coverage is retained as prior evidence, not final new-source proof. Final aggregate status remains unpassed pending the next full gate.
+## 2026-11-19 — Calculator report 9fba77d7: engine fixes proposed; GitHub validation pending
+
+The owner supplied the complete diagnostic timeline and asked to fix it. Autopsy and per-item ledger:
+`docs/autopsies/calculator-9fba77d7.md` (Q-2881–Q-2891). The saved App.tsx is a regression fixture.
+
+The failed repair's root is a boolean union alias plus a positive truthiness guard: the previous cause
+reader required an expanded union and a negated guard. A compiler-backed deterministic pass now follows
+the imported alias, verifies true/false discriminants and receiver identity, and changes only the guard.
+Both fast text-repair callers and the shared endgame use it. Handoffs prioritize actual compiler offenders.
+Compiler repairs cannot introduce new undefined CSS classes without updating their stylesheet in the
+same batch. The fast verifier reaches its existing spacing snap on failed compiles too.
+
+Fast-lane/one-shot verify failures remain unresolved until an appropriate genuine recheck. Wallet
+diagnostics retain admission balance, estimate and provisional stop cost; budget/supersession outcomes
+make no claim that unfinished app code is correct. Prices, wallet gates, exemptions, provider chains,
+settlement and project memory policy are unchanged. Planner guidance includes referenced PWA manifests.
+
+Validation is deliberately GitHub-only under the owner's latest instruction: no local CI, typecheck,
+suite, coverage, emulator drill or app build ran. Static diff review is not a passing gate. CI, merge
+and production replay remain pending. The live registry snapshot, provider receipts, full generated
+manifest/worker and duplicated-constant sources remain blocked as recorded in the ledger; no fabricated
+fix, invoice or successful preview is claimed. No production workspace or wallet was mutated.
+
+### Same session — public push blocked by automatic approval review
+
+Local code commit: `9c997272e3b0ebccf18295b01da4fb4b2a73387f`, branch
+`codex/calculator-build-repair`. The public GitHub push was rejected because explicit authorization
+for publishing the complete payload was required. A read-only remote-ref check found no branch;
+no connector/alternate route was used to bypass the rejection. No PR or CI run has started. A
+private patch is prepared for review; public push/PR and GitHub validation await authorization.

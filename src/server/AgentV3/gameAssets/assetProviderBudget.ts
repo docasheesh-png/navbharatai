@@ -1,6 +1,6 @@
 import { BoundedCache } from '../../lib/boundedCache';
 
-// One release catalogue admits at most 64 assets × 4 origins, plus the fixed metadata API.
+// Keyed by download ORIGIN, not by asset: the reviewed catalogue uses a handful of origins (≤ 4 per entry), plus the fixed metadata API.
 // Bounded state has no TTL that could silently expire a provider's longer Retry-After interval.
 const nextRequest = new BoundedCache<string, number>({ maxEntries: 512 });
 

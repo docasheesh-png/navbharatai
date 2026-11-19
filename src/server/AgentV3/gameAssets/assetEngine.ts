@@ -49,6 +49,8 @@ export async function acquireGameAsset(
   const inspect = async (candidate: AssetCandidate, bytes: Uint8Array): Promise<AssetManifestEntry> => {
     signal.throwIfAborted();
     if (!candidateMatches(candidate, requirement) || hash(bytes) !== candidate.sha256) throw new Error('Unverified asset');
+    const declared = (candidate as { bytes?: unknown }).bytes;
+    if (declared !== undefined && declared !== bytes.byteLength) throw new Error('Asset size differs from its review');
     const model = validateGlb(bytes);
     if (requirement.animation && !model.animations.includes(candidate.animationRoles?.[requirement.animation] ?? requirement.animation)) throw new Error('Missing animation');
     await deps.parse(bytes, { ...requirement, ...(requirement.animation ? { animation: candidate.animationRoles?.[requirement.animation] ?? requirement.animation } : {}) });

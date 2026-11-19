@@ -1,7 +1,7 @@
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isZTestAccount } from '../../lib/zTestAccount';
 import type { AssetRequirement } from './assetPolicy';
-import type { ReviewedAsset } from './providers';
+import { CATALOGUE_MAX_ENTRIES, type ReviewedAsset } from './providers';
 
 /**
  * Default OFF; enabling does not approve any unreviewed catalogue entry or paid service.
@@ -50,6 +50,79 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   windmill: ['windmill', 'windmills', 'पवनचक्की', 'molino'], target: ['target', 'targets', 'निशाना', 'लक्ष्य', 'diana'],
   barrel: ['barrel', 'barrels', 'ड्रम', 'बैरल', 'barril'], wall: ['wall', 'walls', 'दीवार', 'muro'],
   boxer: ['boxer', 'boxers', 'boxing', 'मुक्केबाज़', 'मुक्केबाज', 'बॉक्सर', 'बॉक्सिंग', 'boxeador', 'boxeo'],
+  // 2026-11-19 library batch 2. Tile subjects stay literal so a bare "road" or "river" keeps the procedural terrain.
+  motorcycle: ['motorcycle', 'motorcycles', 'motorbike', 'motorbikes', 'मोटरसाइकिल', 'बाइक', 'moto'],
+  truck: ['truck', 'trucks', 'lorry', 'ट्रक', 'camión'], skeleton: ['skeleton', 'skeletons', 'कंकाल', 'esqueleto'],
+  axe: ['axe', 'axes', 'कुल्हाड़ी', 'hacha'], crossbow: ['crossbow', 'crossbows', 'ballesta'], sword: ['sword', 'swords', 'तलवार', 'espada'],
+  shield: ['shield', 'shields', 'ढाल', 'escudo'], blaster: ['blaster', 'blasters', 'laser gun', 'laser guns', 'ray gun'],
+  coin: ['coin', 'coins', 'सिक्का', 'सिक्के', 'moneda', 'monedas'], 'coin block': ['coin block', 'coin blocks'],
+  flag: ['flag', 'flags', 'झंडा', 'bandera'], 'flying enemy': ['flying enemy', 'flying enemies', 'enemy drone', 'enemy drones'],
+  bed: ['bed', 'beds', 'पलंग', 'बिस्तर', 'cama'], armchair: ['armchair', 'armchairs'], shelf: ['shelf', 'shelves', 'bookshelf', 'bookshelves'],
+  cactus: ['cactus', 'cacti', 'कैक्टस', 'नागफनी'], castle: ['castle', 'castles', 'महल', 'castillo', 'fort', 'forts', 'किला', 'fortress'],
+  market: ['market', 'marketplace', 'bazaar', 'बाज़ार', 'बाजार', 'mercado'], tavern: ['tavern', 'taverns'], church: ['church', 'churches', 'iglesia'],
+  watermill: ['watermill', 'water mill'], tower: ['tower', 'towers', 'मीनार', 'torre'], barracks: ['barracks'], bridge: ['bridge', 'bridges', 'पुल', 'puente'],
+  'forest grove': ['forest grove', 'grove'], fence: ['fence', 'fences', 'बाड़', 'valla'], dustbin: ['dustbin', 'dustbins', 'कूड़ेदान', 'डस्टबिन', 'trash can', 'trash cans', 'garbage can'],
+  'road junction tile': ['road junction tile'], 'road t junction tile': ['road t junction tile'], 'road crossing tile': ['road crossing tile', 'zebra crossing tile'],
+  'curved road tile': ['curved road tile'], 'race track straight tile': ['race track straight tile'], 'race track corner tile': ['race track corner tile'],
+  'race finish line': ['race finish line', 'finish line'],
+  // 2026-11-19 library batch 3: food, kitchen, horror, sci-fi base, town and medieval pieces.
+  burger: ['burger', 'burgers', 'बर्गर', 'hamburguesa'], meal: ['meal', 'meals', 'dinner plate', 'खाना', 'thali'], stew: ['stew', 'soup bowl'],
+  tomato: ['tomato', 'tomatoes', 'टमाटर'], carrot: ['carrot', 'carrots', 'गाजर'], potato: ['potato', 'potatoes', 'आलू'], onion: ['onion', 'onions', 'प्याज', 'प्याज़'],
+  cheese: ['cheese', 'चीज़', 'चीज'], 'vegetable crate': ['vegetable crate', 'vegetable crates', 'sabzi crate'],
+  oven: ['oven', 'ovens', 'ओवन'], fridge: ['fridge', 'fridges', 'refrigerator', 'फ्रिज'], stove: ['stove', 'stoves', 'चूल्हा', 'gas stove'],
+  'cooking pot': ['cooking pot', 'cooking pots', 'पतीला'], 'frying pan': ['frying pan', 'frying pans', 'kadhai', 'कड़ाही'],
+  'round table': ['round table', 'round tables'], 'kitchen counter': ['kitchen counter', 'kitchen counters'],
+  pumpkin: ['pumpkin', 'pumpkins', 'कद्दू'], 'jack o lantern': ['jack o lantern', 'jack o lanterns'], gravestone: ['gravestone', 'gravestones', 'tombstone', 'tombstones'],
+  grave: ['grave', 'graves', 'कब्र', 'graveyard', 'cemetery', 'कब्रिस्तान'], coffin: ['coffin', 'coffins', 'ताबूत'], skull: ['skull', 'skulls', 'खोपड़ी'],
+  'dead tree': ['dead tree', 'dead trees', 'spooky tree'], 'autumn tree': ['autumn tree', 'autumn trees'], lantern: ['lantern', 'lanterns', 'लालटेन'],
+  crypt: ['crypt', 'crypts', 'tomb'], 'iron fence': ['iron fence', 'iron fences'], 'cemetery gate': ['cemetery gate', 'graveyard gate'],
+  lander: ['lander', 'moon lander', 'landers'], 'space rover': ['space rover', 'mars rover', 'moon rover', 'rover'], 'wind turbine': ['wind turbine', 'wind turbines'],
+  'solar panel': ['solar panel', 'solar panels', 'सोलर पैनल'], 'space base': ['space base', 'moon base', 'mars base', 'space colony'],
+  'landing pad': ['landing pad', 'landing pads', 'helipad'], 'cargo container': ['cargo container', 'cargo containers', 'shipping container', 'shipping containers'],
+  'drill rig': ['drill rig', 'mining drill'], fountain: ['fountain', 'fountains', 'फव्वारा', 'फ़व्वारा', 'fuente'], garage: ['garage', 'garages', 'गैराज'],
+  blacksmith: ['blacksmith', 'लोहार'], 'mine entrance': ['mine entrance', 'gold mine', 'coal mine', 'mine shaft'], 'archery range': ['archery range'],
+  sawmill: ['sawmill', 'lumber mill', 'lumbermill'], 'pine forest': ['pine forest', 'pine trees', 'pine tree'], boulder: ['boulder', 'boulders'],
+  'water lily': ['water lily', 'water lilies', 'lily pad', 'lily pads'], door: ['door', 'doors', 'दरवाज़ा', 'दरवाजा', 'puerta'],
+  stairs: ['stairs', 'staircase', 'सीढ़ी', 'सीढ़ियाँ', 'escaleras'], pallet: ['pallet', 'pallets'],
+  // 2026-11-19 library batch 4: people (walk/run), vehicles, boats and animals.
+  man: ['man', 'men', 'आदमी', 'पुरुष', 'hombre'], woman: ['woman', 'women', 'lady', 'औरत', 'महिला', 'mujer'],
+  'old man': ['old man', 'old men', 'grandfather', 'दादा', 'बूढ़ा', 'बुज़ुर्ग'], 'old woman': ['old woman', 'old women', 'grandmother', 'दादी', 'बूढ़ी'],
+  farmer: ['farmer', 'farmers', 'किसान', 'kisan'], 'racing driver': ['racing driver', 'race driver', 'racer', 'racers'],
+  mechanic: ['mechanic', 'mechanics', 'मिस्त्री', 'मैकेनिक'], worker: ['worker', 'workers', 'labourer', 'laborer', 'मज़दूर', 'मजदूर'],
+  businessman: ['businessman', 'businessmen', 'office worker'],
+  ambulance: ['ambulance', 'ambulances', 'एम्बुलेंस'], bicycle: ['bicycle', 'bicycles', 'cycle', 'cycles', 'साइकिल'], bus: ['bus', 'buses', 'बस'],
+  'fire truck': ['fire truck', 'fire trucks', 'fire engine', 'दमकल'], 'garbage truck': ['garbage truck', 'garbage trucks', 'kachra gadi'],
+  'water tanker': ['water tanker', 'water tankers', 'tanker'], 'electric car': ['electric car', 'electric cars', 'ev'],
+  boat: ['boat', 'boats', 'fishing boat', 'नाव', 'नौका', 'kashti', 'barca'], canoe: ['canoe', 'canoes', 'kayak'], jetty: ['jetty', 'pier', 'dock'],
+  capybara: ['capybara', 'capybaras'], toucan: ['toucan', 'toucans'], heron: ['heron', 'herons', 'crane bird', 'बगुला'], frog: ['frog', 'frogs', 'मेंढक'],
+  jaguar: ['jaguar', 'jaguars', 'leopard', 'cheetah', 'तेंदुआ', 'चीता'], puma: ['puma', 'cougar', 'mountain lion'], wolf: ['wolf', 'wolves', 'भेड़िया'],
+  monkey: ['monkey', 'monkeys', 'बंदर', 'mono'], tapir: ['tapir'], sloth: ['sloth', 'sloths'], armadillo: ['armadillo'], 'wild pig': ['wild pig', 'wild boar', 'boar', 'जंगली सूअर'],
+  otter: ['otter', 'otters', 'ऊदबिलाव'], bat: ['bat', 'bats', 'चमगादड़'], whale: ['whale', 'whales', 'व्हेल'], dolphin: ['dolphin', 'dolphins', 'डॉल्फिन'],
+  manatee: ['manatee', 'sea cow'], shark: ['shark', 'sharks', 'शार्क', 'tiburón'], 'hammerhead shark': ['hammerhead', 'hammerhead shark'],
+  'manta ray': ['manta ray', 'stingray', 'ray fish'], seahorse: ['seahorse', 'sea horse'], fish: ['fish', 'fishes', 'मछली', 'machli', 'pez'],
+  turtle: ['turtle', 'turtles', 'tortoise', 'कछुआ'], crab: ['crab', 'crabs', 'केकड़ा'], starfish: ['starfish', 'sea star'],
+  snake: ['snake', 'snakes', 'साँप', 'सांप', 'serpiente'], lizard: ['lizard', 'lizards', 'छिपकली', 'iguana'], 'harpy eagle': ['harpy eagle'],
+  duck: ['duck', 'ducks', 'बत्तख', 'pato'], hummingbird: ['hummingbird', 'hummingbirds'], butterfly: ['butterfly', 'butterflies', 'तितली'],
+  dragonfly: ['dragonfly', 'dragonflies'], ant: ['ant', 'ants', 'चींटी'],
+  // 2026-11-19 library batch 5: public buildings, commerce, energy, nature, farm, street and dirt roads.
+  school: ['school', 'schools', 'स्कूल', 'विद्यालय'], hospital: ['hospital', 'hospitals', 'अस्पताल'], 'police station': ['police station', 'thana', 'थाना'],
+  'fire station': ['fire station'], library: ['library building', 'public library', 'पुस्तकालय'], museum: ['museum', 'museums', 'संग्रहालय'],
+  'town hall': ['town hall', 'city hall'], university: ['university', 'college', 'campus'], monument: ['monument', 'statue', 'स्मारक'],
+  bank: ['bank building', 'बैंक'], hotel: ['hotel', 'hotels', 'होटल'], 'shopping mall': ['shopping mall', 'mall', 'मॉल'], restaurant: ['restaurant', 'restaurants', 'dhaba', 'ढाबा'],
+  supermarket: ['supermarket', 'grocery store', 'kirana'], 'charging station': ['charging station', 'ev charger'], factory: ['factory', 'factories', 'फैक्ट्री', 'कारखाना'],
+  warehouse: ['warehouse', 'godown', 'गोदाम'], port: ['harbour', 'harbor', 'seaport', 'बंदरगाह'], skyscraper: ['skyscraper', 'skyscrapers', 'tower block'],
+  apartment: ['apartment', 'apartments', 'flat building'], bakery: ['bakery', 'bakeries'], dam: ['dam', 'dams', 'बांध', 'बाँध'],
+  'wind farm': ['wind farm', 'windmills farm'], 'nuclear plant': ['nuclear plant', 'power plant'], 'solar farm': ['solar farm', 'solar plant'],
+  'palm tree': ['palm tree', 'palm trees', 'coconut tree', 'नारियल का पेड़'], 'banana tree': ['banana tree', 'banana plant', 'केले का पेड़'],
+  bamboo: ['bamboo', 'बांस'], 'tree stump': ['tree stump', 'stump'], log: ['wooden log', 'fallen log', 'logs', 'लकड़ी का लट्ठा'],
+  'rock pile': ['rock pile', 'pile of rocks', 'stones', 'पत्थर'], flowers: ['flowers', 'flower bed', 'फूल'], 'tall grass': ['tall grass', 'घास'],
+  'lotus leaf': ['lotus leaf', 'lotus leaves', 'lily pad'], 'termite mound': ['termite mound', 'anthill'],
+  scarecrow: ['scarecrow', 'बिजूका'], 'hay bale': ['hay bale', 'hay bales', 'haystack', 'भूसा'], beehive: ['beehive', 'bee hive', 'मधुमक्खी का छत्ता'],
+  'farm gate': ['farm gate'], firewood: ['firewood', 'लकड़ियाँ'], 'vegetable garden': ['vegetable garden', 'kitchen garden'],
+  'traffic cone': ['traffic cone', 'traffic cones', 'cone'], 'food cart': ['food cart', 'thela', 'ठेला', 'popcorn cart'], 'market stall': ['market stall', 'stall', 'stalls'],
+  'stop sign': ['stop sign', 'stop signs'], 'bus stop': ['bus stop', 'bus stops', 'बस स्टॉप'], playground: ['playground', 'park swings', 'झूला'],
+  wheelbarrow: ['wheelbarrow'], 'dirt road tile': ['dirt road tile', 'kaccha road tile', 'kachcha road tile'], 'dirt road curve tile': ['dirt road curve tile'],
+  'road bridge': ['road bridge', 'flyover'],
 };
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
   fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],
@@ -67,7 +140,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
   const clauses = prompt.slice(0, 16000).normalize('NFKC').toLowerCase()
     .split(/[,;.!?।]|\b(?:and|but)\b|(?:^|\s)(?:और|लेकिन|y|pero)(?=\s|$)/u).slice(0, 128)
     .map(normalized).filter(c => c && !['no', 'not', 'don t', 'dont', 'doesn t', 'isn t', 'can t', 'never', 'without', 'exclude', 'excluding', 'avoid', 'omit', 'remove', 'except', 'नहीं', 'न', 'बिना', 'मत', 'sin', 'excepto'].some(n => mentioned(c, n)));
-  const subjects = [...new Set([...Object.keys(ALIASES), ...catalogue.slice(0, 64).flatMap(c => c.subjects.slice(0, 16))])];
+  const subjects = [...new Set([...Object.keys(ALIASES), ...catalogue.slice(0, CATALOGUE_MAX_ENTRIES).flatMap(c => c.subjects.slice(0, 16))])];
   const matching = (subject: string, clause: string) => {
     let scoped = ` ${clause} `;
     const excludedPhrases: Record<string, readonly string[]> = {
@@ -77,6 +150,11 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       stool: ['stool sample', 'stool test'], cabinet: ['cabinet minister', 'cabinet meeting'],
       lamp: ['street lamp', 'traffic lamp'],
       rogue: ['hooded rogue', 'hooded rogues'],
+      flag: ['feature flag', 'red flag'], man: ['pac man', 'spider man', 'iron man', 'snow man', 'super man', 'he man', 'ant man', 'old man', 'old men'],
+      woman: ['old woman', 'old women', 'wonder woman'], bat: ['cricket bat', 'baseball bat', 'bat and ball', 'bat ball'], mechanic: ['game mechanic', 'game mechanics'],
+      worker: ['service worker', 'web worker', 'office worker'], bus: ['bus stop', 'bus stops', 'school bus stop'], school: ['school bus'], bank: ['river bank', 'blood bank'],
+      ant: ['ant man'], log: ['log in', 'login', 'log file', 'log out'],
+      bicycle: ['day night cycle', 'day and night cycle', 'life cycle', 'cycle through', 'weather cycle'], 'traffic cone': ['ice cream cone', 'ice cream cones'], grave: ['grave danger', 'grave mistake'], door: ['door to door', 'door delivery'], market: ['stock market'], shield: ['shield powerup', 'shield power up'],
       car: ['formula one car', 'formula 1 car', 'f1 car', 'hatchback car', 'station wagon car'], building: ['building a', 'building the'],
     };
     if ((excludedPhrases[subject] ?? []).some(p => mentioned(clause, p))) return false;
@@ -89,7 +167,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
     const local = clauses.filter(c => matching(subject, c)).join(' ');
     const motion = (role: string) => MOTIONS[role].some(word => mentioned(local, word));
     const animation = ['bird', 'eagle', 'parrot'].includes(subject) && motion('fly') ? 'fly'
-      : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue'].includes(subject)
+      : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue', 'skeleton', 'man', 'woman', 'old man', 'old woman', 'farmer', 'racing driver', 'mechanic', 'worker', 'businessman'].includes(subject)
         ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
     return { subject, ...(animation ? { animation } : {}) };
   });

@@ -286,7 +286,8 @@ describe('5 · 🔒 the corrections of the adversarial review', () => {
 
   it('🔒 the runner narrates on the build\'s clock through the build-wide set; a sub-agent shares it', () => {
     const runner = readFileSync(join(__dirname, '../src/server/AgentV3/AgentRunner.ts'), 'utf8');
-    expect(runner).toContain('buildBudgetNarration(Date.now() - origin, (buildStartMs - origin) + maxBuildMs, events.budgetStagesSaid)');
+    // The working clock since failedbr #2431: both the elapsed time and the runner's offset subtract the user-wait credit.
+    expect(runner).toContain('buildBudgetNarration(Date.now() - origin - pausedTotal(), (buildStartMs - origin - pausedAtStart) + maxBuildMs, events.budgetStagesSaid)');
     expect(runner).not.toMatch(/text: bs\.narration/);
     const parent = new AgentEventStream(500, 1_000);
     const child = Object.create(parent) as AgentEventStream;

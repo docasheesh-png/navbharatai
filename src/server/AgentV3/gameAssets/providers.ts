@@ -1,10 +1,14 @@
 import type { ObjectCategory } from '../../lib/objectCatalogTypes';
-import { candidateMatches, type AssetCandidate, type AssetRequirement } from './assetPolicy';
+import { ASSET_LIMITS, candidateMatches, type AssetCandidate, type AssetRequirement } from './assetPolicy';
 import type { AssetProvider } from './assetEngine';
 import { assetDownloadUrl } from './assetDownload';
 import { safeGltfResourcePath } from './gltfBundle';
 import { reviewedCatalogue } from './reviewedCatalogue';
 import { REVIEWED_LIBRARY_EXPANSION } from './reviewedExpansion';
+import { REVIEWED_LIBRARY_BATCH_2 } from './reviewedLibraryBatch2';
+import { REVIEWED_LIBRARY_BATCH_3 } from './reviewedLibraryBatch3';
+import { REVIEWED_LIBRARY_BATCH_4 } from './reviewedLibraryBatch4';
+import { REVIEWED_LIBRARY_BATCH_5 } from './reviewedLibraryBatch5';
 
 export const GAME_ASSET_PROVIDERS = ['polyhaven', 'kenney', 'quaternius', 'kaykit', 'github', 'sketchfab'] as const;
 export type GameAssetProviderId = typeof GAME_ASSET_PROVIDERS[number];
@@ -27,14 +31,30 @@ export interface ReviewedAsset extends AssetCandidate {
   /** Node names the runtime removes on load (weapons a boxer does not hold). Reviewed per entry; bytes unchanged. */
   hiddenNodes?: readonly string[];
   sourceSha256?: string;
+  /** Exact reviewed byte length of the served GLB (the bytes `sha256` pins). Undeclared entries count as the 5 MiB worst case. */
+  bytes?: number;
   resources?: readonly { path: string; url: string; sha256: string }[];
 }
 
 /** Exact asset revisions verified locally; feature activation remains independently default OFF. */
-export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalogue, ...REVIEWED_LIBRARY_EXPANSION];
+export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalogue, ...REVIEWED_LIBRARY_EXPANSION, ...REVIEWED_LIBRARY_BATCH_2, ...REVIEWED_LIBRARY_BATCH_3, ...REVIEWED_LIBRARY_BATCH_4, ...REVIEWED_LIBRARY_BATCH_5];
+
+/**
+ * Admin decision 2026-11-19: the library is bounded by STORAGE, not by a model count. The old 64-entry cap was
+ * this same 320 MiB expressed as 64 × the 5 MiB per-model ceiling; small low-poly models (~200 KB) made it a
+ * count limit that left the budget 90% unused. An entry without a reviewed size still costs the full 5 MiB.
+ */
+export const CATALOGUE_STORAGE_BUDGET_BYTES = 320 * 1024 * 1024;
+/** Bounds per-request linear scans; far above what the storage budget admits for real assets. */
+export const CATALOGUE_MAX_ENTRIES = 2048;
+export function catalogueStorageBytes(assets: readonly ReviewedAsset[]): number {
+  return assets.reduce((sum, c) => sum + (c.bytes ?? ASSET_LIMITS.bytes), 0);
+}
 
 export function validateCatalogue(assets: readonly ReviewedAsset[]): void {
-  if (assets.length > 64) throw new Error('Catalogue exceeds the initial 320 MiB cache/storage budget');
+  if (assets.length > CATALOGUE_MAX_ENTRIES) throw new Error('Catalogue exceeds the entry ceiling');
+  for (const c of assets) if (c.bytes !== undefined && (!Number.isSafeInteger(c.bytes) || c.bytes < 28 || c.bytes > ASSET_LIMITS.bytes)) throw new Error('Unreviewed asset size');
+  if (catalogueStorageBytes(assets) > CATALOGUE_STORAGE_BUDGET_BYTES) throw new Error('Catalogue exceeds the 320 MiB cache/storage budget');
   const ids = new Set<string>();
   for (const c of assets) {
     if (!GAME_ASSET_PROVIDERS.includes(c.provider) || !c.review?.reviewer || !c.review.evidenceRevision || c.review.freeDownload !== true

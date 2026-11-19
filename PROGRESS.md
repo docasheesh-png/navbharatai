@@ -102467,3 +102467,9 @@ Admin: *"navbharatai par jab koi user game banwata hai, to road/map bahut chota 
 **Tests:** `theBigWorldWishIsReadByMeaning` (43), `aRaceIsNotDoneOnAShortRoad` (9), `theTwoDWorldIsOneSeamlessMap` (43), updated `athreeMapIntent.test`, `theAthreeMapIsUsedOnlyWhereItIsNeeded`. Reversions seen failing: blocker disabled (3 fail), edge socket broken (2 fail), per-chunk ground tint (1 fail).
 
 **Verified in headless Chromium (software GL):** the Athree map renders (terrain, trees, grass, river, ocean, sky) and streams over ~600 m with no console errors, 42 draw calls / 48k triangles at phone quality; the 2D world renders with roads continuing across chunks, ~0.5 ms per frame. **Not verified:** frame rate on a real phone for either; a live build end-to-end after deploy.
+
+## 2026-11-19 — Every library model is changeable, up to 100% replacement
+- `assetCustomizations.ts` per game: colour (whole / per part), size, turn, offset, opacity, shadows, hidden parts,
+  animation and roles, code-built instead, or the project's own .glb (replace 100% or add new). Nothing a user writes can
+  break the game. Runtime split into a shared mount step; library path still hash-checked; own-file path same-origin only.
+- Old unedited loaders auto-upgrade; `localModelLead` tells the builder in later turns. 13 real-runtime tests, reversion-proven.

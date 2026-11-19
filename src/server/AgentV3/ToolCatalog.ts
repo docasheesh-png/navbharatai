@@ -2269,7 +2269,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: combat, ai, projectile, spawner, weapon, director. Default = all.',
+            description: 'Optional subset: combat, ai, projectile, spawner, weapon, director, nav. Default = all.',
           },
         },
       },

@@ -253,13 +253,18 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/systems/ai.ts": [
     "c4dbc016db9a13e81cad5847399bd37d21cc2fc248941739958c6f00bbe22db6",
-    "7e916aab7186a35f9f061b4e4097b9ee6aa6cb3e104aa13b9c3b0ab5e6eab5a6"
+    "7e916aab7186a35f9f061b4e4097b9ee6aa6cb3e104aa13b9c3b0ab5e6eab5a6",
+    "f261768e9794548a71cede4e0471a5059e662eedb165a06095c7eceb2af1f014"
   ],
   "src/game/systems/combat.ts": [
     "aa1173d83fb2800002182ffaa42f89cf76ceb7a8b6123bc709f679ac2284aaa3"
   ],
   "src/game/systems/director.ts": [
     "c92437c33c810b3a2064440eaa25a5feb8e4a0465b40e0fd475e94e1054ca31e"
+  ],
+  "src/game/systems/nav.ts": [
+    "fb24fe5e4dfc56e9489a3a0a8b3146df95be471f9725f6c03292ec99718ab0d8",
+    "0ad1a0e56e937187a8994d307db8e2a0a38ca63c930c7b9dfccd1d2e57f40a8c"
   ],
   "src/game/systems/projectile.ts": [
     "10553042b746135b191f535de32868a67cb30feb2dea7ff7602a4f99730ad71f",

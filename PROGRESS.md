@@ -102499,3 +102499,11 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
 **Fixed:** `Input.pollGamepads()` (the API is polled): first connected standard pad; left stick → analogue move with a 0.15 deadzone, letting go clears only what the pad wrote (the touch joystick is never cleared by an idle pad); right stick → look; buttons are `Pad:N` codes in `DEFAULT_ACTIONS` with real press/release edges (A jump, X/RT attack — the attack group answers too —, B use, Y reload, LT aim, LB drift, RB/L3 sprint, Start pause, d-pad directions); unplugging releases everything; no API = no-op. The shell polls first in every fixed step.
 
 **Tests:** `aGamepadPlaysTheGame` (6). Reversion: ignoring buttons fails 2.
+
+## 2026-11-19 — Game-gap audit P1 #12: enemies go AROUND walls (A* pathfinding)
+
+**Root cause:** `stepEnemyAI` steered straight at the player; sight was the caller's `canSeePlayer` boolean, and with no notion of walls an enemy either forgot a player who hid or pressed against the first wall in the way.
+
+**Fixed:** kit file `systems/nav.ts` — `createNavGrid` (blocked test, `inflate` for body radius, refuses absurd sizes), `blockedFromBoxes`, `lineClear` (sampled a hair to either side, so a line grazing the corner where two blocked cells meet is not clear — found by the test), `findPath` (A*, 8 directions, no corner cutting, bounded, target-in-wall reached from beside it, string-pulled). `EnemyPerception.nav`: sight needs a clear line, no attack through a wall, a chasing enemy hunts a hidden player along a re-planned path (twice a second or when the player moves two cells), waits instead of walking into a wall when there is no way. Without `nav` the old behaviour is unchanged.
+
+**Tests:** `enemiesGoAroundWalls` (6). Reversion: no path following fails 1.

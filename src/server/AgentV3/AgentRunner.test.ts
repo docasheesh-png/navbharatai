@@ -294,7 +294,7 @@ describe('AgentRunner (native tool-use loop)', () => {
     // statement covers both `builtSomething` outcomes, so there is no second code path that could set
     // `ok:false` while forgetting the flag.
     const src = require('fs').readFileSync(require('path').join(__dirname, 'AgentRunner.ts'), 'utf8');
-    const at = src.indexOf('if (buildTimedOut(buildStartMs, maxBuildMs, Date.now())) {');
+    const at = src.indexOf('if (buildTimedOut(buildStartMs, maxBuildMs, workNow())) {') /* the working clock since failedbr #2431 */;
     expect(at).toBeGreaterThan(-1);
     const block = src.slice(at, src.indexOf('return { ok: builtSomething', at) + 200);
     expect(block).toContain('timedOut: true');

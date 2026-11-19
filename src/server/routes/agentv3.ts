@@ -26043,13 +26043,18 @@ async function noteBuildOutcome(
       // feature whose OUTPUT is invented — a random "recognised" song, "[Translated to hi]: …", search
       // results written into the code. Same scope (this turn's reachable writes), same one sentence.
       try {
-        if (result.ok && expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
+        // failedbr #2421: a STOPPED (not-ok) build's saved writes are scanned too — the next turn scans only its own
+        // writes, so a fake saved before a Stop was never named anywhere. Not ok ⇒ recorded for the admin; the user's
+        // summary (which already says the build stopped) is not changed.
+        if (expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
           const faked = loadedFindings(simulatedResultIssues(Object.fromEntries(writtenFiles)), dispatcher.lastReachability);
           if (faked.length > 0) {
-            result = { ...result, summary: `${result.summary}${simulatedResultNotice(faked)}` };
+            result = result.ok ? { ...result, summary: `${result.summary}${simulatedResultNotice(faked)}` } : result;
             buildDiag.record({
               phase: 'readiness', severity: 'warning', code: 'SIMULATED_RESULT_SHIPPED', autoResolved: false,
-              message: `A feature of the app returns made-up results in ${faked.length} place(s) — disclosed to the user in the summary.`,
+              message: result.ok
+                ? `A feature of the app returns made-up results in ${faked.length} place(s) — disclosed to the user in the summary.`
+                : `A file saved by this unfinished build returns made-up results in ${faked.length} place(s) — not yet made real or labelled; not shown to the user because the build did not finish.`,
               detail: faked.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
             });
           }

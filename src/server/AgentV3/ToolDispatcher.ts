@@ -494,6 +494,7 @@ import { turnAskedTheUser } from './nudgeToBuild';
 import { withAppEnvFile } from './appEnvFileForCommand';
 import { locatedErrorText } from './runtimeErrorSite';
 import { consoleCleanVerdict } from './renderCheckConsole';
+import { FileViews, explainEditMiss } from './editProvenance';
 import { asksForBattleRoyale } from './gameIntent';
 
 /**
@@ -737,6 +738,8 @@ export class ToolDispatcher {
    * and a 15th optional boolean is exactly the kind of thing a later call site gets wrong by silence.
    */
   private _publishConsent = false;
+  /** The file versions the model has read, and its refused proposals — to explain a missed edit (editProvenance.ts, Q-2697). */
+  private readonly fileViews = new FileViews();
 
   /**
    * Paid-tool counts for THIS build. Defaults to a fresh object; a child dispatcher is given the
@@ -1439,7 +1442,8 @@ export class ToolDispatcher {
       if (dup) refuse(dup);
     }
     const writeParseReject = await this.parseGuardRejection(rel, existingContent, content);
-    if (writeParseReject) refuse(writeParseReject);
+    if (writeParseReject) { this.fileViews.note(rel, content, 'refused'); refuse(writeParseReject); }
+    this.fileViews.clearRefused(rel);
     await this.refuseBrokenPageEdit(rel, existingContent, content);
     if (opts.expectedSource !== undefined) {
       if (opts.expectedSource === null) {
@@ -5486,6 +5490,7 @@ export class ToolDispatcher {
           // a development-only bridge ends up published inside somebody's finished app. It is removed
           // here so the model only ever sees the file it actually authored.
           full = withoutPreviewBridge(reqPath, full);
+          this.fileViews.note(reqPath, full, 'read');
         } catch (err) {
           // PATH-MISS RECOVERY (build-report autopsy 2026-08-01): a bare "does not exist" made the builder
           // loop 12 times guessing the same wrong root (created src/components/ui/X.tsx, read
@@ -5899,7 +5904,14 @@ export class ToolDispatcher {
         // Exact match first, with a whitespace-tolerant fallback so a patch whose
         // indentation/spacing is slightly off still applies (still required to be
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
-        const { updated: edited, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
+        let applied: EditResult;
+        try {
+          applied = applyEdit(existing, oldStr, newStr, path);
+        } catch (missErr) {
+          // Name WHERE the quoted text came from (a refused change, a stale read, memory) — Q-2697, editProvenance.ts.
+          throw withEditMissProvenance(missErr, path, oldStr, existing, this.fileViews);
+        }
+        const { updated: edited, matchedOld, note } = applied;
         // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
         const deduped = this.dedupeImportsForSource(path, guardConfigContent(path, this.applyPostgresProviderLock(path, edited), { framework: this.framework }), agent);
         // Parity with write_file: an edit that cuts design-kit rules out of the stylesheet keeps them
@@ -5922,7 +5934,8 @@ export class ToolDispatcher {
         // Parse guard: refuse an edit that would break a clean file (duplicate declaration / broken JSX),
         // so a syntactically-broken version is never saved — the model gets the exact spot + a fix hint.
         const editParseReject = await this.parseGuardRejection(path, existing, updated);
-        if (editParseReject) refuse(editParseReject);
+        if (editParseReject) { this.fileViews.note(path, updated, 'refused'); refuse(editParseReject); }
+        this.fileViews.clearRefused(path);
         await this.refuseBrokenPageEdit(path, existing, updated);
         await this.actuator.writeFile(this.workspaceId, path, updated);
         this.onFileWrite?.(path, updated);
@@ -12969,6 +12982,20 @@ export function ambiguousEditRegions(existing: string, offsets: Iterable<number>
 function withFileNewlines(existing: string, inserted: string): string {
   if (!existing.includes('\r\n')) return inserted;
   return inserted.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+}
+
+/**
+ * Put the provenance sentence into an `old_string not found` error, right after its first sentence; any other
+ * error passes through untouched. PURE.
+ */
+export function withEditMissProvenance(err: unknown, path: string, oldStr: string, current: string, views: FileViews | null | undefined): unknown {
+  if (!(err instanceof Error) || !err.message.startsWith('edit_file: old_string not found')) return err;
+  const why = explainEditMiss(path, oldStr, current, views);
+  if (!why) return err;
+  const cut = err.message.indexOf('. ') + 2;
+  const out = new Error(err.message.slice(0, cut) + why + err.message.slice(cut));
+  out.stack = err.stack;
+  return out;
 }
 
 export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {

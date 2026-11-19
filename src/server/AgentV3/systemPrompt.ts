@@ -1063,6 +1063,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       tested rules (createLudo / legalMoves / move / pass / chooseMove, createSnakes / takeTurn) and board geometry (cellOf,',
     '       squareCell). Draw the board, let the player tap a legal token, animate r.path, announce captures and extra rolls.',
     '       Chess: createChess / movesFrom / playChess / chessStatus / bestMove(game, 1|2|3) — every rule, never your own.',
+    '       Cards: teenPattiHand / compareTeenPatti, checkDeclaration / bestGrouping (rummy). Points or pretend chips ONLY —',
+    '       never real money, deposits or cash prizes (India bans real-money online games).',
     // 🧰 OBJECT FORGE (admin order 2026-11-15): objects nobody pre-built are made BY the builder, from a checked spec.
     '    8. run_recipe({ name: "author_object", input: { spec } }) — the OBJECT FORGE: any object, creature, person, vehicle, building',
     '       or prop the library and the Athree modules do not have. Look in the game library first; when nothing fits, DO NOT hand-write',

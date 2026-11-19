@@ -102629,3 +102629,11 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
 - The move generator matches the published perft counts on five standard positions (start, Kiwipete, positions 3–5).
 - Locked by `tests/chessFollowsEveryRule.test.ts` (reversion: castling through check / en passant leaving the pawn → 4 fail,
   including two perft counts).
+
+## 2026-11-19 — India games pack (c): card games, for fun only (branch `claude/game-board-cards`)
+- `src/game/board/cards.ts` added to `generate_board_games`: deck/deal/shuffle, Teen Patti hand ranking and comparison (A-K-Q >
+  A-2-3 > K-Q-J; K-A-2 not a sequence), Indian rummy melds (pure/impure sequences, sets, wild + printed jokers; a jokers-only group
+  is not a meld), declaration rules (all 13 grouped, two sequences, one pure), points (faces 10, jokers 0, no pure → all count,
+  cap 80), bestGrouping (exhaustive, bounded).
+- Points / pretend chips only: the recipe, catalog and prompt forbid real money, deposits and cash prizes (India's 2025 ban).
+- Locked by `tests/cardGamesRankAndDeclareCorrectly.test.ts` (reversion: A-2-3 ranked low / no pure-sequence rule → 2 fail).

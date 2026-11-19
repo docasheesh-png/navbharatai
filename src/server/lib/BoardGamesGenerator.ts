@@ -13,6 +13,8 @@
 //               token can move, and a computer player. Board geometry for drawing.
 //   chess.ts  — chess with every rule (castling, en passant, promotion, check/mate/stalemate, fifty-move, repetition,
 //               insufficient material), FEN and SAN, a computer player at three strengths; perft-verified.
+//   cards.ts  — a deck and dealing, Teen Patti hand ranking, Indian rummy melds, declarations, points and the best
+//               grouping — for FUN: points and pretend chips only, never real money.
 //   snakes.ts — Snakes & Ladders: the classic board, exact roll to finish (or bounce back), a six rolls again, and the
 //               boustrophedon square → grid position for drawing.
 //   index.ts  — one import.
@@ -733,6 +735,217 @@ export function bestMove(s: ChessState, depth = 2): ChessMove | null {
 }
 `;
 
+const CARDS = String.raw`/**
+ * CARDS — a deck, TEEN PATTI hand ranking and INDIAN RUMMY declarations, for games played for FUN: points and pretend
+ * chips only. Real-money play is not something this pack supports (India's online real-money gaming ban, 2025).
+ *
+ *   const deck = shuffle(createDeck(), rng);                     // 52 cards (createDeck({ decks: 2, jokers: 2 }) for rummy)
+ *   const [hands, rest] = deal(deck, 3, 4);                      // 4 players, 3 cards each
+ *   teenPattiHand(hands[0])  → { category: 'pure-sequence', name: 'Pure sequence', … }
+ *   compareTeenPatti(a, b)    → 1 (a wins), -1, or 0 (a tie)
+ *   checkDeclaration(groups, wildRank) → { valid, reason }       // rummy: 13 cards in groups
+ *   bestGrouping(hand, wildRank)       → the grouping with the fewest points (for the computer and for "sort my cards")
+ * A card is { rank: 1..13 (A=1, J=11, Q=12, K=13), suit: 's' | 'h' | 'd' | 'c' }, or a printed joker { rank: 0, suit: 'j' }.
+ */
+import type { Rng } from './dice';
+
+export type Suit = 's' | 'h' | 'd' | 'c' | 'j';
+export interface Card { rank: number; suit: Suit }
+export const SUITS: readonly Suit[] = ['s', 'h', 'd', 'c'];
+const RANK_NAMES = ['JOKER', 'A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+const SUIT_SYMBOL: Record<Suit, string> = { s: '♠', h: '♥', d: '♦', c: '♣', j: '' };
+
+export function cardName(c: Card): string { return c.suit === 'j' ? 'JOKER' : RANK_NAMES[c.rank] + SUIT_SYMBOL[c.suit]; }
+export function isRed(c: Card): boolean { return c.suit === 'h' || c.suit === 'd'; }
+
+export function createDeck(o: { decks?: number; jokers?: number } = {}): Card[] {
+  const out: Card[] = [];
+  for (let d = 0; d < Math.max(1, Math.floor(o.decks ?? 1)); d++) for (const suit of SUITS) for (let rank = 1; rank <= 13; rank++) out.push({ rank, suit });
+  for (let j = 0; j < Math.max(0, Math.floor(o.jokers ?? 0)); j++) out.push({ rank: 0, suit: 'j' });
+  return out;
+}
+
+/** Fisher–Yates with the game's seeded random source. */
+export function shuffleCards(cards: readonly Card[], rng: Rng): Card[] {
+  const a = cards.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+/** Deal 'count' cards to each of 'players', one at a time round the table. Returns the hands and what is left. */
+export function deal(deck: readonly Card[], count: number, players: number): [Card[][], Card[]] {
+  const n = Math.max(1, Math.floor(players)), k = Math.max(0, Math.floor(count));
+  if (n * k > deck.length) throw new Error('not enough cards to deal ' + k + ' to ' + n + ' players');
+  const hands: Card[][] = Array.from({ length: n }, () => []);
+  for (let i = 0; i < n * k; i++) hands[i % n].push(deck[i]);
+  return [hands, deck.slice(n * k)];
+}
+
+// ── TEEN PATTI ──
+export type TeenPattiCategory = 'trail' | 'pure-sequence' | 'sequence' | 'colour' | 'pair' | 'high-card';
+const TP_ORDER: TeenPattiCategory[] = ['high-card', 'pair', 'colour', 'sequence', 'pure-sequence', 'trail'];
+const TP_NAME: Record<TeenPattiCategory, string> = { trail: 'Trail (three of a kind)', 'pure-sequence': 'Pure sequence', sequence: 'Sequence', colour: 'Colour', pair: 'Pair', 'high-card': 'High card' };
+export interface TeenPattiHand { category: TeenPattiCategory; name: string; /** Compared left to right; higher wins. */ score: number[] }
+
+const high = (r: number): number => (r === 1 ? 14 : r);
+
+/** Rank a three-card hand. A-K-Q is the best sequence, then A-2-3, then K-Q-J and down. */
+export function teenPattiHand(cards: readonly Card[]): TeenPattiHand {
+  if (cards.length !== 3 || cards.some((c) => c.suit === 'j' || c.rank < 1 || c.rank > 13)) throw new Error('teen patti needs three ordinary cards');
+  const r = cards.map((c) => high(c.rank)).sort((a, b) => b - a);
+  const flush = cards.every((c) => c.suit === cards[0].suit);
+  const isA23 = r[0] === 14 && r[1] === 3 && r[2] === 2;
+  const straight = (r[0] - r[1] === 1 && r[1] - r[2] === 1) || isA23;
+  // A-2-3 sits between A-K-Q and K-Q-J.
+  const seqValue = isA23 ? 13.5 : r[0];
+  let category: TeenPattiCategory; let score: number[];
+  if (r[0] === r[2]) { category = 'trail'; score = [r[0]]; }
+  else if (straight && flush) { category = 'pure-sequence'; score = [seqValue]; }
+  else if (straight) { category = 'sequence'; score = [seqValue]; }
+  else if (flush) { category = 'colour'; score = r; }
+  else if (r[0] === r[1] || r[1] === r[2]) { category = 'pair'; const pair = r[1]; score = [pair, r[0] === r[1] ? r[2] : r[0]]; }
+  else { category = 'high-card'; score = r; }
+  return { category, name: TP_NAME[category], score: [TP_ORDER.indexOf(category), ...score] };
+}
+
+export function compareTeenPatti(a: readonly Card[], b: readonly Card[]): 1 | -1 | 0 {
+  const x = teenPattiHand(a).score, y = teenPattiHand(b).score;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0);
+    if (d) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+// ── INDIAN RUMMY (13 cards) ──
+export type MeldType = 'pure-sequence' | 'sequence' | 'set';
+const isJoker = (c: Card, wildRank: number): boolean => c.suit === 'j' || c.rank === wildRank;
+
+function naturalRun(ranks: number[]): boolean {
+  for (let i = 1; i < ranks.length; i++) if (ranks[i] !== ranks[i - 1] + 1) return false;
+  return true;
+}
+
+/** Same suit, consecutive, no gaps: Ace low (A-2-3) or high (Q-K-A), never round the corner (K-A-2). */
+function isPureRun(cards: readonly Card[]): boolean {
+  if (cards.length < 3 || cards.some((c) => c.suit === 'j') || !cards.every((c) => c.suit === cards[0].suit)) return false;
+  const low = cards.map((c) => c.rank).sort((a, b) => a - b);
+  const hi = cards.map((c) => high(c.rank)).sort((a, b) => a - b);
+  return naturalRun(low) || naturalRun(hi);
+}
+
+function canRunWithJokers(naturals: readonly Card[], jokers: number): boolean {
+  const total = naturals.length + jokers;
+  if (total < 3) return false;
+  // A group of jokers alone is not a sequence.
+  if (naturals.length === 0) return false;
+  if (!naturals.every((c) => c.suit === naturals[0].suit)) return false;
+  for (const mapRank of [(r: number) => r, high]) {
+    const rs = naturals.map((c) => mapRank(c.rank)).sort((a, b) => a - b);
+    if (new Set(rs).size !== rs.length) continue;
+    const span = rs[rs.length - 1] - rs[0] + 1;
+    if (span - rs.length <= jokers && total <= 13) return true;
+  }
+  return false;
+}
+
+/** What a group of cards is, or null when it is not a valid meld. The wild rank's cards and printed jokers are jokers. */
+export function meldType(cards: readonly Card[], wildRank: number): MeldType | null {
+  if (cards.length < 3) return null;
+  // A wild-rank card in its natural place still makes a pure sequence.
+  if (isPureRun(cards)) return 'pure-sequence';
+  const naturals = cards.filter((c) => !isJoker(c, wildRank));
+  const jokers = cards.length - naturals.length;
+  if (canRunWithJokers(naturals, jokers)) return 'sequence';
+  if (cards.length <= 4 && naturals.length > 0 && naturals.every((c) => c.rank === naturals[0].rank)) {
+    const suits = naturals.map((c) => c.suit);
+    if (new Set(suits).size === suits.length) return 'set';
+  }
+  return null;
+}
+
+/** Card points in rummy: face cards and Aces 10, numbers their value, jokers 0. */
+export function cardPoints(c: Card, wildRank: number): number {
+  if (isJoker(c, wildRank)) return 0;
+  return c.rank === 1 || c.rank >= 11 ? 10 : c.rank;
+}
+
+export interface Declaration { valid: boolean; reason: string }
+
+/** A rummy declaration: every card in a valid group, at least two sequences, at least one of them pure. */
+export function checkDeclaration(groups: readonly (readonly Card[])[], wildRank: number, handSize = 13): Declaration {
+  const count = groups.reduce((n, g) => n + g.length, 0);
+  if (count !== handSize) return { valid: false, reason: 'Every one of the ' + handSize + ' cards must be in a group' };
+  const types = groups.map((g) => meldType(g, wildRank));
+  const bad = types.findIndex((t) => t === null);
+  if (bad >= 0) return { valid: false, reason: 'Group ' + (bad + 1) + ' is not a sequence or a set' };
+  if (!types.includes('pure-sequence')) return { valid: false, reason: 'A pure sequence (no joker) is needed' };
+  if (types.filter((t) => t === 'pure-sequence' || t === 'sequence').length < 2) return { valid: false, reason: 'Two sequences are needed' };
+  return { valid: true, reason: 'Valid declaration' };
+}
+
+/**
+ * Points a grouping leaves the player with: the cards outside valid groups. Without a pure sequence every card counts;
+ * with a pure sequence but no second sequence, everything except the pure sequence counts. Capped at 80.
+ */
+export function handPoints(groups: readonly (readonly Card[])[], wildRank: number): number {
+  const types = groups.map((g) => meldType(g, wildRank));
+  const sum = (cs: readonly Card[]) => cs.reduce((n, c) => n + cardPoints(c, wildRank), 0);
+  const all = groups.reduce((n, g) => n + sum(g), 0);
+  const pure = types.indexOf('pure-sequence');
+  let points: number;
+  if (pure < 0) points = all;
+  else if (types.filter((t) => t === 'pure-sequence' || t === 'sequence').length < 2) points = all - sum(groups[pure]);
+  else points = groups.reduce((n, g, i) => n + (types[i] ? 0 : sum(g)), 0);
+  return Math.min(80, points);
+}
+
+/**
+ * The grouping with the fewest points (exhaustive over the hand: for the lowest card not yet placed, either leave it
+ * loose or start every valid meld that contains it). The last group holds the loose cards. Used for a computer player
+ * and for a "sort my cards" button.
+ */
+export function bestGrouping(hand: readonly Card[], wildRank: number): { groups: Card[][]; points: number } {
+  const n = hand.length;
+  // Every valid meld of 3–5 cards, as index lists.
+  const melds: number[][] = [];
+  const idx = hand.map((_, i) => i);
+  const choose = (start: number, size: number, acc: number[]) => {
+    if (acc.length === size) { if (meldType(acc.map((i) => hand[i]), wildRank)) melds.push(acc.slice()); return; }
+    for (let i = start; i < n; i++) { acc.push(idx[i]); choose(i + 1, size, acc); acc.pop(); }
+  };
+  for (const size of [3, 4, 5]) choose(0, size, []);
+  let best: { groups: Card[][]; points: number } = { groups: [hand.slice()], points: handPoints([hand.slice()], wildRank) };
+  const used = new Array(n).fill(false);
+  const chosen: number[][] = [];
+  const loose: number[] = [];
+  let visits = 0;
+  const walk = (from: number) => {
+    if (++visits > 200000) return;   // a hard bound; real 13-card hands finish far below it
+    let i = from;
+    while (i < n && used[i]) i++;
+    if (i === n) {
+      const groups = [...chosen.map((g) => g.map((k) => hand[k])), loose.map((k) => hand[k])].filter((g) => g.length);
+      const points = handPoints(groups, wildRank);
+      if (points < best.points) best = { groups, points };
+      return;
+    }
+    for (const m of melds) {
+      // Melds are ascending index lists: start only those whose lowest card is this one.
+      if (m[0] !== i || m.some((k) => used[k])) continue;
+      m.forEach((k) => { used[k] = true; }); chosen.push(m);
+      walk(i + 1);
+      chosen.pop(); m.forEach((k) => { used[k] = false; });
+    }
+    used[i] = true; loose.push(i);
+    walk(i + 1);
+    loose.pop(); used[i] = false;
+  };
+  walk(0);
+  return best;
+}
+`;
+
 const INDEX = String.raw`// The India games pack: tested rules engines (the board is drawn by the game).
 export { createRng, rollDie, shuffle } from './dice';
 export type { Rng } from './dice';
@@ -742,6 +955,8 @@ export { createSnakes, takeTurn, squareCell, validateJumps, CLASSIC_JUMPS, DEFAU
 export type { SnakesRules, SnakesState, SnakesTurn } from './snakes';
 export { createChess, parseFen, toFen, legalMoves as chessMoves, movesFrom, play as playChess, status as chessStatus, inCheck, attacked, perft, evaluate, bestMove, square, squareName, colourOf, START_FEN } from './chess';
 export type { ChessState, ChessMove, ChessStatus, Colour, Piece, Cell, Castling, MoveFlag } from './chess';
+export { createDeck, shuffleCards, deal, cardName, isRed, SUITS, teenPattiHand, compareTeenPatti, meldType, cardPoints, checkDeclaration, handPoints, bestGrouping } from './cards';
+export type { Card, Suit, TeenPattiCategory, TeenPattiHand, MeldType, Declaration } from './cards';
 `;
 
 const FILES: Record<string, string> = {
@@ -749,10 +964,11 @@ const FILES: Record<string, string> = {
   [`${BOARD_DIR}/ludo.ts`]: LUDO,
   [`${BOARD_DIR}/snakes.ts`]: SNAKES,
   [`${BOARD_DIR}/chess.ts`]: CHESS,
+  [`${BOARD_DIR}/cards.ts`]: CARDS,
   [`${BOARD_DIR}/index.ts`]: INDEX,
 };
 
-export const BOARD_GAME_MODULES: readonly string[] = ['dice', 'ludo', 'snakes', 'chess'];
+export const BOARD_GAME_MODULES: readonly string[] = ['dice', 'ludo', 'snakes', 'chess', 'cards'];
 
 const EXAMPLE = [
   "import { createLudo, legalMoves, move, pass, chooseMove, cellOf, createRng, rollDie, type LudoState } from './game/board';",
@@ -794,10 +1010,10 @@ export function generateBoardGames(include?: string[]): BoardGamesResult {
     files,
     dependencies: [],
     instructions:
-      `Added the India games pack (${Object.keys(files).length} files under ${BOARD_DIR}): tested rules for Ludo, Snakes & Ladders and chess, `
+      `Added the India games pack (${Object.keys(files).length} files under ${BOARD_DIR}): tested rules for Ludo, Snakes & Ladders, chess and card games (Teen Patti, rummy), `
       + 'a seeded die, and board geometry for drawing.\n'
       + '```ts\n' + EXAMPLE + '\n```\n'
-      + 'RULES: the game\'s rules come from these engines — never re-implement Ludo, Snakes & Ladders or chess logic. For chess, highlight movesFrom(game, square) when a piece is tapped, ask which piece on a promotion, show check, and end the game on chessStatus (checkmate, stalemate and each draw named). Draw the board from '
+      + 'RULES: the game\'s rules come from these engines — never re-implement Ludo, Snakes & Ladders or chess logic. For chess, highlight movesFrom(game, square) when a piece is tapped, ask which piece on a promotion, show check, and end the game on chessStatus (checkmate, stalemate and each draw named). Card games are for FUN: points or pretend chips only — never real money, never a deposit, a wallet top-up or a cash prize (India bans real-money online games). Draw the board from '
       + 'cellOf / squareCell, animate a token along r.path, and say what happened (a capture, a token home, another roll, a pass when '
       + 'nothing can move). Let the player tap the token they want from legalMoves; highlight those tokens. A computer opponent '
       + 'uses chooseMove. House rules are options (rules: { ... }), not new code.',

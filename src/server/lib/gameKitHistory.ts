@@ -177,6 +177,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "d35a8cd244f22d8cd904c02e4433d23ff6ba11548a7468585ce9e6ca97cbd8ff",
     "0fe39b5c79c7a12b6ebe68b056e70521921795677a1a4387adbd6ae9a204f19e"
   ],
+  "src/game/board/cards.ts": [
+    "a7ca14416a63e05180341db601ba7f7bc5c44165710e4c23e75282210ce88c44"
+  ],
   "src/game/board/chess.ts": [
     "ba9aaca73e9b503b60d4daedf08d3b4a5db94a68d2d083b0dcc7b2032ddaca98"
   ],
@@ -185,7 +188,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/board/index.ts": [
     "905e8c74c0e029a99fae267cbc835304b5c2c519dfd0057d7db1adc79164e2f3",
-    "20af6ddf6766ebc0010edc0f9ba8c3479fe6d755f00fe43bdd0d8094fbf061cc"
+    "20af6ddf6766ebc0010edc0f9ba8c3479fe6d755f00fe43bdd0d8094fbf061cc",
+    "51bd385e993d8765a1c86c568a600f12c9466fe9a30cb8ae5f8ea84ce6abaf67"
   ],
   "src/game/board/ludo.ts": [
     "20d771e554d6d8ac6f292298a5a2299998123e637369d6497ae3ab591500917d"

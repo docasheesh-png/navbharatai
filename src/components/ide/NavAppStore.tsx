@@ -7,6 +7,7 @@ import {
   CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package, Flag,
   Rocket, ImagePlus, Clipboard, Copy, User, ChevronLeft, ChevronRight,
 } from 'lucide-react';
+import { StoreReviewAccess } from './StoreReviewAccess';
 import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../lib/authHeaders';
 import { withStoreAdminSession } from '../../lib/storeAdminHeaders';
@@ -391,11 +392,26 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   const [webActionError, setWebActionError] = useState('');
   const liveRef = useRef(true);
   const statusReportedRef = useRef(false);
-  useEffect(() => () => { liveRef.current = false; }, []);
+  const [statusLoading, setStatusLoading] = useState(true);
+  const statusRequestRef = useRef(0);
+  const reviewReadRef = useRef({ apk: 0, web: 0, reports: 0 });
+  useEffect(() => { liveRef.current = true; return () => { liveRef.current = false; }; }, []);
 
   const loadStatus = useCallback(async () => {
+    const request = ++statusRequestRef.current;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+      // Token refresh may itself be pending before fetch begins. End the visible wait too.
+      if (liveRef.current && request === statusRequestRef.current) {
+        setStatus(null);
+        setStatusProblem('The access check timed out. Check your connection and try again.');
+        setStatusLoading(false);
+      }
+    }, 15_000);
+    if (liveRef.current) { setStatusLoading(true); setStatus(null); setStatusProblem(null); setReviewError(''); }
     try {
-      const res = await fetch('/api/nav-store/status', { headers: await storeHeaders() });
+      const res = await fetch('/api/nav-store/status', { headers: await storeHeaders(), signal: controller.signal });
       const data = await res.json().catch(() => null);
       // Only the real status may become the status. An `{ error }` body from a guard (429 / 401 / 500)
       // used to be stored as if it were one, and `.missing.join` then crashed the whole screen.
@@ -410,10 +426,18 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
           body: JSON.stringify({ ...storeStatusReport(res.status, read.problem, nativePlatformName()), url: window.location.href, ts: Date.now() }),
         }).catch(() => { /* reporting must never change what the screen shows */ });
       }
-      if (!liveRef.current) return;
+      if (!liveRef.current || request !== statusRequestRef.current) return;
       setStatus(read.status);
       setStatusProblem(read.problem);
-    } catch { /* the browse tab still works from cache-less empty state */ }
+    } catch {
+      if (liveRef.current && request === statusRequestRef.current) {
+        setStatus(null);
+        setStatusProblem('Could not verify store access. Check your connection and try again.');
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (liveRef.current && request === statusRequestRef.current) setStatusLoading(false);
+    }
   }, []);
 
   const loadApps = useCallback(async () => {
@@ -451,19 +475,24 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
    * again to take it down. Pending stays first, because that is the work; approved follows as a record.
    */
   const loadQueue = useCallback(async () => {
+    const generation = statusRequestRef.current;
+    const request = ++reviewReadRef.current.apk;
+    const current = () => liveRef.current && generation === statusRequestRef.current && request === reviewReadRef.current.apk;
     try {
       const [pendingRes, approvedRes] = await Promise.all([
         fetch('/api/nav-store/admin/queue?status=pending', { headers: await storeHeaders() }),
         fetch('/api/nav-store/admin/queue?status=approved', { headers: await storeHeaders() }),
       ]);
+      if (!pendingRes.ok || !approvedRes.ok) throw new Error('queue unavailable');
       const pending = await pendingRes.json().catch(() => null);
       const approved = await approvedRes.json().catch(() => null);
-      if (!liveRef.current) return;
+      if (!Array.isArray(pending?.apps) || !Array.isArray(approved?.apps)) throw new Error('invalid queue');
+      if (!current()) return;
       setQueue(mergeReviewQueue<QueueApp>(
         Array.isArray(pending?.apps) ? pending.apps : [],
         Array.isArray(approved?.apps) ? approved.apps : [],
       ));
-    } catch { /* shown as an empty queue */ }
+    } catch { if (current()) setReviewError('Some moderation lists could not be loaded. Retry the access check to reload them.'); }
   }, []);
 
   // FOR YOU ⇄ NEWEST (admin 2026-10-14). Newest = the exact old request (chronological). For You asks the
@@ -610,6 +639,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   }, []);
 
   const loadWebQueue = useCallback(async () => {
+    const generation = statusRequestRef.current;
+    const request = ++reviewReadRef.current.web;
+    const current = () => liveRef.current && generation === statusRequestRef.current && request === reviewReadRef.current.web;
     try {
       // FLAGGED FIRST. A reviewer working top-down must meet the apps the scanner is worried about
       // before the ordinary ones, or the queue's order decides what actually gets looked at.
@@ -620,21 +652,28 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         fetch('/api/nav-store/web/admin/queue', { headers: await storeHeaders() }),
         fetch('/api/nav-store/web/admin/queue?status=listed', { headers: await storeHeaders() }),
       ]);
+      if (!reqRes.ok || !liveRes.ok) throw new Error('queue unavailable');
       const requests = reqRes.ok ? await reqRes.json().catch(() => null) : null;
       const live = liveRes.ok ? await liveRes.json().catch(() => null) : null;
-      if (liveRef.current) setWebQueue(mergeReviewQueue<WebApp>(
+      if (!Array.isArray(requests?.apps) || !Array.isArray(live?.apps)) throw new Error('invalid queue');
+      if (current()) setWebQueue(mergeReviewQueue<WebApp>(
         Array.isArray(requests?.apps) ? requests.apps : [],
         Array.isArray(live?.apps) ? live.apps : [],
       ));
-    } catch { /* shown as an empty queue */ }
+    } catch { if (current()) setReviewError('Some moderation lists could not be loaded. Retry the access check to reload them.'); }
   }, []);
 
   const loadReports = useCallback(async () => {
+    const generation = statusRequestRef.current;
+    const request = ++reviewReadRef.current.reports;
+    const current = () => liveRef.current && generation === statusRequestRef.current && request === reviewReadRef.current.reports;
     try {
       const res = await fetch('/api/nav-store/web/admin/reports', { headers: await storeHeaders() });
+      if (!res.ok) throw new Error('reports unavailable');
       const data = await res.json().catch(() => null);
-      if (liveRef.current) setReports(Array.isArray(data?.reports) ? data.reports : []);
-    } catch { /* shown as no reports */ }
+      if (!Array.isArray(data?.reports)) throw new Error('invalid reports');
+      if (current()) setReports(Array.isArray(data?.reports) ? data.reports : []);
+    } catch { if (current()) setReviewError('Some moderation lists could not be loaded. Retry the access check to reload them.'); }
   }, []);
 
   /** Owner action on one of MY web apps; the store reloads so the change is visibly real. */
@@ -695,8 +734,10 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   useEffect(() => { if (tab !== 'review') setReviewSection(null); }, [tab]);
   useEffect(() => {
     if (tab === 'mine') { void loadMine(); void loadWebMine(); void loadOwned(); }
-    if (tab === 'review') { void loadQueue(); void loadWebQueue(); void loadReports(); }
-  }, [tab, loadMine, loadQueue, loadWebMine, loadWebQueue, loadOwned]);
+  }, [tab, loadMine, loadWebMine, loadOwned]);
+  useEffect(() => {
+    if (tab === 'review' && !statusLoading && status?.isAdmin) { void loadQueue(); void loadWebQueue(); void loadReports(); }
+  }, [tab, statusLoading, status?.isAdmin, loadQueue, loadWebQueue, loadReports]);
 
   /** Returns whether the server SAVED the decision — a refused or failed one is said, never silent. */
   const decide = useCallback(async (id: string, decision: 'approved' | 'rejected' | 'removed', note?: string): Promise<boolean> => {
@@ -1526,8 +1567,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
             "Report sent — a person will look at it" was a promise the code could not keep. This is
             the person. Newest first, with the app it is about and a way to open or remove it. */}
         {/* Reported App Mart COMMENTS — the moderation queue Play's and Apple's user-content rules require. */}
+        {tab === 'review' && (
+          <StoreReviewAccess loading={statusLoading} isAdmin={status?.isAdmin ?? false} problem={statusProblem}
+            onRetry={() => { void loadStatus(); }}
+            onAdminLogin={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'admin' } }))} />
+        )}
         {tab === 'review' && status?.isAdmin && reviewError && (
-          <p role="alert" className="mb-4 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-danger">{reviewError}</p>
+          <p role="alert" className="mb-4 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-danger">{reviewError} <button type="button" className="underline" onClick={() => { void loadStatus(); }}>Retry access and lists</button></p>
         )}
         {/* ── THE REVIEW HUB (admin 2026-10-05: "instant app aur apk app, dono aise bahar hi hai … pahle 2 button
             banao, 'manage app, manage apk' aur uske andar apps dikhe"). Three buttons, each saying what is

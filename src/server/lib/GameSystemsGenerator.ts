@@ -529,7 +529,7 @@ export class ProjectileSystem {
     slot.radius = options.radius ?? 0.15;
     slot.gravity = options.gravity ?? 0;
     slot.ownerId = options.ownerId;
-    if (!options.silent) events.emit('WEAPON_FIRED', { position: { ...options.position } });
+    if (!options.silent) events.emit('WEAPON_FIRED', { position: { ...options.position }, ownerId: options.ownerId });
     return true;
   }
 
@@ -855,7 +855,7 @@ export class Weapon {
       });
     }
     // ONE shot is one bang and one flash, however many pellets it carried.
-    events.emit('WEAPON_FIRED', { position: { ...muzzle }, kind: this.kind });
+    events.emit('WEAPON_FIRED', { position: { ...muzzle }, kind: this.kind, ownerId });
     this.kick += this.spec.recoil;
     this.bloom = Math.min(MAX_BLOOM, this.bloom + 0.35);
     if (this.ammo === 0 && this.spec.magazine === 1) this.reload();   // a bow nocks the next arrow itself
@@ -898,12 +898,12 @@ export class MeleeWeapon {
   private windup = -1;
   constructor(public readonly damage = 30, public readonly rate = 1.6, public readonly range = 1.8, public readonly arc = Math.PI * 0.6, public readonly strikeDelay = 0.12) {}
 
-  /** Start a swing; false while the last one is still recovering. */
-  swing(): boolean {
+  /** Start a swing; false while the last one is still recovering. ownerId names who swings (an enemy's id), so only the player's own swing poses the player's body. */
+  swing(ownerId?: string): boolean {
     if (this.cooldown > READY || this.windup >= 0) return false;
     this.windup = this.strikeDelay;
     this.cooldown = 1 / this.rate;
-    events.emit('MELEE_SWING', {});
+    events.emit('MELEE_SWING', { ownerId });
     return true;
   }
 
@@ -1141,8 +1141,11 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       'for (const hit of bullets.update(dt, targets)) (hit.target.ref as Health).damage(hit.damage);\n' +
       '// A GUN is a Weapon, not one projectile per click (weapon.ts):\n' +
       "const gun = new Weapon('rifle');   // pistol | rifle | smg | shotgun | sniper | bow\n" +
-      'gun.update(dt, input.isDown("attack"), muzzleWorldPos, aimDir, bullets); // camera.pitch += gun.kick\n' +
+      '// isDown OR wasPressed: a quick tap that goes down and up inside one step must still fire.\n' +
+      'gun.update(dt, input.isDown("attack") || input.wasPressed("attack"), muzzleWorldPos, aimDir, bullets); // camera.pitch += gun.kick\n' +
       'const sword = new MeleeWeapon(30); if (input.wasPressed("attack")) sword.swing();\n' +
+      '// An ENEMY\'s gun or sword passes its id, so only the player\'s own shot poses the player\'s body:\n' +
+      '// enemyGun.update(dt, wantsShot, enemyMuzzle, enemyAim, bullets, enemy.id); enemySword.swing(enemy.id);\n' +
       'for (const t of sword.update(dt, player.position, player.rotation.y, targets)) (t.ref as Health).damage(sword.damage);\n' +      '// The RHYTHM and the FLOW (director.ts): build → peak → breather, and difficulty that follows the player.\n' +
       "const director = new Director({ gameId: 'my-game' });   // adapt: false when scores are compared\n" +
       'const offDirector = director.bind();                   // listens to PLAYER_DAMAGED / DIED / ENEMY_DIED\n' +
@@ -1167,6 +1170,9 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       '  and recoil — Weapon does all of it. A shotgun is many pellets and ONE bang. An arrow falls.\n' +
       '- A melee swing hits what is IN FRONT, in reach, once per swing — MeleeWeapon, never a radius check\n' +
       '  every frame.\n' +
+      '- Every action is SEEN, not only computed: the shell\'s player body plays a recoil when Weapon fires, a sweep\n' +
+      '  when MeleeWeapon swings and a punch otherwise. For any other body or action call its pose yourself\n' +
+      '  (ctx.hero.act(\'kick\'), an enemy humanoid\'s act(\'swing\') on its telegraph strike).\n' +
       '- A run needs RHYTHM: Director gives build → peak → a breather with no new enemies (canSpawn is\n' +
       '  false), and moves difficulty slowly (≤1.2%/s) toward what THIS player handles, easing at once after\n' +
       '  two quick deaths. It changes the challenge, never the score; pass adapt: false for a leaderboard.\n' +

@@ -20,6 +20,7 @@ import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
 import { TODO_RIDES_WITH_WORK } from './todoOnlyTurn';
 import { DEVICE_POWERS_RULE } from './devicePowers';
 import { BOOLEAN_DISCRIMINANT_RULE } from './booleanDiscriminant';
+import { ACTION_VISIBLE_RULE } from './actionVisibility';
 import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
 import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE, LIGHT_THEME_BY_DEFAULT_RULE } from './noEvalRule';
@@ -986,6 +987,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '         BEHAVIOUR new Weapon(kind) / new MeleeWeapon() from src/game/systems/weapon.ts (fire rate, semi/auto,',
     '         magazine + reload, spread that blooms, recoil, pellets, falling arrows; a swing that lands once,',
     '         in front). One projectile per click is not a gun; a radius check every frame is not a sword.',
+    // 🎬 Admin 2026-11-19: "fire button press kiya goli chalne lagi par character goli chalate huye dikha nahi".
+    ACTION_VISIBLE_RULE,
     '         A building is createHouse() (door, windows, sun-shades, flat roof + water tank or clay tiles) —',
     '         never a box with a cone on top. Stand vehicles on the road at y = ROAD_SURFACE_Y.',
     '         A hand-written box-with-wheels beside these reads as a bug, not a style. If an object you',

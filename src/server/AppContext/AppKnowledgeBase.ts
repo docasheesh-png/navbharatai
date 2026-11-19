@@ -741,6 +741,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['download', 'download kahan gaya', 'file kahan gayi', 'save nahi hua', 'download nahi hua', 'downloaded file', 'where is my file', 'save to files', 'iphone download', 'android download', 'documents folder', 'export', 'csv', 'zip download', 'report download', 'share sheet', 'file save'],
   },
   {
+    id: 'game_actions_visible',
+    name: 'Game actions you can see — fire, attack, jump, kick, drift',
+    path: 'NavBharatAI Pro → chat → ask for any game with actions (a shooter, a fighting game, a racing game); the built game shows them by itself',
+    description: 'In games NavBharatAI builds, every action button is SEEN, not only computed. When the player presses Fire, the character\'s arms raise the gun and kick back with each shot; Attack with empty hands throws a punch; a sword sweeps overhead and across; Jump throws the arms up at the launch, the body tucks in the air and squashes on landing; taking a hit makes the body flinch; Use reaches forward; Kick and Throw have their own moves. A press is never lost: a tap during the short freeze after a hit still counts, a quick tap still fires a gun, and Fire, Shoot and Punch all answer to the same on-screen Attack button and to the F or J key on a keyboard. Racing games get a real DRIFT: hold the Drift button (or Space) while turning at speed and the car slides sideways, the body leans out and smoke pours from the rear tyres. If a game brings its own character model, the builder is told to animate it on the same frame as the action, and the build is checked for it. In 2D games the builder shows the action on the sprite (a swing arc, a muzzle flash and recoil, a squash on jump).',
+    howToUse: 'Nothing to switch on. Ask for the game you want; to change a move, ask in your own words (for example "fire karte waqt character recoil kare", "jump pe character ke haath upar jaye", "drift button add karo").',
+    relatedFeatures: ['athree_map', 'world_2d'],
+    keywords: ['fire animation', 'goli chalate hue dikhe', 'character hilta nahi', 'action dikhta nahi', 'attack animation', 'punch', 'kick', 'sword swing', 'talwar', 'jump animation', 'recoil', 'drift', 'drift button', 'handbrake', 'tyre smoke', 'button kaam nahi karta', 'fire button', 'shooting game', 'pubg jaisa', 'fight game', 'action button'],
+  },
+  {
     id: 'world_2d',
     name: '2D world — a big map for 2D games',
     path: 'NavBharatAI Pro → chat → ask for a 2D game with a big map (for example "2D game banao jiska map bahut bada ho" or "top-down game jisme kahin bhi ghoom sakun")',

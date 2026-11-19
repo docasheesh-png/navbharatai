@@ -102194,6 +102194,7 @@ To decide next (owner):
   billed sandboxes, the −₹16,102 margin (admin decision), BUILD_BLOCKED_NO_CREDITS on new users, two reason-less log
   lines, the Grievance Officer env.
 
+**2026-11-18, later: #4298 merged** — Q-2754 Q-2755 Q-2756 closed (3). The admin Home autopsy stays NOT COMPLETE: Q-2757…Q-2764 open (Q-2761, Q-2764 blocked on the admin).
 ## 2026-11-18 — Traffic Manager V2, P4: decision records + complete SLO counters (observation only)
 
 The code is in `src/server/AI/TrafficRegistry/decisionRecords.ts`. It hooks the one chat boundary, `observeChatOutcome`, which every chat route passes on both the gateway and the legacy paths. `UniversalAIRouter` passes which path answered.

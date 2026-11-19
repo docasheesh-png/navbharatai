@@ -1,0 +1,13 @@
+{
+  "evidenceType": "synthetic-fixtures-and-source-pins",
+  "privateReportPayloadIncluded": false,
+  "reportRetained": true,
+  "truncationComplete": true,
+  "cases": [
+    "free Weak new website build on Surplus, SUCCEEDED, gate YELLOW, not charged",
+    "the deep bug-hunt offer at ~754 s read abort.signal.aborted as false; CHANGE_RECORDED at ~792 s said 'status stopped'",
+    "no USER_STOPPED_BUILD, OUTCOME_* or advisory-cap code was recorded, so the abort came from a platform mechanism after the result"
+  ],
+  "fixes": { "F1": "src/server/AgentV3/buildAbortCause.ts changeWasStopped; routes/agentv3.ts settle passes it" },
+  "test": "tests/br2002Autopsy.test.ts"
+}

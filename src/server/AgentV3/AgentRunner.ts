@@ -37,6 +37,8 @@ import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { serviceRecommendationEvent } from '../analyzer/serviceRecommendation';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
+import { runWithRunnerSignal, isPassBudgetCause } from './runnerSignal';
+import { isWithheldTool, withheldToolMessage } from './repairScope';
 import { abortCauseOf, abortSummary, buildClockMinutes, timedOutSummary, stalledModelSummary, stoppedCallFields, type SeedState, type AbortCause } from './buildAbortCause';
 import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, buildBudgetNarration, type BudgetStage } from './buildBudgetSteer';
@@ -134,6 +136,12 @@ export interface AgentRunnerOptions {
    * 20-30 minutes (e.g. when a broken preview can't be verified). 0/undefined = no time cap.
    */
   maxBuildMs?: number;
+  /**
+   * The credited time this build has spent WAITING FOR THE USER so far (workClock.ts, failedbr #2431). The runner's
+   * deadline, its budget steer and its "half the build time is used" line subtract it, so a key popup is never counted
+   * as building — the promise the live line makes. Absent ⇒ wall time, exactly as before.
+   */
+  pausedMs?: () => number;
   /**
    * E4 — per-model-turn hard timeout (ms). The wall-clock watchdog above is only checked BETWEEN
    * turns, so a single provider call that hangs (connection open, no bytes, no error) would block the
@@ -263,6 +271,11 @@ export interface AgentRunnerOptions {
    * platform's re-check needs, after which the whole repair is undone (autopsy 6cd698cc, repairScope.ts).
    */
   focusedRepair?: boolean;
+  /**
+   * Tools this runner was built WITHOUT on purpose (Q-2916): a model that names one is refused, not obeyed. Set only by
+   * the platform-checked repairs (`REPAIR_WITHHELD_TOOLS`); absent everywhere else, which keeps today's behaviour.
+   */
+  withheldTools?: ReadonlySet<string>;
   /**
    * The run's instruction comes from one of the platform's own checks (a repair pass), not from the
    * user. The model is told so, so its reply — narrated into the user's chat — never thanks the user
@@ -581,6 +594,12 @@ export class AgentRunner {
   constructor(private readonly opts: AgentRunnerOptions) {}
 
   async run(userPrompt: string): Promise<AgentRunResult> {
+    // Every tool this run executes — and every specialist it delegates to — sees THIS run's stop signal
+    // (runnerSignal.ts, autopsy aba63ead): a pass whose budget ended can no longer leave a child writing.
+    return runWithRunnerSignal(this.opts.signal as AbortSignal | undefined, () => this.runInZone(userPrompt));
+  }
+
+  private async runInZone(userPrompt: string): Promise<AgentRunResult> {
     const {
       client,
       dispatcher,
@@ -636,6 +655,11 @@ export class AgentRunner {
     const modelKeepRecent = Math.max(2, parseInt(process.env.AGENTV3_MODEL_COMPACT_KEEP_RECENT || '', 10) || 6);
     const modelMaxOldToolResultChars = Math.max(500, parseInt(process.env.AGENTV3_MODEL_COMPACT_MAX_CHARS || '', 10) || 2_000);
     const buildStartMs = Date.now();
+    // The user-wait credit (workClock.ts): read once at the start, then subtracted as it grows.
+    const pausedTotal = (): number => { try { const v = Number(this.opts.pausedMs?.() ?? 0); return Number.isFinite(v) && v > 0 ? v : 0; } catch { return 0; } };
+    const pausedAtStart = pausedTotal();
+    /** "Now" on this runner's WORKING clock — wall time minus the user waits since it started. */
+    const workNow = (): number => Date.now() - (pausedTotal() - pausedAtStart);
     /**
      * 🔴 THE TIME BUDGET, TOLD TO THE MODEL (f04421ef autopsy, 2026-09-13).
      *
@@ -969,8 +993,18 @@ export class AgentRunner {
           minutes: buildClockMinutes(maxBuildMs, Date.now(), events.startedAt),
           ...endingContext(),
         });
-        await persist('stopped');
-        events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
+        // 🔴 A PASS'S OWN BUDGET IS NEVER THE BUILD'S ENDING (autopsy aba63ead, failedbr #2475). A repair runner
+        // shares the build's event stream and conversation, so its terminal `done` used to become the BUILD's:
+        // the report's `ok` turned false and its summary read "This repair had used its time…" on a build that
+        // had delivered, and the chat was marked stopped. A pass-budget ending is reported the way a specialist's
+        // is — a non-terminal `agent_done` — and the conversation keeps the status the build gives it.
+        if (isPassBudgetCause(cause)) {
+          await persist();
+          events.emit({ type: 'agent_done', agent: agentRole, ok: false, summary, ts: Date.now() });
+        } else {
+          await persist('stopped');
+          events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
+        }
         // BR1988 — a MEASUREMENT for the route, never a decision here: the user's own Stop ended this run
         // before the readiness check (which was eligible on this turn) ever judged the app finished.
         let stoppedBeforeReady = false;
@@ -1010,7 +1044,7 @@ export class AgentRunner {
         // WATCHDOG — wall-clock cap. Once the build has run past its time limit, stop honestly with
         // whatever was produced instead of looping for 20-30 minutes. A build that DID write files is
         // reported ok:true (the work is real and resumable); one that produced nothing is ok:false.
-        if (buildTimedOut(buildStartMs, maxBuildMs, Date.now())) {
+        if (buildTimedOut(buildStartMs, maxBuildMs, workNow())) {
           const minutes = buildClockMinutes(maxBuildMs, Date.now(), events.startedAt) ?? Math.round((maxBuildMs as number) / 60000);
           const ending = endingContext();
           const builtSomething = ending.builtSomething;
@@ -1669,6 +1703,13 @@ export class AgentRunner {
           if (loopGuardOn && isProbeBanned(repeatProbe, tu.name, tu.input)) {
             return { tool_use_id: tu.id, content: bannedProbeMessage(tu.name), is_error: true };
           }
+          // 🔴 A WITHHELD TOOL IS REFUSED, NOT MERELY HIDDEN (Q-2916, failedbr #2475). A repair the platform checks is
+          // built without a browser and without delegation (repairScope.ts) — but leaving a tool out of the list only
+          // hides it; a model that names it anyway used to have it run. Narrow on purpose: only a runner that DECLARES
+          // `withheldTools` refuses them (the architect's dynamic toolset loads tools on demand and is untouched).
+          if (isWithheldTool(tu.name, this.opts.withheldTools, offeredToolNames)) {
+            return { tool_use_id: tu.id, content: withheldToolMessage(tu.name), is_error: true };
+          }
           // A MADE-UP TOOL NAME WITH A REAL TOOL'S SHAPE RUNS AS THAT TOOL (queue Q-145, toolAlias.ts).
           const aliasTo = resolveToolAlias(tu.name, tu.input, offeredToolNames);
           if (aliasTo) {
@@ -1848,7 +1889,7 @@ export class AgentRunner {
         // message the runner already appends, so it costs no call and cannot block a build.
         let budgetText: string | null = null;
         try {
-          const bs = budgetSteer(Date.now() - buildStartMs, maxBuildMs ?? 0, budgetStagesSent);
+          const bs = budgetSteer(workNow() - buildStartMs, maxBuildMs ?? 0, budgetStagesSent);
           if (bs) {
             budgetStagesSent.add(bs.stage);
             budgetText = bs.text;
@@ -1858,7 +1899,7 @@ export class AgentRunner {
           // runner's remaining budget plus what had passed before it started.
           if (typeof maxBuildMs === 'number' && maxBuildMs > 0 && events.budgetStagesSaid) {
             const origin = typeof events.startedAt === 'number' ? events.startedAt : buildStartMs;
-            const said = buildBudgetNarration(Date.now() - origin, (buildStartMs - origin) + maxBuildMs, events.budgetStagesSaid);
+            const said = buildBudgetNarration(Date.now() - origin - pausedTotal(), (buildStartMs - origin - pausedAtStart) + maxBuildMs, events.budgetStagesSaid);
             if (said) events.emit({ type: 'narration', agent: agentRole, text: said, ts: Date.now() });
           }
         } catch { /* the budget steer is advisory — it must never break a build */ }

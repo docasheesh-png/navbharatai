@@ -132,10 +132,27 @@ export const DEFAULT_ACTIONS: ActionMap = {
   jump: ['Space'],
   sprint: ['ShiftLeft', 'ShiftRight'],
   interact: ['KeyE'],
-  attack: ['Mouse0'],
+  // A keyboard player can attack too (it was the mouse button only, so a laptop with no mouse could never fire).
+  attack: ['Mouse0', 'KeyF', 'KeyJ'],
   aim: ['Mouse2'],
   pause: ['Escape'],
+  kick: ['KeyK'],
+  reload: ['KeyR'],
+  drift: ['Space'],
 };
+
+/**
+ * Names that MEAN the same action (admin 2026-11-19: "fire button press kiya … kabhi kabhi action bhi nahi hota").
+ * A game that reads 'fire' or 'shoot' while the on-screen button sets 'attack' heard nothing: its action had no key
+ * and no button. Every name in a group answers to the keys AND the buttons of every other name in it.
+ */
+export const ACTION_GROUPS: readonly (readonly string[])[] = [
+  ['attack', 'fire', 'shoot', 'punch', 'strike', 'melee', 'hit', 'slash'],
+  ['interact', 'use', 'action'],
+  ['sprint', 'run', 'boost', 'nitro'],
+  ['drift', 'handbrake'],
+];
+const GROUP_OF: Record<string, readonly string[]> = Object.fromEntries(ACTION_GROUPS.flatMap((g) => g.map((name) => [name, g])));
 
 export class Input {
   private down = new Set<string>();
@@ -193,7 +210,11 @@ export class Input {
     }
   }
 
-  private codes(action: string): string[] { return this.actions[action] || []; }
+  private codes(action: string): string[] {
+    const group = GROUP_OF[action];
+    if (!group) return this.actions[action] || [];
+    return group.flatMap((name) => this.actions[name] || []);
+  }
 
   /** Held right now. */
   isDown(action: string): boolean { return this.codes(action).some((c) => this.down.has(c)); }
@@ -215,10 +236,16 @@ export class Input {
     return len > 1 ? { x: x / len, y: y / len } : { x, y };
   }
 
-  /** Call AFTER update. Clears the one-frame edges and the accumulated look delta. */
-  endFrame(): void {
-    this.pressed.clear();
-    this.released.clear();
+  /**
+   * Call AFTER update. Clears the one-frame edges and the accumulated look delta. keepPresses = true keeps the
+   * press/release edges for the next frame: a hit-stop freeze passes it, so a press made during the freeze is
+   * still seen when the game runs again instead of being wiped unseen.
+   */
+  endFrame(keepPresses = false): void {
+    if (!keepPresses) {
+      this.pressed.clear();
+      this.released.clear();
+    }
     this.lookX = 0;
     this.lookY = 0;
   }

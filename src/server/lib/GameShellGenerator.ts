@@ -48,9 +48,9 @@ import { groundScene } from './three/surfaces';
 import { interactHouseDoor, updateHouseDoors, type DoorOccupant } from './three/buildings';
 import { setSceneColliders } from './three/collision';
 import { CameraRig, type CameraKind } from './three/camera';
-import { watchVehicles, isVehicle } from './three/objects';
+import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift } from './three/objects';
 import { CharacterController } from './play/character';
-import { createHumanoid, type Humanoid } from './three/humanoid';
+import { createHumanoid, type Humanoid, type HumanoidAction } from './three/humanoid';
 import { ParticleSystem } from './fx/particles';
 import { audio } from './fx/audio';
 import { bindGameFeedback } from './fx/feedback';
@@ -106,6 +106,15 @@ export interface GameOptions {
   playerBody?: THREE.Object3D | false;
   /** Shirt colour of the default body, so the hero stands out from the world. */
   playerColor?: number;
+  /**
+   * Which POSE the default body plays when an action button is pressed — so every button is SEEN doing its thing
+   * (admin 2026-11-19: "jump, action, fight, fire etc me action ke movement dikhne chahiye"). Default:
+   * { attack: 'auto', interact: 'use' } — 'auto' is the gun's recoil when a Weapon fired, a sword sweep when a
+   * MeleeWeapon swung, a punch otherwise. Jumps, landings and hits are posed from their events. Add your own
+   * actions ({ kick: 'kick', throw: 'throw' }); false turns one off. Poses: punch, swing, fire, kick, throw, jump,
+   * land, hit, use. A body of your own (playerBody) is not posed: call its own animation on those presses.
+   */
+  actionPoses?: Record<string, HumanoidAction | 'auto' | false>;
 }
 
 export interface GameContext {
@@ -125,6 +134,12 @@ export interface GameContext {
    * only followed when you say so — and once you call this, your choice wins, null included.
    */
   follow: (object: THREE.Object3D | null) => void;
+  /**
+   * The default player body (createHumanoid), or null when the game brought its own or is first-person. It already
+   * plays the action poses for the buttons (see actionPoses); call ctx.hero.act('kick') yourself for anything else
+   * the game does — a throw, a reach, a flinch.
+   */
+  hero: Humanoid | null;
 }
 
 export class Game {
@@ -175,6 +190,11 @@ export class Game {
   private setupDone = false;
   /** The default body (createHumanoid), when the game did not bring its own. */
   private hero: Humanoid | null = null;
+  /** A gun fired / a sword swung during this step — what an 'auto' attack pose becomes. */
+  private firedThisStep = false;
+  private swungThisStep = false;
+  /** The attack button is down or went down this step (read before the game's update). */
+  private attackHeldThisStep = false;
   private touch: TouchControls | null = null;
   /** The game left the touch layout to us (no buttons, no layout of its own) — so a car gets pedals. */
   private readonly touchLayoutIsOurs: boolean;
@@ -236,7 +256,9 @@ export class Game {
     // Remember what the player's input looks like, so driveVehicle(car, s, ctx.input.axis(), dt) names
     // the PLAYER's car (see playerVehicle). Same values, same object — only now it is recognisable.
     const readAxis = this.input.axis.bind(this.input);
-    this.input.axis = () => { const a = readAxis(); this.playerAxes.add(a); return a; };
+    this.input.axis = () => { const a = readAxis(); this.playerAxes.add(a); notePlayerAxis(a); return a; };
+    // A drifting car pours tyre smoke where its rear wheels are (driveVehicle reports it).
+    this.disposers.push(onVehicleDrift((at) => this.particles.burst('smoke', at.x, at.y, at.z, 0.35)));
     // And which action buttons the GAME reads (see gameReadsButtons). Same answers as before.
     const buttonActions = new Set(DEFAULT_TOUCH_BUTTONS.map((b) => b.action));
     for (const m of ['isDown', 'wasPressed', 'wasReleased'] as const) {
@@ -269,6 +291,18 @@ export class Game {
     this.disposers.push(mountMetaToasts(options.container));
     // Taking a hit ends the combo — that is what makes a clean run worth more than a long one.
     this.disposers.push(events.on('PLAYER_DAMAGED', () => combo.break()));
+    // 🎬 THE BODY SHOWS THE ACTION. A shot kicks the arms back on every round (an automatic weapon too), a swing
+    // sweeps the arm, a jump throws the arms up and a hit makes the body flinch — whichever code fired the event.
+    // Only the PLAYER's shot or swing: no owner or 'player', AND the attack button is pressed or held right now —
+    // so an enemy firing the same Weapon class never makes the hero recoil.
+    const playersOwn = (payload: unknown): boolean => {
+      const owner = (payload as { ownerId?: unknown } | null)?.ownerId;
+      return (owner === undefined || owner === 'player') && this.attackHeldThisStep;
+    };
+    this.disposers.push(events.on('WEAPON_FIRED', (p) => { if (playersOwn(p)) { this.firedThisStep = true; this.heroAct('fire'); } }));
+    this.disposers.push(events.on('MELEE_SWING', (p) => { if (playersOwn(p)) { this.swungThisStep = true; this.heroAct('swing'); } }));
+    this.disposers.push(events.on('PLAYER_JUMPED', () => this.heroAct('jump')));
+    this.disposers.push(events.on('PLAYER_DAMAGED', () => this.heroAct('hit')));
 
     // A GPU reset or a backgrounded mobile tab fires this. Unprevented, the canvas stays black forever
     // and the game looks crashed to the player.
@@ -341,6 +375,7 @@ export class Game {
       get input() { return game.input; },
       get lights() { return game.lights; },
       follow: (object) => { this.followTarget = object; this.followChosen = true; this.syncTouchLayout(); },
+      get hero() { return game.hero; },
     };
     return this.ctxObject;
   }
@@ -448,14 +483,40 @@ export class Game {
         this.hero.root.visible = !this.chased;
       }
       // The shell listens while the game runs, so a vehicle it drives is known without being declared.
+      this.attackHeldThisStep = this.input.isDown('attack') || this.input.wasPressed('attack');
+      setDriftInput(this.input.isDown('drift'));
       this.asGame(() => this.options.update?.(this.context, delta));
+      this.poseActionButtons();
       // 🔒 NOTHING SINKS: every top-level object (car, NPC, animal, prop, train) is kept on the terrain
       // after the game moved it — the kit enforces it, so no generated game can forget it (2026-11-02).
       groundScene(this.scene);
       this.syncTouchLayout();   // back to the joystick if the car has left the scene
       this.particles.update(delta);
     }
-    this.input.endFrame();
+    // During a hit-stop freeze the game did not run, so a press made now is KEPT for the step that does — wiping it
+    // here was why a tap sometimes did nothing at all (the freeze follows every shot and every hit).
+    this.input.endFrame(this.feel.frozen);
+  }
+
+  /** Play a pose on the default body, if there is one and the player is on foot. */
+  private heroAct(pose: HumanoidAction): void {
+    if (this.hero && !this.chased) this.hero.act(pose);
+  }
+
+  /**
+   * Every action button the player pressed this step plays its pose (actionPoses). Runs AFTER the game's update, so
+   * an 'auto' attack knows whether that press fired a gun (recoil), swung a sword (sweep) or neither (a punch).
+   */
+  private poseActionButtons(): void {
+    const poses: Record<string, HumanoidAction | 'auto' | false> = { attack: 'auto', interact: 'use', ...(this.options.actionPoses ?? {}) };
+    for (const [action, pose] of Object.entries(poses)) {
+      if (!pose || !this.input.wasPressed(action)) continue;
+      if (pose !== 'auto') { this.heroAct(pose); continue; }
+      // The event already posed a shot or a swing this step; only a press that did neither is a punch.
+      if (!this.firedThisStep && !this.swungThisStep) this.heroAct('punch');
+    }
+    this.firedThisStep = false;
+    this.swungThisStep = false;
   }
 
   /** Display rate. Camera and drawing only — never gameplay. */
@@ -786,7 +847,7 @@ export const DEFAULT_TOUCH_BUTTONS: TouchButton[] = [
  */
 export const DRIVE_TOUCH_BUTTONS: { steer: TouchButton[]; pedals: TouchButton[] } = {
   steer: [{ action: 'left', label: 'Left' }, { action: 'right', label: 'Right' }],
-  pedals: [{ action: 'down', label: 'Brake' }, { action: 'up', label: 'Gas' }],
+  pedals: [{ action: 'down', label: 'Brake' }, { action: 'drift', label: 'Drift' }, { action: 'up', label: 'Gas' }],
 };
 
 /** Is the PRIMARY pointer a finger? A touch-screen laptop answers no until it is actually touched. */
@@ -820,6 +881,9 @@ const CSS = [
   '.nbg-tc-pedals{right:max(16px,env(safe-area-inset-right))}',
   '.nbg-tc-steer .nbg-tc-btn,.nbg-tc-pedals .nbg-tc-btn{width:76px;height:76px;border-radius:18px}',
   '.nbg-tc.drive .nbg-tc-steer,.nbg-tc.drive .nbg-tc-pedals{display:flex}',
+  // Drift rides ABOVE Brake/Gas as a wide strip, so the pedal row stays two buttons wide on a 360 px phone.
+  '.nbg-tc.drive .nbg-tc-pedals{display:grid;grid-template-columns:76px 76px;gap:12px 16px}',
+  '.nbg-tc-pedals .nbg-tc-btn[data-action="drift"]{grid-column:1/span 2;grid-row:1;width:auto;height:46px}',
   '.nbg-tc.drive .nbg-tc-move,.nbg-tc.drive .nbg-tc-look,.nbg-tc.drive .nbg-tc-buttons{display:none}',
 ].join('');
 
@@ -937,6 +1001,7 @@ export class TouchControls {
     const el = document.createElement('button');
     el.type = 'button';
     el.className = 'nbg-tc-btn';
+    el.setAttribute('data-action', b.action);
     el.textContent = b.label;
     el.setAttribute('aria-label', b.label);
     this.on(el, 'pointerdown', (e) => this.pressButton(e, b.action, el));

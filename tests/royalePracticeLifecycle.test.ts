@@ -52,7 +52,7 @@ function shellHarness(fail:'renderer'|'setup'|null) {
     './three/renderer':{createRenderer(){if(fail==='renderer')throw Error('renderer fail');return {dispose(){renderDisposals++;}};},handleResize(){return ()=>{observerOff++;};}},
     './three/lighting':{applyLighting:()=>({}),followShadow(){}},'./three/materials':{disposeMaterials(){}},'./three/surfaces':{groundScene(){}},
     './three/buildings':{interactHouseDoor(){},updateHouseDoors(){}},'./three/collision':{setSceneColliders(){}},
-    './three/camera':{CameraRig:class {camera=new THREE.PerspectiveCamera();setCollisionScene(){}}},'./three/objects':{watchVehicles:(_callback:unknown,fn:()=>unknown)=>fn(),isVehicle:()=>false},
+    './three/camera':{CameraRig:class {camera=new THREE.PerspectiveCamera();setCollisionScene(){}}},'./three/objects':{watchVehicles:(_callback:unknown,fn:()=>unknown)=>fn(),isVehicle:()=>false,setDriftInput:()=>{},notePlayerAxis:()=>{},onVehicleDrift:()=>()=>{}},
     './play/character':{CharacterController:Controller},'./three/humanoid':{createHumanoid:()=>({root:new THREE.Group(),dispose(){}})},
     './fx/particles':{ParticleSystem:class {addTo(){}dispose(){}}},'./fx/audio':{audio:{unlock(){},stopAll(){}}},'./fx/feedback':{bindGameFeedback:()=>()=>{}},
     './ui/touchControls':{TouchControls:class {dispose(){}},DEFAULT_TOUCH_BUTTONS:[]},

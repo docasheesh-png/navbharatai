@@ -51,7 +51,7 @@
 
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
 import { hardConstraintLines } from '../lib/megaRoadmap';
-import { buildGameContract, gameContractBlock, gameScopeContractEnabled, type GameScopeContract } from './gameIntent';
+import { asksForBattleRoyale, buildGameContract, gameContractBlock, gameScopeContractEnabled, type GameScopeContract } from './gameIntent';
 import { kitTypeContract, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
 import { namedNonSmartphone } from './deviceTarget';
 import { analyzeRequirementGaps } from '../lib/RequirementGapAnalyzer';
@@ -110,7 +110,7 @@ const SAYS_3D = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional)\b/i;
  * BR1966: glued GTA titles (gta5 / gtav / gta-5) match the same 3D kit as spaced "gta 5"; a bare
  * "gta" word-boundary misses them.
  */
-const DRAWN_IN_3D = /\b(?:(?<!typing\s{1,3})rac(?:e|es|er|ers|ing)|driv(?:e|es|er|ers|ing)|gaa?di|open\s*-?\s*world|first\s*-?\s*person|third\s*-?\s*person|fps|gta(?:\s*[-_]?\s*[5v])?|minecraft|pubg|free\s*-?\s*fire|battle\s*-?\s*royale|flight\s*-?\s*sim\w*|village|gaon|gaanv)\b/i;
+const DRAWN_IN_3D = /\b(?:(?<!typing\s{1,3})rac(?:e|es|er|ers|ing)|driv(?:e|es|er|ers|ing)|gaa?di|open\s*-?\s*world|first\s*-?\s*person|third\s*-?\s*person|fps|gta(?:\s*[-_]?\s*[5v])?|minecraft|flight\s*-?\s*sim\w*|village|gaon|gaanv)\b/i;
 
 /**
  * Does the REQUEST say this game is drawn in 3D? PURE.
@@ -127,7 +127,8 @@ export function gameKitWants3D(prompt: string | null | undefined): boolean {
   if (!wantsSceneObjects(text)) return false;
   // A keypad phone the user named (Q-846) has no WebGL: never three.js under its game, whatever else it says.
   if (namedNonSmartphone(text)) return false;
-  if (SAYS_3D.test(text) || DRAWN_IN_3D.test(text)) return true;
+  // A royale is drawn in 3D — the ONE royale reader (failedbr #2475: the private list here had no "bgmi").
+  if (SAYS_3D.test(text) || DRAWN_IN_3D.test(text) || asksForBattleRoyale(text)) return true;
   try {
     return heroObjectContract(text).categories.some((c) => c === 'vehicle-land' || c === 'vehicle-water');
   } catch { return false; }

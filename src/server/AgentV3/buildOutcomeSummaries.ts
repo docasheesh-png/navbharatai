@@ -263,7 +263,14 @@ const ENGINE_UNAVAILABLE_TEXT = 'The build engine is temporarily unavailable';
 export const ALL_PROVIDERS_FAILED_PREFIX = 'All NavBharatAI Pro providers failed';
 export const ALL_PROVIDERS_UNAVAILABLE_PREFIX = 'All NavBharatAI Pro providers are unavailable';
 const ENGINE_TIMEOUT_TEXT = 'The build step timed out';
-export function terminalOutcomeCode(input: { error?: unknown; crashCode?: string; messages?: ReadonlyArray<string> }): TerminalOutcomeCode {
+/**
+ * 🔴 THE CODES THE RUN ALREADY RECORDED ARE ITS REASON (failedbr #2449, dcb9175e, 2026-11-18). Setup hit E2B's
+ * cap of 20 concurrent sandboxes; the report recorded SANDBOX_UNAVAILABLE and then SANDBOX_ADMISSION_EXHAUSTED,
+ * the runner stopped — and this net, reading only message TEXT, stamped "OUTCOME_UNEXPLAINED: the engine did not
+ * record why". It had recorded why, twice, as codes. A recorded sandbox code is an infrastructure ending.
+ */
+const SANDBOX_ENDING_CODES = new Set(['SANDBOX_UNAVAILABLE', 'SANDBOX_ADMISSION_EXHAUSTED']);
+export function terminalOutcomeCode(input: { error?: unknown; crashCode?: string; messages?: ReadonlyArray<string>; codes?: ReadonlyArray<string> }): TerminalOutcomeCode {
   const texts = [...(input.messages ?? [])];
   if (input.error instanceof Error) texts.push(input.error.message);
   else if (typeof input.error === 'string') texts.push(input.error);
@@ -271,6 +278,7 @@ export function terminalOutcomeCode(input: { error?: unknown; crashCode?: string
   if (texts.some(t => typeof t === 'string' && (t.includes(ENGINE_UNAVAILABLE_TEXT) || t.includes(ALL_PROVIDERS_FAILED_PREFIX)
     || t.includes(ALL_PROVIDERS_UNAVAILABLE_PREFIX) || /DISCOUNT_BUILD_UNAVAILABLE|engine_unavailable/.test(t)))) return 'OUTCOME_ENGINE_UNAVAILABLE';
   if (input.crashCode && input.crashCode !== 'BUILD_EXCEPTION' && /SANDBOX/.test(input.crashCode)) return 'OUTCOME_SANDBOX_UNAVAILABLE';
+  if ((input.codes ?? []).some(c => SANDBOX_ENDING_CODES.has(String(c)))) return 'OUTCOME_SANDBOX_UNAVAILABLE';
   return 'OUTCOME_UNEXPLAINED';
 }
 export function terminalOutcomeRecord(code: TerminalOutcomeCode, phase: 'build' | 'sandbox' = 'build') {

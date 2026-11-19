@@ -71,7 +71,9 @@ describe('the fixed/render split — the bug that makes a game unfair per monito
 
   it('shake uses the feel defaults — a hand-picked small number is invisible', () => {
     // applyShake already scales into world units (×0.02); passing 0.35 gives a 0.007-unit shake.
-    expect(game).toContain('this.rig.applyShake(this.feel.shake())');
+    // (Reduce motion swaps in a zero shake; otherwise the defaults are used, never a small hand-picked number.)
+    expect(game).toContain(': this.feel.shake());');
+    expect(game).not.toMatch(/feel\.shake\(\s*0?\.\d/);
   });
 });
 

@@ -2269,7 +2269,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: combat, ai, projectile, spawner, weapon, director, nav. Default = all.',
+            description: 'Optional subset: combat, ai, projectile, spawner, weapon, director, nav, grenade, aimassist. Default = all.',
           },
         },
       },
@@ -2316,6 +2316,23 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           }
         }
       } },
+    },
+    {
+      name: 'generate_board_games',
+      description:
+        'The INDIA GAMES PACK (src/game/board/): tested rules engines for the board games India plays — LUDO (2–4 players, leave '
+        + 'the yard on a six, sixes roll again and three in a row lose the turn, safe start and star squares, captures send a token '
+        + 'home and earn a roll, exact roll to finish, finishing order, a pass when nothing can move, a computer player, board '
+        + 'geometry) and SNAKES & LADDERS (saanp-seedhi: the classic board, exact finish or bounce back, a six rolls again, the '
+        + 'zig-zag square layout) and CHESS (every rule: castling, en passant, promotion, check, checkmate, stalemate, fifty-move, '
+        + 'threefold repetition, insufficient material; FEN and SAN; a computer player at three strengths; perft-verified) and CARDS '
+        + '(a deck and dealing, TEEN PATTI hand ranking, Indian RUMMY melds, declarations, points and the best grouping — for fun: '
+        + 'points or pretend chips only, never real money), CARROM (real disc physics at real sizes — collisions, friction, '
+        + 'cushions, corner pockets — and the family rules: own coin continues, striker foul, covering the queen, board scoring), '
+        + 'CRICKET (overs, wides and no-balls with a free hit, strike rotation, chases, results, run rates, timing-based batting), '
+        + 'with a seeded die. Use it for any of these games; never re-implement their rules.',
+      input_schema: { type: 'object', properties: { include: { type: 'array', items: { type: 'string' },
+        description: 'Optional subset: dice, ludo, snakes, chess, cards, carrom, cricket. Default = all; every engine brings dice.' } } },
     },
     {
       name: 'generate_game_2d',
@@ -2569,7 +2586,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             items: { type: 'string' },
             description:
               'Optional subset: renderer, lighting, materials, camera, world, collision, environment, surfaces, '
-              + 'humanoid, healthbar, race, markers, objects, buildings, atmosphere. Default = all; imports are pulled in automatically. '
+              + 'humanoid, healthbar, race, markers, splitscreen, flight, objects, buildings, atmosphere. Default = all; imports are pulled in automatically. '
               + 'buildings = createEnterableHouse(): opt-in interiors, stairs and hinged doors; legacy createHouse() stays scenery. '
               + 'atmosphere = createAtmosphere(): a running day-night clock (sun, moon, stars, street lamps '
               + 'on at dusk) and weather (clear, cloudy, rain, storm with lightning, snow, fog, dust); '
@@ -2611,7 +2628,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: loop, input, events, pool, feel, state, meta, settings, loading, strings, levels, quests, inventory, dialogue, economy, perf. Default = all; imports are pulled in automatically.',
+            description: 'Optional subset: loop, input, events, pool, feel, state, meta, settings, loading, strings, levels, quests, inventory, dialogue, economy, perf, powerups, loot, leaderboard, crafting. Default = all; imports are pulled in automatically.',
           },
         },
       },
@@ -3711,6 +3728,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_athree_map',
   'generate_world_2d',
   'generate_game_2d',
+  'generate_board_games',
   'author_object',
   'generate_game_shell',
   'generate_game_royale',
@@ -3938,6 +3956,7 @@ export const RECIPE_TOOLS = [
   'generate_athree_map',
   'generate_world_2d',
   'generate_game_2d',
+  'generate_board_games',
   'author_object',
   'generate_game_shell',
   'generate_game_royale',

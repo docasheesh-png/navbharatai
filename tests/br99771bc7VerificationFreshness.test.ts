@@ -322,8 +322,8 @@ describe('platform compiler proof is bound to the same source revision at final 
     expect(route).toContain("platformTypecheckProof = { outcome: check.ok ? 'passed' : 'failed', revision: check.revision }");
     expect(route).toContain('const prodBuildCheckedRevision = getWorkspaceMemory(workspaceId).verificationRevision()');
     expect(route).toContain('{ outcome: fromBuild, revision: prodBuildCheckedRevision }, getWorkspaceMemory(workspaceId).verificationRevision())');
-    const refresh = 'gateEvidence.typecheck = currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision())';
+    const refresh = 'gateEvidence.typecheck = combineTypecheckEvidence(';
     expect(route.lastIndexOf(refresh)).toBeLessThan(route.indexOf('fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger())'));
-    expect(route).toContain(': currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision())');
+    expect(route).toContain('const currentTypecheck = combineTypecheckEvidence(');
   });
 });

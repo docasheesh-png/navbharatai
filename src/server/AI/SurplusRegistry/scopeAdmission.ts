@@ -43,7 +43,11 @@ export function createSurplusScopeAsk(
               measured = { inputTokens: turn.usage.inputTokens, outputTokens: turn.usage.outputTokens, responseChars: turn.text.length };
               turns.push({ ...turn, usage: { ...turn.usage }, text: '', rawContent: [], toolUses: [] });
             } }).runTurn(params);
-          } catch (error) { failedAt = readScopeFailure(error); throw error; }
+          } catch (error) {
+            failedAt = readScopeFailure(error)
+              ?? (signal?.aborted ? readScopeFailure(signal.reason) : undefined);
+            throw error;
+          }
         } }),
         identify: (reported, used, answered) => ({ provider: reported ? used ?? 'unknown' : 'unknown', model: answered ?? 'unknown' }),
         recordLlmCall: row => {

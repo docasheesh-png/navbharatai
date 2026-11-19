@@ -47,6 +47,8 @@ export type EvidenceOutcome = 'passed' | 'failed';
 /** One shell command as a build already records it (`BuildDiagnostics.commands`). */
 export interface RecordedCommand {
   command: string;
+  /** Live reader only: false means the compiler result does not prove this source revision. */
+  typecheckCurrent?: boolean;
   exitCode?: number | null;
   stdout?: string | null;
   stderr?: string | null;

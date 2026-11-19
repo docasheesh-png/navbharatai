@@ -105,7 +105,7 @@ describe('whyMissing — the one place the reasoning lives', () => {
     expect(whyMissing('preview', none)).toContain('no live preview was ever available');
     expect(whyMissing('pages', none)).toContain('needs a running app');
     expect(whyMissing('journeys', none)).toContain('no user journey could be derived');
-    expect(whyMissing('typecheck', none)).toContain('the typecheck did not run');
+    expect(whyMissing('typecheck', none)).toContain('a typecheck of the current files is not established');
     expect(whyMissing('tests', none)).toContain('has no test suite');
   });
 

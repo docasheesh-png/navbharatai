@@ -106,10 +106,11 @@ describe('2 · only an output that PROVES the compile passed may resolve anythin
     // The only markTscClean call is inside the helper.
     expect(src.match(/\.markTscClean\(/g)?.length).toBe(1);
     // Shell commands also carry their argv mode; fixed internal checks keep the output-only reader.
-    expect(src).toMatch(/private noteCompileOutput\(output: string, command\?: string\): void \{[\s\S]{0,200}tscCommandVerdict\(command, output\) : tscVerdict\(output\)[\s\S]{0,120}verdict === 'passed'[\s\S]{0,120}markTscClean\(\)/);
+    expect(src).toMatch(/private noteCompileOutput\(output: string, command: string \| undefined, skippedBeforeCompile: number, revisionBeforeCompile: number\): void \{[\s\S]{0,200}tscCommandVerdict\(command, output\) : tscVerdict\(output\)[\s\S]{0,450}coversProject && current[\s\S]{0,120}markTscClean\(Date\.now\(\), revisionBeforeCompile\)/);
     // Three callers: the write-time check, the typecheck tool, and bash.
     expect(src.match(/this\.noteCompileOutput\(/g)?.length).toBe(3);
-    expect(src).toMatch(/looksLikeTypecheckCommand\(command\) && exitCode === 0\) this\.noteCompileOutput\(`\$\{stdout\}\\n\$\{stderr\}`, command\)/);
+    expect(src).toContain("looksLikeTypecheckCommand(command) && (exitCode === 0 || tscCommandVerdict(command, `${stdout}\\n${stderr}`) === 'failed')");
+    expect(src).toContain('this.noteCompileOutput(`${stdout}\\n${stderr}`, command, skippedBeforeCompile, revisionBeforeCompile)');
     expect(src).not.toMatch(/\\btsc\\b\[\^&\|;\]\*--noEmit\/\.test\(command\)\) mem\.markTscClean/);
   });
 });
@@ -160,7 +161,7 @@ describe('3 · the compiler outranks the reviewer\'s inference', () => {
 
   it('the route checks the review against the gate BEFORE narrating, offering or repairing it', () => {
     const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    const at = src.indexOf('refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck, stylesheets })');
+    const at = src.indexOf('refuteReviewByEvidence(review, { typecheck: currentTypecheck, stylesheets })');
     expect(at).toBeGreaterThan(0);
     expect(at).toBeLessThan(src.indexOf("const reviewText = review ? formatReview(review) : '';"));
     expect(at).toBeLessThan(src.indexOf("const criticals = (review?.issues ?? []).filter((i) => i.severity === 'critical')"));

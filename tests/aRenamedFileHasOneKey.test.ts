@@ -82,7 +82,7 @@ describe('a build the agent ran itself overrules a forecast that it would fail',
 
   it('the readiness gate reads it, and the shell path records it', () => {
     const src = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
-    expect(src).toMatch(/if \(shellBuildProvesSuccess\(command, exitCode,[^)]*\)\) mem\.markProdBuildClean\(\);/);
+    expect(src).toMatch(/if \(shellBuildProvesSuccess\(command, exitCode,[^)]*\)\) mem\.markProdBuildClean\(Date\.now\(\), revisionBeforeCompile\);/);
     const gate = src.indexOf('prodBuildCleanSinceLastWrite()');
     expect(gate).toBeGreaterThan(0);
     expect(gate).toBeLessThan(src.indexOf('const readiness = assessReadiness(scoredArch, findings, extra);'));

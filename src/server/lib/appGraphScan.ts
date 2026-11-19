@@ -20,6 +20,7 @@
 
 import type { AppFinding } from './appDebugAnalysis';
 import type { FindingSeverity } from './appStaticScan';
+import { importSpecifierPath } from './importSpecifier';
 
 const JS_TS_RE = /\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte)$/i;
 const RESOLVE_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.vue', '.svelte'];
@@ -90,7 +91,8 @@ function dirOf(path: string): string {
 }
 
 /** Resolve a relative import to an existing file in the map. Returns the matched path or null. */
-export function resolveRelative(fromFile: string, spec: string, fileSet: Set<string>): string | null {
+export function resolveRelative(fromFile: string, rawSpec: string, fileSet: Set<string>): string | null {
+  const spec = importSpecifierPath(rawSpec); // BR2001: `./x.svg?react` names `./x.svg`
   const base = dirOf(fromFile);
   const target = normalizePath(base ? `${base}/${spec}` : spec);
   // Exact path (spec already carried an extension).

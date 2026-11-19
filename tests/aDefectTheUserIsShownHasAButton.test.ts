@@ -28,6 +28,7 @@ const ROLL_UPS: Record<string, string> = {
   // batch six
   OUTCOME_PREVIEW_COMPILE: 'PREVIEW_COMPILE_DIVERGENCE',
   REVIEWER_AUTOFIX_INCOMPLETE: 'REVIEW_RECHECK_CRITICALS_REMAIN',
+  ONESHOT_VERIFY_FAILED: 'SIMPLE_BUILD_VERIFY_ERROR',
 };
 const BATCH_FOUR = ['DB_SCHEMA_MISSING', 'FRAMEWORK_SOURCE_MISMATCH'];
 const idOf = (code: string) => `found-${code.toLowerCase().replace(/_/g, '-')}`;

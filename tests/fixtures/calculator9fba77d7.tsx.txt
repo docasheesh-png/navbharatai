@@ -1,0 +1,172 @@
+import { useMemo, useState } from "react";
+import { compute } from "./calc";
+import { MAX_EXPRESSION_LENGTH } from "./data";
+import type { AppProps } from "./types";
+
+const OPERATORS = ["+", "-", "×", "÷"];
+
+interface CalcKey {
+  label: string;
+  kind: "num" | "op" | "clear" | "back" | "equals";
+  span?: number;
+  rowSpan?: number;
+}
+
+const KEYS: CalcKey[] = [
+  { label: "C", kind: "clear" },
+  { label: "⌫", kind: "back" },
+  { label: "÷", kind: "op" },
+  { label: "×", kind: "op" },
+  { label: "7", kind: "num" },
+  { label: "8", kind: "num" },
+  { label: "9", kind: "num" },
+  { label: "-", kind: "op" },
+  { label: "4", kind: "num" },
+  { label: "5", kind: "num" },
+  { label: "6", kind: "num" },
+  { label: "+", kind: "op" },
+  { label: "1", kind: "num" },
+  { label: "2", kind: "num" },
+  { label: "3", kind: "num" },
+  { label: "=", kind: "equals", rowSpan: 2 },
+  { label: "0", kind: "num", span: 2 },
+  { label: ".", kind: "num" },
+];
+
+function lastOperand(expression: string): string {
+  const parts = expression.split(/[+\-×÷]/);
+  return parts[parts.length - 1] ?? "";
+}
+
+export default function App(_props: AppProps) {
+  const [expression, setExpression] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [answer, setAnswer] = useState<string | null>(null);
+
+  const preview = useMemo(() => {
+    if (!expression) return "";
+    const outcome = compute(expression);
+    if (outcome.ok) {
+      return outcome.display;
+    }
+    return "";
+  }, [expression]);
+
+  function handleKey(key: string) {
+    setError(null);
+
+    if (key === "C") {
+      setExpression("");
+      setAnswer(null);
+      return;
+    }
+
+    if (key === "⌫") {
+      setAnswer(null);
+      setExpression((prev) => prev.slice(0, -1));
+      return;
+    }
+
+    if (key === "=") {
+      if (!expression) return;
+      const outcome = compute(expression);
+      if (outcome.ok) {
+        setExpression(outcome.display);
+        setAnswer(outcome.display);
+      } else {
+        setAnswer(null);
+        setError(outcome.error);
+      }
+      return;
+    }
+
+    if (OPERATORS.indexOf(key) !== -1) {
+      setAnswer(null);
+      setExpression((prev) => {
+        if (!prev) return key === "-" ? "-" : prev;
+        const last = prev.slice(-1);
+        if (OPERATORS.indexOf(last) !== -1) return prev.slice(0, -1) + key;
+        if (last === ".") return prev.slice(0, -1) + key;
+        return prev + key;
+      });
+      return;
+    }
+
+    // digits and decimal point
+    setAnswer(null);
+    setExpression((prev) => {
+      if (prev.length >= MAX_EXPRESSION_LENGTH) return prev;
+
+      const operand = lastOperand(prev);
+
+      if (key === ".") {
+        if (operand.indexOf(".") !== -1) return prev;
+        if (operand === "") return prev + "0.";
+        return prev + ".";
+      }
+
+      if (operand === "0") return prev.slice(0, -1) + key;
+      return prev + key;
+    });
+  }
+
+  const shownExpression = expression || "0";
+  const shownResult = error ? "" : preview || answer || "";
+
+  return (
+    <div className="calc-app">
+      <header className="calc-header">
+        <h1 className="calc-title">Calculator</h1>
+        <p className="calc-subtitle">Fast, offline and ad-free</p>
+      </header>
+
+      <div className="calc-shell">
+        <div className="calc-display" role="status" aria-live="polite">
+          <div className="calc-expression">{shownExpression}</div>
+          {error ? (
+            <div className="calc-error" role="alert">
+              {error}
+            </div>
+          ) : (
+            <div className="calc-result">{shownResult}</div>
+          )}
+        </div>
+
+        <div className="calc-keys">
+          {KEYS.map((key, index) => {
+            const style: { gridColumn?: string; gridRow?: string } = {};
+            if (key.span) style.gridColumn = `span ${key.span}`;
+            if (key.rowSpan) style.gridRow = `span ${key.rowSpan}`;
+
+            const classNames = ["calc-key", key.kind].join(" ");
+
+            return (
+              <button
+                key={`${key.label}-${index}`}
+                type="button"
+                className={classNames}
+                style={style}
+                onClick={() => handleKey(key.label)}
+                aria-label={
+                  key.kind === "clear"
+                    ? "Clear"
+                    : key.kind === "back"
+                      ? "Delete last character"
+                      : key.kind === "equals"
+                        ? "Equals"
+                        : key.label
+                }
+              >
+                {key.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="calc-hint">
+          {MAX_EXPRESSION_LENGTH} characters max per expression
+        </p>
+      </div>
+    </div>
+  );
+}

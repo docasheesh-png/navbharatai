@@ -1,3 +1,10 @@
+import { PRO_DEVELOPMENT_NOTICE } from './proDevelopmentNotice';
+
+// 2026-11-18 clarification: historical non-refundable rules below remain subject to
+// applicable legal and payment-platform rights. Complaint review is not an automatic
+// cash-refund promise; failed-build and token re-credit protections remain intact.
+// Release must publish an actual effective-date notice and honor existing advance notice.
+
 // NavBharatAI — Terms of Service. Grounded in the real product: token wallet + tiered builds,
 // user-owned built apps, BYO-database law, Nav App Store review, Doctor-AI-for-doctors (web),
 // Cashfree payments, honest-billing rules ("working app or free"). ⚠️ NOT LEGAL ADVICE — for
@@ -14,7 +21,7 @@
 // WHOLE document for the old promise's vocabulary, not one phrase.
 
 export const TERMS_OF_SERVICE_TITLE = 'Terms of Service';
-export const TERMS_OF_SERVICE_UPDATED = '11 November 2026';
+export const TERMS_OF_SERVICE_UPDATED = '18 November 2026';
 
 export const TERMS_OF_SERVICE = `# Terms of Service
 
@@ -40,6 +47,8 @@ By creating an account or using the Platform you accept these Terms and our Priv
 - NavBharatAI builds real, working software from your descriptions, previews it, stores it durably, and helps you ship it (hosting, domains, APK/AAB, the Nav App Store). We put unusual engineering effort into honesty: the Platform reports real success and real failure, and **a build that was supposed to produce an app and did not succeed is not charged**.
 - The Platform is provided "**as is**". We do not promise uninterrupted availability, that every build will be perfect, or that AI output will be correct. What we do promise is honest reporting and continuous repair.
 - We may add, change or retire features. If a change materially reduces something you paid for, Section 4 (refunds) explains how we put that right — in credit.
+
+${PRO_DEVELOPMENT_NOTICE}
 
 ## 3. Acceptable use
 
@@ -135,7 +144,8 @@ If a third party brings a claim against us because of **your** content, **your**
 
 ## 13. Miscellaneous
 
-- **Changes.** We may update these Terms; material changes are announced in-app before taking effect, and the "Last updated" date always tells the truth. Continued use after the effective date is acceptance.
+- **Changes.** We may update these Terms. Material changes are announced in-app before taking effect; we may also notify you through other appropriate channels, such as email or a website notice. Each change will state its effective date. The effective date will be stated in the publication notice, subject to the advance-notice commitment above. Changes do not remove rights relating to prior payments under applicable law, and the Refund & Cancellation Policy continues to protect credit you already hold from retroactive changes. Continued use after the effective date is acceptance, subject to applicable law.
+- **बदलाव (हिन्दी सारांश).** हम इन शर्तों को अपडेट कर सकते हैं। महत्वपूर्ण बदलाव लागू होने से पहले ऐप में बताए जाएंगे; ईमेल या वेबसाइट की सूचना जैसे अन्य उपयुक्त माध्यमों से भी जानकारी दी जा सकती है। हर बदलाव की लागू होने की तारीख बताई जाएगी। लागू होने की तारीख प्रकाशन की सूचना में बताई जाएगी और ऊपर दी गई अग्रिम सूचना की प्रतिबद्धता का पालन किया जाएगा। लागू कानून के तहत पहले किए गए भुगतानों से जुड़े अधिकार समाप्त नहीं होंगे और पहले से मौजूद क्रेडिट पर बदलाव पिछली तारीख से लागू नहीं होंगे। लागू तारीख के बाद उपयोग जारी रखना, लागू कानून के अधीन, स्वीकृति माना जाएगा।
 - **Assignment.** You may not assign these Terms; we may assign them in a business transfer (with notice, and never to reduce your protections).
 - **Severability.** If a clause is held unenforceable, the rest survive.
 - **Entire agreement.** These Terms + the Privacy Policy (+ the DPA, if your organisation signs one) are the entire agreement — no verbal promise changes them.

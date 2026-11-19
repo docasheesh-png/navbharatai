@@ -1,0 +1,9 @@
+// Shared wording keeps the public legal pages and bundled app documents aligned.
+// Owner-approved 18 November 2026. This supplements, never replaces, existing remedies.
+export const PRO_DEVELOPMENT_NOTICE = `### NavBharatAI Pro: development and complaints
+
+NavBharatAI Pro is in development. AI-generated games and applications may vary in quality; there is no guarantee that every requirement will be met or that output will be error-free. Mere dissatisfaction with a result does not automatically entitle you to a refund. Complaints about a service not delivered after payment, duplicate charges or other technical issues will be reviewed.
+
+Applicable legal rights and payment platform refund rights remain unaffected. All non-refundable-payment statements in this document are subject to those rights. Where applicable law or the payment platform requires a monetary refund, token credit does not replace that entitlement. This notice does not reduce the existing protections for failed builds, unmeasurable usage, missing paid credit or re-crediting tokens consumed by a Platform defect, and does not introduce an automatic cash refund.
+
+**हिन्दी सारांश:** NavBharatAI Pro अभी विकासाधीन है। AI से बने गेम और ऐप की गुणवत्ता अलग-अलग हो सकती है; हर आवश्यकता पूरी होने या परिणाम त्रुटिरहित होने की गारंटी नहीं है। केवल परिणाम से असंतुष्ट होने पर अपने-आप रिफंड का अधिकार नहीं मिलता। भुगतान के बाद सेवा न मिलने, दोहरे शुल्क या अन्य तकनीकी समस्याओं की शिकायतों की समीक्षा की जाएगी। लागू कानूनी अधिकार और भुगतान प्लेटफ़ॉर्म के रिफंड अधिकार अप्रभावित रहेंगे; इस दस्तावेज़ के सभी गैर-वापसी योग्य भुगतान संबंधी प्रावधान इन अधिकारों के अधीन हैं। जहां लागू कानून या भुगतान प्लेटफ़ॉर्म के अनुसार धन-वापसी आवश्यक है, टोकन क्रेडिट उस अधिकार का विकल्प नहीं है। असफल बिल्ड, न मापे जा सकने वाले उपयोग, भुगतान के बाद क्रेडिट न मिलने और प्लेटफ़ॉर्म की खराबी से कटे टोकन वापस क्रेडिट करने की मौजूदा सुरक्षा कम नहीं होगी। यह सूचना अपने-आप नकद रिफंड का वादा नहीं करती।`;

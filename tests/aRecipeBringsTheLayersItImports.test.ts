@@ -36,6 +36,8 @@ describe('a recipe brings the layers it imports', () => {
       // third-person hero invisible — so the closure brings humanoid.ts too.
       'src/game/three/humanoid.ts',
       'src/game/three/lighting.ts', 'src/game/three/materials.ts',
+      // Game.ts reads the minimap's markers (mapView → mapMarkers) since 2026-11-19 — so markers.ts too.
+      'src/game/three/markers.ts',
       // Game.ts and camera.ts import objects.ts since 2026-10-11 (admin, build 46e2d74b: the car showed its
       // headlights): the rig and the shell ask it whether what they frame is a VEHICLE, which is always
       // chased from behind — so the closure brings objects.ts too.

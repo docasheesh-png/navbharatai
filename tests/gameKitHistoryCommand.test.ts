@@ -11,7 +11,12 @@ it('the real history command resolves imported contracts and registers the curre
     mkdirSync(join(root, 'scripts'), { recursive: true });
     mkdirSync(join(root, 'src/server/lib'), { recursive: true });
     copyFileSync('scripts/gameKitHistory.mjs', join(root, 'scripts/gameKitHistory.mjs'));
-    for (const name of ['GameBuildingGenerator', 'GameAssetLodGenerator', 'GameAssetTextureVerifier', 'GameAssetRuntimeGenerator', 'GameRuntimeGenerator', 'Game3DGenerator', 'GameControllerGenerator', 'GameSystemsGenerator', 'GameVfxAudioGenerator', 'MelodyGenerator', 'GameShellGenerator', 'GameRoyaleGenerator', 'GameRoyaleFoundationGenerator', 'kitTypeContract', 'gameKitHistory']) {
+    // Every top-level generator the command bundles is read from ITS OWN list (a hand list here went stale the day the
+    // 2D kit generator was added), plus the helpers those generators import.
+    const script = readFileSync('scripts/gameKitHistory.mjs', 'utf8');
+    const listed = [...(/const GENERATORS = \[([\s\S]*?)\]/.exec(script)?.[1] ?? '').matchAll(/'([A-Za-z0-9]+)'/g)].map((m) => m[1]);   // top-level names; folder generators are copied below
+    expect(listed).toContain('GameShellGenerator');
+    for (const name of new Set([...listed, 'GameBuildingGenerator', 'GameAssetLodGenerator', 'GameAssetTextureVerifier', 'GameAssetRuntimeGenerator', 'GameRoyaleFoundationGenerator', 'kitTypeContract', 'gameKitHistory'])) {
       copyFileSync(`src/server/lib/${name}.ts`, join(root, `src/server/lib/${name}.ts`));
     }
     // Generators that live in their own folder (the Athree map and the Object Forge, with their source modules) travel with the command.

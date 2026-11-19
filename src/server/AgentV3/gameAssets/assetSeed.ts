@@ -46,6 +46,18 @@ export interface GameAssetSeedOptions {
 /** Models downloaded and proved at once. Bounded: each proof is a browser in a sandbox with ~3.7 GB. */
 export const GAME_ASSET_CONCURRENCY = 3;
 
+/** The project's durable store for seeded binary assets (models, sounds) and their text manifests. One adapter, every seed. */
+export function workspaceGameAssetPersistence(verifiedOwnerUid?: string): GameAssetPersistence {
+  return {
+    saveBinary: (id, assets) => saveWorkspaceAssets(id, assets, verifiedOwnerUid),
+    readBinary: readWorkspaceAssetBytes,
+    async saveText(id, files) {
+      const result = await mergeWorkspaceFiles(id, files);
+      if (result.status !== 'saved') throw new Error('Asset manifest persistence not acknowledged');
+    },
+  };
+}
+
 export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<GameAssetSeedResult> {
   // Preserve scenery/vehicles and their manifest. Optional humans use separate filenames.
   const scenery = await prepareExternalGameAssets(options);
@@ -83,14 +95,7 @@ async function prepareExternalGameAssets(options: GameAssetSeedOptions): Promise
     .filter((subject) => served.has(subject) && !named.some((r) => r.subject === subject))
     .map((subject): AssetRequirement => ({ subject }))].slice(0, 6);
   if (!requirements.length) return { ...out, status: 'procedural' };
-  const persistence: GameAssetPersistence = options.persistence ?? {
-    saveBinary: (id, assets) => saveWorkspaceAssets(id, assets, options.verifiedOwnerUid),
-    readBinary: readWorkspaceAssetBytes,
-    async saveText(id, files) {
-      const result = await mergeWorkspaceFiles(id, files);
-      if (result.status !== 'saved') throw new Error('Model manifest persistence not acknowledged');
-    },
-  };
+  const persistence: GameAssetPersistence = options.persistence ?? workspaceGameAssetPersistence(options.verifiedOwnerUid);
   const store = options.dependencies ? undefined : gameAssetObjectStore();
   const dependencies: AssetEngineDependencies = options.dependencies ?? {
     cache: withDiscoveredAssetCache(createDurableAssetCache(store!, catalogue), store!),

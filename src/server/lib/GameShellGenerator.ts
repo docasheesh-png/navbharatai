@@ -56,6 +56,8 @@ import { createHumanoid, type Humanoid, type HumanoidAction } from './three/huma
 import { ParticleSystem } from './fx/particles';
 import { audio } from './fx/audio';
 import { bindGameFeedback } from './fx/feedback';
+// NavBharatAI's recorded sounds when this game was seeded with them; otherwise a stand-in that keeps built-in voices.
+import { loadSoundLibrary } from './fx/soundLibrary';
 import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions } from './ui/touchControls';
 
 /**
@@ -370,6 +372,7 @@ export class Game {
 
     // Once, here — not in whichever gameplay file remembers. Browsers suspend audio until a gesture.
     audio.unlock();
+    loadSoundLibrary();
 
     const colliders = this.asGame(() => options.setup?.(this.context)) || [];
     this.setupDone = true;

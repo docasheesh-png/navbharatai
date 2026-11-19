@@ -5253,3 +5253,13 @@ Gateways with no per-model price (BluesMinds, DiscountedTokens, Mitrify) run onl
 - With no `DISCOUNTEDTOKENS_MODEL`, the shared model rule picks the cheapest strong coding models: gpt-6-sol, gpt-6.1-sol, then gpt-5.6-terra.
 - Billing = that real price + the tier markup.
 
+
+### Recorded game sound library (2026-11-19)
+- **`AGENTV3_GAME_SOUND_LIBRARY`** — **not set in Cloud Run; default ON.** `off`/`false`/`0` disables. When on, a new game whose
+  kit laid down `src/game/fx/audio.ts` gets recorded sounds copied in (`AgentV3/gameAssets/soundSeed.ts`): a core set (footsteps,
+  land, click, error, hit, impact, swing, power-up, laser — replacing the built-in voices of those names) plus prompt-matched
+  sounds (rain, ambience loops, engines, animals, doors, swords…), at most 28 sounds / 8 MiB / 4 loops per game. Source: pinned
+  `facebookincubator/Meta-open-sound` (Oculus Audio Pack 01, **CC BY 4.0**, credited in the game's
+  `public/sfx/library/SOUND_CREDITS.txt`), downloaded from raw.githubusercontent.com with size + sha256 checked. A sound that
+  fails keeps its built-in voice; the kit is never undone for it. Costs no AI and no paid service. Off-switch only if a recorded
+  sound is ever found to harm games.

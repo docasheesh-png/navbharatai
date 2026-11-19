@@ -431,6 +431,8 @@ export class AudioManager {
   private master: GainNode | null = null;
   private buses: Record<SoundCategory, GainNode | null> = { music: null, sfx: null, ui: null };
   private buffers = new Map<string, AudioBuffer>();
+  /** Per-file loudness correction (a recorded library sound is levelled to the mix); 1 when absent. */
+  private gains = new Map<string, number>();
   /** Built-in voices rendered from synth.ts, kept apart so a file loaded later still wins. */
   private synthesized = new Map<string, AudioBuffer>();
   private playing = new Set<AudioBufferSourceNode>();
@@ -505,13 +507,14 @@ export class AudioManager {
   /** True when a name will make a sound: a loaded file or a built-in voice. */
   has(name: string): boolean { return this.buffers.has(name) || SYNTH_NAMES.includes(name); }
 
-  async load(name: string, url: string): Promise<boolean> {
+  async load(name: string, url: string, gain = 1): Promise<boolean> {
     this.init();
     if (!this.ctx) return false;
     try {
       const res = await fetch(url);
       const raw = await res.arrayBuffer();
       this.buffers.set(name, await this.ctx.decodeAudioData(raw));
+      if (Number.isFinite(gain) && gain >= 0) this.gains.set(name, Math.min(gain, 4)); else this.gains.delete(name);
       return true;
     } catch {
       // A missing sound must never break the game — it plays silently and says so in the console.
@@ -545,7 +548,7 @@ export class AudioManager {
     if (spread > 0) src.detune.value = (this.rand() * 2 - 1) * spread;
 
     const gain = this.ctx.createGain();
-    gain.gain.value = options.volume ?? 1;
+    gain.gain.value = (options.volume ?? 1) * (this.buffers.get(name) === buffer ? this.gains.get(name) ?? 1 : 1);
 
     let tail: AudioNode = gain;
     if (options.position) {
@@ -690,14 +693,29 @@ export function bindGameFeedback(ctx: FeedbackContext, table = FEEDBACK): () => 
 }
 `;
 
+/**
+ * The stand-in for NavBharatAI's recorded sound library. The shell always calls loadSoundLibrary(); when a new game
+ * is seeded with recorded sounds (AgentV3/gameAssets/soundSeed.ts) this file is REPLACED by the real loader, and a
+ * game without them keeps every built-in voice. A plain import — no build trick a missing file could break.
+ */
+const SOUND_LIBRARY_STUB = `/** No recorded sounds in this game: every sound plays its built-in voice from synth.ts. */
+export function loadSoundLibrary(): void {}
+
+/** Starts background ambience loops; none in this game. */
+export function startAmbience(_names: readonly string[] = []): () => void {
+  return () => undefined;
+}
+`;
+
 const FILES: Record<string, string> = {
+  'src/game/fx/soundLibrary.ts': SOUND_LIBRARY_STUB,
   'src/game/fx/particles.ts': PARTICLES,
   'src/game/fx/synth.ts': SYNTH,
   'src/game/fx/audio.ts': AUDIO,
   'src/game/fx/feedback.ts': FEEDBACK,
 };
 
-export const GAME_FX_MODULES: readonly string[] = ['particles', 'synth', 'audio', 'feedback'];
+export const GAME_FX_MODULES: readonly string[] = ['particles', 'synth', 'audio', 'feedback', 'soundLibrary'];
 
 /**
  * Generate the VFX/audio layer. `feedback` imports both siblings, so a subset that would not compile is
@@ -724,6 +742,8 @@ export function generateGameVfxAudio(include?: string[]): GameVfxAudioResult {
     }
     // audio.ts imports its built-in voices; without synth.ts it would not compile.
     if (files['src/game/fx/audio.ts']) files['src/game/fx/synth.ts'] = FILES['src/game/fx/synth.ts'];
+    // The shell imports the sound library next to audio; its stand-in travels with audio.ts.
+    if (files['src/game/fx/audio.ts']) files['src/game/fx/soundLibrary.ts'] = FILES['src/game/fx/soundLibrary.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
 

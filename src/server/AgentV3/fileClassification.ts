@@ -1,3 +1,4 @@
+import { importSpecifierPath } from '../lib/importSpecifier';
 // AgentV3 — single source of truth for "is this file editable source, or a binary asset?".
 //
 // This predicate was duplicated (the edit-mode manifest's BINARY_ASSET_RE in systemPrompt.ts) and the
@@ -62,6 +63,6 @@ export function countEditableSourceFiles(paths: readonly string[]): number {
 export function isBinaryAssetSpecifier(spec: string): boolean {
   if (typeof spec !== 'string') return false;
   // Bundlers routinely decorate an asset import: `./logo.png?url`, `./f.woff2#iefix`, `./a.png?w=800`.
-  const bare = spec.trim().split(/[?#]/)[0];
+  const bare = importSpecifierPath(spec);
   return bare.length > 0 && isBinaryAsset(bare);
 }

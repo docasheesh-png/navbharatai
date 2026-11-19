@@ -180,7 +180,7 @@ describe('🔒 the dispatcher asks after EVERY write path, and the route reports
 
   it('every run reaches the evidence bridge the typecheck tool uses, and a JS project is never compiled', () => {
     const helper = dispatcher.slice(dispatcher.indexOf('private async writeTypecheckNote('), dispatcher.indexOf('async dispatch(call: ToolUse'));
-    expect(helper).toContain("this.onCommand?.({ command, exitCode: null");
+    expect(helper).toContain("this.onCommand?.({ command, typecheckProof: { revision: revisionBeforeCompile, project: true }, exitCode: null");
     expect(helper).toContain("this.actuator.readFile(this.workspaceId, 'tsconfig.json')");
     // ⚠️ ANCHORED ON THE GUARD, NOT ITS SPELLING. A compile only ever runs once the project has been
     // ANSWERED as TypeScript — an unknown (a probe that threw) is retried, never compiled and never

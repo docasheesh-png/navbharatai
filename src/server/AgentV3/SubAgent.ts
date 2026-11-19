@@ -170,7 +170,7 @@ export interface SubAgentDeps {
    * phase whose `npm install`, `tsc` and `vite build` output is missing from the one document the
    * admin reads to find out why a build failed.
    */
-  onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number }) => void;
+  onCommand?: (result: { command: string; typecheckProof?: { revision: number; project: boolean }; exitCode: number | null; stdout: string; stderr: string; durationMs: number }) => void;
 
   /**
    * The parent's paid-tool budget (`this.toolBudget`). A thunk: the parent dispatcher does not

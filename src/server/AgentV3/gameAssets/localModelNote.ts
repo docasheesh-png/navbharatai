@@ -42,7 +42,8 @@ export function readyModelFor(objectName: string, ready: readonly string[]): str
 export function localModelLead(subject: string): string {
   return `  ✅ A REVIEWED LOCAL 3D MODEL IS READY FOR THIS ("${subject}") — use it, do NOT hand-model it: `
     + `const handle = await loadRequestedAsset('${subject}', fallback) from src/game/three/assetModels.ts; add handle.root to the scene. `
-    + 'The spec below is ONLY for that procedural fallback (and the real sizes to place the model at).';
+    + 'The spec below is ONLY for that procedural fallback (and the real sizes to place the model at). '
+    + `To CHANGE it — colour, size, turn, position, hidden parts, animation, the code-built object instead, or a 100% replacement with the user's own .glb — add a "${subject}" entry to src/game/three/assetCustomizations.ts (examples at the top of that file); never edit the library model or its loader.`;
 }
 
 /** The handoff sentence that overrides every hand-modelling instruction for the subjects L3 prepared. */

@@ -102726,3 +102726,13 @@ The first exactly-one-lease assertion in the phase-2 handoff race now includes o
 - `systems/aimassist.ts`: a partial pull (strength) toward the target nearest the crosshair inside a cone and in range, with an
   optional line-of-sight test; never a snap; touch/gamepad only (prompt line).
 - Locked by `tests/grenadesAndAimAssistWork.test.ts` (reversion: blast through cover / full snap → 2 fail).
+
+## 2026-11-19 — Game gap P2: local 2-player (branch `claude/game-local-2p`)
+- `core/input.ts`: PLAYER1_ACTIONS (the defaults without the arrows) and PLAYER2_ACTIONS (arrows + nearby keys), and
+  `new Input(target, map, { padIndex })` so each player reads only their own gamepad.
+- `three/splitscreen.ts`: splitRects (side by side when wide, stacked when tall) and renderSplit (viewport + scissor per camera,
+  aspect set per view).
+- Game `players: 2` → two inputs (polled and ended every step), `ctx.players`, `ctx.splitScreen(camera)`; render() draws the
+  split when a second camera is set. The game builds player 2's body; touch drives player 1 only. Same-device play only —
+  online multiplayer needs a server (not built).
+- Locked by `tests/twoPlayersShareOneDevice.test.ts` (reversion: shared arrows / no split render → 2 fail).

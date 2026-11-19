@@ -36,7 +36,7 @@ export interface GameShellResult {
 
 const GAME = `import * as THREE from 'three';
 import { GameLoop } from './core/loop';
-import { Input } from './core/input';
+import { Input, PLAYER1_ACTIONS, PLAYER2_ACTIONS } from './core/input';
 import { GameFeel } from './core/feel';
 import { events } from './core/events';
 import { state, setStatus, resetRun, save as saveState, load as loadState, hasSave, clearSave } from './core/state';
@@ -60,6 +60,7 @@ import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction } from './three/humanoid';
 import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
+import { renderSplit } from './three/splitscreen';
 import { ParticleSystem } from './fx/particles';
 import { audio } from './fx/audio';
 import { bindGameFeedback, type FeedbackContext } from './fx/feedback';
@@ -164,6 +165,12 @@ export interface GameOptions {
   save?: boolean;
   /** People and assets to thank, shown from a Credits button on the start screen. */
   credits?: Array<string | { role: string; name: string }>;
+  /**
+   * Two players on one device: player 1 keeps the keys but the arrows (and gamepad 1), player 2 gets the arrows and the keys
+   * by them (and gamepad 2) — ctx.players[0] / [1]. The game builds player 2's body and passes its camera to
+   * ctx.splitScreen(camera) for a split screen. Touch controls drive player 1 only.
+   */
+  players?: 1 | 2;
   /** Capture the mouse for looking around on a desktop (click to capture, Esc to let go). Default true. */
   pointerLock?: boolean;
   /**
@@ -196,6 +203,10 @@ export interface GameContext {
    * the game does — a throw, a reach, a flinch.
    */
   hero: Humanoid | null;
+  /** Every player's input: [player 1] normally, [player 1, player 2] with options.players = 2. ctx.input is player 1. */
+  players: Input[];
+  /** Split the screen: player 1's camera on the left (or top), this one on the right (or bottom). null = one view. */
+  splitScreen: (camera: THREE.Camera | null) => void;
 }
 
 export class Game {
@@ -206,6 +217,9 @@ export class Game {
   readonly particles = new ParticleSystem();
   readonly feel = new GameFeel();
   readonly input: Input;
+  /** Player 2's input, with options.players = 2. */
+  readonly input2: Input | null = null;
+  private secondCamera: THREE.Camera | null = null;
   readonly lights: AppliedLighting;
 
   private readonly loop: GameLoop;
@@ -321,7 +335,12 @@ export class Game {
     const refocus = () => this.canvas.focus({ preventScroll: true });
     this.canvas.addEventListener('pointerdown', refocus);
     this.disposers.push(() => this.canvas.removeEventListener('pointerdown', refocus));
-    this.input = new Input(this.canvas);
+    if (options.players === 2) {
+      this.input = new Input(this.canvas, PLAYER1_ACTIONS, { padIndex: 0 });
+      this.input2 = new Input(this.canvas, PLAYER2_ACTIONS, { padIndex: 1 });
+      const second = this.input2;
+      this.disposers.push(() => second.dispose());
+    } else this.input = new Input(this.canvas);
     // Remember what the player's input looks like, so driveVehicle(car, s, ctx.input.axis(), dt) names
     // the PLAYER's car (see playerVehicle). Same values, same object — only now it is recognisable.
     const readAxis = this.input.axis.bind(this.input);
@@ -500,6 +519,8 @@ export class Game {
       get lights() { return game.lights; },
       follow: (object) => { this.followTarget = object; this.followChosen = true; this.syncTouchLayout(); },
       get hero() { return game.hero; },
+      get players() { return game.input2 ? [game.input, game.input2] : [game.input]; },
+      splitScreen: (camera) => { this.secondCamera = camera; },
     };
     return this.ctxObject;
   }
@@ -568,6 +589,7 @@ export class Game {
   private fixedUpdate(delta: number): void {
     // A gamepad is polled, not heard: read it before anything reads input this step.
     this.input.pollGamepads();
+    this.input2?.pollGamepads();
     this.feel.update(delta);
     combo.update(delta);
 
@@ -627,6 +649,7 @@ export class Game {
     // During a hit-stop freeze the game did not run, so a press made now is KEPT for the step that does — wiping it
     // here was why a tap sometimes did nothing at all (the freeze follows every shot and every hit).
     this.input.endFrame(this.feel.frozen && !talking);
+    this.input2?.endFrame(this.feel.frozen && !talking);
   }
 
   /** Play a pose on the default body, if there is one and the player is on foot. */
@@ -669,7 +692,9 @@ export class Game {
     followShadow(this.lights.key, p);
     audio.setListener(p.x, p.y, p.z);
     updateHealthBars(this.rig.camera);   // enemy health bars face the camera (three/healthbar.ts)
-    this.renderer.render(this.scene, this.rig.camera);
+    // Two players: each camera in its own half of the screen (three/splitscreen.ts).
+    if (this.secondCamera) renderSplit(this.renderer, this.scene, [this.rig.camera, this.secondCamera]);
+    else this.renderer.render(this.scene, this.rig.camera);
   }
 
   /**

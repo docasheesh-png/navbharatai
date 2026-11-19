@@ -158,6 +158,17 @@ export const ACTION_GROUPS: readonly (readonly string[])[] = [
   ['sprint', 'run', 'boost', 'nitro'],
   ['drift', 'handbrake'],
 ];
+/**
+ * TWO PLAYERS ON ONE DEVICE (admin 2026-11-19 game-gap audit: no local multiplayer). Player 1 keeps every default key
+ * except the arrows; player 2 gets the arrows and the keys by them. Each player reads only their own gamepad.
+ */
+export const PLAYER1_ACTIONS: ActionMap = Object.fromEntries(Object.entries(DEFAULT_ACTIONS).map(([a, codes]) => [a, codes.filter((c) => !c.startsWith('Arrow'))]));
+export const PLAYER2_ACTIONS: ActionMap = {
+  up: ['ArrowUp', 'Pad:12'], down: ['ArrowDown', 'Pad:13'], left: ['ArrowLeft', 'Pad:14'], right: ['ArrowRight', 'Pad:15'],
+  jump: ['ShiftRight', 'Numpad0', 'Pad:0'], attack: ['Slash', 'Enter', 'Numpad1', 'Pad:2', 'Pad:7'], interact: ['Period', 'Numpad2', 'Pad:1'],
+  sprint: ['ControlRight', 'Pad:5', 'Pad:10'], aim: ['Pad:6'], reload: ['Comma', 'Pad:3'], drift: ['Numpad3', 'Pad:4'], pause: ['Pad:9'],
+};
+
 const GROUP_OF: Record<string, readonly string[]> = Object.fromEntries(ACTION_GROUPS.flatMap((g) => g.map((name) => [name, g])));
 
 export class Input {
@@ -179,7 +190,11 @@ export class Input {
   private padMoving = false;
   private padDown = new Set<string>();
 
-  constructor(target: HTMLElement | Window = window, actions: ActionMap = DEFAULT_ACTIONS) {
+  /** Read only this gamepad (0 = the first one plugged in, 1 = the second…); undefined = the first connected pad. */
+  readonly padIndex: number | undefined;
+
+  constructor(target: HTMLElement | Window = window, actions: ActionMap = DEFAULT_ACTIONS, options: { padIndex?: number } = {}) {
+    this.padIndex = Number.isInteger(options.padIndex) ? options.padIndex : undefined;
     this.actions = actions;
     const el = target as Window;
 
@@ -256,7 +271,8 @@ export class Input {
     let pad: Gamepad | null = null;
     try {
       const pads = typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
-      for (const p of pads) { if (p && p.connected && (p.mapping === 'standard' || p.axes.length >= 2)) { pad = p; break; } }
+      const usable = Array.from(pads ?? []).filter((p): p is Gamepad => !!p && p.connected && (p.mapping === 'standard' || p.axes.length >= 2));
+      pad = this.padIndex === undefined ? (usable[0] ?? null) : (usable[this.padIndex] ?? null);
     } catch { pad = null; }
     this.gamepad = pad !== null;
     const now = new Set<string>();

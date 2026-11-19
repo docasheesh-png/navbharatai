@@ -1164,6 +1164,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  worldwide leaderboard without an online service behind it.',
     '  PROGRESS: options.save: true when the game\'s progress lives in the kit state (levels, score, lives, the bag) — the start screen',
     '  then offers Continue / New game. options.credits lists who made it. Desktop mouse-look is captured by the kit (pointer lock).',
+    '  TWO PLAYERS on one device: options.players = 2 → ctx.players[0] (WASD, gamepad 1) and [1] (arrows, gamepad 2); build player 2\'s',
+    '  body and pass its camera to ctx.splitScreen(camera). Say plainly that it is same-device play, not online multiplayer.',
     '  The screen recipes below are for 2D games and anything not on <GameCanvas>.',
     '  🎨 EVERYTHING AROUND THE CANVAS IS UI, AND IT IS WHAT THE PLAYER SEES FIRST. Where the kit is in',
     '  the project, build it from the GAME UI recipes: the stage is `.nb-game`; the start, pause and',

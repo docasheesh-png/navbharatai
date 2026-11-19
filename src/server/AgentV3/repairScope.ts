@@ -33,7 +33,36 @@ export const PLATFORM_CHECK_TOOLS: ReadonlySet<string> = new Set([
   'browser_action', 'update_preview', 'find_ui_element', 'console_errors', 'screenshot',
 ]);
 
-/** The repair's tool list: everything the build had, minus a browser of its own. PURE. */
+/**
+ * 🔴 AND NO DELEGATION (Q-2916, failedbr #2475 aba63ead, 2026-11-19). The explorer repair had 150 s. It spent them on
+ * 16 reads, two exploration hand-backs and then a `task` call: a fresh `debugger` specialist that started with an
+ * empty context, re-read the same files, and was still editing when the budget ended — so the pass was undone
+ * (EXPLORE_REPAIR_UNDONE), and that specialist's late writes are what Q-2913 had to stop. A delegated child knows
+ * nothing of the repair's clock or of what the repair already read; inside a time-boxed pass it can only widen the
+ * job. Point (3) of the class above, by construction: the repair does the fix itself.
+ */
+export const DELEGATION_TOOLS: ReadonlySet<string> = new Set(['task']);
+
+/** The repair's tool list: everything the build had, minus a browser of its own and minus delegation. PURE. */
 export function withoutPlatformCheckTools<T extends { name: string }>(tools: readonly T[]): T[] {
-  return tools.filter((t) => !PLATFORM_CHECK_TOOLS.has(t.name));
+  return tools.filter((t) => !PLATFORM_CHECK_TOOLS.has(t.name) && !DELEGATION_TOOLS.has(t.name));
+}
+
+/**
+ * What a platform-checked repair runner DECLARES it was built without (passed as `AgentRunnerOptions.withheldTools`).
+ * Only a runner that declares this refuses them: the architect's own toolset loads tools on demand (DynamicToolset),
+ * so "not in the list right now" is NOT "withheld" there — a blanket check would have broken real builds.
+ */
+export const REPAIR_WITHHELD_TOOLS: ReadonlySet<string> = new Set([...PLATFORM_CHECK_TOOLS, ...DELEGATION_TOOLS]);
+
+/** Was this tool withheld BY CONSTRUCTION from this runner (declared, and not offered)? PURE. */
+export function isWithheldTool(name: string, withheld: ReadonlySet<string> | null | undefined, offered: ReadonlySet<string>): boolean {
+  return !!withheld && withheld.has(name) && !offered.has(name);
+}
+
+/** What the model reads when it names a withheld tool. PURE. */
+export function withheldToolMessage(name: string): string {
+  return DELEGATION_TOOLS.has(name)
+    ? `"${name}" is not available in this pass: this repair has a fixed time budget and does the fix itself — a helper would start from nothing. Make the change directly with edit_file / write_file, then stop.`
+    : `"${name}" is not available in this pass: NavBharatAI checks the fix in a real browser itself the moment you stop. Write the fix, then stop.`;
 }

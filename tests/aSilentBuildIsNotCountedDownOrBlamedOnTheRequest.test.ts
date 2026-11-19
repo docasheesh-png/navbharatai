@@ -123,6 +123,7 @@ describe('🔒 wiring: the runner reads the verdict at BOTH endings, the route s
     expect(runner).toMatch(/const ending = endingContext\(\);[\s\S]{0,400}timedOutSummary\(minutes, ending\)/);
   });
   it('the route answers it from the build\'s own waste ledger and clock', () => {
-    expect(route).toContain('providerFaultNow: () => engineTimeDominated(providerWaste, Date.now() - buildStartedAt)');
+    // Since failedbr #2431 the denominator is the build's WORKING time (time spent waiting for the user is not engine time).
+    expect(route).toContain('providerFaultNow: () => engineTimeDominated(providerWaste, workElapsed())');
   });
 });

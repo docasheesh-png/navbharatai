@@ -44,8 +44,14 @@ describe('the admission gate uses it on both estimate paths', () => {
     expect((src.match(/const estimate = withHistoryFloor\(surplusSession/g) ?? []).length).toBe(2);
     expect((src.match(/await workspaceHistoryEstimateInr\(workspaceId, powerLevelReqEffective\)\)/g) ?? []).length).toBe(2);
   });
-  it('the route passes the workspace', () => {
-    expect(src).toMatch(/checkBuilderPaidAdmission\(\{ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res, workspaceId,/);
+  it('the route passes the workspace — one already DECLARED when the first admission check runs', () => {
+    // 🔴 CI on #4346: passing `workspaceId` (declared ~1300 lines later) threw a TDZ ReferenceError in every build
+    // admission; tsc cannot see a closure reading a const before its declaration. The id is derived before the check.
+    expect(src).toMatch(/checkBuilderPaidAdmission\(\{ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res, workspaceId: leaseWorkspaceId,/);
+    const declared = src.indexOf('const leaseWorkspaceId = deriveWorkspaceId(');
+    const firstCall = src.indexOf('if (!(await checkPaidBuildAdmission())) return;');
+    expect(declared).toBeGreaterThan(-1);
+    expect(firstCall).toBeGreaterThan(declared);
   });
   it('history entries carry the real token totals', () => {
     expect(readFileSync(join(__dirname, '..', 'src/server/AgentV3/DiagnosticsStore.ts'), 'utf8')).toMatch(/tokenUsage: \{ inputTokens, outputTokens/);

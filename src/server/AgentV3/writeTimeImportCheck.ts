@@ -32,6 +32,7 @@
  */
 
 import { analyzeImportExports } from './ImportExportAnalysis';
+import { importSpecifierPath } from '../lib/importSpecifier';
 
 const TEST_FILE = /(\.(test|spec)\.[tj]sx?)$/;
 const CODE_EXT = ['.ts', '.tsx', '.js', '.jsx'];
@@ -54,7 +55,8 @@ export function relativeSpecifiers(content: string): string[] {
 export function candidatePaths(importer: string, spec: string): string[] {
   const dir = importer.split('/').slice(0, -1);
   const stack = [...dir];
-  for (const part of spec.split('/')) {
+  // BR2001: `./start.svg?react` names `./start.svg` (see importSpecifier.ts).
+  for (const part of importSpecifierPath(spec).split('/')) {
     if (part === '' || part === '.') continue;
     if (part === '..') stack.pop();
     else stack.push(part);

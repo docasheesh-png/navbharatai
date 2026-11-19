@@ -102820,3 +102820,19 @@ Q-2947–Q-2949 OPEN (edit-miss watch, browser-tool outages without detail, Surp
 - **Q-2950 (admin 2026-11-19): an edit is priced by its project's history before it starts.** The admission gate's estimate
   is now the larger of the prompt estimate and the median real cost of the workspace's last 5 builds (same billedAmountInr),
   so a short "fix this" prompt on a big project no longer slips under a low balance and stops mid-build.
+
+## 2026-11-19 — Game gap P2: aircraft and flight (branch `claude/game-flight`)
+- `three/flight.ts`: createAircraft (procedural jet / prop, nose +Z), createFlightState, flyAircraft (throttle spool, thrust vs
+  drag, climb costs speed, lift fades to zero at the stall → soft controls, nose drop and sink, bank-to-turn with self-levelling,
+  runway steering, take-off only above take-off speed with the nose up, touchdown: gentle → landing, steep / banked / nose-down →
+  crash, ground height followed), flightInput (W nose up, A/D roll, Shift / brake throttle).
+- Honesty fix: the architect prompt and the Athree map's "NOT built yet" list both said aircraft were not built — now they name
+  the flight kit (buildings remain not built).
+- Locked by `tests/aPlaneFliesLikeAPlane.test.ts` (reversion: no sink without lift / no crash check → 2 fail).
+
+## 2026-11-19 — Game gap P2: a death the player can see (branch `claude/game-death-topple`)
+- `Humanoid.die(fromFront)` / `revive()` / `isDown()`: the body topples from the hips onto the ground over 0.6 s (backward
+  from the front, forward from behind), knees buckle, arms fling; while down it neither walks nor acts.
+- Game drops the player's body on PLAYER_DIED and stands it up on PLAYER_SPAWNED / GAME_STARTED; the prompt tells the builder
+  to topple enemies before removing them.
+- Locked by `tests/aDeathIsSeen.test.ts` (reversion: no shell wiring / walking while down → 3 fail).

@@ -1029,7 +1029,7 @@ const RULE_BY_MODULE: Record<string, string> = {
   roads: 'ROADS DRAWN: map.roadMesh draws asphalt with lane markings, kerbs, a start line, runway markings, plazas, bridge decks, rails and piers. Do not draw your own roads.',
   vehicles: 'VEHICLES: createVehicle(THREE, map.world, {kind: car or bike, color, quality}) gives a lofted sports car or bike with four or two wheels that spin and steer, brake lights, headlights (setLights) and its own driving physics: engine that fades with speed, braking limited by the surface, steering that narrows with speed, a grip limit, a handbrake slide, pitch and roll from the ground, flight off a crest, water that stops it; you call vehicle.update(dt, {throttle -1..1, steer -1..1, brake 0..1, handbrake}, map.chunks.origin) every frame and read vehicle.state (speed, slip, position). Vehicles do not collide with trees or other vehicles yet.',
 };
-const NOT_BUILT = 'NOT built yet — do not draw them by hand: buildings, aircraft, animals, birds and people, sand ripple textures and heat haze.';
+const NOT_BUILT = 'NOT built yet — do not draw them by hand: buildings, animals, birds and people, sand ripple textures and heat haze. A plane to fly comes from the game kit (createAircraft / flyAircraft in three/flight.ts).';
 
 function exampleSource(chosen: readonly string[]): string {
   const has = (m: string): boolean => chosen.includes(m);

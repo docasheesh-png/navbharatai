@@ -72,7 +72,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "70980278048a7b3bd2bb268198f1ecfe5b6ebb2eb7ac0771e660050d9038c367",
     "67bbacaf079d629f64f7d0229969a32dc16e404bf44d4b46606b24c11ffc406b",
     "3ed01add2e61e59806f01b69a9b3e301e6119be6dd8db7639e25f5b03f4742d8",
-    "d2bd696954b4c36bbbda34c49e0bc1dbe0582be45e30e19fe5714933cb0d6e62"
+    "d2bd696954b4c36bbbda34c49e0bc1dbe0582be45e30e19fe5714933cb0d6e62",
+    "71762785aed90701bbb75dcef60b722d44bbd07061c299be427f2ed951b1c7f0"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -433,6 +434,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/three/environment.ts": [
     "76509d190eeabb44658f377c0487a8217103664d73ed5a3e1888d65e06c9020b"
   ],
+  "src/game/three/flight.ts": [
+    "a647c136c841babfc004666393b3e9c4d2a368fb4b336866fb3193d832b3da0a"
+  ],
   "src/game/three/healthBar.ts": [
     "c05bd26586eedd4d562144678968440d2e71cbd7bef35270955af82f94c1b542"
   ],
@@ -443,7 +447,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "3de226c2c8636dae3e27f2f9f05236ea4c5f990e372ae792a49d9587a9e5d8d0",
     "c305ea5884c401bffe55eafb360752ea3b2fb9f7124107a5a0c4c9ff1953d5e9",
     "f824eab134e9159d672a848eb66f1407629dc1d4e656906320e5032cffee5e95",
-    "6e2d317b6d609072819df5a88fb996b9476d59bc554312ad7ee13d3eb2b7b33d"
+    "6e2d317b6d609072819df5a88fb996b9476d59bc554312ad7ee13d3eb2b7b33d",
+    "09e4f076799fb5409fd3f302c41cac19aef10a2a76ab611f02b93bc378bacc91"
   ],
   "src/game/three/lighting.ts": [
     "7b1f89bdc9398b48a10fcc2fd1fb77a9577a2925dee1e14120857e5ac3e8be96"

@@ -24562,7 +24562,7 @@ async function noteBuildOutcome(
             gateEvidence.game = gameProof.outcome;
             // Game Engine Ultra Phase 2: structured defect codes for Phase 3 — evidence only.
             try {
-              const measured = playtestDefects(playRun, verdict.score, missingKitLayerPaths(playtestFiles));
+              const measured = playtestDefects(playRun, verdict.score, missingKitLayerPaths(playtestFiles), replayFromCode(playtestFiles));
               gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playtestFiles).missing : [] };
               const defectsMsg = gameDefectsMessage(measured);
               if (defectsMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_DEFECTS', message: defectsMsg, autoResolved: true });
@@ -24799,7 +24799,7 @@ async function noteBuildOutcome(
                   const run = parsePlaytest(out.stdout);
                   const v = playtestVerdict(run, replayFromCode(files));
                   const outcome = playtestOutcome(v.code);
-                  return { defects: playtestDefects(run, v.score, missingKitLayerPaths(files)), scopeMissing: gameContract ? scopeMatch(gameContract, files).missing : [],
+                  return { defects: playtestDefects(run, v.score, missingKitLayerPaths(files), replayFromCode(files)), scopeMissing: gameContract ? scopeMatch(gameContract, files).missing : [],
                     proof: v.score && outcome !== 'not-run' ? { outcome, score: v.score.overall } : null };
                 },
                 changedSince: async (s0) => changedWorkspacePaths(s0, (await collectWorkspaceFiles(actuator, workspaceId)).files).length,

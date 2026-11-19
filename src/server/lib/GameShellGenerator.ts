@@ -336,6 +336,16 @@ export class Game {
     const onFullscreen = () => events.emit('FULLSCREEN_CHANGED', { on: this.isFullscreen });
     document.addEventListener('fullscreenchange', onFullscreen);
     this.disposers.push(() => document.removeEventListener('fullscreenchange', onFullscreen));
+    // 🔎 NavBharatAI's playtest reads the round through this (score, status) and ends one to prove Play again works.
+    // Read-only except endRound, which only does what losing does — harmless in a single-player game.
+    const hook = { status: () => state.status, score: () => state.score, endRound: () => { if (state.status === 'playing' || state.status === 'paused') setStatus('gameover'); } };
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __nbKit?: typeof hook }).__nbKit = hook;
+      this.disposers.push(() => {
+        const w = window as unknown as { __nbKit?: typeof hook };
+        if (w.__nbKit === hook) delete w.__nbKit;
+      });
+    }
     // ⚙️ THE PLAYER'S SETTINGS, APPLIED — now and on every change from the pause menu.
     this.applySettings(settings.get());
     this.disposers.push(settings.subscribe((s) => this.applySettings(s)));

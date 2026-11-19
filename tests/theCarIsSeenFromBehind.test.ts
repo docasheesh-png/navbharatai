@@ -69,7 +69,7 @@ class FakeEl {
 // input.ts, touchControls.ts, character.ts, motor.ts, humanoid.ts.
 const STUBS: Record<string, string> = {
   'src/game/three/renderer.ts':
-    'export function createRenderer(): any { return { render() {}, dispose() {}, shadowMap: {} }; }\n'
+    'export function createRenderer(): any { return { render() {}, dispose() {}, shadowMap: {}, getPixelRatio: () => 1, setPixelRatio() {} }; }\n'
     + 'export function handleResize(): () => void { return () => {}; }\n',
   'src/game/three/lighting.ts':
     "import * as THREE from 'three';\nexport type LightingPresetName = string;\n"
@@ -85,7 +85,7 @@ const STUBS: Record<string, string> = {
     'export function startMeta(): void {}\nexport function mountMetaToasts(): () => void { return () => {}; }\n'
     + 'export const combo = { update(): void {}, break(): void {} };\n',
   'src/game/fx/particles.ts': 'export class ParticleSystem { addTo(): void {} update(): void {} dispose(): void {} }\n',
-  'src/game/fx/audio.ts': 'export const audio = { unlock(): void {}, setListener(): void {}, stopAll(): void {} };\n',
+  'src/game/fx/audio.ts': 'export const audio = { unlock(): void {}, setListener(): void {}, stopAll(): void {}, setVolume(): void {} };\n',
   'src/game/fx/feedback.ts': 'export function bindGameFeedback(): () => void { return () => {}; }\n',
 };
 

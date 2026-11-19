@@ -49,12 +49,12 @@ function shellHarness(fail:'renderer'|'setup'|null) {
   const {Game}=load(generateGameShell().files['src/game/Game.ts'],{
     three:THREE,'./core/loop':{GameLoop:class {stop(){}start(){}setPaused(){}}},'./core/input':{Input},'./core/feel':{GameFeel:class {}},'./core/events':{events},
     './core/state':{state,setStatus(status:string){state.status=status;},resetRun(){}},'./core/meta':{startMeta(){},mountMetaToasts(){return ()=>{};},combo:{break(){}}},
-    './three/renderer':{createRenderer(){if(fail==='renderer')throw Error('renderer fail');return {dispose(){renderDisposals++;}};},handleResize(){return ()=>{observerOff++;};}},
+    './three/renderer':{createRenderer(){if(fail==='renderer')throw Error('renderer fail');return {dispose(){renderDisposals++;},getPixelRatio(){return 1;},setPixelRatio(){}};},handleResize(){return ()=>{observerOff++;};}},
     './three/lighting':{applyLighting:()=>({}),followShadow(){}},'./three/materials':{disposeMaterials(){}},'./three/surfaces':{groundScene(){}},
     './three/buildings':{interactHouseDoor(){},updateHouseDoors(){}},'./three/collision':{setSceneColliders(){}},
     './three/camera':{CameraRig:class {camera=new THREE.PerspectiveCamera();setCollisionScene(){}}},'./three/objects':{watchVehicles:(_callback:unknown,fn:()=>unknown)=>fn(),isVehicle:()=>false,setDriftInput:()=>{},notePlayerAxis:()=>{},onVehicleDrift:()=>()=>{}},
     './play/character':{CharacterController:Controller},'./three/humanoid':{createHumanoid:()=>({root:new THREE.Group(),dispose(){}})},
-    './fx/particles':{ParticleSystem:class {addTo(){}dispose(){}}},'./fx/audio':{audio:{unlock(){},stopAll(){}}},'./fx/feedback':{bindGameFeedback:()=>()=>{}},
+    './fx/particles':{ParticleSystem:class {addTo(){}dispose(){}}},'./fx/audio':{audio:{unlock(){},stopAll(){},setVolume(){}}},'./core/settings':{settings:{get:()=>({masterVolume:1,musicVolume:1,sfxVolume:1,muted:false,quality:'high',lookSensitivity:1,vibration:true}),subscribe:()=>()=>{}}},'./fx/feedback':{bindGameFeedback:()=>()=>{}},
     './ui/touchControls':{TouchControls:class {dispose(){}},DEFAULT_TOUCH_BUTTONS:[]},
   });
   return {Game,container,children,events,get rendererDisposed(){return renderDisposals;},get inputDisposed(){return inputDisposals;},get observerOff(){return observerOff;},options:{container,touchControls:false,playerBody:false,setup(){if(fail==='setup')throw Error('setup fail');return [];}}};

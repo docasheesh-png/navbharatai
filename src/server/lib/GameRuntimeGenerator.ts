@@ -276,7 +276,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -500,6 +500,7 @@ export function setStatus(status: GameState['status']): void {
   if (status === 'paused') events.emit('GAME_PAUSED');
   if (status === 'gameover') events.emit('GAME_OVER');
   if (status === 'won') events.emit('GAME_WON');
+  if (status === 'menu') events.emit('GAME_MENU');
 }
 
 export function addScore(points: number): void {
@@ -548,6 +549,92 @@ export function resetRun(): void {
 }
 `;
 
+const SETTINGS = `/**
+ * THE PLAYER'S SETTINGS — one place, saved on this device, and actually APPLIED (admin 2026-11-19 audit: the old
+ * \`state.settings\` held a music volume, an sfx volume and a quality that nothing ever read, and there was no mute).
+ *
+ * The shell (Game.ts) applies every change at once: volumes and mute to the audio buses, quality to the renderer,
+ * look sensitivity to the camera; vibration is read by buzz(). The pause menu edits them. A game can read them too:
+ * settings.get(), settings.subscribe(fn), or the SETTINGS_CHANGED event.
+ */
+import { events } from './events';
+import { state } from './state';
+
+export type Quality = 'low' | 'medium' | 'high';
+
+export interface GameSettings {
+  /** 0..1, all sound. */
+  masterVolume: number;
+  musicVolume: number;
+  sfxVolume: number;
+  /** Silence everything without losing the volumes. */
+  muted: boolean;
+  /** low = fewer pixels and no shadows (smoother on a weak phone); high = full resolution and shadows. */
+  quality: Quality;
+  /** Camera look speed, 0.25..3 (1 = default). */
+  lookSensitivity: number;
+  /** Phone vibration on hits and rewards. */
+  vibration: boolean;
+}
+
+export const DEFAULT_SETTINGS: Readonly<GameSettings> = {
+  masterVolume: 0.9, musicVolume: 0.6, sfxVolume: 0.8, muted: false, quality: 'high', lookSensitivity: 1, vibration: true,
+};
+
+const KEY = 'nb-game-settings-v1';
+const unit = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : d);
+
+/** Anything read from storage is untrusted: every field is checked, and a bad one falls back to its default. */
+export function sanitizeSettings(raw: unknown): GameSettings {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const look = typeof r.lookSensitivity === 'number' && Number.isFinite(r.lookSensitivity) ? Math.max(0.25, Math.min(3, r.lookSensitivity)) : DEFAULT_SETTINGS.lookSensitivity;
+  return {
+    masterVolume: unit(r.masterVolume, DEFAULT_SETTINGS.masterVolume),
+    musicVolume: unit(r.musicVolume, DEFAULT_SETTINGS.musicVolume),
+    sfxVolume: unit(r.sfxVolume, DEFAULT_SETTINGS.sfxVolume),
+    muted: typeof r.muted === 'boolean' ? r.muted : DEFAULT_SETTINGS.muted,
+    quality: r.quality === 'low' || r.quality === 'medium' || r.quality === 'high' ? r.quality : DEFAULT_SETTINGS.quality,
+    lookSensitivity: look,
+    vibration: typeof r.vibration === 'boolean' ? r.vibration : DEFAULT_SETTINGS.vibration,
+  };
+}
+
+function read(): GameSettings {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(KEY);
+      if (raw) return sanitizeSettings(JSON.parse(raw));
+    }
+  } catch { /* private mode or a corrupt value: the defaults */ }
+  return { ...DEFAULT_SETTINGS };
+}
+
+let current: GameSettings = read();
+const listeners = new Set<(s: GameSettings) => void>();
+// The older fields stay in step, so code that reads state.settings sees the same values.
+const mirror = (): void => { state.settings = { musicVolume: current.musicVolume, sfxVolume: current.sfxVolume, quality: current.quality }; };
+mirror();
+
+function set(patch: Partial<GameSettings>): GameSettings {
+  current = sanitizeSettings({ ...current, ...patch });
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem(KEY, JSON.stringify(current)); } catch { /* not saved, still applied */ }
+  mirror();
+  const copy = { ...current };
+  for (const fn of [...listeners]) { try { fn({ ...copy }); } catch { /* one listener must not stop the others */ } }
+  events.emit('SETTINGS_CHANGED', copy);
+  return copy;
+}
+
+export const settings = {
+  get: (): GameSettings => ({ ...current }),
+  set,
+  toggleMute: (): boolean => set({ muted: !current.muted }).muted,
+  reset: (): GameSettings => set({ ...DEFAULT_SETTINGS }),
+  /** Called with the new settings after every change. Returns an unsubscribe. */
+  subscribe(fn: (s: GameSettings) => void): () => void { listeners.add(fn); return () => { listeners.delete(fn); }; },
+};
+`;
+
 const META = `/**
  * META — the reasons a player presses "Play again", and comes back tomorrow.
  *
@@ -573,6 +660,7 @@ const META = `/**
  */
 import { events } from './events';
 import { state, addScore } from './state';
+import { settings } from './settings';
 
 export interface RunStats {
   score: number;
@@ -799,7 +887,8 @@ export const combo = new Combo();
 
 /** A short vibration on a phone that supports it. Off when the player turned haptics off. */
 export function buzz(pattern: number | number[]): void {
-  if (!meta.profile.haptics) return;
+  // The player's Vibration setting (pause menu → Settings) and this game's own haptics toggle must both be on.
+  if (!meta.profile.haptics || !settings.get().vibration) return;
   try {
     const nav = typeof navigator !== 'undefined'
       ? (navigator as Navigator & { vibrate?: (p: number | number[]) => boolean; userActivation?: { hasBeenActive: boolean } })
@@ -1084,10 +1173,11 @@ const FILES: Record<string, string> = {
   'src/game/core/feel.ts': GAME_FEEL,
   'src/game/core/state.ts': STATE,
   'src/game/core/meta.ts': META,
+  'src/game/core/settings.ts': SETTINGS,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -1111,7 +1201,8 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
       if (wanted.has(base)) files[path] = content;
     }
     // meta.ts imports state.ts (and events.ts); state.ts imports events.ts.
-    if (files['src/game/core/meta.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
+    if (files['src/game/core/meta.ts']) { files['src/game/core/state.ts'] = FILES['src/game/core/state.ts']; files['src/game/core/settings.ts'] = FILES['src/game/core/settings.ts']; }
+    if (files['src/game/core/settings.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }

@@ -102450,3 +102450,17 @@ Local code commit: `9c997272e3b0ebccf18295b01da4fb4b2a73387f`, branch
 for publishing the complete payload was required. A read-only remote-ref check found no branch;
 no connector/alternate route was used to bypass the rejection. No PR or CI run has started. A
 private patch is prepared for review; public push/PR and GitHub validation await authorization.
+
+## 2026-11-19 — the OPEN rows from failedbr #2475/#2466/#2449/#2450, root-caused (follow-up to #4320)
+
+Admin: *"baaki open ho woh fix karo, root cause fix karna"*. Each row was traced against the report's own timestamps first.
+
+| Row | Root cause → class | Fix · lock (each reverted-and-failed) |
+|---|---|---|
+| Q-2917, Q-2926, Q-2918 (+ Q-2697 class) | misses quoted a version not on disk (own earlier edit, own REFUSED change, platform undo); the error never said which | `editProvenance.ts` — last read + last refused per file; a miss names its source · `aMissedEditSaysWhereItsTextCameFrom` |
+| Q-2916 | a 150 s platform-checked repair could delegate to a fresh-context specialist; a withheld tool was only hidden, never refused | `DELEGATION_TOOLS` + `AgentRunner` refuses a withheld tool · `aTimeBoxedRepairDoesNotDelegate` |
+| Q-2924 | salvaged fast-lane files skipped the write-time quality notes; no storage rule at the source | `salvageQualityNotes` in the hand-off + `PERSISTED_STATE_RULE` in all four lanes · `aSalvagedFileAndAStoredValueAreChecked` |
+| Q-2925 | the contract froze callback props as `() => void` | `CALLBACK_PROP_EVENT_RULE` (required event param — an optional one fails under strict, verified with tsc) · same file |
+| Q-2927 | an AI-song stub "fixed" with Web Audio tones | `AI_AUDIO_RULE` in all four lanes · same file |
+| Q-2921, Q-2922 | traced: their instances were the delegated/zombie `debugger` | closed by Q-2916 / Q-2913 |
+| Q-2920, Q-2931 (+ Q-2735) | a failed-and-retried Surplus attempt is reported as a zero-token turn | 🟡 billing decision for the admin, options + recommendation in the row |

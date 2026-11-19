@@ -67,7 +67,7 @@ describe('3 · CENSUS: every store, social and gallery route asks the one decisi
   it('the App Mart screen, its social client and the gallery queue send the session', () => {
     const mart = read('src/components/ide/NavAppStore.tsx');
     expect(mart).not.toMatch(/fetch\(['`]\/api\/nav-store[^)]*authedHeaders\(/);
-    expect(mart).toContain("fetch('/api/nav-store/status', { headers: await storeHeaders() })");
+    expect(mart).toMatch(/fetch\('\/api\/nav-store\/status',\s*\{\s*headers:\s*await storeHeaders\(\)(?:\s*,\s*signal:\s*controller\.signal)?\s*\}\)/);
     expect(read('src/components/ide/appMart/appMartSocialApi.ts')).toContain('withStoreAdminSession(');
     expect(read('src/components/panels/GalleryPanel.tsx')).toContain('galleryReviewApi(async () => withStoreAdminSession(');
   });

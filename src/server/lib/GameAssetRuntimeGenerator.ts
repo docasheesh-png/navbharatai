@@ -178,6 +178,7 @@ export function generateGameAssetRuntime(): string {
   return `import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
+import { events } from '../core/events';
 ${gameAssetLodSource()}
 
 ${gameAssetTextureVerifier(true)}
@@ -204,6 +205,7 @@ export interface GameAssetHandle {
   play?(role: string, fadeSeconds?: number): boolean;
 }
 
+let assetJobs = 0;
 /**
  * Per-subject changes a game (or its user) makes to a model without touching the library: edit
  * src/game/three/assetCustomizations.ts. Every field is optional; an empty object changes nothing.
@@ -281,16 +283,18 @@ export function applyGameAssetCustomization(handle: GameAssetHandle, c: GameAsse
   });
 }
 
-async function readOwnedModel(url: URL, maxBytes: number, signal?: AbortSignal): Promise<Uint8Array> {
+async function readOwnedModel(url: URL, maxBytes: number, signal?: AbortSignal, onProgress?: (fraction: number) => void): Promise<Uint8Array> {
   if (url.origin !== location.origin) throw Error('External gameplay asset refused');
   const response = await fetch(url, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(10000)]), redirect: 'error' });
   if (!response.ok || !response.body) throw Error('Model unavailable');
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = []; let total = 0;
+  const expected = Number(response.headers.get('content-length')) || 0;
   try {
     for (;;) {
       const { value, done } = await reader.read(); if (done) break;
       total += value.byteLength; if (total > maxBytes) throw Error('Model exceeds mobile budget');
+      if (expected > 0) onProgress?.(Math.min(0.9, (total / expected) * 0.9));
       chunks.push(value);
     }
   } finally { await reader.cancel(); reader.releaseLock(); }
@@ -309,9 +313,9 @@ export async function loadGameAsset(
   fallback: () => GameAssetHandle,
   signal?: AbortSignal,
 ): Promise<GameAssetHandle> {
-  return mountGameAsset(asset, async () => {
+  return mountGameAsset(asset, async (onProgress) => {
     if (!/^[a-f0-9]{64}$/.test(asset.sha256)) throw Error('Invalid asset manifest');
-    const bytes = await readOwnedModel(new URL(import.meta.env.BASE_URL + 'game-assets/' + asset.sha256 + '.glb', location.href), 5 * 1024 * 1024, signal);
+    const bytes = await readOwnedModel(new URL(import.meta.env.BASE_URL + 'game-assets/' + asset.sha256 + '.glb', location.href), 5 * 1024 * 1024, signal, onProgress);
     if (await sha256Hex(bytes) !== asset.sha256) throw Error('Model integrity mismatch');
     return bytes;
   }, fallback, signal);
@@ -327,14 +331,14 @@ export async function loadOwnGameAsset(
   fallback: () => GameAssetHandle,
   signal?: AbortSignal,
 ): Promise<GameAssetHandle> {
-  return mountGameAsset({ ...asset, sha256: source.sha256 ?? '' }, async () => {
+  return mountGameAsset({ ...asset, sha256: source.sha256 ?? '' }, async (onProgress) => {
     let path = String(source.file ?? '');
     while (path.startsWith('/')) path = path.slice(1);
     if (path.startsWith('public/')) path = path.slice('public/'.length);
     const parts = path.split('/');
     const safePart = (part: string) => part.length > 0 && part !== '.' && part !== '..' && [...part].every((ch) => /[A-Za-z0-9_ .-]/.test(ch));
     if (path.length > 240 || !path.toLowerCase().endsWith('.glb') || !parts.every(safePart)) throw Error('Own model path refused');
-    const bytes = await readOwnedModel(new URL(import.meta.env.BASE_URL + path, location.href), OWN_MODEL_MAX_BYTES, signal);
+    const bytes = await readOwnedModel(new URL(import.meta.env.BASE_URL + path, location.href), OWN_MODEL_MAX_BYTES, signal, onProgress);
     if (source.sha256 !== undefined && await sha256Hex(bytes) !== source.sha256) throw Error('Own model changed');
     return bytes;
   }, fallback, signal);
@@ -342,11 +346,15 @@ export async function loadOwnGameAsset(
 
 async function mountGameAsset(
   asset: LocalGameAsset,
-  readBytes: () => Promise<Uint8Array>,
+  readBytes: (onProgress: (fraction: number) => void) => Promise<Uint8Array>,
   fallback: () => GameAssetHandle,
   signal?: AbortSignal,
 ): Promise<GameAssetHandle> {
   let loaded: THREE.Group | undefined;
+  // The player sees this model arrive on the loading bar — real bytes, never a timer. Sent on the event bus that every
+  // kit has (core/loading.ts turns it into progress), so a project without loading.ts still compiles and plays.
+  const job = ++assetJobs;
+  events.emit('ASSET_LOADING', { id: job, fraction: 0, done: false });
   const disposeRoot = (root: THREE.Object3D) => {
     const geometries = new Set<THREE.BufferGeometry>();
     const materials = new Set<THREE.Material>();
@@ -365,7 +373,7 @@ async function mountGameAsset(
   };
   try {
     if (!Number.isFinite(asset.height) || asset.height <= 0 || !Number.isFinite(asset.yaw)) throw Error('Invalid asset manifest');
-    const bytes = await readBytes();
+    const bytes = await readBytes((fraction) => events.emit('ASSET_LOADING', { id: job, fraction, done: false }));
     // Server policy accepts self-contained GLBs only. Block every URI even if storage is corrupted.
     await verifyGameAssetTextures(bytes);
     const manager = new THREE.LoadingManager();
@@ -434,6 +442,8 @@ async function mountGameAsset(
   } catch {
     if (loaded) disposeRoot(loaded);
     return fallback();
+  } finally {
+    events.emit('ASSET_LOADING', { id: job, fraction: 1, done: true });
   }
 }
 `;

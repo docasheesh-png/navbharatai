@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { generateAssetCustomizations, generateAssetModelLoader, generateGameAssetRuntime, previousAssetModelLoader, upgradeAssetModelLoader } from '../src/server/lib/GameAssetRuntimeGenerator';
 import { syntheticGlb } from './fixtures/gameAssetFixtures';
 import { localModelLead } from '../src/server/AgentV3/gameAssets/localModelNote';
+import { generateGameRuntime } from '../src/server/lib/GameRuntimeGenerator';
 
 const root = join(__dirname, `.tmp-changeable-${process.pid}`);
 const library = syntheticGlb(false);
@@ -20,10 +21,16 @@ const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 const files = new Map<string, Uint8Array>([[`/game-assets/${sha(library)}.glb`, library], ['/models/my-car.glb', own], ['/models/dragon.glb', own]]);
 const procedural = () => ({ root: new THREE.Group(), source: 'procedural' as const, update() {}, dispose() {} });
 
+/** The runtime imports '../core/events' (the loading bar's bus), so every fixture gets the kit's real one beside it. */
+function withCoreEvents(dir: string): void {
+  const core = join(dir, '..', 'core'); mkdirSync(core, { recursive: true });
+  writeFileSync(join(core, 'events.ts'), generateGameRuntime().files['src/game/core/events.ts']);
+}
+
 /** One fixture project per customization file: the loader reads it once, at import, like a real game build. */
 async function game(name: string, customizations: string) {
-  const dir = join(root, name);
-  mkdirSync(dir, { recursive: true });
+  const dir = join(root, name, 'three');
+  mkdirSync(dir, { recursive: true }); withCoreEvents(dir);
   writeFileSync(join(dir, 'externalAssets.ts'), generateGameAssetRuntime());
   writeFileSync(join(dir, 'assetModels.ts'), generateAssetModelLoader({ car: { sha256: sha(library), height: 1.4, yaw: 0, lod: false } }));
   if (customizations) writeFileSync(join(dir, 'assetCustomizations.ts'), generateAssetCustomizations(['car']).replace('= {};', `= ${customizations};`));
@@ -87,7 +94,7 @@ describe('every library model is changeable', () => {
     expect(car.source).toBe('model'); expect(size(car.root).y).toBeCloseTo(1.4, 3);
   });
   it('colours one material by name and leaves the rest', async () => {
-    const dir = join(root, 'helpers'); mkdirSync(dir, { recursive: true });
+    const dir = join(root, 'helpers', 'three'); mkdirSync(dir, { recursive: true }); withCoreEvents(dir);
     writeFileSync(join(dir, 'externalAssets.ts'), generateGameAssetRuntime());
     const rt = await import(join(dir, 'externalAssets.ts'));
     const group = new THREE.Group(); const pivot = new THREE.Group(); group.add(pivot);

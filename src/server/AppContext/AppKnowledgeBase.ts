@@ -759,12 +759,21 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['race', 'racing game', 'countdown', '3 2 1', 'rival cars', 'dusri gaadiyan', 'opponent', 'position', 'lap time', 'timer', 'finish line', 'results', 'crosshair', 'ammo', 'goliyan', 'damage number', 'health bar', 'boss', 'fire animation', 'goli chalate hue dikhe', 'character hilta nahi', 'action dikhta nahi', 'attack animation', 'punch', 'kick', 'sword swing', 'talwar', 'jump animation', 'recoil', 'drift', 'drift button', 'handbrake', 'tyre smoke', 'button kaam nahi karta', 'fire button', 'shooting game', 'pubg jaisa', 'fight game', 'action button'],
   },
   {
+    id: 'game_2d_kit',
+    name: '2D games that feel right — platformers, side-scrollers, runners',
+    path: 'NavBharatAI Pro → chat → ask for any 2D game with movement (for example "Mario jaisa platformer banao", "2D runner game", "side scrolling shooter")',
+    description: 'Every 2D game NavBharatAI builds with movement uses its own tested 2D kit instead of code written from scratch each time. The player jumps the way players expect: speeding up and slowing down smoothly, a jump that still works a moment after running off a ledge, a jump pressed just before landing that still happens, and a short hop when the button is tapped instead of held. The player never passes through a wall however fast it moves; platforms you can jump up through and stand on; spikes that hurt. The camera follows smoothly without jerking on every small step, looks ahead in the direction of running, stays inside the level, and shakes on a hit. Characters are animated (standing, running, jumping, getting hit) and face the way they move; until real artwork is added, a coloured body is drawn so nothing is ever invisible. Backgrounds move slower than the world for depth (parallax), and dust, sparks, coins and explosions burst on screen.',
+    howToUse: 'Nothing to switch on. Ask for the 2D game you want; to change how it feels, ask in your own words (for example "jump thoda uncha karo", "camera thoda aage dekhe", "player tez daude").',
+    relatedFeatures: ['world_2d', 'game_actions_visible'],
+    keywords: ['2d game', 'platformer', 'mario jaisa', 'side scroller', 'side scrolling', 'runner game', 'jump game', 'kudne wala game', 'jump floaty', 'jump theek nahi', 'deewar ke paar', 'camera hilta', 'sprite', 'animation', 'parallax', 'tile map'],
+  },
+  {
     id: 'world_2d',
     name: '2D world — a big map for 2D games',
     path: 'NavBharatAI Pro → chat → ask for a 2D game with a big map (for example "2D game banao jiska map bahut bada ho" or "top-down game jisme kahin bhi ghoom sakun")',
     description: 'A big top-down map for 2D games, made from NavBharatAI\'s own pre-made sample pieces of land (meadow with flowers, forest, lakes and ponds, villages with houses and farms, desert with cactus and an oasis) joined so they look like ONE map: roads always continue from one piece to the next, long straight highways cross the map every few pieces, bridges carry roads over water, and the ground colour blends smoothly from grass to forest to sand with no line between pieces. The map is endless by default (it keeps growing around the player as they move) or can be a bounded square. The game also gets collision (trees, rocks, houses and water block the player; roads and bridges do not), a safe starting point on a long road, a minimap, and drawing of only what is on screen so it stays fast on a phone. Used automatically when the user of a 2D game asks for a big world in any words: a big map, going anywhere, a map that never ends, or saying the map is too small, in English, Hinglish or Hindi. NOT BUILT YET (say so honestly): side-scrolling platformer worlds, sprite art (the land is drawn with simple shapes), and enemies or characters (those are part of each game). For 3D games the big world is the Athree map.',
     howToUse: 'Ask for a 2D game and say you want a big map in your own words (bada map, badi duniya, kahin bhi ghoom sakun, map bahut chhota hai). The builder adds the 2D world (src/game/world2d/) and builds the game on it. Ask for a small or fixed map if you want one instead.',
-    relatedFeatures: ['athree_map'],
+    relatedFeatures: ['athree_map', 'game_2d_kit'],
     keywords: ['2d map', '2d world', 'bada map', '2d game bada map', 'top down map', 'top-down game', 'rpg map', 'tile map', 'endless map', 'map chhota hai', 'kahin bhi ghoom', 'badi duniya', 'map khatam na ho', 'open world 2d', '2d open world', 'gaon', 'jungle map', 'registan map', 'jheel', 'minimap', 'naksha'],
   },
   {

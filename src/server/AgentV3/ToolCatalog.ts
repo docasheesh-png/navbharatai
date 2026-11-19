@@ -2318,6 +2318,18 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       } },
     },
     {
+      name: 'generate_game_2d',
+      description:
+        'The 2D GAME KIT (src/game/2d/) for any 2D canvas game with movement — a platformer, side-scroller, runner, top-down or '
+        + 'side-view shooter: sprites and sprite-sheet animation (Animator with named clips, flip, a drawn placeholder until there is '
+        + 'art), a camera that follows through a dead zone with smoothing, level bounds and shake, a tilemap built from text rows '
+        + '(solid, one-way platform, hazard, spawn markers), platformer physics that never tunnels through a wall (coyote time, jump '
+        + 'buffering, variable jump height, one-way platforms), parallax backgrounds and 2D particles. Never hand-roll these. '
+        + 'A big top-down map is generate_world_2d instead.',
+      input_schema: { type: 'object', properties: { include: { type: 'array', items: { type: 'string' },
+        description: 'Optional subset: sprite, camera, tilemap, physics, parallax, particles. Default = all; physics brings the tilemap.' } } },
+    },
+    {
       name: 'generate_world_2d',
       description:
         'The 2D WORLD — a big top-down map for a 2D game (src/game/world2d/), joined seamlessly from NavBharatAI\'s pre-made sample chunks '
@@ -3698,6 +3710,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_procedural_object',
   'generate_athree_map',
   'generate_world_2d',
+  'generate_game_2d',
   'author_object',
   'generate_game_shell',
   'generate_game_royale',
@@ -3924,6 +3937,7 @@ export const RECIPE_TOOLS = [
   'generate_procedural_object',
   'generate_athree_map',
   'generate_world_2d',
+  'generate_game_2d',
   'author_object',
   'generate_game_shell',
   'generate_game_royale',

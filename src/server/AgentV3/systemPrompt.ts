@@ -1054,6 +1054,10 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '    7b. run_recipe({ name: "generate_world_2d" }) — the big map for a 2D game whose user wants a big world in any words',
     '       (src/game/world2d/): an endless top-down map joined seamlessly from pre-made sample chunks, with roads, collision,',
     '       a spawn point and a minimap. Build the game ON it; never draw a fixed-size background or keep the player on one screen.',
+    // 🎮 2D GAME KIT (admin 2026-11-19 game-gap audit): sprites, animation, camera, tilemap, platformer physics, parallax, particles.
+    '    7c. run_recipe({ name: "generate_game_2d" }) — for ANY 2D canvas game with movement (platformer, side-scroller, runner,',
+    '       shooter): src/game/2d/ gives Animator sprites, Camera2D, Tilemap.fromRows, PlatformerController (coyote time, jump',
+    '       buffer, one-way platforms, no tunnelling), Parallax and Particles2D. Never hand-roll a jump, tile collision or camera.',
     // 🧰 OBJECT FORGE (admin order 2026-11-15): objects nobody pre-built are made BY the builder, from a checked spec.
     '    8. run_recipe({ name: "author_object", input: { spec } }) — the OBJECT FORGE: any object, creature, person, vehicle, building',
     '       or prop the library and the Athree modules do not have. Look in the game library first; when nothing fits, DO NOT hand-write',

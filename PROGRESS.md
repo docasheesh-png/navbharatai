@@ -102560,3 +102560,14 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
   playtest hook gains `fps()` / `quality()`. Settings: Auto quality (on), FPS counter (off); Hud FpsCounter.
 - Found while wiring: the Graphics setting's documented "low = no shadows" was never applied (only the pixel ratio changed).
 - Locked by `tests/theGameStaysSmoothOnEveryPhone.test.ts` (reversion: dropping the shadow switch / the hitch filter → 3 fail).
+
+## 2026-11-19 — Game gap P1: the 2D game kit (branch `claude/game-2d-kit`)
+- Gap: only a top-down big map existed for 2D; every platformer/side-scroller/runner hand-rolled its jump, collision and camera.
+- New recipe `generate_game_2d` (`src/server/lib/Game2DGenerator.ts` → `src/game/2d/`): sprite.ts (SpriteSheet, Animator, drawn
+  placeholder), camera.ts (dead zone, frame-rate-independent easing, bounds, look-ahead, shake), tilemap.ts (text rows + legend,
+  markers, visible-only drawing), physics.ts (per-axis sub-stepped AABB — no tunnelling; one-way platforms; PlatformerController
+  with coyote time, jump buffer, variable jump, drop-through), parallax.ts, particles.ts (capped pool). Wired into GAME_RECIPES,
+  the catalog (tool + both lists), the dispatcher, the architect prompt (step 7c), the kit history script; AppKnowledgeBase entry.
+- Found while testing: a drop-through left the jump press unconsumed, so the buffer + coyote time jumped the player straight back
+  up onto the platform the next step.
+- Locked by `tests/a2DGameFeelsRight.test.ts` (reversion: no sub-stepping / unconsumed drop press → 2 fail).

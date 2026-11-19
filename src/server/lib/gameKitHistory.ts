@@ -14,6 +14,28 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/audio/tunes.ts": [
     "3f47b5dad2bf3f4718e32d8c8c181ba4209cf182da2fc17622e2366574d04cbe"
   ],
+  "src/game/2d/camera.ts": [
+    "942997fec17b1f897c8141236e11817fc7a831f938d5d5d715143e74a7b63036"
+  ],
+  "src/game/2d/index.ts": [
+    "2f463474edb8a4b6bf5b27dcccb0f30111a4137f3852f9b7613905778db17f48"
+  ],
+  "src/game/2d/parallax.ts": [
+    "19c30493cfa17504e090c3a01ae3f4e2a858de1c66aac7c16ce8bc09450f84c2"
+  ],
+  "src/game/2d/particles.ts": [
+    "3f76494ce237d7c90f16972b86679e51496be81a749ee8294ad11ff01ad2b824"
+  ],
+  "src/game/2d/physics.ts": [
+    "40a34663a1ad4d5655e0324071a7e8ef6ea9c8135c68e8af2f1d8cd54cb30ee0",
+    "b9a38c9cc7fa6d2f4bfd4cd295d1ea252a13690e942e20af4008a152d8cba09f"
+  ],
+  "src/game/2d/sprite.ts": [
+    "815b2518cd29e27daa28a893daaeb76de90b8f38dc647936eefb3beb08de63d7"
+  ],
+  "src/game/2d/tilemap.ts": [
+    "26924854e974b07a4a51c6ab4ec748abb05000e65f910f7634608d2c0d2c95c6"
+  ],
   "src/game/Game.ts": [
     "3b59382f3daf5d89b64a8be97aa634f7aa5445c831fd2f1f900199690d1f1483",
     "f7148517e4aa7560bd8ca4378c3819320784dd155a4ceec8fa632c93bccc30db",

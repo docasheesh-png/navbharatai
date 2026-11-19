@@ -102489,3 +102489,13 @@ Admin: *"game me attack, ya dript … action to ho jata hai, par action hota hua
   repair, `coveringElementSource.ts`); Q-2920/Q-2931 built as option (a) (a failed attempt is judged by its receipt —
   `FAILED_ATTEMPT_COST_UNKNOWN`, reporting only). Both ride in #4320. Next in the agreed order: measure idle sandboxes
   (Q-2929), then the admission queue with the BR1983/BR2003 owner (Q-2929 + Q-2930), then Q-2919 after the next royale report.
+
+## 2026-11-19 — Game-gap audit P0 #1–2: start screen, full pause menu, settings that are APPLIED, mute
+
+Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko pr bana kar marge karo!!"*. First fix of the series.
+
+**Root causes:** `GameCanvas` called `start()`, which set 'playing' at once, so no start screen ever showed; the Hud's pause overlay had only Resume; there was no mute; `state.settings` (musicVolume, sfxVolume, quality) was written by nothing and read by nothing; vibration had no player-facing switch.
+
+**Fixed:** new kit file `src/game/core/settings.ts` (validated, saved per device, `settings.get/set/toggleMute/reset/subscribe`, `SETTINGS_CHANGED`, mirrored into `state.settings`); the shell applies every change (mute/master/music/sfx/ui buses, quality scales the renderer's own pixel ratio down, look speed scales mouse and touch look); `buzz()` obeys the Vibration setting; `Game.play()` / `toMenu()` / `startScreenInfo`; a `<GameCanvas>` game opens on the kit's start screen (title, subtitle, device-correct controls, Play, Settings) — a Game constructed directly keeps the old start() behaviour, and a game whose own setup()/menu sets 'playing' is never frozen (the status-follow now un-pauses); Hud: start screen, pause menu (Resume / Restart / Settings / Menu), Settings panel, mute icon, game-over Menu; `GAME_MENU` event; prompt tells the builder the 3D shell owns these screens (no second set).
+
+**Tests:** `theGameHasMenusAndSettingsThatWork` (10) plus the start-screen cases in `aGameRunsWhenItSaysItIsPlaying`; stubs updated in five shell tests. Reversions failing: mute ignored (2), no start screen (1). **Not verified:** the look on a real phone.

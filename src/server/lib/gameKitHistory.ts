@@ -29,11 +29,14 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "9a4875fa493df5133f278972dca8e813c763b95202b37f794398b2dcdabd5cfe",
     "7527a2e5ef0ac683fdcf5fa698656303fb57aa26a91255683d265afdcaaac58e",
     "7d363cac186c24083cfa9259db22c6d5221b65c07c410d3e2a7a548645b20616",
-    "0bde20f3c613c37e727034203a8642f6829b74a93ba3930490c2958d5cfdc8a7"
+    "0bde20f3c613c37e727034203a8642f6829b74a93ba3930490c2958d5cfdc8a7",
+    "0d019452ff1ededf458e5f10504e1f0e3d6e2582574eace2d6bf8158166f1056",
+    "f3502f24458f6db9c8ae05f27434b30f79ab7bd67015aa8af49fc8c19c85cb68"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
-    "6d19d3faa0b46f00871a82026740716b96dd3ad44aae87185b94ecc852bf36ff"
+    "6d19d3faa0b46f00871a82026740716b96dd3ad44aae87185b94ecc852bf36ff",
+    "72e40384b67210f72d5b35c5c8234fcf3bc993bf7b85d05d5163345ec2f43a14"
   ],
   "src/game/RacingRoadGame.tsx": [
     "70c45d59c19199ad2a09336ff9dc048bb8bcb30ce2b935662594292141e165e2",
@@ -144,7 +147,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "faec1a0cc27e2fe60484484f755104ea4cfdede9d459e67ab4f8928f4137b50b",
     "71177558f25eb2e636975798fd7b23b2134e5ca90d2d75b8274f991b182f67cd",
     "ec846cab9a70461667264647e5b206289f4586e88bfd14526af0f0a87f9511a4",
-    "da0828a2296eca6939676adf53c6902e03afdb83ca24e900001fa484f4e3f902"
+    "da0828a2296eca6939676adf53c6902e03afdb83ca24e900001fa484f4e3f902",
+    "593c45bd3f06293967e640cf22bfc628787840bca9f978ee2c6acebbb33f8139"
   ],
   "src/game/core/feel.ts": [
     "6fd476d425ebacb3e80550606f0c2504536fb3f374b3eae871effe8b07acac96"
@@ -158,14 +162,19 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/core/meta.ts": [
     "6cbb9efee29e113dab1565263ee344ebb7f80bd9609752390708edba001db95a",
-    "47b4f5f0230add245aa485ab93ce1f7921534bb8f02f2b7e1f78eeffb2ee5e1e"
+    "47b4f5f0230add245aa485ab93ce1f7921534bb8f02f2b7e1f78eeffb2ee5e1e",
+    "334f3b6d9c10c3bfddf6973a9723fd95dc3c55623ab321fc15687ebdd506556e"
   ],
   "src/game/core/pool.ts": [
     "c0eb7deda0193f62ce37dfee23a5ca5757ab5d8cec5fbd92e9fc79871d688e60"
   ],
+  "src/game/core/settings.ts": [
+    "26763b0415a83d97907448f7e605ac9ddd527119c2ac59ba08e6e9f743416007"
+  ],
   "src/game/core/state.ts": [
     "a89b35a839d47bfddf76d72d89f25ad6085c5dc66edfb5c9cd8983898b88fcba",
-    "dfc9f2a2a953a287b80e12e6c1d06f3e54a61535e12eee60a37c5834976df54b"
+    "dfc9f2a2a953a287b80e12e6c1d06f3e54a61535e12eee60a37c5834976df54b",
+    "78e6d51764f0df4b2557f81776522d67de87755acaf3b8d1944f8c332f70adc2"
   ],
   "src/game/forge/behave.ts": [
     "a6a8751f2a3e0a244fcb606b7e1f558a0617c95e713a710205ebdabd7751ce7e",
@@ -333,7 +342,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/ui/Hud.tsx": [
     "2165d4e2e95b9e5990146f5afcfecbf35d0bf8a0cc1bd457f723a2492ace73b4",
     "1534e80d5cea41ccefbb4e16988c3ba7375d170eae86e70ab4effe6f9f8f2e1b",
-    "f0aa543691e8f8a0ce15f4d3c5846f93c5184115768b02222e7b92abef4b20b6"
+    "f0aa543691e8f8a0ce15f4d3c5846f93c5184115768b02222e7b92abef4b20b6",
+    "3563c4b14710b9ecfc7f114f01691440f1820ce874a985ebdddd7036198274dd"
   ],
   "src/game/ui/touchControls.ts": [
     "144b2a9ed0824bfabe5d47c2d41bcc031cc294a6c43a14fb9bbdfbc152a2096d",

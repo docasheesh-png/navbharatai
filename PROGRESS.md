@@ -102836,3 +102836,15 @@ Q-2947–Q-2949 OPEN (edit-miss watch, browser-tool outages without detail, Surp
 - Game drops the player's body on PLAYER_DIED and stands it up on PLAYER_SPAWNED / GAME_STARTED; the prompt tells the builder
   to topple enemies before removing them.
 - Locked by `tests/aDeathIsSeen.test.ts` (reversion: no shell wiring / walking while down → 3 fail).
+
+## 2026-11-19 — failedbr #2452 / #2437 / #2470 resolved (#4346 merged)
+
+Closed Q-2940, Q-2941, Q-2945, Q-2946, Q-2950, Q-2951, Q-2952 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).
+- Q-2940/Q-2941 (#2452): a read-only `bash` command counts as a read for the exploration guard and can never be a release-gate blocker (`shellInspection.ts`).
+- Q-2945 (#2437): canvas / three.js scene renderers are excluded from the palette count (`isSceneRenderer`).
+- Q-2946 (#2437, admin option a): a READY fresh build on a wallet ≥ 80% spent finishes instead of spending the balance on polish.
+- Q-2950 (admin request): an edit's admission estimate is floored by the median real cost of the workspace's last 5 builds. CI caught a TDZ ReferenceError in the first version (the route read `workspaceId` before its declaration); fixed by deriving the lease workspace id before the first admission check, with a source guard.
+- Q-2951 (#2470): THIS turn's real-browser render opens the done check at once; a delegating architect's 8 steps never reached the every-10th-step check.
+- Q-2952 (#2470): after an 8 s head start the fallback scope classifier runs in parallel; the loser is cancelled as `answered_elsewhere` (info, never a Surplus failure).
+- Also: `aKeyPopupIsNotCountedAgainstTheBuild` made deterministic (controlled clock).
+Still open from these reports: Q-2942, Q-2943, Q-2947, Q-2948, Q-2949 (see the queue). #2469 and #2454 were autopsied by other sessions (Q-2881–Q-2890, Q-2784+).

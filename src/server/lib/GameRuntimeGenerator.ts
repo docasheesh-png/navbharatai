@@ -314,7 +314,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -612,6 +612,7 @@ const EN = {
   level: 'Level', levels: 'Levels', levelComplete: 'Level complete', nextLevel: 'Next level', locked: 'Locked',
   difficulty: 'Difficulty', easy: 'Easy', normal: 'Normal', hard: 'Hard', checkpoint: 'Checkpoint',
   continue: 'Continue', inventory: 'Bag', inventoryEmpty: 'Your bag is empty', close: 'Close', needs: 'Needs {name}',
+  shop: 'Shop', coins: 'Coins', buy: 'Buy', equip: 'Use', equipped: 'In use', owned: 'Owned', maxed: 'Max', levelShort: 'Lv {n}',
 };
 
 export type StringKey = keyof typeof EN;
@@ -634,6 +635,7 @@ const HI: Record<StringKey, string> = {
   level: 'लेवल', levels: 'लेवल', levelComplete: 'लेवल पूरा', nextLevel: 'अगला लेवल', locked: 'बंद',
   difficulty: 'कठिनाई', easy: 'आसान', normal: 'सामान्य', hard: 'कठिन', checkpoint: 'चेकपॉइंट',
   continue: 'आगे', inventory: 'थैला', inventoryEmpty: 'थैला खाली है', close: 'बंद करें', needs: '{name} चाहिए',
+  shop: 'दुकान', coins: 'सिक्के', buy: 'खरीदें', equip: 'चुनें', equipped: 'चुना हुआ', owned: 'आपका', maxed: 'पूरा', levelShort: 'लेवल {n}',
 };
 
 export const GAME_STRINGS: Readonly<Record<GameLanguage, Record<StringKey, string>>> = { en: EN, hi: HI };
@@ -959,6 +961,134 @@ export const inventory = {
     });
   },
   clear(): void { state.inventory.length = 0; changed(); },
+};
+`;
+
+const ECONOMY = `/**
+ * COINS, A SHOP, UPGRADES AND A GARAGE (admin 2026-11-19 game-gap audit: no currency, no shop, no upgrades, no car or
+ * character to choose — nothing to come back for). Saved on the device per game, so coins and purchases survive a
+ * restart and a reload.
+ *
+ *   economy.setup({ id: 'desert-rally', startCoins: 50, items: [
+ *     { id: 'red',    name: 'Red car',    price: 0,   slot: 'car' },             // price 0 = owned and in use from the start
+ *     { id: 'blue',   name: 'Blue racer', price: 300, slot: 'car', icon: '🏎️' },
+ *     { id: 'engine', name: 'Engine',     price: 100, levels: 5 },               // an upgrade: 100, 150, 225 … (priceStep 1.5)
+ *     { id: 'potion', name: 'Potion',     price: 40,  kind: 'item' },            // a consumable: goes in the bag
+ *   ] });
+ *   economy.earn(10);                                 // a coin picked up
+ *   const top = economy.stat('engine', 30, 4);        // 30 + 4 per engine level
+ *   economy.equipped('car')                           // 'red' — build that car; SHOP_CHANGED says when it changes
+ * The kit's Hud shows the coins and a Shop on the start and game-over screens. COINS_CHANGED / SHOP_CHANGED are announced.
+ */
+import { events } from './events';
+import { inventory } from './inventory';
+
+export interface ShopItem {
+  id: string; name: string; price: number; icon?: string; description?: string;
+  /** A slot ('car', 'character', 'gun'): owned items in it are chosen between, one in use at a time. */
+  slot?: string;
+  /** An upgrade: how many times it can be bought. Each level costs priceStep (default 1.5) times the last. */
+  levels?: number; priceStep?: number;
+  /** 'item' = a consumable that goes in the bag (core/inventory.ts) every time it is bought. */
+  kind?: 'item';
+}
+export type BuyResult = 'bought' | 'owned' | 'poor' | 'max' | 'unknown';
+export interface ShopEntry extends ShopItem { owned: boolean; level: number; nextPrice: number | null; inUse: boolean }
+
+interface Saved { coins: number; owned: Record<string, number>; equipped: Record<string, string> }
+let key = 'nb-economy:game';
+let items: ShopItem[] = [];
+let data: Saved = { coins: 0, owned: {}, equipped: {} };
+const whole = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0);
+
+function persist(): void { try { localStorage.setItem(key, JSON.stringify(data)); } catch { /* full or blocked storage: play on */ } }
+function read(): Saved | null {
+  try {
+    const p = JSON.parse(localStorage.getItem(key) || 'null');
+    if (!p || typeof p !== 'object') return null;
+    const owned: Record<string, number> = {}; const equipped: Record<string, string> = {};
+    for (const [k, v] of Object.entries(p.owned ?? {})) if (whole(v) > 0) owned[k] = whole(v);
+    for (const [k, v] of Object.entries(p.equipped ?? {})) if (typeof v === 'string') equipped[k] = v;
+    return { coins: whole(p.coins), owned, equipped };
+  } catch { return null; }
+}
+const find = (id: string): ShopItem | undefined => items.find((i) => i.id === id);
+const maxLevel = (i: ShopItem): number => (i.kind === 'item' ? Infinity : Math.max(1, whole(i.levels ?? 1)));
+const coinsChanged = (): void => { events.emit('COINS_CHANGED', { coins: data.coins }); };
+const shopChanged = (id: string, action: string): void => { events.emit('SHOP_CHANGED', { id, action }); };
+
+/** Free items are owned, and every slot has something in use when anything in it is owned. */
+function settle(): void {
+  for (const i of items) if (whole(i.price) === 0 && i.kind !== 'item' && !data.owned[i.id]) data.owned[i.id] = 1;
+  const slots = new Set(items.filter((i) => i.slot).map((i) => i.slot as string));
+  for (const slot of slots) {
+    const current = find(data.equipped[slot] ?? '');
+    if (current && current.slot === slot && data.owned[current.id]) continue;
+    const first = items.find((i) => i.slot === slot && data.owned[i.id]);
+    if (first) data.equipped[slot] = first.id; else delete data.equipped[slot];
+  }
+}
+
+export const economy = {
+  /** Declare the shop and load this game's saved wallet. Call once, before the start screen shows. */
+  setup(o: { id?: string; items?: ShopItem[]; startCoins?: number }): void {
+    key = 'nb-economy:' + String(o?.id ?? 'game');
+    items = (Array.isArray(o?.items) ? o.items : []).filter((i) => i && typeof i.id === 'string' && i.id && typeof i.name === 'string')
+      .map((i) => ({ ...i, price: whole(i.price) }));
+    data = read() ?? { coins: whole(o?.startCoins), owned: {}, equipped: {} };
+    settle(); persist();
+    coinsChanged(); shopChanged('', 'setup');
+  },
+  get ready(): boolean { return items.length > 0; },
+  get coins(): number { return data.coins; },
+  earn(amount: number): void { const n = whole(amount); if (!n) return; data.coins += n; persist(); coinsChanged(); },
+  /** Pay \`amount\` if the player has it — all or nothing. */
+  spend(amount: number): boolean {
+    const n = whole(amount);
+    if (n > data.coins) return false;
+    if (!n) return true;
+    data.coins -= n; persist(); coinsChanged();
+    return true;
+  },
+  level(id: string): number { return data.owned[id] ?? 0; },
+  owns(id: string): boolean { return (data.owned[id] ?? 0) > 0; },
+  /** What the next purchase of \`id\` costs, or null when it cannot be bought again. */
+  priceOf(id: string): number | null {
+    const i = find(id);
+    if (!i) return null;
+    const lv = economy.level(id);
+    if (lv >= maxLevel(i)) return null;
+    if (i.kind === 'item') return i.price;
+    return Math.round(i.price * Math.pow(i.priceStep && i.priceStep > 0 ? i.priceStep : 1.5, lv));
+  },
+  buy(id: string): BuyResult {
+    const i = find(id);
+    if (!i) return 'unknown';
+    const price = economy.priceOf(id);
+    if (price === null) return maxLevel(i) === 1 ? 'owned' : 'max';
+    if (!economy.spend(price)) return 'poor';
+    if (i.kind === 'item') inventory.add(i.id, 1);
+    else data.owned[id] = economy.level(id) + 1;
+    // A new car or character is put to use at once — that is why it was bought.
+    if (i.slot) data.equipped[i.slot] = i.id;
+    persist(); shopChanged(id, 'bought');
+    return 'bought';
+  },
+  /** Put an owned slot item in use. */
+  equip(id: string): boolean {
+    const i = find(id);
+    if (!i || !i.slot || !economy.owns(id)) return false;
+    data.equipped[i.slot] = id; persist(); shopChanged(id, 'equipped');
+    return true;
+  },
+  equipped(slot: string): string | null { return data.equipped[slot] ?? null; },
+  /** A number that grows with an upgrade: base + perLevel × its level. */
+  stat(id: string, base: number, perLevel: number): number { return base + perLevel * economy.level(id); },
+  get list(): ShopEntry[] {
+    return items.map((i) => ({ ...i, owned: economy.owns(i.id), level: economy.level(i.id), nextPrice: economy.priceOf(i.id), inUse: !!i.slot && data.equipped[i.slot] === i.id }));
+  },
+  /** Wipe this game's wallet and purchases (a "reset progress" button). */
+  reset(): void { data = { coins: 0, owned: {}, equipped: {} }; settle(); persist(); coinsChanged(); shopChanged('', 'reset'); },
 };
 `;
 
@@ -1713,10 +1843,11 @@ const FILES: Record<string, string> = {
   'src/game/core/quests.ts': QUESTS,
   'src/game/core/inventory.ts': INVENTORY,
   'src/game/core/dialogue.ts': DIALOGUE,
+  'src/game/core/economy.ts': ECONOMY,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -1747,6 +1878,7 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/strings.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (files['src/game/core/levels.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/quests.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
+    if (files['src/game/core/economy.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
     if (files['src/game/core/dialogue.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
     if (files['src/game/core/inventory.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];

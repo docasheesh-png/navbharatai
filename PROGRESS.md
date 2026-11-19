@@ -102533,3 +102533,11 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
   Enter/Space/E), bag button + InventoryPanel (I key, pauses), EN/HI strings.
 - Found while testing: a locked choice named the missing item by its id (looked up only among owned items) → `inventory.nameOf`.
 - Locked by `tests/aGameCanTalkAndCarryThings.test.ts` (reversion: dropping the freeze / the all-or-nothing check → 2 fail).
+
+## 2026-11-19 — Game gap P1: coins, shop, upgrades, garage (branch `claude/game-economy`)
+- Gap: no currency, shop, upgrades, or car/character selection — nothing to come back for.
+- Kit: `core/economy.ts` (`setup({ id, items, startCoins })`, `earn`, `spend` all-or-nothing, `buy` → bought/owned/poor/max/unknown,
+  `equip`/`equipped(slot)`, `priceOf` (upgrades ×priceStep, default 1.5, to `levels`), `stat(id, base, perLevel)`, consumables go
+  in the bag; saved per game id on the device, sanitised on load so a corrupt/hand-edited save cannot crash or mint coins; a free
+  slot item is owned and in use from the start). Hud: coin pill, ShopPanel from the start and game-over screens, EN/HI strings.
+- Locked by `tests/aGameHasCoinsAShopAndAGarage.test.ts` (reversion: dropping the spend check / the owned-equip check → 4 fail).

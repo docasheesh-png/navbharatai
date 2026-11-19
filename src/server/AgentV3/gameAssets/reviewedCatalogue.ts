@@ -9,6 +9,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/blob/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Knight.glb",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Knight.glb",
     "sha256": "351f36fbc833b600518d0646c0c9ef59a7f570b79bf8c0ecd79e5729a05683ed",
+    "bytes": 490608,
     "subjects": [
       "human",
       "knight"
@@ -58,6 +59,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_sedan.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_sedan.gltf",
     "sha256": "39ceaf53a23663c0a717f8358517d8f6c88ced2f34837b57bafc13e6c7be6818",
+    "bytes": 69484,
     "subjects": [
       "car"
     ],
@@ -105,6 +107,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_A.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_A.gltf",
     "sha256": "364ebc7676adbbded8fcb9382a4245c92dce8f2e248a27db64ef2b82c30bc8d6",
+    "bytes": 70720,
     "subjects": [
       "building"
     ],
@@ -152,6 +155,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KhronosGroup/glTF-Sample-Assets/blob/8f492390ddc7a2ae221a1369ef560589cf8c70fb/Models/Fox/glTF-Binary/Fox.glb",
     "downloadUrl": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/8f492390ddc7a2ae221a1369ef560589cf8c70fb/Models/Fox/glTF-Binary/Fox.glb",
     "sha256": "d97044e701822bac5a62696459b27d7b375aada5de8574ed4362edbba94771f7",
+    "bytes": 162852,
     "subjects": [
       "fox"
     ],
@@ -193,6 +197,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/Zalamancer/train-game/blob/b593073ea756efa2bba003b9cd2d1ebd3a7488e6/assets/kenney_train-kit/Models/glb/train-diesel-a.glb",
     "downloadUrl": "https://raw.githubusercontent.com/Zalamancer/train-game/b593073ea756efa2bba003b9cd2d1ebd3a7488e6/assets/kenney_train-kit/Models/glb/train-diesel-a.glb",
     "sha256": "83d64b6f67c49aa34abe8cebbccf18edd24070fa8e8ee4a94354603807cdf4e6",
+    "bytes": 141564,
     "subjects": [
       "train"
     ],
@@ -235,6 +240,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/trebeljahr/quaternius-showcase/blob/c664c6f231d3dd522b38ba52fc39ec33028624e2/public/glb/ships_pack/CruiseShip.glb",
     "downloadUrl": "https://raw.githubusercontent.com/trebeljahr/quaternius-showcase/c664c6f231d3dd522b38ba52fc39ec33028624e2/public/glb/ships_pack/CruiseShip.glb",
     "sha256": "e0ce08909dfaed9d8896321079bf2d14a9a740a426efd23a646530caa5b89569",
+    "bytes": 61856,
     "subjects": [
       "ship"
     ],
@@ -268,6 +274,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "downloadUrl": "https://raw.githubusercontent.com/beep2bleep/FreeAssetsByKenneyNLandQuaternius/dea756baf3b3a4889d8c245e456a4791f961578a/FreeModels%20by%20Quaternius%5BPatreon%5D/Characters%20and%20Animals/Animal%20Pack%20Vol.2%20-%20Jul%202017/FBX/Eagle.fbx",
     "packaged": true,
     "sha256": "4e8915ef238773ca0b11576fd71dddb49449ce0aa6b575f0fce9e65e79e03f75",
+    "bytes": 2064220,
     "subjects": [
       "eagle",
       "bird"
@@ -307,6 +314,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_B.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_B.gltf",
     "sha256": "aea2b4915763d7f90874c5f6ed6e0f683ccd6a743a49846b3885050ca56b81f3",
+    "bytes": 86676,
     "subjects": [
       "building"
     ],
@@ -354,6 +362,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_C.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_C.gltf",
     "sha256": "3302fe4f437bbf10650273404d99002da64ae203b3e11330ac21695a2f8e5678",
+    "bytes": 82720,
     "subjects": [
       "building"
     ],
@@ -401,6 +410,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_D.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_D.gltf",
     "sha256": "8013346c877797e1278529a9e2db58b0801d78385f448d499daf0de4c4a67915",
+    "bytes": 91036,
     "subjects": [
       "building"
     ],
@@ -448,6 +458,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_E.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_E.gltf",
     "sha256": "7505c56239acb7c462dc000f077f6c64251b361c393d05c1bbc041595ac6d5bd",
+    "bytes": 106084,
     "subjects": [
       "building"
     ],
@@ -495,6 +506,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_F.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_F.gltf",
     "sha256": "100249f2dcd6cc57d7fefd5a0ac274d89ec0e0d7aedec6686e3634404d8b4cdb",
+    "bytes": 105516,
     "subjects": [
       "building"
     ],
@@ -542,6 +554,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_G.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_G.gltf",
     "sha256": "2165b93715370ef0d2ff287fb9a0703942633fc2e3ac6318e4c04512755c3c04",
+    "bytes": 124956,
     "subjects": [
       "building"
     ],
@@ -589,6 +602,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_H.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/building_H.gltf",
     "sha256": "7563337775b84fb8d2806c220d2144dd104392e611565cbe783c15b31c5a1460",
+    "bytes": 139312,
     "subjects": [
       "building"
     ],
@@ -636,6 +650,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/bush.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/bush.gltf",
     "sha256": "54f1d3902b42a9fda6fb2d6e32262bd7eb9f91509e5b9c0fc580a739ebbf4ff2",
+    "bytes": 24312,
     "subjects": [
       "bush"
     ],
@@ -683,6 +698,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/streetlight.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/streetlight.gltf",
     "sha256": "53775173bf5609c567efa42147543a83caeb6dbfd41209c09160e335a37d9d66",
+    "bytes": 28432,
     "subjects": [
       "streetlight"
     ],
@@ -730,6 +746,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/trafficlight_A.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/trafficlight_A.gltf",
     "sha256": "d6a928b95d6ae2cc40055ae1a82d8b7efe8e5a7531375213a1aa41ab219aed0b",
+    "bytes": 51972,
     "subjects": [
       "traffic light"
     ],
@@ -777,6 +794,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/watertower.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/watertower.gltf",
     "sha256": "9cba3c1822b48da962afb89876a29a38b2263567822ccb33900c1f31cd9538c2",
+    "bytes": 29560,
     "subjects": [
       "water tower"
     ],
@@ -824,6 +842,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_taxi.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_taxi.gltf",
     "sha256": "a5f68e4b44cbea3b6569b8add0c7455afe8c9844d40abcb775c2144cd76bff1d",
+    "bytes": 72852,
     "subjects": [
       "car",
       "taxi"
@@ -872,6 +891,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_police.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_police.gltf",
     "sha256": "6ac24549dd1d29f1028865e99bf491ea8ceb0d50483d344dda39565133114282",
+    "bytes": 76328,
     "subjects": [
       "car",
       "police car"
@@ -920,6 +940,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/blob/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/decoration/nature/tree_single_A.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/decoration/nature/tree_single_A.gltf",
     "sha256": "8453f1de1ea6a8534e369cd614d71321f7bbf7db5ae66425094a51eb6191a19a",
+    "bytes": 20516,
     "subjects": [
       "tree"
     ],
@@ -967,6 +988,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/blob/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/decoration/nature/tree_single_B.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/decoration/nature/tree_single_B.gltf",
     "sha256": "4c1a047cce128c2e25829eab9225f4d205f18e826678c121b7a2878b6cbce25c",
+    "bytes": 24544,
     "subjects": [
       "tree"
     ],
@@ -1014,6 +1036,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/blob/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/decoration/nature/rock_single_A.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/decoration/nature/rock_single_A.gltf",
     "sha256": "dacc2975dd4e8699cd9e0df64406e56f9f11015887598df580b34d367801e0fc",
+    "bytes": 18380,
     "subjects": [
       "rock"
     ],
@@ -1061,6 +1084,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/blob/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/decoration/nature/rock_single_C.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/decoration/nature/rock_single_C.gltf",
     "sha256": "7c6f11cd0b830797e34286588ef745429aa36f381a9d653b8ed8665e2d141ccd",
+    "bytes": 19368,
     "subjects": [
       "rock"
     ],
@@ -1108,6 +1132,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/blob/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/decoration/nature/hills_A_trees.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/decoration/nature/hills_A_trees.gltf",
     "sha256": "00cd544c80eb5561427b2e493b4288c3054d6f8ec3e96a8e8abc0090637dc464",
+    "bytes": 48208,
     "subjects": [
       "hill"
     ],
@@ -1155,6 +1180,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/blob/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/decoration/nature/mountain_A_grass_trees.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/decoration/nature/mountain_A_grass_trees.gltf",
     "sha256": "cc16191a3aaa2f3d77b5ac2a27913d17c85b41db2a86244a88050ab42e4eaa05",
+    "bytes": 44516,
     "subjects": [
       "mountain"
     ],
@@ -1202,6 +1228,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/blob/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/buildings/red/building_home_A_red.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/buildings/red/building_home_A_red.gltf",
     "sha256": "25e067d2b2c22b3b4a29257a0e3166d9447ef951c8905790d8e70692c808a863",
+    "bytes": 72548,
     "subjects": [
       "house"
     ],
@@ -1249,6 +1276,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/blob/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/buildings/yellow/building_home_B_yellow.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/buildings/yellow/building_home_B_yellow.gltf",
     "sha256": "bccb8d11c29bca8d7202d7c8f253b34ddc373f3c516c1f42f7091b55a86dcac9",
+    "bytes": 99328,
     "subjects": [
       "house"
     ],
@@ -1296,6 +1324,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/blob/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/buildings/blue/building_well_blue.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/buildings/blue/building_well_blue.gltf",
     "sha256": "e91874848e41ad201d7b784b01aae95479e337daceb86fe01d02e391e06b7330",
+    "bytes": 59540,
     "subjects": [
       "well"
     ],
@@ -1343,6 +1372,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/blob/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/buildings/red/building_windmill_red.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack/Assets/gltf/buildings/red/building_windmill_red.gltf",
     "sha256": "fad846896c027ed0d08d45ff77b1749a220d0e7c3de952d4e7ebd487a3e8e64d",
+    "bytes": 160680,
     "subjects": [
       "windmill"
     ],
@@ -1390,6 +1420,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Prototype-Bits-1.0/blob/bb159596f4f5106b663741d002c8eb45c80c0f41/addons/kaykit_prototype_bits/Assets/gltf/target.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Prototype-Bits-1.0/bb159596f4f5106b663741d002c8eb45c80c0f41/addons/kaykit_prototype_bits/Assets/gltf/target.gltf",
     "sha256": "070e9995d8513e8025f9fa09c9265ca10f952307a080fc619e622ea117774dd3",
+    "bytes": 40092,
     "subjects": [
       "target"
     ],
@@ -1437,6 +1468,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Prototype-Bits-1.0/blob/bb159596f4f5106b663741d002c8eb45c80c0f41/addons/kaykit_prototype_bits/Assets/gltf/target_stand_A.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Prototype-Bits-1.0/bb159596f4f5106b663741d002c8eb45c80c0f41/addons/kaykit_prototype_bits/Assets/gltf/target_stand_A.gltf",
     "sha256": "adcc7d18739060d3f8b972bcd07aa3c9feb1dc60912cb428f160aae78dfa0d45",
+    "bytes": 45360,
     "subjects": [
       "target"
     ],
@@ -1484,6 +1516,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Prototype-Bits-1.0/blob/bb159596f4f5106b663741d002c8eb45c80c0f41/addons/kaykit_prototype_bits/Assets/gltf/Barrel_A.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Prototype-Bits-1.0/bb159596f4f5106b663741d002c8eb45c80c0f41/addons/kaykit_prototype_bits/Assets/gltf/Barrel_A.gltf",
     "sha256": "804034cefd5191c6ba553f9a848f37d760d741021bd57f03dea44855b00c6307",
+    "bytes": 45668,
     "subjects": [
       "barrel"
     ],
@@ -1531,6 +1564,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Prototype-Bits-1.0/blob/bb159596f4f5106b663741d002c8eb45c80c0f41/addons/kaykit_prototype_bits/Assets/gltf/Wall.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Prototype-Bits-1.0/bb159596f4f5106b663741d002c8eb45c80c0f41/addons/kaykit_prototype_bits/Assets/gltf/Wall.gltf",
     "sha256": "c0e872b75890735d07750cd993800665fedfeda369483b74bc38c5f7044dd84b",
+    "bytes": 37520,
     "subjects": [
       "wall"
     ],
@@ -1578,6 +1612,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Prototype-Bits-1.0/blob/bb159596f4f5106b663741d002c8eb45c80c0f41/addons/kaykit_prototype_bits/Assets/gltf/Wall_Target.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Prototype-Bits-1.0/bb159596f4f5106b663741d002c8eb45c80c0f41/addons/kaykit_prototype_bits/Assets/gltf/Wall_Target.gltf",
     "sha256": "c8e4cd90e485adb042efb5928efa196b708d0ae852f69492c06792d6f350055a",
+    "bytes": 39404,
     "subjects": [
       "wall",
       "target"
@@ -1627,6 +1662,7 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/blob/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Knight.glb",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Knight.glb",
     "sha256": "6ff3a06ff489023e09246cf9cf21c97592943a63b34c5cec39ed8d7a6b7a6ac8",
+    "bytes": 699116,
     "subjects": [
       "boxer"
     ],

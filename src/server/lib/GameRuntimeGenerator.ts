@@ -314,7 +314,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -611,6 +611,7 @@ const EN = {
   minutes: 'min',
   level: 'Level', levels: 'Levels', levelComplete: 'Level complete', nextLevel: 'Next level', locked: 'Locked',
   difficulty: 'Difficulty', easy: 'Easy', normal: 'Normal', hard: 'Hard', checkpoint: 'Checkpoint',
+  continue: 'Continue', inventory: 'Bag', inventoryEmpty: 'Your bag is empty', close: 'Close', needs: 'Needs {name}',
 };
 
 export type StringKey = keyof typeof EN;
@@ -632,6 +633,7 @@ const HI: Record<StringKey, string> = {
   minutes: 'मिनट',
   level: 'लेवल', levels: 'लेवल', levelComplete: 'लेवल पूरा', nextLevel: 'अगला लेवल', locked: 'बंद',
   difficulty: 'कठिनाई', easy: 'आसान', normal: 'सामान्य', hard: 'कठिन', checkpoint: 'चेकपॉइंट',
+  continue: 'आगे', inventory: 'थैला', inventoryEmpty: 'थैला खाली है', close: 'बंद करें', needs: '{name} चाहिए',
 };
 
 export const GAME_STRINGS: Readonly<Record<GameLanguage, Record<StringKey, string>>> = { en: EN, hi: HI };
@@ -880,6 +882,186 @@ export const objectives = {
   get list(): readonly Objective[] { return list.map((o) => ({ ...o })); },
   get allDone(): boolean { return list.length > 0 && list.every((o) => o.done); },
   clear(): void { list = []; changed(); },
+};
+`;
+
+const INVENTORY = `/**
+ * THE PLAYER'S BAG (admin 2026-11-19 game-gap audit: \`state.inventory\` existed and nothing could add to it, count it,
+ * use an item or show it). Items are stacks of ids kept IN \`state.inventory\` itself, so save(), load() and a restart
+ * already handle the bag — there is no second copy to drift.
+ *
+ *   inventory.define({ potion: { name: 'Health potion', icon: '🧪', usable: true }, key: { name: 'Gate key', icon: '🔑' } });
+ *   inventory.onUse('potion', () => healPlayer(30));   // return false to keep the item (e.g. already at full health)
+ *   inventory.add('potion', 2); inventory.has('key'); inventory.remove('key');
+ * The kit's Hud shows a bag button once anything is in it (I on a keyboard); INVENTORY_CHANGED / ITEM_USED are announced.
+ */
+import { events } from './events';
+import { state } from './state';
+
+export interface ItemInfo { name?: string; icon?: string; description?: string; usable?: boolean; max?: number }
+export interface ItemStack { id: string; name: string; icon: string; description: string; count: number; usable: boolean }
+
+const info = new Map<string, ItemInfo>();
+const handlers = new Map<string, (id: string) => boolean | void>();
+const changed = (): void => { events.emit('INVENTORY_CHANGED', { items: inventory.list }); };
+const valid = (id: unknown): id is string => typeof id === 'string' && id.length > 0 && id.length <= 64;
+const whole = (n: number): number => (Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0);
+
+export const inventory = {
+  /** Names, icons and rules for item ids. An undefined id still works — it shows its id. */
+  define(items: Record<string, ItemInfo>): void {
+    for (const [id, i] of Object.entries(items ?? {})) if (valid(id) && i) info.set(id, i);
+    changed();
+  },
+  /** The item's display name (its id when it was never defined). */
+  nameOf(id: string): string { return info.get(id)?.name ?? id; },
+  count(id: string): number { return state.inventory.filter((x) => x === id).length; },
+  has(id: string, count = 1): boolean { return inventory.count(id) >= Math.max(1, whole(count)); },
+  /** Add up to \`count\` (a stack holds at most \`max\`, default 99). Returns how many were added. */
+  add(id: string, count = 1): number {
+    if (!valid(id)) return 0;
+    const room = Math.max(0, whole(info.get(id)?.max ?? 99) - inventory.count(id));
+    const n = Math.min(room, whole(count));
+    for (let i = 0; i < n; i++) state.inventory.push(id);
+    if (n > 0) changed();
+    return n;
+  },
+  /** Take \`count\` away — all of them or none (a recipe needing 3 never takes 2). */
+  remove(id: string, count = 1): boolean {
+    const n = Math.max(1, whole(count));
+    if (!inventory.has(id, n)) return false;
+    let left = n;
+    for (let i = state.inventory.length - 1; i >= 0 && left > 0; i--) if (state.inventory[i] === id) { state.inventory.splice(i, 1); left--; }
+    changed();
+    return true;
+  },
+  /** What happens when the player uses an item. Return false to keep it. */
+  onUse(id: string, fn: (id: string) => boolean | void): () => void {
+    handlers.set(id, fn);
+    return () => { if (handlers.get(id) === fn) handlers.delete(id); };
+  },
+  /** Use one: runs its onUse, then spends it. False when there is none, or nothing to do with it. */
+  use(id: string): boolean {
+    const fn = handlers.get(id);
+    if (!inventory.has(id) || (!fn && !info.get(id)?.usable)) return false;
+    if (fn && fn(id) === false) return false;
+    inventory.remove(id, 1);
+    events.emit('ITEM_USED', { id, left: inventory.count(id) });
+    return true;
+  },
+  /** One entry per kind, in the order they were first picked up. */
+  get list(): ItemStack[] {
+    const order: string[] = [];
+    for (const id of state.inventory) if (!order.includes(id)) order.push(id);
+    return order.map((id) => {
+      const i = info.get(id) ?? {};
+      return { id, name: inventory.nameOf(id), icon: i.icon ?? '◆', description: i.description ?? '', count: inventory.count(id), usable: !!(i.usable || handlers.has(id)) };
+    });
+  },
+  clear(): void { state.inventory.length = 0; changed(); },
+};
+`;
+
+const DIALOGUE = `/**
+ * TALKING TO PEOPLE (admin 2026-11-19 game-gap audit: an RPG had no dialogue box and no choices). A speaker, a line,
+ * and — when the story forks — choices; a choice can need an item from the bag. While someone is talking the game
+ * holds still (the shell does not run your update), and the press that ends the talk is not also a jump.
+ *
+ *   await dialogue.say('Guard', 'Halt! Who goes there?');
+ *   const pick = await dialogue.open({ start: 'hi', nodes: {
+ *     hi:  { speaker: 'Trader', text: 'Want a potion?', choices: [
+ *            { id: 'buy', text: 'Yes (1 coin)', requires: { item: 'coin' }, onChoose: () => { inventory.remove('coin'); inventory.add('potion'); }, next: 'bye' },
+ *            { id: 'no',  text: 'No thanks' } ] },
+ *     bye: { speaker: 'Trader', text: 'Stay safe out there.' } } });
+ * A plain list of lines works too: dialogue.open([{ speaker: 'Mira', text: 'Follow me.' }, { text: '…' }]).
+ * The promise resolves with the id of the last choice made (or null). DIALOGUE_STARTED / _LINE / _ENDED are announced.
+ */
+import { events } from './events';
+import { inventory } from './inventory';
+
+export interface DialogueChoice { id?: string; text: string; next?: string; requires?: { item: string; count?: number }; onChoose?: () => void }
+export interface DialogueNode { speaker?: string; text: string; next?: string; choices?: DialogueChoice[]; onEnter?: () => void }
+export type DialogueScript = DialogueNode[] | { start: string; nodes: Record<string, DialogueNode> };
+export interface DialogueView { speaker: string; text: string; choices: Array<{ text: string; available: boolean; needs: string | null }> }
+
+let nodes: Record<string, DialogueNode> = {};
+let at: string | null = null;
+let lastChoice: string | null = null;
+let resolve: ((choice: string | null) => void) | null = null;
+let justEnded = false;
+
+function enter(id: string | undefined): void {
+  const n = id != null ? nodes[id] : undefined;
+  if (!n || typeof n.text !== 'string') { dialogue.close(); return; }
+  at = id!;
+  try { n.onEnter?.(); } catch (e) { console.error('[dialogue] onEnter failed', e); }
+  events.emit('DIALOGUE_LINE', dialogue.current);
+}
+
+export const dialogue = {
+  /** Start a conversation (it replaces one already open, which ends with null). */
+  open(script: DialogueScript): Promise<string | null> {
+    if (at !== null) dialogue.close();
+    if (Array.isArray(script)) {
+      nodes = {};
+      script.forEach((n, i) => { nodes[String(i)] = { ...n, next: n.next ?? (n.choices?.length ? undefined : (i + 1 < script.length ? String(i + 1) : undefined)) }; });
+      if (script.length === 0) return Promise.resolve(null);
+      return dialogue.begin('0');
+    }
+    nodes = { ...(script?.nodes ?? {}) };
+    return dialogue.begin(script?.start);
+  },
+  /** One line from one speaker. */
+  say(speaker: string, text: string): Promise<string | null> { return dialogue.open([{ speaker, text }]); },
+  begin(start: string | undefined): Promise<string | null> {
+    if (start == null || !nodes[start]) return Promise.resolve(null);
+    lastChoice = null;
+    const done = new Promise<string | null>((r) => { resolve = r; });
+    events.emit('DIALOGUE_STARTED', {});
+    enter(start);
+    return done;
+  },
+  get active(): boolean { return at !== null; },
+  get current(): DialogueView | null {
+    const n = at !== null ? nodes[at] : undefined;
+    if (!n) return null;
+    return {
+      speaker: n.speaker ?? '',
+      text: n.text,
+      choices: (n.choices ?? []).map((c) => {
+        const r = c.requires;
+        const ok = !r || inventory.has(r.item, r.count ?? 1);
+        return { text: c.text, available: ok, needs: ok || !r ? null : inventory.nameOf(r.item) };
+      }),
+    };
+  },
+  /** Next line (Continue). Does nothing while choices are waiting — the player has to pick one. */
+  advance(): void {
+    const n = at !== null ? nodes[at] : undefined;
+    if (!n || n.choices?.length) return;
+    enter(n.next);
+  },
+  /** Pick choice \`index\`. A choice whose item is missing cannot be picked. */
+  choose(index: number): boolean {
+    const n = at !== null ? nodes[at] : undefined;
+    const c = n?.choices?.[index];
+    if (!c || (c.requires && !inventory.has(c.requires.item, c.requires.count ?? 1))) return false;
+    lastChoice = c.id ?? c.text;
+    try { c.onChoose?.(); } catch (e) { console.error('[dialogue] onChoose failed', e); }
+    if (at === null) return true;          // onChoose opened or closed a conversation itself
+    enter(c.next);
+    return true;
+  },
+  close(): void {
+    if (at === null) return;
+    at = null;
+    justEnded = true;
+    const r = resolve; resolve = null;
+    events.emit('DIALOGUE_ENDED', { choice: lastChoice });
+    r?.(lastChoice);
+  },
+  /** True once after a conversation ends — the shell skips that step so the closing press is not also a jump. */
+  takeJustEnded(): boolean { const j = justEnded; justEnded = false; return j; },
 };
 `;
 
@@ -1529,10 +1711,12 @@ const FILES: Record<string, string> = {
   'src/game/core/strings.ts': STRINGS,
   'src/game/core/levels.ts': LEVELS,
   'src/game/core/quests.ts': QUESTS,
+  'src/game/core/inventory.ts': INVENTORY,
+  'src/game/core/dialogue.ts': DIALOGUE,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -1563,6 +1747,8 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/strings.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (files['src/game/core/levels.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/quests.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
+    if (files['src/game/core/dialogue.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
+    if (files['src/game/core/inventory.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }

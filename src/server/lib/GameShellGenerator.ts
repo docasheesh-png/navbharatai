@@ -44,6 +44,7 @@ import { startMeta, mountMetaToasts, combo } from './core/meta';
 import { settings, type GameSettings } from './core/settings';
 import { setGameLanguage, t, type GameLanguage, type StringKey } from './core/strings';
 import { showHint } from './core/levels';
+import { dialogue } from './core/dialogue';
 import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
@@ -526,7 +527,10 @@ export class Game {
 
     // Hit-stop: the simulation freezes for a few frames so a hit lands. Input still ticks, or the
     // press that happened during the freeze is swallowed.
-    if (!this.feel.frozen) {
+    // While someone is talking the world holds still, and the step after the talk ends is skipped too — the press
+    // that closed the dialogue box must not also jump or swing (core/dialogue.ts).
+    const talking = dialogue.active || dialogue.takeJustEnded();
+    if (!this.feel.frozen && !talking) {
       const doorActor = { feet: this.player.object.getWorldPosition(new THREE.Vector3()), radius: 0.4, height: 1.8 };
       if (!this.chased && this.input.wasPressed('interact')) interactHouseDoor(this.scene, doorActor);
       updateHouseDoors(this.scene, delta, [doorActor, ...(this.options.doorOccupants?.(this.context) ?? [])]);
@@ -569,7 +573,7 @@ export class Game {
     }
     // During a hit-stop freeze the game did not run, so a press made now is KEPT for the step that does — wiping it
     // here was why a tap sometimes did nothing at all (the freeze follows every shot and every hit).
-    this.input.endFrame(this.feel.frozen);
+    this.input.endFrame(this.feel.frozen && !talking);
   }
 
   /** Play a pose on the default body, if there is one and the player is on foot. */
@@ -878,6 +882,8 @@ import { t } from '../core/strings';
 import { lastRaceResults } from '../three/race';
 import { levels } from '../core/levels';
 import { objectives, type Objective } from '../core/quests';
+import { dialogue, type DialogueView } from '../core/dialogue';
+import { inventory, type ItemStack } from '../core/inventory';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -1196,6 +1202,89 @@ export function ObjectiveList() {
   );
 }
 
+
+/**
+ * The dialogue box: who is speaking, the line, and the choices (1–9 on a keyboard). Tap the box, or Enter / Space / E,
+ * for the next line. A choice that needs an item the player lacks is shown, greyed, with what it needs.
+ */
+export function DialogueBox() {
+  const [view, setView] = useState<DialogueView | null>(dialogue.current);
+  useEffect(() => {
+    const sync = () => setView(dialogue.current);
+    const offs = [events.on('DIALOGUE_LINE', sync), events.on('DIALOGUE_ENDED', sync), events.on('INVENTORY_CHANGED', sync)];
+    return () => offs.forEach((o) => o());
+  }, []);
+  useEffect(() => {
+    if (!view) return;
+    const onKey = (e: KeyboardEvent) => {
+      const n = Number(e.key);
+      if (view.choices.length && Number.isInteger(n) && n >= 1 && n <= view.choices.length) { e.preventDefault(); dialogue.choose(n - 1); return; }
+      if (!view.choices.length && (e.key === 'Enter' || e.key === ' ' || e.key === 'e' || e.key === 'E')) { e.preventDefault(); dialogue.advance(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [view]);
+  if (!view) return null;
+  return (
+    <div role="dialog" aria-label={view.speaker || t('continue')} onClick={() => { if (!view.choices.length) dialogue.advance(); }}
+      style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', bottom: 'max(16px, env(safe-area-inset-bottom))', width: 'min(92vw, 620px)', padding: '14px 18px', borderRadius: 14, background: 'rgba(10,12,20,0.88)', border: '2px solid rgba(255,255,255,0.35)', color: '#fff', zIndex: 8, pointerEvents: 'auto', cursor: view.choices.length ? 'default' : 'pointer' }}>
+      {view.speaker ? <div style={{ fontWeight: 800, color: '#fde047', marginBottom: 4 }}>{view.speaker}</div> : null}
+      <p style={{ margin: 0, fontSize: 17, lineHeight: 1.4 }}>{view.text}</p>
+      {view.choices.length ? (
+        <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
+          {view.choices.map((c, i) => (
+            <button key={i} type="button" disabled={!c.available} onClick={(e) => { e.stopPropagation(); dialogue.choose(i); }}
+              style={{ ...secondary, marginTop: 0, minWidth: 0, textAlign: 'left', padding: '8px 12px', fontSize: 15, opacity: c.available ? 1 : 0.5, cursor: c.available ? 'pointer' : 'not-allowed' }}>
+              {(i + 1) + '. ' + c.text + (c.needs ? ' (' + t('needs', { name: c.needs }) + ')' : '')}
+            </button>
+          ))}
+        </div>
+      ) : <div aria-hidden="true" style={{ textAlign: 'right', opacity: 0.75, fontSize: 13, marginTop: 6 }}>{t('continue') + ' ▶'}</div>}
+    </div>
+  );
+}
+
+/** Re-render on every bag change. */
+function useInventory(): ItemStack[] {
+  const [items, setItems] = useState<ItemStack[]>(inventory.list);
+  useEffect(() => events.on('INVENTORY_CHANGED', () => setItems(inventory.list)), []);
+  return items;
+}
+
+/** The bag: every item with its icon, name and count; a usable one has a Use button. */
+export function InventoryPanel({ onBack }: { onBack: () => void }) {
+  const items = useInventory();
+  return (
+    <div style={{ width: 'min(92vw, 460px)' }}>
+      <h2 style={{ fontSize: 26, fontWeight: 800 }}>{t('inventory')}</h2>
+      {items.length === 0 ? <p style={{ opacity: 0.8, marginTop: 10 }}>{t('inventoryEmpty')}</p> : (
+        <ul aria-label={t('inventory')} style={{ listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'grid', gap: 8, textAlign: 'left' }}>
+          {items.map((it) => (
+            <li key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, background: 'rgba(255,255,255,0.10)' }}>
+              <span aria-hidden="true" style={{ fontSize: 26, width: 32, textAlign: 'center' }}>{it.icon}</span>
+              <span style={{ flex: 1 }}>
+                <span style={{ fontWeight: 700 }}>{it.name}</span>{it.count > 1 ? <span style={{ opacity: 0.8 }}>{' ×' + it.count}</span> : null}
+                {it.description ? <span style={{ display: 'block', fontSize: 13, opacity: 0.75 }}>{it.description}</span> : null}
+              </span>
+              {it.usable ? <button type="button" style={{ ...button, marginTop: 0, minWidth: 0, padding: '6px 14px', fontSize: 14 }} onClick={() => inventory.use(it.id)}>{t('use')}</button> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      <button type="button" style={secondary} onClick={onBack}>{t('close')}</button>
+    </div>
+  );
+}
+
+/** A bag icon — an icon, so it reads in any language. */
+function BagIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 8h12l-1 12H7L6 8z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" />
+    </svg>
+  );
+}
+
 /** A speaker icon, crossed out when muted — an icon, so it reads in any language. */
 function SpeakerIcon({ muted }: { muted: boolean }) {
   return (
@@ -1283,7 +1372,8 @@ export function Hud({ game }: { game: Game }) {
   const playLevel = (i: number) => { if (hasLevels && !levels.start(i)) return; game.play(); };
   const replayLevel = () => { if (hasLevels) levels.start(levels.index); game.restart(); };
   const nextLevel = () => { if (levels.next()) game.restart(); };
-  const [panel, setPanel] = useState<'settings' | null>(null);
+  const [panel, setPanel] = useState<'settings' | 'inventory' | null>(null);
+  const bag = useInventory();
   const again = useRef<HTMLButtonElement>(null);
   const playRef = useRef<HTMLButtonElement>(null);
   const over = s.status === 'gameover' || s.status === 'won';
@@ -1319,7 +1409,13 @@ export function Hud({ game }: { game: Game }) {
   // Esc pauses (and closes Settings first). Bound to the window because the player expects it to work wherever focus is.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // I opens the bag during play (and closes it again).
+      if ((e.key === 'i' || e.key === 'I') && !dialogue.active) {
+        if (s.status === 'playing') { game.pause(); setPanel('inventory'); return; }
+        if (panel === 'inventory') { setPanel(null); game.resume(); return; }
+      }
       if (e.key !== 'Escape') return;
+      if (panel === 'inventory') { setPanel(null); game.resume(); return; }
       if (panel) { setPanel(null); return; }
       if (s.status === 'playing') game.pause();
       else if (s.status === 'paused') game.resume();
@@ -1329,7 +1425,7 @@ export function Hud({ game }: { game: Game }) {
   }, [game, s.status, panel]);
 
   const settingsOrScreen = (screen: React.ReactNode) => (
-    <div style={overlay}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : screen}</div>
+    <div style={overlay}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : panel === 'inventory' ? <InventoryPanel onBack={() => { setPanel(null); game.resume(); }} /> : screen}</div>
   );
 
   return (
@@ -1358,6 +1454,10 @@ export function Hud({ game }: { game: Game }) {
             <button type="button" aria-label={prefs.muted ? t('soundOn') : t('mute')} aria-pressed={prefs.muted} onClick={() => settings.toggleMute()} style={roundIcon}>
               <SpeakerIcon muted={prefs.muted} />
             </button>
+            {/* The bag appears once there is something in it. */}
+            {s.status === 'playing' && bag.length > 0 ? (
+              <button type="button" aria-label={t('inventory')} onClick={() => { game.pause(); setPanel('inventory'); }} style={roundIcon}><BagIcon /></button>
+            ) : null}
             {/* Esc is a keyboard; a phone has none. Without this a player on a phone can never pause. */}
             {s.status === 'playing' ? (
               <button type="button" aria-label={t('pause')} onClick={() => game.pause()} style={roundIcon}>II</button>
@@ -1371,6 +1471,7 @@ export function Hud({ game }: { game: Game }) {
       {s.status === 'playing' || s.status === 'paused' ? <Minimap game={game} /> : null}
       {s.status === 'playing' || s.status === 'paused' ? <ObjectiveList /> : null}
       <ShooterOverlay game={game} playing={s.status === 'playing'} />
+      {s.status === 'playing' ? <DialogueBox /> : null}
       {s.status === 'playing' || s.status === 'paused' ? <RaceOverlay /> : null}
 
       {s.status === 'menu' && info ? settingsOrScreen(

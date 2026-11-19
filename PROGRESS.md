@@ -102523,3 +102523,13 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
   option, Hud `Minimap` (turns with the camera, far goals pinned to the edge, auto-shows once a marker exists) and `ObjectiveList`.
 - Builder prompt line (MAP AND GOALS); AppKnowledgeBase `game_menus_settings` updated.
 - Locked by `tests/theMinimapAndObjectivesShowTheWay.test.ts` (reversion: flipped right-axis sign and dropped quest record → 2 fail).
+
+## 2026-11-19 — Game gap P1: dialogue with choices + inventory (branch `claude/game-dialogue-inventory`)
+- Gap: RPGs had no dialogue box/choices; `state.inventory` existed but nothing could fill, count, use or show it.
+- Kit: `core/inventory.ts` (stacks stored as ids IN `state.inventory`, so save/load/restart need nothing new; `define/add/remove
+  (all-or-nothing)/has/count/onUse/use/list`, INVENTORY_CHANGED + ITEM_USED), `core/dialogue.ts` (lines or a node graph, choices
+  that can require an item, promise resolves with the last choice; DIALOGUE_STARTED/_LINE/_ENDED). Game.ts freezes the game's
+  update while talking AND for the step the talk ends on (the closing press is not a jump). Hud: DialogueBox (1–9 keys,
+  Enter/Space/E), bag button + InventoryPanel (I key, pauses), EN/HI strings.
+- Found while testing: a locked choice named the missing item by its id (looked up only among owned items) → `inventory.nameOf`.
+- Locked by `tests/aGameCanTalkAndCarryThings.test.ts` (reversion: dropping the freeze / the all-or-nothing check → 2 fail).

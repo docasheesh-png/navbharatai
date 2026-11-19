@@ -34,6 +34,7 @@ describe('every terminal path names its outcome', () => {
   it('route crash path stamps an outcome for EVERY crash code, not only BUILD_EXCEPTION', () => {
     const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     expect(src).not.toContain("if (crash.code === 'BUILD_EXCEPTION') {\n          try {\n            if (!outcomeCodeOf");
-    expect(src).toContain('terminalOutcomeRecord(terminalOutcomeCode({ error: err, crashCode: crash.code }), crash.phase)');
+    // Since failedbr #2449 the crash path also hands over the codes the run recorded (a sandbox ending is named).
+    expect(src).toContain("terminalOutcomeRecord(terminalOutcomeCode({ error: err, crashCode: crash.code, codes: (buildDiagRef?.report()?.issues ?? []).map(i => String(i.code ?? '')) }), crash.phase)");
   });
 });

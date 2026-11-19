@@ -12,7 +12,7 @@
  *      space) and `heightAt` (sit on the terrain), and returns how many were placed. A model that did not arrive is
  *      simply not placed — never an unrelated substitute, never a fake.
  */
-import { buildGameContract } from '../gameIntent';
+import { asksForBattleRoyale, buildGameContract } from '../gameIntent';
 
 export type DressingLayout = 'roadside' | 'village' | 'range';
 
@@ -26,6 +26,9 @@ export function sceneryFor(prompt: string): { layout: DressingLayout; subjects: 
   let genre = 'unknown';
   try { genre = buildGameContract(text).genre; } catch { /* unknown genre: keyword rules below still apply */ }
   if (VILLAGE.test(text)) return { layout: 'village', subjects: ['house', 'tree', 'well', 'windmill', 'rock'] };
+  // A royale is a shooter in a lived-in world, not on a firing range (autopsy aba63ead: naming PUBG now reads as
+  // 'shooter', and a shooting range is not the world that was asked for).
+  if (asksForBattleRoyale(text)) return { layout: 'village', subjects: ['house', 'tree', 'rock', 'barrel'] };
   if (genre === 'shooter') return { layout: 'range', subjects: ['target', 'barrel', 'wall'] };
   if (genre === 'racing' || genre === 'runner') {
     return { layout: 'roadside', subjects: CITY.test(text) ? ['building', 'streetlight', 'tree', 'bush'] : ['tree', 'rock', 'bush', 'building'] };

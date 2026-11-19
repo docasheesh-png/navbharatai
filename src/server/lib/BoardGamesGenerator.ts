@@ -17,6 +17,8 @@
 //               grouping — for FUN: points and pretend chips only, never real money.
 //   carrom.ts — carrom with real disc physics (real sizes, elastic collisions, friction, cushions, corner pockets) and the
 //               family rules (own coin continues, striker foul returns a coin, the queen must be covered, board scoring).
+//   cricket.ts — a cricket match engine: overs, wides and no-balls (free hit), strike rotation, innings ends, chases,
+//               results as commentators say them, run rates, and timing-based batting for a tap game.
 //   snakes.ts — Snakes & Ladders: the classic board, exact roll to finish (or bounce back), a six rolls again, and the
 //               boustrophedon square → grid position for drawing.
 //   index.ts  — one import.
@@ -1173,6 +1175,164 @@ export function shoot(state: CarromState, angle: number, power: number): ShotRes
 }
 `;
 
+const CRICKET = String.raw`/**
+ * CRICKET — the scoring a cricket fan checks first: legal balls and overs, wides and no-balls (a run, the ball bowled
+ * again, a free hit after a no-ball), the strike changing on odd runs and at the end of every over, an innings ending on
+ * overs, all out or the target, and the result said the way commentators say it. Plus the batting itself for a tap game:
+ * the timing of the swing decides the shot.
+ *
+ *   let match = createMatch({ overs: 2, wickets: 3, teams: ['India', 'Australia'] });
+ *   const out = shotFromTiming(timingError, { onStumps: true, aggressive: false }, rng);   // the player's tap
+ *   match = bowl(match, { extra: null, ...out });                                          // or { extra: 'wide' }
+ *   match.innings[match.current]                 → runs, wickets, balls, the batters, the over so far
+ *   summary(match)                               → '45/2 (1.3 ov) · need 12 off 3 balls'
+ *   match.result                                 → 'India won by 12 runs' when it is over
+ */
+import type { Rng } from './dice';
+
+export type Dismissal = 'bowled' | 'caught' | 'lbw' | 'run-out' | 'stumped';
+export type Extra = 'wide' | 'no-ball' | null;
+export interface Ball { runs: number; out: Dismissal | null; extra: Extra }
+export interface BatterCard { name: string; runs: number; balls: number; fours: number; sixes: number; out: Dismissal | null }
+export interface Innings {
+  team: string;
+  runs: number; wickets: number;
+  /** Legal balls bowled. */
+  balls: number;
+  extras: number;
+  batters: BatterCard[];
+  /** Index into batters of the one on strike, and the other one. */
+  striker: number; nonStriker: number;
+  /** This over, ball by ball, as shown on a scoreboard: '1', '4', 'W', 'wd', 'nb'. */
+  thisOver: string[];
+  freeHit: boolean;
+  target: number | null;
+  done: boolean;
+}
+export interface MatchOptions { overs?: number; wickets?: number; teams?: [string, string]; batters?: [string[], string[]] }
+export interface Match { overs: number; wickets: number; teams: [string, string]; innings: Innings[]; current: number; over: boolean; result: string | null; winner: string | null }
+
+const names = (team: string, n: number, given?: string[]): string[] => Array.from({ length: n }, (_, i) => given?.[i] ?? team + ' ' + (i + 1));
+
+function newInnings(team: string, wickets: number, target: number | null, given?: string[]): Innings {
+  const batters = names(team, wickets + 1, given).map((name) => ({ name, runs: 0, balls: 0, fours: 0, sixes: 0, out: null }));
+  return { team, runs: 0, wickets: 0, balls: 0, extras: 0, batters, striker: 0, nonStriker: 1, thisOver: [], freeHit: false, target, done: false };
+}
+
+export function createMatch(o: MatchOptions = {}): Match {
+  const overs = Math.max(1, Math.min(50, Math.floor(o.overs ?? 2)));
+  const wickets = Math.max(1, Math.min(10, Math.floor(o.wickets ?? 10)));
+  const teams: [string, string] = o.teams ?? ['Team A', 'Team B'];
+  return { overs, wickets, teams, innings: [newInnings(teams[0], wickets, null, o.batters?.[0])], current: 0, over: false, result: null, winner: null };
+}
+
+/** Overs as a cricketer writes them: 13 legal balls → '2.1'. */
+export function oversText(balls: number): string { return Math.floor(balls / 6) + '.' + (balls % 6); }
+
+function cloneInnings(i: Innings): Innings { return { ...i, batters: i.batters.map((b) => ({ ...b })), thisOver: i.thisOver.slice() }; }
+
+/** Bowl one ball. A wide or a no-ball adds a run and does not count as a ball; the ball after a no-ball is a free hit. */
+export function bowl(match: Match, ball: Ball): Match {
+  if (match.over) return match;
+  const m: Match = { ...match, innings: match.innings.slice() };
+  const inn = cloneInnings(m.innings[m.current]);
+  m.innings[m.current] = inn;
+  const runs = Math.max(0, Math.min(6, Math.floor(Number.isFinite(ball.runs) ? ball.runs : 0)));
+  const bat = inn.batters[inn.striker];
+  if (ball.extra === 'wide') {
+    inn.runs += 1 + runs; inn.extras += 1 + runs; inn.thisOver.push(runs ? 'wd+' + runs : 'wd');
+    if (runs % 2 === 1) [inn.striker, inn.nonStriker] = [inn.nonStriker, inn.striker];
+  } else {
+    const noBall = ball.extra === 'no-ball';
+    // On a no-ball or a free hit the batter can only be run out.
+    const protectedBall = noBall || inn.freeHit;
+    const out = ball.out && !(protectedBall && ball.out !== 'run-out') ? ball.out : null;
+    inn.runs += runs + (noBall ? 1 : 0);
+    if (noBall) inn.extras += 1;
+    bat.runs += runs;
+    bat.balls += noBall ? 0 : 1;
+    if (runs === 4) bat.fours++;
+    if (runs === 6) bat.sixes++;
+    if (!noBall) inn.balls++;
+    inn.thisOver.push(noBall ? (runs ? 'nb+' + runs : 'nb') : out ? 'W' : String(runs));
+    inn.freeHit = noBall;
+    if (runs % 2 === 1) [inn.striker, inn.nonStriker] = [inn.nonStriker, inn.striker];
+    if (out) {
+      inn.wickets++;
+      bat.out = out;
+      const next = Math.max(inn.striker, inn.nonStriker) + 1;
+      // The new batter takes the dismissed batter's end.
+      if (inn.batters[inn.striker] === bat) inn.striker = next; else inn.nonStriker = next;
+    }
+    // End of the over: the strike changes ends.
+    if (!noBall && inn.balls % 6 === 0) { [inn.striker, inn.nonStriker] = [inn.nonStriker, inn.striker]; inn.thisOver = []; }
+  }
+  const chased = inn.target !== null && inn.runs >= inn.target;
+  if (inn.wickets >= m.wickets || inn.balls >= m.overs * 6 || chased) inn.done = true;
+  if (inn.done) finishInnings(m);
+  return m;
+}
+
+function finishInnings(m: Match): void {
+  if (m.current === 0) {
+    const first = m.innings[0];
+    m.innings.push(newInnings(m.teams[1], m.wickets, first.runs + 1));
+    m.current = 1;
+    return;
+  }
+  const [a, b] = m.innings;
+  m.over = true;
+  if (b.runs > a.runs) {
+    const left = m.wickets - b.wickets;
+    m.winner = b.team;
+    m.result = b.team + ' won by ' + left + ' wicket' + (left === 1 ? '' : 's') + ' (' + (m.overs * 6 - b.balls) + ' balls left)';
+  } else if (b.runs < a.runs) {
+    const by = a.runs - b.runs;
+    m.winner = a.team;
+    m.result = a.team + ' won by ' + by + ' run' + (by === 1 ? '' : 's');
+  } else { m.winner = null; m.result = 'Match tied'; }
+}
+
+/** The scoreboard line: '45/2 (5.3 ov)', with the chase when there is one. */
+export function summary(m: Match): string {
+  const inn = m.innings[m.current];
+  let line = inn.team + ' ' + inn.runs + '/' + inn.wickets + ' (' + oversText(inn.balls) + ' ov)';
+  if (inn.target !== null && !m.over) {
+    const need = inn.target - inn.runs, left = m.overs * 6 - inn.balls;
+    line += ' · need ' + need + ' off ' + left + ' ball' + (left === 1 ? '' : 's');
+  }
+  if (m.over && m.result) line += ' · ' + m.result;
+  return line;
+}
+
+/** Runs per over so far, and (in a chase) the rate still needed. */
+export function runRates(m: Match): { current: number; required: number | null } {
+  const inn = m.innings[m.current];
+  const current = inn.balls ? (inn.runs / inn.balls) * 6 : 0;
+  const left = m.overs * 6 - inn.balls;
+  const required = inn.target !== null && left > 0 ? ((inn.target - inn.runs) / left) * 6 : null;
+  return { current: Math.round(current * 100) / 100, required: required === null ? null : Math.round(required * 100) / 100 };
+}
+
+/**
+ * THE BATTING: the player's tap against the perfect moment. timingError is in seconds (negative = early). Perfect timing
+ * hits a boundary (a six when going big), good timing finds runs, and the further off it is the likelier an edge to a
+ * fielder; a big miss is bowled when the ball was on the stumps and a dot ball when it was not.
+ */
+export function shotFromTiming(timingError: number, ball: { onStumps: boolean; aggressive?: boolean }, rng: Rng): { runs: number; out: Dismissal | null; shot: string } {
+  const e = Math.abs(Number.isFinite(timingError) ? timingError : 1);
+  const big = !!ball.aggressive;
+  if (e <= 0.03) return big ? { runs: 6, out: null, shot: 'six' } : { runs: 4, out: null, shot: 'four' };
+  if (e <= 0.07) {
+    if (big) return rng() < 0.15 ? { runs: 0, out: 'caught', shot: 'caught in the deep' } : { runs: 4, out: null, shot: 'four' };
+    return rng() < 0.5 ? { runs: 2, out: null, shot: 'two' } : { runs: 3, out: null, shot: 'three' };
+  }
+  if (e <= 0.12) return rng() < (big ? 0.3 : 0.1) ? { runs: 0, out: 'caught', shot: 'edged and caught' } : { runs: 1, out: null, shot: 'single' };
+  if (e <= 0.2) return rng() < (big ? 0.45 : 0.25) ? { runs: 0, out: 'caught', shot: 'edged and caught' } : { runs: 0, out: null, shot: 'dot' };
+  return ball.onStumps ? { runs: 0, out: 'bowled', shot: 'bowled' } : { runs: 0, out: null, shot: 'missed' };
+}
+`;
+
 const INDEX = String.raw`// The India games pack: tested rules engines (the board is drawn by the game).
 export { createRng, rollDie, shuffle } from './dice';
 export type { Rng } from './dice';
@@ -1186,6 +1346,8 @@ export { createDeck, shuffleCards, deal, cardName, isRed, SUITS, teenPattiHand, 
 export type { Card, Suit, TeenPattiCategory, TeenPattiHand, MeldType, Declaration } from './cards';
 export { createCarrom, placeStriker, strikerFits, shoot, stepPhysics, BOARD as CARROM_BOARD, BASELINE, BASELINE_HALF_LENGTH, COIN_RADIUS, STRIKER_RADIUS, POCKET_RADIUS } from './carrom';
 export type { CarromState, Disc, DiscKind, QueenState, ShotResult } from './carrom';
+export { createMatch, bowl, summary, runRates, oversText, shotFromTiming } from './cricket';
+export type { Match, MatchOptions, Innings, BatterCard, Ball, Dismissal, Extra } from './cricket';
 `;
 
 const FILES: Record<string, string> = {
@@ -1195,10 +1357,11 @@ const FILES: Record<string, string> = {
   [`${BOARD_DIR}/chess.ts`]: CHESS,
   [`${BOARD_DIR}/cards.ts`]: CARDS,
   [`${BOARD_DIR}/carrom.ts`]: CARROM,
+  [`${BOARD_DIR}/cricket.ts`]: CRICKET,
   [`${BOARD_DIR}/index.ts`]: INDEX,
 };
 
-export const BOARD_GAME_MODULES: readonly string[] = ['dice', 'ludo', 'snakes', 'chess', 'cards', 'carrom'];
+export const BOARD_GAME_MODULES: readonly string[] = ['dice', 'ludo', 'snakes', 'chess', 'cards', 'carrom', 'cricket'];
 
 const EXAMPLE = [
   "import { createLudo, legalMoves, move, pass, chooseMove, cellOf, createRng, rollDie, type LudoState } from './game/board';",
@@ -1240,10 +1403,10 @@ export function generateBoardGames(include?: string[]): BoardGamesResult {
     files,
     dependencies: [],
     instructions:
-      `Added the India games pack (${Object.keys(files).length} files under ${BOARD_DIR}): tested rules for Ludo, Snakes & Ladders, chess, carrom and card games (Teen Patti, rummy), `
+      `Added the India games pack (${Object.keys(files).length} files under ${BOARD_DIR}): tested rules for Ludo, Snakes & Ladders, chess, carrom, cricket and card games (Teen Patti, rummy), `
       + 'a seeded die, and board geometry for drawing.\n'
       + '```ts\n' + EXAMPLE + '\n```\n'
-      + 'RULES: the game\'s rules come from these engines — never re-implement Ludo, Snakes & Ladders or chess logic. For chess, highlight movesFrom(game, square) when a piece is tapped, ask which piece on a promotion, show check, and end the game on chessStatus (checkmate, stalemate and each draw named). For carrom, drag the striker along the baseline (placeStriker), aim and pull back for power, then play shot.frames as the animation and show shot.message. Card games are for FUN: points or pretend chips only — never real money, never a deposit, a wallet top-up or a cash prize (India bans real-money online games). Draw the board from '
+      + 'RULES: the game\'s rules come from these engines — never re-implement Ludo, Snakes & Ladders or chess logic. For chess, highlight movesFrom(game, square) when a piece is tapped, ask which piece on a promotion, show check, and end the game on chessStatus (checkmate, stalemate and each draw named). For cricket, every ball goes through bowl() (with shotFromTiming for the player\'s tap) and the scoreboard shows summary() and match.innings[match.current].thisOver. For carrom, drag the striker along the baseline (placeStriker), aim and pull back for power, then play shot.frames as the animation and show shot.message. Card games are for FUN: points or pretend chips only — never real money, never a deposit, a wallet top-up or a cash prize (India bans real-money online games). Draw the board from '
       + 'cellOf / squareCell, animate a token along r.path, and say what happened (a capture, a token home, another roll, a pass when '
       + 'nothing can move). Let the player tap the token they want from legalMoves; highlight those tokens. A computer opponent '
       + 'uses chooseMove. House rules are options (rules: { ... }), not new code.',

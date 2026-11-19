@@ -102646,3 +102646,11 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
 - Note from the tests: the striker is ~3× a coin's mass, so a hard straight shot follows the coin into the pocket (a foul) —
   real-board behaviour, kept on purpose.
 - Locked by `tests/carromPlaysLikeTheRealBoard.test.ts` (reversion: no collision impulse / uncovered queen kept → 4 fail).
+
+## 2026-11-19 — India games pack (e): cricket (branch `claude/game-board-cricket`)
+- `src/game/board/cricket.ts` added to `generate_board_games`: legal balls/overs, wides and no-balls (a run, re-bowled, free hit —
+  only run out on a protected ball), strike rotation on odd runs and at over end, the new batter at the dismissed end, innings
+  end on overs/all out/target, chase and result text ("won by N wickets (M balls left)" / "by N runs" / tie), run rates, and
+  timing-based batting (shotFromTiming: perfect → boundary, going big → six but riskier, miss → bowled only on the stumps).
+- This completes the India games pack: Ludo, Snakes & Ladders, chess, cards (for fun), carrom, cricket.
+- Locked by `tests/cricketScoresLikeAScorer.test.ts` (reversion: free hit ignored / no change of ends → 2 fail).

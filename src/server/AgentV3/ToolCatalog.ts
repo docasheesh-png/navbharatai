@@ -2329,9 +2329,10 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + '(a deck and dealing, TEEN PATTI hand ranking, Indian RUMMY melds, declarations, points and the best grouping — for fun: '
         + 'points or pretend chips only, never real money), CARROM (real disc physics at real sizes — collisions, friction, '
         + 'cushions, corner pockets — and the family rules: own coin continues, striker foul, covering the queen, board scoring), '
+        + 'CRICKET (overs, wides and no-balls with a free hit, strike rotation, chases, results, run rates, timing-based batting), '
         + 'with a seeded die. Use it for any of these games; never re-implement their rules.',
       input_schema: { type: 'object', properties: { include: { type: 'array', items: { type: 'string' },
-        description: 'Optional subset: dice, ludo, snakes, chess, cards, carrom. Default = all; every engine brings dice.' } } },
+        description: 'Optional subset: dice, ludo, snakes, chess, cards, carrom, cricket. Default = all; every engine brings dice.' } } },
     },
     {
       name: 'generate_game_2d',

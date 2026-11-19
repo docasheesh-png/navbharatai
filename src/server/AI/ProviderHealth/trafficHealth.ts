@@ -54,6 +54,18 @@ interface Row {
   recoverAt: number;
   /** The one recovery call has been released and has not come back yet. */
   probing: boolean;
+  /** When `state` last changed here (local evidence), so newer shared evidence can be told from older. */
+  changedAt: number;
+}
+
+/** A state change worth telling other instances about (P3 shared health). Never carries a key or a prompt. */
+export interface TrafficTransition { provider: string; state: TrafficState; kind: TrafficErrorKind; reason: string | null; recoverAt: number; at: number; model?: string }
+let transitionListener: ((t: TrafficTransition) => void) | null = null;
+/** One listener (the shared-health writer). Kept as a hook so this module never imports storage. */
+export function onTrafficTransition(listener: ((t: TrafficTransition) => void) | null): void { transitionListener = listener; }
+function emit(provider: string, row: Row, kind: TrafficErrorKind, model?: string): void {
+  try { transitionListener?.({ provider, state: row.state, kind, reason: row.reason, recoverAt: row.recoverAt, at: row.changedAt, ...(model ? { model } : {}) }); }
+  catch { /* sharing is an observer; it never affects the call */ }
 }
 
 const rows = new BoundedCache<string, Row>({ maxEntries: 256 });
@@ -101,7 +113,7 @@ function rowOf(provider: string): Row {
   const key = canonProvider(provider);
   let row = rows.get(key);
   if (!row) {
-    row = { samples: [], inFlight: 0, state: 'up', reason: null, recoverAt: 0, probing: false };
+    row = { samples: [], inFlight: 0, state: 'up', reason: null, recoverAt: 0, probing: false, changedAt: 0 };
     rows.set(key, row);
   }
   return row;
@@ -125,27 +137,33 @@ export function noteProviderCall(call: TrafficCall): void {
   row.samples.push(sample);
   if (row.samples.length > MAX_SAMPLES) row.samples.splice(0, row.samples.length - MAX_SAMPLES);
   if (call.ok) {
+    const was = row.state;
     row.state = 'up';
     row.reason = null;
     row.probing = false;
     row.recoverAt = 0;
+    if (was !== 'up') { row.changedAt = sample.at; emit(provider, row, 'ok', sample.model); }
     return;
   }
   // Every completed probe releases its lease, including a rate-limit/other failure.
   if (row.probing) { row.probing = false; row.recoverAt = sample.at + TRAFFIC_RECOVERY_MS; }
   if (kind === 'suspended') {
+    const was = row.state;
     row.state = 'suspended';
     row.reason = errorText(call.error);
     row.probing = false;
     row.recoverAt = sample.at + TRAFFIC_RECOVERY_MS;
+    if (was !== 'suspended') { row.changedAt = sample.at; emit(provider, row, kind, sample.model); }
     return;
   }
   const recent = row.samples.slice(-DOWN_AFTER);
   if (recent.length >= DOWN_AFTER && recent.every((s) => s.kind === 'timeout' || s.kind === 'invalid')) {
+    const was = row.state;
     row.state = 'down';
     row.reason = errorText(call.error);
     row.probing = false;
     row.recoverAt = sample.at + TRAFFIC_RECOVERY_MS;
+    if (was !== 'down') { row.changedAt = sample.at; emit(provider, row, kind, sample.model); }
   }
 }
 
@@ -205,6 +223,9 @@ export interface TrafficProviderView {
   firstByteP95: number | null;
   model: string | null;
   recoverAt: number;
+  /** When the state last changed on this instance (0 = never), and the kind of the latest failure. */
+  changedAt: number;
+  lastFailureKind: TrafficErrorKind | null;
 }
 
 export function trafficProviderViews(now = Date.now()): TrafficProviderView[] {
@@ -222,12 +243,31 @@ export function trafficProviderViews(now = Date.now()): TrafficProviderView[] {
       errorRate, totalP50: percentile(totals, 50), totalP95: percentile(totals, 95),
       firstByteP50: percentile(first, 50), firstByteP95: percentile(first, 95),
       model: lastModel, recoverAt: row.state === 'up' ? 0 : row.recoverAt,
+      changedAt: row.changedAt, lastFailureKind: [...row.samples].reverse().find((s) => !s.ok)?.kind ?? null,
     };
   }).sort((a, b) => a.provider.localeCompare(b.provider));
 }
 
 export function resetTrafficHealthForTests(): void {
   rows.clear();
+  transitionListener = null;
+}
+
+/**
+ * P3 shared health: adopt another instance's state for a provider, only when it is NEWER than what this instance
+ * itself saw. A provider this instance watched recover after the other instance's failure keeps its own (newer)
+ * state. Returns whether anything changed. Called only when sharing is ON (see healthShare.ts).
+ */
+export function adoptSharedState(provider: string, state: TrafficState, reason: string | null, recoverAt: number, at: number): boolean {
+  if (!trafficHealthEnabled()) return false;
+  const row = rowOf(provider);
+  if (at <= row.changedAt || row.state === state) return false;
+  row.state = state;
+  row.reason = state === 'up' ? null : reason;
+  row.recoverAt = state === 'up' ? 0 : recoverAt;
+  row.probing = false;
+  row.changedAt = at;
+  return true;
 }
 
 /** Exposed so a test can prove the recovery window without waiting. */

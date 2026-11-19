@@ -37,6 +37,7 @@ import * as ts from 'typescript';
 import { localImportCandidates } from './ArchitectureAnalysis';
 import path from 'node:path';
 import { isBuiltin } from 'node:module';
+import { importSpecifierPath } from '../lib/importSpecifier';
 
 /** How a single element is addressed, in the order Playwright should be asked for it. */
 export type SelectorKind = 'testid' | 'name' | 'id' | 'placeholder' | 'label' | 'text' | 'role';
@@ -1164,6 +1165,7 @@ export function resolveLocalImport(
   spec: string,
   files: Record<string, string>,
 ): string | null {
+  spec = importSpecifierPath(spec); // BR2001: `./x.svg?react` names `./x.svg`
   if (!spec || !fromPath) return null;
   // `@/x` is the near-universal alias for `src/x` in this repo's scaffolds; anything else bare is a package.
   let base: string;

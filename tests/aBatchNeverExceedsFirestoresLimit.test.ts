@@ -54,6 +54,7 @@ describe('census: every batch is bounded', () => {
   // Each reviewed site, with how its batch stays under 500 writes. A NEW `.batch()` fails this test until it
   // uses deleteInChunks (or another bound) and is listed here with the reason.
   const REVIEWED: Record<string, [number, string]> = {
+    'src/server/AI/TrafficRegistry/decisionRecords.ts': [1, 'one batch per flush of at most MAX_RECORDS_PER_FLUSH (200) decision records, sliced before the batch is built'],
     'src/server/lib/proAttachmentStore.ts': [1, 'deleted_scopes is paged with limit(200); one delete per document and commit before fetching the next page; real backend pagination regression in proAttachmentDisabledDeletion.test.ts'],
     'src/server/lib/batchChunks.ts': [2, 'the chunking helper itself (SAFE_BATCH_WRITES = 400)'],
     'src/server/AgentV3/DiagnosticsStore.ts': [1, 'loop of limit(300) pages'],

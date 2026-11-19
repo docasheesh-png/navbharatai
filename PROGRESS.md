@@ -102101,6 +102101,21 @@ Owner: *"jab bhi koi racing game bane, to hamesa (100%) navbharatai me library s
 - **Honest limit:** the model still writes the game; the platform states the rule, checks the code and notes the exact repair, but a note does not fail a build. Watch the next racing build report for `RACE_COURSE_ENDLESS` and whether the note fired.
 - **Same day, owner correction:** *"12 par takna nahi hai … user jab chahe map ko badlao karwa sake, flexibility maximum ho, kuch bhi hard-core nahi"*. The twelve pieces are now only the STARTING course: the handoff tells the builder to keep the course in the game's own `src/game/<game>/trackPlan.ts` (any number of pieces, any order, any loop mode), and `createTrackStream` gained `stream.setPlan(plan, { now })` — a new course while the game runs, continuing seamlessly from the road already laid (`now` also replaces the pieces ahead; never the one under the car). Width, land seed and stream distance stay as created (they keep joins exact); an ended course is not reopened (returns false). Tests: live swap to 2 and 20 pieces, seamless joins and distance, refusal cases; reversion of the replace-ahead step → fails.
 
+## 2026-11-18 — Mitrify (and Qubax) complete answers were reported as "incomplete stream"
+
+- **Problem (owner, Test Chat Bot):** Mitrify `HTTP 200 · 3144 ms · MITRIFY_INCOMPLETE_STREAM` — "ab ye mitrify response band kar gaya".
+- **Root cause:** the SSE reader split events on a blank line and only then read them. A stream that ends with
+  `data: [DONE]` and no blank line (or `[DONE]\n`) left that last event unread; a stream that finishes with
+  `finish_reason: "stop"` and no `[DONE]` was never accepted. Driving the real reader: only `…[DONE]\n\n` passed.
+- **Class:** an SSE reader that ignores the stream's final event. **Sibling:** Qubax's reader (first in the live chat
+  chain) had the identical loop. Both now use `src/server/lib/sseFrames.ts` (`takeSseEvents` flushes the last event at
+  end of stream; a normal finish is `[DONE]` or a "stop" finish_reason). A really cut-off stream still fails.
+- **Not changed, deliberately:** the inference-gateway and LiveRegistry readers are line-based with different
+  invariants; they were not touched without evidence of the same failure.
+- **Locked by:** `tests/aStreamEndsWhereTheServerEndsIt.test.ts` (five valid endings pass, two cut-off streams fail,
+  splitter units, census). Reversion: the old Mitrify reader fails 5 of 10.
+- **Honest limit:** no live Mitrify key in the session, so the exact bytes Mitrify now sends are inferred from the error
+  (HTTP 200, stream ended without the accepted ending), not captured. Re-test from Test Chat Bot after deploy.
 ## 2026-11-18 — BR1999 autopsy (a gun game's release-gate line was cut mid-sentence): a reason is never cut in half
 
 Owner t311u sequential audit, BR1999 only (boundary 1951..2105 frozen). Branched from origin/main `58fa9a6` (#4292). BR1998 is merged. A free Weak new-game build succeeded GREEN and was not charged.
@@ -102132,6 +102147,129 @@ Owner t311u sequential audit, BR1999 only (boundary 1951..2105 frozen). Branched
   admin account, not with this panel's login" was the very drift fixed above and is replaced. Locked in
   `tests/theAdminMenuHasNineTabs.test.ts`.
 
+## 2026-11-18 — Traffic Manager V2, P3: older paths obey drain/disable (per-path, off by default) + shared health (observe)
+
+The owner approved P3 ("continue, until full work done"). Nothing in P3 changes routing until an admin acts.
+
+**Older paths and the control store:**
+- `src/server/AI/TrafficRegistry/legacyControl.ts` adds a new control-store field, `coverage`, set per path: `free-chain`, `chat-router`, `builder`. Absent means today's behaviour.
+- When a path is covered, it skips a `draining` or `disabled` provider before starting a NEW attempt. The hooks are in `AIRouter.acquire`, the `MultiProviderTurnRunner` rung loop, and the very first step of the Free Chat rung loop, before any reservation.
+- This is skip only: nothing is added or reordered, and the builder never leaves the selected tier.
+- Traffic caps stay gateway-only, because these paths have no stable request id.
+- Turning a path's coverage off is the rollback, with no deploy.
+
+**Shared health:** `src/server/AI/ProviderHealth/healthShare.ts`, mode set by `TRAFFIC_HEALTH_SHARE`, default **observe**.
+- `trafficHealth.ts` now emits state transitions and records when each state changed.
+- Writes are coalesced: at most one per provider per 20 s, at most 32 per flush, and failures stay queued.
+- One bounded read (last 15 min, newest 64), every 20 s backing off to 60 s, with jitter.
+- Only state, kind, recovery time, model and a random instance id are shared. No provider text.
+- `on` mode adopts only NEWER evidence (`adoptSharedState`). Observe mode shows the reports but nobody skips because of them.
+
+**Family outages (owner improvement #1):** `familyHealth.ts`, display only.
+- Only `down` providers with outage-shaped failures count. An empty balance (suspended) or a rate limit never counts.
+- A domain is flagged only when at least 2 DIFFERENT providers that depend on it are down within 10 min.
+- A reseller's own gateway and `unknown` are never shared domains.
+
+**Admin panel:**
+- An "Older routing paths" switch for each path.
+- The scope note names the covered paths, and says caps and Gateway Emergency OFF stay gateway-only.
+- A "Shared provider health" section, with its mode stated and any suspected shared outage shown.
+
+**Tests:**
+- `legacyControl.test.ts`: default off, per-path skip, census of every builder engine label and Free Chat rung, source guards on where each path asks.
+- `familyHealth.test.ts`, `healthShare.test.ts`, and the panel render test.
+- 10 reversions were each caught. Two were missed at first because one test combined both guards; each guard now has its own case.
+- The `provider_health_shared` collection is classified as `platform`.
+
+To decide next (owner):
+- Turn `TRAFFIC_HEALTH_SHARE=on` after observing it.
+- Turn path coverage on, one path at a time.
+## 2026-11-18 — Autopsy of the admin Home page copy (18:26Z)
+
+- Q-2754 ✅(PR) "Nearly full" from a rate tile → chip says "Needs attention" when only rate tiles are worst.
+- Q-2755 ✅(PR) "+465 today" counted wallets WRITTEN today (`updatedAt || createdAt`); creation only now, sibling in
+  the users list fixed, source guard against the pattern.
+- Q-2756 ✅(PR) "vs 0 yesterday" on a 54-minute-old server → unknown unless the process ran all of yesterday.
+- OPEN/BLOCKED: Q-2757…Q-2764 — UTC "today", per-instance hit counters, Reliability 0 from the legacy sample, 3 idle
+  billed sandboxes, the −₹16,102 margin (admin decision), BUILD_BLOCKED_NO_CREDITS on new users, two reason-less log
+  lines, the Grievance Officer env.
+
+**2026-11-18, later: #4298 merged** — Q-2754 Q-2755 Q-2756 closed (3). The admin Home autopsy stays NOT COMPLETE: Q-2757…Q-2764 open (Q-2761, Q-2764 blocked on the admin).
+## 2026-11-18 — Traffic Manager V2, P4: decision records + complete SLO counters (observation only)
+
+The code is in `src/server/AI/TrafficRegistry/decisionRecords.ts`. It hooks the one chat boundary, `observeChatOutcome`, which every chat route passes on both the gateway and the legacy paths. `UniversalAIRouter` passes which path answered.
+
+**Counters (owner improvement #4):**
+- EVERY outcome is counted, with no sampling.
+- Each instance writes its own absolute per-day, per-surface totals once a minute to `routing_slo_daily` (35 days). A retry never double-counts, and there is no hot shared doc.
+- The SLO comes only from these counters. "Eligible" means complete, partial or failed. Policy refusals and user cancels are excluded.
+- Shown with its denominator and a Wilson 95% interval. Target: 99.5% for free, navbharat and professional.
+
+**Decision records (owner decision 4):**
+- 100% of failures and critical events (no provider at all), plus 10% of successes, deterministic and weighted ×10.
+- Fixed fields only (`RECORD_FIELDS`): no prompt, answer, uid, key or provider message. The request id is hashed.
+- Bounded buffer (1,000), at most 200 written per 30 s, and a failed write keeps the records.
+- `routing_decisions`, kept 30 days.
+
+**Admin:** a "Reliability (last 7 days)" card and a recent-failures list, via `GET /api/admin/traffic-control/slo`.
+
+**NOT built in P4, stated plainly:**
+- The planned "shadow plan" for surfaces the gateway does not serve. The gateway's planner needs evidence-bound requests and candidates that only its own ingress builds. Faking them outside it would record a pick the gateway could never have made.
+- The P5 baseline is therefore the legacy path's REAL outcomes from these counters, not a hypothetical gateway pick.
+- Builder, vision and image decisions are recorded in their own phases (P8–P10).
+
+**Tests:**
+- `decisionRecords.test.ts`: sampling, fixed fields, SLO from counters only, absolute counters across instances, bounded buffer, kill switch, the boundary records gateway and legacy paths and rethrows.
+- `ReliabilityBody.render.test.tsx`.
+- 5 reversions each caught.
+
+## 2026-11-18 — Traffic Manager V2, P5 (code): upstream diversity after a gateway failure, OFF by default, staff canary first
+
+`policy.ts` gains `diversified()`, which is pure:
+- after a `retryable-provider-failure` of the same request, the pick moves to the nearest eligible candidate of the SAME payment class whose route shares none of the failed outage domains;
+- `unknown` is independent of nothing;
+- if there is no independent candidate, the original order stands;
+- a terminal failure ends the request exactly as before.
+
+`familyDiversity.ts`: `GATEWAY_FAMILY_DIVERSITY` = off (default) / canary (the uids in `INFERENCE_GATEWAY_CANARY_UIDS`) / on. The executor supplies `dependsOn` only when it is active. The ledger's re-check of the selected attempt is unchanged.
+
+Tests: policy (6 cases, including "without the hook the plan is byte-identical"), familyDiversity (4). 4 reversions each caught.
+
+NOT done (needs the owner):
+- Setting `GATEWAY_FAMILY_DIVERSITY=canary` in Cloud Run.
+- Watching the Reliability card and decision records for 7 days.
+- Then deciding on `on`.
+
+The plan's "Free Chat fully on the gateway" switch is the owner's existing env (`INFERENCE_GATEWAY_ROLLOUT_MODE` canary/all). This phase does not change it.
+
+## 2026-11-19 — BR2001 autopsy (an OS-emulator build ran out of time on a false "missing file"): a bundler query is not part of the file name
+
+Owner t311u sequential audit, BR2001 only (BR2000 not retained). Branched from origin/main `7ed8450` (#4304). A free Weak build was stopped by the 25-min cap (RED, not charged).
+
+- F1: `findUnresolvedLocalImports` reported `./assets/icons/start.svg?react — CREATE this file` while `start.svg` existed and `npm run build` passed; the builder spent both resumes and ~6 min on it. New shared `src/server/lib/importSpecifier.ts` (`importSpecifierPath` / `importSpecifierSuffix`) is now used by every resolver that decides whether a local import exists: ProjectImport (gate + mispath autofix, which keeps the `?react`), appGraphScan (it said "broken import that will fail the build"), writeTimeImportCheck, ArchitectureAnalysis, journeyDerivation, fileClassification. `resolveExportTarget` refuses a query-loaded module on purpose.
+- Locked closures: #4146 (setup note), BR1994 (ending minutes, no "continuing" after "out of time").
+- Queue: opens Q-2765 (two app registries from the fast lane) and Q-2766 (svgr import form); Q-2621 and Q-1007 gain BR2001 evidence.
+- Proof: `tests/br2001Autopsy.test.ts`; reverting any of the five resolver fixes fails 2–5 tests.
+- Docs: `docs/build-report-autopsy-BR2001.md` and its evidence JSON.
+
+## 2026-11-19 — BR2002 autopsy (a website that succeeded was recorded as a stopped change): only a stop before the result is a stop
+
+Owner t311u sequential audit, BR2002 only. Branched from origin/main `f2b1c01` (#4314). A free Weak website build succeeded YELLOW and was not charged; its change record said "status stopped".
+
+- F1: the settle passed `stopped: abort.signal.aborted || userStop`. Several platform mechanisms abort that controller after a result exists (advisory cap, reaper, lock reclaim, deploy drain). New pure `changeWasStopped` in `buildAbortCause.ts`: the user's own stop is always a stop; any other abort only when it ended the build before a successful result.
+- Sibling found and NOT changed: `runProof()` reads the same bare signal and feeds the markup rule — Q-2767, BLOCKED on the admin's billing decision (recommendation: apply the same rule).
+- Queue: opens Q-2767, Q-2768 (fast lane stopped at 8/12 files and handed off a never-written CSS import), Q-2769 (journey vs accessibility label disagreement); Q-1007 and Q-2753 gain BR2002 evidence.
+- Proof: `tests/br2002Autopsy.test.ts`; reverting the helper or the route fails it.
+- Docs: `docs/build-report-autopsy-BR2002.md` and its evidence JSON.
+
+## 2026-11-19 — BR2003 autopsy (a huge quiz spec failed setup in one second): all closed on main; the sizer is queued
+
+Owner t311u sequential audit, BR2003 only. Branched from origin/main `e8c45ef` (#4316). No product code changed.
+
+- D1–D3 already closed on main (BR1983 reason, BR1984 repeat wording, BR1986 ETA untested on a sandbox outcome); the ETA closure is locked here with this report's numbers.
+- Q-2770 opened (BLOCKED, the admin's scope decision): APP_SCOPE named the app "Project Name" and kept a seven-section spec as one build because of the word "Quiz"; fixing the header alone would make the decision worse. Today's output is pinned exactly.
+- Q-2621 and Q-2750 gain BR2003 evidence.
+- Docs: `docs/build-report-autopsy-BR2003.md`, its evidence JSON, `tests/br2003Autopsy.test.ts`.
 ## 2026-11-19 — Calculator report 9fba77d7: engine fixes proposed; GitHub validation pending
 
 The owner supplied the complete diagnostic timeline and asked to fix it. Autopsy and per-item ledger:

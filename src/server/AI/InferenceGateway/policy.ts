@@ -9,7 +9,7 @@ import { chatTextChainRank, FIXED_TEXT_CHAIN_MAX_ATTEMPTS, fixedTextChainRank, f
 import { isCapabilityRequestValid, isCount, isIdentifier, isPositiveCount, supportsCapability } from './capabilities';
 import { evidenceBinding, hasCurrentEvidence, profileRejection, quotaLedgerKey, samePayer, validPayer,
   validQuotaDimension, withoutEvidence } from './profiles';
-import type { BudgetAuthorization, Candidate, CandidateRejection, EvidenceAuthority, PlanningInput,
+import type { BudgetAuthorization, Candidate, CandidateRejection, EvidenceAuthority, PlanningInput, ProviderProfile,
   PlanningResult, RejectionReason, RoutingRequest, SelectionPlan } from './types';
 
 const surfaces = ['chat', 'professional', 'doctor', 'sda', 'builder', 'developer-api', 'published-app', 'image-generation', 'image-enhancement'];
@@ -137,6 +137,26 @@ function evaluate(c: Candidate, input: PlanningInput, requestBinding: string): E
  * never traded for price or preference. Failed admission means replan with fresh
  * snapshots, not blind fallback.
  */
+/**
+ * P5 upstream diversity (pure). After a provider-side failure, two resellers of the same upstream are not
+ * independent fallbacks (owner requirement), so the pick moves to the nearest candidate of the SAME payment class
+ * whose route shares none of the failed domains. `unknown` is independent of nothing. When no such candidate
+ * exists, the original order stands. Free is never jumped by paid, paid never by free.
+ */
+function diversified(first: EvaluatedCandidate, eligible: readonly EvaluatedCandidate[], candidates: readonly Candidate[],
+  r: RoutingRequest, dependsOn: (profile: ProviderProfile) => readonly string[]): EvaluatedCandidate {
+  const failed = new Set<string>();
+  for (const a of r.attempts) {
+    if (a.outcome !== 'definite-failure' || a.failureClass !== 'retryable-provider-failure') continue;
+    const profile = candidates.find(c => c?.profile?.id === a.profileId)?.profile;
+    if (profile) for (const d of dependsOn(profile)) failed.add(d);
+  }
+  if (!failed.size) return first;
+  const shares = (e: EvaluatedCandidate) => { const d = dependsOn(e.candidate.profile); return d.includes('unknown') || d.some(x => failed.has(x)); };
+  if (!shares(first)) return first;
+  return eligible.find(e => !!e.paidHold === !!first.paidHold && !shares(e)) ?? first;
+}
+
 export function planInference(input: PlanningInput): PlanningResult {
   try {
     const rejected: CandidateRejection[] = [];
@@ -178,8 +198,9 @@ export function planInference(input: PlanningInput): PlanningResult {
       if (priority) return priority;
       return a.candidate.profile.id < b.candidate.profile.id ? -1 : a.candidate.profile.id > b.candidate.profile.id ? 1 : 0;
     });
-    const selected = eligible[0];
+    let selected = eligible[0];
     if (!selected) return { kind: 'blocked', reason: 'no-eligible-candidate', rejected };
+    if (input.dependsOn) selected = diversified(selected, eligible, candidates, r, input.dependsOn);
     return { kind: 'plan', authorizedToDispatch: false, logicalRequestId: r.logicalRequestId,
       physicalAttemptId: r.nextPhysicalAttemptId, profileId: selected.candidate.profile.id,
       profileVersion: selected.candidate.profile.version, adapterId: selected.candidate.profile.adapterId,

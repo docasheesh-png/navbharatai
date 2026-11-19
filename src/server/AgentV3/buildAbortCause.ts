@@ -98,6 +98,25 @@ export function abortCauseOf(signal: { reason?: unknown } | undefined | null): A
   return isCarrier(signal.reason) ? signal.reason[TAG] : 'unknown';
 }
 
+/**
+ * 🔴 BR2002: WAS THIS CHANGE STOPPED, OR DID SOMETHING STOP AFTER IT WAS DONE? PURE.
+ *
+ * The change record took `abort.signal.aborted` as "stopped". On BR2002 the build had already succeeded:
+ * the user had been shown "Here's what I built", and the bug-hunt offer had run while the signal was still
+ * clear. Something then aborted the signal in the last seconds of settling (an advisory cap, the reaper, a lock
+ * reclaim or a deploy drain all abort the same controller), and the record said
+ * "status stopped · gate YELLOW" about a working app. Its time-machine entry and change history inherit that.
+ *
+ * The rule: the user's own stop is always a stop. Any other abort is a stop only when it ended the build
+ * before a successful result existed. An abort that only cut what came after the result does not undo the
+ * result.
+ */
+export function changeWasStopped(i: { aborted: boolean; cause: AbortCause; userStopRecorded: boolean; resultOk: boolean }): boolean {
+  if (i.userStopRecorded || (i.aborted && i.cause === 'user-stop')) return true;
+  if (!i.aborted) return false;
+  return !i.resultOk;
+}
+
 /** When the recorded abort was requested (epoch ms), or null when the signal carries no recorded cause. */
 export function abortRequestedAtOf(signal: { reason?: unknown } | undefined | null): number | null {
   if (!signal || !isCarrier(signal.reason)) return null;

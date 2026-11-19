@@ -11,6 +11,7 @@ import path from 'path';
 import type { ProjectGraph } from './WorkspaceMemory';
 import { isComponentName } from './WorkspaceMemory';
 import { isBinaryAssetSpecifier } from './fileClassification';
+import { importSpecifierPath } from '../lib/importSpecifier';
 
 export interface ArchitectureReport {
   fileCount: number;
@@ -70,7 +71,9 @@ export function resolveLocalImport(fromFile: string, spec: string, files: Set<st
 }
 
 /** All matching nodes, in the advisory resolver's original order. Destructive callers must prove uniqueness. */
-export function localImportCandidates(fromFile: string, spec: string, files: Set<string>): string[] {
+export function localImportCandidates(fromFile: string, rawSpec: string, files: Set<string>): string[] {
+  // BR2001: `./start.svg?react` names `./start.svg` (see importSpecifier.ts).
+  const spec = importSpecifierPath(rawSpec);
   const bases: string[] = [];
   if (spec.startsWith('.')) {
     const baseDir = path.posix.dirname(fromFile);

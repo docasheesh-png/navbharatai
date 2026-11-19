@@ -1,4 +1,5 @@
 import { assertAiAvailable, AiMaintenanceError } from '../../lib/aiMaintenance';
+import { familyOfEngineName, legacyPathAllows } from '../../AI/TrafficRegistry/legacyControl';
 import { ALL_PROVIDERS_FAILED_PREFIX, ALL_PROVIDERS_UNAVAILABLE_PREFIX } from '../buildOutcomeSummaries';
 // AgentV3 — multi-provider cost-routing orchestrator (phase 3).
 //
@@ -887,6 +888,14 @@ export function makeMultiProviderTurnRunner(
           fellBackFrom.push(name);
           const why = providerSkipReason(name);
           if (lastError === undefined && why) lastError = new Error(why);
+          continue;
+        }
+        // Traffic Manager V2 (P3): skip ONLY — a rung the admin drained or disabled is passed over for the next rung
+        // of this same chain; nothing is added or reordered and the selected tier is never left. Read only when the
+        // control store covers the builder path (off by default).
+        if (!legacyPathAllows('builder', familyOfEngineName(name))) {
+          fellBackFrom.push(name);
+          if (lastError === undefined) lastError = new Error(`${name} is drained or disabled in traffic control.`);
           continue;
         }
         if (fatalReason !== undefined) {

@@ -2260,7 +2260,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   "today" figure repeats the card above; the duplicate is cleaned up in PR 4. */}
               <div className="grid grid-cols-2 gap-4">
                 {statCard('Website Hits', (analytics?.websiteHitsTotal || 0).toLocaleString(), analytics?.hitsSinceBoot ? 'Since this server started — resets on deploy' : 'All time requests', 'bg-sky-500 text-on-accent', Globe)}
-                {statCard('Today Hits', (analytics?.websiteHitsToday || 0).toLocaleString(), `vs ${analytics?.websiteHitsYesterday || 0} yesterday`, 'bg-indigo-500 text-on-accent', Eye)}
+                {statCard('Today Hits', (analytics?.websiteHitsToday || 0).toLocaleString(), (typeof analytics?.websiteHitsYesterday === 'number' ? `vs ${analytics.websiteHitsYesterday} yesterday` : 'yesterday not measured — this server started today'), 'bg-indigo-500 text-on-accent', Eye)}
               </div>
 
               {/* Row 2: 4 more metrics */}

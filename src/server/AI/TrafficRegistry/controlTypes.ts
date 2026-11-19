@@ -14,6 +14,9 @@ import { PROVIDER_UPSTREAM } from './upstreamFamilies';
 /** Surfaces the gateway can serve today. A surface switch can only send one of them back to its legacy path. */
 export const CONTROL_SURFACES: readonly Surface[] = Object.freeze(['chat', 'professional', 'doctor', 'sda', 'developer-api'] as Surface[]);
 export type SurfaceMode = 'env' | 'legacy';
+/** The older routing paths P3 can extend drain/disable to. Kept here (not imported) so this module stays a leaf. */
+export const COVERED_PATHS = ['free-chain', 'chat-router', 'builder'] as const;
+export type CoveredPath = typeof COVERED_PATHS[number];
 export type RouteState = 'enabled' | 'draining' | 'disabled';
 
 /**
@@ -44,6 +47,11 @@ export interface ControlBody {
   providers: Record<string, RouteControl>;
   /** Keyed `<familyId>/<modelId>`. */
   models: Record<string, ModelControl>;
+  /**
+   * P3: which OLDER routing paths also obey provider drain/disable. Absent/false = that path ignores the store
+   * (today's behaviour). Turning it off again is that path's rollback.
+   */
+  coverage?: Partial<Record<CoveredPath, boolean>>;
 }
 
 /** What is stored: the body plus who changed it, when and why. `revision` only ever goes up. */
@@ -106,7 +114,7 @@ export function isFamilyId(id: string): boolean { return Object.hasOwn(PROVIDER_
 /** Strict validation of an admin-submitted body. Throws `ControlInputError` with a plain reason. */
 export function parseControlBody(raw: unknown): ControlBody {
   const o = obj(raw, 'The control document');
-  onlyKeys(o, ['global', 'surfaces', 'providers', 'models'], 'The control document');
+  onlyKeys(o, ['global', 'surfaces', 'providers', 'models', 'coverage'], 'The control document');
   const g = obj(o.global ?? { gateway: 'on' }, 'global');
   onlyKeys(g, ['gateway'], 'global');
   if (g.gateway !== 'on' && g.gateway !== 'off') throw new ControlInputError('global.gateway must be on or off.');
@@ -134,13 +142,20 @@ export function parseControlBody(raw: unknown): ControlBody {
     onlyKeys(m, ['state', 'trafficCapPct', 'admission'], `models.${k}`);
     models[k] = { ...route(m, `models.${k}`), ...(m.admission !== undefined ? { admission: admission(m.admission, `models.${k}.admission`) } : {}) };
   }
-  return { global: { gateway: g.gateway }, surfaces, providers, models };
+  const coverage: NonNullable<ControlBody['coverage']> = {};
+  for (const [k, v] of Object.entries(obj(o.coverage ?? {}, 'coverage'))) {
+    if (!(COVERED_PATHS as readonly string[]).includes(k)) throw new ControlInputError(`Unknown routing path "${k}".`);
+    if (typeof v !== 'boolean') throw new ControlInputError(`coverage.${k} must be true or false.`);
+    if (v) coverage[k as CoveredPath] = true;
+  }
+  return { global: { gateway: g.gateway }, surfaces, providers, models, ...(Object.keys(coverage).length ? { coverage } : {}) };
 }
 
 /** Read a stored document. Anything unreadable is rejected whole: a half-understood control is never applied. */
 export function parseControlDoc(raw: unknown): ControlDoc {
   const o = obj(raw, 'Stored control document');
-  const body = parseControlBody({ global: o.global, surfaces: o.surfaces, providers: o.providers, models: o.models });
+  const body = parseControlBody({ global: o.global, surfaces: o.surfaces, providers: o.providers, models: o.models,
+    ...(o.coverage !== undefined ? { coverage: o.coverage } : {}) });
   if (!Number.isSafeInteger(o.revision) || (o.revision as number) < 1) throw new ControlInputError('Stored revision is invalid.');
   if (!Number.isSafeInteger(o.updatedAtMs)) throw new ControlInputError('Stored updatedAtMs is invalid.');
   return { ...body, revision: o.revision as number, updatedAtMs: o.updatedAtMs as number,
@@ -148,5 +163,5 @@ export function parseControlDoc(raw: unknown): ControlDoc {
 }
 
 export function bodyOf(doc: ControlDoc): ControlBody {
-  return { global: doc.global, surfaces: doc.surfaces, providers: doc.providers, models: doc.models };
+  return { global: doc.global, surfaces: doc.surfaces, providers: doc.providers, models: doc.models, ...(doc.coverage ? { coverage: doc.coverage } : {}) };
 }

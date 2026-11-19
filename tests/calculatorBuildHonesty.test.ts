@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
+import { BuildDiagnostics, isAppFinding } from '../src/server/AgentV3/BuildDiagnostics';
+import { buildFindingSuggestions } from '../src/server/AgentV3/buildFindingSuggestions';
 import { abortOutcomeFor } from '../src/server/AgentV3/abortOutcome';
 import { buildWalletBudgetDiagnostic, buildWalletStopDetail } from '../src/server/AgentV3/buildWalletDiagnostic';
 import { repairStyleRegression } from '../src/server/AgentV3/repairAcceptance';
@@ -13,6 +14,25 @@ const failure = (code: string) => ({ phase: 'build' as const, severity: 'warning
   code, message: `Fast-lane verify failed: ${ERROR}`, detail: ERROR, autoResolved: true });
 
 describe('a handed-off compiler error stays unresolved until a genuine recheck', () => {
+  it.each(['SIMPLE_BUILD_VERIFY_ERROR', 'ONESHOT_VERIFY_FAILED'])('%s offers a focused repair until the compiler genuinely passes', code => {
+    const diag = new BuildDiagnostics({});
+    diag.record(failure(code));
+    expect(isAppFinding({ phase: 'build', code })).toBe(true);
+    const offers = buildFindingSuggestions(diag.report().issues);
+    expect(offers).toHaveLength(1);
+    expect(offers[0].prompt).toContain('recheck the current files first');
+    expect(offers[0].prompt).toContain(ERROR);
+    diag.recordCommand({ command: 'tsc --noEmit', stdout: '', exitCode: 0 });
+    expect(buildFindingSuggestions(diag.report().issues)).toEqual([]);
+  });
+
+  it('unresolved findings from both initial lanes share one repair offer', () => {
+    const diag = new BuildDiagnostics({});
+    diag.record(failure('SIMPLE_BUILD_VERIFY_ERROR'));
+    diag.record(failure('ONESHOT_VERIFY_FAILED'));
+    expect(buildFindingSuggestions(diag.report().issues)).toHaveLength(1);
+  });
+
   it('only a recheck of the current source can resolve a handed-off compiler finding', () => {
     let revision = 7;
     const diag = new BuildDiagnostics({ currentSourceRevision: () => revision });

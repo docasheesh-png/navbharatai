@@ -133,6 +133,15 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     prompt: 'The last build ran out of time before it finished. Continue from where it stopped: finish the parts that are not done yet, keep everything that is already there and working, and confirm the app builds and opens.',
   },
   {
+    // A fast-lane handoff does not settle its compiler/style errors. The diagnostic stays open
+    // until a genuine recheck, so offer a focused recheck/repair rather than treating it as setup.
+    code: 'SIMPLE_BUILD_VERIFY_ERROR',
+    title: 'Recheck and fix the unfinished build errors',
+    detail: 'An earlier check found errors that have not yet been confirmed fixed.',
+    prompt: 'An earlier check of this app found errors that have not been confirmed fixed. Read the recorded errors and recheck the current files first. Fix only the errors that remain, preserving the existing screens, styles and working behaviour, then confirm the whole app builds and opens correctly. Do not treat a handoff to another build step as proof that the errors were fixed.',
+    withEvidence: true,
+  },
+  {
     // The syntax gate's finding when its repair could not clear it (SYNTAX_HEALED answers it otherwise).
     code: 'SYNTAX_ERROR_DETECTED',
     title: 'Fix the code that does not compile',
@@ -591,6 +600,9 @@ export const APP_FINDINGS_WITHOUT_AN_OFFER = new Set([
  * offer above.
  */
 export const OFFERED_THROUGH: Readonly<Record<string, string>> = {
+  // Both initial lanes use the same compiler/style verification boundary and focused repair action.
+  // Sharing the offer also avoids two buttons if both lanes left unresolved checks in one report.
+  ONESHOT_VERIFY_FAILED: 'SIMPLE_BUILD_VERIFY_ERROR',
   OUTCOME_SYNTAX_ERROR: 'SYNTAX_ERROR_DETECTED',
   OUTCOME_MISSING_FILES: 'MISSING_FILES_DETECTED',
   OUTCOME_MISSING_EXPORT: 'MISSING_EXPORT_DETECTED',

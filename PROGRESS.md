@@ -102389,3 +102389,23 @@ Tests: `visionImageCoverage.test.ts` covers the census, the source guard, and th
 **Current tally after D21–D22:**22 source/implementation findings;94 queue rows through Q-2880 (58 IN PROGRESS/36 BLOCKED). The earlier76 historical classifications,81 E references, nine accepted/evidence-only dispositions and three unallocated draft IDs are unchanged. Earlier validation failures remain recorded and are not relabelled passed.
 
 **D21 diagnostic batch and D22 proof:**the predetermined ten-case batch completed10/10, exit0,36.69s, with no case retry or early stop. Each fresh-wallet race produced one500-token debit and one zero-debit replay,9,500-token/₹95 balance, one operation/immutable ledger record and a valid chain; raw outcomes and read-only audits were retained. This does not reproduce or explain the original failed case, so D21 remains BLOCKED and no wallet logic, retry, timeout or invariant change is justified. D22’s one-line raw-result assertion message passes Node22 syntax checking and leaves the predicate unchanged. The new commit requires all applicable checks again; successful b34 coverage is retained as prior evidence, not final new-source proof. Final aggregate status remains unpassed pending the next full gate.
+
+## 2026-11-19 — failedbr #2475 (aba63ead) autopsy: "pubg/bgmi jaisa game" shipped a 2D map, a stopped repair kept writing
+
+**Report:** turn 3 of a session, Weak tier, qwen3-coder (Surplus), 625 s, gate YELLOW, recorded ok:false. Prompt
+verbatim: *"mujhe pubg/bgmi jaisa game chahiye. jahan ham character ko joystick se move kare! apne pata nahi kya
+photo bana diya hai"*. Tally: ✅ 1 self-heal · 🔀 0 workarounds · ⏭️ 1 skip · ❌ 5 shipped imperfect · 🥵 6 struggles.
+
+| ID | Problem | Root cause → class | Fix · lock |
+|---|---|---|---|
+| Q-2910 | GAME_CONTRACT {unknown, unspecified, unspecified} for PUBG/BGMI | a named well-known game was not a spec; two private royale regexes had drifted | `namedGameReference` + one `asksForBattleRoyale` · `aNamedGameIsASpecification` |
+| Q-2911 | 2D city map shipped as "the game" | same root; nothing told the builder the playable game must come first | contract block line · same test; watch next royale build |
+| Q-2912 | GAME_PLAYTEST_NOT_RUN though "Enter Battleground" opened the game | closed start vocabulary (46e2d74b sibling) | arena stems + `opensGameSession` evidence · same test |
+| Q-2913 | debugger kept writing 595–641 s after the repair was undone; saved as verified | delegated child ran under the BUILD signal only (zombie-write class, delegation road) | `runnerSignal.ts` zone + `childStopSignal` + write refusal · `aStoppedPassLeavesNoWriter` |
+| Q-2914 | report ok:false, summary "This repair had used its time…" | pass runner's terminal `done` on the build stream | pass budget → `agent_done`, no 'stopped' persist · same test |
+| Q-2915 | COVERED map buttons | 🟡 source of the revision not in the report | blocked on information |
+| Q-2916–Q-2922 | repair overrun, 4 old_string misses, syntax reject, nudge, usage, exploration, todo-only | recurrences of Q-2697 / Q-2741 / Q-1347 / Q-2735 / Q-2317 | point at those rows |
+
+**Has it come back before?** Yes — the zombie-write class (July SimpleBuilder, a38c6fef OneShotBuilder): both
+earlier fixes guarded a LANE; neither could see delegation, because `makeSubAgentSpawn` held the build signal.
+The start-vocabulary class (46e2d74b) was "fixed by shape" but kept a stem list; this one adds evidence.

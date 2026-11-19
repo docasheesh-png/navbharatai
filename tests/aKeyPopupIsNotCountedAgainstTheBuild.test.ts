@@ -6,7 +6,7 @@
 //   2. a key the user did not give is never asked for again in the same build.
 // Reversion: drop `pausedMs` from AgentRunner's timeout check, the route's `workElapsed`, the deadline re-arm, or
 // `unansweredOnly` from request_secrets, and the matching block fails.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { waitCreditMs, workElapsedMs, hardDeadlineRemainingMs, CLOUD_RUN_REQUEST_CEILING_MS, CEILING_MARGIN_MS } from '../src/server/AgentV3/workClock';
@@ -50,22 +50,29 @@ class FakeActuator implements ActuatorPort {
 }
 
 describe("the runner's own clock skips the user wait", () => {
+  // DETERMINISTIC (fixed after CI caught the timing version): the "popup" advances a controlled clock by 100 s instead of
+  // really waiting, against a 60 s budget — real CPU time (a few seconds at most under coverage) can never decide it.
   const turn = (i: number) => ({ content: [{ type: 'tool_use', id: `w${i}`, name: 'write_file', input: { path: `src/f${i}.ts`, content: `export const v${i} = ${i};\n` } }], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } });
-  const run = async (pausedMs?: () => number) => {
-    let i = 0, paused = 0;
-    // The first model call stands in for a key popup the user sat in for 1.5 s; every later call is instant work.
-    const client: MessagesCreateClient = { messages: { create: async () => { if (i === 0) { await new Promise((r) => setTimeout(r, 1500)); paused += 1500; } return (i < 3 ? turn(i++) : { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' }) as never; } } };
-    const stream = new AgentEventStream();
-    const state = new WorkspaceState(stream);
-    const runner = new AgentRunner({ client: new ClaudeClient(client), dispatcher: new ToolDispatcher(new FakeActuator(), 'ws-2431', state, stream), state, events: stream, model: 'test', system: 's', tools: defaultToolCatalog(), maxBuildMs: 1200, expectsArtifacts: true, ...(pausedMs ? { pausedMs: () => (pausedMs(), paused) } : {}) });
-    return runner.run('build');
+  const POPUP_MS = 100_000, BUDGET_MS = 60_000;
+  const run = async (withCredit: boolean) => {
+    let i = 0, paused = 0, offset = 0;
+    const realNow = Date.now.bind(Date);
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + offset);
+    try {
+      // The first model call stands in for a key popup the user sat in for 100 s; every later call is instant work.
+      const client: MessagesCreateClient = { messages: { create: async () => { if (i === 0) { offset += POPUP_MS; paused += POPUP_MS; } return (i < 3 ? turn(i++) : { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' }) as never; } } };
+      const stream = new AgentEventStream();
+      const state = new WorkspaceState(stream);
+      const runner = new AgentRunner({ client: new ClaudeClient(client), dispatcher: new ToolDispatcher(new FakeActuator(), 'ws-2431', state, stream), state, events: stream, model: 'test', system: 's', tools: defaultToolCatalog(), maxBuildMs: BUDGET_MS, expectsArtifacts: true, ...(withCredit ? { pausedMs: () => paused } : {}) });
+      return await runner.run('build');
+    } finally { spy.mockRestore(); }
   };
-  it('with the credit, a 1.5 s wait does not eat a 1.2 s budget', async () => {
-    const r = await run(() => 0);
+  it('with the credit, a 100 s wait does not eat a 60 s budget', async () => {
+    const r = await run(true);
     expect(r.summary).not.toMatch(/stopped after about/i);
   });
   it('without it (wall time), the same run is stopped by the clock — the #2431 shape', async () => {
-    const r = await run();
+    const r = await run(false);
     expect(r.summary).toMatch(/stopped after about|to avoid an endless loop/i);
   });
 });

@@ -132,6 +132,16 @@ export function shouldCheckDone(p: {
    * the line could only ever be printed for a turn that was never judged at all.
    */
   projectModule?: string | null;
+  /**
+   * Has THIS turn's app rendered in a real browser since the check last ran? `true` ⇒ check now, past the warm-up and
+   * the cadence. 🔴 FAILEDBR #2470 (99771bc7, 2026-11-18): the architect delegated the board game to a frontend agent,
+   * so it took only 8 steps in total — a step-counted check (every 10th, from step 8) never ran. The app rendered at
+   * 218 s; the architect then started four reviewers in parallel, the live line said "your app is already running —
+   * I'm finishing it", and the user pressed Stop at 263 s. A step is not a unit of progress when one step is a whole
+   * delegated build: the render IS the evidence the warm-up waits for, so it opens the check itself. Every other
+   * guard (edit, module, failed step, already signalled) still applies.
+   */
+  renderedUnchecked?: boolean;
 }): boolean {
   const { cfg, step, toolUses, alreadySignalled, wroteThisRun } = p;
   if (!cfg.enabled || alreadySignalled) return false;
@@ -141,6 +151,7 @@ export function shouldCheckDone(p: {
   if (wroteThisRun === false) return false; // the project is exactly what it was — whatever it scores, it is not this run's work
   if (p.lastStepFailed) return false;
   if (toolUses <= 0) return false;      // nothing written yet — nothing can be finished
+  if (p.renderedUnchecked === true) return true; // the app is on screen — evidence, not a step count (#2470)
   if (step < cfg.minStep) return false; // warm-up
   // A skipped step must not cost the check its whole next window, so the cadence is ANY step at or
   // past a multiple the check has not yet run on — the caller passes the step it last checked.

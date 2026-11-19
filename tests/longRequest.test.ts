@@ -94,21 +94,25 @@ describe('🔒 the wiring — the long actions pass their ceiling, and no caller
   // from hosting) into its own dedicated screen. The endpoint's known "spins forever" bug class (admin
   // 2026-08-27) travels with the caller, not the file, so this test now reads NavAppStore.tsx.
   const store = readFileSync(join(__dirname, '..', 'src/components/ide/NavAppStore.tsx'), 'utf8');
+  const publishStart = store.indexOf('  const publishChosenApp = useCallback(async () => {');
+  const publishEnd = store.indexOf('  const loadOwned = useCallback(', publishStart);
+  if (publishStart < 0 || publishEnd <= publishStart) throw new Error('App Mart publish handler not found');
+  const publishHandler = store.slice(publishStart, publishEnd);
   const fetchSrc = readFileSync(join(__dirname, '..', 'src/lib/authedFetch.ts'), 'utf8');
 
   it('each long request names its own ceiling at the call', () => {
     expect(chooser).toContain('}, LONG_REQUEST_TIMEOUT_MS.pushAppToGitHub);');
     expect(chooser).toContain('}, LONG_REQUEST_TIMEOUT_MS.deployBackend);');
     expect(chooser).toContain('}, LONG_REQUEST_TIMEOUT_MS.provisionDatabase);');
-    expect(store).toContain('}, LONG_REQUEST_TIMEOUT_MS.storePublish);');
+    expect(publishHandler).toContain('}, LONG_REQUEST_TIMEOUT_MS.storePublish);');
   });
 
   it('🔒 the store publish no longer builds a controller authedFetch would have overwritten', () => {
     // The 2026-08-27 "90 seconds" fix passed `signal: ac.signal`; authedFetch replaced it with its
     // own 20-second controller, so the 90 seconds never applied. A private controller here is the
     // exact shape of that regression.
-    expect(store).not.toContain('new AbortController()');
-    expect(store).toContain('const timedOut = isFetchTimeout(e);');
+    expect(publishHandler).not.toContain('new AbortController()');
+    expect(publishHandler).toContain('const timedOut = isFetchTimeout(e);');
   });
 
   it('long-action catches use honest shared messages — a lost database response never invites another create', () => {

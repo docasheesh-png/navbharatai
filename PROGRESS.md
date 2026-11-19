@@ -102240,3 +102240,13 @@ NOT done (needs the owner):
 - Then deciding on `on`.
 
 The plan's "Free Chat fully on the gateway" switch is the owner's existing env (`INFERENCE_GATEWAY_ROLLOUT_MODE` canary/all). This phase does not change it.
+
+## 2026-11-19 — BR2001 autopsy (an OS-emulator build ran out of time on a false "missing file"): a bundler query is not part of the file name
+
+Owner t311u sequential audit, BR2001 only (BR2000 not retained). Branched from origin/main `7ed8450` (#4304). A free Weak build was stopped by the 25-min cap (RED, not charged).
+
+- F1: `findUnresolvedLocalImports` reported `./assets/icons/start.svg?react — CREATE this file` while `start.svg` existed and `npm run build` passed; the builder spent both resumes and ~6 min on it. New shared `src/server/lib/importSpecifier.ts` (`importSpecifierPath` / `importSpecifierSuffix`) is now used by every resolver that decides whether a local import exists: ProjectImport (gate + mispath autofix, which keeps the `?react`), appGraphScan (it said "broken import that will fail the build"), writeTimeImportCheck, ArchitectureAnalysis, journeyDerivation, fileClassification. `resolveExportTarget` refuses a query-loaded module on purpose.
+- Locked closures: #4146 (setup note), BR1994 (ending minutes, no "continuing" after "out of time").
+- Queue: opens Q-2765 (two app registries from the fast lane) and Q-2766 (svgr import form); Q-2621 and Q-1007 gain BR2001 evidence.
+- Proof: `tests/br2001Autopsy.test.ts`; reverting any of the five resolver fixes fails 2–5 tests.
+- Docs: `docs/build-report-autopsy-BR2001.md` and its evidence JSON.

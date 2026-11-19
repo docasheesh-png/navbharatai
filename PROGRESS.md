@@ -102420,3 +102420,33 @@ The start-vocabulary class (46e2d74b) was "fixed by shape" but kept a stem list;
 - **#2449 / #2450** (3-second runs, E2B cap of 20): Q-2928 (the outcome net now reads the recorded sandbox codes —
   no more "the engine did not record why" on a run that recorded it twice; the ETA is "untested" too), Q-2929 🟡
   (E2B plan limit, admin), Q-2930 🟡 (note vs admission budget — owned by the BR1983/BR2003 audit), Q-2931 → Q-2735.
+## 2026-11-19 — Calculator report 9fba77d7: engine fixes proposed; GitHub validation pending
+
+The owner supplied the complete diagnostic timeline and asked to fix it. Autopsy and per-item ledger:
+`docs/autopsies/calculator-9fba77d7.md` (Q-2881–Q-2891). The saved App.tsx is a regression fixture.
+
+The failed repair's root is a boolean union alias plus a positive truthiness guard: the previous cause
+reader required an expanded union and a negated guard. A compiler-backed deterministic pass now follows
+the imported alias, verifies true/false discriminants and receiver identity, and changes only the guard.
+Both fast text-repair callers and the shared endgame use it. Handoffs prioritize actual compiler offenders.
+Compiler repairs cannot introduce new undefined CSS classes without updating their stylesheet in the
+same batch. The fast verifier reaches its existing spacing snap on failed compiles too.
+
+Fast-lane/one-shot verify failures remain unresolved until an appropriate genuine recheck. Wallet
+diagnostics retain admission balance, estimate and provisional stop cost; budget/supersession outcomes
+make no claim that unfinished app code is correct. Prices, wallet gates, exemptions, provider chains,
+settlement and project memory policy are unchanged. Planner guidance includes referenced PWA manifests.
+
+Validation is deliberately GitHub-only under the owner's latest instruction: no local CI, typecheck,
+suite, coverage, emulator drill or app build ran. Static diff review is not a passing gate. CI, merge
+and production replay remain pending. The live registry snapshot, provider receipts, full generated
+manifest/worker and duplicated-constant sources remain blocked as recorded in the ledger; no fabricated
+fix, invoice or successful preview is claimed. No production workspace or wallet was mutated.
+
+### Same session — public push blocked by automatic approval review
+
+Local code commit: `9c997272e3b0ebccf18295b01da4fb4b2a73387f`, branch
+`codex/calculator-build-repair`. The public GitHub push was rejected because explicit authorization
+for publishing the complete payload was required. A read-only remote-ref check found no branch;
+no connector/alternate route was used to bypass the rejection. No PR or CI run has started. A
+private patch is prepared for review; public push/PR and GitHub validation await authorization.

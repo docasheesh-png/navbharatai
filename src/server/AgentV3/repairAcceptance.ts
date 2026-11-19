@@ -31,6 +31,20 @@
 // PURE — no I/O, no clock. The caller performs the revert; this only decides.
 
 import { countTscErrors } from './TscGate';
+import { findUndefinedClasses } from './CssConsistency';
+
+/** A compiler repair must not introduce unstyled classes, even below the review threshold. */
+export function repairStyleRegression(
+  before: Record<string, string>, proposed: ReadonlyArray<{ path: string; content: string }>,
+): string | null {
+  const baseline = new Set(findUndefinedClasses(before));
+  const after = { ...before };
+  for (const file of proposed) after[file.path.replace(/^\.\//, '')] = file.content;
+  const introduced = findUndefinedClasses(after).filter(name => !baseline.has(name));
+  if (introduced.length === 0) return null;
+  return `The compiler repair introduced unstyled classes (${introduced.slice(0, 12).map(name => `.${name}`).join(', ')}). `
+    + 'Keep the existing class names or update their stylesheet in the same repair. The proposal was not written.';
+}
 
 export interface RepairJudgementInput {
   /** The compiler output that PROMPTED this repair. */

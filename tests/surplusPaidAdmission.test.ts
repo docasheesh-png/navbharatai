@@ -75,6 +75,13 @@ describe.each(['false', 'true'])('unchanged plain-chat/legacy paid admission wit
     expect(mocks.healthy).toHaveBeenCalledWith('synthetic-paid-user');
     expect(ctx.onEconomy).not.toHaveBeenCalled(); expect(ctx.status).not.toHaveBeenCalled(); expect(ctx.release).not.toHaveBeenCalled();
   });
+  it('passes the actual admitted wallet and estimate to diagnostics without a provider call or debit', async () => {
+    const onSpendable = vi.fn();
+    const ctx = context({ onSpendable });
+    expect(await checkBuilderPaidAdmission(ctx.input)).toBe(true);
+    expect(onSpendable).toHaveBeenCalledWith(200, 100);
+    expect(ctx.release).not.toHaveBeenCalled();
+  });
   it('retains the existing unknown-wallet fail-open behavior without changing power-mode policy', async () => {
     mocks.wallet.mockRejectedValue(new Error('synthetic read failure'));
     const ctx = context(); expect(await checkBuilderPaidAdmission(ctx.input)).toBe(true);

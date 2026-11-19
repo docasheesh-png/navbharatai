@@ -125,21 +125,27 @@ export type ActionMap = Record<string, string[]>;
 
 /** Sensible defaults; pass your own to remap. Codes are KeyboardEvent.code (layout-independent). */
 export const DEFAULT_ACTIONS: ActionMap = {
-  up: ['KeyW', 'ArrowUp'],
-  down: ['KeyS', 'ArrowDown'],
-  left: ['KeyA', 'ArrowLeft'],
-  right: ['KeyD', 'ArrowRight'],
-  jump: ['Space'],
-  sprint: ['ShiftLeft', 'ShiftRight'],
-  interact: ['KeyE'],
+  // Pad:N is a STANDARD-mapping gamepad's button N (A=0 B=1 X=2 Y=3 LB=4 RB=5 LT=6 RT=7 Start=9 L3=10, d-pad 12-15).
+  up: ['KeyW', 'ArrowUp', 'Pad:12'],
+  down: ['KeyS', 'ArrowDown', 'Pad:13'],
+  left: ['KeyA', 'ArrowLeft', 'Pad:14'],
+  right: ['KeyD', 'ArrowRight', 'Pad:15'],
+  jump: ['Space', 'Pad:0'],
+  sprint: ['ShiftLeft', 'ShiftRight', 'Pad:5', 'Pad:10'],
+  interact: ['KeyE', 'Pad:1'],
   // A keyboard player can attack too (it was the mouse button only, so a laptop with no mouse could never fire).
-  attack: ['Mouse0', 'KeyF', 'KeyJ'],
-  aim: ['Mouse2'],
-  pause: ['Escape'],
+  attack: ['Mouse0', 'KeyF', 'KeyJ', 'Pad:2', 'Pad:7'],
+  aim: ['Mouse2', 'Pad:6'],
+  pause: ['Escape', 'Pad:9'],
   kick: ['KeyK'],
-  reload: ['KeyR'],
-  drift: ['Space'],
+  reload: ['KeyR', 'Pad:3'],
+  drift: ['Space', 'Pad:4'],
 };
+
+/** A stick inside this radius is at rest (worn sticks never read exactly 0). */
+export const PAD_DEADZONE = 0.15;
+/** Right-stick look speed, in mouse-pixels per fixed step at full tilt. */
+export const PAD_LOOK_SPEED = 14;
 
 /**
  * Names that MEAN the same action (admin 2026-11-19: "fire button press kiya … kabhi kabhi action bhi nahi hota").
@@ -167,6 +173,11 @@ export class Input {
   /** Analogue move vector (-1..1). Touch joystick and gamepad write here; keys synthesise it. */
   moveX = 0;
   moveY = 0;
+  /** A gamepad is connected and was read last step. */
+  gamepad = false;
+  /** The left stick wrote moveX/moveY (so letting it go clears only what the pad wrote, never the touch joystick). */
+  private padMoving = false;
+  private padDown = new Set<string>();
 
   constructor(target: HTMLElement | Window = window, actions: ActionMap = DEFAULT_ACTIONS) {
     this.actions = actions;
@@ -234,6 +245,33 @@ export class Input {
     const len = Math.hypot(x, y);
     // Without this, holding two directions moves you 1.41x faster than one — the classic bug.
     return len > 1 ? { x: x / len, y: y / len } : { x, y };
+  }
+
+  /**
+   * Read the GAMEPAD (the Gamepad API is polled, it sends no events): the first connected pad with the standard layout.
+   * Left stick moves, right stick looks, buttons press actions (Pad:N in the action map). Call once per step BEFORE the
+   * game reads input — the shell does. Nothing happens without a pad (or in a browser without the API).
+   */
+  pollGamepads(): void {
+    let pad: Gamepad | null = null;
+    try {
+      const pads = typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
+      for (const p of pads) { if (p && p.connected && (p.mapping === 'standard' || p.axes.length >= 2)) { pad = p; break; } }
+    } catch { pad = null; }
+    this.gamepad = pad !== null;
+    const now = new Set<string>();
+    if (pad) {
+      pad.buttons.forEach((b, i) => { if (b && (b.pressed || b.value > 0.5)) now.add('Pad:' + i); });
+      const dz = (v: number | undefined): number => { const x = typeof v === 'number' && Number.isFinite(v) ? v : 0; return Math.abs(x) < PAD_DEADZONE ? 0 : (x - Math.sign(x) * PAD_DEADZONE) / (1 - PAD_DEADZONE); };
+      const lx = dz(pad.axes[0]), ly = dz(pad.axes[1]);
+      if (lx || ly) { this.setAnalogueMove(lx, ly); this.padMoving = true; }
+      else if (this.padMoving) { this.setAnalogueMove(0, 0); this.padMoving = false; }
+      const rx = dz(pad.axes[2]), ry = dz(pad.axes[3]);
+      this.lookX += rx * PAD_LOOK_SPEED; this.lookY += ry * PAD_LOOK_SPEED;
+    } else if (this.padMoving) { this.setAnalogueMove(0, 0); this.padMoving = false; }
+    for (const code of now) if (!this.padDown.has(code)) this.set(code, true);
+    for (const code of this.padDown) if (!now.has(code)) this.set(code, false);
+    this.padDown = now;
   }
 
   /**

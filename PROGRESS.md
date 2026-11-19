@@ -102491,3 +102491,11 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
 **Fixed:** `TrackStream.poseAt(distance)` — the road's own centre line (the same `piecePoints` geometry) in current world coordinates; kit file `three/race.ts` — `createRace(scene, { stream, opponents, finishDistance, countdown, skill })`: a countdown that holds everyone at the line (`canDrive()`), rivals driving the road in their own lanes with a rubber band, live position and time (`RACE_STATUS`), a finite race ending with ordered results (`RACE_FINISHED`, `lastRaceResults`, the round becomes won / game over), Play again resets it to the grid; the Hud's `RaceOverlay` (big 3-2-1-GO!, P2/4 and the clock) and results on the end screen; `RacingRoadGame` races 3 rivals by default, gated by the countdown, and stays endless unless `finishKm` is given (owner 2026-11-18). Rivals are ghosts (no collision) — said in the module.
 
 **Tests:** `aRaceHasRivalsACountdownAndAFinish` (9). Reversion: driving through the countdown fails 1. **Still open:** rival collisions, garage/car selection, nitro (P1 economy/genre packs).
+
+## 2026-11-19 — Game-gap audit P1 #17: a gamepad plays the game (the runtime claimed it and had no code)
+
+**Root cause:** `core/input.ts`'s header said "keyboard, mouse, gamepad and touch"; there was no Gamepad API code anywhere — an honesty defect as much as a missing feature.
+
+**Fixed:** `Input.pollGamepads()` (the API is polled): first connected standard pad; left stick → analogue move with a 0.15 deadzone, letting go clears only what the pad wrote (the touch joystick is never cleared by an idle pad); right stick → look; buttons are `Pad:N` codes in `DEFAULT_ACTIONS` with real press/release edges (A jump, X/RT attack — the attack group answers too —, B use, Y reload, LT aim, LB drift, RB/L3 sprint, Start pause, d-pad directions); unplugging releases everything; no API = no-op. The shell polls first in every fixed step.
+
+**Tests:** `aGamepadPlaysTheGame` (6). Reversion: ignoring buttons fails 2.

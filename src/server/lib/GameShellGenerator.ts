@@ -508,6 +508,8 @@ export class Game {
 
   /** FIXED 60Hz. Everything that affects the simulation lives here and nowhere else. */
   private fixedUpdate(delta: number): void {
+    // A gamepad is polled, not heard: read it before anything reads input this step.
+    this.input.pollGamepads();
     this.feel.update(delta);
     combo.update(delta);
 

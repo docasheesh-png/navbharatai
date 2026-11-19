@@ -102751,3 +102751,10 @@ The first exactly-one-lease assertion in the phase-2 handoff race now includes o
 - Honesty fix: the architect prompt and the Athree map's "NOT built yet" list both said aircraft were not built — now they name
   the flight kit (buildings remain not built).
 - Locked by `tests/aPlaneFliesLikeAPlane.test.ts` (reversion: no sink without lift / no crash check → 2 fail).
+
+## 2026-11-19 — Game gap P2: a death the player can see (branch `claude/game-death-topple`)
+- `Humanoid.die(fromFront)` / `revive()` / `isDown()`: the body topples from the hips onto the ground over 0.6 s (backward
+  from the front, forward from behind), knees buckle, arms fling; while down it neither walks nor acts.
+- Game drops the player's body on PLAYER_DIED and stands it up on PLAYER_SPAWNED / GAME_STARTED; the prompt tells the builder
+  to topple enemies before removing them.
+- Locked by `tests/aDeathIsSeen.test.ts` (reversion: no shell wiring / walking while down → 3 fail).

@@ -1139,6 +1139,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  a 3-2-1 countdown (drive only when race.canDrive()), the player\'s place and time on the Hud, and results at the finish;',
     '  RacingRoadGame already races 3 rivals. A SHOOTER: the Hud shows the crosshair, ammo, hit markers and damage numbers from the',
     '  kit\'s events; put attachHealthBar(enemy, () => hp.fraction) over every enemy and game.setBossBar(name, read) on a boss.',
+    '  DEATH IS SEEN: an enemy built with createHumanoid calls body.die(hitFromFront) when its health hits zero and is removed only',
+    '  after it has fallen (the kit already drops the player\'s body on PLAYER_DIED). Never make a dead body vanish on the spot.',
     '  GRENADES: simulateThrow / blastDamage from src/game/systems/grenade.ts (draw flight.points as the aim arc; blocked = cover).',
     '  AIM ASSIST on touch and gamepad only: aimAssist(aim, enemies) from systems/aimassist.ts — never for a mouse.',
     '  LEVELS: levels.define([{ name }…], gameId) from src/game/core/levels.ts, build each level on LEVEL_STARTED { index },',

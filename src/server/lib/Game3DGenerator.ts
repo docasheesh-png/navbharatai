@@ -2165,6 +2165,15 @@ export interface Humanoid {
   act: (action: HumanoidAction, strength?: number) => void;
   /** The action pose playing now, or null. */
   acting: () => HumanoidAction | null;
+  /**
+   * Fall down and stay down (a death the player can SEE): the body topples from the hips over ~0.6 s — backward when hit
+   * from the front (fromFront = true, the default), forward when hit from behind — knees buckle, arms fling out.
+   */
+  die: (fromFront?: boolean) => void;
+  /** Stand back up at once (a respawn, a new round). */
+  revive: () => void;
+  /** It has fallen (or is falling). */
+  isDown: () => boolean;
   dispose: () => void;
 }
 
@@ -2395,6 +2404,9 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
   let action: { name: HumanoidAction; t: number; dur: number; strength: number } | null = null;
   let grounded0 = true;
   let airTime = 0;
+  // 💀 A DEATH THE PLAYER CAN SEE (admin 2026-11-19 game-gap audit: a body that "died" kept standing, or vanished).
+  let down: { t: number; dir: 1 | -1 } | null = null;
+  const FALL_SECONDS = 0.6;
   const act = (name: HumanoidAction, strength = 1) => {
     const dur = ACTION_SECONDS[name];
     if (dur === undefined) return;
@@ -2471,6 +2483,22 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
     if (u >= 1) { action = null; neck.rotation.x = 0; }
   };
   const update = (dt: number, speed: number, grounded = true) => {
+    if (down) {
+      // Fallen: no walk, no actions — the topple plays out once and the body stays where it fell.
+      down.t = Math.min(FALL_SECONDS, down.t + Math.max(0, dt));
+      const u = down.t / FALL_SECONDS;
+      const e = u * u * (3 - 2 * u);                      // ease in and out: a collapse, not a hinge
+      hips.rotation.x = -down.dir * (Math.PI / 2) * e;    // backward (from the front) or forward
+      hips.rotation.y = 0;
+      hips.position.y = legH - (legH - 0.12 * H) * e;     // down to the ground
+      leftLeg.knee.rotation.x = 0.9 * e; rightLeg.knee.rotation.x = 0.6 * e;
+      leftLeg.hip.rotation.x = 0.3 * e; rightLeg.hip.rotation.x = 0.1 * e;
+      left.shoulder.rotation.z = -1.2 * e; right.shoulder.rotation.z = 1.2 * e;
+      left.shoulder.rotation.x = 0; right.shoulder.rotation.x = 0;
+      neck.rotation.x = -down.dir * 0.3 * e;
+      action = null;
+      return;
+    }
     const moving = speed > 0.05;
     // Stride frequency rises with speed but saturates — a sprint is a faster stride, not a blur.
     const freq = Math.min(2.2 + speed * 0.85, 9);
@@ -2548,6 +2576,14 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
     update,
     act,
     acting: () => action?.name ?? null,
+    die: (fromFront = true) => { if (!down) down = { t: 0, dir: fromFront ? 1 : -1 }; },
+    revive: () => {
+      if (!down) return;
+      down = null;
+      hips.rotation.x = 0; neck.rotation.x = 0; left.shoulder.rotation.z = 0; right.shoulder.rotation.z = 0;
+      update(0, 0, true);
+    },
+    isDown: () => down !== null,
     dispose: () => { for (const d of disposables) d.dispose(); },
   };
 }

@@ -388,6 +388,7 @@ import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Ar
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateGame2D } from '../lib/Game2DGenerator';
+import { generateBoardGames } from '../lib/BoardGamesGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
@@ -10069,6 +10070,18 @@ export class ToolDispatcher {
         const g2Layers = await this.addMissingRecipeLayers(g2.files, agent);
         this.scheduleCheckpoint('2d game kit');
         return `Added the 2D game kit:\n${g2Written.join('\n')}\n\n${g2.instructions}${g2Layers}`;
+      }
+
+      case 'generate_board_games': {
+        // THE INDIA GAMES PACK (admin 2026-11-19 game-gap audit): tested rules engines — a Ludo written from memory gets
+        // captures on safe squares, overshooting home and the six-rolls-again rule wrong, and a family notices at once.
+        const bgRec = (input as Record<string, unknown>) || {};
+        const bgInclude = Array.isArray(bgRec.include) ? bgRec.include.filter((v): v is string => typeof v === 'string') : undefined;
+        const bg = generateBoardGames(bgInclude);
+        const bgWritten = await this.writeRecipeFiles(bg.files, agent);
+        const bgLayers = await this.addMissingRecipeLayers(bg.files, agent);
+        this.scheduleCheckpoint('india games pack');
+        return `Added the India games pack:\n${bgWritten.join('\n')}\n\n${bg.instructions}${bgLayers}`;
       }
 
       case 'generate_world_2d': {

@@ -4,11 +4,24 @@
 // builder write. The old no-build nudge only runs on a zero-tool turn, so one read made it unreachable.
 // This is advice delivered with real tool results, never a ban on a new range or a reason to hide content.
 
+import { isReadOnlyInspection } from './shellInspection';
+
 export const EXPLORATION_TURNS = 8;
 export const EXPLORATION_PROBES = 16;
 export const MAX_EXPLORATION_STEERS = 2;
 
 const PROBES: ReadonlySet<string> = new Set(['read_file', 'grep', 'glob']);
+
+/**
+ * 🔴 `bash` USED AS A READER IS A READ (failedbr #2452). Four minutes of `cd …; cat …; sed -n …; grep …` wrote nothing,
+ * and this guard never fired because every turn contained `bash`. A bash call whose command only reads
+ * (shellInspection.ts — conservative: anything not recognised is not a read) is counted like read_file.
+ */
+function probeName(call: { name: string; input?: unknown }): string {
+  if (call.name !== 'bash') return call.name;
+  const cmd = (call.input as { command?: unknown } | null | undefined)?.command;
+  return typeof cmd === 'string' && isReadOnlyInspection(cmd) ? 'read_file' : 'bash';
+}
 
 export interface ExplorationProgress {
   changes: number;
@@ -35,6 +48,8 @@ export function advanceExplorationProgress(
     writingRun: boolean;
     changes: number | null;
     toolNames: readonly string[];
+    /** The same calls with their inputs, so a read-only `bash` counts as a read (failedbr #2452). Optional: absent ⇒ names only. */
+    toolCalls?: ReadonlyArray<{ name: string; input?: unknown }>;
     editingExistingApp: boolean;
   },
   env: NodeJS.ProcessEnv = process.env,
@@ -46,10 +61,11 @@ export function advanceExplorationProgress(
   if (input.changes !== state.changes) {
     return { state: { ...initialExplorationProgress(input.changes), steers: state.steers }, steer: null };
   }
-  const probes = input.toolNames.filter((name) => PROBES.has(name)).length;
+  const names = input.toolCalls ? input.toolCalls.map(probeName) : input.toolNames;
+  const probes = names.filter((name) => PROBES.has(name)).length;
   // A plan update may ride with reads. Tests, browser journeys, commands and connected tools are not
   // exploration and are never told they should have been writing instead.
-  if (probes === 0 || !input.toolNames.every((name) => PROBES.has(name) || name === 'update_todo')) return none;
+  if (probes === 0 || !names.every((name) => PROBES.has(name) || name === 'update_todo')) return none;
   const next = { ...state, turns: state.turns + 1, probes: state.probes + probes };
   const stage = next.stage + 1;
   if (next.steers >= MAX_EXPLORATION_STEERS || stage > 2

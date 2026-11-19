@@ -6568,6 +6568,41 @@ export function createAtmosphere(options: AtmosphereOptions): Atmosphere {
 }
 `;
 
+const SPLITSCREEN = `/**
+ * SPLIT SCREEN for two players on one device (admin 2026-11-19 game-gap audit): each camera gets its own part of the
+ * screen — side by side when the screen is wide, one above the other when it is tall (player 1 on the left / top).
+ *   renderSplit(renderer, scene, [camera1, camera2]);   // instead of renderer.render(scene, camera)
+ */
+import * as THREE from 'three';
+
+export interface Rect { x: number; y: number; w: number; h: number }
+
+/** Screen rectangles (three.js viewport units: origin bottom-left) for n views of a w × h canvas. */
+export function splitRects(w: number, h: number, n: number): Rect[] {
+  const W = Math.max(1, Math.floor(w)), H = Math.max(1, Math.floor(h));
+  if (n <= 1) return [{ x: 0, y: 0, w: W, h: H }];
+  if (W >= H) { const half = Math.floor(W / 2); return [{ x: 0, y: 0, w: half, h: H }, { x: half, y: 0, w: W - half, h: H }]; }
+  const half = Math.floor(H / 2);
+  return [{ x: 0, y: H - half, w: W, h: half }, { x: 0, y: 0, w: W, h: H - half }];
+}
+
+/** Draw each camera into its own part of the canvas, each with the right shape. */
+export function renderSplit(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cameras: THREE.Camera[]): void {
+  const size = renderer.getSize(new THREE.Vector2());
+  const rects = splitRects(size.x, size.y, Math.min(2, cameras.length));
+  renderer.setScissorTest(true);
+  rects.forEach((r, i) => {
+    const cam = cameras[i];
+    if ((cam as THREE.PerspectiveCamera).isPerspectiveCamera) { const pc = cam as THREE.PerspectiveCamera; const aspect = r.w / Math.max(1, r.h); if (pc.aspect !== aspect) { pc.aspect = aspect; pc.updateProjectionMatrix(); } }
+    renderer.setViewport(r.x, r.y, r.w, r.h);
+    renderer.setScissor(r.x, r.y, r.w, r.h);
+    renderer.render(scene, cam);
+  });
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, size.x, size.y);
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/three/buildings.ts': GAME_BUILDINGS,
   'src/game/three/renderer.ts': RENDERER,
@@ -6584,6 +6619,7 @@ const FILES: Record<string, string> = {
   'src/game/three/healthbar.ts': HEALTH_BAR,
   'src/game/three/race.ts': RACE,
   'src/game/three/markers.ts': MARKERS,
+  'src/game/three/splitscreen.ts': SPLITSCREEN,
   // The things a world is actually made of (admin 2026-08-27): car, tree, mountain, river, desert,
   // road, animal — each built at a REAL or a LITE tier, because "asli" and "3d" are different asks.
   'src/game/three/objects.ts': OBJECTS,
@@ -6592,7 +6628,7 @@ const FILES: Record<string, string> = {
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen',
 ];
 
 /**

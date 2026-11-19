@@ -36,16 +36,18 @@ export interface GameShellResult {
 
 const GAME = `import * as THREE from 'three';
 import { GameLoop } from './core/loop';
-import { Input } from './core/input';
+import { Input, PLAYER1_ACTIONS, PLAYER2_ACTIONS } from './core/input';
 import { GameFeel } from './core/feel';
 import { events } from './core/events';
-import { state, setStatus, resetRun } from './core/state';
+import { state, setStatus, resetRun, save as saveState, load as loadState, hasSave, clearSave } from './core/state';
 import { startMeta, mountMetaToasts, combo } from './core/meta';
 import { settings, type GameSettings } from './core/settings';
 import { createPerfGovernor, steppedQuality } from './core/perf';
 import { setGameLanguage, t, type GameLanguage, type StringKey } from './core/strings';
 import { showHint } from './core/levels';
 import { dialogue } from './core/dialogue';
+import { powerUps } from './core/powerups';
+import { leaderboard } from './core/leaderboard';
 import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
@@ -58,6 +60,7 @@ import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction } from './three/humanoid';
 import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
+import { renderSplit } from './three/splitscreen';
 import { ParticleSystem } from './fx/particles';
 import { audio } from './fx/audio';
 import { bindGameFeedback, type FeedbackContext } from './fx/feedback';
@@ -157,6 +160,22 @@ export interface GameOptions {
   /** The minimap in a corner. Default: shown by itself as soon as something carries a map marker; true always; false never. */
   minimap?: boolean;
   /**
+   * Keep the player's progress between visits: the kit's state (level, score, lives, the bag, unlocks) is saved when the
+   * game pauses, a round ends or the page is hidden, and the start screen offers Continue / New game. Turn it on when the
+   * game's progress lives in that state (an RPG, a level game) — a world the game builds itself is not saved.
+   */
+  save?: boolean;
+  /** People and assets to thank, shown from a Credits button on the start screen. */
+  credits?: Array<string | { role: string; name: string }>;
+  /**
+   * Two players on one device: player 1 keeps the keys but the arrows (and gamepad 1), player 2 gets the arrows and the keys
+   * by them (and gamepad 2) — ctx.players[0] / [1]. The game builds player 2's body and passes its camera to
+   * ctx.splitScreen(camera) for a split screen. Touch controls drive player 1 only.
+   */
+  players?: 1 | 2;
+  /** Capture the mouse for looking around on a desktop (click to capture, Esc to let go). Default true. */
+  pointerLock?: boolean;
+  /**
    * The music that follows the game (fx/music.ts: calm on the start screen, action in play, tense for a boss, a sting on a
    * win or a loss; lowered while paused or talking). false = none; a table changes cues, e.g. { GAME_STARTED: 'tense' }.
    */
@@ -186,6 +205,10 @@ export interface GameContext {
    * the game does — a throw, a reach, a flinch.
    */
   hero: Humanoid | null;
+  /** Every player's input: [player 1] normally, [player 1, player 2] with options.players = 2. ctx.input is player 1. */
+  players: Input[];
+  /** Split the screen: player 1's camera on the left (or top), this one on the right (or bottom). null = one view. */
+  splitScreen: (camera: THREE.Camera | null) => void;
 }
 
 export class Game {
@@ -196,6 +219,9 @@ export class Game {
   readonly particles = new ParticleSystem();
   readonly feel = new GameFeel();
   readonly input: Input;
+  /** Player 2's input, with options.players = 2. */
+  readonly input2: Input | null = null;
+  private secondCamera: THREE.Camera | null = null;
   readonly lights: AppliedLighting;
 
   private readonly loop: GameLoop;
@@ -247,6 +273,7 @@ export class Game {
   private readonly perf = createPerfGovernor();
   private chosenQuality: GameSettings['quality'] = 'high';
   private autoQuality = true;
+  private reduceMotion = false;
   private effectiveQuality: GameSettings['quality'] = 'high';
   /** Look speed from the player's settings. */
   private lookSensitivity = 1;
@@ -310,7 +337,12 @@ export class Game {
     const refocus = () => this.canvas.focus({ preventScroll: true });
     this.canvas.addEventListener('pointerdown', refocus);
     this.disposers.push(() => this.canvas.removeEventListener('pointerdown', refocus));
-    this.input = new Input(this.canvas);
+    if (options.players === 2) {
+      this.input = new Input(this.canvas, PLAYER1_ACTIONS, { padIndex: 0 });
+      this.input2 = new Input(this.canvas, PLAYER2_ACTIONS, { padIndex: 1 });
+      const second = this.input2;
+      this.disposers.push(() => second.dispose());
+    } else this.input = new Input(this.canvas);
     // Remember what the player's input looks like, so driveVehicle(car, s, ctx.input.axis(), dt) names
     // the PLAYER's car (see playerVehicle). Same values, same object — only now it is recognisable.
     const readAxis = this.input.axis.bind(this.input);
@@ -351,6 +383,32 @@ export class Game {
     // Taking a hit ends the combo — that is what makes a clean run worth more than a long one.
     this.disposers.push(events.on('PLAYER_DAMAGED', () => combo.break()));
     // 🎓 The first time ever this game is played, the controls for the device in hand are shown once (core/levels.ts).
+    // Every finished round goes on this device's leaderboard (core/leaderboard.ts) — recorded here so no game can forget.
+    const recordRound = () => { leaderboard.record(this.leaderboardId, state.score); };
+    this.disposers.push(events.on('GAME_OVER', recordRound), events.on('GAME_WON', recordRound));
+    // 🖱️ POINTER LOCK: a click on the canvas during play captures the mouse; any screen that is not play lets it go. The
+    // browser drops the lock itself on Esc and never delivers that Esc to the page — so losing it mid-play IS the pause.
+    const onCanvasClick = () => { if (state.status === 'playing') this.capturePointer(); };
+    this.canvas.addEventListener('click', onCanvasClick);
+    this.disposers.push(() => this.canvas.removeEventListener('click', onCanvasClick));
+    for (const e of ['GAME_PAUSED', 'GAME_OVER', 'GAME_WON', 'GAME_MENU'] as const) this.disposers.push(events.on(e, () => this.releasePointer()));
+    const onLockChange = () => {
+      const d = document as Document & { pointerLockElement?: Element | null };
+      if (d.pointerLockElement !== this.canvas && state.status === 'playing' && this.options.pointerLock !== false && !touchDevice()) this.pause();
+    };
+    document.addEventListener('pointerlockchange', onLockChange);
+    this.disposers.push(() => { document.removeEventListener('pointerlockchange', onLockChange); this.releasePointer(); });
+    // 💾 SAVE: progress is kept between visits when the game asks for it (options.save).
+    if (this.options.save === true) {
+      loadState();
+      const keep = () => { saveState(); };
+      for (const e of ['GAME_PAUSED', 'GAME_OVER', 'GAME_WON', 'LEVEL_COMPLETED'] as const) this.disposers.push(events.on(e, keep));
+      const onHide = () => { if (document.hidden && state.status === 'playing') saveState(); };
+      document.addEventListener('visibilitychange', onHide);
+      this.disposers.push(() => document.removeEventListener('visibilitychange', onHide));
+    }
+    // A new round starts with no power-ups left over from the last one.
+    this.disposers.push(events.on('GAME_STARTED', () => powerUps.clear()));
     this.disposers.push(events.on('GAME_STARTED', () => { showHint('controls', touchDevice() ? t('controlsTouch') : t('controlsKeyboard'), 5); }));
     // 📱 THE NOTCH: safe-area insets read 0 on an iPhone unless the page asks for viewport-fit=cover. Asked for only
     // while a game is mounted (an ordinary page keeps its own viewport), and put back on dispose.
@@ -464,6 +522,8 @@ export class Game {
       get lights() { return game.lights; },
       follow: (object) => { this.followTarget = object; this.followChosen = true; this.syncTouchLayout(); },
       get hero() { return game.hero; },
+      get players() { return game.input2 ? [game.input, game.input2] : [game.input]; },
+      splitScreen: (camera) => { this.secondCamera = camera; },
     };
     return this.ctxObject;
   }
@@ -532,6 +592,7 @@ export class Game {
   private fixedUpdate(delta: number): void {
     // A gamepad is polled, not heard: read it before anything reads input this step.
     this.input.pollGamepads();
+    this.input2?.pollGamepads();
     this.feel.update(delta);
     combo.update(delta);
 
@@ -578,6 +639,8 @@ export class Game {
       // The shell listens while the game runs, so a vehicle it drives is known without being declared.
       this.attackHeldThisStep = this.input.isDown('attack') || this.input.wasPressed('attack');
       setDriftInput(this.input.isDown('drift'));
+      // Power-ups count down in game time only: frozen by a hit-stop, a conversation or the pause menu (core/powerups.ts).
+      powerUps.update(delta);
       this.asGame(() => this.options.update?.(this.context, delta));
       this.poseActionButtons();
       // 🔒 NOTHING SINKS: every top-level object (car, NPC, animal, prop, train) is kept on the terrain
@@ -589,6 +652,7 @@ export class Game {
     // During a hit-stop freeze the game did not run, so a press made now is KEPT for the step that does — wiping it
     // here was why a tap sometimes did nothing at all (the freeze follows every shot and every hit).
     this.input.endFrame(this.feel.frozen && !talking);
+    this.input2?.endFrame(this.feel.frozen && !talking);
   }
 
   /** Play a pose on the default body, if there is one and the player is on foot. */
@@ -625,12 +689,15 @@ export class Game {
     else this.rig.update(p, frameDelta);
     // Defaults, NOT small 3D-looking numbers: applyShake already scales the offset into world units
     // (×0.02). Passing 0.35 here would produce a 0.007-unit shake — mathematically present, invisible.
-    this.rig.applyShake(this.feel.shake());
+    // Reduce motion (Settings, or the device's own setting on a first visit): the camera never shakes.
+    this.rig.applyShake(this.reduceMotion ? { x: 0, y: 0, roll: 0 } : this.feel.shake());
     // Shadows follow the player, or they blur out as soon as they walk away on a large map.
     followShadow(this.lights.key, p);
     audio.setListener(p.x, p.y, p.z);
     updateHealthBars(this.rig.camera);   // enemy health bars face the camera (three/healthbar.ts)
-    this.renderer.render(this.scene, this.rig.camera);
+    // Two players: each camera in its own half of the screen (three/splitscreen.ts).
+    if (this.secondCamera) renderSplit(this.renderer, this.scene, [this.rig.camera, this.secondCamera]);
+    else this.renderer.render(this.scene, this.rig.camera);
   }
 
   /**
@@ -651,6 +718,7 @@ export class Game {
   play(): void {
     if (this.disposed || state.status !== 'menu') return;
     audio.unlock();
+    this.capturePointer();
     if (touchDevice() && !this.isFullscreen) void this.toggleFullscreen();
     this.loop.setPaused(false);
     setStatus('playing');
@@ -766,6 +834,7 @@ export class Game {
     this.autoQuality = s.autoQuality;
     this.applyQuality();
     this.lookSensitivity = s.lookSensitivity;
+    this.reduceMotion = s.reduceMotion === true;
   }
 
   /**
@@ -782,11 +851,37 @@ export class Game {
     events.emit('PERF_CHANGED', { fps: Math.round(this.perf.fps), quality: q, chosen: this.chosenQuality, auto: this.autoQuality });
   }
 
+  /** The key this game's leaderboard is saved under (the gameId option, or 'game'). */
+  get leaderboardId(): string { return this.options.gameId ?? 'game'; }
+
   /** Frames drawn per second, smoothed. */
   get fps(): number { return Math.round(this.perf.fps); }
   /** The quality being drawn right now (may be below the player's choice when Auto quality stepped it down). */
   get quality(): GameSettings['quality'] { return this.effectiveQuality; }
   pause(): void { if (state.status === 'playing') { this.loop.setPaused(true); setStatus('paused'); } }
+
+  /** Start over: the saved game is forgotten and the run begins from nothing. */
+  newGame(): void {
+    clearSave();
+    resetRun();
+    this.play();
+  }
+  /** The start screen offers Continue: saving is on and there is a save. */
+  get canContinue(): boolean { return this.options.save === true && hasSave(); }
+  get creditsList(): Array<{ role: string; name: string }> {
+    return (this.options.credits ?? []).map((c) => (typeof c === 'string' ? { role: '', name: c } : { role: String(c.role ?? ''), name: String(c.name ?? '') })).filter((c) => c.name);
+  }
+
+  /** Desktop mouse-look: capture the pointer on a click during play (a phone has no pointer to capture). */
+  private capturePointer(): void {
+    if (this.options.pointerLock === false || touchDevice()) return;
+    const c = this.canvas as HTMLCanvasElement & { requestPointerLock?: () => unknown };
+    try { const r = c.requestPointerLock?.(); if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => undefined); } catch { /* refused: the mouse still looks, just not captured */ }
+  }
+  private releasePointer(): void {
+    const d = document as Document & { exitPointerLock?: () => void; pointerLockElement?: Element | null };
+    if (d.pointerLockElement === this.canvas) { try { d.exitPointerLock?.(); } catch { /* already free */ } }
+  }
   resume(): void { if (state.status === 'paused') { this.loop.setPaused(false); setStatus('playing'); } }
 
   restart(): void {
@@ -919,13 +1014,16 @@ import { meta, combo, summaryLines } from '../core/meta';
 import type { Game } from '../Game';
 import { settings, type GameSettings } from '../core/settings';
 import { loading, type LoadingState } from '../core/loading';
-import { t } from '../core/strings';
+import { t, type StringKey } from '../core/strings';
 import { lastRaceResults } from '../three/race';
 import { levels } from '../core/levels';
 import { objectives, type Objective } from '../core/quests';
 import { dialogue, type DialogueView } from '../core/dialogue';
 import { inventory, type ItemStack } from '../core/inventory';
 import { economy, type ShopEntry } from '../core/economy';
+import { powerUps, type ActivePowerUp } from '../core/powerups';
+import { leaderboard } from '../core/leaderboard';
+import { crafting, type RecipeView } from '../core/crafting';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -1191,6 +1289,11 @@ export function minimapPoint(view: { x: number; z: number; forward: { x: number;
 }
 
 const MARKER_COLOUR: Record<string, string> = { enemy: '#f87171', goal: '#fde047', pickup: '#4ade80', friend: '#60a5fa' };
+/** The Okabe–Ito palette: told apart by every common kind of colour blindness (Settings → Colour-blind colours). */
+const MARKER_COLOUR_SAFE: Record<string, string> = { enemy: '#e69f00', goal: '#f0e442', pickup: '#56b4e9', friend: '#ffffff' };
+export const HEALTH_COLOURS = { ok: '#4ade80', low: '#f87171' } as const;
+export const HEALTH_COLOURS_SAFE = { ok: '#56b4e9', low: '#e69f00' } as const;
+export function markerColour(kind: string, safe: boolean): string { return (safe ? MARKER_COLOUR_SAFE : MARKER_COLOUR)[kind] ?? '#fff'; }
 
 /** The round minimap: the player's arrow in the middle, markers around it, turning with the camera. */
 export function Minimap({ game }: { game: Game }) {
@@ -1209,7 +1312,7 @@ export function Minimap({ game }: { game: Game }) {
       c.strokeStyle = 'rgba(255,255,255,0.6)'; c.lineWidth = 2; c.stroke();
       for (const m of view.markers) {
         const at = minimapPoint(view, m, radius, size);
-        c.fillStyle = MARKER_COLOUR[m.kind] ?? '#fff';
+        c.fillStyle = markerColour(m.kind, settings.get().colourSafe);
         c.beginPath(); c.arc(at.x, at.y, at.edge ? 3 : 4, 0, Math.PI * 2); c.fill();
       }
       // The player's arrow, pointing where they face (relative to the camera).
@@ -1296,6 +1399,8 @@ function useInventory(): ItemStack[] {
 /** The bag: every item with its icon, name and count; a usable one has a Use button. */
 export function InventoryPanel({ onBack }: { onBack: () => void }) {
   const items = useInventory();
+  // Recipes re-read on every bag change (useInventory re-renders this panel).
+  const recipes: RecipeView[] = crafting.list;
   return (
     <div style={{ width: 'min(92vw, 460px)' }}>
       <h2 style={{ fontSize: 26, fontWeight: 800 }}>{t('inventory')}</h2>
@@ -1313,6 +1418,26 @@ export function InventoryPanel({ onBack }: { onBack: () => void }) {
           ))}
         </ul>
       )}
+      {recipes.length ? (
+        <>
+          <h3 style={{ fontSize: 18, fontWeight: 800, marginTop: 14 }}>{t('crafting')}</h3>
+          <ul aria-label={t('crafting')} style={{ listStyle: 'none', margin: '6px 0 0', padding: 0, display: 'grid', gap: 6, textAlign: 'left' }}>
+            {recipes.map((r) => (
+              <li key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', borderRadius: 10, background: 'rgba(255,255,255,0.08)' }}>
+                <span aria-hidden="true" style={{ fontSize: 22, width: 28, textAlign: 'center' }}>{r.icon ?? '🛠️'}</span>
+                <span style={{ flex: 1 }}>
+                  <span style={{ fontWeight: 700 }}>{r.name}</span>
+                  <span style={{ display: 'block', fontSize: 12, opacity: 0.8 }}>
+                    {Object.entries(r.needs).map(([item, n]) => inventory.nameOf(item) + ' ' + Math.min(inventory.count(item), n) + '/' + n).join(' · ')}
+                  </span>
+                </span>
+                <button type="button" disabled={!r.can} onClick={() => crafting.craft(r.id)}
+                  style={{ ...button, marginTop: 0, minWidth: 0, padding: '6px 12px', fontSize: 14, opacity: r.can ? 1 : 0.5, cursor: r.can ? 'pointer' : 'not-allowed' }}>{t('craft')}</button>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
       <button type="button" style={secondary} onClick={onBack}>{t('close')}</button>
     </div>
   );
@@ -1330,6 +1455,120 @@ export function FpsCounter({ game }: { game: Pick<Game, 'fps' | 'quality'> }) {
   return (
     <div aria-label={'FPS ' + v.fps} style={{ position: 'absolute', left: 'max(12px, env(safe-area-inset-left))', bottom: 'max(12px, env(safe-area-inset-bottom))', padding: '2px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.55)', color: colour, font: '700 12px ui-monospace, monospace', pointerEvents: 'none', zIndex: 6 }}>
       {v.fps + ' FPS · ' + t(v.quality === 'low' ? 'smooth' : v.quality === 'medium' ? 'balanced' : 'sharp')}
+    </div>
+  );
+}
+
+/**
+ * Share the score: the phone's own share sheet where there is one (WhatsApp, Instagram…), otherwise the text is copied.
+ * Resolves 'shared', 'copied', or 'unavailable' (no way to share at all — the button then hides).
+ */
+export async function shareScore(text: string, url: string): Promise<'shared' | 'copied' | 'unavailable'> {
+  const nav = (typeof navigator !== 'undefined' ? navigator : {}) as Navigator & { share?: (d: ShareData) => Promise<void> };
+  if (typeof nav.share === 'function') {
+    try { await nav.share({ text, url }); return 'shared'; } catch { /* dismissed or refused: try copying */ }
+  }
+  if (nav.clipboard && typeof nav.clipboard.writeText === 'function') {
+    try { await nav.clipboard.writeText(text + ' ' + url); return 'copied'; } catch { /* blocked */ }
+  }
+  return 'unavailable';
+}
+
+export function canShare(): boolean {
+  const nav = (typeof navigator !== 'undefined' ? navigator : {}) as Navigator & { share?: unknown };
+  return typeof nav.share === 'function' || !!(nav.clipboard && typeof nav.clipboard.writeText === 'function');
+}
+
+function ShareButton({ score, title }: { score: number; title: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'gone'>('idle');
+  if (state === 'gone' || !canShare() || score <= 0) return null;
+  const go = async () => {
+    const r = await shareScore(t('shareText', { score, game: title }), typeof location !== 'undefined' ? location.href : '');
+    setState(r === 'copied' ? 'copied' : r === 'unavailable' ? 'gone' : 'idle');
+  };
+  return <button type="button" style={secondary} onClick={() => { void go(); }}>{state === 'copied' ? t('copied') : t('share')}</button>;
+}
+
+/** The best five on this device, the round just played highlighted. Shown once there are at least two. */
+export function DeviceLeaderboard({ gameId }: { gameId: string }) {
+  const list = leaderboard.top(gameId, 5);
+  if (list.length < 2) return null;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 13, opacity: 0.8 }}>{t('bestOnDevice')}</div>
+      <ol aria-label={t('bestOnDevice')} style={{ textAlign: 'left', margin: '4px auto 0', maxWidth: 220, paddingLeft: 24 }}>
+        {list.map((e, i) => {
+          const mine = leaderboard.isLatest(gameId, e);
+          return <li key={i} style={{ fontWeight: mine ? 900 : 500, color: mine ? '#fde047' : '#fff' }}>{e.score}</li>;
+        })}
+      </ol>
+    </div>
+  );
+}
+
+/** The active power-ups: an icon each, a ring for the time left, the level when it stacks. */
+export function PowerUpBar() {
+  const [list, setList] = useState<ActivePowerUp[]>(powerUps.list);
+  useEffect(() => {
+    const sync = () => setList(powerUps.list);
+    const off = events.on('POWERUPS_CHANGED', sync);
+    const id = setInterval(sync, 200);   // the rings move between changes
+    return () => { off(); clearInterval(id); };
+  }, []);
+  if (list.length === 0) return null;
+  return (
+    <div aria-label="Power-ups" style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', top: 'max(56px, calc(env(safe-area-inset-top) + 48px))', display: 'flex', gap: 8, pointerEvents: 'none', zIndex: 5 }}>
+      {list.map((p) => {
+        const f = p.total > 0 ? Math.max(0, Math.min(1, p.remaining / p.total)) : 0;
+        return (
+          <div key={p.id} role="img" aria-label={p.name + ' ' + Math.ceil(p.remaining) + 's'} style={{ position: 'relative', width: 40, height: 40, borderRadius: 999, display: 'grid', placeItems: 'center', fontSize: 20, background: 'conic-gradient(#fde047 ' + Math.round(f * 360) + 'deg, rgba(255,255,255,0.18) 0deg)', opacity: p.remaining < 2 ? 0.6 + 0.4 * Math.abs(Math.sin(p.remaining * 8)) : 1 }}>
+            <span style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 999, background: 'rgba(0,0,0,0.6)' }}>{p.icon}</span>
+            {p.level > 1 ? <span style={{ position: 'absolute', right: -4, bottom: -4, fontSize: 11, fontWeight: 800, color: '#111', background: '#fde047', borderRadius: 999, padding: '0 4px' }}>{'x' + p.level}</span> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Thanks to the people and assets behind the game (options.credits). */
+export function CreditsPanel({ list, onBack }: { list: Array<{ role: string; name: string }>; onBack: () => void }) {
+  return (
+    <div style={{ width: 'min(92vw, 420px)' }}>
+      <h2 style={{ fontSize: 26, fontWeight: 800 }}>{t('credits')}</h2>
+      <ul aria-label={t('credits')} style={{ listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'grid', gap: 6, maxHeight: '55vh', overflowY: 'auto' }}>
+        {list.map((c, i) => (
+          <li key={i}>{c.role ? <span style={{ opacity: 0.75, marginRight: 8 }}>{c.role}</span> : null}<span style={{ fontWeight: 700 }}>{c.name}</span></li>
+        ))}
+      </ul>
+      <button type="button" style={secondary} onClick={onBack}>{t('back')}</button>
+    </div>
+  );
+}
+
+/** Which events get a caption, and the words (Settings → Captions). */
+export const CAPTIONED: Readonly<Record<string, StringKey>> = {
+  PLAYER_DAMAGED: 'capHit', ENEMY_DIED: 'capEnemyDown', ITEM_COLLECTED: 'capPickup', WEAPON_RELOADING: 'capReload',
+  WEAPON_EMPTY: 'capEmpty', BOSS_SPAWNED: 'capBoss', BOSS_DEFEATED: 'capBossDown', LEVEL_UP: 'capLevelUp',
+  GOAL_COMPLETED: 'capCoin', ENEMY_ALERTED: 'capDanger',
+};
+
+/** Captions: the last two important sounds as words, each for a moment. */
+export function CaptionBar() {
+  const [lines, setLines] = useState<Array<{ id: number; text: string }>>([]);
+  useEffect(() => {
+    let n = 0;
+    const offs = Object.entries(CAPTIONED).map(([event, key]) => events.on(event, () => {
+      const id = ++n;
+      setLines((cur) => [...cur.filter((l) => l.text !== t(key)), { id, text: t(key) }].slice(-2));
+      setTimeout(() => setLines((cur) => cur.filter((l) => l.id !== id)), 1600);
+    }));
+    return () => offs.forEach((o) => o());
+  }, []);
+  if (lines.length === 0) return null;
+  return (
+    <div role="status" aria-live="polite" style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', bottom: 'max(170px, calc(env(safe-area-inset-bottom) + 160px))', display: 'grid', gap: 4, justifyItems: 'center', pointerEvents: 'none', zIndex: 6 }}>
+      {lines.map((l) => <span key={l.id} style={{ padding: '3px 10px', borderRadius: 6, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 15 }}>{'[' + l.text + ']'}</span>)}
     </div>
   );
 }
@@ -1458,6 +1697,10 @@ function SettingsPanel({ onBack }: { onBack: () => void }) {
       <Toggle label={t('vibration')} on={s.vibration} onChange={(v) => settings.set({ vibration: v })} />
       <Toggle label={t('autoQuality')} on={s.autoQuality} onChange={(v) => settings.set({ autoQuality: v })} />
       <Toggle label={t('fpsCounter')} on={s.showFps} onChange={(v) => settings.set({ showFps: v })} />
+      <Toggle label={t('reduceMotion')} on={s.reduceMotion} onChange={(v) => settings.set({ reduceMotion: v })} />
+      <Toggle label={t('largeText')} on={s.largeText} onChange={(v) => settings.set({ largeText: v })} />
+      <Toggle label={t('colourSafe')} on={s.colourSafe} onChange={(v) => settings.set({ colourSafe: v })} />
+      <Toggle label={t('captions')} on={s.captions} onChange={(v) => settings.set({ captions: v })} />
       <div style={row}>
         <span>{t('difficulty')}</span>
         <div role="radiogroup" aria-label={t('difficulty')} style={{ display: 'flex', gap: 6 }}>
@@ -1477,6 +1720,8 @@ function SettingsPanel({ onBack }: { onBack: () => void }) {
 export function Hud({ game }: { game: Game }) {
   const s = useGameState();
   const prefs = useSettings();
+  // Large text (Settings): the menus and the top bar drawn a quarter bigger.
+  const zoom = prefs.largeText ? 1.25 : 1;
   const load = useLoading();
   const fullscreen = useFullscreen(game);
   useLevels();
@@ -1485,7 +1730,7 @@ export function Hud({ game }: { game: Game }) {
   const playLevel = (i: number) => { if (hasLevels && !levels.start(i)) return; game.play(); };
   const replayLevel = () => { if (hasLevels) levels.start(levels.index); game.restart(); };
   const nextLevel = () => { if (levels.next()) game.restart(); };
-  const [panel, setPanel] = useState<'settings' | 'inventory' | 'shop' | null>(null);
+  const [panel, setPanel] = useState<'settings' | 'inventory' | 'shop' | 'credits' | null>(null);
   const bag = useInventory();
   const shop = useShop();
   const again = useRef<HTMLButtonElement>(null);
@@ -1539,14 +1784,14 @@ export function Hud({ game }: { game: Game }) {
   }, [game, s.status, panel]);
 
   const settingsOrScreen = (screen: React.ReactNode) => (
-    <div style={overlay}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : panel === 'inventory' ? <InventoryPanel onBack={() => { setPanel(null); game.resume(); }} /> : panel === 'shop' ? <ShopPanel onBack={() => setPanel(null)} /> : screen}</div>
+    <div style={overlay}><div style={{ zoom }}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : panel === 'inventory' ? <InventoryPanel onBack={() => { setPanel(null); game.resume(); }} /> : panel === 'shop' ? <ShopPanel onBack={() => setPanel(null)} /> : panel === 'credits' ? <CreditsPanel list={game.creditsList} onBack={() => setPanel(null)} /> : screen}</div></div>
   );
 
   return (
     <>
       {/* pointerEvents none, or the HUD silently eats clicks meant for the game */}
       {s.status !== 'menu' ? (
-        <div style={{ position: 'absolute', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', right: 'max(12px, env(safe-area-inset-right))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff', pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,0.8)', zIndex: 5 }}>
+        <div style={{ position: 'absolute', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', right: 'max(12px, env(safe-area-inset-right))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff', pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,0.8)', zIndex: 5, zoom }}>
           <div style={{ fontWeight: 700, fontSize: 18 }}>
             {t('score')} {s.score}
             <span style={{ opacity: 0.7, fontSize: 13, marginLeft: 10 }}>{t('best')} {s.highScore}</span>
@@ -1557,7 +1802,7 @@ export function Hud({ game }: { game: Game }) {
             <div style={{ width: 120, height: 10, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden' }}>
               {/* health is an ABSOLUTE value, not a percentage — a game with 250 max HP would peg the
                   bar at full for the first 150 damage if this divided by 100 instead of maxHealth. */}
-              <div style={{ width: \`\${Math.max(0, Math.min(100, (s.health / Math.max(1, s.maxHealth)) * 100))}%\`, height: '100%', background: s.health > s.maxHealth * 0.3 ? '#4ade80' : '#f87171', transition: 'width 160ms ease-out' }} />
+              <div style={{ width: \`\${Math.max(0, Math.min(100, (s.health / Math.max(1, s.maxHealth)) * 100))}%\`, height: '100%', background: (prefs.colourSafe ? HEALTH_COLOURS_SAFE : HEALTH_COLOURS)[s.health > s.maxHealth * 0.3 ? 'ok' : 'low'], transition: 'width 160ms ease-out' }} />
             </div>
             <div style={{ fontWeight: 700 }}>x{s.lives}</div>
             {game.canFullscreen ? (
@@ -1588,6 +1833,8 @@ export function Hud({ game }: { game: Game }) {
       {s.status === 'playing' || s.status === 'paused' ? <ObjectiveList /> : null}
       <ShooterOverlay game={game} playing={s.status === 'playing'} />
       {s.status === 'playing' ? <DialogueBox /> : null}
+      {s.status === 'playing' || s.status === 'paused' ? <PowerUpBar /> : null}
+      {prefs.captions && s.status === 'playing' ? <CaptionBar /> : null}
       {s.status === 'playing' || s.status === 'paused' ? <RaceOverlay /> : null}
 
       {s.status === 'menu' && info ? settingsOrScreen(
@@ -1596,9 +1843,15 @@ export function Hud({ game }: { game: Game }) {
           {info.subtitle ? <p style={{ opacity: 0.9, marginTop: 8, fontSize: 17 }}>{info.subtitle}</p> : null}
           <p style={{ opacity: 0.75, marginTop: 12, fontSize: 14 }}>{touch ? info.controls.touch : info.controls.keyboard}</p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button ref={playRef} type="button" style={button} onClick={() => playLevel(levels.index)}>{t('play')}</button>
+            {game.canContinue ? (
+              <>
+                <button ref={playRef} type="button" style={button} onClick={() => playLevel(levels.index)}>{t('continueGame')}</button>
+                <button type="button" style={secondary} onClick={() => game.newGame()}>{t('newGame')}</button>
+              </>
+            ) : <button ref={playRef} type="button" style={button} onClick={() => playLevel(levels.index)}>{t('play')}</button>}
             {economy.ready ? <button type="button" style={secondary} onClick={() => setPanel('shop')}>{t('shop')} · 🪙{shop.coins}</button> : null}
             <button type="button" style={secondary} onClick={() => setPanel('settings')}>{t('settings')}</button>
+            {game.creditsList.length ? <button type="button" style={secondary} onClick={() => setPanel('credits')}>{t('credits')}</button> : null}
           </div>
           {levels.count > 1 ? (
             <div role="list" aria-label={t('levels')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8, marginTop: 16 }}>
@@ -1647,10 +1900,12 @@ export function Hud({ game }: { game: Game }) {
           ) : (meta.lastSummary ? summaryLines(meta.lastSummary) : [t('score') + ' ' + s.score]).map((line, i) => (
             <p key={i} style={i === 0 ? { fontSize: 20, fontWeight: 800, marginTop: 8, color: '#fde047' } : { opacity: 0.88, marginTop: 4 }}>{line}</p>
           ))}
+          {lastRaceResults ? null : <DeviceLeaderboard gameId={game.leaderboardId} />}
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
             {s.status === 'won' && hasLevels && levels.hasNext ? <button type="button" style={button} onClick={nextLevel}>{t('nextLevel')}</button> : null}
             <button ref={again} type="button" style={s.status === 'won' && hasLevels && levels.hasNext ? secondary : button} onClick={replayLevel}>{t('playAgain')}</button>
             {economy.ready ? <button type="button" style={secondary} onClick={() => setPanel('shop')}>{t('shop')} · 🪙{shop.coins}</button> : null}
+            <ShareButton score={s.score} title={info?.title || (typeof document !== 'undefined' ? document.title : '') || 'NavBharatAI'} />
             {info ? <button type="button" style={secondary} onClick={() => game.toMenu()}>{t('menu')}</button> : null}
           </div>
         </div>,

@@ -102712,3 +102712,118 @@ user, 12.7 working. Tally: ✅ 1 (REPAIR_CLAIM_WITHHELD) · 🔀 0 · ⏭️ 0 �
 - Found while testing: a drop-through left the jump press unconsumed, so the buffer + coyote time jumped the player straight back
   up onto the platform the next step.
 - Locked by `tests/a2DGameFeelsRight.test.ts` (reversion: no sub-stepping / unconsumed drop press → 2 fail).
+
+## 2026-11-19 — India games pack (a): Ludo + Snakes & Ladders (branch `claude/game-board-ludo-snakes`)
+- Gap: no rules engine for any India board game; a model-written Ludo gets safe squares, exact home and sixes wrong.
+- New recipe `generate_board_games` (`src/server/lib/BoardGamesGenerator.ts` → `src/game/board/`): dice.ts (seeded mulberry32,
+  fair die, shuffle), ludo.ts (2–4 players, leave on six, six again / third six forfeits, safe start+star squares, capture → yard
+  + extra roll, exact home + extra roll, pass, finishing order, chooseMove AI, 15×15 board geometry), snakes.ts (classic board,
+  exact finish / bounce back, six again, validated custom boards, zig-zag squareCell). Wired like the 2D kit; AKB entry.
+- Next in the pack (separate PRs): chess; cards (no money — Teen Patti ranking, rummy melds); carrom physics; cricket.
+- Locked by `tests/indiaBoardGamesFollowTheRules.test.ts` (reversion: safe squares ignored / overshooting home → 2 fail).
+
+## 2026-11-19 — India games pack (b): chess (branch `claude/game-board-chess`)
+- `src/game/board/chess.ts` added to `generate_board_games`: FEN in/out, legal moves (castling never out of/through/into check,
+  en passant, promotion), SAN with disambiguation and +/#, status (checkmate, stalemate, fifty-move, threefold repetition,
+  insufficient material), movesFrom for tap highlighting, an alpha-beta computer player (depth 1/2/3).
+- The move generator matches the published perft counts on five standard positions (start, Kiwipete, positions 3–5).
+- Locked by `tests/chessFollowsEveryRule.test.ts` (reversion: castling through check / en passant leaving the pawn → 4 fail,
+  including two perft counts).
+
+## 2026-11-19 — India games pack (c): card games, for fun only (branch `claude/game-board-cards`)
+- `src/game/board/cards.ts` added to `generate_board_games`: deck/deal/shuffle, Teen Patti hand ranking and comparison (A-K-Q >
+  A-2-3 > K-Q-J; K-A-2 not a sequence), Indian rummy melds (pure/impure sequences, sets, wild + printed jokers; a jokers-only group
+  is not a meld), declaration rules (all 13 grouped, two sequences, one pure), points (faces 10, jokers 0, no pure → all count,
+  cap 80), bestGrouping (exhaustive, bounded).
+- Points / pretend chips only: the recipe, catalog and prompt forbid real money, deposits and cash prizes (India's 2025 ban).
+- Locked by `tests/cardGamesRankAndDeclareCorrectly.test.ts` (reversion: A-2-3 ranked low / no pure-sequence rule → 2 fail).
+
+## 2026-11-19 — India games pack (d): carrom (branch `claude/game-board-carrom`)
+- `src/game/board/carrom.ts` added to `generate_board_games`: real sizes in mm (740 board, coin r 15.9, striker r 20.6, pocket
+  r 22.25), elastic disc collisions by mass with restitution, constant friction, cushion bounces, corner pockets, a 240 Hz step
+  with 60 fps animation frames; rules — own coin continues, striker foul returns a coin, the queen pending → covered or returned,
+  no last coin before the queen, board won with points (opponent coins left + 3 for the queen).
+- Note from the tests: the striker is ~3× a coin's mass, so a hard straight shot follows the coin into the pocket (a foul) —
+  real-board behaviour, kept on purpose.
+- Locked by `tests/carromPlaysLikeTheRealBoard.test.ts` (reversion: no collision impulse / uncovered queen kept → 4 fail).
+
+## 2026-11-19 — India games pack (e): cricket (branch `claude/game-board-cricket`)
+- `src/game/board/cricket.ts` added to `generate_board_games`: legal balls/overs, wides and no-balls (a run, re-bowled, free hit —
+  only run out on a protected ball), strike rotation on odd runs and at over end, the new batter at the dismissed end, innings
+  end on overs/all out/target, chase and result text ("won by N wickets (M balls left)" / "by N runs" / tie), run rates, and
+  timing-based batting (shotFromTiming: perfect → boundary, going big → six but riskier, miss → bowled only on the stumps).
+- This completes the India games pack: Ludo, Snakes & Ladders, chess, cards (for fun), carrom, cricket.
+- Locked by `tests/cricketScoresLikeAScorer.test.ts` (reversion: free hit ignored / no change of ends → 2 fail).
+
+## 2026-11-19 — Game gap P2: power-ups and loot drops (branch `claude/game-powerups-loot`)
+- Gap: no timed boosts (hand-rolled setTimeouts kept running in the pause menu and survived a restart) and no drop tables.
+- Kit: `core/powerups.ts` (define/give/active/level/remaining/value/list/clear; refresh/extend/stack; onStart/onEnd; events),
+  ticked by Game.fixedUpdate inside the gameplay block (frozen by hit-stop, dialogue and pause), cleared on GAME_STARTED; Hud
+  PowerUpBar (icon, time ring, level). `core/loot.ts` (createLootTable: weights, rarities, nothing entries, amounts, pity,
+  chances(), LOOT_DROPPED).
+- Locked by `tests/powerUpsAndLootWork.test.ts` (reversion: no clear on a new round / no pity → each fails).
+
+## 2026-11-19 — Game gap P2: share the score + on-device leaderboard (branch `claude/game-share-leaderboard`)
+- Kit: `core/leaderboard.ts` (top ten per game id on the device, sanitised on read; record → place; isLatest), recorded by
+  Game on GAME_OVER / GAME_WON under `leaderboardId` (the gameId option). Hud: DeviceLeaderboard ("Best on this device", top
+  five, this round highlighted) and ShareButton (`shareScore`: Web Share → clipboard → hidden), EN/HI strings.
+- Honest by design: labelled "on this device"; the prompt forbids claiming a worldwide board without an online service.
+- Locked by `tests/theScoreCanBeSharedAndClimbed.test.ts` (reversion: the shell not recording rounds → fails).
+
+## 2026-11-19 — Game gap P2: accessibility (branch `claude/game-accessibility`)
+- Settings gain Reduce motion (no camera shake; on by itself on a first visit when the device prefers reduced motion), Large
+  text (menus and top bar at zoom 1.25), Colour-blind colours (Okabe–Ito palette for the health bar and minimap markers) and
+  Captions (CaptionBar: words for important sounds — hit, enemy down, pickup, reload, empty, boss, level up…, EN/HI).
+- Locked by `tests/everyPlayerCanPlay.test.ts` (reversion: the shake ignoring Reduce motion → fails).
+
+## 2026-11-19 — Game gap P2: Continue, pointer lock, credits (branch `claude/game-continue-pointerlock`)
+- `options.save`: Game loads the kit state on start, saves on pause / game over / win / level complete / page hide; the start
+  screen offers Continue + New game (state `hasSave` / `clearSave`; `Game.newGame`). Opt-in on purpose: only the kit's state
+  is saved, not a world the game builds itself.
+- Pointer lock (desktop, default on, `pointerLock: false` to opt out): captured on Play and on a canvas click during play,
+  released by pause / game over / win / menu; the browser dropping the lock mid-play (its Esc) pauses the game.
+- `options.credits` → a Credits button and panel on the start screen.
+- Locked by `tests/continuePointerLockAndCredits.test.ts` (reversion: no autosave / no pause on lock loss → 2 fail).
+
+## 2026-11-19 — Game gap P2: grenades and aim assist (branch `claude/game-grenade-aimassist`)
+- `systems/grenade.ts`: throwVelocity, simulateThrow (gravity, ground height, bounce, friction, rolling stop, fuse — the same
+  path for the aim arc and the throw), blastDamage (linear falloff to the radius, minDamage, cover blocks, impulse away).
+- `systems/aimassist.ts`: a partial pull (strength) toward the target nearest the crosshair inside a cone and in range, with an
+  optional line-of-sight test; never a snap; touch/gamepad only (prompt line).
+- Locked by `tests/grenadesAndAimAssistWork.test.ts` (reversion: blast through cover / full snap → 2 fail).
+
+## 2026-11-19 — Game gap P2: local 2-player (branch `claude/game-local-2p`)
+- `core/input.ts`: PLAYER1_ACTIONS (the defaults without the arrows) and PLAYER2_ACTIONS (arrows + nearby keys), and
+  `new Input(target, map, { padIndex })` so each player reads only their own gamepad.
+- `three/splitscreen.ts`: splitRects (side by side when wide, stacked when tall) and renderSplit (viewport + scissor per camera,
+  aspect set per view).
+- Game `players: 2` → two inputs (polled and ended every step), `ctx.players`, `ctx.splitScreen(camera)`; render() draws the
+  split when a second camera is set. The game builds player 2's body; touch drives player 1 only. Same-device play only —
+  online multiplayer needs a server (not built).
+- Locked by `tests/twoPlayersShareOneDevice.test.ts` (reversion: shared arrows / no split render → 2 fail).
+
+## 2026-11-19 — Game gap P2: crafting (branch `claude/game-crafting`)
+- `core/crafting.ts` over the bag: define / missing / canCraft / craft (every ingredient or none; a result with no room in the
+  bag gives the ingredients back) / list; ITEM_CRAFTED. The bag screen gains a "Make" list: each recipe, what it needs (have/need)
+  and a Craft button enabled only when it can be made.
+- Locked by `tests/craftingTakesAllOrNothing.test.ts` (reversion: partial take / no give-back → 2 fail).
+## 2026-11-19 — failedbr #2452 (6aed1d6e) autopsy: four silent minutes of `bash` reads
+
+User-stopped at 248 s with nothing written. Q-2940: the exploration guard ignored `bash` reads → one conservative
+`shellInspection.ts` definition; the guard counts a read-only `bash` as a read. Q-2941: the gate called a failed
+read a "build-breaking blocker" → a read cannot break the build. Q-2942 (contract unknown for an unknown title) and
+Q-2943 (Play Store research time) OPEN; Q-2944 → Q-2889.
+
+## 2026-11-19 — failedbr #2437 (fe73bca3) autopsy: a READY app ended as "did not succeed" at the wallet stop
+
+The real defect (a CSS `//` comment breaking the production build) was fixed at 341 s and the app was 100/100 READY at
+525 s; the builder then started optional palette work and the wallet stop fired at 537 s. Q-2945 (fixed in #4346): the
+palette rule judged a canvas renderer's artwork colours — that false finding started the polish. Q-2946 🟡 for the
+admin (billing): finish instead of starting extras when the app is ready and the bill nears the balance — recommended.
+Q-2947–Q-2949 OPEN (edit-miss watch, browser-tool outages without detail, Surplus availability).
+- **Q-2946 decided by the admin (option a) and built in #4346:** a READY fresh build on a nearly-spent wallet finishes (no
+  more tools; the summary is the next turn), and every build — edits included — is told once to skip optional polish when
+  the wallet is ≥ 80% spent. No price or charge changes; the wallet stop remains the net.
+- **Q-2950 (admin 2026-11-19): an edit is priced by its project's history before it starts.** The admission gate's estimate
+  is now the larger of the prompt estimate and the median real cost of the workspace's last 5 builds (same billedAmountInr),
+  so a short "fix this" prompt on a big project no longer slips under a low balance and stops mid-build.

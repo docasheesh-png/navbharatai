@@ -1,10 +1,3 @@
-import { PRO_DEVELOPMENT_NOTICE } from './proDevelopmentNotice';
-
-// 2026-11-18 clarification: historical non-refundable rules below remain subject to
-// applicable legal and payment-platform rights. Complaint review is not an automatic
-// cash-refund promise; failed-build and token re-credit protections remain intact.
-// Release must publish an actual effective-date notice and honor existing advance notice.
-
 // NavBharatAI — Refund & Cancellation Policy.
 //
 // WHY THIS IS ITS OWN DOCUMENT rather than a paragraph inside the Terms (2026-09-20). The refund
@@ -69,7 +62,7 @@ import { PRO_DEVELOPMENT_NOTICE } from './proDevelopmentNotice';
 // absence is exactly what an aggregator's reviewer looks for.
 
 export const REFUND_POLICY_TITLE = 'Refund & Cancellation Policy';
-export const REFUND_POLICY_UPDATED = '18 November 2026';
+export const REFUND_POLICY_UPDATED = '21 October 2026';
 
 export const REFUND_POLICY = `# Refund & Cancellation Policy
 
@@ -82,8 +75,6 @@ It is the full statement of the rules summarised in **Section 4 of our [Terms of
 **The short version:** everything you pay for is **final and non-refundable** — tokens, hosting and other plans, App Mart purchases and any other service — because what you buy is delivered to your account immediately. That includes a payment made twice, or for more than you meant: it is never returned as money. If you paid and did not receive what you paid for, tell us: we investigate, and then the credit is added to your wallet. A build that fails is never charged in the first place. If our own defect consumes your credit, we put the credit back. Nothing you have made is ever deleted over a payment question.
 
 ---
-
-${PRO_DEVELOPMENT_NOTICE}
 
 ## 1. What you are buying, and when you receive it
 
@@ -162,9 +153,7 @@ Write to our Grievance Officer. The [Grievance Redressal](/grievance) page names
 
 ## 10. Changes to this policy
 
-We may update this policy. A change applies to purchases made **after** it is published and no earlier than its stated effective date — never retroactively to credit you already hold. Material changes will be notified in advance through appropriate channels, such as an in-app or website notice or email, where possible. Each change will state its effective date. The effective date will be stated in the publication notice. Rights relating to prior payments under applicable law and payment platform refund rights remain unaffected. The "last updated" date identifies the revision of this text, not a retroactive effective date.
-
-**हिन्दी सारांश:** इस नीति में बदलाव केवल उसके प्रकाशित होने के बाद और बताई गई लागू होने की तारीख से पहले नहीं, नई खरीद पर लागू होंगे, पहले से मौजूद क्रेडिट पर पिछली तारीख से नहीं। जहां संभव होगा, महत्वपूर्ण बदलावों की अग्रिम सूचना ऐप, वेबसाइट या ईमेल जैसे उपयुक्त माध्यम से दी जाएगी। हर बदलाव की लागू होने की तारीख बताई जाएगी; लागू होने की तारीख प्रकाशन की सूचना में बताई जाएगी और ऊपर दी गई अग्रिम सूचना की प्रतिबद्धता का पालन किया जाएगा। लागू कानून के तहत पहले के भुगतानों से जुड़े अधिकार और भुगतान प्लेटफ़ॉर्म के रिफंड अधिकार अप्रभावित रहेंगे।
+We may update this policy. A change applies to purchases made **after** it is published — never retroactively to credit you already hold. The "last updated" date at the top of this page always reflects the version in force.
 
 ---
 

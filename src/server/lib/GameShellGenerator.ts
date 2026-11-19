@@ -407,6 +407,9 @@ export class Game {
       document.addEventListener('visibilitychange', onHide);
       this.disposers.push(() => document.removeEventListener('visibilitychange', onHide));
     }
+    // 💀 The player's body falls when they die and stands back up for the next life or round (Humanoid.die / revive).
+    this.disposers.push(events.on('PLAYER_DIED', () => { this.hero?.die(); }));
+    this.disposers.push(events.on('GAME_STARTED', () => { this.hero?.revive(); }), events.on('PLAYER_SPAWNED', () => { this.hero?.revive(); }));
     // A new round starts with no power-ups left over from the last one.
     this.disposers.push(events.on('GAME_STARTED', () => powerUps.clear()));
     this.disposers.push(events.on('GAME_STARTED', () => { showHint('controls', touchDevice() ? t('controlsTouch') : t('controlsKeyboard'), 5); }));

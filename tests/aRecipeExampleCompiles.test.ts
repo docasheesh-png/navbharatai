@@ -81,7 +81,7 @@ beforeAll(() => {
   const files: Record<string, string> = { ...kit };
   for (const e of all) files[e.path] = e.code;
   files['three-shim.d.ts'] = threeShim(Object.values(files));
-  diagnostics = typecheck(files, all.map((e) => e.path));
+  diagnostics = typecheck(files, [...all.map((e) => e.path), 'src/game/RacingRoadGame.tsx']);
 }, 60_000);
 afterAll(() => rmSync(DIR, { recursive: true, force: true }));
 
@@ -105,6 +105,10 @@ describe('🔴 every compiled recipe example typechecks against the recipes\' re
       expect(mine, mine.join('\n')).toEqual([]);
     });
   }
+});
+
+it('the emitted racing starter typechecks, not only its usage example', () => {
+  expect(diagnostics.filter(d => d.includes('src/game/RacingRoadGame.tsx'))).toEqual([]);
 });
 
 describe('the examples teach the camera that sits BEHIND a vehicle', () => {

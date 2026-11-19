@@ -487,7 +487,8 @@ async function coordinator() {
         const candidates = [randomUUID(), randomUUID()];
         const claims = await Promise.all([a.ok('lease-claim', { workspaceId: f.workspaceId, token: candidates[0], owner: 'handoff-worker-a' }),
           b.ok('lease-claim', { workspaceId: f.workspaceId, token: candidates[1], owner: 'handoff-worker-b' })]);
-        assert.equal(claims.filter((value) => value.ok).length, 1);
+        assert.equal(claims.filter((value) => value.ok).length, 1,
+          JSON.stringify({ workspaceId: f.workspaceId, candidates, claims }));
         const attemptId = candidates[claims.findIndex((value) => value.ok)];
         const request = transfer(f, attemptId);
         // Both processes deliberately replay the same already-authorized attempt; the ticket CAS is

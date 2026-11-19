@@ -1531,7 +1531,11 @@ export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: 
     </div>
     <button type="button" style={{ position: 'absolute', right: 16, top: 16 }} onClick={() => {
       if (!live.current) return;
-      if (state.status === 'paused') live.current.resume(); else live.current.pause();
+      if (state.status === 'paused') {
+        live.current.resume();
+        // Keyboard input belongs to the canvas; activating this button moved focus away.
+        host.current?.querySelector('canvas')?.focus({ preventScroll: true });
+      } else live.current.pause();
     }}>{paused ? 'Resume' : 'Pause'}</button>
     {failure && <div role="alert" style={{ position: 'absolute', top: '40%', padding: 24, color: 'white' }}>{failure}</div>}
   </div>;

@@ -93,7 +93,7 @@ export function AboutPanel({ isAdmin, about, saveState = 'idle', onOverrideChang
           <p className="text-accent-text text-lg sm:text-xl font-bold tracking-tight">{about.tagline}</p>
 
           <div className="flex items-start justify-center gap-3">
-            <p className="text-muted text-base sm:text-lg max-w-2xl font-medium leading-relaxed">{about.description}</p>
+            <p className="text-muted text-base sm:text-lg max-w-2xl font-medium leading-relaxed whitespace-pre-line">{about.description}</p>
             {isAdmin && <EditButton label="Description" current={about.description} onSave={(v) => onOverrideChange({ description: v })} />}
           </div>
         </motion.header>
@@ -116,9 +116,9 @@ export function AboutPanel({ isAdmin, about, saveState = 'idle', onOverrideChang
               </h2>
               <ul className="space-y-3">
                 {items.map((item) => (
-                  <li key={item} className="flex gap-3 text-muted font-medium leading-relaxed">
+                  <li key={item} className="flex gap-3 text-muted font-medium leading-relaxed break-words min-w-0">
                     <Check className={`w-4 h-4 mt-1 shrink-0 ${tone}`} />
-                    <span>{item}</span>
+                    <span className="min-w-0 break-words">{item}</span>
                   </li>
                 ))}
               </ul>
@@ -209,6 +209,7 @@ export function AboutPanel({ isAdmin, about, saveState = 'idle', onOverrideChang
             </h2>
             {isAdmin && <EditButton label="Support email" current={about.contactEmail} onSave={(v) => onOverrideChange({ contactEmail: v })} />}
           </div>
+          {about.contactIntroduction && <p className="text-muted font-medium leading-relaxed">{about.contactIntroduction}</p>}
           <p className="text-muted font-medium leading-relaxed">
             Write to <a className="text-accent-text font-bold underline" href={`mailto:${about.contactEmail}`}>{about.contactEmail}</a>.
           </p>
@@ -230,6 +231,8 @@ export function AboutPanel({ isAdmin, about, saveState = 'idle', onOverrideChang
             ))}
           </div>
         </motion.section>
+
+        {about.copyright && <p className="text-center text-muted text-sm leading-relaxed">{about.copyright}</p>}
 
         {onStartBuilding && (
           <div className="text-center">

@@ -16,8 +16,9 @@
 // the same cure, and nothing read it.
 //
 // This module is that cure generalised: ONE place a gate asks "what has already been proven?", so the
-// third fact does not become a third one-off. `typecheck` DELEGATES to the existing implementation —
-// it is not re-derived here, because a second copy of a verdict is a second copy free to disagree
+// third fact does not become a third one-off. TypeScript evidence DELEGATES to the existing implementation;
+// Angular's native build contributes its own framework-scoped receipt. Neither verdict is re-derived,
+// because a second copy of a verdict is a second copy free to disagree
 // (four ladder comments in this repo once described a rung that no longer existed).
 //
 // 🔒 THE DISCIPLINE, inherited deliberately from the typecheck harvester:
@@ -25,8 +26,8 @@
 //   • A run that could NOT EXECUTE is evidence of nothing, in either direction. The tsc harvester
 //     skips a help page for this reason; here the same role is played by `TestOutcome.ran`, which is
 //     the vaccine's own rule ("a suite that could not EXECUTE is UNVERIFIED, not failed").
-//   • The OUTPUT is parsed, by the SAME parser the vaccine trusts — a shell exit code alone is not
-//     trusted, because a piped invocation reports the last stage's code, not the runner's.
+//   • The OUTPUT is parsed by the SAME parser the vaccine trusts, and a pass additionally requires
+//     observed test execution. Opaque/piped invocations cannot supply a runner completion receipt.
 //   • Latest wins: the agent may have fixed the failures in between.
 //
 // 🔒 WHY FILLING THIS GAP CANNOT COST A USER MONEY, checked rather than assumed. A RED release gate
@@ -38,8 +39,10 @@
 //
 // PURE — no I/O, no clock, never throws.
 
-import { parseTestOutcome, type TestFramework } from './testRunner';
+import { parseTestOutcome, stripAnsi, testSuiteCouldNotRun, type TestFramework } from './testRunner';
 import { typecheckEvidenceFromCommands } from './TscGate';
+import { testInvocationFramework } from './testCommandInvocation';
+import { isAngularValidationCommand, parseAngularValidation } from './angularValidation';
 
 /** The two-sided verdict a gate can adopt. Anything less certain is `undefined`. */
 export type EvidenceOutcome = 'passed' | 'failed';
@@ -47,34 +50,12 @@ export type EvidenceOutcome = 'passed' | 'failed';
 /** One shell command as a build already records it (`BuildDiagnostics.commands`). */
 export interface RecordedCommand {
   command: string;
+  /** Live reader only: false means the compiler result does not prove this source revision. */
+  typecheckCurrent?: boolean;
   exitCode?: number | null;
   stdout?: string | null;
   stderr?: string | null;
 }
-
-/**
- * Things that merely MENTION a test runner without running a suite. Each one produced a plausible
- * "pass" in an earlier draft of this file, which is why they are listed rather than trusted to a
- * general rule: `playwright install` exits 0 and prints nothing that looks like a failure, and
- * `--help` / `--version` do the same.
- */
-// ⚠️ A FLAG CANNOT CARRY A LEADING `\b`, and the first draft of this line did. Between a space and a
-// `-` both sides are non-word characters, so `\b--version` never matches anything — `npx jest
-// --version` was classified as a jest RUN until the test suite caught it. Flags are anchored on
-// whitespace; only the bare sub-commands take word boundaries.
-const NOT_A_RUN =
-  /(?:^|\s)(?:--help|-h|--version|-v|--list|--reporter=list)(?=\s|$)|\b(?:install|init|codegen|show-report)\b/i;
-
-/**
- * Shell verbs that merely HANDLE a test file rather than run it. Without this, `cat
- * src/tests/login.playwright.test.ts` matches the playwright rule on vocabulary alone and a file
- * listing becomes a passing suite — the same "contains the word" trap `looksLikeTypecheckCommand`
- * refuses by requiring `--noEmit`.
- */
-const FILE_VERB = /^\s*(?:cat|less|more|head|tail|ls|find|grep|rg|sed|awk|wc|echo|touch|rm|cp|mv|mkdir|chmod|git|which|stat)\b/i;
-
-/** A watch-mode run never terminates, so whatever was captured is a partial read, not a verdict. */
-const WATCH_MODE = /--watch\b|\bwatch\b(?!\w)/i;
 
 /**
  * Which test framework does this command actually RUN — or `null` when it is not a suite run at all.
@@ -85,17 +66,7 @@ const WATCH_MODE = /--watch\b|\bwatch\b(?!\w)/i;
  * vocabulary they share. Pure.
  */
 export function testFrameworkFromCommand(command: string | null | undefined): TestFramework | null {
-  const raw = String(command ?? '').trim();
-  if (!raw) return null;
-  if (FILE_VERB.test(raw) || NOT_A_RUN.test(raw) || WATCH_MODE.test(raw)) return null;
-  if (/\bplaywright\b[^|;&]*\btest\b/i.test(raw)) return 'playwright';
-  if (/\bvitest\b/i.test(raw)) return 'vitest';
-  if (/\bjest\b/i.test(raw)) return 'jest';
-  if (/\bpytest\b/i.test(raw)) return 'pytest';
-  if (/\bgo\s+test\b/i.test(raw)) return 'go';
-  // Package-manager scripts: `npm test`, `npm run test`, `npm run test:unit`, yarn/pnpm equivalents.
-  if (/\b(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test\b(?::[\w-]+)?/i.test(raw)) return 'npm-script';
-  return null;
+  return testInvocationFramework(String(command ?? ''));
 }
 
 /**
@@ -117,16 +88,37 @@ export function testsEvidenceFromCommands(
 ): EvidenceOutcome | undefined {
   let verdict: EvidenceOutcome | undefined;
   for (const c of commands || []) {
-    const framework = testFrameworkFromCommand(c?.command);
+    let framework = testFrameworkFromCommand(c?.command);
     if (!framework) continue;
+    // An absent/null exit is not zero. This fallback has no runner-owned completion receipt.
+    if (typeof c.exitCode !== 'number' || !Number.isInteger(c.exitCode) || c.exitCode < 0) continue;
+    const output = stripAnsi(`${c.stdout ?? ''}\n${c.stderr ?? ''}`);
+    if (framework === 'npm-script') {
+      // npm prints the script body beneath its package/script header. It may be `echo ...`, a
+      // browser install, or even `tsc`: the name "test" alone does not establish a test execution.
+      const script = output.match(/^> [^\n]+\n> ([^\n]+)$/m)?.[1];
+      if (script) {
+        const invoked = testFrameworkFromCommand(script);
+        if (!invoked || invoked === 'npm-script') continue;
+        framework = invoked;
+      }
+    }
     const outcome = parseTestOutcome(
       { framework, command: String(c.command), reason: 'recovered from the build\'s own command log' },
-      typeof c.exitCode === 'number' ? c.exitCode : 0,
+      c.exitCode,
       String(c.stdout ?? ''),
       String(c.stderr ?? ''),
     );
     // Could not execute ⇒ evidence of nothing, in either direction. Leave the previous verdict alone.
     if (!outcome.ran) continue;
+    if (outcome.ok) {
+      // cdffbb71: uninstalling Vitest was misclassified as a suite and its exit 0 became PASS.
+      // Even a real runner may exit 0 for --passWithNoTests. A pass needs observed test execution;
+      // missing infrastructure/no-tests remains unverified even when a wrapper masks its exit.
+      const executed = (outcome.passed ?? 0) + (outcome.failed ?? 0) > 0
+        || (framework === 'go' && /^ok\s+\S+\s+(?:[\d.]+s|\(cached\))\s*$/m.test(output));
+      if (!executed || testSuiteCouldNotRun(c.exitCode, output)) continue;
+    }
     verdict = outcome.ok ? 'passed' : 'failed'; // latest wins — the agent may have fixed it since
   }
   return verdict;
@@ -153,7 +145,28 @@ export function agentRunEvidence(
   commands: ReadonlyArray<RecordedCommand> | null | undefined,
 ): AgentRunEvidence {
   const list = commands || [];
-  const typecheck = typecheckEvidenceFromCommands(list);
+  let typecheck = typecheckEvidenceFromCommands(list);
+  // Angular's configured build checks templates as well as TypeScript. Keep its actual receipt in
+  // the same ledger: a later NG9/NG5002 failure must not be hidden behind an earlier clean tsc.
+  // Generic compiler recognition remains delegated, including diagnostics after a native build.
+  let nativeIndex = -1;
+  let nativeOutcome: EvidenceOutcome | undefined;
+  for (let i = 0; i < list.length; i++) {
+    const command = list[i];
+    if (!command || command.typecheckCurrent === false
+      || !isAngularValidationCommand(String(command.command ?? ''))) continue;
+    const result = parseAngularValidation(command.exitCode, String(command.stdout ?? ''), String(command.stderr ?? ''));
+    if (result.status === 'passed' || result.status === 'failed') {
+      nativeIndex = i;
+      nativeOutcome = result.status;
+    }
+  }
+  if (nativeOutcome) {
+    // Plain tsc cannot clear a failed Angular template check. Conversely a later TypeScript failure
+    // still matters after a successful Angular build. A later native build can settle both scopes.
+    const laterTypeScript = typecheckEvidenceFromCommands(list.slice(nativeIndex + 1));
+    typecheck = laterTypeScript === 'failed' ? 'failed' : nativeOutcome;
+  }
   const tests = testsEvidenceFromCommands(list);
   return { ...(typecheck ? { typecheck } : {}), ...(tests ? { tests } : {}) };
 }

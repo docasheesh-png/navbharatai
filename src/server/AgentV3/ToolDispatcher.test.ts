@@ -687,6 +687,8 @@ describe('ToolDispatcher', () => {
     _clearWorkspaceMemory();
     act.commandResult = { exitCode: 0, stdout: 'ok', stderr: '' };
     await d.dispatch(call('bash', { command: 'npm install' }));
+    // A successful compiler is silent; an arbitrary 'ok' banner is not whole-project proof.
+    act.commandResult = { exitCode: 0, stdout: '', stderr: '' };
     await d.dispatch(call('bash', { command: 'npx tsc --noEmit' }, 't2'));
     const status = getWorkspaceMemory('ws-1').verificationStatus();
     expect(status).toContain('ALREADY INSTALLED');

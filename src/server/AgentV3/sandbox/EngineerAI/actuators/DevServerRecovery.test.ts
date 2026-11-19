@@ -19,6 +19,34 @@ const MITRIFY_LOG = [
   '    at failureErrorWithLog (/home/user/workspace/node_modules/vite/node_modules/esbuild/lib/main.js:1467:15)',
 ].join('\n');
 
+describe('Angular compile and workspace failures stop deterministic retries (cdffbb71)', () => {
+  it.each([
+    ['NG9 template narrowing', `Application bundle generation failed. [3.417 seconds]\n\n✘ [ERROR] NG9: Property 'colour' does not exist on type 'BetTarget'. [plugin angular-compiler]\n\nWatch mode enabled. Watching for file changes...`, 'NG9'],
+    ['Angular 22 template diagnostic', `Application bundle generation failed. [3.494 seconds]\n\n✘ [ERROR] TS2339: Property 'colour' does not exist on type 'BetTarget'.\n  Property 'colour' does not exist on type '{ type: "number"; number: number; }'. [plugin angular-compiler]`, 'TS2339'],
+    ['legacy Angular template diagnostic', `Error: src/app/game.component.ts:76:102 - error NG9: Property 'colour' does not exist on type 'BetTarget'.`, 'NG9'],
+    ['missing development configuration', `An unhandled exception occurred: Configuration 'development' is not set in the workspace.\nSee "/tmp/ng-test/angular-errors.log" for further details.`, "Configuration 'development'"],
+    ['missing serve target', `Error: Schema validation failed with the following errors:\n  Data path "" must have required property 'buildTarget'.\n  Data path "" must have required property 'browserTarget'.\n  Data path "" must match a schema in anyOf.`, 'buildTarget'],
+    ['invalid workspace option', `Error: Schema validation failed with the following errors:\n  Data path "" must NOT have additional properties(strictPort).`, 'strictPort'],
+  ])('%s requires a source/configuration edit, even while the process is watching', (_name, log, diagnostic) => {
+    const result = classifyDevServerFailure(log);
+    expect(result).toMatchObject({ cause: 'code_error', recovery: 'code_fix' });
+    expect(result.detail).toContain(diagnostic);
+    expect(planDevServerRecovery(log, 1, 2).recovery).toBe('code_fix');
+  });
+
+  it.each([
+    ['Application bundle generation complete.\nWatch mode enabled. Watching for file changes...', 'unknown'],
+    ['[WARNING] NG8107: The left side does not include null.', 'unknown'],
+    ['Notes: Configuration \'development\' is not set in the workspace.', 'unknown'],
+    ['Error: temporary worker exited with code 1', 'crash'],
+    ['FATAL ERROR: JavaScript heap out of memory', 'out_of_memory'],
+    ['Error: listen EADDRINUSE: address already in use :::4200', 'port_in_use'],
+  ])('preserves recovery for non-source failures: %s', (log, cause) => {
+    expect(classifyDevServerFailure(log).cause).toBe(cause);
+    expect(classifyDevServerFailure(log).recovery).not.toBe('code_fix');
+  });
+});
+
 describe('stripAnsi — a coloured log must not defeat every classifier rule (mitrify 2026-08-04)', () => {
   it('removes colour codes so word-boundary patterns can match', () => {
     expect(stripAnsi(`${ESC}[31m✘ ${ESC}[41;97mERROR${ESC}[0m`)).toContain('ERROR');

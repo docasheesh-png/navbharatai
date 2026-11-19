@@ -64,7 +64,8 @@ import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
 import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER, sharedBareTypecheckCommand } from './tscCommand';
 import { parseTscErrors, fixTypeOnlyValueImports as fixTypeOnlyValueImportsFromErrors, type TscError } from './EndgameRepair';
-import { tscCommandVerdict, looksLikeTypecheckCommand, tscVerdict, countTscErrors } from './TscGate';
+import { tscCommandVerdict, looksLikeTypecheckCommand, tscVerdict, countTscErrors, buildScriptTypecheckVerdict, type TypecheckCommandProof } from './TscGate';
+import { checksWholeDefaultTsProject } from './tscCommandMode';
 import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome, withSandboxBrowsers, withTestFilter } from './testRunner';
@@ -78,7 +79,7 @@ import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type Type
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
 import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, writeParseGuardEnabled, parseGuardDecision } from './SyntaxCheck';
 import { htmlEditVerdict, isHtmlPage } from './editIntegrity';
-import { checkPreviewCompiles, previewDivergenceBlocksDelivery } from '../runtime/PreviewCompileCheck';
+import { checkPreviewCompiles, previewCompileApplicability, previewDivergenceBlocksDelivery } from '../runtime/PreviewCompileCheck';
 import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
 import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
@@ -207,7 +208,7 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, reactRangeOf, capacitorRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, restoreInconsistentDowngrades, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, reactRangeOf, capacitorRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, restoreInconsistentDowngrades, npmInstallMaskedFailure, needsViteDependencyMetadata, installSelectsVitestVersion, type ViteDependencyMetadata } from './DependencyAutoFix';
 import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { resolveStringArg, missingArgMessage } from './toolArgRepair';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
@@ -257,7 +258,9 @@ import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
-import { withVitestDeclared, recipeShipsVitestTest, VITEST_RANGE } from './TestGenerationAgent';
+import { withVitestDeclared, recipeShipsVitestTest, vitestDeclarationNote, generatedUnitTestNote, needsVitestVersionSelection } from './TestGenerationAgent';
+import { isAppAnalysisPath } from './appAnalysisPaths';
+import { angularValidationPlan, parseAngularValidation, angularTypeScriptOnlyWriteNote } from './angularValidation';
 import { renderSeenThisBuild } from './renderProof';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
 import { addDependency, removeDependency as removeOneDependency, listDependencies } from './packageEdit';
@@ -546,6 +549,8 @@ export type BrowserActionName = (typeof BROWSER_ACTIONS)[number];
  * the dispatcher decoupled from the full actuator surface.
  */
 export interface ActuatorPort {
+  /** Sync changed manifests before executing JavaScript tests; warm dependency trees are reused. */
+  ensureDependencies?(workspaceId: string): Promise<{ ok: boolean; ran: boolean; log: string }>;
   readFile(workspaceId: string, filePath: string): Promise<string>;
   /**
    * BR1997: an ADVISORY read, bounded by `timeoutMs`, whose timeout never drops the cached sandbox
@@ -780,7 +785,7 @@ export class ToolDispatcher {
      * BuildDiagnostics.recordCommand so a failing npm install / tsc / vite build is captured in
      * full — the single highest-value "why won't the app run" signal. Best-effort; never blocks.
      */
-    private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number; timing?: CommandTiming }) => void,
+    private readonly onCommand?: (result: { command: string; typecheckProof?: TypecheckCommandProof; exitCode: number | null; stdout: string; stderr: string; durationMs: number; timing?: CommandTiming }) => void,
     /** Per-build paid-tool budget. Omit it and this dispatcher keeps a fresh zeroed object. */
     toolBudget?: BuildToolBudget,
   ) {
@@ -1912,7 +1917,7 @@ export class ToolDispatcher {
       ? await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => undefined)
       : undefined;
     const pinCtx = pinPkg !== undefined
-      ? { viteRange: viteRangeOf(pinPkg), reactRange: reactRangeOf(pinPkg), capacitorRange: capacitorRangeOf(pinPkg) }
+      ? { viteRange: viteRangeOf(pinPkg, await this.viteDependencyMetadata(pinPkg, installSelectsVitestVersion(command) ? ['vitest'] : [])), reactRange: reactRangeOf(pinPkg), capacitorRange: capacitorRangeOf(pinPkg) }
       : undefined;
     const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command, pinCtx));
     await this.ensureSandboxPostgres(effectiveCommand);
@@ -3226,7 +3231,11 @@ export class ToolDispatcher {
       } catch {
         pkg = null; // no manifest reachable — analyzeDependencies returns []
       }
-      return analyzeDependencies([...external], pkg);
+      const configFiles: Record<string, string> = {};
+      await Promise.all([...files].filter((path) => /(^|\/)angular\.json$/.test(path) && isAppAnalysisPath(path)).map(async (path) => {
+        try { configFiles[path] = await this.actuator.readFile(this.workspaceId, path); } catch { /* unavailable config cannot prove use */ }
+      }));
+      return analyzeDependencies([...external], pkg, configFiles);
     } catch {
       // Any failure: return no issues so evaluate's other sections stand.
       return [];
@@ -3684,11 +3693,26 @@ export class ToolDispatcher {
    * always 0, so a FAILING tsc was recorded as clean), and nothing ever resolved an old error. The
    * verdict is read from the output, never an exit code. Best-effort: memory must never break a tool.
    */
-  private noteCompileOutput(output: string, command?: string): void {
+  private noteCompileOutput(output: string, command: string | undefined, skippedBeforeCompile: number, revisionBeforeCompile: number): void {
     const verdict = command ? tscCommandVerdict(command, output) : tscVerdict(output);
-    try { if (verdict === 'passed') getWorkspaceMemory(this.workspaceId).markTscClean(); }
+    const mem = getWorkspaceMemory(this.workspaceId);
+    const current = mem.verificationRevision() === revisionBeforeCompile;
+    const project = !command || checksWholeDefaultTsProject(command);
+    const coversProject = verdict === 'passed' && output.trim() === '' && project;
+    try {
+      if (coversProject && current) mem.markTscClean(Date.now(), revisionBeforeCompile);
+      else if (verdict === 'failed' && project && current) mem.markTscFailed(revisionBeforeCompile);
+    }
     catch { /* audit best-effort */ }
-    this.noteTypeErrorCount(output, verdict !== 'passed');
+    // BR99771bc7: explicit typecheck and shell checks already enter this same door, but Q-910 only
+    // credited write-time runs. Shared stats must follow the evidence from every eligible caller.
+    // Internal callers run the default whole-project check; arbitrary shell commands must prove that
+    // scope. Silence is the clean compiler output, never a clipped diagnostic or an unknown banner.
+    if (coversProject && current
+      && skippedBeforeCompile > 0 && this._writeTypecheckStats.skippedNotReady === skippedBeforeCompile) {
+      this._writeTypecheckStats.cleanRunCoveredSkips = true;
+    }
+    this.noteTypeErrorCount(output, !coversProject || !current);
   }
 
   /**
@@ -3754,16 +3778,30 @@ export class ToolDispatcher {
    * output holds a vitest test. Every recipe writer calls it (`tests/aRecipeTestShipsItsRunner` is the census);
    * already declared, unreadable or no test ⇒ nothing. Returns the line for the tool result.
    */
+  private async viteDependencyMetadata(
+    packageJson: string | null | undefined,
+    automaticPackages: readonly string[],
+    knownMetadata: ViteDependencyMetadata = {},
+  ): Promise<ViteDependencyMetadata> {
+    if (!needsViteDependencyMetadata(packageJson, automaticPackages, knownMetadata)) return {};
+    const [installedVitePackageJson, packageLockJson] = await Promise.all([
+      this.actuator.readFile(this.workspaceId, 'node_modules/vite/package.json').catch(() => undefined),
+      this.actuator.readFile(this.workspaceId, 'package-lock.json').catch(() => undefined),
+    ]);
+    return { installedVitePackageJson, packageLockJson };
+  }
+
   private async declareVitestForRecipeTests(files: Record<string, string>, agent: AgentRole): Promise<string> {
     if (!recipeShipsVitestTest(files)) return '';
     try {
       const before = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => null);
-      const after = withVitestDeclared(before);
-      if (!after) return '';
+      const metadata = await this.viteDependencyMetadata(before, needsVitestVersionSelection(before) ? ['vitest'] : []);
+      const after = withVitestDeclared(before, metadata);
+      if (!after) return vitestDeclarationNote(before, after, metadata);
       await this.actuator.writeFile(this.workspaceId, 'package.json', after);
       this.state?.recordFileChange({ path: 'package.json', kind: 'modify' }, agent);
       this.onFileWrite?.('package.json', after);
-      return `Added vitest@${VITEST_RANGE} to devDependencies so the test this recipe ships can run (it installs on the next typecheck or \`npm install\`).`;
+      return vitestDeclarationNote(before, after, metadata);
     } catch {
       return '';
     }
@@ -4063,6 +4101,8 @@ export class ToolDispatcher {
         if (unprobed) s.compiledUnprobed += 1;
         const command = writeTypecheckCommand(this.tsBuildInfoId);
         const startedAt = Date.now();
+        const skippedBeforeCompile = s.skippedNotReady ?? 0;
+        const revisionBeforeCompile = getWorkspaceMemory(this.workspaceId).verificationRevision();
         let r: { stdout: string; stderr: string };
         try {
           r = await withTimeout(this.actuator.runCommand(this.workspaceId, command), WRITE_TYPECHECK_TIMEOUT_MS, 'write-typecheck');
@@ -4086,7 +4126,7 @@ export class ToolDispatcher {
         s.timeouts = 0; // a run that finished resets the consecutive-timeout count
         // The same evidence bridge the `typecheck` tool reports through (autopsy e4ebcb5f): the release
         // gate's typecheck evidence reads recorded commands, and a real compile that ran must be on it.
-        try { this.onCommand?.({ command, exitCode: null, stdout: r.stdout || '', stderr: r.stderr || '', durationMs }); }
+        try { this.onCommand?.({ command, typecheckProof: { revision: revisionBeforeCompile, project: true }, exitCode: null, stdout: r.stdout || '', stderr: r.stderr || '', durationMs }); }
         catch { /* diagnostics are best-effort */ }
         const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
         // tsc printed nothing at all — the only output that means "clean".
@@ -4094,16 +4134,13 @@ export class ToolDispatcher {
         // 🔴 AUTOPSY 12c642ed: a missing compiler also parses to zero errors, and was counted as clean.
         const verdict = tscVerdict(combined);
         const neverRan = verdict === 'not-run' || verdict === 'unknown';
-        this.noteCompileOutput(combined);
+        this.noteCompileOutput(combined, undefined, skippedBeforeCompile, revisionBeforeCompile);
         // A tsc that printed no `error TSxxxx` line is clean; a help page or an install log parses to zero
         // errors too, which is why a clean run here is evidence only through the bridge above, never on its own.
         const errors = parseTscErrors(combined);
         if (neverRan) s.notRunRuns += 1;
         else if (errors.length === 0) {
           s.cleanRuns += 1;
-          // `tsc --noEmit` is project-wide, so this run covered every file skipped before it (Q-910). A fact of
-          // the RUN, so it is counted here, once, with the run's other counters (Q-983).
-          if ((s.skippedNotReady ?? 0) > 0) s.cleanRunCoveredSkips = true;
         }
         return { errors, silent, neverRan, notReady: false, notReadyWhy: null };
       });
@@ -4149,7 +4186,8 @@ export class ToolDispatcher {
       // BottomNav rewritten three times for an export App.tsx lacked). At most two targets' candidates
       // are read, only when such an error exists, and a read that fails is simply not evidence.
       // A clean run is SAID, so the model does not re-run the compiler to find out (autopsy dfd81a3a).
-      if (errors.length === 0) return run.silent ? writeTypecheckCleanNote(tsPaths) : '';
+      if (errors.length === 0) return run.silent
+        ? (angularValidationPlan(this.framework) ? angularTypeScriptOnlyWriteNote(tsPaths) : writeTypecheckCleanNote(tsPaths)) : '';
       sources = { ...(await this.exportTargetSources(splitByWrittenFiles(errors, tsPaths).own, sources)), ...sources };
       // Counted by the SAME split the note makes, after the export targets are in hand (they are what
       // tells "add the export there" from "fix it here"). An error that waits on a file not written yet is
@@ -6158,6 +6196,8 @@ export class ToolDispatcher {
         // TD-12 — pin, quote, detach, vault .env and Postgres live in runShellLikeBash (also used by
         // run_migrations, TD-15). Every retry below runs `prepared`, the same string as this first run.
         const pageSnaps = await this.snapshotPagesNamedBy(command);
+        const skippedBeforeCompile = this._writeTypecheckStats.skippedNotReady ?? 0;
+        const revisionBeforeCompile = getWorkspaceMemory(this.workspaceId).verificationRevision();
         const shell = await this.runShellLikeBash(command, agent, { record: false });
         const effectiveCommand = shell.effectiveCommand;
         const prepared = shell.prepared;
@@ -6363,7 +6403,10 @@ export class ToolDispatcher {
         }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
         try {
-          this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt, timing });
+          this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt, timing,
+            typecheckProof: { revision: revisionBeforeCompile,
+              project: checksWholeDefaultTsProject(command) || buildScriptTypecheckVerdict({ command, stdout, stderr, exitCode }) !== undefined },
+          });
         } catch { /* diagnostics capture is best-effort */ }
         // 🔴 AND NOW TELL THE PROJECT MAP THE FILE IS GONE (autopsy 8b3dca5c). Everything above this
         // line already knew which source files the command would remove; nothing had ever acted on it
@@ -6562,11 +6605,18 @@ export class ToolDispatcher {
           // specialists don't redundantly re-run them (they receive verificationStatus()).
           const mem = getWorkspaceMemory(this.workspaceId);
           if (/\bnpm\s+(ci|install|i)\b/.test(command) || /\b(pnpm|yarn)\s+(install|add)\b/.test(command)) mem.markDepsInstalled();
-          if (shellBuildProvesSuccess(command, exitCode, `${stdout}\n${stderr}`)) mem.markProdBuildClean();
+          if (shellBuildProvesSuccess(command, exitCode, `${stdout}\n${stderr}`)) mem.markProdBuildClean(Date.now(), revisionBeforeCompile);
         }
         // Read from the OUTPUT, never the exit code: `tsc --noEmit 2>&1 | head -40` exits with head's 0
         // whether or not tsc failed, and that used to be recorded as "TypeScript already checked CLEAN".
-        if (looksLikeTypecheckCommand(command) && exitCode === 0) this.noteCompileOutput(`${stdout}\n${stderr}`, command);
+        if (looksLikeTypecheckCommand(command) && (exitCode === 0 || tscCommandVerdict(command, `${stdout}\n${stderr}`) === 'failed')) {
+          this.noteCompileOutput(`${stdout}\n${stderr}`, command, skippedBeforeCompile, revisionBeforeCompile);
+        }
+        // A production script that actually ran its compiler and failed cannot leave an older
+        // production/typecheck proof current. A generic bundler failure says nothing about types.
+        if (buildScriptTypecheckVerdict({ command, stdout, stderr, exitCode }) === 'failed') {
+          getWorkspaceMemory(this.workspaceId).markTscFailed(revisionBeforeCompile, true);
+        }
         if (typoFix.fixed) out = `(Ran it as ./node_modules/… — the folder is node_modules, with no leading dot.)\n${out}`;
         if (cdFix.fixed) out = `(Ran it under the sandbox project root — there is no /workspace folder here.)\n${out}`;
         // A compile whose exit code already said it failed still tells the done check it has errors
@@ -6600,7 +6650,9 @@ export class ToolDispatcher {
         // when grep itself said so. Every dialect it tries carries the same excludes.
         const { stdout } = await this.actuator.runCommand(this.workspaceId, grepCommand(pattern, path, EXCLUDED_DIRS));
         // T1-sec-redact: grep can surface a secret sitting in a matched line (e.g. `grep KEY .env`).
-        return redactSecrets(readGrepOutput(stdout, pattern).text);
+        const reading = readGrepOutput(stdout, pattern);
+        if (reading.failed) throw new Error(redactSecrets(reading.text));
+        return redactSecrets(reading.text);
       }
 
       case 'glob': {
@@ -7065,7 +7117,12 @@ export class ToolDispatcher {
               let pkgJson: string | undefined;
               try { pkgJson = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgJson = undefined; }
               if (typeof pkgJson === 'string') {
-                const depRes = applyWellKnownMissingDeps({ 'package.json': pkgJson, ...astFiles });
+                let depRes = applyWellKnownMissingDeps({ 'package.json': pkgJson, ...astFiles });
+                const metadata = await this.viteDependencyMetadata(pkgJson, depRes.added.map((dep) => dep.package), {
+                  installedVitePackageJson: astFiles['node_modules/vite/package.json'],
+                  packageLockJson: astFiles['package-lock.json'],
+                });
+                if (Object.keys(metadata).length) depRes = applyWellKnownMissingDeps({ 'package.json': pkgJson, ...astFiles }, metadata);
                 if (depRes.added.length) {
                   const newPkg = depRes.files['package.json'];
                   // Said only when it LANDED (autopsy SignBridge, 2026-09-26): on a verified-working app
@@ -7154,8 +7211,8 @@ export class ToolDispatcher {
         // "preview does not compile → not charged" verdict). A non-entry divergence (a possibly-never-
         // imported file) stays advisory — no false block, matching PreviewCompileCheck's reachability scoping.
         try {
-          const pc = checkPreviewCompiles(astFiles);
-          if (!pc.ok && previewDivergenceBlocksDelivery(pc.errors)) {
+          const pc = previewCompileApplicability(this.framework).applicable ? checkPreviewCompiles(astFiles) : null;
+          if (pc && !pc.ok && previewDivergenceBlocksDelivery(pc.errors)) {
             const entryErr = pc.errors.find((e) => previewDivergenceBlocksDelivery([e]));
             extra.push({ severity: 'high', label: `the live preview will not compile — ${entryErr?.file ?? 'entry file'}: ${(entryErr?.message ?? 'compile error').slice(0, 160)}` });
           }
@@ -7517,6 +7574,8 @@ export class ToolDispatcher {
           const replacement = existing != null && rel === SERVICE_WORKER_FILE ? upgradeGeneratedServiceWorker(existing) : null;
           if (existing != null && replacement == null) continue;
           await this.actuator.writeFile(this.workspaceId, target, replacement ?? content);
+          // Record at the write, so a later read-only evaluation cannot date this change after a compile.
+          getWorkspaceMemory(this.workspaceId).indexFile(target, replacement ?? content);
           this.state?.recordFileChange({ path: target, kind: existing != null ? 'modify' : 'create' }, agent);
           written.push(target);
         }
@@ -7526,6 +7585,7 @@ export class ToolDispatcher {
           const upgraded = upgradeGeneratedServiceWorker(await this.actuator.readFile(this.workspaceId, SERVICE_WORKER_FILE).catch(() => null));
           if (upgraded) {
             await this.actuator.writeFile(this.workspaceId, SERVICE_WORKER_FILE, upgraded);
+            getWorkspaceMemory(this.workspaceId).indexFile(SERVICE_WORKER_FILE, upgraded);
             this.state?.recordFileChange({ path: SERVICE_WORKER_FILE, kind: 'modify' }, agent);
             written.push(SERVICE_WORKER_FILE);
           }
@@ -7615,23 +7675,24 @@ export class ToolDispatcher {
         }
         // Declare the runner BEFORE the test lands, so the write-time typecheck that follows the test
         // already sees `vitest` (its script reinstalls when package.json is newer than node_modules).
-        let declaredVitest = false;
+        let declarationNote = '';
         try {
           const pkgBefore = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => null);
-          const pkgAfter = withVitestDeclared(pkgBefore);
+          const metadata = await this.viteDependencyMetadata(pkgBefore, needsVitestVersionSelection(pkgBefore) ? ['vitest'] : []);
+          const pkgAfter = withVitestDeclared(pkgBefore, metadata);
+          declarationNote = vitestDeclarationNote(pkgBefore, pkgAfter, metadata);
           if (pkgAfter) {
             await this.actuator.writeFile(this.workspaceId, 'package.json', pkgAfter);
             this.state?.recordFileChange({ path: 'package.json', kind: 'modify' }, agent);
             this.onFileWrite?.('package.json', pkgAfter);
-            declaredVitest = true;
           }
         } catch { /* the test is still written; the typecheck then names the missing module honestly */ }
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.state?.recordFileChange({ path, kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — Vitest skeleton for ${functions.length} function(s). Fill in the TODO assertions to verify real behaviour.`
-          + (declaredVitest ? ` Added vitest@${VITEST_RANGE} to devDependencies so the test can run (it installs on the next typecheck or \`npm install\`).` : '');
+        return generatedUnitTestNote(path, kind)
+          + (declarationNote ? ` ${declarationNote}` : '');
       }
 
       case 'generate_integration_tests': {
@@ -7728,6 +7789,16 @@ export class ToolDispatcher {
           this.state?.appendTerminal(msg);
           return msg;
         }
+        let dependencyPreparation = '';
+        if (['vitest', 'jest', 'playwright', 'npm-script'].includes(plan.framework) && this.actuator.ensureDependencies) {
+          const prepared = await this.actuator.ensureDependencies(this.workspaceId);
+          dependencyPreparation = `Dependency preparation (${prepared.ran ? 'sync attempted' : 'no install run'}): ${redactSecrets(prepared.log)}\n`;
+          this.state?.appendTerminal(dependencyPreparation);
+          if (!prepared.ok) {
+            getWorkspaceMemory(this.workspaceId).recordAudit('run_tests UNVERIFIED — dependency preparation failed; suite preserved and not executed.');
+            throw new Error(`Tests were not executed because dependency preparation failed. Preserve the test suite and fix its dependencies.\n${dependencyPreparation}`);
+          }
+        }
         const started = Date.now();
         // B4 — run ONE test instead of the whole suite while iterating on a failure. The suite was
         // re-run in full after every fix attempt, spending the user's sandbox minutes (real money)
@@ -7757,7 +7828,7 @@ export class ToolDispatcher {
           );
         }
         const detail =
-          `${outcome.summary}${partial}\n` +
+          `${outcome.summary}${partial}\n` + dependencyPreparation +
           // The command that ACTUALLY ran, not the unfiltered plan — reporting the plan here would
           // describe a run that did not happen.
           `command: ${filtered.command} — ${plan.reason}\n` +
@@ -7828,12 +7899,15 @@ export class ToolDispatcher {
         // run is silently skipped (the esbuild note still stands) — never a fake pass.
         let tscHeader = '';
         let tscStatus: 'clean' | 'errors' | 'did-not-complete' = 'did-not-complete';
+        const angularPlan = angularValidationPlan(this.framework);
         const isTsProject = files.includes('tsconfig.json')
           && files.some((f) => /\.tsx?$/i.test(f) && !/\.d\.ts$/i.test(f));
-        if (isTsProject && !syntaxHeader) {
+        if (isTsProject && !syntaxHeader && !angularPlan) {
           try {
             const tscCommand = robustTscCommand(`--noEmit --incremental --tsBuildInfoFile /tmp/agentv3-${this.tsBuildInfoId}.tsbuildinfo`, '2>&1 | head -60');
             const tscStartedAt = Date.now();
+            const skippedBeforeCompile = this._writeTypecheckStats.skippedNotReady ?? 0;
+            const revisionBeforeCompile = getWorkspaceMemory(this.workspaceId).verificationRevision();
             const r = await withTimeout(
               this.actuator.runCommand(this.workspaceId, tscCommand),
               30_000,
@@ -7858,6 +7932,7 @@ export class ToolDispatcher {
             try {
               this.onCommand?.({
                 command: tscCommand,
+                typecheckProof: { revision: revisionBeforeCompile, project: true },
                 exitCode: null, // piped through `head`, so the shell's code is not tsc's — the parser reads the output
                 stdout: r.stdout || '',
                 stderr: r.stderr || '',
@@ -7870,6 +7945,7 @@ export class ToolDispatcher {
             // '../lib/tsc.js'` — no `error TS` line — and this tool said "type-checks clean" while the
             // app held 15 errors. Zero parsed errors is not a verdict; the ONE reader decides.
             const verdict = tscVerdict(combined);
+            this.noteCompileOutput(combined, undefined, skippedBeforeCompile, revisionBeforeCompile);
             if (verdict === 'not-run' || verdict === 'unknown') {
               tscStatus = 'did-not-complete';
               this._lastTypeErrors = null;
@@ -7886,12 +7962,41 @@ export class ToolDispatcher {
               tscHeader = `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`;
             } else {
               tscStatus = 'clean';
-              this.noteCompileOutput(combined);
             }
           } catch {
             tscStatus = 'did-not-complete';
             this._lastTypeErrors = null;
           }
+        }
+        if (angularPlan && !syntaxHeader) {
+          const nativeStarted = Date.now();
+          let nativeRunStarted = false;
+          let nativeRevision: number | undefined;
+          let nativeResult: { exitCode: number | null; stdout: string; stderr: string };
+          try {
+            if (this.actuator.ensureDependencies) {
+              const prepared = await this.actuator.ensureDependencies(this.workspaceId);
+              this.state?.appendTerminal(`Angular dependency preparation: ${redactSecrets(prepared.log)}`);
+              if (!prepared.ok) throw new Error(`Angular dependency preparation failed; the native build did not run. ${prepared.log}`);
+            }
+            // Capture after dependency preparation, immediately before the native compiler starts.
+            // BuildDiagnostics compares this receipt to the current revision when it is consumed.
+            nativeRevision = getWorkspaceMemory(this.workspaceId).verificationRevision();
+            nativeRunStarted = true;
+            nativeResult = await withTimeout(this.actuator.runCommand(this.workspaceId, angularPlan.command), angularPlan.timeoutMs, 'typecheck-angular');
+          } catch (error) {
+            nativeResult = { exitCode: null, stdout: '', stderr: error instanceof Error ? error.message : String(error) };
+          }
+          try {
+            if (nativeRunStarted) this.onCommand?.({
+              command: angularPlan.command, ...nativeResult, durationMs: Date.now() - nativeStarted,
+              ...(nativeRevision !== undefined ? { typecheckProof: { revision: nativeRevision, project: true } } : {}),
+            });
+          } catch { /* diagnostics best-effort */ }
+          const native = parseAngularValidation(nativeResult.exitCode, nativeResult.stdout, nativeResult.stderr);
+          this._lastTypeErrors = native.status === 'passed' ? 0 : native.status === 'failed' ? 1 : null;
+          if (native.status === 'failed') getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${native.summary}`);
+          return `typecheck: ${native.summary}\n${redactSecrets(native.output).slice(-6000)}\n${crossLang}`.trim();
         }
         if (syntaxHeader || tscHeader) {
           return `${syntaxHeader}${tscHeader}${crossLang || 'No Python/Java/Go sources to check.'}`.trim();

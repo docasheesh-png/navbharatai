@@ -143,6 +143,7 @@ export const LONG_RUN_BUDGET_SHARE = 0.6;
  */
 export function unevidencedEtaTickLine(
   elapsedMs: number, budgetMs?: number, roughBand?: string | null, roughHighMs?: number | null,
+  remainingMs?: number,
 ): string {
   const elapsed = Math.max(0, Number(elapsedMs) || 0);
   const inTxt = formatEta(elapsed).replace('~', '');
@@ -159,9 +160,10 @@ export function unevidencedEtaTickLine(
       : 'still working out how big this one is — I\'ll show a time as soon as I can measure it';
   const plain = `⏱️ Still building… ${inTxt} in · ${sizing}, and tell you the moment it's done.`;
   const budget = Number(budgetMs);
-  if (!Number.isFinite(budget) || budget <= 0 || elapsed >= budget) return plain;
-  const leftTxt = formatEta(budget - elapsed).replace('~', '');
-  if (elapsed >= budget * LONG_RUN_BUDGET_SHARE) {
+  const remaining = remainingMs ?? (Number.isFinite(budget) && budget > 0 ? budget - elapsed : Infinity);
+  if (!Number.isFinite(remaining) || remaining <= 0) return plain;
+  const leftTxt = formatEta(remaining).replace('~', '');
+  if (Number.isFinite(budget) && budget > 0 && budget - remaining >= budget * LONG_RUN_BUDGET_SHARE) {
     // Every clause here is something the engine really does on a timeout: the files written so far
     // are already persisted, the green guard keeps an unverified turn rather than rolling it back,
     // and the summary states honestly where it got to. Promising it will FINISH would be the one

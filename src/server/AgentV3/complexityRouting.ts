@@ -51,7 +51,7 @@ export { signalsMatchedNothing } from './RequestAnalyser';
 
 export type ComplexityVerdict = 'simple' | 'complex';
 /** Where a verdict came from — recorded in the build report so a routing choice is never a mystery. */
-export type ComplexitySource = 'deterministic' | 'model' | 'model-unavailable' | 'disabled' | 'scaffold' | 'workspace';
+export type ComplexitySource = 'deterministic' | 'model' | 'model-unavailable' | 'disabled' | 'scaffold' | 'workspace' | 'user-override';
 
 export interface ComplexityDecision {
   verdict: ComplexityVerdict;

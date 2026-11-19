@@ -81,10 +81,11 @@ describe('a skipped check is not an unchecked file (Q-910, autopsy 50378049)', (
       expect(line).toContain('just later than they should have been');
     });
 
-    it('🔴 no clean run after the skips: says the end-of-build typecheck was their first compile', () => {
+    it('no recorded clean run after the skips does not invent an end-of-build compile', () => {
       const line = writeTypecheckSummary(base({ cleanRunCoveredSkips: false }), true);
-      expect(line).toContain('no check succeeded after them');
-      expect(line).toContain('end-of-build typecheck was their first compile');
+      expect(line).toContain('these tools recorded no later clean project compile covering those writes');
+      expect(line).toContain('other compile evidence must be checked separately');
+      expect(line).not.toContain('their first compile');
     });
 
     it('a build with no skips never gets either sentence', () => {
@@ -120,23 +121,17 @@ describe('a skipped check is not an unchecked file (Q-910, autopsy 50378049)', (
       expect(disp).toContain('s.cleanRunCoveredSkips = false;');
     });
 
-    it('…and only a clean run answers it, and only when something was actually skipped', () => {
-      expect(disp).toContain('if ((s.skippedNotReady ?? 0) > 0) s.cleanRunCoveredSkips = true;');
-      // It sits inside the CLEAN-RUN branch, and nothing else intervenes — a compiler that never ran
-      // covers nothing (autopsy 12c642ed's class, where four such runs were counted as clean).
-      //
-      // ⚠️ Anchored on the enclosing branch, NOT on a byte window. The first version of this case
-      // looked back 260 characters and failed on the `neverRan` branch that legitimately sits just
-      // above — a window measures distance, and the claim is about NESTING. This repo has paid for
-      // byte-window guards before (`slice(0, 6000)`); the rule is to anchor on syntax.
-      const branch = 'if (errors.length === 0) {';
-      const from = disp.indexOf(branch);
-      const to = disp.indexOf('if ((s.skippedNotReady ?? 0) > 0) s.cleanRunCoveredSkips = true;');
-      expect(from).toBeGreaterThan(0);
-      expect(to).toBeGreaterThan(from);
-      const between = disp.slice(from + branch.length, to);
-      expect(between).not.toContain('if (');   // nothing between the branch and the write
-      expect(between).not.toContain('}');      // the branch has not closed before it
+    it('every eligible compile credits coverage through one shared recorder', () => {
+      // BR99771bc7 proved that guarding one write-time setter missed explicit typecheck and shell
+      // callers. Behaviour, command scope and in-flight order are exercised in its regression test.
+      const from = disp.indexOf('private noteCompileOutput(');
+      const to = disp.indexOf('private noteTypeErrorCount(', from);
+      const recorder = disp.slice(from, to);
+      expect(recorder).toContain('this._writeTypecheckStats.cleanRunCoveredSkips = true;');
+      expect(disp.match(/cleanRunCoveredSkips = true;/g)).toHaveLength(1);
+      expect(recorder).toContain("verdict === 'passed' && output.trim() === ''");
+      expect(recorder).toContain('if (coversProject && current');
+      expect(recorder).toContain('this._writeTypecheckStats.skippedNotReady === skippedBeforeCompile');
     });
   });
 });

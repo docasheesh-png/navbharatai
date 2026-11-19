@@ -9,6 +9,7 @@
 
 // The keys screen's address comes from the one source of truth, never from prose here.
 import { SECRETS_SCREEN } from '../AppContext/navPaths';
+import { enclosingTag } from './jsxTags';
 
 export type AuthenticitySeverity = 'high' | 'medium' | 'low';
 
@@ -93,6 +94,28 @@ const SIMULATED_RESULT_RE = new RegExp(String.raw`(?<![a-z])(simulat(?:e|ed|es|i
 const SKIP_PATH = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next)([\\/]|$)|\.test\.|\.spec\.|__tests__|(^|[\\/])tests?([\\/]|$)|(^|[\\/])specs?([\\/]|$)/i;
 
 const SNIPPET_MAX = 120;
+
+/** A quote closing a markup value is not the start of a string saying "placeholder" (cdffbb71).
+ * Read the containing tag with the shared JSX/HTML reader, then prove the quote closes a value.
+ * Values and comments that really say "placeholder" or "stub" still count, even on the same line.
+ */
+function isMarkupAttributeMarker(content: string, offset: number, match: string): boolean {
+  if (!/^["'`]\s+(?:placeholder|stub)$/i.test(match)
+    || !/^\s*=/.test(content.slice(offset + match.length))) return false;
+  const tag = enclosingTag(content, offset);
+  if (!tag) return false;
+  const start = content.lastIndexOf(tag, offset);
+  if (start < 0) return false;
+  let quote: string | null = null;
+  for (let i = start; i < offset; i++) {
+    const char = content[i];
+    if (quote) {
+      if (char === '\\') { i++; continue; }
+      if (char === quote) quote = null;
+    } else if (char === '"' || char === "'" || char === '`') quote = char;
+  }
+  return quote === content[offset];
+}
 
 /** `generateSimulatedVendors` → `generate Simulated Vendors`; `SIMULATED_SHOPS` is left as it is. */
 const splitHumps = (line: string): string => line.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
@@ -302,11 +325,18 @@ export function scanAuthenticity(file: string, content: string): AuthenticityIss
   if (SKIP_PATH.test(file)) return [];
   const issues: AuthenticityIssue[] = [];
   const lines = content.split('\n');
+  let offset = 0;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const lineOffset = offset;
+    offset += line.length + 1;
     if (line.length > 4000) continue; // skip minified/huge lines
     for (const r of RULES) {
-      const m = r.re.exec(line);
+      // A false first match must not hide a genuine marker later on the same line.
+      const m = r.kind === 'stub-marker'
+        ? [...line.matchAll(new RegExp(r.re.source, 'gi'))].find((candidate) =>
+          !isMarkupAttributeMarker(content, lineOffset + candidate.index, candidate[0]))
+        : r.re.exec(line);
       if (m && !(r.ignore && r.ignore(m[0], line))) {
         issues.push({
           file,

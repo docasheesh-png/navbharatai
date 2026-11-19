@@ -324,7 +324,7 @@ const WHY_MISSING: Record<CheckKey, string> = {
   preview: 'no live preview was ever available, so nothing here was proven to RUN',
   pages: 'the page-render check needs a running app and was skipped',
   journeys: 'no user journey could be derived or run',
-  typecheck: 'the typecheck did not run',
+  typecheck: 'a typecheck of the current files is not established',
   tests: 'the app has no test suite that could be run here',
 };
 

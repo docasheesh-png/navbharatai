@@ -26,6 +26,7 @@ import { isAppAnalysisPath } from './appAnalysisPaths';
 import { openTagsAt, enclosingTag, tagName, hasAttr } from './jsxTags';
 import { stripCommentsForMarkup } from './stripCodeComments';
 import { classAttributeValues, cssImportsOf } from './CssConsistency';
+import { angularWorkspaceFacts } from './angularWorkspaceAnalysis';
 
 export interface FocusOwner {
   /** The component file that grabs initial focus. */
@@ -256,7 +257,7 @@ export function findOrphanStylesheets(files: Record<string, string>): OrphanStyl
   const cssFiles = Object.keys(files).filter((p) => /\.css$/i.test(p) && !/\.module\.css$/i.test(p) && isAppAnalysisPath(p));
   if (cssFiles.length === 0) return [];
   // Collect every stylesheet reference: JS/TS side-effect imports + HTML <link href>.
-  const referencedKeys = new Set<string>();
+  const referencedKeys = angularWorkspaceFacts(files).styles;
   const importRe = /import\s+['"]([^'"]+\.css)['"]/g;
   const linkRe = /<link\b[^>]*href\s*=\s*['"]([^'"]+\.css)['"]/gi;
   // In a config file a stylesheet is wired by DECLARATION (Nuxt `css: ['~/assets/css/main.css']`), not

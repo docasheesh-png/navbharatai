@@ -32,7 +32,7 @@ describe('production typecheck lanes use canonical evidence', () => {
   it('the agentic lane cannot call unknown setup output verified', () => {
     const body = bodyOf('runTsc');
     expect(body).toContain('const verdict = tscVerdict(out);');
-    expect(body).toContain("if (verdict === 'not-run' || verdict === 'unknown') return { ok: true, verified: false, errors: '' }");
+    expect(body).toContain("if (verdict === 'not-run' || verdict === 'unknown') return { ok: true, verified: false, errors: '', revision }");
     expect(body).toContain("return verdict === 'failed'");
     expect(body).not.toContain('tscNeverRan(out)');
     expect(body).not.toContain('hasTscErrors(out)');

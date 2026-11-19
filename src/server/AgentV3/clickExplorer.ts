@@ -282,6 +282,8 @@ export interface PressResult {
    * change — THEME_CONTROL) or `view` (something must appear — PROMISES_VIEW). Absent on every other press.
    */
   expects?: 'theme' | 'view';
+  /** On a `covered` press: the covering element's fingerprint (Q-2915) — found in the source by coveringElementSource.ts. */
+  coverer?: { name: string; classes: string[]; text: string; ariaLabel: string; tag: string };
 }
 
 /** How a press is named to a person: the control, and the screen it was found on when that is not the first. */
@@ -369,6 +371,13 @@ export function parseExploreOutput(stdout: string | null | undefined): ExploreRu
         ...(typeof o.via === 'string' && o.via.trim() ? { via: o.via.slice(0, 60) } : {}),
         ...(typeof o.primedBy === 'string' && o.primedBy.trim() ? { primedBy: o.primedBy.slice(0, 60) } : {}),
         ...(o.expects === 'theme' || o.expects === 'view' ? { expects: o.expects as 'theme' | 'view' } : {}),
+        ...(o.verdict === 'covered' && o.coverer && typeof o.coverer === 'object' ? { coverer: {
+          name: String(o.coverer.name ?? '').slice(0, 60),
+          classes: Array.isArray(o.coverer.classes) ? o.coverer.classes.slice(0, 12).map((c: unknown) => String(c).slice(0, 40)) : [],
+          text: String(o.coverer.text ?? '').slice(0, 60),
+          ariaLabel: String(o.coverer.ariaLabel ?? '').slice(0, 60),
+          tag: String(o.coverer.tag ?? '').slice(0, 20),
+        } } : {}),
       });
       // A retry after a primer REPLACES the first try of the same first-screen control (MAX_PRIMED_RETRIES).
       const last = run.presses[run.presses.length - 1];
@@ -783,7 +792,11 @@ function coveredBy(a) {
   const cls = typeof top.className === 'string' ? top.className.trim().split(/\\s+/)[0] : '';
   const name = top.tagName.toLowerCase()
     + (top.id ? '#' + String(top.id).slice(0, 24) : cls ? '.' + cls.slice(0, 24) : '');
-  return { name: name, full: t.width >= vw * 0.9 && t.height >= vh * 0.9 };
+  // Q-2915: the element's own fingerprint, so the platform can find it in the source (coveringElementSource.ts).
+  const classes = typeof top.className === 'string' ? top.className.trim().split(/\\s+/).filter(Boolean).slice(0, 12).map((c) => c.slice(0, 40)) : [];
+  const text = String(top.innerText || top.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 60);
+  const aria = String(top.getAttribute('aria-label') || '').trim().slice(0, 60);
+  return { name: name, full: t.width >= vw * 0.9 && t.height >= vh * 0.9, classes: classes, text: text, aria: aria, tag: top.tagName.toLowerCase() };
 }
 
 // Moves the mouse off the app and drops focus, so a hover or focus style is not read as a change.
@@ -922,6 +935,7 @@ async function judgeFailedPress(page, res, attr, marked, message, prefix) {
   const over = marked >= 0 ? await page.evaluate(coveredBy, { attr: attr, i: marked }).catch(() => null) : null;
   if (!over && !intercepts) return;
   res.verdict = 'covered';
+  if (over) res.coverer = { name: over.name, classes: over.classes || [], text: over.text || '', ariaLabel: over.aria || '', tag: over.tag || '' };
   const what = over ? (over.full ? 'something covering the whole screen (' + over.name + ')' : over.name) : 'something else on the screen';
   res.note = 'it cannot be ' + (prefix.indexOf('used') >= 0 ? 'used' : 'pressed') + ': ' + what + ' is on top of it';
 }

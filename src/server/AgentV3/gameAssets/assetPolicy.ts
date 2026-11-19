@@ -2,8 +2,12 @@ import { textureDimensions } from './texturePolicy.ts';
 /** Build-time policy for externally authored models. Never trust provider metadata as validation. */
 export const ASSET_LIMITS = Object.freeze({ bytes: 5 * 1024 * 1024, triangles: 60_000, nodes: 512, meshes: 128, animations: 128, texturePixels: 2048 * 2048, totalTexturePixels: 8 * 2048 * 2048 });
 
+/** Admin decision 2026-11-19: MIT joins CC0/CC-BY. CC-BY and MIT both require their credit/notice to travel with the asset. */
+export const ACCEPTED_ASSET_LICENSES = ['CC0-1.0', 'CC-BY-4.0', 'MIT'] as const;
+export type AssetLicenseId = typeof ACCEPTED_ASSET_LICENSES[number];
+export const licenseRequiresNotice = (spdx: string): boolean => spdx === 'CC-BY-4.0' || spdx === 'MIT';
 export interface AssetLicense {
-  spdx: 'CC0-1.0' | 'CC-BY-4.0';
+  spdx: AssetLicenseId;
   evidenceUrl: string;
   reviewedAt: string;
   author: string;
@@ -31,10 +35,10 @@ export interface AssetRequirement { subject: string; animation?: string }
 export interface ValidatedModel { triangles: number; animations: string[]; bytes: number }
 
 export function licenseAccepted(license: AssetLicense): boolean {
-  return !!license && ['CC0-1.0', 'CC-BY-4.0'].includes(license.spdx)
+  return !!license && (ACCEPTED_ASSET_LICENSES as readonly string[]).includes(license.spdx)
     && license.commercial === true && license.redistributeInGame === true && license.redistributeSource === true
     && /^https:\/\//.test(license.evidenceUrl) && Number.isFinite(Date.parse(license.reviewedAt))
-    && !!license.author?.trim() && (license.spdx !== 'CC-BY-4.0' || !!license.attribution?.trim());
+    && !!license.author?.trim() && (!licenseRequiresNotice(license.spdx) || !!license.attribution?.trim());
 }
 
 export function candidateMatches(c: AssetCandidate, r: AssetRequirement): boolean {

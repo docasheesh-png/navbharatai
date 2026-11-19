@@ -6,6 +6,9 @@ import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
 import { angularValidationPlan } from '../src/server/AgentV3/angularValidation';
 import { agentRunEvidence } from '../src/server/AgentV3/agentRunEvidence';
+import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
+import { getWorkspaceMemory } from '../src/server/AgentV3/WorkspaceMemory';
+import { refuteReviewByEvidence } from '../src/server/AgentV3/reviewEvidence';
 import * as previewCompiler from '../src/server/runtime/PreviewCompileCheck';
 
 const NATIVE_COMMAND = angularValidationPlan('angular')!.command;
@@ -59,6 +62,55 @@ const typecheck = (dispatcher: ToolDispatcher) => dispatcher.dispatch({ id: 'nat
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 describe('the dispatcher uses Angular validation, not a clean tsc as template proof', () => {
+  it.each(['after completion', 'during compilation'])('retires Angular proof when files change %s', async (when) => {
+    const workspace = `angular-freshness-${++nextWorkspace}`;
+    const actuator = new AngularActuator();
+    const memory = getWorkspaceMemory(workspace);
+    const diag = new BuildDiagnostics({ currentSourceRevision: () => memory.verificationRevision() });
+    const dispatcher = new ToolDispatcher(actuator, workspace, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, 'angular',
+      receipt => diag.recordCommand(receipt));
+    const run = actuator.runCommand.bind(actuator);
+    let mutate = when === 'during compilation';
+    actuator.runCommand = async (id, command) => {
+      const result = await run(id, command);
+      if (mutate && command === NATIVE_COMMAND) memory.indexFile('src/main.ts', 'changed after compile started');
+      return result;
+    };
+    await typecheck(dispatcher);
+    if (when === 'after completion') {
+      expect(diag.agentRunEvidence().typecheck).toBe('passed');
+      memory.indexFile('src/main.ts', 'changed after compile completed');
+    }
+    expect(diag.agentRunEvidence().typecheck).toBeUndefined();
+    expect(diag.evidenceLedger().facts.typecheck?.outcome).not.toBe('passed');
+    mutate = false;
+    await typecheck(dispatcher);
+    expect(diag.agentRunEvidence().typecheck).toBe('passed');
+  });
+
+  it('does not let stale native failure override a later current compile', () => {
+    expect(agentRunEvidence([
+      { command: NATIVE_COMMAND, exitCode: 1, stdout: '[ERROR] NG9: invalid template', typecheckCurrent: false },
+      { command: 'tsc --noEmit', exitCode: 0, stdout: '', typecheckCurrent: true },
+    ]).typecheck).toBe('passed');
+  });
+
+  it('keeps native template failures when refreshing compiler proof for the reviewer', () => {
+    const diag = new BuildDiagnostics({ currentSourceRevision: () => 4 });
+    const typecheckProof = { revision: 4, project: true };
+    diag.recordCommand({ command: NATIVE_COMMAND, exitCode: 1, stdout: '[ERROR] NG9: invalid template', typecheckProof });
+    diag.recordCommand({ command: 'tsc --noEmit', exitCode: 0, stdout: '', typecheckProof });
+    expect(diag.evidenceLedger().facts.typecheck?.outcome).toBe('failed');
+    expect(diag.typecheckEvidenceFromAgentCommands()).toBe('failed');
+    const review = { passed: false, score: 20, summary: 'The app does not compile',
+      issues: [{ severity: 'critical' as const, message: 'The app does not compile: its Angular template accesses an absent property.' }] };
+    expect(refuteReviewByEvidence(review, { typecheck: diag.typecheckEvidenceFromAgentCommands() }).refuted).toEqual([]);
+    diag.recordCommand({ command: NATIVE_COMMAND, exitCode: 0, stdout: COMPLETE, typecheckProof });
+    expect(diag.typecheckEvidenceFromAgentCommands()).toBe('passed');
+    expect(refuteReviewByEvidence(review, { typecheck: diag.typecheckEvidenceFromAgentCommands() }).refuted).toHaveLength(1);
+  });
+
   it.each([
     "NG5002: Parser Error: Unexpected token ')' in [!wallet.txns.some((t) => t.note === 'demo')]",
     "NG9: Property 'colour' does not exist on type 'BetTarget'.",

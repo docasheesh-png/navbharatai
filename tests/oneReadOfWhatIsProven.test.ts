@@ -65,9 +65,11 @@ describe('filling a gate moves the sentence, never the money', () => {
 describe('census: one read', () => {
   it('the route asks the ledger and nothing else', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
-    expect(route).toContain('fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger())');
+    expect(route).toContain('const gateLedger = buildDiag.evidenceLedger();');
+    expect(route).toMatch(/gateEvidence\.typecheck = combineTypecheckEvidence\([\s\S]{0,200}gateLedger\.facts\.typecheck\?\.outcome\);\s*fillGateFromLedger\(gateEvidence, gateLedger\)/);
     expect(route).not.toMatch(/provenFromTimeline\(/);
     expect(route).not.toMatch(/\.agentRunEvidence\(\)/);
+    expect(route).not.toMatch(/\.typecheckEvidenceFromAgentCommands\(\)/);
   });
 
   it('no other server module reads either source directly', () => {

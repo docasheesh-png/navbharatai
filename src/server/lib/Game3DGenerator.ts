@@ -1880,8 +1880,25 @@ export interface Humanoid {
   aim: (on: boolean) => void;
   /** Drive the pose. dt in seconds; speed in world units/second; grounded false while airborne. */
   update: (dt: number, speed: number, grounded?: boolean) => void;
+  /**
+   * Play a one-shot ACTION pose over the walk, so the body visibly does what the button did: 'punch', 'swing'
+   * (a melee weapon), 'fire' (a gun's recoil), 'kick', 'throw', 'jump' (the launch), 'land' (the squash, also
+   * automatic after a fall), 'hit' (a flinch), 'use' (a reach). Call it on the frame the action happens; keep
+   * calling update() every frame. strength 0–1.5 scales it (default 1).
+   */
+  act: (action: HumanoidAction, strength?: number) => void;
+  /** The action pose playing now, or null. */
+  acting: () => HumanoidAction | null;
   dispose: () => void;
 }
+
+/** The one-shot action poses a humanoid can play (see Humanoid.act). */
+export type HumanoidAction = 'punch' | 'swing' | 'fire' | 'kick' | 'throw' | 'jump' | 'land' | 'hit' | 'use';
+
+/** How long each action pose lasts, in seconds — short enough to never delay the next press. */
+export const ACTION_SECONDS: Readonly<Record<HumanoidAction, number>> = {
+  punch: 0.3, swing: 0.45, fire: 0.16, kick: 0.45, throw: 0.5, jump: 0.25, land: 0.24, hit: 0.32, use: 0.4,
+};
 
 /**
  * A rounded limb segment hanging DOWN from its joint at y = 0: a lathed capsule that tapers from r0 at
@@ -2095,6 +2112,88 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
   let phase = 0;
   let aiming = false;
   let held: THREE.Object3D | null = null;
+  // 🎬 THE ACTION LAYER (admin 2026-11-19: "fire button press kiya goli chalne lagi par character goli chalate huye
+  // dikha nahi, character same position me khada raha"). A one-shot pose laid OVER the walk, so the body visibly does
+  // what the button did: a jab, a sword sweep, a gun kicking back, a kick, a throw, a crouch-launch, a landing squash,
+  // a flinch, a reach. It runs in the air too, and the base pose takes back over when it ends.
+  let action: { name: HumanoidAction; t: number; dur: number; strength: number } | null = null;
+  let grounded0 = true;
+  let airTime = 0;
+  const act = (name: HumanoidAction, strength = 1) => {
+    const dur = ACTION_SECONDS[name];
+    if (dur === undefined) return;
+    action = { name, t: 0, dur, strength: Math.max(0, Math.min(1.5, strength)) };
+  };
+  // Move a joint angle toward a target by weight w (0 = the walk's own pose, 1 = the action's).
+  const mix = (o: THREE.Euler, axis: 'x' | 'y' | 'z', target: number, w: number) => { o[axis] += (target - o[axis]) * w; };
+  const applyAction = (dt: number) => {
+    if (!action) return;
+    action.t += dt;
+    const u = Math.min(1, action.t / action.dur);
+    const k = action.strength;
+    // strike: snaps in over the first quarter, then eases home. pulse: rises and falls. kick: instant, then recovers.
+    const strike = (u < 0.25 ? u / 0.25 : 1 - (u - 0.25) / 0.75) * k;
+    const pulse = Math.sin(Math.PI * u) * k;
+    const RS = right.shoulder.rotation, RE = right.elbow.rotation, LS = left.shoulder.rotation, LE = left.elbow.rotation;
+    switch (action.name) {
+      case 'punch':
+        mix(RS, 'x', -1.5, strike); mix(RE, 'x', -0.05, strike);
+        mix(LS, 'x', -0.7, strike); mix(LE, 'x', -1.7, strike);
+        chest.rotation.y += -0.45 * strike; spine.rotation.x += 0.08 * strike;
+        break;
+      case 'swing': {
+        // Wind up overhead for the first 35%, then sweep down and across the body.
+        const wind = u < 0.35 ? u / 0.35 : 0;
+        const sweep = u < 0.35 ? 0 : 1 - (u - 0.35) / 0.65;
+        mix(RS, 'x', -2.7, wind * k); mix(RE, 'x', -1.0, wind * k);
+        mix(RS, 'x', -0.9, sweep * k); mix(RS, 'z', 0.65, sweep * k); mix(RE, 'x', -0.15, sweep * k);
+        chest.rotation.y += (0.4 * wind - 0.55 * sweep) * k;
+        break;
+      }
+      case 'fire': {
+        // Both arms aim the weapon, and the shot kicks the gun arm up and the chest back.
+        const recoil = (1 - u) * k;
+        mix(RS, 'x', -Math.PI / 2 - 0.35 * recoil, Math.min(1, 4 * (1 - u))); mix(RE, 'x', 0, Math.min(1, 4 * (1 - u)));
+        mix(LS, 'x', -Math.PI / 2 + 0.15, Math.min(1, 4 * (1 - u))); mix(LE, 'x', -0.35, Math.min(1, 4 * (1 - u)));
+        spine.rotation.x += -0.07 * recoil; chest.rotation.y *= 1 - Math.min(1, 4 * (1 - u));
+        break;
+      }
+      case 'kick':
+        mix(rightLeg.hip.rotation, 'x', -1.45, strike); mix(rightLeg.knee.rotation, 'x', 0.15, strike);
+        mix(leftLeg.knee.rotation, 'x', 0.25, strike); mix(LS, 'z', -0.6, strike); mix(RS, 'z', 0.4, strike);
+        spine.rotation.x += -0.16 * strike;
+        break;
+      case 'throw': {
+        const back = u < 0.4 ? u / 0.4 : 0;
+        const forward = u < 0.4 ? 0 : 1 - (u - 0.4) / 0.6;
+        mix(RS, 'x', 1.0, back * k); mix(RE, 'x', -1.4, back * k);
+        mix(RS, 'x', -1.9, forward * k); mix(RE, 'x', -0.1, forward * k);
+        chest.rotation.y += (0.35 * back - 0.45 * forward) * k; spine.rotation.x += 0.12 * forward * k;
+        break;
+      }
+      case 'jump':
+        // The launch: arms thrown up and legs straight, before the airborne tuck takes over.
+        mix(RS, 'x', -2.6, pulse); mix(LS, 'x', -2.6, pulse); mix(RE, 'x', -0.1, pulse); mix(LE, 'x', -0.1, pulse);
+        mix(leftLeg.knee.rotation, 'x', 0, pulse); mix(rightLeg.knee.rotation, 'x', 0, pulse);
+        break;
+      case 'land':
+        // Squash: knees give, hips drop, arms come forward for balance.
+        hips.position.y -= 0.075 * H * pulse;
+        mix(leftLeg.hip.rotation, 'x', -0.55, pulse); mix(rightLeg.hip.rotation, 'x', -0.55, pulse);
+        mix(leftLeg.knee.rotation, 'x', 1.0, pulse); mix(rightLeg.knee.rotation, 'x', 1.0, pulse);
+        mix(RS, 'x', -0.5, pulse); mix(LS, 'x', -0.5, pulse); spine.rotation.x += 0.22 * pulse;
+        break;
+      case 'hit':
+        spine.rotation.x += -0.35 * pulse; neck.rotation.x = -0.3 * pulse;
+        mix(LS, 'z', -0.55, pulse); mix(RS, 'z', 0.55, pulse); mix(LS, 'x', -0.4, pulse); mix(RS, 'x', -0.4, pulse);
+        break;
+      case 'use':
+        mix(RS, 'x', -1.25, pulse); mix(LS, 'x', -1.25, pulse); mix(RE, 'x', -0.45, pulse); mix(LE, 'x', -0.45, pulse);
+        spine.rotation.x += 0.1 * pulse;
+        break;
+    }
+    if (u >= 1) { action = null; neck.rotation.x = 0; }
+  };
   const update = (dt: number, speed: number, grounded = true) => {
     const moving = speed > 0.05;
     // Stride frequency rises with speed but saturates — a sprint is a faster stride, not a blur.
@@ -2111,35 +2210,40 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
       leftLeg.knee.rotation.x = 0.9; rightLeg.knee.rotation.x = 0.4;
       left.shoulder.rotation.x = -1.9; right.shoulder.rotation.x = -1.9;
       left.elbow.rotation.x = -0.3; right.elbow.rotation.x = -0.3;
-      return;
-    }
-
-    leftLeg.hip.rotation.x = s * swing;
-    rightLeg.hip.rotation.x = c * swing;
-    // A knee only bends one way. Clamping to >= 0 is what stops the classic backwards-knee look.
-    leftLeg.knee.rotation.x = Math.max(0, -s * swing * 1.5);
-    rightLeg.knee.rotation.x = Math.max(0, -c * swing * 1.5);
-
-    // Arms swing OPPOSITE the legs — the thing everyone forgets, and the thing that makes it read.
-    left.shoulder.rotation.x = c * swing * 0.8;
-    right.shoulder.rotation.x = s * swing * 0.8;
-    left.elbow.rotation.x = -Math.abs(c) * swing * 0.5 - 0.12;
-    right.elbow.rotation.x = -Math.abs(s) * swing * 0.5 - 0.12;
-
-    // Small counter-rotations: the body twists against the stride and bobs twice per cycle. Tiny
-    // numbers, and they are most of the difference between "animated" and "alive".
-    if (aiming) {
-      // Gun arm straight out in front, the other hand supporting it; the torso stops twisting.
-      right.shoulder.rotation.x = -Math.PI / 2; right.elbow.rotation.x = 0;
-      left.shoulder.rotation.x = -Math.PI / 2 + 0.15; left.elbow.rotation.x = -0.35;
-      left.shoulder.rotation.z = -0.45;
     } else {
-      left.shoulder.rotation.z = 0;
+      leftLeg.hip.rotation.x = s * swing;
+      rightLeg.hip.rotation.x = c * swing;
+      // A knee only bends one way. Clamping to >= 0 is what stops the classic backwards-knee look.
+      leftLeg.knee.rotation.x = Math.max(0, -s * swing * 1.5);
+      rightLeg.knee.rotation.x = Math.max(0, -c * swing * 1.5);
+
+      // Arms swing OPPOSITE the legs — the thing everyone forgets, and the thing that makes it read.
+      left.shoulder.rotation.x = c * swing * 0.8;
+      right.shoulder.rotation.x = s * swing * 0.8;
+      left.elbow.rotation.x = -Math.abs(c) * swing * 0.5 - 0.12;
+      right.elbow.rotation.x = -Math.abs(s) * swing * 0.5 - 0.12;
+
+      // Small counter-rotations: the body twists against the stride and bobs twice per cycle. Tiny
+      // numbers, and they are most of the difference between "animated" and "alive".
+      if (aiming) {
+        // Gun arm straight out in front, the other hand supporting it; the torso stops twisting.
+        right.shoulder.rotation.x = -Math.PI / 2; right.elbow.rotation.x = 0;
+        left.shoulder.rotation.x = -Math.PI / 2 + 0.15; left.elbow.rotation.x = -0.35;
+        left.shoulder.rotation.z = -0.45;
+      } else {
+        left.shoulder.rotation.z = 0;
+      }
+      right.shoulder.rotation.z = 0;
+      chest.rotation.y = aiming ? 0 : -s * swing * 0.18;
+      hips.rotation.y = s * swing * 0.1;
+      hips.position.y = legH + (moving ? Math.abs(Math.sin(phase * 2)) * 0.02 * (1 + speed * 0.1) : Math.sin(phase) * 0.006);
+      spine.rotation.x = moving ? Math.min(0.02 + speed * 0.012, 0.16) : 0.01;
     }
-    chest.rotation.y = aiming ? 0 : -s * swing * 0.18;
-    hips.rotation.y = s * swing * 0.1;
-    hips.position.y = legH + (moving ? Math.abs(Math.sin(phase * 2)) * 0.02 * (1 + speed * 0.1) : Math.sin(phase) * 0.006);
-    spine.rotation.x = moving ? Math.min(0.02 + speed * 0.012, 0.16) : 0.01;
+    // A landing after a real fall is SEEN: the body squashes, unless it is mid-action.
+    if (grounded && !grounded0 && airTime > 0.18 && !action) act('land', Math.min(1, airTime / 0.6));
+    airTime = grounded ? 0 : airTime + dt;
+    grounded0 = grounded;
+    applyAction(dt);
   };
 
   update(0, 0, true);
@@ -2166,6 +2270,8 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
     },
     aim: (on: boolean) => { aiming = on; update(0, 0, true); },
     update,
+    act,
+    acting: () => action?.name ?? null,
     dispose: () => { for (const d of disposables) d.dispose(); },
   };
 }
@@ -3591,7 +3697,30 @@ export interface VehicleTuning {
   length?: number;
   width?: number;
 }
-export interface VehicleState { speed: number; heading: number; pitch?: number; roll?: number }
+export interface VehicleState {
+  speed: number; heading: number; pitch?: number; roll?: number;
+  /** The direction the car is actually MOVING; it lags the nose while drifting. */
+  course?: number;
+  /** The angle between the nose and the direction of travel (radians) — the size of the drift. */
+  slip?: number;
+  drifting?: boolean;
+}
+
+// 🏁 DRIFT (admin 2026-11-19: "attack, ya dript … action hota hua dikhata nahi"). The shell tells the kit whether the
+// player holds Drift (Space, or the Drift touch button) and which axis objects are the player's, so the player's car
+// drifts without a line of game code; a game can also pass { drift } to driveVehicle for any car.
+let driftHeld = false;
+const playerAxes = new WeakSet<object>();
+const driftListeners = new Set<(at: THREE.Vector3, vehicle: THREE.Object3D) => void>();
+/** The shell sets this every step from the 'drift' action. */
+export function setDriftInput(held: boolean): void { driftHeld = held; }
+/** The shell marks every axis object ctx.input.axis() hands out, so the player's car is known. */
+export function notePlayerAxis(axis: object): void { playerAxes.add(axis); }
+/** Hear a drifting car (about 16 times a second, at its rear wheels) — the shell puts tyre smoke there. */
+export function onVehicleDrift(handler: (at: THREE.Vector3, vehicle: THREE.Object3D) => void): () => void {
+  driftListeners.add(handler);
+  return () => { driftListeners.delete(handler); };
+}
 
 /**
  * Put a vehicle ON the ground under it: y follows the surface with a soft suspension on the way DOWN
@@ -3763,6 +3892,7 @@ export function driveVehicle(
   axis: { x: number; y: number },
   dt: number,
   tuning: VehicleTuning = {},
+  controls: { drift?: boolean } = {},
 ): VehicleState {
   assertVehicle(vehicle, 'driveVehicle');
   state = resolveState(vehicle, state, tuning);
@@ -3787,10 +3917,18 @@ export function driveVehicle(
 
   // Positive rotation.y turns +Z toward +X, the DRIVER'S LEFT — so a right turn lowers the heading.
   const grip = Math.min(1, Math.abs(speed) / 4);
-  const heading = state.heading - axis.x * steerRate * grip * Math.sign(speed) * dt;
+  // DRIFTING: the nose turns faster than the car can follow, so the car slides sideways along its old course and
+  // scrubs speed. Only at speed and going forward — a parked car does not drift.
+  const drifting = (controls.drift ?? (playerAxes.has(axis) && driftHeld)) && speed > 6;
+  const heading = state.heading - axis.x * steerRate * (drifting ? 1.9 : 1) * grip * Math.sign(speed) * dt;
+  let course = state.course ?? heading;
+  const lag = Math.atan2(Math.sin(heading - course), Math.cos(heading - course));
+  course += lag * Math.min(1, (drifting ? 1.6 : 14) * dt);
+  const slip = Math.atan2(Math.sin(heading - course), Math.cos(heading - course));
+  if (drifting) speed -= speed * 0.22 * dt;
 
   vehicle.rotation.y = heading;
-  const movement = new THREE.Vector3(Math.sin(heading) * speed * dt, 0, Math.cos(heading) * speed * dt);
+  const movement = new THREE.Vector3(Math.sin(course) * speed * dt, 0, Math.cos(course) * speed * dt);
   const travel = vehicleTravel(vehicle, movement, tuning);
   vehicle.position.x += movement.x * travel;
   vehicle.position.z += movement.z * travel;
@@ -3803,6 +3941,22 @@ export function driveVehicle(
   state.speed = travel < 1 ? 0 : speed;
   state.heading = heading;
   if (slope) { state.pitch = slope.pitch; state.roll = slope.roll; }
+  // A slide is SEEN: the body leans to the outside of the slide, and smoke pours from the rear tyres.
+  const lean = Math.max(-0.12, Math.min(0.12, -slip * 0.3));
+  vehicle.rotation.order = 'YXZ';
+  vehicle.rotation.z = (slope ? slope.roll : (state.roll ?? 0)) + lean;
+  state.course = course;
+  state.slip = slip;
+  state.drifting = drifting && Math.abs(slip) > 0.08;
+  if (state.drifting && driftListeners.size > 0) {
+    const ud = vehicle.userData as { nbDriftClock?: number };
+    ud.nbDriftClock = (ud.nbDriftClock ?? 0) + dt;
+    if (ud.nbDriftClock >= 0.06) {
+      ud.nbDriftClock = 0;
+      const rear = new THREE.Vector3(0, 0.25, -(tuning.length ?? 2.6) / 2).applyAxisAngle(new THREE.Vector3(0, 1, 0), heading).add(vehicle.position);
+      for (const listener of driftListeners) listener(rear, vehicle);
+    }
+  }
   return state;
 }
 

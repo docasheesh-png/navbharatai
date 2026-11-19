@@ -47,8 +47,11 @@ describe('the fixed/render split — the bug that makes a game unfair per monito
     expect(game).toContain('if (!this.feel.frozen)');
     const fixed = game.slice(game.indexOf('private fixedUpdate'), game.indexOf('private render'));
     const frozenAt = fixed.indexOf('if (!this.feel.frozen)');
-    const endFrameAt = fixed.indexOf('this.input.endFrame()');
+    const endFrameAt = fixed.indexOf('this.input.endFrame(');
     expect(endFrameAt).toBeGreaterThan(frozenAt);
+    // 2026-11-19: the press made DURING the freeze is kept for the step that runs next (it used to be wiped unseen,
+    // which is why a tap right after a shot sometimes did nothing).
+    expect(fixed).toContain('this.input.endFrame(this.feel.frozen)');
     // endFrame must sit OUTSIDE the freeze block: between the `if` and endFrame the braces balance,
     // which is only true once that block has closed.
     const between = fixed.slice(frozenAt, endFrameAt).replace(/\/\/.*$/gm, '');
@@ -61,7 +64,7 @@ describe('the fixed/render split — the bug that makes a game unfair per monito
     const fixed = game.slice(game.indexOf('private fixedUpdate'), game.indexOf('private render'));
     const lookAt = fixed.indexOf('this.rig.look(');
     expect(lookAt).toBeGreaterThan(-1);
-    expect(lookAt).toBeLessThan(fixed.indexOf('this.input.endFrame()'));
+    expect(lookAt).toBeLessThan(fixed.indexOf('this.input.endFrame('));
   });
 
   it('shake uses the feel defaults — a hand-picked small number is invisible', () => {
@@ -224,7 +227,7 @@ describe('the shell only calls things the other phases actually export', () => {
     for (const api of [
       'export class GameLoop', 'export class Input', 'export class GameFeel', 'export const events',
       'export function setStatus', 'export function resetRun', 'export interface GameState',
-      'get frozen()', 'endFrame(): void', 'axis(): { x: number; y: number }', 'clear(): void',
+      'get frozen()', 'endFrame(keepPresses = false): void', 'axis(): { x: number; y: number }', 'clear(): void',
     ]) expect(exportsIt(api), `runtime is missing ${api}`).toBe(true);
   });
 

@@ -1,0 +1,522 @@
+[
+  {
+    "id": "lib5-school",
+    "file": "escola.glb",
+    "sourceBytes": 83920,
+    "bytes": 82476,
+    "triangles": 1328,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-hospital",
+    "file": "hospital.glb",
+    "sourceBytes": 78560,
+    "bytes": 77984,
+    "triangles": 1224,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-police-station",
+    "file": "policia.glb",
+    "sourceBytes": 52224,
+    "bytes": 51072,
+    "triangles": 772,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-fire-station",
+    "file": "bombeiros.glb",
+    "sourceBytes": 45060,
+    "bytes": 43332,
+    "triangles": 670,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-library",
+    "file": "biblioteca.glb",
+    "sourceBytes": 54664,
+    "bytes": 54376,
+    "triangles": 812,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-museum",
+    "file": "museu.glb",
+    "sourceBytes": 80372,
+    "bytes": 80084,
+    "triangles": 1238,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-town-hall",
+    "file": "prefeitura.glb",
+    "sourceBytes": 76328,
+    "bytes": 76040,
+    "triangles": 1146,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-university",
+    "file": "universidade.glb",
+    "sourceBytes": 87720,
+    "bytes": 86424,
+    "triangles": 1352,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-monument",
+    "file": "monumento.glb",
+    "sourceBytes": 76252,
+    "bytes": 76252,
+    "triangles": 1154,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-bank",
+    "file": "banco.glb",
+    "sourceBytes": 46040,
+    "bytes": 46040,
+    "triangles": 662,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-hotel",
+    "file": "hotel.glb",
+    "sourceBytes": 46952,
+    "bytes": 45512,
+    "triangles": 678,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-shopping-mall",
+    "file": "shopping.glb",
+    "sourceBytes": 58060,
+    "bytes": 56620,
+    "triangles": 796,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-restaurant",
+    "file": "restaurante.glb",
+    "sourceBytes": 51868,
+    "bytes": 50620,
+    "triangles": 738,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-supermarket",
+    "file": "mercado.glb",
+    "sourceBytes": 37260,
+    "bytes": 36684,
+    "triangles": 512,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-ev-charger",
+    "file": "posto_recarga.glb",
+    "sourceBytes": 46616,
+    "bytes": 44888,
+    "triangles": 636,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-factory",
+    "file": "fabrica.glb",
+    "sourceBytes": 85648,
+    "bytes": 84496,
+    "triangles": 1372,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-warehouse",
+    "file": "galpao.glb",
+    "sourceBytes": 48904,
+    "bytes": 48904,
+    "triangles": 748,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-port",
+    "file": "porto.glb",
+    "sourceBytes": 67172,
+    "bytes": 66016,
+    "triangles": 1020,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-skyscraper",
+    "file": "predio_alto.glb",
+    "sourceBytes": 67640,
+    "bytes": 66344,
+    "triangles": 1008,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-apartment",
+    "file": "predio_apartamentos.glb",
+    "sourceBytes": 77680,
+    "bytes": 77392,
+    "triangles": 1208,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-bakery",
+    "file": "padaria_toldo.glb",
+    "sourceBytes": 66640,
+    "bytes": 62604,
+    "triangles": 1024,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-dam",
+    "file": "hidreletrica.glb",
+    "sourceBytes": 69360,
+    "bytes": 69360,
+    "triangles": 972,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-wind-farm",
+    "file": "parque_eolico.glb",
+    "sourceBytes": 56032,
+    "bytes": 51900,
+    "triangles": 846,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-nuclear-plant",
+    "file": "usina_nuclear.glb",
+    "sourceBytes": 86388,
+    "bytes": 86096,
+    "triangles": 1488,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-solar-farm",
+    "file": "usina_solar.glb",
+    "sourceBytes": 59396,
+    "bytes": 59396,
+    "triangles": 944,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-coconut-palm",
+    "file": "coqueiro.glb",
+    "sourceBytes": 11332,
+    "bytes": 11332,
+    "triangles": 140,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-banana-plant",
+    "file": "bananeira.glb",
+    "sourceBytes": 9832,
+    "bytes": 9832,
+    "triangles": 112,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-bamboo",
+    "file": "bambu.glb",
+    "sourceBytes": 9788,
+    "bytes": 9788,
+    "triangles": 132,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-tree-stump",
+    "file": "toco.glb",
+    "sourceBytes": 7612,
+    "bytes": 7108,
+    "triangles": 96,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-fallen-log",
+    "file": "tronco_caido.glb",
+    "sourceBytes": 8864,
+    "bytes": 8864,
+    "triangles": 88,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-rocks",
+    "file": "pedras.glb",
+    "sourceBytes": 9572,
+    "bytes": 9572,
+    "triangles": 84,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-flowers",
+    "file": "flores_campo.glb",
+    "sourceBytes": 12612,
+    "bytes": 12036,
+    "triangles": 136,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-tall-grass",
+    "file": "capim_alto.glb",
+    "sourceBytes": 6428,
+    "bytes": 6428,
+    "triangles": 54,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-giant-water-lily",
+    "file": "vitoria_regia.glb",
+    "sourceBytes": 10108,
+    "bytes": 8956,
+    "triangles": 148,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-termite-mound",
+    "file": "cupinzeiro.glb",
+    "sourceBytes": 6092,
+    "bytes": 6092,
+    "triangles": 54,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-scarecrow",
+    "file": "espantalho.glb",
+    "sourceBytes": 10352,
+    "bytes": 10352,
+    "triangles": 120,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-hay-bale",
+    "file": "fardo_feno.glb",
+    "sourceBytes": 5816,
+    "bytes": 5816,
+    "triangles": 84,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-beehive",
+    "file": "colmeia.glb",
+    "sourceBytes": 7424,
+    "bytes": 6560,
+    "triangles": 72,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-farm-gate",
+    "file": "porteira.glb",
+    "sourceBytes": 6404,
+    "bytes": 6404,
+    "triangles": 84,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-firewood",
+    "file": "pilha_lenha.glb",
+    "sourceBytes": 8440,
+    "bytes": 7360,
+    "triangles": 120,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-vegetable-garden",
+    "file": "horta.glb",
+    "sourceBytes": 13000,
+    "bytes": 13000,
+    "triangles": 144,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-traffic-cone",
+    "file": "cone_transito.glb",
+    "sourceBytes": 4372,
+    "bytes": 4372,
+    "triangles": 52,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-popcorn-cart",
+    "file": "carrinho_pipoca.glb",
+    "sourceBytes": 11660,
+    "bytes": 11372,
+    "triangles": 112,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-market-stall",
+    "file": "barraca_feira.glb",
+    "sourceBytes": 13152,
+    "bytes": 12576,
+    "triangles": 140,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-stop-sign",
+    "file": "placa_pare.glb",
+    "sourceBytes": 9996,
+    "bytes": 9996,
+    "triangles": 136,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-bus-stop",
+    "file": "ponto_onibus.glb",
+    "sourceBytes": 39164,
+    "bytes": 37436,
+    "triangles": 480,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-playground",
+    "file": "parquinho.glb",
+    "sourceBytes": 38500,
+    "bytes": 38500,
+    "triangles": 596,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-wheelbarrow",
+    "file": "carrinho_mao.glb",
+    "sourceBytes": 9992,
+    "bytes": 9992,
+    "triangles": 100,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-dirt-road",
+    "file": "terra_reta.glb",
+    "sourceBytes": 15292,
+    "bytes": 14428,
+    "triangles": 160,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-dirt-road-curve",
+    "file": "terra_curva.glb",
+    "sourceBytes": 27468,
+    "bytes": 27468,
+    "triangles": 484,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-zebra-crossing",
+    "file": "asfalto_faixa_pedestre.glb",
+    "sourceBytes": 16708,
+    "bytes": 13824,
+    "triangles": 228,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib5-road-bridge",
+    "file": "ponte.glb",
+    "sourceBytes": 29164,
+    "bytes": 27432,
+    "triangles": 428,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  }
+]

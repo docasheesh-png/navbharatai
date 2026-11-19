@@ -17,6 +17,9 @@ export function assetCacheKey(hash: string): string {
 export function createDurableAssetCache(store: AssetObjectStore, catalogue: readonly ReviewedAsset[]): AssetCache {
   validateCatalogue(catalogue);
   const approved = new Set(catalogue.map(c => c.sha256));
+  // A declared size is part of the storage budget's evidence: bytes that disagree with it are not the reviewed asset.
+  const declared = new Map(catalogue.filter(c => c.bytes !== undefined).map(c => [c.sha256, c.bytes!] as const));
+  const sizeMatches = (hash: string, bytes: Uint8Array) => !declared.has(hash) || declared.get(hash) === bytes.byteLength;
   return {
     async find(requirement) {
       // No unbounded listing and no mutable metadata authority: the reviewed release catalogue is the index.
@@ -28,12 +31,12 @@ export function createDurableAssetCache(store: AssetObjectStore, catalogue: read
     async read(hash) {
       if (!approved.has(hash)) return null;
       const bytes = await store.read(assetCacheKey(hash), ASSET_LIMITS.bytes);
-      if (!bytes || bytes.byteLength > ASSET_LIMITS.bytes || createHash('sha256').update(bytes).digest('hex') !== hash) return null;
+      if (!bytes || bytes.byteLength > ASSET_LIMITS.bytes || !sizeMatches(hash, bytes) || createHash('sha256').update(bytes).digest('hex') !== hash) return null;
       validateGlb(bytes);
       return bytes;
     },
     async put(entry, bytes) {
-      if (!approved.has(entry.sha256) || createHash('sha256').update(bytes).digest('hex') !== entry.sha256) throw new Error('Unapproved cache write');
+      if (!approved.has(entry.sha256) || !sizeMatches(entry.sha256, bytes) || createHash('sha256').update(bytes).digest('hex') !== entry.sha256) throw new Error('Unapproved cache write');
       validateGlb(bytes);
       await store.write(assetCacheKey(entry.sha256), bytes, 'model/gltf-binary');
     },

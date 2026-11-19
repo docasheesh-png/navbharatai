@@ -4850,7 +4850,7 @@ export function renderSessionDiagnosticsText(reports: readonly BuildDiagnosticsR
  * it states the ₹ billed, which the owner wants users to see.
  */
 export const USER_HIDDEN_BILLING_METHOD_CODES: ReadonlySet<string> = new Set([
-  'ENGINE_COST_ESTIMATED', 'USAGE_NOT_REPORTED', 'DISCOUNT_COST_UNCONFIRMED',
+  'ENGINE_COST_ESTIMATED', 'USAGE_NOT_REPORTED', 'FAILED_ATTEMPT_COST_UNKNOWN', 'DISCOUNT_COST_UNCONFIRMED',
   'PRO_CHAIN_V2_USAGE_ESTIMATED', 'PRO_CHAIN_V2_RATE_ESTIMATED',
   'ROUTER_ONE_CATALOGUE_ESTIMATED', 'SURPLUS_STOP_COST_ESTIMATED',
 ]);

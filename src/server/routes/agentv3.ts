@@ -789,6 +789,7 @@ import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedCla
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
 import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../AgentV3/spacingSnap';
 import { filesANoteStillFlags, salvageQualityNotes } from '../AgentV3/writeTimeQualityCheck';
+import { failedAttemptCostVerdict } from '../AI/SurplusRegistry/failedAttemptCost';
 import { persistedStateBuildWarnings } from '../AgentV3/persistedStateCheck';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
@@ -14902,7 +14903,8 @@ async function noteBuildOutcome(
           () => { liveCostDiscountPct = 0; }, // unreadable ⇒ 0% — the ordinary price, as at settle
         );
       }
-      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
+      let failedAttemptUnknownFired = false;
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt; measured?: boolean; failedAttempt?: boolean; producedNothing?: boolean; discardedOutput?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
         if (routerOneCostUnconfirmed(used, usage.routerOneReceipt) && !costUnconfirmedNoted) {
           costUnconfirmedNoted = true;
           try { buildDiag.record({ phase: 'build', severity: 'info', code: 'DISCOUNT_COST_UNCONFIRMED', autoResolved: true,
@@ -14919,7 +14921,20 @@ async function noteBuildOutcome(
         // free to them). What it protects is the ADMIN's own cost figure, which silently under-states
         // itself otherwise — the same shape as the E2B_USD_PER_HOUR drift, and on the very panel used
         // to judge provider spend.
-        if (usage.measured === false && !usageUnreportedFired) {
+        // 🔴 A FAILED, RETRIED ATTEMPT IS NOT "A PROVIDER THAT RETURNED NO USAGE" (Q-2920, admin decision 2026-11-19, option a).
+        // Surplus's failure path reported its attempt as a zero-token turn, so #2449 and #2475 read "cost is an
+        // under-estimate" although the answered turn reported its tokens. Its cost is in its RECEIPT: known ⇒ nothing to
+        // say; unknown ⇒ its own code, never zero. The user's bill is untouched: this changes only what the report says.
+        const failedAttemptVerdict = failedAttemptCostVerdict(usage);
+        if (failedAttemptVerdict === 'unknown' && !failedAttemptUnknownFired) {
+          failedAttemptUnknownFired = true;
+          try {
+            buildDiag.record({ phase: 'build', severity: 'info', code: 'FAILED_ATTEMPT_COST_UNKNOWN', autoResolved: true,
+              message: 'A failed engine attempt was retried; its cost is not on its receipt, so it is unmeasured (never counted as zero).',
+              detail: `${used}${model ? ` (${model})` : ''}: the attempt failed before answering and its receipt carries no provider-reported cost. The answered turn's own tokens are recorded as usual. Reconcile against the provider invoice.` });
+          } catch { /* diagnostics are best-effort */ }
+        }
+        if (failedAttemptVerdict === null && usage.measured === false && !usageUnreportedFired) {
           usageUnreportedFired = true;
           try {
             buildDiag.record({

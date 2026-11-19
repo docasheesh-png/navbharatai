@@ -1,6 +1,8 @@
 # Calculator build 9fba77d7 — proposed engine repairs
 
 Report: `9fba77d7-7434-44fb-a5a2-633cf74d0902`, prompt hash `1cad59de`.
+
+Integration identity correction (2026-11-19): this report now owns Q-2881–Q-2891. Its original branch-local Q-2756–Q-2766 labels collided with unrelated rows already assigned on main, including closed Q-2756. The mapping preserves order (Q-2756 → Q-2881 through Q-2766 → Q-2891); findings, evidence and states are unchanged. Historical work-log entries retain their original labels.
 Request: “Make a simple calculator app that I can upload on playstore”.
 Reviewed on 2026-11-19. Status: code proposed; GitHub CI and a fresh production build remain verification gates.
 

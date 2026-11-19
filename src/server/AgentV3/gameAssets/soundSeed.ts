@@ -14,6 +14,8 @@ import { createHash } from 'node:crypto';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { downloadGameAsset } from './assetDownload';
 import type { GameAssetPersistence, GameAssetWorkspace } from './assetProject';
+import type { AssetObjectStore } from './assetCache';
+import { gameAssetObjectStore } from './objectStore';
 import { SOUND_LIBRARY, SOUND_LIBRARY_LICENCE, SOUND_LIBRARY_REVISION, type LibrarySound } from './soundLibraryCatalogue';
 
 export const GAME_SOUND_LIBRARY_PATH = 'src/game/fx/soundLibrary.ts';
@@ -22,6 +24,8 @@ export const GAME_SOUND_DIR = 'public/sfx/library';
 /** Bounds per game: an ambience loop is ~1 MB, so a prompt naming everything still ships a light game. */
 export const SOUND_BUDGET = Object.freeze({ maxSounds: 28, maxBytes: 8 * 1024 * 1024, maxLoops: 4 });
 const ORIGIN = 'https://raw.githubusercontent.com';
+/** One retry after a refused download, just past the downloader's one-second per-origin window. */
+export const RETRY_AFTER_MS = 1200;
 
 export const gameSoundLibraryEnabled = (env: NodeJS.ProcessEnv = process.env): boolean => parseEnvFlag(env.AGENTV3_GAME_SOUND_LIBRARY) ?? true;
 
@@ -122,6 +126,8 @@ export interface GameSoundSeedOptions {
   env?: NodeJS.ProcessEnv;
   library?: readonly LibrarySound[];
   download?: (sound: LibrarySound, signal: AbortSignal) => Promise<Uint8Array>;
+  /** The shared public-asset cache (the models' bucket); null = no cache. Default: the production store. */
+  store?: AssetObjectStore | null;
 }
 export interface GameSoundSeedResult { status: 'off' | 'prepared' | 'none'; files: Record<string, string>; prepared: string[]; skipped: string[]; handoff: string }
 
@@ -134,13 +140,36 @@ export async function prepareGameSounds(options: GameSoundSeedOptions): Promise<
   const chosen = soundsForPrompt(options.prompt, options.library);
   const download = options.download ?? ((s: LibrarySound, signal: AbortSignal) => downloadGameAsset({ downloadUrl: s.url }, new Set([ORIGIN]), signal));
   const ready: LibrarySound[] = []; const skipped: string[] = [];
+  let store: AssetObjectStore | null = null;
+  try { store = options.store === undefined ? gameAssetObjectStore() : options.store; } catch { store = null; }
+  const verified = (s: LibrarySound, b: Uint8Array | null | undefined): b is Uint8Array => !!b && b.byteLength === s.bytes && sha256(b) === s.sha256 && Buffer.from(b.subarray(0, 4)).toString('latin1') === 'OggS';
+  /**
+   * The shared cache first, then the pinned source. ONE download at a time (2026-11-19, found by the end-to-end
+   * village build: 17 of 18 sounds skipped): the downloader allows one request per second per origin and refuses
+   * any that would wait longer, so four parallel fetches from raw.githubusercontent.com lost three of every four.
+   * A cache hit costs no origin request at all, so a sound any earlier game fetched is instant.
+   */
+  const fetchSound = async (s: LibrarySound): Promise<Uint8Array> => {
+    const key = `game-assets-public-cc/v1/${s.sha256}.ogg`;
+    try { const hit = await store?.read(key, s.bytes + 1); if (verified(s, hit)) return hit; } catch { /* cache outage: the source still answers */ }
+    let bytes: Uint8Array;
+    try { bytes = await download(s, options.signal); } catch (first) {
+      // A refused or rate-limited request is transient by nature: wait out the per-origin window once, then retry.
+      // Wrong bytes are NOT retried — they are never right on a second try.
+      options.signal.throwIfAborted();
+      await new Promise((r) => setTimeout(r, RETRY_AFTER_MS));
+      bytes = await download(s, options.signal).catch(() => { throw first; });
+    }
+    if (!verified(s, bytes)) throw new Error('unverified sound');
+    try { await store?.write(key, bytes, 'audio/ogg'); } catch { /* the game has its copy; caching is optional */ }
+    return bytes;
+  };
   const queue = [...chosen];
   const worker = async () => {
     for (let s = queue.shift(); s; s = queue.shift()) {
       options.signal.throwIfAborted();
       try {
-        const bytes = await download(s, options.signal);
-        if (bytes.byteLength !== s.bytes || sha256(bytes) !== s.sha256 || Buffer.from(bytes.subarray(0, 4)).toString('latin1') !== 'OggS') throw new Error('unverified sound');
+        const bytes = await fetchSound(s);
         const path = `${GAME_SOUND_DIR}/${s.name}.ogg`;
         const base64 = Buffer.from(bytes).toString('base64');
         await options.persistence.saveBinary(options.workspaceId, { [path]: `data:audio/ogg;base64,${base64}` });
@@ -154,7 +183,7 @@ export async function prepareGameSounds(options: GameSoundSeedOptions): Promise<
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(4, chosen.length) }, worker));
+  await worker();
   if (!ready.length) return { ...none, status: 'none', skipped };
   const order = new Map(chosen.map((s, i) => [s.name, i]));
   ready.sort((a, b) => order.get(a.name)! - order.get(b.name)!);

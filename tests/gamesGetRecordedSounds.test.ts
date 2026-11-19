@@ -81,7 +81,7 @@ describe('seeding the sounds into a new game', () => {
     const r = rig();
     const result = await prepareGameSounds({
       prompt: 'game in the rain', workspaceId: 'w', workspace: r.workspace, persistence: r.persistence, signal: new AbortController().signal, env: {},
-      library: [a.sound, b.sound, c.sound],
+      library: [a.sound, b.sound, c.sound], store: null,
       download: async (s) => s.name === 'click' ? Buffer.from('tampered') : s.name === 'step' ? a.bytes : c.bytes,
     });
     expect(result.status).toBe('prepared');
@@ -93,10 +93,43 @@ describe('seeding the sounds into a new game', () => {
     expect(r.disk.get('public/sfx/library/SOUND_CREDITS.txt')).toContain('CC BY 4.0');
     expect(result.handoff).toMatch(/soundCustomizations\.ts/);
   });
+  it('downloads ONE at a time (the per-origin limit refused 17 of 18 parallel fetches), retries a refused one once, and serves repeats from the shared cache', async () => {
+    const lib = ['step', 'click', 'hit', 'swing', 'land'].map((n) => fake(n, true));
+    let inFlight = 0; let maxInFlight = 0; let refusedOnce = false; let downloads = 0;
+    const download = async (s: { name: string }) => {
+      inFlight++; maxInFlight = Math.max(maxInFlight, inFlight); downloads++;
+      try {
+        if (inFlight > 1) throw new Error('Provider rate limit');
+        if (s.name === 'hit' && !refusedOnce) { refusedOnce = true; throw new Error('Provider rate limit'); }
+        await new Promise((r) => setTimeout(r, 5));
+        return lib.find((l) => l.sound.name === s.name)!.bytes;
+      } finally { inFlight--; }
+    };
+    const cache = new Map<string, Uint8Array>();
+    const store = { read: async (k: string) => cache.get(k) ?? null, write: async (k: string, b: Uint8Array) => { cache.set(k, b); } };
+    const r = rig();
+    const first = await prepareGameSounds({ prompt: 'x', workspaceId: 'w', workspace: r.workspace, persistence: r.persistence, signal: new AbortController().signal, env: {}, library: lib.map((l) => l.sound), download, store });
+    expect(first.prepared).toEqual(['step', 'click', 'hit', 'swing', 'land']);
+    expect(first.skipped).toEqual([]);
+    expect(maxInFlight).toBe(1);
+    expect(cache.size).toBe(5);
+    const before = downloads;
+    const second = await prepareGameSounds({ prompt: 'x', workspaceId: 'w2', workspace: rig().workspace, persistence: rig().persistence, signal: new AbortController().signal, env: {}, library: lib.map((l) => l.sound), download, store });
+    expect(second.prepared.length).toBe(5);
+    expect(downloads).toBe(before);
+  }, 20_000);
+  it('a cached copy with the wrong bytes is ignored, never served', async () => {
+    const a = fake('step', true);
+    const store = { read: async () => Buffer.from('OggS-not-the-right-bytes'), write: async () => {} };
+    const r = rig();
+    const out = await prepareGameSounds({ prompt: 'x', workspaceId: 'w', workspace: r.workspace, persistence: r.persistence, signal: new AbortController().signal, env: {}, library: [a.sound], download: async () => a.bytes, store });
+    expect(out.prepared).toEqual(['step']);
+    expect(r.binary.get('public/sfx/library/step.ogg')).toContain(a.bytes.toString('base64'));
+  });
   it('does nothing when switched off, and reports none when every download fails', async () => {
     const r = rig();
     expect((await prepareGameSounds({ prompt: 'x', workspaceId: 'w', workspace: r.workspace, persistence: r.persistence, signal: new AbortController().signal, env: { AGENTV3_GAME_SOUND_LIBRARY: 'off' } })).status).toBe('off');
-    const failed = await prepareGameSounds({ prompt: 'x', workspaceId: 'w', workspace: r.workspace, persistence: r.persistence, signal: new AbortController().signal, env: {}, library: [fake('step', true).sound], download: async () => { throw new Error('offline'); } });
+    const failed = await prepareGameSounds({ prompt: 'x', workspaceId: 'w', workspace: r.workspace, persistence: r.persistence, signal: new AbortController().signal, env: {}, library: [fake('step', true).sound], download: async () => { throw new Error('offline'); }, store: null });
     expect(failed.status).toBe('none'); expect(failed.skipped).toEqual(['step']); expect(r.disk.size).toBe(0);
   });
 });

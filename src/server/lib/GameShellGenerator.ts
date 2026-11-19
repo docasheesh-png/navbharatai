@@ -53,7 +53,7 @@ import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift } from './three/objects';
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction } from './three/humanoid';
-import { updateHealthBars } from './three/healthBar';
+import { updateHealthBars } from './three/healthbar';
 import { ParticleSystem } from './fx/particles';
 import { audio } from './fx/audio';
 import { bindGameFeedback } from './fx/feedback';
@@ -600,7 +600,7 @@ export class Game {
     // Shadows follow the player, or they blur out as soon as they walk away on a large map.
     followShadow(this.lights.key, p);
     audio.setListener(p.x, p.y, p.z);
-    updateHealthBars(this.rig.camera);   // enemy health bars face the camera (three/healthBar.ts)
+    updateHealthBars(this.rig.camera);   // enemy health bars face the camera (three/healthbar.ts)
     this.renderer.render(this.scene, this.rig.camera);
   }
 

@@ -36,7 +36,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "c1fc56d522a6a07e5dc757c005b218b7b35e54424e5cea302558c20214950213",
     "13eb26e77e2ececf4cdc471b8bdf95d4e9e537d1236fb79967efdfae4ae26867",
     "a33ab824b238a911bd39a29beb551d57857af24fd9c289d4ed2857e691f508d8",
-    "dfeb65e9cf2b214a998e64f5224ba7f7784f70b03010b99c27963d7e316603b7"
+    "dfeb65e9cf2b214a998e64f5224ba7f7784f70b03010b99c27963d7e316603b7",
+    "7366f2cef22d57043c563ad651858838895f5cc726b941e208e4ab775a856f01"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -296,6 +297,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "76509d190eeabb44658f377c0487a8217103664d73ed5a3e1888d65e06c9020b"
   ],
   "src/game/three/healthBar.ts": [
+    "c05bd26586eedd4d562144678968440d2e71cbd7bef35270955af82f94c1b542"
+  ],
+  "src/game/three/healthbar.ts": [
     "c05bd26586eedd4d562144678968440d2e71cbd7bef35270955af82f94c1b542"
   ],
   "src/game/three/humanoid.ts": [

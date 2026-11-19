@@ -25,7 +25,7 @@ beforeAll(async () => {
   W = await import(join(DIR, 'src/game/systems/weapon.ts'));
   P = await import(join(DIR, 'src/game/systems/projectile.ts'));
   E = await import(join(DIR, 'src/game/core/events.ts'));
-  HB = await import(join(DIR, 'src/game/three/healthBar.ts'));
+  HB = await import(join(DIR, 'src/game/three/healthbar.ts'));
 }, 60_000);
 afterAll(() => rmSync(DIR, { recursive: true, force: true }));
 

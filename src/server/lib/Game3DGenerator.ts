@@ -6359,7 +6359,7 @@ const FILES: Record<string, string> = {
   'src/game/three/environment.ts': ENVIRONMENT,
   'src/game/three/surfaces.ts': SURFACES,
   'src/game/three/humanoid.ts': HUMANOID,
-  'src/game/three/healthBar.ts': HEALTH_BAR,
+  'src/game/three/healthbar.ts': HEALTH_BAR,
   // The things a world is actually made of (admin 2026-08-27): car, tree, mountain, river, desert,
   // road, animal — each built at a REAL or a LITE tier, because "asli" and "3d" are different asks.
   'src/game/three/objects.ts': OBJECTS,

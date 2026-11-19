@@ -45,8 +45,16 @@ describe('the tool is registered everywhere a recipe must be', () => {
   });
 });
 
-describe('OFF by default', () => {
-  it('refuses honestly and writes nothing while AGENTV3_ATHREE_MAP is not on', async () => {
+// 2026-11-19 (admin: "AGENTV3_ATHREE_MAP ko default on karo"): ON with no setting; AGENTV3_ATHREE_MAP=off is the kill switch.
+describe('ON by default; the kill switch turns it off', () => {
+  it('with no setting at all, a named + needed map is written', async () => {
+    delete process.env.AGENTV3_ATHREE_MAP;
+    const res = await run('athree map par ek 3D racing game banao');
+    expect(res.is_error).toBeFalsy();
+    expect(act.files.has('src/game/athree/index.ts')).toBe(true);
+  });
+  it.each(['off', 'OFF', '0', 'false', 'no'])('AGENTV3_ATHREE_MAP=%s refuses honestly and writes nothing', async (value) => {
+    process.env.AGENTV3_ATHREE_MAP = value;
     const res = await run('athree map par racing game banao');
     expect(res.is_error).toBe(true);
     expect(res.content).toMatch(/not switched on/i);
@@ -63,10 +71,24 @@ describe('ON: the request decides', () => {
     for (const m of ['noise', 'config', 'world', 'collider', 'chunks', 'index']) expect(act.files.has(`src/game/athree/${m}.ts`), m).toBe(true);
     expect(res.content).toMatch(/Athree map/);
   });
-  it('needed without the name (a racing game) → written too (Athree is the only map the library has)', async () => {
-    const res = await run('ek 3D racing game banao');
+  it('needed without the name (an open-world game) → written too (Athree is the only map the library has)', async () => {
+    const res = await run('ek 3D open world game banao');
     expect(res.is_error).toBeFalsy();
     expect(act.files.has('src/game/athree/index.ts')).toBe(true);
+  });
+  it('the wish, not the word: "bada map", "kahin bhi ghoom sakun" and a too-small complaint each get the world', async () => {
+    for (const p of ['ek 3D game banao jiska map bahut bada ho', 'aisa 3D game jisme kahin bhi ghoom sakun', 'mere 3D game ka map bahut chhota hai, bada karo']) {
+      act.files.clear();
+      const res = await run(p);
+      expect(res.is_error, p).toBeFalsy();
+      expect(act.files.has('src/game/athree/index.ts'), p).toBe(true);
+    }
+  });
+  it('a plain race is NOT given the Athree world: it runs on the endless road library', async () => {
+    const res = await run('ek 3D racing game banao');
+    expect(res.is_error).toBe(true);
+    expect(res.content).toMatch(/endless road library/);
+    expect(act.files.has('src/game/athree/index.ts')).toBe(false);
   });
   it('named but NOT needed → refused with the reason, nothing written', async () => {
     const res = await run('athree map use karke ek calculator banao');
@@ -96,8 +118,8 @@ describe('ON: the request also decides WHICH modules (admin 2026-11-15: modules 
   beforeEach(() => { process.env.AGENTV3_ATHREE_MAP = 'on'; });
   const has = (m: string): boolean => act.files.has(`src/game/athree/${m}.ts`);
 
-  it('a racing game with cars gets roads and vehicles and none of the sea, plants, rivers or sky', async () => {
-    const res = await run('ek 3D racing game banao jisme gaadi chale');
+  it('an open-world racing game with cars gets roads and vehicles and none of the sea, plants, rivers or sky', async () => {
+    const res = await run('ek 3D open world racing game banao jisme gaadi chale');
     expect(res.is_error).toBeFalsy();
     expect(has('roadmesh')).toBe(true); expect(has('vehicles')).toBe(true);
     for (const m of ['ocean', 'water', 'plants', 'vegetation', 'riverwater', 'sky', 'budget']) expect(has(m), m).toBe(false);
@@ -127,9 +149,10 @@ describe('ON: the request also decides WHICH modules (admin 2026-11-15: modules 
 });
 
 describe('the library lists the map only while it is switched on', () => {
-  it('OFF: no maps category entry; ON: the map is there with its owner licence and recipe', () => {
+  it('OFF: no maps category entry; ON (the default): the map is there with its owner licence and recipe', () => {
+    process.env.AGENTV3_ATHREE_MAP = 'off';
     expect(searchGameLibrary({ category: 'maps' }).entries).toEqual([]);
-    process.env.AGENTV3_ATHREE_MAP = 'on';
+    delete process.env.AGENTV3_ATHREE_MAP;
     const on = searchGameLibrary({ category: 'maps' });
     expect(on.entries.map((e) => e.id)).toEqual(['map:athree']);
     expect(on.entries[0]).toMatchObject({ category: 'maps', kind: 'recipe', builder: 'generate_athree_map', availability: 'code-recipe' });

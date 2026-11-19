@@ -15,7 +15,7 @@ export interface LibraryMap {
   license: { spdx: string; evidenceUrl: string; attribution: string };
   /** The recipe tool that writes the map into a game. */
   recipe: string;
-  /** Present only when the map is switched on for the build (AGENTV3_ATHREE_MAP). */
+  /** Present only when the map is switched on for the build (AGENTV3_ATHREE_MAP, default on). */
   summary: string;
 }
 
@@ -34,9 +34,12 @@ export const ATHREE_MAP: LibraryMap = {
 export const LIBRARY_MAPS: readonly LibraryMap[] = [ATHREE_MAP];
 
 /**
- * Is the Athree map switched on? Default OFF (AGENTV3_ATHREE_MAP=on). OFF means the map is neither offered by the library nor written by
- * the recipe: a map that cannot be used is not listed (real features only).
+ * Is the Athree map switched on? Default ON since 2026-11-19 (admin, verbatim: *"AGENTV3_ATHREE_MAP ko default "on" karo.
+ * mujhe cloud run me kuch nahi dalna"*). Before that it was default OFF, so no user ever got the big world that phases 1–5b
+ * had built — the main reason games came out with a few hundred metres of ground. Kill switch: AGENTV3_ATHREE_MAP=off
+ * (also 0 / false / no). OFF means the map is neither offered by the library nor written by the recipe: a map that cannot be
+ * used is not listed (real features only). Any other value, or no value, is ON.
  */
 export function athreeMapEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return ['on', '1', 'true', 'yes'].includes(String(env.AGENTV3_ATHREE_MAP ?? '').trim().toLowerCase());
+  return !['off', '0', 'false', 'no'].includes(String(env.AGENTV3_ATHREE_MAP ?? '').trim().toLowerCase());
 }

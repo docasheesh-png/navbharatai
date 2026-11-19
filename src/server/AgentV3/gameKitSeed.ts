@@ -56,9 +56,10 @@ import { kitTypeContract, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
 import { namedNonSmartphone } from './deviceTarget';
 import { analyzeRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { wantsSceneObjects, heroObjectContract } from '../lib/heroObjectSpec';
+import { world2dIntent } from './world2dIntent';
 
 /** The recipes the seed may run, in the order the architect prompt lists them (runtime first, shell last). */
-export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell';
+export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell' | 'generate_world_2d';
 
 /** `AGENTV3_GAME_KIT_SEED=off` restores the pre-2026-10-11 behaviour exactly (the model decides). */
 export function gameKitSeedEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -90,9 +91,12 @@ export function gameKitPlan(prompt: string | null | undefined, framework?: strin
   let domain = '';
   try { domain = analyzeRequirementGaps(text).domain; } catch { return []; }
   if (domain !== 'game') return [];
-  return gameKitWants3D(text)
-    ? ['generate_game_runtime', 'generate_game_3d', 'generate_game_vfx', 'generate_melody', 'generate_game_shell']
-    : ['generate_game_runtime', 'generate_game_vfx', 'generate_melody'];
+  if (gameKitWants3D(text)) return ['generate_game_runtime', 'generate_game_3d', 'generate_game_vfx', 'generate_melody', 'generate_game_shell'];
+  // 🗺️ A 2D game whose user wants a big world (the wish, not one word: world2dIntent → largeWorldIntent, admin 2026-11-19)
+  // gets the 2D world laid down by the platform too — the same reason the kit is seeded at all: a capability the
+  // platform KNOWS a build needs is not left to the model's optional tool call.
+  const flat: GameKitRecipe[] = ['generate_game_runtime', 'generate_game_vfx', 'generate_melody'];
+  return world2dIntent({ prompt: text, drawnIn3D: false }).use ? [...flat, 'generate_world_2d'] : flat;
 }
 
 /** Says 3D in so many words — the same reading `wantsSceneObjects` gives "3d". */
@@ -253,6 +257,12 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
     // A race whose course the request did not describe runs on the kit's endless track (endlessRaceCourse.ts):
     // said only when the 3D layer that holds createTrackStream is really on disk.
     opts.endlessRaceCourse && has('generate_game_3d') ? ENDLESS_RACE_COURSE_RULE : '',
+    has('generate_world_2d')
+      ? '🗺️ THE BIG 2D WORLD IS ALREADY IN src/game/world2d/: the user asked for a big map, so build the game ON it —'
+        + ' createWorld2D(...) for the map (endless), createWorldRenderer(world).draw(ctx, player.x, player.y, w, h) every frame'
+        + ' with the camera on the player, moveWithCollision(...) for every moving body, world.spawnPoint() for the start and'
+        + ' drawMinimap(...) in a corner. NEVER draw a fixed-size background or confine the player to one screen.'
+      : '',
     failed.length > 0
       ? `NOT laid down: ${failed.map((r) => r.recipe).join(', ')} — if the game needs ${failed.length === 1 ? 'it' : 'them'}, run`
         + ` ${failed.map((r) => `run_recipe({ name: "${r.recipe}" })`).join(' and ')} yourself before you use anything from ${failed.length === 1 ? 'it' : 'them'}.`

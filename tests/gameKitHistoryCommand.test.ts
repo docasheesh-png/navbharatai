@@ -15,7 +15,7 @@ it('the real history command resolves imported contracts and registers the curre
       copyFileSync(`src/server/lib/${name}.ts`, join(root, `src/server/lib/${name}.ts`));
     }
     // Generators that live in their own folder (the Athree map and the Object Forge, with their source modules) travel with the command.
-    for (const folder of ['athreeMap', 'objectForge']) {
+    for (const folder of ['athreeMap', 'world2d', 'objectForge']) {
       mkdirSync(join(root, `src/server/lib/${folder}`), { recursive: true });
       for (const name of readdirSync(`src/server/lib/${folder}`)) {
         if (/\.ts$/.test(name) && !/\.test\.ts$/.test(name)) copyFileSync(`src/server/lib/${folder}/${name}`, join(root, `src/server/lib/${folder}/${name}`));

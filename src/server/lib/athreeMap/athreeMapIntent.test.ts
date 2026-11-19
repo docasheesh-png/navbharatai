@@ -44,8 +44,8 @@ describe('condition 1 — NAMED and really needed', () => {
 
 describe('condition 2 — a big map is really needed (Athree eligible)', () => {
   const needed = [
-    'ek 3D racing game banao', 'build an open world game', 'pubg jaisa battle royale game', 'flight simulator banao',
-    'explore karne wala 3D survival game', 'sport car driving game with a big map',
+    'build an open world game', 'pubg jaisa battle royale game', 'flight simulator banao',
+    'explore karne wala 3D survival game', 'sport car driving game with a big map', 'open world racing game',
   ];
   for (const p of needed) it(`needs a map: ${p}`, () => {
     expect(mapProfileFor(p), p).not.toBeNull();
@@ -53,6 +53,18 @@ describe('condition 2 — a big map is really needed (Athree eligible)', () => {
     expect(r.use).toBe(true);
     expect(r.via).toBe('needed'); // a pool of one: Athree is the only map the library has today
     expect(r.mapId).toBe('athree');
+  });
+  // 2026-11-19: a race on a road gets the endless road library; the Athree world only when the race leaves the road.
+  it('a plain race gets the endless road library, not the Athree world', () => {
+    for (const p of ['ek 3D racing game banao', 'car racing game', 'lambi sadak par race wala game', 'racing game jisme road khatam na ho']) {
+      expect(mapProfileFor(p), p).toBe('racing');
+      expect(intent(p), p).toMatchObject({ use: false, via: 'road-library', mapId: null, profile: 'racing' });
+    }
+  });
+  it('a race that leaves the road, or asks for a big map/world, gets the Athree world', () => {
+    for (const p of ['open world car racing game', 'racing game jisme kahin bhi gaadi chala sakun', 'car game ka bada map banao', 'GTA jaisa driving game']) {
+      expect(intent(p), p).toMatchObject({ use: true, mapId: 'athree' });
+    }
   });
   it('apps and small games need none', () => {
     for (const p of ['ek calculator banao', 'billing app', 'portfolio website', '2D snake game', 'quiz app banao', 'todo list']) {
@@ -73,13 +85,13 @@ describe('condition 3 — the librarian picks at random, Athree always in the po
   });
   it('racing: both maps fit, so the pick varies across different requests and Athree is among them', () => {
     const picks = new Set<string>();
-    for (let i = 0; i < 60; i++) picks.add(intent('3D racing game number ' + i, { maps }).mapId!);
+    for (let i = 0; i < 60; i++) picks.add(intent('open world 3D racing game number ' + i, { maps }).mapId!);
     expect(picks).toEqual(new Set(['athree', 'desert-run']));
-    const r = intent('3D racing game number 5', { maps });
+    const r = intent('open world 3D racing game number 5', { maps });
     expect(r.via).toBe('librarian');
   });
   it('the pick is DETERMINISTIC for one project (same seed → same map, every time)', () => {
-    for (let i = 0; i < 10; i++) expect(intent('3D racing game', { maps, seedKey: 'ws-42' }).mapId).toBe(intent('3D racing game', { maps, seedKey: 'ws-42' }).mapId);
+    for (let i = 0; i < 10; i++) expect(intent('open world 3D racing game', { maps, seedKey: 'ws-42' }).mapId).toBe(intent('open world 3D racing game', { maps, seedKey: 'ws-42' }).mapId);
     expect(pickLibraryMap(maps, 'k1')).toBe(pickLibraryMap(maps, 'k1'));
     expect(pickLibraryMap([], 'k')).toBeNull();
   });

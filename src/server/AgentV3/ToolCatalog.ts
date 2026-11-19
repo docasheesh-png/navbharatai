@@ -2318,6 +2318,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       } },
     },
     {
+      name: 'generate_world_2d',
+      description:
+        'The 2D WORLD — a big top-down map for a 2D game (src/game/world2d/), joined seamlessly from NavBharatAI\'s pre-made sample chunks '
+        + '(meadow, forest, lake, village, desert): endless by default, roads that continue from chunk to chunk, straight highways, '
+        + 'ground that blends across chunk edges, collision, a spawn point on a road, a minimap, and drawing of only what is on screen. '
+        + 'Use it for a 2D game whose user wants a big world in any words ("bada map", "kahin bhi ghoom sakun", "map bahut chhota hai"), '
+        + 'or names a 2D / top-down map. It decides from the request: it refuses an app with no world, a 3D game (use the Athree map), '
+        + 'and a board, card, puzzle or quiz game. Never draw a fixed-size background for such a game.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_game_royale',
       description: 'Add an ORIGINAL offline 3D royale practice starter when the user requests a battle-royale-style game. '
         + 'This is a bounded procedural arena with two local bots, a shrinking zone and restart, not PUBG, multiplayer or photorealism. '
@@ -3686,6 +3697,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_game_systems',
   'generate_procedural_object',
   'generate_athree_map',
+  'generate_world_2d',
   'author_object',
   'generate_game_shell',
   'generate_game_royale',
@@ -3911,6 +3923,7 @@ export const RECIPE_TOOLS = [
   'generate_game_runtime',
   'generate_procedural_object',
   'generate_athree_map',
+  'generate_world_2d',
   'author_object',
   'generate_game_shell',
   'generate_game_royale',

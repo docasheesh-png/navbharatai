@@ -105,11 +105,17 @@ export function replayFromCode(files: Record<string, string>): GameCodeFacts {
     if (/\bstartMeta\s*\(/.test(content) || /localStorage\.setItem\([^)]*(best|high|score|level|progress)/i.test(content)) progress = true;
     if (/\b(play again|restart|try again|retry|replay)\b/i.test(content) || /\.restart\s*\(/.test(content)) restart = true;
   }
-  if (!isDrivingGame(files)) return { progress, restart };
+  const sound = Object.entries(files || {}).some(([p, c]) => typeof c === 'string' && CODE_FILE.test(p) && !/(^|\/)node_modules\//.test(p)
+    && !/(^|\/)src\/game\/(?:fx|core)\//.test(p) && GAME_SOUND_USE.test(c));
+  const base = sound ? { progress, restart, sound: true } : { progress, restart };
+  if (!isDrivingGame(files)) return base;
   const cockpit = Object.entries(files || {}).some(([p, c]) => typeof c === 'string' && CODE_FILE.test(p) && !/(^|\/)node_modules\//.test(p)
     && !/(^|\/)src\/game\/three\/camera\.ts$/.test(p) && /\b(first-person|cockpit|cab ?view|driver view)\b/i.test(c));
-  return cockpit ? { progress, restart, driving: true, cockpit: true } : { progress, restart, driving: true };
+  return cockpit ? { ...base, driving: true, cockpit: true } : { ...base, driving: true };
 }
+
+/** The game's OWN code asks for a sound (the kit's fx files only define it, so they are skipped by the caller). */
+const GAME_SOUND_USE = /\baudio\.play\s*\(|\bbindGameFeedback\s*\(|\bnew\s+(?:window\.)?(?:Audio|AudioContext|webkitAudioContext)\s*\(|\bMelodyPlayer\b|\.playMelody\s*\(|<audio\b/;
 
 /**
  * 🏁 THE BUTTON THAT STARTS THE GAME IS FOUND BY ITS SHAPE (admin 2026-10-11, build 46e2d74b).
@@ -140,6 +146,8 @@ export const START_LABEL = new RegExp(`(?:^|[^\\p{L}\\p{N}])${START_STEM}(?![\\p
 export const START_LABEL_LEADING = new RegExp(`^\\s*(?:[▶►⏵]\\s*)?${START_STEM}(?![\\p{L}\\p{N}])|^\\s*[▶►⏵]`, 'iu');
 /** Controls on a title screen that do something other than start the game. */
 export const NOT_A_START = /\b(?:how|help|rules|tutorial|instructions?|settings?|options|about|credits|store|shop|leader ?board|high ?scores?|scores?|controls|privacy|terms|sign|log ?in|back|menu|mute|unmute|sound|music|volume|quit|exit|google play|app store)\b/i;
+/** A control that starts the round again after it ended (the kit writes Play again / फिर खेलें). */
+export const RESTART_LABEL = /play\s*again|restart|retry|try\s*again|replay|new\s+game|फिर\s*खेलें|फिर\s*से\s*शुरू|दोबारा/i;
 /** At most this many start candidates are pressed, one at a time, before the game is called unreachable. */
 export const MAX_START_PRESSES = 3;
 
@@ -205,6 +213,8 @@ export interface GameCodeFacts {
   driving?: boolean;
   /** The game offers a cockpit / first-person view, where a camera inside the vehicle is the design. */
   cockpit?: boolean;
+  /** The game's own code plays sound (2026-11-19): the kit's audio or melody, Web Audio, or an <audio>. */
+  sound?: boolean;
 }
 
 /** The in-sandbox shell command. PURE. */
@@ -245,6 +255,9 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
       never: NEVER_PRESS.source, neverFlags: NEVER_PRESS.flags, notStart: NOT_A_START.source, notStartFlags: NOT_A_START.flags,
       known: startLabels.map((l) => String(l ?? '').trim()).filter((l) => l && l.length <= 40).slice(0, 5),
       max: MAX_START_PRESSES },
+    // The controls that start the round again after a game over (2026-11-19) — the kit's English and Hindi words and
+    // the usual ones a game writes. Matched against a visible button's text or aria-label.
+    restartPattern: RESTART_LABEL.source,
     // NOT reduced motion: a game is supposed to move, and a game that honours the preference would read
     // as frozen. The saved session still applies, so a game behind a login is played signed in.
     pageOpts: { ...JSON.parse(newPageOptionsExpr(storageState)), reducedMotion: 'no-preference' },
@@ -275,6 +288,28 @@ const frameCounter = () => {
     if (t !== s.last) { if (s.last && t - s.last > 100) s.long++; s.frames++; s.last = t; }
     return cb(t);
   });
+};
+
+// COUNT THE SOUNDS THE GAME PLAYS (2026-11-19 game-gap audit: "audio plays" was never checked). Every Web Audio
+// source the page starts is counted; an <audio> element's play() too. Counting only — nothing is changed or muted.
+const soundCounter = () => {
+  window.__nbSounds = 0;
+  for (const name of ['AudioContext', 'webkitAudioContext']) {
+    const C = window[name];
+    if (!C || !C.prototype) continue;
+    for (const m of ['createBufferSource', 'createOscillator']) {
+      const make = C.prototype[m];
+      if (typeof make !== 'function') continue;
+      C.prototype[m] = function (...args) {
+        const node = make.apply(this, args);
+        const start = node.start;
+        node.start = function (...a) { window.__nbSounds++; return start.apply(this, a); };
+        return node;
+      };
+    }
+  }
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function (...a) { if (this instanceof HTMLAudioElement) window.__nbSounds++; return play.apply(this, a); };
 };
 
 // READ THE SCENE ITSELF, NOT ONLY ITS PIXELS (Q-869). three.js announces every WebGLRenderer to
@@ -683,6 +718,7 @@ try {
   // ── DESKTOP: keyboard + mouse ─────────────────────────────────────────────────────────────────────
   const ctx = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 1280, height: 720 } });
   await ctx.addInitScript(frameCounter);
+  await ctx.addInitScript(soundCounter);
   await ctx.addInitScript(sceneHook);
   if (cfg.seed != null) await ctx.addInitScript(seedRandom, cfg.seed);
   const page = await ctx.newPage();
@@ -705,6 +741,8 @@ try {
   box = (await surface(page)) || box;
 
   const f0 = await page.evaluate(() => ({ ...window.__nb, t: performance.now() }));
+  // The kit's game reports its own state (window.__nbKit, Game.ts): the score before the controls are touched.
+  out.kitScoreStart = await page.evaluate(() => (window.__nbKit ? window.__nbKit.score() : null)).catch(() => null);
   const sceneIdle0 = await snapScene(page);
   const a = await shot(page, box);
   await page.waitForTimeout(700);
@@ -878,6 +916,33 @@ try {
       out.scene.aim = { straight: vec(before), early: vec(early), late: vec(after) };
     }
   }
+  // ── SCORE, SOUND AND PLAY AGAIN (2026-11-19 game-gap audit: none of the three was ever checked) ─────────────────
+  // MEASURED only; the verdict decides. The round is ended through the kit's own hook — never by guessing a losing
+  // move — and the play-again control is found by its words and PRESSED, as a player would.
+  out.stage = 'checking the score, the sound and play again';
+  try {
+    out.sounds = await page.evaluate(() => (typeof window.__nbSounds === 'number' ? window.__nbSounds : null));
+    const kit = await page.evaluate(() => (window.__nbKit ? { status: window.__nbKit.status(), score: window.__nbKit.score() } : null));
+    if (kit) {
+      out.kitScoreEnd = kit.score;
+      const ended = await page.evaluate(() => { window.__nbKit.endRound(); return window.__nbKit.status(); });
+      await page.waitForTimeout(500);
+      const pressed = await page.evaluate((source) => {
+        const re = new RegExp(source, 'i');
+        for (const el of document.querySelectorAll('button, [role=button]')) {
+          const b = el.getBoundingClientRect();
+          const st = getComputedStyle(el);
+          if (b.width < 8 || b.height < 8 || st.display === 'none' || st.visibility === 'hidden') continue;
+          const text = ((el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '')).trim();
+          if (re.test(text)) { el.click(); return text.slice(0, 40); }
+        }
+        return null;
+      }, cfg.restartPattern);
+      await page.waitForTimeout(600);
+      const after = await page.evaluate(() => window.__nbKit.status());
+      out.restartCheck = { ended, pressed, after };
+    }
+  } catch (e) { out.restartCheck = { error: String(e && e.message || e).slice(0, 120) }; }
   await ctx.close();
 
   // ── PHONE: touch only ─────────────────────────────────────────────────────────────────────────────
@@ -1106,6 +1171,13 @@ export interface PlaytestRun {
   steerFlow?: FlowRead | null;
   /** Read from a three.js game's own scene (Q-869): see SceneRead. */
   scene?: SceneRead;
+  /** Web Audio sources and <audio> plays the page started during the desktop session (2026-11-19). */
+  sounds?: number | null;
+  /** The kit game's own score before the controls were touched and at the end (window.__nbKit). */
+  kitScoreStart?: number | null;
+  kitScoreEnd?: number | null;
+  /** The play-again probe: the status after the round was ended, the control pressed (null: none found), the status after. */
+  restartCheck?: { ended?: string; pressed?: string | null; after?: string; error?: string };
   errors?: string[];
   /** The stack captured with each of `errors`, same order ('' when none). Absent from an older script's output. */
   errorStacks?: string[];
@@ -1526,7 +1598,14 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
       ? ` Steering could not be read from the picture — ${steerStarved}.`
       : '',
   ].join('');
-  const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.${starvedNote}`;
+  // 2026-11-19: what the play-again, score and sound probes measured — evidence in the head, never points.
+  const rc = run.restartCheck;
+  const probeNote = [
+    typeof run.sounds === 'number' ? ` ${run.sounds} sound(s) played.` : '',
+    typeof run.kitScoreStart === 'number' && typeof run.kitScoreEnd === 'number' ? ` Score ${run.kitScoreStart} → ${run.kitScoreEnd} while played.` : '',
+    rc?.ended === 'gameover' ? (rc.pressed && rc.after === 'playing' ? ` Play again works ("${rc.pressed}").` : ' Play again did NOT start a new round.') : '',
+  ].join('');
+  const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.${starvedNote}${probeNote}`;
   if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: head };
   const fix = score.stalledVehicle ? STALLED_VEHICLE_FIX
     : score.cameraInsideVehicle ? `${CAMERA_INSIDE_VEHICLE_FIX} (measured: inside a ${(run.cameraInside ?? []).join(' × ')} m part of it)`
@@ -1617,10 +1696,12 @@ export type GameDefectCode =
   | 'GAME_DEFECT_RUNTIME_ERROR'   // uncaught errors while played
   | 'GAME_DEFECT_CAMERA_WRONG'    // Q-861: camera faces the vehicle / steering mirrored
   | 'GAME_DEFECT_VEHICLE_STALLED' // build 46e2d74b: the car never moves
-  | 'GAME_DEFECT_MISSING_LAYER';  // autopsy 6a55d939: imports a kit layer that is not on disk
+  | 'GAME_DEFECT_MISSING_LAYER'   // autopsy 6a55d939: imports a kit layer that is not on disk
+  | 'GAME_DEFECT_RESTART_BROKEN'  // 2026-11-19: after the round ended, no play-again control, or pressing it did not restart
+  | 'GAME_DEFECT_SILENT';         // 2026-11-19: the game's code plays sound, and a whole playthrough played none
 export interface GameDefect { code: GameDefectCode; evidence: string }
 
-export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | null, missingLayerPaths: readonly string[] = []): GameDefect[] {
+export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | null, missingLayerPaths: readonly string[] = [], replay?: GameCodeFacts | null): GameDefect[] {
   const out: GameDefect[] = [];
   if (run && !run.ok && run.started && /no game surface/i.test(run.error ?? '')) out.push({ code: 'GAME_DEFECT_START_STUCK', evidence: `pressed "${run.started}", no game surface appeared` });
   if (score) {
@@ -1634,6 +1715,13 @@ export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | 
   const errs = run ? (run.errorCount ?? run.errors?.length ?? 0) : 0;
   // The site is appended AFTER the message's own cap, so a long message can never cut the file off (Q-2301).
   if (run && errs > 0) out.push({ code: 'GAME_DEFECT_RUNTIME_ERROR', evidence: run.errors?.[0] ? firstPlayError(run) : `${errs} error(s)` });
+  const rc = run?.restartCheck;
+  if (rc && rc.ended === 'gameover') {
+    if (!rc.pressed) out.push({ code: 'GAME_DEFECT_RESTART_BROKEN', evidence: 'the round ended and no Play again / Restart control appeared' });
+    else if (rc.after !== 'playing') out.push({ code: 'GAME_DEFECT_RESTART_BROKEN', evidence: `pressed "${rc.pressed}" after the round ended, and the game stayed "${rc.after ?? 'unknown'}"` });
+  }
+  // Only a real zero from a run that counted (null = an older script or no Web Audio at all) and only for a game whose code plays sound.
+  if (run && replay?.sound === true && run.sounds === 0) out.push({ code: 'GAME_DEFECT_SILENT', evidence: 'the game\'s code plays sound, and the whole desktop playthrough played none' });
   if (missingLayerPaths.length > 0) out.push({ code: 'GAME_DEFECT_MISSING_LAYER', evidence: `imports kit files not on disk: ${missingLayerPaths.slice(0, 5).join(', ')}` });
   return out;
 }

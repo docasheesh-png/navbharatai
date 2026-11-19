@@ -27024,7 +27024,11 @@ async function noteBuildOutcome(
             buildDiag.record(initialTerminalDecline && !abort.signal.aborted ? {
               phase: 'build', severity: 'info', code: 'OUTCOME_INITIAL_DECLINED', autoResolved: true,
               message: 'Build outcome: DECLINED — an initial build lane declined to build and wrote no files. Its original answer was preserved, not retried.',
-            } : terminalOutcomeRecord(terminalOutcomeCode({ messages: [String(result.summary ?? ''), ...buildDiag.report().issues.map(i => String(i.message ?? ''))] })));
+            } : terminalOutcomeRecord(terminalOutcomeCode({
+              messages: [String(result.summary ?? ''), ...buildDiag.report().issues.map(i => String(i.message ?? ''))],
+              // The codes this run already recorded name its reason (failedbr #2449: SANDBOX_ADMISSION_EXHAUSTED).
+              codes: buildDiag.report().issues.map(i => String(i.code ?? '')),
+            })));
           }
         } catch { /* the record must never be what breaks the build it is describing */ }
       }
@@ -28995,7 +28999,7 @@ async function noteBuildOutcome(
         // to get none), and only a truly unknown exception is OUTCOME_UNEXPLAINED.
         try {
           if (!outcomeCodeOf(buildDiagRef?.report()?.issues ?? [])) {
-            buildDiagRef?.record(terminalOutcomeRecord(terminalOutcomeCode({ error: err, crashCode: crash.code }), crash.phase));
+            buildDiagRef?.record(terminalOutcomeRecord(terminalOutcomeCode({ error: err, crashCode: crash.code, codes: (buildDiagRef?.report()?.issues ?? []).map(i => String(i.code ?? '')) }), crash.phase));
           }
         } catch { /* naming the hole must not replace the crash record */ }
         // SAME STALE-SUMMARY SIBLING AS THE WATCHDOG PATH (see the comment beside `pauseMsgForReport`

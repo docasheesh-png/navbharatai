@@ -102417,3 +102417,6 @@ The start-vocabulary class (46e2d74b) was "fixed by shape" but kept a stem list;
 - **#2466** (song app, user-stopped at 286 s after a rendered app): Q-2923 ✅-pending-merge (a lying a11y analyzer —
   forwarding primitives labelled by their caller, one shared reader for both analyzers); Q-2924–Q-2927 OPEN rows.
 - **#2469** is owned by open PR #4300; **#2470** (99771bc7) was autopsied in #4303. Not touched here.
+- **#2449 / #2450** (3-second runs, E2B cap of 20): Q-2928 (the outcome net now reads the recorded sandbox codes —
+  no more "the engine did not record why" on a run that recorded it twice; the ETA is "untested" too), Q-2929 🟡
+  (E2B plan limit, admin), Q-2930 🟡 (note vs admission budget — owned by the BR1983/BR2003 audit), Q-2931 → Q-2735.

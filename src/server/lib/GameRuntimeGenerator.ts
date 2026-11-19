@@ -314,7 +314,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -609,6 +609,8 @@ const EN = {
   xpLine: '+{xp} XP · Level {level} ({into}/{next})', levelUp: 'Level up! You reached level {level}', unlocked: 'Unlocked: {name}',
   achievement: 'Achievement: {name}', goalComplete: 'Goal complete: {name}', nextGoal: 'Next goal: {name} ({done})', streak: '{n}-day streak',
   minutes: 'min',
+  level: 'Level', levels: 'Levels', levelComplete: 'Level complete', nextLevel: 'Next level', locked: 'Locked',
+  difficulty: 'Difficulty', easy: 'Easy', normal: 'Normal', hard: 'Hard', checkpoint: 'Checkpoint',
 };
 
 export type StringKey = keyof typeof EN;
@@ -628,6 +630,8 @@ const HI: Record<StringKey, string> = {
   xpLine: '+{xp} XP · लेवल {level} ({into}/{next})', levelUp: 'लेवल अप! आप लेवल {level} पर पहुँचे', unlocked: 'अनलॉक: {name}',
   achievement: 'उपलब्धि: {name}', goalComplete: 'लक्ष्य पूरा: {name}', nextGoal: 'अगला लक्ष्य: {name} ({done})', streak: '{n} दिन लगातार',
   minutes: 'मिनट',
+  level: 'लेवल', levels: 'लेवल', levelComplete: 'लेवल पूरा', nextLevel: 'अगला लेवल', locked: 'बंद',
+  difficulty: 'कठिनाई', easy: 'आसान', normal: 'सामान्य', hard: 'कठिन', checkpoint: 'चेकपॉइंट',
 };
 
 export const GAME_STRINGS: Readonly<Record<GameLanguage, Record<StringKey, string>>> = { en: EN, hi: HI };
@@ -724,6 +728,114 @@ events.on('ASSET_LOADING', (p: { id?: unknown; fraction?: unknown; done?: unknow
 });
 `;
 
+const LEVELS = `/**
+ * LEVELS, CHECKPOINTS AND FIRST-TIME HINTS (admin 2026-11-19 game-gap audit: no stage progression, no respawn at a
+ * checkpoint, no tutorial — the LEVEL_* and CHECKPOINT_REACHED events were declared and nothing emitted them).
+ *
+ *   levels.define([{ name: 'Village' }, { name: 'Forest' }, { name: 'Fort' }], 'my-game');   // once, at start-up
+ *   events.on('LEVEL_STARTED', ({ index }) => buildLevel(index));                              // the game builds it
+ *   … levels.complete(stars);        // the round is won; the Hud offers Next level
+ *   … levels.checkpoint(player.position); on death: const p = levels.respawnPoint(); if (p) put the player there
+ *   showHint('jump', 'Press Space or Jump to jump over the gap');   // shown once per game, ever
+ * Progress (unlocked levels, stars, the last checkpoint) is saved on the device per game.
+ */
+import { events } from './events';
+import { state, setStatus } from './state';
+
+export interface LevelDef { name: string; /** One line shown in the level list. */ goal?: string }
+interface Progress { unlocked: number; stars: number[]; checkpoint: { level: number; x: number; y: number; z: number } | null; hints: string[] }
+
+let defs: LevelDef[] = [];
+let gameId = 'game';
+let index = 0;
+let progress: Progress = { unlocked: 0, stars: [], checkpoint: null, hints: [] };
+const key = (): string => 'nb-levels-v1:' + gameId;
+
+function load(): void {
+  progress = { unlocked: 0, stars: [], checkpoint: null, hints: [] };
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(key()) : null;
+    if (!raw) return;
+    const p = JSON.parse(raw) as Partial<Progress>;
+    if (typeof p.unlocked === 'number' && p.unlocked >= 0) progress.unlocked = Math.floor(p.unlocked);
+    if (Array.isArray(p.stars)) progress.stars = p.stars.map((n) => (typeof n === 'number' ? Math.max(0, Math.min(3, Math.floor(n))) : 0));
+    const c = p.checkpoint;
+    if (c && typeof c.level === 'number' && [c.x, c.y, c.z].every((v) => typeof v === 'number' && Number.isFinite(v))) progress.checkpoint = { level: c.level, x: c.x, y: c.y, z: c.z };
+    if (Array.isArray(p.hints)) progress.hints = p.hints.filter((h): h is string => typeof h === 'string').slice(0, 200);
+  } catch { /* a corrupt save starts fresh */ }
+}
+function save(): void {
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem(key(), JSON.stringify(progress)); } catch { /* not saved, still played */ }
+}
+
+export const levels = {
+  /** Declare the levels (once). Re-declaring keeps the saved progress for the same gameId. */
+  define(list: LevelDef[], id = 'game'): void {
+    defs = (Array.isArray(list) ? list : []).filter((l) => l && typeof l.name === 'string').map((l) => ({ name: l.name, goal: l.goal }));
+    gameId = String(id || 'game');
+    load();
+    index = Math.min(progress.unlocked, Math.max(0, defs.length - 1));
+    state.level = index + 1;
+    events.emit('LEVELS_CHANGED', {});
+  },
+  get count(): number { return defs.length; },
+  get list(): readonly LevelDef[] { return defs; },
+  get index(): number { return index; },
+  get current(): LevelDef | null { return defs[index] ?? null; },
+  get hasNext(): boolean { return index + 1 < defs.length; },
+  isUnlocked(i: number): boolean { return i >= 0 && i < defs.length && i <= progress.unlocked; },
+  stars(i: number): number { return progress.stars[i] ?? 0; },
+  /** Begin level i (when unlocked): LEVEL_STARTED { index, name } — the game builds that level. */
+  start(i: number): boolean {
+    if (!levels.isUnlocked(i)) return false;
+    index = i; state.level = i + 1;
+    if (progress.checkpoint && progress.checkpoint.level !== i) progress.checkpoint = null;
+    save();
+    events.emit('LEVEL_STARTED', { index: i, name: defs[i].name });
+    return true;
+  },
+  /** The current level is beaten: stars (0..3) kept at their best, the next level unlocked, the round won. */
+  complete(stars = 1): void {
+    if (!defs.length) return;
+    const s = Math.max(0, Math.min(3, Math.floor(stars)));
+    progress.stars[index] = Math.max(progress.stars[index] ?? 0, s);
+    progress.unlocked = Math.max(progress.unlocked, Math.min(defs.length - 1, index + 1));
+    progress.checkpoint = null;
+    save();
+    events.emit('LEVEL_COMPLETED', { index, name: defs[index].name, stars: s, next: index + 1 < defs.length });
+    setStatus('won');
+  },
+  /** Start the level after this one. */
+  next(): boolean { return levels.start(index + 1); },
+  /** Remember where the player is (CHECKPOINT_REACHED); a death can resume here. */
+  checkpoint(p: { x: number; y: number; z: number }): void {
+    if (![p?.x, p?.y, p?.z].every((v) => typeof v === 'number' && Number.isFinite(v))) return;
+    progress.checkpoint = { level: index, x: p.x, y: p.y, z: p.z };
+    save();
+    events.emit('CHECKPOINT_REACHED', { level: index, position: { x: p.x, y: p.y, z: p.z } });
+  },
+  /** The last checkpoint in THIS level, or null (start from the level's beginning). */
+  respawnPoint(): { x: number; y: number; z: number } | null {
+    const c = progress.checkpoint;
+    return c && c.level === index ? { x: c.x, y: c.y, z: c.z } : null;
+  },
+  /** Forget all progress for this game (a "reset progress" button). */
+  reset(): void { progress = { unlocked: 0, stars: [], checkpoint: null, hints: [] }; index = 0; save(); events.emit('LEVELS_CHANGED', {}); },
+};
+
+/**
+ * Show a hint ONCE per game, ever (first-time tutorial): HINT { id, text, seconds }. The kit's Hud shows it; the next
+ * time the player plays, it stays quiet. Returns whether it was shown.
+ */
+export function showHint(id: string, text: string, seconds = 4): boolean {
+  if (!id || !text || progress.hints.includes(id)) return false;
+  progress.hints.push(id);
+  save();
+  events.emit('HINT', { id, text, seconds: Math.max(1, Math.min(15, seconds)) });
+  return true;
+}
+`;
+
 const SETTINGS = `/**
  * THE PLAYER'S SETTINGS — one place, saved on this device, and actually APPLIED (admin 2026-11-19 audit: the old
  * \`state.settings\` held a music volume, an sfx volume and a quality that nothing ever read, and there was no mute).
@@ -750,10 +862,25 @@ export interface GameSettings {
   lookSensitivity: number;
   /** Phone vibration on hits and rewards. */
   vibration: boolean;
+  /** How hard the game is; read it with difficultyScale(). */
+  difficulty: Difficulty;
+}
+
+export type Difficulty = 'easy' | 'normal' | 'hard';
+
+/**
+ * What a difficulty means, as multipliers a game applies to its own numbers (admin 2026-11-19 game-gap audit: no Easy /
+ * Normal / Hard). enemyDamage and enemyHealth scale enemies; enemySpeed their movement; spawn how many come.
+ *   const k = difficultyScale(); hp.max = 100 * k.enemyHealth; …
+ */
+export function difficultyScale(d: Difficulty = current.difficulty): { enemyDamage: number; enemyHealth: number; enemySpeed: number; spawn: number } {
+  if (d === 'easy') return { enemyDamage: 0.6, enemyHealth: 0.75, enemySpeed: 0.85, spawn: 0.7 };
+  if (d === 'hard') return { enemyDamage: 1.35, enemyHealth: 1.3, enemySpeed: 1.12, spawn: 1.3 };
+  return { enemyDamage: 1, enemyHealth: 1, enemySpeed: 1, spawn: 1 };
 }
 
 export const DEFAULT_SETTINGS: Readonly<GameSettings> = {
-  masterVolume: 0.9, musicVolume: 0.6, sfxVolume: 0.8, muted: false, quality: 'high', lookSensitivity: 1, vibration: true,
+  masterVolume: 0.9, musicVolume: 0.6, sfxVolume: 0.8, muted: false, quality: 'high', lookSensitivity: 1, vibration: true, difficulty: 'normal',
 };
 
 const KEY = 'nb-game-settings-v1';
@@ -771,6 +898,7 @@ export function sanitizeSettings(raw: unknown): GameSettings {
     quality: r.quality === 'low' || r.quality === 'medium' || r.quality === 'high' ? r.quality : DEFAULT_SETTINGS.quality,
     lookSensitivity: look,
     vibration: typeof r.vibration === 'boolean' ? r.vibration : DEFAULT_SETTINGS.vibration,
+    difficulty: r.difficulty === 'easy' || r.difficulty === 'normal' || r.difficulty === 'hard' ? r.difficulty : DEFAULT_SETTINGS.difficulty,
   };
 }
 
@@ -1352,10 +1480,11 @@ const FILES: Record<string, string> = {
   'src/game/core/settings.ts': SETTINGS,
   'src/game/core/loading.ts': LOADING,
   'src/game/core/strings.ts': STRINGS,
+  'src/game/core/levels.ts': LEVELS,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -1384,6 +1513,7 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/loading.ts']) { files['src/game/core/events.ts'] = FILES['src/game/core/events.ts']; files['src/game/core/strings.ts'] = FILES['src/game/core/strings.ts']; }
     if (files['src/game/core/meta.ts']) files['src/game/core/strings.ts'] = FILES['src/game/core/strings.ts'];
     if (files['src/game/core/strings.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
+    if (files['src/game/core/levels.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }

@@ -43,6 +43,7 @@ import { state, setStatus, resetRun } from './core/state';
 import { startMeta, mountMetaToasts, combo } from './core/meta';
 import { settings, type GameSettings } from './core/settings';
 import { setGameLanguage, t, type GameLanguage, type StringKey } from './core/strings';
+import { showHint } from './core/levels';
 import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
@@ -331,6 +332,8 @@ export class Game {
     this.disposers.push(mountMetaToasts(options.container));
     // Taking a hit ends the combo — that is what makes a clean run worth more than a long one.
     this.disposers.push(events.on('PLAYER_DAMAGED', () => combo.break()));
+    // 🎓 The first time ever this game is played, the controls for the device in hand are shown once (core/levels.ts).
+    this.disposers.push(events.on('GAME_STARTED', () => { showHint('controls', touchDevice() ? t('controlsTouch') : t('controlsKeyboard'), 5); }));
     // 📱 THE NOTCH: safe-area insets read 0 on an iPhone unless the page asks for viewport-fit=cover. Asked for only
     // while a game is mounted (an ordinary page keeps its own viewport), and put back on dispose.
     const viewport = document.querySelector?.('meta[name="viewport"]') as HTMLMetaElement | null;
@@ -855,6 +858,7 @@ import { settings, type GameSettings } from '../core/settings';
 import { loading, type LoadingState } from '../core/loading';
 import { t } from '../core/strings';
 import { lastRaceResults } from '../three/race';
+import { levels } from '../core/levels';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -1070,6 +1074,39 @@ export function RaceOverlay() {
   );
 }
 
+/** Live level list and progress (core/levels.ts). */
+function useLevels(): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setTick((n) => n + 1);
+    const offs = ['LEVELS_CHANGED', 'LEVEL_STARTED', 'LEVEL_COMPLETED'].map((e) => events.on(e, bump));
+    return () => { for (const off of offs) off(); };
+  }, []);
+  return tick;
+}
+
+/** A first-time hint (showHint in core/levels.ts): shown once per game, then never again. */
+export function HintBar() {
+  const [hint, setHint] = useState<string | null>(null);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const off = events.on('HINT', (p: { text?: string; seconds?: number }) => {
+      if (!p?.text) return;
+      setHint(p.text); clearTimeout(timer);
+      timer = setTimeout(() => setHint(null), (p.seconds ?? 4) * 1000);
+    });
+    return () => { off(); clearTimeout(timer); };
+  }, []);
+  if (!hint) return null;
+  return (
+    <div role="status" aria-live="polite" style={{ position: 'absolute', left: '50%', bottom: 'max(120px, calc(env(safe-area-inset-bottom) + 112px))', transform: 'translateX(-50%)', maxWidth: 'min(90vw, 460px)', padding: '10px 16px', borderRadius: 12, background: 'rgba(0,0,0,0.72)', color: '#fff', fontSize: 15, textAlign: 'center', pointerEvents: 'none', zIndex: 7 }}>
+      {hint}
+    </div>
+  );
+}
+
+const starRow = (n: number): string => '★★★'.slice(0, n) + '☆☆☆'.slice(0, 3 - n);
+
 /** A speaker icon, crossed out when muted — an icon, so it reads in any language. */
 function SpeakerIcon({ muted }: { muted: boolean }) {
   return (
@@ -1130,6 +1167,17 @@ function SettingsPanel({ onBack }: { onBack: () => void }) {
       </div>
       <Slider label={t('lookSpeed')} value={s.lookSensitivity} min={0.25} max={3} step={0.25} onChange={(v) => settings.set({ lookSensitivity: v })} />
       <Toggle label={t('vibration')} on={s.vibration} onChange={(v) => settings.set({ vibration: v })} />
+      <div style={row}>
+        <span>{t('difficulty')}</span>
+        <div role="radiogroup" aria-label={t('difficulty')} style={{ display: 'flex', gap: 6 }}>
+          {(['easy', 'normal', 'hard'] as const).map((d) => (
+            <button key={d} type="button" role="radio" aria-checked={s.difficulty === d} onClick={() => settings.set({ difficulty: d })}
+              style={{ ...secondary, marginTop: 0, minWidth: 0, minHeight: 40, padding: '6px 10px', background: s.difficulty === d ? '#fde047' : 'rgba(255,255,255,0.14)', color: s.difficulty === d ? '#111' : '#fff' }}>
+              {t(d)}
+            </button>
+          ))}
+        </div>
+      </div>
       <button ref={back} type="button" style={button} onClick={onBack}>{t('back')}</button>
     </div>
   );
@@ -1140,6 +1188,12 @@ export function Hud({ game }: { game: Game }) {
   const prefs = useSettings();
   const load = useLoading();
   const fullscreen = useFullscreen(game);
+  useLevels();
+  const hasLevels = levels.count > 0;
+  /** Begin play on the chosen (or current) level — the game builds it on LEVEL_STARTED. */
+  const playLevel = (i: number) => { if (hasLevels && !levels.start(i)) return; game.play(); };
+  const replayLevel = () => { if (hasLevels) levels.start(levels.index); game.restart(); };
+  const nextLevel = () => { if (levels.next()) game.restart(); };
   const [panel, setPanel] = useState<'settings' | null>(null);
   const again = useRef<HTMLButtonElement>(null);
   const playRef = useRef<HTMLButtonElement>(null);
@@ -1224,6 +1278,7 @@ export function Hud({ game }: { game: Game }) {
       ) : null}
 
       <LoadingBar state={load} />
+      {s.status === 'playing' ? <HintBar /> : null}
       <ShooterOverlay game={game} playing={s.status === 'playing'} />
       {s.status === 'playing' || s.status === 'paused' ? <RaceOverlay /> : null}
 
@@ -1233,9 +1288,25 @@ export function Hud({ game }: { game: Game }) {
           {info.subtitle ? <p style={{ opacity: 0.9, marginTop: 8, fontSize: 17 }}>{info.subtitle}</p> : null}
           <p style={{ opacity: 0.75, marginTop: 12, fontSize: 14 }}>{touch ? info.controls.touch : info.controls.keyboard}</p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button ref={playRef} type="button" style={button} onClick={() => game.play()}>{t('play')}</button>
+            <button ref={playRef} type="button" style={button} onClick={() => playLevel(levels.index)}>{t('play')}</button>
             <button type="button" style={secondary} onClick={() => setPanel('settings')}>{t('settings')}</button>
           </div>
+          {levels.count > 1 ? (
+            <div role="list" aria-label={t('levels')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8, marginTop: 16 }}>
+              {levels.list.map((l, i) => {
+                const open = levels.isUnlocked(i);
+                return (
+                  <button key={i} role="listitem" type="button" disabled={!open} aria-label={t('level') + ' ' + (i + 1) + ' ' + l.name + (open ? '' : ' (' + t('locked') + ')')}
+                    onClick={() => playLevel(i)}
+                    style={{ ...secondary, marginTop: 0, minWidth: 0, padding: '8px 6px', opacity: open ? 1 : 0.45, cursor: open ? 'pointer' : 'not-allowed', outline: i === levels.index ? '2px solid #fde047' : 'none' }}>
+                    <div style={{ fontWeight: 800 }}>{open ? i + 1 : '🔒'}</div>
+                    <div style={{ fontSize: 12, opacity: 0.85 }}>{l.name}</div>
+                    <div aria-hidden="true" style={{ fontSize: 12, color: '#fde047' }}>{starRow(levels.stars(i))}</div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </div>,
       ) : null}
 
@@ -1253,7 +1324,8 @@ export function Hud({ game }: { game: Game }) {
 
       {over ? settingsOrScreen(
         <div style={{ maxWidth: 420, padding: '0 16px' }}>
-          <h2 style={{ fontSize: 30, fontWeight: 800 }}>{s.status === 'won' ? t('youWin') : t('gameOver')}</h2>
+          <h2 style={{ fontSize: 30, fontWeight: 800 }}>{s.status === 'won' ? (hasLevels ? t('levelComplete') : t('youWin')) : t('gameOver')}</h2>
+          {s.status === 'won' && hasLevels ? <p aria-label={levels.stars(levels.index) + ' / 3'} style={{ fontSize: 28, color: '#fde047', marginTop: 4 }}>{starRow(levels.stars(levels.index))}</p> : null}
           {/* The run summary: the first line is the hook — a new best, or exactly how close it was. */}
           {lastRaceResults ? (
             <ol aria-label="Race results" style={{ textAlign: 'left', margin: '12px auto 0', maxWidth: 280, paddingLeft: 24 }}>
@@ -1267,7 +1339,8 @@ export function Hud({ game }: { game: Game }) {
             <p key={i} style={i === 0 ? { fontSize: 20, fontWeight: 800, marginTop: 8, color: '#fde047' } : { opacity: 0.88, marginTop: 4 }}>{line}</p>
           ))}
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button ref={again} type="button" style={button} onClick={() => game.restart()}>{t('playAgain')}</button>
+            {s.status === 'won' && hasLevels && levels.hasNext ? <button type="button" style={button} onClick={nextLevel}>{t('nextLevel')}</button> : null}
+            <button ref={again} type="button" style={s.status === 'won' && hasLevels && levels.hasNext ? secondary : button} onClick={replayLevel}>{t('playAgain')}</button>
             {info ? <button type="button" style={secondary} onClick={() => game.toMenu()}>{t('menu')}</button> : null}
           </div>
         </div>,

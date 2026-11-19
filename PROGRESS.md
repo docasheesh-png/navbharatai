@@ -102507,3 +102507,11 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
 **Fixed:** kit file `systems/nav.ts` — `createNavGrid` (blocked test, `inflate` for body radius, refuses absurd sizes), `blockedFromBoxes`, `lineClear` (sampled a hair to either side, so a line grazing the corner where two blocked cells meet is not clear — found by the test), `findPath` (A*, 8 directions, no corner cutting, bounded, target-in-wall reached from beside it, string-pulled). `EnemyPerception.nav`: sight needs a clear line, no attack through a wall, a chasing enemy hunts a hidden player along a re-planned path (twice a second or when the player moves two cells), waits instead of walking into a wall when there is no way. Without `nav` the old behaviour is unchanged.
 
 **Tests:** `enemiesGoAroundWalls` (6). Reversion: no path following fails 1.
+
+## 2026-11-19 — Game-gap audit P1 #13: levels, checkpoints, difficulty and first-time hints
+
+**Root cause:** no stage manager, no respawn-at-checkpoint, no Easy/Normal/Hard, no tutorial; `LEVEL_STARTED`, `LEVEL_COMPLETED` and `CHECKPOINT_REACHED` were declared and never emitted by anything.
+
+**Fixed:** kit file `core/levels.ts` — `levels.define/start/complete/next/isUnlocked/stars/checkpoint/respawnPoint/reset`, progress saved per game (unlocks, best stars, the checkpoint), `complete` wins the round; `showHint(id, text)` once per game, ever; `settings.difficulty` + `difficultyScale()`; the Hud's level list on the start screen (locked shut, stars), Level complete with stars and Next level, Difficulty in Settings, the hint bar; Game shows the controls hint on the very first start. Prompt tells the builder to use it.
+
+**Tests:** `theGameHasLevelsCheckpointsAndHints` (7). Reversion: no unlock on complete fails 2.

@@ -1,3 +1,4 @@
+import { childStopSignal } from './runnerSignal';
 import { collectHandoff, handoffBlock } from './taskHandoff';
 import { parallelHelperScopeNote } from './parallelHelperScope';
 import { withoutPreviewBridge } from './previewBridge';
@@ -394,7 +395,10 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       onTodoOnlyTurn: deps.onTodoOnlyTurn,
       // Stop / the mid-build cost ceiling can finally end a delegated run. `AgentRunner` ends BETWEEN
       // turns, so this cancels nothing in flight and loses no written file — it stops the next call.
-      signal: deps.signal,
+      // …and since autopsy aba63ead (failedbr #2475) also when the RUNNER THAT SPAWNED IT stops: a repair pass
+      // whose budget ended used to leave its specialist writing for 68 s after the pass was undone, and those
+      // unchecked edits were saved as the verified version. `childStopSignal` joins the two (runnerSignal.ts).
+      signal: childStopSignal(deps.signal),
       // The REMAINING build time, read now (see `remainingBuildMs`). A non-positive answer is omitted
       // rather than passed as 0 — `buildTimedOut` treats 0 as "no deadline", so passing it would read
       // as unlimited, which is the opposite of what an exhausted budget means.

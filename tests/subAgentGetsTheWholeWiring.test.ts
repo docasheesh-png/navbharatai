@@ -126,7 +126,9 @@ describe('🔴 the child runner gets the six options it never had', () => {
   });
 
   it('the abort signal, so Stop and the cost ceiling can end a delegated run', () => {
-    expect(runnerBlock).toContain('signal: deps.signal');
+    // Since autopsy aba63ead the build's signal is JOINED with the spawning runner's (runnerSignal.ts): Stop and
+    // the cost ceiling still end the child, and so does the end of the pass that delegated to it.
+    expect(runnerBlock).toContain('signal: childStopSignal(deps.signal)');
   });
 
   it('the REMAINING build time, never the total', () => {

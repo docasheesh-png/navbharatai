@@ -37,6 +37,7 @@ import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { serviceRecommendationEvent } from '../analyzer/serviceRecommendation';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
+import { runWithRunnerSignal, isPassBudgetCause } from './runnerSignal';
 import { abortCauseOf, abortSummary, buildClockMinutes, timedOutSummary, stalledModelSummary, stoppedCallFields, type SeedState, type AbortCause } from './buildAbortCause';
 import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, buildBudgetNarration, type BudgetStage } from './buildBudgetSteer';
@@ -581,6 +582,12 @@ export class AgentRunner {
   constructor(private readonly opts: AgentRunnerOptions) {}
 
   async run(userPrompt: string): Promise<AgentRunResult> {
+    // Every tool this run executes — and every specialist it delegates to — sees THIS run's stop signal
+    // (runnerSignal.ts, autopsy aba63ead): a pass whose budget ended can no longer leave a child writing.
+    return runWithRunnerSignal(this.opts.signal as AbortSignal | undefined, () => this.runInZone(userPrompt));
+  }
+
+  private async runInZone(userPrompt: string): Promise<AgentRunResult> {
     const {
       client,
       dispatcher,
@@ -969,8 +976,18 @@ export class AgentRunner {
           minutes: buildClockMinutes(maxBuildMs, Date.now(), events.startedAt),
           ...endingContext(),
         });
-        await persist('stopped');
-        events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
+        // 🔴 A PASS'S OWN BUDGET IS NEVER THE BUILD'S ENDING (autopsy aba63ead, failedbr #2475). A repair runner
+        // shares the build's event stream and conversation, so its terminal `done` used to become the BUILD's:
+        // the report's `ok` turned false and its summary read "This repair had used its time…" on a build that
+        // had delivered, and the chat was marked stopped. A pass-budget ending is reported the way a specialist's
+        // is — a non-terminal `agent_done` — and the conversation keeps the status the build gives it.
+        if (isPassBudgetCause(cause)) {
+          await persist();
+          events.emit({ type: 'agent_done', agent: agentRole, ok: false, summary, ts: Date.now() });
+        } else {
+          await persist('stopped');
+          events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
+        }
         // BR1988 — a MEASUREMENT for the route, never a decision here: the user's own Stop ended this run
         // before the readiness check (which was eligible on this turn) ever judged the app finished.
         let stoppedBeforeReady = false;

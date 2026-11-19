@@ -79,15 +79,6 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     detail: 'Your app was opened in a browser and nothing rendered.',
     prompt: 'When the app is opened in a browser it does not render — a blank screen or an error instead of the app. Find the real cause (the mount point, the entry script, an error thrown while loading) and fix it, then confirm the app renders.',
   },
-  // Failed lane verification is an app finding until the corresponding recheck clears it.
-  // Keep compiler and stylesheet failures together; neither handoff nor a compiler-only pass
-  // establishes that a stylesheet defect was repaired. Never interpolate raw diagnostics here.
-  {
-    code: 'SIMPLE_BUILD_VERIFY_ERROR',
-    title: 'Fix remaining build errors',
-    detail: 'An app check found errors that have not yet been confirmed fixed.',
-    prompt: 'Inspect the saved build diagnostics and current app files. Fix the remaining compiler or stylesheet errors with targeted changes that preserve working features. Run the relevant checks again before claiming success; a compiler pass alone does not confirm that stylesheet errors are fixed. If a check cannot run, report what remains unverified.',
-  },
   // ── Q-381 BATCH THREE (2026-10-11): app findings that were shown with nothing to press ──────────
   // Each was a warning about the user's app in their build-health card, with no button. Every one is
   // either the final state of its check or is answered when a later check passes (the HEAL_RESOLVES
@@ -140,6 +131,15 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     title: 'Finish building your app',
     detail: 'The last build ran out of time before it finished.',
     prompt: 'The last build ran out of time before it finished. Continue from where it stopped: finish the parts that are not done yet, keep everything that is already there and working, and confirm the app builds and opens.',
+  },
+  // Failed lane verification is an app finding until the corresponding recheck clears it.
+  // Keep compiler and stylesheet failures together; neither handoff nor a compiler-only pass
+  // establishes that a stylesheet defect was repaired. Never interpolate raw diagnostics here.
+  {
+    code: 'SIMPLE_BUILD_VERIFY_ERROR',
+    title: 'Fix remaining build errors',
+    detail: 'An app check found errors that have not yet been confirmed fixed.',
+    prompt: 'Inspect the saved build diagnostics and current app files. Fix the remaining compiler or stylesheet errors with targeted changes that preserve working features. Run the relevant checks again before claiming success; a compiler pass alone does not confirm that stylesheet errors are fixed. If a check cannot run, report what remains unverified.',
   },
   {
     // The syntax gate's finding when its repair could not clear it (SYNTAX_HEALED answers it otherwise).
@@ -600,7 +600,8 @@ export const APP_FINDINGS_WITHOUT_AN_OFFER = new Set([
  * offer above.
  */
 export const OFFERED_THROUGH: Readonly<Record<string, string>> = {
-  // Both lanes retain the same verification evidence; offer one action even when both are open.
+  // Both initial lanes use the same compiler/style verification boundary and focused repair action.
+  // Sharing the offer also avoids two buttons if both lanes left unresolved checks in one report.
   ONESHOT_VERIFY_FAILED: 'SIMPLE_BUILD_VERIFY_ERROR',
   OUTCOME_SYNTAX_ERROR: 'SYNTAX_ERROR_DETECTED',
   OUTCOME_MISSING_FILES: 'MISSING_FILES_DETECTED',

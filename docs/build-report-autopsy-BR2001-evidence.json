@@ -1,0 +1,14 @@
+{
+  "evidenceType": "synthetic-fixtures-and-source-pins",
+  "privateReportPayloadIncluded": false,
+  "reportRetained": true,
+  "truncationComplete": true,
+  "cases": [
+    "free Weak new-app build on Surplus, stopped by the 25-min wall-clock cap, RELEASE_GATE RED, not charged",
+    "eight icons imported as ./assets/icons/<name>.svg?react; the .svg files were later written, vite-plugin-svgr installed and npm run build passed",
+    "the readiness check kept reporting '<name>.svg?react ... CREATE this file'; two resumes and the last ~6 min went to it",
+    "two app registries with different icon types held the typecheck at 14 errors for ~5 min"
+  ],
+  "fixes": { "F1": "src/server/lib/importSpecifier.ts importSpecifierPath, used by ProjectImport (gate + mispath autofix), appGraphScan, writeTimeImportCheck, ArchitectureAnalysis, journeyDerivation, fileClassification; exportCapabilities refuses query-loaded modules" },
+  "test": "tests/br2001Autopsy.test.ts"
+}

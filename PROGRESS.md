@@ -102233,6 +102233,7 @@ To decide next (owner):
   billed sandboxes, the −₹16,102 margin (admin decision), BUILD_BLOCKED_NO_CREDITS on new users, two reason-less log
   lines, the Grievance Officer env.
 
+**2026-11-18, later: #4298 merged** — Q-2754 Q-2755 Q-2756 closed (3). The admin Home autopsy stays NOT COMPLETE: Q-2757…Q-2764 open (Q-2761, Q-2764 blocked on the admin).
 
 ### 2026-11-18 — BR 99771bc7: fresh-main integration and honest validation retries
 
@@ -102280,6 +102281,53 @@ The code is in `src/server/AI/TrafficRegistry/decisionRecords.ts`. It hooks the 
 - `ReliabilityBody.render.test.tsx`.
 - 5 reversions each caught.
 
+## 2026-11-18 — Traffic Manager V2, P5 (code): upstream diversity after a gateway failure, OFF by default, staff canary first
+
+`policy.ts` gains `diversified()`, which is pure:
+- after a `retryable-provider-failure` of the same request, the pick moves to the nearest eligible candidate of the SAME payment class whose route shares none of the failed outage domains;
+- `unknown` is independent of nothing;
+- if there is no independent candidate, the original order stands;
+- a terminal failure ends the request exactly as before.
+
+`familyDiversity.ts`: `GATEWAY_FAMILY_DIVERSITY` = off (default) / canary (the uids in `INFERENCE_GATEWAY_CANARY_UIDS`) / on. The executor supplies `dependsOn` only when it is active. The ledger's re-check of the selected attempt is unchanged.
+
+Tests: policy (6 cases, including "without the hook the plan is byte-identical"), familyDiversity (4). 4 reversions each caught.
+
+NOT done (needs the owner):
+- Setting `GATEWAY_FAMILY_DIVERSITY=canary` in Cloud Run.
+- Watching the Reliability card and decision records for 7 days.
+- Then deciding on `on`.
+
+The plan's "Free Chat fully on the gateway" switch is the owner's existing env (`INFERENCE_GATEWAY_ROLLOUT_MODE` canary/all). This phase does not change it.
+
+## 2026-11-19 — BR2001 autopsy (an OS-emulator build ran out of time on a false "missing file"): a bundler query is not part of the file name
+
+Owner t311u sequential audit, BR2001 only (BR2000 not retained). Branched from origin/main `7ed8450` (#4304). A free Weak build was stopped by the 25-min cap (RED, not charged).
+
+- F1: `findUnresolvedLocalImports` reported `./assets/icons/start.svg?react — CREATE this file` while `start.svg` existed and `npm run build` passed; the builder spent both resumes and ~6 min on it. New shared `src/server/lib/importSpecifier.ts` (`importSpecifierPath` / `importSpecifierSuffix`) is now used by every resolver that decides whether a local import exists: ProjectImport (gate + mispath autofix, which keeps the `?react`), appGraphScan (it said "broken import that will fail the build"), writeTimeImportCheck, ArchitectureAnalysis, journeyDerivation, fileClassification. `resolveExportTarget` refuses a query-loaded module on purpose.
+- Locked closures: #4146 (setup note), BR1994 (ending minutes, no "continuing" after "out of time").
+- Queue: opens Q-2765 (two app registries from the fast lane) and Q-2766 (svgr import form); Q-2621 and Q-1007 gain BR2001 evidence.
+- Proof: `tests/br2001Autopsy.test.ts`; reverting any of the five resolver fixes fails 2–5 tests.
+- Docs: `docs/build-report-autopsy-BR2001.md` and its evidence JSON.
+
+## 2026-11-19 — BR2002 autopsy (a website that succeeded was recorded as a stopped change): only a stop before the result is a stop
+
+Owner t311u sequential audit, BR2002 only. Branched from origin/main `f2b1c01` (#4314). A free Weak website build succeeded YELLOW and was not charged; its change record said "status stopped".
+
+- F1: the settle passed `stopped: abort.signal.aborted || userStop`. Several platform mechanisms abort that controller after a result exists (advisory cap, reaper, lock reclaim, deploy drain). New pure `changeWasStopped` in `buildAbortCause.ts`: the user's own stop is always a stop; any other abort only when it ended the build before a successful result.
+- Sibling found and NOT changed: `runProof()` reads the same bare signal and feeds the markup rule — Q-2767, BLOCKED on the admin's billing decision (recommendation: apply the same rule).
+- Queue: opens Q-2767, Q-2768 (fast lane stopped at 8/12 files and handed off a never-written CSS import), Q-2769 (journey vs accessibility label disagreement); Q-1007 and Q-2753 gain BR2002 evidence.
+- Proof: `tests/br2002Autopsy.test.ts`; reverting the helper or the route fails it.
+- Docs: `docs/build-report-autopsy-BR2002.md` and its evidence JSON.
+
+## 2026-11-19 — BR2003 autopsy (a huge quiz spec failed setup in one second): all closed on main; the sizer is queued
+
+Owner t311u sequential audit, BR2003 only. Branched from origin/main `e8c45ef` (#4316). No product code changed.
+
+- D1–D3 already closed on main (BR1983 reason, BR1984 repeat wording, BR1986 ETA untested on a sandbox outcome); the ETA closure is locked here with this report's numbers.
+- Q-2770 opened (BLOCKED, the admin's scope decision): APP_SCOPE named the app "Project Name" and kept a seven-section spec as one build because of the word "Quiz"; fixing the header alone would make the decision worse. Today's output is pinned exactly.
+- Q-2621 and Q-2750 gain BR2003 evidence.
+- Docs: `docs/build-report-autopsy-BR2003.md`, its evidence JSON, `tests/br2003Autopsy.test.ts`.
 
 ### 2026-11-18 — BR 99771bc7: PR4303 green, then fresh Traffic Manager P4 integration
 

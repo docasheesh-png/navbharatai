@@ -27,6 +27,9 @@ import { makeTempDir } from './helpers/tempDir';
 const shell = generateGameShell().files;
 const TOUCH = shell['src/game/ui/touchControls.ts'];
 const INPUT = generateGameRuntime().files['src/game/core/input.ts'];
+// The controls' labels come from core/strings.ts (the player's language), which announces on core/events.ts.
+const EVENTS = generateGameRuntime().files['src/game/core/events.ts'];
+const STRINGS = generateGameRuntime().files['src/game/core/strings.ts'];
 
 describe('the game shell draws touch controls and wires them in', () => {
   it('ships the controls, and Game builds them unless a game opts out', () => {
@@ -48,7 +51,8 @@ describe('the game shell draws touch controls and wires them in', () => {
 
   it('a phone can pause: the HUD has a real Pause button that takes taps, inside the safe area', () => {
     const hud = shell['src/game/ui/Hud.tsx'];
-    expect(hud).toContain('aria-label="Pause" onClick={() => game.pause()}');
+    // The label is the player's language (core/strings.ts): "Pause" in English.
+    expect(hud).toContain("aria-label={t('pause')} onClick={() => game.pause()}");
     expect(hud).toContain("pointerEvents: 'auto', width: 44, height: 44");
     expect(hud).toContain("top: 'max(12px, env(safe-area-inset-top))'");
   });
@@ -107,7 +111,9 @@ function setup(coarse: boolean) {
   const win = Object.assign(winTarget, { matchMedia: () => ({ matches: coarse }) });
   const globals = { document: doc, window: win, getComputedStyle: (el: FakeEl) => ({ position: el.style.position || 'static' }), navigator: { maxTouchPoints: 5 } };
   const { Input } = load(INPUT, globals);
-  const { TouchControls } = load(TOUCH, globals);
+  const events = load(EVENTS, globals);
+  const strings = load(STRINGS, globals, { './events': events });
+  const { TouchControls } = load(TOUCH, globals, { '../core/strings': strings });
   const canvas = new FakeEl('canvas');
   const input = new Input(canvas);
   const container = new FakeEl('div');
@@ -223,7 +229,9 @@ describe.skipIf(!haveBrowser)('in a real browser, with real touch events', () =>
   beforeAll(async () => {
     const files: Record<string, string> = {
       '/input.js': esm(INPUT),
-      '/touch.js': esm(TOUCH).replace("'../core/input'", "'./input.js'"),
+      '/events.js': esm(EVENTS),
+      '/strings.js': esm(STRINGS).replace("'./events'", "'./events.js'"),
+      '/touch.js': esm(TOUCH).replace("'../core/input'", "'./input.js'").replace("'../core/strings'", "'./strings.js'"),
       '/': '<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body style="margin:0">'
         + '<div id="host" style="position:fixed;inset:0;background:#123"></div><script type="module">'
         + "import { Input } from './input.js'; import { TouchControls } from './touch.js';"

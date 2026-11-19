@@ -14,8 +14,10 @@ import { persistProjectAsset, type GameAssetWorkspace, type GameAssetPersistence
 import { proveAssetInSandbox } from './assetBrowserProof';
 import { saveWorkspaceAssets, readWorkspaceAssetBytes } from '../WorkspaceAssetStore';
 import { mergeWorkspaceFiles } from '../WorkspaceFileStore';
-import { GAME_ASSET_MODELS_PATH, generateAssetModelLoader, generateGameAssetRuntime } from '../../lib/GameAssetRuntimeGenerator';
+import { GAME_ASSET_CUSTOMIZATIONS_PATH, GAME_ASSET_MODELS_PATH, generateAssetCustomizations, generateAssetModelLoader, generateGameAssetRuntime } from '../../lib/GameAssetRuntimeGenerator';
 import { sceneryFor, generateWorldDressingModule } from './worldDressing';
+/** MIT requires its permission notice in every copy; the copyright line is the entry's `attribution`. */
+export const MIT_PERMISSION_NOTICE = 'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.';
 
 const discover = createPolyHavenDiscovery(polyHavenTransport, (url, signal) => downloadGameAsset({ downloadUrl: url }, new Set(['https://dl.polyhaven.org']), signal));
 
@@ -173,13 +175,14 @@ async function prepareExternalGameAssets(options: GameAssetSeedOptions): Promise
   const credits = ready.map(r => {
     const c = r.outcome.entry.candidate;
     const reviewed = isDiscoveredAsset(c) ? c : catalogue.find(a => a.sha256 === c.sha256 && a.provider === c.provider && a.id === c.id && a.revision === c.revision);
-    return `${r.subject}: ${c.license.author} — ${c.license.spdx}\n${c.license.attribution}\nSource: ${c.sourceUrl}\nLicense evidence: ${c.license.evidenceUrl}\nRevision: ${c.revision}\nChanges: ${reviewed?.optimization === 'animation-selection-v1' ? 'retained clips ' + reviewed.retainedAnimations?.join(', ') + '; removed other clips and unused data (animation-selection-v1); ' : reviewed?.optimization === 'compact-v1' ? 'lossless GLB buffer compaction (compact-v1); ' : ''}glTF packaging when applicable; runtime scale, grounding, curated orientation normalization and eligible bounded static LOD generation.\nSHA-256: ${c.sha256}${reviewed?.sourceSha256 ? '\nSource SHA-256: ' + reviewed.sourceSha256 : ''}`;
+    return `${r.subject}: ${c.license.author} — ${c.license.spdx}\n${c.license.attribution}\nSource: ${c.sourceUrl}\nLicense evidence: ${c.license.evidenceUrl}\nRevision: ${c.revision}\nChanges: ${reviewed?.optimization === 'animation-selection-v1' ? 'retained clips ' + reviewed.retainedAnimations?.join(', ') + '; removed other clips and unused data (animation-selection-v1); ' : reviewed?.optimization === 'compact-v1' ? 'lossless GLB buffer compaction (compact-v1); ' : ''}glTF packaging when applicable; runtime scale, grounding, curated orientation normalization and eligible bounded static LOD generation.\nSHA-256: ${c.sha256}${reviewed?.sourceSha256 ? '\nSource SHA-256: ' + reviewed.sourceSha256 : ''}${c.license.spdx === 'MIT' ? '\n\n' + MIT_PERMISSION_NOTICE : ''}`;
   }).join('\n\n');
   const files: Record<string, string> = {
     'public/game-assets/manifest.json': JSON.stringify(manifest, null, 2),
     'public/game-assets/ATTRIBUTION.txt': credits,
     'src/game/three/externalAssets.ts': generateGameAssetRuntime(),
     [GAME_ASSET_MODELS_PATH]: generateAssetModelLoader(local),
+    [GAME_ASSET_CUSTOMIZATIONS_PATH]: generateAssetCustomizations(ready.map(r => r.subject)),
   };
   const dressed = scenery ? scenery.subjects.filter((subject) => ready.some((r) => r.subject === subject)) : [];
   if (scenery && dressed.length) files['src/game/three/worldDressing.ts'] = generateWorldDressingModule(dressed, scenery.layout);
@@ -192,7 +195,7 @@ async function prepareExternalGameAssets(options: GameAssetSeedOptions): Promise
     }
     out.files = files;
     out.status = 'prepared';
-    out.handoff = `${localModelsOverride(ready.map(r => r.subject))} LOCAL 3D MODELS PREPARED: ${ready.map(r => r.subject).join(', ')}. Import loadRequestedAsset from src/game/three/assetModels.ts. Await loadRequestedAsset(subject, proceduralFallback); add handle.root to the scene; call handle.update(dt) each frame and handle.dispose() on teardown. The fallback must return { root, source: 'procedural', update, dispose } using the existing appropriate real/lite builder. Use these matching local models for those subjects, preserve gameplay physics and controls, and do not fetch provider URLs. Keep manifest.json and ATTRIBUTION.txt in the published bundle. A model passed an isolated render check; the finished game's normal playtest still must verify its integration.`
+    out.handoff = `${localModelsOverride(ready.map(r => r.subject))} LOCAL 3D MODELS PREPARED: ${ready.map(r => r.subject).join(', ')}. Import loadRequestedAsset from src/game/three/assetModels.ts. Await loadRequestedAsset(subject, proceduralFallback); add handle.root to the scene; call handle.update(dt) each frame and handle.dispose() on teardown. The fallback must return { root, source: 'procedural', update, dispose } using the existing appropriate real/lite builder. Use these matching local models for those subjects, preserve gameplay physics and controls, and do not fetch provider URLs. Keep manifest.json and ATTRIBUTION.txt in the published bundle. A model passed an isolated render check; the finished game's normal playtest still must verify its integration. EVERY MODEL IS CHANGEABLE: when the user asks to recolour, resize, turn, move, hide a part of, re-animate, swap to the code-built object, or fully replace a model with their own .glb (or add a new one), edit ONLY src/game/three/assetCustomizations.ts (examples are in that file) — never the library files, manifest.json, assetModels.ts or externalAssets.ts.`
       + (dressed.length ? ` WORLD DRESSING READY (${dressed.join(', ')}; ${scenery!.layout} layout): import { dressWorld } from src/game/three/worldDressing.ts and call await dressWorld(scene, { heightAt, accept }) ONCE after the terrain/road exists — pass the kit's ground-height function as heightAt and an accept(x, z) that returns false on the road, track and play space. Solid scenery carries collision geometry into the scene with each clone. Do not also scatter procedural copies of these subjects.` : '');
     return out;
   } catch {

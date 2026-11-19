@@ -1,0 +1,502 @@
+[
+  {
+    "id": "lib3-burger",
+    "file": "food_burger.gltf",
+    "sourceBytes": 3066,
+    "bytes": 84780,
+    "triangles": 1622,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-dinner",
+    "file": "food_dinner.gltf",
+    "sourceBytes": 3065,
+    "bytes": 67216,
+    "triangles": 1196,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-stew",
+    "file": "food_stew.gltf",
+    "sourceBytes": 3056,
+    "bytes": 45408,
+    "triangles": 560,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-tomato",
+    "file": "food_ingredient_tomato.gltf",
+    "sourceBytes": 3082,
+    "bytes": 35784,
+    "triangles": 388,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-carrot",
+    "file": "food_ingredient_carrot.gltf",
+    "sourceBytes": 3076,
+    "bytes": 32544,
+    "triangles": 324,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-potato",
+    "file": "food_ingredient_potato.gltf",
+    "sourceBytes": 3064,
+    "bytes": 25956,
+    "triangles": 156,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-onion",
+    "file": "food_ingredient_onion.gltf",
+    "sourceBytes": 3060,
+    "bytes": 32792,
+    "triangles": 304,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-cheese",
+    "file": "food_ingredient_cheese.gltf",
+    "sourceBytes": 3061,
+    "bytes": 32516,
+    "triangles": 258,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-vegetable-crate",
+    "file": "crate_tomatoes.gltf",
+    "sourceBytes": 3048,
+    "bytes": 104360,
+    "triangles": 2072,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-oven",
+    "file": "oven.gltf",
+    "sourceBytes": 5058,
+    "bytes": 57832,
+    "triangles": 542,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-fridge",
+    "file": "fridge_A.gltf",
+    "sourceBytes": 7062,
+    "bytes": 51040,
+    "triangles": 614,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-stove",
+    "file": "stove_multi.gltf",
+    "sourceBytes": 3006,
+    "bytes": 77108,
+    "triangles": 1084,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-cooking-pot",
+    "file": "pot_A.gltf",
+    "sourceBytes": 2977,
+    "bytes": 35404,
+    "triangles": 324,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-frying-pan",
+    "file": "pan_A.gltf",
+    "sourceBytes": 2947,
+    "bytes": 33468,
+    "triangles": 310,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-round-table",
+    "file": "table_round_A.gltf",
+    "sourceBytes": 3001,
+    "bytes": 34932,
+    "triangles": 312,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-kitchen-counter",
+    "file": "kitchencounter_straight_A.gltf",
+    "sourceBytes": 2989,
+    "bytes": 30780,
+    "triangles": 168,
+    "animations": 0,
+    "licenseFileSha256": "4da4ad3a3face68a71c11c8adc8e93017fdeb8fd67fcb0ca8286bd9c3dbbf674",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-pumpkin",
+    "file": "pumpkin_orange.gltf",
+    "sourceBytes": 3072,
+    "bytes": 25120,
+    "triangles": 306,
+    "animations": 0,
+    "licenseFileSha256": "a514c41d8d5f2a07c94c55acd29ba94f50b86837f972e37edb4cbdeb7ba0e0e0",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-jack-o-lantern",
+    "file": "pumpkin_orange_jackolantern.gltf",
+    "sourceBytes": 3089,
+    "bytes": 29852,
+    "triangles": 374,
+    "animations": 0,
+    "licenseFileSha256": "a514c41d8d5f2a07c94c55acd29ba94f50b86837f972e37edb4cbdeb7ba0e0e0",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-gravestone",
+    "file": "gravestone.gltf",
+    "sourceBytes": 3066,
+    "bytes": 28812,
+    "triangles": 271,
+    "animations": 0,
+    "licenseFileSha256": "a514c41d8d5f2a07c94c55acd29ba94f50b86837f972e37edb4cbdeb7ba0e0e0",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-grave",
+    "file": "grave_A.gltf",
+    "sourceBytes": 2990,
+    "bytes": 32124,
+    "triangles": 323,
+    "animations": 0,
+    "licenseFileSha256": "a514c41d8d5f2a07c94c55acd29ba94f50b86837f972e37edb4cbdeb7ba0e0e0",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-coffin",
+    "file": "coffin.gltf",
+    "sourceBytes": 4828,
+    "bytes": 35212,
+    "triangles": 316,
+    "animations": 0,
+    "licenseFileSha256": "a514c41d8d5f2a07c94c55acd29ba94f50b86837f972e37edb4cbdeb7ba0e0e0",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-skull",
+    "file": "skull.gltf",
+    "sourceBytes": 3058,
+    "bytes": 29056,
+    "triangles": 344,
+    "animations": 0,
+    "licenseFileSha256": "a514c41d8d5f2a07c94c55acd29ba94f50b86837f972e37edb4cbdeb7ba0e0e0",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-dead-tree",
+    "file": "tree_dead_large.gltf",
+    "sourceBytes": 3074,
+    "bytes": 23700,
+    "triangles": 256,
+    "animations": 0,
+    "licenseFileSha256": "a514c41d8d5f2a07c94c55acd29ba94f50b86837f972e37edb4cbdeb7ba0e0e0",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-pine-tree",
+    "file": "tree_pine_orange_large.gltf",
+    "sourceBytes": 3085,
+    "bytes": 33996,
+    "triangles": 318,
+    "animations": 0,
+    "licenseFileSha256": "a514c41d8d5f2a07c94c55acd29ba94f50b86837f972e37edb4cbdeb7ba0e0e0",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-lantern",
+    "file": "lantern_standing.gltf",
+    "sourceBytes": 3084,
+    "bytes": 28908,
+    "triangles": 264,
+    "animations": 0,
+    "licenseFileSha256": "a514c41d8d5f2a07c94c55acd29ba94f50b86837f972e37edb4cbdeb7ba0e0e0",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-crypt",
+    "file": "crypt.gltf",
+    "sourceBytes": 2960,
+    "bytes": 75036,
+    "triangles": 952,
+    "animations": 0,
+    "licenseFileSha256": "a514c41d8d5f2a07c94c55acd29ba94f50b86837f972e37edb4cbdeb7ba0e0e0",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-iron-fence",
+    "file": "fence.gltf",
+    "sourceBytes": 2976,
+    "bytes": 43140,
+    "triangles": 380,
+    "animations": 0,
+    "licenseFileSha256": "a514c41d8d5f2a07c94c55acd29ba94f50b86837f972e37edb4cbdeb7ba0e0e0",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-cemetery-gate",
+    "file": "arch_gate.gltf",
+    "sourceBytes": 7059,
+    "bytes": 76344,
+    "triangles": 868,
+    "animations": 0,
+    "licenseFileSha256": "a514c41d8d5f2a07c94c55acd29ba94f50b86837f972e37edb4cbdeb7ba0e0e0",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-lander",
+    "file": "lander_A.gltf",
+    "sourceBytes": 3059,
+    "bytes": 108420,
+    "triangles": 1464,
+    "animations": 0,
+    "licenseFileSha256": "e1c732edc054bcc23fcee2409304f03fe0f15c9e5150bfd6a72a0f09d513e93f",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-space-rover",
+    "file": "spacetruck.gltf",
+    "sourceBytes": 10917,
+    "bytes": 69528,
+    "triangles": 1118,
+    "animations": 0,
+    "licenseFileSha256": "e1c732edc054bcc23fcee2409304f03fe0f15c9e5150bfd6a72a0f09d513e93f",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-wind-turbine",
+    "file": "windturbine_tall.gltf",
+    "sourceBytes": 5168,
+    "bytes": 57940,
+    "triangles": 632,
+    "animations": 0,
+    "licenseFileSha256": "e1c732edc054bcc23fcee2409304f03fe0f15c9e5150bfd6a72a0f09d513e93f",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-solar-panel",
+    "file": "solarpanel.gltf",
+    "sourceBytes": 3066,
+    "bytes": 33820,
+    "triangles": 118,
+    "animations": 0,
+    "licenseFileSha256": "e1c732edc054bcc23fcee2409304f03fe0f15c9e5150bfd6a72a0f09d513e93f",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-space-base",
+    "file": "basemodule_A.gltf",
+    "sourceBytes": 3064,
+    "bytes": 64208,
+    "triangles": 586,
+    "animations": 0,
+    "licenseFileSha256": "e1c732edc054bcc23fcee2409304f03fe0f15c9e5150bfd6a72a0f09d513e93f",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-landing-pad",
+    "file": "landingpad_large.gltf",
+    "sourceBytes": 3067,
+    "bytes": 54632,
+    "triangles": 478,
+    "animations": 0,
+    "licenseFileSha256": "e1c732edc054bcc23fcee2409304f03fe0f15c9e5150bfd6a72a0f09d513e93f",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-cargo-container",
+    "file": "cargo_A.gltf",
+    "sourceBytes": 3007,
+    "bytes": 34016,
+    "triangles": 128,
+    "animations": 0,
+    "licenseFileSha256": "e1c732edc054bcc23fcee2409304f03fe0f15c9e5150bfd6a72a0f09d513e93f",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-drill-rig",
+    "file": "drill_structure.gltf",
+    "sourceBytes": 5127,
+    "bytes": 96208,
+    "triangles": 1198,
+    "animations": 0,
+    "licenseFileSha256": "e1c732edc054bcc23fcee2409304f03fe0f15c9e5150bfd6a72a0f09d513e93f",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-fountain",
+    "file": "pavement-fountain.glb",
+    "sourceBytes": 14076,
+    "bytes": 24124,
+    "triangles": 152,
+    "animations": 0,
+    "licenseFileSha256": "8e99e4045f71bb96d77a1765c815511c63c9f9185bfada2b8917e041ced00754",
+    "license": "MIT"
+  },
+  {
+    "id": "lib3-garage",
+    "file": "building-garage.glb",
+    "sourceBytes": 19204,
+    "bytes": 29256,
+    "triangles": 196,
+    "animations": 0,
+    "licenseFileSha256": "8e99e4045f71bb96d77a1765c815511c63c9f9185bfada2b8917e041ced00754",
+    "license": "MIT"
+  },
+  {
+    "id": "lib3-small-house-a",
+    "file": "building-small-a.glb",
+    "sourceBytes": 39660,
+    "bytes": 49708,
+    "triangles": 452,
+    "animations": 0,
+    "licenseFileSha256": "8e99e4045f71bb96d77a1765c815511c63c9f9185bfada2b8917e041ced00754",
+    "license": "MIT"
+  },
+  {
+    "id": "lib3-small-house-b",
+    "file": "building-small-b.glb",
+    "sourceBytes": 49764,
+    "bytes": 59816,
+    "triangles": 600,
+    "animations": 0,
+    "licenseFileSha256": "8e99e4045f71bb96d77a1765c815511c63c9f9185bfada2b8917e041ced00754",
+    "license": "MIT"
+  },
+  {
+    "id": "lib3-blacksmith",
+    "file": "building_blacksmith_red.gltf",
+    "sourceBytes": 3100,
+    "bytes": 140248,
+    "triangles": 2410,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-mine",
+    "file": "building_mine_yellow.gltf",
+    "sourceBytes": 3090,
+    "bytes": 83224,
+    "triangles": 1126,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-archery-range",
+    "file": "building_archeryrange_blue.gltf",
+    "sourceBytes": 3090,
+    "bytes": 219572,
+    "triangles": 3819,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-lumbermill",
+    "file": "building_lumbermill_green.gltf",
+    "sourceBytes": 7365,
+    "bytes": 185348,
+    "triangles": 3170,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-pine-forest",
+    "file": "trees_B_large.gltf",
+    "sourceBytes": 3067,
+    "bytes": 69148,
+    "triangles": 1540,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-boulder",
+    "file": "rock_single_E.gltf",
+    "sourceBytes": 3057,
+    "bytes": 21480,
+    "triangles": 71,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-water-lily",
+    "file": "waterlily_A.gltf",
+    "sourceBytes": 3027,
+    "bytes": 19768,
+    "triangles": 68,
+    "animations": 0,
+    "licenseFileSha256": "881e50d3629fba90629bedc65e9e6f47cfab3609598c296dcb7f70ea83174360",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-door",
+    "file": "Door_A.gltf",
+    "sourceBytes": 3049,
+    "bytes": 45852,
+    "triangles": 296,
+    "animations": 0,
+    "licenseFileSha256": "1706d3369ecd7676320c03c25a898cc29fd1bb83bd3136646c45e6f400058887",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-stairs",
+    "file": "Primitive_Stairs.gltf",
+    "sourceBytes": 3012,
+    "bytes": 35028,
+    "triangles": 68,
+    "animations": 0,
+    "licenseFileSha256": "1706d3369ecd7676320c03c25a898cc29fd1bb83bd3136646c45e6f400058887",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib3-pallet",
+    "file": "Pallet_Large.gltf",
+    "sourceBytes": 3005,
+    "bytes": 40276,
+    "triangles": 132,
+    "animations": 0,
+    "licenseFileSha256": "1706d3369ecd7676320c03c25a898cc29fd1bb83bd3136646c45e6f400058887",
+    "license": "CC0-1.0"
+  }
+]

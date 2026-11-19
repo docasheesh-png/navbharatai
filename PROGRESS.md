@@ -102850,3 +102850,9 @@ Q-2947–Q-2949 OPEN (edit-miss watch, browser-tool outages without detail, Surp
   unpinned (newer Chromium dropped the automatic SwiftShader fallback). Fix: `SANDBOX_BROWSER_ARGS` (one list, every
   launch, census test), `SANDBOX_PLAYWRIGHT_VERSION` pinned (= Dockerfiles), honest `checkerLacksWebGL` verdict.
   Real-Chromium test, reversion-proven. Watch the next 3D build for real fps / a scored Controls dimension.
+## 2026-11-19 — The model library reaches existing games (add_library_models)
+- The seed added library models only to NEW games; in an existing game the builder could only search metadata.
+  New run_recipe tool `add_library_models`: same rollout gate, downloads, proofs and durable saves as the seed, merged
+  into the game's loader/manifest/credits; the user's assetCustomizations.ts is never replaced; the runtime is written only
+  when missing or too old for the new loader. Honest answers when the library is off, a name is not in it, or the sandbox
+  cannot write binary files. Verified end-to-end: castle + motorcycle added to a built village game, 8/8 models in Chromium.

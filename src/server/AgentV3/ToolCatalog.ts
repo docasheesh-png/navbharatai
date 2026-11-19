@@ -2509,6 +2509,27 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'add_library_models',
+      description:
+        'Add READY 3D models from the NavBharatAI library to the CURRENT game (use it when a game already exists and the user asks '
+        + 'for an object the library has — "add a cow", "put a castle here", "use a real motorcycle"). It downloads, verifies and '
+        + 'proves each model, saves it into the project and adds it to src/game/three/assetModels.ts without touching earlier models '
+        + 'or the user\'s assetCustomizations.ts. Up to 6 per call; names come from object_spec({ library_query }). Then load each with '
+        + 'loadRequestedAsset(subject, fallback). It answers honestly when the library is off for this account or a model is not available — '
+        + 'then build that object with the existing recipes.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          models: {
+            type: 'array', maxItems: 6,
+            items: { type: 'object', properties: { subject: { type: 'string', maxLength: 64 }, animation: { type: 'string', enum: ['walk', 'run', 'fly'] } }, required: ['subject'] },
+            description: 'The library models to add, e.g. [{ "subject": "cow" }, { "subject": "farmer", "animation": "walk" }].',
+          },
+        },
+        required: ['models'],
+      },
+    },
+    {
       name: 'object_spec',
       description:
         'Search the categorized game library without model calls using library_query and optional category/animation; an empty query lists indexed entries. Results distinguish reviewed models needing admission, code recipes, and specifications only. No result proves placement or gameplay. '
@@ -3737,6 +3758,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_game_controller',
   'generate_game_3d',
   'object_spec',
+  'add_library_models',
   'generate_game_runtime',
   'generate_animation',
   'generate_ui_states',
@@ -3932,6 +3954,8 @@ export function consensusToolDef(): ClaudeToolDef {
  * Every recipe here is a code generator that runs on the USER's own keys — none spends NavBharatAI money.
  */
 export const RECIPE_TOOLS = [
+  // Adds library models to an EXISTING game: downloads public assets, spends no AI money (gameAssets/assetSeed.ts).
+  'add_library_models',
   'generate_ai',
   'generate_analytics',
   'generate_architecture_docs',

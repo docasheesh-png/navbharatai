@@ -64,6 +64,8 @@ export type ToolName =
   | 'find_ui_element'
   // The read-only object lookup the build prompt names for 3D games (autopsy f496c75b).
   | 'object_spec'
+  // Adds named library models to an EXISTING game (gameAssets/assetSeed.ts addLibraryModels), via run_recipe.
+  | 'add_library_models'
   | 'task'
   | 'second_opinion'
   | 'consensus'

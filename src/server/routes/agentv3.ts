@@ -17061,6 +17061,8 @@ async function noteBuildOutcome(
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
+      // The library's rollout switch (add_library_models) is decided for the verified owner, never a claimed one.
+      dispatcher.setLibraryOwner(verified?.uid);
       dispatcher.setRoyaleNewProjectAllowed(royaleNewProjectAllowed({
         inventoryRead: royaleInventoryRead, intent, editing: isEditMode,
         hasVerifiedRevision: editHeadAtStart !== null,

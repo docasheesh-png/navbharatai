@@ -51,7 +51,8 @@ describe('1 — the correction budget is reserved at build start', () => {
   });
 
   it('the reserve is computed from the build-wide budget, at the generation runner itself', () => {
-    expect(route).toContain('maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, Date.now() - buildStartedAt)');
+    // The working clock since failedbr #2431 (a key popup is not counted against the reserve either).
+    expect(route).toContain('maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, workElapsed())');
   });
 });
 

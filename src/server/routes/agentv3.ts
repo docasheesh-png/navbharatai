@@ -255,7 +255,7 @@ import {
   explorerRepairEnabled, repairTargets, explorerRepairPlan, explorerRepairTierGate, runExplorerRepair,
   explorerRepairOutcomeRecord, explorerRepairProof, explorerRepairUserLine, EXPLORER_REPAIR_PASS, explorerRepairPrompt,
 } from '../AgentV3/explorerRepair';
-import { withoutPlatformCheckTools } from '../AgentV3/repairScope';
+import { withoutPlatformCheckTools, REPAIR_WITHHELD_TOOLS } from '../AgentV3/repairScope';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
 import { applyGateRedNotice } from '../AgentV3/gateRedNotice';
@@ -788,7 +788,9 @@ import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuator
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, cssStoppedUnfinishedRecord, cssClassesUndefinedFields, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
 import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../AgentV3/spacingSnap';
-import { filesANoteStillFlags } from '../AgentV3/writeTimeQualityCheck';
+import { filesANoteStillFlags, salvageQualityNotes } from '../AgentV3/writeTimeQualityCheck';
+import { failedAttemptCostVerdict } from '../AI/SurplusRegistry/failedAttemptCost';
+import { waitCreditMs, workElapsedMs, hardDeadlineRemainingMs } from '../AgentV3/workClock';
 import { persistedStateBuildWarnings } from '../AgentV3/persistedStateCheck';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
@@ -13208,6 +13210,8 @@ async function noteBuildOutcome(
      */
     const userWait: { since: number | null; totalMs: number } = { since: null, totalMs: 0 };
     let onUserWaitEnded: ((startedAt: number, waitedMs: number) => void) | null = null;
+    /** Pushes the hard deadline back by the credited wait (workClock.ts, failedbr #2431); set once the timer is armed. */
+    let onWaitCredited: (() => void) | null = null;
     const waitForUser = async (requestId: string, timeoutMs?: number): Promise<ApprovalOutcome> => {
       const startedWait = Date.now();
       userWait.since = startedWait;
@@ -13219,6 +13223,7 @@ async function noteBuildOutcome(
         userWait.totalMs += waited;
         try { buildDiagRef?.addUserWait(waited, startedWait); } catch { /* diagnostics are best-effort */ }
         try { onUserWaitEnded?.(startedWait, waited); } catch { /* clocks are best-effort */ }
+        try { onWaitCredited?.(); } catch { /* the deadline keeps its old time if this fails */ }
       }
     };
     // Durable history rows read near the START, summarized at the END — see the note at the read.
@@ -13458,6 +13463,10 @@ async function noteBuildOutcome(
     if (freeTierBuildActive) void noteFreeBuildStartDurable(workspaceId, prompt, firestoreFreeChainStore()).catch(() => {});
     const effectiveBuildSeconds = freeWindow.seconds;
     const deadlineMs = effectiveBuildSeconds * 1000;
+    // 🔴 THE USER-WAIT CREDIT (workClock.ts, failedbr #2431): the live line promises a key popup "is not counted against"
+    // the build, so every clock that decides whether the build may go on subtracts it — capped below Cloud Run's
+    // request ceiling so a build can never outlive the request that carries it.
+    const creditedWaitMs = (): number => waitCreditMs(userWait.totalMs, deadlineMs);
     // P-ARCH+.3 — tokens spent by the optional up-front blueprint step (below). Declared here so the
     // final billing hook can fold them into the user's charge with the same markup as every other
     // v5.0 call (NavBharatAI-Anthropic-billed). Stays {0,0} unless the blueprint step actually runs.
@@ -13967,6 +13976,14 @@ async function noteBuildOutcome(
     });
     const finalizeOnDeadline = deadlineFinalization.run;
     deadlineTimer = deadlineMs > 0 ? setTimeout(finalizeOnDeadline, deadlineMs) : undefined;
+    const deadlineArmedAt = Date.now();
+    /** True until the advisory cap replaces the hard deadline — only the HARD deadline earns the wait credit. */
+    let deadlineIsHard = deadlineMs > 0;
+    onWaitCredited = () => {
+      if (!deadlineIsHard || !deadlineTimer || rb.ended) return;
+      clearTimeout(deadlineTimer);
+      deadlineTimer = setTimeout(finalizeOnDeadline, hardDeadlineRemainingMs(Date.now(), deadlineArmedAt, deadlineMs, creditedWaitMs()));
+    };
     // ADVISORY CAP — the #1 "build stuck running" root cause: once the app is BUILT and durably saved,
     // the remaining post-build work (reviewer, reflection, project summary, memory persist, and above
     // all the GitHub push/merge NETWORK calls) is ADVISORY. A single hung advisory step used to hold
@@ -13992,6 +14009,7 @@ async function noteBuildOutcome(
     // cap's promise — a finished build is never held open indefinitely — holds for every caller.
     const armAdvisoryCap = (ms: number = ADVISORY_CAP_MS) => {
       if (deadlineMs <= 0) return;
+      deadlineIsHard = false;
       if (deadlineTimer) clearTimeout(deadlineTimer);
       deadlineTimer = setTimeout(finalizeOnDeadline, Number.isFinite(ms) && ms > 0 ? ms : ADVISORY_CAP_MS);
     };
@@ -14417,7 +14435,7 @@ async function noteBuildOutcome(
             plannedFiles: etaPlannedFiles, filesDone: etaFilesDone, firstFileAt: etaFirstFileAt,
             plannedSteps: etaPlannedSteps, stepsDone: etaStepPaths.size, firstStepAt: etaFirstStepAt,
             evidenced: etaEvidenced, budgetMs: effectiveBuildSeconds * 1000,
-            remainingMs: effectiveBuildSeconds === 0 ? Infinity : effectiveBuildSeconds * 1000 - (now - (billingCtx.buildStartedAt ?? now)),
+            remainingMs: effectiveBuildSeconds === 0 ? Infinity : effectiveBuildSeconds * 1000 - workElapsedMs(now, billingCtx.buildStartedAt ?? now, creditedWaitMs()),
             roughBand: etaRoughBand, roughHighMs: etaRoughHighMs,
             totalMs: etaTotalMs, baseMs: etaBaseMs, revisions: etaRevisions, promisedHighMs: etaPromisedHighMs,
           });
@@ -14902,7 +14920,8 @@ async function noteBuildOutcome(
           () => { liveCostDiscountPct = 0; }, // unreadable ⇒ 0% — the ordinary price, as at settle
         );
       }
-      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
+      let failedAttemptUnknownFired = false;
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt; measured?: boolean; failedAttempt?: boolean; producedNothing?: boolean; discardedOutput?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
         if (routerOneCostUnconfirmed(used, usage.routerOneReceipt) && !costUnconfirmedNoted) {
           costUnconfirmedNoted = true;
           try { buildDiag.record({ phase: 'build', severity: 'info', code: 'DISCOUNT_COST_UNCONFIRMED', autoResolved: true,
@@ -14919,7 +14938,20 @@ async function noteBuildOutcome(
         // free to them). What it protects is the ADMIN's own cost figure, which silently under-states
         // itself otherwise — the same shape as the E2B_USD_PER_HOUR drift, and on the very panel used
         // to judge provider spend.
-        if (usage.measured === false && !usageUnreportedFired) {
+        // 🔴 A FAILED, RETRIED ATTEMPT IS NOT "A PROVIDER THAT RETURNED NO USAGE" (Q-2920, admin decision 2026-11-19, option a).
+        // Surplus's failure path reported its attempt as a zero-token turn, so #2449 and #2475 read "cost is an
+        // under-estimate" although the answered turn reported its tokens. Its cost is in its RECEIPT: known ⇒ nothing to
+        // say; unknown ⇒ its own code, never zero. The user's bill is untouched: this changes only what the report says.
+        const failedAttemptVerdict = failedAttemptCostVerdict(usage);
+        if (failedAttemptVerdict === 'unknown' && !failedAttemptUnknownFired) {
+          failedAttemptUnknownFired = true;
+          try {
+            buildDiag.record({ phase: 'build', severity: 'info', code: 'FAILED_ATTEMPT_COST_UNKNOWN', autoResolved: true,
+              message: 'A failed engine attempt was retried; its cost is not on its receipt, so it is unmeasured (never counted as zero).',
+              detail: `${used}${model ? ` (${model})` : ''}: the attempt failed before answering and its receipt carries no provider-reported cost. The answered turn's own tokens are recorded as usual. Reconcile against the provider invoice.` });
+          } catch { /* diagnostics are best-effort */ }
+        }
+        if (failedAttemptVerdict === null && usage.measured === false && !usageUnreportedFired) {
           usageUnreportedFired = true;
           try {
             buildDiag.record({
@@ -15553,6 +15585,8 @@ async function noteBuildOutcome(
 
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
       const buildStartedAt = Date.now();
+      /** How long this build has WORKED — wall time minus the credited user wait (workClock.ts). Every budget check reads it. */
+      const workElapsed = (): number => workElapsedMs(Date.now(), buildStartedAt, creditedWaitMs());
       billingCtx.buildStartedAt = buildStartedAt; // Fix 67 — the finalizer debits with this exact ref
       etaStartMs = buildStartedAt; // anchor the live ETA heartbeat to the real build start
       // P-BRE.1 — open a distributed trace for this build (root span). Continues an inbound W3C
@@ -16661,7 +16695,7 @@ async function noteBuildOutcome(
         // The time THIS BUILD has left, asked at spawn — never the build's total (see remainingBuildMs).
         // `0` means the operator disabled the wall clock, and that must stay "no deadline", not "none left".
         remainingBuildMs: () => (effectiveBuildSeconds > 0
-          ? effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt)
+          ? effectiveBuildSeconds * 1000 - (workElapsed())
           : 0),
         // A thunk: `expectsArtifacts` is decided further down, and `intent` can still change before it.
         expectsArtifacts: () => expectsArtifacts,
@@ -18021,6 +18055,8 @@ async function noteBuildOutcome(
       const requestContractRef: { contract: GameScopeContract | null } = { contract: null };
       const baseRunnerOpts = {
         sandboxAdmissionBudget,
+        // The runner's own clock skips the user-wait credit too (workClock.ts, failedbr #2431).
+        pausedMs: creditedWaitMs,
         replyVoice: () => rb.replyVoice ?? voiceOf(originalPrompt),
         dispatcher,
         state,
@@ -18054,7 +18090,7 @@ async function noteBuildOutcome(
         // pasted page) IS in the workspace — the ending then says so instead of "nothing was written".
         // …and WHICH seed, read with the router's own test, so the way on it names is the one the next turn takes.
         seedState: () => seedStateOf(writtenFiles),
-        providerFaultNow: () => engineTimeDominated(providerWaste, Date.now() - buildStartedAt),
+        providerFaultNow: () => engineTimeDominated(providerWaste, workElapsed()),
         // Autopsy 95598899 — wording of the build nudge only, never whether it fires. An established
         // project must never be told to "start by writing the entry file". See nudgeToBuild.ts.
         editingExistingApp: isEditMode,
@@ -18164,7 +18200,7 @@ async function noteBuildOutcome(
         // `final` stage — advisory until now, and a build that ignored it reached every post-build
         // check with the headroom test already false. Nothing here extends the build's wall clock:
         // `deadlineMs` and `finalizeOnDeadline` are untouched.
-        maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, Date.now() - buildStartedAt),
+        maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, workElapsed()),
         // D7: persist the build transcript so it survives a reconnect/refresh. Best-effort —
         // a store failure never breaks the build (see AgentRunner). Reloadable via the
         // GET /api/agentv3/conversations endpoints below.
@@ -20266,6 +20302,8 @@ async function noteBuildOutcome(
             `${SALVAGE_HANDOFF_MARKER} A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app ${salvageWhy}; ` +
             `they are in the workspace now and they are YOUR OWN prior work (any project context below that lists fewer files was taken before they were written):\n${sb.salvagedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
             salvageErrors +
+            // Q-2924: the salvage door used to skip the write-time quality check every other write gets.
+            salvageQualityNotes(Object.fromEntries(writtenFiles), sb.salvagedPaths) +
             `${salvageReadInstruction(sb.verifyErrors, Object.fromEntries(writtenFiles))} COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
             `fix any error in place. ${HANDOFF_NOTE_FIX_LINE} Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.` +
             // 🖥️ The calendar report's first build (earlyPreview.ts): the lane stopped before its entry and
@@ -20448,7 +20486,7 @@ async function noteBuildOutcome(
               // Generation-shaped, so it respects the correction reserve too. Without this the
               // escalation would be handed a FRESH full-length clock (AgentRunner starts its own
               // stopwatch inside run()) and could spend the reserve the main runner just protected.
-              maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, Date.now() - buildStartedAt),
+              maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, workElapsed()),
               persistence: {
                 store: getConversationStore(),
                 conversationId: mainConversationId, // same session conversation — append, don't fork
@@ -20698,7 +20736,7 @@ async function noteBuildOutcome(
         result: () => result,
         aborted: () => abort.signal.aborted,
         signal: abort.signal,
-        remainingMs: () => effectiveBuildSeconds === 0 ? Infinity : effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt),
+        remainingMs: () => effectiveBuildSeconds === 0 ? Infinity : effectiveBuildSeconds * 1000 - (workElapsed()),
         record: (note) => buildDiag.record(note),
       });
       if (result.timedOut === true) {
@@ -20706,7 +20744,7 @@ async function noteBuildOutcome(
         try {
           buildDiag.record({
             phase: 'build', severity: result.ok ? 'warning' : 'error', code: 'OUTCOME_BUILD_TIMEOUT',
-            message: generationTimeoutNote(Date.now() - buildStartedAt, result.ok),
+            message: generationTimeoutNote(workElapsed(), result.ok),
             autoResolved: false,
           });
         } catch { /* diagnostics best-effort */ }
@@ -20828,7 +20866,7 @@ async function noteBuildOutcome(
           effort: powerSpecResolved.effort,
           // Generation-shaped (it re-runs the whole build), so it respects the correction reserve —
           // same reason as the escalation runner above.
-          maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, Date.now() - buildStartedAt),
+          maxBuildMs: generationBudgetMs(effectiveBuildSeconds * 1000, workElapsed()),
           persistence: {
             store: getConversationStore(),
             conversationId: mainConversationId, // same session conversation — append, don't fork
@@ -21045,7 +21083,7 @@ async function noteBuildOutcome(
       if (
         typecheckGateShouldRun({ ...tscGateBase, wroteTypeScript })
         // Only with comfortable time left for install + tsc + one repair pass.
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
       ) {
         // `verified` is separate from `ok` on purpose. Two of the paths below return ok=true meaning
         // "we could not check, so do not block" — which is right for the gate and would be a LIE as
@@ -21186,7 +21224,7 @@ async function noteBuildOutcome(
           // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
           isImportTurn, aborted: abort.signal.aborted,
         })
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 60_000)
       ) {
         try {
           const scaffoldPaths = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
@@ -21306,7 +21344,7 @@ async function noteBuildOutcome(
           // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
           isImportTurn, aborted: abort.signal.aborted,
         })
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 45_000)
       ) {
         try {
           let syntaxErrors = await findSyntaxErrors(Object.fromEntries(writtenFiles));
@@ -21368,7 +21406,7 @@ async function noteBuildOutcome(
           // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
           isImportTurn, aborted: abort.signal.aborted,
         })
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 45_000)
       ) {
         try {
           // 🔴 DETECTION SCOPE IS NOT REPAIR SCOPE (Q-1378, Q-1380, Q-1384, Q-1392, Q-1427, Q-1446 — six
@@ -22534,7 +22572,7 @@ async function noteBuildOutcome(
             // Bounded LLM self-heal — same gate/pattern as the runtime auto-fix loop and the integrity
             // heal. Only fires when a REAL divergence exists (the app already white-screens in-browser),
             // once, with time to spare. Never blocks or fails the build.
-            const timeLeft = effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000;
+            const timeLeft = effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000;
             if (autoFixEnabled() && !abort.signal.aborted && timeLeft) {
               events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing a preview compile issue so the live preview renders…', ts: Date.now() });
               const compileHealRunner = new AgentRunner({
@@ -22588,7 +22626,7 @@ async function noteBuildOutcome(
         && result && !result.ok && expectsArtifacts && writtenFiles.size > 0 && autoFixEnabled() && !abort.signal.aborted) {
         try {
           const hooksReport = await analyzeHooksRules(Object.fromEntries(writtenFiles));
-          const timeLeft = effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000;
+          const timeLeft = effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000;
           if (!hooksReport.ok && hooksReport.violations.length > 0 && timeLeft) {
             events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing a React hooks issue so the app runs without crashing…', ts: Date.now() });
             const hooksHealRunner = new AgentRunner({
@@ -22643,7 +22681,7 @@ async function noteBuildOutcome(
           // autopsy e706e068: 22 model calls completed a stray hook nothing imported). The readiness
           // gate that runs before this heal already judged which files the app loads; ask it.
           const stubs = loadedFindings(highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles)), dispatcher.lastReachability);
-          const timeLeft = effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000;
+          const timeLeft = effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000;
           if (stubs.length > 0 && timeLeft) {
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 Completing ${stubs.length} unfinished piece(s) of the code so the feature actually works…`, ts: Date.now() });
             const completeRunner = new AgentRunner({
@@ -22742,7 +22780,7 @@ async function noteBuildOutcome(
               phase: 'build', severity: 'warning', code: 'BOOT_KILLING_ENV_GUARD', autoResolved: false,
               message: bootKillingGuardSummary(killers).slice(0, 400),
             });
-            const timeLeft = effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000;
+            const timeLeft = effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000;
             if (autoFixEnabled() && timeLeft) {
               events.emit({ type: 'narration', agent: 'architect', text: '🔧 Making sure a missing key freezes just that one feature instead of stopping the whole app…', ts: Date.now() });
               const guardHealRunner = new AgentRunner({
@@ -23125,7 +23163,7 @@ async function noteBuildOutcome(
       // come up leaves the build exactly as unproven as it was.
       try {
         const remainingForProof = effectiveBuildSeconds > 0
-          ? effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt)
+          ? effectiveBuildSeconds * 1000 - (workElapsed())
           : null;
         // A turn that only asked or declined has no app of its own to check — never start the starter for it.
         const presentFiles = (!lastPreviewUrl && !abort.signal.aborted && expectsArtifacts && !isImportTurn && !answerOnlyNow())
@@ -23741,7 +23779,7 @@ async function noteBuildOutcome(
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
         && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: builderWroteCount() })
         && lastPreviewUrl && actuator.browseUrl && !abort.signal.aborted
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 30_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 30_000)
       ) {
         try {
           // This check's own window — see renderCheckConsole.ts (autopsy 7d79254b).
@@ -23815,7 +23853,7 @@ async function noteBuildOutcome(
         process.env.AGENTV3_PREVIEW_VERIFY !== 'off' && result.ok && !renderRescued && lastPreviewUrl && actuator.browseUrl
         && !abort.signal.aborted
         // Only if there's comfortable time left before the wall-clock cap (verify + a heal pass).
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
       ) {
         /**
          * 🔒 AN IMPORT/SURVEY TURN IS LOOKED AT, NEVER REPAIRED (autopsy d0b2fcd6, Q-736). The user said "do not
@@ -23953,7 +23991,7 @@ async function noteBuildOutcome(
               const readOtherScreens = async (): Promise<ProbedScreen[]> => {
                 const out: ProbedScreen[] = [];
                 if (!featureProbeScreensEnabled() || !actuator.browseUrl || !lastPreviewUrl) return out;
-                if (effectiveBuildSeconds !== 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 90_000) return out;
+                if (effectiveBuildSeconds !== 0 && workElapsed() > effectiveBuildSeconds * 1000 - 90_000) return out;
                 const routes = screensToProbe(extractPageRoutes({ ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) }));
                 const started = Date.now();
                 for (const route of routes) {
@@ -24005,7 +24043,7 @@ async function noteBuildOutcome(
               // warning below still stands. Never blocks or fails a build.
               if (
                 (coverage.missing.length > 0 || regressedLabels.length > 0) && featureHealEnabled(workspaceId) && !abort.signal.aborted
-                && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
+                && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 60_000)
               ) {
                 events.emit({ type: 'narration', agent: 'architect', text: `🧪 The app runs, but I don't see a control for: ${[...coverage.missing, ...regressedLabels].join(', ')}. ${regressedLabels.length > 0 && coverage.missing.length === 0 ? 'It worked before this change — restoring it now…' : 'Adding it now…'}`, ts: Date.now() });
                 try {
@@ -24176,7 +24214,7 @@ async function noteBuildOutcome(
           }
           buildDiag.record({ phase: 'preview', severity: 'warning', code: 'PREVIEW_NOT_RENDERED', message: problems.slice(0, 4).join(' | ').slice(0, 500), autoResolved: false });
           // Out of repair budget OR the wall-clock cap is near → stop and report honestly.
-          if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
+          if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0 && workElapsed() > effectiveBuildSeconds * 1000 - 60_000)) {
             previewVerifiedFailed = true; billingCtx.previewVerifiedFailed = previewVerifiedFailed; // the eyes saw it NOT render, and the heal budget is spent — billing zeroes below
             previewRenderFailed = true;
             // RUNTIME HONESTY (deep-test 2026-07-18 — "onLinkClick is not a function"): the live preview
@@ -24241,7 +24279,7 @@ async function noteBuildOutcome(
       if (
         process.env.AGENTV3_ROUTE_SMOKE !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
         && !abort.signal.aborted
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 45_000)
       ) {
         try {
           const plan = routeSmokePlan;
@@ -24299,7 +24337,7 @@ async function noteBuildOutcome(
       if (
         process.env.AGENTV3_PAGE_CHECK !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
         && !abort.signal.aborted
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 45_000)
       ) {
         try {
           // THE WHOLE PROJECT, overlaid with this turn's writes — the journey check's own rule (below). Read
@@ -24392,7 +24430,7 @@ async function noteBuildOutcome(
       if (
         process.env.AGENTV3_JOURNEY_CHECK !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
         && !isImportTurn && !abort.signal.aborted
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 60_000)
       ) {
         try {
           // THE WHOLE PROJECT, overlaid with what this turn wrote — never `writtenFiles` alone.
@@ -24506,7 +24544,7 @@ async function noteBuildOutcome(
       if (
         mobileLayoutCheckEnabled() && result.ok && lastPreviewUrl && actuator.runCommand
         && !isImportTurn && !abort.signal.aborted && !awaitsShellNow()
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 60_000)
       ) {
         try {
           const out = await withTimeout(actuator.runCommand(workspaceId, mobileLayoutScript(lastPreviewUrl, { storageState: signedInState() })), MOBILE_CHECK_BUDGET_MS, 'mobile-layout');
@@ -24549,7 +24587,7 @@ async function noteBuildOutcome(
           gamePlaytestEnabled() && result?.ok && lastPreviewUrl && actuator.runCommand
           && !isImportTurn && !abort.signal.aborted && !awaitsShellNow()
           && isCanvasGameProject(playtestFiles)
-          && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
+          && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
         ) {
           try {
             const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
@@ -24601,7 +24639,7 @@ async function noteBuildOutcome(
               hasRunCommand: !!actuator.runCommand,
               hasPreviewUrl: !!lastPreviewUrl,
               awaitsShell: !!awaitsShellNow(),
-              timeLeft: effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000,
+              timeLeft: effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000,
             });
             if (why) {
               const notRun = playtestNotRunVerdict(why);
@@ -24635,7 +24673,7 @@ async function noteBuildOutcome(
       if (
         clickExplorerEnabled() && result.ok && lastPreviewUrl && actuator.runCommand
         && !isImportTurn && !abort.signal.aborted
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
       ) {
         try {
           const exploreFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
@@ -24685,7 +24723,7 @@ async function noteBuildOutcome(
               } catch { /* best-effort */ }
             };
             try {
-              const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt);
+              const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (workElapsed());
               const plan = explorerRepairPlan(headroomMs);
               const canVerify = verifyAfterFixEnabled() && isGreenLatched(workspaceId) && !!actuator.browseUrl;
               const freeListed = isAgentV3FreeUser(userId, email);
@@ -24720,7 +24758,7 @@ async function noteBuildOutcome(
                           client: buildTurnRunner(healRunnerOpts()),
                           platformRequest: true,
                           focusedRepair: true,
-                          tools: withoutPlatformCheckTools(baseRunnerOpts.tools),
+                          tools: withoutPlatformCheckTools(baseRunnerOpts.tools), withheldTools: REPAIR_WITHHELD_TOOLS,
                           model: resolveModel(powerLevelReqEffective),
                           persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                         });
@@ -24779,7 +24817,7 @@ async function noteBuildOutcome(
         if (gameAutoRepairEnabled() && lastPreviewUrl && actuator.runCommand) {
           try {
             const previewUrl = lastPreviewUrl;
-            const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt);
+            const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (workElapsed());
             const snap = (await collectWorkspaceFiles(actuator, workspaceId)).files;
             const outcome = await runGameRepair(gamePlayed.defects, gamePlayed.scopeMissing, prompt, {
               repairMs: explorerRepairPlan(headroomMs).repairMs, snapshot: snap, buildSignal: abort.signal,
@@ -24787,7 +24825,7 @@ async function noteBuildOutcome(
                 repair: async (repairPrompt, signal) => {
                   const runner = new AgentRunner({
                     ...baseRunnerOpts, signal, client: buildTurnRunner(healRunnerOpts()), platformRequest: true, focusedRepair: true,
-                    tools: withoutPlatformCheckTools(baseRunnerOpts.tools), model: resolveModel(powerLevelReqEffective),
+                    tools: withoutPlatformCheckTools(baseRunnerOpts.tools), withheldTools: REPAIR_WITHHELD_TOOLS, model: resolveModel(powerLevelReqEffective),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });
                   const r = await runInBillingPhase(PHASE_GAME_REPAIR, () => runInPass(GAME_REPAIR_PASS, () => runner.run(repairPrompt)));
@@ -24885,7 +24923,7 @@ async function noteBuildOutcome(
 
       if (
         prodBuildGateEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
       ) {
         try {
           let pkgRaw: string | undefined;
@@ -25004,7 +25042,7 @@ async function noteBuildOutcome(
       // never blocks or hangs a build.
       if (
         vaccineEnabled(workspaceId) && expectsArtifacts && result.ok && !abort.signal.aborted
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 90_000)
       ) {
         try {
           const vaxHealMax = featureHealEnabled(workspaceId) ? 1 : 0; // repair only when the heal budget is opted in
@@ -25074,7 +25112,7 @@ async function noteBuildOutcome(
               break;
             }
             // Out of repair budget OR near the wall-clock cap → record the honest failure and stop.
-            if (attempt >= vaxHealMax || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
+            if (attempt >= vaxHealMax || (effectiveBuildSeconds > 0 && workElapsed() > effectiveBuildSeconds * 1000 - 60_000)) {
               // The suite RAN and did not pass — that is real evidence, unlike the unverified case above.
               gateEvidence.tests = 'failed';
               buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'TEST_SUITE', message: outcome.summary + (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 8).join(', ')}` : ''), autoResolved: false });
@@ -25252,7 +25290,7 @@ async function noteBuildOutcome(
         try {
           const totalBudgetMs = effectiveBuildSeconds * 1000;
           const reserveMs = correctionReserveMs(totalBudgetMs);
-          const atGateMs = Date.now() - buildStartedAt;
+          const atGateMs = workElapsed();
           const unusedMs = totalBudgetMs > 0 ? Math.max(0, totalBudgetMs - atGateMs) : 0;
           buildDiag.record({
             phase: 'readiness', severity: 'info', code: 'CORRECTION_BUDGET', autoResolved: true,
@@ -25294,7 +25332,7 @@ async function noteBuildOutcome(
           && !abort.signal.aborted
           // Only if ONE bounded open still fits inside the build's own budget — never an extension of
           // it, and never started when it would be cut off half-way.
-          && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - LAST_CHANCE_PROOF_MS)
+          && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - LAST_CHANCE_PROOF_MS)
         ) {
           const proofStartedAt = Date.now();
           try {
@@ -25553,7 +25591,7 @@ async function noteBuildOutcome(
       if (
         redTeamEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted
         && actuator.browserAction && actuator.getConsoleErrors && actuator.browseUrl && lastPreviewUrl
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 120_000)
+        && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 120_000)
       ) {
         try {
           let fuzzHtml = '';
@@ -25588,7 +25626,7 @@ async function noteBuildOutcome(
           if (findings.length > 0) {
             buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'FUZZ_ROBUSTNESS', message: fuzzSummary(findings), autoResolved: false });
             // Opt-in bounded heal — harden the source, then trust the next build/preview to re-verify.
-            if (featureHealEnabled(workspaceId) && !abort.signal.aborted && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)) {
+            if (featureHealEnabled(workspaceId) && !abort.signal.aborted && (effectiveBuildSeconds === 0 || workElapsed() < effectiveBuildSeconds * 1000 - 60_000)) {
               events.emit({ type: 'narration', agent: 'architect', text: `🛡️ Red-team crashed ${findings.length} input(s) on hostile input — hardening validation now…`, ts: Date.now() });
               try {
                 const rtRunner = new AgentRunner({
@@ -26192,7 +26230,7 @@ async function noteBuildOutcome(
       // the wall-clock deadline ("paused at time limit"). It is purely advisory, so (a) skip it when
       // little deadline headroom remains, and (b) cap it with a hard timeout so it can never be the
       // reason a built app times out.
-      const reviewHeadroomOk = effectiveBuildSeconds === 0 || (Date.now() - buildStartedAt) < (effectiveBuildSeconds * 1000 - 120_000);
+      const reviewHeadroomOk = effectiveBuildSeconds === 0 || (workElapsed()) < (effectiveBuildSeconds * 1000 - 120_000);
       // SPEED: skip the advisory reviewer (30-90s + 3-6 Claude calls) for FAST-LANE (simple) builds —
       // they already passed the fast lane's own `npx tsc --noEmit` type-check + CSS-consistency verify +
       // repair, so the extra multi-call review adds latency to the most common build with little value.
@@ -26282,7 +26320,7 @@ async function noteBuildOutcome(
           // SIZE-SCALED, HEADROOM-CLAMPED reviewer budget (2026-07-07): a fixed 90s cap killed the
           // reviewer mid-review on a 40-file app and silently lost its completeness verdict. Bigger apps
           // get more time, never past the wall-clock safety margin. Honest note on timeout, not silence.
-          const reviewHeadroomMs = effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt));
+          const reviewHeadroomMs = effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (workElapsed()));
           // 💸 A SUGGESTION COSTS A SUGGESTION'S PRICE (autopsy b6f88a72). On a proven-green app Green
           // Stop already makes this review suggest-only; it ran anyway at full budget and the full
           // 40-step cap — 523,374 input tokens, zero characters back. The plan is the SAME rule
@@ -26406,7 +26444,7 @@ async function noteBuildOutcome(
             // it, so a rejection can never surface as an unhandled rejection, and no second reviewer
             // is spawned — this waits on work that is already running and already paid for.
             const graceMs = timedOut
-              ? reviewGraceMs(reviewBudget, effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt)))
+              ? reviewGraceMs(reviewBudget, effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (workElapsed())))
               : 0;
             if (graceMs > 0) {
               review = await raceTimeout(reviewPromise, graceMs, 'post-build-review-grace').catch(() => null);
@@ -26573,7 +26611,7 @@ async function noteBuildOutcome(
             // Findings the repair traced and reported NOT A BUG: never claimed as fixed, never offered.
             let greenRefuted: string[] = [];
             if (greenRepairable.length > 0) {
-              const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt);
+              const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (workElapsed());
               const plan = greenRepairPlan(headroomMs);
               const canVerify = verifyAfterFixEnabled() && isGreenLatched(workspaceId) && !!lastPreviewUrl && !!actuator.browseUrl;
               if (plan.repairMs > 0 && canVerify && !abort.signal.aborted) {
@@ -26603,7 +26641,7 @@ async function noteBuildOutcome(
                     platformRequest: true,
                     // Re-rendered by the platform: no browser of its own, no extra jobs (repairScope.ts).
                     focusedRepair: true,
-                    tools: withoutPlatformCheckTools(baseRunnerOpts.tools),
+                    tools: withoutPlatformCheckTools(baseRunnerOpts.tools), withheldTools: REPAIR_WITHHELD_TOOLS,
                     model: resolveModel(powerLevelReqEffective),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });
@@ -26751,7 +26789,7 @@ async function noteBuildOutcome(
             //  - reviewerFixShouldRetry: ONE bounded retry after a COMPLETED-but-failed or non-timeout
             //    thrown pass, never after a timeout (the raced-out runner may still be editing — two
             //    concurrent runners on one workspace is a corruption risk), max 2 attempts total.
-            const fixHeadroomMs = () => effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt));
+            const fixHeadroomMs = () => effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (workElapsed()));
             for (let fixAttempt = 1; ; fixAttempt++) {
               // A FRESH runner per attempt — never re-run a runner whose previous run was abandoned.
               const critFixRunner = new AgentRunner({
@@ -27043,7 +27081,11 @@ async function noteBuildOutcome(
             buildDiag.record(initialTerminalDecline && !abort.signal.aborted ? {
               phase: 'build', severity: 'info', code: 'OUTCOME_INITIAL_DECLINED', autoResolved: true,
               message: 'Build outcome: DECLINED — an initial build lane declined to build and wrote no files. Its original answer was preserved, not retried.',
-            } : terminalOutcomeRecord(terminalOutcomeCode({ messages: [String(result.summary ?? ''), ...buildDiag.report().issues.map(i => String(i.message ?? ''))] })));
+            } : terminalOutcomeRecord(terminalOutcomeCode({
+              messages: [String(result.summary ?? ''), ...buildDiag.report().issues.map(i => String(i.message ?? ''))],
+              // The codes this run already recorded name its reason (failedbr #2449: SANDBOX_ADMISSION_EXHAUSTED).
+              codes: buildDiag.report().issues.map(i => String(i.code ?? '')),
+            })));
           }
         } catch { /* the record must never be what breaks the build it is describing */ }
       }
@@ -29014,7 +29056,7 @@ async function noteBuildOutcome(
         // to get none), and only a truly unknown exception is OUTCOME_UNEXPLAINED.
         try {
           if (!outcomeCodeOf(buildDiagRef?.report()?.issues ?? [])) {
-            buildDiagRef?.record(terminalOutcomeRecord(terminalOutcomeCode({ error: err, crashCode: crash.code }), crash.phase));
+            buildDiagRef?.record(terminalOutcomeRecord(terminalOutcomeCode({ error: err, crashCode: crash.code, codes: (buildDiagRef?.report()?.issues ?? []).map(i => String(i.code ?? '')) }), crash.phase));
           }
         } catch { /* naming the hole must not replace the crash record */ }
         // SAME STALE-SUMMARY SIBLING AS THE WATCHDOG PATH (see the comment beside `pauseMsgForReport`

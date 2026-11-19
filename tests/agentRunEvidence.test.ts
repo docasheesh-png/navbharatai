@@ -294,7 +294,7 @@ describe('wiring — the gate reads it, and only to FILL a gap', () => {
 
   // Since Q-101 (2026-10-05) the gate reads the ONE evidence ledger, which composes this reader unchanged.
   it('the release-gate assembly reads the evidence ledger (which composes agentRunEvidence)', () => {
-    expect(route).toContain('fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger())');
+    expect(route).toContain('fillGateFromLedger(gateEvidence, gateLedger)');
     expect(readFileSync(join(__dirname, '../src/server/AgentV3/evidenceLedger.ts'), 'utf8')).toContain('agentRunEvidence(commands)');
   });
 

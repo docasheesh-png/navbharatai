@@ -28,9 +28,9 @@ describe('integrated native and platform compiler proof', () => {
     record(nativeCommand, nativeFailure, 1);
     record('./node_modules/.bin/tsc --noEmit', '', 0);
 
-    const commandProof = diagnostics.typecheckEvidenceFromAgentCommands();
+    const commandProof = diagnostics.evidenceLedger().facts.typecheck?.outcome;
     expect(commandProof).toBe('failed');
-    expect(diagnostics.evidenceLedger().facts.typecheck?.outcome).toBe(commandProof);
+    expect(diagnostics.typecheckEvidenceFromAgentCommands()).toBe(commandProof);
     const combined = combineTypecheckEvidence('passed', commandProof);
     expect(combined).toBe('failed');
     const checked = refuteReviewByEvidence(compileFinding, { typecheck: combined });
@@ -44,7 +44,7 @@ describe('integrated native and platform compiler proof', () => {
     record(nativeCommand, nativeFailure, 1);
     record(nativeCommand, nativeSuccess, 0);
     expect(diagnostics.typecheckEvidenceFromAgentCommands()).toBe('passed');
-    expect(combineTypecheckEvidence('not-run', diagnostics.typecheckEvidenceFromAgentCommands())).toBe('passed');
+    expect(combineTypecheckEvidence('not-run', diagnostics.evidenceLedger().facts.typecheck?.outcome)).toBe('passed');
   });
 
   it.each([['passed', nativeSuccess, 0], ['failed', nativeFailure, 1]] as const)(
@@ -56,24 +56,24 @@ describe('integrated native and platform compiler proof', () => {
       const currentPlatform = currentTypecheckProof(platform, revision());
       expect(diagnostics.typecheckEvidenceFromAgentCommands()).toBeUndefined();
       expect(diagnostics.evidenceLedger().facts.typecheck).toBeUndefined();
-      expect(combineTypecheckEvidence(currentPlatform, diagnostics.typecheckEvidenceFromAgentCommands())).toBe('not-run');
+      expect(combineTypecheckEvidence(currentPlatform, diagnostics.evidenceLedger().facts.typecheck?.outcome)).toBe('not-run');
     },
   );
 
   it('keeps a current platform compiler failure after an earlier native success', () => {
     const { diagnostics, record } = fixture();
     record(nativeCommand, nativeSuccess, 0);
-    const combined = combineTypecheckEvidence('failed', diagnostics.typecheckEvidenceFromAgentCommands());
+    const combined = combineTypecheckEvidence('failed', diagnostics.evidenceLedger().facts.typecheck?.outcome);
     expect(combined).toBe('failed');
     expect(refuteReviewByEvidence(compileFinding, { typecheck: combined }).review.passed).toBe(false);
   });
 
   it('preserves ordinary TypeScript evidence and leaves absent checks unverified', () => {
     const { diagnostics, record } = fixture();
-    expect(combineTypecheckEvidence('not-run', diagnostics.typecheckEvidenceFromAgentCommands())).toBe('not-run');
+    expect(combineTypecheckEvidence('not-run', diagnostics.evidenceLedger().facts.typecheck?.outcome)).toBe('not-run');
     record('./node_modules/.bin/tsc --noEmit', '', 0);
-    expect(combineTypecheckEvidence('not-run', diagnostics.typecheckEvidenceFromAgentCommands())).toBe('passed');
+    expect(combineTypecheckEvidence('not-run', diagnostics.evidenceLedger().facts.typecheck?.outcome)).toBe('passed');
     record('./node_modules/.bin/tsc --noEmit', 'src/app.ts(1,1): error TS2307: Cannot find module missing.', 1);
-    expect(combineTypecheckEvidence('passed', diagnostics.typecheckEvidenceFromAgentCommands())).toBe('failed');
+    expect(combineTypecheckEvidence('passed', diagnostics.evidenceLedger().facts.typecheck?.outcome)).toBe('failed');
   });
 });

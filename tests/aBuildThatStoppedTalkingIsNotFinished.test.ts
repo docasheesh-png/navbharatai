@@ -101,10 +101,28 @@ describe('2 · only an output that PROVES the compile passed may resolve anythin
     expect(tscOutputProvesClean('npm ERR! code ERESOLVE')).toBe(false);
   });
 
-  it('every compile path reports its OUTPUT through one door, and the shell path no longer trusts its exit code', () => {
+  it('each compiler dialect reports parsed OUTPUT through its guarded door, never shell exit alone', () => {
     const src = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
-    // The only markTscClean call is inside the helper.
-    expect(src.match(/\.markTscClean\(/g)?.length).toBe(1);
+    // Exactly two authorized dialects: generic TypeScript output and native Angular output.
+    // Each has one guarded clean writer; adding an unguarded third path still fails this census.
+    expect(src.match(/\.markTscClean\(/g)?.length).toBe(2);
+    const genericAt = src.indexOf('private noteCompileOutput(');
+    const nativeAt = src.indexOf('private noteNativeTypeErrorCount(');
+    expect(genericAt).toBeGreaterThan(0);
+    expect(nativeAt).toBeGreaterThan(genericAt);
+    const generic = src.slice(genericAt, src.indexOf('private noteTypeErrorCount(', genericAt));
+    const native = src.slice(nativeAt, src.indexOf('lastKnownTypeErrors():', nativeAt));
+    expect(generic.match(/\.markTscClean\(/g)?.length).toBe(1);
+    expect(native.match(/\.markTscClean\(/g)?.length).toBe(1);
+    expect(generic).toContain('coversProject && current && !this.currentNativeTypecheckFailure()');
+    expect(native).toContain('if (checkedRevision === undefined || checkedRevision !== memory.verificationRevision()) return;');
+    expect(native).toContain("if (result.status !== 'passed' && result.status !== 'failed') return;");
+    expect(native).toContain("const errors = result.status === 'passed' ? 0 : 1;");
+    expect(native).toContain('if (errors === 0) memory.markTscClean(Date.now(), checkedRevision);');
+    expect(src.match(/this\.noteNativeTypeErrorCount\(/g)?.length).toBe(2);
+    expect(src).toContain('this.noteNativeTypeErrorCount(parseAngularValidation(exitCode, stdout, stderr), revisionBeforeCompile)');
+    expect(src).toContain('const native = parseAngularValidation(nativeResult.exitCode, nativeResult.stdout, nativeResult.stderr);');
+    expect(src).toContain('this.noteNativeTypeErrorCount(native, nativeRevision);');
     // Shell commands also carry their argv mode; fixed internal checks keep the output-only reader.
     expect(src).toMatch(/private noteCompileOutput\(output: string, command: string \| undefined, skippedBeforeCompile: number, revisionBeforeCompile: number\): void \{[\s\S]{0,200}tscCommandVerdict\(command, output\) : tscVerdict\(output\)[\s\S]{0,450}coversProject && current[\s\S]{0,120}markTscClean\(Date\.now\(\), revisionBeforeCompile\)/);
     // Three callers: the write-time check, the typecheck tool, and bash.

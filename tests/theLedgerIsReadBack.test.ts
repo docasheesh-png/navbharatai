@@ -123,7 +123,7 @@ describe('🔒 the wiring — a reader nothing calls is not a fix', () => {
 
   it('the gate assembly asks the timeline, beside the command log', () => {
     // Since Q-101: one ledger read, which composes this timeline reader and the command log.
-    expect(route).toContain('fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger())');
+    expect(route).toContain('fillGateFromLedger(gateEvidence, gateLedger)');
     expect(code('../src/server/AgentV3/evidenceLedger.ts')).toContain('provenFromTimeline(issues)');
   });
 

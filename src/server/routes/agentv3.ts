@@ -20115,7 +20115,7 @@ async function noteBuildOutcome(
             // Style normalization can write after the compiler ran. Do not settle old findings
             // from different source bytes, or contradict a current native framework failure.
             if (fastVerifyRevision === getWorkspaceMemory(workspaceId).verificationRevision()
-              && buildDiag.agentRunEvidence().typecheck !== 'failed') {
+              && buildDiag.evidenceLedger().facts.typecheck?.outcome !== 'failed') {
               buildDiag.resolveOnRecheck('SIMPLE_BUILD_VERIFY_ERROR');
               buildDiag.resolveOnRecheck('ONESHOT_VERIFY_FAILED');
             }
@@ -21068,7 +21068,7 @@ async function noteBuildOutcome(
             if (verdict === 'not-run' || verdict === 'unknown') return { ok: true, verified: false, errors: '', revision };
             if (verdict === 'passed'
               && currentTypecheckProof({ outcome: 'passed', revision }, getWorkspaceMemory(workspaceId).verificationRevision()) === 'passed'
-              && buildDiag.agentRunEvidence().typecheck !== 'failed') {
+              && buildDiag.evidenceLedger().facts.typecheck?.outcome !== 'failed') {
               buildDiag.resolveCompilerFailuresOnRecheck(revision);
             }
             return verdict === 'failed'
@@ -25190,13 +25190,14 @@ async function noteBuildOutcome(
         // shippingIssueCount('error'), which test evidence does not contribute to.
         // THE EVIDENCE LEDGER (Q-101, autopsy 697b38ee): one read of everything this build already proved —
         // typecheck and tests from the command log, pages and preview from facts an actor recorded on the
-        // timeline. FILL-ONLY: a recorded failure keeps its failure, so this moves the sentence, never the
-        // bill (see evidenceLedger.ts / provenFromTimeline.ts).
+        // timeline. Reconcile compiler scope first: either current failure must remain visible. Then
+        // fill only missing facts from that same ledger snapshot (see evidenceLedger.ts).
         try {
+          const gateLedger = buildDiag.evidenceLedger();
           gateEvidence.typecheck = combineTypecheckEvidence(
             currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision()),
-            buildDiag.typecheckEvidenceFromAgentCommands());
-          fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger());
+            gateLedger.facts.typecheck?.outcome);
+          fillGateFromLedger(gateEvidence, gateLedger);
         }
         catch { /* evidence recovery is best-effort and must never touch a build */ }
         // THE EARLY SYNTAX VERDICT IS RE-CHECKED BEFORE THE GATE COUNTS IT (Q-821). A later pass can have made
@@ -26490,7 +26491,7 @@ async function noteBuildOutcome(
             // deterministic platform proof are checked against the current source revision here.
             const currentTypecheck = combineTypecheckEvidence(
               currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision()),
-              buildDiag.typecheckEvidenceFromAgentCommands());
+              buildDiag.evidenceLedger().facts.typecheck?.outcome);
             const checked = refuteReviewByEvidence(review, { typecheck: currentTypecheck, stylesheets });
             if (checked.refuted.length > 0 || checked.amended.length > 0) {
               review = checked.review;

@@ -271,7 +271,9 @@ describe('current compiler evidence is read at the consumer, without rewriting h
     expect(route).toContain('gateEvidence.typecheck = combineTypecheckEvidence(');
     expect(route).toContain('const currentTypecheck = combineTypecheckEvidence(');
     expect(route).toContain('currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision()),');
-    expect(route).toContain('buildDiag.typecheckEvidenceFromAgentCommands());');
+    expect(route).toContain('const gateLedger = buildDiag.evidenceLedger();');
+    expect(route).toContain('gateLedger.facts.typecheck?.outcome);');
+    expect(route).toContain('buildDiag.evidenceLedger().facts.typecheck?.outcome);');
     expect(route).toContain('refuteReviewByEvidence(review, { typecheck: currentTypecheck, stylesheets })');
   });
 });
@@ -323,7 +325,7 @@ describe('platform compiler proof is bound to the same source revision at final 
     expect(route).toContain('const prodBuildCheckedRevision = getWorkspaceMemory(workspaceId).verificationRevision()');
     expect(route).toContain('{ outcome: fromBuild, revision: prodBuildCheckedRevision }, getWorkspaceMemory(workspaceId).verificationRevision())');
     const refresh = 'gateEvidence.typecheck = combineTypecheckEvidence(';
-    expect(route.lastIndexOf(refresh)).toBeLessThan(route.indexOf('fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger())'));
+    expect(route.lastIndexOf(refresh)).toBeLessThan(route.indexOf('fillGateFromLedger(gateEvidence, gateLedger)'));
     expect(route).toContain('const currentTypecheck = combineTypecheckEvidence(');
   });
 });

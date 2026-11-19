@@ -275,7 +275,7 @@ describe('the 3D shell wires it, so no game can forget', () => {
     expect(hud).toContain('summaryLines(meta.lastSummary)');
     expect(hud).toContain('again.current?.focus()');
     expect(hud).toMatch(/e\.key === 'Enter' \|\| e\.key === ' ' \|\| e\.key === 'r'/);
-    expect(hud).toContain('Best {s.highScore}');
+    expect(hud).toContain("{t('best')} {s.highScore}");     // "Best", in the player's language
   });
 });
 

@@ -69,6 +69,11 @@ import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions } from 
  * fixed step and it stutters on any display that is not exactly 60Hz. Both look like "bad performance"
  * and neither is.
  */
+/** A finger is the main pointer (a phone or a tablet). */
+function touchDevice(): boolean {
+  try { return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches; } catch { return false; }
+}
+
 export interface GameOptions {
   /** Additional world-space NPC/remote bodies that must block door swings. */
   doorOccupants?: (ctx: GameContext) => readonly DoorOccupant[];
@@ -124,6 +129,11 @@ export interface GameOptions {
    * its own HUD) has none unless this is given, so its start() still begins play at once.
    */
   startScreen?: false | { title?: string; subtitle?: string; controls?: { touch?: string; keyboard?: string } };
+  /**
+   * How a PHONE holds this game. Default 'landscape': going full screen (the Full screen button, or Play on a phone)
+   * also locks the screen sideways where the browser allows it. 'portrait' locks upright; 'any' never locks.
+   */
+  orientation?: 'landscape' | 'portrait' | 'any';
 }
 
 export interface GameContext {
@@ -305,6 +315,17 @@ export class Game {
     this.disposers.push(mountMetaToasts(options.container));
     // Taking a hit ends the combo — that is what makes a clean run worth more than a long one.
     this.disposers.push(events.on('PLAYER_DAMAGED', () => combo.break()));
+    // 📱 THE NOTCH: safe-area insets read 0 on an iPhone unless the page asks for viewport-fit=cover. Asked for only
+    // while a game is mounted (an ordinary page keeps its own viewport), and put back on dispose.
+    const viewport = document.querySelector?.('meta[name="viewport"]') as HTMLMetaElement | null;
+    if (viewport && !/viewport-fit/.test(viewport.content)) {
+      const before = viewport.content;
+      viewport.content = before ? before + ', viewport-fit=cover' : 'width=device-width, initial-scale=1, viewport-fit=cover';
+      this.disposers.push(() => { viewport.content = before; });
+    }
+    const onFullscreen = () => events.emit('FULLSCREEN_CHANGED', { on: this.isFullscreen });
+    document.addEventListener('fullscreenchange', onFullscreen);
+    this.disposers.push(() => document.removeEventListener('fullscreenchange', onFullscreen));
     // ⚙️ THE PLAYER'S SETTINGS, APPLIED — now and on every change from the pause menu.
     this.applySettings(settings.get());
     this.disposers.push(settings.subscribe((s) => this.applySettings(s)));
@@ -568,12 +589,43 @@ export class Game {
     this.loop.setPaused(true);
     setStatus('menu');
   }
-  /** Leave the start screen and begin the round. */
+  /** Leave the start screen and begin the round. On a phone it also goes full screen (the tap is the permission). */
   play(): void {
     if (this.disposed || state.status !== 'menu') return;
     audio.unlock();
+    if (touchDevice() && !this.isFullscreen) void this.toggleFullscreen();
     this.loop.setPaused(false);
     setStatus('playing');
+  }
+
+  /** The game fills the whole screen right now. */
+  get isFullscreen(): boolean {
+    const d = document as Document & { webkitFullscreenElement?: Element | null };
+    return Boolean(document.fullscreenElement || d.webkitFullscreenElement);
+  }
+  /** The browser lets this page go full screen (an iPhone's Safari does not, for anything but video). */
+  get canFullscreen(): boolean {
+    const d = document as Document & { webkitFullscreenEnabled?: boolean };
+    return Boolean(document.fullscreenEnabled || d.webkitFullscreenEnabled);
+  }
+  /**
+   * Full screen on or off, and on a phone lock the orientation the game is made for (options.orientation). Every
+   * step is allowed to fail quietly: a browser that refuses still plays the game in the page.
+   */
+  async toggleFullscreen(): Promise<void> {
+    try {
+      if (this.isFullscreen) {
+        const d = document as Document & { webkitExitFullscreen?: () => void };
+        if (document.exitFullscreen) await document.exitFullscreen(); else d.webkitExitFullscreen?.();
+        return;
+      }
+      const target = (this.options.container.parentElement ?? this.options.container) as HTMLElement & { webkitRequestFullscreen?: () => void };
+      if (target.requestFullscreen) await target.requestFullscreen({ navigationUI: 'hide' }); else target.webkitRequestFullscreen?.();
+      const want = this.options.orientation ?? 'landscape';
+      const orientation = (screen as Screen & { orientation?: { lock?: (o: string) => Promise<void> } }).orientation;
+      if (want !== 'any' && orientation?.lock) await orientation.lock(want).catch(() => undefined);
+    } catch { /* refused: the game keeps playing in the page */ }
+    events.emit('FULLSCREEN_CHANGED', { on: this.isFullscreen });
   }
   /** Back to the start screen (pause menu → Menu, game over → Menu): the run is reset and the world freezes. */
   toMenu(): void {
@@ -723,7 +775,12 @@ export function GameCanvas({ options, onReady, className = '', fullscreen = true
   return (
     <div className={className} style={{ ...fill, overflow: 'hidden', background: 'var(--game-bg, #eef1ff)' }}>
       <div ref={hostRef} style={{ width: '100%', height: '100%' }} />
-      {game ? <Hud game={game} /> : null}
+      {/* Building the world takes a moment on a phone: the player sees that it is coming, not a blank screen. */}
+      {game ? <Hud game={game} /> : (
+        <div role="status" aria-live="polite" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--fg, #17171c)', fontWeight: 600 }}>
+          Loading…
+        </div>
+      )}
     </div>
   );
 }
@@ -735,6 +792,7 @@ import { state, type GameState } from '../core/state';
 import { meta, combo, summaryLines } from '../core/meta';
 import type { Game } from '../Game';
 import { settings, type GameSettings } from '../core/settings';
+import { loading, type LoadingState } from '../core/loading';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -783,6 +841,46 @@ function useSettings(): GameSettings {
   const [value, setValue] = useState<GameSettings>(settings.get());
   useEffect(() => settings.subscribe(setValue), []);
   return value;
+}
+
+/** What is still loading, live (core/loading.ts) — real downloads and builds only. */
+function useLoading(): LoadingState {
+  const [value, setValue] = useState<LoadingState>(loading.get());
+  useEffect(() => events.on('LOADING_PROGRESS', () => setValue(loading.get())), []);
+  return value;
+}
+
+/** Full screen on or off, live. */
+function useFullscreen(game: Game): boolean {
+  const [on, setOn] = useState(game.isFullscreen);
+  useEffect(() => events.on('FULLSCREEN_CHANGED', () => setOn(game.isFullscreen)), [game]);
+  return on;
+}
+
+/** The loading bar: a label and a real fraction. Shown only while something is still loading. */
+export function LoadingBar({ state: l }: { state: LoadingState }) {
+  if (!l.active) return null;
+  const pct = Math.round(Math.max(0, Math.min(1, l.fraction)) * 100);
+  return (
+    <div role="progressbar" aria-label={l.label || 'Loading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}
+      style={{ position: 'absolute', left: '50%', bottom: 'max(24px, env(safe-area-inset-bottom))', transform: 'translateX(-50%)', width: 'min(70vw, 320px)', color: '#fff', textAlign: 'center', zIndex: 12, pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>
+      <div style={{ fontSize: 13, marginBottom: 6 }}>{(l.label || 'Loading') + ' ' + pct + '%'}</div>
+      <div style={{ height: 6, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden' }}>
+        <div style={{ width: pct + '%', height: '100%', background: '#fde047', transition: 'width 160ms ease-out' }} />
+      </div>
+    </div>
+  );
+}
+
+/** Four corners pointing out (in) — full screen (leave full screen). */
+function FullscreenIcon({ on }: { on: boolean }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
+      {on
+        ? <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+        : <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />}
+    </svg>
+  );
 }
 
 /** A speaker icon, crossed out when muted — an icon, so it reads in any language. */
@@ -853,6 +951,8 @@ function SettingsPanel({ onBack }: { onBack: () => void }) {
 export function Hud({ game }: { game: Game }) {
   const s = useGameState();
   const prefs = useSettings();
+  const load = useLoading();
+  const fullscreen = useFullscreen(game);
   const [panel, setPanel] = useState<'settings' | null>(null);
   const again = useRef<HTMLButtonElement>(null);
   const playRef = useRef<HTMLButtonElement>(null);
@@ -919,6 +1019,11 @@ export function Hud({ game }: { game: Game }) {
               <div style={{ width: \`\${Math.max(0, Math.min(100, (s.health / Math.max(1, s.maxHealth)) * 100))}%\`, height: '100%', background: s.health > s.maxHealth * 0.3 ? '#4ade80' : '#f87171', transition: 'width 160ms ease-out' }} />
             </div>
             <div style={{ fontWeight: 700 }}>x{s.lives}</div>
+            {game.canFullscreen ? (
+              <button type="button" aria-label={fullscreen ? 'Exit full screen' : 'Full screen'} onClick={() => { void game.toggleFullscreen(); }} style={roundIcon}>
+                <FullscreenIcon on={fullscreen} />
+              </button>
+            ) : null}
             {/* One tap silences the game — the most-asked-for control on a phone in a quiet room. */}
             <button type="button" aria-label={prefs.muted ? 'Sound on' : 'Mute'} aria-pressed={prefs.muted} onClick={() => settings.toggleMute()} style={roundIcon}>
               <SpeakerIcon muted={prefs.muted} />
@@ -930,6 +1035,8 @@ export function Hud({ game }: { game: Game }) {
           </div>
         </div>
       ) : null}
+
+      <LoadingBar state={load} />
 
       {s.status === 'menu' && info ? settingsOrScreen(
         <div style={{ maxWidth: 440, padding: '0 16px' }}>

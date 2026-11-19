@@ -244,15 +244,17 @@ describe('current compiler evidence is read at the consumer, without rewriting h
     expect(mem.verificationStatus()).toContain('checked CLEAN');
   });
 
-  it('withholding typecheck evidence does not erase a passing test suite on the same receipt', () => {
-    const diag = new BuildDiagnostics({ currentSourceRevision: () => 2 });
-    diag.recordCommand({ command: 'npx vitest run && tsc --noEmit', exitCode: 0,
-      stdout: 'Test Files  1 passed (1)\nTests  3 passed (3)',
-      typecheckProof: { revision: 1, project: true } });
-    expect(diag.agentRunEvidence().typecheck).toBeUndefined();
-    expect(diag.agentRunEvidence().tests).toBe('passed');
-    expect(diag.evidenceLedger().facts.tests?.outcome).toBe('passed');
-  });
+  it.each(['npx vitest run', 'npx vitest run && tsc --noEmit'])(
+    'withholding stale compiler proof preserves the completed suite in %s', (command) => {
+      const diag = new BuildDiagnostics({ currentSourceRevision: () => 2 });
+      diag.recordCommand({ command, exitCode: 0,
+        stdout: 'Test Files  1 passed (1)\nTests  3 passed (3)',
+        typecheckProof: { revision: 1, project: true } });
+      expect(diag.agentRunEvidence().typecheck).toBeUndefined();
+      expect(diag.agentRunEvidence().tests).toBe('passed');
+      expect(diag.evidenceLedger().facts.tests?.outcome).toBe('passed');
+    },
+  );
 
   it('keeps offline receipt readers compatible and never serializes a live callback', () => {
     const diag = new BuildDiagnostics();
@@ -268,9 +270,12 @@ describe('current compiler evidence is read at the consumer, without rewriting h
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     expect(route).toContain('currentSourceRevision: () => getWorkspaceMemory(workspaceId).verificationRevision()');
     expect(route).not.toContain('const fromAgent = buildDiag.typecheckEvidenceFromAgentCommands();');
-    expect(route).toContain("commandTypecheckEvidence = beforeTypecheck === 'not-run' && gateEvidence.typecheck !== 'not-run'");
-    expect(route).toContain("? buildDiag.typecheckEvidenceFromAgentCommands() ?? 'not-run'");
-    expect(route).toContain(': currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision())');
+    expect(route).toContain('gateEvidence.typecheck = combineTypecheckEvidence(');
+    expect(route).toContain('const currentTypecheck = combineTypecheckEvidence(');
+    expect(route).toContain('currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision()),');
+    expect(route).toContain('const gateLedger = buildDiag.evidenceLedger();');
+    expect(route).toContain('gateLedger.facts.typecheck?.outcome);');
+    expect(route).toContain('buildDiag.evidenceLedger().facts.typecheck?.outcome);');
     expect(route).toContain('refuteReviewByEvidence(review, { typecheck: currentTypecheck, stylesheets })');
   });
 });
@@ -321,8 +326,8 @@ describe('platform compiler proof is bound to the same source revision at final 
     expect(route).toContain("platformTypecheckProof = { outcome: check.ok ? 'passed' : 'failed', revision: check.revision }");
     expect(route).toContain('const prodBuildCheckedRevision = getWorkspaceMemory(workspaceId).verificationRevision()');
     expect(route).toContain('{ outcome: fromBuild, revision: prodBuildCheckedRevision }, getWorkspaceMemory(workspaceId).verificationRevision())');
-    const refresh = 'gateEvidence.typecheck = currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision())';
-    expect(route.lastIndexOf(refresh)).toBeLessThan(route.indexOf('fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger())'));
-    expect(route).toContain(': currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision())');
+    const refresh = 'gateEvidence.typecheck = combineTypecheckEvidence(';
+    expect(route.lastIndexOf(refresh)).toBeLessThan(route.indexOf('fillGateFromLedger(gateEvidence, gateLedger)'));
+    expect(route).toContain('const currentTypecheck = combineTypecheckEvidence(');
   });
 });

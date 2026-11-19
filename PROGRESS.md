@@ -102507,3 +102507,15 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
 **Fixed:** kit file `core/loading.ts` (real jobs, a fraction that moves only by real progress, `LOADING_PROGRESS`); the model loader reports bytes as `ASSET_LOADING` on the event bus — it never imports loading.ts, so an older project still compiles; `LoadingBar` in the Hud and "Loading…" in GameCanvas before the world exists; `Game.toggleFullscreen()` / `isFullscreen` / `canFullscreen`, Play on a phone goes full screen, `options.orientation` (default landscape) locks where the browser allows, a Full screen button only where allowed; `viewport-fit=cover` added only while a game is mounted and restored on dispose; `FeedbackSpec.haptic` on PLAYER_DAMAGED / PLAYER_DIED / MELEE_HIT / PROJECTILE_HIT / ENEMY_DIED / BOSS_DEFEATED / PLAYER_LANDED, through `buzz()` (obeys the Vibration setting).
 
 **Tests:** `theGameFeelsRightOnAPhone` (9); 818 kit/asset/shell tests green. Reversions failing: haptics removed (1), notch removed (1). **Not verified:** real iPhone/Android behaviour of fullscreen and orientation lock (browser-dependent by design; every step fails quietly).
+
+## 2026-11-19 — failedbr #2431 (21d59838) autopsy: "not counted against it" was false, and the same keys were asked twice
+
+Report: a Weak "fix the network error" turn, 25-min free window, OUTCOME_STOPPED at the cap; 12.4 min waiting for the
+user, 12.7 working. Tally: ✅ 1 (REPAIR_CLAIM_WITHHELD) · 🔀 0 · ⏭️ 0 · ❌ 4 · 🥵 4.
+- Q-2932 the watchdog counted the user wait → `workClock.ts` (one credit, capped below Cloud Run's 3600 s; deadline
+  re-armed, runner `pausedMs`, 43 budget checks).
+- Q-2933 the same keys re-asked → per-build unanswered-key memory at the one door.
+- Q-2934 generate_otp ×8 → `run_recipe` reads arguments beside `name` (the error-conversion attempt was reverted:
+  it escaped the do-nothing loop guard).
+- Q-2935 the gate counted no-match probes as blockers, and excused a failed build after a grep → last statement decides.
+- Q-2936 / Q-2937 follow from Q-2933 (watch); Q-2938 usage half closed by #4320's Q-2920; Q-2939 ETA band OPEN.

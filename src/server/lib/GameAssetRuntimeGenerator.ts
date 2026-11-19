@@ -2,6 +2,33 @@ import { gameAssetLodSource } from './GameAssetLodGenerator.ts';
 import { gameAssetTextureVerifier } from './GameAssetTextureVerifier.ts';
 
 export const GAME_ASSET_MODELS_PATH = 'src/game/three/assetModels.ts';
+/** The game's own model changes. Written once with a new game; after that it belongs to the game and is never regenerated. */
+export const GAME_ASSET_CUSTOMIZATIONS_PATH = 'src/game/three/assetCustomizations.ts';
+
+/** Starting customization file: empty (nothing changed), with worked examples of every kind of change. */
+export function generateAssetCustomizations(subjects: readonly string[] = []): string {
+  return `import type { GameAssetCustomization } from './externalAssets';
+
+/**
+ * Change any 3D model in this game here — no model is fixed. Key = the subject name used with loadRequestedAsset().
+ * Models in this game: ${subjects.length ? subjects.join(', ') : '(none yet)'}.
+ *
+ *   car: { tint: '#e53935' }                                  // recolour the whole model
+ *   car: { colors: { Body: '#1e88e5' } }                      // recolour one material or mesh by name
+ *   house: { height: 9, yaw: 90, offset: [0, 0.2, 0] }        // size in metres, turn in degrees, nudge in metres
+ *   truck: { scale: 1.5, shadows: false, opacity: 0.8 }
+ *   skeleton: { animation: 'Running_A', roles: { attack: '1H_Melee_Attack_Chop' } }
+ *   knight: { hide: ['Shield'] }                              // remove a part by node name
+ *   tree: { source: 'procedural' }                            // use the code-built object instead of the model
+ *   car: { source: { file: 'public/models/my-car.glb' } }     // replace the model 100% with your own .glb
+ *   dragon: { source: { file: 'public/models/dragon.glb' }, height: 6 }  // add a brand-new model
+ *
+ * An invalid value is ignored and a model that cannot load falls back to the code-built object, so a change here
+ * can never break the game.
+ */
+export const assetCustomizations: Record<string, GameAssetCustomization> = {};
+`;
+}
 
 /** Shared metadata read by the 3D kit. Object3D clones retain this key. */
 export const GAME_WORLD_COLLIDER_KEY = 'navbharatWorldCollider';
@@ -16,6 +43,8 @@ export function loadRequestedAsset(subject: string, fallback: () => GameAssetHan
 
 /** Upgrade the original generated loader and keep its per-game asset manifest. */
 export function upgradeAssetModelLoader(source: string | undefined): string | null {
+  const previous = source ? previousLoaderManifest(source) : null;
+  if (previous) return generateAssetModelLoader(previous);
   if (!source?.startsWith(legacyModelPrefix) || !source.endsWith(legacyModelSuffix)) return null;
   const manifest = source.slice(legacyModelPrefix.length, -legacyModelSuffix.length);
   try {
@@ -27,8 +56,84 @@ export function upgradeAssetModelLoader(source: string | undefined): string | nu
   }
 }
 
+/** The manifest of an UNEDITED previous-generation loader (byte-identical to what it generated), else null. */
+function previousLoaderManifest(source: string): Record<string, unknown> | null {
+  const marker = 'const assets: Record<string, LocalGameAsset> = ';
+  const at = source.indexOf(marker);
+  if (at < 0 || source.includes('assetCustomizations')) return null;
+  const end = source.indexOf(';\n', at);
+  try {
+    const models: unknown = JSON.parse(source.slice(at + marker.length, end));
+    if (!models || typeof models !== 'object' || Array.isArray(models)) return null;
+    return previousAssetModelLoader(models as Record<string, unknown>) === source ? models as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Loader used by individually placed models and world dressing. */
 export function generateAssetModelLoader(models: Readonly<Record<string, unknown>>): string {
+  return `import * as THREE from 'three';
+import { applyGameAssetCustomization, customizedGameAsset, loadGameAsset, loadOwnGameAsset, type GameAssetCustomization, type GameAssetHandle, type LocalGameAsset } from './externalAssets';
+
+const assets: Record<string, LocalGameAsset> = ${JSON.stringify(models)};
+const solidScenery = new Set(['building', 'house', 'wall', 'rock', 'hill', 'mountain', 'well', 'barrel', 'streetlight', 'windmill']);
+const markSolid = (object: THREE.Object3D) => { object.userData[${JSON.stringify(GAME_WORLD_COLLIDER_KEY)}] = 'solid'; };
+
+function markSceneryCollider(subject: string, root: THREE.Object3D): void {
+  if (subject === 'tree') {
+    // The loader returns a centred, grounded model. A trunk proxy keeps space under the canopy open.
+    const bounds = new THREE.Box3().setFromObject(root);
+    const size = bounds.getSize(new THREE.Vector3());
+    const center = bounds.getCenter(new THREE.Vector3());
+    const radius = Math.min(size.x, size.z) * 0.1;
+    const height = size.y * 0.48;
+    if (!Number.isFinite(radius + height) || radius <= 0 || height <= 0) return;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.7, radius, height, 8), new THREE.MeshBasicMaterial());
+    trunk.position.set(center.x, bounds.min.y + height / 2, center.z);
+    trunk.visible = false;
+    markSolid(trunk);
+    root.add(trunk);
+  } else if (solidScenery.has(subject)) {
+    root.traverseVisible((object) => {
+      const lod = object.parent as THREE.LOD | null;
+      if ((object as THREE.Mesh).isMesh && (!lod?.isLOD || lod.levels[0]?.object === object)) markSolid(object);
+    });
+  }
+}
+
+// The game's own changes (src/game/three/assetCustomizations.ts). A missing file means no changes, never a broken build.
+const customizationModules = import.meta.glob('./assetCustomizations.ts', { eager: true }) as Record<string, { assetCustomizations?: Record<string, GameAssetCustomization> }>;
+const customizations: Record<string, GameAssetCustomization> = Object.values(customizationModules)[0]?.assetCustomizations ?? {};
+
+/** Subjects the game can load: every library model plus every subject the game added with its own file. */
+export const availableAssetSubjects = (): string[] => [...new Set([...Object.keys(assets), ...Object.keys(customizations).filter((s) => typeof customizations[s]?.source === 'object')])];
+
+export async function loadRequestedAsset(subject: string, fallback: () => GameAssetHandle, signal?: AbortSignal): Promise<GameAssetHandle> {
+  const custom = customizations[subject];
+  const asset = assets[subject];
+  if (custom?.source === 'procedural') return fallback();
+  let handle: GameAssetHandle;
+  if (custom?.source && typeof custom.source === 'object') {
+    // 100% replacement (or a brand-new subject): the project's own .glb, with the same customization fields.
+    const base = asset ?? { sha256: '', height: 1, yaw: 0 };
+    handle = await loadOwnGameAsset(custom.source, customizedGameAsset({ ...base, serviceCredit: undefined, attributionCredit: undefined, hidden: undefined, roles: undefined, animation: undefined }, custom), fallback, signal);
+  } else if (asset) {
+    handle = await loadGameAsset(customizedGameAsset(asset, custom), fallback, signal);
+  } else {
+    return fallback();
+  }
+  if (handle.source === 'model') {
+    applyGameAssetCustomization(handle, custom);
+    markSceneryCollider(subject, handle.root);
+  }
+  return handle;
+}
+`;
+}
+
+/** FROZEN copy of the loader generated until 2026-11-19 (before customizations). Used only to recognise an UNEDITED one to upgrade. */
+export function previousAssetModelLoader(models: Readonly<Record<string, unknown>>): string {
   return `import * as THREE from 'three';
 import { loadGameAsset, type GameAssetHandle, type LocalGameAsset } from './externalAssets';
 
@@ -101,10 +206,147 @@ export interface GameAssetHandle {
 }
 
 let assetJobs = 0;
+/**
+ * Per-subject changes a game (or its user) makes to a model without touching the library: edit
+ * src/game/three/assetCustomizations.ts. Every field is optional; an empty object changes nothing.
+ * source: 'library' (default) | 'procedural' (always the code-built object) | { file } — the project's OWN .glb
+ * (e.g. 'public/models/my-car.glb'), which replaces the library model 100%, or adds a subject the library lacks.
+ */
+export interface GameAssetCustomization {
+  source?: 'library' | 'procedural' | { file: string; sha256?: string };
+  /** Target height in metres (replaces the library height); scale multiplies on top of it. */
+  height?: number;
+  scale?: number;
+  /** Extra turn in DEGREES, added to the library orientation. */
+  yaw?: number;
+  /** Metres, applied inside the model's root so the game's own positioning keeps working. */
+  offset?: [number, number, number];
+  /** Multiplied into every material colour, e.g. '#ff8800'. */
+  tint?: string;
+  /** Exact colour per material OR mesh name, e.g. { Body: '#1e88e5' }. Wins over tint. */
+  colors?: Record<string, string>;
+  /** 0..1; below 1 makes the model see-through. */
+  opacity?: number;
+  /** Node names to remove, added to the library's own hidden list. */
+  hide?: string[];
+  /** Clip that plays on load, and role → clip overrides (handle.play(role)). */
+  animation?: string;
+  roles?: Record<string, string>;
+  lod?: boolean;
+  shadows?: boolean;
+}
+const OWN_MODEL_MAX_BYTES = 16 * 1024 * 1024;
+const finitePositive = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
+
+/** Library metadata with the user's changes merged in; invalid values are ignored, never thrown. */
+export function customizedGameAsset(asset: LocalGameAsset, c: GameAssetCustomization | undefined): LocalGameAsset {
+  if (!c) return asset;
+  const height = (finitePositive(c.height) ? c.height : asset.height) * (finitePositive(c.scale) ? c.scale : 1);
+  const yaw = asset.yaw + (typeof c.yaw === 'number' && Number.isFinite(c.yaw) ? c.yaw * Math.PI / 180 : 0);
+  return {
+    ...asset, height, yaw,
+    ...(typeof c.animation === 'string' ? { animation: c.animation } : {}),
+    ...(typeof c.lod === 'boolean' ? { lod: c.lod } : {}),
+    ...(Array.isArray(c.hide) ? { hidden: [...(asset.hidden ?? []), ...c.hide.filter((n) => typeof n === 'string')] } : {}),
+    ...(c.roles && typeof c.roles === 'object' ? { roles: { ...(asset.roles ?? {}), ...c.roles } } : {}),
+  };
+}
+
+/** Colour, opacity, offset and shadow changes on a mounted model. Materials are cloned first, so nothing is shared. */
+export function applyGameAssetCustomization(handle: GameAssetHandle, c: GameAssetCustomization | undefined): void {
+  if (!c || handle.source !== 'model') return;
+  const pivot = handle.root.children[0];
+  if (pivot && Array.isArray(c.offset) && c.offset.length === 3 && c.offset.every((n) => typeof n === 'number' && Number.isFinite(n))) {
+    pivot.position.add(new THREE.Vector3(c.offset[0], c.offset[1], c.offset[2]));
+  }
+  const color = (value: unknown): THREE.Color | null => {
+    if (typeof value !== 'string' || !/^#[0-9a-f]{6}$/i.test(value)) return null;
+    return new THREE.Color(value);
+  };
+  const tint = color(c.tint);
+  const opacity = typeof c.opacity === 'number' && Number.isFinite(c.opacity) ? Math.max(0, Math.min(1, c.opacity)) : null;
+  const named = c.colors && typeof c.colors === 'object' ? c.colors : {};
+  handle.root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    if (typeof c.shadows === 'boolean') { object.castShadow = c.shadows; object.receiveShadow = c.shadows; }
+    if (!tint && opacity === null && !Object.keys(named).length) return;
+    const list = (Array.isArray(object.material) ? object.material : [object.material]).map((m: THREE.Material) => {
+      const own = m.clone();
+      const target = (own as THREE.MeshStandardMaterial).color as THREE.Color | undefined;
+      const exact = color(named[own.name]) ?? color(named[object.name]);
+      if (target && exact) target.copy(exact); else if (target && tint) target.multiply(tint);
+      if (opacity !== null) { own.transparent = opacity < 1; own.opacity = opacity; }
+      m.dispose();
+      return own;
+    });
+    object.material = Array.isArray(object.material) ? list : list[0];
+  });
+}
+
+async function readOwnedModel(url: URL, maxBytes: number, signal?: AbortSignal, onProgress?: (fraction: number) => void): Promise<Uint8Array> {
+  if (url.origin !== location.origin) throw Error('External gameplay asset refused');
+  const response = await fetch(url, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(10000)]), redirect: 'error' });
+  if (!response.ok || !response.body) throw Error('Model unavailable');
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = []; let total = 0;
+  const expected = Number(response.headers.get('content-length')) || 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      total += value.byteLength; if (total > maxBytes) throw Error('Model exceeds mobile budget');
+      if (expected > 0) onProgress?.(Math.min(0.9, (total / expected) * 0.9));
+      chunks.push(value);
+    }
+  } finally { await reader.cancel(); reader.releaseLock(); }
+  const bytes = new Uint8Array(total); let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bytes;
+}
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return Array.from(digest, n => n.toString(16).padStart(2, '0')).join('');
+}
 
 /** Own one instance per call: skinned meshes and animation mixers are never shared across actors. */
 export async function loadGameAsset(
   asset: LocalGameAsset,
+  fallback: () => GameAssetHandle,
+  signal?: AbortSignal,
+): Promise<GameAssetHandle> {
+  return mountGameAsset(asset, async (onProgress) => {
+    if (!/^[a-f0-9]{64}$/.test(asset.sha256)) throw Error('Invalid asset manifest');
+    const bytes = await readOwnedModel(new URL(import.meta.env.BASE_URL + 'game-assets/' + asset.sha256 + '.glb', location.href), 5 * 1024 * 1024, signal, onProgress);
+    if (await sha256Hex(bytes) !== asset.sha256) throw Error('Model integrity mismatch');
+    return bytes;
+  }, fallback, signal);
+}
+
+/**
+ * The project's OWN model replacing (or adding to) the library: a same-origin .glb under public/, e.g.
+ * 'public/models/my-car.glb' or 'models/my-car.glb'. Optional sha256 pins its exact bytes.
+ */
+export async function loadOwnGameAsset(
+  source: { file: string; sha256?: string },
+  asset: Omit<LocalGameAsset, 'sha256'>,
+  fallback: () => GameAssetHandle,
+  signal?: AbortSignal,
+): Promise<GameAssetHandle> {
+  return mountGameAsset({ ...asset, sha256: source.sha256 ?? '' }, async (onProgress) => {
+    let path = String(source.file ?? '');
+    while (path.startsWith('/')) path = path.slice(1);
+    if (path.startsWith('public/')) path = path.slice('public/'.length);
+    const parts = path.split('/');
+    const safePart = (part: string) => part.length > 0 && part !== '.' && part !== '..' && [...part].every((ch) => /[A-Za-z0-9_ .-]/.test(ch));
+    if (path.length > 240 || !path.toLowerCase().endsWith('.glb') || !parts.every(safePart)) throw Error('Own model path refused');
+    const bytes = await readOwnedModel(new URL(import.meta.env.BASE_URL + path, location.href), OWN_MODEL_MAX_BYTES, signal, onProgress);
+    if (source.sha256 !== undefined && await sha256Hex(bytes) !== source.sha256) throw Error('Own model changed');
+    return bytes;
+  }, fallback, signal);
+}
+
+async function mountGameAsset(
+  asset: LocalGameAsset,
+  readBytes: (onProgress: (fraction: number) => void) => Promise<Uint8Array>,
   fallback: () => GameAssetHandle,
   signal?: AbortSignal,
 ): Promise<GameAssetHandle> {
@@ -130,26 +372,8 @@ export async function loadGameAsset(
     for (const geometry of geometries) geometry.dispose();
   };
   try {
-    if (!/^[a-f0-9]{64}$/.test(asset.sha256) || !Number.isFinite(asset.height) || asset.height <= 0 || !Number.isFinite(asset.yaw)) throw Error('Invalid asset manifest');
-    const url = new URL(import.meta.env.BASE_URL + 'game-assets/' + asset.sha256 + '.glb', location.href);
-    if (url.origin !== location.origin) throw Error('External gameplay asset refused');
-    const response = await fetch(url, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(10000)]), redirect: 'error' });
-    if (!response.ok || !response.body) throw Error('Model unavailable');
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = []; let total = 0;
-    const expected = Number(response.headers.get('content-length')) || 0;
-    try {
-      for (;;) {
-        const { value, done } = await reader.read(); if (done) break;
-        total += value.byteLength; if (total > 5 * 1024 * 1024) throw Error('Model exceeds mobile budget');
-        if (expected > 0) events.emit('ASSET_LOADING', { id: job, fraction: Math.min(0.9, (total / expected) * 0.9), done: false });
-        chunks.push(value);
-      }
-    } finally { await reader.cancel(); reader.releaseLock(); }
-    const bytes = new Uint8Array(total); let offset = 0;
-    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-    if (Array.from(digest, n => n.toString(16).padStart(2, '0')).join('') !== asset.sha256) throw Error('Model integrity mismatch');
+    if (!Number.isFinite(asset.height) || asset.height <= 0 || !Number.isFinite(asset.yaw)) throw Error('Invalid asset manifest');
+    const bytes = await readBytes((fraction) => events.emit('ASSET_LOADING', { id: job, fraction, done: false }));
     // Server policy accepts self-contained GLBs only. Block every URI even if storage is corrupted.
     await verifyGameAssetTextures(bytes);
     const manager = new THREE.LoadingManager();

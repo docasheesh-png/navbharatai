@@ -35,7 +35,7 @@ import { isModelUnavailableError, isProviderBalanceError } from './providerError
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError, isReasoningRungHandoff, providerNeverAnswered, isSlowStreamAbandon } from './turnDeadline';
-import { typecheckEvidenceFromCommands, commandOutcomeText, type TypecheckCommandProof, looksLikeTypecheckCommand } from './TscGate';
+import { commandOutcomeText, looksLikeTypecheckCommand, type TypecheckCommandProof } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
@@ -1502,16 +1502,26 @@ export class BuildDiagnostics {
     });
     // A completed whole-project compiler check, never a build-only command, a help page,
     // a partial-file check, a pipe whose exit belongs to head/tail, or an interrupted command.
-    if (rec.exitCode === 0 && this.typecheckProofIsCurrent(rec.typecheckProof) && looksLikeTypecheckCommand(rec.command)
+    if (rec.exitCode === 0 && looksLikeTypecheckCommand(rec.command)
       && /^\s*(?:(?:[.\w/-]+\/)?tsc|npx(?:\s+--no-install)?\s+tsc)\s/.test(rec.command)
       && !/[|;&]/.test(rec.command)
       && !/(?:^|\s)["']?[^\s"']+\.tsx?["']?(?=\s|$)/.test(rec.command)
       && !/(?:^|\s)(?:-p|--project)(?:\s|=)/.test(rec.command)
-      && typecheckEvidenceFromCommands([rec]) === 'passed') this.resolveCompilerFailuresOnRecheck();
+      && readAgentRunEvidence([{ ...rec, typecheckCurrent: this.currentCommandEvidence().at(-1)?.typecheckCurrent }]).typecheck === 'passed'
+      && this.typecheckEvidenceFromAgentCommands() === 'passed') {
+      this.resolveCompilerFailuresOnRecheck(rec.typecheckProof?.revision);
+    }
   }
 
   /** Called only after the compiler genuinely passed; CSS-only/mixed failures need their own recheck. */
-  resolveCompilerFailuresOnRecheck(): number {
+  resolveCompilerFailuresOnRecheck(checkedRevision?: number): number {
+    // A live run cannot settle findings with a missing/stale receipt, even if exit zero is real.
+    // Historical diagnostics without a live revision reader retain their original interpretation.
+    if (this.meta.currentSourceRevision) {
+      try {
+        if (checkedRevision === undefined || checkedRevision !== this.meta.currentSourceRevision()) return 0;
+      } catch { return 0; }
+    }
     let cleared = 0;
     for (const issue of this.issues) {
       if (!['SIMPLE_BUILD_VERIFY_ERROR', 'ONESHOT_VERIFY_FAILED'].includes(issue.code) || issue.autoResolved) continue;
@@ -1531,12 +1541,6 @@ export class BuildDiagnostics {
    * surfaced the gap. `undefined` means "found nothing to go on" — callers should leave their own
    * evidence at whatever default they already had, never invent a pass.
    */
-  private typecheckProofIsCurrent(proof: TypecheckCommandProof | undefined): boolean {
-    if (!this.meta.currentSourceRevision) return true;
-    try { return proof?.project === true && proof.revision === this.meta.currentSourceRevision(); }
-    catch { return false; }
-  }
-
   private currentCommandEvidence(): Array<SandboxCommandRecord & { typecheckCurrent?: boolean }> {
     if (!this.meta.currentSourceRevision) return this.commands;
     let revision: number | undefined;
@@ -1549,6 +1553,7 @@ export class BuildDiagnostics {
   }
 
   typecheckEvidenceFromAgentCommands(): 'passed' | 'failed' | undefined {
+    // Refutation and release readers must agree on native framework scope and live freshness.
     return readAgentRunEvidence(this.currentCommandEvidence()).typecheck;
   }
 

@@ -102328,6 +102328,12 @@ Owner t311u sequential audit, BR2003 only. Branched from origin/main `e8c45ef` (
 - Q-2770 opened (BLOCKED, the admin's scope decision): APP_SCOPE named the app "Project Name" and kept a seven-section spec as one build because of the word "Quiz"; fixing the header alone would make the decision worse. Today's output is pinned exactly.
 - Q-2621 and Q-2750 gain BR2003 evidence.
 - Docs: `docs/build-report-autopsy-BR2003.md`, its evidence JSON, `tests/br2003Autopsy.test.ts`.
+
+### 2026-11-18 — BR 99771bc7: PR4303 green, then fresh Traffic Manager P4 integration
+
+Published PR #4303 at `c172ee3` after all 27 required local CI checks plus package signatures passed. Local coverage: 53,817 passed/89 skipped; all 11 emulator drills passed. GitHub run `44407511896` passed build/test and drills on that same head (53,811 passed/95 skipped); its artifact uploads succeeded and the asset-only conditional job was inapplicable. The six-test difference matched built-CSS/JS availability: local coverage had prior-build artifacts, while CI ran coverage before building. A separate check against the completed final8 build passed 12 tests/1 skipped, including all six actual built-asset checks; no earlier artifact-freshness claim was invented.
+
+During remote CI, main advanced to `a5b136d` (#4302 Traffic Manager P4). GitHub subsequently reported PR mergeability as dirty; the local merge completed automatically without manual source conflicts, preserving both progress histories. The complete gate must now verify this newly combined tree before updating the PR branch. The previous head's successful checks remain valid historical evidence, not a substitute for the new combined run. The generated prior `dist` is archived outside the repository before the next coverage run so local built-asset availability matches CI's fresh checkout; fresh output will be checked after the build as a separate supplemental test. No production gate, coverage threshold or test selection changed. No merge to main is authorized.
 ## 2026-11-18 — Traffic Manager V2, P8/P9: image reading (vision) and image generation obey drain/disable per path (off by default)
 
 What changed:
@@ -102421,6 +102427,8 @@ During remote CI, main advanced to `a5b136d` (#4302 Traffic Manager P4). GitHub 
 **D21 diagnostic batch and D22 proof:**the predetermined ten-case batch completed10/10, exit0,36.69s, with no case retry or early stop. Each fresh-wallet race produced one500-token debit and one zero-debit replay,9,500-token/₹95 balance, one operation/immutable ledger record and a valid chain; raw outcomes and read-only audits were retained. This does not reproduce or explain the original failed case, so D21 remains BLOCKED and no wallet logic, retry, timeout or invariant change is justified. D22’s one-line raw-result assertion message passes Node22 syntax checking and leaves the predicate unchanged. The new commit requires all applicable checks again; successful b34 coverage is retained as prior evidence, not final new-source proof. Final aggregate status remains unpassed pending the next full gate.
 
 ## 2026-11-19 — Safe integration of the ten open PRs (local candidate)
+The owner supplied the complete diagnostic timeline and asked to fix it. Autopsy and per-item ledger:
+`docs/autopsies/calculator-9fba77d7.md` (Q-2881–Q-2891). The saved App.tsx is a regression fixture.
 
 Integrated the latest heads of #4300, #4303, #4305, #4309, #4310, #4311, #4312, #4313, #4315 and #4318 while preserving ancestry; #4318 was already on main d4cac12. Queue conflicts retain each distinct report's entries, including independently reused Q numbers. Current main's expanded BR1999 evidence supersedes the stale duplicate row.
 
@@ -102439,3 +102447,8 @@ The integrated queue census caught the calculator branch's Q-2756–Q-2766 alloc
 ### 2026-11-19 — Reconcile concurrent PR updates before final validation
 
 Reconciled main d62593336 and PR heads #4305 384064ab3, #4303 53e88f515 and #4300 271d7ccd6 into the integrated candidate without losing ancestry or source repairs. The independently corrected calculator queue uses the same Q-2881–Q-2891 mapping; queue bytes and the closed register are unchanged from a5a8ff1. The external autopsy history and meaningful suggestion privacy tests are preserved. One suggestion object now uses the external curated wording and does not interpolate raw diagnostics into the user action; existing recheck/removal and deduplication coverage remains. No compiler, wallet, timeout, coverage or CI policy changes were made during reconciliation. Six focused offline files pass 84/84 tests, covering classification, both queue censuses, verification actions/privacy and combined Angular proof. A fresh complete validation of this final reconciled source remains required.
+Local code commit: `9c997272e3b0ebccf18295b01da4fb4b2a73387f`, branch
+`codex/calculator-build-repair`. The public GitHub push was rejected because explicit authorization
+for publishing the complete payload was required. A read-only remote-ref check found no branch;
+no connector/alternate route was used to bypass the rejection. No PR or CI run has started. A
+private patch is prepared for review; public push/PR and GitHub validation await authorization.

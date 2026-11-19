@@ -260,7 +260,7 @@ import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGene
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
 import { withVitestDeclared, recipeShipsVitestTest, vitestDeclarationNote, generatedUnitTestNote, needsVitestVersionSelection } from './TestGenerationAgent';
 import { isAppAnalysisPath } from './appAnalysisPaths';
-import { angularValidationPlan, parseAngularValidation, angularTypeScriptOnlyWriteNote } from './angularValidation';
+import { angularValidationPlan, isAngularValidationCommand, parseAngularValidation, angularTypeScriptOnlyWriteNote } from './angularValidation';
 import { renderSeenThisBuild } from './renderProof';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
 import { addDependency, removeDependency as removeOneDependency, listDependencies } from './packageEdit';
@@ -6405,7 +6405,7 @@ export class ToolDispatcher {
         try {
           this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt, timing,
             typecheckProof: { revision: revisionBeforeCompile,
-              project: checksWholeDefaultTsProject(command) || buildScriptTypecheckVerdict({ command, stdout, stderr, exitCode }) !== undefined },
+              project: checksWholeDefaultTsProject(command) || isAngularValidationCommand(command) || buildScriptTypecheckVerdict({ command, stdout, stderr, exitCode }) !== undefined },
           });
         } catch { /* diagnostics capture is best-effort */ }
         // 🔴 AND NOW TELL THE PROJECT MAP THE FILE IS GONE (autopsy 8b3dca5c). Everything above this
@@ -7970,6 +7970,7 @@ export class ToolDispatcher {
         }
         if (angularPlan && !syntaxHeader) {
           const nativeStarted = Date.now();
+          let nativeRevision = getWorkspaceMemory(this.workspaceId).verificationRevision();
           let nativeRunStarted = false;
           let nativeResult: { exitCode: number | null; stdout: string; stderr: string };
           try {
@@ -7978,12 +7979,13 @@ export class ToolDispatcher {
               this.state?.appendTerminal(`Angular dependency preparation: ${redactSecrets(prepared.log)}`);
               if (!prepared.ok) throw new Error(`Angular dependency preparation failed; the native build did not run. ${prepared.log}`);
             }
+            nativeRevision = getWorkspaceMemory(this.workspaceId).verificationRevision();
             nativeRunStarted = true;
             nativeResult = await withTimeout(this.actuator.runCommand(this.workspaceId, angularPlan.command), angularPlan.timeoutMs, 'typecheck-angular');
           } catch (error) {
             nativeResult = { exitCode: null, stdout: '', stderr: error instanceof Error ? error.message : String(error) };
           }
-          try { if (nativeRunStarted) this.onCommand?.({ command: angularPlan.command, ...nativeResult, durationMs: Date.now() - nativeStarted }); } catch { /* diagnostics best-effort */ }
+          try { if (nativeRunStarted) this.onCommand?.({ command: angularPlan.command, typecheckProof: { revision: nativeRevision, project: true }, ...nativeResult, durationMs: Date.now() - nativeStarted }); } catch { /* diagnostics best-effort */ }
           const native = parseAngularValidation(nativeResult.exitCode, nativeResult.stdout, nativeResult.stderr);
           this._lastTypeErrors = native.status === 'passed' ? 0 : native.status === 'failed' ? 1 : null;
           if (native.status === 'failed') getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${native.summary}`);

@@ -1502,7 +1502,7 @@ export class BuildDiagnostics {
     });
     // A completed whole-project compiler check, never a build-only command, a help page,
     // a partial-file check, a pipe whose exit belongs to head/tail, or an interrupted command.
-    if (rec.exitCode === 0 && looksLikeTypecheckCommand(rec.command)
+    if (rec.exitCode === 0 && this.typecheckProofIsCurrent(rec.typecheckProof) && looksLikeTypecheckCommand(rec.command)
       && /^\s*(?:(?:[.\w/-]+\/)?tsc|npx(?:\s+--no-install)?\s+tsc)\s/.test(rec.command)
       && !/[|;&]/.test(rec.command)
       && !/(?:^|\s)["']?[^\s"']+\.tsx?["']?(?=\s|$)/.test(rec.command)
@@ -1531,6 +1531,12 @@ export class BuildDiagnostics {
    * surfaced the gap. `undefined` means "found nothing to go on" — callers should leave their own
    * evidence at whatever default they already had, never invent a pass.
    */
+  private typecheckProofIsCurrent(proof: TypecheckCommandProof | undefined): boolean {
+    if (!this.meta.currentSourceRevision) return true;
+    try { return proof?.project === true && proof.revision === this.meta.currentSourceRevision(); }
+    catch { return false; }
+  }
+
   private currentCommandEvidence(): Array<SandboxCommandRecord & { typecheckCurrent?: boolean }> {
     if (!this.meta.currentSourceRevision) return this.commands;
     let revision: number | undefined;
@@ -1543,7 +1549,7 @@ export class BuildDiagnostics {
   }
 
   typecheckEvidenceFromAgentCommands(): 'passed' | 'failed' | undefined {
-    return typecheckEvidenceFromCommands(this.currentCommandEvidence());
+    return readAgentRunEvidence(this.currentCommandEvidence()).typecheck;
   }
 
   /**

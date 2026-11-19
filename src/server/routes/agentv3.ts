@@ -473,7 +473,7 @@ import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
-import { tscVerdict, looksLikeBrokenTscInstall, buildScriptTypecheckVerdict, salvageTypecheckLine, currentTypecheckProof, mergeCurrentTypecheckProof, type RevisionedTypecheck, combinedVerifyErrors } from '../AgentV3/TscGate';
+import { tscVerdict, looksLikeBrokenTscInstall, buildScriptTypecheckVerdict, salvageTypecheckLine, combineTypecheckEvidence, currentTypecheckProof, mergeCurrentTypecheckProof, type RevisionedTypecheck, combinedVerifyErrors } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
@@ -20996,7 +20996,6 @@ async function noteBuildOutcome(
         buildOk: false, preview: 'not-run', pages: 'not-run', journeys: 'not-run',
         typecheck: 'not-run', tests: 'not-run',
       };
-      let commandTypecheckEvidence = false;
       let platformTypecheckProof: RevisionedTypecheck | undefined;
       // Zero means "none found", and it stays zero when the browser never ran — which is correct here
       // only because the gate cannot reach GREEN without runtime proof anyway, so an unmeasured app is
@@ -25184,10 +25183,10 @@ async function noteBuildOutcome(
         // timeline. FILL-ONLY: a recorded failure keeps its failure, so this moves the sentence, never the
         // bill (see evidenceLedger.ts / provenFromTimeline.ts).
         try {
-          gateEvidence.typecheck = currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision());
-          const beforeTypecheck = gateEvidence.typecheck;
+          gateEvidence.typecheck = combineTypecheckEvidence(
+            currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision()),
+            buildDiag.typecheckEvidenceFromAgentCommands());
           fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger());
-          commandTypecheckEvidence = beforeTypecheck === 'not-run' && gateEvidence.typecheck !== 'not-run';
         }
         catch { /* evidence recovery is best-effort and must never touch a build */ }
         // THE EARLY SYNTAX VERDICT IS RE-CHECKED BEFORE THE GATE COUNTS IT (Q-821). A later pass can have made
@@ -26479,9 +26478,9 @@ async function noteBuildOutcome(
             }
             // Compiler receipts may become stale during finishing/review work. Both command and
             // deterministic platform proof are checked against the current source revision here.
-            const currentTypecheck = commandTypecheckEvidence
-              ? buildDiag.typecheckEvidenceFromAgentCommands() ?? 'not-run'
-              : currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision());
+            const currentTypecheck = combineTypecheckEvidence(
+              currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision()),
+              buildDiag.typecheckEvidenceFromAgentCommands());
             const checked = refuteReviewByEvidence(review, { typecheck: currentTypecheck, stylesheets });
             if (checked.refuted.length > 0 || checked.amended.length > 0) {
               review = checked.review;

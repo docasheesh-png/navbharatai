@@ -13,6 +13,20 @@ const failure = (code: string) => ({ phase: 'build' as const, severity: 'warning
   code, message: `Fast-lane verify failed: ${ERROR}`, detail: ERROR, autoResolved: true });
 
 describe('a handed-off compiler error stays unresolved until a genuine recheck', () => {
+  it('only a recheck of the current source can resolve a handed-off compiler finding', () => {
+    let revision = 7;
+    const diag = new BuildDiagnostics({ currentSourceRevision: () => revision });
+    diag.record(failure('SIMPLE_BUILD_VERIFY_ERROR'));
+    const clean = { command: 'tsc --noEmit', stdout: '', exitCode: 0 };
+    revision++;
+    for (const proof of [undefined, { revision: 7, project: true }, { revision, project: false }]) {
+      diag.recordCommand({ ...clean, typecheckProof: proof });
+      expect(diag.report().issues.find(issue => issue.code === 'SIMPLE_BUILD_VERIFY_ERROR')?.autoResolved).toBe(false);
+    }
+    diag.recordCommand({ ...clean, typecheckProof: { revision, project: true } });
+    expect(diag.report().issues.find(issue => issue.code === 'SIMPLE_BUILD_VERIFY_ERROR')?.autoResolved).toBe(true);
+  });
+
   it.each(['SIMPLE_BUILD_VERIFY_ERROR', 'ONESHOT_VERIFY_FAILED'])('%s is not healed by handing off or by a wallet stop', code => {
     const diag = new BuildDiagnostics({ workspaceId: 'synthetic-calculator' });
     diag.record(failure(code));

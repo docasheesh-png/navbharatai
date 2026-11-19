@@ -153,7 +153,7 @@ export function agentRunEvidence(
   let nativeOutcome: EvidenceOutcome | undefined;
   for (let i = 0; i < list.length; i++) {
     const command = list[i];
-    if (!command || !isAngularValidationCommand(String(command.command ?? ''))) continue;
+    if (!command || command.typecheckCurrent === false || !isAngularValidationCommand(String(command.command ?? ''))) continue;
     const result = parseAngularValidation(command.exitCode, String(command.stdout ?? ''), String(command.stderr ?? ''));
     if (result.status === 'passed' || result.status === 'failed') {
       nativeIndex = i;

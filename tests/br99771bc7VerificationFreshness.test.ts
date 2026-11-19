@@ -244,9 +244,9 @@ describe('current compiler evidence is read at the consumer, without rewriting h
     expect(mem.verificationStatus()).toContain('checked CLEAN');
   });
 
-  it('withholding typecheck evidence does not erase a passing test suite on the same receipt', () => {
+  it('withholding typecheck evidence does not erase a completed test-run receipt', () => {
     const diag = new BuildDiagnostics({ currentSourceRevision: () => 2 });
-    diag.recordCommand({ command: 'npx vitest run && tsc --noEmit', exitCode: 0,
+    diag.recordCommand({ command: 'npx vitest run', exitCode: 0,
       stdout: 'Test Files  1 passed (1)\nTests  3 passed (3)',
       typecheckProof: { revision: 1, project: true } });
     expect(diag.agentRunEvidence().typecheck).toBeUndefined();
@@ -268,9 +268,10 @@ describe('current compiler evidence is read at the consumer, without rewriting h
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     expect(route).toContain('currentSourceRevision: () => getWorkspaceMemory(workspaceId).verificationRevision()');
     expect(route).not.toContain('const fromAgent = buildDiag.typecheckEvidenceFromAgentCommands();');
-    expect(route).toContain("commandTypecheckEvidence = beforeTypecheck === 'not-run' && gateEvidence.typecheck !== 'not-run'");
-    expect(route).toContain("? buildDiag.typecheckEvidenceFromAgentCommands() ?? 'not-run'");
-    expect(route).toContain(': currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision())');
+    expect(route).toContain('gateEvidence.typecheck = combineTypecheckEvidence(');
+    expect(route).toContain('const currentTypecheck = combineTypecheckEvidence(');
+    expect(route).toContain('currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision()),');
+    expect(route).toContain('buildDiag.typecheckEvidenceFromAgentCommands());');
     expect(route).toContain('refuteReviewByEvidence(review, { typecheck: currentTypecheck, stylesheets })');
   });
 });

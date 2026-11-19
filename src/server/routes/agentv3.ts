@@ -788,7 +788,7 @@ import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuator
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, cssStoppedUnfinishedRecord, cssClassesUndefinedFields, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
 import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../AgentV3/spacingSnap';
-import { filesANoteStillFlags } from '../AgentV3/writeTimeQualityCheck';
+import { filesANoteStillFlags, salvageQualityNotes } from '../AgentV3/writeTimeQualityCheck';
 import { persistedStateBuildWarnings } from '../AgentV3/persistedStateCheck';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
@@ -20266,6 +20266,8 @@ async function noteBuildOutcome(
             `${SALVAGE_HANDOFF_MARKER} A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app ${salvageWhy}; ` +
             `they are in the workspace now and they are YOUR OWN prior work (any project context below that lists fewer files was taken before they were written):\n${sb.salvagedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
             salvageErrors +
+            // Q-2924: the salvage door used to skip the write-time quality check every other write gets.
+            salvageQualityNotes(Object.fromEntries(writtenFiles), sb.salvagedPaths) +
             `${salvageReadInstruction(sb.verifyErrors, Object.fromEntries(writtenFiles))} COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
             `fix any error in place. ${HANDOFF_NOTE_FIX_LINE} Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.` +
             // 🖥️ The calendar report's first build (earlyPreview.ts): the lane stopped before its entry and

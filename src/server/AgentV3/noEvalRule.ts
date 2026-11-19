@@ -129,3 +129,16 @@ export const LIGHT_THEME_BY_DEFAULT_RULE =
   '`data-theme="dark"` on <html> in index.html so the kit\'s dark palette applies, and use the matching 3D lighting. ' +
   '"Follow my phone / system theme" → set data-theme from prefers-color-scheme. A light/dark switch the user asked for ' +
   'starts in light.';
+
+/**
+ * 🔴 STORED DATA IS CHECKED BEFORE IT BECOMES STATE (Q-2924, failedbr #2466 a360bc2c, 2026-11-19). A generated generic
+ * `useLocalStorage` hook put `JSON.parse(localStorage.getItem(key))` straight into React state — one corrupted or
+ * old-shape value and the app crashes on load, every load, until the user clears site data. The build report caught
+ * it (PERSISTED_STATE_BOUNDARY) only after it shipped. This is the rule at the source, in every lane that writes app
+ * code, so the guard is written where the data's shape is known.
+ */
+export const PERSISTED_STATE_RULE =
+  'STORED DATA IS UNTRUSTED: a value read back from localStorage/sessionStorage is parsed, then its shape checked '
+  + '(the fields and types this screen needs) before it reaches state — anything that does not fit falls back to the '
+  + 'default. A cast or a try/catch is not a check. A generic storage hook takes the check as an argument: '
+  + '`useLocalStorage<T>(key, initial, isValid: (v: unknown) => v is T)`.';

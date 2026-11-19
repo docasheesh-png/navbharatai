@@ -19,7 +19,7 @@ import { STEERING_YIELD_REASON, isSteeringYield } from './steeringHandoff';
 
 import { MANIFEST_V2_RULES, cleanPurpose, fastLaneDepsChars, fastLaneMaxFiles, fastLaneV2Enabled, fullDepsContext, parseManifestContract, topoWaves, validateManifestContract, type ValidatedContract } from './reliability/fastLaneV2';
 import { dropShadowingEntries } from './entryShadow';
-import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE, LIGHT_THEME_BY_DEFAULT_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE, LIGHT_THEME_BY_DEFAULT_RULE, PERSISTED_STATE_RULE } from './noEvalRule';
 import { posix } from 'node:path';
 import { contractFilePath, contractImportSpecifier } from './contractLocation';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
@@ -578,6 +578,7 @@ export function fileSystemPrompt(framework: string): string {
     SEED_PASSWORD_RULE,
     NO_FAKE_FEATURE_RULE,
     LIGHT_THEME_BY_DEFAULT_RULE,
+    PERSISTED_STATE_RULE,
     ...webPlatformRule(framework),
     ...exportImportConvention(framework),
     ...designContractFor(framework),
@@ -776,6 +777,7 @@ export function contractSystemPrompt(framework: string): string {
     '- These names are FROZEN. Files generated later MUST use these EXACT identifiers — no synonyms,',
     '  no re-casing, no renaming. If a symbol is not here, files must not assume it exists.',
     '- Real declarations only — no `// TODO`, no placeholder shapes. Keep it minimal but complete.',
+    CALLBACK_PROP_EVENT_RULE,
     // Autopsy 121c2431: the contract named its data type `StationaryItem` beside a planned component
     // file `StationaryItem.tsx`; that file then imported the type and declared a component of the same
     // name, and the collision was one of the errors the build never got past.
@@ -810,6 +812,18 @@ export function contractUserPrompt(prompt: string, manifest: SimpleFileSpec[]): 
  * convention asks for `import type` on types, so `useInput.ts` imported the `InputAction` enum type-only
  * and read its members: TS1361 on every line, re-quoted by the write-time typecheck for seven minutes.
  */
+/**
+ * 🔴 A CALLBACK PROP ACCEPTS WHAT ITS CALLER PASSES (Q-2925, failedbr #2466 a360bc2c, 2026-11-19). The contract froze a
+ * prop as `() => void`; `LyricsForm` then handed it `(e: React.FormEvent) => void` (it calls `e.preventDefault()`) —
+ * TS2322, the lane failed verification and handed off. Two files written in parallel each followed the contract
+ * correctly; the CONTRACT was the defect, because a handler wired to a DOM event receives that event.
+ */
+// ⚠️ The parameter is REQUIRED, not optional: under `strict`, `(e: FormEvent) => void` is NOT assignable to
+// `(e?: FormEvent) => void` (verified with tsc while writing this), while a no-argument handler fits either way.
+export const CALLBACK_PROP_EVENT_RULE = '- A callback prop that a component wires to a DOM event (onClick, onSubmit, onChange…) takes that event '
+  + 'as its parameter — `onSubmit: (e: React.FormEvent) => void`, `onClick: (e: React.MouseEvent) => void` — and the component '
+  + 'passes the event on. A handler that calls `e.preventDefault()` and a handler with no parameter both fit. Never freeze such a prop as `() => void`.';
+
 export const ENUM_IMPORT_RULE = 'An ENUM (or a const, function or class) is a VALUE: import it with a plain `import { Name }`, never `import type` — a type-only import of an enum fails to compile the moment a member is read.';
 
 /**

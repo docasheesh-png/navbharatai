@@ -19,6 +19,7 @@ import { EMOJI_RULE } from '../lib/responseEmoji';
 import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
 import { TODO_RIDES_WITH_WORK } from './todoOnlyTurn';
 import { DEVICE_POWERS_RULE } from './devicePowers';
+import { BOOLEAN_DISCRIMINANT_RULE } from './booleanDiscriminant';
 import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
 import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE, LIGHT_THEME_BY_DEFAULT_RULE } from './noEvalRule';
@@ -1270,6 +1271,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  `if (result.ok === false)` (or `\'message\' in result`) from the start: it is correct in BOTH modes;',
     '  tell any sub-agent the same. With strict ON, also give every function parameter a type and check a',
     '  value that may be null or undefined before you use it. Never change the "strict" setting to clear errors.',
+    BOOLEAN_DISCRIMINANT_RULE,
     '- NEVER destroy your own generated source to fix an error or "restructure". The files',
     '  already in this workspace are YOUR OWN prior work — treat them as code to PRESERVE and',
     '  fix in place, never as clutter to clear out. Do NOT delete a source directory, bulk-',

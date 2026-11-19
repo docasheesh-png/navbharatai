@@ -26,7 +26,7 @@ import { appAiGatewayEnabled } from '../lib/appAiGateway';
 import { generateAiIntegration } from '../lib/AiGenerator';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { deadlineFromBudget, isReasoningRungHandoff } from './turnDeadline';
-import { judgeRepair } from './repairAcceptance';
+import { judgeRepair, repairStyleRegression } from './repairAcceptance';
 import { scaffoldRestores, protectBoilerplateInRepair, planProvidedFiles } from './scaffoldBoilerplate';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { readInitialLaneDecline, InitialLaneDeclinedError, initialLaneDeclineResult, type InitialLaneDecline } from './initialLaneDecline';
@@ -57,6 +57,7 @@ import { contractEnumAsConstEnabled, stringEnumsAsConstObjects, contractEnumHead
 import { contractRenameHeaderLine, type ContractRename } from './contractRenames';
 import { readWriteOutcomes, type WriteOutcome } from './writeOutcomes';
 import { binaryTextGenerationProblem } from './binaryTextWrite';
+import { BOOLEAN_DISCRIMINANT_RULE, repairBooleanDiscriminants } from './booleanDiscriminant';
 
 
 /**
@@ -519,6 +520,8 @@ export function manifestSystemPrompt(framework: string, scaffoldPaths?: readonly
     '  files, list them honestly: that plan must go to the tool-capable builder to obtain real bytes.',
     `- Edit/replace the scaffolded entry files (${entryFilesHint(framework)}) — do not nest a subfolder.`,
     '- Keep it minimal but COMPLETE — no file the app references should be missing.',
+    '- If the app registers a service worker or links/caches a web manifest, include the real manifest',
+    '  and every local asset it references in the plan. A web/PWA shell alone is not a signed Android store bundle.',
     // SIZE DISCIPLINE (admin 2026-08-02): "minimal" alone is an adjective a weak model reads as optional —
     // a real build planned 50 files for an app needing ~12. The per-app NUMBER lives in the user prompt
     // (fileBudgetInstruction); this is the app-agnostic anti-pattern that produces most of the bloat.
@@ -565,6 +568,7 @@ export function fileSystemPrompt(framework: string): string {
     '- Write the COMPLETE, real file — no TODOs, no placeholders, no "..." stubs.',
     '- Never generate simulated/mock data about OTHER people (nearby shops, other users, followers, drivers) and present it as real — showing other people\'s data needs a shared online database. Example entries shown for layout must be labelled on screen as examples.',
     '- Match the imports/exports the rest of the app expects (you are given the full file list).',
+    BOOLEAN_DISCRIMINANT_RULE,
     NO_EVAL_RULE,
     NO_FAKE_RESULTS_RULE,
     BUILD_WHAT_WAS_ASKED_RULE,
@@ -1784,6 +1788,9 @@ export function repairSystemPrompt(framework: string, strategy: RepairStrategy =
     '  — e.g. a hook that does NOT return a value its consumer destructures. Make the producer and the',
     '  consumer AGREE (add the missing return fields, or stop using ones that do not exist).',
     '- Real, complete code — no TODOs, no placeholders. Keep changes minimal and consistent across files.',
+    BOOLEAN_DISCRIMINANT_RULE,
+    '- Preserve existing className values and working interactions when repairing a compiler error.',
+    '  If a class name must change, update its actual stylesheet in the same repair; never replace the screen wholesale.',
   ];
   if (strategy === 'focus-offenders') {
     base.push(
@@ -1830,6 +1837,39 @@ export function repairUserPrompt(
     'disagree, the SHARED CONTRACT above is the source of truth — make both sides match it.',
   );
   return lines.join('\n');
+}
+
+/** Focus a compiler handoff on its actual offenders instead of re-reading every salvaged file. */
+export function salvageReadInstruction(errors: string | undefined, files: Record<string, string>): string {
+  const parsed = parseTscErrors(errors ?? '');
+  if (parsed.length === 0) return 'READ these files first and';
+  const paths = [...new Set(parsed.map(error => error.file))].slice(0, 6);
+  const causes = tscCauseNote(tscErrorCauses(parsed, files));
+  return `READ the compiler-named files first (${paths.join(', ')}) and only the declarations they need. `
+    + 'Apply the focused mechanical fix and re-run the compiler before surveying unchanged files.'
+    + `${causes}\nThen`;
+}
+
+/** Shared text-repair boundary for the per-file and one-shot callers. Keeps the chat handler bounded. */
+export async function repairCompilerFiles(deps: {
+  framework: string; prompt: string; errors: string; currentFiles: OneShotFile[];
+  contract?: string; strategy?: RepairStrategy; contractPath?: string;
+  workspaceFiles?: Record<string, string>; weakRepair: boolean;
+  generate: (system: string, user: string, options?: { repair: true; mayReason: true }) => Promise<string>;
+  beforeModel: () => void; log?: (message: string) => void;
+}): Promise<OneShotFile[]> {
+  const before = Object.fromEntries(deps.currentFiles.map(file => [file.path, file.content]));
+  const guards = repairBooleanDiscriminants(before, parseTscErrors(deps.errors));
+  if (guards.fixed.length > 0) return Object.entries(guards.files)
+    .filter(([path, content]) => content !== before[path]).map(([path, content]) => ({ path, content }));
+  deps.beforeModel();
+  const text = await deps.generate(repairSystemPrompt(deps.framework, deps.strategy),
+    repairUserPrompt(deps.prompt, deps.errors, deps.currentFiles, deps.contract, deps.strategy, deps.contractPath),
+    deps.weakRepair ? { repair: true, mayReason: true } : undefined);
+  const proposed = parseFileBlocks(text).map(block => ({ path: block.path, content: block.content }));
+  const regression = repairStyleRegression({ ...deps.workspaceFiles, ...before }, proposed);
+  if (regression) { deps.log?.(regression); return []; }
+  return proposed;
 }
 
 /** Result of the real compile/build check run in the sandbox. */
@@ -3240,6 +3280,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         }
         fixed = guarded.files as OneShotFile[];
       }
+      const styleRegression = repairStyleRegression(Object.fromEntries([...byPath].map(([path, file]) => [path, file.content])), fixed);
+      if (styleRegression) { deps.log?.(styleRegression); break; }
       // ACCEPTANCE TEST (real build report 2026-08-23: a repair took the app from 4 errors to 41 and was
       // kept, because the only brake here was byte-IDENTICAL errors and 41 is not identical to 4). A
       // repair is a HYPOTHESIS; snapshot what it is about to overwrite so a regression can be undone.

@@ -5545,16 +5545,23 @@ export class ToolDispatcher {
         // ONE entry point for the RECIPE_TOOLS (ToolCatalog.ts). The recipe runs through its OWN case
         // below, unchanged — this only chooses which one. Unknown or "list" ⇒ the inputs, never a guess.
         const recipe = optStr(input, 'name');
-        const inner = (input as Record<string, unknown> | undefined)?.input;
-        const hasInput = !!inner && typeof inner === 'object' && !Array.isArray(inner) && Object.keys(inner).length > 0;
+        // 🔴 ARGUMENTS BESIDE `name` ARE ARGUMENTS (failedbr #2431, 21d59838). The model called
+        // `run_recipe({ name: "generate_otp", provider: … })` eight times: the flat shape models naturally write.
+        // Only `input` was read, so `provider` was dropped, the recipe answered "pass provider" as if that were a
+        // result, and the model repeated the same call. `recipeArguments` takes `input` when it is given, else every
+        // key beside `name`.
+        const inner = recipeArguments(input as Record<string, unknown> | undefined);
+        const hasInput = Object.keys(inner).length > 0;
         if (!isRecipeName(recipe)) {
           const lead = recipe && recipe !== 'list' ? `There is no recipe called "${recipe}". ` : '';
           return `${lead}Available recipes and their inputs:\n\n${recipeListing()}`;
         }
         const def = defaultToolCatalog().find((t) => t.name === recipe);
         const required = ((def?.input_schema as { required?: string[] } | undefined)?.required ?? []);
+        // ⚠️ Help stays a NON-error receipt on purpose: the "steps that do nothing" loop guard counts and ends a model that
+        // repeats it (tests/aPureToolReceiptCannotResetItsLoopGuard). Turned into an error, the repeat ran unbounded.
         if (!hasInput && required.length > 0) return `run_recipe: "${recipe}" needs input. Its inputs:\n\n${recipeListing(recipe)}`;
-        return this.run({ ...call, name: recipe, input: hasInput ? inner as Record<string, unknown> : {} }, agent);
+        return this.run({ ...call, name: recipe, input: inner }, agent);
       }
       case 'read_file': {
         const reqPath = reqStr(input, 'path');
@@ -13098,6 +13105,19 @@ export function withEditMissProvenance(err: unknown, path: string, oldStr: strin
   const out = new Error(err.message.slice(0, cut) + why + err.message.slice(cut));
   out.stack = err.stack;
   return out;
+}
+
+/**
+ * The arguments a `run_recipe` call carries: its `input` object when one is given, otherwise every key beside `name`
+ * (the flat shape a model naturally writes — failedbr #2431). PURE.
+ */
+export function recipeArguments(input: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const rec = input && typeof input === 'object' ? input : {};
+  const inner = rec.input;
+  if (inner && typeof inner === 'object' && !Array.isArray(inner) && Object.keys(inner).length > 0) return inner as Record<string, unknown>;
+  const rest: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(rec)) if (k !== 'name' && k !== 'input' && v !== undefined) rest[k] = v;
+  return rest;
 }
 
 export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {

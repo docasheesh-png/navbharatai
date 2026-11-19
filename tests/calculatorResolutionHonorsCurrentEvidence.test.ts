@@ -59,7 +59,7 @@ describe('route resolution retains source revision around compilation and style 
     const block = src.slice(start, end);
     expect(block).toContain("await fastReconcileDependencies('verify');\n            const fastVerifyRevision");
     expect(block).toContain('fastVerifyRevision === getWorkspaceMemory(workspaceId).verificationRevision()');
-    expect(block).toContain("buildDiag.agentRunEvidence().typecheck !== 'failed'");
+    expect(block).toContain("buildDiag.evidenceLedger().facts.typecheck?.outcome !== 'failed'");
     expect(block.indexOf('fastVerifyRevision ===')).toBeGreaterThan(block.indexOf('spacingSnapNote(landed)'));
   });
   it('keeps runTsc proof current before resolving compiler-only findings', () => {
@@ -70,6 +70,6 @@ describe('route resolution retains source revision around compilation and style 
     const block = src.slice(start, end);
     expect(block).toContain("currentTypecheckProof({ outcome: 'passed', revision }, getWorkspaceMemory(workspaceId).verificationRevision()) === 'passed'");
     expect(block).toContain('buildDiag.resolveCompilerFailuresOnRecheck(revision)');
-    expect(block).toContain("buildDiag.agentRunEvidence().typecheck !== 'failed'");
+    expect(block).toContain("buildDiag.evidenceLedger().facts.typecheck?.outcome !== 'failed'");
   });
 });

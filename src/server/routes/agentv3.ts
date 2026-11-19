@@ -20115,7 +20115,7 @@ async function noteBuildOutcome(
             // Style normalization can write after the compiler ran. Do not settle old findings
             // from different source bytes, or contradict a current native framework failure.
             if (fastVerifyRevision === getWorkspaceMemory(workspaceId).verificationRevision()
-              && buildDiag.agentRunEvidence().typecheck !== 'failed') {
+              && buildDiag.evidenceLedger().facts.typecheck?.outcome !== 'failed') {
               buildDiag.resolveOnRecheck('SIMPLE_BUILD_VERIFY_ERROR');
               buildDiag.resolveOnRecheck('ONESHOT_VERIFY_FAILED');
             }
@@ -21069,7 +21069,7 @@ async function noteBuildOutcome(
             if (verdict === 'not-run' || verdict === 'unknown') return { ok: true, verified: false, errors: '', revision };
             if (verdict === 'passed'
               && currentTypecheckProof({ outcome: 'passed', revision }, getWorkspaceMemory(workspaceId).verificationRevision()) === 'passed'
-              && buildDiag.agentRunEvidence().typecheck !== 'failed') {
+              && buildDiag.evidenceLedger().facts.typecheck?.outcome !== 'failed') {
               buildDiag.resolveCompilerFailuresOnRecheck(revision);
             }
             return verdict === 'failed'

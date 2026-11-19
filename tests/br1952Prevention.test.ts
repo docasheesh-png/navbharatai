@@ -1,4 +1,5 @@
 // BR1952 (84d16d0e): offline production-path regressions, never a paid replay.
+import { failedAttemptCostVerdict } from '../src/server/AI/SurplusRegistry/failedAttemptCost';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import ts from 'typescript';
@@ -313,6 +314,8 @@ function cacheCapture() {
   const capture = execute(`return (...args) => { return (${init.parameters.length ? `(${init.parameters.map(p=>p.getText(ast)).join(',')})` : '()'} => {${body.statements.slice(0,snapshot+1).map(n=>n.getText(ast)).join('\n')}})(...args); };`, {
     routerOneCostUnconfirmed: () => false, costUnconfirmedNoted: false,
     usageUnreportedFired: false, currentBillingPhase: () => undefined,
+    // Q-2920: the real verdict (not a stub) and its once-only flag, both free names of the production body.
+    failedAttemptCostVerdict, failedAttemptUnknownFired: false,
     providerLedger: ledger, billingCtx, buildDiag: {setLiveUsage: live},
   }) as (provider: string, usage: Record<string,unknown>, model: string, cacheRead?: number, cacheWrite?: number) => void;
   return {capture, ledger, billingCtx, live};

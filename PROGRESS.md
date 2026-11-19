@@ -102623,3 +102623,6 @@ The real defect (a CSS `//` comment breaking the production build) was fixed at 
 palette rule judged a canvas renderer's artwork colours — that false finding started the polish. Q-2946 🟡 for the
 admin (billing): finish instead of starting extras when the app is ready and the bill nears the balance — recommended.
 Q-2947–Q-2949 OPEN (edit-miss watch, browser-tool outages without detail, Surplus availability).
+- **Q-2946 decided by the admin (option a) and built in #4346:** a READY fresh build on a nearly-spent wallet finishes (no
+  more tools; the summary is the next turn), and every build — edits included — is told once to skip optional polish when
+  the wallet is ≥ 80% spent. No price or charge changes; the wallet stop remains the net.

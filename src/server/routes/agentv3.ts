@@ -791,6 +791,8 @@ import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../A
 import { filesANoteStillFlags, salvageQualityNotes } from '../AgentV3/writeTimeQualityCheck';
 import { failedAttemptCostVerdict } from '../AI/SurplusRegistry/failedAttemptCost';
 import { waitCreditMs, workElapsedMs, hardDeadlineRemainingMs } from '../AgentV3/workClock';
+/** Q-2946: from this share of the spendable balance on, a ready app finishes instead of starting extras. */
+const WALLET_FINISH_RATIO = 0.8;
 import { persistedStateBuildWarnings } from '../AgentV3/persistedStateCheck';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
@@ -14921,6 +14923,8 @@ async function noteBuildOutcome(
         );
       }
       let failedAttemptUnknownFired = false;
+      /** Q-2946: the running bill as a share of what this build may spend (updated with every priced turn). */
+      let walletUseRatio = 0;
       const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt; measured?: boolean; failedAttempt?: boolean; producedNothing?: boolean; discardedOutput?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
         if (routerOneCostUnconfirmed(used, usage.routerOneReceipt) && !costUnconfirmedNoted) {
           costUnconfirmedNoted = true;
@@ -15059,6 +15063,7 @@ async function noteBuildOutcome(
               billedUsd: d.effectiveBilledUsd, floorUsd: d.realCostUsd,
               discountPct: liveCostDiscountPct ?? 0, usdInr: usdInrRate(),
             });
+            if (inr !== null && spendableBalanceInr > 0) walletUseRatio = inr / spendableBalanceInr;
             if (inr !== null && inr > spendableBalanceInr) {
               walletStopFired = true;
               const notice = balanceRechargeNotice(prompt);
@@ -18057,6 +18062,8 @@ async function noteBuildOutcome(
         sandboxAdmissionBudget,
         // The runner's own clock skips the user-wait credit too (workClock.ts, failedbr #2431).
         pausedMs: creditedWaitMs,
+        // Q-2946 (admin decision 2026-11-19): a READY app on a nearly-spent wallet finishes instead of starting extras.
+        finishWhenReady: () => walletUseRatio >= WALLET_FINISH_RATIO,
         replyVoice: () => rb.replyVoice ?? voiceOf(originalPrompt),
         dispatcher,
         state,

@@ -1,0 +1,602 @@
+[
+  {
+    "id": "lib4-man-a",
+    "file": "multidao_01.glb",
+    "sourceBytes": 267108,
+    "bytes": 240524,
+    "triangles": 1166,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-man-b",
+    "file": "multidao_15.glb",
+    "sourceBytes": 259220,
+    "bytes": 232720,
+    "triangles": 1154,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-man-c",
+    "file": "multidao_24.glb",
+    "sourceBytes": 236108,
+    "bytes": 209604,
+    "triangles": 1166,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-woman-a",
+    "file": "multidao_02.glb",
+    "sourceBytes": 255876,
+    "bytes": 229376,
+    "triangles": 1226,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-woman-b",
+    "file": "multidao_09.glb",
+    "sourceBytes": 264064,
+    "bytes": 237564,
+    "triangles": 1226,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-woman-c",
+    "file": "multidao_19.glb",
+    "sourceBytes": 278560,
+    "bytes": 252056,
+    "triangles": 1202,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-old-man",
+    "file": "multidao_03.glb",
+    "sourceBytes": 267876,
+    "bytes": 241368,
+    "triangles": 1190,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-old-woman",
+    "file": "multidao_04.glb",
+    "sourceBytes": 270844,
+    "bytes": 244340,
+    "triangles": 1202,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-farmer",
+    "file": "bento.glb",
+    "sourceBytes": 346144,
+    "bytes": 319576,
+    "triangles": 1702,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-racing-driver",
+    "file": "piloto_h01.glb",
+    "sourceBytes": 342220,
+    "bytes": 315568,
+    "triangles": 1614,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-mechanic",
+    "file": "dito.glb",
+    "sourceBytes": 317132,
+    "bytes": 290476,
+    "triangles": 1570,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-worker",
+    "file": "multidao_06.glb",
+    "sourceBytes": 260516,
+    "bytes": 234012,
+    "triangles": 1178,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-businessman",
+    "file": "multidao_17.glb",
+    "sourceBytes": 245168,
+    "bytes": 218664,
+    "triangles": 1166,
+    "animations": 3,
+    "licenseFileSha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-ambulance",
+    "file": "ambulancia.glb",
+    "sourceBytes": 40876,
+    "bytes": 40300,
+    "triangles": 624,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-bicycle",
+    "file": "bicicleta.glb",
+    "sourceBytes": 20916,
+    "bytes": 20916,
+    "triangles": 332,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-bus",
+    "file": "onibus.glb",
+    "sourceBytes": 39956,
+    "bytes": 37648,
+    "triangles": 616,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-fire-truck",
+    "file": "caminhao_bombeiros.glb",
+    "sourceBytes": 61048,
+    "bytes": 60472,
+    "triangles": 1028,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-garbage-truck",
+    "file": "caminhao_lixo.glb",
+    "sourceBytes": 39520,
+    "bytes": 38368,
+    "triangles": 616,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-water-tanker",
+    "file": "caminhao_pipa.glb",
+    "sourceBytes": 48280,
+    "bytes": 46840,
+    "triangles": 856,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-electric-car",
+    "file": "carro_eletrico.glb",
+    "sourceBytes": 31720,
+    "bytes": 31144,
+    "triangles": 488,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-fishing-boat",
+    "file": "barco_pesca.glb",
+    "sourceBytes": 26824,
+    "bytes": 26824,
+    "triangles": 412,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-canoe",
+    "file": "canoa.glb",
+    "sourceBytes": 17660,
+    "bytes": 17660,
+    "triangles": 296,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-jetty",
+    "file": "trapiche.glb",
+    "sourceBytes": 35648,
+    "bytes": 35360,
+    "triangles": 570,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-cow",
+    "file": "vaca.glb",
+    "sourceBytes": 10484,
+    "bytes": 10484,
+    "triangles": 128,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-dog",
+    "file": "cachorro_caramelo.glb",
+    "sourceBytes": 8452,
+    "bytes": 8452,
+    "triangles": 108,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-capybara",
+    "file": "capivara.glb",
+    "sourceBytes": 8612,
+    "bytes": 8612,
+    "triangles": 116,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-toucan",
+    "file": "tucano.glb",
+    "sourceBytes": 10660,
+    "bytes": 10300,
+    "triangles": 108,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-heron",
+    "file": "garca.glb",
+    "sourceBytes": 7344,
+    "bytes": 7344,
+    "triangles": 80,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-frog",
+    "file": "sapo.glb",
+    "sourceBytes": 10720,
+    "bytes": 10720,
+    "triangles": 104,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-jaguar",
+    "file": "onca_pintada.glb",
+    "sourceBytes": 45800,
+    "bytes": 45800,
+    "triangles": 646,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-puma",
+    "file": "onca_parda.glb",
+    "sourceBytes": 31324,
+    "bytes": 31324,
+    "triangles": 484,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-wolf",
+    "file": "lobo_guara.glb",
+    "sourceBytes": 31068,
+    "bytes": 31068,
+    "triangles": 496,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-deer",
+    "file": "veado_campeiro.glb",
+    "sourceBytes": 33828,
+    "bytes": 33828,
+    "triangles": 524,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-monkey",
+    "file": "macaco_prego.glb",
+    "sourceBytes": 28552,
+    "bytes": 28552,
+    "triangles": 426,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-tapir",
+    "file": "anta.glb",
+    "sourceBytes": 30348,
+    "bytes": 30348,
+    "triangles": 512,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-sloth",
+    "file": "preguica_de_coleira.glb",
+    "sourceBytes": 34032,
+    "bytes": 34032,
+    "triangles": 480,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-armadillo",
+    "file": "tatu_canastra.glb",
+    "sourceBytes": 32852,
+    "bytes": 32852,
+    "triangles": 506,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-peccary",
+    "file": "queixada.glb",
+    "sourceBytes": 25528,
+    "bytes": 25528,
+    "triangles": 392,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-otter",
+    "file": "ariranha.glb",
+    "sourceBytes": 30184,
+    "bytes": 30184,
+    "triangles": 478,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-bat",
+    "file": "morcego_aurita.glb",
+    "sourceBytes": 25984,
+    "bytes": 25984,
+    "triangles": 380,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-whale",
+    "file": "baleia_azul.glb",
+    "sourceBytes": 30500,
+    "bytes": 30500,
+    "triangles": 432,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-dolphin",
+    "file": "boto_cinza.glb",
+    "sourceBytes": 19944,
+    "bytes": 19944,
+    "triangles": 316,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-manatee",
+    "file": "peixe_boi_marinho.glb",
+    "sourceBytes": 27488,
+    "bytes": 27488,
+    "triangles": 404,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-shark",
+    "file": "tubarao_branco.glb",
+    "sourceBytes": 24352,
+    "bytes": 24352,
+    "triangles": 366,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-hammerhead",
+    "file": "tubarao_martelo_grande.glb",
+    "sourceBytes": 26296,
+    "bytes": 26296,
+    "triangles": 420,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-manta-ray",
+    "file": "raia_manta_birostris.glb",
+    "sourceBytes": 19432,
+    "bytes": 19432,
+    "triangles": 290,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-seahorse",
+    "file": "cavalo_marinho_reidi.glb",
+    "sourceBytes": 35412,
+    "bytes": 35412,
+    "triangles": 486,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-tuna",
+    "file": "atum_azul.glb",
+    "sourceBytes": 37944,
+    "bytes": 37944,
+    "triangles": 560,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-sea-turtle",
+    "file": "tartaruga_verde.glb",
+    "sourceBytes": 28696,
+    "bytes": 28696,
+    "triangles": 368,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-crab",
+    "file": "caranguejo_amarelo.glb",
+    "sourceBytes": 29804,
+    "bytes": 29804,
+    "triangles": 476,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-starfish",
+    "file": "estrela_do_mar_brasiliensis.glb",
+    "sourceBytes": 25728,
+    "bytes": 25728,
+    "triangles": 338,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-snake",
+    "file": "jiboia_amarela.glb",
+    "sourceBytes": 54032,
+    "bytes": 54032,
+    "triangles": 778,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-lizard",
+    "file": "iguaninha_azul.glb",
+    "sourceBytes": 50036,
+    "bytes": 50036,
+    "triangles": 654,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-macaw",
+    "file": "arara_azul_de_lear.glb",
+    "sourceBytes": 29268,
+    "bytes": 29268,
+    "triangles": 372,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-harpy-eagle",
+    "file": "gaviao_real.glb",
+    "sourceBytes": 35240,
+    "bytes": 35240,
+    "triangles": 498,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-duck",
+    "file": "pato_mergulhao.glb",
+    "sourceBytes": 35580,
+    "bytes": 35580,
+    "triangles": 504,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-hummingbird",
+    "file": "beija_flor_de_gravata_vermelha.glb",
+    "sourceBytes": 34908,
+    "bytes": 34908,
+    "triangles": 450,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-butterfly",
+    "file": "borboleta_azul.glb",
+    "sourceBytes": 24388,
+    "bytes": 24004,
+    "triangles": 380,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-dragonfly",
+    "file": "libelula_rosea.glb",
+    "sourceBytes": 18992,
+    "bytes": 18992,
+    "triangles": 272,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  },
+  {
+    "id": "lib4-ant",
+    "file": "formiga_lucida.glb",
+    "sourceBytes": 23056,
+    "bytes": 23056,
+    "triangles": 350,
+    "animations": 0,
+    "licenseFileSha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "license": "CC0-1.0"
+  }
+]

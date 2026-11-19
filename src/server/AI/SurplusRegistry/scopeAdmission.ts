@@ -62,7 +62,10 @@ export function createSurplusScopeAsk(
       { promptPreview: SURPLUS_SCOPE_PURPOSE });
       return { text: result.text };
     } catch (error) {
-      try { onFailure?.(error); } catch { /* observation cannot alter the original failure */ }
+      // A call cancelled because the parallel classifier answered first (failedbr #2470) is not a Surplus failure:
+      // reporting it would drop Surplus from the build and count a death against its admit circuit.
+      const lostRace = failedAt?.stage === 'hedge' || readScopeFailure(signal?.reason)?.stage === 'hedge';
+      if (!lostRace) { try { onFailure?.(error); } catch { /* observation cannot alter the original failure */ } }
       throw error;
     }
   };

@@ -102616,3 +102616,214 @@ user, 12.7 working. Tally: ✅ 1 (REPAIR_CLAIM_WITHHELD) · 🔀 0 · ⏭️ 0 �
 **Fixed:** the kit's Game.ts exposes `window.__nbKit` (status, score, endRound — endRound only does what losing does; removed on dispose); the playtest counts every Web Audio source and `<audio>` play (`soundCounter` init script), reads the kit score before and after the controls, ends the round through the hook and finds and PRESSES the play-again control by its words (`RESTART_LABEL`, English and Hindi), then reads the status. New defects `GAME_DEFECT_RESTART_BROKEN` (no control, or pressing it did not restart) and `GAME_DEFECT_SILENT` (the game's code plays sound — `replayFromCode().sound` — and a whole playthrough played none), each with a repair hint; evidence appended to the verdict head, never points. Soft defects (not in HARD_DEFECTS): a new probe starts as evidence.
 
 **Tests:** `thePlaytestChecksPlayAgainScoreAndSound` (7, four in a real Chromium against kit-hook games: works / no button / dead button / no hook); the 10 existing playtest/repair suites stay green (143). Reversion: the probe that never presses fails. **Still open:** auto-repair stays suspended by design (`docs/security/game-auto-repair-suspension.md`: needs byte-preserving rollback) — the gate and these defects are evidence for the user's one-tap fix; "a win/level can be completed" is not provable generically and is not claimed.
+
+## 2026-11-19 — Game-gap audit P0 #7: the shooter's HUD — crosshair, ammo, hit marker, damage numbers, enemy and boss health bars
+
+**Root cause:** the kit had the logic (Weapon ammo/reload, Health, BossPhases) and no UI for any of it — a gun game showed no crosshair, no ammo count, no sign a shot landed, and enemies had no health bar.
+
+**Fixed:** Weapon events carry `ammo`, `magazine` and `ownerId` (new `WEAPON_RELOADING`); `PROJECTILE_HIT` carries `ownerId`; kit file `three/healthbar.ts` (`attachHealthBar(target, read)`, billboarded, hidden at full health and at zero, coloured by health, updated by the shell every frame); `Game.worldToScreen()`, `Game.setBossBar(name, read)` / `bossBar`, `options.crosshair`; the Hud's `ShooterOverlay` — crosshair shown by itself on the player's first shot, hit and kill markers, ammo with reload state, damage numbers that rise from where the enemy was hit, a boss bar — all driven by events and ignoring an enemy's weapon. Also: the playtest hook `window.__nbKit` is guarded for non-browser runs.
+
+**Tests:** `theShooterHudShowsTheFight` (5; the overlay is bundled with esbuild and driven by the kit's events in a real Chromium). Reversion: counting enemy shots fails 1. **Still open:** a minimap and an objective tracker (P1).
+
+## 2026-11-19 — Game-gap audit P0 #6: a race has rivals, a 3-2-1 countdown, a place, a clock and (when asked) a finish
+
+**Root cause:** the kit's racing stopped at a road and a car: no countdown, no other cars to race, no position, no timer, no finish or results — every one hand-written per game, or missing.
+
+**Fixed:** `TrackStream.poseAt(distance)` — the road's own centre line (the same `piecePoints` geometry) in current world coordinates; kit file `three/race.ts` — `createRace(scene, { stream, opponents, finishDistance, countdown, skill })`: a countdown that holds everyone at the line (`canDrive()`), rivals driving the road in their own lanes with a rubber band, live position and time (`RACE_STATUS`), a finite race ending with ordered results (`RACE_FINISHED`, `lastRaceResults`, the round becomes won / game over), Play again resets it to the grid; the Hud's `RaceOverlay` (big 3-2-1-GO!, P2/4 and the clock) and results on the end screen; `RacingRoadGame` races 3 rivals by default, gated by the countdown, and stays endless unless `finishKm` is given (owner 2026-11-18). Rivals are ghosts (no collision) — said in the module.
+
+**Tests:** `aRaceHasRivalsACountdownAndAFinish` (9). Reversion: driving through the countdown fails 1. **Still open:** rival collisions, garage/car selection, nitro (P1 economy/genre packs).
+
+## 2026-11-19 — Game-gap audit P1 #17: a gamepad plays the game (the runtime claimed it and had no code)
+
+**Root cause:** `core/input.ts`'s header said "keyboard, mouse, gamepad and touch"; there was no Gamepad API code anywhere — an honesty defect as much as a missing feature.
+
+**Fixed:** `Input.pollGamepads()` (the API is polled): first connected standard pad; left stick → analogue move with a 0.15 deadzone, letting go clears only what the pad wrote (the touch joystick is never cleared by an idle pad); right stick → look; buttons are `Pad:N` codes in `DEFAULT_ACTIONS` with real press/release edges (A jump, X/RT attack — the attack group answers too —, B use, Y reload, LT aim, LB drift, RB/L3 sprint, Start pause, d-pad directions); unplugging releases everything; no API = no-op. The shell polls first in every fixed step.
+
+**Tests:** `aGamepadPlaysTheGame` (6). Reversion: ignoring buttons fails 2.
+
+## 2026-11-19 — Game-gap audit P1 #12: enemies go AROUND walls (A* pathfinding)
+
+**Root cause:** `stepEnemyAI` steered straight at the player; sight was the caller's `canSeePlayer` boolean, and with no notion of walls an enemy either forgot a player who hid or pressed against the first wall in the way.
+
+**Fixed:** kit file `systems/nav.ts` — `createNavGrid` (blocked test, `inflate` for body radius, refuses absurd sizes), `blockedFromBoxes`, `lineClear` (sampled a hair to either side, so a line grazing the corner where two blocked cells meet is not clear — found by the test), `findPath` (A*, 8 directions, no corner cutting, bounded, target-in-wall reached from beside it, string-pulled). `EnemyPerception.nav`: sight needs a clear line, no attack through a wall, a chasing enemy hunts a hidden player along a re-planned path (twice a second or when the player moves two cells), waits instead of walking into a wall when there is no way. Without `nav` the old behaviour is unchanged.
+
+**Tests:** `enemiesGoAroundWalls` (6). Reversion: no path following fails 1.
+
+## 2026-11-19 — Game-gap audit P1 #13: levels, checkpoints, difficulty and first-time hints
+
+**Root cause:** no stage manager, no respawn-at-checkpoint, no Easy/Normal/Hard, no tutorial; `LEVEL_STARTED`, `LEVEL_COMPLETED` and `CHECKPOINT_REACHED` were declared and never emitted by anything.
+
+**Fixed:** kit file `core/levels.ts` — `levels.define/start/complete/next/isUnlocked/stars/checkpoint/respawnPoint/reset`, progress saved per game (unlocks, best stars, the checkpoint), `complete` wins the round; `showHint(id, text)` once per game, ever; `settings.difficulty` + `difficultyScale()`; the Hud's level list on the start screen (locked shut, stars), Level complete with stars and Next level, Difficulty in Settings, the hint bar; Game shows the controls hint on the very first start. Prompt tells the builder to use it.
+
+**Tests:** `theGameHasLevelsCheckpointsAndHints` (7). Reversion: no unlock on complete fails 2.
+
+## 2026-11-19 — Game gap P1 #16: minimap + objective tracker (branch `claude/game-minimap-objectives`)
+- Gap: 3D games had no minimap and no tracker of what the player must do (`QUEST_*` events were declared, never emitted).
+- Kit: `three/markers.ts` (`addMapMarker(obj, kind)`, `mapMarkers()`), `core/quests.ts` (`objectives.set/progress/complete`,
+  emits QUEST_STARTED / QUEST_COMPLETED / OBJECTIVES_CHANGED, records `state.questsCompleted`), `Game.mapView()` + `minimap`
+  option, Hud `Minimap` (turns with the camera, far goals pinned to the edge, auto-shows once a marker exists) and `ObjectiveList`.
+- Builder prompt line (MAP AND GOALS); AppKnowledgeBase `game_menus_settings` updated.
+- Locked by `tests/theMinimapAndObjectivesShowTheWay.test.ts` (reversion: flipped right-axis sign and dropped quest record → 2 fail).
+
+## 2026-11-19 — Game gap P1: dialogue with choices + inventory (branch `claude/game-dialogue-inventory`)
+- Gap: RPGs had no dialogue box/choices; `state.inventory` existed but nothing could fill, count, use or show it.
+- Kit: `core/inventory.ts` (stacks stored as ids IN `state.inventory`, so save/load/restart need nothing new; `define/add/remove
+  (all-or-nothing)/has/count/onUse/use/list`, INVENTORY_CHANGED + ITEM_USED), `core/dialogue.ts` (lines or a node graph, choices
+  that can require an item, promise resolves with the last choice; DIALOGUE_STARTED/_LINE/_ENDED). Game.ts freezes the game's
+  update while talking AND for the step the talk ends on (the closing press is not a jump). Hud: DialogueBox (1–9 keys,
+  Enter/Space/E), bag button + InventoryPanel (I key, pauses), EN/HI strings.
+- Found while testing: a locked choice named the missing item by its id (looked up only among owned items) → `inventory.nameOf`.
+- Locked by `tests/aGameCanTalkAndCarryThings.test.ts` (reversion: dropping the freeze / the all-or-nothing check → 2 fail).
+
+## 2026-11-19 — Game gap P1: coins, shop, upgrades, garage (branch `claude/game-economy`)
+- Gap: no currency, shop, upgrades, or car/character selection — nothing to come back for.
+- Kit: `core/economy.ts` (`setup({ id, items, startCoins })`, `earn`, `spend` all-or-nothing, `buy` → bought/owned/poor/max/unknown,
+  `equip`/`equipped(slot)`, `priceOf` (upgrades ×priceStep, default 1.5, to `levels`), `stat(id, base, perLevel)`, consumables go
+  in the bag; saved per game id on the device, sanitised on load so a corrupt/hand-edited save cannot crash or mint coins; a free
+  slot item is owned and in use from the start). Hud: coin pill, ShopPanel from the start and game-over screens, EN/HI strings.
+- Locked by `tests/aGameHasCoinsAShopAndAGarage.test.ts` (reversion: dropping the spend check / the owned-equip check → 4 fail).
+
+## 2026-11-19 — Game gap P1: music that follows the game (branch `claude/game-music`)
+- Gap: the music bus and Music volume slider existed; nothing ever played music.
+- Kit: `fx/music.ts` renders five moods from code (calm, action, tense loops; victory/defeat stings), seamless and deterministic;
+  `AudioManager.playMusic` (crossfade, same mood keeps going), `stopMusic`, `duckMusic`; a file loaded as `music:<mood>` replaces
+  one. `bindGameFeedback` cues it from events (menu→calm, start→action, pause/dialogue→duck, boss→tense, win/loss→sting);
+  `Game` option `music` (false or a cue table).
+- Found while wiring: `toMenu()` never announced GAME_MENU (resetRun() sets 'menu' silently, so setStatus('menu') said nothing —
+  the race overlay never cleared either); the first start screen had the same gap. Both now emit it.
+- Locked by `tests/theGameHasMusicThatFollowsIt.test.ts` (reversion: dropping the cue binding / the toMenu announcement → 3 fail).
+
+## 2026-11-19 — Game gap P1: adaptive quality + FPS counter (branch `claude/game-adaptive-quality`)
+- Gap: no frame-rate watch and no automatic quality — a game that ran at 60 on a laptop ran at 18 on a budget phone and stayed.
+- Kit: `core/perf.ts` (`createPerfGovernor`: smoothed fps, steps down after 3 s below 40, up after 12 s above 56, max 2 steps,
+  ignores hitches > 0.25 s and a 2 s warm-up; `steppedQuality`). Game feeds it while PLAYING only and applies the result
+  (pixel ratio; shadows off at low), never above the player's Graphics choice; `game.fps` / `game.quality`; PERF_CHANGED;
+  playtest hook gains `fps()` / `quality()`. Settings: Auto quality (on), FPS counter (off); Hud FpsCounter.
+- Found while wiring: the Graphics setting's documented "low = no shadows" was never applied (only the pixel ratio changed).
+- Locked by `tests/theGameStaysSmoothOnEveryPhone.test.ts` (reversion: dropping the shadow switch / the hitch filter → 3 fail).
+
+## 2026-11-19 — Game gap P1: the 2D game kit (branch `claude/game-2d-kit`)
+- Gap: only a top-down big map existed for 2D; every platformer/side-scroller/runner hand-rolled its jump, collision and camera.
+- New recipe `generate_game_2d` (`src/server/lib/Game2DGenerator.ts` → `src/game/2d/`): sprite.ts (SpriteSheet, Animator, drawn
+  placeholder), camera.ts (dead zone, frame-rate-independent easing, bounds, look-ahead, shake), tilemap.ts (text rows + legend,
+  markers, visible-only drawing), physics.ts (per-axis sub-stepped AABB — no tunnelling; one-way platforms; PlatformerController
+  with coyote time, jump buffer, variable jump, drop-through), parallax.ts, particles.ts (capped pool). Wired into GAME_RECIPES,
+  the catalog (tool + both lists), the dispatcher, the architect prompt (step 7c), the kit history script; AppKnowledgeBase entry.
+- Found while testing: a drop-through left the jump press unconsumed, so the buffer + coyote time jumped the player straight back
+  up onto the platform the next step.
+- Locked by `tests/a2DGameFeelsRight.test.ts` (reversion: no sub-stepping / unconsumed drop press → 2 fail).
+
+## 2026-11-19 — India games pack (a): Ludo + Snakes & Ladders (branch `claude/game-board-ludo-snakes`)
+- Gap: no rules engine for any India board game; a model-written Ludo gets safe squares, exact home and sixes wrong.
+- New recipe `generate_board_games` (`src/server/lib/BoardGamesGenerator.ts` → `src/game/board/`): dice.ts (seeded mulberry32,
+  fair die, shuffle), ludo.ts (2–4 players, leave on six, six again / third six forfeits, safe start+star squares, capture → yard
+  + extra roll, exact home + extra roll, pass, finishing order, chooseMove AI, 15×15 board geometry), snakes.ts (classic board,
+  exact finish / bounce back, six again, validated custom boards, zig-zag squareCell). Wired like the 2D kit; AKB entry.
+- Next in the pack (separate PRs): chess; cards (no money — Teen Patti ranking, rummy melds); carrom physics; cricket.
+- Locked by `tests/indiaBoardGamesFollowTheRules.test.ts` (reversion: safe squares ignored / overshooting home → 2 fail).
+
+## 2026-11-19 — India games pack (b): chess (branch `claude/game-board-chess`)
+- `src/game/board/chess.ts` added to `generate_board_games`: FEN in/out, legal moves (castling never out of/through/into check,
+  en passant, promotion), SAN with disambiguation and +/#, status (checkmate, stalemate, fifty-move, threefold repetition,
+  insufficient material), movesFrom for tap highlighting, an alpha-beta computer player (depth 1/2/3).
+- The move generator matches the published perft counts on five standard positions (start, Kiwipete, positions 3–5).
+- Locked by `tests/chessFollowsEveryRule.test.ts` (reversion: castling through check / en passant leaving the pawn → 4 fail,
+  including two perft counts).
+
+## 2026-11-19 — India games pack (c): card games, for fun only (branch `claude/game-board-cards`)
+- `src/game/board/cards.ts` added to `generate_board_games`: deck/deal/shuffle, Teen Patti hand ranking and comparison (A-K-Q >
+  A-2-3 > K-Q-J; K-A-2 not a sequence), Indian rummy melds (pure/impure sequences, sets, wild + printed jokers; a jokers-only group
+  is not a meld), declaration rules (all 13 grouped, two sequences, one pure), points (faces 10, jokers 0, no pure → all count,
+  cap 80), bestGrouping (exhaustive, bounded).
+- Points / pretend chips only: the recipe, catalog and prompt forbid real money, deposits and cash prizes (India's 2025 ban).
+- Locked by `tests/cardGamesRankAndDeclareCorrectly.test.ts` (reversion: A-2-3 ranked low / no pure-sequence rule → 2 fail).
+
+## 2026-11-19 — India games pack (d): carrom (branch `claude/game-board-carrom`)
+- `src/game/board/carrom.ts` added to `generate_board_games`: real sizes in mm (740 board, coin r 15.9, striker r 20.6, pocket
+  r 22.25), elastic disc collisions by mass with restitution, constant friction, cushion bounces, corner pockets, a 240 Hz step
+  with 60 fps animation frames; rules — own coin continues, striker foul returns a coin, the queen pending → covered or returned,
+  no last coin before the queen, board won with points (opponent coins left + 3 for the queen).
+- Note from the tests: the striker is ~3× a coin's mass, so a hard straight shot follows the coin into the pocket (a foul) —
+  real-board behaviour, kept on purpose.
+- Locked by `tests/carromPlaysLikeTheRealBoard.test.ts` (reversion: no collision impulse / uncovered queen kept → 4 fail).
+
+## 2026-11-19 — India games pack (e): cricket (branch `claude/game-board-cricket`)
+- `src/game/board/cricket.ts` added to `generate_board_games`: legal balls/overs, wides and no-balls (a run, re-bowled, free hit —
+  only run out on a protected ball), strike rotation on odd runs and at over end, the new batter at the dismissed end, innings
+  end on overs/all out/target, chase and result text ("won by N wickets (M balls left)" / "by N runs" / tie), run rates, and
+  timing-based batting (shotFromTiming: perfect → boundary, going big → six but riskier, miss → bowled only on the stumps).
+- This completes the India games pack: Ludo, Snakes & Ladders, chess, cards (for fun), carrom, cricket.
+- Locked by `tests/cricketScoresLikeAScorer.test.ts` (reversion: free hit ignored / no change of ends → 2 fail).
+
+## 2026-11-19 — Game gap P2: power-ups and loot drops (branch `claude/game-powerups-loot`)
+- Gap: no timed boosts (hand-rolled setTimeouts kept running in the pause menu and survived a restart) and no drop tables.
+- Kit: `core/powerups.ts` (define/give/active/level/remaining/value/list/clear; refresh/extend/stack; onStart/onEnd; events),
+  ticked by Game.fixedUpdate inside the gameplay block (frozen by hit-stop, dialogue and pause), cleared on GAME_STARTED; Hud
+  PowerUpBar (icon, time ring, level). `core/loot.ts` (createLootTable: weights, rarities, nothing entries, amounts, pity,
+  chances(), LOOT_DROPPED).
+- Locked by `tests/powerUpsAndLootWork.test.ts` (reversion: no clear on a new round / no pity → each fails).
+
+## 2026-11-19 — Game gap P2: share the score + on-device leaderboard (branch `claude/game-share-leaderboard`)
+- Kit: `core/leaderboard.ts` (top ten per game id on the device, sanitised on read; record → place; isLatest), recorded by
+  Game on GAME_OVER / GAME_WON under `leaderboardId` (the gameId option). Hud: DeviceLeaderboard ("Best on this device", top
+  five, this round highlighted) and ShareButton (`shareScore`: Web Share → clipboard → hidden), EN/HI strings.
+- Honest by design: labelled "on this device"; the prompt forbids claiming a worldwide board without an online service.
+- Locked by `tests/theScoreCanBeSharedAndClimbed.test.ts` (reversion: the shell not recording rounds → fails).
+
+## 2026-11-19 — Game gap P2: accessibility (branch `claude/game-accessibility`)
+- Settings gain Reduce motion (no camera shake; on by itself on a first visit when the device prefers reduced motion), Large
+  text (menus and top bar at zoom 1.25), Colour-blind colours (Okabe–Ito palette for the health bar and minimap markers) and
+  Captions (CaptionBar: words for important sounds — hit, enemy down, pickup, reload, empty, boss, level up…, EN/HI).
+- Locked by `tests/everyPlayerCanPlay.test.ts` (reversion: the shake ignoring Reduce motion → fails).
+
+## 2026-11-19 — Game gap P2: Continue, pointer lock, credits (branch `claude/game-continue-pointerlock`)
+- `options.save`: Game loads the kit state on start, saves on pause / game over / win / level complete / page hide; the start
+  screen offers Continue + New game (state `hasSave` / `clearSave`; `Game.newGame`). Opt-in on purpose: only the kit's state
+  is saved, not a world the game builds itself.
+- Pointer lock (desktop, default on, `pointerLock: false` to opt out): captured on Play and on a canvas click during play,
+  released by pause / game over / win / menu; the browser dropping the lock mid-play (its Esc) pauses the game.
+- `options.credits` → a Credits button and panel on the start screen.
+- Locked by `tests/continuePointerLockAndCredits.test.ts` (reversion: no autosave / no pause on lock loss → 2 fail).
+
+## 2026-11-19 — Game gap P2: grenades and aim assist (branch `claude/game-grenade-aimassist`)
+- `systems/grenade.ts`: throwVelocity, simulateThrow (gravity, ground height, bounce, friction, rolling stop, fuse — the same
+  path for the aim arc and the throw), blastDamage (linear falloff to the radius, minDamage, cover blocks, impulse away).
+- `systems/aimassist.ts`: a partial pull (strength) toward the target nearest the crosshair inside a cone and in range, with an
+  optional line-of-sight test; never a snap; touch/gamepad only (prompt line).
+- Locked by `tests/grenadesAndAimAssistWork.test.ts` (reversion: blast through cover / full snap → 2 fail).
+
+## 2026-11-19 — Game gap P2: local 2-player (branch `claude/game-local-2p`)
+- `core/input.ts`: PLAYER1_ACTIONS (the defaults without the arrows) and PLAYER2_ACTIONS (arrows + nearby keys), and
+  `new Input(target, map, { padIndex })` so each player reads only their own gamepad.
+- `three/splitscreen.ts`: splitRects (side by side when wide, stacked when tall) and renderSplit (viewport + scissor per camera,
+  aspect set per view).
+- Game `players: 2` → two inputs (polled and ended every step), `ctx.players`, `ctx.splitScreen(camera)`; render() draws the
+  split when a second camera is set. The game builds player 2's body; touch drives player 1 only. Same-device play only —
+  online multiplayer needs a server (not built).
+- Locked by `tests/twoPlayersShareOneDevice.test.ts` (reversion: shared arrows / no split render → 2 fail).
+
+## 2026-11-19 — Game gap P2: crafting (branch `claude/game-crafting`)
+- `core/crafting.ts` over the bag: define / missing / canCraft / craft (every ingredient or none; a result with no room in the
+  bag gives the ingredients back) / list; ITEM_CRAFTED. The bag screen gains a "Make" list: each recipe, what it needs (have/need)
+  and a Craft button enabled only when it can be made.
+- Locked by `tests/craftingTakesAllOrNothing.test.ts` (reversion: partial take / no give-back → 2 fail).
+## 2026-11-19 — failedbr #2452 (6aed1d6e) autopsy: four silent minutes of `bash` reads
+
+User-stopped at 248 s with nothing written. Q-2940: the exploration guard ignored `bash` reads → one conservative
+`shellInspection.ts` definition; the guard counts a read-only `bash` as a read. Q-2941: the gate called a failed
+read a "build-breaking blocker" → a read cannot break the build. Q-2942 (contract unknown for an unknown title) and
+Q-2943 (Play Store research time) OPEN; Q-2944 → Q-2889.
+
+## 2026-11-19 — failedbr #2437 (fe73bca3) autopsy: a READY app ended as "did not succeed" at the wallet stop
+
+The real defect (a CSS `//` comment breaking the production build) was fixed at 341 s and the app was 100/100 READY at
+525 s; the builder then started optional palette work and the wallet stop fired at 537 s. Q-2945 (fixed in #4346): the
+palette rule judged a canvas renderer's artwork colours — that false finding started the polish. Q-2946 🟡 for the
+admin (billing): finish instead of starting extras when the app is ready and the bill nears the balance — recommended.
+Q-2947–Q-2949 OPEN (edit-miss watch, browser-tool outages without detail, Surplus availability).
+- **Q-2946 decided by the admin (option a) and built in #4346:** a READY fresh build on a nearly-spent wallet finishes (no
+  more tools; the summary is the next turn), and every build — edits included — is told once to skip optional polish when
+  the wallet is ≥ 80% spent. No price or charge changes; the wallet stop remains the net.
+- **Q-2950 (admin 2026-11-19): an edit is priced by its project's history before it starts.** The admission gate's estimate
+  is now the larger of the prompt estimate and the median real cost of the workspace's last 5 builds (same billedAmountInr),
+  so a short "fix this" prompt on a big project no longer slips under a low balance and stops mid-build.

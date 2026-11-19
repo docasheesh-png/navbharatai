@@ -80,3 +80,31 @@ export function estimateBuildCost(
     inr: billedAmountInr(usage, power, usdInrRate),
   };
 }
+
+/**
+ * 🔴 AN EDIT OF A BIG PROJECT IS NOT PRICED BY ITS PROMPT'S WORDS (failedbr #2437, fe73bca3; admin 2026-11-19: "edit/update se
+ * pahle estimate kharcha napa jaye; user ke wallet me paise kam hon to build shuru hi na ho"). "Fix this error and continue
+ * building the app: network error" names no screen and no feature, so `estimateBuildCost` gave it the minimum — while an
+ * edit of a 37-file app reads the whole project into every turn and cost many times that, until the wallet stopped it
+ * mid-build. The evidence that exists is this workspace's own recent builds: their real tokens, priced with the SAME
+ * `billedAmountInr` the prompt estimate uses (no new rate, no new markup). The median of the last few — one huge build is
+ * not the rule. `null` when there is no history. PURE.
+ */
+export function historyEstimateInr(
+  entries: ReadonlyArray<{ tokenUsage?: { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number } }> | null | undefined,
+  power: BillingPowerLevel | boolean,
+  usdInrRate: number,
+  max = 5,
+): number | null {
+  const priced = (entries ?? [])
+    .map((e) => e?.tokenUsage)
+    .filter((u): u is { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number } => !!u && (u.inputTokens + u.outputTokens) > 0)
+    .slice(0, max)
+    // Cache-served input is priced at its own (cheaper) rate, exactly as the real bill prices it.
+    .map((u) => billedAmountInr({ inputTokens: u.inputTokens, outputTokens: u.outputTokens, ...(u.cacheReadInputTokens ? { cacheReadInputTokens: u.cacheReadInputTokens } : {}) }, power, usdInrRate))
+    .filter((v) => Number.isFinite(v) && v > 0)
+    .sort((a, b) => a - b);
+  if (priced.length === 0) return null;
+  const mid = Math.floor(priced.length / 2);
+  return priced.length % 2 ? priced[mid] : (priced[mid - 1] + priced[mid]) / 2;
+}

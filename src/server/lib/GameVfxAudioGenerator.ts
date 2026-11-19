@@ -414,6 +414,7 @@ const AUDIO = `/**
  * game with sound and one without.
  */
 import { synthesize, SYNTH_NAMES } from './synth';
+import { renderMusic, musicLoops } from './music';
 
 export type SoundCategory = 'music' | 'sfx' | 'ui';
 
@@ -438,6 +439,10 @@ export class AudioManager {
   private playing = new Set<AudioBufferSourceNode>();
   private unlocked = false;
   private seed = 987;
+  /** The music: one track at a time, crossfaded, through a duck gain so pauses and dialogue can lower it. */
+  private music: { name: string; src: AudioBufferSourceNode; gain: GainNode } | null = null;
+  private musicDuck: GainNode | null = null;
+  private ducked = false;
   /** Hard voice cap: fifty simultaneous explosions clip the master and turn the mix to mud. */
   private readonly maxVoices: number;
 
@@ -476,6 +481,76 @@ export class AudioManager {
       g.connect(this.master);
       this.buses[cat] = g;
     }
+    this.musicDuck = this.ctx.createGain();
+    this.musicDuck.gain.value = 1;
+    this.musicDuck.connect(this.buses.music!);
+  }
+
+  /** The buffer for a mood: a file loaded as 'music:<name>', else the track music.ts writes. */
+  private musicBuffer(name: string): AudioBuffer | undefined {
+    if (!this.ctx) return undefined;
+    const file = this.buffers.get('music:' + name);
+    if (file) return file;
+    const key = 'music:' + name;
+    const ready = this.synthesized.get(key);
+    if (ready) return ready;
+    const samples = renderMusic(name, this.ctx.sampleRate);
+    if (!samples) return undefined;
+    const buffer = this.ctx.createBuffer(1, samples.length, this.ctx.sampleRate);
+    buffer.getChannelData(0).set(samples);
+    this.synthesized.set(key, buffer);
+    return buffer;
+  }
+
+  /** What is playing now (null for silence). */
+  get musicName(): string | null { return this.music?.name ?? null; }
+  get musicDucked(): boolean { return this.ducked; }
+
+  /**
+   * Play a music mood (calm, action, tense, victory, defeat, or any name loaded as 'music:<name>'), crossfading from
+   * whatever was playing. The same mood already playing carries on — a restart does not jolt the music.
+   */
+  playMusic(name: string, options: { fade?: number; volume?: number } = {}): void {
+    this.init();
+    if (!this.ctx || !this.musicDuck) return;
+    if (this.music?.name === name) return;
+    const buffer = this.musicBuffer(name);
+    if (!buffer) return;
+    const fade = Math.max(0.01, options.fade ?? 1.2);
+    this.stopMusic(fade);
+    const now = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = this.buffers.has('music:' + name) ? true : musicLoops(name);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(options.volume ?? 1, now + fade);
+    src.connect(gain);
+    gain.connect(this.musicDuck);
+    const track = { name, src, gain };
+    src.onended = () => { if (this.music === track) this.music = null; };
+    src.start();
+    this.music = track;
+  }
+
+  /** Fade the music out. */
+  stopMusic(fade = 0.8): void {
+    const m = this.music;
+    this.music = null;
+    if (!m || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    m.gain.gain.cancelScheduledValues(now);
+    m.gain.gain.setValueAtTime(m.gain.gain.value, now);
+    m.gain.gain.linearRampToValueAtTime(0, now + fade);
+    try { m.src.stop(now + fade + 0.05); } catch { /* already ended */ }
+  }
+
+  /** Lower the music (a pause, a conversation) or bring it back. */
+  duckMusic(on: boolean, level = 0.3): void {
+    this.init();
+    this.ducked = on;
+    if (!this.ctx || !this.musicDuck) return;
+    this.musicDuck.gain.setTargetAtTime(on ? level : 1, this.ctx.currentTime, 0.12);
   }
 
   /**
@@ -591,10 +666,131 @@ export class AudioManager {
   stopAll(): void {
     for (const src of [...this.playing]) { try { src.stop(); } catch { /* already ended */ } }
     this.playing.clear();
+    if (this.music) { try { this.music.src.stop(); } catch { /* already ended */ } this.music = null; }
   }
 }
 
 export const audio = new AudioManager();
+`;
+
+const MUSIC_FILE = `/**
+ * MUSIC WRITTEN BY CODE (admin 2026-11-19 game-gap audit: "background music nahi" — the music bus and the music volume
+ * slider existed and nothing ever played on them). Five moods, rendered once into a buffer on first use: no file, no
+ * download, so a game is never musically silent. A file loaded as 'music:<mood>' replaces a mood.
+ *
+ *   calm    — the start screen          action  — playing           tense — a boss is up
+ *   victory — a short sting on a win    defeat  — a short sting on a loss
+ * The loops are seamless: a note that rings past the end is folded back over the start, so there is no click.
+ */
+export type MusicMood = 'calm' | 'action' | 'tense' | 'victory' | 'defeat';
+export const MUSIC_MOODS: readonly MusicMood[] = ['calm', 'action', 'tense', 'victory', 'defeat'];
+
+interface Style {
+  bpm: number; bars: number; root: number; minor: boolean;
+  /** One scale degree per bar: the chord. */
+  prog: number[];
+  drums: 'none' | 'light' | 'full';
+  /** Arpeggio notes per beat (0 = none). */
+  arp: number;
+  loop: boolean; level: number;
+}
+
+const STYLES: Record<MusicMood, Style> = {
+  calm:    { bpm: 84,  bars: 8, root: 57, minor: false, prog: [0, 5, 3, 4, 0, 5, 3, 4], drums: 'none',  arp: 2, loop: true,  level: 0.5 },
+  action:  { bpm: 128, bars: 8, root: 50, minor: true,  prog: [0, 5, 2, 6, 0, 5, 3, 4], drums: 'full',  arp: 2, loop: true,  level: 0.62 },
+  tense:   { bpm: 140, bars: 4, root: 52, minor: true,  prog: [0, 0, 1, 0],             drums: 'full',  arp: 4, loop: true,  level: 0.62 },
+  victory: { bpm: 132, bars: 2, root: 60, minor: false, prog: [0, 4],                   drums: 'light', arp: 4, loop: false, level: 0.7 },
+  defeat:  { bpm: 72,  bars: 2, root: 57, minor: true,  prog: [0, 5],                   drums: 'none',  arp: 0, loop: false, level: 0.55 },
+};
+
+const MAJOR = [0, 2, 4, 5, 7, 9, 11];
+const MINOR = [0, 2, 3, 5, 7, 8, 10];
+const hz = (midi: number): number => 440 * Math.pow(2, (midi - 69) / 12);
+const note = (st: Style, degree: number, octave = 0): number => {
+  const scale = st.minor ? MINOR : MAJOR;
+  const d = ((degree % 7) + 7) % 7;
+  return st.root + scale[d] + 12 * (octave + Math.floor(degree / 7));
+};
+
+type Wave = 'sine' | 'tri' | 'saw' | 'square';
+
+/** Render one musical moment into the track. */
+function tone(out: Float32Array, sr: number, wrap: boolean, at: number, dur: number, freq: number, wave: Wave, gain: number, attack: number, release: number, cutoff = 1): void {
+  const start = Math.floor(at * sr), len = Math.floor((dur + release) * sr), a = Math.max(1, attack * sr), sus = dur * sr, rel = Math.max(1, release * sr);
+  let phase = 0, lp = 0;
+  const step = freq / sr;
+  for (let i = 0; i < len; i++) {
+    phase += step; phase -= Math.floor(phase);
+    let v = wave === 'sine' ? Math.sin(phase * 2 * Math.PI)
+      : wave === 'tri' ? 1 - 4 * Math.abs(phase - 0.5)
+      : wave === 'saw' ? 2 * phase - 1
+      : phase < 0.5 ? 1 : -1;
+    lp += (v - lp) * cutoff; v = lp;
+    const env = i < a ? i / a : i < sus ? 1 : Math.max(0, 1 - (i - sus) / rel);
+    let k = start + i;
+    if (k >= out.length) { if (!wrap) break; k %= out.length; }
+    out[k] += v * env * env * gain;
+  }
+}
+
+function drum(out: Float32Array, sr: number, wrap: boolean, at: number, kind: 'kick' | 'snare' | 'hat', seedBox: { s: number }): void {
+  const rnd = (): number => { let x = seedBox.s; x ^= x << 13; x ^= x >>> 17; x ^= x << 5; seedBox.s = x; return ((x >>> 0) / 0xffffffff) * 2 - 1; };
+  const len = Math.floor((kind === 'kick' ? 0.32 : kind === 'snare' ? 0.18 : 0.05) * sr);
+  const start = Math.floor(at * sr);
+  let phase = 0, prev = 0;
+  for (let i = 0; i < len; i++) {
+    const t = i / sr, env = Math.pow(1 - i / len, kind === 'hat' ? 3 : 2);
+    let v: number;
+    if (kind === 'kick') { phase += (45 + 75 * Math.exp(-t * 30)) / sr; v = Math.sin(phase * 2 * Math.PI) * 0.9; }
+    else if (kind === 'snare') { phase += 185 / sr; v = rnd() * 0.5 + Math.sin(phase * 2 * Math.PI) * 0.3; }
+    else { const n = rnd(); v = (n - prev) * 0.25; prev = n; }
+    let k = start + i;
+    if (k >= out.length) { if (!wrap) break; k %= out.length; }
+    out[k] += v * env;
+  }
+}
+
+/** Render a mood. A loop is exactly \`bars\` long; a sting gets a short tail to ring out. Deterministic. */
+export function renderMusic(mood: string, sampleRate: number): Float32Array | null {
+  const st = STYLES[mood as MusicMood];
+  if (!st || !(sampleRate > 0)) return null;
+  const beat = 60 / st.bpm, bar = beat * 4, total = st.bars * bar;
+  const out = new Float32Array(Math.round((st.loop ? total : total + 1.2) * sampleRate));
+  const wrap = st.loop, seed = { s: 12345 };
+  st.prog.forEach((degree, b) => {
+    const t0 = b * bar;
+    const chord = [note(st, degree), note(st, degree + 2), note(st, degree + 4)];
+    // Pad: a soft chord across the bar.
+    for (const m of chord) tone(out, sampleRate, wrap, t0, bar * 0.92, hz(m), 'saw', 0.05, 0.25, 0.4, 0.06);
+    // Bass: the root on every beat (a sting holds it).
+    if (st.loop) for (let q = 0; q < 4; q++) tone(out, sampleRate, wrap, t0 + q * beat, beat * 0.7, hz(chord[0] - 12), 'tri', 0.22, 0.01, 0.08);
+    else tone(out, sampleRate, wrap, t0, bar * 0.9, hz(chord[0] - 12), 'tri', 0.22, 0.01, 0.6);
+    // Arpeggio: up the chord, an octave higher.
+    if (st.arp > 0) {
+      const n = st.arp * 4, each = bar / n;
+      for (let i = 0; i < n; i++) tone(out, sampleRate, wrap, t0 + i * each, each * 0.6, hz(chord[i % 3] + 12), st.loop ? 'square' : 'tri', 0.06, 0.005, 0.12, 0.2);
+    }
+    if (st.drums !== 'none') {
+      for (let q = 0; q < 4; q++) {
+        const t = t0 + q * beat;
+        if (q % 2 === 0 || st.drums === 'full') drum(out, sampleRate, wrap, t, 'kick', seed);
+        if (q % 2 === 1 && st.drums === 'full') drum(out, sampleRate, wrap, t, 'snare', seed);
+        drum(out, sampleRate, wrap, t + beat / 2, 'hat', seed);
+      }
+    }
+  });
+  if (mood === 'defeat') {
+    // A falling line over the chords: the round is over.
+    [7, 5, 4, 2, 0].forEach((d, i) => tone(out, sampleRate, wrap, i * beat * 1.5, beat * 1.3, hz(note(st, d, 1)), 'tri', 0.12, 0.02, 0.3));
+  }
+  let peak = 0;
+  for (let i = 0; i < out.length; i++) peak = Math.max(peak, Math.abs(out[i]));
+  if (peak > 0) { const k = st.level / peak; for (let i = 0; i < out.length; i++) out[i] *= k; }
+  return out;
+}
+
+/** True when the mood loops (play it with loop on); stings play once. */
+export function musicLoops(mood: string): boolean { return STYLES[mood as MusicMood]?.loop ?? true; }
 `;
 
 const FEEDBACK = `import { events, type GameEvent } from '../core/events';
@@ -659,7 +855,27 @@ export const FEEDBACK: Partial<Record<GameEvent, FeedbackSpec>> = {
   DAILY_REWARD:   { sound: 'coin',     category: 'ui' },
 };
 
+/**
+ * THE MUSIC FOLLOWS THE GAME: the start screen is calm, play is action, a boss is tense, a win or a loss gets its
+ * sting; a pause or a conversation lowers it. A mood name plays it; 'duck' / 'unduck' lower and restore it.
+ */
+export type MusicCue = string | 'duck' | 'unduck' | null;
+export const MUSIC: Partial<Record<GameEvent, MusicCue>> = {
+  GAME_MENU: 'calm',
+  GAME_STARTED: 'action',
+  GAME_PAUSED: 'duck',
+  GAME_RESUMED: 'unduck',
+  BOSS_SPAWNED: 'tense',
+  BOSS_DEFEATED: 'action',
+  GAME_WON: 'victory',
+  GAME_OVER: 'defeat',
+  DIALOGUE_STARTED: 'duck',
+  DIALOGUE_ENDED: 'unduck',
+};
+
 export interface FeedbackContext {
+  /** false = no music; a table replaces (merges over) the default cues. */
+  music?: false | Partial<Record<GameEvent, MusicCue>>;
   particles?: ParticleSystem;
   feel?: GameFeel;
   /** Where the effect happens. Payloads that omit it get no particle rather than one at the origin. */
@@ -689,6 +905,18 @@ export function bindGameFeedback(ctx: FeedbackContext, table = FEEDBACK): () => 
       if (spec.haptic) buzz(spec.haptic);
     }));
   }
+  if (ctx.music !== false) {
+    const cues = { ...MUSIC, ...(ctx.music ?? {}) };
+    for (const [event, cue] of Object.entries(cues)) {
+      if (!cue) continue;
+      offs.push(events.on(event, () => {
+        if (cue === 'duck') audio.duckMusic(true);
+        else if (cue === 'unduck') audio.duckMusic(false);
+        else { audio.duckMusic(false); audio.playMusic(cue); }
+      }));
+    }
+    offs.push(() => audio.stopMusic(0.3));
+  }
   return () => { for (const off of offs) off(); };
 }
 `;
@@ -711,11 +939,12 @@ const FILES: Record<string, string> = {
   'src/game/fx/soundLibrary.ts': SOUND_LIBRARY_STUB,
   'src/game/fx/particles.ts': PARTICLES,
   'src/game/fx/synth.ts': SYNTH,
+  'src/game/fx/music.ts': MUSIC_FILE,
   'src/game/fx/audio.ts': AUDIO,
   'src/game/fx/feedback.ts': FEEDBACK,
 };
 
-export const GAME_FX_MODULES: readonly string[] = ['particles', 'synth', 'audio', 'feedback', 'soundLibrary'];
+export const GAME_FX_MODULES: readonly string[] = ['particles', 'synth', 'music', 'audio', 'feedback', 'soundLibrary'];
 
 /**
  * Generate the VFX/audio layer. `feedback` imports both siblings, so a subset that would not compile is
@@ -741,7 +970,7 @@ export function generateGameVfxAudio(include?: string[]): GameVfxAudioResult {
       files['src/game/fx/audio.ts'] = FILES['src/game/fx/audio.ts'];
     }
     // audio.ts imports its built-in voices; without synth.ts it would not compile.
-    if (files['src/game/fx/audio.ts']) files['src/game/fx/synth.ts'] = FILES['src/game/fx/synth.ts'];
+    if (files['src/game/fx/audio.ts']) { files['src/game/fx/synth.ts'] = FILES['src/game/fx/synth.ts']; files['src/game/fx/music.ts'] = FILES['src/game/fx/music.ts']; }
     // The shell imports the sound library next to audio; its stand-in travels with audio.ts.
     if (files['src/game/fx/audio.ts']) files['src/game/fx/soundLibrary.ts'] = FILES['src/game/fx/soundLibrary.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };

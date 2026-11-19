@@ -550,6 +550,12 @@ export interface DiagnosticsHistoryEntry {
    */
   dataLossCount?: number;
   /**
+   * The build's real model tokens, summed over every provider (failedbr #2437). The wallet admission prices this
+   * workspace's recent builds with the SAME `billedAmountInr` the prompt estimate uses, so an edit of a big existing
+   * project is no longer estimated from the words of its prompt alone. Absent on rows recorded before it existed.
+   */
+  tokenUsage?: { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number };
+  /**
    * The user's OWN build request. Carried so the report picker can label each past build with what
    * the user asked for — the only field on this entry a non-admin is ever shown, because it is the
    * one field the user wrote themselves (`summary`/`rootCause` are our analysis, and admin-only).
@@ -811,6 +817,15 @@ async function listDiagnosticsHistoryInner(
         // the guardian records every workspace wipe, but each report shows one TURN, so three wipes
         // across a session were invisible in all three of them.
         dataLossCount: Array.isArray(r.dataLossEvents) ? r.dataLossEvents.length : 0,
+        ...((): { tokenUsage?: { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number } } => {
+          try {
+            const t = r.providerTokens && typeof r.providerTokens === 'object' ? Object.values(r.providerTokens) : [];
+            const inputTokens = t.reduce((s, u) => s + (Number((u as { inputTokens?: unknown }).inputTokens) || 0), 0);
+            const outputTokens = t.reduce((s, u) => s + (Number((u as { outputTokens?: unknown }).outputTokens) || 0), 0);
+            const cacheReadInputTokens = t.reduce((s, u) => s + (Number((u as { cacheReadInputTokens?: unknown }).cacheReadInputTokens) || 0), 0);
+            return inputTokens + outputTokens > 0 ? { tokenUsage: { inputTokens, outputTokens, ...(cacheReadInputTokens > 0 ? { cacheReadInputTokens } : {}) } } : {};
+          } catch { return {}; }
+        })(),
         prompt: typeof r.prompt === 'string' ? r.prompt.slice(0, HISTORY_PROMPT_MAX) : undefined,
         // Read-only aggregation over a report this query already holds. Wrapped for the same reason
         // `modelPerformance` is: an observability field must never fail the listing that carries it.

@@ -125,21 +125,27 @@ export type ActionMap = Record<string, string[]>;
 
 /** Sensible defaults; pass your own to remap. Codes are KeyboardEvent.code (layout-independent). */
 export const DEFAULT_ACTIONS: ActionMap = {
-  up: ['KeyW', 'ArrowUp'],
-  down: ['KeyS', 'ArrowDown'],
-  left: ['KeyA', 'ArrowLeft'],
-  right: ['KeyD', 'ArrowRight'],
-  jump: ['Space'],
-  sprint: ['ShiftLeft', 'ShiftRight'],
-  interact: ['KeyE'],
+  // Pad:N is a STANDARD-mapping gamepad's button N (A=0 B=1 X=2 Y=3 LB=4 RB=5 LT=6 RT=7 Start=9 L3=10, d-pad 12-15).
+  up: ['KeyW', 'ArrowUp', 'Pad:12'],
+  down: ['KeyS', 'ArrowDown', 'Pad:13'],
+  left: ['KeyA', 'ArrowLeft', 'Pad:14'],
+  right: ['KeyD', 'ArrowRight', 'Pad:15'],
+  jump: ['Space', 'Pad:0'],
+  sprint: ['ShiftLeft', 'ShiftRight', 'Pad:5', 'Pad:10'],
+  interact: ['KeyE', 'Pad:1'],
   // A keyboard player can attack too (it was the mouse button only, so a laptop with no mouse could never fire).
-  attack: ['Mouse0', 'KeyF', 'KeyJ'],
-  aim: ['Mouse2'],
-  pause: ['Escape'],
+  attack: ['Mouse0', 'KeyF', 'KeyJ', 'Pad:2', 'Pad:7'],
+  aim: ['Mouse2', 'Pad:6'],
+  pause: ['Escape', 'Pad:9'],
   kick: ['KeyK'],
-  reload: ['KeyR'],
-  drift: ['Space'],
+  reload: ['KeyR', 'Pad:3'],
+  drift: ['Space', 'Pad:4'],
 };
+
+/** A stick inside this radius is at rest (worn sticks never read exactly 0). */
+export const PAD_DEADZONE = 0.15;
+/** Right-stick look speed, in mouse-pixels per fixed step at full tilt. */
+export const PAD_LOOK_SPEED = 14;
 
 /**
  * Names that MEAN the same action (admin 2026-11-19: "fire button press kiya … kabhi kabhi action bhi nahi hota").
@@ -152,6 +158,17 @@ export const ACTION_GROUPS: readonly (readonly string[])[] = [
   ['sprint', 'run', 'boost', 'nitro'],
   ['drift', 'handbrake'],
 ];
+/**
+ * TWO PLAYERS ON ONE DEVICE (admin 2026-11-19 game-gap audit: no local multiplayer). Player 1 keeps every default key
+ * except the arrows; player 2 gets the arrows and the keys by them. Each player reads only their own gamepad.
+ */
+export const PLAYER1_ACTIONS: ActionMap = Object.fromEntries(Object.entries(DEFAULT_ACTIONS).map(([a, codes]) => [a, codes.filter((c) => !c.startsWith('Arrow'))]));
+export const PLAYER2_ACTIONS: ActionMap = {
+  up: ['ArrowUp', 'Pad:12'], down: ['ArrowDown', 'Pad:13'], left: ['ArrowLeft', 'Pad:14'], right: ['ArrowRight', 'Pad:15'],
+  jump: ['ShiftRight', 'Numpad0', 'Pad:0'], attack: ['Slash', 'Enter', 'Numpad1', 'Pad:2', 'Pad:7'], interact: ['Period', 'Numpad2', 'Pad:1'],
+  sprint: ['ControlRight', 'Pad:5', 'Pad:10'], aim: ['Pad:6'], reload: ['Comma', 'Pad:3'], drift: ['Numpad3', 'Pad:4'], pause: ['Pad:9'],
+};
+
 const GROUP_OF: Record<string, readonly string[]> = Object.fromEntries(ACTION_GROUPS.flatMap((g) => g.map((name) => [name, g])));
 
 export class Input {
@@ -167,8 +184,17 @@ export class Input {
   /** Analogue move vector (-1..1). Touch joystick and gamepad write here; keys synthesise it. */
   moveX = 0;
   moveY = 0;
+  /** A gamepad is connected and was read last step. */
+  gamepad = false;
+  /** The left stick wrote moveX/moveY (so letting it go clears only what the pad wrote, never the touch joystick). */
+  private padMoving = false;
+  private padDown = new Set<string>();
 
-  constructor(target: HTMLElement | Window = window, actions: ActionMap = DEFAULT_ACTIONS) {
+  /** Read only this gamepad (0 = the first one plugged in, 1 = the second…); undefined = the first connected pad. */
+  readonly padIndex: number | undefined;
+
+  constructor(target: HTMLElement | Window = window, actions: ActionMap = DEFAULT_ACTIONS, options: { padIndex?: number } = {}) {
+    this.padIndex = Number.isInteger(options.padIndex) ? options.padIndex : undefined;
     this.actions = actions;
     const el = target as Window;
 
@@ -237,6 +263,34 @@ export class Input {
   }
 
   /**
+   * Read the GAMEPAD (the Gamepad API is polled, it sends no events): the first connected pad with the standard layout.
+   * Left stick moves, right stick looks, buttons press actions (Pad:N in the action map). Call once per step BEFORE the
+   * game reads input — the shell does. Nothing happens without a pad (or in a browser without the API).
+   */
+  pollGamepads(): void {
+    let pad: Gamepad | null = null;
+    try {
+      const pads = typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
+      const usable = Array.from(pads ?? []).filter((p): p is Gamepad => !!p && p.connected && (p.mapping === 'standard' || p.axes.length >= 2));
+      pad = this.padIndex === undefined ? (usable[0] ?? null) : (usable[this.padIndex] ?? null);
+    } catch { pad = null; }
+    this.gamepad = pad !== null;
+    const now = new Set<string>();
+    if (pad) {
+      pad.buttons.forEach((b, i) => { if (b && (b.pressed || b.value > 0.5)) now.add('Pad:' + i); });
+      const dz = (v: number | undefined): number => { const x = typeof v === 'number' && Number.isFinite(v) ? v : 0; return Math.abs(x) < PAD_DEADZONE ? 0 : (x - Math.sign(x) * PAD_DEADZONE) / (1 - PAD_DEADZONE); };
+      const lx = dz(pad.axes[0]), ly = dz(pad.axes[1]);
+      if (lx || ly) { this.setAnalogueMove(lx, ly); this.padMoving = true; }
+      else if (this.padMoving) { this.setAnalogueMove(0, 0); this.padMoving = false; }
+      const rx = dz(pad.axes[2]), ry = dz(pad.axes[3]);
+      this.lookX += rx * PAD_LOOK_SPEED; this.lookY += ry * PAD_LOOK_SPEED;
+    } else if (this.padMoving) { this.setAnalogueMove(0, 0); this.padMoving = false; }
+    for (const code of now) if (!this.padDown.has(code)) this.set(code, true);
+    for (const code of this.padDown) if (!now.has(code)) this.set(code, false);
+    this.padDown = now;
+  }
+
+  /**
    * Call AFTER update. Clears the one-frame edges and the accumulated look delta. keepPresses = true keeps the
    * press/release edges for the next frame: a hit-stop freeze passes it, so a press made during the freeze is
    * still seen when the game runs again instead of being wiped unseen.
@@ -276,7 +330,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED' | 'PERF_CHANGED' | 'POWERUP_STARTED' | 'POWERUP_ENDED' | 'POWERUPS_CHANGED' | 'LOOT_DROPPED' | 'LEADERBOARD_CHANGED' | 'ITEM_CRAFTED'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -543,6 +597,16 @@ export function load(): boolean {
   } catch { return false; }
 }
 
+/** A saved game exists on this device (the start screen offers Continue). */
+export function hasSave(): boolean {
+  try { return !!localStorage.getItem(SAVE_KEY); } catch { return false; }
+}
+
+/** Forget the saved game (New game). */
+export function clearSave(): void {
+  try { localStorage.removeItem(SAVE_KEY); } catch { /* nothing to forget */ }
+}
+
 export function resetRun(): void {
   const { highScore, unlocked, settings } = state;
   Object.assign(state, initialState(), { highScore, unlocked, settings });
@@ -571,6 +635,15 @@ const EN = {
   xpLine: '+{xp} XP · Level {level} ({into}/{next})', levelUp: 'Level up! You reached level {level}', unlocked: 'Unlocked: {name}',
   achievement: 'Achievement: {name}', goalComplete: 'Goal complete: {name}', nextGoal: 'Next goal: {name} ({done})', streak: '{n}-day streak',
   minutes: 'min',
+  level: 'Level', levels: 'Levels', levelComplete: 'Level complete', nextLevel: 'Next level', locked: 'Locked',
+  difficulty: 'Difficulty', easy: 'Easy', normal: 'Normal', hard: 'Hard', checkpoint: 'Checkpoint',
+  continue: 'Continue', inventory: 'Bag', inventoryEmpty: 'Your bag is empty', close: 'Close', needs: 'Needs {name}',
+  continueGame: 'Continue', newGame: 'New game', credits: 'Credits', craft: 'Craft', crafting: 'Make',
+  reduceMotion: 'Reduce motion', largeText: 'Large text', colourSafe: 'Colour-blind colours', captions: 'Captions',
+  capHit: 'You were hit', capEnemyDown: 'Enemy down', capPickup: 'Picked up', capReload: 'Reloading', capEmpty: 'Out of ammo', capBoss: 'A boss appears', capBossDown: 'Boss defeated', capLevelUp: 'Level up', capCoin: 'Coin', capDanger: 'Enemy spotted you',
+  share: 'Share', copied: 'Copied!', shareText: 'I scored {score} in {game}! Can you beat it?', bestOnDevice: 'Best on this device',
+  autoQuality: 'Auto quality', fpsCounter: 'FPS counter',
+  shop: 'Shop', coins: 'Coins', buy: 'Buy', equip: 'Use', equipped: 'In use', owned: 'Owned', maxed: 'Max', levelShort: 'Lv {n}',
 };
 
 export type StringKey = keyof typeof EN;
@@ -590,6 +663,15 @@ const HI: Record<StringKey, string> = {
   xpLine: '+{xp} XP · लेवल {level} ({into}/{next})', levelUp: 'लेवल अप! आप लेवल {level} पर पहुँचे', unlocked: 'अनलॉक: {name}',
   achievement: 'उपलब्धि: {name}', goalComplete: 'लक्ष्य पूरा: {name}', nextGoal: 'अगला लक्ष्य: {name} ({done})', streak: '{n} दिन लगातार',
   minutes: 'मिनट',
+  level: 'लेवल', levels: 'लेवल', levelComplete: 'लेवल पूरा', nextLevel: 'अगला लेवल', locked: 'बंद',
+  difficulty: 'कठिनाई', easy: 'आसान', normal: 'सामान्य', hard: 'कठिन', checkpoint: 'चेकपॉइंट',
+  continue: 'आगे', inventory: 'थैला', inventoryEmpty: 'थैला खाली है', close: 'बंद करें', needs: '{name} चाहिए',
+  continueGame: 'जारी रखें', newGame: 'नया गेम', credits: 'क्रेडिट्स', craft: 'बनाएँ', crafting: 'बनाना',
+  reduceMotion: 'कम हलचल', largeText: 'बड़े अक्षर', colourSafe: 'कलर-ब्लाइंड रंग', captions: 'कैप्शन',
+  capHit: 'आपको चोट लगी', capEnemyDown: 'दुश्मन गिरा', capPickup: 'उठाया', capReload: 'रीलोड', capEmpty: 'गोलियाँ ख़त्म', capBoss: 'बॉस आ गया', capBossDown: 'बॉस हारा', capLevelUp: 'लेवल अप', capCoin: 'सिक्का', capDanger: 'दुश्मन ने देख लिया',
+  share: 'शेयर करें', copied: 'कॉपी हो गया!', shareText: 'मैंने {game} में {score} स्कोर किया! क्या आप इसे हरा सकते हैं?', bestOnDevice: 'इस फ़ोन पर सबसे अच्छे',
+  autoQuality: 'ऑटो क्वालिटी', fpsCounter: 'FPS काउंटर',
+  shop: 'दुकान', coins: 'सिक्के', buy: 'खरीदें', equip: 'चुनें', equipped: 'चुना हुआ', owned: 'आपका', maxed: 'पूरा', levelShort: 'लेवल {n}',
 };
 
 export const GAME_STRINGS: Readonly<Record<GameLanguage, Record<StringKey, string>>> = { en: EN, hi: HI };
@@ -686,6 +768,760 @@ events.on('ASSET_LOADING', (p: { id?: unknown; fraction?: unknown; done?: unknow
 });
 `;
 
+const LEVELS = `/**
+ * LEVELS, CHECKPOINTS AND FIRST-TIME HINTS (admin 2026-11-19 game-gap audit: no stage progression, no respawn at a
+ * checkpoint, no tutorial — the LEVEL_* and CHECKPOINT_REACHED events were declared and nothing emitted them).
+ *
+ *   levels.define([{ name: 'Village' }, { name: 'Forest' }, { name: 'Fort' }], 'my-game');   // once, at start-up
+ *   events.on('LEVEL_STARTED', ({ index }) => buildLevel(index));                              // the game builds it
+ *   … levels.complete(stars);        // the round is won; the Hud offers Next level
+ *   … levels.checkpoint(player.position); on death: const p = levels.respawnPoint(); if (p) put the player there
+ *   showHint('jump', 'Press Space or Jump to jump over the gap');   // shown once per game, ever
+ * Progress (unlocked levels, stars, the last checkpoint) is saved on the device per game.
+ */
+import { events } from './events';
+import { state, setStatus } from './state';
+
+export interface LevelDef { name: string; /** One line shown in the level list. */ goal?: string }
+interface Progress { unlocked: number; stars: number[]; checkpoint: { level: number; x: number; y: number; z: number } | null; hints: string[] }
+
+let defs: LevelDef[] = [];
+let gameId = 'game';
+let index = 0;
+let progress: Progress = { unlocked: 0, stars: [], checkpoint: null, hints: [] };
+const key = (): string => 'nb-levels-v1:' + gameId;
+
+function load(): void {
+  progress = { unlocked: 0, stars: [], checkpoint: null, hints: [] };
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(key()) : null;
+    if (!raw) return;
+    const p = JSON.parse(raw) as Partial<Progress>;
+    if (typeof p.unlocked === 'number' && p.unlocked >= 0) progress.unlocked = Math.floor(p.unlocked);
+    if (Array.isArray(p.stars)) progress.stars = p.stars.map((n) => (typeof n === 'number' ? Math.max(0, Math.min(3, Math.floor(n))) : 0));
+    const c = p.checkpoint;
+    if (c && typeof c.level === 'number' && [c.x, c.y, c.z].every((v) => typeof v === 'number' && Number.isFinite(v))) progress.checkpoint = { level: c.level, x: c.x, y: c.y, z: c.z };
+    if (Array.isArray(p.hints)) progress.hints = p.hints.filter((h): h is string => typeof h === 'string').slice(0, 200);
+  } catch { /* a corrupt save starts fresh */ }
+}
+function save(): void {
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem(key(), JSON.stringify(progress)); } catch { /* not saved, still played */ }
+}
+
+export const levels = {
+  /** Declare the levels (once). Re-declaring keeps the saved progress for the same gameId. */
+  define(list: LevelDef[], id = 'game'): void {
+    defs = (Array.isArray(list) ? list : []).filter((l) => l && typeof l.name === 'string').map((l) => ({ name: l.name, goal: l.goal }));
+    gameId = String(id || 'game');
+    load();
+    index = Math.min(progress.unlocked, Math.max(0, defs.length - 1));
+    state.level = index + 1;
+    events.emit('LEVELS_CHANGED', {});
+  },
+  get count(): number { return defs.length; },
+  get list(): readonly LevelDef[] { return defs; },
+  get index(): number { return index; },
+  get current(): LevelDef | null { return defs[index] ?? null; },
+  get hasNext(): boolean { return index + 1 < defs.length; },
+  isUnlocked(i: number): boolean { return i >= 0 && i < defs.length && i <= progress.unlocked; },
+  stars(i: number): number { return progress.stars[i] ?? 0; },
+  /** Begin level i (when unlocked): LEVEL_STARTED { index, name } — the game builds that level. */
+  start(i: number): boolean {
+    if (!levels.isUnlocked(i)) return false;
+    index = i; state.level = i + 1;
+    if (progress.checkpoint && progress.checkpoint.level !== i) progress.checkpoint = null;
+    save();
+    events.emit('LEVEL_STARTED', { index: i, name: defs[i].name });
+    return true;
+  },
+  /** The current level is beaten: stars (0..3) kept at their best, the next level unlocked, the round won. */
+  complete(stars = 1): void {
+    if (!defs.length) return;
+    const s = Math.max(0, Math.min(3, Math.floor(stars)));
+    progress.stars[index] = Math.max(progress.stars[index] ?? 0, s);
+    progress.unlocked = Math.max(progress.unlocked, Math.min(defs.length - 1, index + 1));
+    progress.checkpoint = null;
+    save();
+    events.emit('LEVEL_COMPLETED', { index, name: defs[index].name, stars: s, next: index + 1 < defs.length });
+    setStatus('won');
+  },
+  /** Start the level after this one. */
+  next(): boolean { return levels.start(index + 1); },
+  /** Remember where the player is (CHECKPOINT_REACHED); a death can resume here. */
+  checkpoint(p: { x: number; y: number; z: number }): void {
+    if (![p?.x, p?.y, p?.z].every((v) => typeof v === 'number' && Number.isFinite(v))) return;
+    progress.checkpoint = { level: index, x: p.x, y: p.y, z: p.z };
+    save();
+    events.emit('CHECKPOINT_REACHED', { level: index, position: { x: p.x, y: p.y, z: p.z } });
+  },
+  /** The last checkpoint in THIS level, or null (start from the level's beginning). */
+  respawnPoint(): { x: number; y: number; z: number } | null {
+    const c = progress.checkpoint;
+    return c && c.level === index ? { x: c.x, y: c.y, z: c.z } : null;
+  },
+  /** Forget all progress for this game (a "reset progress" button). */
+  reset(): void { progress = { unlocked: 0, stars: [], checkpoint: null, hints: [] }; index = 0; save(); events.emit('LEVELS_CHANGED', {}); },
+};
+
+/**
+ * Show a hint ONCE per game, ever (first-time tutorial): HINT { id, text, seconds }. The kit's Hud shows it; the next
+ * time the player plays, it stays quiet. Returns whether it was shown.
+ */
+export function showHint(id: string, text: string, seconds = 4): boolean {
+  if (!id || !text || progress.hints.includes(id)) return false;
+  progress.hints.push(id);
+  save();
+  events.emit('HINT', { id, text, seconds: Math.max(1, Math.min(15, seconds)) });
+  return true;
+}
+`;
+
+const QUESTS = `/**
+ * OBJECTIVES AND QUESTS (admin 2026-11-19 game-gap audit: "objective / quest tracker nahi" — QUEST_STARTED and
+ * QUEST_COMPLETED were declared and nothing used them). What the player is trying to do, on screen, with progress.
+ *
+ *   objectives.set([{ id: 'coins', text: 'Collect coins', target: 10 }, { id: 'boss', text: 'Defeat the guard' }]);
+ *   objectives.progress('coins');          // +1 (or progress('coins', 3))
+ *   objectives.complete('boss');
+ *   objectives.allDone                     // true once every one is done
+ * The kit's Hud shows the list; QUEST_STARTED / QUEST_COMPLETED / OBJECTIVES_CHANGED are announced.
+ */
+import { events } from './events';
+import { state } from './state';
+
+export interface Objective { id: string; text: string; target: number; progress: number; done: boolean }
+
+let list: Objective[] = [];
+const changed = (): void => { events.emit('OBJECTIVES_CHANGED', { objectives: objectives.list }); };
+
+export const objectives = {
+  /** Replace the list (a new level, a new chapter). */
+  set(items: Array<{ id: string; text: string; target?: number }>): void {
+    list = (Array.isArray(items) ? items : []).filter((o) => o && o.id && o.text)
+      .map((o) => ({ id: String(o.id), text: String(o.text), target: Math.max(1, Math.floor(o.target ?? 1)), progress: 0, done: false }));
+    for (const o of list) events.emit('QUEST_STARTED', { id: o.id, text: o.text });
+    changed();
+  },
+  /** Add progress (default 1); reaching the target completes it. */
+  progress(id: string, amount = 1): void {
+    const o = list.find((x) => x.id === id);
+    if (!o || o.done || !Number.isFinite(amount)) return;
+    o.progress = Math.max(0, Math.min(o.target, o.progress + amount));
+    if (o.progress >= o.target) objectives.complete(id); else changed();
+  },
+  complete(id: string): void {
+    const o = list.find((x) => x.id === id);
+    if (!o || o.done) return;
+    o.done = true; o.progress = o.target;
+    if (!state.questsCompleted.includes(o.id)) state.questsCompleted.push(o.id);
+    events.emit('QUEST_COMPLETED', { id: o.id, text: o.text });
+    changed();
+  },
+  get list(): readonly Objective[] { return list.map((o) => ({ ...o })); },
+  get allDone(): boolean { return list.length > 0 && list.every((o) => o.done); },
+  clear(): void { list = []; changed(); },
+};
+`;
+
+const INVENTORY = `/**
+ * THE PLAYER'S BAG (admin 2026-11-19 game-gap audit: \`state.inventory\` existed and nothing could add to it, count it,
+ * use an item or show it). Items are stacks of ids kept IN \`state.inventory\` itself, so save(), load() and a restart
+ * already handle the bag — there is no second copy to drift.
+ *
+ *   inventory.define({ potion: { name: 'Health potion', icon: '🧪', usable: true }, key: { name: 'Gate key', icon: '🔑' } });
+ *   inventory.onUse('potion', () => healPlayer(30));   // return false to keep the item (e.g. already at full health)
+ *   inventory.add('potion', 2); inventory.has('key'); inventory.remove('key');
+ * The kit's Hud shows a bag button once anything is in it (I on a keyboard); INVENTORY_CHANGED / ITEM_USED are announced.
+ */
+import { events } from './events';
+import { state } from './state';
+
+export interface ItemInfo { name?: string; icon?: string; description?: string; usable?: boolean; max?: number }
+export interface ItemStack { id: string; name: string; icon: string; description: string; count: number; usable: boolean }
+
+const info = new Map<string, ItemInfo>();
+const handlers = new Map<string, (id: string) => boolean | void>();
+const changed = (): void => { events.emit('INVENTORY_CHANGED', { items: inventory.list }); };
+const valid = (id: unknown): id is string => typeof id === 'string' && id.length > 0 && id.length <= 64;
+const whole = (n: number): number => (Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0);
+
+export const inventory = {
+  /** Names, icons and rules for item ids. An undefined id still works — it shows its id. */
+  define(items: Record<string, ItemInfo>): void {
+    for (const [id, i] of Object.entries(items ?? {})) if (valid(id) && i) info.set(id, i);
+    changed();
+  },
+  /** The item's display name (its id when it was never defined). */
+  nameOf(id: string): string { return info.get(id)?.name ?? id; },
+  count(id: string): number { return state.inventory.filter((x) => x === id).length; },
+  has(id: string, count = 1): boolean { return inventory.count(id) >= Math.max(1, whole(count)); },
+  /** Add up to \`count\` (a stack holds at most \`max\`, default 99). Returns how many were added. */
+  add(id: string, count = 1): number {
+    if (!valid(id)) return 0;
+    const room = Math.max(0, whole(info.get(id)?.max ?? 99) - inventory.count(id));
+    const n = Math.min(room, whole(count));
+    for (let i = 0; i < n; i++) state.inventory.push(id);
+    if (n > 0) changed();
+    return n;
+  },
+  /** Take \`count\` away — all of them or none (a recipe needing 3 never takes 2). */
+  remove(id: string, count = 1): boolean {
+    const n = Math.max(1, whole(count));
+    if (!inventory.has(id, n)) return false;
+    let left = n;
+    for (let i = state.inventory.length - 1; i >= 0 && left > 0; i--) if (state.inventory[i] === id) { state.inventory.splice(i, 1); left--; }
+    changed();
+    return true;
+  },
+  /** What happens when the player uses an item. Return false to keep it. */
+  onUse(id: string, fn: (id: string) => boolean | void): () => void {
+    handlers.set(id, fn);
+    return () => { if (handlers.get(id) === fn) handlers.delete(id); };
+  },
+  /** Use one: runs its onUse, then spends it. False when there is none, or nothing to do with it. */
+  use(id: string): boolean {
+    const fn = handlers.get(id);
+    if (!inventory.has(id) || (!fn && !info.get(id)?.usable)) return false;
+    if (fn && fn(id) === false) return false;
+    inventory.remove(id, 1);
+    events.emit('ITEM_USED', { id, left: inventory.count(id) });
+    return true;
+  },
+  /** One entry per kind, in the order they were first picked up. */
+  get list(): ItemStack[] {
+    const order: string[] = [];
+    for (const id of state.inventory) if (!order.includes(id)) order.push(id);
+    return order.map((id) => {
+      const i = info.get(id) ?? {};
+      return { id, name: inventory.nameOf(id), icon: i.icon ?? '◆', description: i.description ?? '', count: inventory.count(id), usable: !!(i.usable || handlers.has(id)) };
+    });
+  },
+  clear(): void { state.inventory.length = 0; changed(); },
+};
+`;
+
+const PERF = `/**
+ * SMOOTH ON EVERY PHONE (admin 2026-11-19 game-gap audit: no frame-rate watch and no automatic quality — a game that ran
+ * at 60 on a laptop ran at 18 on a budget phone and stayed there). The governor watches the real frame time and steps
+ * the picture DOWN one level after a few seconds of struggling, and back up after a long good run. It never goes above
+ * what the player chose in Settings, and the player can turn it off (Settings → Auto quality).
+ *
+ *   const gov = createPerfGovernor();
+ *   gov.feed(frameSeconds);   // every drawn frame; true when the step changed
+ *   gov.fps, gov.drop          // smoothed frames per second; 0, 1 or 2 levels below the player's choice
+ * Hitches (a tab switch, a long load) are ignored, and so are the first seconds while the world is still building.
+ */
+export interface PerfOptions {
+  /** Below this many frames a second counts as struggling. */
+  low?: number;
+  /** Above this counts as comfortable. */
+  high?: number;
+  /** Seconds of struggling before stepping down. */
+  downAfter?: number;
+  /** Seconds of comfort before stepping back up. */
+  upAfter?: number;
+  /** Seconds ignored at the start. */
+  warmup?: number;
+  /** The most levels it may drop. */
+  maxDrop?: number;
+}
+
+export interface PerfGovernor { feed(frameSeconds: number): boolean; readonly fps: number; readonly drop: number; reset(): void }
+
+export function createPerfGovernor(o: PerfOptions = {}): PerfGovernor {
+  const low = o.low ?? 40, high = o.high ?? 56, downAfter = o.downAfter ?? 3, upAfter = o.upAfter ?? 12;
+  const warmup = o.warmup ?? 2, maxDrop = Math.max(0, Math.floor(o.maxDrop ?? 2));
+  let fps = 60, drop = 0, elapsed = 0, slow = 0, fast = 0;
+  return {
+    feed(dt: number): boolean {
+      // A hitch is not the device's pace: a tab switch or a long load would otherwise drop quality for nothing.
+      if (!Number.isFinite(dt) || dt <= 0 || dt > 0.25) return false;
+      elapsed += dt;
+      fps += (1 / dt - fps) * Math.min(1, dt * 2);       // smoothed over about half a second
+      if (elapsed < warmup) return false;
+      if (fps < low) { slow += dt; fast = 0; } else if (fps > high) { fast += dt; slow = 0; } else { slow = 0; fast = 0; }
+      if (slow >= downAfter && drop < maxDrop) { drop++; slow = 0; fps = Math.max(fps, low); return true; }
+      if (fast >= upAfter && drop > 0) { drop--; fast = 0; return true; }
+      return false;
+    },
+    get fps(): number { return fps; },
+    get drop(): number { return drop; },
+    reset(): void { fps = 60; drop = 0; elapsed = 0; slow = 0; fast = 0; },
+  };
+}
+
+/** The player's quality stepped down \`drop\` levels (high → medium → low). */
+export function steppedQuality(chosen: 'low' | 'medium' | 'high', drop: number): 'low' | 'medium' | 'high' {
+  const order = ['high', 'medium', 'low'] as const;
+  return order[Math.min(2, order.indexOf(chosen) + Math.max(0, Math.floor(drop)))];
+}
+`;
+
+const ECONOMY = `/**
+ * COINS, A SHOP, UPGRADES AND A GARAGE (admin 2026-11-19 game-gap audit: no currency, no shop, no upgrades, no car or
+ * character to choose — nothing to come back for). Saved on the device per game, so coins and purchases survive a
+ * restart and a reload.
+ *
+ *   economy.setup({ id: 'desert-rally', startCoins: 50, items: [
+ *     { id: 'red',    name: 'Red car',    price: 0,   slot: 'car' },             // price 0 = owned and in use from the start
+ *     { id: 'blue',   name: 'Blue racer', price: 300, slot: 'car', icon: '🏎️' },
+ *     { id: 'engine', name: 'Engine',     price: 100, levels: 5 },               // an upgrade: 100, 150, 225 … (priceStep 1.5)
+ *     { id: 'potion', name: 'Potion',     price: 40,  kind: 'item' },            // a consumable: goes in the bag
+ *   ] });
+ *   economy.earn(10);                                 // a coin picked up
+ *   const top = economy.stat('engine', 30, 4);        // 30 + 4 per engine level
+ *   economy.equipped('car')                           // 'red' — build that car; SHOP_CHANGED says when it changes
+ * The kit's Hud shows the coins and a Shop on the start and game-over screens. COINS_CHANGED / SHOP_CHANGED are announced.
+ */
+import { events } from './events';
+import { inventory } from './inventory';
+
+export interface ShopItem {
+  id: string; name: string; price: number; icon?: string; description?: string;
+  /** A slot ('car', 'character', 'gun'): owned items in it are chosen between, one in use at a time. */
+  slot?: string;
+  /** An upgrade: how many times it can be bought. Each level costs priceStep (default 1.5) times the last. */
+  levels?: number; priceStep?: number;
+  /** 'item' = a consumable that goes in the bag (core/inventory.ts) every time it is bought. */
+  kind?: 'item';
+}
+export type BuyResult = 'bought' | 'owned' | 'poor' | 'max' | 'unknown';
+export interface ShopEntry extends ShopItem { owned: boolean; level: number; nextPrice: number | null; inUse: boolean }
+
+interface Saved { coins: number; owned: Record<string, number>; equipped: Record<string, string> }
+let key = 'nb-economy:game';
+let items: ShopItem[] = [];
+let data: Saved = { coins: 0, owned: {}, equipped: {} };
+const whole = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0);
+
+function persist(): void { try { localStorage.setItem(key, JSON.stringify(data)); } catch { /* full or blocked storage: play on */ } }
+function read(): Saved | null {
+  try {
+    const p = JSON.parse(localStorage.getItem(key) || 'null');
+    if (!p || typeof p !== 'object') return null;
+    const owned: Record<string, number> = {}; const equipped: Record<string, string> = {};
+    for (const [k, v] of Object.entries(p.owned ?? {})) if (whole(v) > 0) owned[k] = whole(v);
+    for (const [k, v] of Object.entries(p.equipped ?? {})) if (typeof v === 'string') equipped[k] = v;
+    return { coins: whole(p.coins), owned, equipped };
+  } catch { return null; }
+}
+const find = (id: string): ShopItem | undefined => items.find((i) => i.id === id);
+const maxLevel = (i: ShopItem): number => (i.kind === 'item' ? Infinity : Math.max(1, whole(i.levels ?? 1)));
+const coinsChanged = (): void => { events.emit('COINS_CHANGED', { coins: data.coins }); };
+const shopChanged = (id: string, action: string): void => { events.emit('SHOP_CHANGED', { id, action }); };
+
+/** Free items are owned, and every slot has something in use when anything in it is owned. */
+function settle(): void {
+  for (const i of items) if (whole(i.price) === 0 && i.kind !== 'item' && !data.owned[i.id]) data.owned[i.id] = 1;
+  const slots = new Set(items.filter((i) => i.slot).map((i) => i.slot as string));
+  for (const slot of slots) {
+    const current = find(data.equipped[slot] ?? '');
+    if (current && current.slot === slot && data.owned[current.id]) continue;
+    const first = items.find((i) => i.slot === slot && data.owned[i.id]);
+    if (first) data.equipped[slot] = first.id; else delete data.equipped[slot];
+  }
+}
+
+export const economy = {
+  /** Declare the shop and load this game's saved wallet. Call once, before the start screen shows. */
+  setup(o: { id?: string; items?: ShopItem[]; startCoins?: number }): void {
+    key = 'nb-economy:' + String(o?.id ?? 'game');
+    items = (Array.isArray(o?.items) ? o.items : []).filter((i) => i && typeof i.id === 'string' && i.id && typeof i.name === 'string')
+      .map((i) => ({ ...i, price: whole(i.price) }));
+    data = read() ?? { coins: whole(o?.startCoins), owned: {}, equipped: {} };
+    settle(); persist();
+    coinsChanged(); shopChanged('', 'setup');
+  },
+  get ready(): boolean { return items.length > 0; },
+  get coins(): number { return data.coins; },
+  earn(amount: number): void { const n = whole(amount); if (!n) return; data.coins += n; persist(); coinsChanged(); },
+  /** Pay \`amount\` if the player has it — all or nothing. */
+  spend(amount: number): boolean {
+    const n = whole(amount);
+    if (n > data.coins) return false;
+    if (!n) return true;
+    data.coins -= n; persist(); coinsChanged();
+    return true;
+  },
+  level(id: string): number { return data.owned[id] ?? 0; },
+  owns(id: string): boolean { return (data.owned[id] ?? 0) > 0; },
+  /** What the next purchase of \`id\` costs, or null when it cannot be bought again. */
+  priceOf(id: string): number | null {
+    const i = find(id);
+    if (!i) return null;
+    const lv = economy.level(id);
+    if (lv >= maxLevel(i)) return null;
+    if (i.kind === 'item') return i.price;
+    return Math.round(i.price * Math.pow(i.priceStep && i.priceStep > 0 ? i.priceStep : 1.5, lv));
+  },
+  buy(id: string): BuyResult {
+    const i = find(id);
+    if (!i) return 'unknown';
+    const price = economy.priceOf(id);
+    if (price === null) return maxLevel(i) === 1 ? 'owned' : 'max';
+    if (!economy.spend(price)) return 'poor';
+    if (i.kind === 'item') inventory.add(i.id, 1);
+    else data.owned[id] = economy.level(id) + 1;
+    // A new car or character is put to use at once — that is why it was bought.
+    if (i.slot) data.equipped[i.slot] = i.id;
+    persist(); shopChanged(id, 'bought');
+    return 'bought';
+  },
+  /** Put an owned slot item in use. */
+  equip(id: string): boolean {
+    const i = find(id);
+    if (!i || !i.slot || !economy.owns(id)) return false;
+    data.equipped[i.slot] = id; persist(); shopChanged(id, 'equipped');
+    return true;
+  },
+  equipped(slot: string): string | null { return data.equipped[slot] ?? null; },
+  /** A number that grows with an upgrade: base + perLevel × its level. */
+  stat(id: string, base: number, perLevel: number): number { return base + perLevel * economy.level(id); },
+  get list(): ShopEntry[] {
+    return items.map((i) => ({ ...i, owned: economy.owns(i.id), level: economy.level(i.id), nextPrice: economy.priceOf(i.id), inUse: !!i.slot && data.equipped[i.slot] === i.id }));
+  },
+  /** Wipe this game's wallet and purchases (a "reset progress" button). */
+  reset(): void { data = { coins: 0, owned: {}, equipped: {} }; settle(); persist(); coinsChanged(); shopChanged('', 'reset'); },
+};
+`;
+
+const POWERUPS = `/**
+ * POWER-UPS (admin 2026-11-19 game-gap audit: no timed boosts — every "speed boost" or "shield" was a hand-rolled
+ * setTimeout that kept running through the pause menu and survived a restart). A power-up here lasts game time: it
+ * counts down only while the round runs, freezes in the pause menu, and every one ends when a new round starts.
+ *
+ *   powerUps.define({ speed: { name: 'Speed', icon: '⚡', seconds: 6 }, shield: { name: 'Shield', icon: '🛡️', seconds: 8 },
+ *                     magnet: { name: 'Magnet', icon: '🧲', seconds: 10, stack: 'extend' } });
+ *   powerUps.give('speed');                                   // on pickup
+ *   const run = powerUps.value('speed', 6, 10);               // 10 while it lasts, 6 otherwise
+ *   if (powerUps.active('shield')) return;                    // ignore the hit
+ * Picking one up again: 'refresh' (default) restarts its clock, 'extend' adds its time, 'stack' raises its level (up to
+ * maxStacks) and restarts the clock. The kit's Hud shows each with a ring for the time left.
+ */
+import { events } from './events';
+
+export interface PowerUpDef {
+  name?: string; icon?: string;
+  /** How long one pickup lasts, in seconds of play. */
+  seconds: number;
+  stack?: 'refresh' | 'extend' | 'stack';
+  maxStacks?: number;
+  /** Called when it starts (and with the new level when it stacks). */
+  onStart?: (level: number) => void;
+  onEnd?: () => void;
+}
+export interface ActivePowerUp { id: string; name: string; icon: string; remaining: number; total: number; level: number }
+
+const defs = new Map<string, PowerUpDef>();
+const live = new Map<string, { remaining: number; total: number; level: number }>();
+const changed = (): void => { events.emit('POWERUPS_CHANGED', { active: powerUps.list }); };
+const safe = (fn: (() => void) | undefined): void => { try { fn?.(); } catch (e) { console.error('[powerUps]', e); } };
+
+export const powerUps = {
+  define(items: Record<string, PowerUpDef>): void {
+    for (const [id, d] of Object.entries(items ?? {})) if (id && d && Number.isFinite(d.seconds) && d.seconds > 0) defs.set(id, d);
+  },
+  /** Start (or re-apply) a power-up. Unknown ids are refused. seconds overrides the defined length. */
+  give(id: string, seconds?: number): boolean {
+    const d = defs.get(id);
+    if (!d) return false;
+    const len = Number.isFinite(seconds) && (seconds as number) > 0 ? (seconds as number) : d.seconds;
+    const cur = live.get(id);
+    if (!cur) {
+      live.set(id, { remaining: len, total: len, level: 1 });
+      safe(() => d.onStart?.(1));
+      events.emit('POWERUP_STARTED', { id, level: 1 });
+    } else if ((d.stack ?? 'refresh') === 'extend') {
+      cur.remaining += len; cur.total = Math.max(cur.total, cur.remaining);
+    } else if (d.stack === 'stack') {
+      const level = Math.min(Math.max(1, Math.floor(d.maxStacks ?? 3)), cur.level + 1);
+      if (level !== cur.level) { cur.level = level; safe(() => d.onStart?.(level)); events.emit('POWERUP_STARTED', { id, level }); }
+      cur.remaining = Math.max(cur.remaining, len); cur.total = Math.max(cur.total, len);
+    } else {
+      cur.remaining = Math.max(cur.remaining, len); cur.total = Math.max(cur.total, cur.remaining);
+    }
+    changed();
+    return true;
+  },
+  /** Advance the clocks by dt seconds of play (the 3D shell calls this every step of a running round). */
+  update(dt: number): void {
+    if (!Number.isFinite(dt) || dt <= 0 || live.size === 0) return;
+    const ended: string[] = [];
+    for (const [id, p] of live) { p.remaining -= dt; if (p.remaining <= 0) ended.push(id); }
+    for (const id of ended) powerUps.end(id);
+  },
+  end(id: string): void {
+    if (!live.delete(id)) return;
+    safe(() => defs.get(id)?.onEnd?.());
+    events.emit('POWERUP_ENDED', { id });
+    changed();
+  },
+  active(id: string): boolean { return live.has(id); },
+  level(id: string): number { return live.get(id)?.level ?? 0; },
+  remaining(id: string): number { return Math.max(0, live.get(id)?.remaining ?? 0); },
+  /** boosted while the power-up lasts, base otherwise. */
+  value<T>(id: string, base: T, boosted: T): T { return live.has(id) ? boosted : base; },
+  get list(): ActivePowerUp[] {
+    return [...live].map(([id, p]) => { const d = defs.get(id) ?? { seconds: p.total }; return { id, name: d.name ?? id, icon: d.icon ?? '★', remaining: Math.max(0, p.remaining), total: p.total, level: p.level }; });
+  },
+  /** End every power-up (a new round). */
+  clear(): void { for (const id of [...live.keys()]) powerUps.end(id); },
+};
+`;
+
+const LOOT = `/**
+ * LOOT TABLES (admin 2026-11-19 game-gap audit: no drops — an enemy died and nothing happened, or the model wrote
+ * Math.random() < 0.1 and a player went 40 kills without the item). Weighted entries with rarities, a "nothing" entry,
+ * amounts, and a pity rule so bad luck has a ceiling.
+ *
+ *   const drops = createLootTable([
+ *     { item: null, weight: 50 },                                  // nothing
+ *     { item: 'coin', weight: 40, count: [1, 5] },
+ *     { item: 'potion', weight: 9, rarity: 'rare' },
+ *     { item: 'golden-sword', weight: 1, rarity: 'legendary' },
+ *   ], { pity: { rarity: 'rare', after: 15 } });                    // a rare or better at least every 15 rolls
+ *   const d = drops.roll();      // { item, rarity, count } — LOOT_DROPPED is announced when there is an item
+ */
+import { events } from './events';
+
+export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
+const ORDER: Rarity[] = ['common', 'rare', 'epic', 'legendary'];
+export interface LootEntry { item: string | null; weight: number; rarity?: Rarity; count?: [number, number] }
+export interface LootDrop { item: string | null; rarity: Rarity; count: number }
+export interface LootTable { roll(rng?: () => number): LootDrop; chances(): Array<{ item: string | null; rarity: Rarity; chance: number }>; readonly sincePity: number }
+
+export function createLootTable(entries: LootEntry[], o: { pity?: { rarity: Rarity; after: number } } = {}): LootTable {
+  const list = (Array.isArray(entries) ? entries : []).filter((e) => e && Number.isFinite(e.weight) && e.weight > 0).map((e) => ({ ...e, rarity: e.rarity ?? 'common' as Rarity }));
+  if (list.length === 0) throw new Error('a loot table needs at least one entry with a positive weight');
+  const total = list.reduce((n, e) => n + e.weight, 0);
+  const pity = o.pity && ORDER.includes(o.pity.rarity) && o.pity.after >= 1 ? o.pity : null;
+  const pityPool = pity ? list.filter((e) => e.item !== null && ORDER.indexOf(e.rarity) >= ORDER.indexOf(pity.rarity)) : [];
+  let since = 0;
+  const pick = (pool: typeof list, r: number) => {
+    const sum = pool.reduce((n, e) => n + e.weight, 0);
+    let x = r * sum;
+    for (const e of pool) { x -= e.weight; if (x < 0) return e; }
+    return pool[pool.length - 1];
+  };
+  return {
+    roll(rng: () => number = Math.random): LootDrop {
+      const forced = pity && pityPool.length > 0 && since >= pity.after - 1;
+      const e = forced ? pick(pityPool, rng()) : pick(list, rng());
+      const counts = e.count ?? [1, 1];
+      const lo = Math.max(0, Math.floor(Math.min(counts[0], counts[1]))), hi = Math.max(lo, Math.floor(Math.max(counts[0], counts[1])));
+      const count = e.item === null ? 0 : lo + Math.floor(rng() * (hi - lo + 1));
+      if (pity) since = e.item !== null && ORDER.indexOf(e.rarity) >= ORDER.indexOf(pity.rarity) ? 0 : since + 1;
+      const drop = { item: e.item, rarity: e.rarity, count };
+      if (drop.item !== null && drop.count > 0) events.emit('LOOT_DROPPED', drop);
+      return drop;
+    },
+    chances() { return list.map((e) => ({ item: e.item, rarity: e.rarity, chance: e.weight / total })); },
+    get sincePity() { return since; },
+  };
+}
+`;
+
+const LEADERBOARD = `/**
+ * THE BEST SCORES ON THIS DEVICE (admin 2026-11-19 game-gap audit: no leaderboard — one "best" number, nothing to climb).
+ * A top ten per game, saved on the device. It is honest about what it is: the scores played HERE, not the world — a
+ * worldwide board needs an online service the game does not have.
+ *
+ *   leaderboard.record('desert-rally', 1250)   → 3 (the place it took), or null outside the top ten
+ *   leaderboard.top('desert-rally', 5)          → [{ score, name, at }, …] best first
+ * The 3D shell records every finished round by itself and the end screen lists the top five.
+ */
+import { events } from './events';
+
+export interface ScoreEntry { score: number; name: string; at: number }
+const SIZE = 10;
+const key = (gameId: string): string => 'nb-leaderboard:' + String(gameId || 'game');
+
+function read(gameId: string): ScoreEntry[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(key(gameId)) || '[]');
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((e) => e && Number.isFinite(e.score) && e.score >= 0)
+      .map((e) => ({ score: Math.floor(e.score), name: String(e.name ?? 'You').slice(0, 24), at: Number.isFinite(e.at) ? e.at : 0 }))
+      .sort((a, b) => b.score - a.score || a.at - b.at).slice(0, SIZE);
+  } catch { return []; }
+}
+
+let last: { gameId: string; at: number } | null = null;
+
+export const leaderboard = {
+  /** Record a finished round. Returns its place (1 = best) or null when it did not make the top ten. */
+  record(gameId: string, score: number, name = 'You'): number | null {
+    if (!Number.isFinite(score) || score <= 0) return null;
+    const entry: ScoreEntry = { score: Math.floor(score), name: String(name).slice(0, 24) || 'You', at: Date.now() };
+    const list = [...read(gameId), entry].sort((a, b) => b.score - a.score || a.at - b.at).slice(0, SIZE);
+    const place = list.indexOf(entry);
+    if (place < 0) return null;
+    try { localStorage.setItem(key(gameId), JSON.stringify(list)); } catch { /* full or blocked storage: the round still counts on screen */ }
+    last = { gameId, at: entry.at };
+    events.emit('LEADERBOARD_CHANGED', { gameId, place: place + 1 });
+    return place + 1;
+  },
+  top(gameId: string, n = SIZE): ScoreEntry[] { return read(gameId).slice(0, Math.max(0, n)); },
+  /** Is this entry the one just recorded (for highlighting it)? */
+  isLatest(gameId: string, e: ScoreEntry): boolean { return !!last && last.gameId === gameId && last.at === e.at; },
+  clear(gameId: string): void { try { localStorage.removeItem(key(gameId)); } catch { /* nothing to clear */ } last = null; events.emit('LEADERBOARD_CHANGED', { gameId, place: null }); },
+};
+`;
+
+const CRAFTING = `/**
+ * CRAFTING (admin 2026-11-19 game-gap audit: no crafting — a survival game's "make a sword from wood and iron" was a
+ * hand-rolled check that took the wood and then found there was no iron). Recipes over the bag (core/inventory.ts):
+ * crafting takes every ingredient or none of them.
+ *
+ *   crafting.define([{ id: 'sword', name: 'Sword', needs: { wood: 2, iron: 3 }, makes: { item: 'sword', count: 1 } },
+ *                    { id: 'torch', name: 'Torch', needs: { wood: 1, coal: 1 }, makes: { item: 'torch', count: 4 } }]);
+ *   crafting.canCraft('sword');  crafting.missing('sword') → [{ item: 'iron', need: 3, have: 1 }]
+ *   crafting.craft('sword')      → true: the ingredients are gone and the sword is in the bag (ITEM_CRAFTED)
+ * The kit's bag screen lists the recipes with what each needs and a Craft button.
+ */
+import { events } from './events';
+import { inventory } from './inventory';
+
+export interface Recipe { id: string; name: string; icon?: string; needs: Record<string, number>; makes: { item: string; count?: number } }
+export interface RecipeView extends Recipe { can: boolean; missing: Array<{ item: string; need: number; have: number }> }
+
+let recipes: Recipe[] = [];
+const whole = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0);
+
+export const crafting = {
+  define(list: Recipe[]): void {
+    recipes = (Array.isArray(list) ? list : []).filter((r) => r && r.id && r.makes && r.makes.item && r.needs && Object.values(r.needs).some((n) => whole(n) > 0));
+  },
+  missing(id: string): Array<{ item: string; need: number; have: number }> {
+    const r = recipes.find((x) => x.id === id);
+    if (!r) return [];
+    return Object.entries(r.needs).map(([item, n]) => ({ item, need: whole(n), have: inventory.count(item) })).filter((m) => m.need > m.have);
+  },
+  canCraft(id: string): boolean { return recipes.some((r) => r.id === id) && crafting.missing(id).length === 0; },
+  /** Make it: every ingredient is taken, or none is. Returns false when something is missing (or the bag is full). */
+  craft(id: string): boolean {
+    const r = recipes.find((x) => x.id === id);
+    if (!r || !crafting.canCraft(id)) return false;
+    const count = Math.max(1, whole(r.makes.count ?? 1));
+    // Room check first: a full stack must not swallow the ingredients and give nothing back.
+    const before = inventory.count(r.makes.item);
+    const taken: Array<[string, number]> = [];
+    for (const [item, n] of Object.entries(r.needs)) { if (whole(n) > 0 && inventory.remove(item, whole(n))) taken.push([item, whole(n)]); }
+    const added = inventory.add(r.makes.item, count);
+    if (added === 0 && inventory.count(r.makes.item) === before) {
+      for (const [item, n] of taken) inventory.add(item, n);   // put everything back
+      return false;
+    }
+    events.emit('ITEM_CRAFTED', { id: r.id, item: r.makes.item, count: added });
+    return true;
+  },
+  get list(): RecipeView[] { return recipes.map((r) => ({ ...r, can: crafting.canCraft(r.id), missing: crafting.missing(r.id) })); },
+};
+`;
+
+const DIALOGUE = `/**
+ * TALKING TO PEOPLE (admin 2026-11-19 game-gap audit: an RPG had no dialogue box and no choices). A speaker, a line,
+ * and — when the story forks — choices; a choice can need an item from the bag. While someone is talking the game
+ * holds still (the shell does not run your update), and the press that ends the talk is not also a jump.
+ *
+ *   await dialogue.say('Guard', 'Halt! Who goes there?');
+ *   const pick = await dialogue.open({ start: 'hi', nodes: {
+ *     hi:  { speaker: 'Trader', text: 'Want a potion?', choices: [
+ *            { id: 'buy', text: 'Yes (1 coin)', requires: { item: 'coin' }, onChoose: () => { inventory.remove('coin'); inventory.add('potion'); }, next: 'bye' },
+ *            { id: 'no',  text: 'No thanks' } ] },
+ *     bye: { speaker: 'Trader', text: 'Stay safe out there.' } } });
+ * A plain list of lines works too: dialogue.open([{ speaker: 'Mira', text: 'Follow me.' }, { text: '…' }]).
+ * The promise resolves with the id of the last choice made (or null). DIALOGUE_STARTED / _LINE / _ENDED are announced.
+ */
+import { events } from './events';
+import { inventory } from './inventory';
+
+export interface DialogueChoice { id?: string; text: string; next?: string; requires?: { item: string; count?: number }; onChoose?: () => void }
+export interface DialogueNode { speaker?: string; text: string; next?: string; choices?: DialogueChoice[]; onEnter?: () => void }
+export type DialogueScript = DialogueNode[] | { start: string; nodes: Record<string, DialogueNode> };
+export interface DialogueView { speaker: string; text: string; choices: Array<{ text: string; available: boolean; needs: string | null }> }
+
+let nodes: Record<string, DialogueNode> = {};
+let at: string | null = null;
+let lastChoice: string | null = null;
+let resolve: ((choice: string | null) => void) | null = null;
+let justEnded = false;
+
+function enter(id: string | undefined): void {
+  const n = id != null ? nodes[id] : undefined;
+  if (!n || typeof n.text !== 'string') { dialogue.close(); return; }
+  at = id!;
+  try { n.onEnter?.(); } catch (e) { console.error('[dialogue] onEnter failed', e); }
+  events.emit('DIALOGUE_LINE', dialogue.current);
+}
+
+export const dialogue = {
+  /** Start a conversation (it replaces one already open, which ends with null). */
+  open(script: DialogueScript): Promise<string | null> {
+    if (at !== null) dialogue.close();
+    if (Array.isArray(script)) {
+      nodes = {};
+      script.forEach((n, i) => { nodes[String(i)] = { ...n, next: n.next ?? (n.choices?.length ? undefined : (i + 1 < script.length ? String(i + 1) : undefined)) }; });
+      if (script.length === 0) return Promise.resolve(null);
+      return dialogue.begin('0');
+    }
+    nodes = { ...(script?.nodes ?? {}) };
+    return dialogue.begin(script?.start);
+  },
+  /** One line from one speaker. */
+  say(speaker: string, text: string): Promise<string | null> { return dialogue.open([{ speaker, text }]); },
+  begin(start: string | undefined): Promise<string | null> {
+    if (start == null || !nodes[start]) return Promise.resolve(null);
+    lastChoice = null;
+    const done = new Promise<string | null>((r) => { resolve = r; });
+    events.emit('DIALOGUE_STARTED', {});
+    enter(start);
+    return done;
+  },
+  get active(): boolean { return at !== null; },
+  get current(): DialogueView | null {
+    const n = at !== null ? nodes[at] : undefined;
+    if (!n) return null;
+    return {
+      speaker: n.speaker ?? '',
+      text: n.text,
+      choices: (n.choices ?? []).map((c) => {
+        const r = c.requires;
+        const ok = !r || inventory.has(r.item, r.count ?? 1);
+        return { text: c.text, available: ok, needs: ok || !r ? null : inventory.nameOf(r.item) };
+      }),
+    };
+  },
+  /** Next line (Continue). Does nothing while choices are waiting — the player has to pick one. */
+  advance(): void {
+    const n = at !== null ? nodes[at] : undefined;
+    if (!n || n.choices?.length) return;
+    enter(n.next);
+  },
+  /** Pick choice \`index\`. A choice whose item is missing cannot be picked. */
+  choose(index: number): boolean {
+    const n = at !== null ? nodes[at] : undefined;
+    const c = n?.choices?.[index];
+    if (!c || (c.requires && !inventory.has(c.requires.item, c.requires.count ?? 1))) return false;
+    lastChoice = c.id ?? c.text;
+    try { c.onChoose?.(); } catch (e) { console.error('[dialogue] onChoose failed', e); }
+    if (at === null) return true;          // onChoose opened or closed a conversation itself
+    enter(c.next);
+    return true;
+  },
+  close(): void {
+    if (at === null) return;
+    at = null;
+    justEnded = true;
+    const r = resolve; resolve = null;
+    events.emit('DIALOGUE_ENDED', { choice: lastChoice });
+    r?.(lastChoice);
+  },
+  /** True once after a conversation ends — the shell skips that step so the closing press is not also a jump. */
+  takeJustEnded(): boolean { const j = justEnded; justEnded = false; return j; },
+};
+`;
+
 const SETTINGS = `/**
  * THE PLAYER'S SETTINGS — one place, saved on this device, and actually APPLIED (admin 2026-11-19 audit: the old
  * \`state.settings\` held a music volume, an sfx volume and a quality that nothing ever read, and there was no mute).
@@ -712,10 +1548,37 @@ export interface GameSettings {
   lookSensitivity: number;
   /** Phone vibration on hits and rewards. */
   vibration: boolean;
+  /** How hard the game is; read it with difficultyScale(). */
+  difficulty: Difficulty;
+  /** Lower the picture by itself when the device cannot keep up (never above \`quality\`). */
+  autoQuality: boolean;
+  /** Show the frames-per-second counter. */
+  showFps: boolean;
+  /** No camera shake. On by itself when the device asks for reduced motion. */
+  reduceMotion: boolean;
+  /** Menus and the HUD drawn larger. */
+  largeText: boolean;
+  /** Colours that colour-blind players can tell apart (health bar, minimap). */
+  colourSafe: boolean;
+  /** Short text for important sounds (a hit, an enemy down, a boss…). */
+  captions: boolean;
+}
+
+export type Difficulty = 'easy' | 'normal' | 'hard';
+
+/**
+ * What a difficulty means, as multipliers a game applies to its own numbers (admin 2026-11-19 game-gap audit: no Easy /
+ * Normal / Hard). enemyDamage and enemyHealth scale enemies; enemySpeed their movement; spawn how many come.
+ *   const k = difficultyScale(); hp.max = 100 * k.enemyHealth; …
+ */
+export function difficultyScale(d: Difficulty = current.difficulty): { enemyDamage: number; enemyHealth: number; enemySpeed: number; spawn: number } {
+  if (d === 'easy') return { enemyDamage: 0.6, enemyHealth: 0.75, enemySpeed: 0.85, spawn: 0.7 };
+  if (d === 'hard') return { enemyDamage: 1.35, enemyHealth: 1.3, enemySpeed: 1.12, spawn: 1.3 };
+  return { enemyDamage: 1, enemyHealth: 1, enemySpeed: 1, spawn: 1 };
 }
 
 export const DEFAULT_SETTINGS: Readonly<GameSettings> = {
-  masterVolume: 0.9, musicVolume: 0.6, sfxVolume: 0.8, muted: false, quality: 'high', lookSensitivity: 1, vibration: true,
+  masterVolume: 0.9, musicVolume: 0.6, sfxVolume: 0.8, muted: false, quality: 'high', lookSensitivity: 1, vibration: true, difficulty: 'normal', autoQuality: true, showFps: false, reduceMotion: false, largeText: false, colourSafe: false, captions: false,
 };
 
 const KEY = 'nb-game-settings-v1';
@@ -733,6 +1596,13 @@ export function sanitizeSettings(raw: unknown): GameSettings {
     quality: r.quality === 'low' || r.quality === 'medium' || r.quality === 'high' ? r.quality : DEFAULT_SETTINGS.quality,
     lookSensitivity: look,
     vibration: typeof r.vibration === 'boolean' ? r.vibration : DEFAULT_SETTINGS.vibration,
+    difficulty: r.difficulty === 'easy' || r.difficulty === 'normal' || r.difficulty === 'hard' ? r.difficulty : DEFAULT_SETTINGS.difficulty,
+    autoQuality: typeof r.autoQuality === 'boolean' ? r.autoQuality : DEFAULT_SETTINGS.autoQuality,
+    showFps: typeof r.showFps === 'boolean' ? r.showFps : DEFAULT_SETTINGS.showFps,
+    reduceMotion: typeof r.reduceMotion === 'boolean' ? r.reduceMotion : DEFAULT_SETTINGS.reduceMotion,
+    largeText: typeof r.largeText === 'boolean' ? r.largeText : DEFAULT_SETTINGS.largeText,
+    colourSafe: typeof r.colourSafe === 'boolean' ? r.colourSafe : DEFAULT_SETTINGS.colourSafe,
+    captions: typeof r.captions === 'boolean' ? r.captions : DEFAULT_SETTINGS.captions,
   };
 }
 
@@ -743,7 +1613,10 @@ function read(): GameSettings {
       if (raw) return sanitizeSettings(JSON.parse(raw));
     }
   } catch { /* private mode or a corrupt value: the defaults */ }
-  return { ...DEFAULT_SETTINGS };
+  // A first visit follows the device: someone who asked their phone for reduced motion gets no camera shake.
+  let reduce = false;
+  try { reduce = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { /* no media queries */ }
+  return { ...DEFAULT_SETTINGS, reduceMotion: reduce };
 }
 
 let current: GameSettings = read();
@@ -1314,10 +2187,20 @@ const FILES: Record<string, string> = {
   'src/game/core/settings.ts': SETTINGS,
   'src/game/core/loading.ts': LOADING,
   'src/game/core/strings.ts': STRINGS,
+  'src/game/core/levels.ts': LEVELS,
+  'src/game/core/quests.ts': QUESTS,
+  'src/game/core/inventory.ts': INVENTORY,
+  'src/game/core/dialogue.ts': DIALOGUE,
+  'src/game/core/economy.ts': ECONOMY,
+  'src/game/core/perf.ts': PERF,
+  'src/game/core/powerups.ts': POWERUPS,
+  'src/game/core/loot.ts': LOOT,
+  'src/game/core/leaderboard.ts': LEADERBOARD,
+  'src/game/core/crafting.ts': CRAFTING,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot', 'leaderboard', 'crafting'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -1346,6 +2229,12 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/loading.ts']) { files['src/game/core/events.ts'] = FILES['src/game/core/events.ts']; files['src/game/core/strings.ts'] = FILES['src/game/core/strings.ts']; }
     if (files['src/game/core/meta.ts']) files['src/game/core/strings.ts'] = FILES['src/game/core/strings.ts'];
     if (files['src/game/core/strings.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
+    if (files['src/game/core/levels.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
+    if (files['src/game/core/quests.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
+    if (files['src/game/core/economy.ts'] || files['src/game/core/crafting.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
+    if (files['src/game/core/dialogue.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
+    if (files['src/game/core/inventory.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
+    if (files['src/game/core/powerups.ts'] || files['src/game/core/loot.ts'] || files['src/game/core/leaderboard.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }

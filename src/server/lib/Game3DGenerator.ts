@@ -6603,6 +6603,134 @@ export function renderSplit(renderer: THREE.WebGLRenderer, scene: THREE.Scene, c
 }
 `;
 
+const FLIGHT = `/**
+ * FLIGHT (admin 2026-11-19 game-gap audit: aircraft were "not built" — a plane game got a box that slid through the
+ * air). An arcade flight model that still behaves like a plane, so it feels right without a pilot's licence:
+ *   • throttle and drag set the speed; climbing costs speed, diving gains it;
+ *   • below the stall speed the wings stop lifting — the controls go soft, the nose drops and it sinks;
+ *   • you BANK to turn (roll left, it turns left), and the wings level by themselves when you let go;
+ *   • on the ground it rolls; it lifts off only above take-off speed with the nose pulled up;
+ *   • touching down too steep, too fast a descent or banked over is a crash; a gentle landing rolls out.
+ *
+ *   const plane = createAircraft({ kind: 'jet', colour: 0xd0d6de });  scene.add(plane);  ctx.follow(plane);
+ *   let flight = createFlightState({ onGround: true });
+ *   flight = flyAircraft(plane, flight, flightInput(ctx.input), dt, { ground: (x, z) => 0 });   // in update
+ *   flight.speed, flight.altitude, flight.stalled, flight.crashed → the HUD and the game rules
+ * The nose points along +Z, like every vehicle in the kit, so ctx.follow(plane) frames it from behind.
+ */
+import * as THREE from 'three';
+
+export interface FlightState {
+  speed: number; throttle: number;
+  /** Radians. yaw 0 = flying along +Z. */
+  yaw: number; pitch: number; roll: number;
+  /** Vertical speed from lost lift (m/s, negative = sinking). */
+  sink: number;
+  onGround: boolean; stalled: boolean; crashed: boolean;
+  /** Height above the ground under the plane. */
+  altitude: number;
+}
+export interface FlightInput { pitch: number; roll: number; yaw?: number; throttle: number }
+export interface FlightOptions {
+  ground?: (x: number, z: number) => number;
+  maxSpeed?: number; stallSpeed?: number; takeoffSpeed?: number;
+  /** How hard a touchdown may be (m/s down) and still be a landing. */
+  maxTouchdown?: number;
+  gearHeight?: number;
+}
+
+export function createFlightState(o: Partial<FlightState> = {}): FlightState {
+  return { speed: 0, throttle: 0, yaw: 0, pitch: 0, roll: 0, sink: 0, onGround: true, stalled: false, crashed: false, altitude: 0, ...o };
+}
+
+/** The usual keys: W/S or the stick pitch (W = nose up), A/D roll, Shift raises the throttle, Ctrl/brake lowers it. */
+export function flightInput(input: { axis(): { x: number; y: number }; isDown(a: string): boolean }, current = 0.5): FlightInput {
+  const a = input.axis();
+  const up = input.isDown('sprint'), down = input.isDown('brake') || input.isDown('aim');
+  return { pitch: -a.y, roll: a.x, throttle: Math.max(0, Math.min(1, current + (up ? 0.02 : 0) - (down ? 0.02 : 0))) };
+}
+
+const G = 9.8;
+const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, Number.isFinite(v) ? v : 0));
+
+/** One step of flight. Moves and turns the object; returns the new state (the old one is not changed). */
+export function flyAircraft(plane: THREE.Object3D, prev: FlightState, input: FlightInput, dt: number, o: FlightOptions = {}): FlightState {
+  const s: FlightState = { ...prev };
+  if (s.crashed || !Number.isFinite(dt) || dt <= 0) return s;
+  const maxSpeed = o.maxSpeed ?? 90, stall = o.stallSpeed ?? 28, takeoff = o.takeoffSpeed ?? 34;
+  const ground = o.ground ?? (() => 0), gear = o.gearHeight ?? 1.2, maxTouch = o.maxTouchdown ?? 6;
+  const pitchIn = clamp(input.pitch, -1, 1), rollIn = clamp(input.roll, -1, 1);
+  // Engines spool, they do not jump.
+  s.throttle += clamp(clamp(input.throttle, 0, 1) - s.throttle, -0.6 * dt, 0.6 * dt);
+  // Thrust against drag; climbing costs speed, diving gains it.
+  const thrust = s.throttle * maxSpeed * 0.9, drag = (s.speed * s.speed) / maxSpeed * 0.9;
+  s.speed = Math.max(0, s.speed + (thrust - drag - (s.onGround ? 0 : G * Math.sin(s.pitch) * 1.2)) * dt * 0.5);
+  // How much the wings lift: nothing at the stall, full at a comfortable speed.
+  const lift = clamp((s.speed - stall) / (stall * 0.6), 0, 1);
+  s.stalled = !s.onGround && s.speed < stall;
+  if (s.onGround) {
+    s.roll += (0 - s.roll) * Math.min(1, dt * 6);
+    // Steering on the runway, and lifting off only fast enough with the nose pulled up.
+    s.yaw -= rollIn * 0.6 * dt * Math.min(1, s.speed / 10);
+    s.pitch = Math.max(0, s.pitch + (pitchIn > 0 && s.speed >= takeoff ? pitchIn * 0.5 * dt : -s.pitch * dt * 3));
+    if (s.pitch > 0.05 && s.speed >= takeoff) s.onGround = false;
+  } else {
+    // Bank to turn; the wings level themselves when the stick is let go.
+    s.roll = clamp(s.roll + rollIn * 1.8 * dt * (0.4 + 0.6 * lift) - (rollIn === 0 ? s.roll * 1.2 * dt : 0), -1.2, 1.2);
+    s.pitch = clamp(s.pitch + pitchIn * 0.9 * dt * (0.3 + 0.7 * lift), -1.0, 1.0);
+    if (s.stalled) s.pitch -= 0.7 * dt;   // the nose drops in a stall
+    s.yaw -= Math.sin(s.roll) * 0.9 * dt * (0.3 + 0.7 * lift) + clamp(input.yaw ?? 0, -1, 1) * 0.3 * dt;
+    // Without lift the plane sinks; with lift the sink fades away.
+    s.sink = lift >= 1 ? s.sink * Math.max(0, 1 - 2 * dt) : s.sink - G * (1 - lift) * dt;
+  }
+  const dir = new THREE.Vector3(Math.sin(s.yaw) * Math.cos(s.pitch), Math.sin(s.pitch), Math.cos(s.yaw) * Math.cos(s.pitch));
+  plane.position.addScaledVector(dir, s.speed * dt);
+  plane.position.y += s.sink * dt;
+  const floor = ground(plane.position.x, plane.position.z) + gear;
+  if (plane.position.y <= floor) {
+    const descent = -(dir.y * s.speed + s.sink);
+    if (!s.onGround) {
+      // Touchdown: gentle, level and nose-up enough is a landing; anything else is a crash.
+      if (descent > maxTouch || Math.abs(s.roll) > 0.35 || s.pitch < -0.25) { s.crashed = true; s.speed = 0; }
+      s.onGround = true;
+    }
+    plane.position.y = floor;
+    s.sink = 0;
+    if (s.pitch < 0) s.pitch = 0;
+  }
+  s.altitude = Math.max(0, plane.position.y - floor);
+  plane.rotation.set(-s.pitch, s.yaw, -s.roll, 'YXZ');
+  return s;
+}
+
+/** A low-poly plane: fuselage, swept wings, a tail fin and tailplane, a cockpit. Nose along +Z. */
+export function createAircraft(o: { kind?: 'jet' | 'prop'; colour?: number } = {}): THREE.Group {
+  const g = new THREE.Group();
+  g.name = 'aircraft';
+  const body = new THREE.MeshStandardMaterial({ color: o.colour ?? 0xd0d6de, metalness: 0.4, roughness: 0.45 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.2, roughness: 0.3 });
+  const jet = (o.kind ?? 'jet') === 'jet';
+  const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(0.55, jet ? 0.35 : 0.45, 8, 12), body);
+  fuselage.rotation.x = Math.PI / 2; g.add(fuselage);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.55, jet ? 2 : 1, 12), body);
+  nose.rotation.x = Math.PI / 2; nose.position.z = jet ? 5 : 4.5; g.add(nose);
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(jet ? 9 : 11, 0.15, jet ? 2.4 : 1.6), body);
+  wing.position.set(0, -0.1, jet ? -0.5 : 0.6); g.add(wing);
+  const tailplane = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.12, 1.1), body);
+  tailplane.position.set(0, 0.1, -3.6); g.add(tailplane);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.8, 1.4), body);
+  fin.position.set(0, 1, -3.5); g.add(fin);
+  const cockpit = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), dark);
+  cockpit.scale.set(0.9, 0.8, 2); cockpit.position.set(0, 0.45, 2.2); g.add(cockpit);
+  if (!jet) {
+    const prop = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.18, 0.06), dark);
+    prop.name = 'propeller'; prop.position.z = 5.05; g.add(prop);
+  }
+  g.traverse((m) => { if ((m as THREE.Mesh).isMesh) { (m as THREE.Mesh).castShadow = true; } });
+  return g;
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/three/buildings.ts': GAME_BUILDINGS,
   'src/game/three/renderer.ts': RENDERER,
@@ -6620,6 +6748,7 @@ const FILES: Record<string, string> = {
   'src/game/three/race.ts': RACE,
   'src/game/three/markers.ts': MARKERS,
   'src/game/three/splitscreen.ts': SPLITSCREEN,
+  'src/game/three/flight.ts': FLIGHT,
   // The things a world is actually made of (admin 2026-08-27): car, tree, mountain, river, desert,
   // road, animal — each built at a REAL or a LITE tier, because "asli" and "3d" are different asks.
   'src/game/three/objects.ts': OBJECTS,
@@ -6628,7 +6757,7 @@ const FILES: Record<string, string> = {
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight',
 ];
 
 /**

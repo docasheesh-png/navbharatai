@@ -432,6 +432,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/three/environment.ts": [
     "76509d190eeabb44658f377c0487a8217103664d73ed5a3e1888d65e06c9020b"
   ],
+  "src/game/three/flight.ts": [
+    "a647c136c841babfc004666393b3e9c4d2a368fb4b336866fb3193d832b3da0a"
+  ],
   "src/game/three/healthBar.ts": [
     "c05bd26586eedd4d562144678968440d2e71cbd7bef35270955af82f94c1b542"
   ],

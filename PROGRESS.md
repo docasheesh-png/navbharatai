@@ -102742,3 +102742,12 @@ The first exactly-one-lease assertion in the phase-2 handoff race now includes o
   bag gives the ingredients back) / list; ITEM_CRAFTED. The bag screen gains a "Make" list: each recipe, what it needs (have/need)
   and a Craft button enabled only when it can be made.
 - Locked by `tests/craftingTakesAllOrNothing.test.ts` (reversion: partial take / no give-back → 2 fail).
+
+## 2026-11-19 — Game gap P2: aircraft and flight (branch `claude/game-flight`)
+- `three/flight.ts`: createAircraft (procedural jet / prop, nose +Z), createFlightState, flyAircraft (throttle spool, thrust vs
+  drag, climb costs speed, lift fades to zero at the stall → soft controls, nose drop and sink, bank-to-turn with self-levelling,
+  runway steering, take-off only above take-off speed with the nose up, touchdown: gentle → landing, steep / banked / nose-down →
+  crash, ground height followed), flightInput (W nose up, A/D roll, Shift / brake throttle).
+- Honesty fix: the architect prompt and the Athree map's "NOT built yet" list both said aircraft were not built — now they name
+  the flight kit (buildings remain not built).
+- Locked by `tests/aPlaneFliesLikeAPlane.test.ts` (reversion: no sink without lift / no crash check → 2 fail).

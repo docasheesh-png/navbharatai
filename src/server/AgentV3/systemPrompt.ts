@@ -1049,7 +1049,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       brings (ocean, rivers, grass, trees, sky, roads, cars, bikes). The map comes in 12 kinds (continental, plains, hills, alpine, desert,',
     '       tundra, jungle, savanna, archipelago, island, wetland, coast) at any size from 1 to 1000 km: pass archetype and size_km from what the',
     '       user said ("5 km ka registan" -> archetype desert, size_km 5), or leave them out and their words decide. A map under 20 km has no roads',
-    '       or runway (too small to hold one): say so. People and animals are made with author_object (the Object Forge); buildings and aircraft are not built yet.',
+    '       or runway (too small to hold one): say so. People and animals are made with author_object (the Object Forge); a plane to fly is createAircraft + flyAircraft (three/flight.ts); buildings are not built yet.',
     // 🗺️ 2D WORLD (admin 2026-11-19): the big map for a 2D game, joined from pre-made sample chunks.
     '    7b. run_recipe({ name: "generate_world_2d" }) — the big map for a 2D game whose user wants a big world in any words',
     '       (src/game/world2d/): an endless top-down map joined seamlessly from pre-made sample chunks, with roads, collision,',
@@ -1158,6 +1158,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  build the car economy.equipped(\'car\') names (again on SHOP_CHANGED), and read upgrades with economy.stat(id, base, perLevel).',
     '  MUSIC plays by itself and follows the game (calm menu, action play, tense on BOSS_SPAWNED, a sting on win/loss, lowered',
     '  when paused or talking). Do not start your own background loop; options.music changes cues, audio.load(\'music:action\', url) a track.',
+    '  FLIGHT: createAircraft / createFlightState / flyAircraft(plane, state, flightInput(ctx.input), dt, { ground }) from',
+    '  src/game/three/flight.ts — take-off, stall, bank-to-turn, landing and crash are in it; ctx.follow(plane) frames it.',
     '  SMOOTHNESS is the kit\'s job: it lowers the picture by itself when a phone struggles (Settings → Auto quality, FPS counter).',
     '  Never set the renderer\'s pixel ratio or shadows yourself; read game.fps / game.quality if a game needs to cut its own extras.',
     '  POWER-UPS AND DROPS: powerUps.define / give / active / value from src/game/core/powerups.ts (they pause with the game and end',

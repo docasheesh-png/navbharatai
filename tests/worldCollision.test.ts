@@ -44,6 +44,10 @@ export async function loadGameAsset(asset: { height: number }) {
   root.add(body);
   return { root, source: 'model' };
 }
+// The real runtime's customization helpers (2026-11-19); this stand-in leaves models unchanged.
+export const customizedGameAsset = (asset: unknown) => asset;
+export const applyGameAssetCustomization = () => {};
+export const loadOwnGameAsset = loadGameAsset;
 `);
 });
 afterAll(() => rmSync(fixture, { recursive: true, force: true }));

@@ -1,0 +1,1106 @@
+{
+  "checkedAt": "2026-11-19",
+  "renderer": "Chromium headless, SwiftShader WebGL, 390x844 viewport",
+  "results": [
+    {
+      "id": "lib3-burger",
+      "sha256": "ee82f9ef980fed1a9c177e577d07b2237d8b153ecb428745ff24c035f68134e0",
+      "bytes": 84780,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1622,
+          "changedPixels": 2413,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1622,
+          "changedPixels": 2413,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-dinner",
+      "sha256": "0319a3b54d9b343e8799a57d6917d745a7ba84c01484f4daa30569568cb7a949",
+      "bytes": 67216,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1196,
+          "changedPixels": 2347,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1196,
+          "changedPixels": 2347,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-stew",
+      "sha256": "f191348f4c1bd7fd0a1f2a819304242ee185deb7f92b4fe71101860eae050e6a",
+      "bytes": 45408,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 560,
+          "changedPixels": 1841,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 560,
+          "changedPixels": 1841,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-tomato",
+      "sha256": "412700746b76bb07a551d65cf762f51b01cc68ff80729dc99ff0cd2f61db2fee",
+      "bytes": 35784,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 388,
+          "changedPixels": 2010,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 388,
+          "changedPixels": 2010,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-carrot",
+      "sha256": "e2b8444a969c8bbf0212de18197c67f1257e5accd932dada8610e0bb105e50f4",
+      "bytes": 32544,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 324,
+          "changedPixels": 1719,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 324,
+          "changedPixels": 1719,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-potato",
+      "sha256": "38640199a6f3e3af3a11cc710f8cbb48d100c50639cd72120662a046287cd3bd",
+      "bytes": 25956,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 156,
+          "changedPixels": 2593,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 156,
+          "changedPixels": 2593,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-onion",
+      "sha256": "db88f1d0901403e34827d0fda5fe62c65494496b525c34ebb6b05df8a4d3e91d",
+      "bytes": 32792,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 304,
+          "changedPixels": 1762,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 304,
+          "changedPixels": 1762,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-cheese",
+      "sha256": "b33a148d8f4aa41340fbe3ca4251e4c69b1bb9bed2acf43526d9704dd956ad1d",
+      "bytes": 32516,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 258,
+          "changedPixels": 2690,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 258,
+          "changedPixels": 2690,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-vegetable-crate",
+      "sha256": "f7eacb8322131b0e91d9d0b2a206e7835cabce9961b457e114ddca37f72e148a",
+      "bytes": 104360,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 2072,
+          "changedPixels": 3299,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 2072,
+          "changedPixels": 3299,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-oven",
+      "sha256": "02ae99664a538409784498482a6985df11092f65506eabca4227fcf7208b8a68",
+      "bytes": 57832,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 542,
+          "changedPixels": 3934,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 542,
+          "changedPixels": 3934,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-fridge",
+      "sha256": "94416443562ac74d6e96796af1fa7ac0b2ad513c98ec0fc12636e96c69b8d4f1",
+      "bytes": 51040,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 614,
+          "changedPixels": 3847,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 614,
+          "changedPixels": 3847,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-stove",
+      "sha256": "129375cb612f3eec2625db281863482161229fa1ee8283860e6b83bdc27c4749",
+      "bytes": 77108,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1084,
+          "changedPixels": 3187,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1084,
+          "changedPixels": 3187,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-cooking-pot",
+      "sha256": "d06f5dee5b534b0da8ad287eb7e88fb0ad0a619e088dc5046a391cb25cf0bf48",
+      "bytes": 35404,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 324,
+          "changedPixels": 2044,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 324,
+          "changedPixels": 2044,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-frying-pan",
+      "sha256": "ee5fd4da654218660d73ac0f6b7cbac30049812c726ec9f5e84cdb6486b724fa",
+      "bytes": 33468,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 310,
+          "changedPixels": 1166,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 310,
+          "changedPixels": 1166,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-round-table",
+      "sha256": "e2c436aa4ee5d60257a26566b00056fbd4f1dfe9d4a92f6975f6a74f656ac0d9",
+      "bytes": 34932,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 312,
+          "changedPixels": 1657,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 312,
+          "changedPixels": 1657,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-kitchen-counter",
+      "sha256": "56c0b768eb2e2bd3cdabd0d518260cb8e61b23d4c3270837c1c2ff67d22ccfc0",
+      "bytes": 30780,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 168,
+          "changedPixels": 3448,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 168,
+          "changedPixels": 3448,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-pumpkin",
+      "sha256": "7486fd95a3f96cda4dfc2bc35fb59dbbcd9edd27e17808d4a554c2d428fc91d4",
+      "bytes": 25120,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 306,
+          "changedPixels": 2222,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 306,
+          "changedPixels": 2222,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-jack-o-lantern",
+      "sha256": "04e8ae55d1b3070b5c5c447755ba1fa574bce605cd4c9dfbd98c8dfa389b56cc",
+      "bytes": 29852,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 374,
+          "changedPixels": 2040,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 374,
+          "changedPixels": 2040,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-gravestone",
+      "sha256": "16ccbc9f11fcff693a342e723c929438bc125f92e5ec97c5dd8d2bc29e0d05e1",
+      "bytes": 28812,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 271,
+          "changedPixels": 3522,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 271,
+          "changedPixels": 3522,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-grave",
+      "sha256": "33c7f1e724ff9f4d4de8286da4c7555b1eaecf2903dbc6a497d3fe24c575d0d5",
+      "bytes": 32124,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 323,
+          "changedPixels": 2730,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 323,
+          "changedPixels": 2730,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-coffin",
+      "sha256": "1e0b68944a31527bf508c13e58ff7e87d693277f2210fca407369856ffb61132",
+      "bytes": 35212,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 316,
+          "changedPixels": 2371,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 316,
+          "changedPixels": 2371,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-skull",
+      "sha256": "7744d1a4c8ad0b90c56f6a8f61deef0f183904afd2a2ae1820f0ec3bdbe2292b",
+      "bytes": 29056,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 344,
+          "changedPixels": 2761,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 344,
+          "changedPixels": 2761,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-dead-tree",
+      "sha256": "c3db4052bc4154db4f9d3d980ae26273f54bc4c327859d7f3e6f1f62aa8dad6e",
+      "bytes": 23700,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 256,
+          "changedPixels": 404,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 256,
+          "changedPixels": 404,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-pine-tree",
+      "sha256": "c4f902f22057c5c14de21e2eff3f847a0609a7f50964f73cc730f3effffee0f2",
+      "bytes": 33996,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 318,
+          "changedPixels": 1345,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 318,
+          "changedPixels": 1345,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-lantern",
+      "sha256": "158fcca4191f1803487074c0090a1914a980d16531248c2a11d596a2d45da8ab",
+      "bytes": 28908,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 264,
+          "changedPixels": 2637,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 264,
+          "changedPixels": 2637,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-crypt",
+      "sha256": "31ebdcee8dd4517c73af76c2d00f91f2c7952877188e8431fe33b5df7f574da8",
+      "bytes": 75036,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 952,
+          "changedPixels": 3436,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 952,
+          "changedPixels": 3436,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-iron-fence",
+      "sha256": "8526892a8143c9b462de3c51e12897aa942a2cdaf84dd14f303754e532a7b2b2",
+      "bytes": 43140,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 380,
+          "changedPixels": 2079,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 380,
+          "changedPixels": 2079,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-cemetery-gate",
+      "sha256": "3bccdd8bc0957178e34b9506b5bc195cb261af087f8c3887b5cd01340bd5a27d",
+      "bytes": 76344,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 868,
+          "changedPixels": 1899,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 868,
+          "changedPixels": 1899,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-lander",
+      "sha256": "7b55f9a6a836b2d47a816d73ac5ecca920f855dc4073a66c98393528684e8111",
+      "bytes": 108420,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1464,
+          "changedPixels": 2115,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1464,
+          "changedPixels": 2115,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-space-rover",
+      "sha256": "b81b728a112ff48883e6031984a3bb5c87339e0802351e39ca0f45339021e23f",
+      "bytes": 69528,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1118,
+          "changedPixels": 2312,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1118,
+          "changedPixels": 2312,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-wind-turbine",
+      "sha256": "1e6b7609f2dc1f643aa558a4e539b4070be42fe0d4fe16412d79ddfe0d07e6b0",
+      "bytes": 57940,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 632,
+          "changedPixels": 687,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 632,
+          "changedPixels": 687,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-solar-panel",
+      "sha256": "9d4217b13e6f3d9ae2f863bc6455137b9e2e5009c42e580e37ca93d791665369",
+      "bytes": 33820,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 118,
+          "changedPixels": 2678,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 118,
+          "changedPixels": 2678,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-space-base",
+      "sha256": "5706e5ff3321b8dc676fa5e03b12f8b31694ffb326ae332935248d2ae9615251",
+      "bytes": 64208,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 586,
+          "changedPixels": 2584,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 586,
+          "changedPixels": 2584,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-landing-pad",
+      "sha256": "88168ea51e2fd0e56e1a7b7650e03a62d43c0f766956cec9de247eec8067f814",
+      "bytes": 54632,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 478,
+          "changedPixels": 1854,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 478,
+          "changedPixels": 1854,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-cargo-container",
+      "sha256": "cf74f859c6f15b0b378ae0a3ba7f565535be3f2ae7c3023729250b12679766c5",
+      "bytes": 34016,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 128,
+          "changedPixels": 3587,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 128,
+          "changedPixels": 3587,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-drill-rig",
+      "sha256": "7cdad3f144024f7e616e150139149b473e980db52f9b5d5c84a67161d442b3af",
+      "bytes": 96208,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1198,
+          "changedPixels": 2496,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1198,
+          "changedPixels": 2496,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-fountain",
+      "sha256": "206e9afdc8e6cff2bb189c21de482c2d3a309e55a5ab32d0e9e12a2809c41d48",
+      "bytes": 24124,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 152,
+          "changedPixels": 2188,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 152,
+          "changedPixels": 2188,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-garage",
+      "sha256": "9cdfb058bab040ff3efa703792eab9a1f5b84ec0d89f62665bbc96d573c11609",
+      "bytes": 29256,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 196,
+          "changedPixels": 3519,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 196,
+          "changedPixels": 3519,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-small-house-a",
+      "sha256": "07e131be53efcd770e4482e7a2016363ca363a3f9fcc5ccb23217396e9535199",
+      "bytes": 49708,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 452,
+          "changedPixels": 3990,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 452,
+          "changedPixels": 3990,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-small-house-b",
+      "sha256": "5ade1244a457c73479e2e8cf848bcfe055bc8159fa3b5d7a6e5b601fcc8c27df",
+      "bytes": 59816,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 600,
+          "changedPixels": 3150,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 600,
+          "changedPixels": 3150,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-blacksmith",
+      "sha256": "402d3eb8516d58dae4b74140ad70d275bee7c33c34241de28f33dfc72b4c84f3",
+      "bytes": 140248,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 2410,
+          "changedPixels": 1939,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 2410,
+          "changedPixels": 1939,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-mine",
+      "sha256": "60cc44a2a307c3e76017a65cfaf90c76536ee6b6f01eaa3be00b7d0da906e859",
+      "bytes": 83224,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1126,
+          "changedPixels": 2196,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1126,
+          "changedPixels": 2196,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-archery-range",
+      "sha256": "c14c7929b815c7431747f979236e804d8b3ce30f400521919e78a92e33bec40b",
+      "bytes": 219572,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3819,
+          "changedPixels": 2326,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3819,
+          "changedPixels": 2326,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-lumbermill",
+      "sha256": "ef350f8fe8ae6d4ccf3635d41ead87a8a030172ba92dc3384a5d9c53c329396c",
+      "bytes": 185348,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3170,
+          "changedPixels": 2170,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3170,
+          "changedPixels": 2170,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-pine-forest",
+      "sha256": "5b49ec3b99bd7ff64d19f46166e3a39cb0b0875ad58ace0859217c100b9f6745",
+      "bytes": 69148,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1540,
+          "changedPixels": 2052,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1540,
+          "changedPixels": 2052,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-boulder",
+      "sha256": "ad4471e0d0a6d438a9462153755aa2b273d2d280860d66bab53da051d26e73bf",
+      "bytes": 21480,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 71,
+          "changedPixels": 1940,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 71,
+          "changedPixels": 1940,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-water-lily",
+      "sha256": "21d1937e73dcecbc35badfd8024c556d58187d6d061dc3aa09d3734a41965c25",
+      "bytes": 19768,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 68,
+          "changedPixels": 1326,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 68,
+          "changedPixels": 1326,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-door",
+      "sha256": "a793d6c9fdafaf916ee173681eefd62f5320f26e9fde0676cc6cb54b6ddac861",
+      "bytes": 45852,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 296,
+          "changedPixels": 3000,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 296,
+          "changedPixels": 3000,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-stairs",
+      "sha256": "6bbbd79b486d0193306b3b4a5a4de26a011791d916259a6f61f452dbd7a9010f",
+      "bytes": 35028,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 68,
+          "changedPixels": 3749,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 68,
+          "changedPixels": 3749,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "lib3-pallet",
+      "sha256": "bd3921884ae0e5682d75f040135c7c78d511d388428b8e0b7cf8f711eb47c513",
+      "bytes": 40276,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 132,
+          "changedPixels": 2330,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 132,
+          "changedPixels": 2330,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    }
+  ]
+}

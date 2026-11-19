@@ -44,16 +44,14 @@ describe('the fixed/render split — the bug that makes a game unfair per monito
 
   it('HIT-STOP freezes the simulation but still ticks input', () => {
     // Frozen input swallows the press that happened during the freeze, and the player feels ignored.
-    // The simulation also holds while someone is talking (core/dialogue.ts) — the freeze test is the same block.
-    expect(game).toContain('if (!this.feel.frozen && !talking)');
+    expect(game).toContain('if (!this.feel.frozen)');
     const fixed = game.slice(game.indexOf('private fixedUpdate'), game.indexOf('private render'));
-    const frozenAt = fixed.indexOf('if (!this.feel.frozen && !talking)');
+    const frozenAt = fixed.indexOf('if (!this.feel.frozen)');
     const endFrameAt = fixed.indexOf('this.input.endFrame(');
     expect(endFrameAt).toBeGreaterThan(frozenAt);
     // 2026-11-19: the press made DURING the freeze is kept for the step that runs next (it used to be wiped unseen,
     // which is why a tap right after a shot sometimes did nothing).
-    // …but not a press made while talking, and not the one that closed the box (that would jump).
-    expect(fixed).toContain('this.input.endFrame(this.feel.frozen && !talking)');
+    expect(fixed).toContain('this.input.endFrame(this.feel.frozen)');
     // endFrame must sit OUTSIDE the freeze block: between the `if` and endFrame the braces balance,
     // which is only true once that block has closed.
     const between = fixed.slice(frozenAt, endFrameAt).replace(/\/\/.*$/gm, '');

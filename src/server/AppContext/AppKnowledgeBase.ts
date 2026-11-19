@@ -97,6 +97,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['game library', 'asset library', 'librarian', 'game assets', 'maps', 'compatible models', '3d models', 'game objects', 'ready models', 'motorcycle model', 'castle model', 'coin model', 'skeleton enemy', 'food model', 'graveyard', 'space base', 'kitchen model', 'animal model', 'people model', 'boat model', 'kaccha road', 'janwar', 'naav'],
   },
   {
+    id: 'game_library_picker',
+    name: 'Game library screen (browse 3D models with pictures)',
+    path: 'NavBharatAI Pro → the mode button under the message box (Build / Plan) → Game library',
+    description: 'Shows the ready 3D models of the NavBharatAI library as a grid with a picture each: people, animals, vehicles, buildings, nature, props and more. Search by name (cow, castle, car), filter by kind, and see which models can walk, run or fly. Tapping a model fills the message box with an instruction to add that exact model to the current game; nothing runs until you send it. If the library is not switched on for your account the screen says so, and games use the built-in shapes instead. A few models show a plain tile instead of a picture.',
+    howToUse: 'Open a game project, tap the mode button under the message box, choose Game library, search or pick a kind, tap a model, then review and send the message. After the build, every added model can still be recoloured, resized, animated or replaced in src/game/three/assetCustomizations.ts or by asking in chat.',
+    relatedFeatures: ['game_asset_librarian', 'agentv3_builder'],
+    keywords: ['game library', 'model library', 'browse models', '3d model picker', 'add model to game', 'model gallery', 'pick a model', 'library pictures', 'model dikhao', 'game ke models', 'library kholo', 'janwar model', 'gaadi model'],
+    aiSurface: 'pro_chat',
+  },
+  {
     id: 'pro_private_binary_originals',
     name: 'Private original-file storage (when enabled)',
     path: 'NavBharatAI Pro → Choose file; Private attached files',

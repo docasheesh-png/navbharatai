@@ -10325,7 +10325,14 @@ export class ToolDispatcher {
         const alRec = (input as Record<string, unknown>) || {};
         const raw = Array.isArray(alRec.models) ? alRec.models : [];
         const asked = raw.map((m) => (typeof m === 'string' ? { subject: m } : m && typeof m === 'object' ? m as Record<string, unknown> : null))
-          .filter((m): m is Record<string, unknown> => !!m && typeof m.subject === 'string' && m.subject.trim() !== '').slice(0, 6);
+          .filter((m): m is Record<string, unknown> => !!m && ((typeof m.subject === 'string' && m.subject.trim() !== '') || typeof m.id === 'string')).slice(0, 6);
+        // An exact library id (what the in-app Game library sends) pins THAT model: other models serving its subjects
+        // are left out of this call's catalogue, so "the brown cow I tapped" never arrives as a different cow.
+        const pinned = asked.map((m) => typeof m.id === 'string' ? REVIEWED_GAME_ASSETS.find((c) => c.id === m.id) : undefined);
+        asked.forEach((m, i) => { const pin = pinned[i]; if (pin) m.subject = pin.subjects[0]; else if (typeof m.subject !== 'string') m.subject = String(m.id); });
+        const pins = pinned.filter((c): c is NonNullable<typeof c> => !!c);
+        const pinnedSubjects = new Set(pins.flatMap((c) => c.subjects));
+        const catalogue = pins.length ? REVIEWED_GAME_ASSETS.filter((c) => pins.includes(c) || !c.subjects.some((s2) => pinnedSubjects.has(s2))) : undefined;
         if (!asked.length) return 'Name the library models to add, for example: add_library_models({ models: [{ subject: "cow" }, { subject: "farmer", animation: "walk" }] }). Find names with object_spec({ library_query: "…" }).';
         if (!externalGameAssetsEnabled(process.env, this.libraryOwnerUid)) {
           return 'The NavBharatAI model library is not switched on for this account, so no model was added. Build these objects with the existing recipes (object_spec / the 3D kit builders) instead.';
@@ -10347,7 +10354,7 @@ export class ToolDispatcher {
           runtime: await read('src/game/three/externalAssets.ts'),
         };
         const workspace = { writeFile: (id: string, p2: string, c: string) => this.actuator.writeFile(id, p2, c), writeBinaryFile: (id: string, p2: string, b: string) => this.actuator.writeBinaryFile!(id, p2, b), runCommand: (id: string, c: string) => this.actuator.runCommand(id, c) };
-        const result = await addLibraryModels({ requirements, workspaceId: this.workspaceId, workspace, signal: AbortSignal.timeout(90_000), verifiedOwnerUid: this.libraryOwnerUid ?? undefined, existing });
+        const result = await addLibraryModels({ requirements, ...(catalogue ? { catalogue } : {}), workspaceId: this.workspaceId, workspace, signal: AbortSignal.timeout(90_000), verifiedOwnerUid: this.libraryOwnerUid ?? undefined, existing });
         const ready = result.outcomes.filter((o) => o.outcome.kind === 'model').map((o) => o.subject);
         const missed = result.outcomes.filter((o) => o.outcome.kind !== 'model').map((o) => o.subject);
         if (result.status !== 'prepared' || !ready.length) return `No library model could be added this time (${missed.join(', ') || 'none ready'}); build ${[...missed, ...unknown].join(', ') || 'these objects'} with the existing recipes instead. Nothing in the game was changed.`;

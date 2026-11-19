@@ -102856,3 +102856,16 @@ Q-2947–Q-2949 OPEN (edit-miss watch, browser-tool outages without detail, Surp
   into the game's loader/manifest/credits; the user's assetCustomizations.ts is never replaced; the runtime is written only
   when missing or too old for the new loader. Honest answers when the library is off, a name is not in it, or the sandbox
   cannot write binary files. Verified end-to-end: castle + motorcycle added to a built village game, 8/8 models in Chromium.
+
+## 2026-11-19 — The Game library on screen (item 3 of the admin's next-level list)
+- **What:** Pro → mode button → **Game library**: a searchable, filterable grid of all 259 reviewed models with a picture
+  each; tapping one fills the composer with "add the <name> model … (library id: "<id>")" — nothing runs until sent.
+- **Server:** `GET /api/agentv3/game-library` (signed-in, free, no model call; `enabled` is the same per-account gate the
+  builder uses) and `GET /api/agentv3/game-library/thumb/:hash` (serves only a catalogue-hash file).
+- **Exact model:** `add_library_models` takes `{ id }`; other models serving that id's subjects are left out of the call's
+  catalogue, so the tapped cow is the cow that arrives.
+- **Pictures:** 258 webp renders (1.1 MB) in `assets/game-models/thumbs/`, which the production image already copies;
+  `scripts/library/renderLibraryThumbnails.mts` renders missing ones after a new batch. The one CC BY model has a plain
+  tile (a picture would need an on-screen credit; users never see source names). Names drop internal batch prefixes.
+- **Proof:** the real picker bundled into Chromium against the real server function: grid renders, search "cow" → "Cow",
+  tap → composer holds the id instruction, no page errors. Locks: `tests/theGameLibraryIsOnScreen.test.ts` (12).

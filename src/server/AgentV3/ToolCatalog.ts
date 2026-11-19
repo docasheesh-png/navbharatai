@@ -2522,8 +2522,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         properties: {
           models: {
             type: 'array', maxItems: 6,
-            items: { type: 'object', properties: { subject: { type: 'string', maxLength: 64 }, animation: { type: 'string', enum: ['walk', 'run', 'fly'] } }, required: ['subject'] },
-            description: 'The library models to add, e.g. [{ "subject": "cow" }, { "subject": "farmer", "animation": "walk" }].',
+            items: { type: 'object', properties: { subject: { type: 'string', maxLength: 64 }, id: { type: 'string', maxLength: 80 }, animation: { type: 'string', enum: ['walk', 'run', 'fly'] } } },
+            description: 'The library models to add, e.g. [{ "subject": "cow" }, { "subject": "farmer", "animation": "walk" }]. When the user\'s message names an exact library id (sent from the in-app Game library), pass it as { "id": "…" } so that exact model is used.',
           },
         },
         required: ['models'],

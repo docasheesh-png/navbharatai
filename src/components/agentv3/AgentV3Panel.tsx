@@ -79,6 +79,7 @@ import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterA
 import { SplitDivider } from './SplitDivider';
 import { loadSplit, saveSplit, clampSplit, paneSplitVars } from './splitPane';
 import { NextSuggestionsBulb } from './NextSuggestionsBulb';
+import { GameLibraryPicker } from './GameLibraryPicker';
 import { useScreenWakeLock } from '../../lib/useScreenWakeLock';
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
@@ -228,6 +229,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // composer as a dropdown selector — position only, identical function).
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [adviseIdeasOpen, setAdviseIdeasOpen] = useState(false);
+  const [gameLibraryOpen, setGameLibraryOpen] = useState(false);
   const [adviseCount, setAdviseCount] = useState(0);
   const modeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const settingsTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -5893,14 +5895,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               <div className="relative">
                 {modeMenuOpen && (
                   <ComposerPopover anchorRef={modeTriggerRef} label="Chat mode"
-                    width={adviseIdeasOpen ? 300 : 240}
-                    onClose={() => { setAdviseIdeasOpen(false); setModeMenuOpen(false); }}>
+                    width={gameLibraryOpen ? 320 : adviseIdeasOpen ? 300 : 240}
+                    onClose={() => { setAdviseIdeasOpen(false); setGameLibraryOpen(false); setModeMenuOpen(false); }}>
                       <div className="flex items-center justify-end px-1.5 pt-1">
                         <button
                           type="button"
                           aria-label="Close"
                           title="Close"
-                          onClick={() => { setAdviseIdeasOpen(false); setModeMenuOpen(false); }}
+                          onClick={() => { setAdviseIdeasOpen(false); setGameLibraryOpen(false); setModeMenuOpen(false); }}
                           className="h-9 w-9 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-raised"
                         >
                           <X className="w-4 h-4" />
@@ -5936,7 +5938,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       ))}
                       <button
                         type="button"
-                        onClick={() => setAdviseIdeasOpen((v) => !v)}
+                        onClick={() => { setGameLibraryOpen(false); setAdviseIdeasOpen((v) => !v); }}
                         title="Advise — ideas for what to build next"
                         className={`w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left ${adviseIdeasOpen ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink hover:bg-raised'}`}
                       >
@@ -5946,7 +5948,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                           <span className="ml-auto min-w-[15px] h-[15px] px-1 rounded-full bg-amber-500 text-[9px] font-black text-on-accent flex items-center justify-center">{adviseCount}</span>
                         )}
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => { setAdviseIdeasOpen(false); setGameLibraryOpen((v) => !v); }}
+                        title="Game library — ready 3D models to add to your game"
+                        aria-expanded={gameLibraryOpen}
+                        className={`w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left ${gameLibraryOpen ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink hover:bg-raised'}`}
+                      >
+                        <span>🎮</span>
+                        <span>Game library</span>
+                      </button>
                       </div>
+                      {gameLibraryOpen && (
+                        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-line">
+                          <GameLibraryPicker
+                            onPick={(text) => { setPrompt(text); setGameLibraryOpen(false); setModeMenuOpen(false); setTimeout(() => composerRef.current?.focus(), 0); }}
+                          />
+                        </div>
+                      )}
                       {adviseIdeasOpen && (
                         <div className="nb-mode-ideas min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-line">
                           <NextSuggestionsBulb

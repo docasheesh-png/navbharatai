@@ -102389,3 +102389,15 @@ Tests: `visionImageCoverage.test.ts` covers the census, the source guard, and th
 **Current tally after D21–D22:**22 source/implementation findings;94 queue rows through Q-2880 (58 IN PROGRESS/36 BLOCKED). The earlier76 historical classifications,81 E references, nine accepted/evidence-only dispositions and three unallocated draft IDs are unchanged. Earlier validation failures remain recorded and are not relabelled passed.
 
 **D21 diagnostic batch and D22 proof:**the predetermined ten-case batch completed10/10, exit0,36.69s, with no case retry or early stop. Each fresh-wallet race produced one500-token debit and one zero-debit replay,9,500-token/₹95 balance, one operation/immutable ledger record and a valid chain; raw outcomes and read-only audits were retained. This does not reproduce or explain the original failed case, so D21 remains BLOCKED and no wallet logic, retry, timeout or invariant change is justified. D22’s one-line raw-result assertion message passes Node22 syntax checking and leaves the predicate unchanged. The new commit requires all applicable checks again; successful b34 coverage is retained as prior evidence, not final new-source proof. Final aggregate status remains unpassed pending the next full gate.
+
+## 2026-11-19 — Game library: storage budget + MIT licence (admin request: bigger game object library)
+- Admin asked for 10-20 free models per game subject (people, animals, vehicles, water, terrain, roads...) in the
+  NavBharatAI library. Survey found 100 subject specs exist but only 47 real models; the 64-entry catalogue cap blocked growth.
+- Admin decisions: (1) byte budget instead of a count (320 MiB kept; `CATALOGUE_STORAGE_BUDGET_BYTES`, per-entry `bytes`,
+  cache + engine reject bytes that disagree with the reviewed size); (2) MIT accepted next to CC0/CC-BY-4.0, notice required
+  and the full MIT notice shipped in ATTRIBUTION.txt; (3) a personal `navbharatai` cloud environment allowing Kenney,
+  Quaternius and Poly Pizza hosts. kenney.nl and poly.pizza still refuse automated clients; not bypassed.
+- Tests: `catalogueBudget.test.ts`, MIT case in `assetIntegration.test.ts`, both proven by reversion.
+- NEXT: admit batches of CC0/MIT GitHub models (KayKit City/Medieval/Prototype/Skeletons, Kenney starter kits) through the
+  existing admission; design a hash-pinned NavBharatAI-hosted copy for non-GitHub CC0 sources (Quaternius animals/nature).
+  Plan: `docs/game-engine/library-growth-plan-2026-11-19.md`.

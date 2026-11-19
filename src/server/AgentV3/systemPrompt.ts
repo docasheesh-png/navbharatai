@@ -1139,6 +1139,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  a 3-2-1 countdown (drive only when race.canDrive()), the player\'s place and time on the Hud, and results at the finish;',
     '  RacingRoadGame already races 3 rivals. A SHOOTER: the Hud shows the crosshair, ammo, hit markers and damage numbers from the',
     '  kit\'s events; put attachHealthBar(enemy, () => hp.fraction) over every enemy and game.setBossBar(name, read) on a boss.',
+    '  GRENADES: simulateThrow / blastDamage from src/game/systems/grenade.ts (draw flight.points as the aim arc; blocked = cover).',
+    '  AIM ASSIST on touch and gamepad only: aimAssist(aim, enemies) from systems/aimassist.ts — never for a mouse.',
     '  LEVELS: levels.define([{ name }…], gameId) from src/game/core/levels.ts, build each level on LEVEL_STARTED { index },',
     '  call levels.complete(stars) when it is beaten (the Hud offers Next level), levels.checkpoint(pos) at a checkpoint and',
     '  respawn at levels.respawnPoint() after a death; scale enemies by difficultyScale() from core/settings.ts (the player picks',

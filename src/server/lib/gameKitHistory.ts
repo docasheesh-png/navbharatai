@@ -370,11 +370,17 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "7e916aab7186a35f9f061b4e4097b9ee6aa6cb3e104aa13b9c3b0ab5e6eab5a6",
     "f261768e9794548a71cede4e0471a5059e662eedb165a06095c7eceb2af1f014"
   ],
+  "src/game/systems/aimassist.ts": [
+    "ec3ca40df8e8a87f454cf4dd1e74698be5fbde06e5ac5aad32c6169b0588411b"
+  ],
   "src/game/systems/combat.ts": [
     "aa1173d83fb2800002182ffaa42f89cf76ceb7a8b6123bc709f679ac2284aaa3"
   ],
   "src/game/systems/director.ts": [
     "c92437c33c810b3a2064440eaa25a5feb8e4a0465b40e0fd475e94e1054ca31e"
+  ],
+  "src/game/systems/grenade.ts": [
+    "e482cb46dcc1bd5f3f0a6955f2934623aad71e506e1b27049b955a7d0739293f"
   ],
   "src/game/systems/nav.ts": [
     "fb24fe5e4dfc56e9489a3a0a8b3146df95be471f9725f6c03292ec99718ab0d8",

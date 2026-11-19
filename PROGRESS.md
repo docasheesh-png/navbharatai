@@ -102719,3 +102719,10 @@ The first exactly-one-lease assertion in the phase-2 handoff race now includes o
   released by pause / game over / win / menu; the browser dropping the lock mid-play (its Esc) pauses the game.
 - `options.credits` → a Credits button and panel on the start screen.
 - Locked by `tests/continuePointerLockAndCredits.test.ts` (reversion: no autosave / no pause on lock loss → 2 fail).
+
+## 2026-11-19 — Game gap P2: grenades and aim assist (branch `claude/game-grenade-aimassist`)
+- `systems/grenade.ts`: throwVelocity, simulateThrow (gravity, ground height, bounce, friction, rolling stop, fuse — the same
+  path for the aim arc and the throw), blastDamage (linear falloff to the radius, minDamage, cover blocks, impulse away).
+- `systems/aimassist.ts`: a partial pull (strength) toward the target nearest the crosshair inside a cone and in range, with an
+  optional line-of-sight test; never a snap; touch/gamepad only (prompt line).
+- Locked by `tests/grenadesAndAimAssistWork.test.ts` (reversion: blast through cover / full snap → 2 fail).

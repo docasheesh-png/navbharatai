@@ -3,6 +3,7 @@ import { createDurableAssetCache } from './assetCache';
 import { createAssetProviders, validateCatalogue, polyHavenContainsFile, REVIEWED_GAME_ASSETS } from './providers';
 import { syntheticGlb, syntheticCandidate, paddedSyntheticGlb } from '../../../../tests/fixtures/gameAssetFixtures';
 import { compactGlb } from './assetOptimize';
+import { candidateMatches } from './assetPolicy';
 import { acquireGameAsset } from './assetEngine';
 import { persistProjectAsset, type GameAssetWorkspace } from './assetProject';
 import { prepareGameAssets, MIT_PERMISSION_NOTICE } from './assetSeed';
@@ -50,7 +51,14 @@ describe('L3 acquisition, durable restore and bundle contract (synthetic)', () =
   it('requests animal locomotion without substituting a fox for other animals or inventing clips', () => {
     expect(gameAssetRequirements('walking foxes', REVIEWED_GAME_ASSETS)).toEqual([{ subject: 'fox', animation: 'walk' }]);
     expect(gameAssetRequirements('running human', REVIEWED_GAME_ASSETS)).toEqual([{ subject: 'human', animation: 'run' }]);
-    expect(REVIEWED_GAME_ASSETS.filter(c => c.subjects.includes('dog'))).toEqual([]);
+    // 2026-11-19: a real STATIC dog model exists now. A walking dog still gets no model (never the fox, never an invented clip):
+    // the requirement asks for the walk role and no dog entry carries one, so the procedural dog keeps walking.
+    const dogs = REVIEWED_GAME_ASSETS.filter(c => c.subjects.includes('dog'));
+    expect(dogs.length).toBeGreaterThan(0);
+    expect(dogs.every(c => !c.subjects.includes('fox') && c.animations.length === 0)).toBe(true);
+    const walkingDog = gameAssetRequirements('walking dog', REVIEWED_GAME_ASSETS);
+    expect(walkingDog).toEqual([{ subject: 'dog', animation: 'walk' }]);
+    expect(REVIEWED_GAME_ASSETS.filter(c => candidateMatches(c, walkingDog[0]))).toEqual([]);
   });
   it.each([
     // UPDATED 2026-11-04 (L3 step 4): named subjects first, then the scenery this kind of game needs

@@ -31,8 +31,10 @@ describe('game library storage budget (admin decision 2026-11-19: bytes, not a 6
     expect(() => validateCatalogue(catalogue)).not.toThrow();
     expect(gameAssetRequirements('3D island game with a lighthouse', catalogue)).toEqual([{ subject: 'lighthouse' }]);
   });
-  it('the shipped catalogue fits the budget', () => {
+  it('the shipped catalogue fits the budget, and every entry declares its measured size', () => {
     expect(catalogueStorageBytes(REVIEWED_GAME_ASSETS)).toBeLessThanOrEqual(CATALOGUE_STORAGE_BUDGET_BYTES);
+    // An undeclared size silently costs 5 MiB of budget; scripts/library/measureCatalogueBytes.mts records the real one.
+    expect(REVIEWED_GAME_ASSETS.filter(c => c.bytes === undefined).map(c => c.id)).toEqual([]);
   });
   it('bytes that disagree with the reviewed size are rejected by the cache and the engine', async () => {
     const bytes = syntheticGlb();

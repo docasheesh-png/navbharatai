@@ -84,6 +84,45 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   sawmill: ['sawmill', 'lumber mill', 'lumbermill'], 'pine forest': ['pine forest', 'pine trees', 'pine tree'], boulder: ['boulder', 'boulders'],
   'water lily': ['water lily', 'water lilies', 'lily pad', 'lily pads'], door: ['door', 'doors', 'दरवाज़ा', 'दरवाजा', 'puerta'],
   stairs: ['stairs', 'staircase', 'सीढ़ी', 'सीढ़ियाँ', 'escaleras'], pallet: ['pallet', 'pallets'],
+  // 2026-11-19 library batch 4: people (walk/run), vehicles, boats and animals.
+  man: ['man', 'men', 'आदमी', 'पुरुष', 'hombre'], woman: ['woman', 'women', 'lady', 'औरत', 'महिला', 'mujer'],
+  'old man': ['old man', 'old men', 'grandfather', 'दादा', 'बूढ़ा', 'बुज़ुर्ग'], 'old woman': ['old woman', 'old women', 'grandmother', 'दादी', 'बूढ़ी'],
+  farmer: ['farmer', 'farmers', 'किसान', 'kisan'], 'racing driver': ['racing driver', 'race driver', 'racer', 'racers'],
+  mechanic: ['mechanic', 'mechanics', 'मिस्त्री', 'मैकेनिक'], worker: ['worker', 'workers', 'labourer', 'laborer', 'मज़दूर', 'मजदूर'],
+  businessman: ['businessman', 'businessmen', 'office worker'],
+  ambulance: ['ambulance', 'ambulances', 'एम्बुलेंस'], bicycle: ['bicycle', 'bicycles', 'cycle', 'cycles', 'साइकिल'], bus: ['bus', 'buses', 'बस'],
+  'fire truck': ['fire truck', 'fire trucks', 'fire engine', 'दमकल'], 'garbage truck': ['garbage truck', 'garbage trucks', 'kachra gadi'],
+  'water tanker': ['water tanker', 'water tankers', 'tanker'], 'electric car': ['electric car', 'electric cars', 'ev'],
+  boat: ['boat', 'boats', 'fishing boat', 'नाव', 'नौका', 'kashti', 'barca'], canoe: ['canoe', 'canoes', 'kayak'], jetty: ['jetty', 'pier', 'dock'],
+  capybara: ['capybara', 'capybaras'], toucan: ['toucan', 'toucans'], heron: ['heron', 'herons', 'crane bird', 'बगुला'], frog: ['frog', 'frogs', 'मेंढक'],
+  jaguar: ['jaguar', 'jaguars', 'leopard', 'cheetah', 'तेंदुआ', 'चीता'], puma: ['puma', 'cougar', 'mountain lion'], wolf: ['wolf', 'wolves', 'भेड़िया'],
+  monkey: ['monkey', 'monkeys', 'बंदर', 'mono'], tapir: ['tapir'], sloth: ['sloth', 'sloths'], armadillo: ['armadillo'], 'wild pig': ['wild pig', 'wild boar', 'boar', 'जंगली सूअर'],
+  otter: ['otter', 'otters', 'ऊदबिलाव'], bat: ['bat', 'bats', 'चमगादड़'], whale: ['whale', 'whales', 'व्हेल'], dolphin: ['dolphin', 'dolphins', 'डॉल्फिन'],
+  manatee: ['manatee', 'sea cow'], shark: ['shark', 'sharks', 'शार्क', 'tiburón'], 'hammerhead shark': ['hammerhead', 'hammerhead shark'],
+  'manta ray': ['manta ray', 'stingray', 'ray fish'], seahorse: ['seahorse', 'sea horse'], fish: ['fish', 'fishes', 'मछली', 'machli', 'pez'],
+  turtle: ['turtle', 'turtles', 'tortoise', 'कछुआ'], crab: ['crab', 'crabs', 'केकड़ा'], starfish: ['starfish', 'sea star'],
+  snake: ['snake', 'snakes', 'साँप', 'सांप', 'serpiente'], lizard: ['lizard', 'lizards', 'छिपकली', 'iguana'], 'harpy eagle': ['harpy eagle'],
+  duck: ['duck', 'ducks', 'बत्तख', 'pato'], hummingbird: ['hummingbird', 'hummingbirds'], butterfly: ['butterfly', 'butterflies', 'तितली'],
+  dragonfly: ['dragonfly', 'dragonflies'], ant: ['ant', 'ants', 'चींटी'],
+  // 2026-11-19 library batch 5: public buildings, commerce, energy, nature, farm, street and dirt roads.
+  school: ['school', 'schools', 'स्कूल', 'विद्यालय'], hospital: ['hospital', 'hospitals', 'अस्पताल'], 'police station': ['police station', 'thana', 'थाना'],
+  'fire station': ['fire station'], library: ['library building', 'public library', 'पुस्तकालय'], museum: ['museum', 'museums', 'संग्रहालय'],
+  'town hall': ['town hall', 'city hall'], university: ['university', 'college', 'campus'], monument: ['monument', 'statue', 'स्मारक'],
+  bank: ['bank building', 'बैंक'], hotel: ['hotel', 'hotels', 'होटल'], 'shopping mall': ['shopping mall', 'mall', 'मॉल'], restaurant: ['restaurant', 'restaurants', 'dhaba', 'ढाबा'],
+  supermarket: ['supermarket', 'grocery store', 'kirana'], 'charging station': ['charging station', 'ev charger'], factory: ['factory', 'factories', 'फैक्ट्री', 'कारखाना'],
+  warehouse: ['warehouse', 'godown', 'गोदाम'], port: ['harbour', 'harbor', 'seaport', 'बंदरगाह'], skyscraper: ['skyscraper', 'skyscrapers', 'tower block'],
+  apartment: ['apartment', 'apartments', 'flat building'], bakery: ['bakery', 'bakeries'], dam: ['dam', 'dams', 'बांध', 'बाँध'],
+  'wind farm': ['wind farm', 'windmills farm'], 'nuclear plant': ['nuclear plant', 'power plant'], 'solar farm': ['solar farm', 'solar plant'],
+  'palm tree': ['palm tree', 'palm trees', 'coconut tree', 'नारियल का पेड़'], 'banana tree': ['banana tree', 'banana plant', 'केले का पेड़'],
+  bamboo: ['bamboo', 'बांस'], 'tree stump': ['tree stump', 'stump'], log: ['wooden log', 'fallen log', 'logs', 'लकड़ी का लट्ठा'],
+  'rock pile': ['rock pile', 'pile of rocks', 'stones', 'पत्थर'], flowers: ['flowers', 'flower bed', 'फूल'], 'tall grass': ['tall grass', 'घास'],
+  'lotus leaf': ['lotus leaf', 'lotus leaves', 'lily pad'], 'termite mound': ['termite mound', 'anthill'],
+  scarecrow: ['scarecrow', 'बिजूका'], 'hay bale': ['hay bale', 'hay bales', 'haystack', 'भूसा'], beehive: ['beehive', 'bee hive', 'मधुमक्खी का छत्ता'],
+  'farm gate': ['farm gate'], firewood: ['firewood', 'लकड़ियाँ'], 'vegetable garden': ['vegetable garden', 'kitchen garden'],
+  'traffic cone': ['traffic cone', 'traffic cones', 'cone'], 'food cart': ['food cart', 'thela', 'ठेला', 'popcorn cart'], 'market stall': ['market stall', 'stall', 'stalls'],
+  'stop sign': ['stop sign', 'stop signs'], 'bus stop': ['bus stop', 'bus stops', 'बस स्टॉप'], playground: ['playground', 'park swings', 'झूला'],
+  wheelbarrow: ['wheelbarrow'], 'dirt road tile': ['dirt road tile', 'kaccha road tile', 'kachcha road tile'], 'dirt road curve tile': ['dirt road curve tile'],
+  'road bridge': ['road bridge', 'flyover'],
 };
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
   fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],
@@ -111,7 +150,11 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       stool: ['stool sample', 'stool test'], cabinet: ['cabinet minister', 'cabinet meeting'],
       lamp: ['street lamp', 'traffic lamp'],
       rogue: ['hooded rogue', 'hooded rogues'],
-      flag: ['feature flag', 'red flag'], grave: ['grave danger', 'grave mistake'], door: ['door to door', 'door delivery'], market: ['stock market'], shield: ['shield powerup', 'shield power up'],
+      flag: ['feature flag', 'red flag'], man: ['pac man', 'spider man', 'iron man', 'snow man', 'super man', 'he man', 'ant man', 'old man', 'old men'],
+      woman: ['old woman', 'old women', 'wonder woman'], bat: ['cricket bat', 'baseball bat', 'bat and ball', 'bat ball'], mechanic: ['game mechanic', 'game mechanics'],
+      worker: ['service worker', 'web worker', 'office worker'], bus: ['bus stop', 'bus stops', 'school bus stop'], school: ['school bus'], bank: ['river bank', 'blood bank'],
+      ant: ['ant man'], log: ['log in', 'login', 'log file', 'log out'],
+      bicycle: ['day night cycle', 'day and night cycle', 'life cycle', 'cycle through', 'weather cycle'], 'traffic cone': ['ice cream cone', 'ice cream cones'], grave: ['grave danger', 'grave mistake'], door: ['door to door', 'door delivery'], market: ['stock market'], shield: ['shield powerup', 'shield power up'],
       car: ['formula one car', 'formula 1 car', 'f1 car', 'hatchback car', 'station wagon car'], building: ['building a', 'building the'],
     };
     if ((excludedPhrases[subject] ?? []).some(p => mentioned(clause, p))) return false;
@@ -124,7 +167,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
     const local = clauses.filter(c => matching(subject, c)).join(' ');
     const motion = (role: string) => MOTIONS[role].some(word => mentioned(local, word));
     const animation = ['bird', 'eagle', 'parrot'].includes(subject) && motion('fly') ? 'fly'
-      : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue', 'skeleton'].includes(subject)
+      : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue', 'skeleton', 'man', 'woman', 'old man', 'old woman', 'farmer', 'racing driver', 'mechanic', 'worker', 'businessman'].includes(subject)
         ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
     return { subject, ...(animation ? { animation } : {}) };
   });

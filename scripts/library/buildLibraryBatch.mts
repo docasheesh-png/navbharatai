@@ -40,7 +40,7 @@ for (const row of ROWS) {
   }
   const path = normal(`${p.root}/${row.file}`); const source = await readFile(join(repoDir, path));
   const license = await readFile(join(repoDir, p.licenseFile));
-  if (p.spdx === 'CC0-1.0') assert.match(license.toString(), /Creative Commons Zero, CC0/); else assert.match(license.toString(), /^MIT License/);
+  if (p.spdx === 'CC0-1.0') assert.match(license.toString(), /Creative Commons Zero, CC0|^Creative Commons Legal Code\s+CC0 1\.0 Universal/); else assert.match(license.toString(), /^MIT License/);
   const isGltf = path.endsWith('.gltf');
   const doc = isGltf ? JSON.parse(source.toString('utf8')) : JSON.parse(source.subarray(20, 20 + source.readUInt32LE(12)).toString('utf8'));
   const uris = [...(doc.buffers ?? []), ...(doc.images ?? [])].map((x: { uri?: string }) => x.uri).filter((u): u is string => !!u && !u.startsWith('data:'));

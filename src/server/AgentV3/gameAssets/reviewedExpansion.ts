@@ -8,6 +8,7 @@ export const REVIEWED_LIBRARY_EXPANSION: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/blob/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Barbarian.glb",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Barbarian.glb",
     "sha256": "acd89c53337498d5e7183a3fd87fc90a0486467e45b34e5f50eeeffd64566e2c",
+    "bytes": 445300,
     "subjects": [
       "barbarian"
     ],
@@ -57,6 +58,7 @@ export const REVIEWED_LIBRARY_EXPANSION: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/blob/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Mage.glb",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Mage.glb",
     "sha256": "7914f14f46a490cb77dcde290d460dd0220592815e8cd14d2941e4ecfda9ac16",
+    "bytes": 432608,
     "subjects": [
       "mage",
       "wizard"
@@ -107,6 +109,7 @@ export const REVIEWED_LIBRARY_EXPANSION: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/blob/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Rogue.glb",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Rogue.glb",
     "sha256": "8d7b7c9b0631f698f6be1d6234900952afb0218c7ad79eea9c77d20859e66890",
+    "bytes": 452492,
     "subjects": [
       "rogue"
     ],
@@ -156,6 +159,7 @@ export const REVIEWED_LIBRARY_EXPANSION: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/blob/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Rogue_Hooded.glb",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Rogue_Hooded.glb",
     "sha256": "a129802cf7b8e1f38b34073406d9328cddc9289a1af70897906c995bcb99488b",
+    "bytes": 434068,
     "subjects": [
       "hooded rogue"
     ],
@@ -205,6 +209,7 @@ export const REVIEWED_LIBRARY_EXPANSION: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_hatchback.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_hatchback.gltf",
     "sha256": "9597f183dd72e9a0694527a36c311d1110555dfcea49a1f53a3cf2eedb0262c6",
+    "bytes": 67736,
     "subjects": [
       "hatchback"
     ],
@@ -253,6 +258,7 @@ export const REVIEWED_LIBRARY_EXPANSION: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_stationwagon.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/car_stationwagon.gltf",
     "sha256": "077866d11f4a52b67b859b219958d92f0768f31f8f23fdb939e17931828d9b98",
+    "bytes": 70360,
     "subjects": [
       "station wagon"
     ],
@@ -301,6 +307,7 @@ export const REVIEWED_LIBRARY_EXPANSION: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/road_straight.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/road_straight.gltf",
     "sha256": "1deb113375de9adf980bda69e7c946ad1811ff4f694d6e0069be5e29b2463835",
+    "bytes": 24876,
     "subjects": [
       "straight road tile"
     ],
@@ -349,6 +356,7 @@ export const REVIEWED_LIBRARY_EXPANSION: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/road_corner.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/road_corner.gltf",
     "sha256": "2e2c711d1eb171bc18f6337712d70222751c34295fe61ae7ece6776b854629a1",
+    "bytes": 28608,
     "subjects": [
       "road corner tile"
     ],
@@ -397,6 +405,7 @@ export const REVIEWED_LIBRARY_EXPANSION: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/box_A.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/box_A.gltf",
     "sha256": "2acbf90a6615ad0694d08f7b739164b20ccf13a56747fd2aaca07931944718a6",
+    "bytes": 23516,
     "subjects": [
       "crate"
     ],
@@ -445,6 +454,7 @@ export const REVIEWED_LIBRARY_EXPANSION: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/firehydrant.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/firehydrant.gltf",
     "sha256": "0f01e076f4289fbd87e7cbffc5ec4c729573024c9d2d17592f10d65243075af1",
+    "bytes": 29352,
     "subjects": [
       "fire hydrant"
     ],
@@ -493,6 +503,7 @@ export const REVIEWED_LIBRARY_EXPANSION: readonly ReviewedAsset[] = [
     "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/dumpster.gltf",
     "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits/Assets/gltf/dumpster.gltf",
     "sha256": "8770653d31dd61a41a40bd8d2c30e1b41fd2c1a3d88f364b83ba782f4aea07f9",
+    "bytes": 29444,
     "subjects": [
       "dumpster"
     ],

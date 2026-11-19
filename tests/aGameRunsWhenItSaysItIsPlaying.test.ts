@@ -57,7 +57,7 @@ class FakeEl {
 // input.ts, touchControls.ts, character.ts, motor.ts, humanoid.ts.
 const STUBS: Record<string, string> = {
   'src/game/three/renderer.ts':
-    'export function createRenderer(): any { return { render() { (globalThis as any).__frames = ((globalThis as any).__frames ?? 0) + 1; }, dispose() {}, shadowMap: {} }; }\n'
+    'export function createRenderer(): any { return { render() { (globalThis as any).__frames = ((globalThis as any).__frames ?? 0) + 1; }, dispose() {}, shadowMap: {}, getPixelRatio: () => 1, setPixelRatio() {} }; }\n'
     + 'export function handleResize(): () => void { return () => {}; }\n',
   'src/game/three/lighting.ts':
     "import * as THREE from 'three';\nexport type LightingPresetName = string;\n"
@@ -73,7 +73,7 @@ const STUBS: Record<string, string> = {
     'export function startMeta(): void {}\nexport function mountMetaToasts(): () => void { return () => {}; }\n'
     + 'export const combo = { update(): void {}, break(): void {} };\n',
   'src/game/fx/particles.ts': 'export class ParticleSystem { addTo(): void {} update(): void {} dispose(): void {} }\n',
-  'src/game/fx/audio.ts': 'export const audio = { unlock(): void {}, setListener(): void {}, stopAll(): void {} };\n',
+  'src/game/fx/audio.ts': 'export const audio = { unlock(): void {}, setListener(): void {}, stopAll(): void {}, setVolume(): void {} };\n',
   'src/game/fx/feedback.ts': 'export function bindGameFeedback(): () => void { return () => {}; }\n',
 };
 
@@ -114,6 +114,28 @@ describe('🔴 the loop runs whenever the game is playing, whoever set it', () =
     expect((globalThis as any).__frames, 'an empty page behind the menu').toBeGreaterThanOrEqual(1);
     game.start();
     expect(game.loop.running).toBe(true);
+    expect(STATE.state.status, 'a Game with its own HUD (no startScreen) begins play at start()').toBe('playing');
+    game.dispose();
+  });
+
+  // 2026-11-19: <GameCanvas> games open on the kit's START SCREEN; the world is drawn but frozen until Play.
+  it('with a start screen, start() shows the menu and Play (or the game\'s own setStatus("playing")) runs it', () => {
+    const game = new SHELL.Game({ container: new FakeEl('div'), startScreen: { title: 'Test' }, setup: () => [] });
+    game.start();
+    expect(STATE.state.status).toBe('menu');
+    expect(game.startScreenInfo?.title).toBe('Test');
+    game.play();
+    expect(STATE.state.status).toBe('playing');
+    game.toMenu();
+    expect(STATE.state.status).toBe('menu');
+    STATE.setStatus('playing');                       // a game's own Play button
+    expect(game.loop.running).toBe(true);
+    game.dispose();
+  });
+  it("a game whose own setup() already set 'playing' is never thrown back to a start screen", () => {
+    const game = new SHELL.Game({ container: new FakeEl('div'), startScreen: {}, setup: () => { STATE.setStatus('playing'); return []; } });
+    game.start();
+    expect(STATE.state.status).toBe('playing');
     game.dispose();
   });
 

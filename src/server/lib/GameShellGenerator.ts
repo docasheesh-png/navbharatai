@@ -41,6 +41,7 @@ import { GameFeel } from './core/feel';
 import { events } from './core/events';
 import { state, setStatus, resetRun } from './core/state';
 import { startMeta, mountMetaToasts, combo } from './core/meta';
+import { settings, type GameSettings } from './core/settings';
 import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
@@ -115,6 +116,14 @@ export interface GameOptions {
    * land, hit, use. A body of your own (playerBody) is not posed: call its own animation on those presses.
    */
   actionPoses?: Record<string, HumanoidAction | 'auto' | false>;
+  /**
+   * The START SCREEN the game opens on (admin 2026-11-19 audit: games used to throw the player straight into play).
+   * <GameCanvas> shows it by default, with the game's title, a one-line subtitle and the controls for the device in
+   * hand; Play starts the round and Settings opens the same settings as the pause menu. Pass false to start playing
+   * at once (a game with its own menu calls setStatus('playing') or game.play()). A Game constructed directly (with
+   * its own HUD) has none unless this is given, so its start() still begins play at once.
+   */
+  startScreen?: false | { title?: string; subtitle?: string; controls?: { touch?: string; keyboard?: string } };
 }
 
 export interface GameContext {
@@ -195,6 +204,10 @@ export class Game {
   private swungThisStep = false;
   /** The attack button is down or went down this step (read before the game's update). */
   private attackHeldThisStep = false;
+  /** The pixel ratio the renderer chose for this device; quality scales DOWN from it, never up. */
+  private basePixelRatio = 1;
+  /** Look speed from the player's settings. */
+  private lookSensitivity = 1;
   private touch: TouchControls | null = null;
   /** The game left the touch layout to us (no buttons, no layout of its own) — so a car gets pedals. */
   private readonly touchLayoutIsOurs: boolean;
@@ -220,6 +233,7 @@ export class Game {
     options.container.appendChild(this.canvas);
 
     this.renderer = createRenderer({ canvas: this.canvas, shadows: options.shadows !== false });
+    this.basePixelRatio = this.renderer.getPixelRatio();
     // camera: 'chase' is the SHELL's job (see \`chased\`): it chases the vehicle from behind. On foot the
     // rig stays third-person — a camera that chases the walker's own heading turns with every step the
     // walker takes relative to it, so S spun the hero on the spot and a joystick held a little off-centre
@@ -291,6 +305,9 @@ export class Game {
     this.disposers.push(mountMetaToasts(options.container));
     // Taking a hit ends the combo — that is what makes a clean run worth more than a long one.
     this.disposers.push(events.on('PLAYER_DAMAGED', () => combo.break()));
+    // ⚙️ THE PLAYER'S SETTINGS, APPLIED — now and on every change from the pause menu.
+    this.applySettings(settings.get());
+    this.disposers.push(settings.subscribe((s) => this.applySettings(s)));
     // 🎬 THE BODY SHOWS THE ACTION. A shot kicks the arms back on every round (an automatic weapon too), a swing
     // sweeps the arm, a jump throws the arms up and a hit makes the body flinch — whichever code fired the event.
     // Only the PLAYER's shot or swing: no owner or 'player', AND the attack button is pressed or held right now —
@@ -338,7 +355,9 @@ export class Game {
     // game's own setup() called setStatus('playing') itself, so the HUD showed a running game and hid the
     // Play menu, while start() — the only thing that ran the loop — was never called. Not one frame was
     // drawn: an empty page behind the HUD, every control ignored. Now 'playing' from anywhere runs the loop.
-    const follow = () => { if (!this.disposed && state.status === 'playing') this.loop.start(); };
+    // ...and UN-PAUSES it: a start screen freezes the world until Play, and a game whose own menu sets 'playing'
+    // must not stay frozen behind it.
+    const follow = () => { if (!this.disposed && state.status === 'playing') { this.loop.start(); this.loop.setPaused(false); } };
     this.disposers.push(events.on('GAME_STARTED', follow), events.on('GAME_RESUMED', follow));
     follow();
     // One frame now, so the world shows behind the menu instead of an empty page. The loop draws the rest.
@@ -448,7 +467,7 @@ export class Game {
     // Mouse/stick look MUST be consumed here, not in render: endFrame() below zeroes it, and endFrame
     // runs before the next render. Read it there and the camera never turns at all.
     // Deliberately outside the hit-stop freeze — freezing the simulation should not make aiming sticky.
-    if (this.input.lookX || this.input.lookY) this.rig.look(this.input.lookX, this.input.lookY);
+    if (this.input.lookX || this.input.lookY) this.rig.look(this.input.lookX * this.lookSensitivity, this.input.lookY * this.lookSensitivity);
 
     // Hit-stop: the simulation freezes for a few frames so a hit lands. Input still ticks, or the
     // press that happened during the freeze is swallowed.
@@ -537,7 +556,59 @@ export class Game {
     this.renderer.render(this.scene, this.rig.camera);
   }
 
-  start(): void { if (!this.disposed) { setStatus('playing'); this.loop.start(); } }
+  /**
+   * Start the loop. With the start screen (the default) the world is drawn but frozen until the player presses Play
+   * (game.play()); with startScreen: false the round begins at once, as before.
+   */
+  start(): void {
+    if (this.disposed) return;
+    this.loop.start();
+    // No start screen asked for (a Game with its own HUD), or the game's own setup() already began the round.
+    if (!this.options.startScreen || state.status === 'playing') { this.loop.setPaused(false); setStatus('playing'); return; }
+    this.loop.setPaused(true);
+    setStatus('menu');
+  }
+  /** Leave the start screen and begin the round. */
+  play(): void {
+    if (this.disposed || state.status !== 'menu') return;
+    audio.unlock();
+    this.loop.setPaused(false);
+    setStatus('playing');
+  }
+  /** Back to the start screen (pause menu → Menu, game over → Menu): the run is reset and the world freezes. */
+  toMenu(): void {
+    if (this.disposed) return;
+    resetRun();
+    this.feel.reset();
+    this.player.reset();
+    this.loop.setPaused(true);
+    setStatus('menu');
+  }
+  /** What the start screen shows; null when the game has its own. */
+  get startScreenInfo(): { title: string; subtitle: string; controls: { touch: string; keyboard: string } } | null {
+    const o = this.options.startScreen;
+    if (!o) return null;
+    return {
+      title: o?.title || this.options.gameId || 'Ready?',
+      subtitle: o?.subtitle || '',
+      controls: {
+        touch: o?.controls?.touch || 'Left thumb to move · buttons on the right to act',
+        keyboard: o?.controls?.keyboard || 'WASD / arrow keys to move · Space to jump · F or click to attack · Esc to pause',
+      },
+    };
+  }
+
+  /** Apply the player's settings: sound, picture quality and look speed. */
+  private applySettings(s: GameSettings): void {
+    audio.setVolume('master', s.muted ? 0 : s.masterVolume);
+    audio.setVolume('music', s.musicVolume);
+    audio.setVolume('sfx', s.sfxVolume);
+    audio.setVolume('ui', s.sfxVolume);
+    // Fewer pixels is the biggest single saving on a weak phone; the base ratio already respects the device.
+    const scale = s.quality === 'low' ? 0.55 : s.quality === 'medium' ? 0.8 : 1;
+    this.renderer.setPixelRatio(Math.max(0.35, this.basePixelRatio * scale));
+    this.lookSensitivity = s.lookSensitivity;
+  }
   pause(): void { if (state.status === 'playing') { this.loop.setPaused(true); setStatus('paused'); } }
   resume(): void { if (state.status === 'paused') { this.loop.setPaused(false); setStatus('playing'); } }
 
@@ -618,7 +689,8 @@ export function GameCanvas({ options, onReady, className = '', fullscreen = true
 
     let instance: Game | null = null;
     try {
-      instance = new Game({ ...(optionsRef.current || {}), container: host });
+      // The start screen is ON for a GameCanvas game (its Hud draws it); options.startScreen: false turns it off.
+      instance = new Game({ startScreen: {}, ...(optionsRef.current || {}), container: host });
       instance.start();
       gameRef.current = instance;
       setGame(instance);
@@ -662,6 +734,7 @@ import { events } from '../core/events';
 import { state, type GameState } from '../core/state';
 import { meta, combo, summaryLines } from '../core/meta';
 import type { Game } from '../Game';
+import { settings, type GameSettings } from '../core/settings';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -679,7 +752,7 @@ function useGameState(): GameState {
     const sync = () => setSnapshot({ ...state });
     const offs = [
       'SCORE_CHANGED', 'PLAYER_DAMAGED', 'PLAYER_HEALED', 'PLAYER_DIED',
-      'GAME_STARTED', 'GAME_OVER', 'GAME_WON', 'GAME_PAUSED', 'GAME_RESUMED',
+      'GAME_STARTED', 'GAME_OVER', 'GAME_WON', 'GAME_PAUSED', 'GAME_RESUMED', 'GAME_MENU',
       'LEVEL_STARTED', 'LEVEL_COMPLETED', 'ITEM_COLLECTED', 'COMBO_CHANGED', 'RUN_SUMMARY',
     ].map((e) => events.on(e, sync));
     sync(); // an event fired between render and subscribe would otherwise be missed
@@ -701,77 +774,199 @@ const button: React.CSSProperties = {
   minWidth: 140, minHeight: 48,
 };
 
+const secondary: React.CSSProperties = { ...button, background: 'rgba(255,255,255,0.14)', color: '#fff', border: '2px solid rgba(255,255,255,0.55)' };
+const row: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, margin: '10px 0', textAlign: 'left' };
+const roundIcon: React.CSSProperties = { pointerEvents: 'auto', width: 44, height: 44, borderRadius: 999, border: '2px solid rgba(255,255,255,0.5)', background: 'rgba(0,0,0,0.35)', color: '#fff', fontWeight: 800, fontSize: 16, cursor: 'pointer', display: 'grid', placeItems: 'center' };
+
+/** The player's settings, live: re-renders when the pause menu (or the game) changes them. */
+function useSettings(): GameSettings {
+  const [value, setValue] = useState<GameSettings>(settings.get());
+  useEffect(() => settings.subscribe(setValue), []);
+  return value;
+}
+
+/** A speaker icon, crossed out when muted — an icon, so it reads in any language. */
+function SpeakerIcon({ muted }: { muted: boolean }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" />
+      {muted ? <path d="M17 9l5 6M22 9l-5 6" /> : <path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" />}
+    </svg>
+  );
+}
+
+function Slider({ label, value, min = 0, max = 1, step = 0.05, onChange }: { label: string; value: number; min?: number; max?: number; step?: number; onChange: (v: number) => void }) {
+  return (
+    <label style={row}>
+      <span>{label}</span>
+      <input type="range" min={min} max={max} step={step} value={value} aria-label={label}
+        onChange={(e) => onChange(Number(e.currentTarget.value))} style={{ width: 160, accentColor: '#fde047' }} />
+    </label>
+  );
+}
+
+function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div style={row}>
+      <span>{label}</span>
+      <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)}
+        style={{ ...secondary, marginTop: 0, minWidth: 84, minHeight: 40, padding: '6px 14px', background: on ? '#fde047' : 'rgba(255,255,255,0.14)', color: on ? '#111' : '#fff' }}>
+        {on ? 'On' : 'Off'}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * SETTINGS — every control here is APPLIED at once by the shell (Game.applySettings) and saved on this device:
+ * sound (mute, master, music, effects), picture quality, look speed, vibration.
+ */
+function SettingsPanel({ onBack }: { onBack: () => void }) {
+  const s = useSettings();
+  const back = useRef<HTMLButtonElement>(null);
+  useEffect(() => { back.current?.focus(); }, []);
+  return (
+    <div style={{ width: 'min(92vw, 380px)', maxHeight: '86dvh', overflowY: 'auto', padding: '8px 4px' }}>
+      <h2 style={{ fontSize: 26, fontWeight: 800, marginBottom: 6 }}>Settings</h2>
+      <Toggle label="Sound" on={!s.muted} onChange={(v) => settings.set({ muted: !v })} />
+      <Slider label="Volume" value={s.masterVolume} onChange={(v) => settings.set({ masterVolume: v })} />
+      <Slider label="Music" value={s.musicVolume} onChange={(v) => settings.set({ musicVolume: v })} />
+      <Slider label="Effects" value={s.sfxVolume} onChange={(v) => settings.set({ sfxVolume: v })} />
+      <div style={row}>
+        <span>Graphics</span>
+        <div role="radiogroup" aria-label="Graphics quality" style={{ display: 'flex', gap: 6 }}>
+          {(['low', 'medium', 'high'] as const).map((q) => (
+            <button key={q} type="button" role="radio" aria-checked={s.quality === q} onClick={() => settings.set({ quality: q })}
+              style={{ ...secondary, marginTop: 0, minWidth: 0, minHeight: 40, padding: '6px 10px', background: s.quality === q ? '#fde047' : 'rgba(255,255,255,0.14)', color: s.quality === q ? '#111' : '#fff' }}>
+              {q === 'low' ? 'Smooth' : q === 'medium' ? 'Balanced' : 'Sharp'}
+            </button>
+          ))}
+        </div>
+      </div>
+      <Slider label="Look speed" value={s.lookSensitivity} min={0.25} max={3} step={0.25} onChange={(v) => settings.set({ lookSensitivity: v })} />
+      <Toggle label="Vibration" on={s.vibration} onChange={(v) => settings.set({ vibration: v })} />
+      <button ref={back} type="button" style={button} onClick={onBack}>Back</button>
+    </div>
+  );
+}
+
 export function Hud({ game }: { game: Game }) {
   const s = useGameState();
+  const prefs = useSettings();
+  const [panel, setPanel] = useState<'settings' | null>(null);
   const again = useRef<HTMLButtonElement>(null);
+  const playRef = useRef<HTMLButtonElement>(null);
   const over = s.status === 'gameover' || s.status === 'won';
+  const info = game.startScreenInfo;
+  const touch = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+
+  // A settings panel belongs to the screen it was opened from; leaving that screen closes it.
+  useEffect(() => { if (s.status === 'playing') setPanel(null); }, [s.status]);
+
+  // ONE TAP TO PLAY. The Play button takes focus, and Enter or Space starts from anywhere.
+  useEffect(() => {
+    if (s.status !== 'menu' || panel || !info) return;
+    playRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); game.play(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [s.status, panel, info, game]);
 
   // ONE TAP TO PLAY AGAIN. The button takes focus the moment the round ends, and Enter, Space or R
   // restart from anywhere. Every extra step between "I lost" and "again" is where a player stops.
   useEffect(() => {
-    if (!over) return;
+    if (!over || panel) return;
     again.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ' || e.key === 'r' || e.key === 'R') { e.preventDefault(); game.restart(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [over, game]);
+  }, [over, panel, game]);
 
-  // Esc pauses. Bound to the window because the player expects it to work wherever focus is.
+  // Esc pauses (and closes Settings first). Bound to the window because the player expects it to work wherever focus is.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (panel) { setPanel(null); return; }
       if (s.status === 'playing') game.pause();
       else if (s.status === 'paused') game.resume();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [game, s.status]);
+  }, [game, s.status, panel]);
+
+  const settingsOrScreen = (screen: React.ReactNode) => (
+    <div style={overlay}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : screen}</div>
+  );
 
   return (
     <>
       {/* pointerEvents none, or the HUD silently eats clicks meant for the game */}
-      <div style={{ position: 'absolute', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', right: 'max(12px, env(safe-area-inset-right))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff', pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,0.8)', zIndex: 5 }}>
-        <div style={{ fontWeight: 700, fontSize: 18 }}>
-          Score {s.score}
-          <span style={{ opacity: 0.7, fontSize: 13, marginLeft: 10 }}>Best {s.highScore}</span>
-          {combo.multiplier > 1 ? <span style={{ marginLeft: 10, color: '#fde047' }}>x{combo.multiplier}</span> : null}
-        </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <div style={{ width: 120, height: 10, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden' }}>
-            {/* health is an ABSOLUTE value, not a percentage — a game with 250 max HP would peg the
-                bar at full for the first 150 damage if this divided by 100 instead of maxHealth. */}
-            <div style={{ width: \`\${Math.max(0, Math.min(100, (s.health / Math.max(1, s.maxHealth)) * 100))}%\`, height: '100%', background: s.health > s.maxHealth * 0.3 ? '#4ade80' : '#f87171', transition: 'width 160ms ease-out' }} />
+      {s.status !== 'menu' ? (
+        <div style={{ position: 'absolute', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', right: 'max(12px, env(safe-area-inset-right))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff', pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,0.8)', zIndex: 5 }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>
+            Score {s.score}
+            <span style={{ opacity: 0.7, fontSize: 13, marginLeft: 10 }}>Best {s.highScore}</span>
+            {combo.multiplier > 1 ? <span style={{ marginLeft: 10, color: '#fde047' }}>x{combo.multiplier}</span> : null}
           </div>
-          <div style={{ fontWeight: 700 }}>x{s.lives}</div>
-          {/* Esc is a keyboard; a phone has none. Without this a player on a phone can never pause. */}
-          {s.status === 'playing' ? (
-            <button type="button" aria-label="Pause" onClick={() => game.pause()} style={{ pointerEvents: 'auto', width: 44, height: 44, borderRadius: 999, border: '2px solid rgba(255,255,255,0.5)', background: 'rgba(0,0,0,0.35)', color: '#fff', fontWeight: 800, fontSize: 16, cursor: 'pointer' }}>II</button>
-          ) : null}
-        </div>
-      </div>
-
-      {s.status === 'paused' ? (
-        <div style={overlay}>
-          <div>
-            <h2 style={{ fontSize: 30, fontWeight: 800 }}>Paused</h2>
-            <button style={button} onClick={() => game.resume()}>Resume</button>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <div style={{ width: 120, height: 10, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden' }}>
+              {/* health is an ABSOLUTE value, not a percentage — a game with 250 max HP would peg the
+                  bar at full for the first 150 damage if this divided by 100 instead of maxHealth. */}
+              <div style={{ width: \`\${Math.max(0, Math.min(100, (s.health / Math.max(1, s.maxHealth)) * 100))}%\`, height: '100%', background: s.health > s.maxHealth * 0.3 ? '#4ade80' : '#f87171', transition: 'width 160ms ease-out' }} />
+            </div>
+            <div style={{ fontWeight: 700 }}>x{s.lives}</div>
+            {/* One tap silences the game — the most-asked-for control on a phone in a quiet room. */}
+            <button type="button" aria-label={prefs.muted ? 'Sound on' : 'Mute'} aria-pressed={prefs.muted} onClick={() => settings.toggleMute()} style={roundIcon}>
+              <SpeakerIcon muted={prefs.muted} />
+            </button>
+            {/* Esc is a keyboard; a phone has none. Without this a player on a phone can never pause. */}
+            {s.status === 'playing' ? (
+              <button type="button" aria-label="Pause" onClick={() => game.pause()} style={roundIcon}>II</button>
+            ) : null}
           </div>
         </div>
       ) : null}
 
-      {over ? (
-        <div style={overlay}>
-          <div style={{ maxWidth: 420, padding: '0 16px' }}>
-            <h2 style={{ fontSize: 30, fontWeight: 800 }}>{s.status === 'won' ? 'You win' : 'Game over'}</h2>
-            {/* The run summary: the first line is the hook — a new best, or exactly how close it was. */}
-            {(meta.lastSummary ? summaryLines(meta.lastSummary) : ['Score ' + s.score]).map((line, i) => (
-              <p key={i} style={i === 0 ? { fontSize: 20, fontWeight: 800, marginTop: 8, color: '#fde047' } : { opacity: 0.88, marginTop: 4 }}>{line}</p>
-            ))}
-            <button ref={again} style={button} onClick={() => game.restart()}>Play again</button>
+      {s.status === 'menu' && info ? settingsOrScreen(
+        <div style={{ maxWidth: 440, padding: '0 16px' }}>
+          <h1 style={{ fontSize: 36, fontWeight: 900, lineHeight: 1.1 }}>{info.title}</h1>
+          {info.subtitle ? <p style={{ opacity: 0.9, marginTop: 8, fontSize: 17 }}>{info.subtitle}</p> : null}
+          <p style={{ opacity: 0.75, marginTop: 12, fontSize: 14 }}>{touch ? info.controls.touch : info.controls.keyboard}</p>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button ref={playRef} type="button" style={button} onClick={() => game.play()}>Play</button>
+            <button type="button" style={secondary} onClick={() => setPanel('settings')}>Settings</button>
           </div>
-        </div>
+        </div>,
+      ) : null}
+
+      {s.status === 'paused' ? settingsOrScreen(
+        <div>
+          <h2 style={{ fontSize: 30, fontWeight: 800 }}>Paused</h2>
+          <div style={{ display: 'grid', gap: 0, justifyItems: 'center' }}>
+            <button type="button" style={button} onClick={() => game.resume()}>Resume</button>
+            <button type="button" style={secondary} onClick={() => game.restart()}>Restart</button>
+            <button type="button" style={secondary} onClick={() => setPanel('settings')}>Settings</button>
+            {info ? <button type="button" style={secondary} onClick={() => game.toMenu()}>Menu</button> : null}
+          </div>
+        </div>,
+      ) : null}
+
+      {over ? settingsOrScreen(
+        <div style={{ maxWidth: 420, padding: '0 16px' }}>
+          <h2 style={{ fontSize: 30, fontWeight: 800 }}>{s.status === 'won' ? 'You win' : 'Game over'}</h2>
+          {/* The run summary: the first line is the hook — a new best, or exactly how close it was. */}
+          {(meta.lastSummary ? summaryLines(meta.lastSummary) : ['Score ' + s.score]).map((line, i) => (
+            <p key={i} style={i === 0 ? { fontSize: 20, fontWeight: 800, marginTop: 8, color: '#fde047' } : { opacity: 0.88, marginTop: 4 }}>{line}</p>
+          ))}
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button ref={again} type="button" style={button} onClick={() => game.restart()}>Play again</button>
+            {info ? <button type="button" style={secondary} onClick={() => game.toMenu()}>Menu</button> : null}
+          </div>
+        </div>,
       ) : null}
     </>
   );

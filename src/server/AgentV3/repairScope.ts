@@ -48,9 +48,16 @@ export function withoutPlatformCheckTools<T extends { name: string }>(tools: rea
   return tools.filter((t) => !PLATFORM_CHECK_TOOLS.has(t.name) && !DELEGATION_TOOLS.has(t.name));
 }
 
-/** Was this tool withheld BY CONSTRUCTION from a runner that was not offered it? PURE. */
-export function isWithheldTool(name: string, offered: ReadonlySet<string>): boolean {
-  return (PLATFORM_CHECK_TOOLS.has(name) || DELEGATION_TOOLS.has(name)) && !offered.has(name);
+/**
+ * What a platform-checked repair runner DECLARES it was built without (passed as `AgentRunnerOptions.withheldTools`).
+ * Only a runner that declares this refuses them: the architect's own toolset loads tools on demand (DynamicToolset),
+ * so "not in the list right now" is NOT "withheld" there — a blanket check would have broken real builds.
+ */
+export const REPAIR_WITHHELD_TOOLS: ReadonlySet<string> = new Set([...PLATFORM_CHECK_TOOLS, ...DELEGATION_TOOLS]);
+
+/** Was this tool withheld BY CONSTRUCTION from this runner (declared, and not offered)? PURE. */
+export function isWithheldTool(name: string, withheld: ReadonlySet<string> | null | undefined, offered: ReadonlySet<string>): boolean {
+  return !!withheld && withheld.has(name) && !offered.has(name);
 }
 
 /** What the model reads when it names a withheld tool. PURE. */

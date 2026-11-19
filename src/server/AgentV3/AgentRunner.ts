@@ -266,6 +266,11 @@ export interface AgentRunnerOptions {
    */
   focusedRepair?: boolean;
   /**
+   * Tools this runner was built WITHOUT on purpose (Q-2916): a model that names one is refused, not obeyed. Set only by
+   * the platform-checked repairs (`REPAIR_WITHHELD_TOOLS`); absent everywhere else, which keeps today's behaviour.
+   */
+  withheldTools?: ReadonlySet<string>;
+  /**
    * The run's instruction comes from one of the platform's own checks (a repair pass), not from the
    * user. The model is told so, so its reply — narrated into the user's chat — never thanks the user
    * for a request they did not make (platformRequest.ts, autopsy 1be16985).
@@ -1689,9 +1694,9 @@ export class AgentRunner {
           }
           // 🔴 A WITHHELD TOOL IS REFUSED, NOT MERELY HIDDEN (Q-2916, failedbr #2475). A repair the platform checks is
           // built without a browser and without delegation (repairScope.ts) — but leaving a tool out of the list only
-          // hides it; a model that names it anyway used to have it run. Narrow on purpose: only the tools withheld
-          // BY CONSTRUCTION are refused, and only when this runner was not offered them.
-          if (isWithheldTool(tu.name, offeredToolNames)) {
+          // hides it; a model that names it anyway used to have it run. Narrow on purpose: only a runner that DECLARES
+          // `withheldTools` refuses them (the architect's dynamic toolset loads tools on demand and is untouched).
+          if (isWithheldTool(tu.name, this.opts.withheldTools, offeredToolNames)) {
             return { tool_use_id: tu.id, content: withheldToolMessage(tu.name), is_error: true };
           }
           // A MADE-UP TOOL NAME WITH A REAL TOOL'S SHAPE RUNS AS THAT TOOL (queue Q-145, toolAlias.ts).

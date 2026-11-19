@@ -12,7 +12,9 @@ import { defaultToolCatalog, taskToolDef } from '../src/server/AgentV3/ToolCatal
 
 /** What the build's architect is offered — the catalog plus `task` (the shape the #2475 repair inherited). */
 const architectTools = () => [...defaultToolCatalog(), taskToolDef()];
-import { withoutPlatformCheckTools, isWithheldTool } from '../src/server/AgentV3/repairScope';
+import { withoutPlatformCheckTools, isWithheldTool, REPAIR_WITHHELD_TOOLS } from '../src/server/AgentV3/repairScope';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 class FakeActuator implements ActuatorPort {
   files = new Map<string, string>();
@@ -24,7 +26,7 @@ class FakeActuator implements ActuatorPort {
 const scripted = (m: unknown[]): MessagesCreateClient => { let i = 0; return { messages: { create: async () => (m[i++] ?? { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' }) as never } }; };
 const delegateTurn = { content: [{ type: 'tool_use', id: 't1', name: 'task', input: { role: 'debugger', instruction: 'fix the covered buttons' } }], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } };
 
-function runWith(tools: ReturnType<typeof architectTools>) {
+function runWith(tools: ReturnType<typeof architectTools>, withheldTools?: ReadonlySet<string>) {
   let spawned = 0;
   const spawn: SubAgentSpawn = async () => { spawned++; return { ok: true, summary: 'ok', written: [] }; };
   const stream = new AgentEventStream();
@@ -32,7 +34,7 @@ function runWith(tools: ReturnType<typeof architectTools>) {
   const runner = new AgentRunner({
     client: new ClaudeClient(scripted([delegateTurn])),
     dispatcher: new ToolDispatcher(new FakeActuator(), 'ws-q2916', state, stream, spawn),
-    state, events: stream, model: 'test', system: 'repair', tools,
+    state, events: stream, model: 'test', system: 'repair', tools, ...(withheldTools ? { withheldTools } : {}),
   });
   return { run: () => runner.run('2 buttons did not work'), spawned: () => spawned };
 }
@@ -46,7 +48,7 @@ describe('a time-boxed, platform-checked repair does not delegate', () => {
   });
 
   it('a repair that names `task` anyway is refused, and no specialist is spawned', async () => {
-    const r = runWith(withoutPlatformCheckTools(architectTools()));
+    const r = runWith(withoutPlatformCheckTools(architectTools()), REPAIR_WITHHELD_TOOLS);
     await r.run();
     expect(r.spawned()).toBe(0);
   });
@@ -57,9 +59,19 @@ describe('a time-boxed, platform-checked repair does not delegate', () => {
     expect(r.spawned()).toBe(1);
   });
 
-  it('only tools withheld by construction are refused', () => {
-    expect(isWithheldTool('task', new Set(['edit_file']))).toBe(true);
-    expect(isWithheldTool('task', new Set(['task']))).toBe(false);
-    expect(isWithheldTool('some_other_tool', new Set())).toBe(false);
+  it('only a runner that DECLARES withheld tools refuses them — the architect is untouched', async () => {
+    expect(isWithheldTool('task', REPAIR_WITHHELD_TOOLS, new Set(['edit_file']))).toBe(true);
+    expect(isWithheldTool('task', REPAIR_WITHHELD_TOOLS, new Set(['task']))).toBe(false);
+    expect(isWithheldTool('task', undefined, new Set(['edit_file']))).toBe(false);
+    // A runner with no declaration that names `task` while it is not listed (the architect's dynamic toolset shape)
+    // still delegates exactly as before.
+    const r = runWith(defaultToolCatalog());
+    await r.run();
+    expect(r.spawned()).toBe(1);
+  });
+
+  it('all three platform-checked repairs in the route declare it', () => {
+    const src = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
+    expect((src.match(/withoutPlatformCheckTools\(baseRunnerOpts\.tools\), withheldTools: REPAIR_WITHHELD_TOOLS/g) ?? []).length).toBe(3);
   });
 });

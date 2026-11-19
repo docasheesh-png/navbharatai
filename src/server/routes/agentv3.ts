@@ -255,7 +255,7 @@ import {
   explorerRepairEnabled, repairTargets, explorerRepairPlan, explorerRepairTierGate, runExplorerRepair,
   explorerRepairOutcomeRecord, explorerRepairProof, explorerRepairUserLine, EXPLORER_REPAIR_PASS, explorerRepairPrompt,
 } from '../AgentV3/explorerRepair';
-import { withoutPlatformCheckTools } from '../AgentV3/repairScope';
+import { withoutPlatformCheckTools, REPAIR_WITHHELD_TOOLS } from '../AgentV3/repairScope';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
 import { applyGateRedNotice } from '../AgentV3/gateRedNotice';
@@ -24723,7 +24723,7 @@ async function noteBuildOutcome(
                           client: buildTurnRunner(healRunnerOpts()),
                           platformRequest: true,
                           focusedRepair: true,
-                          tools: withoutPlatformCheckTools(baseRunnerOpts.tools),
+                          tools: withoutPlatformCheckTools(baseRunnerOpts.tools), withheldTools: REPAIR_WITHHELD_TOOLS,
                           model: resolveModel(powerLevelReqEffective),
                           persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                         });
@@ -24790,7 +24790,7 @@ async function noteBuildOutcome(
                 repair: async (repairPrompt, signal) => {
                   const runner = new AgentRunner({
                     ...baseRunnerOpts, signal, client: buildTurnRunner(healRunnerOpts()), platformRequest: true, focusedRepair: true,
-                    tools: withoutPlatformCheckTools(baseRunnerOpts.tools), model: resolveModel(powerLevelReqEffective),
+                    tools: withoutPlatformCheckTools(baseRunnerOpts.tools), withheldTools: REPAIR_WITHHELD_TOOLS, model: resolveModel(powerLevelReqEffective),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });
                   const r = await runInBillingPhase(PHASE_GAME_REPAIR, () => runInPass(GAME_REPAIR_PASS, () => runner.run(repairPrompt)));
@@ -26605,7 +26605,7 @@ async function noteBuildOutcome(
                     platformRequest: true,
                     // Re-rendered by the platform: no browser of its own, no extra jobs (repairScope.ts).
                     focusedRepair: true,
-                    tools: withoutPlatformCheckTools(baseRunnerOpts.tools),
+                    tools: withoutPlatformCheckTools(baseRunnerOpts.tools), withheldTools: REPAIR_WITHHELD_TOOLS,
                     model: resolveModel(powerLevelReqEffective),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });

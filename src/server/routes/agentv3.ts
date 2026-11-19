@@ -10996,7 +10996,10 @@ async function noteBuildOutcome(
     // (AGENTV3_CREDIT_GATE) is on. The credit gate lets ₹0-balance accounts be blocked from spending
     // NavBharatAI's model budget without turning on the rest of paid-public (which stays OFF during the
     // security migration). Free-list users (admin/testers) always bypass it.
-    const checkPaidBuildAdmission = () => checkBuilderPaidAdmission({ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res, workspaceId,
+    // Derived here, before the first admission check: the edit estimate (Q-2950) reads this workspace's build history,
+    // and `workspaceId` itself is not declared until much later (reading it here was a TDZ ReferenceError).
+    const leaseWorkspaceId = deriveWorkspaceId(userId, lockSessionId && SESSION_ID_RE.test(lockSessionId) ? lockSessionId : String(requestArrivedAt));
+    const checkPaidBuildAdmission = () => checkBuilderPaidAdmission({ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res, workspaceId: leaseWorkspaceId,
       release: () => releaseBuildLock(buildKey, buildLockToken), onFreeTier: value => { callerIsFreeTier = value; }, onEconomy: value => { paidEconomyNotice = value; },
       onSpendable: (balance, estimate: number | null = null) => { if (typeof balance === 'number') spendableBalanceInr = balance; spendableEstimateInr = estimate; } });
     if (!(await checkPaidBuildAdmission())) return;
@@ -11090,7 +11093,6 @@ async function noteBuildOutcome(
     // minutes. The workspace is now claimed in Firestore before the stream opens (so a refusal is a clean
     // 409), renewed every LEASE_HEARTBEAT_MS while the build runs, released when it ends, and flagged by
     // a Stop pressed on any instance. An unavailable store refuses admission; see workspaceBuildLease.ts.
-    const leaseWorkspaceId = deriveWorkspaceId(userId, lockSessionId && SESSION_ID_RE.test(lockSessionId) ? lockSessionId : String(requestArrivedAt));
     const buildLeaseStore = leaseWorkspaceId && workspaceLeaseEnabled() ? (getDb() as unknown as BuildLeaseStore) : null;
     const buildLeaseToken = randomUUID();
     let buildLeaseHeld = false;

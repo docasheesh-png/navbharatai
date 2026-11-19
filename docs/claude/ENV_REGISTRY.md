@@ -5187,6 +5187,18 @@ unchanged. Module: `src/server/AgentV3/moyiBuilder.ts` (same shape as `bluesmind
 - **Normal and Strong**: **DiscountedTokens (`ENGINE_DT`)** sits right before the first Sonnet/Opus rung (`discountedTokensBuilder.ts`), with up to three models (owner's order in `DISCOUNTEDTOKENS_MODEL`, else gpt-6-sol then the key's own list). It needs `DISCOUNTEDTOKENS_API_KEY` **and** `DISCOUNTEDTOKENS_BUILDER_RATE_IN/_OUT`; until the rates are set it does not run. Never on Weak.
 - Both labels are admin-only: redaction, brand scrub (Moyi was missing there since #4276 and is added too) and the off-ladder census know them.
 
+### `GATEWAY_FAMILY_DIVERSITY` — upstream diversity after a gateway failure (Traffic Manager V2, P5)
+
+| Value | Meaning |
+|---|---|
+| unset / `off` (default) | Today's order, byte-identical. |
+| `canary` | Only for the verified staff uids in `INFERENCE_GATEWAY_CANARY_UIDS`. |
+| `on` | Every gateway request. Set only after the canary's decision records show it helps. |
+
+What it changes when active: only the pick after a PROVIDER-SIDE failure of the same request.
+- The pick moves to the nearest candidate of the same payment class whose route shares no outage domain with the failed one (P1 registry; `unknown` is independent of nothing).
+- Free never jumps paid, and paid never jumps free. Nothing is added, and a terminal failure still ends the request.
+
 ### `ROUTING_DECISIONS` — routing decision records and SLO counters (Traffic Manager V2, P4)
 
 Default ON. `off` / `false` / `0` stops both writers.

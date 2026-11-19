@@ -237,6 +237,12 @@ export interface PlanningInput {
    * ledger's re-check of an already-selected attempt, so a change can stop new work but never strand started work.
    */
   readonly controlGate?: (profile: ProviderProfile, request: RoutingRequest) => 'control' | 'admission' | null;
+  /**
+   * Optional (Traffic Manager V2, P5): the outage domains a profile's route depends on. When supplied and an earlier
+   * attempt of THIS request failed on the provider side, the next pick skips ahead to the nearest candidate of the
+   * same payment class that shares none of the failed domains. Nothing else is reordered. Off unless supplied.
+   */
+  readonly dependsOn?: (profile: ProviderProfile) => readonly string[];
 }
 export type RejectionReason = 'malformed' | 'evidence' | 'profile-ineligible' | 'surface'
   | 'capability' | 'quality' | 'privacy' | 'payer' | 'quota' | 'cooldown' | 'deadline'

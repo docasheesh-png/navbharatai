@@ -28,6 +28,7 @@ import {
   SKIP_DIR_RE, JUNK_FILE_RE, SECRET_FILE_RE, BINARY_EXT_RE, assetMimeFor, safeImportPath, IMPORT_LIMITS,
 } from '../../lib/importRules';
 import { allowedBeforeLifting } from '../../lib/liftEmbeddedMedia';
+import { importSpecifierPath, importSpecifierSuffix } from '../lib/importSpecifier';
 export {
   SKIP_DIR_RE, JUNK_FILE_RE, SECRET_FILE_RE, BINARY_EXT_RE, assetMimeFor, safeImportPath,
   importDropReason, type ImportDropReason,
@@ -718,7 +719,8 @@ export function findUnresolvedLocalImports(files: Record<string, string>): Array
     let m: RegExpExecArray | null;
     importRe.lastIndex = 0;
     while ((m = importRe.exec(content))) {
-      const spec = m[1];
+      // BR2001: `./start.svg?react` names `./start.svg` (see importSpecifier.ts).
+      const spec = importSpecifierPath(m[1]);
       let base: string | null = null;
       if (spec.startsWith('./') || spec.startsWith('../')) {
         base = normalizeRel(`${path.split('/').slice(0, -1).join('/')}/${spec}`);
@@ -796,7 +798,10 @@ export function fixMispathLocalImports(files: Record<string, string>): {
   for (const [path, content] of Object.entries(files)) {
     if (!/\.(?:m?[jt]sx?)$/i.test(path) || typeof content !== 'string') continue;
     let changed = false;
-    const next = content.replace(re, (full: string, pre: string, spec: string, close: string) => {
+    const next = content.replace(re, (full: string, pre: string, rawSpec: string, close: string) => {
+      // BR2001: resolve the file without the bundler's `?react` / `?raw`, and keep that suffix on a rewrite.
+      const spec = importSpecifierPath(rawSpec);
+      const suffix = importSpecifierSuffix(rawSpec);
       let base: string | null = null;
       if (spec.startsWith('./') || spec.startsWith('../')) base = normalizeRel(`${path.split('/').slice(0, -1).join('/')}/${spec}`);
       else if (spec.startsWith('@/') && hasSrc) base = normalizeRel(`src/${spec.slice(2)}`);
@@ -804,10 +809,10 @@ export function fixMispathLocalImports(files: Record<string, string>): {
       if (LOCAL_RESOLVE_SUFFIXES.some((s) => paths.has(base + s))) return full; // already resolves
       const existsAt = existingModuleByTail(base, paths);
       if (!existsAt) return full; // truly missing — the repair pass CREATEs it, we don't invent a path
-      const correct = relImportSpecifier(path, existsAt);
-      if (correct === spec) return full;
+      const correct = relImportSpecifier(path, existsAt) + suffix;
+      if (correct === rawSpec) return full;
       changed = true;
-      fixes.push({ importedBy: path, from: spec, to: correct });
+      fixes.push({ importedBy: path, from: rawSpec, to: correct });
       return `${pre}${correct}${close}`;
     });
     if (changed) out[path] = next;

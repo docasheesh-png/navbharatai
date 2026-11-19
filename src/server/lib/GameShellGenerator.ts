@@ -47,6 +47,7 @@ import { setGameLanguage, t, type GameLanguage, type StringKey } from './core/st
 import { showHint } from './core/levels';
 import { dialogue } from './core/dialogue';
 import { powerUps } from './core/powerups';
+import { leaderboard } from './core/leaderboard';
 import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
@@ -350,6 +351,9 @@ export class Game {
     // Taking a hit ends the combo — that is what makes a clean run worth more than a long one.
     this.disposers.push(events.on('PLAYER_DAMAGED', () => combo.break()));
     // 🎓 The first time ever this game is played, the controls for the device in hand are shown once (core/levels.ts).
+    // Every finished round goes on this device's leaderboard (core/leaderboard.ts) — recorded here so no game can forget.
+    const recordRound = () => { leaderboard.record(this.leaderboardId, state.score); };
+    this.disposers.push(events.on('GAME_OVER', recordRound), events.on('GAME_WON', recordRound));
     // A new round starts with no power-ups left over from the last one.
     this.disposers.push(events.on('GAME_STARTED', () => powerUps.clear()));
     this.disposers.push(events.on('GAME_STARTED', () => { showHint('controls', touchDevice() ? t('controlsTouch') : t('controlsKeyboard'), 5); }));
@@ -784,6 +788,9 @@ export class Game {
     events.emit('PERF_CHANGED', { fps: Math.round(this.perf.fps), quality: q, chosen: this.chosenQuality, auto: this.autoQuality });
   }
 
+  /** The key this game's leaderboard is saved under (the gameId option, or 'game'). */
+  get leaderboardId(): string { return this.options.gameId ?? 'game'; }
+
   /** Frames drawn per second, smoothed. */
   get fps(): number { return Math.round(this.perf.fps); }
   /** The quality being drawn right now (may be below the player's choice when Auto quality stepped it down). */
@@ -929,6 +936,7 @@ import { dialogue, type DialogueView } from '../core/dialogue';
 import { inventory, type ItemStack } from '../core/inventory';
 import { economy, type ShopEntry } from '../core/economy';
 import { powerUps, type ActivePowerUp } from '../core/powerups';
+import { leaderboard } from '../core/leaderboard';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -1337,6 +1345,53 @@ export function FpsCounter({ game }: { game: Pick<Game, 'fps' | 'quality'> }) {
   );
 }
 
+/**
+ * Share the score: the phone's own share sheet where there is one (WhatsApp, Instagram…), otherwise the text is copied.
+ * Resolves 'shared', 'copied', or 'unavailable' (no way to share at all — the button then hides).
+ */
+export async function shareScore(text: string, url: string): Promise<'shared' | 'copied' | 'unavailable'> {
+  const nav = (typeof navigator !== 'undefined' ? navigator : {}) as Navigator & { share?: (d: ShareData) => Promise<void> };
+  if (typeof nav.share === 'function') {
+    try { await nav.share({ text, url }); return 'shared'; } catch { /* dismissed or refused: try copying */ }
+  }
+  if (nav.clipboard && typeof nav.clipboard.writeText === 'function') {
+    try { await nav.clipboard.writeText(text + ' ' + url); return 'copied'; } catch { /* blocked */ }
+  }
+  return 'unavailable';
+}
+
+export function canShare(): boolean {
+  const nav = (typeof navigator !== 'undefined' ? navigator : {}) as Navigator & { share?: unknown };
+  return typeof nav.share === 'function' || !!(nav.clipboard && typeof nav.clipboard.writeText === 'function');
+}
+
+function ShareButton({ score, title }: { score: number; title: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'gone'>('idle');
+  if (state === 'gone' || !canShare() || score <= 0) return null;
+  const go = async () => {
+    const r = await shareScore(t('shareText', { score, game: title }), typeof location !== 'undefined' ? location.href : '');
+    setState(r === 'copied' ? 'copied' : r === 'unavailable' ? 'gone' : 'idle');
+  };
+  return <button type="button" style={secondary} onClick={() => { void go(); }}>{state === 'copied' ? t('copied') : t('share')}</button>;
+}
+
+/** The best five on this device, the round just played highlighted. Shown once there are at least two. */
+export function DeviceLeaderboard({ gameId }: { gameId: string }) {
+  const list = leaderboard.top(gameId, 5);
+  if (list.length < 2) return null;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 13, opacity: 0.8 }}>{t('bestOnDevice')}</div>
+      <ol aria-label={t('bestOnDevice')} style={{ textAlign: 'left', margin: '4px auto 0', maxWidth: 220, paddingLeft: 24 }}>
+        {list.map((e, i) => {
+          const mine = leaderboard.isLatest(gameId, e);
+          return <li key={i} style={{ fontWeight: mine ? 900 : 500, color: mine ? '#fde047' : '#fff' }}>{e.score}</li>;
+        })}
+      </ol>
+    </div>
+  );
+}
+
 /** The active power-ups: an icon each, a ring for the time left, the level when it stacks. */
 export function PowerUpBar() {
   const [list, setList] = useState<ActivePowerUp[]>(powerUps.list);
@@ -1676,10 +1731,12 @@ export function Hud({ game }: { game: Game }) {
           ) : (meta.lastSummary ? summaryLines(meta.lastSummary) : [t('score') + ' ' + s.score]).map((line, i) => (
             <p key={i} style={i === 0 ? { fontSize: 20, fontWeight: 800, marginTop: 8, color: '#fde047' } : { opacity: 0.88, marginTop: 4 }}>{line}</p>
           ))}
+          {lastRaceResults ? null : <DeviceLeaderboard gameId={game.leaderboardId} />}
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
             {s.status === 'won' && hasLevels && levels.hasNext ? <button type="button" style={button} onClick={nextLevel}>{t('nextLevel')}</button> : null}
             <button ref={again} type="button" style={s.status === 'won' && hasLevels && levels.hasNext ? secondary : button} onClick={replayLevel}>{t('playAgain')}</button>
             {economy.ready ? <button type="button" style={secondary} onClick={() => setPanel('shop')}>{t('shop')} · 🪙{shop.coins}</button> : null}
+            <ShareButton score={s.score} title={info?.title || (typeof document !== 'undefined' ? document.title : '') || 'NavBharatAI'} />
             {info ? <button type="button" style={secondary} onClick={() => game.toMenu()}>{t('menu')}</button> : null}
           </div>
         </div>,

@@ -314,7 +314,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED' | 'PERF_CHANGED' | 'POWERUP_STARTED' | 'POWERUP_ENDED' | 'POWERUPS_CHANGED' | 'LOOT_DROPPED'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED' | 'PERF_CHANGED' | 'POWERUP_STARTED' | 'POWERUP_ENDED' | 'POWERUPS_CHANGED' | 'LOOT_DROPPED' | 'LEADERBOARD_CHANGED'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -612,6 +612,7 @@ const EN = {
   level: 'Level', levels: 'Levels', levelComplete: 'Level complete', nextLevel: 'Next level', locked: 'Locked',
   difficulty: 'Difficulty', easy: 'Easy', normal: 'Normal', hard: 'Hard', checkpoint: 'Checkpoint',
   continue: 'Continue', inventory: 'Bag', inventoryEmpty: 'Your bag is empty', close: 'Close', needs: 'Needs {name}',
+  share: 'Share', copied: 'Copied!', shareText: 'I scored {score} in {game}! Can you beat it?', bestOnDevice: 'Best on this device',
   autoQuality: 'Auto quality', fpsCounter: 'FPS counter',
   shop: 'Shop', coins: 'Coins', buy: 'Buy', equip: 'Use', equipped: 'In use', owned: 'Owned', maxed: 'Max', levelShort: 'Lv {n}',
 };
@@ -636,6 +637,7 @@ const HI: Record<StringKey, string> = {
   level: 'लेवल', levels: 'लेवल', levelComplete: 'लेवल पूरा', nextLevel: 'अगला लेवल', locked: 'बंद',
   difficulty: 'कठिनाई', easy: 'आसान', normal: 'सामान्य', hard: 'कठिन', checkpoint: 'चेकपॉइंट',
   continue: 'आगे', inventory: 'थैला', inventoryEmpty: 'थैला खाली है', close: 'बंद करें', needs: '{name} चाहिए',
+  share: 'शेयर करें', copied: 'कॉपी हो गया!', shareText: 'मैंने {game} में {score} स्कोर किया! क्या आप इसे हरा सकते हैं?', bestOnDevice: 'इस फ़ोन पर सबसे अच्छे',
   autoQuality: 'ऑटो क्वालिटी', fpsCounter: 'FPS काउंटर',
   shop: 'दुकान', coins: 'सिक्के', buy: 'खरीदें', equip: 'चुनें', equipped: 'चुना हुआ', owned: 'आपका', maxed: 'पूरा', levelShort: 'लेवल {n}',
 };
@@ -1285,6 +1287,53 @@ export function createLootTable(entries: LootEntry[], o: { pity?: { rarity: Rari
     get sincePity() { return since; },
   };
 }
+`;
+
+const LEADERBOARD = `/**
+ * THE BEST SCORES ON THIS DEVICE (admin 2026-11-19 game-gap audit: no leaderboard — one "best" number, nothing to climb).
+ * A top ten per game, saved on the device. It is honest about what it is: the scores played HERE, not the world — a
+ * worldwide board needs an online service the game does not have.
+ *
+ *   leaderboard.record('desert-rally', 1250)   → 3 (the place it took), or null outside the top ten
+ *   leaderboard.top('desert-rally', 5)          → [{ score, name, at }, …] best first
+ * The 3D shell records every finished round by itself and the end screen lists the top five.
+ */
+import { events } from './events';
+
+export interface ScoreEntry { score: number; name: string; at: number }
+const SIZE = 10;
+const key = (gameId: string): string => 'nb-leaderboard:' + String(gameId || 'game');
+
+function read(gameId: string): ScoreEntry[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(key(gameId)) || '[]');
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((e) => e && Number.isFinite(e.score) && e.score >= 0)
+      .map((e) => ({ score: Math.floor(e.score), name: String(e.name ?? 'You').slice(0, 24), at: Number.isFinite(e.at) ? e.at : 0 }))
+      .sort((a, b) => b.score - a.score || a.at - b.at).slice(0, SIZE);
+  } catch { return []; }
+}
+
+let last: { gameId: string; at: number } | null = null;
+
+export const leaderboard = {
+  /** Record a finished round. Returns its place (1 = best) or null when it did not make the top ten. */
+  record(gameId: string, score: number, name = 'You'): number | null {
+    if (!Number.isFinite(score) || score <= 0) return null;
+    const entry: ScoreEntry = { score: Math.floor(score), name: String(name).slice(0, 24) || 'You', at: Date.now() };
+    const list = [...read(gameId), entry].sort((a, b) => b.score - a.score || a.at - b.at).slice(0, SIZE);
+    const place = list.indexOf(entry);
+    if (place < 0) return null;
+    try { localStorage.setItem(key(gameId), JSON.stringify(list)); } catch { /* full or blocked storage: the round still counts on screen */ }
+    last = { gameId, at: entry.at };
+    events.emit('LEADERBOARD_CHANGED', { gameId, place: place + 1 });
+    return place + 1;
+  },
+  top(gameId: string, n = SIZE): ScoreEntry[] { return read(gameId).slice(0, Math.max(0, n)); },
+  /** Is this entry the one just recorded (for highlighting it)? */
+  isLatest(gameId: string, e: ScoreEntry): boolean { return !!last && last.gameId === gameId && last.at === e.at; },
+  clear(gameId: string): void { try { localStorage.removeItem(key(gameId)); } catch { /* nothing to clear */ } last = null; events.emit('LEADERBOARD_CHANGED', { gameId, place: null }); },
+};
 `;
 
 const DIALOGUE = `/**
@@ -2048,10 +2097,11 @@ const FILES: Record<string, string> = {
   'src/game/core/perf.ts': PERF,
   'src/game/core/powerups.ts': POWERUPS,
   'src/game/core/loot.ts': LOOT,
+  'src/game/core/leaderboard.ts': LEADERBOARD,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot', 'leaderboard'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -2085,7 +2135,7 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/economy.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
     if (files['src/game/core/dialogue.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
     if (files['src/game/core/inventory.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
-    if (files['src/game/core/powerups.ts'] || files['src/game/core/loot.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
+    if (files['src/game/core/powerups.ts'] || files['src/game/core/loot.ts'] || files['src/game/core/leaderboard.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }

@@ -102697,3 +102697,10 @@ The first exactly-one-lease assertion in the phase-2 handoff race now includes o
   PowerUpBar (icon, time ring, level). `core/loot.ts` (createLootTable: weights, rarities, nothing entries, amounts, pity,
   chances(), LOOT_DROPPED).
 - Locked by `tests/powerUpsAndLootWork.test.ts` (reversion: no clear on a new round / no pity → each fails).
+
+## 2026-11-19 — Game gap P2: share the score + on-device leaderboard (branch `claude/game-share-leaderboard`)
+- Kit: `core/leaderboard.ts` (top ten per game id on the device, sanitised on read; record → place; isLatest), recorded by
+  Game on GAME_OVER / GAME_WON under `leaderboardId` (the gameId option). Hud: DeviceLeaderboard ("Best on this device", top
+  five, this round highlighted) and ShareButton (`shareScore`: Web Share → clipboard → hidden), EN/HI strings.
+- Honest by design: labelled "on this device"; the prompt forbids claiming a worldwide board without an online service.
+- Locked by `tests/theScoreCanBeSharedAndClimbed.test.ts` (reversion: the shell not recording rounds → fails).

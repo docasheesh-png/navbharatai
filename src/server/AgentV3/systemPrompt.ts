@@ -1158,6 +1158,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  Never set the renderer\'s pixel ratio or shadows yourself; read game.fps / game.quality if a game needs to cut its own extras.',
     '  POWER-UPS AND DROPS: powerUps.define / give / active / value from src/game/core/powerups.ts (they pause with the game and end',
     '  on a new round — never setTimeout); createLootTable(entries, { pity }) from core/loot.ts for what an enemy or chest drops.',
+    '  The end screen already has Share and this device\'s top scores (core/leaderboard.ts, recorded by the kit) — never claim a',
+    '  worldwide leaderboard without an online service behind it.',
     '  The screen recipes below are for 2D games and anything not on <GameCanvas>.',
     '  🎨 EVERYTHING AROUND THE CANVAS IS UI, AND IT IS WHAT THE PLAYER SEES FIRST. Where the kit is in',
     '  the project, build it from the GAME UI recipes: the stage is `.nb-game`; the start, pause and',

@@ -1,7 +1,7 @@
 import { prepareHumanAssets } from './humanPack';
 import { createPolyHavenDiscovery, withDiscoveredAssetCache, isDiscoveredAsset } from './polyHavenDiscovery';
 import { createHash } from 'node:crypto';
-import { localModelsOverride, localModelSubjects } from './localModelNote';
+import { localModelEntries, localModelsOverride, localModelSubjects } from './localModelNote';
 import { downloadGameAsset } from './assetDownload';
 import { acquireGameAsset, type AssetEngineDependencies, type AssetOutcome } from './assetEngine';
 import type { AssetRequirement } from './assetPolicy';
@@ -14,7 +14,7 @@ import { persistProjectAsset, type GameAssetWorkspace, type GameAssetPersistence
 import { proveAssetInSandbox } from './assetBrowserProof';
 import { saveWorkspaceAssets, readWorkspaceAssetBytes } from '../WorkspaceAssetStore';
 import { mergeWorkspaceFiles } from '../WorkspaceFileStore';
-import { GAME_ASSET_CUSTOMIZATIONS_PATH, GAME_ASSET_MODELS_PATH, generateAssetCustomizations, generateAssetModelLoader, generateGameAssetRuntime } from '../../lib/GameAssetRuntimeGenerator';
+import { GAME_ASSET_CUSTOMIZATIONS_PATH, GAME_ASSET_MODELS_PATH, generateAssetCustomizations, generateAssetModelLoader, generateGameAssetRuntime, runtimeExportsAll, runtimeImportNames } from '../../lib/GameAssetRuntimeGenerator';
 import { sceneryFor, generateWorldDressingModule } from './worldDressing';
 /** MIT requires its permission notice in every copy; the copyright line is the entry's `attribution`. */
 export const MIT_PERMISSION_NOTICE = 'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.';
@@ -40,11 +40,31 @@ export interface GameAssetSeedOptions {
   /** Test adapters exercise the same orchestration without live accounts or paid sandbox creation. */
   dependencies?: AssetEngineDependencies;
   persistence?: GameAssetPersistence;
+  /** Explicit models to add (edit turns: add_library_models) instead of reading them from the prompt; no scenery. */
+  requirements?: readonly AssetRequirement[];
+  /**
+   * The game's current files, for MERGING into an existing game rather than seeding a new one: earlier models
+   * stay in the loader, the manifest and the credits; the user's customization file is never replaced; the runtime
+   * is written only when missing or too old to export what the new loader imports.
+   */
+  existing?: { assetModels?: string | null; manifest?: string | null; attribution?: string | null; customizations?: string | null; runtime?: string | null };
 }
 
 /** Called only inside the existing new-game seed guard, after the 3D recipe has installed Three.js. */
 /** Models downloaded and proved at once. Bounded: each proof is a browser in a sandbox with ~3.7 GB. */
 export const GAME_ASSET_CONCURRENCY = 3;
+
+/** The project's durable store for seeded binary assets (models, sounds) and their text manifests. One adapter, every seed. */
+export function workspaceGameAssetPersistence(verifiedOwnerUid?: string): GameAssetPersistence {
+  return {
+    saveBinary: (id, assets) => saveWorkspaceAssets(id, assets, verifiedOwnerUid),
+    readBinary: readWorkspaceAssetBytes,
+    async saveText(id, files) {
+      const result = await mergeWorkspaceFiles(id, files);
+      if (result.status !== 'saved') throw new Error('Asset manifest persistence not acknowledged');
+    },
+  };
+}
 
 export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<GameAssetSeedResult> {
   // Preserve scenery/vehicles and their manifest. Optional humans use separate filenames.
@@ -71,26 +91,29 @@ export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<
   };
 }
 
+/**
+ * Add named library models to an EXISTING game (the add_library_models tool, 2026-11-19). Same gate, catalogue,
+ * downloads, proofs and durable saves as the new-game seed; merges into the game's current files (see `existing`).
+ * Without this, the library only reached NEW games: "add a cow to my game" could never get the library cow.
+ */
+export function addLibraryModels(options: Omit<GameAssetSeedOptions, 'prompt' | 'needsHuman'> & { requirements: readonly AssetRequirement[] }): Promise<GameAssetSeedResult> {
+  return prepareExternalGameAssets({ ...options, prompt: '', existing: options.existing ?? {} });
+}
+
 async function prepareExternalGameAssets(options: GameAssetSeedOptions): Promise<GameAssetSeedResult> {
   const out: GameAssetSeedResult = { files: {}, handoff: '', outcomes: [], status: 'off' };
   if (!externalGameAssetsEnabled(options.env, options.verifiedOwnerUid)) return out;
   const catalogue = options.catalogue ?? REVIEWED_GAME_ASSETS;
   // Named subjects first, then the scenery this KIND of game needs (L3 step 4) — same bound of six models.
-  const named = gameAssetRequirements(options.prompt, catalogue);
-  const scenery = sceneryFor(options.prompt);
+  const explicit = options.requirements !== undefined;
+  const named = explicit ? options.requirements!.slice(0, 6).map((r) => ({ subject: r.subject, ...(r.animation ? { animation: r.animation } : {}) })) : gameAssetRequirements(options.prompt, catalogue);
+  const scenery = explicit ? null : sceneryFor(options.prompt);
   const served = new Set(catalogue.flatMap((c) => c.subjects));
   const requirements = [...named, ...(scenery?.subjects ?? [])
     .filter((subject) => served.has(subject) && !named.some((r) => r.subject === subject))
     .map((subject): AssetRequirement => ({ subject }))].slice(0, 6);
   if (!requirements.length) return { ...out, status: 'procedural' };
-  const persistence: GameAssetPersistence = options.persistence ?? {
-    saveBinary: (id, assets) => saveWorkspaceAssets(id, assets, options.verifiedOwnerUid),
-    readBinary: readWorkspaceAssetBytes,
-    async saveText(id, files) {
-      const result = await mergeWorkspaceFiles(id, files);
-      if (result.status !== 'saved') throw new Error('Model manifest persistence not acknowledged');
-    },
-  };
+  const persistence: GameAssetPersistence = options.persistence ?? workspaceGameAssetPersistence(options.verifiedOwnerUid);
   const store = options.dependencies ? undefined : gameAssetObjectStore();
   const dependencies: AssetEngineDependencies = options.dependencies ?? {
     cache: withDiscoveredAssetCache(createDurableAssetCache(store!, catalogue), store!),
@@ -177,12 +200,22 @@ async function prepareExternalGameAssets(options: GameAssetSeedOptions): Promise
     const reviewed = isDiscoveredAsset(c) ? c : catalogue.find(a => a.sha256 === c.sha256 && a.provider === c.provider && a.id === c.id && a.revision === c.revision);
     return `${r.subject}: ${c.license.author} — ${c.license.spdx}\n${c.license.attribution}\nSource: ${c.sourceUrl}\nLicense evidence: ${c.license.evidenceUrl}\nRevision: ${c.revision}\nChanges: ${reviewed?.optimization === 'animation-selection-v1' ? 'retained clips ' + reviewed.retainedAnimations?.join(', ') + '; removed other clips and unused data (animation-selection-v1); ' : reviewed?.optimization === 'compact-v1' ? 'lossless GLB buffer compaction (compact-v1); ' : ''}glTF packaging when applicable; runtime scale, grounding, curated orientation normalization and eligible bounded static LOD generation.\nSHA-256: ${c.sha256}${reviewed?.sourceSha256 ? '\nSource SHA-256: ' + reviewed.sourceSha256 : ''}${c.license.spdx === 'MIT' ? '\n\n' + MIT_PERMISSION_NOTICE : ''}`;
   }).join('\n\n');
+  const existing = options.existing;
+  const added = new Set(ready.map((r) => r.subject));
+  const previousLocal = existing ? localModelEntries(existing.assetModels) : {};
+  const mergedLocal: Record<string, unknown> = { ...previousLocal, ...local };
+  let previousManifest: unknown[] = [];
+  try { const m = JSON.parse(existing?.manifest ?? '') as { assets?: unknown[] }; if (Array.isArray(m?.assets)) previousManifest = m.assets; } catch { /* no earlier manifest */ }
+  const mergedManifest = { schema: 1, assets: [...previousManifest.filter((a) => !added.has(String((a as { subject?: unknown })?.subject ?? ''))), ...manifest.assets] };
+  const mergedCredits = existing?.attribution?.trim() ? `${existing.attribution.trim()}\n\n${credits}` : credits;
+  const loader = generateAssetModelLoader(mergedLocal);
+  const keepRuntime = !!existing?.runtime && runtimeExportsAll(existing.runtime, runtimeImportNames(loader));
   const files: Record<string, string> = {
-    'public/game-assets/manifest.json': JSON.stringify(manifest, null, 2),
-    'public/game-assets/ATTRIBUTION.txt': credits,
-    'src/game/three/externalAssets.ts': generateGameAssetRuntime(),
-    [GAME_ASSET_MODELS_PATH]: generateAssetModelLoader(local),
-    [GAME_ASSET_CUSTOMIZATIONS_PATH]: generateAssetCustomizations(ready.map(r => r.subject)),
+    'public/game-assets/manifest.json': JSON.stringify(mergedManifest, null, 2),
+    'public/game-assets/ATTRIBUTION.txt': mergedCredits,
+    ...(keepRuntime ? {} : { 'src/game/three/externalAssets.ts': generateGameAssetRuntime() }),
+    [GAME_ASSET_MODELS_PATH]: loader,
+    ...(existing?.customizations ? {} : { [GAME_ASSET_CUSTOMIZATIONS_PATH]: generateAssetCustomizations(Object.keys(mergedLocal)) }),
   };
   const dressed = scenery ? scenery.subjects.filter((subject) => ready.some((r) => r.subject === subject)) : [];
   if (scenery && dressed.length) files['src/game/three/worldDressing.ts'] = generateWorldDressingModule(dressed, scenery.layout);

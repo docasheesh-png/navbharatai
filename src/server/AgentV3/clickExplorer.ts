@@ -49,7 +49,7 @@
 // PURE. The runner is a STRING built here and executed by the caller in the sandbox. No I/O, no clock,
 // no model call in this module.
 
-import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
+import { SANDBOX_BROWSER_ARGS, browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
 import { BROWSER_PAGE_OPTIONS } from './signInExplore';
 import { DESTRUCTIVE_LOCAL_WORDS, SPENDING_LOCAL_WORDS, DEVANAGARI_NEVER_WORDS } from './localActionWords';
 import { MAIN_REGION_EMPTY_JS, BROWSE_MAIN_GRACE_MS } from './PreviewVerify';
@@ -1147,7 +1147,7 @@ async function narrowOne(browser, target) {
   return res;
 }
 
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await chromium.launch({ args: ${JSON.stringify(SANDBOX_BROWSER_ARGS)} });
 try {
   let plan;
   {

@@ -108,6 +108,7 @@ export function createGameLibrary(models: readonly ReviewedAsset[] = REVIEWED_GA
       if (!ranked.length) missing.push(query ? `No compatible indexed asset for: ${query}${animation ? ` (${animation})` : ''}` : `No indexed entries${category ? ` in ${category}` : ''}`);
       return { entries: ranked.slice(0, bound(input.limit)).map(v => structuredClone(v.row.entry)), total: ranked.length, categories: summary.map(c => ({ ...c })), missing,
         notes: ['Search is metadata-only: requires-admission models are not proof of local bytes or live availability.',
+          'To put a reviewed model into the CURRENT game, call run_recipe({ name: "add_library_models", input: { models: [{ subject }] } }) — it downloads, proves and wires it, or says honestly why not.',
           'Use already prepared project models first. Keep existing download/license/hash/render admission and game playtests.',
           'Empty maps/audio categories do not imply runtime terrain or synthesized effects are absent; they mean no indexed ready-made files.',
           'No claim of universal game support or photorealism. Missing content must be reported, not replaced with an unrelated asset.'] };

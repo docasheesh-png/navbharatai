@@ -52,6 +52,8 @@ export const PRODUCES_WORK_TOOLS: ReadonlySet<string> = new Set([
   'deploy', 'task',
   // writes src/game/forge/forge.ts and src/game/objects/<id>.ts (the Object Forge)
   'author_object',
+  // writes library models (public/game-assets/*.glb) and their loader into an existing game
+  'add_library_models',
 ]);
 
 /** Families whose every member writes code into the app (`generate_auth`, `codemod_rename`, …). */

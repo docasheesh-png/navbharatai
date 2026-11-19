@@ -2561,7 +2561,15 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     // It writes only a tsconfig already in `writtenFiles`, and only to drop a dangling tsconfig.node.json
     // reference (sanitizeTsconfigReferences). Kill switch AGENTV3_TSCONFIG_SANITIZE. Considered ✓.
     expect(SRC).toContain('for (const w of landed) writtenFiles.set(w.path, w.content);');
-    expect(count).toBe(38);
+    // +1 the RECORDED SOUND seed (soundSeed.ts, 2026-11-19) — inside the same GAME KIT SEED block as the L3
+    // model seed above (new build, non-import, non-module, untouched starter), and only when the kit itself
+    // laid down src/game/fx/audio.ts. It writes only the files prepareGameSounds returns AFTER their durable
+    // acknowledgement (loader, customizations, credits), and the seed accounting below attributes every one to
+    // the platform (preseededGolden + kitSeededFiles), never to the model. Cannot run on a survey/import/edit. ✓
+    expect(seed).toContain("if (writtenFiles.has('src/game/fx/audio.ts') && !abort.signal.aborted)");
+    expect(seed).toContain('for (const [path, content] of Object.entries(sounds.files)) writtenFiles.set(path, content)');
+    expect(seed.indexOf('Object.entries(sounds.files)')).toBeLessThan(seed.indexOf('preseededGolden.set(kp, kc)'));
+    expect(count).toBe(39);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

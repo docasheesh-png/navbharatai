@@ -102601,6 +102601,13 @@ user, 12.7 working. Tally: ✅ 1 (REPAIR_CLAIM_WITHHELD) · 🔀 0 · ⏭️ 0 �
 **Fixed:** kit file `core/strings.ts` — English and Hindi tables with identical keys and placeholders, `t(key, vars)`, `setGameLanguage('en' | 'hi' | 'auto', overrides)`; the builder supplies any other language through `options.strings` (never machine-guessed here); a missing word falls back to English, never blank. Used by the start screen, pause menu, settings, game over, HUD, loading bar, kit touch-button labels (a label the game wrote is kept), the rotate hint and the run summary. `options.language` / `options.strings` on the Game; prompt tells the builder to set it. (The English-only rule is for NavBharatAI's own UI; this is the user's game.)
 
 **Tests:** `theGameSpeaksThePlayersLanguage` (6). Reversion: a hard-coded Play fails 1. **Still open:** meta goal texts and achievement titles are English data; the racing starter's own buttons are English.
+## 2026-11-19 — Recorded sound library for new games
+- 47 CC BY 4.0 recordings (Meta-open-sound, pinned), loudness-measured in Chromium, 47/47 admitted live. New kit games get a core
+  set replacing built-in voices of the same names + prompt-matched ambience/engines/animals/doors (≤28 sounds, 8 MiB, 4 loops).
+- Every sound changeable in `soundCustomizations.ts` (own file, volume, back to built-in). Kit ships a stand-in loader so nothing
+  can break. Publish serves .ogg as audio/ogg. Kill switch `AGENTV3_GAME_SOUND_LIBRARY` (default on). `tests/gamesGetRecordedSounds.test.ts`.
+- BLOCKED: Quaternius animated animals / guns / vehicles — Google Drive answers "Quota exceeded" for every file (Google's own
+  limit on popular shared files, up to 24 h). Retry later; no workaround used.
 
 ## 2026-11-19 — Game-gap audit P0 #3: the playtest now PRESSES Play again, reads the score and counts the sounds
 
@@ -102848,3 +102855,29 @@ Closed Q-2940, Q-2941, Q-2945, Q-2946, Q-2950, Q-2951, Q-2952 (IDs appended to `
 - Q-2952 (#2470): after an 8 s head start the fallback scope classifier runs in parallel; the loser is cancelled as `answered_elsewhere` (info, never a Surplus failure).
 - Also: `aKeyPopupIsNotCountedAgainstTheBuild` made deterministic (controlled clock).
 Still open from these reports: Q-2942, Q-2943, Q-2947, Q-2948, Q-2949 (see the queue). #2469 and #2454 were autopsied by other sessions (Q-2881–Q-2890, Q-2784+).
+## 2026-11-19 — 3D games were blamed for our checker's missing WebGL (Q-2698)
+- Live in builds 2439–2476: every 3D game scored "Controls 0 · 0 fps · no canvas" and the user was told the controls
+  do nothing, while the game had rendered its own "Error creating WebGL context" screen inside the playtest.
+- Root: platform browsers in the sandbox launched without software-WebGL flags; the fallback Playwright install was
+  unpinned (newer Chromium dropped the automatic SwiftShader fallback). Fix: `SANDBOX_BROWSER_ARGS` (one list, every
+  launch, census test), `SANDBOX_PLAYWRIGHT_VERSION` pinned (= Dockerfiles), honest `checkerLacksWebGL` verdict.
+  Real-Chromium test, reversion-proven. Watch the next 3D build for real fps / a scored Controls dimension.
+## 2026-11-19 — The model library reaches existing games (add_library_models)
+- The seed added library models only to NEW games; in an existing game the builder could only search metadata.
+  New run_recipe tool `add_library_models`: same rollout gate, downloads, proofs and durable saves as the seed, merged
+  into the game's loader/manifest/credits; the user's assetCustomizations.ts is never replaced; the runtime is written only
+  when missing or too old for the new loader. Honest answers when the library is off, a name is not in it, or the sandbox
+  cannot write binary files. Verified end-to-end: castle + motorcycle added to a built village game, 8/8 models in Chromium.
+
+## 2026-11-19 — The Game library on screen (item 3 of the admin's next-level list)
+- **What:** Pro → mode button → **Game library**: a searchable, filterable grid of all 259 reviewed models with a picture
+  each; tapping one fills the composer with "add the <name> model … (library id: "<id>")" — nothing runs until sent.
+- **Server:** `GET /api/agentv3/game-library` (signed-in, free, no model call; `enabled` is the same per-account gate the
+  builder uses) and `GET /api/agentv3/game-library/thumb/:hash` (serves only a catalogue-hash file).
+- **Exact model:** `add_library_models` takes `{ id }`; other models serving that id's subjects are left out of the call's
+  catalogue, so the tapped cow is the cow that arrives.
+- **Pictures:** 258 webp renders (1.1 MB) in `assets/game-models/thumbs/`, which the production image already copies;
+  `scripts/library/renderLibraryThumbnails.mts` renders missing ones after a new batch. The one CC BY model has a plain
+  tile (a picture would need an on-screen credit; users never see source names). Names drop internal batch prefixes.
+- **Proof:** the real picker bundled into Chromium against the real server function: grid renders, search "cow" → "Cow",
+  tap → composer holds the id instruction, no page errors. Locks: `tests/theGameLibraryIsOnScreen.test.ts` (12).

@@ -33,7 +33,7 @@
 // including the cases that LOOK like violations: alt="" with aria-hidden, an aria-label on a button, a
 // label[for], a wrapping label, and a hidden input).
 
-import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
+import { SANDBOX_BROWSER_ARGS, browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
 import { newPageOptionsExpr } from './signInExplore';
 import { declaredRoutes } from './routerPaths';
 import { MAIN_REGION_EMPTY_JS, BROWSE_MAIN_GRACE_MS, BROWSE_PAINT_POLL_MS } from './PreviewVerify';
@@ -180,7 +180,7 @@ export function pageCheckScript(previewUrl: string, routes: string[], opts: { st
 ${playwrightImport(TOOLS_DIR)}
 const base = ${JSON.stringify(base)};
 const routes = ${list};
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await chromium.launch({ args: ${JSON.stringify(SANDBOX_BROWSER_ARGS)} });
 for (const route of routes) {
   const out = { route, status: null, text: 0, mainEmpty: false, errors: [], settled: false, vitals: null, a11y: [], finalPath: null };
   // Signed in when the app's screens are behind a sign-in page (signInExplore.ts), anonymous otherwise.

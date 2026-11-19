@@ -33,7 +33,7 @@
  *
  * PURE: the candidate reader, the script builder and the output parser. The route runs the script.
  */
-import { playwrightImport, browserScriptRunLine } from './sandboxBrowserScript';
+import { SANDBOX_BROWSER_ARGS, playwrightImport, browserScriptRunLine } from './sandboxBrowserScript';
 import { DESTRUCTIVE_LOCAL_WORDS, SPENDING_LOCAL_WORDS, DEVANAGARI_NEVER_WORDS } from './localActionWords';
 import { detectBackendPresence } from './BackendPresence';
 
@@ -367,7 +367,7 @@ async function attemptSignUp(page, name, who) {
   return await attempt(page, { identifier: who.username, password: who.password });
 }
 
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await chromium.launch({ args: ${JSON.stringify(SANDBOX_BROWSER_ARGS)} });
 try {
   const ctx = await browser.newContext(${JSON.stringify(BROWSER_PAGE_OPTIONS)});
   const page = await ctx.newPage();

@@ -12,3 +12,12 @@ Conversion used factory settings, disabled Python auto-execution and disabled im
 The server image includes this directory privately. The Eagle is loaded only on demand and checked
 against its exact byte size and SHA-256; it is not fetched from this private repository at runtime.
 The original public FBX URL remains provenance only. No user prompt can select a filesystem path.
+
+## thumbs/
+
+`thumbs/<sha256>.webp` — one 160×160 picture per reviewed library model, shown by the in-app Game library
+(`GET /api/agentv3/game-library/thumb/:hash`, which serves only a file named by a catalogue hash). Rendered by
+`node --import tsx scripts/library/renderLibraryThumbnails.mts <work dir> <playwright index.mjs>`; re-run it after
+adding a library batch (it renders only the missing ones). Pictures exist only for CC0 and MIT models: a CC BY
+picture would need an on-screen credit, and users never see a source name. `tests/theGameLibraryIsOnScreen.test.ts`
+fails when a picture is missing or orphaned.

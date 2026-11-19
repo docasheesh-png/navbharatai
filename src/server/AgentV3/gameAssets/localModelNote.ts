@@ -16,14 +16,21 @@ import { REVIEWED_GAME_ASSETS } from './providers';
 
 export const ASSET_MODELS_PATH = 'src/game/three/assetModels.ts';
 
-/** The subjects a generated assetModels.ts has a local model for ([] for anything else). */
-export function localModelSubjects(assetModelsSource: string | null | undefined): string[] {
+/** The local-model manifest a generated assetModels.ts carries ({} for anything else) — subject → entry. */
+export function localModelEntries(assetModelsSource: string | null | undefined): Record<string, Record<string, unknown>> {
   const m = /const assets: Record<string, LocalGameAsset> = (\{.*\});\n/.exec(String(assetModelsSource ?? ''));
-  if (!m) return [];
+  if (!m) return {};
   try {
     const parsed = JSON.parse(m[1]) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? Object.keys(parsed).filter((k) => /^[a-z][a-z0-9 _-]{0,40}$/i.test(k)) : [];
-  } catch { return []; }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>)
+      .filter(([k, v]) => /^[a-z][a-z0-9 _-]{0,40}$/i.test(k) && !!v && typeof v === 'object' && !Array.isArray(v)) as Array<[string, Record<string, unknown>]>);
+  } catch { return {}; }
+}
+
+/** The subjects a generated assetModels.ts has a local model for ([] for anything else). */
+export function localModelSubjects(assetModelsSource: string | null | undefined): string[] {
+  return Object.keys(localModelEntries(assetModelsSource));
 }
 
 /** Which ready local model (if any) an object name is asking for — through the catalogue's own aliases. */

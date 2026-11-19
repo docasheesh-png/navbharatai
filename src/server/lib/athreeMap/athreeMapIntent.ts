@@ -13,8 +13,9 @@
 
 import { buildGameContract } from '../../AgentV3/gameIntent';
 import { ATHREE_MAP, LIBRARY_MAPS, type LibraryMap, type MapProfile } from './athreeMapLibrary';
+import { largeWorldIntent } from '../../AgentV3/largeWorldIntent';
 
-export type AthreeVia = 'stored' | 'named' | 'needed' | 'librarian' | 'declined' | 'other-map' | 'named-not-needed' | 'none';
+export type AthreeVia = 'stored' | 'named' | 'needed' | 'librarian' | 'declined' | 'other-map' | 'named-not-needed' | 'road-library' | 'none';
 
 export interface AthreeIntent {
   /** Use the Athree map for this game. */
@@ -60,8 +61,38 @@ export function mapProfileFor(prompt: string): MapProfile | null {
   if (FLIGHT.test(t) || c.vehicle === 'aircraft') return 'flight';
   if (c.genre === 'racing' || RACING.test(t) || (c.vehicle && ['car', 'motorcycle', 'truck', 'bus', 'tractor'].includes(c.vehicle) && /\bgame\b|\bsim/.test(t))) return 'racing';
   if (OPEN_WORLD.test(t)) return /\bexplor|\bwalk|survival|adventure/.test(t) ? 'explore' : 'open-world';
+  // 🗺️ The WISH, not the word (admin 2026-11-19: "sirf word par nahi, intension par trigger ho"). "Bada map banao",
+  // "kahin bhi ghoom sakun", "map bahut chhota hai" mean a big world as surely as "open world" does. Only for a
+  // GAME: a big font or a long list is not a world. An endless runner is a lane, not a world.
+  const wish = largeWorldIntent(prompt);
+  if (wish.wants && isGameRequest(t, c) && !(c.genre === 'runner' && wish.wish === 'never-ending')) {
+    return wish.wish === 'free-roam' || /\bexplor|\bwalk|survival|adventure|ghoom|घूम/.test(t) ? 'explore' : 'open-world';
+  }
   return null;
 }
+
+const GAME_WORD = /\bgames?\b|\bkhel\b|गेम|खेल/;
+
+/** The request is for a game (a named genre, a driven vehicle, or the word itself). */
+function isGameRequest(t: string, c: ReturnType<typeof buildGameContract>): boolean {
+  return c.genre !== 'unknown' || Boolean(c.vehicle) || GAME_WORD.test(t);
+}
+
+/**
+ * A race on a ROAD gets the endless road library (endlessRaceCourse.ts, owner 2026-11-18: "racing game me hamesa
+ * library se road map") — twelve 10–100 km maps that join seamlessly and never end. The Athree WORLD is for a race
+ * where the player leaves the road: free roam, an open world, a named Athree. Without this split, turning the map
+ * on (2026-11-19) would have put a second road system under every race.
+ */
+export function raceWantsOpenWorld(prompt: string): boolean {
+  const t = norm(prompt);
+  if (OPEN_WORLD_RACE.test(t)) return true;
+  const wish = largeWorldIntent(prompt);
+  // "Bada MAP / badi DUNIYA" asks for land around the race; "lambi sadak" asks for road, which the library gives.
+  return wish.wish === 'free-roam' || (wish.wish === 'big-space' && WORLD_NOUN.test(wish.evidence));
+}
+const WORLD_NOUN = /\b(?:maps?|worlds?|land|terrain|island|duniya|dunia|zameen|zamin|naksh\w*|ilaa?ka|area|region|continent)\b|मैप|दुनिया|नक्श|ज़मीन|जमीन|इलाक/;
+const OPEN_WORLD_RACE = /ओपन\s*वर्ल्ड|खुली\s*दुनिया|open[\s-]?world|\bgta\b|sandbox|free[\s-]?roam|off[\s-]?road|\bterrain\b|\bisland\b/;
 
 function hashString(s: string): number {
   let h = 2166136261;
@@ -101,6 +132,10 @@ export function athreeMapIntent(input: AthreeIntentInput): AthreeIntent {
   if (named) {
     if (profile) return { use: true, via: 'named', mapId: ATHREE_MAP.id, profile, reason: `The request names the Athree map and a ${profile} game needs a map.` };
     return none('named-not-needed', 'The Athree map is a large world for games (racing, open world, battle royale, flight, exploring). This app has no world to put it on, so no map is added.');
+  }
+
+  if (profile === 'racing' && !raceWantsOpenWorld(prompt)) {
+    return none('road-library', 'A race on a road gets NavBharatAI\'s endless road library (twelve seamless 10–100 km maps); the Athree world is for a race that leaves the road (free roam, open world) or names Athree.');
   }
 
   if (profile) {

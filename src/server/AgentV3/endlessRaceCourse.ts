@@ -119,6 +119,25 @@ export function raceCourseFinding(index: ReadonlyMap<string, RaceCourseHalves>):
   return { finiteRoadFiles: all.filter(([, h]) => h.finiteRoad).map(([p]) => p).sort() };
 }
 
+/**
+ * THE END-OF-BUILD CHECK (admin 2026-11-19: "road/map bahut chota sa banta hai"). The write-time note above is said
+ * ONCE; a builder that ignored it shipped a 300 m road and nothing stopped it. This reads the WHOLE workspace as it
+ * is at the end (every lane's writes, not one dispatcher's), so a sub-agent's game file is judged too, and returns
+ * the readiness blocker that keeps the build from being called done. Null when the race streams a course, or when
+ * nothing drives a vehicle.
+ */
+export function endlessRaceCourseBlocker(files: ReadonlyMap<string, string> | Record<string, string>): string | null {
+  const entries = files instanceof Map ? [...files.entries()] : Object.entries(files);
+  const index = new Map<string, RaceCourseHalves>();
+  for (const [p, c] of entries) index.set(p, raceCourseHalves(p, c));
+  const finding = raceCourseFinding(index);
+  if (!finding) return null;
+  const where = finding.finiteRoadFiles.length ? ` (${finding.finiteRoadFiles.join(', ')} build${finding.finiteRoadFiles.length === 1 ? 's' : ''} a finite createRoad() course)` : '';
+  return `RACE COURSE IS NOT ENDLESS: the game drives a vehicle but no file streams a track${where}, so the road ends after about ten seconds. `
+    + 'Mount the ready starter (<RacingRoadGame plan={TRACK_PLAN} /> from src/game/RacingRoadGame.tsx) or call createTrackStream(TRACK_PLAN) '
+    + 'with TRACK_PLAN = createRacingRoadPlan() from src/game/three/objects.ts, and call stream.update(car) every frame.';
+}
+
 /** The repair note for that finding. */
 export function endlessRaceCourseNote(f: RaceCourseFinding): string {
   const where = f.finiteRoadFiles.length

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { athreeMapEnabled, LIBRARY_MAPS } from '../src/server/lib/athreeMap/athreeMapLibrary';
 import { createGameLibrary, searchGameLibrary, gameLibraryObjectNote } from '../src/server/AgentV3/gameAssets/gameLibrary';
 import { REVIEWED_GAME_ASSETS } from '../src/server/AgentV3/gameAssets/providers';
 import { OBJECT_CATALOG } from '../src/server/lib/objectCatalog';
@@ -7,7 +8,8 @@ import { readFileSync } from 'node:fs';
 describe('one categorized game librarian over existing sources', () => {
   it('indexes every object specification and reviewed model without pretending specifications are assets', () => {
     const r = searchGameLibrary({ limit: 20 });
-    expect(r.total).toBe(OBJECT_CATALOG.length + REVIEWED_GAME_ASSETS.length);
+    // + our own library maps, listed while the Athree map is on (the default since 2026-11-19).
+    expect(r.total).toBe(OBJECT_CATALOG.length + REVIEWED_GAME_ASSETS.length + (athreeMapEnabled() ? LIBRARY_MAPS.length : 0));
     expect(r.categories.reduce((n, c) => n + c.count, 0)).toBe(r.total);
     expect(r.entries).toHaveLength(20);
     const train = searchGameLibrary({ query: 'train' });
@@ -42,7 +44,9 @@ describe('one categorized game librarian over existing sources', () => {
     const r = searchGameLibrary({ query: 'PUBG Erangel map', category: 'maps' });
     expect(r.entries).toEqual([]);
     expect(r.missing.length).toBeGreaterThan(0);
-    expect(r.categories.find(c => c.category === 'maps')?.count).toBe(0);
+    // The only maps are our OWN (Athree, default on); a named third-party map is never invented.
+    expect(r.categories.find(c => c.category === 'maps')?.count ?? 0).toBe(athreeMapEnabled() ? LIBRARY_MAPS.length : 0);
+    expect(r.entries.some(e => /erangel/i.test(e.id + ' ' + e.name))).toBe(false);
     expect(r.notes.join(' ')).toContain('No claim of universal game support');
   });
   it('rejects unlicensed or invalid model metadata even if supplied in the catalogue', () => {

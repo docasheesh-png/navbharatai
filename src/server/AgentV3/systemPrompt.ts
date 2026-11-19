@@ -1035,7 +1035,10 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '    7. run_recipe({ name: "generate_athree_map" }) — only for a 3D game that needs a LARGE WORLD (racing, open',
     '       world, battle royale, flight, exploring): the Athree map (src/game/athree/) — streaming terrain, sea level,',
     '       biomes, one wind field, safe spawn points and physics heightfield data. Use it when the user names',
-    '       Athree / a-three, or when the library offers it. It refuses an app with no world, a map the user declined and',
+    '       Athree / a-three, when the library offers it, or when the user MEANS a big world in any words ("bada map",',
+    '       "kahin bhi ghoom sakun", "map bahut chhota hai"). A plain RACE on a road is the exception: it runs on the endless',
+    '       road library (createTrackStream / RacingRoadGame), and gets this world only when it leaves the road (open world,',
+    '       free roam) or asks for a big map or world. It refuses an app with no world, a map the user declined and',
     '       a project that already chose another map — then build without it and SAY why. Never hand-write a terrain for such a',
     '       game. The map is made of MODULES (sea, plants, rivers, sky, roads, vehicles) that need nothing from each other:',
     '       pass include: [...] with only the ones the user asked for ("sirf nadi aur ped" -> rivers, plants); with no include the',
@@ -1044,6 +1047,10 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       tundra, jungle, savanna, archipelago, island, wetland, coast) at any size from 1 to 1000 km: pass archetype and size_km from what the',
     '       user said ("5 km ka registan" -> archetype desert, size_km 5), or leave them out and their words decide. A map under 20 km has no roads',
     '       or runway (too small to hold one): say so. People and animals are made with author_object (the Object Forge); buildings and aircraft are not built yet.',
+    // 🗺️ 2D WORLD (admin 2026-11-19): the big map for a 2D game, joined from pre-made sample chunks.
+    '    7b. run_recipe({ name: "generate_world_2d" }) — the big map for a 2D game whose user wants a big world in any words',
+    '       (src/game/world2d/): an endless top-down map joined seamlessly from pre-made sample chunks, with roads, collision,',
+    '       a spawn point and a minimap. Build the game ON it; never draw a fixed-size background or keep the player on one screen.',
     // 🧰 OBJECT FORGE (admin order 2026-11-15): objects nobody pre-built are made BY the builder, from a checked spec.
     '    8. run_recipe({ name: "author_object", input: { spec } }) — the OBJECT FORGE: any object, creature, person, vehicle, building',
     '       or prop the library and the Athree modules do not have. Look in the game library first; when nothing fits, DO NOT hand-write',

@@ -178,7 +178,16 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
 
   const selected: Array<[string, string, string]> = [];
 
-  for (const [path, content] of Object.entries(files || {})) {
+  // 🔴 THE USER'S OWN FILES ARE JUDGED FIRST (2026-11-19). The cap below skips whatever comes after it is reached,
+  // and files arrive in workspace order — so as the platform's kit grew (the 2D world added ~40 KB), byte-identical
+  // kit files we already reviewed could use up the budget and push the USER's stylesheet out of the lint entirely,
+  // reported only as "truncated". Unedited kit files now come last; the order inside each group is kept.
+  const entries = Object.entries(files || {});
+  const isKit = (path: unknown, content: unknown): boolean =>
+    typeof path === 'string' && typeof content === 'string' && isKnownKitVersion(path, content);
+  const ordered = [...entries.filter(([p, c]) => !isKit(p, c)), ...entries.filter(([p, c]) => isKit(p, c))];
+
+  for (const [path, content] of ordered) {
     if (typeof path !== 'string' || typeof content !== 'string') continue;
     if (!LINTABLE.test(path) || NOT_APP_DESIGN.test(path) || GENERATED.test(path)) continue;
     if (total + content.length > MAX_LINT_CHARS) { truncated = true; continue; }

@@ -54,6 +54,8 @@ export interface GameScopeContract {
   subjects?: string[];
   /** Did the request ask for real 3D models/assets rather than primitive placeholders? */
   externalAssets?: boolean;
+  /** The well-known game the user named as the reference ("PUBG", "BGMI", "GTA 5"); absent when none. */
+  reference?: string;
   /** BR1954: named actions/economy survive the contract, including on existing-game edits. */
   runnerMechanics?: RunnerMechanic[];
   collectibles?: GameCollectible[];
@@ -85,6 +87,48 @@ const GENRES: ReadonlyArray<[GameGenre, RegExp]> = [
   ['strategy', /\b(strategy|tower defen[cs]e|rts)\b/i],
   ['arcade', /\b(arcade|flappy|pong|breakout|pac-?man)\b/i],
 ];
+
+/**
+ * 🔴 A NAMED GAME IS A SPECIFICATION (autopsy aba63ead, failedbr #2475, 2026-11-19).
+ *
+ * "mujhe pubg/bgmi jaisa game chahiye. jahan ham character ko joystick se move kare!" became
+ * {genre: unknown, dimension: unspecified, camera: unspecified}. The scope reader on the same request said
+ * "clone of PUBG" and the map reader said 'battle-royale', but the contract the BUILDER reads named nothing,
+ * so a Weak builder kept the project's old 2D city map as the game, put a "photo" in front of the user
+ * ("apne pata nahi kya photo bana diya hai") and never mounted a 3D world. When a user names a well-known
+ * game as the reference, its genre, its view and its camera are what they asked for — written down here
+ * (the build is still an ORIGINAL game in that genre, never a copy of the named one).
+ *
+ * ONE reader for "a royale-style game": this module's `asksForBattleRoyale`. The map profile
+ * (athreeMapIntent) and the royale starter's guard (ToolDispatcher) used private copies that had already
+ * drifted apart (one knew Fortnite, the other Battlefield) — both read this one now.
+ */
+export const BATTLE_ROYALE_REFERENCE = /बैटल\s*रॉयल|पबजी|फ्री\s*फायर|battle\s*royale|\bpubg\b|\bbgmi\b|free\s*fire|firefree|fortnite|battlefield|apex\s+legends|last\s+man\s+standing|\bbr\s+game\b/i;
+
+/** Does the request ask for a royale-style game (by genre or by a named royale title)? PURE. */
+export function asksForBattleRoyale(text: string | null | undefined): boolean {
+  return BATTLE_ROYALE_REFERENCE.test(String(text ?? '').normalize('NFKC'));
+}
+
+interface NamedGameReference { name: string; genre: GameGenre; dimension: GameDimension; camera: GameCamera }
+
+/** Well-known titles → what naming one asks for. First match wins; the request's own explicit words still win.
+ * GTA is deliberately absent: its titles already take the 3D open-world kit through their own reader (#4151). */
+const NAMED_GAMES: ReadonlyArray<[RegExp, Omit<NamedGameReference, 'name'>]> = [
+  [BATTLE_ROYALE_REFERENCE, { genre: 'shooter', dimension: '3d', camera: 'third-person' }],
+  [/\b(?:call\s+of\s+duty|cod\s+mobile|counter[\s-]*strike|cs\s*:?\s*go|valorant|halo|doom)\b/i, { genre: 'shooter', dimension: '3d', camera: 'first-person' }],
+  [/\b(?:temple\s+run|subway\s+surfers?)\b/i, { genre: 'runner', dimension: '3d', camera: 'third-person' }],
+];
+
+/** The well-known game the request names as its reference, with what that asks for, or null. PURE. */
+export function namedGameReference(text: string | null | undefined): NamedGameReference | null {
+  const t = String(text ?? '').normalize('NFKC');
+  for (const [re, spec] of NAMED_GAMES) {
+    const m = re.exec(t);
+    if (m) return { name: m[0].trim(), ...spec };
+  }
+  return null;
+}
 
 const FEATURES: ReadonlyArray<[GameFeature, RegExp]> = [
   ['score', /\b(score|points?|high ?score)\b/i],
@@ -183,8 +227,9 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
   // What the user DECLINED is not what they named (autopsy 958aa1ec: "no login, multiplayer, purchases" made
   // multiplayer a required feature). The same reader the domain and the complexity signals use.
   const text = withoutDeclinedSentences(String(prompt ?? ''));
-  const genre = GENRES.find(([, re]) => re.test(text))?.[0] ?? 'unknown';
-  const dimension: GameDimension = /\b3\s?-?d\b|three\.?js|open world/i.test(text) ? '3d' : /\b2\s?-?d\b/i.test(text) ? '2d' : 'unspecified';
+  const reference = namedGameReference(text);
+  const genre = GENRES.find(([, re]) => re.test(text))?.[0] ?? reference?.genre ?? 'unknown';
+  const dimension: GameDimension = /\b3\s?-?d\b|three\.?js|open world/i.test(text) ? '3d' : /\b2\s?-?d\b/i.test(text) ? '2d' : reference?.dimension ?? 'unspecified';
   const requiredFeatures = FEATURES.filter(([, re]) => re.test(text)).map(([f]) => f);
   const vehicle = VEHICLES.find(([, re]) => re.test(text))?.[0] ?? null;
   // A vehicle the player DRIVES is driven: it speeds up and it stops. A train, bus or car simulator that
@@ -198,8 +243,9 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
   }
   const camera: GameCamera = /\b(first[- ]person|cockpit|cab view|fps)\b/i.test(text) ? 'first-person'
     : /\b(top[- ]down|bird'?s[- ]eye|overhead)\b/i.test(text) ? 'top-down'
-      : /\b(third[- ]person|chase cam(era)?|behind the)\b/i.test(text) || vehicle ? 'third-person' : 'unspecified';
+      : /\b(third[- ]person|chase cam(era)?|behind the)\b/i.test(text) || vehicle ? 'third-person' : reference?.camera ?? 'unspecified';
   return {
+    ...(reference ? { reference: reference.name } : {}),
     genre,
     dimension,
     controls: CONTROLS.filter(([, re]) => re.test(text)).map(([c]) => c),
@@ -215,10 +261,11 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
 
 /** The block the builder reads in the kit handoff. '' when the contract adds nothing. PURE. */
 export function gameContractBlock(c: GameScopeContract): string {
-  if (c.genre === 'unknown' && c.requiredFeatures.length === 0 && c.controls.length === 0 && c.dimension === 'unspecified' && !c.vehicle && !(c.subjects ?? []).length) return '';
+  if (c.genre === 'unknown' && c.requiredFeatures.length === 0 && c.controls.length === 0 && c.dimension === 'unspecified' && !c.vehicle && !(c.subjects ?? []).length && !c.reference) return '';
   const lines = [
     '[GAME SCOPE CONTRACT — read from the request, checked after the build]',
     `Genre: ${c.genre}. View: ${c.dimension}.`,
+    c.reference ? `The user named "${c.reference}" as the reference: build an ORIGINAL ${c.dimension === '3d' ? '3D ' : ''}${c.genre} game in that style (never its name, characters, art or maps). The PLAYABLE game itself — ${c.dimension === '3d' ? 'a 3D world drawn on a canvas, ' : ''}a character or vehicle the player controls${c.camera && c.camera !== 'unspecified' ? `, a ${c.camera} camera` : ''} — must be the first screen or one press away. A map, a menu, a list or a picture standing in for the game is not the game; if the project already holds such a screen, replace it.` : '',
     c.vehicle ? `The player drives: a ${c.vehicle} — it must speed up, slow down and stop under the player's control, on keys AND touch.` : '',
     c.camera === 'third-person' && c.vehicle ? `Camera: a chase view from OUTSIDE the ${c.vehicle} — CameraRig({ kind: 'chase' }) and rig.follow(${c.vehicle === 'train' ? 'train' : 'vehicle'}, dt) every frame. The rig sizes itself to the model, so never hand it a fixed offset and never place the camera yourself.`
       : c.camera && c.camera !== 'unspecified' ? `Camera: ${c.camera}.` : '',

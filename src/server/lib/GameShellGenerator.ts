@@ -55,6 +55,7 @@ import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction } from './three/humanoid';
 import { updateHealthBars } from './three/healthbar';
+import { mapMarkers, type MarkerKind } from './three/markers';
 import { ParticleSystem } from './fx/particles';
 import { audio } from './fx/audio';
 import { bindGameFeedback } from './fx/feedback';
@@ -149,6 +150,8 @@ export interface GameOptions {
    * (a game with a gun), with a hit marker when a shot lands. true shows it from the start; false never.
    */
   crosshair?: boolean;
+  /** The minimap in a corner. Default: shown by itself as soon as something carries a map marker; true always; false never. */
+  minimap?: boolean;
 }
 
 export interface GameContext {
@@ -697,6 +700,21 @@ export class Game {
   }
   /** The crosshair setting the Hud reads. */
   get crosshairOption(): boolean | undefined { return this.options.crosshair; }
+  get minimapOption(): boolean | undefined { return this.options.minimap; }
+
+  /**
+   * What the minimap draws: where the player (or the vehicle it drives) is, which way the camera looks (screen up),
+   * which way the player faces, and every map marker (three/markers.ts).
+   */
+  mapView(): { x: number; z: number; forward: { x: number; z: number }; facing: number; markers: Array<{ x: number; z: number; kind: MarkerKind }> } {
+    const f = new THREE.Vector3();
+    this.rig.camera.getWorldDirection(f);
+    const flat = Math.hypot(f.x, f.z) || 1;
+    const body = this.chased ?? this.player.object;
+    const p = body.getWorldPosition(new THREE.Vector3());
+    const facing = this.chased ? this.chased.rotation.y : (this.hero?.root.rotation.y ?? 0);
+    return { x: p.x, z: p.z, forward: { x: f.x / flat, z: f.z / flat }, facing, markers: mapMarkers() };
+  }
 
   /** What the start screen shows; null when the game has its own. */
   get startScreenInfo(): { title: string; subtitle: string; controls: { touch: string; keyboard: string } } | null {
@@ -859,6 +877,7 @@ import { loading, type LoadingState } from '../core/loading';
 import { t } from '../core/strings';
 import { lastRaceResults } from '../three/race';
 import { levels } from '../core/levels';
+import { objectives, type Objective } from '../core/quests';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -1107,6 +1126,76 @@ export function HintBar() {
 
 const starRow = (n: number): string => '★★★'.slice(0, n) + '☆☆☆'.slice(0, 3 - n);
 
+/**
+ * Where a world point lands on a round minimap of size px showing radius metres around the player, turned so the
+ * camera's forward is up. Points beyond the edge are pinned to it (edge: true) — a far goal still points the way.
+ */
+export function minimapPoint(view: { x: number; z: number; forward: { x: number; z: number } }, p: { x: number; z: number }, radius: number, size: number): { x: number; y: number; edge: boolean } {
+  const dx = p.x - view.x, dz = p.z - view.z;
+  const fx = view.forward.x, fz = view.forward.z;
+  let right = -dx * fz + dz * fx;           // along the camera's right
+  let up = dx * fx + dz * fz;               // along the camera's forward
+  const d = Math.hypot(right, up);
+  const edge = d > radius;
+  if (edge) { right = (right / d) * radius; up = (up / d) * radius; }
+  const half = size / 2, k = (half - 6) / radius;
+  return { x: half + right * k, y: half - up * k, edge };
+}
+
+const MARKER_COLOUR: Record<string, string> = { enemy: '#f87171', goal: '#fde047', pickup: '#4ade80', friend: '#60a5fa' };
+
+/** The round minimap: the player's arrow in the middle, markers around it, turning with the camera. */
+export function Minimap({ game }: { game: Game }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const [visible, setVisible] = useState(game.minimapOption === true);
+  useEffect(() => {
+    if (game.minimapOption === false) return;
+    const size = 128, radius = 60;
+    const draw = () => {
+      const view = game.mapView();
+      if (!visible && view.markers.length > 0) setVisible(true);
+      const c = canvas.current?.getContext('2d');
+      if (!c) return;
+      c.clearRect(0, 0, size, size);
+      c.fillStyle = 'rgba(0,0,0,0.5)'; c.beginPath(); c.arc(size / 2, size / 2, size / 2 - 1, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = 'rgba(255,255,255,0.6)'; c.lineWidth = 2; c.stroke();
+      for (const m of view.markers) {
+        const at = minimapPoint(view, m, radius, size);
+        c.fillStyle = MARKER_COLOUR[m.kind] ?? '#fff';
+        c.beginPath(); c.arc(at.x, at.y, at.edge ? 3 : 4, 0, Math.PI * 2); c.fill();
+      }
+      // The player's arrow, pointing where they face (relative to the camera).
+      const face = minimapPoint(view, { x: view.x + Math.sin(view.facing), z: view.z + Math.cos(view.facing) }, radius, size);
+      const ang = Math.atan2(face.x - size / 2, -(face.y - size / 2));
+      c.save(); c.translate(size / 2, size / 2); c.rotate(ang);
+      c.fillStyle = '#fff'; c.beginPath(); c.moveTo(0, -8); c.lineTo(6, 6); c.lineTo(0, 3); c.lineTo(-6, 6); c.closePath(); c.fill();
+      c.restore();
+    };
+    const timer = setInterval(draw, 100);
+    draw();
+    return () => clearInterval(timer);
+  }, [game, visible]);
+  if (game.minimapOption === false || !visible) return null;
+  return <canvas ref={canvas} width={128} height={128} aria-label="Minimap" role="img"
+    style={{ position: 'absolute', left: 'max(12px, env(safe-area-inset-left))', top: 'max(56px, calc(env(safe-area-inset-top) + 48px))', width: 128, height: 128, pointerEvents: 'none', zIndex: 5 }} />;
+}
+
+/** What the player is trying to do (core/quests.ts), with progress — under the score. */
+export function ObjectiveList() {
+  const [list, setList] = useState<readonly Objective[]>(objectives.list);
+  useEffect(() => events.on('OBJECTIVES_CHANGED', () => setList(objectives.list)), []);
+  if (list.length === 0) return null;
+  return (
+    <ul aria-label="Objectives" style={{ position: 'absolute', right: 'max(12px, env(safe-area-inset-right))', top: 'max(64px, calc(env(safe-area-inset-top) + 56px))', listStyle: 'none', margin: 0, padding: '8px 12px', borderRadius: 10, background: 'rgba(0,0,0,0.45)', color: '#fff', fontSize: 14, maxWidth: 'min(46vw, 260px)', pointerEvents: 'none', zIndex: 5, textShadow: '0 1px 2px rgba(0,0,0,.8)' }}>
+      {list.map((o) => (
+        <li key={o.id} style={{ opacity: o.done ? 0.65 : 1, textDecoration: o.done ? 'line-through' : 'none', marginTop: 2 }}>
+          {(o.done ? '✓ ' : '• ') + o.text + (o.target > 1 ? ' ' + o.progress + '/' + o.target : '')}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** A speaker icon, crossed out when muted — an icon, so it reads in any language. */
 function SpeakerIcon({ muted }: { muted: boolean }) {
   return (
@@ -1279,6 +1368,8 @@ export function Hud({ game }: { game: Game }) {
 
       <LoadingBar state={load} />
       {s.status === 'playing' ? <HintBar /> : null}
+      {s.status === 'playing' || s.status === 'paused' ? <Minimap game={game} /> : null}
+      {s.status === 'playing' || s.status === 'paused' ? <ObjectiveList /> : null}
       <ShooterOverlay game={game} playing={s.status === 'playing'} />
       {s.status === 'playing' || s.status === 'paused' ? <RaceOverlay /> : null}
 

@@ -39,7 +39,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "dfeb65e9cf2b214a998e64f5224ba7f7784f70b03010b99c27963d7e316603b7",
     "7366f2cef22d57043c563ad651858838895f5cc726b941e208e4ab775a856f01",
     "7f781d207d3bd59cbd1cb6809eaffccc9894957e4a96b530fab73f6958f8a991",
-    "d1cf3326115f8acf4a79908d57cf2ad8fa316e88e66441b29c0c63d608b952f7"
+    "d1cf3326115f8acf4a79908d57cf2ad8fa316e88e66441b29c0c63d608b952f7",
+    "439a17ee3b06b278160e689a66abbb0a681c9f17b8cbfd66ed93c958e17c2787"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -164,7 +165,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "2e0e85615fdd7775692d783d3a684892e733623de94ea959a85c8607f99e3a44",
     "5e68bf3e49d838b378282cb9af572cf2682a083a6286623c497294e5e89cc2e7",
     "e28664d00de33896c2858a33099ec34a141eb32449e4ef18716054c1aaca22f8",
-    "b79104a433f9b70dd850932524b5ebfea9778bff7e347d0a7c1835c9cb9a7edf"
+    "b79104a433f9b70dd850932524b5ebfea9778bff7e347d0a7c1835c9cb9a7edf",
+    "1f1a3516f805a291ec07b31632eb1e02b799d2d88a4a25c6168ac5f69e817e3b"
   ],
   "src/game/core/feel.ts": [
     "6fd476d425ebacb3e80550606f0c2504536fb3f374b3eae871effe8b07acac96"
@@ -192,6 +194,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/core/pool.ts": [
     "c0eb7deda0193f62ce37dfee23a5ca5757ab5d8cec5fbd92e9fc79871d688e60"
+  ],
+  "src/game/core/quests.ts": [
+    "23688f9c511f110c2e0aab1a704abd655b54a2822d5143b09f816313d43dc06c"
   ],
   "src/game/core/settings.ts": [
     "26763b0415a83d97907448f7e605ac9ddd527119c2ac59ba08e6e9f743416007",
@@ -327,6 +332,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/three/lighting.ts": [
     "7b1f89bdc9398b48a10fcc2fd1fb77a9577a2925dee1e14120857e5ac3e8be96"
   ],
+  "src/game/three/markers.ts": [
+    "2a30d3470136210a99b4629a55acb2d03ff66d69fed850711866b6475a8d68fd"
+  ],
   "src/game/three/materials.ts": [
     "70a9d3153008e8bd80d417bb65f8a64592ba88f1515ebf09d8bdbfca6b23511a"
   ],
@@ -396,7 +404,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "5eff0b85ae9aaf4d4ba8ae76aa1c82d1cb5624b7ff046d1be1076ef91c952fec",
     "53221432c3b0d687f2e70edc3e59e9a5b82cc1509a202696d68d4b1e807366fb",
     "de68cf22b826e7941925c6d628f913ad62aa1492612a1f77cc4ab067dfbbb624",
-    "a2171dde8aa13f7706a20c40861c5f7f04587c283a1d7b95a02e9bfb8b5747b6"
+    "a2171dde8aa13f7706a20c40861c5f7f04587c283a1d7b95a02e9bfb8b5747b6",
+    "4afa9500c116c7fb679056adf34f9a0ef0052554b80a7727959e37b6bf81da8f"
   ],
   "src/game/ui/touchControls.ts": [
     "144b2a9ed0824bfabe5d47c2d41bcc031cc294a6c43a14fb9bbdfbc152a2096d",

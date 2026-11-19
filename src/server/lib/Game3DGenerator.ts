@@ -1844,6 +1844,41 @@ export function setEnvironmentIntensity(scene: THREE.Scene, intensity: number): 
 // right ratios read as stacked blocks (Phase 2, 2026-10-05 — the admin's "FAIL" bar). So the parts are
 // rounded and tapered too; see createHumanoid.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
+const MARKERS = `import * as THREE from 'three';
+
+/**
+ * WHAT THE MINIMAP SHOWS (admin 2026-11-19 game-gap audit: "3D minimap nahi"). Put a marker on anything the player
+ * should find — an enemy, the goal, a pickup, a friend — and the kit's Hud minimap draws it around the player, turning
+ * with the camera; a goal beyond its reach stays pinned to the edge, pointing the way.
+ *
+ *   const off = addMapMarker(enemy.mesh, 'enemy');   …   off();   // when it is gone
+ */
+export type MarkerKind = 'enemy' | 'goal' | 'pickup' | 'friend';
+export interface MapMarker { object: THREE.Object3D; kind: MarkerKind }
+
+const markers = new Set<MapMarker>();
+
+export function addMapMarker(object: THREE.Object3D, kind: MarkerKind = 'goal'): () => void {
+  const m: MapMarker = { object, kind };
+  markers.add(m);
+  return () => { markers.delete(m); };
+}
+
+/** Every live marker's world position (x, z) — hidden or removed objects are left out. */
+export function mapMarkers(): Array<{ x: number; z: number; kind: MarkerKind }> {
+  const out: Array<{ x: number; z: number; kind: MarkerKind }> = [];
+  const p = new THREE.Vector3();
+  for (const m of markers) {
+    if (!m.object.parent || !m.object.visible) continue;
+    m.object.getWorldPosition(p);
+    out.push({ x: p.x, z: p.z, kind: m.kind });
+  }
+  return out;
+}
+
+export function clearMapMarkers(): void { markers.clear(); }
+`;
+
 const RACE = `import * as THREE from 'three';
 import { events } from '../core/events';
 import { setStatus } from '../core/state';
@@ -6548,6 +6583,7 @@ const FILES: Record<string, string> = {
   'src/game/three/humanoid.ts': HUMANOID,
   'src/game/three/healthbar.ts': HEALTH_BAR,
   'src/game/three/race.ts': RACE,
+  'src/game/three/markers.ts': MARKERS,
   // The things a world is actually made of (admin 2026-08-27): car, tree, mountain, river, desert,
   // road, animal — each built at a REAL or a LITE tier, because "asli" and "3d" are different asks.
   'src/game/three/objects.ts': OBJECTS,
@@ -6556,7 +6592,7 @@ const FILES: Record<string, string> = {
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'objects', 'atmosphere',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere',
 ];
 
 /**

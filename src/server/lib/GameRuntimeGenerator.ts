@@ -314,7 +314,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -834,6 +834,53 @@ export function showHint(id: string, text: string, seconds = 4): boolean {
   events.emit('HINT', { id, text, seconds: Math.max(1, Math.min(15, seconds)) });
   return true;
 }
+`;
+
+const QUESTS = `/**
+ * OBJECTIVES AND QUESTS (admin 2026-11-19 game-gap audit: "objective / quest tracker nahi" — QUEST_STARTED and
+ * QUEST_COMPLETED were declared and nothing used them). What the player is trying to do, on screen, with progress.
+ *
+ *   objectives.set([{ id: 'coins', text: 'Collect coins', target: 10 }, { id: 'boss', text: 'Defeat the guard' }]);
+ *   objectives.progress('coins');          // +1 (or progress('coins', 3))
+ *   objectives.complete('boss');
+ *   objectives.allDone                     // true once every one is done
+ * The kit's Hud shows the list; QUEST_STARTED / QUEST_COMPLETED / OBJECTIVES_CHANGED are announced.
+ */
+import { events } from './events';
+import { state } from './state';
+
+export interface Objective { id: string; text: string; target: number; progress: number; done: boolean }
+
+let list: Objective[] = [];
+const changed = (): void => { events.emit('OBJECTIVES_CHANGED', { objectives: objectives.list }); };
+
+export const objectives = {
+  /** Replace the list (a new level, a new chapter). */
+  set(items: Array<{ id: string; text: string; target?: number }>): void {
+    list = (Array.isArray(items) ? items : []).filter((o) => o && o.id && o.text)
+      .map((o) => ({ id: String(o.id), text: String(o.text), target: Math.max(1, Math.floor(o.target ?? 1)), progress: 0, done: false }));
+    for (const o of list) events.emit('QUEST_STARTED', { id: o.id, text: o.text });
+    changed();
+  },
+  /** Add progress (default 1); reaching the target completes it. */
+  progress(id: string, amount = 1): void {
+    const o = list.find((x) => x.id === id);
+    if (!o || o.done || !Number.isFinite(amount)) return;
+    o.progress = Math.max(0, Math.min(o.target, o.progress + amount));
+    if (o.progress >= o.target) objectives.complete(id); else changed();
+  },
+  complete(id: string): void {
+    const o = list.find((x) => x.id === id);
+    if (!o || o.done) return;
+    o.done = true; o.progress = o.target;
+    if (!state.questsCompleted.includes(o.id)) state.questsCompleted.push(o.id);
+    events.emit('QUEST_COMPLETED', { id: o.id, text: o.text });
+    changed();
+  },
+  get list(): readonly Objective[] { return list.map((o) => ({ ...o })); },
+  get allDone(): boolean { return list.length > 0 && list.every((o) => o.done); },
+  clear(): void { list = []; changed(); },
+};
 `;
 
 const SETTINGS = `/**
@@ -1481,10 +1528,11 @@ const FILES: Record<string, string> = {
   'src/game/core/loading.ts': LOADING,
   'src/game/core/strings.ts': STRINGS,
   'src/game/core/levels.ts': LEVELS,
+  'src/game/core/quests.ts': QUESTS,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -1514,6 +1562,7 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/meta.ts']) files['src/game/core/strings.ts'] = FILES['src/game/core/strings.ts'];
     if (files['src/game/core/strings.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (files['src/game/core/levels.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
+    if (files['src/game/core/quests.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }

@@ -102515,3 +102515,11 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
 **Fixed:** kit file `core/levels.ts` — `levels.define/start/complete/next/isUnlocked/stars/checkpoint/respawnPoint/reset`, progress saved per game (unlocks, best stars, the checkpoint), `complete` wins the round; `showHint(id, text)` once per game, ever; `settings.difficulty` + `difficultyScale()`; the Hud's level list on the start screen (locked shut, stars), Level complete with stars and Next level, Difficulty in Settings, the hint bar; Game shows the controls hint on the very first start. Prompt tells the builder to use it.
 
 **Tests:** `theGameHasLevelsCheckpointsAndHints` (7). Reversion: no unlock on complete fails 2.
+
+## 2026-11-19 — Game gap P1 #16: minimap + objective tracker (branch `claude/game-minimap-objectives`)
+- Gap: 3D games had no minimap and no tracker of what the player must do (`QUEST_*` events were declared, never emitted).
+- Kit: `three/markers.ts` (`addMapMarker(obj, kind)`, `mapMarkers()`), `core/quests.ts` (`objectives.set/progress/complete`,
+  emits QUEST_STARTED / QUEST_COMPLETED / OBJECTIVES_CHANGED, records `state.questsCompleted`), `Game.mapView()` + `minimap`
+  option, Hud `Minimap` (turns with the camera, far goals pinned to the edge, auto-shows once a marker exists) and `ObjectiveList`.
+- Builder prompt line (MAP AND GOALS); AppKnowledgeBase `game_menus_settings` updated.
+- Locked by `tests/theMinimapAndObjectivesShowTheWay.test.ts` (reversion: flipped right-axis sign and dropped quest record → 2 fail).

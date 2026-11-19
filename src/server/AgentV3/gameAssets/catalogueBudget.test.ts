@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ASSET_LIMITS, licenseAccepted, type AssetLicense } from './assetPolicy';
 import { CATALOGUE_STORAGE_BUDGET_BYTES, catalogueStorageBytes, validateCatalogue, REVIEWED_GAME_ASSETS, type ReviewedAsset } from './providers';
 import { createDurableAssetCache } from './assetCache';
+import { gameAssetRequirements } from './assetPlan';
 import { acquireGameAsset } from './assetEngine';
 import { syntheticGlb, syntheticCandidate } from '../../../../tests/fixtures/gameAssetFixtures';
 
@@ -23,6 +24,12 @@ describe('game library storage budget (admin decision 2026-11-19: bytes, not a 6
   });
   it('refuses a declared size outside the per-model limits', () => {
     for (const bytes of [0, 27, 1.5, ASSET_LIMITS.bytes + 1]) expect(() => validateCatalogue(many(1, bytes))).toThrow('size');
+  });
+  it('a model past the old 64th slot is still matched to a game prompt (sibling of the count cap)', () => {
+    const catalogue = many(80, 200_000);
+    catalogue[79] = { ...catalogue[79], subjects: ['lighthouse'] };
+    expect(() => validateCatalogue(catalogue)).not.toThrow();
+    expect(gameAssetRequirements('3D island game with a lighthouse', catalogue)).toEqual([{ subject: 'lighthouse' }]);
   });
   it('the shipped catalogue fits the budget', () => {
     expect(catalogueStorageBytes(REVIEWED_GAME_ASSETS)).toBeLessThanOrEqual(CATALOGUE_STORAGE_BUDGET_BYTES);

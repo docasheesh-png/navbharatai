@@ -1,7 +1,7 @@
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isZTestAccount } from '../../lib/zTestAccount';
 import type { AssetRequirement } from './assetPolicy';
-import type { ReviewedAsset } from './providers';
+import { CATALOGUE_MAX_ENTRIES, type ReviewedAsset } from './providers';
 
 /**
  * Default OFF; enabling does not approve any unreviewed catalogue entry or paid service.
@@ -67,7 +67,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
   const clauses = prompt.slice(0, 16000).normalize('NFKC').toLowerCase()
     .split(/[,;.!?।]|\b(?:and|but)\b|(?:^|\s)(?:और|लेकिन|y|pero)(?=\s|$)/u).slice(0, 128)
     .map(normalized).filter(c => c && !['no', 'not', 'don t', 'dont', 'doesn t', 'isn t', 'can t', 'never', 'without', 'exclude', 'excluding', 'avoid', 'omit', 'remove', 'except', 'नहीं', 'न', 'बिना', 'मत', 'sin', 'excepto'].some(n => mentioned(c, n)));
-  const subjects = [...new Set([...Object.keys(ALIASES), ...catalogue.slice(0, 64).flatMap(c => c.subjects.slice(0, 16))])];
+  const subjects = [...new Set([...Object.keys(ALIASES), ...catalogue.slice(0, CATALOGUE_MAX_ENTRIES).flatMap(c => c.subjects.slice(0, 16))])];
   const matching = (subject: string, clause: string) => {
     let scoped = ` ${clause} `;
     const excludedPhrases: Record<string, readonly string[]> = {

@@ -102250,3 +102250,13 @@ Owner t311u sequential audit, BR2001 only (BR2000 not retained). Branched from o
 - Queue: opens Q-2765 (two app registries from the fast lane) and Q-2766 (svgr import form); Q-2621 and Q-1007 gain BR2001 evidence.
 - Proof: `tests/br2001Autopsy.test.ts`; reverting any of the five resolver fixes fails 2–5 tests.
 - Docs: `docs/build-report-autopsy-BR2001.md` and its evidence JSON.
+
+## 2026-11-19 — BR2002 autopsy (a website that succeeded was recorded as a stopped change): only a stop before the result is a stop
+
+Owner t311u sequential audit, BR2002 only. Branched from origin/main `f2b1c01` (#4314). A free Weak website build succeeded YELLOW and was not charged; its change record said "status stopped".
+
+- F1: the settle passed `stopped: abort.signal.aborted || userStop`. Several platform mechanisms abort that controller after a result exists (advisory cap, reaper, lock reclaim, deploy drain). New pure `changeWasStopped` in `buildAbortCause.ts`: the user's own stop is always a stop; any other abort only when it ended the build before a successful result.
+- Sibling found and NOT changed: `runProof()` reads the same bare signal and feeds the markup rule — Q-2767, BLOCKED on the admin's billing decision (recommendation: apply the same rule).
+- Queue: opens Q-2767, Q-2768 (fast lane stopped at 8/12 files and handed off a never-written CSS import), Q-2769 (journey vs accessibility label disagreement); Q-1007 and Q-2753 gain BR2002 evidence.
+- Proof: `tests/br2002Autopsy.test.ts`; reverting the helper or the route fails it.
+- Docs: `docs/build-report-autopsy-BR2002.md` and its evidence JSON.

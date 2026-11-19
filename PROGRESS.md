@@ -102459,3 +102459,11 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
 **Fixed:** kit file `core/loading.ts` (real jobs, a fraction that moves only by real progress, `LOADING_PROGRESS`); the model loader reports bytes as `ASSET_LOADING` on the event bus — it never imports loading.ts, so an older project still compiles; `LoadingBar` in the Hud and "Loading…" in GameCanvas before the world exists; `Game.toggleFullscreen()` / `isFullscreen` / `canFullscreen`, Play on a phone goes full screen, `options.orientation` (default landscape) locks where the browser allows, a Full screen button only where allowed; `viewport-fit=cover` added only while a game is mounted and restored on dispose; `FeedbackSpec.haptic` on PLAYER_DAMAGED / PLAYER_DIED / MELEE_HIT / PROJECTILE_HIT / ENEMY_DIED / BOSS_DEFEATED / PLAYER_LANDED, through `buzz()` (obeys the Vibration setting).
 
 **Tests:** `theGameFeelsRightOnAPhone` (9); 818 kit/asset/shell tests green. Reversions failing: haptics removed (1), notch removed (1). **Not verified:** real iPhone/Android behaviour of fullscreen and orientation lock (browser-dependent by design; every step fails quietly).
+
+## 2026-11-19 — Game-gap audit P0 #8: the kit's screens and buttons speak the player's language
+
+**Root cause:** every kit string was hard-coded English (Game.ts, Hud.tsx, touchControls.ts, meta summary lines), so a game asked for in Hindi still showed "Paused", "Game over", "Play again", "Attack".
+
+**Fixed:** kit file `core/strings.ts` — English and Hindi tables with identical keys and placeholders, `t(key, vars)`, `setGameLanguage('en' | 'hi' | 'auto', overrides)`; the builder supplies any other language through `options.strings` (never machine-guessed here); a missing word falls back to English, never blank. Used by the start screen, pause menu, settings, game over, HUD, loading bar, kit touch-button labels (a label the game wrote is kept), the rotate hint and the run summary. `options.language` / `options.strings` on the Game; prompt tells the builder to set it. (The English-only rule is for NavBharatAI's own UI; this is the user's game.)
+
+**Tests:** `theGameSpeaksThePlayersLanguage` (6). Reversion: a hard-coded Play fails 1. **Still open:** meta goal texts and achievement titles are English data; the racing starter's own buttons are English.

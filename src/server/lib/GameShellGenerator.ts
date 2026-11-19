@@ -852,6 +852,7 @@ import type { Game } from '../Game';
 import { settings, type GameSettings } from '../core/settings';
 import { loading, type LoadingState } from '../core/loading';
 import { t } from '../core/strings';
+import { lastRaceResults } from '../three/race';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -1034,6 +1035,39 @@ export function ShooterOverlay({ game, playing }: { game: Game; playing: boolean
   );
 }
 
+/**
+ * THE RACE ON SCREEN (admin 2026-11-19 game-gap audit): a big 3-2-1-GO!, the player's place and time while racing,
+ * from three/race.ts's events. The finish's results are listed on the game-over screen.
+ */
+export function RaceOverlay() {
+  const [call, setCall] = useState<string | null>(null);
+  const [standing, setStanding] = useState<{ position: number; total: number; time: number; distance: number; finish: number | null } | null>(null);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const go = () => { setCall('GO!'); clearTimeout(timer); timer = setTimeout(() => setCall(null), 700); };
+    const offs = [
+      events.on('RACE_COUNTDOWN', (p: { n?: number }) => { if (p?.n) { setCall(String(p.n)); clearTimeout(timer); } else go(); }),
+      events.on('RACE_STARTED', go),
+      events.on('RACE_STATUS', (p) => setStanding(p)),
+      events.on('GAME_MENU', () => setStanding(null)),
+    ];
+    return () => { clearTimeout(timer); for (const off of offs) off(); };
+  }, []);
+  const clock = (sec: number) => Math.floor(sec / 60) + ':' + (sec % 60).toFixed(1).padStart(4, '0');
+  return (
+    <>
+      {call ? <div role="status" aria-live="assertive" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#fde047', fontSize: 'min(28vw, 140px)', fontWeight: 900, textShadow: '0 4px 14px rgba(0,0,0,.85)', pointerEvents: 'none', zIndex: 8 }}>{call}</div> : null}
+      {standing && standing.total > 1 ? (
+        <div aria-label="Race position" style={{ position: 'absolute', top: 'max(56px, calc(env(safe-area-inset-top) + 48px))', left: '50%', transform: 'translateX(-50%)', color: '#fff', fontWeight: 900, fontSize: 22, textShadow: '0 1px 3px rgba(0,0,0,.9)', pointerEvents: 'none', zIndex: 5, whiteSpace: 'nowrap' }}>
+          {'P' + standing.position + '/' + standing.total}
+          <span style={{ fontSize: 16, opacity: 0.85, marginLeft: 12 }}>{clock(standing.time)}</span>
+          {standing.finish ? <span style={{ fontSize: 14, opacity: 0.75, marginLeft: 12 }}>{(standing.distance / 1000).toFixed(1) + ' / ' + (standing.finish / 1000).toFixed(1) + ' km'}</span> : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 /** A speaker icon, crossed out when muted — an icon, so it reads in any language. */
 function SpeakerIcon({ muted }: { muted: boolean }) {
   return (
@@ -1189,6 +1223,7 @@ export function Hud({ game }: { game: Game }) {
 
       <LoadingBar state={load} />
       <ShooterOverlay game={game} playing={s.status === 'playing'} />
+      {s.status === 'playing' || s.status === 'paused' ? <RaceOverlay /> : null}
 
       {s.status === 'menu' && info ? settingsOrScreen(
         <div style={{ maxWidth: 440, padding: '0 16px' }}>
@@ -1218,7 +1253,15 @@ export function Hud({ game }: { game: Game }) {
         <div style={{ maxWidth: 420, padding: '0 16px' }}>
           <h2 style={{ fontSize: 30, fontWeight: 800 }}>{s.status === 'won' ? t('youWin') : t('gameOver')}</h2>
           {/* The run summary: the first line is the hook — a new best, or exactly how close it was. */}
-          {(meta.lastSummary ? summaryLines(meta.lastSummary) : [t('score') + ' ' + s.score]).map((line, i) => (
+          {lastRaceResults ? (
+            <ol aria-label="Race results" style={{ textAlign: 'left', margin: '12px auto 0', maxWidth: 280, paddingLeft: 24 }}>
+              {lastRaceResults.map((r, i) => (
+                <li key={i} style={{ fontWeight: r.player ? 900 : 500, color: r.player ? '#fde047' : '#fff', marginTop: 2 }}>
+                  {r.name + ' — ' + (r.time === null ? 'DNF' : Math.floor(r.time / 60) + ':' + (r.time % 60).toFixed(1).padStart(4, '0'))}
+                </li>
+              ))}
+            </ol>
+          ) : (meta.lastSummary ? summaryLines(meta.lastSummary) : [t('score') + ' ' + s.score]).map((line, i) => (
             <p key={i} style={i === 0 ? { fontSize: 20, fontWeight: 800, marginTop: 8, color: '#fde047' } : { opacity: 0.88, marginTop: 4 }}>{line}</p>
           ))}
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -1595,10 +1638,17 @@ import { Game } from './Game';
 import { events } from './core/events';
 import { state } from './core/state';
 import { createCar, createTrackStream, createVehicleState, driveVehicle, RACING_ROAD_MAPS, type TrackPlan, type TrackStream, type VehicleState } from './three/objects';
+import { createRace, type Race } from './three/race';
 
 /** Original racing starter. New plan identity restarts the game (all settings apply).
  * Keep plan identity stable for ordinary rerenders; onReady exposes seamless live setPlan. */
-export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: (stream: TrackStream) => void } = {}) {
+export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null }: {
+  plan?: TrackPlan; onReady?: (stream: TrackStream) => void;
+  /** Rival cars on the road (0 to 7); 0 is a solo drive. */
+  opponents?: number;
+  /** A finish line this many km from the start; null (default) keeps the endless road endless. */
+  finishKm?: number | null;
+} = {}) {
   const host = useRef<HTMLDivElement>(null);
   const hud = useRef<HTMLDivElement>(null);
   const live = useRef<Game | null>(null);
@@ -1606,11 +1656,19 @@ export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: 
   config.current = { plan, onReady };
   const [failure, setFailure] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  const [call, setCall] = useState<string | null>(null);
   useEffect(() => {
     if (!host.current) return;
     setFailure(null);
     let game: Game | null = null, stream: TrackStream | null = null;
-    let car: ReturnType<typeof createCar> | undefined, drive: VehicleState;
+    let car: ReturnType<typeof createCar> | undefined, drive: VehicleState, race: Race | null = null;
+    // 3-2-1-GO! big in the middle; GO! clears itself.
+    let callTimer: ReturnType<typeof setTimeout> | undefined;
+    const offCount = events.on('RACE_COUNTDOWN', (p: { n?: number }) => {
+      setCall(p?.n ? String(p.n) : 'GO!'); clearTimeout(callTimer);
+      if (!p?.n) callTimer = setTimeout(() => setCall(null), 700);
+    });
+    const offGo = events.on('RACE_STARTED', () => { setCall('GO!'); clearTimeout(callTimer); callTimer = setTimeout(() => setCall(null), 700); });
     let lastMap = -1, hudTime = 0;
     const skies = [0x9bcde6, 0xb8d9dc, 0x9dc3b9, 0xa9bfdf, 0xb7c4cf, 0x83b3b1,
       0xb6b9c3, 0x8da4ba, 0x8dd5df, 0xf2d6a2, 0x5d7a52, 0x10162f];
@@ -1620,7 +1678,8 @@ export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: 
     const release = () => {
       if (released) return; released = true;
       for (const off of offs) off();
-      stream?.dispose(); car?.userData.disposeOwnedMaterials?.(); game?.dispose();
+      offCount(); offGo(); clearTimeout(callTimer);
+      race?.dispose(); stream?.dispose(); car?.userData.disposeOwnedMaterials?.(); game?.dispose();
     };
     try {
       game = new Game({ container: host.current, camera: 'chase', playerBody: false, gameId: 'road-library',
@@ -1631,11 +1690,14 @@ export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: 
           car.rotation.y = stream.startPose.heading;
           drive = createVehicleState(car);
           ctx.scene.add(stream.root, car); ctx.follow(car);
+          race = createRace(ctx.scene, { stream, opponents, finishDistance: finishKm != null && finishKm > 0 ? finishKm * 1000 : null });
         },
         update: (ctx, dt) => {
           if (!stream || !car) return;
-          drive = driveVehicle(car, drive, ctx.input.axis(), dt);
+          // Held at the line through the countdown; the car keeps its starting speed for the moment GO comes.
+          if (!race || race.canDrive()) drive = driveVehicle(car, drive, ctx.input.axis(), dt);
           const status = stream.update(car);
+          const standing = race?.update(dt, status.distance);
           if (status.rebased) { const p = ctx.player.object.position.clone().sub(status.rebased); ctx.player.reset(p.x, p.y, p.z); ctx.camera.position.sub(status.rebased); }
           const piece = status.segment?.piece;
           const id = piece?.mapId ?? 0, map = RACING_ROAD_MAPS[id - 1];
@@ -1651,7 +1713,9 @@ export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: 
           if (hud.current && hudTime >= 0.2) {
             hudTime = 0;
             const km = ((piece?.mapOffsetMetres ?? 0) + status.distance - (status.segment?.startDistance ?? 0)) / 1000;
-            hud.current.textContent = (map ? String(id).padStart(2, '0') + '/12 · ' + map.name : piece?.name ?? 'Custom course') + ' · ' + km.toFixed(1) + '/' + ((piece?.mapLengthMetres ?? status.segment?.length ?? 0) / 1000).toFixed(1) + ' km · Loop ' + (status.lap + 1) + ' · ' + Math.round(Math.abs(drive.speed) * 3.6) + ' km/h';
+            const place = standing && standing.total > 1 ? 'P' + standing.position + '/' + standing.total + ' · ' : '';
+            const clock = standing ? Math.floor(standing.time / 60) + ':' + (standing.time % 60).toFixed(1).padStart(4, '0') + ' · ' : '';
+            hud.current.textContent = place + clock + (map ? String(id).padStart(2, '0') + '/12 · ' + map.name : piece?.name ?? 'Custom course') + ' · ' + km.toFixed(1) + '/' + ((piece?.mapLengthMetres ?? status.segment?.length ?? 0) / 1000).toFixed(1) + ' km · Loop ' + (status.lap + 1) + ' · ' + Math.round(Math.abs(drive.speed) * 3.6) + ' km/h';
           }
         },
       });
@@ -1662,7 +1726,7 @@ export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: 
       setFailure(error instanceof Error ? error.message : 'This device could not start the 3D road.');
     }
     return () => { live.current = null; release(); };
-  }, [plan]);
+  }, [plan, opponents, finishKm]);
   return <div style={{ position: 'relative', width: '100%', height: '100dvh', minHeight: 320, background: '#10162f' }}>
     <div ref={host} style={{ position: 'absolute', inset: 0 }} />
     <div style={{ position: 'absolute', left: 16, top: 16, color: 'white', background: '#10162fcc', padding: 12, borderRadius: 12, pointerEvents: 'none' }}>
@@ -1673,6 +1737,7 @@ export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: 
       if (!live.current) return;
       if (state.status === 'paused') live.current.resume(); else live.current.pause();
     }}>{paused ? 'Resume' : 'Pause'}</button>
+    {call && <div role="status" aria-live="assertive" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#fde047', fontSize: 96, fontWeight: 900, textShadow: '0 4px 12px rgba(0,0,0,.8)', pointerEvents: 'none' }}>{call}</div>}
     {failure && <div role="alert" style={{ position: 'absolute', top: '40%', padding: 24, color: 'white' }}>{failure}</div>}
   </div>;
 }

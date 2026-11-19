@@ -102483,3 +102483,11 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
 **Fixed:** Weapon events carry `ammo`, `magazine` and `ownerId` (new `WEAPON_RELOADING`); `PROJECTILE_HIT` carries `ownerId`; kit file `three/healthbar.ts` (`attachHealthBar(target, read)`, billboarded, hidden at full health and at zero, coloured by health, updated by the shell every frame); `Game.worldToScreen()`, `Game.setBossBar(name, read)` / `bossBar`, `options.crosshair`; the Hud's `ShooterOverlay` — crosshair shown by itself on the player's first shot, hit and kill markers, ammo with reload state, damage numbers that rise from where the enemy was hit, a boss bar — all driven by events and ignoring an enemy's weapon. Also: the playtest hook `window.__nbKit` is guarded for non-browser runs.
 
 **Tests:** `theShooterHudShowsTheFight` (5; the overlay is bundled with esbuild and driven by the kit's events in a real Chromium). Reversion: counting enemy shots fails 1. **Still open:** a minimap and an objective tracker (P1).
+
+## 2026-11-19 — Game-gap audit P0 #6: a race has rivals, a 3-2-1 countdown, a place, a clock and (when asked) a finish
+
+**Root cause:** the kit's racing stopped at a road and a car: no countdown, no other cars to race, no position, no timer, no finish or results — every one hand-written per game, or missing.
+
+**Fixed:** `TrackStream.poseAt(distance)` — the road's own centre line (the same `piecePoints` geometry) in current world coordinates; kit file `three/race.ts` — `createRace(scene, { stream, opponents, finishDistance, countdown, skill })`: a countdown that holds everyone at the line (`canDrive()`), rivals driving the road in their own lanes with a rubber band, live position and time (`RACE_STATUS`), a finite race ending with ordered results (`RACE_FINISHED`, `lastRaceResults`, the round becomes won / game over), Play again resets it to the grid; the Hud's `RaceOverlay` (big 3-2-1-GO!, P2/4 and the clock) and results on the end screen; `RacingRoadGame` races 3 rivals by default, gated by the countdown, and stays endless unless `finishKm` is given (owner 2026-11-18). Rivals are ghosts (no collision) — said in the module.
+
+**Tests:** `aRaceHasRivalsACountdownAndAFinish` (9). Reversion: driving through the countdown fails 1. **Still open:** rival collisions, garage/car selection, nitro (P1 economy/genre packs).

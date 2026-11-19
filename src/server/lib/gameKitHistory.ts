@@ -50,7 +50,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "70c45d59c19199ad2a09336ff9dc048bb8bcb30ce2b935662594292141e165e2",
     "b670d1ca7850c12b055c278dd20def90c1ea7a68fb832283009c4fe6b6b3529f",
     "9c0ec2fce693144563e2eaca37f3ef48dbf031809dc1bee7e2085dfb20acd032",
-    "b5b617ab2654eff43fb1c5a5e7bcae89c6c823e701ad99c4bd15a105ac2d0541"
+    "b5b617ab2654eff43fb1c5a5e7bcae89c6c823e701ad99c4bd15a105ac2d0541",
+    "c9bfc6b97b35c03a6382846117485ce924d0b076ff7fc477faa5fd41e443b229"
   ],
   "src/game/RoyalePractice.tsx": [
     "e4cc8d056f67ca49efa6d0ae8a37a2296d74b8e2c67cb20122dc6b189c5e71c5",
@@ -159,7 +160,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "593c45bd3f06293967e640cf22bfc628787840bca9f978ee2c6acebbb33f8139",
     "7758b13a2baf9740e6c85f72aba68c910aba95a9029b5661e2475f2852d84ecb",
     "2e0e85615fdd7775692d783d3a684892e733623de94ea959a85c8607f99e3a44",
-    "5e68bf3e49d838b378282cb9af572cf2682a083a6286623c497294e5e89cc2e7"
+    "5e68bf3e49d838b378282cb9af572cf2682a083a6286623c497294e5e89cc2e7",
+    "e28664d00de33896c2858a33099ec34a141eb32449e4ef18716054c1aaca22f8"
   ],
   "src/game/core/feel.ts": [
     "6fd476d425ebacb3e80550606f0c2504536fb3f374b3eae871effe8b07acac96"
@@ -343,7 +345,11 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "34fac543f3f341b2e3190b80352587f3122896c3604fa372ed7f9c1fe5206b65",
     "0cb5ef03a66577557e110ca20dc61008af6368bd30b07174130d6ef045b6588c",
     "cb918bf48ca8f64f2943539913e658a108761f1e37b6ea6ac5d725bbd9eb5ab8",
-    "fe2d66923322f205defff093200ecc727890ed99f7feb58060008cfb9a9b4f9e"
+    "fe2d66923322f205defff093200ecc727890ed99f7feb58060008cfb9a9b4f9e",
+    "e9ca3f0c156ac3cf2257e8ab81823164712e21911517a6d85dfced61eceaea6a"
+  ],
+  "src/game/three/race.ts": [
+    "f1d609a86491745c075b1605a20943b5a0cca91e2c341110a5412a800819e548"
   ],
   "src/game/three/renderer.ts": [
     "e3bd063f8ab3ab10a658e8d808c0155a163ca15fb0d8744a4cd7d4fb902b7c19",
@@ -374,7 +380,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "3563c4b14710b9ecfc7f114f01691440f1820ce874a985ebdddd7036198274dd",
     "9861eede496cf9e4b3c6229fec27566dc801fb961018690efe7824cd30299b94",
     "5eff0b85ae9aaf4d4ba8ae76aa1c82d1cb5624b7ff046d1be1076ef91c952fec",
-    "53221432c3b0d687f2e70edc3e59e9a5b82cc1509a202696d68d4b1e807366fb"
+    "53221432c3b0d687f2e70edc3e59e9a5b82cc1509a202696d68d4b1e807366fb",
+    "de68cf22b826e7941925c6d628f913ad62aa1492612a1f77cc4ab067dfbbb624"
   ],
   "src/game/ui/touchControls.ts": [
     "144b2a9ed0824bfabe5d47c2d41bcc031cc294a6c43a14fb9bbdfbc152a2096d",

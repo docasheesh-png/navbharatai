@@ -1844,6 +1844,174 @@ export function setEnvironmentIntensity(scene: THREE.Scene, intensity: number): 
 // right ratios read as stacked blocks (Phase 2, 2026-10-05 — the admin's "FAIL" bar). So the parts are
 // rounded and tapered too; see createHumanoid.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
+const RACE = `import * as THREE from 'three';
+import { events } from '../core/events';
+import { setStatus } from '../core/state';
+import { createCar, type TrackStream } from './objects';
+
+/** The last finished race's results — the kit's game-over screen lists them. */
+export let lastRaceResults: RaceResult[] | null = null;
+
+/**
+ * A RACE ON THE STREAMED ROAD (admin 2026-11-19 game-gap audit: racing had no countdown, no rivals, no position, no lap
+ * timer and no finish). Rivals drive the same road (TrackStream.poseAt) in their own lanes; a 3-2-1 countdown holds
+ * everyone at the line; the player's place and time are announced; and an optional finish line ends the race with
+ * results. The library road stays endless unless finishDistance is given (owner 2026-11-18: the road never ends).
+ *
+ *   const race = createRace(scene, { stream, opponents: 3, finishDistance: 3000 });
+ *   // every update: if (race.canDrive()) drive = driveVehicle(car, drive, ctx.input.axis(), dt);
+ *   //               const s = stream.update(car); race.update(dt, s.distance);
+ * Events (the kit Hud shows them): RACE_COUNTDOWN { n }, RACE_STARTED, RACE_STATUS { position, total, time,
+ * distance, finish } 5 times a second, RACE_FINISHED { position, time, results }.
+ * Rivals are ghosts: they do not collide with the player (said, not hidden).
+ */
+export interface RaceOptions {
+  stream: TrackStream;
+  /** Rival cars, 0 to 7. Default 3. */
+  opponents?: number;
+  /** Where the race ends, in metres from the start line; null (default) is an endless race with a live position. */
+  finishDistance?: number | null;
+  /** Seconds of countdown before GO; 0 starts at once. Default 3. */
+  countdown?: number;
+  /** How fast the rivals are, 0.6 (easy) to 1 (hard). Default 0.82. */
+  skill?: number;
+  /** The rivals' top speed in m/s. Default 24. */
+  maxSpeed?: number;
+  names?: string[];
+  colors?: number[];
+}
+
+export interface Rival { name: string; car: THREE.Group; distance: number; speed: number; lane: number; pace: number; finishTime: number | null }
+export interface RaceResult { name: string; time: number | null; player: boolean }
+export interface RaceStatus {
+  phase: 'countdown' | 'racing' | 'finished';
+  /** Seconds of countdown left. */
+  countdown: number;
+  /** The player's place, 1 = leading. */
+  position: number;
+  total: number;
+  /** Seconds since GO. */
+  time: number;
+  playerDistance: number;
+  finishDistance: number | null;
+  results: RaceResult[] | null;
+}
+export interface Race {
+  readonly rivals: readonly Rival[];
+  /** False during the countdown and after the finish — do not drive the player's car then. */
+  canDrive: () => boolean;
+  update: (dt: number, playerDistance: number) => RaceStatus;
+  status: () => RaceStatus;
+  dispose: () => void;
+}
+
+const NAMES = ['Arjun', 'Meera', 'Kabir', 'Zoya', 'Vikram', 'Anaya', 'Rohan'];
+const COLORS = [0x2563eb, 0xf59e0b, 0x16a34a, 0x9333ea, 0xdb2777, 0x0891b2, 0x65a30d];
+
+export function createRace(scene: THREE.Object3D, options: RaceOptions): Race {
+  const stream = options.stream;
+  const count = Math.max(0, Math.min(7, Math.floor(options.opponents ?? 3)));
+  const finish = options.finishDistance != null && options.finishDistance > 0 ? options.finishDistance : null;
+  const skill = Math.max(0.6, Math.min(1, options.skill ?? 0.82));
+  const top = Math.max(5, options.maxSpeed ?? 24);
+  let left = Math.max(0, options.countdown ?? 3);
+  let phase: RaceStatus['phase'] = left > 0 ? 'countdown' : 'racing';
+  let time = 0, playerDistance = 0, lastShown = Math.ceil(left), statusClock = 0, lastPosition = 0;
+  let results: RaceResult[] | null = null;
+  const rivals: Rival[] = [];
+  for (let i = 0; i < count; i++) {
+    const car = createCar({ color: (options.colors ?? COLORS)[i % (options.colors ?? COLORS).length], detail: 'lite' });
+    car.name = 'rival';
+    // A grid behind the line: two lanes, a car length apart. The player starts at the line itself.
+    rivals.push({ name: (options.names ?? NAMES)[i % (options.names ?? NAMES).length], car, distance: -6 - Math.floor(i / 2) * 7, speed: 0,
+      lane: i % 2 === 0 ? -2.4 : 2.4, pace: 0.94 + ((i * 37) % 11) / 100, finishTime: null });
+    scene.add(car);
+  }
+  const place = (r: Rival): void => {
+    const pose = stream.poseAt(Math.max(0, r.distance));
+    r.car.visible = pose !== null;
+    if (!pose) return;
+    // The driver's LEFT of a +Z car is +X, turned by the heading.
+    r.car.position.set(pose.x + Math.cos(pose.heading) * r.lane, pose.y, pose.z - Math.sin(pose.heading) * r.lane);
+    r.car.rotation.y = pose.heading;
+  };
+  for (const r of rivals) place(r);
+  const startCountdown = (): void => {
+    left = Math.max(0, options.countdown ?? 3); phase = left > 0 ? 'countdown' : 'racing'; lastShown = Math.ceil(left);
+    if (phase === 'countdown') events.emit('RACE_COUNTDOWN', { n: lastShown }); else events.emit('RACE_STARTED', {});
+  };
+  startCountdown();
+  // Play again after a finish runs the SAME race again from the grid (the game puts its own car back at
+  // stream.startPose on GAME_STARTED).
+  const offRestart = events.on('GAME_STARTED', () => {
+    if (phase !== 'finished') return;
+    time = 0; playerDistance = 0; results = null; lastRaceResults = null; lastPosition = 0;
+    rivals.forEach((r, i) => { r.distance = -6 - Math.floor(i / 2) * 7; r.speed = 0; r.finishTime = null; place(r); });
+    startCountdown();
+  });
+
+  const position = (): number => {
+    let ahead = 0;
+    for (const r of rivals) {
+      if (phase === 'finished') { if (r.finishTime !== null && (results?.find((x) => x.player)?.time ?? Infinity) > r.finishTime) ahead++; }
+      else if (r.finishTime !== null || r.distance > playerDistance) ahead++;
+    }
+    return ahead + 1;
+  };
+  const status = (): RaceStatus => ({ phase, countdown: Math.max(0, left), position: position(), total: count + 1, time, playerDistance, finishDistance: finish, results });
+
+  return {
+    rivals,
+    canDrive: () => phase === 'racing',
+    status,
+    update(dt, distance) {
+      playerDistance = Number.isFinite(distance) ? distance : playerDistance;
+      if (phase === 'countdown') {
+        left -= dt;
+        const shown = Math.max(0, Math.ceil(left));
+        if (shown !== lastShown) { lastShown = shown; events.emit('RACE_COUNTDOWN', { n: shown }); }
+        if (left <= 0) { phase = 'racing'; events.emit('RACE_STARTED', {}); }
+        for (const r of rivals) place(r);
+        return status();
+      }
+      if (phase === 'racing') {
+        time += dt;
+        for (const r of rivals) {
+          if (r.finishTime !== null) { r.speed *= Math.max(0, 1 - dt * 0.8); r.distance += r.speed * dt; place(r); continue; }
+          // Rubber band: a rival far behind finds a little pace, one far ahead eases — the race stays a race.
+          const gap = playerDistance - r.distance;
+          const target = top * skill * r.pace * Math.max(0.85, Math.min(1.15, 1 + gap / 400));
+          r.speed += Math.sign(target - r.speed) * Math.min(Math.abs(target - r.speed), 6 * dt);
+          const before = r.distance;
+          r.distance += r.speed * dt;
+          if (finish !== null && before < finish && r.distance >= finish) r.finishTime = time - dt * ((r.distance - finish) / Math.max(1e-6, r.distance - before));
+          place(r);
+        }
+        if (finish !== null && playerDistance >= finish) {
+          phase = 'finished';
+          const all: RaceResult[] = [{ name: 'You', time, player: true }, ...rivals.map((r) => ({ name: r.name, time: r.finishTime, player: false }))];
+          all.sort((a, b) => (a.time ?? Infinity) - (b.time ?? Infinity));
+          results = all;
+          lastRaceResults = all;
+          const p = all.findIndex((x) => x.player) + 1;
+          events.emit('RACE_FINISHED', { position: p, time, results: all });
+          // The race is the round: winning is a win, any other place ends it (the game-over screen lists the results).
+          setStatus(p === 1 ? 'won' : 'gameover');
+        }
+        statusClock += dt;
+        const pos = position();
+        if (statusClock >= 0.2 || pos !== lastPosition) {
+          statusClock = 0; lastPosition = pos;
+          events.emit('RACE_STATUS', { position: pos, total: count + 1, time, distance: playerDistance, finish });
+        }
+      }
+      return status();
+    },
+    dispose() { offRestart(); for (const r of rivals) { r.car.removeFromParent(); r.car.userData.disposeOwnedMaterials?.(); } rivals.length = 0; },
+  };
+}
+`;
+
 const HEALTH_BAR = `import * as THREE from 'three';
 
 /**
@@ -4640,6 +4808,12 @@ export interface TrackStream {
   setPlan: (plan: TrackPlan, options?: { now?: boolean }) => boolean;
   /** Pieces ever created (for a lap / variety HUD) and pieces alive now. */
   stats: () => { created: number; alive: number };
+  /**
+   * The road's centre at a distance along the track (the same geometry the road is built from), facing along it, in
+   * the CURRENT world coordinates (after any origin shift). null where no piece is alive (far behind or not yet laid)
+   * — how rivals (three/race.ts), traffic or a ghost car are put on the road.
+   */
+  poseAt: (distance: number) => TrackPose | null;
   dispose: () => void;
   /** Called for every new piece — spawn your own traffic, coins or scenery with the per-loop rng. */
   onSegment?: (segment: TrackSegment, rand: () => number) => void;
@@ -4749,6 +4923,19 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
     update: () => ({ distance: 0, lap: 0, segment: null, ended: false, rebased: null }),
     setPlan: () => false,
     stats: () => ({ created, alive: segments.length }),
+    poseAt: (distance) => {
+      for (const sg of segments) {
+        if (!Number.isFinite(distance) || distance < sg.startDistance || distance > sg.startDistance + sg.length) continue;
+        const s = distance - sg.startDistance;
+        const geom = piecePoints(sg.piece, sg.start);
+        const n = geom.pts.length - 1;
+        const f = Math.max(0, Math.min(n, (s / geom.length) * n));
+        const i = Math.min(n - 1, Math.floor(f)), t = f - i;
+        const a = geom.pts[i], b = geom.pts[i + 1];
+        return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, heading: Math.atan2(b.x - a.x, b.z - a.z), y: pieceProfile(sg.piece, sg.start.y, geom.length)(s) };
+      }
+      return null;
+    },
     dispose: () => { while (segments.length) segments.shift()!.dispose(); for (const mat of groundMaterials.values()) mat.dispose(); groundMaterials.clear(); registerTerrain(null); },
   };
 
@@ -6360,6 +6547,7 @@ const FILES: Record<string, string> = {
   'src/game/three/surfaces.ts': SURFACES,
   'src/game/three/humanoid.ts': HUMANOID,
   'src/game/three/healthbar.ts': HEALTH_BAR,
+  'src/game/three/race.ts': RACE,
   // The things a world is actually made of (admin 2026-08-27): car, tree, mountain, river, desert,
   // road, animal — each built at a REAL or a LITE tier, because "asli" and "3d" are different asks.
   'src/game/three/objects.ts': OBJECTS,
@@ -6368,7 +6556,7 @@ const FILES: Record<string, string> = {
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'objects', 'atmosphere',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'objects', 'atmosphere',
 ];
 
 /**
@@ -6390,6 +6578,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
       const base = (path.split('/').pop() || '').replace(/\.ts$/i, '').toLowerCase();
       if (wanted.has(base)) files[path] = content;
     }
+    // race.ts drives rival cars on the streamed road (objects.ts) — first, so objects' own dependencies follow below.
+    if (files['src/game/three/race.ts']) files['src/game/three/objects.ts'] = FILES['src/game/three/objects.ts'];
     if (files['src/game/three/world.ts']) {
       files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
       // The ground is textured in the real tier and reads the detail level, both from surfaces.ts.

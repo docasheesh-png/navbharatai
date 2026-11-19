@@ -884,6 +884,7 @@ import { levels } from '../core/levels';
 import { objectives, type Objective } from '../core/quests';
 import { dialogue, type DialogueView } from '../core/dialogue';
 import { inventory, type ItemStack } from '../core/inventory';
+import { economy, type ShopEntry } from '../core/economy';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -1276,6 +1277,60 @@ export function InventoryPanel({ onBack }: { onBack: () => void }) {
   );
 }
 
+
+/** Re-render on every coin or shop change. */
+function useShop(): { coins: number; list: ShopEntry[] } {
+  const read = () => ({ coins: economy.coins, list: economy.list });
+  const [v, setV] = useState(read);
+  useEffect(() => {
+    const sync = () => setV(read());
+    const offs = [events.on('COINS_CHANGED', sync), events.on('SHOP_CHANGED', sync)];
+    return () => offs.forEach((o) => o());
+  }, []);
+  return v;
+}
+
+/** The coin count — shown wherever the game has a shop. */
+export function CoinPill({ coins }: { coins: number }) {
+  return <span aria-label={t('coins') + ' ' + coins} style={{ fontWeight: 800, color: '#fde047', whiteSpace: 'nowrap' }}>🪙 {coins}</span>;
+}
+
+/**
+ * The shop and garage: every item with its price; slot items (a car, a character) are chosen with Use; an upgrade shows its
+ * level and the next price; an item the player cannot afford is shown, greyed — the goal to play for.
+ */
+export function ShopPanel({ onBack }: { onBack: () => void }) {
+  const { coins, list } = useShop();
+  return (
+    <div style={{ width: 'min(92vw, 520px)' }}>
+      <h2 style={{ fontSize: 26, fontWeight: 800 }}>{t('shop')} · <CoinPill coins={coins} /></h2>
+      <ul aria-label={t('shop')} style={{ listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'grid', gap: 8, textAlign: 'left', maxHeight: '58vh', overflowY: 'auto' }}>
+        {list.map((it) => {
+          const upgrade = (it.levels ?? 1) > 1;
+          // Exactly one of: in use · choose it · bought out · buy (greyed while the coins are short — the goal to play for).
+          const choose = it.owned && !!it.slot && !upgrade && !it.inUse;
+          const label = it.inUse ? t('equipped') : choose ? t('equip') : it.nextPrice === null ? (upgrade ? t('maxed') : t('owned')) : t('buy') + ' 🪙' + it.nextPrice;
+          const disabled = it.inUse || (!choose && (it.nextPrice === null || it.nextPrice > coins));
+          const act = () => { if (choose) economy.equip(it.id); else economy.buy(it.id); };
+          return (
+            <li key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, background: it.inUse ? 'rgba(253,224,71,0.18)' : 'rgba(255,255,255,0.10)' }}>
+              <span aria-hidden="true" style={{ fontSize: 26, width: 32, textAlign: 'center' }}>{it.icon ?? (it.slot === 'car' ? '🚗' : it.kind === 'item' ? '🎁' : upgrade ? '⬆️' : '⭐')}</span>
+              <span style={{ flex: 1 }}>
+                <span style={{ fontWeight: 700 }}>{it.name}</span>
+                {upgrade ? <span style={{ opacity: 0.8, marginLeft: 6 }}>{t('levelShort', { n: it.level }) + '/' + it.levels}</span> : null}
+                {it.description ? <span style={{ display: 'block', fontSize: 13, opacity: 0.75 }}>{it.description}</span> : null}
+              </span>
+              <button type="button" disabled={disabled} onClick={act}
+                style={{ ...button, marginTop: 0, minWidth: 0, padding: '6px 12px', fontSize: 14, opacity: disabled && !it.inUse ? 0.5 : 1, cursor: disabled ? 'default' : 'pointer' }}>{label}</button>
+            </li>
+          );
+        })}
+      </ul>
+      <button type="button" style={secondary} onClick={onBack}>{t('back')}</button>
+    </div>
+  );
+}
+
 /** A bag icon — an icon, so it reads in any language. */
 function BagIcon() {
   return (
@@ -1372,8 +1427,9 @@ export function Hud({ game }: { game: Game }) {
   const playLevel = (i: number) => { if (hasLevels && !levels.start(i)) return; game.play(); };
   const replayLevel = () => { if (hasLevels) levels.start(levels.index); game.restart(); };
   const nextLevel = () => { if (levels.next()) game.restart(); };
-  const [panel, setPanel] = useState<'settings' | 'inventory' | null>(null);
+  const [panel, setPanel] = useState<'settings' | 'inventory' | 'shop' | null>(null);
   const bag = useInventory();
+  const shop = useShop();
   const again = useRef<HTMLButtonElement>(null);
   const playRef = useRef<HTMLButtonElement>(null);
   const over = s.status === 'gameover' || s.status === 'won';
@@ -1425,7 +1481,7 @@ export function Hud({ game }: { game: Game }) {
   }, [game, s.status, panel]);
 
   const settingsOrScreen = (screen: React.ReactNode) => (
-    <div style={overlay}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : panel === 'inventory' ? <InventoryPanel onBack={() => { setPanel(null); game.resume(); }} /> : screen}</div>
+    <div style={overlay}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : panel === 'inventory' ? <InventoryPanel onBack={() => { setPanel(null); game.resume(); }} /> : panel === 'shop' ? <ShopPanel onBack={() => setPanel(null)} /> : screen}</div>
   );
 
   return (
@@ -1437,6 +1493,7 @@ export function Hud({ game }: { game: Game }) {
             {t('score')} {s.score}
             <span style={{ opacity: 0.7, fontSize: 13, marginLeft: 10 }}>{t('best')} {s.highScore}</span>
             {combo.multiplier > 1 ? <span style={{ marginLeft: 10, color: '#fde047' }}>x{combo.multiplier}</span> : null}
+            {economy.ready ? <span style={{ marginLeft: 12, fontSize: 16 }}><CoinPill coins={shop.coins} /></span> : null}
           </div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <div style={{ width: 120, height: 10, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden' }}>
@@ -1481,6 +1538,7 @@ export function Hud({ game }: { game: Game }) {
           <p style={{ opacity: 0.75, marginTop: 12, fontSize: 14 }}>{touch ? info.controls.touch : info.controls.keyboard}</p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
             <button ref={playRef} type="button" style={button} onClick={() => playLevel(levels.index)}>{t('play')}</button>
+            {economy.ready ? <button type="button" style={secondary} onClick={() => setPanel('shop')}>{t('shop')} · 🪙{shop.coins}</button> : null}
             <button type="button" style={secondary} onClick={() => setPanel('settings')}>{t('settings')}</button>
           </div>
           {levels.count > 1 ? (
@@ -1533,6 +1591,7 @@ export function Hud({ game }: { game: Game }) {
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
             {s.status === 'won' && hasLevels && levels.hasNext ? <button type="button" style={button} onClick={nextLevel}>{t('nextLevel')}</button> : null}
             <button ref={again} type="button" style={s.status === 'won' && hasLevels && levels.hasNext ? secondary : button} onClick={replayLevel}>{t('playAgain')}</button>
+            {economy.ready ? <button type="button" style={secondary} onClick={() => setPanel('shop')}>{t('shop')} · 🪙{shop.coins}</button> : null}
             {info ? <button type="button" style={secondary} onClick={() => game.toMenu()}>{t('menu')}</button> : null}
           </div>
         </div>,

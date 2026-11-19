@@ -149,7 +149,7 @@ describe('the defect, at the two producers', () => {
 describe('the consumers', () => {
   it('the gate fill is FILL-ONLY — a preview recorded as failed keeps its failure', () => {
     // Since Q-101 the fill lives in the one ledger helper, for every fact at once (preview included).
-    expect(ROUTE).toContain('fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger())');
+    expect(ROUTE).toContain('fillGateFromLedger(gateEvidence, gateLedger)');
     expect(readFileSync('src/server/AgentV3/evidenceLedger.ts', 'utf8')).toContain("if (entry && gate[name] === 'not-run') gate[name] = entry.outcome;");
   });
 

@@ -43,6 +43,7 @@ import { generateGameRoyale } from './GameRoyaleGenerator';
 import { generateGameShell } from './GameShellGenerator';
 import { generateAthreeMap } from './athreeMap/AthreeMapGenerator';
 import { generateWorld2D } from './world2d/World2DGenerator';
+import { generateGame2D } from './Game2DGenerator';
 import { generateObjectForge } from './objectForge/ObjectForgeGenerator';
 import { createHash } from 'node:crypto';
 import { GAME_KIT_HISTORY } from './gameKitHistory';
@@ -68,6 +69,7 @@ export const GAME_RECIPES: Readonly<Record<string, (include?: string[]) => Recip
   generate_game_royale: generateGameRoyale,
   generate_athree_map: generateAthreeMap,
   generate_world_2d: generateWorld2D,
+  generate_game_2d: generateGame2D,
   // The Object Forge kit (src/game/forge/forge.ts). The objects themselves are written per spec by the author_object tool; only the engine is a kit file.
   author_object: generateObjectForge,
 };

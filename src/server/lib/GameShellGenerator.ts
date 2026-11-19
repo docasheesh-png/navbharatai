@@ -42,7 +42,10 @@ import { events } from './core/events';
 import { state, setStatus, resetRun } from './core/state';
 import { startMeta, mountMetaToasts, combo } from './core/meta';
 import { settings, type GameSettings } from './core/settings';
+import { createPerfGovernor, steppedQuality } from './core/perf';
 import { setGameLanguage, t, type GameLanguage, type StringKey } from './core/strings';
+import { showHint } from './core/levels';
+import { dialogue } from './core/dialogue';
 import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
@@ -53,9 +56,11 @@ import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift } from './three/objects';
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction } from './three/humanoid';
+import { updateHealthBars } from './three/healthbar';
+import { mapMarkers, type MarkerKind } from './three/markers';
 import { ParticleSystem } from './fx/particles';
 import { audio } from './fx/audio';
-import { bindGameFeedback } from './fx/feedback';
+import { bindGameFeedback, type FeedbackContext } from './fx/feedback';
 import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions } from './ui/touchControls';
 
 /**
@@ -142,6 +147,18 @@ export interface GameOptions {
    */
   language?: GameLanguage | 'auto';
   strings?: Partial<Record<StringKey, string>>;
+  /**
+   * The aiming cross in the middle of the screen. Default: shown by itself the first time the player's own gun fires
+   * (a game with a gun), with a hit marker when a shot lands. true shows it from the start; false never.
+   */
+  crosshair?: boolean;
+  /** The minimap in a corner. Default: shown by itself as soon as something carries a map marker; true always; false never. */
+  minimap?: boolean;
+  /**
+   * The music that follows the game (fx/music.ts: calm on the start screen, action in play, tense for a boss, a sting on a
+   * win or a loss; lowered while paused or talking). false = none; a table changes cues, e.g. { GAME_STARTED: 'tense' }.
+   */
+  music?: false | Partial<Record<string, string | null>>;
 }
 
 export interface GameContext {
@@ -224,6 +241,11 @@ export class Game {
   private attackHeldThisStep = false;
   /** The pixel ratio the renderer chose for this device; quality scales DOWN from it, never up. */
   private basePixelRatio = 1;
+  /** Watches the frame rate and steps the picture down when the device cannot keep up (core/perf.ts). */
+  private readonly perf = createPerfGovernor();
+  private chosenQuality: GameSettings['quality'] = 'high';
+  private autoQuality = true;
+  private effectiveQuality: GameSettings['quality'] = 'high';
   /** Look speed from the player's settings. */
   private lookSensitivity = 1;
   private touch: TouchControls | null = null;
@@ -313,6 +335,7 @@ export class Game {
 
     this.disposers.push(handleResize(this.renderer, this.rig.camera, options.container));
     this.disposers.push(bindGameFeedback({
+      music: options.music as FeedbackContext['music'],
       particles: this.particles,
       feel: this.feel,
       positionOf: (p) => p?.position ?? null,
@@ -325,6 +348,8 @@ export class Game {
     this.disposers.push(mountMetaToasts(options.container));
     // Taking a hit ends the combo — that is what makes a clean run worth more than a long one.
     this.disposers.push(events.on('PLAYER_DAMAGED', () => combo.break()));
+    // 🎓 The first time ever this game is played, the controls for the device in hand are shown once (core/levels.ts).
+    this.disposers.push(events.on('GAME_STARTED', () => { showHint('controls', touchDevice() ? t('controlsTouch') : t('controlsKeyboard'), 5); }));
     // 📱 THE NOTCH: safe-area insets read 0 on an iPhone unless the page asks for viewport-fit=cover. Asked for only
     // while a game is mounted (an ordinary page keeps its own viewport), and put back on dispose.
     const viewport = document.querySelector?.('meta[name="viewport"]') as HTMLMetaElement | null;
@@ -336,6 +361,16 @@ export class Game {
     const onFullscreen = () => events.emit('FULLSCREEN_CHANGED', { on: this.isFullscreen });
     document.addEventListener('fullscreenchange', onFullscreen);
     this.disposers.push(() => document.removeEventListener('fullscreenchange', onFullscreen));
+    // 🔎 NavBharatAI's playtest reads the round through this (score, status) and ends one to prove Play again works.
+    // Read-only except endRound, which only does what losing does — harmless in a single-player game.
+    const hook = { status: () => state.status, score: () => state.score, fps: () => this.fps, quality: () => this.effectiveQuality, endRound: () => { if (state.status === 'playing' || state.status === 'paused') setStatus('gameover'); } };
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __nbKit?: typeof hook }).__nbKit = hook;
+      this.disposers.push(() => {
+        const w = window as unknown as { __nbKit?: typeof hook };
+        if (w.__nbKit === hook) delete w.__nbKit;
+      });
+    }
     // ⚙️ THE PLAYER'S SETTINGS, APPLIED — now and on every change from the pause menu.
     this.applySettings(settings.get());
     this.disposers.push(settings.subscribe((s) => this.applySettings(s)));
@@ -492,6 +527,8 @@ export class Game {
 
   /** FIXED 60Hz. Everything that affects the simulation lives here and nowhere else. */
   private fixedUpdate(delta: number): void {
+    // A gamepad is polled, not heard: read it before anything reads input this step.
+    this.input.pollGamepads();
     this.feel.update(delta);
     combo.update(delta);
 
@@ -502,7 +539,10 @@ export class Game {
 
     // Hit-stop: the simulation freezes for a few frames so a hit lands. Input still ticks, or the
     // press that happened during the freeze is swallowed.
-    if (!this.feel.frozen) {
+    // While someone is talking the world holds still, and the step after the talk ends is skipped too — the press
+    // that closed the dialogue box must not also jump or swing (core/dialogue.ts).
+    const talking = dialogue.active || dialogue.takeJustEnded();
+    if (!this.feel.frozen && !talking) {
       const doorActor = { feet: this.player.object.getWorldPosition(new THREE.Vector3()), radius: 0.4, height: 1.8 };
       if (!this.chased && this.input.wasPressed('interact')) interactHouseDoor(this.scene, doorActor);
       updateHouseDoors(this.scene, delta, [doorActor, ...(this.options.doorOccupants?.(this.context) ?? [])]);
@@ -545,7 +585,7 @@ export class Game {
     }
     // During a hit-stop freeze the game did not run, so a press made now is KEPT for the step that does — wiping it
     // here was why a tap sometimes did nothing at all (the freeze follows every shot and every hit).
-    this.input.endFrame(this.feel.frozen);
+    this.input.endFrame(this.feel.frozen && !talking);
   }
 
   /** Play a pose on the default body, if there is one and the player is on foot. */
@@ -571,6 +611,8 @@ export class Game {
 
   /** Display rate. Camera and drawing only — never gameplay. */
   private render(_alpha: number, frameDelta: number): void {
+    // Only play is measured: a frozen start screen or pause menu says nothing about how the game itself runs.
+    if (state.status === 'playing' && this.perf.feed(frameDelta) && this.autoQuality) this.applyQuality();
     // Driving or riding: the camera sits behind the VEHICLE's own front, whatever its heading — the one
     // the game named with ctx.follow(), or the one it drives. On foot the player is framed as it always
     // has been (a 'chase' game too: its rig is third-person on foot, see the constructor).
@@ -584,6 +626,7 @@ export class Game {
     // Shadows follow the player, or they blur out as soon as they walk away on a large map.
     followShadow(this.lights.key, p);
     audio.setListener(p.x, p.y, p.z);
+    updateHealthBars(this.rig.camera);   // enemy health bars face the camera (three/healthbar.ts)
     this.renderer.render(this.scene, this.rig.camera);
   }
 
@@ -597,7 +640,9 @@ export class Game {
     // No start screen asked for (a Game with its own HUD), or the game's own setup() already began the round.
     if (!this.options.startScreen || state.status === 'playing') { this.loop.setPaused(false); setStatus('playing'); return; }
     this.loop.setPaused(true);
-    setStatus('menu');
+    // The first start screen is already 'menu' (the initial state), so setStatus would announce nothing — and the
+    // start-screen music (GAME_MENU) would never begin.
+    if (state.status === 'menu') events.emit('GAME_MENU'); else setStatus('menu');
   }
   /** Leave the start screen and begin the round. On a phone it also goes full screen (the tap is the permission). */
   play(): void {
@@ -644,8 +689,55 @@ export class Game {
     this.feel.reset();
     this.player.reset();
     this.loop.setPaused(true);
-    setStatus('menu');
+    // resetRun() already put the status back to 'menu' WITHOUT announcing it, so setStatus('menu') would say nothing:
+    // GAME_MENU (the start-screen music, the race overlay clearing) never happened on Menu.
+    if (state.status === 'menu') events.emit('GAME_MENU'); else setStatus('menu');
   }
+  /**
+   * Where a world point is on screen, in pixels inside the game's box, and whether it is in front of the camera —
+   * for anything drawn over the 3D view (damage numbers, a marker, a name tag).
+   */
+  worldToScreen(p: { x: number; y: number; z: number }): { x: number; y: number; visible: boolean } {
+    const v = new THREE.Vector3(p.x, p.y, p.z).project(this.rig.camera);
+    const box = this.options.container.getBoundingClientRect?.();
+    const w = box?.width || window.innerWidth || 1; const h = box?.height || window.innerHeight || 1;
+    return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h, visible: v.z > -1 && v.z < 1 };
+  }
+
+  private boss: { name: string; read: () => number } | null = null;
+  /**
+   * Show a BOSS bar across the top (name and health), or hide it with null. read returns 0..1 — a Health's fraction.
+   *   game.setBossBar('Raavan', () => boss.hp.fraction);   …   game.setBossBar(null);
+   */
+  setBossBar(name: string | null, read?: () => number): void {
+    this.boss = name && read ? { name, read } : null;
+    events.emit('BOSS_BAR', { name: this.boss?.name ?? null });
+  }
+  /** The boss bar now, or null. */
+  get bossBar(): { name: string; fraction: number } | null {
+    if (!this.boss) return null;
+    let f = 0;
+    try { f = Math.max(0, Math.min(1, Number(this.boss.read()) || 0)); } catch { f = 0; }
+    return { name: this.boss.name, fraction: f };
+  }
+  /** The crosshair setting the Hud reads. */
+  get crosshairOption(): boolean | undefined { return this.options.crosshair; }
+  get minimapOption(): boolean | undefined { return this.options.minimap; }
+
+  /**
+   * What the minimap draws: where the player (or the vehicle it drives) is, which way the camera looks (screen up),
+   * which way the player faces, and every map marker (three/markers.ts).
+   */
+  mapView(): { x: number; z: number; forward: { x: number; z: number }; facing: number; markers: Array<{ x: number; z: number; kind: MarkerKind }> } {
+    const f = new THREE.Vector3();
+    this.rig.camera.getWorldDirection(f);
+    const flat = Math.hypot(f.x, f.z) || 1;
+    const body = this.chased ?? this.player.object;
+    const p = body.getWorldPosition(new THREE.Vector3());
+    const facing = this.chased ? this.chased.rotation.y : (this.hero?.root.rotation.y ?? 0);
+    return { x: p.x, z: p.z, forward: { x: f.x / flat, z: f.z / flat }, facing, markers: mapMarkers() };
+  }
+
   /** What the start screen shows; null when the game has its own. */
   get startScreenInfo(): { title: string; subtitle: string; controls: { touch: string; keyboard: string } } | null {
     const o = this.options.startScreen;
@@ -666,11 +758,31 @@ export class Game {
     audio.setVolume('music', s.musicVolume);
     audio.setVolume('sfx', s.sfxVolume);
     audio.setVolume('ui', s.sfxVolume);
-    // Fewer pixels is the biggest single saving on a weak phone; the base ratio already respects the device.
-    const scale = s.quality === 'low' ? 0.55 : s.quality === 'medium' ? 0.8 : 1;
-    this.renderer.setPixelRatio(Math.max(0.35, this.basePixelRatio * scale));
+    if (s.quality !== this.chosenQuality || s.autoQuality !== this.autoQuality) this.perf.reset();
+    this.chosenQuality = s.quality;
+    this.autoQuality = s.autoQuality;
+    this.applyQuality();
     this.lookSensitivity = s.lookSensitivity;
   }
+
+  /**
+   * The picture actually drawn: the player's choice, stepped down by the governor when Auto quality is on. Fewer pixels
+   * is the biggest single saving on a weak phone (the base ratio already respects the device); 'low' also drops the sun's
+   * shadows — which the Graphics setting always promised and never did.
+   */
+  private applyQuality(): void {
+    const q = this.autoQuality ? steppedQuality(this.chosenQuality, this.perf.drop) : this.chosenQuality;
+    this.effectiveQuality = q;
+    const scale = q === 'low' ? 0.55 : q === 'medium' ? 0.8 : 1;
+    this.renderer.setPixelRatio(Math.max(0.35, this.basePixelRatio * scale));
+    if (this.lights?.key) this.lights.key.castShadow = q !== 'low';
+    events.emit('PERF_CHANGED', { fps: Math.round(this.perf.fps), quality: q, chosen: this.chosenQuality, auto: this.autoQuality });
+  }
+
+  /** Frames drawn per second, smoothed. */
+  get fps(): number { return Math.round(this.perf.fps); }
+  /** The quality being drawn right now (may be below the player's choice when Auto quality stepped it down). */
+  get quality(): GameSettings['quality'] { return this.effectiveQuality; }
   pause(): void { if (state.status === 'playing') { this.loop.setPaused(true); setStatus('paused'); } }
   resume(): void { if (state.status === 'paused') { this.loop.setPaused(false); setStatus('playing'); } }
 
@@ -805,6 +917,12 @@ import type { Game } from '../Game';
 import { settings, type GameSettings } from '../core/settings';
 import { loading, type LoadingState } from '../core/loading';
 import { t } from '../core/strings';
+import { lastRaceResults } from '../three/race';
+import { levels } from '../core/levels';
+import { objectives, type Objective } from '../core/quests';
+import { dialogue, type DialogueView } from '../core/dialogue';
+import { inventory, type ItemStack } from '../core/inventory';
+import { economy, type ShopEntry } from '../core/economy';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -895,6 +1013,386 @@ function FullscreenIcon({ on }: { on: boolean }) {
   );
 }
 
+/** The player's own weapon event (no owner, or 'player') — an enemy's gun never moves the player's HUD. */
+const mine = (p: unknown): boolean => { const o = (p as { ownerId?: unknown } | null)?.ownerId; return o === undefined || o === 'player'; };
+
+interface DamageNumber { id: number; x: number; y: number; text: string; kill: boolean }
+
+/**
+ * THE SHOOTER'S HUD (admin 2026-11-19 game-gap audit: crosshair, ammo, hit markers, damage numbers and a boss bar were
+ * all missing). Driven by the kit's events, never by the frame: the crosshair appears the first time the player's own
+ * gun fires (or always, with options.crosshair), a hit marker flashes when a shot lands, the ammo count follows the
+ * Weapon, damage numbers rise from where the enemy was hit, and a boss bar shows while game.setBossBar is set.
+ */
+export function ShooterOverlay({ game, playing }: { game: Game; playing: boolean }) {
+  const forced = game.crosshairOption;
+  const [armed, setArmed] = useState(forced === true);
+  const [ammo, setAmmo] = useState<{ ammo: number; magazine: number; reloading: boolean } | null>(null);
+  const [hit, setHit] = useState<'hit' | 'kill' | null>(null);
+  const [numbers, setNumbers] = useState<DamageNumber[]>([]);
+  const [boss, setBoss] = useState<{ name: string; fraction: number } | null>(game.bossBar);
+  const seq = useRef(0);
+
+  useEffect(() => {
+    let hitTimer: ReturnType<typeof setTimeout> | undefined;
+    const flash = (kind: 'hit' | 'kill') => { setHit(kind); clearTimeout(hitTimer); hitTimer = setTimeout(() => setHit(null), kind === 'kill' ? 260 : 150); };
+    const number = (p: { position?: { x: number; y: number; z: number }; amount?: unknown }, kill: boolean) => {
+      if (!p?.position) return;
+      const at = game.worldToScreen(p.position);
+      if (!at.visible) return;
+      const id = ++seq.current;
+      const text = kill ? '✖' : typeof p.amount === 'number' ? '-' + Math.round(p.amount) : '';
+      if (!text) return;
+      setNumbers((list) => [...list.slice(-11), { id, x: at.x, y: at.y, text, kill }]);
+      setTimeout(() => setNumbers((list) => list.filter((n) => n.id !== id)), 800);
+    };
+    const ammoFrom = (p: { ammo?: unknown; magazine?: unknown } | null, reloading: boolean) => {
+      if (typeof p?.ammo === 'number' && typeof p?.magazine === 'number') setAmmo({ ammo: p.ammo, magazine: p.magazine, reloading });
+    };
+    const offs = [
+      events.on('WEAPON_FIRED', (p) => { if (!mine(p)) return; if (forced !== false) setArmed(true); ammoFrom(p, false); }),
+      events.on('WEAPON_RELOADING', (p) => { if (mine(p)) ammoFrom(p, true); }),
+      events.on('WEAPON_RELOADED', (p) => { if (mine(p)) ammoFrom(p, false); }),
+      events.on('WEAPON_EMPTY', (p) => { if (mine(p)) ammoFrom(p, false); }),
+      events.on('ENEMY_DAMAGED', (p) => { flash('hit'); number(p, false); }),
+      events.on('ENEMY_DIED', (p) => { flash('kill'); number(p, true); }),
+      events.on('MELEE_HIT', () => flash('hit')),
+      events.on('BOSS_BAR', () => setBoss(game.bossBar)),
+    ];
+    return () => { clearTimeout(hitTimer); for (const off of offs) off(); };
+  }, [game, forced]);
+
+  // The boss bar follows the boss's health while it is shown (10 times a second is smooth and cheap).
+  useEffect(() => {
+    if (!boss) return;
+    const timer = setInterval(() => setBoss(game.bossBar), 100);
+    return () => clearInterval(timer);
+  }, [game, boss !== null]);
+
+  const showCross = playing && armed && forced !== false;
+  const crossColour = hit === 'kill' ? '#f87171' : '#fff';
+  return (
+    <>
+      <style>{'@keyframes nbDmg{from{transform:translate(-50%,-50%);opacity:1}to{transform:translate(-50%,-160%);opacity:0}}'}</style>
+      {showCross ? (
+        <div aria-hidden="true" style={{ position: 'absolute', left: '50%', top: '50%', width: 28, height: 28, transform: 'translate(-50%,-50%)', pointerEvents: 'none', zIndex: 6 }}>
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke={crossColour} strokeWidth="2" strokeLinecap="round" style={{ filter: 'drop-shadow(0 0 2px rgba(0,0,0,.9))' }}>
+            <path d="M14 3v6M14 19v6M3 14h6M19 14h6" />
+            {hit ? <path d="M7 7l4 4M21 7l-4 4M7 21l4-4M21 21l-4-4" stroke={hit === 'kill' ? '#f87171' : '#fde047'} strokeWidth="2.6" /> : null}
+          </svg>
+        </div>
+      ) : null}
+      {numbers.map((n) => (
+        <div key={n.id} aria-hidden="true" style={{ position: 'absolute', left: n.x, top: n.y, transform: 'translate(-50%,-50%)', color: n.kill ? '#f87171' : '#fde047', fontWeight: 900, fontSize: n.kill ? 22 : 18, textShadow: '0 1px 3px rgba(0,0,0,.9)', pointerEvents: 'none', zIndex: 6, animation: 'nbDmg 0.8s ease-out forwards' }}>
+          {n.text}
+        </div>
+      ))}
+      {playing && ammo ? (
+        <div role="status" aria-label={'Ammo ' + ammo.ammo + ' of ' + ammo.magazine} style={{ position: 'absolute', right: 'max(16px, env(safe-area-inset-right))', bottom: 'max(150px, calc(env(safe-area-inset-bottom) + 150px))', color: ammo.ammo === 0 ? '#f87171' : '#fff', fontWeight: 900, fontSize: 26, textShadow: '0 1px 3px rgba(0,0,0,.9)', pointerEvents: 'none', zIndex: 5 }}>
+          {ammo.reloading ? '⟳ ' : ''}{ammo.ammo}<span style={{ fontSize: 16, opacity: 0.75 }}> / {ammo.magazine}</span>
+        </div>
+      ) : null}
+      {boss ? (
+        <div role="progressbar" aria-label={boss.name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(boss.fraction * 100)}
+          style={{ position: 'absolute', top: 'max(64px, calc(env(safe-area-inset-top) + 56px))', left: '50%', transform: 'translateX(-50%)', width: 'min(80vw, 520px)', color: '#fff', textAlign: 'center', pointerEvents: 'none', zIndex: 5, textShadow: '0 1px 3px rgba(0,0,0,.9)' }}>
+          <div style={{ fontWeight: 800, marginBottom: 4 }}>{boss.name}</div>
+          <div style={{ height: 12, background: 'rgba(0,0,0,0.5)', borderRadius: 999, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.4)' }}>
+            <div style={{ width: Math.round(boss.fraction * 100) + '%', height: '100%', background: '#ef4444', transition: 'width 120ms linear' }} />
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * THE RACE ON SCREEN (admin 2026-11-19 game-gap audit): a big 3-2-1-GO!, the player's place and time while racing,
+ * from three/race.ts's events. The finish's results are listed on the game-over screen.
+ */
+export function RaceOverlay() {
+  const [call, setCall] = useState<string | null>(null);
+  const [standing, setStanding] = useState<{ position: number; total: number; time: number; distance: number; finish: number | null } | null>(null);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const go = () => { setCall('GO!'); clearTimeout(timer); timer = setTimeout(() => setCall(null), 700); };
+    const offs = [
+      events.on('RACE_COUNTDOWN', (p: { n?: number }) => { if (p?.n) { setCall(String(p.n)); clearTimeout(timer); } else go(); }),
+      events.on('RACE_STARTED', go),
+      events.on('RACE_STATUS', (p) => setStanding(p)),
+      events.on('GAME_MENU', () => setStanding(null)),
+    ];
+    return () => { clearTimeout(timer); for (const off of offs) off(); };
+  }, []);
+  const clock = (sec: number) => Math.floor(sec / 60) + ':' + (sec % 60).toFixed(1).padStart(4, '0');
+  return (
+    <>
+      {call ? <div role="status" aria-live="assertive" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#fde047', fontSize: 'min(28vw, 140px)', fontWeight: 900, textShadow: '0 4px 14px rgba(0,0,0,.85)', pointerEvents: 'none', zIndex: 8 }}>{call}</div> : null}
+      {standing && standing.total > 1 ? (
+        <div aria-label="Race position" style={{ position: 'absolute', top: 'max(56px, calc(env(safe-area-inset-top) + 48px))', left: '50%', transform: 'translateX(-50%)', color: '#fff', fontWeight: 900, fontSize: 22, textShadow: '0 1px 3px rgba(0,0,0,.9)', pointerEvents: 'none', zIndex: 5, whiteSpace: 'nowrap' }}>
+          {'P' + standing.position + '/' + standing.total}
+          <span style={{ fontSize: 16, opacity: 0.85, marginLeft: 12 }}>{clock(standing.time)}</span>
+          {standing.finish ? <span style={{ fontSize: 14, opacity: 0.75, marginLeft: 12 }}>{(standing.distance / 1000).toFixed(1) + ' / ' + (standing.finish / 1000).toFixed(1) + ' km'}</span> : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/** Live level list and progress (core/levels.ts). */
+function useLevels(): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setTick((n) => n + 1);
+    const offs = ['LEVELS_CHANGED', 'LEVEL_STARTED', 'LEVEL_COMPLETED'].map((e) => events.on(e, bump));
+    return () => { for (const off of offs) off(); };
+  }, []);
+  return tick;
+}
+
+/** A first-time hint (showHint in core/levels.ts): shown once per game, then never again. */
+export function HintBar() {
+  const [hint, setHint] = useState<string | null>(null);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const off = events.on('HINT', (p: { text?: string; seconds?: number }) => {
+      if (!p?.text) return;
+      setHint(p.text); clearTimeout(timer);
+      timer = setTimeout(() => setHint(null), (p.seconds ?? 4) * 1000);
+    });
+    return () => { off(); clearTimeout(timer); };
+  }, []);
+  if (!hint) return null;
+  return (
+    <div role="status" aria-live="polite" style={{ position: 'absolute', left: '50%', bottom: 'max(120px, calc(env(safe-area-inset-bottom) + 112px))', transform: 'translateX(-50%)', maxWidth: 'min(90vw, 460px)', padding: '10px 16px', borderRadius: 12, background: 'rgba(0,0,0,0.72)', color: '#fff', fontSize: 15, textAlign: 'center', pointerEvents: 'none', zIndex: 7 }}>
+      {hint}
+    </div>
+  );
+}
+
+const starRow = (n: number): string => '★★★'.slice(0, n) + '☆☆☆'.slice(0, 3 - n);
+
+/**
+ * Where a world point lands on a round minimap of size px showing radius metres around the player, turned so the
+ * camera's forward is up. Points beyond the edge are pinned to it (edge: true) — a far goal still points the way.
+ */
+export function minimapPoint(view: { x: number; z: number; forward: { x: number; z: number } }, p: { x: number; z: number }, radius: number, size: number): { x: number; y: number; edge: boolean } {
+  const dx = p.x - view.x, dz = p.z - view.z;
+  const fx = view.forward.x, fz = view.forward.z;
+  let right = -dx * fz + dz * fx;           // along the camera's right
+  let up = dx * fx + dz * fz;               // along the camera's forward
+  const d = Math.hypot(right, up);
+  const edge = d > radius;
+  if (edge) { right = (right / d) * radius; up = (up / d) * radius; }
+  const half = size / 2, k = (half - 6) / radius;
+  return { x: half + right * k, y: half - up * k, edge };
+}
+
+const MARKER_COLOUR: Record<string, string> = { enemy: '#f87171', goal: '#fde047', pickup: '#4ade80', friend: '#60a5fa' };
+
+/** The round minimap: the player's arrow in the middle, markers around it, turning with the camera. */
+export function Minimap({ game }: { game: Game }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const [visible, setVisible] = useState(game.minimapOption === true);
+  useEffect(() => {
+    if (game.minimapOption === false) return;
+    const size = 128, radius = 60;
+    const draw = () => {
+      const view = game.mapView();
+      if (!visible && view.markers.length > 0) setVisible(true);
+      const c = canvas.current?.getContext('2d');
+      if (!c) return;
+      c.clearRect(0, 0, size, size);
+      c.fillStyle = 'rgba(0,0,0,0.5)'; c.beginPath(); c.arc(size / 2, size / 2, size / 2 - 1, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = 'rgba(255,255,255,0.6)'; c.lineWidth = 2; c.stroke();
+      for (const m of view.markers) {
+        const at = minimapPoint(view, m, radius, size);
+        c.fillStyle = MARKER_COLOUR[m.kind] ?? '#fff';
+        c.beginPath(); c.arc(at.x, at.y, at.edge ? 3 : 4, 0, Math.PI * 2); c.fill();
+      }
+      // The player's arrow, pointing where they face (relative to the camera).
+      const face = minimapPoint(view, { x: view.x + Math.sin(view.facing), z: view.z + Math.cos(view.facing) }, radius, size);
+      const ang = Math.atan2(face.x - size / 2, -(face.y - size / 2));
+      c.save(); c.translate(size / 2, size / 2); c.rotate(ang);
+      c.fillStyle = '#fff'; c.beginPath(); c.moveTo(0, -8); c.lineTo(6, 6); c.lineTo(0, 3); c.lineTo(-6, 6); c.closePath(); c.fill();
+      c.restore();
+    };
+    const timer = setInterval(draw, 100);
+    draw();
+    return () => clearInterval(timer);
+  }, [game, visible]);
+  if (game.minimapOption === false || !visible) return null;
+  return <canvas ref={canvas} width={128} height={128} aria-label="Minimap" role="img"
+    style={{ position: 'absolute', left: 'max(12px, env(safe-area-inset-left))', top: 'max(56px, calc(env(safe-area-inset-top) + 48px))', width: 128, height: 128, pointerEvents: 'none', zIndex: 5 }} />;
+}
+
+/** What the player is trying to do (core/quests.ts), with progress — under the score. */
+export function ObjectiveList() {
+  const [list, setList] = useState<readonly Objective[]>(objectives.list);
+  useEffect(() => events.on('OBJECTIVES_CHANGED', () => setList(objectives.list)), []);
+  if (list.length === 0) return null;
+  return (
+    <ul aria-label="Objectives" style={{ position: 'absolute', right: 'max(12px, env(safe-area-inset-right))', top: 'max(64px, calc(env(safe-area-inset-top) + 56px))', listStyle: 'none', margin: 0, padding: '8px 12px', borderRadius: 10, background: 'rgba(0,0,0,0.45)', color: '#fff', fontSize: 14, maxWidth: 'min(46vw, 260px)', pointerEvents: 'none', zIndex: 5, textShadow: '0 1px 2px rgba(0,0,0,.8)' }}>
+      {list.map((o) => (
+        <li key={o.id} style={{ opacity: o.done ? 0.65 : 1, textDecoration: o.done ? 'line-through' : 'none', marginTop: 2 }}>
+          {(o.done ? '✓ ' : '• ') + o.text + (o.target > 1 ? ' ' + o.progress + '/' + o.target : '')}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+
+/**
+ * The dialogue box: who is speaking, the line, and the choices (1–9 on a keyboard). Tap the box, or Enter / Space / E,
+ * for the next line. A choice that needs an item the player lacks is shown, greyed, with what it needs.
+ */
+export function DialogueBox() {
+  const [view, setView] = useState<DialogueView | null>(dialogue.current);
+  useEffect(() => {
+    const sync = () => setView(dialogue.current);
+    const offs = [events.on('DIALOGUE_LINE', sync), events.on('DIALOGUE_ENDED', sync), events.on('INVENTORY_CHANGED', sync)];
+    return () => offs.forEach((o) => o());
+  }, []);
+  useEffect(() => {
+    if (!view) return;
+    const onKey = (e: KeyboardEvent) => {
+      const n = Number(e.key);
+      if (view.choices.length && Number.isInteger(n) && n >= 1 && n <= view.choices.length) { e.preventDefault(); dialogue.choose(n - 1); return; }
+      if (!view.choices.length && (e.key === 'Enter' || e.key === ' ' || e.key === 'e' || e.key === 'E')) { e.preventDefault(); dialogue.advance(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [view]);
+  if (!view) return null;
+  return (
+    <div role="dialog" aria-label={view.speaker || t('continue')} onClick={() => { if (!view.choices.length) dialogue.advance(); }}
+      style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', bottom: 'max(16px, env(safe-area-inset-bottom))', width: 'min(92vw, 620px)', padding: '14px 18px', borderRadius: 14, background: 'rgba(10,12,20,0.88)', border: '2px solid rgba(255,255,255,0.35)', color: '#fff', zIndex: 8, pointerEvents: 'auto', cursor: view.choices.length ? 'default' : 'pointer' }}>
+      {view.speaker ? <div style={{ fontWeight: 800, color: '#fde047', marginBottom: 4 }}>{view.speaker}</div> : null}
+      <p style={{ margin: 0, fontSize: 17, lineHeight: 1.4 }}>{view.text}</p>
+      {view.choices.length ? (
+        <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
+          {view.choices.map((c, i) => (
+            <button key={i} type="button" disabled={!c.available} onClick={(e) => { e.stopPropagation(); dialogue.choose(i); }}
+              style={{ ...secondary, marginTop: 0, minWidth: 0, textAlign: 'left', padding: '8px 12px', fontSize: 15, opacity: c.available ? 1 : 0.5, cursor: c.available ? 'pointer' : 'not-allowed' }}>
+              {(i + 1) + '. ' + c.text + (c.needs ? ' (' + t('needs', { name: c.needs }) + ')' : '')}
+            </button>
+          ))}
+        </div>
+      ) : <div aria-hidden="true" style={{ textAlign: 'right', opacity: 0.75, fontSize: 13, marginTop: 6 }}>{t('continue') + ' ▶'}</div>}
+    </div>
+  );
+}
+
+/** Re-render on every bag change. */
+function useInventory(): ItemStack[] {
+  const [items, setItems] = useState<ItemStack[]>(inventory.list);
+  useEffect(() => events.on('INVENTORY_CHANGED', () => setItems(inventory.list)), []);
+  return items;
+}
+
+/** The bag: every item with its icon, name and count; a usable one has a Use button. */
+export function InventoryPanel({ onBack }: { onBack: () => void }) {
+  const items = useInventory();
+  return (
+    <div style={{ width: 'min(92vw, 460px)' }}>
+      <h2 style={{ fontSize: 26, fontWeight: 800 }}>{t('inventory')}</h2>
+      {items.length === 0 ? <p style={{ opacity: 0.8, marginTop: 10 }}>{t('inventoryEmpty')}</p> : (
+        <ul aria-label={t('inventory')} style={{ listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'grid', gap: 8, textAlign: 'left' }}>
+          {items.map((it) => (
+            <li key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, background: 'rgba(255,255,255,0.10)' }}>
+              <span aria-hidden="true" style={{ fontSize: 26, width: 32, textAlign: 'center' }}>{it.icon}</span>
+              <span style={{ flex: 1 }}>
+                <span style={{ fontWeight: 700 }}>{it.name}</span>{it.count > 1 ? <span style={{ opacity: 0.8 }}>{' ×' + it.count}</span> : null}
+                {it.description ? <span style={{ display: 'block', fontSize: 13, opacity: 0.75 }}>{it.description}</span> : null}
+              </span>
+              {it.usable ? <button type="button" style={{ ...button, marginTop: 0, minWidth: 0, padding: '6px 14px', fontSize: 14 }} onClick={() => inventory.use(it.id)}>{t('use')}</button> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      <button type="button" style={secondary} onClick={onBack}>{t('close')}</button>
+    </div>
+  );
+}
+
+
+/** Frames per second, read twice a second, with the quality being drawn (Settings → FPS counter). */
+export function FpsCounter({ game }: { game: Pick<Game, 'fps' | 'quality'> }) {
+  const [v, setV] = useState({ fps: game.fps, quality: game.quality });
+  useEffect(() => {
+    const id = setInterval(() => setV({ fps: game.fps, quality: game.quality }), 500);
+    return () => clearInterval(id);
+  }, [game]);
+  const colour = v.fps >= 50 ? '#4ade80' : v.fps >= 30 ? '#fde047' : '#f87171';
+  return (
+    <div aria-label={'FPS ' + v.fps} style={{ position: 'absolute', left: 'max(12px, env(safe-area-inset-left))', bottom: 'max(12px, env(safe-area-inset-bottom))', padding: '2px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.55)', color: colour, font: '700 12px ui-monospace, monospace', pointerEvents: 'none', zIndex: 6 }}>
+      {v.fps + ' FPS · ' + t(v.quality === 'low' ? 'smooth' : v.quality === 'medium' ? 'balanced' : 'sharp')}
+    </div>
+  );
+}
+
+/** Re-render on every coin or shop change. */
+function useShop(): { coins: number; list: ShopEntry[] } {
+  const read = () => ({ coins: economy.coins, list: economy.list });
+  const [v, setV] = useState(read);
+  useEffect(() => {
+    const sync = () => setV(read());
+    const offs = [events.on('COINS_CHANGED', sync), events.on('SHOP_CHANGED', sync)];
+    return () => offs.forEach((o) => o());
+  }, []);
+  return v;
+}
+
+/** The coin count — shown wherever the game has a shop. */
+export function CoinPill({ coins }: { coins: number }) {
+  return <span aria-label={t('coins') + ' ' + coins} style={{ fontWeight: 800, color: '#fde047', whiteSpace: 'nowrap' }}>🪙 {coins}</span>;
+}
+
+/**
+ * The shop and garage: every item with its price; slot items (a car, a character) are chosen with Use; an upgrade shows its
+ * level and the next price; an item the player cannot afford is shown, greyed — the goal to play for.
+ */
+export function ShopPanel({ onBack }: { onBack: () => void }) {
+  const { coins, list } = useShop();
+  return (
+    <div style={{ width: 'min(92vw, 520px)' }}>
+      <h2 style={{ fontSize: 26, fontWeight: 800 }}>{t('shop')} · <CoinPill coins={coins} /></h2>
+      <ul aria-label={t('shop')} style={{ listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'grid', gap: 8, textAlign: 'left', maxHeight: '58vh', overflowY: 'auto' }}>
+        {list.map((it) => {
+          const upgrade = (it.levels ?? 1) > 1;
+          // Exactly one of: in use · choose it · bought out · buy (greyed while the coins are short — the goal to play for).
+          const choose = it.owned && !!it.slot && !upgrade && !it.inUse;
+          const label = it.inUse ? t('equipped') : choose ? t('equip') : it.nextPrice === null ? (upgrade ? t('maxed') : t('owned')) : t('buy') + ' 🪙' + it.nextPrice;
+          const disabled = it.inUse || (!choose && (it.nextPrice === null || it.nextPrice > coins));
+          const act = () => { if (choose) economy.equip(it.id); else economy.buy(it.id); };
+          return (
+            <li key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, background: it.inUse ? 'rgba(253,224,71,0.18)' : 'rgba(255,255,255,0.10)' }}>
+              <span aria-hidden="true" style={{ fontSize: 26, width: 32, textAlign: 'center' }}>{it.icon ?? (it.slot === 'car' ? '🚗' : it.kind === 'item' ? '🎁' : upgrade ? '⬆️' : '⭐')}</span>
+              <span style={{ flex: 1 }}>
+                <span style={{ fontWeight: 700 }}>{it.name}</span>
+                {upgrade ? <span style={{ opacity: 0.8, marginLeft: 6 }}>{t('levelShort', { n: it.level }) + '/' + it.levels}</span> : null}
+                {it.description ? <span style={{ display: 'block', fontSize: 13, opacity: 0.75 }}>{it.description}</span> : null}
+              </span>
+              <button type="button" disabled={disabled} onClick={act}
+                style={{ ...button, marginTop: 0, minWidth: 0, padding: '6px 12px', fontSize: 14, opacity: disabled && !it.inUse ? 0.5 : 1, cursor: disabled ? 'default' : 'pointer' }}>{label}</button>
+            </li>
+          );
+        })}
+      </ul>
+      <button type="button" style={secondary} onClick={onBack}>{t('back')}</button>
+    </div>
+  );
+}
+
+/** A bag icon — an icon, so it reads in any language. */
+function BagIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 8h12l-1 12H7L6 8z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" />
+    </svg>
+  );
+}
+
 /** A speaker icon, crossed out when muted — an icon, so it reads in any language. */
 function SpeakerIcon({ muted }: { muted: boolean }) {
   return (
@@ -955,6 +1453,19 @@ function SettingsPanel({ onBack }: { onBack: () => void }) {
       </div>
       <Slider label={t('lookSpeed')} value={s.lookSensitivity} min={0.25} max={3} step={0.25} onChange={(v) => settings.set({ lookSensitivity: v })} />
       <Toggle label={t('vibration')} on={s.vibration} onChange={(v) => settings.set({ vibration: v })} />
+      <Toggle label={t('autoQuality')} on={s.autoQuality} onChange={(v) => settings.set({ autoQuality: v })} />
+      <Toggle label={t('fpsCounter')} on={s.showFps} onChange={(v) => settings.set({ showFps: v })} />
+      <div style={row}>
+        <span>{t('difficulty')}</span>
+        <div role="radiogroup" aria-label={t('difficulty')} style={{ display: 'flex', gap: 6 }}>
+          {(['easy', 'normal', 'hard'] as const).map((d) => (
+            <button key={d} type="button" role="radio" aria-checked={s.difficulty === d} onClick={() => settings.set({ difficulty: d })}
+              style={{ ...secondary, marginTop: 0, minWidth: 0, minHeight: 40, padding: '6px 10px', background: s.difficulty === d ? '#fde047' : 'rgba(255,255,255,0.14)', color: s.difficulty === d ? '#111' : '#fff' }}>
+              {t(d)}
+            </button>
+          ))}
+        </div>
+      </div>
       <button ref={back} type="button" style={button} onClick={onBack}>{t('back')}</button>
     </div>
   );
@@ -965,7 +1476,15 @@ export function Hud({ game }: { game: Game }) {
   const prefs = useSettings();
   const load = useLoading();
   const fullscreen = useFullscreen(game);
-  const [panel, setPanel] = useState<'settings' | null>(null);
+  useLevels();
+  const hasLevels = levels.count > 0;
+  /** Begin play on the chosen (or current) level — the game builds it on LEVEL_STARTED. */
+  const playLevel = (i: number) => { if (hasLevels && !levels.start(i)) return; game.play(); };
+  const replayLevel = () => { if (hasLevels) levels.start(levels.index); game.restart(); };
+  const nextLevel = () => { if (levels.next()) game.restart(); };
+  const [panel, setPanel] = useState<'settings' | 'inventory' | 'shop' | null>(null);
+  const bag = useInventory();
+  const shop = useShop();
   const again = useRef<HTMLButtonElement>(null);
   const playRef = useRef<HTMLButtonElement>(null);
   const over = s.status === 'gameover' || s.status === 'won';
@@ -1001,7 +1520,13 @@ export function Hud({ game }: { game: Game }) {
   // Esc pauses (and closes Settings first). Bound to the window because the player expects it to work wherever focus is.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // I opens the bag during play (and closes it again).
+      if ((e.key === 'i' || e.key === 'I') && !dialogue.active) {
+        if (s.status === 'playing') { game.pause(); setPanel('inventory'); return; }
+        if (panel === 'inventory') { setPanel(null); game.resume(); return; }
+      }
       if (e.key !== 'Escape') return;
+      if (panel === 'inventory') { setPanel(null); game.resume(); return; }
       if (panel) { setPanel(null); return; }
       if (s.status === 'playing') game.pause();
       else if (s.status === 'paused') game.resume();
@@ -1011,7 +1536,7 @@ export function Hud({ game }: { game: Game }) {
   }, [game, s.status, panel]);
 
   const settingsOrScreen = (screen: React.ReactNode) => (
-    <div style={overlay}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : screen}</div>
+    <div style={overlay}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : panel === 'inventory' ? <InventoryPanel onBack={() => { setPanel(null); game.resume(); }} /> : panel === 'shop' ? <ShopPanel onBack={() => setPanel(null)} /> : screen}</div>
   );
 
   return (
@@ -1023,6 +1548,7 @@ export function Hud({ game }: { game: Game }) {
             {t('score')} {s.score}
             <span style={{ opacity: 0.7, fontSize: 13, marginLeft: 10 }}>{t('best')} {s.highScore}</span>
             {combo.multiplier > 1 ? <span style={{ marginLeft: 10, color: '#fde047' }}>x{combo.multiplier}</span> : null}
+            {economy.ready ? <span style={{ marginLeft: 12, fontSize: 16 }}><CoinPill coins={shop.coins} /></span> : null}
           </div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <div style={{ width: 120, height: 10, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden' }}>
@@ -1040,6 +1566,10 @@ export function Hud({ game }: { game: Game }) {
             <button type="button" aria-label={prefs.muted ? t('soundOn') : t('mute')} aria-pressed={prefs.muted} onClick={() => settings.toggleMute()} style={roundIcon}>
               <SpeakerIcon muted={prefs.muted} />
             </button>
+            {/* The bag appears once there is something in it. */}
+            {s.status === 'playing' && bag.length > 0 ? (
+              <button type="button" aria-label={t('inventory')} onClick={() => { game.pause(); setPanel('inventory'); }} style={roundIcon}><BagIcon /></button>
+            ) : null}
             {/* Esc is a keyboard; a phone has none. Without this a player on a phone can never pause. */}
             {s.status === 'playing' ? (
               <button type="button" aria-label={t('pause')} onClick={() => game.pause()} style={roundIcon}>II</button>
@@ -1049,6 +1579,13 @@ export function Hud({ game }: { game: Game }) {
       ) : null}
 
       <LoadingBar state={load} />
+      {prefs.showFps && s.status !== 'menu' ? <FpsCounter game={game} /> : null}
+      {s.status === 'playing' ? <HintBar /> : null}
+      {s.status === 'playing' || s.status === 'paused' ? <Minimap game={game} /> : null}
+      {s.status === 'playing' || s.status === 'paused' ? <ObjectiveList /> : null}
+      <ShooterOverlay game={game} playing={s.status === 'playing'} />
+      {s.status === 'playing' ? <DialogueBox /> : null}
+      {s.status === 'playing' || s.status === 'paused' ? <RaceOverlay /> : null}
 
       {s.status === 'menu' && info ? settingsOrScreen(
         <div style={{ maxWidth: 440, padding: '0 16px' }}>
@@ -1056,9 +1593,26 @@ export function Hud({ game }: { game: Game }) {
           {info.subtitle ? <p style={{ opacity: 0.9, marginTop: 8, fontSize: 17 }}>{info.subtitle}</p> : null}
           <p style={{ opacity: 0.75, marginTop: 12, fontSize: 14 }}>{touch ? info.controls.touch : info.controls.keyboard}</p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button ref={playRef} type="button" style={button} onClick={() => game.play()}>{t('play')}</button>
+            <button ref={playRef} type="button" style={button} onClick={() => playLevel(levels.index)}>{t('play')}</button>
+            {economy.ready ? <button type="button" style={secondary} onClick={() => setPanel('shop')}>{t('shop')} · 🪙{shop.coins}</button> : null}
             <button type="button" style={secondary} onClick={() => setPanel('settings')}>{t('settings')}</button>
           </div>
+          {levels.count > 1 ? (
+            <div role="list" aria-label={t('levels')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8, marginTop: 16 }}>
+              {levels.list.map((l, i) => {
+                const open = levels.isUnlocked(i);
+                return (
+                  <button key={i} role="listitem" type="button" disabled={!open} aria-label={t('level') + ' ' + (i + 1) + ' ' + l.name + (open ? '' : ' (' + t('locked') + ')')}
+                    onClick={() => playLevel(i)}
+                    style={{ ...secondary, marginTop: 0, minWidth: 0, padding: '8px 6px', opacity: open ? 1 : 0.45, cursor: open ? 'pointer' : 'not-allowed', outline: i === levels.index ? '2px solid #fde047' : 'none' }}>
+                    <div style={{ fontWeight: 800 }}>{open ? i + 1 : '🔒'}</div>
+                    <div style={{ fontSize: 12, opacity: 0.85 }}>{l.name}</div>
+                    <div aria-hidden="true" style={{ fontSize: 12, color: '#fde047' }}>{starRow(levels.stars(i))}</div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </div>,
       ) : null}
 
@@ -1076,13 +1630,24 @@ export function Hud({ game }: { game: Game }) {
 
       {over ? settingsOrScreen(
         <div style={{ maxWidth: 420, padding: '0 16px' }}>
-          <h2 style={{ fontSize: 30, fontWeight: 800 }}>{s.status === 'won' ? t('youWin') : t('gameOver')}</h2>
+          <h2 style={{ fontSize: 30, fontWeight: 800 }}>{s.status === 'won' ? (hasLevels ? t('levelComplete') : t('youWin')) : t('gameOver')}</h2>
+          {s.status === 'won' && hasLevels ? <p aria-label={levels.stars(levels.index) + ' / 3'} style={{ fontSize: 28, color: '#fde047', marginTop: 4 }}>{starRow(levels.stars(levels.index))}</p> : null}
           {/* The run summary: the first line is the hook — a new best, or exactly how close it was. */}
-          {(meta.lastSummary ? summaryLines(meta.lastSummary) : [t('score') + ' ' + s.score]).map((line, i) => (
+          {lastRaceResults ? (
+            <ol aria-label="Race results" style={{ textAlign: 'left', margin: '12px auto 0', maxWidth: 280, paddingLeft: 24 }}>
+              {lastRaceResults.map((r, i) => (
+                <li key={i} style={{ fontWeight: r.player ? 900 : 500, color: r.player ? '#fde047' : '#fff', marginTop: 2 }}>
+                  {r.name + ' — ' + (r.time === null ? 'DNF' : Math.floor(r.time / 60) + ':' + (r.time % 60).toFixed(1).padStart(4, '0'))}
+                </li>
+              ))}
+            </ol>
+          ) : (meta.lastSummary ? summaryLines(meta.lastSummary) : [t('score') + ' ' + s.score]).map((line, i) => (
             <p key={i} style={i === 0 ? { fontSize: 20, fontWeight: 800, marginTop: 8, color: '#fde047' } : { opacity: 0.88, marginTop: 4 }}>{line}</p>
           ))}
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button ref={again} type="button" style={button} onClick={() => game.restart()}>{t('playAgain')}</button>
+            {s.status === 'won' && hasLevels && levels.hasNext ? <button type="button" style={button} onClick={nextLevel}>{t('nextLevel')}</button> : null}
+            <button ref={again} type="button" style={s.status === 'won' && hasLevels && levels.hasNext ? secondary : button} onClick={replayLevel}>{t('playAgain')}</button>
+            {economy.ready ? <button type="button" style={secondary} onClick={() => setPanel('shop')}>{t('shop')} · 🪙{shop.coins}</button> : null}
             {info ? <button type="button" style={secondary} onClick={() => game.toMenu()}>{t('menu')}</button> : null}
           </div>
         </div>,
@@ -1455,10 +2020,17 @@ import { Game } from './Game';
 import { events } from './core/events';
 import { state } from './core/state';
 import { createCar, createTrackStream, createVehicleState, driveVehicle, RACING_ROAD_MAPS, type TrackPlan, type TrackStream, type VehicleState } from './three/objects';
+import { createRace, type Race } from './three/race';
 
 /** Original racing starter. New plan identity restarts the game (all settings apply).
  * Keep plan identity stable for ordinary rerenders; onReady exposes seamless live setPlan. */
-export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: (stream: TrackStream) => void } = {}) {
+export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null }: {
+  plan?: TrackPlan; onReady?: (stream: TrackStream) => void;
+  /** Rival cars on the road (0 to 7); 0 is a solo drive. */
+  opponents?: number;
+  /** A finish line this many km from the start; null (default) keeps the endless road endless. */
+  finishKm?: number | null;
+} = {}) {
   const host = useRef<HTMLDivElement>(null);
   const hud = useRef<HTMLDivElement>(null);
   const live = useRef<Game | null>(null);
@@ -1466,11 +2038,19 @@ export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: 
   config.current = { plan, onReady };
   const [failure, setFailure] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  const [call, setCall] = useState<string | null>(null);
   useEffect(() => {
     if (!host.current) return;
     setFailure(null);
     let game: Game | null = null, stream: TrackStream | null = null;
-    let car: ReturnType<typeof createCar> | undefined, drive: VehicleState;
+    let car: ReturnType<typeof createCar> | undefined, drive: VehicleState, race: Race | null = null;
+    // 3-2-1-GO! big in the middle; GO! clears itself.
+    let callTimer: ReturnType<typeof setTimeout> | undefined;
+    const offCount = events.on('RACE_COUNTDOWN', (p: { n?: number }) => {
+      setCall(p?.n ? String(p.n) : 'GO!'); clearTimeout(callTimer);
+      if (!p?.n) callTimer = setTimeout(() => setCall(null), 700);
+    });
+    const offGo = events.on('RACE_STARTED', () => { setCall('GO!'); clearTimeout(callTimer); callTimer = setTimeout(() => setCall(null), 700); });
     let lastMap = -1, hudTime = 0;
     const skies = [0x9bcde6, 0xb8d9dc, 0x9dc3b9, 0xa9bfdf, 0xb7c4cf, 0x83b3b1,
       0xb6b9c3, 0x8da4ba, 0x8dd5df, 0xf2d6a2, 0x5d7a52, 0x10162f];
@@ -1480,7 +2060,8 @@ export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: 
     const release = () => {
       if (released) return; released = true;
       for (const off of offs) off();
-      stream?.dispose(); car?.userData.disposeOwnedMaterials?.(); game?.dispose();
+      offCount(); offGo(); clearTimeout(callTimer);
+      race?.dispose(); stream?.dispose(); car?.userData.disposeOwnedMaterials?.(); game?.dispose();
     };
     try {
       game = new Game({ container: host.current, camera: 'chase', playerBody: false, gameId: 'road-library',
@@ -1491,11 +2072,14 @@ export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: 
           car.rotation.y = stream.startPose.heading;
           drive = createVehicleState(car);
           ctx.scene.add(stream.root, car); ctx.follow(car);
+          race = createRace(ctx.scene, { stream, opponents, finishDistance: finishKm != null && finishKm > 0 ? finishKm * 1000 : null });
         },
         update: (ctx, dt) => {
           if (!stream || !car) return;
-          drive = driveVehicle(car, drive, ctx.input.axis(), dt);
+          // Held at the line through the countdown; the car keeps its starting speed for the moment GO comes.
+          if (!race || race.canDrive()) drive = driveVehicle(car, drive, ctx.input.axis(), dt);
           const status = stream.update(car);
+          const standing = race?.update(dt, status.distance);
           if (status.rebased) { const p = ctx.player.object.position.clone().sub(status.rebased); ctx.player.reset(p.x, p.y, p.z); ctx.camera.position.sub(status.rebased); }
           const piece = status.segment?.piece;
           const id = piece?.mapId ?? 0, map = RACING_ROAD_MAPS[id - 1];
@@ -1511,7 +2095,9 @@ export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: 
           if (hud.current && hudTime >= 0.2) {
             hudTime = 0;
             const km = ((piece?.mapOffsetMetres ?? 0) + status.distance - (status.segment?.startDistance ?? 0)) / 1000;
-            hud.current.textContent = (map ? String(id).padStart(2, '0') + '/12 · ' + map.name : piece?.name ?? 'Custom course') + ' · ' + km.toFixed(1) + '/' + ((piece?.mapLengthMetres ?? status.segment?.length ?? 0) / 1000).toFixed(1) + ' km · Loop ' + (status.lap + 1) + ' · ' + Math.round(Math.abs(drive.speed) * 3.6) + ' km/h';
+            const place = standing && standing.total > 1 ? 'P' + standing.position + '/' + standing.total + ' · ' : '';
+            const clock = standing ? Math.floor(standing.time / 60) + ':' + (standing.time % 60).toFixed(1).padStart(4, '0') + ' · ' : '';
+            hud.current.textContent = place + clock + (map ? String(id).padStart(2, '0') + '/12 · ' + map.name : piece?.name ?? 'Custom course') + ' · ' + km.toFixed(1) + '/' + ((piece?.mapLengthMetres ?? status.segment?.length ?? 0) / 1000).toFixed(1) + ' km · Loop ' + (status.lap + 1) + ' · ' + Math.round(Math.abs(drive.speed) * 3.6) + ' km/h';
           }
         },
       });
@@ -1522,7 +2108,7 @@ export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: 
       setFailure(error instanceof Error ? error.message : 'This device could not start the 3D road.');
     }
     return () => { live.current = null; release(); };
-  }, [plan]);
+  }, [plan, opponents, finishKm]);
   return <div style={{ position: 'relative', width: '100%', height: '100dvh', minHeight: 320, background: '#10162f' }}>
     <div ref={host} style={{ position: 'absolute', inset: 0 }} />
     <div style={{ position: 'absolute', left: 16, top: 16, color: 'white', background: '#10162fcc', padding: 12, borderRadius: 12, pointerEvents: 'none' }}>
@@ -1533,6 +2119,7 @@ export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: 
       if (!live.current) return;
       if (state.status === 'paused') live.current.resume(); else live.current.pause();
     }}>{paused ? 'Resume' : 'Pause'}</button>
+    {call && <div role="status" aria-live="assertive" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#fde047', fontSize: 96, fontWeight: 900, textShadow: '0 4px 12px rgba(0,0,0,.8)', pointerEvents: 'none' }}>{call}</div>}
     {failure && <div role="alert" style={{ position: 'absolute', top: '40%', padding: 24, color: 'white' }}>{failure}</div>}
   </div>;
 }

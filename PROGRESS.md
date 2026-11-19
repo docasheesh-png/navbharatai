@@ -102508,3 +102508,107 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
 **Fixed:** kit file `core/strings.ts` — English and Hindi tables with identical keys and placeholders, `t(key, vars)`, `setGameLanguage('en' | 'hi' | 'auto', overrides)`; the builder supplies any other language through `options.strings` (never machine-guessed here); a missing word falls back to English, never blank. Used by the start screen, pause menu, settings, game over, HUD, loading bar, kit touch-button labels (a label the game wrote is kept), the rotate hint and the run summary. `options.language` / `options.strings` on the Game; prompt tells the builder to set it. (The English-only rule is for NavBharatAI's own UI; this is the user's game.)
 
 **Tests:** `theGameSpeaksThePlayersLanguage` (6). Reversion: a hard-coded Play fails 1. **Still open:** meta goal texts and achievement titles are English data; the racing starter's own buttons are English.
+
+## 2026-11-19 — Game-gap audit P0 #3: the playtest now PRESSES Play again, reads the score and counts the sounds
+
+**Root cause:** the playtest proved a game starts, renders and answers input, but never that a round can be played again, that the score moves, or that any sound plays; restart was read from the code only (`replayFromCode`'s word match).
+
+**Fixed:** the kit's Game.ts exposes `window.__nbKit` (status, score, endRound — endRound only does what losing does; removed on dispose); the playtest counts every Web Audio source and `<audio>` play (`soundCounter` init script), reads the kit score before and after the controls, ends the round through the hook and finds and PRESSES the play-again control by its words (`RESTART_LABEL`, English and Hindi), then reads the status. New defects `GAME_DEFECT_RESTART_BROKEN` (no control, or pressing it did not restart) and `GAME_DEFECT_SILENT` (the game's code plays sound — `replayFromCode().sound` — and a whole playthrough played none), each with a repair hint; evidence appended to the verdict head, never points. Soft defects (not in HARD_DEFECTS): a new probe starts as evidence.
+
+**Tests:** `thePlaytestChecksPlayAgainScoreAndSound` (7, four in a real Chromium against kit-hook games: works / no button / dead button / no hook); the 10 existing playtest/repair suites stay green (143). Reversion: the probe that never presses fails. **Still open:** auto-repair stays suspended by design (`docs/security/game-auto-repair-suspension.md`: needs byte-preserving rollback) — the gate and these defects are evidence for the user's one-tap fix; "a win/level can be completed" is not provable generically and is not claimed.
+
+## 2026-11-19 — Game-gap audit P0 #7: the shooter's HUD — crosshair, ammo, hit marker, damage numbers, enemy and boss health bars
+
+**Root cause:** the kit had the logic (Weapon ammo/reload, Health, BossPhases) and no UI for any of it — a gun game showed no crosshair, no ammo count, no sign a shot landed, and enemies had no health bar.
+
+**Fixed:** Weapon events carry `ammo`, `magazine` and `ownerId` (new `WEAPON_RELOADING`); `PROJECTILE_HIT` carries `ownerId`; kit file `three/healthbar.ts` (`attachHealthBar(target, read)`, billboarded, hidden at full health and at zero, coloured by health, updated by the shell every frame); `Game.worldToScreen()`, `Game.setBossBar(name, read)` / `bossBar`, `options.crosshair`; the Hud's `ShooterOverlay` — crosshair shown by itself on the player's first shot, hit and kill markers, ammo with reload state, damage numbers that rise from where the enemy was hit, a boss bar — all driven by events and ignoring an enemy's weapon. Also: the playtest hook `window.__nbKit` is guarded for non-browser runs.
+
+**Tests:** `theShooterHudShowsTheFight` (5; the overlay is bundled with esbuild and driven by the kit's events in a real Chromium). Reversion: counting enemy shots fails 1. **Still open:** a minimap and an objective tracker (P1).
+
+## 2026-11-19 — Game-gap audit P0 #6: a race has rivals, a 3-2-1 countdown, a place, a clock and (when asked) a finish
+
+**Root cause:** the kit's racing stopped at a road and a car: no countdown, no other cars to race, no position, no timer, no finish or results — every one hand-written per game, or missing.
+
+**Fixed:** `TrackStream.poseAt(distance)` — the road's own centre line (the same `piecePoints` geometry) in current world coordinates; kit file `three/race.ts` — `createRace(scene, { stream, opponents, finishDistance, countdown, skill })`: a countdown that holds everyone at the line (`canDrive()`), rivals driving the road in their own lanes with a rubber band, live position and time (`RACE_STATUS`), a finite race ending with ordered results (`RACE_FINISHED`, `lastRaceResults`, the round becomes won / game over), Play again resets it to the grid; the Hud's `RaceOverlay` (big 3-2-1-GO!, P2/4 and the clock) and results on the end screen; `RacingRoadGame` races 3 rivals by default, gated by the countdown, and stays endless unless `finishKm` is given (owner 2026-11-18). Rivals are ghosts (no collision) — said in the module.
+
+**Tests:** `aRaceHasRivalsACountdownAndAFinish` (9). Reversion: driving through the countdown fails 1. **Still open:** rival collisions, garage/car selection, nitro (P1 economy/genre packs).
+
+## 2026-11-19 — Game-gap audit P1 #17: a gamepad plays the game (the runtime claimed it and had no code)
+
+**Root cause:** `core/input.ts`'s header said "keyboard, mouse, gamepad and touch"; there was no Gamepad API code anywhere — an honesty defect as much as a missing feature.
+
+**Fixed:** `Input.pollGamepads()` (the API is polled): first connected standard pad; left stick → analogue move with a 0.15 deadzone, letting go clears only what the pad wrote (the touch joystick is never cleared by an idle pad); right stick → look; buttons are `Pad:N` codes in `DEFAULT_ACTIONS` with real press/release edges (A jump, X/RT attack — the attack group answers too —, B use, Y reload, LT aim, LB drift, RB/L3 sprint, Start pause, d-pad directions); unplugging releases everything; no API = no-op. The shell polls first in every fixed step.
+
+**Tests:** `aGamepadPlaysTheGame` (6). Reversion: ignoring buttons fails 2.
+
+## 2026-11-19 — Game-gap audit P1 #12: enemies go AROUND walls (A* pathfinding)
+
+**Root cause:** `stepEnemyAI` steered straight at the player; sight was the caller's `canSeePlayer` boolean, and with no notion of walls an enemy either forgot a player who hid or pressed against the first wall in the way.
+
+**Fixed:** kit file `systems/nav.ts` — `createNavGrid` (blocked test, `inflate` for body radius, refuses absurd sizes), `blockedFromBoxes`, `lineClear` (sampled a hair to either side, so a line grazing the corner where two blocked cells meet is not clear — found by the test), `findPath` (A*, 8 directions, no corner cutting, bounded, target-in-wall reached from beside it, string-pulled). `EnemyPerception.nav`: sight needs a clear line, no attack through a wall, a chasing enemy hunts a hidden player along a re-planned path (twice a second or when the player moves two cells), waits instead of walking into a wall when there is no way. Without `nav` the old behaviour is unchanged.
+
+**Tests:** `enemiesGoAroundWalls` (6). Reversion: no path following fails 1.
+
+## 2026-11-19 — Game-gap audit P1 #13: levels, checkpoints, difficulty and first-time hints
+
+**Root cause:** no stage manager, no respawn-at-checkpoint, no Easy/Normal/Hard, no tutorial; `LEVEL_STARTED`, `LEVEL_COMPLETED` and `CHECKPOINT_REACHED` were declared and never emitted by anything.
+
+**Fixed:** kit file `core/levels.ts` — `levels.define/start/complete/next/isUnlocked/stars/checkpoint/respawnPoint/reset`, progress saved per game (unlocks, best stars, the checkpoint), `complete` wins the round; `showHint(id, text)` once per game, ever; `settings.difficulty` + `difficultyScale()`; the Hud's level list on the start screen (locked shut, stars), Level complete with stars and Next level, Difficulty in Settings, the hint bar; Game shows the controls hint on the very first start. Prompt tells the builder to use it.
+
+**Tests:** `theGameHasLevelsCheckpointsAndHints` (7). Reversion: no unlock on complete fails 2.
+
+## 2026-11-19 — Game gap P1 #16: minimap + objective tracker (branch `claude/game-minimap-objectives`)
+- Gap: 3D games had no minimap and no tracker of what the player must do (`QUEST_*` events were declared, never emitted).
+- Kit: `three/markers.ts` (`addMapMarker(obj, kind)`, `mapMarkers()`), `core/quests.ts` (`objectives.set/progress/complete`,
+  emits QUEST_STARTED / QUEST_COMPLETED / OBJECTIVES_CHANGED, records `state.questsCompleted`), `Game.mapView()` + `minimap`
+  option, Hud `Minimap` (turns with the camera, far goals pinned to the edge, auto-shows once a marker exists) and `ObjectiveList`.
+- Builder prompt line (MAP AND GOALS); AppKnowledgeBase `game_menus_settings` updated.
+- Locked by `tests/theMinimapAndObjectivesShowTheWay.test.ts` (reversion: flipped right-axis sign and dropped quest record → 2 fail).
+
+## 2026-11-19 — Game gap P1: dialogue with choices + inventory (branch `claude/game-dialogue-inventory`)
+- Gap: RPGs had no dialogue box/choices; `state.inventory` existed but nothing could fill, count, use or show it.
+- Kit: `core/inventory.ts` (stacks stored as ids IN `state.inventory`, so save/load/restart need nothing new; `define/add/remove
+  (all-or-nothing)/has/count/onUse/use/list`, INVENTORY_CHANGED + ITEM_USED), `core/dialogue.ts` (lines or a node graph, choices
+  that can require an item, promise resolves with the last choice; DIALOGUE_STARTED/_LINE/_ENDED). Game.ts freezes the game's
+  update while talking AND for the step the talk ends on (the closing press is not a jump). Hud: DialogueBox (1–9 keys,
+  Enter/Space/E), bag button + InventoryPanel (I key, pauses), EN/HI strings.
+- Found while testing: a locked choice named the missing item by its id (looked up only among owned items) → `inventory.nameOf`.
+- Locked by `tests/aGameCanTalkAndCarryThings.test.ts` (reversion: dropping the freeze / the all-or-nothing check → 2 fail).
+
+## 2026-11-19 — Game gap P1: coins, shop, upgrades, garage (branch `claude/game-economy`)
+- Gap: no currency, shop, upgrades, or car/character selection — nothing to come back for.
+- Kit: `core/economy.ts` (`setup({ id, items, startCoins })`, `earn`, `spend` all-or-nothing, `buy` → bought/owned/poor/max/unknown,
+  `equip`/`equipped(slot)`, `priceOf` (upgrades ×priceStep, default 1.5, to `levels`), `stat(id, base, perLevel)`, consumables go
+  in the bag; saved per game id on the device, sanitised on load so a corrupt/hand-edited save cannot crash or mint coins; a free
+  slot item is owned and in use from the start). Hud: coin pill, ShopPanel from the start and game-over screens, EN/HI strings.
+- Locked by `tests/aGameHasCoinsAShopAndAGarage.test.ts` (reversion: dropping the spend check / the owned-equip check → 4 fail).
+
+## 2026-11-19 — Game gap P1: music that follows the game (branch `claude/game-music`)
+- Gap: the music bus and Music volume slider existed; nothing ever played music.
+- Kit: `fx/music.ts` renders five moods from code (calm, action, tense loops; victory/defeat stings), seamless and deterministic;
+  `AudioManager.playMusic` (crossfade, same mood keeps going), `stopMusic`, `duckMusic`; a file loaded as `music:<mood>` replaces
+  one. `bindGameFeedback` cues it from events (menu→calm, start→action, pause/dialogue→duck, boss→tense, win/loss→sting);
+  `Game` option `music` (false or a cue table).
+- Found while wiring: `toMenu()` never announced GAME_MENU (resetRun() sets 'menu' silently, so setStatus('menu') said nothing —
+  the race overlay never cleared either); the first start screen had the same gap. Both now emit it.
+- Locked by `tests/theGameHasMusicThatFollowsIt.test.ts` (reversion: dropping the cue binding / the toMenu announcement → 3 fail).
+
+## 2026-11-19 — Game gap P1: adaptive quality + FPS counter (branch `claude/game-adaptive-quality`)
+- Gap: no frame-rate watch and no automatic quality — a game that ran at 60 on a laptop ran at 18 on a budget phone and stayed.
+- Kit: `core/perf.ts` (`createPerfGovernor`: smoothed fps, steps down after 3 s below 40, up after 12 s above 56, max 2 steps,
+  ignores hitches > 0.25 s and a 2 s warm-up; `steppedQuality`). Game feeds it while PLAYING only and applies the result
+  (pixel ratio; shadows off at low), never above the player's Graphics choice; `game.fps` / `game.quality`; PERF_CHANGED;
+  playtest hook gains `fps()` / `quality()`. Settings: Auto quality (on), FPS counter (off); Hud FpsCounter.
+- Found while wiring: the Graphics setting's documented "low = no shadows" was never applied (only the pixel ratio changed).
+- Locked by `tests/theGameStaysSmoothOnEveryPhone.test.ts` (reversion: dropping the shadow switch / the hitch filter → 3 fail).
+
+## 2026-11-19 — Game gap P1: the 2D game kit (branch `claude/game-2d-kit`)
+- Gap: only a top-down big map existed for 2D; every platformer/side-scroller/runner hand-rolled its jump, collision and camera.
+- New recipe `generate_game_2d` (`src/server/lib/Game2DGenerator.ts` → `src/game/2d/`): sprite.ts (SpriteSheet, Animator, drawn
+  placeholder), camera.ts (dead zone, frame-rate-independent easing, bounds, look-ahead, shake), tilemap.ts (text rows + legend,
+  markers, visible-only drawing), physics.ts (per-axis sub-stepped AABB — no tunnelling; one-way platforms; PlatformerController
+  with coyote time, jump buffer, variable jump, drop-through), parallax.ts, particles.ts (capped pool). Wired into GAME_RECIPES,
+  the catalog (tool + both lists), the dispatcher, the architect prompt (step 7c), the kit history script; AppKnowledgeBase entry.
+- Found while testing: a drop-through left the jump press unconsumed, so the buffer + coyote time jumped the player straight back
+  up onto the platform the next step.
+- Locked by `tests/a2DGameFeelsRight.test.ts` (reversion: no sub-stepping / unconsumed drop press → 2 fail).

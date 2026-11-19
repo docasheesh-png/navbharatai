@@ -29,6 +29,7 @@ function mountStarter(props: Record<string, unknown> = {}) {
     './core/events': { events: { on: (event: string, fn: () => void) => { handlers.set(event, fn); return () => handlers.delete(event); } } },
     './core/state': { state },
     './Game': { Game: class { constructor(o: unknown) { options = o; options.setup(context); return game; } } },
+    './three/race': { createRace: () => ({ canDrive: () => true, update: () => ({ position: 1, total: 1, time: 0 }), dispose: () => {} }) },
     './three/objects': { createTrackStream: create, createCar: () => new THREE.Group(), createVehicleState: () => ({ speed: 20, heading: 0 }),
       driveVehicle: (_car: unknown, drive: unknown) => drive,
       RACING_ROAD_MAPS: Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: `Map ${i + 1}`, lengthKm: 10, lighting: i === 11 ? 'night' : 'day' })) },

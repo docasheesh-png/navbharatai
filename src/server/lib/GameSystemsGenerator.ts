@@ -154,6 +154,7 @@ const AI = `/**
  *   3. It attacks every frame it is in range. That belongs to a cooldown, and the AI only ever REQUESTS
  *      an attack.
  */
+import { findPath, lineClear, type NavGrid } from './nav';
 export type EnemyMode = 'idle' | 'patrol' | 'chase' | 'attack' | 'dead';
 
 export interface Vec2 { x: number; z: number; }
@@ -206,6 +207,9 @@ export interface EnemyState {
   home: Vec2;
   patrolRadius: number;
   timeInMode: number;
+  /** With a nav grid: the path being followed around the walls, and how old it is (filled by stepEnemyAI). */
+  path?: Vec2[];
+  pathAge?: number;
 }
 
 export interface EnemyPerception {
@@ -214,6 +218,11 @@ export interface EnemyPerception {
   neighbours: Vec2[];
   /** False when a wall is in the way — the AI itself does no raycasting. */
   canSeePlayer: boolean;
+  /**
+   * The level's walls (systems/nav.ts). With it the enemy never sees, or strikes, THROUGH a wall, and a player who
+   * ducks behind one is HUNTED around it along a path instead of forgotten or walked into the wall.
+   */
+  nav?: NavGrid;
 }
 
 export interface EnemyDecision {
@@ -273,14 +282,18 @@ export function stepEnemyAI(
   s.timeInMode += delta;
   const toPlayer = dist(s.position, perception.player);
   const wasChasing = prev.mode === 'chase' || prev.mode === 'attack';
+  const nav = perception.nav;
+  // With walls known, sight needs a clear line; without them the caller's canSeePlayer is the answer, as before.
+  const sees = perception.canSeePlayer && (!nav || lineClear(nav, s.position, perception.player));
 
-  // Asymmetric radii: a single radius makes the enemy flicker between chase and idle at the boundary.
-  const engaged = perception.canSeePlayer
+  // Asymmetric radii: a single radius makes the enemy flicker between chase and idle at the boundary. An enemy
+  // already chasing keeps hunting a player who stepped behind a wall — when it can path to them.
+  const engaged = (sees || (nav !== undefined && wasChasing))
     && (wasChasing ? toPlayer <= config.loseRadius : toPlayer <= config.detectRadius);
 
   let mode: EnemyMode;
   if (!engaged) mode = s.patrolRadius > 0 ? 'patrol' : 'idle';
-  else if (toPlayer <= config.attackRadius) mode = 'attack';
+  else if (toPlayer <= config.attackRadius && sees) mode = 'attack';
   else mode = 'chase';
 
   const alerted = !wasChasing && (mode === 'chase' || mode === 'attack');
@@ -319,6 +332,21 @@ export function stepEnemyAI(
     desired = normalise({ x: target.x - s.position.x, z: target.z - s.position.z });
     speed = config.speed;
   }
+
+  // 🧭 AROUND THE WALL, NOT INTO IT: chasing with no clear line, follow a path (re-planned twice a second, or when
+  // the player has moved two cells from where it ended).
+  if (nav && mode === 'chase' && !lineClear(nav, s.position, perception.player)) {
+    const end = s.path && s.path.length ? s.path[s.path.length - 1] : null;
+    s.pathAge = (prev.pathAge ?? 0) + delta;
+    if (!s.path || !end || s.pathAge > 0.5 || dist(end, perception.player) > nav.cell * 2) {
+      s.path = findPath(nav, s.position, perception.player) ?? undefined;
+      s.pathAge = 0;
+    }
+    while (s.path && s.path.length > 1 && dist(s.path[0], s.position) < nav.cell * 0.6) s.path = s.path.slice(1);
+    const wp = s.path?.[0];
+    if (wp) desired = normalise({ x: wp.x - s.position.x, z: wp.z - s.position.z });
+    else { desired = { x: 0, z: 0 }; speed = 0; }   // no way through: wait rather than walk into the wall
+  } else if (s.path) { s.path = undefined; s.pathAge = 0; }
 
   // Separation applies even while attacking, or the pack piles into one square metre.
   const sep = separationVector(s.position, perception.neighbours, config.separationRadius);
@@ -565,7 +593,7 @@ export class ProjectileSystem {
         s.active = false;
         const hit: ProjectileHit = { target: best, point: { ...best.position }, damage: s.damage, ownerId: s.ownerId };
         hits.push(hit);
-        events.emit('PROJECTILE_HIT', { position: hit.point, damage: s.damage });
+        events.emit('PROJECTILE_HIT', { position: hit.point, damage: s.damage, ownerId: s.ownerId });
       }
     }
     return hits;
@@ -778,6 +806,8 @@ export class Weapon {
   private wasHeld = false;
   /** The trigger was held and the gun ready last step — a late shot now carries its lateness. */
   private streak = false;
+  /** Who fired last (an enemy passes its id) — so the HUD shows only the player's own ammo. */
+  private lastOwner: string | undefined;
   private seed: number;
 
   constructor(kind: WeaponKind | WeaponSpec = 'pistol', seed = 1) {
@@ -794,6 +824,7 @@ export class Weapon {
   reload(): boolean {
     if (this.reloading > 0 || this.ammo >= this.spec.magazine) return false;
     this.reloading = this.spec.reload;
+    events.emit('WEAPON_RELOADING', { kind: this.kind, ammo: this.ammo, magazine: this.spec.magazine, seconds: this.spec.reload, ownerId: this.lastOwner });
     return true;
   }
 
@@ -802,6 +833,7 @@ export class Weapon {
    * space and \`aim\` the direction the player is aiming (it need not be normalised).
    */
   update(dt: number, triggerHeld: boolean, muzzle: Vec3, aim: Vec3, projectiles: ProjectileSystem, ownerId?: string): number {
+    this.lastOwner = ownerId;
     // The time between shots rarely divides into 1/60 s steps (13 rounds a second is 4.6 frames). A
     // cooldown RESET on each shot rounds every gap up to whole frames and quietly turns 13/s into 12/s, so
     // a shot that comes due mid-step CARRIES how late it is into the next gap. Only while the trigger is
@@ -820,7 +852,7 @@ export class Weapon {
       this.reloading = Math.max(0, this.reloading - dt);
       if (this.reloading === 0) {
         this.ammo = this.spec.magazine;
-        events.emit('WEAPON_RELOADED', { kind: this.kind });
+        events.emit('WEAPON_RELOADED', { kind: this.kind, ammo: this.ammo, magazine: this.spec.magazine, ownerId: this.lastOwner });
       }
       return 0;
     }
@@ -828,7 +860,7 @@ export class Weapon {
     if (this.ammo <= 0) {
       // Dry: say so (a click) — tapped or held through the last round alike — and start the reload the
       // player obviously wants. The reload then blocks this branch, so the click sounds once.
-      events.emit('WEAPON_EMPTY', { kind: this.kind });
+      events.emit('WEAPON_EMPTY', { kind: this.kind, ammo: 0, magazine: this.spec.magazine, ownerId: this.lastOwner });
       this.reload();
       return 0;
     }
@@ -855,7 +887,7 @@ export class Weapon {
       });
     }
     // ONE shot is one bang and one flash, however many pellets it carried.
-    events.emit('WEAPON_FIRED', { position: { ...muzzle }, kind: this.kind, ownerId });
+    events.emit('WEAPON_FIRED', { position: { ...muzzle }, kind: this.kind, ownerId, ammo: this.ammo, magazine: this.spec.magazine });
     this.kick += this.spec.recoil;
     this.bloom = Math.min(MAX_BLOOM, this.bloom + 0.35);
     if (this.ammo === 0 && this.spec.magazine === 1) this.reload();   // a bow nocks the next arrow itself
@@ -918,6 +950,158 @@ export class MeleeWeapon {
     if (hits.length) events.emit('MELEE_HIT', { count: hits.length });
     return hits;
   }
+}
+`;
+
+const NAV = `/**
+ * PATHFINDING — enemies (and anything else) go AROUND walls instead of into them (admin 2026-11-19 game-gap audit:
+ * "dushman seedha chalta hai aur deewar se takrata rehta hai"). Pure arithmetic: a grid of blocked cells, A* over it
+ * (eight directions, never cutting a blocked corner), and the path pulled tight so it reads as walking, not stepping.
+ *
+ *   const nav = createNavGrid({ minX: -50, minZ: -50, maxX: 50, maxZ: 50, cell: 1,
+ *     blocked: blockedFromBoxes(walls) });                     // walls: world boxes of your colliders
+ *   // 2D world: blocked: (x, z) => world.isSolid(x, z)
+ *   stepEnemyAI(state, { player, neighbours, canSeePlayer: true, nav }, DEFAULT_ENEMY, dt);
+ */
+export interface Vec2 { x: number; z: number }
+
+export interface NavGrid {
+  readonly minX: number; readonly minZ: number; readonly cell: number;
+  readonly cols: number; readonly rows: number;
+  /** 1 = blocked. */
+  readonly blocked: Uint8Array;
+  isBlocked(x: number, z: number): boolean;
+}
+
+export interface NavGridOptions {
+  minX: number; minZ: number; maxX: number; maxZ: number;
+  /** Cell size in world units. Default 1. Smaller is more exact and slower. */
+  cell?: number;
+  /** Is this point inside a wall? */
+  blocked: (x: number, z: number) => boolean;
+  /** Extra cells kept clear around every wall, so a body of that radius never scrapes one. Default 0. */
+  inflate?: number;
+}
+
+/** A grid larger than this many cells is refused (a level-sized grid at 1 m is far below it). */
+export const MAX_NAV_CELLS = 250_000;
+
+export function createNavGrid(o: NavGridOptions): NavGrid {
+  const cell = Math.max(0.1, o.cell ?? 1);
+  const cols = Math.max(1, Math.ceil((o.maxX - o.minX) / cell));
+  const rows = Math.max(1, Math.ceil((o.maxZ - o.minZ) / cell));
+  if (cols * rows > MAX_NAV_CELLS) throw new Error('Nav grid too large: ' + cols + ' x ' + rows + ' cells; use a bigger cell size');
+  const raw = new Uint8Array(cols * rows);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (o.blocked(o.minX + (c + 0.5) * cell, o.minZ + (r + 0.5) * cell)) raw[r * cols + c] = 1;
+  }
+  let blocked = raw;
+  const inflate = Math.max(0, Math.floor(o.inflate ?? 0));
+  if (inflate > 0) {
+    blocked = new Uint8Array(raw);
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      if (!raw[r * cols + c]) continue;
+      for (let dr = -inflate; dr <= inflate; dr++) for (let dc = -inflate; dc <= inflate; dc++) {
+        const rr = r + dr, cc = c + dc;
+        if (rr >= 0 && rr < rows && cc >= 0 && cc < cols) blocked[rr * cols + cc] = 1;
+      }
+    }
+  }
+  const grid: NavGrid = {
+    minX: o.minX, minZ: o.minZ, cell, cols, rows, blocked,
+    isBlocked(x, z) {
+      const c = Math.floor((x - o.minX) / cell), r = Math.floor((z - o.minZ) / cell);
+      return c < 0 || r < 0 || c >= cols || r >= rows || blocked[r * cols + c] === 1;
+    },
+  };
+  return grid;
+}
+
+/** Walls given as world boxes (from your colliders' Box3) as a blocked() test for createNavGrid. */
+export function blockedFromBoxes(boxes: ReadonlyArray<{ minX: number; maxX: number; minZ: number; maxZ: number }>): (x: number, z: number) => boolean {
+  return (x, z) => boxes.some((b) => x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ);
+}
+
+const cellOf = (g: NavGrid, p: Vec2): [number, number] => [Math.floor((p.x - g.minX) / g.cell), Math.floor((p.z - g.minZ) / g.cell)];
+const centre = (g: NavGrid, c: number, r: number): Vec2 => ({ x: g.minX + (c + 0.5) * g.cell, z: g.minZ + (r + 0.5) * g.cell });
+const free = (g: NavGrid, c: number, r: number): boolean => c >= 0 && r >= 0 && c < g.cols && r < g.rows && g.blocked[r * g.cols + c] === 0;
+
+/**
+ * Can a body walk straight from a to b without entering a blocked cell? Sampled every quarter cell along the line AND
+ * a hair to either side of it, so a line that grazes the exact corner where two blocked cells meet is not "clear" —
+ * the gap between them has no width, and nothing can walk through it.
+ */
+export function lineClear(g: NavGrid, a: Vec2, b: Vec2): boolean {
+  const dx = b.x - a.x, dz = b.z - a.z;
+  const dist = Math.hypot(dx, dz);
+  const steps = Math.max(1, Math.ceil(dist / (g.cell * 0.25)));
+  const off = g.cell * 0.05;
+  const nx = dist > 0 ? (-dz / dist) * off : 0, nz = dist > 0 ? (dx / dist) * off : 0;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps, x = a.x + dx * t, z = a.z + dz * t;
+    if (g.isBlocked(x, z) || g.isBlocked(x + nx, z + nz) || g.isBlocked(x - nx, z - nz)) return false;
+  }
+  return true;
+}
+
+/** The nearest free cell to p (a target standing inside a wall is still reachable from beside it). */
+function nearestFree(g: NavGrid, c: number, r: number): [number, number] | null {
+  if (free(g, c, r)) return [c, r];
+  for (let rad = 1; rad <= 6; rad++) for (let dr = -rad; dr <= rad; dr++) for (let dc = -rad; dc <= rad; dc++) {
+    if (Math.max(Math.abs(dr), Math.abs(dc)) === rad && free(g, c + dc, r + dr)) return [c + dc, r + dr];
+  }
+  return null;
+}
+
+/**
+ * The shortest walkable path from one point to another (world points, ending at the target), or null when there
+ * is none within maxNodes. Eight directions; a diagonal never squeezes between two blocked cells. Pulled tight: a
+ * point is kept only where the straight line to the next one would hit a wall.
+ */
+export function findPath(g: NavGrid, from: Vec2, to: Vec2, maxNodes = 20_000): Vec2[] | null {
+  const s0 = cellOf(g, from), t0 = cellOf(g, to);
+  const s = nearestFree(g, s0[0], s0[1]), t = nearestFree(g, t0[0], t0[1]);
+  if (!s || !t) return null;
+  if (lineClear(g, from, to)) return [{ x: to.x, z: to.z }];
+  const N = g.cols * g.rows, key = (c: number, r: number) => r * g.cols + c;
+  const gScore = new Float32Array(N).fill(Infinity), came = new Int32Array(N).fill(-1), closed = new Uint8Array(N);
+  const h = (c: number, r: number) => { const dx = Math.abs(c - t[0]), dz = Math.abs(r - t[1]); return Math.max(dx, dz) + 0.41421356 * Math.min(dx, dz); };
+  // A small binary heap of [f, key].
+  const heap: Array<[number, number]> = [];
+  const push = (f: number, k: number) => { heap.push([f, k]); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+  const pop = (): number => { const top = heap[0]; const last = heap.pop()!; if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, rr = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (rr < heap.length && heap[rr][0] < heap[m][0]) m = rr; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top[1]; };
+  const start = key(s[0], s[1]), goal = key(t[0], t[1]);
+  gScore[start] = 0; push(h(s[0], s[1]), start);
+  let expanded = 0;
+  while (heap.length) {
+    const k = pop();
+    if (closed[k]) continue;
+    if (k === goal) break;
+    closed[k] = 1;
+    if (++expanded > maxNodes) return null;
+    const c = k % g.cols, r = (k - c) / g.cols;
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      if (!dc && !dr) continue;
+      const nc = c + dc, nr = r + dr;
+      if (!free(g, nc, nr)) continue;
+      if (dc && dr && (!free(g, c + dc, r) || !free(g, c, r + dr))) continue;   // no corner cutting
+      const nk = key(nc, nr), cost = gScore[k] + (dc && dr ? 1.41421356 : 1);
+      if (cost < gScore[nk]) { gScore[nk] = cost; came[nk] = k; push(cost + h(nc, nr), nk); }
+    }
+  }
+  if (came[goal] === -1 && goal !== start) return null;
+  const cells: Vec2[] = [];
+  for (let k = goal; k !== -1 && k !== start; k = came[k]) { const c = k % g.cols; cells.push(centre(g, c, (k - c) / g.cols)); }
+  cells.reverse();
+  cells[cells.length - 1] = { x: to.x, z: to.z };
+  // Pull the string: keep a point only where the line onward is blocked.
+  const out: Vec2[] = [];
+  let anchor = from;
+  for (let i = 0; i < cells.length; i++) {
+    const next = cells[i + 1];
+    if (!next || !lineClear(g, anchor, next)) { out.push(cells[i]); anchor = cells[i]; }
+  }
+  return out;
 }
 `;
 
@@ -1099,10 +1283,11 @@ const FILES: Record<string, string> = {
   'src/game/systems/spawner.ts': SPAWNER,
   // Pacing (build → peak → breather) and slow, bounded difficulty adaptation — 2026-10-05.
   'src/game/systems/director.ts': DIRECTOR,
+  'src/game/systems/nav.ts': NAV,
   'src/game/systems/weapon.ts': WEAPON,
 };
 
-export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'ai', 'projectile', 'spawner', 'weapon', 'director'];
+export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'ai', 'projectile', 'spawner', 'weapon', 'director', 'nav'];
 
 /** Generate the gameplay systems. Pure; never throws. */
 export function generateGameSystems(include?: string[]): GameSystemsResult {
@@ -1121,6 +1306,8 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
     }
     // weapon.ts fires through projectile.ts.
     if (files['src/game/systems/weapon.ts']) files['src/game/systems/projectile.ts'] = FILES['src/game/systems/projectile.ts'];
+    // ai.ts follows paths around walls (nav.ts).
+    if (files['src/game/systems/ai.ts']) files['src/game/systems/nav.ts'] = FILES['src/game/systems/nav.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
 
@@ -1164,6 +1351,9 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       "  emit BOSS_PHASE_CHANGED when update(hp / maxHp).changed, and change its attacks per phase.\n" +
       '- De-aggro radius must be LARGER than the detect radius, or enemies flicker at the boundary.\n' +
       '- The AI only REQUESTS an attack; a Cooldown decides if it happens.\n' +
+      '- Enemies go AROUND walls: build one nav grid for the level (createNavGrid from nav.ts, blocked from your\n' +
+      '  colliders\' boxes or a 2D world\'s isSolid) and pass it as perception.nav — they never see or strike through\n' +
+      '  a wall, and a player who hides is hunted along a path instead of walked into the wall.\n' +
       '- A wave is cleared when every enemy is dead OR has fallen out of the world — otherwise one enemy\n' +
       '  through the floor hangs the level forever.\n' +
       '- A gun has a fire rate, semi/auto, a magazine, a reload you can be caught in, spread that blooms\n' +

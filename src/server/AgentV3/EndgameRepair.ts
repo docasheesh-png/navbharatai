@@ -26,6 +26,8 @@ import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import { countTscErrors, tscVerdict } from './TscGate';
 import { reactNamespaceValueUse } from './PostEditReviewer';
 import { applySnapshotRestore, snapshotRestoreComplete, snapshotRestoreDetail, type SnapshotRestoreOutcome } from './snapshotRestore';
+import { repairBooleanDiscriminants } from './booleanDiscriminant';
+import { repairStyleRegression } from './repairAcceptance';
 
 export interface TscError {
   file: string;
@@ -320,6 +322,12 @@ export async function endgameDeterministicPass(
   let errors = compilerErrors;
   const fixes: string[] = [];
   let cur = files;
+  // Diagnostic coordinates refer to the original tree. Run before other edits can shift them.
+  try {
+    const guards = repairBooleanDiscriminants(cur, errors);
+    cur = guards.files;
+    fixes.push(...guards.fixed);
+  } catch { /* uncertain syntax or types stay on the ordinary verified repair path */ }
   // 🔁 FIRST: a nested wrapper that shadows the import it wraps and calls itself (autopsy BR1959). It must
   // run before `removeUnusedImports` — the shadowed import is exactly what the compiler calls unused, and
   // deleting it would leave the endless recursion in place with nothing left to point the call back at.
@@ -677,9 +685,16 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
       const out2 = checked2.out;
       const causes = tscCauseNote(tscErrorCauses(errors2, files));
       // The deadline's signal goes WITH the call, not just around it (Q-1011).
-      const fixed = (await io.llmRepair(out2 + causes, subset, io.signal).catch(() => [])) || [];
-      const preRepair = new Map<string, string | undefined>();
+      let fixed = (await io.llmRepair(out2 + causes, subset, io.signal).catch(() => [])) || [];
       const referenced = referencedMissingModules(errors2);
+      const proposed = fixed.flatMap(file => {
+        if (!file?.path || typeof file.content !== 'string') return [];
+        const target = resolveRepairTarget(file.path, files, referenced).target;
+        return target ? [{ path: target, content: file.content }] : [];
+      });
+      const styleRegression = repairStyleRegression(files, proposed);
+      if (styleRegression) { io.log?.(styleRegression); llmFilesRejected = fixed.length; fixed = []; }
+      const preRepair = new Map<string, string | undefined>();
       const rejected: string[] = [];
       if (io.signal?.aborted) return lapsedVerdict(errors1.length);
       for (const f of fixed) {

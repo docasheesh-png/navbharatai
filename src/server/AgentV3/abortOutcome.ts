@@ -116,12 +116,12 @@ export function abortOutcomeFor(cause: AbortCause, opts: { platformComposed?: bo
     case 'wallet-empty':
       return {
         code: ABORT_OUTCOME_CODES.walletEmpty, severity: 'error',
-        message: 'Build outcome: STOPPED — the wallet balance could not cover the rest of this build. Files already written are kept. Not a defect in the app.',
+        message: 'Build outcome: STOPPED — the wallet balance could not cover the rest of this build. Files already written are kept. This stop does not establish whether the app compiles or runs; any unresolved code findings remain in this report.',
       };
     case 'cost-cap':
       return {
         code: ABORT_OUTCOME_CODES.costCeiling, severity: 'error',
-        message: 'Build outcome: STOPPED — the build reached its cost ceiling (AGENTV3_BUILD_COST_CEILING_USD) and was stopped between turns. Not a defect in the app; the work so far is kept.',
+        message: 'Build outcome: STOPPED — the build reached its cost ceiling (AGENTV3_BUILD_COST_CEILING_USD) and was stopped between turns. The work so far is kept; this stop does not establish whether the app compiles or runs.',
       };
     case 'futile':
       return {
@@ -136,7 +136,7 @@ export function abortOutcomeFor(cause: AbortCause, opts: { platformComposed?: bo
     case 'lock-reclaimed':
       return {
         code: ABORT_OUTCOME_CODES.superseded, severity: 'error',
-        message: 'Build outcome: SUPERSEDED — a newer build on the same project reclaimed this one\'s lock. Not a defect in the app.',
+        message: 'Build outcome: SUPERSEDED — a newer build on the same project reclaimed this one\'s lock. This stop does not establish whether the app compiles or runs.',
       };
     case 'authority-unavailable':
       return {

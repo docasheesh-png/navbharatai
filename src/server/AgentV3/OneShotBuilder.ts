@@ -20,6 +20,7 @@ import { binaryTextGenerationProblem, BINARY_TEXT_GENERATION_PREFIX } from './bi
 // INJECTED, so the parsing/classification/prompt logic is fully unit-testable without a sandbox.
 
 import { ensureReactValueImport } from './EndgameRepair';
+import { BOOLEAN_DISCRIMINANT_RULE } from './booleanDiscriminant';
 import { NO_FAKE_FEATURE_RULE, NO_FAKED_RESULT_RULE, NO_FAKE_RESULTS_RULE, LIGHT_THEME_BY_DEFAULT_RULE } from './noEvalRule';
 import type { StartTier } from './RequestAnalyser';
 // ONE timeout helper for the whole build pipeline. This module used to carry its own private copy,
@@ -262,6 +263,7 @@ export function oneShotSystemPrompt(framework: string): string {
     '- Edit/replace the scaffolded entry files (e.g. src/App.tsx or index.html) — do not nest a subfolder.',
     '- Keep the dev server config intact (host:true / 0.0.0.0) so the preview works.',
     '- Only include files you actually need; do not touch node_modules or lockfiles.',
+    BOOLEAN_DISCRIMINANT_RULE,
     // The honesty rules every other lane carries (this lane had none until 2026-10-04).
     NO_FAKE_FEATURE_RULE,
     NO_FAKED_RESULT_RULE,

@@ -67,11 +67,11 @@ export const MAX_CAUSES = 3;
 const REACT_CLASS_MEMBER_RE =
   /^Property '(props|state|setState|context|refs|forceUpdate)' does not exist on type '([^']+)'/;
 
-/** `Property 'message' does not exist on type 'Ok | Err'` — a member missing from a UNION type. */
-const UNION_MEMBER_RE = /^Property '([\w$]+)' does not exist on type '([^']*\|[^']*)'/;
+/** Named aliases (CalcOutcome) and expanded unions carry the same missing-member diagnostic. */
+const UNION_MEMBER_RE = /^Property '([\w$]+)' does not exist on type '([^']+)'/;
 
-/** A negated boolean-flag guard, `if (!result.ok)` — the narrowing `strict: false` does not perform. */
-const NEGATED_FLAG_GUARD_RE = /\bif\s*\(\s*!\s*([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\s*\)/;
+/** Both truthiness guards lose failure-branch narrowing with strictNullChecks off. */
+const BOOLEAN_FLAG_GUARD_RE = /\bif\s*\(\s*(!?)\s*([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\s*\)/g;
 
 /** `Property 'env' does not exist on type 'ImportMeta'` — Vite's client types, not React's. */
 const IMPORT_META_ENV_RE = /^Property 'env' does not exist on type 'ImportMeta'/;
@@ -539,15 +539,19 @@ export function tscErrorCauses(
     const union = UNION_MEMBER_RE.exec(message);
     if (union && !REACT_CLASS_MEMBER_RE.test(message)) {
       const src = sourceFor(e.file);
-      const guard = src ? NEGATED_FLAG_GUARD_RE.exec(src) : null;
-      if (guard || !src) {
+      const guard = src ? [...src.matchAll(BOOLEAN_FLAG_GUARD_RE)].find(match =>
+        new RegExp(`\\b${escapeRe(match[2])}\\.${escapeRe(union[1])}\\b`).test(src)) : null;
+      // Without source, only an explicitly printed union is evidence. A named alias alone
+      // must not turn every genuinely missing property into narrowing advice.
+      if (guard || (!src && union[2].includes('|'))) {
         const [, prop] = union;
-        const flag = guard ? `${guard[1]}.${guard[2]}` : 'result.ok';
+        const flag = guard ? `${guard[2]}.${guard[3]}` : 'result.ok';
+        const negated = guard ? guard[1] === '!' : true;
         add('union-not-narrowed-nonstrict',
           `When a project compiles with \`"strict"\` off (the starter's default), TypeScript does NOT narrow a union `
-          + `by a boolean check like \`if (!${flag})\` — so \`${prop}\` looks missing even though the code is right. `
-          + `Compare the flag to its literal instead: \`if (${flag} === false)\` (or test the member: \`'${prop}' in `
-          + `${flag.split('.')[0]}\`). Do NOT change tsconfig and do not experiment further — that one edit clears it.`);
+          + `by a truthiness check like \`if (${negated ? '!' : ''}${flag})\`. For a boolean-discriminated union, `
+          + `compare the flag to its literal instead: \`if (${flag} === ${negated ? 'false' : 'true'})\` (or test the member: \`'${prop}' in `
+          + `${flag.split('.')[0]}\`). Do NOT change tsconfig or weaken the union; re-run the compiler after this focused edit.`);
         continue;
       }
     }

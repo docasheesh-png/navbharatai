@@ -1115,7 +1115,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  user who reports it will describe it as "the speed is not increasing", not as "the car is stuck".',
     // ⚙️ Admin 2026-11-19 game-gap audit: the 3D shell now owns these screens, so a builder must not add a second set.
     '  ⚙️ A 3D GAME ON <GameCanvas> ALREADY HAS the start screen, the pause menu (Resume / Restart / Settings / Menu),',
-    '  the game-over screen and a mute button, and its Settings (volume, music, effects, mute, graphics quality, look',
+    '  the game-over screen, a mute button, a Full screen button (Play on a phone goes full screen and locks it sideways;',
+    '  options.orientation = \'portrait\' | \'any\' changes that), a loading bar for real downloads, and its Settings (volume, music, effects, mute, graphics quality, look',
     '  speed, vibration) are applied and saved by the kit. Do NOT build a second start or pause screen: set',
     '  options.startScreen = { title, subtitle, controls: { touch, keyboard } } for the start screen, or',
     '  startScreen: false only when the game has its own menu (which then calls setStatus(\'playing\')). Read the',

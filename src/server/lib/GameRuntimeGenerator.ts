@@ -276,7 +276,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -547,6 +547,61 @@ export function resetRun(): void {
   const { highScore, unlocked, settings } = state;
   Object.assign(state, initialState(), { highScore, unlocked, settings });
 }
+`;
+
+const LOADING = `/**
+ * LOADING — what is still being fetched or built, so the player sees honest progress instead of a blank screen
+ * (admin 2026-11-19 game-gap audit: "loading screen nahi"). Real work only: a job is begun when a download or a
+ * build starts and ended when it finishes; the fraction never moves on its own. The Hud draws it while active.
+ */
+import { events } from './events';
+
+interface Job { label: string; fraction: number }
+
+export interface LoadingState {
+  /** Something is still loading. */
+  active: boolean;
+  /** 0..1 across everything begun since the last time nothing was loading. */
+  fraction: number;
+  /** What is loading now (the newest job). */
+  label: string;
+  pending: number;
+}
+
+const jobs = new Map<number, Job>();
+let nextId = 1;
+let finished = 0;
+
+function snapshot(): LoadingState {
+  const total = finished + jobs.size;
+  let done = finished;
+  let label = '';
+  for (const job of jobs.values()) { done += Math.max(0, Math.min(1, job.fraction)); label = job.label; }
+  return { active: jobs.size > 0, fraction: total === 0 ? 1 : done / total, label, pending: jobs.size };
+}
+const announce = (): void => { events.emit('LOADING_PROGRESS', snapshot()); };
+
+export const loading = {
+  /** A job starts; returns its id. */
+  begin(label = 'Loading'): number { const id = nextId++; jobs.set(id, { label, fraction: 0 }); announce(); return id; },
+  /** How far one job is, 0..1 (only from real bytes or real steps). */
+  progress(id: number, fraction: number): void { const job = jobs.get(id); if (!job || !Number.isFinite(fraction)) return; job.fraction = fraction; announce(); },
+  /** A job finished (or failed — either way it is no longer loading). */
+  end(id: number): void { if (jobs.delete(id)) finished++; if (jobs.size === 0) finished = 0; announce(); },
+  get: snapshot,
+  /** Track a promise as one job. */
+  async track<T>(label: string, work: Promise<T>): Promise<T> { const id = loading.begin(label); try { return await work; } finally { loading.end(id); } },
+};
+
+// The model loader (externalAssets.ts / humanRuntime.ts) reports on the event bus, so it never depends on this file.
+const assetJob = new Map<number, number>();
+events.on('ASSET_LOADING', (p: { id?: unknown; fraction?: unknown; done?: unknown } | undefined) => {
+  if (!p || typeof p.id !== 'number') return;
+  let id = assetJob.get(p.id);
+  if (id === undefined) { id = loading.begin('Loading models'); assetJob.set(p.id, id); }
+  if (p.done === true) { loading.end(id); assetJob.delete(p.id); return; }
+  if (typeof p.fraction === 'number') loading.progress(id, p.fraction);
+});
 `;
 
 const SETTINGS = `/**
@@ -1174,10 +1229,11 @@ const FILES: Record<string, string> = {
   'src/game/core/state.ts': STATE,
   'src/game/core/meta.ts': META,
   'src/game/core/settings.ts': SETTINGS,
+  'src/game/core/loading.ts': LOADING,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -1203,6 +1259,7 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     // meta.ts imports state.ts (and events.ts); state.ts imports events.ts.
     if (files['src/game/core/meta.ts']) { files['src/game/core/state.ts'] = FILES['src/game/core/state.ts']; files['src/game/core/settings.ts'] = FILES['src/game/core/settings.ts']; }
     if (files['src/game/core/settings.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
+    if (files['src/game/core/loading.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }

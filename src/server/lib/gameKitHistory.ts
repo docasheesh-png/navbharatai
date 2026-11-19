@@ -77,7 +77,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "3ed01add2e61e59806f01b69a9b3e301e6119be6dd8db7639e25f5b03f4742d8",
     "d2bd696954b4c36bbbda34c49e0bc1dbe0582be45e30e19fe5714933cb0d6e62",
     "7631c5cc1f92a650013cb9f4fa2a9b3bd2cacd6e1344c9a00857c35d2054088f",
-    "71762785aed90701bbb75dcef60b722d44bbd07061c299be427f2ed951b1c7f0"
+    "71762785aed90701bbb75dcef60b722d44bbd07061c299be427f2ed951b1c7f0",
+    "1d3fbe3ba2d6655fc2bffaa8014dfe40b6f1c8cf016f17247dc66569e43073ab"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",

@@ -40,6 +40,18 @@ import { generateGameShell } from '../src/server/lib/GameShellGenerator';
 const KIT = generateGameShell().files;
 const GAME_CANVAS = 'src/game/GameCanvas.tsx';
 
+/**
+ * A stub for EVERY relative file GameCanvas.tsx really imports, read from its bytes. A hand list of two went stale the
+ * day GameCanvas also imported core/strings (2026-11-19): one unresolved import and the graph refuses, so every test
+ * here "found nothing" for the wrong reason.
+ */
+const CANVAS_IMPORT_STUBS: Record<string, string> = Object.fromEntries(
+  [...KIT[GAME_CANVAS].matchAll(/^import [^;]*? from '(\.[^']+)';/gm)]
+    .map((m) => 'src/game/' + m[1].replace(/^\.\//, ''))
+    .filter((p) => !p.endsWith('/Game') && !p.endsWith('/ui/Hud'))
+    .map((p) => [p + '.ts', 'export {};\n']),
+);
+
 const project = (over: Record<string, string> = {}): Record<string, string> => ({
   // Destructive orphan proof also needs to know this import is an external package, not a local alias.
   'package.json': JSON.stringify({ dependencies: { react: '^19.0.0' } }),
@@ -52,6 +64,7 @@ const project = (over: Record<string, string> = {}): Record<string, string> => (
   [GAME_CANVAS]: KIT[GAME_CANVAS],
   'src/game/Game.ts': 'export class Game {}\n',
   'src/game/ui/Hud.tsx': 'export function Hud() { return <div/>; }\n',
+  ...CANVAS_IMPORT_STUBS,
   ...over,
 });
 

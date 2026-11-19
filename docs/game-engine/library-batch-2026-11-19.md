@@ -43,3 +43,13 @@ entry's `attribution`, and the full MIT notice ships in the game's `ATTRIBUTION.
 - Medieval buildings are decorative: no enterable interiors. Tiles are pieces, not finished maps.
 - Still missing (needs non-GitHub CC0 sources and a NavBharatAI-hosted pinned copy): animals beyond fox/eagle, boats,
   aeroplanes, helicopters, realistic firearms, audio.
+
+## Batch 3 (same day): fifty more, 147 total (+2.78 MB)
+Food (burger, meal, stew, tomato, carrot, potato, onion, cheese, vegetable crate), kitchen (oven, fridge, stove, cooking
+pot, frying pan, round table, counter), graveyard (pumpkin, jack-o-lantern, gravestone, grave, coffin, skull, dead tree,
+autumn tree, lantern, crypt, iron fence, cemetery gate), sci-fi base (lander, space rover, wind turbine, solar panel, base
+module, landing pad, cargo container, drill rig), Kenney town (fountain, garage, two small houses), medieval extras
+(blacksmith, mine entrance, archery range, sawmill, pine forest, boulder, water lily), prototype door, stairs and pallet.
+Sources: KayKit Restaurant / Halloween / Space Base / Medieval / Prototype (CC0), Kenney City Builder (MIT).
+Build: `buildLibraryBatch.mts <clones> 3`; admission: `admitLibraryBatch.mts <work> <playwright> "" "" 3` gave 50/50 admitted
+(`asset-candidates/library-batch-3-admission.json`). KayKit Dungeon was skipped: it ships FBX/OBJ only, no glTF.

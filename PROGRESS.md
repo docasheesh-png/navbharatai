@@ -102443,3 +102443,8 @@ Local code commit: `9c997272e3b0ebccf18295b01da4fb4b2a73387f`, branch
 for publishing the complete payload was required. A read-only remote-ref check found no branch;
 no connector/alternate route was used to bypass the rejection. No PR or CI run has started. A
 private patch is prepared for review; public push/PR and GitHub validation await authorization.
+
+## 2026-11-19 — Game library batch 3: 50 more live-admitted models (97 → 147)
+- Food, kitchen, graveyard/horror, sci-fi base, town and medieval extras (KayKit Restaurant/Halloween/Space Base/Medieval/
+  Prototype CC0; Kenney City Builder MIT). 50/50 admitted live. `tests/libraryBatch3.test.ts`.
+- Build/admission scripts now take a batch number (`scripts/library/batch<N>.mts`); batch 2 rebuilt byte-identical.

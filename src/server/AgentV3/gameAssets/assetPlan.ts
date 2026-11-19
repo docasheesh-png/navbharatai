@@ -65,6 +65,25 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   'road junction tile': ['road junction tile'], 'road t junction tile': ['road t junction tile'], 'road crossing tile': ['road crossing tile', 'zebra crossing tile'],
   'curved road tile': ['curved road tile'], 'race track straight tile': ['race track straight tile'], 'race track corner tile': ['race track corner tile'],
   'race finish line': ['race finish line', 'finish line'],
+  // 2026-11-19 library batch 3: food, kitchen, horror, sci-fi base, town and medieval pieces.
+  burger: ['burger', 'burgers', 'बर्गर', 'hamburguesa'], meal: ['meal', 'meals', 'dinner plate', 'खाना', 'thali'], stew: ['stew', 'soup bowl'],
+  tomato: ['tomato', 'tomatoes', 'टमाटर'], carrot: ['carrot', 'carrots', 'गाजर'], potato: ['potato', 'potatoes', 'आलू'], onion: ['onion', 'onions', 'प्याज', 'प्याज़'],
+  cheese: ['cheese', 'चीज़', 'चीज'], 'vegetable crate': ['vegetable crate', 'vegetable crates', 'sabzi crate'],
+  oven: ['oven', 'ovens', 'ओवन'], fridge: ['fridge', 'fridges', 'refrigerator', 'फ्रिज'], stove: ['stove', 'stoves', 'चूल्हा', 'gas stove'],
+  'cooking pot': ['cooking pot', 'cooking pots', 'पतीला'], 'frying pan': ['frying pan', 'frying pans', 'kadhai', 'कड़ाही'],
+  'round table': ['round table', 'round tables'], 'kitchen counter': ['kitchen counter', 'kitchen counters'],
+  pumpkin: ['pumpkin', 'pumpkins', 'कद्दू'], 'jack o lantern': ['jack o lantern', 'jack o lanterns'], gravestone: ['gravestone', 'gravestones', 'tombstone', 'tombstones'],
+  grave: ['grave', 'graves', 'कब्र', 'graveyard', 'cemetery', 'कब्रिस्तान'], coffin: ['coffin', 'coffins', 'ताबूत'], skull: ['skull', 'skulls', 'खोपड़ी'],
+  'dead tree': ['dead tree', 'dead trees', 'spooky tree'], 'autumn tree': ['autumn tree', 'autumn trees'], lantern: ['lantern', 'lanterns', 'लालटेन'],
+  crypt: ['crypt', 'crypts', 'tomb'], 'iron fence': ['iron fence', 'iron fences'], 'cemetery gate': ['cemetery gate', 'graveyard gate'],
+  lander: ['lander', 'moon lander', 'landers'], 'space rover': ['space rover', 'mars rover', 'moon rover', 'rover'], 'wind turbine': ['wind turbine', 'wind turbines'],
+  'solar panel': ['solar panel', 'solar panels', 'सोलर पैनल'], 'space base': ['space base', 'moon base', 'mars base', 'space colony'],
+  'landing pad': ['landing pad', 'landing pads', 'helipad'], 'cargo container': ['cargo container', 'cargo containers', 'shipping container', 'shipping containers'],
+  'drill rig': ['drill rig', 'mining drill'], fountain: ['fountain', 'fountains', 'फव्वारा', 'फ़व्वारा', 'fuente'], garage: ['garage', 'garages', 'गैराज'],
+  blacksmith: ['blacksmith', 'लोहार'], 'mine entrance': ['mine entrance', 'gold mine', 'coal mine', 'mine shaft'], 'archery range': ['archery range'],
+  sawmill: ['sawmill', 'lumber mill', 'lumbermill'], 'pine forest': ['pine forest', 'pine trees', 'pine tree'], boulder: ['boulder', 'boulders'],
+  'water lily': ['water lily', 'water lilies', 'lily pad', 'lily pads'], door: ['door', 'doors', 'दरवाज़ा', 'दरवाजा', 'puerta'],
+  stairs: ['stairs', 'staircase', 'सीढ़ी', 'सीढ़ियाँ', 'escaleras'], pallet: ['pallet', 'pallets'],
 };
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
   fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],
@@ -92,7 +111,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       stool: ['stool sample', 'stool test'], cabinet: ['cabinet minister', 'cabinet meeting'],
       lamp: ['street lamp', 'traffic lamp'],
       rogue: ['hooded rogue', 'hooded rogues'],
-      flag: ['feature flag', 'red flag'], market: ['stock market'], shield: ['shield powerup', 'shield power up'],
+      flag: ['feature flag', 'red flag'], grave: ['grave danger', 'grave mistake'], door: ['door to door', 'door delivery'], market: ['stock market'], shield: ['shield powerup', 'shield power up'],
       car: ['formula one car', 'formula 1 car', 'f1 car', 'hatchback car', 'station wagon car'], building: ['building a', 'building the'],
     };
     if ((excludedPhrases[subject] ?? []).some(p => mentioned(clause, p))) return false;

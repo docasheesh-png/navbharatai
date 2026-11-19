@@ -281,6 +281,8 @@ export const PROCESS_ONLY_CODES = new Set([
   'MILESTONE_NOTES_DROPPED', // Q-975: OUR prompt assembly could not keep the notes on a milestone build — never the user's app
   // …and each per-file call that handoff stopped (autopsy d382b398) — a planned handoff, not a failure.
   'LLM_CALL_HANDED_OFF',
+  // …and the scope ask that lost the classifier race (failedbr #2470) — a planned cancel, not a failure.
+  'LLM_CALL_ANSWERED_ELSEWHERE',
   // An observation about OUR checkpoint heuristic (autopsy SignBridge, 2026-09-26) — never the app.
   'CHECKPOINT_SIGNAL',
   // A suggest-only review on a green app that ran out of time — our process, never the app (same autopsy).
@@ -1968,7 +1970,20 @@ export class BuildDiagnostics {
     // ("Model call failed (unknown)", with all 51 pool keys listed) and became a SUCCESSFUL build's root
     // cause. Recorded as INFO and resolved, never dropped.
     const handedOff = !rec.ok && !budgetEnded && isReasoningRungHandoff(rec.error);
-    if (stopped) {
+    // 🔴 …AND A SCOPE ASK THAT LOST A RACE DID NOT FAIL (failedbr #2470). After its head start the Surplus scope ask
+    // is raced against the fallback classifier (RouterOne/admission.ts); the one that answers second is cancelled.
+    const answeredElsewhere = !rec.ok && /stage=hedge reason=answered_elsewhere/.test(String(rec.error ?? ''));
+    if (answeredElsewhere) {
+      this.record({
+        ts: completedAt,
+        phase: 'provider',
+        severity: 'info',
+        code: 'LLM_CALL_ANSWERED_ELSEWHERE',
+        message: 'A scope question was answered by the next classifier first, so this slower call was cancelled — a planned race, not a failure.',
+        autoResolved: true,
+        detail: `${rec.provider && rec.provider !== 'unknown' ? `provider=${rec.provider}` : 'no provider had answered yet'} · it had been running ${Math.round(Math.max(0, rec.latencyMs ?? 0) / 1000)}s`,
+      });
+    } else if (stopped) {
       this.record({
         ts: completedAt,
         phase: 'provider',

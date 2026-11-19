@@ -18082,6 +18082,8 @@ async function noteBuildOutcome(
         pausedMs: creditedWaitMs,
         // Q-2946 (admin decision 2026-11-19): a READY app on a nearly-spent wallet finishes instead of starting extras.
         finishWhenReady: () => walletUseRatio >= WALLET_FINISH_RATIO,
+        // failedbr #2470: THIS turn's app on screen opens the done check at once (doneSignal.ts `renderedUnchecked`).
+        appRenderedAt: () => etaAppRenderedAt,
         replyVoice: () => rb.replyVoice ?? voiceOf(originalPrompt),
         dispatcher,
         state,

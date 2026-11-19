@@ -8,6 +8,8 @@ export const SCOPE_FAILURE_REASONS = {
   dispatch: ['dispatch_failed'],
   response_validation: ['invalid_completion'],
   receipt: ['receipt_failed'],
+  // failedbr #2470: Surplus was still thinking when the parallel classifier answered — cancelled, not failed.
+  hedge: ['answered_elsewhere'],
 } as const;
 export type ScopeFailureDiagnostic = { [S in keyof typeof SCOPE_FAILURE_REASONS]: {
   stage: S; reason: (typeof SCOPE_FAILURE_REASONS)[S][number];

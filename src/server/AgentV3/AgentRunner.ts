@@ -150,6 +150,11 @@ export interface AgentRunnerOptions {
    */
   finishWhenReady?: () => boolean;
   /**
+   * When THIS turn's app first rendered in a real browser (epoch ms), 0 while it has not. A render opens the done
+   * check at once instead of waiting for the next 10th step (doneSignal.ts `renderedUnchecked`, failedbr #2470).
+   */
+  appRenderedAt?: () => number;
+  /**
    * E4 — per-model-turn hard timeout (ms). The wall-clock watchdog above is only checked BETWEEN
    * turns, so a single provider call that hangs (connection open, no bytes, no error) would block the
    * whole build indefinitely — the watchdog never even gets to run. This caps every `runTurn` so a
@@ -999,6 +1004,7 @@ export class AgentRunner {
       // is recorded whether or not the model acts on the steer.
       const doneCfg = doneSignalConfig();
       let doneSignalled = false;
+      let doneLastCheckedAt = 0;
       /** A due done-check skipped because its step failed — the next clean step runs it (autopsy 6ae30b33). */
       let doneMissedAt: number | undefined;
       // The ONE ending for an aborted build — reached between turns, and (since autopsy 2720e553) also
@@ -1941,10 +1947,14 @@ export class AgentRunner {
         let doneText: string | null = null;
         try {
           const lastStepFailed = resultBlocks.some((b) => (b as { is_error?: boolean }).is_error === true);
-          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null });
+          let renderedAt = 0;
+          try { renderedAt = Number(this.opts.appRenderedAt?.() ?? 0) || 0; } catch { renderedAt = 0; }
+          const renderedUnchecked = renderedAt > 0 && doneLastCheckedAt < renderedAt;
+          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null, renderedUnchecked });
           if (doneDue && lastStepFailed) doneMissedAt = doneMissedAt ?? steps;
-          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null })) {
+          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null, renderedUnchecked })) {
             doneMissedAt = undefined;
+            doneLastCheckedAt = Date.now();
             const readiness = await dispatcher.assessBuildReadiness();
             // Never "complete and healthy" over a compile that just failed (autopsy 33812996).
             const typeErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;

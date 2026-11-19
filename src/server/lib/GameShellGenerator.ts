@@ -42,6 +42,7 @@ import { events } from './core/events';
 import { state, setStatus, resetRun } from './core/state';
 import { startMeta, mountMetaToasts, combo } from './core/meta';
 import { settings, type GameSettings } from './core/settings';
+import { setGameLanguage, t, type GameLanguage, type StringKey } from './core/strings';
 import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
@@ -134,6 +135,13 @@ export interface GameOptions {
    * also locks the screen sideways where the browser allows it. 'portrait' locks upright; 'any' never locks.
    */
   orientation?: 'landscape' | 'portrait' | 'any';
+  /**
+   * The language of the game's own screens and buttons (start, pause, settings, game over, touch buttons). Default 'en';
+   * 'hi' is Hindi; 'auto' follows the page. For any other language pass strings with every word you need — a key you
+   * leave out stays English, never blank.
+   */
+  language?: GameLanguage | 'auto';
+  strings?: Partial<Record<StringKey, string>>;
 }
 
 export interface GameContext {
@@ -232,6 +240,8 @@ export class Game {
 
   constructor(options: GameOptions) {
     this.options = options;
+    // The words first: everything built below (touch buttons, hints) reads them.
+    setGameLanguage(options.language ?? 'en', options.strings);
 
     try {
     this.canvas = document.createElement('canvas');
@@ -641,11 +651,11 @@ export class Game {
     const o = this.options.startScreen;
     if (!o) return null;
     return {
-      title: o?.title || this.options.gameId || 'Ready?',
+      title: o?.title || this.options.gameId || t('ready'),
       subtitle: o?.subtitle || '',
       controls: {
-        touch: o?.controls?.touch || 'Left thumb to move · buttons on the right to act',
-        keyboard: o?.controls?.keyboard || 'WASD / arrow keys to move · Space to jump · F or click to attack · Esc to pause',
+        touch: o?.controls?.touch || t('controlsTouch'),
+        keyboard: o?.controls?.keyboard || t('controlsKeyboard'),
       },
     };
   }
@@ -703,6 +713,7 @@ export class Game {
 const GAME_CANVAS = `import { useEffect, useRef, useState } from 'react';
 import { Game, type GameOptions } from './Game';
 import { Hud } from './ui/Hud';
+import { t } from './core/strings';
 
 /**
  * Mount a Game into React, correctly.
@@ -778,7 +789,7 @@ export function GameCanvas({ options, onReady, className = '', fullscreen = true
       {/* Building the world takes a moment on a phone: the player sees that it is coming, not a blank screen. */}
       {game ? <Hud game={game} /> : (
         <div role="status" aria-live="polite" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--fg, #17171c)', fontWeight: 600 }}>
-          Loading…
+          {t('loading') + '…'}
         </div>
       )}
     </div>
@@ -793,6 +804,7 @@ import { meta, combo, summaryLines } from '../core/meta';
 import type { Game } from '../Game';
 import { settings, type GameSettings } from '../core/settings';
 import { loading, type LoadingState } from '../core/loading';
+import { t } from '../core/strings';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -862,9 +874,9 @@ export function LoadingBar({ state: l }: { state: LoadingState }) {
   if (!l.active) return null;
   const pct = Math.round(Math.max(0, Math.min(1, l.fraction)) * 100);
   return (
-    <div role="progressbar" aria-label={l.label || 'Loading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}
+    <div role="progressbar" aria-label={l.label || t('loading')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}
       style={{ position: 'absolute', left: '50%', bottom: 'max(24px, env(safe-area-inset-bottom))', transform: 'translateX(-50%)', width: 'min(70vw, 320px)', color: '#fff', textAlign: 'center', zIndex: 12, pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>
-      <div style={{ fontSize: 13, marginBottom: 6 }}>{(l.label || 'Loading') + ' ' + pct + '%'}</div>
+      <div style={{ fontSize: 13, marginBottom: 6 }}>{(l.label || t('loading')) + ' ' + pct + '%'}</div>
       <div style={{ height: 6, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden' }}>
         <div style={{ width: pct + '%', height: '100%', background: '#fde047', transition: 'width 160ms ease-out' }} />
       </div>
@@ -909,7 +921,7 @@ function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange:
       <span>{label}</span>
       <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)}
         style={{ ...secondary, marginTop: 0, minWidth: 84, minHeight: 40, padding: '6px 14px', background: on ? '#fde047' : 'rgba(255,255,255,0.14)', color: on ? '#111' : '#fff' }}>
-        {on ? 'On' : 'Off'}
+        {on ? t('on') : t('off')}
       </button>
     </div>
   );
@@ -925,25 +937,25 @@ function SettingsPanel({ onBack }: { onBack: () => void }) {
   useEffect(() => { back.current?.focus(); }, []);
   return (
     <div style={{ width: 'min(92vw, 380px)', maxHeight: '86dvh', overflowY: 'auto', padding: '8px 4px' }}>
-      <h2 style={{ fontSize: 26, fontWeight: 800, marginBottom: 6 }}>Settings</h2>
-      <Toggle label="Sound" on={!s.muted} onChange={(v) => settings.set({ muted: !v })} />
-      <Slider label="Volume" value={s.masterVolume} onChange={(v) => settings.set({ masterVolume: v })} />
-      <Slider label="Music" value={s.musicVolume} onChange={(v) => settings.set({ musicVolume: v })} />
-      <Slider label="Effects" value={s.sfxVolume} onChange={(v) => settings.set({ sfxVolume: v })} />
+      <h2 style={{ fontSize: 26, fontWeight: 800, marginBottom: 6 }}>{t('settings')}</h2>
+      <Toggle label={t('sound')} on={!s.muted} onChange={(v) => settings.set({ muted: !v })} />
+      <Slider label={t('volume')} value={s.masterVolume} onChange={(v) => settings.set({ masterVolume: v })} />
+      <Slider label={t('music')} value={s.musicVolume} onChange={(v) => settings.set({ musicVolume: v })} />
+      <Slider label={t('effects')} value={s.sfxVolume} onChange={(v) => settings.set({ sfxVolume: v })} />
       <div style={row}>
-        <span>Graphics</span>
-        <div role="radiogroup" aria-label="Graphics quality" style={{ display: 'flex', gap: 6 }}>
+        <span>{t('graphics')}</span>
+        <div role="radiogroup" aria-label={t('graphicsQuality')} style={{ display: 'flex', gap: 6 }}>
           {(['low', 'medium', 'high'] as const).map((q) => (
             <button key={q} type="button" role="radio" aria-checked={s.quality === q} onClick={() => settings.set({ quality: q })}
               style={{ ...secondary, marginTop: 0, minWidth: 0, minHeight: 40, padding: '6px 10px', background: s.quality === q ? '#fde047' : 'rgba(255,255,255,0.14)', color: s.quality === q ? '#111' : '#fff' }}>
-              {q === 'low' ? 'Smooth' : q === 'medium' ? 'Balanced' : 'Sharp'}
+              {q === 'low' ? t('smooth') : q === 'medium' ? t('balanced') : t('sharp')}
             </button>
           ))}
         </div>
       </div>
-      <Slider label="Look speed" value={s.lookSensitivity} min={0.25} max={3} step={0.25} onChange={(v) => settings.set({ lookSensitivity: v })} />
-      <Toggle label="Vibration" on={s.vibration} onChange={(v) => settings.set({ vibration: v })} />
-      <button ref={back} type="button" style={button} onClick={onBack}>Back</button>
+      <Slider label={t('lookSpeed')} value={s.lookSensitivity} min={0.25} max={3} step={0.25} onChange={(v) => settings.set({ lookSensitivity: v })} />
+      <Toggle label={t('vibration')} on={s.vibration} onChange={(v) => settings.set({ vibration: v })} />
+      <button ref={back} type="button" style={button} onClick={onBack}>{t('back')}</button>
     </div>
   );
 }
@@ -1008,8 +1020,8 @@ export function Hud({ game }: { game: Game }) {
       {s.status !== 'menu' ? (
         <div style={{ position: 'absolute', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', right: 'max(12px, env(safe-area-inset-right))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff', pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,0.8)', zIndex: 5 }}>
           <div style={{ fontWeight: 700, fontSize: 18 }}>
-            Score {s.score}
-            <span style={{ opacity: 0.7, fontSize: 13, marginLeft: 10 }}>Best {s.highScore}</span>
+            {t('score')} {s.score}
+            <span style={{ opacity: 0.7, fontSize: 13, marginLeft: 10 }}>{t('best')} {s.highScore}</span>
             {combo.multiplier > 1 ? <span style={{ marginLeft: 10, color: '#fde047' }}>x{combo.multiplier}</span> : null}
           </div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -1020,17 +1032,17 @@ export function Hud({ game }: { game: Game }) {
             </div>
             <div style={{ fontWeight: 700 }}>x{s.lives}</div>
             {game.canFullscreen ? (
-              <button type="button" aria-label={fullscreen ? 'Exit full screen' : 'Full screen'} onClick={() => { void game.toggleFullscreen(); }} style={roundIcon}>
+              <button type="button" aria-label={fullscreen ? t('exitFullScreen') : t('fullScreen')} onClick={() => { void game.toggleFullscreen(); }} style={roundIcon}>
                 <FullscreenIcon on={fullscreen} />
               </button>
             ) : null}
             {/* One tap silences the game — the most-asked-for control on a phone in a quiet room. */}
-            <button type="button" aria-label={prefs.muted ? 'Sound on' : 'Mute'} aria-pressed={prefs.muted} onClick={() => settings.toggleMute()} style={roundIcon}>
+            <button type="button" aria-label={prefs.muted ? t('soundOn') : t('mute')} aria-pressed={prefs.muted} onClick={() => settings.toggleMute()} style={roundIcon}>
               <SpeakerIcon muted={prefs.muted} />
             </button>
             {/* Esc is a keyboard; a phone has none. Without this a player on a phone can never pause. */}
             {s.status === 'playing' ? (
-              <button type="button" aria-label="Pause" onClick={() => game.pause()} style={roundIcon}>II</button>
+              <button type="button" aria-label={t('pause')} onClick={() => game.pause()} style={roundIcon}>II</button>
             ) : null}
           </div>
         </div>
@@ -1044,34 +1056,34 @@ export function Hud({ game }: { game: Game }) {
           {info.subtitle ? <p style={{ opacity: 0.9, marginTop: 8, fontSize: 17 }}>{info.subtitle}</p> : null}
           <p style={{ opacity: 0.75, marginTop: 12, fontSize: 14 }}>{touch ? info.controls.touch : info.controls.keyboard}</p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button ref={playRef} type="button" style={button} onClick={() => game.play()}>Play</button>
-            <button type="button" style={secondary} onClick={() => setPanel('settings')}>Settings</button>
+            <button ref={playRef} type="button" style={button} onClick={() => game.play()}>{t('play')}</button>
+            <button type="button" style={secondary} onClick={() => setPanel('settings')}>{t('settings')}</button>
           </div>
         </div>,
       ) : null}
 
       {s.status === 'paused' ? settingsOrScreen(
         <div>
-          <h2 style={{ fontSize: 30, fontWeight: 800 }}>Paused</h2>
+          <h2 style={{ fontSize: 30, fontWeight: 800 }}>{t('paused')}</h2>
           <div style={{ display: 'grid', gap: 0, justifyItems: 'center' }}>
-            <button type="button" style={button} onClick={() => game.resume()}>Resume</button>
-            <button type="button" style={secondary} onClick={() => game.restart()}>Restart</button>
-            <button type="button" style={secondary} onClick={() => setPanel('settings')}>Settings</button>
-            {info ? <button type="button" style={secondary} onClick={() => game.toMenu()}>Menu</button> : null}
+            <button type="button" style={button} onClick={() => game.resume()}>{t('resume')}</button>
+            <button type="button" style={secondary} onClick={() => game.restart()}>{t('restart')}</button>
+            <button type="button" style={secondary} onClick={() => setPanel('settings')}>{t('settings')}</button>
+            {info ? <button type="button" style={secondary} onClick={() => game.toMenu()}>{t('menu')}</button> : null}
           </div>
         </div>,
       ) : null}
 
       {over ? settingsOrScreen(
         <div style={{ maxWidth: 420, padding: '0 16px' }}>
-          <h2 style={{ fontSize: 30, fontWeight: 800 }}>{s.status === 'won' ? 'You win' : 'Game over'}</h2>
+          <h2 style={{ fontSize: 30, fontWeight: 800 }}>{s.status === 'won' ? t('youWin') : t('gameOver')}</h2>
           {/* The run summary: the first line is the hook — a new best, or exactly how close it was. */}
-          {(meta.lastSummary ? summaryLines(meta.lastSummary) : ['Score ' + s.score]).map((line, i) => (
+          {(meta.lastSummary ? summaryLines(meta.lastSummary) : [t('score') + ' ' + s.score]).map((line, i) => (
             <p key={i} style={i === 0 ? { fontSize: 20, fontWeight: 800, marginTop: 8, color: '#fde047' } : { opacity: 0.88, marginTop: 4 }}>{line}</p>
           ))}
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button ref={again} type="button" style={button} onClick={() => game.restart()}>Play again</button>
-            {info ? <button type="button" style={secondary} onClick={() => game.toMenu()}>Menu</button> : null}
+            <button ref={again} type="button" style={button} onClick={() => game.restart()}>{t('playAgain')}</button>
+            {info ? <button type="button" style={secondary} onClick={() => game.toMenu()}>{t('menu')}</button> : null}
           </div>
         </div>,
       ) : null}
@@ -1081,6 +1093,7 @@ export function Hud({ game }: { game: Game }) {
 `;
 
 const TOUCH_CONTROLS = `import type { Input } from '../core/input';
+import { t, type StringKey } from '../core/strings';
 
 /**
  * ON-SCREEN CONTROLS FOR A TOUCH SCREEN — the difference between a game and a picture of one on a phone.
@@ -1132,6 +1145,11 @@ export interface TouchControlsOptions {
   /** Show even on a device with no touch screen — for testing on a desktop. */
   force?: boolean;
 }
+
+/** The kit's own button labels and the word each one is in the game's language (core/strings.ts). */
+const KIT_LABEL_KEYS: Record<string, StringKey> = {
+  Attack: 'attack', Jump: 'jump', Use: 'use', Run: 'run', Left: 'left', Right: 'right', Brake: 'brake', Drift: 'drift', Gas: 'gas',
+};
 
 export const DEFAULT_TOUCH_BUTTONS: TouchButton[] = [
   { action: 'attack', label: 'Attack' },
@@ -1251,7 +1269,7 @@ export class TouchControls {
 
     const hint = document.createElement('div');
     hint.className = 'nbg-tc-hint';
-    hint.textContent = 'Turn your phone sideways to play';
+    hint.textContent = t('rotateHint');
     this.root.appendChild(hint);
 
     this.on(move, 'pointerdown', (e) => this.startStick(e, move));
@@ -1304,8 +1322,10 @@ export class TouchControls {
     el.type = 'button';
     el.className = 'nbg-tc-btn';
     el.setAttribute('data-action', b.action);
-    el.textContent = b.label;
-    el.setAttribute('aria-label', b.label);
+    // The kit's own labels follow the game's language; a label the game chose is shown as it wrote it.
+    const label = KIT_LABEL_KEYS[b.label] ? t(KIT_LABEL_KEYS[b.label]) : b.label;
+    el.textContent = label;
+    el.setAttribute('aria-label', label);
     this.on(el, 'pointerdown', (e) => this.pressButton(e, b.action, el));
     for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) this.on(el, t, (e) => this.releaseButton(e));
     parent.appendChild(el);

@@ -102328,12 +102328,6 @@ Owner t311u sequential audit, BR2003 only. Branched from origin/main `e8c45ef` (
 - Q-2770 opened (BLOCKED, the admin's scope decision): APP_SCOPE named the app "Project Name" and kept a seven-section spec as one build because of the word "Quiz"; fixing the header alone would make the decision worse. Today's output is pinned exactly.
 - Q-2621 and Q-2750 gain BR2003 evidence.
 - Docs: `docs/build-report-autopsy-BR2003.md`, its evidence JSON, `tests/br2003Autopsy.test.ts`.
-
-### 2026-11-18 — BR 99771bc7: PR4303 green, then fresh Traffic Manager P4 integration
-
-Published PR #4303 at `c172ee3` after all 27 required local CI checks plus package signatures passed. Local coverage: 53,817 passed/89 skipped; all 11 emulator drills passed. GitHub run `44407511896` passed build/test and drills on that same head (53,811 passed/95 skipped); its artifact uploads succeeded and the asset-only conditional job was inapplicable. The six-test difference matched built-CSS/JS availability: local coverage had prior-build artifacts, while CI ran coverage before building. A separate check against the completed final8 build passed 12 tests/1 skipped, including all six actual built-asset checks; no earlier artifact-freshness claim was invented.
-
-During remote CI, main advanced to `a5b136d` (#4302 Traffic Manager P4). GitHub subsequently reported PR mergeability as dirty; the local merge completed automatically without manual source conflicts, preserving both progress histories. The complete gate must now verify this newly combined tree before updating the PR branch. The previous head's successful checks remain valid historical evidence, not a substitute for the new combined run. The generated prior `dist` is archived outside the repository before the next coverage run so local built-asset availability matches CI's fresh checkout; fresh output will be checked after the build as a separate supplemental test. No production gate, coverage threshold or test selection changed. No merge to main is authorized.
 ## 2026-11-18 — Traffic Manager V2, P8/P9: image reading (vision) and image generation obey drain/disable per path (off by default)
 
 What changed:
@@ -102345,6 +102339,42 @@ What changed:
 Deliberately NOT done: recording image-engine health. The image engine shares provider labels with chat (GROK). An image failure would make chat skip that provider, which is a cross-surface routing change nobody approved. That needs separate image labels first.
 
 Tests: `visionImageCoverage.test.ts` covers the census, the source guard, and the image engine with coverage off (still tried) and on (skipped, next engine tried). Reversion of each hook was caught.
+## 2026-11-19 — Calculator report 9fba77d7: engine fixes proposed; GitHub validation pending
+
+The owner supplied the complete diagnostic timeline and asked to fix it. Autopsy and per-item ledger:
+`docs/autopsies/calculator-9fba77d7.md` (Q-2756–Q-2766). The saved App.tsx is a regression fixture.
+
+The failed repair's root is a boolean union alias plus a positive truthiness guard: the previous cause
+reader required an expanded union and a negated guard. A compiler-backed deterministic pass now follows
+the imported alias, verifies true/false discriminants and receiver identity, and changes only the guard.
+Both fast text-repair callers and the shared endgame use it. Handoffs prioritize actual compiler offenders.
+Compiler repairs cannot introduce new undefined CSS classes without updating their stylesheet in the
+same batch. The fast verifier reaches its existing spacing snap on failed compiles too.
+
+Fast-lane/one-shot verify failures remain unresolved until an appropriate genuine recheck. Wallet
+diagnostics retain admission balance, estimate and provisional stop cost; budget/supersession outcomes
+make no claim that unfinished app code is correct. Prices, wallet gates, exemptions, provider chains,
+settlement and project memory policy are unchanged. Planner guidance includes referenced PWA manifests.
+
+Validation is deliberately GitHub-only under the owner's latest instruction: no local CI, typecheck,
+suite, coverage, emulator drill or app build ran. Static diff review is not a passing gate. CI, merge
+and production replay remain pending. The live registry snapshot, provider receipts, full generated
+manifest/worker and duplicated-constant sources remain blocked as recorded in the ledger; no fabricated
+fix, invoice or successful preview is claimed. No production workspace or wallet was mutated.
+
+### Same session — public push blocked by automatic approval review
+
+Local code commit: `9c997272e3b0ebccf18295b01da4fb4b2a73387f`, branch
+`codex/calculator-build-repair`. The public GitHub push was rejected because explicit authorization
+for publishing the complete payload was required. A read-only remote-ref check found no branch;
+no connector/alternate route was used to bypass the rejection. No PR or CI run has started. A
+private patch is prepared for review; public push/PR and GitHub validation await authorization.
+
+### 2026-11-18 — BR 99771bc7: PR4303 green, then fresh Traffic Manager P4 integration
+
+Published PR #4303 at `c172ee3` after all 27 required local CI checks plus package signatures passed. Local coverage: 53,817 passed/89 skipped; all 11 emulator drills passed. GitHub run `44407511896` passed build/test and drills on that same head (53,811 passed/95 skipped); its artifact uploads succeeded and the asset-only conditional job was inapplicable. The six-test difference matched built-CSS/JS availability: local coverage had prior-build artifacts, while CI ran coverage before building. A separate check against the completed final8 build passed 12 tests/1 skipped, including all six actual built-asset checks; no earlier artifact-freshness claim was invented.
+
+During remote CI, main advanced to `a5b136d` (#4302 Traffic Manager P4). GitHub subsequently reported PR mergeability as dirty; the local merge completed automatically without manual source conflicts, preserving both progress histories. The complete gate must now verify this newly combined tree before updating the PR branch. The previous head's successful checks remain valid historical evidence, not a substitute for the new combined run. The generated prior `dist` is archived outside the repository before the next coverage run so local built-asset availability matches CI's fresh checkout; fresh output will be checked after the build as a separate supplemental test. No production gate, coverage threshold or test selection changed. No merge to main is authorized.
 ## 2026-11-19 — cdffbb71 Angular colour-game autopsy: source prepared, gates/merge not claimed
 
 **Report:** `cdffbb71-cf6e-4591-93c4-9c9e79e6852c`. The requested game was not proven runnable; real payments were not delivered. Final report `ok=false`, no customer debit. Historical generated source was not recovered or run. [Full autopsy](docs/build-report-autopsy-cdffbb71.md).
@@ -102445,28 +102475,15 @@ The start-vocabulary class (46e2d74b) was "fixed by shape" but kept a stem list;
   fox/eagle, boats, aircraft, realistic firearms and audio need non-GitHub CC0 sources + a NavBharatAI-hosted pinned copy.
 ## 2026-11-19 — Calculator report 9fba77d7: engine fixes proposed; GitHub validation pending
 
-The owner supplied the complete diagnostic timeline and asked to fix it. Autopsy and per-item ledger:
-`docs/autopsies/calculator-9fba77d7.md` (Q-2881–Q-2891). The saved App.tsx is a regression fixture.
+## 2026-11-19 — Safe integration of the ten open PRs (local candidate)
 
-The failed repair's root is a boolean union alias plus a positive truthiness guard: the previous cause
-reader required an expanded union and a negated guard. A compiler-backed deterministic pass now follows
-the imported alias, verifies true/false discriminants and receiver identity, and changes only the guard.
-Both fast text-repair callers and the shared endgame use it. Handoffs prioritize actual compiler offenders.
-Compiler repairs cannot introduce new undefined CSS classes without updating their stylesheet in the
-same batch. The fast verifier reaches its existing spacing snap on failed compiles too.
+Integrated the latest heads of #4300, #4303, #4305, #4309, #4310, #4311, #4312, #4313, #4315 and #4318 while preserving ancestry; #4318 was already on main d4cac12. Queue conflicts retain each distinct report's entries, including independently reused Q numbers. Current main's expanded BR1999 evidence supersedes the stale duplicate row.
 
-Fast-lane/one-shot verify failures remain unresolved until an appropriate genuine recheck. Wallet
-diagnostics retain admission balance, estimate and provisional stop cost; budget/supersession outcomes
-make no claim that unfinished app code is correct. Prices, wallet gates, exemptions, provider chains,
-settlement and project memory policy are unchanged. Planner guidance includes referenced PWA manifests.
+Cross-PR review found that native Angular receipts bypassed compiler revision freshness and that plain TypeScript proof could hide an Angular template failure at final gate/reviewer consumption. Native receipts now carry checked scope/revision; stale receipts cannot certify later writes; both consumers combine current platform and canonical command proof with current failures preserved. A stale completed compiler command cannot resolve a newer handed-off failure. Racing Resume now restores canvas keyboard focus; generator history preserves the new emitted version.
 
-Validation is deliberately GitHub-only under the owner's latest instruction: no local CI, typecheck,
-suite, coverage, emulator drill or app build ran. Static diff review is not a passing gate. CI, merge
-and production replay remain pending. The live registry snapshot, provider receipts, full generated
-manifest/worker and duplicated-constant sources remain blocked as recorded in the ledger; no fabricated
-fix, invoice or successful preview is claimed. No production workspace or wallet was mutated.
+Focused offline validation: 165 tests passed before the final combined-proof helper. The extended run passed 170/171; its remaining failure was an older source assertion requiring the removed reviewer ternary. The corrected source-boundary check and independent six-case proof regression then passed 30/30. An earlier compound test-command fixture was updated to a genuine standalone completed suite receipt because #4315 deliberately withholds evidence for arbitrary command chains. No runtime gate or coverage threshold was weakened. Full local/hosted CI and native validation remain required before merging this combined candidate; this entry claims no remote merge or deployment.
 
-### Same session — public push blocked by automatic approval review
+### 2026-11-19 — Integration gate follow-up: actionable unresolved verification findings
 
 Local code commit: `9c997272e3b0ebccf18295b01da4fb4b2a73387f`, branch
 `codex/calculator-build-repair`. The public GitHub push was rejected because explicit authorization
@@ -102547,6 +102564,24 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
 **Fixed:** kit file `core/loading.ts` (real jobs, a fraction that moves only by real progress, `LOADING_PROGRESS`); the model loader reports bytes as `ASSET_LOADING` on the event bus — it never imports loading.ts, so an older project still compiles; `LoadingBar` in the Hud and "Loading…" in GameCanvas before the world exists; `Game.toggleFullscreen()` / `isFullscreen` / `canFullscreen`, Play on a phone goes full screen, `options.orientation` (default landscape) locks where the browser allows, a Full screen button only where allowed; `viewport-fit=cover` added only while a game is mounted and restored on dispose; `FeedbackSpec.haptic` on PLAYER_DAMAGED / PLAYER_DIED / MELEE_HIT / PROJECTILE_HIT / ENEMY_DIED / BOSS_DEFEATED / PLAYER_LANDED, through `buzz()` (obeys the Vibration setting).
 
 **Tests:** `theGameFeelsRightOnAPhone` (9); 818 kit/asset/shell tests green. Reversions failing: haptics removed (1), notch removed (1). **Not verified:** real iPhone/Android behaviour of fullscreen and orientation lock (browser-dependent by design; every step fails quietly).
+The first integrated coverage run exposed two newly unclassified problem codes: SIMPLE_BUILD_VERIFY_ERROR and ONESHOT_VERIFY_FAILED. The calculator repair correctly keeps these findings unresolved across a handoff, but omitted their user action. Both now share a focused current-file recheck/repair offer; they remain app findings with their original severity, and a genuine compiler recheck removes the offer. Dual-lane findings produce one button. The classification ratchet and its empty backlog fixture are unchanged. Isolated offline reproduction failed the ratchet with exactly those two codes; after the fix, the unchanged census plus calculator honesty/lifecycle tests pass 64/64. Full combined validation remains pending.
+
+### 2026-11-19 — Integration gate follow-up: preserve unique queue identities
+
+The integrated queue census caught the calculator branch's Q-2756–Q-2766 allocation colliding with pre-existing main records: Q-2756 was already closed, and ten other IDs belonged to unrelated open reports. The calculator report 9fba77d7 is now assigned fresh Q-2881–Q-2891 in the same order; its autopsy references and explicit old-to-new mapping are updated. Existing main IDs and the append-only closed register are untouched. All 1,046 open rows remain byte-identical after reversing only those eleven ID substitutions; no evidence or state was dropped or silently resolved. The unchanged closed-row/unique-ID regression now passes 4/4 offline. This supersedes the earlier integration note that retained duplicate IDs by report provenance; distinct report provenance preserves content but does not satisfy the queue's unique-identity contract.
+
+### 2026-11-19 — Reconcile concurrent PR updates before final validation
+
+Reconciled main d62593336 and PR heads #4305 384064ab3, #4303 53e88f515 and #4300 271d7ccd6 into the integrated candidate without losing ancestry or source repairs. The independently corrected calculator queue uses the same Q-2881–Q-2891 mapping; queue bytes and the closed register are unchanged from a5a8ff1. The external autopsy history and meaningful suggestion privacy tests are preserved. One suggestion object now uses the external curated wording and does not interpolate raw diagnostics into the user action; existing recheck/removal and deduplication coverage remains. No compiler, wallet, timeout, coverage or CI policy changes were made during reconciliation. Six focused offline files pass 84/84 tests, covering classification, both queue censuses, verification actions/privacy and combined Angular proof. A fresh complete validation of this final reconciled source remains required.
+
+
+### 2026-11-19 — Current-revision compiler proof across the final PR union
+
+Preserved main 696a45f78 and the latest #4300 69fab2520 / #4315 3e6b4b04b ancestors while reconciling their source-revision and compiler-resolution guards with the integrated final-gate/reviewer proof combination, literal shell Angular evidence, and Racing Resume focus repair. The concurrent updates added meaningful current-source and resolution regressions. Duplicate historical progress paragraphs introduced by the merge were removed; the original historical entries remain above, and the queue and closed register retain their existing bytes.
+
+Independent real-dispatcher review exposed a remaining done/quality hint defect: a generic TypeScript success could erase a current Angular template failure, and stale asynchronous compiler results could replace newer proof. The hint now tracks source revision and native scope, retains decisive failures through incomplete checks, and allows a current native success to clear the prior failure. Its memory-clean hint follows the same native failure constraint. Seven behavioral regressions cover native-tool and literal-shell scope, held stale completions, changed source, and a subsequent unrun native check. The new regression file first failed 5 of its original 6 cases on the unchanged union; after the fix, 9 focused files passed 207 tests, and independent validation passed 3 files / 12 tests including the expanded 7-case file. The earlier union-only focused run passed 11 files / 160 tests. Node 22 TypeScript checking and the changed drill script syntax check also passed. These are targeted evidence; the complete final local CI run is still required.
+
+The first exactly-one-lease assertion in the phase-2 handoff race now includes only a diagnostic message with the synthetic workspace ID, candidate tokens and raw claim responses. Operations, predicates, deadlines and retries are unchanged. This preserves future failure evidence; it does not establish or fix the cause of the earlier failure whose raw responses were unavailable.
 
 ## 2026-11-19 — failedbr #2431 (21d59838) autopsy: "not counted against it" was false, and the same keys were asked twice
 

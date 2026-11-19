@@ -114,7 +114,7 @@ Fxx references point to the current platform fix inventory. Bxx references are e
 
 ## Additional defects discovered during implementation/review
 
-These sixteen rows are **not retroactively attributed to the historical report** and are excluded from the76-item historical bucket tally. Each is an implemented candidate at source preparation; full aggregate CI and explicit merge authorization remain required. Durable queue ownership is mapped below.
+These seventeen rows are **not retroactively attributed to the historical report** and are excluded from the76-item historical bucket tally. Each is an implemented candidate at source preparation; full aggregate CI and explicit merge authorization remain required. Durable queue ownership is mapped below.
 
 | ID | Discovery | Cause and correction | Regression/proof boundary |
 |---|---|---|---|
@@ -135,6 +135,8 @@ These sixteen rows are **not retroactively attributed to the historical report**
 | D14 | Current timeout narration called the generation cutoff the full wall-clock cap. | F08 distinguishes observed elapsed time, generation allowance and correction reserve. This is source-discovered; the precise historical formal-timeout receipt is unavailable. | Source and regression checks cover the corrected wording; no exact historical timeout duration is reconstructed. |
 | D15 | A successful narrow integrity/preview repair could replace the original build result. | F08 preserves original outcome/history while accepting edits through shared callbacks. Current source reproduction proves the defect, not that this exact path caused the historical verdict. | Lost-provenance mutation fails; restored finishing checks pass. |
 | D16 | Static orphan detection ignored styles referenced by Angular CLI configuration. | F04 reads CLI/configuration and component stylesheet ownership, including inject:false. This is a source-reproduced sibling, not an observed styles.css warning in the report. | Four analyzer integrations individually fail when reverted; restored integrity5 files/203 tests pass. |
+
+| D17 | First full-gate coverage collection failed because initialLaneDeclineRoute.test.ts only searched direct AST children after the production writer moved inside a named awaited boundary. | The harness now executes the entire actual awaited production IIFE, real writeUnlessFrozen AST, retention/error helpers and guard ordering; exact-count checks and mutation controls remain. | Focused1 file/29 tests pass, including two writer-positive controls and six independent in-memory mutation witnesses (`initial-lane-harness-focused.log`). The first full gate remains incomplete; final-source full CI must rerun. |
 
 ## Reconciled timing, usage, cost and counters
 
@@ -226,6 +228,8 @@ Required parent run includes dependency install, audit gate/signatures, license 
 
 At source preparation, **full CI/coverage/drills are not claimed passed**, and no merge is authorized. Parent prechecks actually observed an undefined ETA clock plus TS2563 failure, then a passing server typecheck, then a later semver-ambient plus TS2563 failure after additional changes. The exact semver declarations, shared retained-repair loops and named awaited deterministic-integrity boundary address those findings. The final server precheck exited0 (`root-typecheck-server-final-result.json`); full CI must still check the final source. Current and final validation outcomes belong in PR/check artifacts. The user’s explicit-merge requirement overrides autonomous merge guidance.
 
+First full-gate attempt on `2e651be`: the first12 checks exited0, including the informational signature check. Coverage then failed collecting `tests/initialLaneDeclineRoute.test.ts`; focused reproduction reported “Expected one production last deterministic integrity writer, found0” at line80. The run was stopped early: coverage is incomplete, and later production-build/bundle/boot checks and database/emulator drills were not run in that attempt. D17 tracks the harness correction. This does not convert earlier focused checks into a full-CI pass; the final commit must rerun the gate.
+
 ## Next-build observations and prevention priorities
 
 For a fresh Angular request, observe one valid CLI scaffold, no duplicated launch flags, and native template diagnostics before any “compiles” claim. For generated tests, observe compatible installed tooling and actual test results; uninstall/remove commands must contribute no test pass. For an Angular shell/configured stylesheet, observe no fake page or orphan/unused finding unless actual graph evidence supports it. After a generation timeout, optional finishing must preserve the remaining verification window, and a refused write must leave both saved and runtime bytes unchanged. Replacing only an untouched unverified starter must not trigger authored-project protection; incomplete inventories must keep protection.
@@ -236,7 +240,7 @@ The largest remaining structural gains are early framework-native contract valid
 
 Every historical E row and every discovered D row maps below to an individual durable queue row or explicit accepted evidence. Shared roots retain separate evidence rows. Nine accepted/evidence-only observations have no newly invented defect; their related actionable roots remain queued separately. Current implementations are **IN PROGRESS**, not resolved or merged. Historical/missing-evidence blockers include What/Why/Needs/Tried in the queue and B contracts above.
 
-Allocation: **Q-2784–Q-2874**, 88 new queue rows: 53 IN PROGRESS and 35 BLOCKED; nine accepted/evidence-only E dispositions. Q-2792, Q-2832 and Q-2837 are unallocated: their unpublished draft rows were removed after evidence review; no existing or published ID was closed or renumbered. Existing open PR #4303 owns four recurrence rows; #4300 remains a shared-file/compiler sibling owner, not silently absorbed.
+Allocation: **Q-2784–Q-2875**, 89 new queue rows: 54 IN PROGRESS and 35 BLOCKED; nine accepted/evidence-only E dispositions. Q-2792, Q-2832 and Q-2837 are unallocated: their unpublished draft rows were removed after evidence review; no existing or published ID was closed or renumbered. Existing open PR #4303 owns four recurrence rows; #4300 remains a shared-file/compiler sibling owner, not silently absorbed.
 
 | Evidence | Durable ID / disposition | State | Owner / reason |
 |---|---|---|---|
@@ -338,3 +342,5 @@ Allocation: **Q-2784–Q-2874**, 88 new queue rows: 53 IN PROGRESS and 35 BLOCKE
 | D14 | Q-2830 | IN PROGRESS | Owner codex/autopsy-cdffbb71; source-discovered timeout wording |
 | D15 | Q-2836 | IN PROGRESS | Owner codex/autopsy-cdffbb71; source-discovered result replacement |
 | D16 | Q-2840 | IN PROGRESS | Owner codex/autopsy-cdffbb71; source-discovered configured-style detection |
+
+| D17 | Q-2875 | IN PROGRESS | Owner codex/autopsy-cdffbb71; first full-gate AST harness collection failure |

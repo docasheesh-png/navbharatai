@@ -102615,3 +102615,11 @@ User-stopped at 248 s with nothing written. Q-2940: the exploration guard ignore
 `shellInspection.ts` definition; the guard counts a read-only `bash` as a read. Q-2941: the gate called a failed
 read a "build-breaking blocker" → a read cannot break the build. Q-2942 (contract unknown for an unknown title) and
 Q-2943 (Play Store research time) OPEN; Q-2944 → Q-2889.
+
+## 2026-11-19 — failedbr #2437 (fe73bca3) autopsy: a READY app ended as "did not succeed" at the wallet stop
+
+The real defect (a CSS `//` comment breaking the production build) was fixed at 341 s and the app was 100/100 READY at
+525 s; the builder then started optional palette work and the wallet stop fired at 537 s. Q-2945 (fixed in #4346): the
+palette rule judged a canvas renderer's artwork colours — that false finding started the polish. Q-2946 🟡 for the
+admin (billing): finish instead of starting extras when the app is ready and the bill nears the balance — recommended.
+Q-2947–Q-2949 OPEN (edit-miss watch, browser-tool outages without detail, Surplus availability).

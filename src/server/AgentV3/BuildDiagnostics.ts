@@ -3316,7 +3316,14 @@ export function isExpectedNonzeroExit(command: string, exitCode: number | null):
   // quoted regions first so a `|` INSIDE a pattern (e.g. `grep -v "test|vitest"`) can't be mistaken for
   // a pipe (the segment's BASE command is never itself quoted, so this is safe).
   const unquoted = cmd.replace(/"[^"]*"/g, '""').replace(/'[^']*'/g, "''");
-  const segments = unquoted.split(/(?<!\|)\|(?!\|)/);
+  // 🔴 …AND A SEQUENCE'S EXIT IS ITS LAST STATEMENT (failedbr #2431, 21d59838). `grep … | head -30; echo ---; cat
+  // src/App.css; echo ---; grep -n "nb-" src/nb-autostyle.css` exited 1 because the FINAL grep found nothing — but
+  // only `|` was split, so the judged command was `head`, and a no-match became one of the release gate's "3
+  // build-breaking blockers". Split on `;` / newline first (never inside quotes — stripped above), then on `|`.
+  // `&&` / `||` chains are left as they were: which part failed cannot be known from the exit code alone.
+  const statements = unquoted.split(/;|\n/).map((st) => st.trim()).filter(Boolean);
+  const lastStatement = statements[statements.length - 1] || unquoted;
+  const segments = lastStatement.split(/(?<!\|)\|(?!\|)/);
   const last = (segments[segments.length - 1] || '').trim();
   const base = (last.split(/\s+/)[0] || '').replace(/^.*\//, ''); // strip any path prefix
   // ⚠️ `diff` ADDED 2026-08-25, and it had become a build's REPORTED ROOT CAUSE. A real report carried
@@ -3330,6 +3337,9 @@ export function isExpectedNonzeroExit(command: string, exitCode: number | null):
     return exitCode === 1 || exitCode < 0;
   }
   if (base === 'curl') return exitCode === 7 || exitCode === 6 || exitCode === 28 || exitCode < 0;
+  // A read-only look at a file the author SAID might be absent (`2>/dev/null`): `cat .env.example 2>/dev/null` exiting 1
+  // is "there is no such file", the answer the probe was asking for (failedbr #2431). Without the redirect it stays a failure.
+  if (/^(cat|head|tail|ls|wc|stat|file)$/.test(base) && /\b2>\s*\/dev\/null\b/.test(last)) return exitCode === 1 || exitCode === 2 || exitCode < 0;
   // A single-FILE `tsc` typecheck is a SELF-INVALIDATING probe, not a build failure. See
   // isUnconfiguredTscFileProbe: passing explicit source-file operands to tsc makes it IGNORE
   // tsconfig.json (documented tsc behaviour), so `jsx`/`module`/`paths`/`lib` are all lost and it

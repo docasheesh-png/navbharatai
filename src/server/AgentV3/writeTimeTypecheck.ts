@@ -449,11 +449,11 @@ export interface WriteTypecheckStats {
    * compiled every skipped file. The two cases are opposite facts about the build:
    *
    *   • a later run succeeded ⇒ the skips cost a few seconds of lateness and nothing else;
-   *   • no later run succeeded ⇒ the end-of-build typecheck was those files' FIRST compile, which is
-   *     the most expensive moment to find anything.
+   *   • no later run was recorded ⇒ coverage is not established by these tools. Other lanes may have
+   *     compiled the project, and an end-of-build check may not have run (for example after Stop).
    *
    * Nothing recorded which, so nobody could tell — the same gap `notReadyReasons` was added to close one
-   * level up. `true` = a clean run followed the last skip. `false` = none did. `null`/absent = the
+   * level up. `true` = a clean project run followed the last skip. `false` = none was recorded. `null`/absent = the
    * question was never asked (a stats object from before this existed), never a silent "no".
    */
   cleanRunCoveredSkips?: boolean | null;
@@ -642,9 +642,14 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
   if (!enabled) return 'Write-time typecheck: OFF (AGENTV3_WRITE_TYPECHECK=off) — the first compile is whenever the model asks for one.';
   const notReady = s.skippedNotReady ?? 0;
   const notReadyNote = notReady > 0 ? notReadyPhrase(notReady, s.notReadyReasons) : '';
+  const skipsCovered = notReady > 0 && s.cleanRunCoveredSkips === true
+    ? ' — a later check compiled the whole project, so those files were covered, just later than they should have been'
+    : notReady > 0 && s.cleanRunCoveredSkips === false
+      ? ' — these tools recorded no later clean project compile covering those writes; other compile evidence must be checked separately'
+      : '';
   if (s.runs === 0) {
     if (s.disabledReason) return `Write-time typecheck: never ran — ${s.disabledReason}.`;
-    if (notReadyNote) return `Write-time typecheck: never ran — ${notReadyNote}.`;
+    if (notReadyNote) return `Write-time typecheck: never ran — ${notReadyNote}${skipsCovered}.`;
     // A compile that timed out is not "no TypeScript was written" (autopsy Sur Taal).
     if (s.timeouts > 0) return `Write-time typecheck: never finished — ${s.timeouts} compile(s) timed out after ${Math.round(WRITE_TYPECHECK_TIMEOUT_MS / 1000)}s.`;
     // A lane that does not write through the build's tools is the commonest reason this check sees
@@ -701,11 +706,6 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
   // 🔴 WHAT THE SKIPS ACTUALLY COST (Q-910). `tsc --noEmit` compiles the whole project, so one clean run
   // AFTER the last skip has already covered every skipped file. Said plainly, because "9 writes skipped"
   // reads as "9 files never compiled" and that is usually not what happened.
-  const skipsCovered = notReady > 0 && s.cleanRunCoveredSkips === true
-    ? ' — a later check compiled the whole project, so those files were covered, just later than they should have been'
-    : notReady > 0 && s.cleanRunCoveredSkips === false
-      ? ' — and no check succeeded after them, so the end-of-build typecheck was their first compile'
-      : '';
   return `Write-time typecheck: ${s.runs} run(s), ${s.cleanRuns} clean${notRun}, ${s.ownErrorsSurfaced} error(s) quoted back in the file just written${waiting}${mistyped}, `
     + `${Math.round(s.elapsedMs / 1000)}s total (~${avg}s each)`
     + (s.timeouts ? `, ${s.timeouts} timeout(s)` : '')

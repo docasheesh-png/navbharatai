@@ -357,6 +357,7 @@ export function graphKey(file: string): string {
 
 export class WorkspaceMemory {
   private readonly fileFacts = new Map<string, FileFacts>();
+  private writeRevision = 0;
   /**
    * Files whose facts came from `RESTORED_STUB` rather than from real content.
    *
@@ -426,6 +427,7 @@ export class WorkspaceMemory {
     // invalidates "deps installed". Conservative-by-design — a stale claim would make the
     // team SKIP a needed check, which is worse than one redundant run.
     this.lastWriteAt = Date.now();
+    this.writeRevision += 1;
     if (/(^|\/)package\.json$/.test(file)) this.depsInstalledAt = 0;
   }
 
@@ -450,6 +452,7 @@ export class WorkspaceMemory {
     this.fileFacts.delete(file);
     this.restoredStubs.delete(file);
     this.lastWriteAt = Date.now();
+    this.writeRevision += 1;
   }
 
   // ── Verification ledger (deep-rebuild slice 4) ───────────────────────────────
@@ -465,7 +468,12 @@ export class WorkspaceMemory {
   markDepsInstalled(): void { this.depsInstalledAt = Date.now(); }
   private prodBuildCleanAt = 0;
   /** The agent's own production build ran and succeeded (`shellBuildProvesSuccess`). */
-  markProdBuildClean(ts: number = Date.now()): void { this.prodBuildCleanAt = ts; }
+  markProdBuildClean(ts: number = Date.now(), checkedRevision?: number): void {
+    if (checkedRevision !== undefined && checkedRevision !== this.writeRevision) return;
+    this.prodBuildCleanAt = ts;
+  }
+  /** Capture immediately before a compiler starts; a concurrent writer makes its result stale. */
+  verificationRevision(): number { return this.writeRevision; }
   /** True while no file has been written since the last successful production build. Strict >, like tsc. */
   prodBuildCleanSinceLastWrite(): boolean { return this.prodBuildCleanAt > 0 && this.prodBuildCleanAt > this.lastWriteAt; }
   /**
@@ -475,11 +483,19 @@ export class WorkspaceMemory {
    * of fixed `write-typecheck` errors, after `tsc` and `npm run build` had both passed, and reported
    * "[CRITICAL] TypeScript build errors are present" — which reached the user's summary as a thing to fix.
    */
-  markTscClean(ts: number = Date.now()): void {
+  markTscClean(ts: number = Date.now(), checkedRevision?: number): void {
+    if (checkedRevision !== undefined && checkedRevision !== this.writeRevision) return;
     this.tscCleanAt = ts;
     for (const e of this.episodes) {
       if (e.kind === 'error' && e.resolvedAt === undefined && e.ts <= ts && isCompileErrorText(e.text)) e.resolvedAt = ts;
     }
+  }
+
+  /** A proven failure on this source retires the corresponding positive hint, never a newer check. */
+  markTscFailed(checkedRevision: number, productionBuild = false): void {
+    if (checkedRevision !== this.writeRevision) return;
+    this.tscCleanAt = 0;
+    if (productionBuild) this.prodBuildCleanAt = 0;
   }
 
   /** Errors still open — what an agent may be told is currently wrong. */

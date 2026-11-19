@@ -1,12 +1,12 @@
 import type { VerifiedFreeProof } from '../AI/LiveRegistry/proof';
-import { readScopeFailure, type ScopeFailureDiagnostic } from './scopeFailureDiagnostic';
+import { readScopeFailure, tagScopeFailure, type ScopeFailureDiagnostic } from './scopeFailureDiagnostic';
 import { WEAK_SCOPE_STRONG, WEAK_SCOPE_UNAVAILABLE, type WeakScopeGuidanceCode } from '../../lib/weakScopeGuidance';
 /** Weak-tier preflight: one bounded classification, before sandbox work. No fallback chain. */
 export type WeakScope = 'simple' | 'complex' | 'strong';
 export interface AdmissionUsage { pricingProof?: VerifiedFreeProof; inputTokens: number; outputTokens: number; }
 export interface WeakAdmission {
   scope: WeakScope | null;
-  source: 'template' | 'model' | 'unavailable';
+  source: 'template' | 'model' | 'unavailable' | 'user-override';
   usage?: AdmissionUsage;
   failure?: Readonly<ScopeFailureDiagnostic>;
 }
@@ -44,7 +44,14 @@ export async function admitWeakBuild(
     const answer = await Promise.race([
       ask(WEAK_SCOPE_INSTRUCTIONS, prompt, abort.signal),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { timedOut = true; abort.abort(); reject(new Error('scope-timeout')); }, opts.timeoutMs ?? WEAK_SCOPE_TIMEOUT_MS);
+        timer = setTimeout(() => {
+          timedOut = true;
+          // The call recorder also needs the owner of this abort. A generic AbortError loses
+          // that fact before this admission result is attached to the later build report.
+          const error = tagScopeFailure(new Error('scope-timeout'), { stage: 'deadline', reason: 'scope_timeout' });
+          abort.abort(error);
+          reject(error);
+        }, opts.timeoutMs ?? WEAK_SCOPE_TIMEOUT_MS);
       }),
     ]);
     const scope = parseWeakScope(answer.text);

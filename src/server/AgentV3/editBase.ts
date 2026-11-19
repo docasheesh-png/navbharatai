@@ -25,7 +25,7 @@ export async function checkEditBase(i: {
     const head = await i.withTimeout(i.store.head(i.workspaceId), 4_000, 'revisionHead');
     const check = verifyBase(head, i.hydrated);
     if (!head) {
-      return { head, check, verifiedBase: null, finding: { severity: 'info', code: 'EDIT_BASE_LEGACY', message: 'This project has no verified revision yet (it was saved before revisions existed). Its saved source is the base for this edit; the first verified revision is recorded when this edit is promoted.', autoResolved: true } };
+      return { head, check, verifiedBase: null, finding: { severity: 'info', code: 'EDIT_BASE_LEGACY', message: 'This project has no verified revision yet. Its saved source is the base for this turn; the first verified revision is recorded when a turn is promoted. A missing revision does not establish when the project was created.', autoResolved: true } };
     }
     if (check.state === 'verified') return { head, check, verifiedBase: null, finding: null };
     const copy = await i.loadVerifiedCopy().catch(() => ({} as Record<string, string>));

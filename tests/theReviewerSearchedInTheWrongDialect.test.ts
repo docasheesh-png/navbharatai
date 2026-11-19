@@ -182,7 +182,7 @@ describe('🔎 a reviewer claim a file can answer is checked before a repair is 
   });
   it('the route reads the stylesheets only when a finding makes the claim, and passes them in', () => {
     expect(route).toContain('if (review.issues.some((i) => missingClassClaim(i.message))) {');
-    expect(route).toContain('refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck, stylesheets })');
+    expect(route).toContain('refuteReviewByEvidence(review, { typecheck: currentTypecheck, stylesheets })');
   });
 });
 

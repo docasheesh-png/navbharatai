@@ -50,6 +50,8 @@ export type EvidenceOutcome = 'passed' | 'failed';
 /** One shell command as a build already records it (`BuildDiagnostics.commands`). */
 export interface RecordedCommand {
   command: string;
+  /** Live reader only: false means the compiler result does not prove this source revision. */
+  typecheckCurrent?: boolean;
   exitCode?: number | null;
   stdout?: string | null;
   stderr?: string | null;
@@ -151,7 +153,8 @@ export function agentRunEvidence(
   let nativeOutcome: EvidenceOutcome | undefined;
   for (let i = 0; i < list.length; i++) {
     const command = list[i];
-    if (!command || !isAngularValidationCommand(String(command.command ?? ''))) continue;
+    if (!command || command.typecheckCurrent === false
+      || !isAngularValidationCommand(String(command.command ?? ''))) continue;
     const result = parseAngularValidation(command.exitCode, String(command.stdout ?? ''), String(command.stderr ?? ''));
     if (result.status === 'passed' || result.status === 'failed') {
       nativeIndex = i;

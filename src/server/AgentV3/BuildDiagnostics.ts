@@ -35,7 +35,7 @@ import { isModelUnavailableError, isProviderBalanceError } from './providerError
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError, isReasoningRungHandoff, providerNeverAnswered, isSlowStreamAbandon } from './turnDeadline';
-import { typecheckEvidenceFromCommands, commandOutcomeText } from './TscGate';
+import { commandOutcomeText, type TypecheckCommandProof } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
@@ -605,6 +605,7 @@ export interface BuildIssue {
  */
 export interface SandboxCommandRecord {
   ts: number;
+  typecheckProof?: TypecheckCommandProof;
   command: string;
   /** Process exit code. null when the actuator could not report one (e.g. it threw). */
   exitCode: number | null;
@@ -988,6 +989,8 @@ export interface BuildDiagnosticsMeta {
   prompt?: string;
   model?: string;
   framework?: string;
+  /** Live evidence reads compare compiler-start revision with the current source; never serialized. */
+  currentSourceRevision?: () => number;
   /** Injected clock for deterministic tests; defaults to Date.now. */
   now?: () => number;
   /** Fired after EVERY recorded issue / ingested event / finish, with the current report — so the
@@ -1277,7 +1280,8 @@ export class BuildDiagnostics {
    */
   private looksStillRunning(): boolean {
     if (this.endedAt !== undefined) return false;
-    const last = this.issues.length ? this.issues[this.issues.length - 1].ts : this.startedAt;
+    // Buffered evidence may arrive after a newer heartbeat. Insertion order is not event order.
+    const last = this.issues.reduce((latest, issue) => Math.max(latest, issue.ts), this.startedAt);
     return this.now() - last <= STILL_RUNNING_WINDOW_MS;
   }
 
@@ -1350,7 +1354,7 @@ export class BuildDiagnostics {
    */
   private compatibleAuditFixRan = false;
 
-  recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number; timing?: CommandTiming; tree?: DevServerLaunchInput | null }): void {
+  recordCommand(rec: { command: string; typecheckProof?: TypecheckCommandProof; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number; timing?: CommandTiming; tree?: DevServerLaunchInput | null }): void {
     // TD-4: one door. The audit parser below still sees vulnerability counts; it does not need values.
     rec = {
       ...rec,
@@ -1419,6 +1423,7 @@ export class BuildDiagnostics {
     pushBounded(this.commands, {
       ts: this.now(),
       command: clipCommand(rec.command),
+      ...(rec.typecheckProof ? { typecheckProof: { ...rec.typecheckProof } } : {}),
       exitCode: rec.exitCode,
       durationMs: rec.durationMs,
       stdout: capTail(rec.stdout, CMD_OUTPUT_CAP),
@@ -1500,8 +1505,20 @@ export class BuildDiagnostics {
    * surfaced the gap. `undefined` means "found nothing to go on" — callers should leave their own
    * evidence at whatever default they already had, never invent a pass.
    */
+  private currentCommandEvidence(): Array<SandboxCommandRecord & { typecheckCurrent?: boolean }> {
+    if (!this.meta.currentSourceRevision) return this.commands;
+    let revision: number | undefined;
+    try { revision = this.meta.currentSourceRevision(); } catch { /* no current proof */ }
+    return this.commands.map(c => ({
+      ...c,
+      typecheckCurrent: revision !== undefined && c.typecheckProof?.project === true
+        && c.typecheckProof.revision === revision,
+    }));
+  }
+
   typecheckEvidenceFromAgentCommands(): 'passed' | 'failed' | undefined {
-    return typecheckEvidenceFromCommands(this.commands);
+    // Refutation and release readers must agree on native framework scope and live freshness.
+    return readAgentRunEvidence(this.currentCommandEvidence()).typecheck;
   }
 
   /**
@@ -1515,7 +1532,7 @@ export class BuildDiagnostics {
    * Absent keys mean the log does not settle that fact — never a promotion to a pass.
    */
   agentRunEvidence(): AgentRunEvidence {
-    return readAgentRunEvidence(this.commands);
+    return readAgentRunEvidence(this.currentCommandEvidence());
   }
 
   /**
@@ -1524,7 +1541,7 @@ export class BuildDiagnostics {
    * `./evidenceLedger` and `tests/oneReadOfWhatIsProven.test.ts`.
    */
   evidenceLedger(): EvidenceLedger {
-    return readEvidenceLedger(this.commands, this.report().issues);
+    return readEvidenceLedger(this.currentCommandEvidence(), this.report().issues);
   }
 
   /**
@@ -1679,9 +1696,9 @@ export class BuildDiagnostics {
     return { split: false, text: `${s(lat)}s` };
   }
 
-  private recordTimeToFirstCall(latencyMs?: number, answerMs?: number, fallbackMs?: number): void {
+  private recordTimeToFirstCall(latencyMs?: number, answerMs?: number, fallbackMs?: number, completedAt = this.now()): void {
     if (this.llmCalls.length > 0) return; // only the first
-    const elapsedMs = Math.max(0, this.now() - this.startedAt);
+    const elapsedMs = Math.max(0, completedAt - this.startedAt);
     // Only compatible timing windows can be subtracted: a longer measured call may have been
     // backfilled from before this timer. Neither a negative prep time nor a fabricated zero is valid.
     // BR1958: pre-build admission calls are backfilled after this timer starts. Clamping their
@@ -1737,7 +1754,7 @@ export class BuildDiagnostics {
     // WHERE THE TIME WENT — see longestSilentGap. Appended rather than replacing the sentence above,
     // because the total and the biggest single stretch answer two different questions, and the second
     // one is what an autopsy actually acts on. Only stated when a real gap exists.
-    const gap = BuildDiagnostics.longestSilentGap(this.issues, this.startedAt, this.now() - (lat ?? 0));
+    const gap = BuildDiagnostics.longestSilentGap(this.issues, this.startedAt, completedAt - (lat ?? 0));
     // ⚠️ THE WORDING HAD TO CHANGE IN THE SAME EDIT AS THE FILTER. Once timer ticks stop counting as
     // activity, "with NOTHING recorded" would be literally false — a heartbeat WAS recorded in that
     // stretch. Fixing a misleading pointer by making an untrue claim is the trade this repo forbids.
@@ -1759,7 +1776,7 @@ export class BuildDiagnostics {
     // was abandoned in it the window is lane time — a coverage figure there would describe the wrong thing.
     if (lat !== undefined && !abandoned) {
       try {
-        const callStart = this.now() - lat;
+        const callStart = completedAt - lat;
         const cov = this.setupSpans.length ? this.setupCoverage(this.startedAt, callStart) : null;
         const prepMs = Math.max(0, callStart - this.startedAt);
         if (cov && prepMs > 0 && (cov.untimedMs >= 1000 || cov.untimedMs >= prepMs * 0.1)) {
@@ -1776,6 +1793,7 @@ export class BuildDiagnostics {
       // flagging it here sent the reader hunting the wrong subsystem.
       severity: seconds >= 60 ? 'warning' : 'info',
       code: 'TIME_TO_FIRST_CALL',
+      ts: completedAt,
       message: covered,
       autoResolved: seconds < 60,
     });
@@ -1800,6 +1818,8 @@ export class BuildDiagnostics {
   }
 
   recordLlmCall(rec: Omit<LlmCallRecord, 'ts' | 'promptPreview' | 'responsePreview'> & {
+    /** Actual completion time, retained when pre-build calls are buffered and replayed later. */
+    ts?: number;
     promptPreview?: string;
     responsePreview?: string;
     /**
@@ -1815,14 +1835,17 @@ export class BuildDiagnostics {
     const fallbackMs = typeof rec.fallbackMs === 'number' && Number.isFinite(rec.fallbackMs) && rec.fallbackMs >= 0
       ? (typeof rec.latencyMs === 'number' && Number.isFinite(rec.latencyMs) ? Math.min(rec.fallbackMs, Math.max(0, rec.latencyMs)) : rec.fallbackMs)
       : undefined;
-    this.recordTimeToFirstCall(rec.latencyMs, answerMs, fallbackMs);
+    const receivedAt = this.now();
+    const completedAt = typeof rec.ts === 'number' && Number.isFinite(rec.ts) && rec.ts > 0 && rec.ts <= receivedAt
+      ? rec.ts : receivedAt;
+    this.recordTimeToFirstCall(rec.latencyMs, answerMs, fallbackMs, completedAt);
     this.channelTotals.llmCalls += 1;
     // 🔴 BOTH ENDS, NEVER A PREFIX (2026-09-21). This read `if (this.llmCalls.length < MAX_LLM_CALLS)`,
     // so a build past the cap recorded NO further model calls — and `DiagnosticsStore` then kept the
     // "last 40" of a list whose last entries were calls 261–300 of a 312-call build. The end the
     // store thought it was preserving had never been written down. See pushBounded.
     pushBounded(this.llmCalls, {
-      ts: this.now(),
+      ts: completedAt,
       provider: rec.provider,
       model: rec.model,
       // Each half capped on its own: one cap over the whole string always fell inside a long system
@@ -1856,6 +1879,7 @@ export class BuildDiagnostics {
     // showed it, and the sole trace was a field that looked like a glitch. Now it is a finding.
     if (typeof rec.promptChars === 'number' && rec.promptChars > HUGE_PROMPT_CHARS) {
       this.record({
+        ts: completedAt,
         phase: 'provider',
         severity: 'warning',
         code: 'HUGE_PROMPT_DISCARDED',
@@ -1906,6 +1930,7 @@ export class BuildDiagnostics {
     const handedOff = !rec.ok && !budgetEnded && isReasoningRungHandoff(rec.error);
     if (stopped) {
       this.record({
+        ts: completedAt,
         phase: 'provider',
         severity: 'info',
         code: 'LLM_CALL_STOPPED',
@@ -1918,6 +1943,7 @@ export class BuildDiagnostics {
       });
     } else if (handedOff) {
       this.record({
+        ts: completedAt,
         phase: 'provider',
         severity: 'info',
         code: 'LLM_CALL_HANDED_OFF',
@@ -1928,6 +1954,7 @@ export class BuildDiagnostics {
       });
     } else if (budgetEnded) {
       this.record({
+        ts: completedAt,
         phase: 'provider',
         severity: 'info',
         code: 'LLM_CALL_BUDGET_ENDED',
@@ -1959,6 +1986,7 @@ export class BuildDiagnostics {
       // is actually known, and keep the planned id where it belongs — in the detail.
       const turnTimedOutUnanswered = !rec.ok && /timed out after/.test(rec.error ?? '') && !(rec.inputTokens || 0) && !rec.provider;
       this.record({
+        ts: completedAt,
         phase: 'provider',
         severity: rec.ok ? 'warning' : 'error',
         code: rec.ok ? 'LLM_TRUNCATED' : 'LLM_CALL_FAILED',

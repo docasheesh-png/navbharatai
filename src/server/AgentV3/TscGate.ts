@@ -233,11 +233,37 @@ export function looksLikeTypecheckCommand(command: string | null | undefined): b
  * whose output is the tsc HELP page (see `looksLikeTscHelpOutput`) is skipped rather than counted as a
  * clean pass, for the same reason the deterministic gate itself refuses to trust one. Pure.
  */
+/** Platform compiler evidence is historical until its checked revision matches current source. */
+export interface RevisionedTypecheck {
+  outcome: 'passed' | 'failed';
+  revision: number;
+}
+
+export function currentTypecheckProof(proof: RevisionedTypecheck | undefined, revision: number): 'passed' | 'failed' | 'not-run' {
+  return proof?.revision === revision ? proof.outcome : 'not-run';
+}
+
+/** A current failure cannot be hidden by an earlier pass, or by a narrower production success. */
+export function mergeCurrentTypecheckProof(previous: RevisionedTypecheck | undefined, incoming: RevisionedTypecheck, revision: number): RevisionedTypecheck | undefined {
+  if (incoming.revision !== revision) return previous;
+  if (currentTypecheckProof(previous, revision) === 'failed' && incoming.outcome === 'passed') return previous;
+  return incoming;
+}
+
+/** Compiler scope and source revision observed before the command started (live evidence only). */
+export interface TypecheckCommandProof {
+  revision: number;
+  project: boolean;
+}
+
 export function typecheckEvidenceFromCommands(
-  commands: ReadonlyArray<{ command: string; stdout?: string | null; stderr?: string | null; exitCode?: number | null }>,
+  commands: ReadonlyArray<{ command: string; stdout?: string | null; stderr?: string | null; exitCode?: number | null; typecheckCurrent?: boolean }>,
 ): 'passed' | 'failed' | undefined {
   let verdict: 'passed' | 'failed' | undefined;
   for (const c of commands) {
+    // A live reader can withhold this historical result for the current source. Tests on the same
+    // receipt remain independently readable; no command output or historical verdict is erased.
+    if (c.typecheckCurrent === false) continue;
     const viaBuild = buildScriptTypecheckVerdict(c);
     if (viaBuild) { verdict = viaBuild; continue; }
     if (!looksLikeTypecheckCommand(c?.command)) continue;

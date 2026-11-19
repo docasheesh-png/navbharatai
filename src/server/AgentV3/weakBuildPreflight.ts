@@ -35,10 +35,11 @@ export function createWeakTextRepairAllowance(active: boolean): () => void {
   };
 }
 
-export async function resolveWeakComplexity<T>(result: WeakAdmission | null, score: number, fallback: () => Promise<T>): Promise<T | { verdict: 'simple' | 'complex'; score: number; source: 'model' | 'scaffold'; reason: string }> {
+export async function resolveWeakComplexity<T>(result: WeakAdmission | null, score: number, fallback: () => Promise<T>): Promise<T | { verdict: 'simple' | 'complex'; score: number; source: 'model' | 'scaffold' | 'user-override'; reason: string }> {
   if (result?.scope === 'simple' || result?.scope === 'complex') {
-    return { verdict: result.scope, score, source: result.source === 'template' ? 'scaffold' : 'model',
-      reason: result.source === 'template' ? 'the exact tested template supplies the requested scope; no classifier call was bought'
+    return { verdict: result.scope, score, source: result.source === 'template' ? 'scaffold' : result.source === 'user-override' ? 'user-override' : 'model',
+      reason: result.source === 'user-override' ? 'the user chose Continue with Weak after scope admission was blocked; the complex route is a continuation default, not a successful classification'
+        : result.source === 'template' ? 'the exact tested template supplies the requested scope; no classifier call was bought'
         : 'one bounded preflight classified the requested implementation scope' };
   }
   return fallback();
@@ -61,5 +62,5 @@ export function weakForceContinueDecision(
   const force = bodyForce === true && tier === 'weak';
   const wasBlocked = weakAdmissionBlocked(admission);
   if (!(force && wasBlocked)) return { blocked: wasBlocked && !force, admissionForBuild: admission };
-  return { blocked: false, admissionForBuild: { scope: 'complex', source: 'model', usage: admission?.usage } };
+  return { blocked: false, admissionForBuild: { ...admission, scope: 'complex', source: 'user-override' } };
 }

@@ -11,7 +11,7 @@
 // line, tag-local) so the precision is high and the agent isn't sent chasing
 // false positives.
 
-import { tagsOnLine, hasAttrOrBareBoolean } from './jsxTags';
+import { tagsOnLine, hasAttrOrBareBoolean, forwardsCallerProps } from './jsxTags';
 import { stripCommentsForMarkup } from './stripCodeComments';
 
 export type AccessibilitySeverity = 'high' | 'medium' | 'low';
@@ -255,6 +255,8 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
       if (
         LABELLED_CONTROLS.has(name) &&
         !insideWrappingLabel &&
+        // A primitive forwarding its caller's props is labelled at the call site (failedbr #2466).
+        !forwardsCallerProps(tag) &&
         !hasAttr(tag, 'aria-label') &&
         !hasAttr(tag, 'aria-labelledby') &&
         !hasAttr(tag, 'title') &&

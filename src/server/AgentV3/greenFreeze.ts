@@ -52,6 +52,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { modelToolOrigin, type ModelToolOrigin } from './modelToolWrites';
+import { stoppedPassCause, StoppedPassWriteError } from './runnerSignal';
 
 /** Kill switch. Default ON — this is the fix the admin approved. `off` restores today's behaviour. */
 export function greenFreezeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -376,6 +377,11 @@ export function writeRefused(workspaceId: string, path: string, env: NodeJS.Proc
  * point; the invariant lives here, not at twelve call sites.
  */
 export function assertWriteAllowed(workspaceId: string, path: string, env: NodeJS.ProcessEnv = process.env): void {
+  // A runner whose own pass budget has ended has had its files put back; a write still in flight from it
+  // (its own tool, or a specialist it delegated to) would land unchecked on the restored app (autopsy
+  // aba63ead, failedbr #2475 — see runnerSignal.ts). Refused whether or not the app is green-latched.
+  const stopped = isInfraPath(path) ? null : stoppedPassCause(env);
+  if (stopped) throw new StoppedPassWriteError(norm(path), stopped);
   if (!writeRefused(workspaceId, path, env)) {
     if (!isInfraPath(path)) notify(writeObservers, { workspaceId, path: norm(path), pass: currentPass(), model: modelToolOrigin() });
     return;

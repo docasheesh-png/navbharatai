@@ -48,6 +48,9 @@ function normalize(path: string): string {
 /** Also used by the old public resolver: one extension/index policy across checks and mutations. */
 export function resolveExportTarget(importer: string, spec: string, files: ReadonlySet<string>): string | null {
   if (!spec.startsWith('.') && !spec.startsWith('/')) return null;
+  // BR2001: `./start.svg?react` exports what the svgr plugin makes, not what the file declares, so its
+  // names are never checked against the file. Said explicitly: the other resolvers now strip the query.
+  if (/[?#]/.test(spec)) return null;
   const dir = importer.includes('/') ? importer.slice(0, importer.lastIndexOf('/')) : '';
   const base = normalize(spec.startsWith('/') ? spec : `${dir}/${spec}`);
   const candidates = [base, ...['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'].map(e => base + e)];

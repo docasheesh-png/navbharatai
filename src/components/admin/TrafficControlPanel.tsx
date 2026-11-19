@@ -104,7 +104,7 @@ export function ReliabilityBody({ slo, error }: { slo: SloView | null; error: st
 }
 
 const STATES: Array<RouteState | 'default'> = ['default', 'enabled', 'draining', 'disabled'];
-const PATH_LABELS: Record<string, string> = { 'free-chain': 'Free Chat chain', 'chat-router': 'Chat router', builder: 'Pro builder' };
+const PATH_LABELS: Record<string, string> = { 'free-chain': 'Free Chat chain', 'chat-router': 'Chat router', builder: 'Pro builder', vision: 'Image and PDF reading', image: 'Image generation' };
 const fmt = (t: number | null | undefined) => (t ? new Date(t).toLocaleString() : 'never');
 
 /** The panel's markup: pure props, so static render tests read exactly what the admin sees. */

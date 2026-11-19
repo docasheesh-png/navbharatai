@@ -15,7 +15,7 @@ import { PROVIDER_UPSTREAM } from './upstreamFamilies';
 export const CONTROL_SURFACES: readonly Surface[] = Object.freeze(['chat', 'professional', 'doctor', 'sda', 'developer-api'] as Surface[]);
 export type SurfaceMode = 'env' | 'legacy';
 /** The older routing paths P3 can extend drain/disable to. Kept here (not imported) so this module stays a leaf. */
-export const COVERED_PATHS = ['free-chain', 'chat-router', 'builder'] as const;
+export const COVERED_PATHS = ['free-chain', 'chat-router', 'builder', 'vision', 'image'] as const;
 export type CoveredPath = typeof COVERED_PATHS[number];
 export type RouteState = 'enabled' | 'draining' | 'disabled';
 

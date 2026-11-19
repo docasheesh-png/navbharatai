@@ -158,6 +158,17 @@ export const ACTION_GROUPS: readonly (readonly string[])[] = [
   ['sprint', 'run', 'boost', 'nitro'],
   ['drift', 'handbrake'],
 ];
+/**
+ * TWO PLAYERS ON ONE DEVICE (admin 2026-11-19 game-gap audit: no local multiplayer). Player 1 keeps every default key
+ * except the arrows; player 2 gets the arrows and the keys by them. Each player reads only their own gamepad.
+ */
+export const PLAYER1_ACTIONS: ActionMap = Object.fromEntries(Object.entries(DEFAULT_ACTIONS).map(([a, codes]) => [a, codes.filter((c) => !c.startsWith('Arrow'))]));
+export const PLAYER2_ACTIONS: ActionMap = {
+  up: ['ArrowUp', 'Pad:12'], down: ['ArrowDown', 'Pad:13'], left: ['ArrowLeft', 'Pad:14'], right: ['ArrowRight', 'Pad:15'],
+  jump: ['ShiftRight', 'Numpad0', 'Pad:0'], attack: ['Slash', 'Enter', 'Numpad1', 'Pad:2', 'Pad:7'], interact: ['Period', 'Numpad2', 'Pad:1'],
+  sprint: ['ControlRight', 'Pad:5', 'Pad:10'], aim: ['Pad:6'], reload: ['Comma', 'Pad:3'], drift: ['Numpad3', 'Pad:4'], pause: ['Pad:9'],
+};
+
 const GROUP_OF: Record<string, readonly string[]> = Object.fromEntries(ACTION_GROUPS.flatMap((g) => g.map((name) => [name, g])));
 
 export class Input {
@@ -179,7 +190,11 @@ export class Input {
   private padMoving = false;
   private padDown = new Set<string>();
 
-  constructor(target: HTMLElement | Window = window, actions: ActionMap = DEFAULT_ACTIONS) {
+  /** Read only this gamepad (0 = the first one plugged in, 1 = the second…); undefined = the first connected pad. */
+  readonly padIndex: number | undefined;
+
+  constructor(target: HTMLElement | Window = window, actions: ActionMap = DEFAULT_ACTIONS, options: { padIndex?: number } = {}) {
+    this.padIndex = Number.isInteger(options.padIndex) ? options.padIndex : undefined;
     this.actions = actions;
     const el = target as Window;
 
@@ -256,7 +271,8 @@ export class Input {
     let pad: Gamepad | null = null;
     try {
       const pads = typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
-      for (const p of pads) { if (p && p.connected && (p.mapping === 'standard' || p.axes.length >= 2)) { pad = p; break; } }
+      const usable = Array.from(pads ?? []).filter((p): p is Gamepad => !!p && p.connected && (p.mapping === 'standard' || p.axes.length >= 2));
+      pad = this.padIndex === undefined ? (usable[0] ?? null) : (usable[this.padIndex] ?? null);
     } catch { pad = null; }
     this.gamepad = pad !== null;
     const now = new Set<string>();
@@ -314,7 +330,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED' | 'PERF_CHANGED'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED' | 'PERF_CHANGED' | 'POWERUP_STARTED' | 'POWERUP_ENDED' | 'POWERUPS_CHANGED' | 'LOOT_DROPPED' | 'LEADERBOARD_CHANGED' | 'ITEM_CRAFTED'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -581,6 +597,16 @@ export function load(): boolean {
   } catch { return false; }
 }
 
+/** A saved game exists on this device (the start screen offers Continue). */
+export function hasSave(): boolean {
+  try { return !!localStorage.getItem(SAVE_KEY); } catch { return false; }
+}
+
+/** Forget the saved game (New game). */
+export function clearSave(): void {
+  try { localStorage.removeItem(SAVE_KEY); } catch { /* nothing to forget */ }
+}
+
 export function resetRun(): void {
   const { highScore, unlocked, settings } = state;
   Object.assign(state, initialState(), { highScore, unlocked, settings });
@@ -612,6 +638,10 @@ const EN = {
   level: 'Level', levels: 'Levels', levelComplete: 'Level complete', nextLevel: 'Next level', locked: 'Locked',
   difficulty: 'Difficulty', easy: 'Easy', normal: 'Normal', hard: 'Hard', checkpoint: 'Checkpoint',
   continue: 'Continue', inventory: 'Bag', inventoryEmpty: 'Your bag is empty', close: 'Close', needs: 'Needs {name}',
+  continueGame: 'Continue', newGame: 'New game', credits: 'Credits', craft: 'Craft', crafting: 'Make',
+  reduceMotion: 'Reduce motion', largeText: 'Large text', colourSafe: 'Colour-blind colours', captions: 'Captions',
+  capHit: 'You were hit', capEnemyDown: 'Enemy down', capPickup: 'Picked up', capReload: 'Reloading', capEmpty: 'Out of ammo', capBoss: 'A boss appears', capBossDown: 'Boss defeated', capLevelUp: 'Level up', capCoin: 'Coin', capDanger: 'Enemy spotted you',
+  share: 'Share', copied: 'Copied!', shareText: 'I scored {score} in {game}! Can you beat it?', bestOnDevice: 'Best on this device',
   autoQuality: 'Auto quality', fpsCounter: 'FPS counter',
   shop: 'Shop', coins: 'Coins', buy: 'Buy', equip: 'Use', equipped: 'In use', owned: 'Owned', maxed: 'Max', levelShort: 'Lv {n}',
 };
@@ -636,6 +666,10 @@ const HI: Record<StringKey, string> = {
   level: 'लेवल', levels: 'लेवल', levelComplete: 'लेवल पूरा', nextLevel: 'अगला लेवल', locked: 'बंद',
   difficulty: 'कठिनाई', easy: 'आसान', normal: 'सामान्य', hard: 'कठिन', checkpoint: 'चेकपॉइंट',
   continue: 'आगे', inventory: 'थैला', inventoryEmpty: 'थैला खाली है', close: 'बंद करें', needs: '{name} चाहिए',
+  continueGame: 'जारी रखें', newGame: 'नया गेम', credits: 'क्रेडिट्स', craft: 'बनाएँ', crafting: 'बनाना',
+  reduceMotion: 'कम हलचल', largeText: 'बड़े अक्षर', colourSafe: 'कलर-ब्लाइंड रंग', captions: 'कैप्शन',
+  capHit: 'आपको चोट लगी', capEnemyDown: 'दुश्मन गिरा', capPickup: 'उठाया', capReload: 'रीलोड', capEmpty: 'गोलियाँ ख़त्म', capBoss: 'बॉस आ गया', capBossDown: 'बॉस हारा', capLevelUp: 'लेवल अप', capCoin: 'सिक्का', capDanger: 'दुश्मन ने देख लिया',
+  share: 'शेयर करें', copied: 'कॉपी हो गया!', shareText: 'मैंने {game} में {score} स्कोर किया! क्या आप इसे हरा सकते हैं?', bestOnDevice: 'इस फ़ोन पर सबसे अच्छे',
   autoQuality: 'ऑटो क्वालिटी', fpsCounter: 'FPS काउंटर',
   shop: 'दुकान', coins: 'सिक्के', buy: 'खरीदें', equip: 'चुनें', equipped: 'चुना हुआ', owned: 'आपका', maxed: 'पूरा', levelShort: 'लेवल {n}',
 };
@@ -1151,6 +1185,240 @@ export const economy = {
 };
 `;
 
+const POWERUPS = `/**
+ * POWER-UPS (admin 2026-11-19 game-gap audit: no timed boosts — every "speed boost" or "shield" was a hand-rolled
+ * setTimeout that kept running through the pause menu and survived a restart). A power-up here lasts game time: it
+ * counts down only while the round runs, freezes in the pause menu, and every one ends when a new round starts.
+ *
+ *   powerUps.define({ speed: { name: 'Speed', icon: '⚡', seconds: 6 }, shield: { name: 'Shield', icon: '🛡️', seconds: 8 },
+ *                     magnet: { name: 'Magnet', icon: '🧲', seconds: 10, stack: 'extend' } });
+ *   powerUps.give('speed');                                   // on pickup
+ *   const run = powerUps.value('speed', 6, 10);               // 10 while it lasts, 6 otherwise
+ *   if (powerUps.active('shield')) return;                    // ignore the hit
+ * Picking one up again: 'refresh' (default) restarts its clock, 'extend' adds its time, 'stack' raises its level (up to
+ * maxStacks) and restarts the clock. The kit's Hud shows each with a ring for the time left.
+ */
+import { events } from './events';
+
+export interface PowerUpDef {
+  name?: string; icon?: string;
+  /** How long one pickup lasts, in seconds of play. */
+  seconds: number;
+  stack?: 'refresh' | 'extend' | 'stack';
+  maxStacks?: number;
+  /** Called when it starts (and with the new level when it stacks). */
+  onStart?: (level: number) => void;
+  onEnd?: () => void;
+}
+export interface ActivePowerUp { id: string; name: string; icon: string; remaining: number; total: number; level: number }
+
+const defs = new Map<string, PowerUpDef>();
+const live = new Map<string, { remaining: number; total: number; level: number }>();
+const changed = (): void => { events.emit('POWERUPS_CHANGED', { active: powerUps.list }); };
+const safe = (fn: (() => void) | undefined): void => { try { fn?.(); } catch (e) { console.error('[powerUps]', e); } };
+
+export const powerUps = {
+  define(items: Record<string, PowerUpDef>): void {
+    for (const [id, d] of Object.entries(items ?? {})) if (id && d && Number.isFinite(d.seconds) && d.seconds > 0) defs.set(id, d);
+  },
+  /** Start (or re-apply) a power-up. Unknown ids are refused. seconds overrides the defined length. */
+  give(id: string, seconds?: number): boolean {
+    const d = defs.get(id);
+    if (!d) return false;
+    const len = Number.isFinite(seconds) && (seconds as number) > 0 ? (seconds as number) : d.seconds;
+    const cur = live.get(id);
+    if (!cur) {
+      live.set(id, { remaining: len, total: len, level: 1 });
+      safe(() => d.onStart?.(1));
+      events.emit('POWERUP_STARTED', { id, level: 1 });
+    } else if ((d.stack ?? 'refresh') === 'extend') {
+      cur.remaining += len; cur.total = Math.max(cur.total, cur.remaining);
+    } else if (d.stack === 'stack') {
+      const level = Math.min(Math.max(1, Math.floor(d.maxStacks ?? 3)), cur.level + 1);
+      if (level !== cur.level) { cur.level = level; safe(() => d.onStart?.(level)); events.emit('POWERUP_STARTED', { id, level }); }
+      cur.remaining = Math.max(cur.remaining, len); cur.total = Math.max(cur.total, len);
+    } else {
+      cur.remaining = Math.max(cur.remaining, len); cur.total = Math.max(cur.total, cur.remaining);
+    }
+    changed();
+    return true;
+  },
+  /** Advance the clocks by dt seconds of play (the 3D shell calls this every step of a running round). */
+  update(dt: number): void {
+    if (!Number.isFinite(dt) || dt <= 0 || live.size === 0) return;
+    const ended: string[] = [];
+    for (const [id, p] of live) { p.remaining -= dt; if (p.remaining <= 0) ended.push(id); }
+    for (const id of ended) powerUps.end(id);
+  },
+  end(id: string): void {
+    if (!live.delete(id)) return;
+    safe(() => defs.get(id)?.onEnd?.());
+    events.emit('POWERUP_ENDED', { id });
+    changed();
+  },
+  active(id: string): boolean { return live.has(id); },
+  level(id: string): number { return live.get(id)?.level ?? 0; },
+  remaining(id: string): number { return Math.max(0, live.get(id)?.remaining ?? 0); },
+  /** boosted while the power-up lasts, base otherwise. */
+  value<T>(id: string, base: T, boosted: T): T { return live.has(id) ? boosted : base; },
+  get list(): ActivePowerUp[] {
+    return [...live].map(([id, p]) => { const d = defs.get(id) ?? { seconds: p.total }; return { id, name: d.name ?? id, icon: d.icon ?? '★', remaining: Math.max(0, p.remaining), total: p.total, level: p.level }; });
+  },
+  /** End every power-up (a new round). */
+  clear(): void { for (const id of [...live.keys()]) powerUps.end(id); },
+};
+`;
+
+const LOOT = `/**
+ * LOOT TABLES (admin 2026-11-19 game-gap audit: no drops — an enemy died and nothing happened, or the model wrote
+ * Math.random() < 0.1 and a player went 40 kills without the item). Weighted entries with rarities, a "nothing" entry,
+ * amounts, and a pity rule so bad luck has a ceiling.
+ *
+ *   const drops = createLootTable([
+ *     { item: null, weight: 50 },                                  // nothing
+ *     { item: 'coin', weight: 40, count: [1, 5] },
+ *     { item: 'potion', weight: 9, rarity: 'rare' },
+ *     { item: 'golden-sword', weight: 1, rarity: 'legendary' },
+ *   ], { pity: { rarity: 'rare', after: 15 } });                    // a rare or better at least every 15 rolls
+ *   const d = drops.roll();      // { item, rarity, count } — LOOT_DROPPED is announced when there is an item
+ */
+import { events } from './events';
+
+export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
+const ORDER: Rarity[] = ['common', 'rare', 'epic', 'legendary'];
+export interface LootEntry { item: string | null; weight: number; rarity?: Rarity; count?: [number, number] }
+export interface LootDrop { item: string | null; rarity: Rarity; count: number }
+export interface LootTable { roll(rng?: () => number): LootDrop; chances(): Array<{ item: string | null; rarity: Rarity; chance: number }>; readonly sincePity: number }
+
+export function createLootTable(entries: LootEntry[], o: { pity?: { rarity: Rarity; after: number } } = {}): LootTable {
+  const list = (Array.isArray(entries) ? entries : []).filter((e) => e && Number.isFinite(e.weight) && e.weight > 0).map((e) => ({ ...e, rarity: e.rarity ?? 'common' as Rarity }));
+  if (list.length === 0) throw new Error('a loot table needs at least one entry with a positive weight');
+  const total = list.reduce((n, e) => n + e.weight, 0);
+  const pity = o.pity && ORDER.includes(o.pity.rarity) && o.pity.after >= 1 ? o.pity : null;
+  const pityPool = pity ? list.filter((e) => e.item !== null && ORDER.indexOf(e.rarity) >= ORDER.indexOf(pity.rarity)) : [];
+  let since = 0;
+  const pick = (pool: typeof list, r: number) => {
+    const sum = pool.reduce((n, e) => n + e.weight, 0);
+    let x = r * sum;
+    for (const e of pool) { x -= e.weight; if (x < 0) return e; }
+    return pool[pool.length - 1];
+  };
+  return {
+    roll(rng: () => number = Math.random): LootDrop {
+      const forced = pity && pityPool.length > 0 && since >= pity.after - 1;
+      const e = forced ? pick(pityPool, rng()) : pick(list, rng());
+      const counts = e.count ?? [1, 1];
+      const lo = Math.max(0, Math.floor(Math.min(counts[0], counts[1]))), hi = Math.max(lo, Math.floor(Math.max(counts[0], counts[1])));
+      const count = e.item === null ? 0 : lo + Math.floor(rng() * (hi - lo + 1));
+      if (pity) since = e.item !== null && ORDER.indexOf(e.rarity) >= ORDER.indexOf(pity.rarity) ? 0 : since + 1;
+      const drop = { item: e.item, rarity: e.rarity, count };
+      if (drop.item !== null && drop.count > 0) events.emit('LOOT_DROPPED', drop);
+      return drop;
+    },
+    chances() { return list.map((e) => ({ item: e.item, rarity: e.rarity, chance: e.weight / total })); },
+    get sincePity() { return since; },
+  };
+}
+`;
+
+const LEADERBOARD = `/**
+ * THE BEST SCORES ON THIS DEVICE (admin 2026-11-19 game-gap audit: no leaderboard — one "best" number, nothing to climb).
+ * A top ten per game, saved on the device. It is honest about what it is: the scores played HERE, not the world — a
+ * worldwide board needs an online service the game does not have.
+ *
+ *   leaderboard.record('desert-rally', 1250)   → 3 (the place it took), or null outside the top ten
+ *   leaderboard.top('desert-rally', 5)          → [{ score, name, at }, …] best first
+ * The 3D shell records every finished round by itself and the end screen lists the top five.
+ */
+import { events } from './events';
+
+export interface ScoreEntry { score: number; name: string; at: number }
+const SIZE = 10;
+const key = (gameId: string): string => 'nb-leaderboard:' + String(gameId || 'game');
+
+function read(gameId: string): ScoreEntry[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(key(gameId)) || '[]');
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((e) => e && Number.isFinite(e.score) && e.score >= 0)
+      .map((e) => ({ score: Math.floor(e.score), name: String(e.name ?? 'You').slice(0, 24), at: Number.isFinite(e.at) ? e.at : 0 }))
+      .sort((a, b) => b.score - a.score || a.at - b.at).slice(0, SIZE);
+  } catch { return []; }
+}
+
+let last: { gameId: string; at: number } | null = null;
+
+export const leaderboard = {
+  /** Record a finished round. Returns its place (1 = best) or null when it did not make the top ten. */
+  record(gameId: string, score: number, name = 'You'): number | null {
+    if (!Number.isFinite(score) || score <= 0) return null;
+    const entry: ScoreEntry = { score: Math.floor(score), name: String(name).slice(0, 24) || 'You', at: Date.now() };
+    const list = [...read(gameId), entry].sort((a, b) => b.score - a.score || a.at - b.at).slice(0, SIZE);
+    const place = list.indexOf(entry);
+    if (place < 0) return null;
+    try { localStorage.setItem(key(gameId), JSON.stringify(list)); } catch { /* full or blocked storage: the round still counts on screen */ }
+    last = { gameId, at: entry.at };
+    events.emit('LEADERBOARD_CHANGED', { gameId, place: place + 1 });
+    return place + 1;
+  },
+  top(gameId: string, n = SIZE): ScoreEntry[] { return read(gameId).slice(0, Math.max(0, n)); },
+  /** Is this entry the one just recorded (for highlighting it)? */
+  isLatest(gameId: string, e: ScoreEntry): boolean { return !!last && last.gameId === gameId && last.at === e.at; },
+  clear(gameId: string): void { try { localStorage.removeItem(key(gameId)); } catch { /* nothing to clear */ } last = null; events.emit('LEADERBOARD_CHANGED', { gameId, place: null }); },
+};
+`;
+
+const CRAFTING = `/**
+ * CRAFTING (admin 2026-11-19 game-gap audit: no crafting — a survival game's "make a sword from wood and iron" was a
+ * hand-rolled check that took the wood and then found there was no iron). Recipes over the bag (core/inventory.ts):
+ * crafting takes every ingredient or none of them.
+ *
+ *   crafting.define([{ id: 'sword', name: 'Sword', needs: { wood: 2, iron: 3 }, makes: { item: 'sword', count: 1 } },
+ *                    { id: 'torch', name: 'Torch', needs: { wood: 1, coal: 1 }, makes: { item: 'torch', count: 4 } }]);
+ *   crafting.canCraft('sword');  crafting.missing('sword') → [{ item: 'iron', need: 3, have: 1 }]
+ *   crafting.craft('sword')      → true: the ingredients are gone and the sword is in the bag (ITEM_CRAFTED)
+ * The kit's bag screen lists the recipes with what each needs and a Craft button.
+ */
+import { events } from './events';
+import { inventory } from './inventory';
+
+export interface Recipe { id: string; name: string; icon?: string; needs: Record<string, number>; makes: { item: string; count?: number } }
+export interface RecipeView extends Recipe { can: boolean; missing: Array<{ item: string; need: number; have: number }> }
+
+let recipes: Recipe[] = [];
+const whole = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0);
+
+export const crafting = {
+  define(list: Recipe[]): void {
+    recipes = (Array.isArray(list) ? list : []).filter((r) => r && r.id && r.makes && r.makes.item && r.needs && Object.values(r.needs).some((n) => whole(n) > 0));
+  },
+  missing(id: string): Array<{ item: string; need: number; have: number }> {
+    const r = recipes.find((x) => x.id === id);
+    if (!r) return [];
+    return Object.entries(r.needs).map(([item, n]) => ({ item, need: whole(n), have: inventory.count(item) })).filter((m) => m.need > m.have);
+  },
+  canCraft(id: string): boolean { return recipes.some((r) => r.id === id) && crafting.missing(id).length === 0; },
+  /** Make it: every ingredient is taken, or none is. Returns false when something is missing (or the bag is full). */
+  craft(id: string): boolean {
+    const r = recipes.find((x) => x.id === id);
+    if (!r || !crafting.canCraft(id)) return false;
+    const count = Math.max(1, whole(r.makes.count ?? 1));
+    // Room check first: a full stack must not swallow the ingredients and give nothing back.
+    const before = inventory.count(r.makes.item);
+    const taken: Array<[string, number]> = [];
+    for (const [item, n] of Object.entries(r.needs)) { if (whole(n) > 0 && inventory.remove(item, whole(n))) taken.push([item, whole(n)]); }
+    const added = inventory.add(r.makes.item, count);
+    if (added === 0 && inventory.count(r.makes.item) === before) {
+      for (const [item, n] of taken) inventory.add(item, n);   // put everything back
+      return false;
+    }
+    events.emit('ITEM_CRAFTED', { id: r.id, item: r.makes.item, count: added });
+    return true;
+  },
+  get list(): RecipeView[] { return recipes.map((r) => ({ ...r, can: crafting.canCraft(r.id), missing: crafting.missing(r.id) })); },
+};
+`;
+
 const DIALOGUE = `/**
  * TALKING TO PEOPLE (admin 2026-11-19 game-gap audit: an RPG had no dialogue box and no choices). A speaker, a line,
  * and — when the story forks — choices; a choice can need an item from the bag. While someone is talking the game
@@ -1286,6 +1554,14 @@ export interface GameSettings {
   autoQuality: boolean;
   /** Show the frames-per-second counter. */
   showFps: boolean;
+  /** No camera shake. On by itself when the device asks for reduced motion. */
+  reduceMotion: boolean;
+  /** Menus and the HUD drawn larger. */
+  largeText: boolean;
+  /** Colours that colour-blind players can tell apart (health bar, minimap). */
+  colourSafe: boolean;
+  /** Short text for important sounds (a hit, an enemy down, a boss…). */
+  captions: boolean;
 }
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -1302,7 +1578,7 @@ export function difficultyScale(d: Difficulty = current.difficulty): { enemyDama
 }
 
 export const DEFAULT_SETTINGS: Readonly<GameSettings> = {
-  masterVolume: 0.9, musicVolume: 0.6, sfxVolume: 0.8, muted: false, quality: 'high', lookSensitivity: 1, vibration: true, difficulty: 'normal', autoQuality: true, showFps: false,
+  masterVolume: 0.9, musicVolume: 0.6, sfxVolume: 0.8, muted: false, quality: 'high', lookSensitivity: 1, vibration: true, difficulty: 'normal', autoQuality: true, showFps: false, reduceMotion: false, largeText: false, colourSafe: false, captions: false,
 };
 
 const KEY = 'nb-game-settings-v1';
@@ -1323,6 +1599,10 @@ export function sanitizeSettings(raw: unknown): GameSettings {
     difficulty: r.difficulty === 'easy' || r.difficulty === 'normal' || r.difficulty === 'hard' ? r.difficulty : DEFAULT_SETTINGS.difficulty,
     autoQuality: typeof r.autoQuality === 'boolean' ? r.autoQuality : DEFAULT_SETTINGS.autoQuality,
     showFps: typeof r.showFps === 'boolean' ? r.showFps : DEFAULT_SETTINGS.showFps,
+    reduceMotion: typeof r.reduceMotion === 'boolean' ? r.reduceMotion : DEFAULT_SETTINGS.reduceMotion,
+    largeText: typeof r.largeText === 'boolean' ? r.largeText : DEFAULT_SETTINGS.largeText,
+    colourSafe: typeof r.colourSafe === 'boolean' ? r.colourSafe : DEFAULT_SETTINGS.colourSafe,
+    captions: typeof r.captions === 'boolean' ? r.captions : DEFAULT_SETTINGS.captions,
   };
 }
 
@@ -1333,7 +1613,10 @@ function read(): GameSettings {
       if (raw) return sanitizeSettings(JSON.parse(raw));
     }
   } catch { /* private mode or a corrupt value: the defaults */ }
-  return { ...DEFAULT_SETTINGS };
+  // A first visit follows the device: someone who asked their phone for reduced motion gets no camera shake.
+  let reduce = false;
+  try { reduce = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { /* no media queries */ }
+  return { ...DEFAULT_SETTINGS, reduceMotion: reduce };
 }
 
 let current: GameSettings = read();
@@ -1910,10 +2193,14 @@ const FILES: Record<string, string> = {
   'src/game/core/dialogue.ts': DIALOGUE,
   'src/game/core/economy.ts': ECONOMY,
   'src/game/core/perf.ts': PERF,
+  'src/game/core/powerups.ts': POWERUPS,
+  'src/game/core/loot.ts': LOOT,
+  'src/game/core/leaderboard.ts': LEADERBOARD,
+  'src/game/core/crafting.ts': CRAFTING,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot', 'leaderboard', 'crafting'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -1944,9 +2231,10 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/strings.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (files['src/game/core/levels.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/quests.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
-    if (files['src/game/core/economy.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
+    if (files['src/game/core/economy.ts'] || files['src/game/core/crafting.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
     if (files['src/game/core/dialogue.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
     if (files['src/game/core/inventory.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
+    if (files['src/game/core/powerups.ts'] || files['src/game/core/loot.ts'] || files['src/game/core/leaderboard.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }

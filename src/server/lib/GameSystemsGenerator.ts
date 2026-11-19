@@ -1276,6 +1276,136 @@ export class Director {
 function clamp01(v: number): number { return Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0)); }
 `;
 
+const GRENADE = `/**
+ * GRENADES AND BLASTS — pure arithmetic, like the rest of systems/ (admin 2026-11-19 game-gap audit: no grenade; a
+ * hand-rolled one flew in a straight line, exploded on contact and hurt through walls).
+ *
+ *   const v = throwVelocity(yaw, 0.6, 14);                                    // direction + speed
+ *   const flight = simulateThrow({ origin, velocity: v, fuse: 2.5 });          // the SAME path for the aim arc and the throw
+ *   flight.points  → draw the arc while aiming;   flight.end  → where it goes off (after flight.time seconds)
+ *   const hits = blastDamage(flight.end, enemies, { radius: 6, maxDamage: 100, blocked: (a, b) => !lineOfSight(a, b) });
+ *   for (const h of hits) applyDamage(h.id, h.damage), push(h.id, h.impulse);
+ * It arcs under gravity, bounces off the ground losing speed, rolls to a stop, and goes off when the fuse runs out. Damage
+ * falls off from the centre to the edge, and a target behind cover takes none.
+ */
+export interface V3 { x: number; y: number; z: number }
+export interface ThrowOptions {
+  origin: V3; velocity: V3;
+  gravity?: number;
+  /** Ground height under (x, z). Default flat at 0. */
+  ground?: (x: number, z: number) => number;
+  /** How much upward speed survives a bounce (0..1). */
+  bounce?: number;
+  /** Sideways speed kept per bounce (0..1). */
+  friction?: number;
+  /** Seconds until it goes off. */
+  fuse?: number;
+  dt?: number;
+  /** Radius of the grenade, so it rests on the ground rather than in it. */
+  radius?: number;
+}
+export interface Flight { points: V3[]; end: V3; time: number; bounces: number }
+
+/** A throw's starting velocity: yaw (radians, 0 = +Z), pitch upward (radians), speed (m/s). */
+export function throwVelocity(yaw: number, pitch: number, speed: number): V3 {
+  const c = Math.cos(pitch);
+  return { x: Math.sin(yaw) * c * speed, y: Math.sin(pitch) * speed, z: Math.cos(yaw) * c * speed };
+}
+
+export function simulateThrow(o: ThrowOptions): Flight {
+  const g = o.gravity ?? -9.8, dt = o.dt ?? 1 / 60, fuse = Math.max(0, o.fuse ?? 2.5);
+  const bounce = Math.max(0, Math.min(1, o.bounce ?? 0.35)), friction = Math.max(0, Math.min(1, o.friction ?? 0.7));
+  const r = o.radius ?? 0.1, ground = o.ground ?? (() => 0);
+  const p = { ...o.origin }, v = { ...o.velocity };
+  const points: V3[] = [{ ...p }];
+  let t = 0, bounces = 0;
+  while (t < fuse) {
+    v.y += g * dt;
+    p.x += v.x * dt; p.y += v.y * dt; p.z += v.z * dt;
+    const floor = ground(p.x, p.z) + r;
+    if (p.y < floor) {
+      p.y = floor;
+      if (v.y < 0) {
+        v.y = Math.abs(v.y) < 0.6 ? 0 : -v.y * bounce;
+        v.x *= friction; v.z *= friction;
+        if (v.y !== 0) bounces++;
+      }
+      // Rolling on the ground slows it down.
+      if (v.y === 0) { const k = Math.max(0, 1 - 3 * dt); v.x *= k; v.z *= k; }
+    }
+    t += dt;
+    points.push({ ...p });
+  }
+  return { points, end: { ...p }, time: fuse, bounces };
+}
+
+export interface BlastTarget { id: string; position: V3 }
+export interface BlastHit { id: string; damage: number; impulse: V3; distance: number }
+
+/**
+ * Damage from a blast at center: maxDamage at the centre falling to minDamage at radius (linear), nothing beyond it.
+ * blocked(center, target) = true means cover is between them: no damage. Each hit carries a push away from the blast.
+ */
+export function blastDamage(center: V3, targets: readonly BlastTarget[], o: { radius: number; maxDamage: number; minDamage?: number; force?: number; blocked?: (a: V3, b: V3) => boolean }): BlastHit[] {
+  const out: BlastHit[] = [];
+  const radius = Math.max(0.001, o.radius), min = Math.max(0, o.minDamage ?? 0), force = o.force ?? 12;
+  for (const t of targets) {
+    const dx = t.position.x - center.x, dy = t.position.y - center.y, dz = t.position.z - center.z;
+    const d = Math.hypot(dx, dy, dz);
+    if (d > radius) continue;
+    if (o.blocked?.(center, t.position)) continue;
+    const k = 1 - d / radius;
+    const damage = Math.round(min + (o.maxDamage - min) * k);
+    const len = d || 1;
+    out.push({ id: t.id, damage, distance: d, impulse: { x: (dx / len) * force * k, y: Math.max(0.3, dy / len + 0.5) * force * k, z: (dz / len) * force * k } });
+  }
+  return out.sort((a, b) => a.distance - b.distance);
+}
+`;
+
+const AIMASSIST = `/**
+ * AIM ASSIST — a gentle pull toward a target near the crosshair, for thumbs and gamepads (admin 2026-11-19 game-gap
+ * audit: a touch shooter was nearly unplayable — aiming a phone at a moving target with one thumb). It never snaps:
+ * the aim turns part of the way, only toward a target inside a small cone and in range. Leave it OFF for a mouse.
+ *
+ *   const a = aimAssist({ origin: eye, dir: aimDir }, enemies, { cone: 8, range: 60, strength: 0.35 });
+ *   aimDir = a.dir;   a.target  → the id it leaned toward, or null
+ */
+import type { V3 } from './grenade';
+
+export interface AssistOptions {
+  /** Half-angle of the cone, in degrees. */
+  cone?: number;
+  range?: number;
+  /** 0..1: how far toward the target the aim turns each call. */
+  strength?: number;
+  /** Optional line-of-sight test: no pull toward a target behind a wall. */
+  visible?: (from: V3, to: V3) => boolean;
+}
+
+const norm = (v: V3): V3 => { const l = Math.hypot(v.x, v.y, v.z) || 1; return { x: v.x / l, y: v.y / l, z: v.z / l }; };
+
+export function aimAssist(aim: { origin: V3; dir: V3 }, targets: ReadonlyArray<{ id: string; position: V3 }>, o: AssistOptions = {}): { dir: V3; target: string | null } {
+  const cone = Math.max(0, o.cone ?? 8) * (Math.PI / 180), range = o.range ?? 60, strength = Math.max(0, Math.min(1, o.strength ?? 0.35));
+  const dir = norm(aim.dir);
+  let best: { id: string; to: V3; score: number } | null = null;
+  for (const t of targets) {
+    const v = { x: t.position.x - aim.origin.x, y: t.position.y - aim.origin.y, z: t.position.z - aim.origin.z };
+    const d = Math.hypot(v.x, v.y, v.z);
+    if (d === 0 || d > range) continue;
+    const to = { x: v.x / d, y: v.y / d, z: v.z / d };
+    const angle = Math.acos(Math.max(-1, Math.min(1, to.x * dir.x + to.y * dir.y + to.z * dir.z)));
+    if (angle > cone) continue;
+    if (o.visible && !o.visible(aim.origin, t.position)) continue;
+    // Closest to the crosshair first, nearer targets breaking ties.
+    const score = angle / Math.max(cone, 1e-6) + (d / range) * 0.25;
+    if (!best || score < best.score) best = { id: t.id, to, score };
+  }
+  if (!best || strength === 0) return { dir, target: null };
+  return { dir: norm({ x: dir.x + (best.to.x - dir.x) * strength, y: dir.y + (best.to.y - dir.y) * strength, z: dir.z + (best.to.z - dir.z) * strength }), target: best.id };
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/systems/combat.ts': COMBAT,
   'src/game/systems/ai.ts': AI,
@@ -1285,9 +1415,11 @@ const FILES: Record<string, string> = {
   'src/game/systems/director.ts': DIRECTOR,
   'src/game/systems/nav.ts': NAV,
   'src/game/systems/weapon.ts': WEAPON,
+  'src/game/systems/grenade.ts': GRENADE,
+  'src/game/systems/aimassist.ts': AIMASSIST,
 };
 
-export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'ai', 'projectile', 'spawner', 'weapon', 'director', 'nav'];
+export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'ai', 'projectile', 'spawner', 'weapon', 'director', 'nav', 'grenade', 'aimassist'];
 
 /** Generate the gameplay systems. Pure; never throws. */
 export function generateGameSystems(include?: string[]): GameSystemsResult {
@@ -1308,6 +1440,7 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
     if (files['src/game/systems/weapon.ts']) files['src/game/systems/projectile.ts'] = FILES['src/game/systems/projectile.ts'];
     // ai.ts follows paths around walls (nav.ts).
     if (files['src/game/systems/ai.ts']) files['src/game/systems/nav.ts'] = FILES['src/game/systems/nav.ts'];
+    if (files['src/game/systems/aimassist.ts']) files['src/game/systems/grenade.ts'] = FILES['src/game/systems/grenade.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
 

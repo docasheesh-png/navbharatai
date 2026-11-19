@@ -47,7 +47,10 @@ describe('a recipe brings the layers it imports', () => {
       'src/game/three/race.ts',
       // world.ts imports surfaces.ts since 2026-10-05 (the ground reads the detail tier and is textured
       // in the real tier) — so the closure must bring it too, or the added world.ts would not compile.
-      'src/game/three/renderer.ts', 'src/game/three/surfaces.ts', 'src/game/three/world.ts',
+      'src/game/three/renderer.ts',
+      // Game.ts draws a split screen for two players (renderSplit) since 2026-11-19 — so splitscreen.ts too.
+      'src/game/three/splitscreen.ts',
+      'src/game/three/surfaces.ts', 'src/game/three/world.ts',
     ]);
     expect([...missing.values()].every((f) => f.recipe === 'generate_game_3d')).toBe(true);
     expect(missing.get('src/game/three/renderer.ts')!.content).toBe(GAME_RECIPES.generate_game_3d().files['src/game/three/renderer.ts']);

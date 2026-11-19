@@ -2117,7 +2117,11 @@ export function RacingRoadGame({ plan, onReady, opponents = 3, finishKm = null }
     </div>
     <button type="button" style={{ position: 'absolute', right: 16, top: 16 }} onClick={() => {
       if (!live.current) return;
-      if (state.status === 'paused') live.current.resume(); else live.current.pause();
+      if (state.status === 'paused') {
+        live.current.resume();
+        // Keyboard input belongs to the canvas; activating this button moved focus away.
+        host.current?.querySelector('canvas')?.focus({ preventScroll: true });
+      } else live.current.pause();
     }}>{paused ? 'Resume' : 'Pause'}</button>
     {call && <div role="status" aria-live="assertive" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#fde047', fontSize: 96, fontWeight: 900, textShadow: '0 4px 12px rgba(0,0,0,.8)', pointerEvents: 'none' }}>{call}</div>}
     {failure && <div role="alert" style={{ position: 'absolute', top: '40%', padding: 24, color: 'white' }}>{failure}</div>}

@@ -261,7 +261,7 @@ import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGene
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
 import { withVitestDeclared, recipeShipsVitestTest, vitestDeclarationNote, generatedUnitTestNote, needsVitestVersionSelection } from './TestGenerationAgent';
 import { isAppAnalysisPath } from './appAnalysisPaths';
-import { angularValidationPlan, parseAngularValidation, angularTypeScriptOnlyWriteNote } from './angularValidation';
+import { angularValidationPlan, isAngularValidationCommand, parseAngularValidation, angularTypeScriptOnlyWriteNote } from './angularValidation';
 import { renderSeenThisBuild } from './renderProof';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
 import { addDependency, removeDependency as removeOneDependency, listDependencies } from './packageEdit';
@@ -3761,7 +3761,7 @@ export class ToolDispatcher {
     const project = !command || checksWholeDefaultTsProject(command);
     const coversProject = verdict === 'passed' && output.trim() === '' && project;
     try {
-      if (coversProject && current) mem.markTscClean(Date.now(), revisionBeforeCompile);
+      if (coversProject && current && !this.currentNativeTypecheckFailure()) mem.markTscClean(Date.now(), revisionBeforeCompile);
       else if (verdict === 'failed' && project && current) mem.markTscFailed(revisionBeforeCompile);
     }
     catch { /* audit best-effort */ }
@@ -3773,7 +3773,7 @@ export class ToolDispatcher {
       && skippedBeforeCompile > 0 && this._writeTypecheckStats.skippedNotReady === skippedBeforeCompile) {
       this._writeTypecheckStats.cleanRunCoveredSkips = true;
     }
-    this.noteTypeErrorCount(output, !coversProject || !current);
+    this.noteTypeErrorCount(output, !coversProject || !current, revisionBeforeCompile);
   }
 
   /**
@@ -3781,17 +3781,43 @@ export class ToolDispatcher {
    * compile whose exit code already said it failed: its output may not parse (a bare `TS2304` on stderr),
    * so it may RAISE the count but never set it to clean.
    */
-  private noteTypeErrorCount(output: string, failuresOnly = false): void {
+  private noteTypeErrorCount(output: string, failuresOnly: boolean, checkedRevision: number): void {
+    if (checkedRevision !== getWorkspaceMemory(this.workspaceId).verificationRevision()) return;
     try {
       const v = tscVerdict(output);
-      if (v === 'passed' && !failuresOnly) this._lastTypeErrors = 0;
-      else if (v === 'failed') this._lastTypeErrors = Math.max(1, countTscErrors(output));
+      if (v === 'passed' && !failuresOnly) {
+        this._lastTypeErrors = 0;
+        this._lastTypeErrorsRevision = checkedRevision;
+      } else if (v === 'failed') {
+        this._lastTypeErrors = Math.max(1, countTscErrors(output));
+        this._lastTypeErrorsRevision = checkedRevision;
+      }
     } catch { /* a reading, never a failure */ }
   }
 
-  /** Type errors in the LATEST compile this build ran (write-time, the typecheck tool, or a shell `tsc`);
-   *  null when none has run or none produced a verdict. */
+  /** Latest decisive compiler count, scoped to the source revision it checked. Native template
+   *  failures also survive narrower TypeScript passes until a current native check succeeds. */
   private _lastTypeErrors: number | null = null;
+  private _lastTypeErrorsRevision: number | undefined;
+  private _nativeTypecheck: { revision: number; errors: number } | undefined;
+
+  private currentNativeTypecheckFailure(): boolean {
+    return this._nativeTypecheck?.revision === getWorkspaceMemory(this.workspaceId).verificationRevision()
+      && this._nativeTypecheck.errors > 0;
+  }
+
+  /** Native templates cover more than plain TypeScript; neither stale nor unknown runs settle them. */
+  private noteNativeTypeErrorCount(result: ReturnType<typeof parseAngularValidation>, checkedRevision: number | undefined): void {
+    const memory = getWorkspaceMemory(this.workspaceId);
+    if (checkedRevision === undefined || checkedRevision !== memory.verificationRevision()) return;
+    if (result.status !== 'passed' && result.status !== 'failed') return;
+    const errors = result.status === 'passed' ? 0 : 1;
+    this._nativeTypecheck = { revision: checkedRevision, errors };
+    this._lastTypeErrors = errors;
+    this._lastTypeErrorsRevision = checkedRevision;
+    if (errors === 0) memory.markTscClean(Date.now(), checkedRevision);
+    else memory.markTscFailed(checkedRevision, true);
+  }
 
   /**
    * How many type errors the latest compile reported — null when unknown. 🔴 Autopsy 33812996: the
@@ -3809,8 +3835,10 @@ export class ToolDispatcher {
   /** P2b — cut-off writes waiting for append_file (never on disk). */
   private readonly _pendingWrites = new PendingWrites();
 
-    lastKnownTypeErrors(): number | null {
-    return this._lastTypeErrors;
+  lastKnownTypeErrors(): number | null {
+    const revision = getWorkspaceMemory(this.workspaceId).verificationRevision();
+    const latest = this._lastTypeErrorsRevision === revision ? this._lastTypeErrors : null;
+    return this.currentNativeTypecheckFailure() ? Math.max(1, latest ?? 0) : latest;
   }
 
   /**
@@ -6475,7 +6503,7 @@ export class ToolDispatcher {
         try {
           this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt, timing,
             typecheckProof: { revision: revisionBeforeCompile,
-              project: checksWholeDefaultTsProject(command) || buildScriptTypecheckVerdict({ command, stdout, stderr, exitCode }) !== undefined },
+              project: checksWholeDefaultTsProject(command) || isAngularValidationCommand(command) || buildScriptTypecheckVerdict({ command, stdout, stderr, exitCode }) !== undefined },
           });
         } catch { /* diagnostics capture is best-effort */ }
         // 🔴 AND NOW TELL THE PROJECT MAP THE FILE IS GONE (autopsy 8b3dca5c). Everything above this
@@ -6691,7 +6719,10 @@ export class ToolDispatcher {
         if (cdFix.fixed) out = `(Ran it under the sandbox project root — there is no /workspace folder here.)\n${out}`;
         // A compile whose exit code already said it failed still tells the done check it has errors
         // (autopsy 33812996) — it can never mark anything clean.
-        if (looksLikeTypecheckCommand(command) && exitCode !== 0) this.noteTypeErrorCount(`${stdout}\n${stderr}`, true);
+        if (looksLikeTypecheckCommand(command) && exitCode !== 0) this.noteTypeErrorCount(`${stdout}\n${stderr}`, true, revisionBeforeCompile);
+        if (isAngularValidationCommand(command)) {
+          this.noteNativeTypeErrorCount(parseAngularValidation(exitCode, stdout, stderr), revisionBeforeCompile);
+        }
         return out;
       }
 
@@ -8018,7 +8049,6 @@ export class ToolDispatcher {
             this.noteCompileOutput(combined, undefined, skippedBeforeCompile, revisionBeforeCompile);
             if (verdict === 'not-run' || verdict === 'unknown') {
               tscStatus = 'did-not-complete';
-              this._lastTypeErrors = null;
               tscHeader = `TYPECHECK DID NOT RUN — the TypeScript compiler could not start, so the types were NOT checked (this is not a verdict about your code). Its output:\n${combined.split('\n').slice(0, 8).join('\n')}\n\n`;
             } else if (tscErrs.length > 0 || verdict === 'failed') {
               tscStatus = 'errors';
@@ -8035,7 +8065,6 @@ export class ToolDispatcher {
             }
           } catch {
             tscStatus = 'did-not-complete';
-            this._lastTypeErrors = null;
           }
         }
         if (angularPlan && !syntaxHeader) {
@@ -8064,8 +8093,10 @@ export class ToolDispatcher {
             });
           } catch { /* diagnostics best-effort */ }
           const native = parseAngularValidation(nativeResult.exitCode, nativeResult.stdout, nativeResult.stderr);
-          this._lastTypeErrors = native.status === 'passed' ? 0 : native.status === 'failed' ? 1 : null;
-          if (native.status === 'failed') getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${native.summary}`);
+          this.noteNativeTypeErrorCount(native, nativeRevision);
+          if (native.status === 'failed' && nativeRevision === getWorkspaceMemory(this.workspaceId).verificationRevision()) {
+            getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${native.summary}`);
+          }
           return `typecheck: ${native.summary}\n${redactSecrets(native.output).slice(-6000)}\n${crossLang}`.trim();
         }
         if (syntaxHeader || tscHeader) {

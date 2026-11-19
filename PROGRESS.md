@@ -102551,3 +102551,12 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
 - Found while wiring: `toMenu()` never announced GAME_MENU (resetRun() sets 'menu' silently, so setStatus('menu') said nothing —
   the race overlay never cleared either); the first start screen had the same gap. Both now emit it.
 - Locked by `tests/theGameHasMusicThatFollowsIt.test.ts` (reversion: dropping the cue binding / the toMenu announcement → 3 fail).
+
+## 2026-11-19 — Game gap P1: adaptive quality + FPS counter (branch `claude/game-adaptive-quality`)
+- Gap: no frame-rate watch and no automatic quality — a game that ran at 60 on a laptop ran at 18 on a budget phone and stayed.
+- Kit: `core/perf.ts` (`createPerfGovernor`: smoothed fps, steps down after 3 s below 40, up after 12 s above 56, max 2 steps,
+  ignores hitches > 0.25 s and a 2 s warm-up; `steppedQuality`). Game feeds it while PLAYING only and applies the result
+  (pixel ratio; shadows off at low), never above the player's Graphics choice; `game.fps` / `game.quality`; PERF_CHANGED;
+  playtest hook gains `fps()` / `quality()`. Settings: Auto quality (on), FPS counter (off); Hud FpsCounter.
+- Found while wiring: the Graphics setting's documented "low = no shadows" was never applied (only the pixel ratio changed).
+- Locked by `tests/theGameStaysSmoothOnEveryPhone.test.ts` (reversion: dropping the shadow switch / the hitch filter → 3 fail).

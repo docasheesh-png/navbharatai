@@ -42,6 +42,7 @@ import { events } from './core/events';
 import { state, setStatus, resetRun } from './core/state';
 import { startMeta, mountMetaToasts, combo } from './core/meta';
 import { settings, type GameSettings } from './core/settings';
+import { createPerfGovernor, steppedQuality } from './core/perf';
 import { setGameLanguage, t, type GameLanguage, type StringKey } from './core/strings';
 import { showHint } from './core/levels';
 import { dialogue } from './core/dialogue';
@@ -240,6 +241,11 @@ export class Game {
   private attackHeldThisStep = false;
   /** The pixel ratio the renderer chose for this device; quality scales DOWN from it, never up. */
   private basePixelRatio = 1;
+  /** Watches the frame rate and steps the picture down when the device cannot keep up (core/perf.ts). */
+  private readonly perf = createPerfGovernor();
+  private chosenQuality: GameSettings['quality'] = 'high';
+  private autoQuality = true;
+  private effectiveQuality: GameSettings['quality'] = 'high';
   /** Look speed from the player's settings. */
   private lookSensitivity = 1;
   private touch: TouchControls | null = null;
@@ -357,7 +363,7 @@ export class Game {
     this.disposers.push(() => document.removeEventListener('fullscreenchange', onFullscreen));
     // 🔎 NavBharatAI's playtest reads the round through this (score, status) and ends one to prove Play again works.
     // Read-only except endRound, which only does what losing does — harmless in a single-player game.
-    const hook = { status: () => state.status, score: () => state.score, endRound: () => { if (state.status === 'playing' || state.status === 'paused') setStatus('gameover'); } };
+    const hook = { status: () => state.status, score: () => state.score, fps: () => this.fps, quality: () => this.effectiveQuality, endRound: () => { if (state.status === 'playing' || state.status === 'paused') setStatus('gameover'); } };
     if (typeof window !== 'undefined') {
       (window as unknown as { __nbKit?: typeof hook }).__nbKit = hook;
       this.disposers.push(() => {
@@ -605,6 +611,8 @@ export class Game {
 
   /** Display rate. Camera and drawing only — never gameplay. */
   private render(_alpha: number, frameDelta: number): void {
+    // Only play is measured: a frozen start screen or pause menu says nothing about how the game itself runs.
+    if (state.status === 'playing' && this.perf.feed(frameDelta) && this.autoQuality) this.applyQuality();
     // Driving or riding: the camera sits behind the VEHICLE's own front, whatever its heading — the one
     // the game named with ctx.follow(), or the one it drives. On foot the player is framed as it always
     // has been (a 'chase' game too: its rig is third-person on foot, see the constructor).
@@ -750,11 +758,31 @@ export class Game {
     audio.setVolume('music', s.musicVolume);
     audio.setVolume('sfx', s.sfxVolume);
     audio.setVolume('ui', s.sfxVolume);
-    // Fewer pixels is the biggest single saving on a weak phone; the base ratio already respects the device.
-    const scale = s.quality === 'low' ? 0.55 : s.quality === 'medium' ? 0.8 : 1;
-    this.renderer.setPixelRatio(Math.max(0.35, this.basePixelRatio * scale));
+    if (s.quality !== this.chosenQuality || s.autoQuality !== this.autoQuality) this.perf.reset();
+    this.chosenQuality = s.quality;
+    this.autoQuality = s.autoQuality;
+    this.applyQuality();
     this.lookSensitivity = s.lookSensitivity;
   }
+
+  /**
+   * The picture actually drawn: the player's choice, stepped down by the governor when Auto quality is on. Fewer pixels
+   * is the biggest single saving on a weak phone (the base ratio already respects the device); 'low' also drops the sun's
+   * shadows — which the Graphics setting always promised and never did.
+   */
+  private applyQuality(): void {
+    const q = this.autoQuality ? steppedQuality(this.chosenQuality, this.perf.drop) : this.chosenQuality;
+    this.effectiveQuality = q;
+    const scale = q === 'low' ? 0.55 : q === 'medium' ? 0.8 : 1;
+    this.renderer.setPixelRatio(Math.max(0.35, this.basePixelRatio * scale));
+    if (this.lights?.key) this.lights.key.castShadow = q !== 'low';
+    events.emit('PERF_CHANGED', { fps: Math.round(this.perf.fps), quality: q, chosen: this.chosenQuality, auto: this.autoQuality });
+  }
+
+  /** Frames drawn per second, smoothed. */
+  get fps(): number { return Math.round(this.perf.fps); }
+  /** The quality being drawn right now (may be below the player's choice when Auto quality stepped it down). */
+  get quality(): GameSettings['quality'] { return this.effectiveQuality; }
   pause(): void { if (state.status === 'playing') { this.loop.setPaused(true); setStatus('paused'); } }
   resume(): void { if (state.status === 'paused') { this.loop.setPaused(false); setStatus('playing'); } }
 
@@ -1288,6 +1316,21 @@ export function InventoryPanel({ onBack }: { onBack: () => void }) {
 }
 
 
+/** Frames per second, read twice a second, with the quality being drawn (Settings → FPS counter). */
+export function FpsCounter({ game }: { game: Pick<Game, 'fps' | 'quality'> }) {
+  const [v, setV] = useState({ fps: game.fps, quality: game.quality });
+  useEffect(() => {
+    const id = setInterval(() => setV({ fps: game.fps, quality: game.quality }), 500);
+    return () => clearInterval(id);
+  }, [game]);
+  const colour = v.fps >= 50 ? '#4ade80' : v.fps >= 30 ? '#fde047' : '#f87171';
+  return (
+    <div aria-label={'FPS ' + v.fps} style={{ position: 'absolute', left: 'max(12px, env(safe-area-inset-left))', bottom: 'max(12px, env(safe-area-inset-bottom))', padding: '2px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.55)', color: colour, font: '700 12px ui-monospace, monospace', pointerEvents: 'none', zIndex: 6 }}>
+      {v.fps + ' FPS · ' + t(v.quality === 'low' ? 'smooth' : v.quality === 'medium' ? 'balanced' : 'sharp')}
+    </div>
+  );
+}
+
 /** Re-render on every coin or shop change. */
 function useShop(): { coins: number; list: ShopEntry[] } {
   const read = () => ({ coins: economy.coins, list: economy.list });
@@ -1410,6 +1453,8 @@ function SettingsPanel({ onBack }: { onBack: () => void }) {
       </div>
       <Slider label={t('lookSpeed')} value={s.lookSensitivity} min={0.25} max={3} step={0.25} onChange={(v) => settings.set({ lookSensitivity: v })} />
       <Toggle label={t('vibration')} on={s.vibration} onChange={(v) => settings.set({ vibration: v })} />
+      <Toggle label={t('autoQuality')} on={s.autoQuality} onChange={(v) => settings.set({ autoQuality: v })} />
+      <Toggle label={t('fpsCounter')} on={s.showFps} onChange={(v) => settings.set({ showFps: v })} />
       <div style={row}>
         <span>{t('difficulty')}</span>
         <div role="radiogroup" aria-label={t('difficulty')} style={{ display: 'flex', gap: 6 }}>
@@ -1534,6 +1579,7 @@ export function Hud({ game }: { game: Game }) {
       ) : null}
 
       <LoadingBar state={load} />
+      {prefs.showFps && s.status !== 'menu' ? <FpsCounter game={game} /> : null}
       {s.status === 'playing' ? <HintBar /> : null}
       {s.status === 'playing' || s.status === 'paused' ? <Minimap game={game} /> : null}
       {s.status === 'playing' || s.status === 'paused' ? <ObjectiveList /> : null}

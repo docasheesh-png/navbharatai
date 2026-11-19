@@ -2599,7 +2599,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: loop, input, events, pool, feel, state, meta, settings, loading, strings, levels, quests, inventory, dialogue, economy. Default = all; imports are pulled in automatically.',
+            description: 'Optional subset: loop, input, events, pool, feel, state, meta, settings, loading, strings, levels, quests, inventory, dialogue, economy, perf. Default = all; imports are pulled in automatically.',
           },
         },
       },

@@ -1141,6 +1141,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  build the car economy.equipped(\'car\') names (again on SHOP_CHANGED), and read upgrades with economy.stat(id, base, perLevel).',
     '  MUSIC plays by itself and follows the game (calm menu, action play, tense on BOSS_SPAWNED, a sting on win/loss, lowered',
     '  when paused or talking). Do not start your own background loop; options.music changes cues, audio.load(\'music:action\', url) a track.',
+    '  SMOOTHNESS is the kit\'s job: it lowers the picture by itself when a phone struggles (Settings → Auto quality, FPS counter).',
+    '  Never set the renderer\'s pixel ratio or shadows yourself; read game.fps / game.quality if a game needs to cut its own extras.',
     '  The screen recipes below are for 2D games and anything not on <GameCanvas>.',
     '  🎨 EVERYTHING AROUND THE CANVAS IS UI, AND IT IS WHAT THE PLAYER SEES FIRST. Where the kit is in',
     '  the project, build it from the GAME UI recipes: the stage is `.nb-game`; the start, pause and',

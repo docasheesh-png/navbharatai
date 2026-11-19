@@ -314,7 +314,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED' | 'PERF_CHANGED'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -612,6 +612,7 @@ const EN = {
   level: 'Level', levels: 'Levels', levelComplete: 'Level complete', nextLevel: 'Next level', locked: 'Locked',
   difficulty: 'Difficulty', easy: 'Easy', normal: 'Normal', hard: 'Hard', checkpoint: 'Checkpoint',
   continue: 'Continue', inventory: 'Bag', inventoryEmpty: 'Your bag is empty', close: 'Close', needs: 'Needs {name}',
+  autoQuality: 'Auto quality', fpsCounter: 'FPS counter',
   shop: 'Shop', coins: 'Coins', buy: 'Buy', equip: 'Use', equipped: 'In use', owned: 'Owned', maxed: 'Max', levelShort: 'Lv {n}',
 };
 
@@ -635,6 +636,7 @@ const HI: Record<StringKey, string> = {
   level: 'लेवल', levels: 'लेवल', levelComplete: 'लेवल पूरा', nextLevel: 'अगला लेवल', locked: 'बंद',
   difficulty: 'कठिनाई', easy: 'आसान', normal: 'सामान्य', hard: 'कठिन', checkpoint: 'चेकपॉइंट',
   continue: 'आगे', inventory: 'थैला', inventoryEmpty: 'थैला खाली है', close: 'बंद करें', needs: '{name} चाहिए',
+  autoQuality: 'ऑटो क्वालिटी', fpsCounter: 'FPS काउंटर',
   shop: 'दुकान', coins: 'सिक्के', buy: 'खरीदें', equip: 'चुनें', equipped: 'चुना हुआ', owned: 'आपका', maxed: 'पूरा', levelShort: 'लेवल {n}',
 };
 
@@ -964,6 +966,63 @@ export const inventory = {
 };
 `;
 
+const PERF = `/**
+ * SMOOTH ON EVERY PHONE (admin 2026-11-19 game-gap audit: no frame-rate watch and no automatic quality — a game that ran
+ * at 60 on a laptop ran at 18 on a budget phone and stayed there). The governor watches the real frame time and steps
+ * the picture DOWN one level after a few seconds of struggling, and back up after a long good run. It never goes above
+ * what the player chose in Settings, and the player can turn it off (Settings → Auto quality).
+ *
+ *   const gov = createPerfGovernor();
+ *   gov.feed(frameSeconds);   // every drawn frame; true when the step changed
+ *   gov.fps, gov.drop          // smoothed frames per second; 0, 1 or 2 levels below the player's choice
+ * Hitches (a tab switch, a long load) are ignored, and so are the first seconds while the world is still building.
+ */
+export interface PerfOptions {
+  /** Below this many frames a second counts as struggling. */
+  low?: number;
+  /** Above this counts as comfortable. */
+  high?: number;
+  /** Seconds of struggling before stepping down. */
+  downAfter?: number;
+  /** Seconds of comfort before stepping back up. */
+  upAfter?: number;
+  /** Seconds ignored at the start. */
+  warmup?: number;
+  /** The most levels it may drop. */
+  maxDrop?: number;
+}
+
+export interface PerfGovernor { feed(frameSeconds: number): boolean; readonly fps: number; readonly drop: number; reset(): void }
+
+export function createPerfGovernor(o: PerfOptions = {}): PerfGovernor {
+  const low = o.low ?? 40, high = o.high ?? 56, downAfter = o.downAfter ?? 3, upAfter = o.upAfter ?? 12;
+  const warmup = o.warmup ?? 2, maxDrop = Math.max(0, Math.floor(o.maxDrop ?? 2));
+  let fps = 60, drop = 0, elapsed = 0, slow = 0, fast = 0;
+  return {
+    feed(dt: number): boolean {
+      // A hitch is not the device's pace: a tab switch or a long load would otherwise drop quality for nothing.
+      if (!Number.isFinite(dt) || dt <= 0 || dt > 0.25) return false;
+      elapsed += dt;
+      fps += (1 / dt - fps) * Math.min(1, dt * 2);       // smoothed over about half a second
+      if (elapsed < warmup) return false;
+      if (fps < low) { slow += dt; fast = 0; } else if (fps > high) { fast += dt; slow = 0; } else { slow = 0; fast = 0; }
+      if (slow >= downAfter && drop < maxDrop) { drop++; slow = 0; fps = Math.max(fps, low); return true; }
+      if (fast >= upAfter && drop > 0) { drop--; fast = 0; return true; }
+      return false;
+    },
+    get fps(): number { return fps; },
+    get drop(): number { return drop; },
+    reset(): void { fps = 60; drop = 0; elapsed = 0; slow = 0; fast = 0; },
+  };
+}
+
+/** The player's quality stepped down \`drop\` levels (high → medium → low). */
+export function steppedQuality(chosen: 'low' | 'medium' | 'high', drop: number): 'low' | 'medium' | 'high' {
+  const order = ['high', 'medium', 'low'] as const;
+  return order[Math.min(2, order.indexOf(chosen) + Math.max(0, Math.floor(drop)))];
+}
+`;
+
 const ECONOMY = `/**
  * COINS, A SHOP, UPGRADES AND A GARAGE (admin 2026-11-19 game-gap audit: no currency, no shop, no upgrades, no car or
  * character to choose — nothing to come back for). Saved on the device per game, so coins and purchases survive a
@@ -1223,6 +1282,10 @@ export interface GameSettings {
   vibration: boolean;
   /** How hard the game is; read it with difficultyScale(). */
   difficulty: Difficulty;
+  /** Lower the picture by itself when the device cannot keep up (never above \`quality\`). */
+  autoQuality: boolean;
+  /** Show the frames-per-second counter. */
+  showFps: boolean;
 }
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -1239,7 +1302,7 @@ export function difficultyScale(d: Difficulty = current.difficulty): { enemyDama
 }
 
 export const DEFAULT_SETTINGS: Readonly<GameSettings> = {
-  masterVolume: 0.9, musicVolume: 0.6, sfxVolume: 0.8, muted: false, quality: 'high', lookSensitivity: 1, vibration: true, difficulty: 'normal',
+  masterVolume: 0.9, musicVolume: 0.6, sfxVolume: 0.8, muted: false, quality: 'high', lookSensitivity: 1, vibration: true, difficulty: 'normal', autoQuality: true, showFps: false,
 };
 
 const KEY = 'nb-game-settings-v1';
@@ -1258,6 +1321,8 @@ export function sanitizeSettings(raw: unknown): GameSettings {
     lookSensitivity: look,
     vibration: typeof r.vibration === 'boolean' ? r.vibration : DEFAULT_SETTINGS.vibration,
     difficulty: r.difficulty === 'easy' || r.difficulty === 'normal' || r.difficulty === 'hard' ? r.difficulty : DEFAULT_SETTINGS.difficulty,
+    autoQuality: typeof r.autoQuality === 'boolean' ? r.autoQuality : DEFAULT_SETTINGS.autoQuality,
+    showFps: typeof r.showFps === 'boolean' ? r.showFps : DEFAULT_SETTINGS.showFps,
   };
 }
 
@@ -1844,10 +1909,11 @@ const FILES: Record<string, string> = {
   'src/game/core/inventory.ts': INVENTORY,
   'src/game/core/dialogue.ts': DIALOGUE,
   'src/game/core/economy.ts': ECONOMY,
+  'src/game/core/perf.ts': PERF,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.

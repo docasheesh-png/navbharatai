@@ -41,7 +41,10 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "7f781d207d3bd59cbd1cb6809eaffccc9894957e4a96b530fab73f6958f8a991",
     "d1cf3326115f8acf4a79908d57cf2ad8fa316e88e66441b29c0c63d608b952f7",
     "439a17ee3b06b278160e689a66abbb0a681c9f17b8cbfd66ed93c958e17c2787",
-    "d752dbb9b1226f57e81d8d5d817f64f7c88efd519f3ca91e560eee7b4a8dadc6"
+    "d752dbb9b1226f57e81d8d5d817f64f7c88efd519f3ca91e560eee7b4a8dadc6",
+    "1bcc20eca46b0ab25ee9b37e10f509c9d5289df580a36c4dfded83412db67dcc",
+    "2ebb9b4efa2eec7e04a95e629b1b030343828201959184eb3ad954d4feb34153",
+    "b825072aca196a7ccc2df9245e55f638f6eaece518998694db9beadb6610efe6"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -248,12 +251,17 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/fx/audio.ts": [
     "c9b08a58e84a865c0d58353f6ebd7af60211622cb95639ac6f4c56d20ad82c7d",
-    "7fd1dc2470cf216b39346c5034710fd1688b27d636bcfa42157d54afc118ced3"
+    "7fd1dc2470cf216b39346c5034710fd1688b27d636bcfa42157d54afc118ced3",
+    "c48b5ea716493cea8024e5192c841982a298308ee64c62d7378673b8f3f6f836"
   ],
   "src/game/fx/feedback.ts": [
     "3b1bdaba648b84956fdb7f87f9fe77190edd03343751df01871e513a109403d2",
     "b24bb48a0a85cff4c6b92a534c2ba4f8a5324fc793aeced49109d0bbb1edeb97",
-    "1cb1260ae5b8a06669f86ae06e13d19c65ade1bc46c0dbaa984af20444ea5e6d"
+    "1cb1260ae5b8a06669f86ae06e13d19c65ade1bc46c0dbaa984af20444ea5e6d",
+    "38707d870fa12b534e70acf0da4a415ecc468a28593071eb3daee524e793de59"
+  ],
+  "src/game/fx/music.ts": [
+    "9236e81cb871e1e42f8d51efac8ee6b84a392e7ec5a0ba55c893af945f906dd1"
   ],
   "src/game/fx/particles.ts": [
     "959d5a2a5c2de08c15db1b0c23e83da423ab4aa1672c1a8a01bff1b26883d436"

@@ -102541,3 +102541,13 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
   in the bag; saved per game id on the device, sanitised on load so a corrupt/hand-edited save cannot crash or mint coins; a free
   slot item is owned and in use from the start). Hud: coin pill, ShopPanel from the start and game-over screens, EN/HI strings.
 - Locked by `tests/aGameHasCoinsAShopAndAGarage.test.ts` (reversion: dropping the spend check / the owned-equip check → 4 fail).
+
+## 2026-11-19 — Game gap P1: music that follows the game (branch `claude/game-music`)
+- Gap: the music bus and Music volume slider existed; nothing ever played music.
+- Kit: `fx/music.ts` renders five moods from code (calm, action, tense loops; victory/defeat stings), seamless and deterministic;
+  `AudioManager.playMusic` (crossfade, same mood keeps going), `stopMusic`, `duckMusic`; a file loaded as `music:<mood>` replaces
+  one. `bindGameFeedback` cues it from events (menu→calm, start→action, pause/dialogue→duck, boss→tense, win/loss→sting);
+  `Game` option `music` (false or a cue table).
+- Found while wiring: `toMenu()` never announced GAME_MENU (resetRun() sets 'menu' silently, so setStatus('menu') said nothing —
+  the race overlay never cleared either); the first start screen had the same gap. Both now emit it.
+- Locked by `tests/theGameHasMusicThatFollowsIt.test.ts` (reversion: dropping the cue binding / the toMenu announcement → 3 fail).

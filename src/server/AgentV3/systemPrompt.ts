@@ -1139,6 +1139,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  COINS, SHOP, UPGRADES, GARAGE: economy.setup({ id, items, startCoins }) from src/game/core/economy.ts (items with a slot',
     '  such as \'car\' are chosen in the shop; levels makes an upgrade; kind \'item\' goes in the bag); economy.earn(n) on a coin,',
     '  build the car economy.equipped(\'car\') names (again on SHOP_CHANGED), and read upgrades with economy.stat(id, base, perLevel).',
+    '  MUSIC plays by itself and follows the game (calm menu, action play, tense on BOSS_SPAWNED, a sting on win/loss, lowered',
+    '  when paused or talking). Do not start your own background loop; options.music changes cues, audio.load(\'music:action\', url) a track.',
     '  The screen recipes below are for 2D games and anything not on <GameCanvas>.',
     '  🎨 EVERYTHING AROUND THE CANVAS IS UI, AND IT IS WHAT THE PLAYER SEES FIRST. Where the kit is in',
     '  the project, build it from the GAME UI recipes: the stage is `.nb-game`; the start, pause and',

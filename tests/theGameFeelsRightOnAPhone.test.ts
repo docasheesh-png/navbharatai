@@ -54,7 +54,7 @@ const STUBS: Record<string, string> = {
     + '  start(): void { this.running = true; }\n  stop(): void { this.running = false; }\n  setPaused(p: boolean): void { this.paused = p; }\n'
     + '  step(n = 1, dt = 1 / 60): void { for (let i = 0; i < n; i++) { if (!this.paused) this.update(dt); this.render(1, dt); } }\n}\n',
   'src/game/fx/particles.ts': 'export class ParticleSystem { addTo(): void {} update(): void {} dispose(): void {} burst(): void {} }\n',
-  'src/game/fx/audio.ts': "export type SoundCategory = 'music' | 'sfx' | 'ui';\nexport const audio = { unlock(): void {}, setListener(): void {}, stopAll(): void {}, setVolume(): void {}, play(): () => void { return () => {}; } };\n",
+  'src/game/fx/audio.ts': "export type SoundCategory = 'music' | 'sfx' | 'ui';\nexport const audio = { unlock(): void {}, setListener(): void {}, stopAll(): void {}, setVolume(): void {}, play(): () => void { return () => {}; }, playMusic(): void {}, stopMusic(): void {}, duckMusic(): void {} };\n",
 };
 
 let LOAD: any; let EV: any; let SET: any; let FB: any; let SHELL: any; let HUD: any; let CANVAS: any; let META: any;

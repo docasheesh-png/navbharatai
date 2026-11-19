@@ -59,7 +59,7 @@ import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
 import { ParticleSystem } from './fx/particles';
 import { audio } from './fx/audio';
-import { bindGameFeedback } from './fx/feedback';
+import { bindGameFeedback, type FeedbackContext } from './fx/feedback';
 import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions } from './ui/touchControls';
 
 /**
@@ -153,6 +153,11 @@ export interface GameOptions {
   crosshair?: boolean;
   /** The minimap in a corner. Default: shown by itself as soon as something carries a map marker; true always; false never. */
   minimap?: boolean;
+  /**
+   * The music that follows the game (fx/music.ts: calm on the start screen, action in play, tense for a boss, a sting on a
+   * win or a loss; lowered while paused or talking). false = none; a table changes cues, e.g. { GAME_STARTED: 'tense' }.
+   */
+  music?: false | Partial<Record<string, string | null>>;
 }
 
 export interface GameContext {
@@ -324,6 +329,7 @@ export class Game {
 
     this.disposers.push(handleResize(this.renderer, this.rig.camera, options.container));
     this.disposers.push(bindGameFeedback({
+      music: options.music as FeedbackContext['music'],
       particles: this.particles,
       feel: this.feel,
       positionOf: (p) => p?.position ?? null,
@@ -626,7 +632,9 @@ export class Game {
     // No start screen asked for (a Game with its own HUD), or the game's own setup() already began the round.
     if (!this.options.startScreen || state.status === 'playing') { this.loop.setPaused(false); setStatus('playing'); return; }
     this.loop.setPaused(true);
-    setStatus('menu');
+    // The first start screen is already 'menu' (the initial state), so setStatus would announce nothing — and the
+    // start-screen music (GAME_MENU) would never begin.
+    if (state.status === 'menu') events.emit('GAME_MENU'); else setStatus('menu');
   }
   /** Leave the start screen and begin the round. On a phone it also goes full screen (the tap is the permission). */
   play(): void {
@@ -673,7 +681,9 @@ export class Game {
     this.feel.reset();
     this.player.reset();
     this.loop.setPaused(true);
-    setStatus('menu');
+    // resetRun() already put the status back to 'menu' WITHOUT announcing it, so setStatus('menu') would say nothing:
+    // GAME_MENU (the start-screen music, the race overlay clearing) never happened on Menu.
+    if (state.status === 'menu') events.emit('GAME_MENU'); else setStatus('menu');
   }
   /**
    * Where a world point is on screen, in pixels inside the game's box, and whether it is in front of the camera —

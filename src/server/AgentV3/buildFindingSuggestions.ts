@@ -132,14 +132,14 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     detail: 'The last build ran out of time before it finished.',
     prompt: 'The last build ran out of time before it finished. Continue from where it stopped: finish the parts that are not done yet, keep everything that is already there and working, and confirm the app builds and opens.',
   },
+  // Failed lane verification is an app finding until the corresponding recheck clears it.
+  // Keep compiler and stylesheet failures together; neither handoff nor a compiler-only pass
+  // establishes that a stylesheet defect was repaired. Never interpolate raw diagnostics here.
   {
-    // A fast-lane handoff does not settle its compiler/style errors. The diagnostic stays open
-    // until a genuine recheck, so offer a focused recheck/repair rather than treating it as setup.
     code: 'SIMPLE_BUILD_VERIFY_ERROR',
-    title: 'Recheck and fix the unfinished build errors',
-    detail: 'An earlier check found errors that have not yet been confirmed fixed.',
-    prompt: 'An earlier check of this app found errors that have not been confirmed fixed. Read the recorded errors and recheck the current files first. Fix only the errors that remain, preserving the existing screens, styles and working behaviour, then confirm the whole app builds and opens correctly. Do not treat a handoff to another build step as proof that the errors were fixed.',
-    withEvidence: true,
+    title: 'Fix remaining build errors',
+    detail: 'An app check found errors that have not yet been confirmed fixed.',
+    prompt: 'Inspect the saved build diagnostics and current app files. Fix the remaining compiler or stylesheet errors with targeted changes that preserve working features. Run the relevant checks again before claiming success; a compiler pass alone does not confirm that stylesheet errors are fixed. If a check cannot run, report what remains unverified.',
   },
   {
     // The syntax gate's finding when its repair could not clear it (SYNTAX_HEALED answers it otherwise).

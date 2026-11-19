@@ -20,8 +20,8 @@ describe('a handed-off compiler error stays unresolved until a genuine recheck',
     expect(isAppFinding({ phase: 'build', code })).toBe(true);
     const offers = buildFindingSuggestions(diag.report().issues);
     expect(offers).toHaveLength(1);
-    expect(offers[0].prompt).toContain('recheck the current files first');
-    expect(offers[0].prompt).toContain(ERROR);
+    expect(offers[0].prompt).toContain('saved build diagnostics and current app files');
+    expect(offers[0].prompt).not.toContain(ERROR);
     diag.recordCommand({ command: 'tsc --noEmit', stdout: '', exitCode: 0 });
     expect(buildFindingSuggestions(diag.report().issues)).toEqual([]);
   });

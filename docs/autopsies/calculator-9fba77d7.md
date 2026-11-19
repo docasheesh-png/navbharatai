@@ -67,3 +67,44 @@ Automatic approval review rejected the public GitHub push: it required explicit 
 to publish the complete payload to the public repository. A read-only remote-ref check found no
 matching branch. No alternate write route was attempted. Consequently no PR or GitHub CI run
 exists for this change yet. A private, reviewable patch is the delivery pending that authorization.
+
+## 2026-11-19: queue identity and finding-action correction
+
+Required hosted job 135519217978 on b1751db5 failed four tests: two unclassified
+app-finding codes, duplicate queue identities and reuse of closed Q-2756. No local
+tests or CI were run for this correction. Existing failing evidence is preserved.
+
+The calculator rows were allocated from a stale queue. Their old IDs did not refer
+to the incumbent items with the same numbers. All eleven calculator rows retain
+their evidence and status under the following mapping (calculator context only):
+
+| Former calculator ID | Current calculator ID |
+| --- | --- |
+| Q-2756 | Q-2881 |
+| Q-2757 | Q-2882 |
+| Q-2758 | Q-2883 |
+| Q-2759 | Q-2884 |
+| Q-2760 | Q-2885 |
+| Q-2761 | Q-2886 |
+| Q-2762 | Q-2887 |
+| Q-2763 | Q-2888 |
+| Q-2764 | Q-2889 |
+| Q-2765 | Q-2890 |
+| Q-2766 | Q-2891 |
+
+The closed register is unchanged: its Q-2756 remains closed. The canonical Q-2753
+row retains its newer BR2002 evidence; only its stale duplicate was removed.
+Prior progress entries and commit history retain the former calculator IDs; this
+mapping disambiguates them rather than rewriting their historical evidence.
+
+Allocation scan: main d62593336e71cc1b3a2e52f4e30358244f33e3a6 queue and closed
+register; all four open PR diffs (#4300, #4303, #4305, #4315). #4303 reserves
+through Q-2783 and #4315 through Q-2880. Q-2881 through Q-2891 were unused in
+that snapshot. Recheck before publication because concurrent work can allocate IDs.
+
+SIMPLE_BUILD_VERIFY_ERROR now has one curated action in the existing suggestions
+UI; ONESHOT_VERIFY_FAILED aliases it. Neither raw diagnostic text nor provider
+identifiers are interpolated. Both remain real unresolved app findings until the
+appropriate recheck, with no change to severity, billing, resolution or CI gates.
+The focused regression source covers both codes, deduplication, resolved and
+observation exclusions, and absence of raw evidence in the suggestion. It is unrun.

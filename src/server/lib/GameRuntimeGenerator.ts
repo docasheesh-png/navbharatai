@@ -276,7 +276,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -549,12 +549,94 @@ export function resetRun(): void {
 }
 `;
 
+const STRINGS = `/**
+ * THE GAME'S OWN WORDS, IN THE PLAYER'S LANGUAGE (admin 2026-11-19 game-gap audit: every kit screen was hard-coded
+ * English — "Paused", "Game over", "Play again"). This is the USER'S game, so its words follow the user: English and
+ * Hindi are written here; any other language is supplied by the builder through options.strings (never guessed).
+ * Placeholders like {score} are filled by t(key, { score }).
+ */
+import { events } from './events';
+
+const EN = {
+  ready: 'Ready?', play: 'Play', settings: 'Settings', paused: 'Paused', resume: 'Resume', restart: 'Restart', menu: 'Menu',
+  gameOver: 'Game over', youWin: 'You win', playAgain: 'Play again', back: 'Back', score: 'Score', best: 'Best',
+  sound: 'Sound', volume: 'Volume', music: 'Music', effects: 'Effects', graphics: 'Graphics', graphicsQuality: 'Graphics quality',
+  smooth: 'Smooth', balanced: 'Balanced', sharp: 'Sharp', lookSpeed: 'Look speed', vibration: 'Vibration', on: 'On', off: 'Off',
+  mute: 'Mute', soundOn: 'Sound on', pause: 'Pause', fullScreen: 'Full screen', exitFullScreen: 'Exit full screen',
+  loading: 'Loading', loadingModels: 'Loading models', rotateHint: 'Turn your phone sideways to play',
+  controlsTouch: 'Left thumb to move · buttons on the right to act',
+  controlsKeyboard: 'WASD / arrow keys to move · Space to jump · F or click to attack · Esc to pause',
+  attack: 'Attack', jump: 'Jump', use: 'Use', run: 'Run', left: 'Left', right: 'Right', brake: 'Brake', drift: 'Drift', gas: 'Gas',
+  newBest: 'NEW BEST! {score}', soClose: 'So close! Only {n} more to beat your best ({best})', scoreBest: 'Score {score} · Best {best}',
+  xpLine: '+{xp} XP · Level {level} ({into}/{next})', levelUp: 'Level up! You reached level {level}', unlocked: 'Unlocked: {name}',
+  achievement: 'Achievement: {name}', goalComplete: 'Goal complete: {name}', nextGoal: 'Next goal: {name} ({done})', streak: '{n}-day streak',
+  minutes: 'min',
+};
+
+export type StringKey = keyof typeof EN;
+export type GameLanguage = 'en' | 'hi';
+
+const HI: Record<StringKey, string> = {
+  ready: 'तैयार?', play: 'खेलें', settings: 'सेटिंग्स', paused: 'रुका हुआ', resume: 'जारी रखें', restart: 'फिर से शुरू', menu: 'मेनू',
+  gameOver: 'गेम ओवर', youWin: 'आप जीत गए', playAgain: 'फिर खेलें', back: 'वापस', score: 'स्कोर', best: 'बेस्ट',
+  sound: 'आवाज़', volume: 'वॉल्यूम', music: 'संगीत', effects: 'इफ़ेक्ट्स', graphics: 'ग्राफ़िक्स', graphicsQuality: 'ग्राफ़िक्स क्वालिटी',
+  smooth: 'स्मूथ', balanced: 'संतुलित', sharp: 'शार्प', lookSpeed: 'कैमरा स्पीड', vibration: 'वाइब्रेशन', on: 'चालू', off: 'बंद',
+  mute: 'आवाज़ बंद करें', soundOn: 'आवाज़ चालू करें', pause: 'रोकें', fullScreen: 'फ़ुल स्क्रीन', exitFullScreen: 'फ़ुल स्क्रीन बंद करें',
+  loading: 'लोड हो रहा है', loadingModels: 'मॉडल लोड हो रहे हैं', rotateHint: 'खेलने के लिए फ़ोन को तिरछा करें',
+  controlsTouch: 'बाएँ अंगूठे से चलें · दाईं ओर के बटन से एक्शन करें',
+  controlsKeyboard: 'WASD / तीर कुंजियों से चलें · Space से कूदें · F या क्लिक से हमला · Esc से रोकें',
+  attack: 'हमला', jump: 'कूदें', use: 'इस्तेमाल', run: 'दौड़ें', left: 'बाएँ', right: 'दाएँ', brake: 'ब्रेक', drift: 'ड्रिफ़्ट', gas: 'गैस',
+  newBest: 'नया बेस्ट! {score}', soClose: 'बस {n} और! अपना बेस्ट ({best}) तोड़ने के लिए', scoreBest: 'स्कोर {score} · बेस्ट {best}',
+  xpLine: '+{xp} XP · लेवल {level} ({into}/{next})', levelUp: 'लेवल अप! आप लेवल {level} पर पहुँचे', unlocked: 'अनलॉक: {name}',
+  achievement: 'उपलब्धि: {name}', goalComplete: 'लक्ष्य पूरा: {name}', nextGoal: 'अगला लक्ष्य: {name} ({done})', streak: '{n} दिन लगातार',
+  minutes: 'मिनट',
+};
+
+export const GAME_STRINGS: Readonly<Record<GameLanguage, Record<StringKey, string>>> = { en: EN, hi: HI };
+
+let active: Record<StringKey, string> = { ...EN };
+let activeLanguage: GameLanguage | 'custom' = 'en';
+
+/** The page's own language, then the browser's — for language: 'auto'. */
+function detect(): GameLanguage {
+  try {
+    const page = typeof document !== 'undefined' ? document.documentElement?.lang ?? '' : '';
+    const browser = typeof navigator !== 'undefined' ? navigator.language ?? '' : '';
+    return /^hi\\b/i.test(page) || (!page && /^hi\\b/i.test(browser)) ? 'hi' : 'en';
+  } catch { return 'en'; }
+}
+
+/**
+ * Choose the words: 'en', 'hi', or 'auto' (the page's language). overrides replaces any key — the way a builder
+ * gives Tamil, Bangla or any other language, or changes one label. A non-string override is ignored.
+ */
+export function setGameLanguage(language: GameLanguage | 'auto' = 'en', overrides: Partial<Record<StringKey, string>> = {}): GameLanguage {
+  const lang: GameLanguage = language === 'auto' ? detect() : (language in GAME_STRINGS ? language : 'en');
+  const clean: Partial<Record<StringKey, string>> = {};
+  for (const [k, v] of Object.entries(overrides ?? {})) if (k in EN && typeof v === 'string' && v.trim()) clean[k as StringKey] = v;
+  active = { ...GAME_STRINGS[lang], ...clean };
+  activeLanguage = Object.keys(clean).length ? 'custom' : lang;
+  events.emit('LANGUAGE_CHANGED', { language: lang });
+  return lang;
+}
+
+export function gameLanguage(): GameLanguage | 'custom' { return activeLanguage; }
+
+/** The word for key in the chosen language, with {placeholders} filled. Falls back to English, never to a key name. */
+export function t(key: StringKey, vars?: Record<string, string | number>): string {
+  let text = active[key] ?? EN[key] ?? '';
+  if (vars) for (const [k, v] of Object.entries(vars)) text = text.split('{' + k + '}').join(String(v));
+  return text;
+}
+`;
+
 const LOADING = `/**
  * LOADING — what is still being fetched or built, so the player sees honest progress instead of a blank screen
  * (admin 2026-11-19 game-gap audit: "loading screen nahi"). Real work only: a job is begun when a download or a
  * build starts and ended when it finishes; the fraction never moves on its own. The Hud draws it while active.
  */
 import { events } from './events';
+import { t } from './strings';
 
 interface Job { label: string; fraction: number }
 
@@ -583,7 +665,7 @@ const announce = (): void => { events.emit('LOADING_PROGRESS', snapshot()); };
 
 export const loading = {
   /** A job starts; returns its id. */
-  begin(label = 'Loading'): number { const id = nextId++; jobs.set(id, { label, fraction: 0 }); announce(); return id; },
+  begin(label = t('loading')): number { const id = nextId++; jobs.set(id, { label, fraction: 0 }); announce(); return id; },
   /** How far one job is, 0..1 (only from real bytes or real steps). */
   progress(id: number, fraction: number): void { const job = jobs.get(id); if (!job || !Number.isFinite(fraction)) return; job.fraction = fraction; announce(); },
   /** A job finished (or failed — either way it is no longer loading). */
@@ -598,7 +680,7 @@ const assetJob = new Map<number, number>();
 events.on('ASSET_LOADING', (p: { id?: unknown; fraction?: unknown; done?: unknown } | undefined) => {
   if (!p || typeof p.id !== 'number') return;
   let id = assetJob.get(p.id);
-  if (id === undefined) { id = loading.begin('Loading models'); assetJob.set(p.id, id); }
+  if (id === undefined) { id = loading.begin(t('loadingModels')); assetJob.set(p.id, id); }
   if (p.done === true) { loading.end(id); assetJob.delete(p.id); return; }
   if (typeof p.fraction === 'number') loading.progress(id, p.fraction);
 });
@@ -716,6 +798,7 @@ const META = `/**
 import { events } from './events';
 import { state, addScore } from './state';
 import { settings } from './settings';
+import { t } from './strings';
 
 export interface RunStats {
   score: number;
@@ -1168,20 +1251,20 @@ export function startMeta(config: MetaConfig = {}): Profile { return meta.start(
  */
 export function summaryLines(s: RunSummary): string[] {
   const lines: string[] = [];
-  if (s.newBest) lines.push('NEW BEST! ' + s.run.score);
-  else if (s.nearMiss !== null) lines.push('So close! Only ' + s.nearMiss + ' more to beat your best (' + s.previousBest + ')');
-  else lines.push('Score ' + s.run.score + ' · Best ' + s.best);
-  lines.push('+' + s.xpGained + ' XP · Level ' + s.level + ' (' + s.xpIntoLevel + '/' + s.xpForNext + ')');
-  if (s.levelsGained > 0) lines.push('Level up! You reached level ' + s.level);
-  for (const u of s.unlockedNow) lines.push('Unlocked: ' + u);
-  for (const a of s.achievementsNow) lines.push('Achievement: ' + a.title);
-  for (const g of s.goalsCompletedNow) lines.push('Goal complete: ' + g.text);
+  if (s.newBest) lines.push(t('newBest', { score: s.run.score }));
+  else if (s.nearMiss !== null) lines.push(t('soClose', { n: s.nearMiss, best: s.previousBest }));
+  else lines.push(t('scoreBest', { score: s.run.score, best: s.best }));
+  lines.push(t('xpLine', { xp: s.xpGained, level: s.level, into: s.xpIntoLevel, next: s.xpForNext }));
+  if (s.levelsGained > 0) lines.push(t('levelUp', { level: s.level }));
+  for (const u of s.unlockedNow) lines.push(t('unlocked', { name: u }));
+  for (const a of s.achievementsNow) lines.push(t('achievement', { name: a.title }));
+  for (const g of s.goalsCompletedNow) lines.push(t('goalComplete', { name: g.text }));
   const open = s.goals.filter((g) => !g.done)[0];
   if (open) {
-    const done = open.stat === 'time' ? Math.floor(open.progress / 60) + '/' + open.target / 60 + ' min' : open.progress + '/' + open.target;
-    lines.push('Next goal: ' + open.text + ' (' + done + ')');
+    const done = open.stat === 'time' ? Math.floor(open.progress / 60) + '/' + open.target / 60 + ' ' + t('minutes') : open.progress + '/' + open.target;
+    lines.push(t('nextGoal', { name: open.text, done }));
   }
-  if (s.streak > 1) lines.push(s.streak + '-day streak');
+  if (s.streak > 1) lines.push(t('streak', { n: s.streak }));
   return lines;
 }
 
@@ -1230,10 +1313,11 @@ const FILES: Record<string, string> = {
   'src/game/core/meta.ts': META,
   'src/game/core/settings.ts': SETTINGS,
   'src/game/core/loading.ts': LOADING,
+  'src/game/core/strings.ts': STRINGS,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -1259,7 +1343,9 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     // meta.ts imports state.ts (and events.ts); state.ts imports events.ts.
     if (files['src/game/core/meta.ts']) { files['src/game/core/state.ts'] = FILES['src/game/core/state.ts']; files['src/game/core/settings.ts'] = FILES['src/game/core/settings.ts']; }
     if (files['src/game/core/settings.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
-    if (files['src/game/core/loading.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
+    if (files['src/game/core/loading.ts']) { files['src/game/core/events.ts'] = FILES['src/game/core/events.ts']; files['src/game/core/strings.ts'] = FILES['src/game/core/strings.ts']; }
+    if (files['src/game/core/meta.ts']) files['src/game/core/strings.ts'] = FILES['src/game/core/strings.ts'];
+    if (files['src/game/core/strings.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }

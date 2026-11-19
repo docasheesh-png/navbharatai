@@ -88,10 +88,13 @@ export function testsEvidenceFromCommands(
 ): EvidenceOutcome | undefined {
   let verdict: EvidenceOutcome | undefined;
   for (const c of commands || []) {
-    let framework = testFrameworkFromCommand(c?.command);
-    if (!framework) continue;
     // An absent/null exit is not zero. This fallback has no runner-owned completion receipt.
-    if (typeof c.exitCode !== 'number' || !Number.isInteger(c.exitCode) || c.exitCode < 0) continue;
+    if (typeof c?.exitCode !== 'number' || !Number.isInteger(c.exitCode) || c.exitCode < 0) continue;
+    // A successful test && tsc receipt proves both commands completed. Keep the suite output
+    // independently readable even when the compiler proof belongs to an older source revision.
+    const command = c.exitCode === 0 ? c.command?.replace(/\s+&&\s+tsc\s+--noEmit\s*$/, '') : c.command;
+    let framework = testFrameworkFromCommand(command);
+    if (!framework) continue;
     const output = stripAnsi(`${c.stdout ?? ''}\n${c.stderr ?? ''}`);
     if (framework === 'npm-script') {
       // npm prints the script body beneath its package/script header. It may be `echo ...`, a

@@ -565,7 +565,7 @@ export class ProjectileSystem {
         s.active = false;
         const hit: ProjectileHit = { target: best, point: { ...best.position }, damage: s.damage, ownerId: s.ownerId };
         hits.push(hit);
-        events.emit('PROJECTILE_HIT', { position: hit.point, damage: s.damage });
+        events.emit('PROJECTILE_HIT', { position: hit.point, damage: s.damage, ownerId: s.ownerId });
       }
     }
     return hits;
@@ -778,6 +778,8 @@ export class Weapon {
   private wasHeld = false;
   /** The trigger was held and the gun ready last step — a late shot now carries its lateness. */
   private streak = false;
+  /** Who fired last (an enemy passes its id) — so the HUD shows only the player's own ammo. */
+  private lastOwner: string | undefined;
   private seed: number;
 
   constructor(kind: WeaponKind | WeaponSpec = 'pistol', seed = 1) {
@@ -794,6 +796,7 @@ export class Weapon {
   reload(): boolean {
     if (this.reloading > 0 || this.ammo >= this.spec.magazine) return false;
     this.reloading = this.spec.reload;
+    events.emit('WEAPON_RELOADING', { kind: this.kind, ammo: this.ammo, magazine: this.spec.magazine, seconds: this.spec.reload, ownerId: this.lastOwner });
     return true;
   }
 
@@ -802,6 +805,7 @@ export class Weapon {
    * space and \`aim\` the direction the player is aiming (it need not be normalised).
    */
   update(dt: number, triggerHeld: boolean, muzzle: Vec3, aim: Vec3, projectiles: ProjectileSystem, ownerId?: string): number {
+    this.lastOwner = ownerId;
     // The time between shots rarely divides into 1/60 s steps (13 rounds a second is 4.6 frames). A
     // cooldown RESET on each shot rounds every gap up to whole frames and quietly turns 13/s into 12/s, so
     // a shot that comes due mid-step CARRIES how late it is into the next gap. Only while the trigger is
@@ -820,7 +824,7 @@ export class Weapon {
       this.reloading = Math.max(0, this.reloading - dt);
       if (this.reloading === 0) {
         this.ammo = this.spec.magazine;
-        events.emit('WEAPON_RELOADED', { kind: this.kind });
+        events.emit('WEAPON_RELOADED', { kind: this.kind, ammo: this.ammo, magazine: this.spec.magazine, ownerId: this.lastOwner });
       }
       return 0;
     }
@@ -828,7 +832,7 @@ export class Weapon {
     if (this.ammo <= 0) {
       // Dry: say so (a click) — tapped or held through the last round alike — and start the reload the
       // player obviously wants. The reload then blocks this branch, so the click sounds once.
-      events.emit('WEAPON_EMPTY', { kind: this.kind });
+      events.emit('WEAPON_EMPTY', { kind: this.kind, ammo: 0, magazine: this.spec.magazine, ownerId: this.lastOwner });
       this.reload();
       return 0;
     }
@@ -855,7 +859,7 @@ export class Weapon {
       });
     }
     // ONE shot is one bang and one flash, however many pellets it carried.
-    events.emit('WEAPON_FIRED', { position: { ...muzzle }, kind: this.kind, ownerId });
+    events.emit('WEAPON_FIRED', { position: { ...muzzle }, kind: this.kind, ownerId, ammo: this.ammo, magazine: this.spec.magazine });
     this.kick += this.spec.recoil;
     this.bloom = Math.min(MAX_BLOOM, this.bloom + 0.35);
     if (this.ammo === 0 && this.spec.magazine === 1) this.reload();   // a bow nocks the next arrow itself

@@ -1844,6 +1844,79 @@ export function setEnvironmentIntensity(scene: THREE.Scene, intensity: number): 
 // right ratios read as stacked blocks (Phase 2, 2026-10-05 — the admin's "FAIL" bar). So the parts are
 // rounded and tapered too; see createHumanoid.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
+const HEALTH_BAR = `import * as THREE from 'three';
+
+/**
+ * HEALTH BARS OVER ENEMIES (admin 2026-11-19 game-gap audit: "enemy health bars nahi"). A thin bar that floats above an
+ * enemy, always faces the camera, empties as it is hurt and hides at full health (a field of full bars is noise) and
+ * at zero. One shared geometry; the shell calls updateHealthBars(camera) every frame, so a game only attaches them.
+ *
+ *   const bar = attachHealthBar(enemy.mesh, () => enemy.hp.fraction);   // Health.fraction from systems/combat.ts
+ *   // when the enemy is removed: bar.dispose();
+ */
+export interface HealthBarOptions {
+  /** Height above the target's origin, in world units. Default: just above its bounding box. */
+  height?: number;
+  /** Bar width in world units. Default 1. */
+  width?: number;
+  /** Show even at full health (a boss, a friendly). Default false. */
+  always?: boolean;
+}
+
+export interface HealthBar { readonly group: THREE.Group; dispose: () => void }
+
+interface Entry { target: THREE.Object3D; read: () => number; group: THREE.Group; fill: THREE.Mesh; always: boolean; mats: THREE.Material[] }
+
+const bars = new Set<Entry>();
+let plane: THREE.PlaneGeometry | null = null;
+
+export function attachHealthBar(target: THREE.Object3D, read: () => number, options: HealthBarOptions = {}): HealthBar {
+  plane = plane ?? new THREE.PlaneGeometry(1, 1);
+  const width = options.width ?? 1;
+  let height = options.height;
+  if (height === undefined) {
+    const box = new THREE.Box3().setFromObject(target);
+    height = Number.isFinite(box.max.y) ? box.max.y - target.getWorldPosition(new THREE.Vector3()).y + 0.35 : 2;
+  }
+  const back = new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.6, depthTest: false });
+  const front = new THREE.MeshBasicMaterial({ color: 0x4ade80, depthTest: false });
+  const group = new THREE.Group();
+  group.name = 'healthBar';
+  const bg = new THREE.Mesh(plane, back); bg.scale.set(width, 0.12, 1); bg.renderOrder = 998;
+  const fill = new THREE.Mesh(plane, front); fill.scale.set(width * 0.94, 0.08, 1); fill.position.z = 0.001; fill.renderOrder = 999;
+  group.add(bg, fill);
+  group.position.y = height;
+  target.add(group);
+  const entry: Entry = { target, read, group, fill, always: options.always === true, mats: [back, front] };
+  bars.add(entry);
+  return {
+    group,
+    dispose: () => { if (!bars.delete(entry)) return; group.removeFromParent(); for (const m of entry.mats) m.dispose(); },
+  };
+}
+
+/** Called every frame by the shell: face the camera, size the fill, colour it by how hurt the enemy is. */
+export function updateHealthBars(camera: THREE.Camera): void {
+  const q = new THREE.Quaternion();
+  for (const e of bars) {
+    let f = 0;
+    try { f = Math.max(0, Math.min(1, Number(e.read()) || 0)); } catch { f = 0; }
+    e.group.visible = f > 0 && (e.always || f < 1) && e.target.visible;
+    if (!e.group.visible) continue;
+    const width = e.group.children[0].scale.x;
+    e.fill.scale.x = Math.max(0.0001, width * 0.94 * f);
+    e.fill.position.x = -(width * 0.94 * (1 - f)) / 2;
+    (e.fill.material as THREE.MeshBasicMaterial).color.setHex(f > 0.5 ? 0x4ade80 : f > 0.25 ? 0xfacc15 : 0xf87171);
+    // Face the camera: undo the parent's rotation, then take the camera's.
+    e.target.getWorldQuaternion(q).invert();
+    e.group.quaternion.copy(q.multiply(camera.quaternion));
+  }
+}
+
+/** How many bars are live (tests and debugging). */
+export function healthBarCount(): number { return bars.size; }
+`;
+
 const HUMANOID = `import * as THREE from 'three';
 import { mergeGeometries } from './surfaces';
 
@@ -6286,6 +6359,7 @@ const FILES: Record<string, string> = {
   'src/game/three/environment.ts': ENVIRONMENT,
   'src/game/three/surfaces.ts': SURFACES,
   'src/game/three/humanoid.ts': HUMANOID,
+  'src/game/three/healthBar.ts': HEALTH_BAR,
   // The things a world is actually made of (admin 2026-08-27): car, tree, mountain, river, desert,
   // road, animal — each built at a REAL or a LITE tier, because "asli" and "3d" are different asks.
   'src/game/three/objects.ts': OBJECTS,
@@ -6294,7 +6368,7 @@ const FILES: Record<string, string> = {
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'objects', 'atmosphere',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthBar', 'objects', 'atmosphere',
 ];
 
 /**

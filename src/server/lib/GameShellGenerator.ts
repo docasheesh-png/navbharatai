@@ -53,6 +53,7 @@ import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle, setDriftInput, notePlayerAxis, onVehicleDrift } from './three/objects';
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid, type HumanoidAction } from './three/humanoid';
+import { updateHealthBars } from './three/healthBar';
 import { ParticleSystem } from './fx/particles';
 import { audio } from './fx/audio';
 import { bindGameFeedback } from './fx/feedback';
@@ -142,6 +143,11 @@ export interface GameOptions {
    */
   language?: GameLanguage | 'auto';
   strings?: Partial<Record<StringKey, string>>;
+  /**
+   * The aiming cross in the middle of the screen. Default: shown by itself the first time the player's own gun fires
+   * (a game with a gun), with a hit marker when a shot lands. true shows it from the start; false never.
+   */
+  crosshair?: boolean;
 }
 
 export interface GameContext {
@@ -339,11 +345,13 @@ export class Game {
     // 🔎 NavBharatAI's playtest reads the round through this (score, status) and ends one to prove Play again works.
     // Read-only except endRound, which only does what losing does — harmless in a single-player game.
     const hook = { status: () => state.status, score: () => state.score, endRound: () => { if (state.status === 'playing' || state.status === 'paused') setStatus('gameover'); } };
-    (window as unknown as { __nbKit?: typeof hook }).__nbKit = hook;
-    this.disposers.push(() => {
-      const w = window as unknown as { __nbKit?: typeof hook };
-      if (w.__nbKit === hook) delete w.__nbKit;
-    });
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __nbKit?: typeof hook }).__nbKit = hook;
+      this.disposers.push(() => {
+        const w = window as unknown as { __nbKit?: typeof hook };
+        if (w.__nbKit === hook) delete w.__nbKit;
+      });
+    }
     // ⚙️ THE PLAYER'S SETTINGS, APPLIED — now and on every change from the pause menu.
     this.applySettings(settings.get());
     this.disposers.push(settings.subscribe((s) => this.applySettings(s)));
@@ -592,6 +600,7 @@ export class Game {
     // Shadows follow the player, or they blur out as soon as they walk away on a large map.
     followShadow(this.lights.key, p);
     audio.setListener(p.x, p.y, p.z);
+    updateHealthBars(this.rig.camera);   // enemy health bars face the camera (three/healthBar.ts)
     this.renderer.render(this.scene, this.rig.camera);
   }
 
@@ -654,6 +663,36 @@ export class Game {
     this.loop.setPaused(true);
     setStatus('menu');
   }
+  /**
+   * Where a world point is on screen, in pixels inside the game's box, and whether it is in front of the camera —
+   * for anything drawn over the 3D view (damage numbers, a marker, a name tag).
+   */
+  worldToScreen(p: { x: number; y: number; z: number }): { x: number; y: number; visible: boolean } {
+    const v = new THREE.Vector3(p.x, p.y, p.z).project(this.rig.camera);
+    const box = this.options.container.getBoundingClientRect?.();
+    const w = box?.width || window.innerWidth || 1; const h = box?.height || window.innerHeight || 1;
+    return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h, visible: v.z > -1 && v.z < 1 };
+  }
+
+  private boss: { name: string; read: () => number } | null = null;
+  /**
+   * Show a BOSS bar across the top (name and health), or hide it with null. read returns 0..1 — a Health's fraction.
+   *   game.setBossBar('Raavan', () => boss.hp.fraction);   …   game.setBossBar(null);
+   */
+  setBossBar(name: string | null, read?: () => number): void {
+    this.boss = name && read ? { name, read } : null;
+    events.emit('BOSS_BAR', { name: this.boss?.name ?? null });
+  }
+  /** The boss bar now, or null. */
+  get bossBar(): { name: string; fraction: number } | null {
+    if (!this.boss) return null;
+    let f = 0;
+    try { f = Math.max(0, Math.min(1, Number(this.boss.read()) || 0)); } catch { f = 0; }
+    return { name: this.boss.name, fraction: f };
+  }
+  /** The crosshair setting the Hud reads. */
+  get crosshairOption(): boolean | undefined { return this.options.crosshair; }
+
   /** What the start screen shows; null when the game has its own. */
   get startScreenInfo(): { title: string; subtitle: string; controls: { touch: string; keyboard: string } } | null {
     const o = this.options.startScreen;
@@ -903,6 +942,98 @@ function FullscreenIcon({ on }: { on: boolean }) {
   );
 }
 
+/** The player's own weapon event (no owner, or 'player') — an enemy's gun never moves the player's HUD. */
+const mine = (p: unknown): boolean => { const o = (p as { ownerId?: unknown } | null)?.ownerId; return o === undefined || o === 'player'; };
+
+interface DamageNumber { id: number; x: number; y: number; text: string; kill: boolean }
+
+/**
+ * THE SHOOTER'S HUD (admin 2026-11-19 game-gap audit: crosshair, ammo, hit markers, damage numbers and a boss bar were
+ * all missing). Driven by the kit's events, never by the frame: the crosshair appears the first time the player's own
+ * gun fires (or always, with options.crosshair), a hit marker flashes when a shot lands, the ammo count follows the
+ * Weapon, damage numbers rise from where the enemy was hit, and a boss bar shows while game.setBossBar is set.
+ */
+export function ShooterOverlay({ game, playing }: { game: Game; playing: boolean }) {
+  const forced = game.crosshairOption;
+  const [armed, setArmed] = useState(forced === true);
+  const [ammo, setAmmo] = useState<{ ammo: number; magazine: number; reloading: boolean } | null>(null);
+  const [hit, setHit] = useState<'hit' | 'kill' | null>(null);
+  const [numbers, setNumbers] = useState<DamageNumber[]>([]);
+  const [boss, setBoss] = useState<{ name: string; fraction: number } | null>(game.bossBar);
+  const seq = useRef(0);
+
+  useEffect(() => {
+    let hitTimer: ReturnType<typeof setTimeout> | undefined;
+    const flash = (kind: 'hit' | 'kill') => { setHit(kind); clearTimeout(hitTimer); hitTimer = setTimeout(() => setHit(null), kind === 'kill' ? 260 : 150); };
+    const number = (p: { position?: { x: number; y: number; z: number }; amount?: unknown }, kill: boolean) => {
+      if (!p?.position) return;
+      const at = game.worldToScreen(p.position);
+      if (!at.visible) return;
+      const id = ++seq.current;
+      const text = kill ? '✖' : typeof p.amount === 'number' ? '-' + Math.round(p.amount) : '';
+      if (!text) return;
+      setNumbers((list) => [...list.slice(-11), { id, x: at.x, y: at.y, text, kill }]);
+      setTimeout(() => setNumbers((list) => list.filter((n) => n.id !== id)), 800);
+    };
+    const ammoFrom = (p: { ammo?: unknown; magazine?: unknown } | null, reloading: boolean) => {
+      if (typeof p?.ammo === 'number' && typeof p?.magazine === 'number') setAmmo({ ammo: p.ammo, magazine: p.magazine, reloading });
+    };
+    const offs = [
+      events.on('WEAPON_FIRED', (p) => { if (!mine(p)) return; if (forced !== false) setArmed(true); ammoFrom(p, false); }),
+      events.on('WEAPON_RELOADING', (p) => { if (mine(p)) ammoFrom(p, true); }),
+      events.on('WEAPON_RELOADED', (p) => { if (mine(p)) ammoFrom(p, false); }),
+      events.on('WEAPON_EMPTY', (p) => { if (mine(p)) ammoFrom(p, false); }),
+      events.on('ENEMY_DAMAGED', (p) => { flash('hit'); number(p, false); }),
+      events.on('ENEMY_DIED', (p) => { flash('kill'); number(p, true); }),
+      events.on('MELEE_HIT', () => flash('hit')),
+      events.on('BOSS_BAR', () => setBoss(game.bossBar)),
+    ];
+    return () => { clearTimeout(hitTimer); for (const off of offs) off(); };
+  }, [game, forced]);
+
+  // The boss bar follows the boss's health while it is shown (10 times a second is smooth and cheap).
+  useEffect(() => {
+    if (!boss) return;
+    const timer = setInterval(() => setBoss(game.bossBar), 100);
+    return () => clearInterval(timer);
+  }, [game, boss !== null]);
+
+  const showCross = playing && armed && forced !== false;
+  const crossColour = hit === 'kill' ? '#f87171' : '#fff';
+  return (
+    <>
+      <style>{'@keyframes nbDmg{from{transform:translate(-50%,-50%);opacity:1}to{transform:translate(-50%,-160%);opacity:0}}'}</style>
+      {showCross ? (
+        <div aria-hidden="true" style={{ position: 'absolute', left: '50%', top: '50%', width: 28, height: 28, transform: 'translate(-50%,-50%)', pointerEvents: 'none', zIndex: 6 }}>
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke={crossColour} strokeWidth="2" strokeLinecap="round" style={{ filter: 'drop-shadow(0 0 2px rgba(0,0,0,.9))' }}>
+            <path d="M14 3v6M14 19v6M3 14h6M19 14h6" />
+            {hit ? <path d="M7 7l4 4M21 7l-4 4M7 21l4-4M21 21l-4-4" stroke={hit === 'kill' ? '#f87171' : '#fde047'} strokeWidth="2.6" /> : null}
+          </svg>
+        </div>
+      ) : null}
+      {numbers.map((n) => (
+        <div key={n.id} aria-hidden="true" style={{ position: 'absolute', left: n.x, top: n.y, transform: 'translate(-50%,-50%)', color: n.kill ? '#f87171' : '#fde047', fontWeight: 900, fontSize: n.kill ? 22 : 18, textShadow: '0 1px 3px rgba(0,0,0,.9)', pointerEvents: 'none', zIndex: 6, animation: 'nbDmg 0.8s ease-out forwards' }}>
+          {n.text}
+        </div>
+      ))}
+      {playing && ammo ? (
+        <div role="status" aria-label={'Ammo ' + ammo.ammo + ' of ' + ammo.magazine} style={{ position: 'absolute', right: 'max(16px, env(safe-area-inset-right))', bottom: 'max(150px, calc(env(safe-area-inset-bottom) + 150px))', color: ammo.ammo === 0 ? '#f87171' : '#fff', fontWeight: 900, fontSize: 26, textShadow: '0 1px 3px rgba(0,0,0,.9)', pointerEvents: 'none', zIndex: 5 }}>
+          {ammo.reloading ? '⟳ ' : ''}{ammo.ammo}<span style={{ fontSize: 16, opacity: 0.75 }}> / {ammo.magazine}</span>
+        </div>
+      ) : null}
+      {boss ? (
+        <div role="progressbar" aria-label={boss.name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(boss.fraction * 100)}
+          style={{ position: 'absolute', top: 'max(64px, calc(env(safe-area-inset-top) + 56px))', left: '50%', transform: 'translateX(-50%)', width: 'min(80vw, 520px)', color: '#fff', textAlign: 'center', pointerEvents: 'none', zIndex: 5, textShadow: '0 1px 3px rgba(0,0,0,.9)' }}>
+          <div style={{ fontWeight: 800, marginBottom: 4 }}>{boss.name}</div>
+          <div style={{ height: 12, background: 'rgba(0,0,0,0.5)', borderRadius: 999, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.4)' }}>
+            <div style={{ width: Math.round(boss.fraction * 100) + '%', height: '100%', background: '#ef4444', transition: 'width 120ms linear' }} />
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 /** A speaker icon, crossed out when muted — an icon, so it reads in any language. */
 function SpeakerIcon({ muted }: { muted: boolean }) {
   return (
@@ -1057,6 +1188,7 @@ export function Hud({ game }: { game: Game }) {
       ) : null}
 
       <LoadingBar state={load} />
+      <ShooterOverlay game={game} playing={s.status === 'playing'} />
 
       {s.status === 'menu' && info ? settingsOrScreen(
         <div style={{ maxWidth: 440, padding: '0 16px' }}>

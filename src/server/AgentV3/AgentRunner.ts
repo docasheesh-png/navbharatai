@@ -38,6 +38,7 @@ import { serviceRecommendationEvent } from '../analyzer/serviceRecommendation';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
 import { runWithRunnerSignal, isPassBudgetCause } from './runnerSignal';
+import { isWithheldTool, withheldToolMessage } from './repairScope';
 import { abortCauseOf, abortSummary, buildClockMinutes, timedOutSummary, stalledModelSummary, stoppedCallFields, type SeedState, type AbortCause } from './buildAbortCause';
 import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, buildBudgetNarration, type BudgetStage } from './buildBudgetSteer';
@@ -1685,6 +1686,13 @@ export class AgentRunner {
           }
           if (loopGuardOn && isProbeBanned(repeatProbe, tu.name, tu.input)) {
             return { tool_use_id: tu.id, content: bannedProbeMessage(tu.name), is_error: true };
+          }
+          // 🔴 A WITHHELD TOOL IS REFUSED, NOT MERELY HIDDEN (Q-2916, failedbr #2475). A repair the platform checks is
+          // built without a browser and without delegation (repairScope.ts) — but leaving a tool out of the list only
+          // hides it; a model that names it anyway used to have it run. Narrow on purpose: only the tools withheld
+          // BY CONSTRUCTION are refused, and only when this runner was not offered them.
+          if (isWithheldTool(tu.name, offeredToolNames)) {
+            return { tool_use_id: tu.id, content: withheldToolMessage(tu.name), is_error: true };
           }
           // A MADE-UP TOOL NAME WITH A REAL TOOL'S SHAPE RUNS AS THAT TOOL (queue Q-145, toolAlias.ts).
           const aliasTo = resolveToolAlias(tu.name, tu.input, offeredToolNames);

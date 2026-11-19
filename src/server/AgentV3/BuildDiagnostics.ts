@@ -10,6 +10,7 @@
 // the live AgentEvent stream and (b) accepts explicitly-recorded issues for signals that are not
 // events (a provider fallback, a sandbox-create timeout).
 
+import { isReadOnlyInspection } from './shellInspection';
 import { isNpmInstallWithoutPackageJson, isMissingStartToolchain, type DevServerLaunchInput } from './devServerLaunchPlan';
 import { startBandLabel } from './RequestAnalyser';
 import { todoOnlyTurnsLine } from './todoOnlyTurn';
@@ -1449,7 +1450,10 @@ export class BuildDiagnostics {
       && !isNpmInstallWithoutPackageJson(rec.command, rec.stdout, rec.stderr, rec.tree ?? this.workspaceTree)
       // A Maven / Go start that failed only because the image lacks the compiler is
       // infrastructure, not a compile error in the app.
-      && !isMissingStartToolchain(rec.command, rec.stdout, rec.stderr);
+      && !isMissingStartToolchain(rec.command, rec.stdout, rec.stderr)
+      // A command that only READS (shellInspection.ts) cannot break the build: a failed `cd …; cat …` is a wrong guess
+      // about where a file is, not a build failure (failedbr #2452 listed one as a "build-breaking blocker").
+      && !isReadOnlyInspection(rec.command);
     const cmdHead = ourCommandLabel(rec.command) ?? rec.command.split('\n')[0].slice(0, 120);
     const durTxt = rec.durationMs != null ? ` (${Math.round(rec.durationMs / 1000)}s)` : '';
     // Q-273 — a slow command says where its time went (our setup / the machine / the command).

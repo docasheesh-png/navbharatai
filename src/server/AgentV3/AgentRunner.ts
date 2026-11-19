@@ -1974,6 +1974,7 @@ export class AgentRunner {
           writingRun: expectsArtifacts && !this.opts.signal?.aborted && runCanWrite(tools.map((t) => t.name)),
           changes: typeof dispatcher.changeCount === 'function' ? dispatcher.changeCount() : null,
           toolNames: turn.toolUses.filter((_, idx) => resultBlocks[idx]?.is_error === false).map((tu) => tu.name),
+          toolCalls: turn.toolUses.filter((_, idx) => resultBlocks[idx]?.is_error === false).map((tu) => ({ name: tu.name, input: tu.input })),
           editingExistingApp: this.opts.editingExistingApp === true,
         });
         explorationProgress = exploration.state;

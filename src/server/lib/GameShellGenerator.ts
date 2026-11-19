@@ -39,7 +39,7 @@ import { GameLoop } from './core/loop';
 import { Input } from './core/input';
 import { GameFeel } from './core/feel';
 import { events } from './core/events';
-import { state, setStatus, resetRun } from './core/state';
+import { state, setStatus, resetRun, save as saveState, load as loadState, hasSave, clearSave } from './core/state';
 import { startMeta, mountMetaToasts, combo } from './core/meta';
 import { settings, type GameSettings } from './core/settings';
 import { createPerfGovernor, steppedQuality } from './core/perf';
@@ -156,6 +156,16 @@ export interface GameOptions {
   crosshair?: boolean;
   /** The minimap in a corner. Default: shown by itself as soon as something carries a map marker; true always; false never. */
   minimap?: boolean;
+  /**
+   * Keep the player's progress between visits: the kit's state (level, score, lives, the bag, unlocks) is saved when the
+   * game pauses, a round ends or the page is hidden, and the start screen offers Continue / New game. Turn it on when the
+   * game's progress lives in that state (an RPG, a level game) — a world the game builds itself is not saved.
+   */
+  save?: boolean;
+  /** People and assets to thank, shown from a Credits button on the start screen. */
+  credits?: Array<string | { role: string; name: string }>;
+  /** Capture the mouse for looking around on a desktop (click to capture, Esc to let go). Default true. */
+  pointerLock?: boolean;
   /**
    * The music that follows the game (fx/music.ts: calm on the start screen, action in play, tense for a boss, a sting on a
    * win or a loss; lowered while paused or talking). false = none; a table changes cues, e.g. { GAME_STARTED: 'tense' }.
@@ -355,6 +365,27 @@ export class Game {
     // Every finished round goes on this device's leaderboard (core/leaderboard.ts) — recorded here so no game can forget.
     const recordRound = () => { leaderboard.record(this.leaderboardId, state.score); };
     this.disposers.push(events.on('GAME_OVER', recordRound), events.on('GAME_WON', recordRound));
+    // 🖱️ POINTER LOCK: a click on the canvas during play captures the mouse; any screen that is not play lets it go. The
+    // browser drops the lock itself on Esc and never delivers that Esc to the page — so losing it mid-play IS the pause.
+    const onCanvasClick = () => { if (state.status === 'playing') this.capturePointer(); };
+    this.canvas.addEventListener('click', onCanvasClick);
+    this.disposers.push(() => this.canvas.removeEventListener('click', onCanvasClick));
+    for (const e of ['GAME_PAUSED', 'GAME_OVER', 'GAME_WON', 'GAME_MENU'] as const) this.disposers.push(events.on(e, () => this.releasePointer()));
+    const onLockChange = () => {
+      const d = document as Document & { pointerLockElement?: Element | null };
+      if (d.pointerLockElement !== this.canvas && state.status === 'playing' && this.options.pointerLock !== false && !touchDevice()) this.pause();
+    };
+    document.addEventListener('pointerlockchange', onLockChange);
+    this.disposers.push(() => { document.removeEventListener('pointerlockchange', onLockChange); this.releasePointer(); });
+    // 💾 SAVE: progress is kept between visits when the game asks for it (options.save).
+    if (this.options.save === true) {
+      loadState();
+      const keep = () => { saveState(); };
+      for (const e of ['GAME_PAUSED', 'GAME_OVER', 'GAME_WON', 'LEVEL_COMPLETED'] as const) this.disposers.push(events.on(e, keep));
+      const onHide = () => { if (document.hidden && state.status === 'playing') saveState(); };
+      document.addEventListener('visibilitychange', onHide);
+      this.disposers.push(() => document.removeEventListener('visibilitychange', onHide));
+    }
     // A new round starts with no power-ups left over from the last one.
     this.disposers.push(events.on('GAME_STARTED', () => powerUps.clear()));
     this.disposers.push(events.on('GAME_STARTED', () => { showHint('controls', touchDevice() ? t('controlsTouch') : t('controlsKeyboard'), 5); }));
@@ -659,6 +690,7 @@ export class Game {
   play(): void {
     if (this.disposed || state.status !== 'menu') return;
     audio.unlock();
+    this.capturePointer();
     if (touchDevice() && !this.isFullscreen) void this.toggleFullscreen();
     this.loop.setPaused(false);
     setStatus('playing');
@@ -799,6 +831,29 @@ export class Game {
   /** The quality being drawn right now (may be below the player's choice when Auto quality stepped it down). */
   get quality(): GameSettings['quality'] { return this.effectiveQuality; }
   pause(): void { if (state.status === 'playing') { this.loop.setPaused(true); setStatus('paused'); } }
+
+  /** Start over: the saved game is forgotten and the run begins from nothing. */
+  newGame(): void {
+    clearSave();
+    resetRun();
+    this.play();
+  }
+  /** The start screen offers Continue: saving is on and there is a save. */
+  get canContinue(): boolean { return this.options.save === true && hasSave(); }
+  get creditsList(): Array<{ role: string; name: string }> {
+    return (this.options.credits ?? []).map((c) => (typeof c === 'string' ? { role: '', name: c } : { role: String(c.role ?? ''), name: String(c.name ?? '') })).filter((c) => c.name);
+  }
+
+  /** Desktop mouse-look: capture the pointer on a click during play (a phone has no pointer to capture). */
+  private capturePointer(): void {
+    if (this.options.pointerLock === false || touchDevice()) return;
+    const c = this.canvas as HTMLCanvasElement & { requestPointerLock?: () => unknown };
+    try { const r = c.requestPointerLock?.(); if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => undefined); } catch { /* refused: the mouse still looks, just not captured */ }
+  }
+  private releasePointer(): void {
+    const d = document as Document & { exitPointerLock?: () => void; pointerLockElement?: Element | null };
+    if (d.pointerLockElement === this.canvas) { try { d.exitPointerLock?.(); } catch { /* already free */ } }
+  }
   resume(): void { if (state.status === 'paused') { this.loop.setPaused(false); setStatus('playing'); } }
 
   restart(): void {
@@ -1425,6 +1480,21 @@ export function PowerUpBar() {
   );
 }
 
+/** Thanks to the people and assets behind the game (options.credits). */
+export function CreditsPanel({ list, onBack }: { list: Array<{ role: string; name: string }>; onBack: () => void }) {
+  return (
+    <div style={{ width: 'min(92vw, 420px)' }}>
+      <h2 style={{ fontSize: 26, fontWeight: 800 }}>{t('credits')}</h2>
+      <ul aria-label={t('credits')} style={{ listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'grid', gap: 6, maxHeight: '55vh', overflowY: 'auto' }}>
+        {list.map((c, i) => (
+          <li key={i}>{c.role ? <span style={{ opacity: 0.75, marginRight: 8 }}>{c.role}</span> : null}<span style={{ fontWeight: 700 }}>{c.name}</span></li>
+        ))}
+      </ul>
+      <button type="button" style={secondary} onClick={onBack}>{t('back')}</button>
+    </div>
+  );
+}
+
 /** Which events get a caption, and the words (Settings → Captions). */
 export const CAPTIONED: Readonly<Record<string, StringKey>> = {
   PLAYER_DAMAGED: 'capHit', ENEMY_DIED: 'capEnemyDown', ITEM_COLLECTED: 'capPickup', WEAPON_RELOADING: 'capReload',
@@ -1609,7 +1679,7 @@ export function Hud({ game }: { game: Game }) {
   const playLevel = (i: number) => { if (hasLevels && !levels.start(i)) return; game.play(); };
   const replayLevel = () => { if (hasLevels) levels.start(levels.index); game.restart(); };
   const nextLevel = () => { if (levels.next()) game.restart(); };
-  const [panel, setPanel] = useState<'settings' | 'inventory' | 'shop' | null>(null);
+  const [panel, setPanel] = useState<'settings' | 'inventory' | 'shop' | 'credits' | null>(null);
   const bag = useInventory();
   const shop = useShop();
   const again = useRef<HTMLButtonElement>(null);
@@ -1663,7 +1733,7 @@ export function Hud({ game }: { game: Game }) {
   }, [game, s.status, panel]);
 
   const settingsOrScreen = (screen: React.ReactNode) => (
-    <div style={overlay}><div style={{ zoom }}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : panel === 'inventory' ? <InventoryPanel onBack={() => { setPanel(null); game.resume(); }} /> : panel === 'shop' ? <ShopPanel onBack={() => setPanel(null)} /> : screen}</div></div>
+    <div style={overlay}><div style={{ zoom }}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : panel === 'inventory' ? <InventoryPanel onBack={() => { setPanel(null); game.resume(); }} /> : panel === 'shop' ? <ShopPanel onBack={() => setPanel(null)} /> : panel === 'credits' ? <CreditsPanel list={game.creditsList} onBack={() => setPanel(null)} /> : screen}</div></div>
   );
 
   return (
@@ -1722,9 +1792,15 @@ export function Hud({ game }: { game: Game }) {
           {info.subtitle ? <p style={{ opacity: 0.9, marginTop: 8, fontSize: 17 }}>{info.subtitle}</p> : null}
           <p style={{ opacity: 0.75, marginTop: 12, fontSize: 14 }}>{touch ? info.controls.touch : info.controls.keyboard}</p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button ref={playRef} type="button" style={button} onClick={() => playLevel(levels.index)}>{t('play')}</button>
+            {game.canContinue ? (
+              <>
+                <button ref={playRef} type="button" style={button} onClick={() => playLevel(levels.index)}>{t('continueGame')}</button>
+                <button type="button" style={secondary} onClick={() => game.newGame()}>{t('newGame')}</button>
+              </>
+            ) : <button ref={playRef} type="button" style={button} onClick={() => playLevel(levels.index)}>{t('play')}</button>}
             {economy.ready ? <button type="button" style={secondary} onClick={() => setPanel('shop')}>{t('shop')} · 🪙{shop.coins}</button> : null}
             <button type="button" style={secondary} onClick={() => setPanel('settings')}>{t('settings')}</button>
+            {game.creditsList.length ? <button type="button" style={secondary} onClick={() => setPanel('credits')}>{t('credits')}</button> : null}
           </div>
           {levels.count > 1 ? (
             <div role="list" aria-label={t('levels')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8, marginTop: 16 }}>

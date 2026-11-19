@@ -103,7 +103,7 @@ describe('♿ the settings', () => {
 
 /** The minimum the Hud reads from a game. */
 function fakeGame() {
-  return { startScreenInfo: { title: 'T', subtitle: '', controls: { touch: '', keyboard: '' } }, canFullscreen: false, isFullscreen: false, minimapOption: false, leaderboardId: 'g',
+  return { startScreenInfo: { title: 'T', subtitle: '', controls: { touch: '', keyboard: '' } }, canContinue: false, creditsList: [], canFullscreen: false, isFullscreen: false, minimapOption: false, leaderboardId: 'g',
     fps: 60, quality: 'high', mapView: () => ({ x: 0, z: 0, forward: { x: 0, z: 1 }, facing: 0, markers: [] }), play() {}, pause() {}, resume() {}, restart() {}, toMenu() {}, toggleFullscreen: async () => {} } as any;
 }
 

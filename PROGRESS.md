@@ -102710,3 +102710,12 @@ The first exactly-one-lease assertion in the phase-2 handoff race now includes o
   text (menus and top bar at zoom 1.25), Colour-blind colours (Okabe–Ito palette for the health bar and minimap markers) and
   Captions (CaptionBar: words for important sounds — hit, enemy down, pickup, reload, empty, boss, level up…, EN/HI).
 - Locked by `tests/everyPlayerCanPlay.test.ts` (reversion: the shake ignoring Reduce motion → fails).
+
+## 2026-11-19 — Game gap P2: Continue, pointer lock, credits (branch `claude/game-continue-pointerlock`)
+- `options.save`: Game loads the kit state on start, saves on pause / game over / win / level complete / page hide; the start
+  screen offers Continue + New game (state `hasSave` / `clearSave`; `Game.newGame`). Opt-in on purpose: only the kit's state
+  is saved, not a world the game builds itself.
+- Pointer lock (desktop, default on, `pointerLock: false` to opt out): captured on Play and on a canvas click during play,
+  released by pause / game over / win / menu; the browser dropping the lock mid-play (its Esc) pauses the game.
+- `options.credits` → a Credits button and panel on the start screen.
+- Locked by `tests/continuePointerLockAndCredits.test.ts` (reversion: no autosave / no pause on lock loss → 2 fail).

@@ -1160,6 +1160,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  on a new round — never setTimeout); createLootTable(entries, { pity }) from core/loot.ts for what an enemy or chest drops.',
     '  The end screen already has Share and this device\'s top scores (core/leaderboard.ts, recorded by the kit) — never claim a',
     '  worldwide leaderboard without an online service behind it.',
+    '  PROGRESS: options.save: true when the game\'s progress lives in the kit state (levels, score, lives, the bag) — the start screen',
+    '  then offers Continue / New game. options.credits lists who made it. Desktop mouse-look is captured by the kit (pointer lock).',
     '  The screen recipes below are for 2D games and anything not on <GameCanvas>.',
     '  🎨 EVERYTHING AROUND THE CANVAS IS UI, AND IT IS WHAT THE PLAYER SEES FIRST. Where the kit is in',
     '  the project, build it from the GAME UI recipes: the stage is `.nb-game`; the start, pause and',

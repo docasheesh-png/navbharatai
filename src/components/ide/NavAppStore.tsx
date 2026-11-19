@@ -400,7 +400,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   const loadStatus = useCallback(async () => {
     const request = ++statusRequestRef.current;
     const controller = new AbortController();
+    let accessTimedOut = false;
     const timeout = setTimeout(() => {
+      accessTimedOut = true;
       controller.abort();
       // Token refresh may itself be pending before fetch begins. End the visible wait too.
       if (liveRef.current && request === statusRequestRef.current) {
@@ -415,6 +417,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       const data = await res.json().catch(() => null);
       // Only the real status may become the status. An `{ error }` body from a guard (429 / 401 / 500)
       // used to be stored as if it were one, and `.missing.join` then crashed the whole screen.
+      if (!liveRef.current || request !== statusRequestRef.current || accessTimedOut) return;
       const read = readStoreStatus(res.ok, data, res.status);
       // Q-013: the same facts go to the admin Errors view, once per screen, so which guard answered
       // is known without a screenshot.
@@ -426,13 +429,12 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
           body: JSON.stringify({ ...storeStatusReport(res.status, read.problem, nativePlatformName()), url: window.location.href, ts: Date.now() }),
         }).catch(() => { /* reporting must never change what the screen shows */ });
       }
-      if (!liveRef.current || request !== statusRequestRef.current) return;
       setStatus(read.status);
       setStatusProblem(read.problem);
     } catch {
       if (liveRef.current && request === statusRequestRef.current) {
         setStatus(null);
-        setStatusProblem('Could not verify store access. Check your connection and try again.');
+        if (!accessTimedOut) setStatusProblem('Could not verify store access. Check your connection and try again.');
       }
     } finally {
       clearTimeout(timeout);

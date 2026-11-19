@@ -32,8 +32,9 @@ const repair = (io: GameRepairIO, buildSignal = new AbortController().signal) =>
 describe('BR1955 F1: action vocabulary belongs to the real source API handoff', () => {
   it('hands over every actual default action/code pair, including the bounded real route handoff', () => {
     const declaration = extractExportedDeclaration(inputSource, 'DEFAULT_ACTIONS');
-    expect(declaration).toContain("up: ['KeyW', 'ArrowUp']");
-    expect(declaration).toContain("jump: ['Space']");
+    // Each action also answers to a standard gamepad button (Pad:N) since 2026-11-19 — the handoff quotes them too.
+    expect(declaration).toContain("up: ['KeyW', 'ArrowUp', 'Pad:12']");
+    expect(declaration).toContain("jump: ['Space', 'Pad:0']");
     const block = gameTurnHandoff(BR1955_PROMPT, sourceFiles, writer, {}).block;
     expect(block.replace(/^  /gm, '')).toContain(declaration!);
     expect(block).toContain('isDown(action: string)');

@@ -243,7 +243,8 @@ export async function createSurplusBuildSession(options: {
           // Refusal cannot be downgraded into generic poisoned-session availability on a later turn.
           if (failure?.reason === 'content_filter') terminalPolicyFailure = publicBuildEngineError('policy_refusal');
           const result: TurnResult = { text: '', toolUses: [], rawContent: [], stopReason: null, model: permit.model,
-            usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, measured: false } };
+            // A FAILED attempt (Q-2920): it did not answer, so it is not "a provider that returned no usage".
+            usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, measured: false, failedAttempt: true } };
           try {
             if (failure && adapter.failure) {
               const resolution = await adapter.failure(raw, permit, result, failure);

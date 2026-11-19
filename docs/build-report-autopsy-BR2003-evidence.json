@@ -1,0 +1,13 @@
+{
+  "evidenceType": "synthetic-fixtures-and-source-pins",
+  "privateReportPayloadIncluded": false,
+  "reportRetained": true,
+  "truncationComplete": true,
+  "cases": [
+    "first build, free Weak, long sectioned quiz-app spec headed 'Project Name:'; failed in ~1 s with SANDBOX_RECOVERY_UNAVAILABLE",
+    "etaAccuracy line read '0.0 min — UNDER the band' (closed by BR1986)",
+    "APP_SCOPE named the app 'Project Name' and kept a seven-section spec as one build because of the word 'Quiz'"
+  ],
+  "fixes": {},
+  "test": "tests/br2003Autopsy.test.ts"
+}

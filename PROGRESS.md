@@ -102626,3 +102626,6 @@ Q-2947–Q-2949 OPEN (edit-miss watch, browser-tool outages without detail, Surp
 - **Q-2946 decided by the admin (option a) and built in #4346:** a READY fresh build on a nearly-spent wallet finishes (no
   more tools; the summary is the next turn), and every build — edits included — is told once to skip optional polish when
   the wallet is ≥ 80% spent. No price or charge changes; the wallet stop remains the net.
+- **Q-2950 (admin 2026-11-19): an edit is priced by its project's history before it starts.** The admission gate's estimate
+  is now the larger of the prompt estimate and the median real cost of the workspace's last 5 builds (same billedAmountInr),
+  so a short "fix this" prompt on a big project no longer slips under a low balance and stops mid-build.

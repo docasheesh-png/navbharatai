@@ -791,6 +791,7 @@ import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../A
 import { filesANoteStillFlags, salvageQualityNotes } from '../AgentV3/writeTimeQualityCheck';
 import { failedAttemptCostVerdict } from '../AI/SurplusRegistry/failedAttemptCost';
 import { waitCreditMs, workElapsedMs, hardDeadlineRemainingMs } from '../AgentV3/workClock';
+import { historyEstimateInr } from '../AgentV3/PreflightEstimate';
 /** Q-2946: from this share of the spendable balance on, a ready app finishes instead of starting extras. */
 const WALLET_FINISH_RATIO = 0.8;
 import { persistedStateBuildWarnings } from '../AgentV3/persistedStateCheck';
@@ -4315,8 +4316,25 @@ function respondBuilderEngineUnavailable(res: Response, tier: PowerLevel, debugD
 
 // Explicit admission context keeps the route's flow graph bounded. Policy is shared verbatim
 // between default routing and opt-in routing; only the timing/estimate differs.
-export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res, release, onFreeTier, onEconomy, onSpendable }: {
+/**
+ * 🔴 THE ADMISSION ESTIMATE FOR AN EDIT KNOWS THE PROJECT (failedbr #2437; admin 2026-11-19). The larger of the prompt
+ * estimate and the median real cost of this workspace's recent builds (`historyEstimateInr`, priced with the same
+ * `billedAmountInr`). An unreadable history is not zero: the prompt estimate stands alone, as before.
+ */
+async function workspaceHistoryEstimateInr(workspaceId: string | undefined, power: PowerLevel): Promise<number | null> {
+  if (!workspaceId) return null;
+  try { return historyEstimateInr(await listDiagnosticsHistory(workspaceId, 5), power, usdInrRate()); } catch { return null; }
+}
+function withHistoryFloor<T extends { inr: number; usd: number }>(estimate: T, historyInr: number | null): T {
+  if (historyInr === null || !(historyInr > estimate.inr)) return estimate;
+  const rate = usdInrRate();
+  return { ...estimate, inr: historyInr, usd: rate > 0 ? historyInr / rate : estimate.usd };
+}
+
+export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res, release, onFreeTier, onEconomy, onSpendable, workspaceId }: {
   userId: string | null; email: GrantEmail | null; onlyOpus: boolean; prompt: string;
+  /** Whose recent builds price this one (failedbr #2437). Absent ⇒ the prompt estimate alone, as before. */
+  workspaceId?: string;
   powerLevelReqEffective: PowerLevel; surplusSession?: SurplusBuildSession; res: Response;
   release: () => void; onFreeTier: (free: boolean) => void; onEconomy: (notice: string) => void;
   onSpendable?: (balanceInr: number | null, estimatedBuildCostInr?: number) => void;
@@ -4342,9 +4360,9 @@ export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, promp
         });
         return false;
       }
-      const estimate = surplusSession
+      const estimate = withHistoryFloor(surplusSession
         ? { inr: Number(surplusSession.estimatedMicroUsd) / 1_000_000 * 10 * usdInrRate(), usd: Number(surplusSession.estimatedMicroUsd) / 1_000_000 * 10 }
-        : estimateBuildCost(prompt, powerLevelReqEffective, usdInrRate());
+        : estimateBuildCost(prompt, powerLevelReqEffective, usdInrRate()), await workspaceHistoryEstimateInr(workspaceId, powerLevelReqEffective));
       onSpendable?.(balanceInr, estimate.inr);
       if (shouldRefuseBuildForBalance({ exempt: false, balanceInr, estimateInr: estimate.inr })) {
         release();
@@ -4382,9 +4400,9 @@ export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, promp
         });
         return false;
       }
-      const estimate = surplusSession
+      const estimate = withHistoryFloor(surplusSession
         ? { inr: Number(surplusSession.estimatedMicroUsd) / 1_000_000 * 10 * usdInrRate(), usd: Number(surplusSession.estimatedMicroUsd) / 1_000_000 * 10 }
-        : estimateBuildCost(prompt, powerLevelReqEffective, usdInrRate());
+        : estimateBuildCost(prompt, powerLevelReqEffective, usdInrRate()), await workspaceHistoryEstimateInr(workspaceId, powerLevelReqEffective));
       const gate = decidePaidGate({
         // The gate itself is active here (outer condition already gated on the two flags); decidePaidGate
         // keys its block/economy/proceed decision on this being true, so pass true regardless of which
@@ -10978,7 +10996,7 @@ async function noteBuildOutcome(
     // (AGENTV3_CREDIT_GATE) is on. The credit gate lets ₹0-balance accounts be blocked from spending
     // NavBharatAI's model budget without turning on the rest of paid-public (which stays OFF during the
     // security migration). Free-list users (admin/testers) always bypass it.
-    const checkPaidBuildAdmission = () => checkBuilderPaidAdmission({ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res,
+    const checkPaidBuildAdmission = () => checkBuilderPaidAdmission({ userId, email, onlyOpus, prompt, powerLevelReqEffective, surplusSession, res, workspaceId,
       release: () => releaseBuildLock(buildKey, buildLockToken), onFreeTier: value => { callerIsFreeTier = value; }, onEconomy: value => { paidEconomyNotice = value; },
       onSpendable: (balance, estimate: number | null = null) => { if (typeof balance === 'number') spendableBalanceInr = balance; spendableEstimateInr = estimate; } });
     if (!(await checkPaidBuildAdmission())) return;

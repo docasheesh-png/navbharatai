@@ -26,6 +26,7 @@
 
 import { buildStreamingEnabled, streamHardCapMs } from './providers/openAiStream';
 import { FLOOR_TIMEOUT_CAP_MS } from './floorBudget';
+import { isBuildStoppedError } from './stopSignal';
 
 /**
  * The project planner's OUTPUT allowance. It was a flat 8,000 — the same number every small text call
@@ -70,12 +71,20 @@ export const PROJECT_PLANNER_TIMED_OUT = 'project planner timed out';
  */
 export const ROADMAP_PLANNER_TIMED_OUT = 'roadmap planner timed out';
 
-export type PlannerFailureKind = 'timed-out' | 'threw';
+/**
+ * `stopped`: the BUILD was stopped while the planner ran (failedbr #2417, dae2cbea). It was filed as `threw`, so the
+ * report said "the planner call failed (Stopped — the build was asked to stop…) — the build proceeded directly":
+ * a stopped build was described as carrying on. A stop is not a planner failure and nothing proceeds after it.
+ */
+export type PlannerFailureKind = 'timed-out' | 'threw' | 'stopped';
 
 export function plannerFailureKind(err: unknown): PlannerFailureKind {
+  if (isBuildStoppedError(err)) return 'stopped';
   const msg = err instanceof Error ? err.message : String(err ?? '');
   return msg === PROJECT_PLANNER_TIMED_OUT || msg === ROADMAP_PLANNER_TIMED_OUT ? 'timed-out' : 'threw';
 }
+
+const PLANNER_STOPPED_TAIL = 'the build was stopped while it ran — it did not fail, and the build did not proceed past it.';
 
 /**
  * The admin-only line for a roadmap planner that did not deliver. Says where the seconds went — the
@@ -84,6 +93,7 @@ export function plannerFailureKind(err: unknown): PlannerFailureKind {
  */
 export function roadmapPlannerFailedMessage(kind: PlannerFailureKind, timeoutMs: number, err: unknown): string {
   const detail = err instanceof Error ? err.message : String(err ?? 'unknown error');
+  if (kind === 'stopped') return `Mega-app roadmap: the planner call was cancelled because ${PLANNER_STOPPED_TAIL}`;
   return kind === 'timed-out'
     ? `Mega-app roadmap: the planner did not answer within its ${Math.round(timeoutMs / 1000)}s bound — the build proceeded directly. Those seconds were spent waiting on this call.`
     : `Mega-app roadmap: the planner call failed (${detail.slice(0, 200)}) — the build proceeded directly.`;
@@ -96,6 +106,7 @@ export function roadmapPlannerFailedMessage(kind: PlannerFailureKind, timeoutMs:
  */
 export function projectModeFailedMessage(kind: PlannerFailureKind, timeoutMs: number, err: unknown): string {
   const detail = err instanceof Error ? err.message : String(err ?? 'unknown error');
+  if (kind === 'stopped') return `Project mode: the planner call was cancelled because ${PLANNER_STOPPED_TAIL}`;
   return kind === 'timed-out'
     ? `Project mode could not decompose this build: the planner did not answer within its ${Math.round(timeoutMs / 1000)}s bound — the build proceeded on the ordinary path.`
     : `Project mode could not steer this build (${detail.slice(0, 200)}) — the build proceeded on the ordinary path.`;

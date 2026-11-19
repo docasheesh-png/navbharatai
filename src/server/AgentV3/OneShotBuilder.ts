@@ -21,7 +21,7 @@ import { binaryTextGenerationProblem, BINARY_TEXT_GENERATION_PREFIX } from './bi
 
 import { ensureReactValueImport } from './EndgameRepair';
 import { BOOLEAN_DISCRIMINANT_RULE } from './booleanDiscriminant';
-import { NO_FAKE_FEATURE_RULE, NO_FAKED_RESULT_RULE, NO_FAKE_RESULTS_RULE, LIGHT_THEME_BY_DEFAULT_RULE } from './noEvalRule';
+import { NO_FAKE_FEATURE_RULE, NO_FAKED_RESULT_RULE, NO_FAKE_RESULTS_RULE, LIGHT_THEME_BY_DEFAULT_RULE, PERSISTED_STATE_RULE, AI_AUDIO_RULE } from './noEvalRule';
 import type { StartTier } from './RequestAnalyser';
 // ONE timeout helper for the whole build pipeline. This module used to carry its own private copy,
 // and that duplication is the direct reason the July zombie-write fix landed in `SimpleBuilder` and
@@ -269,6 +269,8 @@ export function oneShotSystemPrompt(framework: string): string {
     NO_FAKED_RESULT_RULE,
     NO_FAKE_RESULTS_RULE,
     LIGHT_THEME_BY_DEFAULT_RULE,
+    PERSISTED_STATE_RULE,
+    AI_AUDIO_RULE,
   ].join('\n');
 }
 

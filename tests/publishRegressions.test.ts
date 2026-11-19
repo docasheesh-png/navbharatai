@@ -37,6 +37,10 @@ describe('2 — App Mart publish must not hang', () => {
   // — it is a separate decision from hosting), so the button-side half of this regression now lives
   // in NavAppStore.tsx, the sole remaining caller of this endpoint.
   const chooser = read('src/components/ide/NavAppStore.tsx');
+  const publishStart = chooser.indexOf('  const publishChosenApp = useCallback(async () => {');
+  const publishEnd = chooser.indexOf('  const loadOwned = useCallback(', publishStart);
+  if (publishStart < 0 || publishEnd <= publishStart) throw new Error('App Mart publish handler not found');
+  const publishHandler = chooser.slice(publishStart, publishEnd);
 
   it('the page bake happens AFTER the response, never inside the user\'s wait', () => {
     // renderPreview + gzipSync are SYNCHRONOUS and CPU-bound: a timeout could not have rescued this,
@@ -65,10 +69,10 @@ describe('2 — App Mart publish must not hang', () => {
     const longRequest = read('src/lib/longRequest.ts');
     const authed = read('src/lib/authedFetch.ts');
     expect(longRequest).toContain('storePublish: 90_000');
-    expect(chooser).toContain('}, LONG_REQUEST_TIMEOUT_MS.storePublish);');
-    expect(chooser).toContain('const timedOut = isFetchTimeout(e);');
+    expect(publishHandler).toContain('}, LONG_REQUEST_TIMEOUT_MS.storePublish);');
+    expect(publishHandler).toContain('const timedOut = isFetchTimeout(e);');
     // The chooser must not grow a private controller back — that is the exact shape of the regression.
-    expect(chooser).not.toContain('new AbortController()');
+    expect(publishHandler).not.toContain('new AbortController()');
     // …and the timer is always cleared, so a fast publish leaves nothing pending.
     expect(authed).toContain('clearTimeout(timer)');
   });

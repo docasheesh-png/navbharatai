@@ -102843,3 +102843,29 @@ Q-2947–Q-2949 OPEN (edit-miss watch, browser-tool outages without detail, Surp
 - Game drops the player's body on PLAYER_DIED and stands it up on PLAYER_SPAWNED / GAME_STARTED; the prompt tells the builder
   to topple enemies before removing them.
 - Locked by `tests/aDeathIsSeen.test.ts` (reversion: no shell wiring / walking while down → 3 fail).
+## 2026-11-19 — 3D games were blamed for our checker's missing WebGL (Q-2698)
+- Live in builds 2439–2476: every 3D game scored "Controls 0 · 0 fps · no canvas" and the user was told the controls
+  do nothing, while the game had rendered its own "Error creating WebGL context" screen inside the playtest.
+- Root: platform browsers in the sandbox launched without software-WebGL flags; the fallback Playwright install was
+  unpinned (newer Chromium dropped the automatic SwiftShader fallback). Fix: `SANDBOX_BROWSER_ARGS` (one list, every
+  launch, census test), `SANDBOX_PLAYWRIGHT_VERSION` pinned (= Dockerfiles), honest `checkerLacksWebGL` verdict.
+  Real-Chromium test, reversion-proven. Watch the next 3D build for real fps / a scored Controls dimension.
+## 2026-11-19 — The model library reaches existing games (add_library_models)
+- The seed added library models only to NEW games; in an existing game the builder could only search metadata.
+  New run_recipe tool `add_library_models`: same rollout gate, downloads, proofs and durable saves as the seed, merged
+  into the game's loader/manifest/credits; the user's assetCustomizations.ts is never replaced; the runtime is written only
+  when missing or too old for the new loader. Honest answers when the library is off, a name is not in it, or the sandbox
+  cannot write binary files. Verified end-to-end: castle + motorcycle added to a built village game, 8/8 models in Chromium.
+
+## 2026-11-19 — The Game library on screen (item 3 of the admin's next-level list)
+- **What:** Pro → mode button → **Game library**: a searchable, filterable grid of all 259 reviewed models with a picture
+  each; tapping one fills the composer with "add the <name> model … (library id: "<id>")" — nothing runs until sent.
+- **Server:** `GET /api/agentv3/game-library` (signed-in, free, no model call; `enabled` is the same per-account gate the
+  builder uses) and `GET /api/agentv3/game-library/thumb/:hash` (serves only a catalogue-hash file).
+- **Exact model:** `add_library_models` takes `{ id }`; other models serving that id's subjects are left out of the call's
+  catalogue, so the tapped cow is the cow that arrives.
+- **Pictures:** 258 webp renders (1.1 MB) in `assets/game-models/thumbs/`, which the production image already copies;
+  `scripts/library/renderLibraryThumbnails.mts` renders missing ones after a new batch. The one CC BY model has a plain
+  tile (a picture would need an on-screen credit; users never see source names). Names drop internal batch prefixes.
+- **Proof:** the real picker bundled into Chromium against the real server function: grid renders, search "cow" → "Cow",
+  tap → composer holds the id instruction, no page errors. Locks: `tests/theGameLibraryIsOnScreen.test.ts` (12).

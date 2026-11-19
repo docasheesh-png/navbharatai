@@ -455,6 +455,8 @@ import { prepareGameAssets, workspaceGameAssetPersistence } from '../AgentV3/gam
 import { prepareGameSounds } from '../AgentV3/gameAssets/soundSeed';
 import { gameLibraryPlanningHandoff } from '../AgentV3/gameAssets/gameLibrarySelection';
 import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
+import { browseLibrary, libraryThumbPath, addToGamePrompt } from '../AgentV3/gameAssets/libraryThumbnails';
+import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
 import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
 import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
@@ -5242,6 +5244,31 @@ async function noteBuildOutcome(
       providerLabel: (id) => dbProvider(id)?.label ?? null,
       supabaseConnected,
     }));
+  });
+
+  // THE GAME LIBRARY ON SCREEN (2026-11-19). Browse the reviewed models with a picture each; tapping one only FILLS the
+  // composer with an instruction naming its exact library id (add_library_models pins that model). Free: no model call,
+  // no download. `enabled` is the same per-account gate the builder uses, so the screen never offers what a build refuses.
+  app.get('/api/agentv3/game-library', async (req: Request, res: Response) => {
+    const uid = await verifyFirebaseToken(req).catch(() => null);
+    if (!uid) { res.status(401).json({ error: 'Sign in to browse the library.' }); return; }
+    const num = (v: unknown) => (typeof v === 'string' && /^\d{1,4}$/.test(v) ? Number(v) : undefined);
+    const result = browseLibrary({
+      q: typeof req.query.q === 'string' ? req.query.q : '',
+      category: typeof req.query.category === 'string' ? req.query.category : '',
+      limit: num(req.query.limit), offset: num(req.query.offset),
+    });
+    res.setHeader('Cache-Control', 'private, max-age=60');
+    res.json({ enabled: externalGameAssetsEnabled(process.env, uid), ...result, prompts: Object.fromEntries(result.rows.map((r) => [r.id, addToGamePrompt(r)])) });
+  });
+  // Pictures are renders of public, reviewed models — no user data — so an <img> can load them without a token. Only a
+  // file named by a catalogue hash is ever read.
+  app.get('/api/agentv3/game-library/thumb/:hash', (req: Request, res: Response) => {
+    const path = libraryThumbPath(String(req.params.hash || ''));
+    if (!path) { res.status(404).end(); return; }
+    res.setHeader('Content-Type', 'image/webp');
+    res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+    res.sendFile(path);
   });
 
   // NEXT-BUILD SUGGESTIONS (admin 2026-08-13) — after a build, "what could I add next?" for THIS app.
@@ -17061,6 +17088,8 @@ async function noteBuildOutcome(
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
+      // The library's rollout switch (add_library_models) is decided for the verified owner, never a claimed one.
+      dispatcher.setLibraryOwner(verified?.uid);
       dispatcher.setRoyaleNewProjectAllowed(royaleNewProjectAllowed({
         inventoryRead: royaleInventoryRead, intent, editing: isEditMode,
         hasVerifiedRevision: editHeadAtStart !== null,

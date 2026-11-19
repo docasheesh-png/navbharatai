@@ -44,6 +44,32 @@ export function playwrightImport(toolsDir: string): string {
   return `import playwright from '${toolsDir}/node_modules/playwright/index.js';\nconst { chromium } = playwright;`;
 }
 
+/**
+ * How every platform browser in the sandbox is launched, in ONE place (2026-11-19).
+ *
+ * The sandbox has no GPU, so WebGL only exists through Chromium's software renderer (SwiftShader). Newer Chromium
+ * stopped falling back to it on its own, and the sandbox installs an UNPINNED Playwright when its image lacks one —
+ * so a newer browser can arrive at any time. Builds 2439–2471 show the result: every 3D game rendered its own
+ * "Error creating WebGL context" screen inside the playtest and was scored "Controls 0 · 0 fps". These flags ask
+ * for software WebGL explicitly; on a browser that already had it they change nothing. --no-sandbox is the
+ * existing requirement of running Chromium as the sandbox user.
+ */
+/**
+ * The ONE Playwright version the sandbox runs. The E2B images install it (infra/e2b/*.Dockerfile) and the runtime
+ * fallback install (E2BActuator._kickoffPlaywright) must install the SAME one: it used to run an unpinned
+ * `npm install playwright`, so whichever sandbox missed the image's copy got the newest browser, with different
+ * WebGL behaviour from every other build. tests/oneSandboxPlaywrightVersion.test.ts keeps the three in step.
+ */
+export const SANDBOX_PLAYWRIGHT_VERSION = '1.49.1';
+
+export const SANDBOX_BROWSER_ARGS: readonly string[] = Object.freeze([
+  '--no-sandbox',
+  '--enable-webgl',
+  '--ignore-gpu-blocklist',
+  '--use-angle=swiftshader',
+  '--enable-unsafe-swiftshader',
+]);
+
 /** The marker the run line prefixes its diagnostic lines with. Never a result marker. */
 export const SCRIPT_DIAG_MARKER = 'NBAI_DIAG:';
 

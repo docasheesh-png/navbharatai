@@ -38,7 +38,7 @@
 
 import { missingLayerFiles } from '../lib/gameRecipeLayers';
 import { scopeMatch, type GameScopeContract } from './gameIntent';
-import { browserScriptRunLine, parseScriptDiagnostic, playwrightImport } from './sandboxBrowserScript';
+import { SANDBOX_BROWSER_ARGS, browserScriptRunLine, parseScriptDiagnostic, playwrightImport } from './sandboxBrowserScript';
 import { newPageOptionsExpr } from './signInExplore';
 import { CONSOLE_NOISE, NEVER_PRESS } from './clickExplorer';
 import { GAME_SIGNAL } from './touchPlayableGame';
@@ -285,6 +285,8 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     // NOT reduced motion: a game is supposed to move, and a game that honours the preference would read
     // as frozen. The saved session still applies, so a game behind a login is played signed in.
     pageOpts: { ...JSON.parse(newPageOptionsExpr(storageState)), reducedMotion: 'no-preference' },
+    // Software WebGL, said out loud (see SANDBOX_BROWSER_ARGS): newer Chromium no longer falls back to it by itself.
+    browserArgs: [...SANDBOX_BROWSER_ARGS],
   };
 }
 
@@ -726,7 +728,7 @@ function framesBetween(before, after, ms) {
   return { frames: Math.max(0, after - before), ms };
 }
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ args: cfg.browserArgs });
 const out = { ok: true, stage: 'loading the game' };
 // THE SCRIPT ENDS ITSELF IN TIME (autopsy 61279465: a heavy 3D train scene ran past the route's 80 s
 // timeout, which killed the browser and left only "timed out" — no stage, no frame rate, nothing to fix).
@@ -734,7 +736,7 @@ const out = { ok: true, stage: 'loading the game' };
 const watchdog = setTimeout(async () => {
   let fps = null;
   try { fps = out.fps ?? null; } catch (e) { /* nothing measured yet */ }
-  say({ ok: false, partial: true, stage: out.stage, fps, started: out.started ?? null,
+  say({ ok: false, partial: true, webgl: out.webgl, stage: out.stage, fps, started: out.started ?? null,
     error: 'the playtest ran out of time while ' + out.stage + (fps != null ? ' (the page drew ' + fps + ' frames per second)' : '') });
   process.exit(0);
 }, Math.max(10000, Number(cfg.budgetMs) || 60000));
@@ -749,6 +751,18 @@ try {
   watch(page);
   await page.goto(cfg.base, { waitUntil: 'load', timeout: cfg.loadMs });
   await page.waitForTimeout(1500);
+  // CAN THIS BROWSER DRAW 3D AT ALL? (2026-11-19, builds 2439–2471: every 3D game scored "Controls 0", 0 fps, no
+  // canvas, while the game itself showed "Error creating WebGL context"). Recorded so the verdict can tell OUR
+  // checker's missing WebGL from a game that ignores its controls.
+  out.webgl = await page.evaluate(() => {
+    try {
+      const c = document.createElement('canvas');
+      const gl = c.getContext('webgl2') || c.getContext('webgl');
+      if (!gl) return false;
+      const info = gl.getExtension('WEBGL_debug_renderer_info');
+      return String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || 'webgl');
+    } catch (e) { return false; }
+  }).catch(() => null);
   out.stage = 'starting the game';
   out.started = await pressStart(page);
   let box = await surface(page);
@@ -757,7 +771,7 @@ try {
     if (revealed) out.started = revealed;
     box = await surface(page);
   }
-  if (!box) { say({ ok: false, error: out.started ? 'no game surface (canvas) appeared after pressing "' + out.started + '"' : 'no game surface (canvas) on the page, and no control that starts a game' }); throw null; }
+  if (!box) { say({ ok: false, webgl: out.webgl, errors: errors.slice(0, 5), error: out.started ? 'no game surface (canvas) appeared after pressing "' + out.started + '"' : 'no game surface (canvas) on the page, and no control that starts a game' }); throw null; }
   // The tap that starts many games, focuses the canvas for the keyboard, and counts as the user gesture.
   await page.mouse.click(box.x + box.w / 2, box.y + box.h / 2);
   await page.waitForTimeout(400);
@@ -1019,7 +1033,7 @@ try {
   out.errorCount = errors.length;
   say(out);
 } catch (e) {
-  if (e !== null) say({ ok: false, error: String(e && e.message || e).slice(0, 200) });
+  if (e !== null) say({ ok: false, webgl: out.webgl, error: String(e && e.message || e).slice(0, 200) });
 } finally {
   clearTimeout(watchdog);
   await browser.close();
@@ -1206,6 +1220,21 @@ export interface PlaytestRun {
   /** The stack captured with each of `errors`, same order ('' when none). Absent from an older script's output. */
   errorStacks?: string[];
   errorCount?: number;
+  /** The checking browser's own WebGL: the renderer name, false when it could not create a context, null when not probed. */
+  webgl?: string | false | null;
+}
+
+/**
+ * OUR CHECKER COULD NOT DRAW 3D — not a fact about the game (2026-11-19, builds 2439, 2440, 2441, 2471, 2476).
+ * Every 3D game was scored "Controls 0 · 0 fps · no canvas", and the report told the user their controls do not
+ * move anything, while the game itself had rendered its own "Error creating WebGL context" screen: the playtest's
+ * browser had no WebGL. A browser without WebGL that saw no frames, no surface or a WebGL error has measured
+ * nothing about a 3D game. A 2D canvas game that drew frames without WebGL is still judged normally. PURE.
+ */
+export function checkerLacksWebGL(run: PlaytestRun): boolean {
+  if (run.webgl !== false) return false;
+  const glError = (run.errors ?? []).some((e) => /webgl/i.test(String(e)));
+  return glError || !run.ok || !run.fps;
 }
 
 /** Read the runner's stdout. A run with no result line is `ok: false`, never a pass. PURE. */
@@ -1554,6 +1583,7 @@ export function playtestSkipReason(ctx: {
 
 /** The report line, with the scorecard. PURE. */
 export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): PlaytestVerdict {
+  if (checkerLacksWebGL(run)) return playtestNotRunVerdict('the checking browser could not create a WebGL context, so this 3D game could not be drawn or played here — that is NavBharatAI\'s checker, not the game');
   if (!run.ok) return playtestNotRunVerdict(run.error || run.diagnostic || '');
   const score = scorePlaytest(run, replay);
   const card = (Object.keys(DIMENSION_WEIGHTS) as Dimension[]).map((d) => `${LABEL[d]} ${score.dimensions[d]}`).join(' · ');

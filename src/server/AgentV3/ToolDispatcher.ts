@@ -3,6 +3,10 @@ import { splitSeedOrphans, seedOrphanObservation, kitOrphanObservation } from '.
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
 import { ASSET_MODELS_PATH, localModelSubjects, readyModelFor, localModelLead } from './gameAssets/localModelNote';
+import { addLibraryModels } from './gameAssets/assetSeed';
+import { externalGameAssetsEnabled, gameAssetRequirements } from './gameAssets/assetPlan';
+import { REVIEWED_GAME_ASSETS } from './gameAssets/providers';
+import type { AssetRequirement } from './gameAssets/assetPolicy';
 import { randomUUID } from 'node:crypto';
 import { entryShadowNote } from './entryShadow';
 import { bannedInstallRefusal, bannedPackageGuardEnabled, stripBannedDeps, strippedDepsNote } from './reliability/bannedPackages';
@@ -566,6 +570,8 @@ export interface ActuatorPort {
    */
   readFileAdvisory?(workspaceId: string, filePath: string, timeoutMs?: number): Promise<string>;
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
+  /** Binary write (base64), e.g. a library model added to an existing game. Optional; absent means none. */
+  writeBinaryFile?(workspaceId: string, filePath: string, base64: string): Promise<void>;
   /** Atomic exclusive creation, never replace an existing path. Required by new procedural recipes. */
   createFileExclusive?(workspaceId: string, filePath: string, content: string): Promise<void>;
   /** Optional genuine expected-content atomic replacement; never emulate with read then write. */
@@ -1206,6 +1212,9 @@ export class ToolDispatcher {
   private royaleNewProject = false;
   /** Only the composition root may grant this after verified lifecycle/source inventory. */
   setRoyaleNewProjectAllowed(allowed: boolean): void { this.royaleNewProject = allowed === true; }
+  /** The build's verified owner, for the model library's rollout switch (AGENTV3_EXTERNAL_GAME_ASSETS=admin). */
+  private libraryOwnerUid: string | null = null;
+  setLibraryOwner(uid: string | null | undefined): void { this.libraryOwnerUid = typeof uid === 'string' && uid ? uid : null; }
   private userRequest: string | null = null;
   setUserOwnedFiles(paths: readonly string[], request: string | null): void {
     this.userOwnedSnapshotKnown = true;
@@ -10307,6 +10316,55 @@ export class ToolDispatcher {
           return parts.join('\n\n');
         }
         return this.dispatchObjectSpec(wantedList[0]);
+      }
+
+      case 'add_library_models': {
+        // THE LIBRARY IN AN EXISTING GAME (2026-11-19). The seed adds library models only to NEW games; "add a cow to my
+        // game" had no way to fetch the library cow. Same gate, downloads, proofs and durable saves as the seed,
+        // merged into the game's current loader/manifest/credits; the user's customization file is never replaced.
+        const alRec = (input as Record<string, unknown>) || {};
+        const raw = Array.isArray(alRec.models) ? alRec.models : [];
+        const asked = raw.map((m) => (typeof m === 'string' ? { subject: m } : m && typeof m === 'object' ? m as Record<string, unknown> : null))
+          .filter((m): m is Record<string, unknown> => !!m && ((typeof m.subject === 'string' && m.subject.trim() !== '') || typeof m.id === 'string')).slice(0, 6);
+        // An exact library id (what the in-app Game library sends) pins THAT model: other models serving its subjects
+        // are left out of this call's catalogue, so "the brown cow I tapped" never arrives as a different cow.
+        const pinned = asked.map((m) => typeof m.id === 'string' ? REVIEWED_GAME_ASSETS.find((c) => c.id === m.id) : undefined);
+        asked.forEach((m, i) => { const pin = pinned[i]; if (pin) m.subject = pin.subjects[0]; else if (typeof m.subject !== 'string') m.subject = String(m.id); });
+        const pins = pinned.filter((c): c is NonNullable<typeof c> => !!c);
+        const pinnedSubjects = new Set(pins.flatMap((c) => c.subjects));
+        const catalogue = pins.length ? REVIEWED_GAME_ASSETS.filter((c) => pins.includes(c) || !c.subjects.some((s2) => pinnedSubjects.has(s2))) : undefined;
+        if (!asked.length) return 'Name the library models to add, for example: add_library_models({ models: [{ subject: "cow" }, { subject: "farmer", animation: "walk" }] }). Find names with object_spec({ library_query: "…" }).';
+        if (!externalGameAssetsEnabled(process.env, this.libraryOwnerUid)) {
+          return 'The NavBharatAI model library is not switched on for this account, so no model was added. Build these objects with the existing recipes (object_spec / the 3D kit builders) instead.';
+        }
+        if (typeof this.actuator.writeBinaryFile !== 'function') return 'This sandbox cannot write binary files, so no library model was added. Build these objects with the existing recipes instead.';
+        const served = new Set(REVIEWED_GAME_ASSETS.flatMap((c) => c.subjects));
+        const requirements: AssetRequirement[] = []; const unknown: string[] = [];
+        for (const m of asked) {
+          const name = String(m.subject).trim().toLowerCase();
+          const subject = served.has(name) ? name : gameAssetRequirements(name, REVIEWED_GAME_ASSETS).map((r) => r.subject).find((s2) => served.has(s2));
+          if (!subject) { unknown.push(String(m.subject)); continue; }
+          if (!requirements.some((r) => r.subject === subject)) requirements.push({ subject, ...(typeof m.animation === 'string' && m.animation ? { animation: m.animation } : {}) });
+        }
+        if (!requirements.length) return `None of these are in the NavBharatAI model library: ${unknown.join(', ')}. Search with object_spec({ library_query: "…" }) for names it has, or build them with the existing recipes.`;
+        const read = (path: string) => this.actuator.readFile(this.workspaceId, path).catch(() => null);
+        const existing = {
+          assetModels: await read(ASSET_MODELS_PATH), manifest: await read('public/game-assets/manifest.json'),
+          attribution: await read('public/game-assets/ATTRIBUTION.txt'), customizations: await read('src/game/three/assetCustomizations.ts'),
+          runtime: await read('src/game/three/externalAssets.ts'),
+        };
+        const workspace = { writeFile: (id: string, p2: string, c: string) => this.actuator.writeFile(id, p2, c), writeBinaryFile: (id: string, p2: string, b: string) => this.actuator.writeBinaryFile!(id, p2, b), runCommand: (id: string, c: string) => this.actuator.runCommand(id, c) };
+        const result = await addLibraryModels({ requirements, ...(catalogue ? { catalogue } : {}), workspaceId: this.workspaceId, workspace, signal: AbortSignal.timeout(90_000), verifiedOwnerUid: this.libraryOwnerUid ?? undefined, existing });
+        const ready = result.outcomes.filter((o) => o.outcome.kind === 'model').map((o) => o.subject);
+        const missed = result.outcomes.filter((o) => o.outcome.kind !== 'model').map((o) => o.subject);
+        if (result.status !== 'prepared' || !ready.length) return `No library model could be added this time (${missed.join(', ') || 'none ready'}); build ${[...missed, ...unknown].join(', ') || 'these objects'} with the existing recipes instead. Nothing in the game was changed.`;
+        // The runtime imports the kit's core modules (events, loading): pull in any the game is missing.
+        const layers = await this.addMissingRecipeLayers(result.files, agent);
+        this.scheduleCheckpoint('library models');
+        return `Added to the game from the NavBharatAI library: ${ready.join(', ')}.`
+          + (missed.length ? ` Not added (build these with the existing recipes): ${missed.join(', ')}.` : '')
+          + (unknown.length ? ` Not in the library: ${unknown.join(', ')}.` : '')
+          + ` Use them with: const handle = await loadRequestedAsset('<subject>', fallback) from src/game/three/assetModels.ts; add handle.root to the scene, call handle.update(dt) each frame and handle.dispose() on teardown. Earlier models are unchanged. To recolour, resize or replace one, edit ONLY src/game/three/assetCustomizations.ts.${layers}`;
       }
 
       case 'generate_game_3d': {

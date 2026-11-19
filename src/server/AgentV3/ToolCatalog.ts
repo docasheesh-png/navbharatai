@@ -2327,9 +2327,11 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'zig-zag square layout) and CHESS (every rule: castling, en passant, promotion, check, checkmate, stalemate, fifty-move, '
         + 'threefold repetition, insufficient material; FEN and SAN; a computer player at three strengths; perft-verified) and CARDS '
         + '(a deck and dealing, TEEN PATTI hand ranking, Indian RUMMY melds, declarations, points and the best grouping — for fun: '
-        + 'points or pretend chips only, never real money), with a seeded die. Use it for any of these games; never re-implement their rules.',
+        + 'points or pretend chips only, never real money), CARROM (real disc physics at real sizes — collisions, friction, '
+        + 'cushions, corner pockets — and the family rules: own coin continues, striker foul, covering the queen, board scoring), '
+        + 'with a seeded die. Use it for any of these games; never re-implement their rules.',
       input_schema: { type: 'object', properties: { include: { type: 'array', items: { type: 'string' },
-        description: 'Optional subset: dice, ludo, snakes, chess, cards. Default = all; every engine brings dice.' } } },
+        description: 'Optional subset: dice, ludo, snakes, chess, cards, carrom. Default = all; every engine brings dice.' } } },
     },
     {
       name: 'generate_game_2d',

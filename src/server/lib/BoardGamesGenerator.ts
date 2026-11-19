@@ -15,6 +15,8 @@
 //               insufficient material), FEN and SAN, a computer player at three strengths; perft-verified.
 //   cards.ts  — a deck and dealing, Teen Patti hand ranking, Indian rummy melds, declarations, points and the best
 //               grouping — for FUN: points and pretend chips only, never real money.
+//   carrom.ts — carrom with real disc physics (real sizes, elastic collisions, friction, cushions, corner pockets) and the
+//               family rules (own coin continues, striker foul returns a coin, the queen must be covered, board scoring).
 //   snakes.ts — Snakes & Ladders: the classic board, exact roll to finish (or bounce back), a six rolls again, and the
 //               boustrophedon square → grid position for drawing.
 //   index.ts  — one import.
@@ -946,6 +948,231 @@ export function bestGrouping(hand: readonly Card[], wildRank: number): { groups:
 }
 `;
 
+const CARROM = String.raw`/**
+ * CARROM — real disc physics and the family rules. Sizes are the real board's, in millimetres, centred on the board's
+ * middle (x right, y down, the board 740 mm square): coins bounce off each other and the cushions, slow down on the
+ * board, and drop into a corner pocket. The rules on top: your own coin keeps your turn, pocketing the striker is a
+ * foul that returns one of your coins, the queen must be covered by one of your coins in the same turn, and the game is
+ * won by pocketing all your coins (scored by the coins the other player has left, plus the queen).
+ *
+ *   let game = createCarrom();
+ *   game = placeStriker(game, x);                     // slide the striker along the current player's baseline
+ *   const shot = shoot(game, angle, power);           // angle in radians (0 = right, -π/2 = up the board), power 0..1
+ *   shot.frames                                       // positions every 1/60 s, for animation
+ *   game = shot.state;  shot.pocketed / shot.foul / shot.turnContinues / shot.message
+ * Player 0 shoots from the bottom baseline (white coins), player 1 from the top (black coins).
+ */
+export const BOARD = 740;
+export const HALF = BOARD / 2;
+export const POCKET_RADIUS = 22.25;
+export const COIN_RADIUS = 15.9;
+export const STRIKER_RADIUS = 20.6;
+/** Distance of each player's baseline (striker centre line) from the board's middle. */
+export const BASELINE = 250;
+/** How far along the baseline the striker may slide from the middle, each way. */
+export const BASELINE_HALF_LENGTH = 235;
+const COIN_MASS = 5.5, STRIKER_MASS = 15;
+const FRICTION = 380;          // mm/s² — how quickly a disc slows on the board
+const DISC_RESTITUTION = 0.92, WALL_RESTITUTION = 0.72;
+const MAX_SPEED = 4200;        // mm/s at full power
+const STEP = 1 / 240;
+
+export type DiscKind = 'striker' | 'white' | 'black' | 'queen';
+export interface Disc { id: string; kind: DiscKind; x: number; y: number; vx: number; vy: number; r: number; pocketed: boolean }
+export type QueenState = 'board' | 'pending' | 'covered';
+export interface CarromState {
+  discs: Disc[];
+  turn: 0 | 1;
+  /** Coins each player has pocketed (white for player 0, black for player 1). */
+  pocketedBy: [number, number];
+  queen: QueenState;
+  /** Who covered the queen (null until someone does). */
+  queenOwner: 0 | 1 | null;
+  over: boolean;
+  winner: 0 | 1 | null;
+  /** Points the winner scores for the board: the other player's coins left, plus 3 for the queen if the winner covered it. */
+  points: number;
+}
+export interface ShotResult {
+  state: CarromState;
+  frames: Array<Array<{ id: string; x: number; y: number }>>;
+  pocketed: Array<{ id: string; kind: DiscKind }>;
+  foul: boolean;
+  turnContinues: boolean;
+  message: string;
+}
+
+const colourOf = (player: 0 | 1): DiscKind => (player === 0 ? 'white' : 'black');
+
+/** The starting position: the queen in the middle, six coins round it, twelve round those, colours alternating. */
+export function createCarrom(): CarromState {
+  const discs: Disc[] = [{ id: 'queen', kind: 'queen', x: 0, y: 0, vx: 0, vy: 0, r: COIN_RADIUS, pocketed: false }];
+  const d = COIN_RADIUS * 2 + 0.2;
+  let w = 0, b = 0;
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const kind: DiscKind = i % 2 === 0 ? 'white' : 'black';
+    discs.push({ id: kind === 'white' ? 'w' + w++ : 'b' + b++, kind, x: Math.cos(a) * d, y: Math.sin(a) * d, vx: 0, vy: 0, r: COIN_RADIUS, pocketed: false });
+  }
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    const ring = i % 2 === 0 ? d * 2 : d * Math.sqrt(3);
+    const kind: DiscKind = i % 2 === 0 ? 'black' : 'white';
+    discs.push({ id: kind === 'white' ? 'w' + w++ : 'b' + b++, kind, x: Math.cos(a) * ring, y: Math.sin(a) * ring, vx: 0, vy: 0, r: COIN_RADIUS, pocketed: false });
+  }
+  discs.push({ id: 'striker', kind: 'striker', x: 0, y: BASELINE, vx: 0, vy: 0, r: STRIKER_RADIUS, pocketed: false });
+  return { discs, turn: 0, pocketedBy: [0, 0], queen: 'board', queenOwner: null, over: false, winner: null, points: 0 };
+}
+
+const cloneState = (s: CarromState): CarromState => ({ ...s, discs: s.discs.map((d) => ({ ...d })), pocketedBy: [s.pocketedBy[0], s.pocketedBy[1]] });
+
+/** Is the striker free to sit at (x, baseline) — not on top of a coin? */
+export function strikerFits(s: CarromState, x: number): boolean {
+  const y = s.turn === 0 ? BASELINE : -BASELINE;
+  return s.discs.every((d) => d.kind === 'striker' || d.pocketed || Math.hypot(d.x - x, d.y - y) >= d.r + STRIKER_RADIUS);
+}
+
+/** Put the striker on the current player's baseline at x (clamped to the line). */
+export function placeStriker(s: CarromState, x: number): CarromState {
+  const next = cloneState(s);
+  const st = next.discs.find((d) => d.kind === 'striker')!;
+  st.x = Math.max(-BASELINE_HALF_LENGTH, Math.min(BASELINE_HALF_LENGTH, Number.isFinite(x) ? x : 0));
+  st.y = next.turn === 0 ? BASELINE : -BASELINE;
+  st.vx = 0; st.vy = 0; st.pocketed = false;
+  return next;
+}
+
+const POCKETS = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sy]) => ({ x: sx * (HALF - POCKET_RADIUS), y: sy * (HALF - POCKET_RADIUS) }));
+
+/** One small physics step for every moving disc. Returns the discs that dropped this step. */
+export function stepPhysics(discs: Disc[], dt: number): Disc[] {
+  const live = discs.filter((d) => !d.pocketed);
+  for (const d of live) {
+    const speed = Math.hypot(d.vx, d.vy);
+    if (speed > 0) {
+      const slow = Math.max(0, speed - FRICTION * dt) / speed;
+      d.vx *= slow; d.vy *= slow;
+      if (Math.hypot(d.vx, d.vy) < 2) { d.vx = 0; d.vy = 0; }
+    }
+    d.x += d.vx * dt; d.y += d.vy * dt;
+  }
+  // Disc-disc collisions: elastic with restitution, by mass, overlap pushed apart.
+  for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
+    const a = live[i], b = live[j];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const dist = Math.hypot(dx, dy), min = a.r + b.r;
+    if (dist >= min || dist === 0) continue;
+    const nx = dx / dist, ny = dy / dist;
+    const ma = a.kind === 'striker' ? STRIKER_MASS : COIN_MASS, mb = b.kind === 'striker' ? STRIKER_MASS : COIN_MASS;
+    const overlap = min - dist;
+    a.x -= nx * overlap * (mb / (ma + mb)); a.y -= ny * overlap * (mb / (ma + mb));
+    b.x += nx * overlap * (ma / (ma + mb)); b.y += ny * overlap * (ma / (ma + mb));
+    const rel = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+    if (rel >= 0) continue;   // already moving apart
+    const jImpulse = (-(1 + DISC_RESTITUTION) * rel) / (1 / ma + 1 / mb);
+    a.vx -= (jImpulse / ma) * nx; a.vy -= (jImpulse / ma) * ny;
+    b.vx += (jImpulse / mb) * nx; b.vy += (jImpulse / mb) * ny;
+  }
+  const dropped: Disc[] = [];
+  for (const d of live) {
+    if (POCKETS.some((p) => Math.hypot(d.x - p.x, d.y - p.y) < POCKET_RADIUS)) { d.pocketed = true; d.vx = 0; d.vy = 0; dropped.push(d); continue; }
+    if (d.x - d.r < -HALF) { d.x = -HALF + d.r; d.vx = Math.abs(d.vx) * WALL_RESTITUTION; }
+    if (d.x + d.r > HALF) { d.x = HALF - d.r; d.vx = -Math.abs(d.vx) * WALL_RESTITUTION; }
+    if (d.y - d.r < -HALF) { d.y = -HALF + d.r; d.vy = Math.abs(d.vy) * WALL_RESTITUTION; }
+    if (d.y + d.r > HALF) { d.y = HALF - d.r; d.vy = -Math.abs(d.vy) * WALL_RESTITUTION; }
+  }
+  return dropped;
+}
+
+/** A free spot near the middle for a coin coming back onto the board. */
+function centreSpot(discs: Disc[], r: number): { x: number; y: number } {
+  for (let ring = 0; ring < 12; ring++) for (let k = 0; k < Math.max(1, ring * 6); k++) {
+    const a = (k / Math.max(1, ring * 6)) * Math.PI * 2;
+    const x = Math.cos(a) * ring * r * 2, y = Math.sin(a) * ring * r * 2;
+    if (discs.every((d) => d.pocketed || Math.hypot(d.x - x, d.y - y) >= d.r + r)) return { x, y };
+  }
+  return { x: 0, y: 0 };
+}
+
+function returnToCentre(s: CarromState, d: Disc): void {
+  const spot = centreSpot(s.discs, d.r);
+  d.pocketed = false; d.x = spot.x; d.y = spot.y; d.vx = 0; d.vy = 0;
+}
+
+/**
+ * Flick the striker. The physics runs until every disc has stopped (at most 20 s of board time); then the rules decide
+ * what the shot meant.
+ */
+export function shoot(state: CarromState, angle: number, power: number): ShotResult {
+  if (state.over) return { state, frames: [], pocketed: [], foul: false, turnContinues: false, message: 'The game is over' };
+  const s = cloneState(state);
+  const me = s.turn, mine = colourOf(me), theirs = colourOf(me === 0 ? 1 : 0);
+  const striker = s.discs.find((d) => d.kind === 'striker')!;
+  const p = Math.max(0, Math.min(1, Number.isFinite(power) ? power : 0));
+  const a = Number.isFinite(angle) ? angle : -Math.PI / 2;
+  striker.vx = Math.cos(a) * MAX_SPEED * p; striker.vy = Math.sin(a) * MAX_SPEED * p;
+  const frames: ShotResult['frames'] = [];
+  const pocketed: ShotResult['pocketed'] = [];
+  let t = 0, nextFrame = 0;
+  while (t < 20) {
+    for (const d of stepPhysics(s.discs, STEP)) pocketed.push({ id: d.id, kind: d.kind });
+    t += STEP;
+    if (t >= nextFrame) { frames.push(s.discs.filter((d) => !d.pocketed).map((d) => ({ id: d.id, x: d.x, y: d.y }))); nextFrame += 1 / 60; }
+    if (s.discs.every((d) => d.pocketed || (d.vx === 0 && d.vy === 0))) break;
+  }
+  // ── The rules ──
+  const strikerIn = pocketed.some((x) => x.kind === 'striker');
+  const ownIn = pocketed.filter((x) => x.kind === mine).length;
+  const theirIn = pocketed.filter((x) => x.kind === theirs).length;
+  const queenIn = pocketed.some((x) => x.kind === 'queen');
+  s.pocketedBy[me] += ownIn;
+  s.pocketedBy[me === 0 ? 1 : 0] += theirIn;
+  const messages: string[] = [];
+  let foul = false;
+  if (strikerIn) {
+    foul = true;
+    messages.push('Foul: the striker went in');
+    // The penalty: one of your pocketed coins comes back to the middle.
+    const back = s.discs.find((d) => d.kind === mine && d.pocketed && !pocketed.some((x) => x.id === d.id)) ?? s.discs.find((d) => d.kind === mine && d.pocketed);
+    if (back) { returnToCentre(s, back); s.pocketedBy[me] -= 1; messages.push('one of your coins goes back to the middle'); }
+  }
+  // The queen: pocketed now, it must be covered by one of your coins in this shot or your next one.
+  if (queenIn && !foul) {
+    if (ownIn > 0) { s.queen = 'covered'; s.queenOwner = me; messages.push('Queen covered!'); }
+    else { s.queen = 'pending'; messages.push('Queen pocketed — cover it with your next coin'); }
+  } else if (queenIn && foul) {
+    const q = s.discs.find((d) => d.kind === 'queen')!; returnToCentre(s, q); s.queen = 'board';
+  } else if (state.queen === 'pending') {
+    if (ownIn > 0 && !foul) { s.queen = 'covered'; s.queenOwner = me; messages.push('Queen covered!'); }
+    else { const q = s.discs.find((d) => d.kind === 'queen')!; returnToCentre(s, q); s.queen = 'board'; messages.push('The queen was not covered and goes back to the middle'); }
+  }
+  // Your last coin cannot go in while the queen is still to be won: it comes back.
+  const mineLeft = s.discs.filter((d) => d.kind === mine && !d.pocketed).length;
+  if (mineLeft === 0 && s.queen !== 'covered') {
+    const last = s.discs.find((d) => d.kind === mine && d.pocketed && pocketed.some((x) => x.id === d.id));
+    if (last) { returnToCentre(s, last); s.pocketedBy[me] -= 1; foul = true; messages.push('Foul: the queen must be covered before your last coin'); }
+  }
+  // The striker always comes back for the next shot.
+  striker.pocketed = false;
+  const minesNow = s.discs.filter((d) => d.kind === mine && !d.pocketed).length;
+  const theirsNow = s.discs.filter((d) => d.kind === theirs && !d.pocketed).length;
+  if (minesNow === 0 && s.queen === 'covered') {
+    s.over = true; s.winner = me;
+    s.points = theirsNow + (s.queenOwner === me ? 3 : 0);
+    messages.push('Board won!');
+  } else if (theirsNow === 0 && s.queen === 'covered') {
+    s.over = true; s.winner = me === 0 ? 1 : 0;
+    s.points = minesNow + (s.queenOwner === s.winner ? 3 : 0);
+    messages.push('Your last opponent coin ended the board for them');
+  }
+  const turnContinues = !s.over && !foul && (ownIn > 0 || (queenIn && s.queen === 'pending'));
+  if (!turnContinues && !s.over) s.turn = me === 0 ? 1 : 0;
+  const placed = placeStriker(s, 0);
+  if (!messages.length) messages.push(ownIn ? 'Good shot — shoot again' : 'Next player');
+  return { state: placed, frames, pocketed, foul, turnContinues, message: messages.join('; ') };
+}
+`;
+
 const INDEX = String.raw`// The India games pack: tested rules engines (the board is drawn by the game).
 export { createRng, rollDie, shuffle } from './dice';
 export type { Rng } from './dice';
@@ -957,6 +1184,8 @@ export { createChess, parseFen, toFen, legalMoves as chessMoves, movesFrom, play
 export type { ChessState, ChessMove, ChessStatus, Colour, Piece, Cell, Castling, MoveFlag } from './chess';
 export { createDeck, shuffleCards, deal, cardName, isRed, SUITS, teenPattiHand, compareTeenPatti, meldType, cardPoints, checkDeclaration, handPoints, bestGrouping } from './cards';
 export type { Card, Suit, TeenPattiCategory, TeenPattiHand, MeldType, Declaration } from './cards';
+export { createCarrom, placeStriker, strikerFits, shoot, stepPhysics, BOARD as CARROM_BOARD, BASELINE, BASELINE_HALF_LENGTH, COIN_RADIUS, STRIKER_RADIUS, POCKET_RADIUS } from './carrom';
+export type { CarromState, Disc, DiscKind, QueenState, ShotResult } from './carrom';
 `;
 
 const FILES: Record<string, string> = {
@@ -965,10 +1194,11 @@ const FILES: Record<string, string> = {
   [`${BOARD_DIR}/snakes.ts`]: SNAKES,
   [`${BOARD_DIR}/chess.ts`]: CHESS,
   [`${BOARD_DIR}/cards.ts`]: CARDS,
+  [`${BOARD_DIR}/carrom.ts`]: CARROM,
   [`${BOARD_DIR}/index.ts`]: INDEX,
 };
 
-export const BOARD_GAME_MODULES: readonly string[] = ['dice', 'ludo', 'snakes', 'chess', 'cards'];
+export const BOARD_GAME_MODULES: readonly string[] = ['dice', 'ludo', 'snakes', 'chess', 'cards', 'carrom'];
 
 const EXAMPLE = [
   "import { createLudo, legalMoves, move, pass, chooseMove, cellOf, createRng, rollDie, type LudoState } from './game/board';",
@@ -1010,10 +1240,10 @@ export function generateBoardGames(include?: string[]): BoardGamesResult {
     files,
     dependencies: [],
     instructions:
-      `Added the India games pack (${Object.keys(files).length} files under ${BOARD_DIR}): tested rules for Ludo, Snakes & Ladders, chess and card games (Teen Patti, rummy), `
+      `Added the India games pack (${Object.keys(files).length} files under ${BOARD_DIR}): tested rules for Ludo, Snakes & Ladders, chess, carrom and card games (Teen Patti, rummy), `
       + 'a seeded die, and board geometry for drawing.\n'
       + '```ts\n' + EXAMPLE + '\n```\n'
-      + 'RULES: the game\'s rules come from these engines — never re-implement Ludo, Snakes & Ladders or chess logic. For chess, highlight movesFrom(game, square) when a piece is tapped, ask which piece on a promotion, show check, and end the game on chessStatus (checkmate, stalemate and each draw named). Card games are for FUN: points or pretend chips only — never real money, never a deposit, a wallet top-up or a cash prize (India bans real-money online games). Draw the board from '
+      + 'RULES: the game\'s rules come from these engines — never re-implement Ludo, Snakes & Ladders or chess logic. For chess, highlight movesFrom(game, square) when a piece is tapped, ask which piece on a promotion, show check, and end the game on chessStatus (checkmate, stalemate and each draw named). For carrom, drag the striker along the baseline (placeStriker), aim and pull back for power, then play shot.frames as the animation and show shot.message. Card games are for FUN: points or pretend chips only — never real money, never a deposit, a wallet top-up or a cash prize (India bans real-money online games). Draw the board from '
       + 'cellOf / squareCell, animate a token along r.path, and say what happened (a capture, a token home, another roll, a pass when '
       + 'nothing can move). Let the player tap the token they want from legalMoves; highlight those tokens. A computer opponent '
       + 'uses chooseMove. House rules are options (rules: { ... }), not new code.',

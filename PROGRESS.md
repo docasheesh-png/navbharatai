@@ -102637,3 +102637,12 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
   cap 80), bestGrouping (exhaustive, bounded).
 - Points / pretend chips only: the recipe, catalog and prompt forbid real money, deposits and cash prizes (India's 2025 ban).
 - Locked by `tests/cardGamesRankAndDeclareCorrectly.test.ts` (reversion: A-2-3 ranked low / no pure-sequence rule → 2 fail).
+
+## 2026-11-19 — India games pack (d): carrom (branch `claude/game-board-carrom`)
+- `src/game/board/carrom.ts` added to `generate_board_games`: real sizes in mm (740 board, coin r 15.9, striker r 20.6, pocket
+  r 22.25), elastic disc collisions by mass with restitution, constant friction, cushion bounces, corner pockets, a 240 Hz step
+  with 60 fps animation frames; rules — own coin continues, striker foul returns a coin, the queen pending → covered or returned,
+  no last coin before the queen, board won with points (opponent coins left + 3 for the queen).
+- Note from the tests: the striker is ~3× a coin's mass, so a hard straight shot follows the coin into the pocket (a foul) —
+  real-board behaviour, kept on purpose.
+- Locked by `tests/carromPlaysLikeTheRealBoard.test.ts` (reversion: no collision impulse / uncovered queen kept → 4 fail).

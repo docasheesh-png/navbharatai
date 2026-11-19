@@ -323,6 +323,8 @@ export interface EtaTickState {
   evidenced: boolean;
   /** The build's own configured time limit, ms; 0 = no cap. */
   budgetMs: number;
+  /** Live wall-clock remainder, independent of wait-adjusted elapsedMs. Infinity = no cap. */
+  remainingMs?: number;
   /** The labelled rough band the user was first shown (`~4–6 min`), or null when the first figure was evidenced. */
   roughBand: string | null;
   roughHighMs: number | null;
@@ -335,7 +337,7 @@ export interface EtaTickState {
 
 export interface EtaTickDecision {
   text: string;
-  kind: 'final-checks' | 'app-running' | 'measured-files' | 'measured-steps' | 'no-work-yet' | 'unevidenced' | 'rough-countdown' | 'rough-outrun' | 'budget';
+  kind: 'final-checks' | 'app-running' | 'measured-files' | 'measured-steps' | 'no-work-yet' | 'unevidenced' | 'rough-countdown' | 'rough-outrun' | 'budget' | 'budget-limit';
   /** State to carry into the next tick. */
   totalMs: number;
   revisions: number;
@@ -351,10 +353,11 @@ export function noWorkGraceMs(promisedHighMs: number): number {
 }
 
 /** The line that replaces a countdown nothing in this build supports. Elapsed time is the one number that is never a promise. PURE. */
-export function noWorkYetLine(elapsedMs: number, budgetMs?: number): string {
+export function noWorkYetLine(elapsedMs: number, budgetMs?: number, remainingMs?: number): string {
   const inTxt = formatEta(Math.max(0, Number(elapsedMs) || 0)).replace('~', '');
   const budget = Number(budgetMs);
-  const left = Number.isFinite(budget) && budget > Number(elapsedMs) ? ` I will keep going for up to ${formatEta(budget - Number(elapsedMs)).replace('~', '')} more.` : '';
+  const remaining = remainingMs ?? (budget > 0 ? budget - Number(elapsedMs) : Infinity);
+  const left = Number.isFinite(remaining) && remaining > 0 ? ` I will keep going for up to ${formatEta(remaining).replace('~', '')} more.` : '';
   return `⏱️ Still building… ${inTxt} in · nothing has been written yet, so I can't give you a finish time.${left} If it still produces nothing, I will stop and tell you honestly.`;
 }
 
@@ -364,17 +367,28 @@ export function etaTickLine(s: EtaTickState): EtaTickDecision {
   const phase = etaPhaseLine({ elapsedMs, finalChecks: s.finalChecks, appRenderedAt: s.appRenderedAt, ...(s.appExists === undefined ? {} : { appExists: s.appExists }) });
   if (phase !== null) return { text: phase, kind: s.finalChecks ? 'final-checks' : 'app-running', ...keep };
 
+  // BRcdffbb71: at minute 22 the historical overrun promised another 8 minutes in a 25-minute
+  // build. A forecast cannot extend its execution window. The same applies to measured forecasts;
+  // keep their evidence/state, but never turn the time limit into a promised completion time.
+  // elapsedMs can exclude waits, so the route supplies the independent wall-clock remainder.
+  const remaining = s.remainingMs ?? (Number.isFinite(s.budgetMs) && s.budgetMs > 0 ? s.budgetMs - elapsedMs : Infinity);
+  const withinWindow = (decision: EtaTickDecision, forecastMs: number): EtaTickDecision => {
+    if (remaining === Infinity || (Number.isFinite(remaining) && forecastMs <= Math.max(0, remaining))) return decision;
+    const inTxt = formatEta(elapsedMs).replace('~', '');
+    return { ...decision, kind: 'budget-limit', text: `⏱️ Still building… ${inTxt} in · I can't give a finish time within this build's remaining window.` };
+  };
+
   const measured = measuredRemainingMs({ plannedFiles: s.plannedFiles, filesDone: s.filesDone, firstFileAt: s.firstFileAt, now: s.now });
   if (measured !== null) {
     // A MEASUREMENT IS EVIDENCE, and it re-anchors the budget: if measurement later stops applying (the
     // build enters repair) the countdown continues from this build's own pace, not from the prompt guess.
-    return { text: measuredEtaText(elapsedMs, measured, s.filesDone, s.plannedFiles), kind: 'measured-files', totalMs: elapsedMs + measured, revisions: s.revisions, evidenced: true };
+    return withinWindow({ text: measuredEtaText(elapsedMs, measured, s.filesDone, s.plannedFiles), kind: 'measured-files', totalMs: elapsedMs + measured, revisions: s.revisions, evidenced: true }, measured);
   }
   // The plan second: a file manifest is an exact count of what will be written, a plan step is a unit
   // of the architect's own choosing — where both exist the file count is the better evidence.
   const byStep = measuredRemainingFromSteps({ plannedSteps: s.plannedSteps, stepsDone: s.stepsDone, firstStepAt: s.firstStepAt, now: s.now });
   if (byStep !== null) {
-    return { text: stepEtaText(elapsedMs, byStep, s.stepsDone, s.plannedSteps), kind: 'measured-steps', totalMs: elapsedMs + byStep, revisions: s.revisions, evidenced: true };
+    return withinWindow({ text: stepEtaText(elapsedMs, byStep, s.stepsDone, s.plannedSteps), kind: 'measured-steps', totalMs: elapsedMs + byStep, revisions: s.revisions, evidenced: true }, byStep);
   }
   // A FORECAST THIS BUILD HAS ALREADY CONTRADICTED IS NOT COUNTED DOWN (autopsy 67a2b0a2, 2026-10-15).
   // The opening figure was evidenced — "23 recent builds of this kind averaged 10 min" — and that evidence is
@@ -385,11 +399,11 @@ export function etaTickLine(s: EtaTickState): EtaTickDecision {
   // says what is measured — time spent, nothing written — and names no finish.
   if (s.evidenced && (Number(s.filesDone) || 0) === 0 && (Number(s.stepsDone) || 0) === 0
       && elapsedMs >= noWorkGraceMs(s.promisedHighMs)) {
-    return { text: noWorkYetLine(elapsedMs, s.budgetMs), kind: 'no-work-yet', ...keep };
+    return { text: noWorkYetLine(elapsedMs, s.budgetMs, s.remainingMs), kind: 'no-work-yet', ...keep };
   }
   // NO EVIDENCE ⇒ NO COUNTDOWN (autopsy d11ad529): elapsed time, the build's own limit and the labelled band.
   if (!s.evidenced) {
-    return { text: unevidencedEtaTickLine(elapsedMs, s.budgetMs, s.roughBand, s.roughHighMs), kind: 'unevidenced', ...keep };
+    return { text: unevidencedEtaTickLine(elapsedMs, s.budgetMs, s.roughBand, s.roughHighMs, s.remainingMs), kind: 'unevidenced', ...keep };
   }
   // A COUNTDOWN WHOSE TARGET IS THE TOP OF A GUESS IS STILL A GUESS. The budget's target is the rough
   // band's top whenever no broken promise has re-baselined it and no measurement has pushed it past
@@ -400,20 +414,23 @@ export function etaTickLine(s: EtaTickState): EtaTickDecision {
     // Past it: the guess was too low — said in the words the unevidenced line already uses, with no new
     // number (the overrun floor is a constant, not a measurement). Nothing is re-baselined, so every
     // later tick says the same true thing until a real measurement takes the line back.
-    return { text: unevidencedEtaTickLine(elapsedMs, s.budgetMs, s.roughBand, s.roughHighMs ?? promised), kind: 'rough-outrun', ...keep };
+    return { text: unevidencedEtaTickLine(elapsedMs, s.budgetMs, s.roughBand, s.roughHighMs ?? promised, s.remainingMs), kind: 'rough-outrun', ...keep };
   }
   const tick = liveEtaTick(elapsedMs, s.totalMs, s.baseMs || s.totalMs, s.revisions, s.promisedHighMs);
   const next = { totalMs: tick.totalMs, revisions: tick.revisions, evidenced: true };
   if (roughTarget && tick.kind === 'countdown') {
     const inTxt = formatEta(elapsedMs).replace('~', '');
     const leftTxt = formatEta(Math.max(0, tick.totalMs - elapsedMs)).replace('~', '');
-    return { text: `⏱️ Still building… ${inTxt} in · ~${leftTxt} to go on my rough estimate of ${s.roughBand} (${ROUGH_ESTIMATE_LABEL})`, kind: 'rough-countdown', ...next };
+    return withinWindow({ text: `⏱️ Still building… ${inTxt} in · ~${leftTxt} to go on my rough estimate of ${s.roughBand} (${ROUGH_ESTIMATE_LABEL})`, kind: 'rough-countdown', ...next }, tick.totalMs - elapsedMs);
   }
   if (roughTarget && tick.kind === 'near-end') {
     const inTxt = formatEta(elapsedMs).replace('~', '');
     return { text: `⏱️ Still building… ${inTxt} in · nearly at the top of my rough estimate of ${s.roughBand} (${ROUGH_ESTIMATE_LABEL}) — I'll tell you the moment it's done.`, kind: 'rough-countdown', ...next };
   }
-  return { text: tick.text, kind: 'budget', ...next };
+  const decision: EtaTickDecision = { text: tick.text, kind: 'budget', ...next };
+  return tick.kind === 'countdown' || tick.kind === 'overrun'
+    ? withinWindow(decision, tick.totalMs - elapsedMs)
+    : decision;
 }
 
 export function measuredEtaText(elapsedMs: number, remainingMs: number, filesDone: number, plannedFiles: number): string {

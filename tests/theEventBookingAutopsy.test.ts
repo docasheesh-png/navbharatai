@@ -89,8 +89,10 @@ describe('2 · a test the builder asks for can run', () => {
     const src = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
     const at = src.indexOf("case 'generate_tests': {");
     const body = src.slice(at, src.indexOf("case 'generate_integration_tests'", at));
-    expect(body.indexOf('withVitestDeclared(pkgBefore)')).toBeGreaterThan(0);
-    expect(body.indexOf('withVitestDeclared(pkgBefore)')).toBeLessThan(body.indexOf('await this.actuator.writeFile(this.workspaceId, path, content);'));
+    // cdffbb71: include installed/lock metadata, while preserving the original before-write invariant.
+    const declarationAt = body.indexOf('withVitestDeclared(pkgBefore,');
+    expect(declarationAt).toBeGreaterThan(0);
+    expect(declarationAt).toBeLessThan(body.indexOf('await this.actuator.writeFile(this.workspaceId, path, content);'));
   });
 });
 

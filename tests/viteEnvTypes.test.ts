@@ -134,8 +134,8 @@ describe('WIRING — both build paths, and neither can break an app', () => {
     // a dead sandbox still keeps the fix (best-effort, as before); only a Green Freeze refusal drops it.
     // Pin updated 2026-10-13 (autopsy 9c612cdb): the write is now named `vite-env-types` so its file is attributed to
     // this pass, not to the build loop. It still goes through writeUnlessFrozen, which is what this test guards.
-    expect(route.slice(at, at + 700)).toContain("await writeUnlessFrozen(() => runInPass('vite-env-types', () => actuator.writeFile(workspaceId, dts.path, dts.content)))");
+    expect(route.slice(at, at + 700)).toContain("await writeUnlessFrozen(() => finishingGuard.writeOrThrow('vite-env-types', () => runInPass('vite-env-types', () => actuator.writeFile(workspaceId, dts.path, dts.content))))");
     const helper = route.slice(route.indexOf('export async function writeUnlessFrozen'), route.indexOf('export async function writeUnlessFrozen') + 400);
-    expect(helper).toContain('return !(err instanceof GreenFreezeError);');
+    expect(helper).toContain('return !(err instanceof GreenFreezeError || err instanceof FinishingPassDeferredError);');
   });
 });

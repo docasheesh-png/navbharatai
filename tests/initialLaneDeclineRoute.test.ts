@@ -17,7 +17,8 @@ import { normalizeImportSpecifiers, injectGlobalStylesheetImport, dedupeStyleshe
 import { injectDotenvLoad, dotenvWiringMessage } from '../src/server/AgentV3/envLoading';
 import { missingViteEnvTypes, viteEnvTypesNote } from '../src/server/AgentV3/viteEnvTypes';
 import { redactCredentialLogs } from '../src/server/AgentV3/credentialLogRedaction';
-import { createFinishingPassGuard } from '../src/server/AgentV3/finishingPassesAtCap';
+import { createFinishingPassGuard, FinishingPassDeferredError, retainFinishingFileRepairs, retainedRepairRecords } from '../src/server/AgentV3/finishingPassesAtCap';
+import { GreenFreezeError } from '../src/server/AgentV3/greenFreeze';
 import { shouldAutoScaffoldE2e } from '../src/server/AgentV3/e2eAutoScaffold';
 import { renderRescueEligible } from '../src/server/AgentV3/renderRescue';
 import { findAmbientShimCollisions, stripCollidingAmbientShims, ambientShimNote } from '../src/server/AgentV3/ambientModuleShim';
@@ -77,9 +78,15 @@ const retry = conditionContains('shouldRetryEmptyBuild(');
 const firstAttempt = siblingsFrom(variable('costAfterFirstAttempt'), retry);
 const captureAnswer = siblingsFrom(variable('modelAnswer'), conditionContains('modelAnswer.declined && !abort.signal.aborted'));
 const integrityTry = one(nodes.filter(ts.isTryStatement).filter((n) => n.tryBlock.statements.some((s) => ts.isVariableStatement(s) && s.declarationList.declarations.some((d) => text(d.name) === 'integrityStartedAt'))), 'integrity try');
-const integrityLast = one([...integrityTry.tryBlock.statements].filter(ts.isIfStatement).filter((n) => text(n.expression).includes('AGENTV3_CRED_LOG_GUARD')), 'last deterministic integrity writer');
+const integrityLast = one([...integrityTry.tryBlock.statements].filter(ts.isExpressionStatement).filter((n) => {
+  if (!ts.isAwaitExpression(n.expression) || !ts.isCallExpression(n.expression.expression)) return false;
+  let callee: ts.Expression = n.expression.expression.expression;
+  while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
+  return ts.isFunctionExpression(callee) && callee.name?.text === 'runDeterministicIntegrityRepairs';
+}), 'awaited deterministic integrity repairs');
 const integrityAdmission = ts.isIfStatement(integrityTry.parent) ? integrityTry.parent : integrityTry;
-// Keep the production wrapper and every original prefix statement, including all write calls/catches.
+// Keep the production wrapper and every original prefix statement, including the complete awaited
+// repair IIFE and all of its write calls/catches. Its nested guards are not direct children of the try.
 // Omit only the later advisory/model-quality stages, whose behavior this test does not claim to prove.
 const integrity = text(integrityAdmission).replace(
   text(integrityTry.tryBlock),
@@ -94,7 +101,7 @@ const billing = statementContainingCall('buildDiag.setBilling');
 const sandboxFeeAssignment = one(nodes.filter(ts.isExpressionStatement).filter(n => text(n.expression) === 'effectiveBilledUsd = settledSandboxFee.totalUsd'), 'settled sandbox fee assignment');
 const providerTokens = statementContainingCall('buildDiag.setProviderTokens');
 const resultEvent = statementContainingCall('emit', (n) => text(n).includes("type: 'result', ...result"));
-const pureFunctions = ['shouldRetryEmptyBuild', 'sessionCostCapUsd'].map((name) => text(one(nodes.filter(ts.isFunctionDeclaration).filter((n) => n.name?.text === name), name)).replace(/^export /, '')).join('\n');
+const pureFunctions = ['shouldRetryEmptyBuild', 'sessionCostCapUsd', 'writeUnlessFrozen'].map((name) => text(one(nodes.filter(ts.isFunctionDeclaration).filter((n) => n.name?.text === name), name)).replace(/^export /, '')).join('\n');
 
 type Mutation = 'simple-handoff' | 'one-shot-handoff' | 'integrity' | 'finishing' | 'cost-narration' | 'diagnostic-outcome';
 const compiledPrograms = new Map<string, string>();
@@ -126,8 +133,8 @@ function program(mutation?: Mutation): string {
     ${text(lastFallback)}
     ${attemptCode}
     ${captureAnswer}
-    ${integrityCode}
     ${text(variable('finishingGuard'))}
+    ${integrityCode}
     ${text(variable('applyFinishingPasses'))}
     ${finishingCode}
     ${text(statementContainingCall('recheckAfterFinishingWrites'))}
@@ -226,7 +233,6 @@ async function runCaller(options: { files: Record<string, string>; replies?: str
     fastGenerate: generate, fastPreview: preview, fastVerify: verify, fastRepair: repair,
     fastWrite: rawWrite, fastLog: (msg: string) => events.push({ type: 'narration', text: msg }),
     runInPass: async (pass: string, action: () => Promise<unknown>) => { passes.push(pass); return action(); },
-    writeUnlessFrozen: async (action: () => Promise<unknown>) => { await action(); return true; },
     actuator: { readFile, writeFile, runCommand: commands, browseUrl: preview },
     loadWorkspaceFiles: async () => ({ ...files }), saveWorkspaceFiles: vi.fn(async () => {}),
     readExistingProjectFile: (path: string) => readFile('synthetic-workspace', path),
@@ -246,7 +252,8 @@ async function runCaller(options: { files: Record<string, string>; replies?: str
     thirdPartyAdFactsAtStart: { players: [] },
     normalizeImportSpecifiers, injectGlobalStylesheetImport, dedupeStylesheetImports, injectDotenvLoad,
     dotenvWiringMessage, missingViteEnvTypes, viteEnvTypesNote, redactCredentialLogs, isImportTurn: false,
-    createFinishingPassGuard, effectiveBuildSeconds: 0, buildStartedAt: Date.now(), singleHtmlFileRule: false,
+    createFinishingPassGuard, FinishingPassDeferredError, GreenFreezeError, retainFinishingFileRepairs, retainedRepairRecords,
+    effectiveBuildSeconds: 0, buildStartedAt: Date.now(), singleHtmlFileRule: false,
     shouldAutoScaffoldE2e, renderRescueEligible, lastPreviewUrl: options.existingPreview ? 'https://synthetic.invalid/preview' : null,
     findAmbientShimCollisions, stripCollidingAmbientShims, ambientShimNote, withE2eExcluded, e2eExcludeNote,
     noteFinishingWrite: (path: string) => finishingPaths.add(path), userId: null,

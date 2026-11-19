@@ -17,6 +17,7 @@
 // surface we use is declared ambiently in ./semver.d.ts so the version-conflict analyzer stays typed.
 import { validRange, intersects, minVersion, gt } from 'semver';
 import { shipsOwnTypes, typingsMajorMayLag } from '../lib/selfTypedPackages';
+import { angularRequiredDependencies, angularWorkspaceFacts } from './angularWorkspaceAnalysis';
 
 export type DependencySeverity = 'high' | 'medium' | 'low';
 
@@ -157,6 +158,7 @@ function isImplicitDep(name: string): boolean {
 export function analyzeDependencies(
   externalImports: string[],
   packageJsonContent: string | null,
+  files: Readonly<Record<string, string>> = {},
 ): DependencyIssue[] {
   if (packageJsonContent == null) return [];
   let parsed: unknown;
@@ -222,8 +224,10 @@ export function analyzeDependencies(
   }
 
   // Unused (low): declared in `dependencies` but never imported (conservative).
+  const angularUsed = new Set([...angularRequiredDependencies(packageJsonContent), ...angularWorkspaceFacts(files).packages]);
   for (const name of manifest.dependencies) {
     if (isImplicitDep(name)) continue;
+    if (angularUsed.has(name)) continue;
     if (!importedPackages.has(name)) {
       issues.push({
         kind: 'unused',

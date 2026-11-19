@@ -16,7 +16,7 @@
 import { MIN_CORRECTION_RESERVE_MS } from './correctionReserve';
 import { abortBuild } from './buildAbortCause';
 
-/** Did this run end because the wall-clock cap stopped it? */
+/** Did this generation run reach its limit (which can precede the final verification deadline)? */
 export function capStoppedTheRun(result: { timedOut?: boolean } | null | undefined): boolean {
   return result?.timedOut === true;
 }
@@ -28,7 +28,7 @@ export function finishingPassMayRun(result: { timedOut?: boolean } | null | unde
 
 /** The admin-report line for the passes that waited. Never user-facing. */
 export function finishingPassesHeldNote(passes: readonly string[]): string {
-  return `The wall-clock cap stopped this build, so ${passes.join(' and ')} did not write into the app: there was no time left to open it and check what they wrote. `
+  return `The generation run reached its time limit, so ${passes.join(' and ')} did not write into the app: the remaining build time is reserved for verification. `
     + 'They run on the next turn, with time to verify.';
 }
 
@@ -46,6 +46,43 @@ export function recordFinishingPassesHeld(
 
 /** The existing correction floor clears the >90s preview gate with room for its browser check. */
 export const FINISHING_PROOF_RESERVE_MS = MIN_CORRECTION_RESERVE_MS;
+
+/** An explicit refusal, never a transport error that permits a saved-only repair. */
+export class FinishingPassDeferredError extends Error {
+  constructor(pass: string) {
+    super(`Finishing pass deferred: ${pass}`);
+    this.name = 'FinishingPassDeferredError';
+  }
+}
+
+/** A planned repair is not an applied repair; receipts include only files whose writes were accepted. */
+export function retainedRepairRecords<T extends { file: string }>(records: readonly T[], retainedPaths: ReadonlySet<string>): T[] {
+  return records.filter((record) => retainedPaths.has(record.file));
+}
+
+/** Retain only changed files accepted by the write boundary, and return exactly those paths for receipts. */
+export async function retainFinishingFileRepairs(
+  current: Readonly<Record<string, string>>,
+  proposed: Readonly<Record<string, string>>,
+  write: (path: string, content: string) => Promise<boolean>,
+  keep: (path: string, content: string) => void,
+): Promise<Set<string>> {
+  const retained = new Set<string>();
+  for (const [path, content] of Object.entries(proposed)) {
+    if (typeof content !== 'string' || content === current[path]) continue;
+    if (!(await write(path, content))) continue;
+    keep(path, content);
+    retained.add(path);
+  }
+  return retained;
+}
+
+export function generationTimeoutNote(elapsedMs: number, savedWork: boolean): string {
+  const elapsedSeconds = Math.max(0, Math.round(elapsedMs / 1000));
+  return `Build outcome: the generation run reached its time limit after ${elapsedSeconds}s elapsed `
+    + (savedWork ? 'with work saved — resumable, not a crash. ' : 'before producing application files. ')
+    + 'The generation limit can precede the total build deadline; any remaining time is reserved for verification.';
+}
 
 export interface FinishingPassGuardDeps {
   result: () => { timedOut?: boolean } | null | undefined;
@@ -91,7 +128,7 @@ export function createFinishingPassGuard(d: FinishingPassGuardDeps): {
     return left === Infinity ? 0 : Number.isFinite(left) ? Math.max(1, Math.floor(left - FINISHING_PROOF_RESERVE_MS)) : 1;
   };
   const repairOrThrow = async <T>(pass: string, action: (budgetMs: number, signal: AbortSignal) => Promise<T>): Promise<T> => {
-    if (!allow(pass)) throw new Error(`Finishing pass deferred: ${pass}`);
+    if (!allow(pass)) throw new FinishingPassDeferredError(pass);
     const budgetMs = repairBudgetMs();
     const controller = new AbortController();
     const signal = d.signal ? AbortSignal.any([d.signal, controller.signal]) : controller.signal;
@@ -109,7 +146,7 @@ export function createFinishingPassGuard(d: FinishingPassGuardDeps): {
       return true;
     },
     writeOrThrow: async (pass, action) => {
-      if (!allow(pass)) throw new Error(`Finishing pass deferred: ${pass}`);
+      if (!allow(pass)) throw new FinishingPassDeferredError(pass);
       await action();
     },
     repair: async (pass, action) => {

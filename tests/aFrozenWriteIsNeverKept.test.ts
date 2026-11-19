@@ -27,9 +27,9 @@ describe('census: after green, a refused write is never kept', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('the shared helper keeps every other failure and drops only a freeze refusal', () => {
+  it('the shared helper drops explicit freeze and finishing refusals', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    expect(route).toContain('return !(err instanceof GreenFreezeError);');
+    expect(route).toContain('return !(err instanceof GreenFreezeError || err instanceof FinishingPassDeferredError);');
     expect((route.match(/writeUnlessFrozen\(/g) || []).length).toBeGreaterThanOrEqual(10);
   });
 });

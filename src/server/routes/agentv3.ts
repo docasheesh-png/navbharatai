@@ -428,7 +428,8 @@ import { dormancyReason, reportableFileCount } from '../AgentV3/workspaceDormanc
 import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
 import { repeatedReadSummary, READ_LOOP_LIMIT } from '../AgentV3/repeatedReads';
 import { noteTodoOnlyTurn } from '../AgentV3/todoOnlyTurn';
-import { createFinishingPassGuard, recordFinishingPassesHeld } from '../AgentV3/finishingPassesAtCap';
+import { createFinishingPassGuard, recordFinishingPassesHeld, FinishingPassDeferredError, generationTimeoutNote, retainedRepairRecords, retainFinishingFileRepairs } from '../AgentV3/finishingPassesAtCap';
+import { selectEditPromotionBase, editBaseHydrationIsComplete } from '../AgentV3/editPromotionBase';
 import { recheckAfterFinishingWrites, postGreenRecheckEnabled } from '../AgentV3/finishingRecheck';
 import { APPEND_WITH_EMPTY_OLD_STRING } from '../AgentV3/appendByEdit';
 import { greenGuardUndidWork, withGreenGuardCorrection, type GreenGuardRestoreFacts } from '../AgentV3/greenGuardHonesty';
@@ -665,7 +666,7 @@ import { foundationFilesStillAbsent, ensureViteReactFoundation, ensureStaticSite
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
 import { wakePublicState, sanitizeWakeError, type TerminalWakeState } from '../AgentV3/terminalWake';
-import { checkPreviewCompiles, previewCompileRepairInstruction, previewDivergenceBlocksDelivery, previewCompileUnresolvedSummary } from '../runtime/PreviewCompileCheck';
+import { checkPreviewCompiles, admitPreviewCompileCheck, previewCompileRepairInstruction, previewDivergenceBlocksDelivery, previewCompileUnresolvedSummary } from '../runtime/PreviewCompileCheck';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
@@ -3295,7 +3296,7 @@ export function plannerCallLabel(
  *
  * These passes deliberately keep their fix in the saved copy even when the sandbox write fails — a dead
  * or paused machine must not cost a correct repair ("the store copy is fixed"). The ONE failure that must
- * not be kept is a Green Freeze refusal: the app was verified working, the freeze said no, and keeping the
+ * not be kept is an explicit Green Freeze or finishing-budget refusal: a guard said no, and keeping the
  * change in the saved copy anyway would put an unverified edit into the app the user publishes while the
  * running preview shows the verified one (autopsy SignBridge, 2026-09-26 — the sibling of the heal-write
  * leak fixed in ToolDispatcher.landHealWrite). So: refused ⇒ false; written or any other failure ⇒ true.
@@ -3305,7 +3306,7 @@ export async function writeUnlessFrozen(write: () => Promise<unknown>): Promise<
     await write();
     return true;
   } catch (err) {
-    return !(err instanceof GreenFreezeError);
+    return !(err instanceof GreenFreezeError || err instanceof FinishingPassDeferredError);
   }
 }
 
@@ -14136,11 +14137,12 @@ async function noteBuildOutcome(
     let editBaseCheck: BaseVerification = { state: 'no-head', missing: [], extra: [], differing: [] };
     let editHeadAtStart: RevisionRecord | null = null;
     let editVerifiedBase: Record<string, string> | null = null;
+    let editBaseHydrationComplete = false;
     /** What an edit is compared with; null when this turn may replace the project (fresh start, approved rebuild, import). */
     const editGateBase = (): Record<string, string> | null => {
       if (!editPromotionEnabled() || userApprovedReplace || isImportTurn || hasImportIntent) return null;
       const base = editVerifiedBase ?? projectFilesAtTurnStart;
-      return base && Object.keys(base).length > 0 ? base : null;
+      return selectEditPromotionBase({ base, verifiedHead: editHeadAtStart !== null, completeHydration: editBaseHydrationComplete });
     };
     /** The one id this edit carries through retries, reconnects and fallbacks: it promotes at most once. */
     const editId = editIdFor(workspaceId, req.body?.requestId, randomUUID());
@@ -14415,6 +14417,7 @@ async function noteBuildOutcome(
             plannedFiles: etaPlannedFiles, filesDone: etaFilesDone, firstFileAt: etaFirstFileAt,
             plannedSteps: etaPlannedSteps, stepsDone: etaStepPaths.size, firstStepAt: etaFirstStepAt,
             evidenced: etaEvidenced, budgetMs: effectiveBuildSeconds * 1000,
+            remainingMs: effectiveBuildSeconds === 0 ? Infinity : effectiveBuildSeconds * 1000 - (now - (billingCtx.buildStartedAt ?? now)),
             roughBand: etaRoughBand, roughHighMs: etaRoughHighMs,
             totalMs: etaTotalMs, baseMs: etaBaseMs, revisions: etaRevisions, promisedHighMs: etaPromisedHighMs,
           });
@@ -16306,6 +16309,7 @@ async function noteBuildOutcome(
           editHeadAtStart = baseResult.head;
           editBaseCheck = baseResult.check;
           editVerifiedBase = baseResult.verifiedBase;
+          editBaseHydrationComplete = editBaseHydrationIsComplete(durableFilePaths, saved, durable.status, baseResult.finding?.code === 'EDIT_BASE_UNCHECKED');
           if (baseResult.finding) buildDiag.record({ phase: 'build', ...baseResult.finding });
           const scanT0 = Date.now();
           // ⚠️ A SCAN THAT FAILED IS NOT AN EMPTY SANDBOX — and this line used to say it was.
@@ -20696,9 +20700,7 @@ async function noteBuildOutcome(
         try {
           buildDiag.record({
             phase: 'build', severity: result.ok ? 'warning' : 'error', code: 'OUTCOME_BUILD_TIMEOUT',
-            message: result.ok
-              ? `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (${freeWindow.capped ? 'AGENTV3_FREE_BUILD_SECONDS' : 'AGENTV3_MAX_BUILD_SECONDS'}) with real work saved — resumable, not a crash.`
-              : `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (${freeWindow.capped ? 'AGENTV3_FREE_BUILD_SECONDS' : 'AGENTV3_MAX_BUILD_SECONDS'}) before producing anything.`,
+            message: generationTimeoutNote(Date.now() - buildStartedAt, result.ok),
             autoResolved: false,
           });
         } catch { /* diagnostics best-effort */ }
@@ -21490,6 +21492,9 @@ async function noteBuildOutcome(
             try { integrityFiles[p] = await actuator.readFile(workspaceId, p); } catch { /* absent in sandbox too */ }
           }
         }
+        // This independent finishing phase has its own control-flow boundary; the chat route is at
+        // TypeScript's flow-analysis limit. Its guard decisions and writes remain sequential.
+        await (async function runDeterministicIntegrityRepairs() {
         // MIXED IMPORT SPECIFIERS — deterministic normalize (FitPulse: ThemeContext imported both
         // './context/ThemeContext' and 'context/ThemeContext' → the in-browser bundler instantiated the
         // module TWICE → two React contexts → "useTheme must be used within a ThemeProvider" crash that
@@ -21506,12 +21511,13 @@ async function noteBuildOutcome(
           for (const f of touched) {
             const content = norm.files[f];
             if (typeof content !== 'string') continue;
+            if (!(await writeUnlessFrozen(() => finishingGuard.writeOrThrow('import-specifier-normalize', () => runInPass('import-specifier-normalize', () => actuator.writeFile(workspaceId, f, content)))))) continue;
             integrityFiles[f] = content;
             if (writtenFiles.has(f) || f !== 'index.html') writtenFiles.set(f, content);
-            try { await runInPass('import-specifier-normalize', () => actuator.writeFile(workspaceId, f, content)); } catch { /* sandbox write best-effort */ }
           }
-          if (norm.rewrites.length > 0) {
-            buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_IMPORTS_NORMALIZED', message: `Normalized ${norm.rewrites.length} import specifier(s) so every bundler sees one module instance (prevents duplicate-context "must be used within a Provider" crashes).`, autoResolved: true, detail: norm.rewrites.slice(0, 10).map((r) => `${r.file}: ${r.from} → ${r.to}`).join('; ') });
+          const keptRewrites = norm.rewrites.filter((r) => integrityFiles[r.file] === norm.files[r.file]);
+          if (keptRewrites.length > 0) {
+            buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_IMPORTS_NORMALIZED', message: `Normalized ${keptRewrites.length} import specifier(s) so every bundler sees one module instance (prevents duplicate-context "must be used within a Provider" crashes).`, autoResolved: true, detail: keptRewrites.slice(0, 10).map((r) => `${r.file}: ${r.from} → ${r.to}`).join('; ') });
           }
         }
         // ORPHAN STYLESHEET — deterministic fix FIRST (NotesNest autopsy 2026-07-16: the app shipped as
@@ -21523,11 +21529,11 @@ async function noteBuildOutcome(
           for (const inj of wired.injected) {
             const newEntry = wired.files[inj.entry];
             if (typeof newEntry === 'string') {
-              if (await writeUnlessFrozen(() => runInPass('stylesheet-import-wire', () => actuator.writeFile(workspaceId, inj.entry, newEntry)))) {
+              if (await writeUnlessFrozen(() => finishingGuard.writeOrThrow('stylesheet-import-wire', () => runInPass('stylesheet-import-wire', () => actuator.writeFile(workspaceId, inj.entry, newEntry))))) {
                 integrityFiles[inj.entry] = newEntry;
                 writtenFiles.set(inj.entry, newEntry);
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_WIRED', message: `"${inj.stylesheet}" had no detected stylesheet reference — added its import to ${inj.entry}.`, autoResolved: true });
               }
-              buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_WIRED', message: `"${inj.stylesheet}" was imported by NOTHING (app would render unstyled) — injected its import into ${inj.entry}.`, autoResolved: true });
             }
           }
           // The same certainty for a DUPLICATE import the entry already covers (autopsy 33812996) — the
@@ -21536,7 +21542,7 @@ async function noteBuildOutcome(
           for (const r of deduped.removed) {
             const next = deduped.files[r.from];
             if (typeof next !== 'string') continue;
-            if (await writeUnlessFrozen(() => runInPass('stylesheet-dedupe', () => actuator.writeFile(workspaceId, r.from, next)))) {
+            if (await writeUnlessFrozen(() => finishingGuard.writeOrThrow('stylesheet-dedupe', () => runInPass('stylesheet-dedupe', () => actuator.writeFile(workspaceId, r.from, next))))) {
               integrityFiles[r.from] = next;
               writtenFiles.set(r.from, next);
               buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_DEDUPED', message: `"${r.stylesheet}" was imported by the entry AND by ${r.from} — removed the second import (a global stylesheet applies once, whoever imports it).`, autoResolved: true });
@@ -21565,11 +21571,11 @@ async function noteBuildOutcome(
             const patched = env.files[env.wired.entry];
             if (typeof patched === 'string') {
               const entry = env.wired.entry;
-              if (await writeUnlessFrozen(() => runInPass('dotenv-load-wire', () => actuator.writeFile(workspaceId, entry, patched)))) {
+              if (await writeUnlessFrozen(() => finishingGuard.writeOrThrow('dotenv-load-wire', () => runInPass('dotenv-load-wire', () => actuator.writeFile(workspaceId, entry, patched))))) {
                 integrityFiles[entry] = patched;
                 writtenFiles.set(entry, patched);
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'ENV_LOADING_WIRED', message: dotenvWiringMessage(env.wired), autoResolved: true });
               }
-              buildDiag.record({ phase: 'build', severity: 'info', code: 'ENV_LOADING_WIRED', message: dotenvWiringMessage(env.wired), autoResolved: true });
             }
           }
         }
@@ -21582,7 +21588,7 @@ async function noteBuildOutcome(
         if (process.env.AGENTV3_VITE_ENV_TYPES !== 'off' && !isImportTurn) {
           const dts = missingViteEnvTypes(integrityFiles);
           if (dts) {
-            if (await writeUnlessFrozen(() => runInPass('vite-env-types', () => actuator.writeFile(workspaceId, dts.path, dts.content)))) {
+            if (await writeUnlessFrozen(() => finishingGuard.writeOrThrow('vite-env-types', () => runInPass('vite-env-types', () => actuator.writeFile(workspaceId, dts.path, dts.content))))) {
               integrityFiles[dts.path] = dts.content;
               writtenFiles.set(dts.path, dts.content);
               // Said only when it landed — a freeze-refused file was not added.
@@ -21611,20 +21617,16 @@ async function noteBuildOutcome(
               buildDiag.record({ phase: 'build', severity: 'warning', code: 'COMPLIANCE_LOG_LEAK_FOUND', message: `${redacted.redactions.length} console log(s) across ${files.length} file(s) print a credential/token. NOT changed — you asked me not to modify files on this turn. Ask me to fix them and I will redact every one.`, autoResolved: false, detail: redacted.redactions.slice(0, 10).map((r) => `${r.file}:${r.line}`).join('; ') });
             }
           } else {
-            for (const r of redacted.redactions) {
-              const newContent = redacted.files[r.file];
-              if (typeof newContent !== 'string' || newContent === integrityFiles[r.file]) continue;
-              if (await writeUnlessFrozen(() => runInPass('credential-log-redact', () => actuator.writeFile(workspaceId, r.file, newContent)))) {
-                integrityFiles[r.file] = newContent;
-                writtenFiles.set(r.file, newContent);
-              }
-            }
-            if (redacted.redactions.length > 0) {
-              const files = [...new Set(redacted.redactions.map((r) => r.file))];
-              buildDiag.record({ phase: 'build', severity: 'info', code: 'COMPLIANCE_LOG_REDACTED', message: `Redacted ${redacted.redactions.length} console log(s) that leaked a credential/token (would have hard-blocked the readiness gate) across ${files.length} file(s).`, autoResolved: true, detail: redacted.redactions.slice(0, 10).map((r) => `${r.file}:${r.line}`).join('; ') });
+            const retainedPaths = await retainFinishingFileRepairs(integrityFiles, redacted.files,
+              (path, content) => writeUnlessFrozen(() => finishingGuard.writeOrThrow('credential-log-redact', () => runInPass('credential-log-redact', () => actuator.writeFile(workspaceId, path, content)))),
+              (path, content) => { integrityFiles[path] = content; writtenFiles.set(path, content); });
+            const retained = retainedRepairRecords(redacted.redactions, retainedPaths);
+            if (retained.length > 0) {
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'COMPLIANCE_LOG_REDACTED', message: `Redacted ${retained.length} console log(s) that leaked a credential/token (would have hard-blocked the readiness gate) across ${retainedPaths.size} file(s).`, autoResolved: true, detail: retained.slice(0, 10).map((r) => `${r.file}:${r.line}`).join('; ') });
             }
           }
         }
+        })();
         // 🔴 IS THERE A SECOND REPOSITORY INSIDE THIS PROJECT? (autopsy c5fd6ad1 — the open root
         // cause `gitCloneGuard.ts` recorded and could not close). `.git` is pruned by
         // `buildListFilesCommand` INSIDE the sandbox, so the file list cannot tell a nested repository
@@ -21846,26 +21848,30 @@ async function noteBuildOutcome(
           // import/survey turn (mitrify autopsy 2026-07-24): the user said "do not change any files yet",
           // so the heal must not edit the imported project — the warnings above stay advisory (matches the
           // C9 reviewer-autofix `!isImportTurn` gate). `expectsArtifacts` is false on every import turn.
-          if (shouldRunIntegrityHeal({ gateEnabled: envFlag('AGENTV3_INTEGRITY_GATE'), resultOk: result.ok, expectsArtifacts, aborted: abort.signal.aborted })) {
+          if (shouldRunIntegrityHeal({ gateEnabled: envFlag('AGENTV3_INTEGRITY_GATE'), resultOk: result.ok, expectsArtifacts, aborted: abort.signal.aborted }) && finishingGuard.allow('integrity-repair')) {
             events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing project-integrity issues…', ts: Date.now() });
             try {
-              const integrityRunner = new AgentRunner({
-                ...baseRunnerOpts,
-                client: buildTurnRunner(healRunnerOpts()),
-                platformRequest: true,
-                model: resolveModel(powerLevelReqEffective),
-                persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+              const healed = await finishingGuard.repairOrThrow('integrity-repair', (maxBuildMs, signal) => {
+                const integrityRunner = new AgentRunner({
+                  ...baseRunnerOpts,
+                  maxBuildMs,
+                  signal,
+                  client: buildTurnRunner(healRunnerOpts()),
+                  platformRequest: true,
+                  model: resolveModel(powerLevelReqEffective),
+                  persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+                });
+                return runInPass('integrity-repair', () => integrityRunner.run(
+                  `Static analysis found these project-integrity defects. Compilation and runtime success are not established by this analysis. Fix ONLY these defects — make the smallest ` +
+                  `possible edits to the existing files, change nothing else:\n\n${integrityRepairInstruction(integrity)}`,
+                ));
               });
-              const healed = await runInPass('integrity-repair', () => integrityRunner.run(
-                `The app is built and compiles. Fix ONLY these project-integrity defects — make the smallest ` +
-                `possible edits to the existing files, change nothing else:\n\n${integrityRepairInstruction(integrity)}`,
-              ));
               if (healed.ok) {
                 // SUMMARY HONESTY (FitPulse autopsy 2026-07-17): the heal run's final narration used to
                 // REPLACE the build summary — a no-op heal shipped "It seems there's a misunderstanding…
                 // I will not make any changes." as the user's build result. Keep the REAL build summary;
                 // the heal contributes its edits, never its chatter.
-                result = { ...healed, summary: result.summary };
+                // Optional repair contributes writes, not a replacement build outcome or timeout history.
                 // Re-judged on the WHOLE project, the same map the finding came from — this build's writes
                 // alone cannot see a focus owner or an entry in a file the build did not touch.
                 const after = analyzeProjectIntegrity({ ...integrityFiles, ...Object.fromEntries(writtenFiles) });
@@ -22126,7 +22132,7 @@ async function noteBuildOutcome(
               for (const path of [...writtenFiles.keys()]) {
                 if (!/\.(?:tsx|jsx|html?)$/i.test(path) || typeof integrityFiles[path] !== 'string') continue;
                 const r = labelFieldsFromPlaceholder(integrityFiles[path]);
-                if (r.repaired > 0 && await writeUnlessFrozen(() => runInPass('label-repair', () => actuator.writeFile(workspaceId, path, r.code)))) {
+                if (r.repaired > 0 && await writeUnlessFrozen(() => finishingGuard.writeOrThrow('label-repair', () => runInPass('label-repair', () => actuator.writeFile(workspaceId, path, r.code))))) {
                   integrityFiles[path] = r.code;
                   writtenFiles.set(path, r.code);
                   labelled += r.repaired;
@@ -22200,13 +22206,11 @@ async function noteBuildOutcome(
               if (process.env.AGENTV3_SCRIPT_REPAIR !== 'off' && !isImportTurn) {
                 const repaired = repairLostEscapes(integrityFiles);
                 if (repaired.repairs.length > 0) {
-                  for (const [path, content] of Object.entries(repaired.files)) {
-                    if (await writeUnlessFrozen(() => runInPass('script-escape-repair', () => actuator.writeFile(workspaceId, path, content)))) {
-                      integrityFiles[path] = content;
-                      writtenFiles.set(path, content);
-                    }
-                  }
-                  buildDiag.record({ phase: 'build', severity: 'info', code: 'SCRIPT_INTEGRITY_REPAIRED', message: scriptRepairSummary(repaired.repairs), autoResolved: true });
+                  const retainedPaths = await retainFinishingFileRepairs(integrityFiles, repaired.files,
+                    (path, content) => writeUnlessFrozen(() => finishingGuard.writeOrThrow('script-escape-repair', () => runInPass('script-escape-repair', () => actuator.writeFile(workspaceId, path, content)))),
+                    (path, content) => { integrityFiles[path] = content; writtenFiles.set(path, content); });
+                  const retained = retainedRepairRecords(repaired.repairs, retainedPaths);
+                  if (retained.length > 0) buildDiag.record({ phase: 'build', severity: 'info', code: 'SCRIPT_INTEGRITY_REPAIRED', message: scriptRepairSummary(retained), autoResolved: true });
                 }
               }
               const mixed = findMixedScriptText(integrityFiles);
@@ -22451,7 +22455,7 @@ async function noteBuildOutcome(
             if (removed.length > 0 && deduped !== c) {
               // The saved copy follows the live file, never leads it: a write the freeze refused used to be
               // saved anyway, so the next session restored a change the working app never had (f496c75b).
-              if (!(await writeUnlessFrozen(() => runInPass('duplicate-import-dedupe', () => actuator.writeFile(workspaceId, p, deduped))))) continue;
+              if (!(await writeUnlessFrozen(() => finishingGuard.writeOrThrow('duplicate-import-dedupe', () => runInPass('duplicate-import-dedupe', () => actuator.writeFile(workspaceId, p, deduped)))))) continue;
               writtenFiles.set(p, deduped);
               dedupedFiles++;
               try { getWorkspaceMemory(workspaceId).indexFile(p, deduped); } catch { /* index best-effort */ }
@@ -22510,7 +22514,9 @@ async function noteBuildOutcome(
       // when the auto-fix gate is on, makes ONE bounded repair pass. Additive + best-effort: it records an
       // honest admin diagnostic and never changes result.ok, the bill, or the browser-verify verdict below.
       // Disable with AGENTV3_PREVIEW_COMPILE_CHECK=off.
-      if (process.env.AGENTV3_PREVIEW_COMPILE_CHECK !== 'off' && result.ok && expectsArtifacts && writtenFiles.size > 0) {
+      if (admitPreviewCompileCheck(framework,
+        process.env.AGENTV3_PREVIEW_COMPILE_CHECK !== 'off' && result.ok && expectsArtifacts && writtenFiles.size > 0,
+        (message) => buildDiag.record({ phase: 'preview', severity: 'info', code: 'PREVIEW_COMPILE_NOT_APPLICABLE', message, autoResolved: true }))) {
         try {
           let compile = checkPreviewCompiles(Object.fromEntries(writtenFiles));
           if (!compile.ok) {
@@ -22531,7 +22537,7 @@ async function noteBuildOutcome(
               });
               const healed = await runInPass('preview-compile-repair', () => compileHealRunner.run(previewCompileRepairInstruction(compile.errors)));
               if (healed.ok) {
-                result = { ...healed, summary: result.summary }; // keep the REAL build summary; take the heal's edits
+                // Keep the build outcome/timeout provenance; the shared write callbacks already retain edits.
                 compile = checkPreviewCompiles(Object.fromEntries(writtenFiles));
                 if (compile.ok) {
                   buildDiag.record({ phase: 'preview', severity: 'info', code: 'PREVIEW_COMPILE_HEALED', message: 'in-browser preview compile issue fixed — the live preview now compiles.', autoResolved: true });

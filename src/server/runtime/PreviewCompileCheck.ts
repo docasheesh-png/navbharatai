@@ -22,6 +22,27 @@
 // a billing change. Reachability-scoping is a future refinement.
 
 import * as Babel from '@babel/standalone';
+import { frameworkRunsInBrowser, serverFrameworkLabel } from '../../lib/frameworkDetect';
+
+/** A compiler is only evidence for the preview lane that actually uses it. Not-applicable is no pass. */
+export function previewCompileApplicability(framework?: string):
+  | { applicable: true }
+  | { applicable: false; reason: string } {
+  if (frameworkRunsInBrowser(framework)) return { applicable: true };
+  return {
+    applicable: false,
+    reason: `${serverFrameworkLabel(framework)} uses the Live server; the in-browser Babel compiler does not validate this framework. Its native build and live preview still need verification.`,
+  };
+}
+
+/** Keep lane admission and its non-pass receipt together, outside the route's large control-flow graph. */
+export function admitPreviewCompileCheck(framework: string | undefined, enabled: boolean, recordReason: (reason: string) => void): boolean {
+  if (!enabled) return false;
+  const support = previewCompileApplicability(framework);
+  if (support.applicable) return true;
+  recordReason(support.reason);
+  return false;
+}
 
 export interface PreviewCompileError {
   file: string;

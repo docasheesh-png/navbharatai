@@ -83,7 +83,7 @@ describe('🔴 the live tick must not count down from a number we declined to sh
     // rough band (null when there is none).
     expect(route).toContain('evidenced: etaEvidenced, budgetMs: effectiveBuildSeconds * 1000,');
     expect(route).toContain('roughBand: etaRoughBand, roughHighMs: etaRoughHighMs,');
-    expect(fnBody).toContain('unevidencedEtaTickLine(elapsedMs, s.budgetMs, s.roughBand, s.roughHighMs)');
+    expect(fnBody).toContain('unevidencedEtaTickLine(elapsedMs, s.budgetMs, s.roughBand, s.roughHighMs, s.remainingMs)');
   });
 
   it('a real measurement flips the flag, so the countdown resumes on a measured anchor', () => {
@@ -156,7 +156,7 @@ describe('the order rule: phase → measure → gate → count down', () => {
     for (let i = 0; i < branches.length; i += 1) {
       const from = branches[i].index!;
       const to = i + 1 < branches.length ? branches[i + 1].index! : body.length;
-      expect(body.slice(from, to)).toContain('return {');
+      expect(body.slice(from, to)).toMatch(/\breturn\s+withinWindow\s*\(\s*\{/);
     }
   });
 

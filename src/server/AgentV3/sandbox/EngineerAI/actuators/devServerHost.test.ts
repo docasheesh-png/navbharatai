@@ -182,6 +182,42 @@ describe('ensureHostBinding — framework-aware host flag', () => {
   });
 });
 
+describe('resolved package scripts keep their own host and port exactly once (cdffbb71)', () => {
+  it.each([
+    ['ng serve --host 0.0.0.0 --port 4200', 'angular', 4200],
+    ['astro dev --host=0.0.0.0 --port=4321', 'astro', 4321],
+    ['next dev -H 0.0.0.0 -p 3001', 'next', 3001],
+    ['vite --host 0.0.0.0 --port 5174 --strictPort', 'vite', 5174],
+  ] as const)('does not append duplicate flags to %s', (script, framework, port) => {
+    const bound = ensureHostBinding('npm run dev', framework, script);
+    expect(pinDevServerPort(bound, port, framework, script)).toBe('npm run dev');
+  });
+
+  it('forwards the port with npm separator when only the script already binds a host', () => {
+    const script = 'ng serve --host 0.0.0.0';
+    const bound = ensureHostBinding('npm run dev', 'angular', script);
+    expect(pinDevServerPort(bound, 4200, 'angular', script)).toBe('npm run dev -- --port 4200');
+  });
+
+  it('adds only the host when the script already pins its port', () => {
+    const script = 'ng serve --port 4201';
+    const bound = ensureHostBinding('npm run dev', 'angular', script);
+    expect(pinDevServerPort(bound, 4201, 'angular', script)).toBe('npm run dev -- --host 0.0.0.0');
+  });
+
+  it('preserves an explicit custom script binding and caller port override', () => {
+    const script = 'ng serve --host 127.0.0.1 --port 4201';
+    expect(ensureHostBinding('npm run dev', 'angular', script)).toBe('npm run dev');
+    expect(pinDevServerPort('npm run dev -- --port 4300', 4300, 'angular', script)).toBe('npm run dev -- --port 4300');
+  });
+
+  it('does not confuse setup-command flags with the actual server flags', () => {
+    const script = 'echo --host 0.0.0.0 --port 9000 && ng serve';
+    const bound = ensureHostBinding('npm run dev', 'angular', script);
+    expect(pinDevServerPort(bound, 4200, 'angular', script)).toBe('npm run dev -- --host 0.0.0.0 --port 4200');
+  });
+});
+
 describe('pinDevServerPort — framework-aware port pinning (no Vite-only --strictPort on other tools)', () => {
   it('is BYTE-IDENTICAL to the historical Vite behaviour when no framework is given', () => {
     expect(pinDevServerPort('npm run dev -- --host 0.0.0.0', 5173)).toBe('npm run dev -- --host 0.0.0.0 --port 5173 --strictPort');
@@ -832,12 +868,12 @@ describe('pinDevServerPort sees through a package-manager script', () => {
   it('still pins a real Vite script the Vite way', () => {
     // The resolved script decides; a genuine Vite app must keep --strictPort.
     expect(pinDevServerPort('npm run dev', 5173, 'vite', 'vite'))
-      .toBe('npm run dev --port 5173 --strictPort');
+      .toBe('npm run dev -- --port 5173 --strictPort');
   });
 
   it('keeps the historical assumption when nothing resolved', () => {
     // No resolved script (no package.json / parse error) → unchanged behaviour, not a new guess.
-    expect(pinDevServerPort('npm run dev', 5173)).toBe('npm run dev --port 5173 --strictPort');
+    expect(pinDevServerPort('npm run dev', 5173)).toBe('npm run dev -- --port 5173 --strictPort');
   });
 
   it('a direct node server still works without the resolved argument', () => {

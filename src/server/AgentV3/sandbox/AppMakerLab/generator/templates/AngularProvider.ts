@@ -13,30 +13,29 @@ const PKG = JSON.stringify({
     build: 'ng build',
   },
   dependencies: {
-    '@angular/animations': '^18.0.0',
-    '@angular/common': '^18.0.0',
-    '@angular/compiler': '^18.0.0',
-    '@angular/core': '^18.0.0',
-    '@angular/forms': '^18.0.0',
-    '@angular/platform-browser': '^18.0.0',
-    '@angular/platform-browser-dynamic': '^18.0.0',
-    '@angular/router': '^18.0.0',
+    '@angular/animations': '^22.3.0',
+    '@angular/common': '^22.3.0',
+    '@angular/compiler': '^22.3.0',
+    '@angular/core': '^22.3.0',
+    '@angular/forms': '^22.3.0',
+    '@angular/platform-browser': '^22.3.0',
+    '@angular/platform-browser-dynamic': '^22.3.0',
+    '@angular/router': '^22.3.0',
     rxjs: '^7.8.0',
     tslib: '^2.6.0',
-    'zone.js': '~0.14.0',
+    'zone.js': '~0.16.0',
   },
   devDependencies: {
-    '@angular-devkit/build-angular': '^18.0.0',
-    '@angular/cli': '^18.0.0',
-    '@angular/compiler-cli': '^18.0.0',
-    typescript: '~5.4.0',
+    '@angular-devkit/build-angular': '^22.3.0',
+    '@angular/cli': '^22.3.0',
+    '@angular/compiler-cli': '^22.3.0',
+    typescript: '~6.0.3',
   },
 }, null, 2);
 
 const TSCONFIG = JSON.stringify({
   compileOnSave: false,
   compilerOptions: {
-    baseUrl: './',
     outDir: './dist/out-tsc',
     forceConsistentCasingInFileNames: true,
     strict: true,
@@ -81,13 +80,20 @@ const ANGULAR_JSON = JSON.stringify({
             browser: 'src/main.ts',
             polyfills: ['zone.js'],
             tsConfig: 'tsconfig.json',
-            assets: ['src/favicon.ico', 'src/assets'],
+            // No icon or asset directory exists until the app supplies one.
+            assets: [],
             styles: ['src/styles.css'],
             scripts: [],
           },
+          configurations: {
+            production: { outputHashing: 'all' },
+            development: { optimization: false, extractLicenses: false, sourceMap: true },
+          },
+          defaultConfiguration: 'production',
         },
         serve: {
           builder: '@angular-devkit/build-angular:dev-server',
+          options: { buildTarget: 'app:build' },
           configurations: { production: { buildTarget: 'app:build:production' }, development: { buildTarget: 'app:build:development' } },
           defaultConfiguration: 'development',
         },
@@ -103,11 +109,11 @@ import { appConfig } from './app/app.config';
 bootstrapApplication(AppComponent, appConfig).catch(err => console.error(err));
 `;
 
-const APP_CONFIG = `import { ApplicationConfig } from '@angular/core';
+const APP_CONFIG = `import { ApplicationConfig, provideZoneChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
 
 export const appConfig: ApplicationConfig = {
-  providers: [provideRouter([])],
+  providers: [provideZoneChangeDetection(), provideRouter([])],
 };
 `;
 
@@ -147,7 +153,6 @@ const INDEX_HTML = `<!doctype html>
   <title>My Angular App</title>
   <base href="/">
   ${APP_VIEWPORT_META}
-  <link rel="icon" type="image/x-icon" href="favicon.ico">
 </head>
 <body>
   <app-root></app-root>

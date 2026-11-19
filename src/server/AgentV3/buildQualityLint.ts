@@ -88,6 +88,21 @@ export { LINTABLE as LINTABLE_DESIGN_FILE, NOT_APP_DESIGN as NOT_APP_DESIGN_FILE
  * ⚠️ Our markup is blanked BEFORE the comments, because the honesty banner is delimited by HTML comments
  * (`<!-- nbai-honesty -->`) and blanking those first would hide the block from its own pattern. PURE.
  */
+/**
+ * A file that PAINTS a scene rather than styling a UI: a non-JSX script that draws on a 2D canvas (`getContext('2d')`,
+ * `fillStyle`, `strokeStyle`) or builds a Three.js scene (`new THREE.`/`MeshStandardMaterial`/`Color(`) and renders no
+ * markup. Its colours are the picture, so the UI palette budget does not apply. Conservative: any JSX or CSS-in-JS is
+ * still judged. PURE.
+ */
+export function isSceneRenderer(path: string, content: string): boolean {
+  if (!/\.(?:[cm]?[jt]s)$/i.test(path) || typeof content !== 'string') return false;
+  if (/<[A-Za-z][\w.]*[\s/>]/.test(content) && /\.(?:tsx|jsx)$/i.test(path)) return false;
+  if (/\b(?:styled\.|css`|className\s*=)/.test(content)) return false;
+  const paints = /\.(?:fillStyle|strokeStyle|shadowColor)\s*=|getContext\(\s*['"]2d['"]/.test(content);
+  const scene = /\bnew\s+THREE\.|\bMesh(?:Standard|Basic|Lambert|Phong)Material\b|\bnew\s+Color\(/.test(content);
+  return paints || scene;
+}
+
 export function shippedDesignText(path: string, content: string): string {
   const shipped = stripCommentsForMarkup(blankOurMarkup(path, content));
   // An indented syntax's line break IS its declaration terminator, so it becomes one the shared spacing
@@ -207,7 +222,10 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
     // BR1954/Q-2311: a byte-identical reviewed kit palette is not ad-hoc user UI colour.
     // Only colour analysis uses this boundary. Accessibility, fonts and spacing still see every byte.
     // Edited/unknown content, even at a kit path, remains fully judged.
-    const colorCode = isKnownKitVersion(path, content) ? '' : shipped;
+    // failedbr #2437: a canvas / 3D SCENE RENDERER's colours are artwork (sky, ground, player, enemies), not UI theme.
+    // "24 distinct colours — worst: src/game/platformer/render.ts (21)" sent a builder whose app was already 100/100 READY
+    // into optional palette work on an exhausted wallet. Same boundary as the kit: colour analysis only.
+    const colorCode = isKnownKitVersion(path, content) || isSceneRenderer(path, shipped) ? '' : shipped;
     colorParts.push(colorCode);
     selected.push([path, shipped, colorCode]);
     total += content.length;

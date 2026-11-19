@@ -102800,6 +102800,26 @@ user, 12.7 working. Tally: ✅ 1 (REPAIR_CLAIM_WITHHELD) · 🔀 0 · ⏭️ 0 �
   bag gives the ingredients back) / list; ITEM_CRAFTED. The bag screen gains a "Make" list: each recipe, what it needs (have/need)
   and a Craft button enabled only when it can be made.
 - Locked by `tests/craftingTakesAllOrNothing.test.ts` (reversion: partial take / no give-back → 2 fail).
+## 2026-11-19 — failedbr #2452 (6aed1d6e) autopsy: four silent minutes of `bash` reads
+
+User-stopped at 248 s with nothing written. Q-2940: the exploration guard ignored `bash` reads → one conservative
+`shellInspection.ts` definition; the guard counts a read-only `bash` as a read. Q-2941: the gate called a failed
+read a "build-breaking blocker" → a read cannot break the build. Q-2942 (contract unknown for an unknown title) and
+Q-2943 (Play Store research time) OPEN; Q-2944 → Q-2889.
+
+## 2026-11-19 — failedbr #2437 (fe73bca3) autopsy: a READY app ended as "did not succeed" at the wallet stop
+
+The real defect (a CSS `//` comment breaking the production build) was fixed at 341 s and the app was 100/100 READY at
+525 s; the builder then started optional palette work and the wallet stop fired at 537 s. Q-2945 (fixed in #4346): the
+palette rule judged a canvas renderer's artwork colours — that false finding started the polish. Q-2946 🟡 for the
+admin (billing): finish instead of starting extras when the app is ready and the bill nears the balance — recommended.
+Q-2947–Q-2949 OPEN (edit-miss watch, browser-tool outages without detail, Surplus availability).
+- **Q-2946 decided by the admin (option a) and built in #4346:** a READY fresh build on a nearly-spent wallet finishes (no
+  more tools; the summary is the next turn), and every build — edits included — is told once to skip optional polish when
+  the wallet is ≥ 80% spent. No price or charge changes; the wallet stop remains the net.
+- **Q-2950 (admin 2026-11-19): an edit is priced by its project's history before it starts.** The admission gate's estimate
+  is now the larger of the prompt estimate and the median real cost of the workspace's last 5 builds (same billedAmountInr),
+  so a short "fix this" prompt on a big project no longer slips under a low balance and stops mid-build.
 
 ## 2026-11-19 — Game gap P2: aircraft and flight (branch `claude/game-flight`)
 - `three/flight.ts`: createAircraft (procedural jet / prop, nose +Z), createFlightState, flyAircraft (throttle spool, thrust vs

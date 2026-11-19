@@ -143,6 +143,18 @@ export interface AgentRunnerOptions {
    */
   pausedMs?: () => number;
   /**
+   * 🔴 Q-2946 (failedbr #2437; admin decision 2026-11-19): true when the user's wallet is nearly spent. Once the app is
+   * READY (the done signal), the runner then runs no more tools — the model's next turn can only be its summary, so the
+   * build ends through the ordinary success path instead of spending the balance on polish nobody asked for and being
+   * stopped by the wallet as "did not succeed". No price or charge changes; the wallet stop stays the net.
+   */
+  finishWhenReady?: () => boolean;
+  /**
+   * When THIS turn's app first rendered in a real browser (epoch ms), 0 while it has not. A render opens the done
+   * check at once instead of waiting for the next 10th step (doneSignal.ts `renderedUnchecked`, failedbr #2470).
+   */
+  appRenderedAt?: () => number;
+  /**
    * E4 — per-model-turn hard timeout (ms). The wall-clock watchdog above is only checked BETWEEN
    * turns, so a single provider call that hangs (connection open, no bytes, no error) would block the
    * whole build indefinitely — the watchdog never even gets to run. This caps every `runTurn` so a
@@ -474,6 +486,13 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T,
 }
 
 /** WATCHDOG — true once a build has run past its wall-clock cap (pure, testable). */
+/** Q-2946: what the model reads when the app is ready and the user's wallet is nearly spent. */
+export const FINISH_NOW_STEER = '[FINISH NOW] The app is ready and the user\'s wallet is nearly spent. Write your summary for the user now and stop — no more tool calls will run. Do not start polish or extra features.';
+/** Q-2946, layer 2: said once to any build whose wallet is nearly spent (an edit cannot be judged "ready"). */
+export const WALLET_NEARLY_SPENT_STEER = '[WALLET NEARLY SPENT] The user\'s balance is almost used up. Finish exactly what the user asked, check it works, and write your summary. Do NOT start optional work — palette or colour clean-ups, refactors, extra features or polish nobody asked for — that would stop this build before it can hand the app over.';
+/** Q-2946: the result of any tool the model still asks for after that. */
+export const FINISH_NOW_REFUSAL = 'Not run — the app is ready and the user\'s wallet is nearly spent, so this build is finishing. Write your summary now.';
+
 export function buildTimedOut(startMs: number, maxBuildMs: number | undefined, nowMs: number): boolean {
   return typeof maxBuildMs === 'number' && maxBuildMs > 0 && nowMs - startMs >= maxBuildMs;
 }
@@ -660,6 +679,10 @@ export class AgentRunner {
     const pausedAtStart = pausedTotal();
     /** "Now" on this runner's WORKING clock — wall time minus the user waits since it started. */
     const workNow = (): number => Date.now() - (pausedTotal() - pausedAtStart);
+    /** Set once the app is ready and `finishWhenReady` says the wallet is nearly spent (Q-2946). */
+    let finishOnly = false;
+    /** Q-2946: the nearly-spent-wallet instruction is given once per run. */
+    let walletSteerSent = false;
     /**
      * 🔴 THE TIME BUDGET, TOLD TO THE MODEL (f04421ef autopsy, 2026-09-13).
      *
@@ -981,6 +1004,7 @@ export class AgentRunner {
       // is recorded whether or not the model acts on the steer.
       const doneCfg = doneSignalConfig();
       let doneSignalled = false;
+      let doneLastCheckedAt = 0;
       /** A due done-check skipped because its step failed — the next clean step runs it (autopsy 6ae30b33). */
       let doneMissedAt: number | undefined;
       // The ONE ending for an aborted build — reached between turns, and (since autopsy 2720e553) also
@@ -1710,6 +1734,10 @@ export class AgentRunner {
           if (isWithheldTool(tu.name, this.opts.withheldTools, offeredToolNames)) {
             return { tool_use_id: tu.id, content: withheldToolMessage(tu.name), is_error: true };
           }
+          // Q-2946: the app is ready and the wallet is nearly spent — no more work runs; the summary is all that is left.
+          if (finishOnly && tu.name !== 'update_todo') {
+            return { tool_use_id: tu.id, content: FINISH_NOW_REFUSAL, is_error: true };
+          }
           // A MADE-UP TOOL NAME WITH A REAL TOOL'S SHAPE RUNS AS THAT TOOL (queue Q-145, toolAlias.ts).
           const aliasTo = resolveToolAlias(tu.name, tu.input, offeredToolNames);
           if (aliasTo) {
@@ -1894,6 +1922,16 @@ export class AgentRunner {
             budgetStagesSent.add(bs.stage);
             budgetText = bs.text;
           }
+          // Q-2946, layer 2 — EVERY build (an edit too, where the done signal cannot judge "ready"): once the wallet is
+          // nearly spent, the builder is told once to finish the request and skip optional polish.
+          if (!walletSteerSent) {
+            let nearlySpent = false;
+            try { nearlySpent = this.opts.finishWhenReady?.() === true; } catch { nearlySpent = false; }
+            if (nearlySpent) {
+              walletSteerSent = true;
+              budgetText = budgetText ? `${budgetText}\n\n${WALLET_NEARLY_SPENT_STEER}` : WALLET_NEARLY_SPENT_STEER;
+            }
+          }
           // Narrated, because a build that silently stops polishing looks like a build that gave up — on the BUILD's
           // clock and once per build (a retry runner's own "half" is ~75% of the build). The build's total is this
           // runner's remaining budget plus what had passed before it started.
@@ -1909,10 +1947,14 @@ export class AgentRunner {
         let doneText: string | null = null;
         try {
           const lastStepFailed = resultBlocks.some((b) => (b as { is_error?: boolean }).is_error === true);
-          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null });
+          let renderedAt = 0;
+          try { renderedAt = Number(this.opts.appRenderedAt?.() ?? 0) || 0; } catch { renderedAt = 0; }
+          const renderedUnchecked = renderedAt > 0 && doneLastCheckedAt < renderedAt;
+          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null, renderedUnchecked });
           if (doneDue && lastStepFailed) doneMissedAt = doneMissedAt ?? steps;
-          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null })) {
+          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null, renderedUnchecked })) {
             doneMissedAt = undefined;
+            doneLastCheckedAt = Date.now();
             const readiness = await dispatcher.assessBuildReadiness();
             // Never "complete and healthy" over a compile that just failed (autopsy 33812996).
             const typeErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;
@@ -1923,6 +1965,14 @@ export class AgentRunner {
               doneText = doneSteer(readiness);
               if (doneText) {
                 doneSignalled = true;
+                // Q-2946: a ready app on a nearly-spent wallet FINISHES — told so, and held to it by `finishOnly`.
+                let nearlySpent = false;
+                try { nearlySpent = this.opts.finishWhenReady?.() === true; } catch { nearlySpent = false; }
+                if (nearlySpent) {
+                  finishOnly = true;
+                  doneText = `${doneText}\n\n${FINISH_NOW_STEER}`;
+                  try { this.opts.onNote?.({ code: 'FINISHED_AT_READY', message: 'The app was ready and the wallet was nearly spent, so the build finished instead of starting extra work.' }); } catch { /* observation only */ }
+                }
                 // Not "complete" while the screens use classes no stylesheet defines (autopsy 2f723acb): the
                 // model is told which, in the same steer, and the user is not told the app is finished.
                 let styleNote = '';
@@ -1974,6 +2024,7 @@ export class AgentRunner {
           writingRun: expectsArtifacts && !this.opts.signal?.aborted && runCanWrite(tools.map((t) => t.name)),
           changes: typeof dispatcher.changeCount === 'function' ? dispatcher.changeCount() : null,
           toolNames: turn.toolUses.filter((_, idx) => resultBlocks[idx]?.is_error === false).map((tu) => tu.name),
+          toolCalls: turn.toolUses.filter((_, idx) => resultBlocks[idx]?.is_error === false).map((tu) => ({ name: tu.name, input: tu.input })),
           editingExistingApp: this.opts.editingExistingApp === true,
         });
         explorationProgress = exploration.state;

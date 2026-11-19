@@ -88,6 +88,7 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "9c0ec2fce693144563e2eaca37f3ef48dbf031809dc1bee7e2085dfb20acd032",
     "b5b617ab2654eff43fb1c5a5e7bcae89c6c823e701ad99c4bd15a105ac2d0541",
     "c9bfc6b97b35c03a6382846117485ce924d0b076ff7fc477faa5fd41e443b229",
+    "e71b801e4d03cb1020e0d23f3e37612e4f49cefd562f0d8d97bba2f65181321a",
     "0fe8e46b17e6b3244f6fc31cab116ee5ed9f48e11b7d8c9f110795d56f0d8ca1"
   ],
   "src/game/RoyalePractice.tsx": [

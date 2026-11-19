@@ -742,7 +742,7 @@ import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
 import { restateDesignAfterRepair } from '../AgentV3/designAfterRepair';
 import { withRequestNotes, requestNotesFor } from '../AgentV3/requestNotes';
-import { abortBuild, abortCauseOf, abortRequestedAtOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
+import { abortBuild, abortCauseOf, abortRequestedAtOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort, changeWasStopped } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { isAnswerOnlyTurn, answeredInsteadOfBuilding, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate } from '../AgentV3/answerOnlyTurn';
@@ -28195,9 +28195,11 @@ async function noteBuildOutcome(
       if (changeSession) {
         try {
           const settleIssues = buildDiag.report().issues;
+          // BR2002: an abort that only cut the settling after a successful result is not a stopped change.
+          const changeStopped = changeWasStopped({ aborted: abort.signal.aborted, cause: abortCauseOf(abort.signal), userStopRecorded: buildWasStopped(settleIssues), resultOk: result.ok === true });
           const settled = await withTimeout(settleChange(changeSession, {
             ok: result.ok === true,
-            stopped: abort.signal.aborted || buildWasStopped(settleIssues),
+            stopped: changeStopped,
             // What THIS build changed — never our untouched template or our own finishing writes (autopsy
             // 303e8a6f: a stopped starter chip was recorded as "14 file(s)", every one of them the template).
             // The bill (2b0a3ed5) and the review (8257ca59) already read the same helper.

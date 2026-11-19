@@ -46,6 +46,7 @@ import { createPerfGovernor, steppedQuality } from './core/perf';
 import { setGameLanguage, t, type GameLanguage, type StringKey } from './core/strings';
 import { showHint } from './core/levels';
 import { dialogue } from './core/dialogue';
+import { powerUps } from './core/powerups';
 import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
@@ -349,6 +350,8 @@ export class Game {
     // Taking a hit ends the combo — that is what makes a clean run worth more than a long one.
     this.disposers.push(events.on('PLAYER_DAMAGED', () => combo.break()));
     // 🎓 The first time ever this game is played, the controls for the device in hand are shown once (core/levels.ts).
+    // A new round starts with no power-ups left over from the last one.
+    this.disposers.push(events.on('GAME_STARTED', () => powerUps.clear()));
     this.disposers.push(events.on('GAME_STARTED', () => { showHint('controls', touchDevice() ? t('controlsTouch') : t('controlsKeyboard'), 5); }));
     // 📱 THE NOTCH: safe-area insets read 0 on an iPhone unless the page asks for viewport-fit=cover. Asked for only
     // while a game is mounted (an ordinary page keeps its own viewport), and put back on dispose.
@@ -575,6 +578,8 @@ export class Game {
       // The shell listens while the game runs, so a vehicle it drives is known without being declared.
       this.attackHeldThisStep = this.input.isDown('attack') || this.input.wasPressed('attack');
       setDriftInput(this.input.isDown('drift'));
+      // Power-ups count down in game time only: frozen by a hit-stop, a conversation or the pause menu (core/powerups.ts).
+      powerUps.update(delta);
       this.asGame(() => this.options.update?.(this.context, delta));
       this.poseActionButtons();
       // 🔒 NOTHING SINKS: every top-level object (car, NPC, animal, prop, train) is kept on the terrain
@@ -923,6 +928,7 @@ import { objectives, type Objective } from '../core/quests';
 import { dialogue, type DialogueView } from '../core/dialogue';
 import { inventory, type ItemStack } from '../core/inventory';
 import { economy, type ShopEntry } from '../core/economy';
+import { powerUps, type ActivePowerUp } from '../core/powerups';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -1331,6 +1337,31 @@ export function FpsCounter({ game }: { game: Pick<Game, 'fps' | 'quality'> }) {
   );
 }
 
+/** The active power-ups: an icon each, a ring for the time left, the level when it stacks. */
+export function PowerUpBar() {
+  const [list, setList] = useState<ActivePowerUp[]>(powerUps.list);
+  useEffect(() => {
+    const sync = () => setList(powerUps.list);
+    const off = events.on('POWERUPS_CHANGED', sync);
+    const id = setInterval(sync, 200);   // the rings move between changes
+    return () => { off(); clearInterval(id); };
+  }, []);
+  if (list.length === 0) return null;
+  return (
+    <div aria-label="Power-ups" style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', top: 'max(56px, calc(env(safe-area-inset-top) + 48px))', display: 'flex', gap: 8, pointerEvents: 'none', zIndex: 5 }}>
+      {list.map((p) => {
+        const f = p.total > 0 ? Math.max(0, Math.min(1, p.remaining / p.total)) : 0;
+        return (
+          <div key={p.id} role="img" aria-label={p.name + ' ' + Math.ceil(p.remaining) + 's'} style={{ position: 'relative', width: 40, height: 40, borderRadius: 999, display: 'grid', placeItems: 'center', fontSize: 20, background: 'conic-gradient(#fde047 ' + Math.round(f * 360) + 'deg, rgba(255,255,255,0.18) 0deg)', opacity: p.remaining < 2 ? 0.6 + 0.4 * Math.abs(Math.sin(p.remaining * 8)) : 1 }}>
+            <span style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 999, background: 'rgba(0,0,0,0.6)' }}>{p.icon}</span>
+            {p.level > 1 ? <span style={{ position: 'absolute', right: -4, bottom: -4, fontSize: 11, fontWeight: 800, color: '#111', background: '#fde047', borderRadius: 999, padding: '0 4px' }}>{'x' + p.level}</span> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Re-render on every coin or shop change. */
 function useShop(): { coins: number; list: ShopEntry[] } {
   const read = () => ({ coins: economy.coins, list: economy.list });
@@ -1585,6 +1616,7 @@ export function Hud({ game }: { game: Game }) {
       {s.status === 'playing' || s.status === 'paused' ? <ObjectiveList /> : null}
       <ShooterOverlay game={game} playing={s.status === 'playing'} />
       {s.status === 'playing' ? <DialogueBox /> : null}
+      {s.status === 'playing' || s.status === 'paused' ? <PowerUpBar /> : null}
       {s.status === 'playing' || s.status === 'paused' ? <RaceOverlay /> : null}
 
       {s.status === 'menu' && info ? settingsOrScreen(

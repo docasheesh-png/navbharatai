@@ -102689,3 +102689,11 @@ The first exactly-one-lease assertion in the phase-2 handoff race now includes o
   timing-based batting (shotFromTiming: perfect → boundary, going big → six but riskier, miss → bowled only on the stumps).
 - This completes the India games pack: Ludo, Snakes & Ladders, chess, cards (for fun), carrom, cricket.
 - Locked by `tests/cricketScoresLikeAScorer.test.ts` (reversion: free hit ignored / no change of ends → 2 fail).
+
+## 2026-11-19 — Game gap P2: power-ups and loot drops (branch `claude/game-powerups-loot`)
+- Gap: no timed boosts (hand-rolled setTimeouts kept running in the pause menu and survived a restart) and no drop tables.
+- Kit: `core/powerups.ts` (define/give/active/level/remaining/value/list/clear; refresh/extend/stack; onStart/onEnd; events),
+  ticked by Game.fixedUpdate inside the gameplay block (frozen by hit-stop, dialogue and pause), cleared on GAME_STARTED; Hud
+  PowerUpBar (icon, time ring, level). `core/loot.ts` (createLootTable: weights, rarities, nothing entries, amounts, pity,
+  chances(), LOOT_DROPPED).
+- Locked by `tests/powerUpsAndLootWork.test.ts` (reversion: no clear on a new round / no pity → each fails).

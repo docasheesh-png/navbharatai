@@ -314,7 +314,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED' | 'PERF_CHANGED'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED' | 'PERF_CHANGED' | 'POWERUP_STARTED' | 'POWERUP_ENDED' | 'POWERUPS_CHANGED' | 'LOOT_DROPPED'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -1151,6 +1151,142 @@ export const economy = {
 };
 `;
 
+const POWERUPS = `/**
+ * POWER-UPS (admin 2026-11-19 game-gap audit: no timed boosts — every "speed boost" or "shield" was a hand-rolled
+ * setTimeout that kept running through the pause menu and survived a restart). A power-up here lasts game time: it
+ * counts down only while the round runs, freezes in the pause menu, and every one ends when a new round starts.
+ *
+ *   powerUps.define({ speed: { name: 'Speed', icon: '⚡', seconds: 6 }, shield: { name: 'Shield', icon: '🛡️', seconds: 8 },
+ *                     magnet: { name: 'Magnet', icon: '🧲', seconds: 10, stack: 'extend' } });
+ *   powerUps.give('speed');                                   // on pickup
+ *   const run = powerUps.value('speed', 6, 10);               // 10 while it lasts, 6 otherwise
+ *   if (powerUps.active('shield')) return;                    // ignore the hit
+ * Picking one up again: 'refresh' (default) restarts its clock, 'extend' adds its time, 'stack' raises its level (up to
+ * maxStacks) and restarts the clock. The kit's Hud shows each with a ring for the time left.
+ */
+import { events } from './events';
+
+export interface PowerUpDef {
+  name?: string; icon?: string;
+  /** How long one pickup lasts, in seconds of play. */
+  seconds: number;
+  stack?: 'refresh' | 'extend' | 'stack';
+  maxStacks?: number;
+  /** Called when it starts (and with the new level when it stacks). */
+  onStart?: (level: number) => void;
+  onEnd?: () => void;
+}
+export interface ActivePowerUp { id: string; name: string; icon: string; remaining: number; total: number; level: number }
+
+const defs = new Map<string, PowerUpDef>();
+const live = new Map<string, { remaining: number; total: number; level: number }>();
+const changed = (): void => { events.emit('POWERUPS_CHANGED', { active: powerUps.list }); };
+const safe = (fn: (() => void) | undefined): void => { try { fn?.(); } catch (e) { console.error('[powerUps]', e); } };
+
+export const powerUps = {
+  define(items: Record<string, PowerUpDef>): void {
+    for (const [id, d] of Object.entries(items ?? {})) if (id && d && Number.isFinite(d.seconds) && d.seconds > 0) defs.set(id, d);
+  },
+  /** Start (or re-apply) a power-up. Unknown ids are refused. seconds overrides the defined length. */
+  give(id: string, seconds?: number): boolean {
+    const d = defs.get(id);
+    if (!d) return false;
+    const len = Number.isFinite(seconds) && (seconds as number) > 0 ? (seconds as number) : d.seconds;
+    const cur = live.get(id);
+    if (!cur) {
+      live.set(id, { remaining: len, total: len, level: 1 });
+      safe(() => d.onStart?.(1));
+      events.emit('POWERUP_STARTED', { id, level: 1 });
+    } else if ((d.stack ?? 'refresh') === 'extend') {
+      cur.remaining += len; cur.total = Math.max(cur.total, cur.remaining);
+    } else if (d.stack === 'stack') {
+      const level = Math.min(Math.max(1, Math.floor(d.maxStacks ?? 3)), cur.level + 1);
+      if (level !== cur.level) { cur.level = level; safe(() => d.onStart?.(level)); events.emit('POWERUP_STARTED', { id, level }); }
+      cur.remaining = Math.max(cur.remaining, len); cur.total = Math.max(cur.total, len);
+    } else {
+      cur.remaining = Math.max(cur.remaining, len); cur.total = Math.max(cur.total, cur.remaining);
+    }
+    changed();
+    return true;
+  },
+  /** Advance the clocks by dt seconds of play (the 3D shell calls this every step of a running round). */
+  update(dt: number): void {
+    if (!Number.isFinite(dt) || dt <= 0 || live.size === 0) return;
+    const ended: string[] = [];
+    for (const [id, p] of live) { p.remaining -= dt; if (p.remaining <= 0) ended.push(id); }
+    for (const id of ended) powerUps.end(id);
+  },
+  end(id: string): void {
+    if (!live.delete(id)) return;
+    safe(() => defs.get(id)?.onEnd?.());
+    events.emit('POWERUP_ENDED', { id });
+    changed();
+  },
+  active(id: string): boolean { return live.has(id); },
+  level(id: string): number { return live.get(id)?.level ?? 0; },
+  remaining(id: string): number { return Math.max(0, live.get(id)?.remaining ?? 0); },
+  /** boosted while the power-up lasts, base otherwise. */
+  value<T>(id: string, base: T, boosted: T): T { return live.has(id) ? boosted : base; },
+  get list(): ActivePowerUp[] {
+    return [...live].map(([id, p]) => { const d = defs.get(id) ?? { seconds: p.total }; return { id, name: d.name ?? id, icon: d.icon ?? '★', remaining: Math.max(0, p.remaining), total: p.total, level: p.level }; });
+  },
+  /** End every power-up (a new round). */
+  clear(): void { for (const id of [...live.keys()]) powerUps.end(id); },
+};
+`;
+
+const LOOT = `/**
+ * LOOT TABLES (admin 2026-11-19 game-gap audit: no drops — an enemy died and nothing happened, or the model wrote
+ * Math.random() < 0.1 and a player went 40 kills without the item). Weighted entries with rarities, a "nothing" entry,
+ * amounts, and a pity rule so bad luck has a ceiling.
+ *
+ *   const drops = createLootTable([
+ *     { item: null, weight: 50 },                                  // nothing
+ *     { item: 'coin', weight: 40, count: [1, 5] },
+ *     { item: 'potion', weight: 9, rarity: 'rare' },
+ *     { item: 'golden-sword', weight: 1, rarity: 'legendary' },
+ *   ], { pity: { rarity: 'rare', after: 15 } });                    // a rare or better at least every 15 rolls
+ *   const d = drops.roll();      // { item, rarity, count } — LOOT_DROPPED is announced when there is an item
+ */
+import { events } from './events';
+
+export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
+const ORDER: Rarity[] = ['common', 'rare', 'epic', 'legendary'];
+export interface LootEntry { item: string | null; weight: number; rarity?: Rarity; count?: [number, number] }
+export interface LootDrop { item: string | null; rarity: Rarity; count: number }
+export interface LootTable { roll(rng?: () => number): LootDrop; chances(): Array<{ item: string | null; rarity: Rarity; chance: number }>; readonly sincePity: number }
+
+export function createLootTable(entries: LootEntry[], o: { pity?: { rarity: Rarity; after: number } } = {}): LootTable {
+  const list = (Array.isArray(entries) ? entries : []).filter((e) => e && Number.isFinite(e.weight) && e.weight > 0).map((e) => ({ ...e, rarity: e.rarity ?? 'common' as Rarity }));
+  if (list.length === 0) throw new Error('a loot table needs at least one entry with a positive weight');
+  const total = list.reduce((n, e) => n + e.weight, 0);
+  const pity = o.pity && ORDER.includes(o.pity.rarity) && o.pity.after >= 1 ? o.pity : null;
+  const pityPool = pity ? list.filter((e) => e.item !== null && ORDER.indexOf(e.rarity) >= ORDER.indexOf(pity.rarity)) : [];
+  let since = 0;
+  const pick = (pool: typeof list, r: number) => {
+    const sum = pool.reduce((n, e) => n + e.weight, 0);
+    let x = r * sum;
+    for (const e of pool) { x -= e.weight; if (x < 0) return e; }
+    return pool[pool.length - 1];
+  };
+  return {
+    roll(rng: () => number = Math.random): LootDrop {
+      const forced = pity && pityPool.length > 0 && since >= pity.after - 1;
+      const e = forced ? pick(pityPool, rng()) : pick(list, rng());
+      const counts = e.count ?? [1, 1];
+      const lo = Math.max(0, Math.floor(Math.min(counts[0], counts[1]))), hi = Math.max(lo, Math.floor(Math.max(counts[0], counts[1])));
+      const count = e.item === null ? 0 : lo + Math.floor(rng() * (hi - lo + 1));
+      if (pity) since = e.item !== null && ORDER.indexOf(e.rarity) >= ORDER.indexOf(pity.rarity) ? 0 : since + 1;
+      const drop = { item: e.item, rarity: e.rarity, count };
+      if (drop.item !== null && drop.count > 0) events.emit('LOOT_DROPPED', drop);
+      return drop;
+    },
+    chances() { return list.map((e) => ({ item: e.item, rarity: e.rarity, chance: e.weight / total })); },
+    get sincePity() { return since; },
+  };
+}
+`;
+
 const DIALOGUE = `/**
  * TALKING TO PEOPLE (admin 2026-11-19 game-gap audit: an RPG had no dialogue box and no choices). A speaker, a line,
  * and — when the story forks — choices; a choice can need an item from the bag. While someone is talking the game
@@ -1910,10 +2046,12 @@ const FILES: Record<string, string> = {
   'src/game/core/dialogue.ts': DIALOGUE,
   'src/game/core/economy.ts': ECONOMY,
   'src/game/core/perf.ts': PERF,
+  'src/game/core/powerups.ts': POWERUPS,
+  'src/game/core/loot.ts': LOOT,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -1947,6 +2085,7 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/economy.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
     if (files['src/game/core/dialogue.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
     if (files['src/game/core/inventory.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
+    if (files['src/game/core/powerups.ts'] || files['src/game/core/loot.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (files['src/game/core/state.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }

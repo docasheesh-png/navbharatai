@@ -35,11 +35,16 @@ describe('a recipe brings the layers it imports', () => {
       // Game.ts gives the player a body (createHumanoid) since 2026-10-05 — an empty controller left the
       // third-person hero invisible — so the closure brings humanoid.ts too.
       'src/game/three/humanoid.ts',
-      'src/game/three/lighting.ts', 'src/game/three/materials.ts',
+      'src/game/three/lighting.ts',
+      // Game.ts reads the minimap's markers (mapView → mapMarkers) since 2026-11-19 — so markers.ts too.
+      'src/game/three/markers.ts',
+      'src/game/three/materials.ts',
       // Game.ts and camera.ts import objects.ts since 2026-10-11 (admin, build 46e2d74b: the car showed its
       // headlights): the rig and the shell ask it whether what they frame is a VEHICLE, which is always
       // chased from behind — so the closure brings objects.ts too.
       'src/game/three/objects.ts',
+      // RacingRoadGame races rivals with a countdown and a finish (createRace) since 2026-11-19 — so race.ts too.
+      'src/game/three/race.ts',
       // world.ts imports surfaces.ts since 2026-10-05 (the ground reads the detail tier and is textured
       // in the real tier) — so the closure must bring it too, or the added world.ts would not compile.
       'src/game/three/renderer.ts', 'src/game/three/surfaces.ts', 'src/game/three/world.ts',

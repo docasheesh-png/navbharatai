@@ -387,6 +387,7 @@ import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from
 import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
+import { generateGame2D } from '../lib/Game2DGenerator';
 import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
@@ -10055,6 +10056,19 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('athree map');
         return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${ath.instructions}${athLayers}`;
+      }
+
+      case 'generate_game_2d': {
+        // THE 2D GAME KIT (admin 2026-11-19 game-gap audit): sprites + animation, camera, tilemap, platformer physics, parallax,
+        // particles — the tested version of everything a 2D canvas game otherwise hand-rolls (and gets wrong: a floaty jump,
+        // a wall the player clips through at speed, a camera nailed to the player).
+        const g2Rec = (input as Record<string, unknown>) || {};
+        const g2Include = Array.isArray(g2Rec.include) ? g2Rec.include.filter((v): v is string => typeof v === 'string') : undefined;
+        const g2 = generateGame2D(g2Include);
+        const g2Written = await this.writeRecipeFiles(g2.files, agent);
+        const g2Layers = await this.addMissingRecipeLayers(g2.files, agent);
+        this.scheduleCheckpoint('2d game kit');
+        return `Added the 2D game kit:\n${g2Written.join('\n')}\n\n${g2.instructions}${g2Layers}`;
       }
 
       case 'generate_world_2d': {

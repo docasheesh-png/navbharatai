@@ -31,7 +31,7 @@ import { buildGameContract } from './gameIntent';
  */
 const COURSE_DESCRIBED = new RegExp([
   // shape
-  String.raw`\b(?:curves?|curvy|sharp turns?|bends?|zig-?zag|hairpins?|s-bends?|sharp corners?|spiral|oval|figure[- ]?(?:8|eight))\b`,
+  String.raw`\b(?:straight|curves?|curvy|sharp turns?|bends?|zig-?zag|hairpins?|s-bends?|sharp corners?|spiral|oval|figure[- ]?(?:8|eight))\b`,
   // relief and crossings
   String.raw`\b(?:hills?|hilly|mountains?|slopes?|climbs?|ramps?|bridges?|tunnels?|flyovers?|level crossings?)\b`,
   // water
@@ -41,9 +41,9 @@ const COURSE_DESCRIBED = new RegExp([
   // length and end
   String.raw`\b(?:finish line|laps?|circuit|closed track|loop track|dead[- ]end|ends? (?:at|in|with)|\d+\s*(?:km|kilomet(?:er|re)s?|m|met(?:er|re)s?)\b)`,
   // Hinglish
-  String.raw`\b(?:pahad|pahaad|pahari|nadi|pul|shahar|gaon|gaanv|registan|jungle|samundar|ghumavdar)\b`,
+  String.raw`\b(?:pahad|pahaad|pahari|nadi|pul|shahar|gaon|gaanv|registan|jungle|samundar|ghumavdar|seedha|sidha)\b`,
   // Devanagari (no \b: it does not apply to these letters)
-  'पहाड़|नदी|पुल|शहर|गाँव|गांव|जंगल|रेगिस्तान|समुद्र|मोड़|घुमावदार|सुरंग',
+  'सीधा|सीधी|पहाड़|नदी|पुल|शहर|गाँव|गांव|जंगल|रेगिस्तान|समुद्र|मोड़|घुमावदार|सुरंग',
 ].join('|'), 'i');
 
 /** "Endless road", "infinite track", "never-ending highway": the default course IS that, so it describes nothing else. */
@@ -68,15 +68,17 @@ export function wantsEndlessRaceCourse(prompt: string | null | undefined): boole
 export const ENDLESS_RACE_COURSE_RULE = [
   '🛣️ THE RACE COURSE: the request says nothing about the road, so the race STARTS on NavBharatAI\'s endless course,',
   'and nothing about it is fixed. Keep the course in ONE file of the game\'s own, src/game/<your-game>/trackPlan.ts:',
-  '`export const TRACK_PLAN: TrackPlan = { loop: \'infinite\', pieces: [ … ] }`, with the twelve pieces of',
-  'DEFAULT_TRACK_PLAN (src/game/three/objects.ts, A..L) written out as its starting list — any number of pieces',
+  '`export const TRACK_PLAN = createRacingRoadPlan()` from src/game/three/objects.ts starts with twelve',
+  '10–100 km maps split into bounded chunks, cycling 1..12..1. This is only a starting list — any number of pieces',
   'in any order is valid, so when the user later asks for more or fewer stretches, other scenery, a course that',
   'ends at a lake or a closed circuit, that is an edit to this one file. Build it with',
   '`const stream = createTrackStream(TRACK_PLAN)`, `scene.add(stream.root)` in setup(), the car at',
   '`stream.startPose` (x, y, z and heading), and `stream.update(car)` every frame (it streams pieces ahead,',
   'recycles the ones behind and rebases the origin; use its { distance, lap } for the HUD).',
   '`stream.setPlan(plan, { now: true })` changes the course while the game runs (a track picker, a new stage),',
-  'continuing seamlessly from the road already laid. NEVER build the race course with createRoad() or a',
+  'continuing seamlessly from the road already laid; check its boolean result. Width, seed, terrain and streaming',
+  'settings require a new stream; a terminal under the car requires restart. RacingRoadGame restarts when its plan',
+  'prop identity changes; keep it stable for normal rerenders and use onReady(stream) for seamless setPlan. NEVER build the race course with createRoad() or a',
   'PlaneGeometry: createRoad\'s default is 300 m, which ends after about ten seconds of racing.',
 ].join(' ');
 
@@ -92,7 +94,7 @@ export interface RaceCourseHalves {
 const SOURCE = /^src\/.+\.(?:t|j)sx?$/i;
 const TEST_FILE = /\.(?:test|spec)\.[tj]sx?$/i;
 /** Generated kit files define these calls; only the game's own files are read. */
-const KIT_FILE = /^src\/game\/(?:three|core|fx|ui)\/|^src\/game\/(?:Game|GameCanvas)\.tsx?$|^src\/audio\//i;
+const KIT_FILE = /^src\/game\/(?:three|core|fx|ui)\/|^src\/game\/(?:Game|GameCanvas|RacingRoadGame)\.tsx?$|^src\/audio\//i;
 
 const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
@@ -103,7 +105,7 @@ export function raceCourseHalves(path: string, content: string): RaceCourseHalve
   const src = stripComments(String(content ?? ''));
   return {
     drives: /\b(?:driveVehicle|createVehicleState|createCar|createMotorcycle|createBicycle)\s*\(/.test(src),
-    streams: /\bcreateTrackStream\s*\(/.test(src),
+    streams: /\bcreateTrackStream\s*\(/.test(src) || /<RacingRoadGame(?:\s|\/?>)/.test(src),
     finiteRoad: /\bcreateRoad\s*\(/.test(src) && !/\bclosed\s*:\s*true\b/.test(src),
   };
 }

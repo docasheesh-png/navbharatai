@@ -1062,14 +1062,104 @@ export class TouchControls {
 }
 `;
 
+const RACING_ROAD_GAME = `import { useEffect, useRef, useState } from 'react';
+import * as THREE from 'three';
+import { Game } from './Game';
+import { events } from './core/events';
+import { state } from './core/state';
+import { createCar, createTrackStream, createVehicleState, driveVehicle, RACING_ROAD_MAPS, type TrackPlan, type TrackStream, type VehicleState } from './three/objects';
+
+/** Original racing starter. New plan identity restarts the game (all settings apply).
+ * Keep plan identity stable for ordinary rerenders; onReady exposes seamless live setPlan. */
+export function RacingRoadGame({ plan, onReady }: { plan?: TrackPlan; onReady?: (stream: TrackStream) => void } = {}) {
+  const host = useRef<HTMLDivElement>(null);
+  const hud = useRef<HTMLDivElement>(null);
+  const live = useRef<Game | null>(null);
+  const config = useRef({ plan, onReady });
+  config.current = { plan, onReady };
+  const [failure, setFailure] = useState<string | null>(null);
+  const [paused, setPaused] = useState(false);
+  useEffect(() => {
+    if (!host.current) return;
+    setFailure(null);
+    let game: Game | null = null, stream: TrackStream | null = null;
+    let car: ReturnType<typeof createCar> | undefined, drive: VehicleState;
+    let lastMap = -1, hudTime = 0;
+    const skies = [0x9bcde6, 0xb8d9dc, 0x9dc3b9, 0xa9bfdf, 0xb7c4cf, 0x83b3b1,
+      0xb6b9c3, 0x8da4ba, 0x8dd5df, 0xf2d6a2, 0x5d7a52, 0x10162f];
+    const syncPause = () => setPaused(state.status === 'paused');
+    const offs = ['GAME_PAUSED', 'GAME_RESUMED', 'GAME_STARTED'].map(event => events.on(event, syncPause));
+    let released = false;
+    const release = () => {
+      if (released) return; released = true;
+      for (const off of offs) off();
+      stream?.dispose(); car?.userData.disposeOwnedMaterials?.(); game?.dispose();
+    };
+    try {
+      game = new Game({ container: host.current, camera: 'chase', playerBody: false, gameId: 'road-library',
+        setup: (ctx) => {
+          stream = createTrackStream(config.current.plan, { detail: 'lite' });
+          car = createCar({ color: 0xb42b2b, detail: 'lite' });
+          car.position.set(stream.startPose.x, stream.startPose.y, stream.startPose.z);
+          car.rotation.y = stream.startPose.heading;
+          drive = createVehicleState(car);
+          ctx.scene.add(stream.root, car); ctx.follow(car);
+        },
+        update: (ctx, dt) => {
+          if (!stream || !car) return;
+          drive = driveVehicle(car, drive, ctx.input.axis(), dt);
+          const status = stream.update(car);
+          if (status.rebased) { const p = ctx.player.object.position.clone().sub(status.rebased); ctx.player.reset(p.x, p.y, p.z); ctx.camera.position.sub(status.rebased); }
+          const piece = status.segment?.piece;
+          const id = piece?.mapId ?? 0, map = RACING_ROAD_MAPS[id - 1];
+          if (id !== lastMap) {
+            lastMap = id;
+            ctx.scene.background = new THREE.Color(skies[id - 1] ?? skies[0]);
+            ctx.scene.fog = new THREE.Fog(skies[id - 1] ?? skies[0], 70, 450);
+            ctx.lights.key.intensity = map?.lighting === 'night' ? 0.6 : 2.2;
+            ctx.lights.hemisphere.intensity = map?.lighting === 'night' ? 0.6 : 1;
+            ctx.lights.ambient.intensity = map?.lighting === 'night' ? 0.35 : 0.2;
+          }
+          hudTime += dt;
+          if (hud.current && hudTime >= 0.2) {
+            hudTime = 0;
+            const km = ((piece?.mapOffsetMetres ?? 0) + status.distance - (status.segment?.startDistance ?? 0)) / 1000;
+            hud.current.textContent = (map ? String(id).padStart(2, '0') + '/12 · ' + map.name : piece?.name ?? 'Custom course') + ' · ' + km.toFixed(1) + '/' + ((piece?.mapLengthMetres ?? status.segment?.length ?? 0) / 1000).toFixed(1) + ' km · Loop ' + (status.lap + 1) + ' · ' + Math.round(Math.abs(drive.speed) * 3.6) + ' km/h';
+          }
+        },
+      });
+      live.current = game; game.start();
+      const ready = () => { if (stream) config.current.onReady?.(stream); }; ready();
+    } catch (error) {
+      release();
+      setFailure(error instanceof Error ? error.message : 'This device could not start the 3D road.');
+    }
+    return () => { live.current = null; release(); };
+  }, [plan]);
+  return <div style={{ position: 'relative', width: '100%', height: '100dvh', minHeight: 320, background: '#10162f' }}>
+    <div ref={host} style={{ position: 'absolute', inset: 0 }} />
+    <div style={{ position: 'absolute', left: 16, top: 16, color: 'white', background: '#10162fcc', padding: 12, borderRadius: 12, pointerEvents: 'none' }}>
+      <div ref={hud}>01/12 · Highway Straight · 0/10 km · Loop 1</div>
+      <small>W/S or arrows: gas/brake · A/D: steer · Touch controls on phones</small>
+    </div>
+    <button type="button" style={{ position: 'absolute', right: 16, top: 16 }} onClick={() => {
+      if (!live.current) return;
+      if (state.status === 'paused') live.current.resume(); else live.current.pause();
+    }}>{paused ? 'Resume' : 'Pause'}</button>
+    {failure && <div role="alert" style={{ position: 'absolute', top: '40%', padding: 24, color: 'white' }}>{failure}</div>}
+  </div>;
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/Game.ts': GAME,
+  'src/game/RacingRoadGame.tsx': RACING_ROAD_GAME,
   'src/game/GameCanvas.tsx': GAME_CANVAS,
   'src/game/ui/Hud.tsx': HUD,
   'src/game/ui/touchControls.ts': TOUCH_CONTROLS,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols', 'racingroadgame'];
 
 /**
  * Generate the shell. `gamecanvas` renders the HUD and constructs the Game, so a subset that would not
@@ -1151,7 +1241,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       if (wanted.has(base)) files[path] = content;
     }
     // GameCanvas constructs Game and renders Hud; Hud imports Game's type. Neither compiles alone.
-    if (files['src/game/GameCanvas.tsx'] || files['src/game/ui/Hud.tsx']) {
+    if (files['src/game/GameCanvas.tsx'] || files['src/game/ui/Hud.tsx'] || files['src/game/RacingRoadGame.tsx']) {
       files['src/game/Game.ts'] = FILES['src/game/Game.ts'];
     }
     // Game draws the touch controls, so it never ships without them (and they are useless alone).
@@ -1172,6 +1262,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
     instructions:
       `Added the game shell (${Object.keys(files).length} files). This COMPOSES the runtime, 3D, ` +
       'controller and VFX layers — render it and you have a running game.\n' +
+      'For racing without a specified course, render <RacingRoadGame /> from ./game/RacingRoadGame: it actually runs the 12-map 10–100 km looping library, HUD, touch driving, distinct sky themes and pause/resume. Custom routes still use your own setup.\n' +
       // 🔴 THE TYPES FIRST, AND FIRST ON PURPOSE (Q-909, autopsy 50378049). The example below touches
       // three of GameContext's nine members, so for the rest the reported build GUESSED — ctx.canvas,
       // ctx.followTarget (both private fields of Game) and ctx.crosshairTarget (nothing at all) — and
@@ -1182,6 +1273,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       `${kitTypeContract(files)}\n` +
       '```tsx\n' +
       "import { GameCanvas } from './game/GameCanvas';\n" +
+      "import { RacingRoadGame } from './game/RacingRoadGame';\n" +
       "import { createTerrain } from './game/three/world';\n" +
       "import { createCar, createRoad, createVehicleState, driveVehicle, ROAD_SURFACE_Y, type VehicleState } from './game/three/objects';\n" +
       '\n' +
@@ -1203,7 +1295,10 @@ export function generateGameShell(include?: string[]): GameShellResult {
       '\n' +
       '// DRIVING / RIDING: every model faces +Z. driveVehicle owns the control signs, ctx.follow keeps the\n' +
       '// camera BEHIND the car (tail lights toward the player), and a phone gets Left/Right + Brake/Gas.\n' +
-      'export function RacingGame() {\n' +
+      '// No custom road requested: use the ready-made twelve-map library.\n' +
+      'export function RacingGame() { return <RacingRoadGame />; }\n' +
+      '// A user-requested custom road stays custom.\n' +
+      'export function CustomDrivingGame() {\n' +
       '  let car: ReturnType<typeof createCar>;\n' +
       '  let drive: VehicleState;\n' +
       '  return <GameCanvas options={{\n' +

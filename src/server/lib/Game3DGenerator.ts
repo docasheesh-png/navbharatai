@@ -2700,18 +2700,21 @@ export function createCar(options: CarOptions = {}): THREE.Group {
   const paint = options.color ?? 0xb42b2b;
   const real = d === 'real';
   const group = new THREE.Group();
+  const ownedMaterials = new Set<THREE.Material>();
+  const own = <T extends THREE.Material>(mat: T): T => { ownedMaterials.add(mat); return mat; };
+  group.userData.disposeOwnedMaterials = () => { for (const mat of ownedMaterials) mat.dispose(); ownedMaterials.clear(); };
 
   const bodyMat = real
-    ? new THREE.MeshPhysicalMaterial({ color: paint, roughness: 0.28, metalness: 0.85, clearcoat: 1, clearcoatRoughness: 0.08 })
-    : new THREE.MeshStandardMaterial({ color: paint, roughness: 0.5, metalness: 0.3 });
+    ? own(new THREE.MeshPhysicalMaterial({ color: paint, roughness: 0.28, metalness: 0.85, clearcoat: 1, clearcoatRoughness: 0.08 }))
+    : own(new THREE.MeshStandardMaterial({ color: paint, roughness: 0.5, metalness: 0.3 }));
   // Glass is DARK and REFLECTIVE, not see-through: the greenhouse is a solid volume, so transmission
   // would show the sky through the whole cabin and read as a glass brick.
   const glassMat = real
-    ? new THREE.MeshPhysicalMaterial({ color: 0x0b0f13, roughness: 0.04, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.02 })
-    : new THREE.MeshStandardMaterial({ color: 0x10151a, roughness: 0.2, metalness: 0.3 });
-  const trimMat = new THREE.MeshStandardMaterial({ color: 0x15181c, roughness: 0.6, metalness: 0.5 });
+    ? own(new THREE.MeshPhysicalMaterial({ color: 0x0b0f13, roughness: 0.04, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.02 }))
+    : own(new THREE.MeshStandardMaterial({ color: 0x10151a, roughness: 0.2, metalness: 0.3 }));
+  const trimMat = own(new THREE.MeshStandardMaterial({ color: 0x15181c, roughness: 0.6, metalness: 0.5 }));
   const tyreMat = shared('fabric', d, 0x14161a, 2);
-  const rimMat = new THREE.MeshStandardMaterial({ color: 0xc6ccd4, roughness: 0.25, metalness: 1 });
+  const rimMat = own(new THREE.MeshStandardMaterial({ color: 0xc6ccd4, roughness: 0.25, metalness: 1 }));
 
   const wheelR = L * 0.075;
   const axleZ = 1.3 * s;             // 2.6 m wheelbase
@@ -2787,7 +2790,7 @@ export function createCar(options: CarOptions = {}): THREE.Group {
     trimParts.push(box(W * 0.56, 0.13 * s, 0.03 * s, 0, 0.4 * s, 2.215 * s));
     trimParts.push(box(W * 0.36, 0.07 * s, 0.03 * s, 0, 0.6 * s, 2.19 * s));
     trimParts.push(box(W * 0.7, 0.1 * s, 0.03 * s, 0, 0.29 * s, -2.21 * s));
-    const plate = mesh(new THREE.BoxGeometry(0.52 * s, 0.11 * s, 0.03 * s), new THREE.MeshStandardMaterial({ color: 0xe8e6df, roughness: 0.6 }), d);
+    const plate = mesh(new THREE.BoxGeometry(0.52 * s, 0.11 * s, 0.03 * s), own(new THREE.MeshStandardMaterial({ color: 0xe8e6df, roughness: 0.6 })), d);
     plate.position.set(0, 0.52 * s, -2.225 * s);
     group.add(plate);
   }
@@ -2797,18 +2800,18 @@ export function createCar(options: CarOptions = {}): THREE.Group {
 
   // Lights that EMIT, laid on the nose and tail surfaces. An unlit "light" is a coloured sticker.
   for (const side of [-1, 1]) {
-    const head = new THREE.Mesh(new THREE.BoxGeometry(W * 0.24, 0.12 * s, 0.025 * s), new THREE.MeshBasicMaterial({ color: 0xfff3d0 }));
+    const head = new THREE.Mesh(new THREE.BoxGeometry(W * 0.24, 0.12 * s, 0.025 * s), own(new THREE.MeshBasicMaterial({ color: 0xfff3d0 })));
     head.position.set(side * W * 0.31, 0.722 * s, 2.098 * s);
     head.rotation.x = -0.985;
     group.add(head);
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(W * 0.27, 0.09 * s, 0.025 * s), new THREE.MeshBasicMaterial({ color: 0xd82b1e }));
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(W * 0.27, 0.09 * s, 0.025 * s), own(new THREE.MeshBasicMaterial({ color: 0xd82b1e })));
     tail.position.set(side * W * 0.3, 0.8 * s, -2.215 * s);
     group.add(tail);
   }
 
   // Wheels: a rounded tyre on a spoked rim (roadWheel, shared by every vehicle), sitting IN the wells.
   const tyreW = 0.22 * s;
-  const linerMat = new THREE.MeshStandardMaterial({ color: 0x0b0c0e, roughness: 0.95, side: THREE.DoubleSide });
+  const linerMat = own(new THREE.MeshStandardMaterial({ color: 0x0b0c0e, roughness: 0.95, side: THREE.DoubleSide }));
   for (const sx of [-1, 1]) {
     for (const sz of [1, -1]) {
       const wheel = roadWheel(wheelR, tyreW, sx, d, { tyre: tyreMat, rim: rimMat, rimInner: trimMat });
@@ -4168,6 +4171,8 @@ function createCurvedRoad(options: RoadOptions): THREE.Group {
   surface.castShadow = false;
   group.add(markWorldCollider(surface, 'ground'));
   const paint = new THREE.MeshStandardMaterial({ color: 0xe8e4d8, roughness: 0.75, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  let paintDisposed = false;
+  group.userData.disposeOwnedMaterials = () => { if (!paintDisposed) { paintDisposed = true; paint.dispose(); } };
   const spans: Array<[number, number]> = [];
   for (let s0 = 3; s0 + 3 <= L; s0 += 9) spans.push([s0, s0 + 3]);
   if (spans.length) { const dash = new THREE.Mesh(ribbonGeometry(path, 0, 0.14, spans, 1.5), paint); dash.userData.drape = ROAD_SURFACE_Y + 0.008; group.add(dash); }
@@ -4292,6 +4297,10 @@ export interface TrackPiece {
   rise?: number;
   scenery?: TrackScenery;
   name?: string;
+  /** Library map identity/progress; absent on custom user-authored plans. */
+  mapId?: number;
+  mapLengthMetres?: number;
+  mapOffsetMetres?: number;
 }
 export interface TrackPlan {
   pieces: TrackPiece[];
@@ -4311,29 +4320,62 @@ export interface TrackPlan {
   /** Coins and cones per piece; they change every loop (more cones each lap). false = none. */
   pickups?: boolean;
 }
-/**
- * The default endless course: TWELVE different pieces, A..L, looped for ever (A..L, A..L, …). Owner
- * 2026-11-18: "10-12 road track ko systemically add karo — 1-2-3-…→1-2-3 aise cycle me … user ko hamesa
- * infinity road dikhe". The turns cancel over one loop (+60° −60° +45° −45°), so every lap leaves the car
- * heading the way it started: the course winds, but never spirals back over itself.
+/** Original reusable road catalog. A map is a long route, NOT one giant mesh. */
+export interface RacingRoadMap {
+  id: number;
+  name: string;
+  lengthKm: number;
+  scenery: TrackScenery;
+  lighting: 'day' | 'night';
+}
+export const RACING_ROAD_MAPS: readonly Readonly<RacingRoadMap>[] = Object.freeze([
+  { id: 1, name: 'Highway Straight', lengthKm: 10, scenery: 'field', lighting: 'day' },
+  { id: 2, name: 'Left Sweep', lengthKm: 15, scenery: 'field', lighting: 'day' },
+  { id: 3, name: 'Right Sweep', lengthKm: 20, scenery: 'forest', lighting: 'day' },
+  { id: 4, name: 'S Bends', lengthKm: 25, scenery: 'field', lighting: 'day' },
+  { id: 5, name: 'Ghat Crests', lengthKm: 30, scenery: 'forest', lighting: 'day' },
+  { id: 6, name: 'Valley Dips', lengthKm: 35, scenery: 'field', lighting: 'day' },
+  { id: 7, name: 'City Arterial', lengthKm: 40, scenery: 'city', lighting: 'day' },
+  { id: 8, name: 'Underpasses', lengthKm: 45, scenery: 'city', lighting: 'day' },
+  { id: 9, name: 'River Bridges', lengthKm: 50, scenery: 'field', lighting: 'day' },
+  { id: 10, name: 'Desert Highway', lengthKm: 60, scenery: 'desert', lighting: 'day' },
+  { id: 11, name: 'Forest Cut', lengthKm: 80, scenery: 'forest', lighting: 'day' },
+  { id: 12, name: 'Night Market', lengthKm: 100, scenery: 'village', lighting: 'night' },
+].map(m => Object.freeze(m as RacingRoadMap)));
+export const RACING_ROAD_CHUNK_METRES = 200;
+/** Fixed 1..12..1 order. Explicit user plans still go directly to createTrackStream unchanged.
+ * lengthsKm overrides must contain exactly twelve finite lengths in [10,100].
+ * At most 6000 small DATA entries; only ahead/current/behind chunks get geometry.
  */
-export const DEFAULT_TRACK_PLAN: TrackPlan = {
-  loop: 'infinite',
-  pieces: [
-    { kind: 'straight', length: 120, scenery: 'village', name: 'A village straight' },
-    { kind: 'curve', angle: Math.PI / 3, length: 140, scenery: 'field', name: 'B left sweeper' },
-    { kind: 'hill', length: 160, rise: 7, scenery: 'forest', name: 'C forest hill' },
-    { kind: 'curve', angle: -Math.PI / 3, length: 140, scenery: 'forest', name: 'D right sweeper' },
-    { kind: 'bridge', length: 100, scenery: 'field', name: 'E river bridge' },
-    { kind: 'straight', length: 140, scenery: 'city', name: 'F city straight' },
-    { kind: 'tunnel', length: 80, scenery: 'city', name: 'G tunnel' },
-    { kind: 'curve', angle: Math.PI / 4, length: 120, scenery: 'desert', name: 'H desert bend' },
-    { kind: 'checkpoint', length: 60, scenery: 'village', name: 'I checkpoint' },
-    { kind: 'curve', angle: -Math.PI / 4, length: 120, scenery: 'field', name: 'J field bend' },
-    { kind: 'hill', length: 140, rise: 5, scenery: 'field', name: 'K valley crest' },
-    { kind: 'straight', length: 120, scenery: 'village', name: 'L home straight' },
-  ],
-};
+export function createRacingRoadPlan(lengthsKm: readonly number[] = RACING_ROAD_MAPS.map(m => m.lengthKm)): TrackPlan {
+  if (lengthsKm.length !== 12 || Array.from(lengthsKm).some(km => !Number.isFinite(km) || km < 10 || km > 100)) {
+    throw new RangeError('Provide twelve road lengths between 10 and 100 km');
+  }
+  const pieces: TrackPiece[] = [];
+  for (const map of RACING_ROAD_MAPS) {
+    const total = lengthsKm[map.id - 1] * 1000;
+    const count = Math.ceil(total / RACING_ROAD_CHUNK_METRES);
+    const length = total / count;
+    for (let n = 0; n < count; n++) {
+      // Gentle short bends, never a 100 km curve winding over itself. Hills return to
+      // the same height with zero slope at each join. Bridge/tunnel entries are flat.
+      let kind: TrackPieceKind = 'straight', angle = 0, rise = 0;
+      const phase = n % 8;
+      if (map.id === 2 || map.id === 3 || map.id === 4 || map.id === 11) {
+        kind = 'curve';
+        angle = Math.sin(2 * Math.PI * (phase + 0.5) / Math.min(8, count - 8 * Math.floor(n / 8))) * (map.id === 3 ? -1 : 1) * (map.id === 4 ? 0.10 : 0.06);
+      } else if (map.id === 5 || map.id === 6) {
+        kind = 'hill'; rise = map.id === 5 ? 3 : -3;
+      } else if (map.id === 8 && phase === 3) kind = 'tunnel';
+      else if (map.id === 9 && phase === 3) kind = 'bridge';
+      pieces.push({ kind, length, angle, rise, scenery: map.scenery, name: map.name,
+        mapId: map.id, mapLengthMetres: total, mapOffsetMetres: n * length });
+    }
+  }
+  return { pieces, loop: 'infinite', loopFrom: 0, width: 9, ahead: 3, behind: 1, rebaseAt: 800 };
+}
+/** Default only when the user has NOT supplied a course: twelve 10–100 km maps. */
+export const DEFAULT_TRACK_PLAN: TrackPlan = createRacingRoadPlan();
 export interface TrackPose { x: number; z: number; heading: number; y: number }
 export interface TrackSegment {
   piece: TrackPiece;
@@ -4365,7 +4407,8 @@ export interface TrackStream {
   /**
    * Change the course at any time — any number of pieces, any order, any loop mode. The new plan continues
    * seamlessly from the road already laid; { now: true } also replaces the pieces ahead of the player. Returns
-   * false (and changes nothing) for an empty plan or a course that has already ended.
+   * false for an empty plan or a terminal piece already under/behind the player. A sealed road
+   * ahead can be replaced with { now: true }. Constructor terrain/window settings require a new stream.
    */
   setPlan: (plan: TrackPlan, options?: { now?: boolean }) => boolean;
   /** Pieces ever created (for a lap / variety HUD) and pieces alive now. */
@@ -4433,7 +4476,13 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
   const origin = { x: 0, z: 0 };
   const field = rollingLand(plan.amplitude ?? 5, plan.frequency ?? 0.015, seed);
   const base = (x: number, z: number) => field(x + origin.x, z + origin.z);
-  const groundMat = new THREE.MeshStandardMaterial({ color: 0x5a7d3a, roughness: 0.95, metalness: 0 });
+  const groundColors: Record<TrackScenery, number> = { field: 0x5a7d3a, forest: 0x355a35, desert: 0xb9a065, city: 0x77756d, village: 0x8e8057 };
+  const groundMaterials = new Map<TrackScenery, THREE.MeshStandardMaterial>();
+  const groundMaterial = (scenery: TrackScenery) => {
+    let mat = groundMaterials.get(scenery);
+    if (!mat) { mat = new THREE.MeshStandardMaterial({ color: groundColors[scenery], roughness: 0.95, metalness: 0 }); groundMaterials.set(scenery, mat); }
+    return mat;
+  };
   const segments: TrackSegment[] = [];
   registerTerrain({ base, drawn: shapedHeight, step: 2, flat: false, rebuild: () => { for (const sg of segments) rebuildGround(sg.ground); } });
 
@@ -4445,7 +4494,7 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
     m.geometry.computeBoundingSphere();
   }
   /** A strip of land ±60 m around the piece; its first row IS the previous strip's last row (seamless). */
-  function groundChunk(path: CorridorPath): THREE.Mesh {
+  function groundChunk(path: CorridorPath, scenery: TrackScenery = 'field'): THREE.Mesh {
     const cols = 30, rows = Math.max(1, Math.ceil(path.total / 2));
     const pos: number[] = [], idx: number[] = [];
     for (let r = 0; r <= rows; r++) {
@@ -4456,7 +4505,7 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setIndex(idx);
-    const m = new THREE.Mesh(geo, groundMat);
+    const m = new THREE.Mesh(geo, groundMaterial(scenery));
     m.receiveShadow = true;
     m.userData.ground = false;
     rebuildGround(m);
@@ -4467,13 +4516,13 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
   let cursor = 0, loop = 0, serial = 0, distance = 0, ended = false, created = 0;
   let loopFrom = Math.max(0, Math.min(plan.pieces.length - 1, plan.loopFrom ?? 0));
   /** The piece the player was last on (its serial), so setPlan({ now }) keeps it and replaces only what is ahead. */
-  let currentSerial = -1;
+  let currentSerial = -1, sealedAt = -1;
   const stream: TrackStream = {
     root, plan, segments, startPose: { ...pose },
     update: () => ({ distance: 0, lap: 0, segment: null, ended: false, rebased: null }),
     setPlan: () => false,
     stats: () => ({ created, alive: segments.length }),
-    dispose: () => { while (segments.length) segments.shift()!.dispose(); groundMat.dispose(); registerTerrain(null); },
+    dispose: () => { while (segments.length) segments.shift()!.dispose(); for (const mat of groundMaterials.values()) mat.dispose(); groundMaterials.clear(); registerTerrain(null); },
   };
 
   function nextPiece(): { piece: TrackPiece; index: number } | null {
@@ -4490,11 +4539,20 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
   // swapped while the game runs: the new plan starts exactly where the road laid so far ends, so the join stays
   // seamless. { now: true } also replaces the pieces already laid AHEAD of the player (never the one under the
   // car). The road width, the land seed and how far ahead it streams stay as created — they are what keeps every
-  // join exact. A course that has ENDED (a barrier, a lake, a closed circuit) is not reopened: create a new
-  // stream for a new course.
+  // join exact. A sealed piece still ahead can be removed with { now: true }; a terminal under the car
+  // requires a new stream. Seed, terrain and window changes also require a new stream.
   stream.setPlan = (next, opts = {}) => {
-    if (ended || !next || !Array.isArray(next.pieces) || next.pieces.length === 0) return false;
-    plan = { ...plan, ...next, width: plan.width, pieces: next.pieces.slice() };
+    if (!next || !Array.isArray(next.pieces) || next.pieces.length === 0) return false;
+    const keep = Math.max(currentSerial, segments[0]?.serial ?? -1);
+    // A terminal spawned in the ahead window is not a completed drive. It can
+    // be removed safely, but never reopen a barrier/lake already under the car.
+    if (ended) {
+      const seal = segments.find((seg) => seg.serial === sealedAt);
+      if (!opts.now || !seal || seal.serial <= keep) return false;
+      ended = false; sealedAt = -1;
+    }
+    plan = { ...plan, ...next, width: W, ahead, behind, rebaseAt, seed,
+      amplitude: plan.amplitude ?? 5, frequency: plan.frequency ?? 0.015, pieces: next.pieces.slice() };
     stream.plan = plan;
     loopFrom = Math.max(0, Math.min(plan.pieces.length - 1, plan.loopFrom ?? 0));
     cursor = 0;
@@ -4521,10 +4579,12 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
     const road = createRoad({ path: geom.pts.map((q) => [q.x, q.z] as [number, number]), width: W, detail: d, profile, valley: piece.kind === 'bridge' ? 7 : undefined });
     const extras = new THREE.Group(); extras.userData.ground = false;
     const removers: Array<() => void> = [];
+    const ownedMaterials = new Set<THREE.Material>();
+    const own = <T extends THREE.Material>(mat: T): T => { ownedMaterials.add(mat); return mat; };
     const mid = pathPose(path, geom.length / 2);
     if (piece.kind === 'bridge') {
       // A river runs in the valley under the deck: WATER, declared — the one place a thing may go below.
-      const water = new THREE.Mesh(new THREE.PlaneGeometry(26, 200), new THREE.MeshStandardMaterial({ color: 0x2f6f8f, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.9 }));
+      const water = new THREE.Mesh(new THREE.PlaneGeometry(26, 200), own(new THREE.MeshStandardMaterial({ color: 0x2f6f8f, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.9 })));
       water.rotation.x = -Math.PI / 2; water.rotation.z = Math.atan2(mid.tx, mid.tz) + Math.PI / 2;
       water.position.set(mid.x, pose.y - 5.5, mid.z); water.userData.ground = false; extras.add(water);
       const mx = mid.x, mz = mid.z, tx = mid.tx, tz = mid.tz;
@@ -4549,7 +4609,7 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
     if (piece.kind === 'checkpoint' || piece.kind === 'finish' || piece.kind === 'end') {
       const q = pathPose(path, piece.kind === 'end' ? geom.length - 1 : geom.length / 2);
       const col = piece.kind === 'end' ? 0xd12b2b : piece.kind === 'finish' ? 0xffffff : 0xf2b705;
-      const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.5 });
+      const mat = own(new THREE.MeshStandardMaterial({ color: col, roughness: 0.5 }));
       const gate = new THREE.Group();
       if (piece.kind === 'end') gate.add(new THREE.Mesh(new THREE.BoxGeometry(W + 2, 1.2, 0.6), mat)).children[0].position.set(0, 0.6, 0);
       else {
@@ -4562,19 +4622,19 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
     if (piece.kind === 'water') {
       // The road runs down a slipway into a lake: the far half is declared WATER (a boat floats, a car sinks).
       const q = pathPose(path, geom.length * 0.8);
-      const lake = new THREE.Mesh(new THREE.CircleGeometry(70, 40), new THREE.MeshStandardMaterial({ color: 0x2f6f8f, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.92 }));
+      const lake = new THREE.Mesh(new THREE.CircleGeometry(70, 40), own(new THREE.MeshStandardMaterial({ color: 0x2f6f8f, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.92 })));
       lake.rotation.x = -Math.PI / 2; lake.position.set(q.x + q.tx * 50, pose.y - 1.5, q.z + q.tz * 50); lake.userData.ground = false; extras.add(lake);
       const cx = lake.position.x, cz = lake.position.z;
       removers.push(addWater((x, z) => Math.hypot(x - cx, z - cz) < 70));
     }
-    const ground = groundChunk(path);
+    const ground = groundChunk(path, piece.scenery ?? 'field');
     root.add(road, ground, extras);
     // Per-loop variation: the same piece gets different coins and more cones every lap.
     const rand = rng(seed * 7919 + loop * 104729 + index * 131);
     const pickups: THREE.Object3D[] = [];
     if (plan.pickups !== false && !terminal) {
-      const coinMat = new THREE.MeshStandardMaterial({ color: 0xffc83d, metalness: 0.8, roughness: 0.3, emissive: 0x3a2a00 });
-      const coneMat = new THREE.MeshStandardMaterial({ color: 0xff6a00, roughness: 0.6 });
+      const coinMat = own(new THREE.MeshStandardMaterial({ color: 0xffc83d, metalness: 0.8, roughness: 0.3, emissive: 0x3a2a00 }));
+      const coneMat = own(new THREE.MeshStandardMaterial({ color: 0xff6a00, roughness: 0.6 }));
       const coins = 4 + Math.floor(rand() * 6), cones = Math.min(8, loop + Math.floor(rand() * 2));
       for (let i = 0; i < coins + cones; i++) {
         const sv = 8 + rand() * (geom.length - 16);
@@ -4593,7 +4653,10 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
       startDistance: distance, length: geom.length, road, ground, extras, pickups, terminal,
       dispose: () => {
         for (const r of removers) r();
+        for (const mat of ownedMaterials) mat.dispose();
+        ownedMaterials.clear();
         removeCorridor(road.userData.corridor as Corridor);
+        road.userData.disposeOwnedMaterials?.();
         for (const g of [road, ground, extras]) {
           g.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry) m.geometry.dispose(); });
           root.remove(g);
@@ -4604,10 +4667,11 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
     pose = seg.end;
     segments.push(seg);
     created++;
-    if (terminal) ended = true;
+    if (terminal) { ended = true; sealedAt = seg.serial; }
     if (plan.loop === 'circuit' && cursor >= plan.pieces.length) {
       ended = true;
       closeCircuit();
+      if (!terminal) sealedAt = segments[segments.length - 1].serial;
     }
     stream.onSegment?.(seg, rand);
     return true;
@@ -4633,7 +4697,8 @@ export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, option
     segments.push({
       piece: { kind: 'straight', name: 'circuit closer' }, index: -1, loop, serial: serial++, start: { ...a }, end: { ...b },
       startDistance: distance, length: path.total, road, ground, extras, pickups: [], terminal: false,
-      dispose: () => { removeCorridor(road.userData.corridor as Corridor); for (const g of [road, ground, extras]) { g.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry) m.geometry.dispose(); }); root.remove(g); } },
+      dispose: () => { removeCorridor(road.userData.corridor as Corridor);
+        road.userData.disposeOwnedMaterials?.(); for (const g of [road, ground, extras]) { g.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry) m.geometry.dispose(); }); root.remove(g); } },
     });
     distance += path.total;
   }
@@ -6242,10 +6307,18 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "  'tunnel' | 'checkpoint' | 'finish' | 'water' (road runs into a lake: declared water) | 'end' (a\n" +
       "  barrier) — loop: 'infinite' (repeat; loopFrom: k keeps an intro once), 'none' (the course ENDS),\n" +
       "  or 'circuit' (closes back to the start). Only when the user said nothing about the course use\n" +
-      "  DEFAULT_TRACK_PLAN (twelve different pieces, A..L, looped for ever) as the STARTING list. Start the car at\n" +
+      "  DEFAULT_TRACK_PLAN (12 maps of 10–100 km, starting 1..12..1 order). Start at stream.startPose.\n" +
+      "  createRacingRoadPlan(lengthsKm) accepts twelve 10–100 km lengths. Map ID/name/progress live on\n" +
+      "  status.segment.piece: mapId, name, mapLengthMetres, mapOffsetMetres. Geometry streams in 200m chunks.\n" +
+      "  Apply RACING_ROAD_MAPS[mapId-1].lighting on map changes using atmosphere.ts; do not allocate all maps.\n" +
+      "  Dispose the stream on unmount; pass other moving objects to update(car, carry) for origin shifts.\n" +
+      "  A one-off curved road or circuit: createRoad({ path: [[x, z], ...], closed }).\n" +
       "  stream.startPose. Nothing is fixed: any number of pieces, any order. Keep the plan in its own file\n" +
       "  (src/game/<your-game>/trackPlan.ts) so a later 'change the map' is an edit there, and call\n" +
-      "  stream.setPlan(plan, { now: true }) to change the course while the game runs (a track picker, a stage).\n" +
+      "  stream.setPlan(plan, { now: true }) changes future pieces while running; check its boolean result.\n" +
+      "  Width, terrain seed/amplitude/frequency and stream window/rebase settings require a new stream.\n" +
+      "  A terminal under the car requires restart; terminal pieces still ahead can be replaced.\n" +
+      "  RacingRoadGame plan prop changes restart its entire game; onReady(stream) enables seamless setPlan.\n" +
       "  🔴 A RACE is never one createRoad(): its default is 300 m, which a racing car covers in about ten\n" +
       "  seconds and then the road is gone. createRoad is for a town street or a closed circuit the user drew:\n" +
       "  createRoad({ path: [[x, z], ...], closed }).\n" +

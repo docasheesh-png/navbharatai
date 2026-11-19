@@ -70,12 +70,16 @@ describe('no claim that nobody can prove', () => {
     }
   });
 
-  it('no company name or registered address until one legally exists', () => {
-    // The organization (D-U-N-S) account is in progress; naming a company before it exists is the
-    // kind of detail Play checks. Deliberately absent, and this case says so.
-    for (const forbidden of ['pvt ltd', 'private limited', 'llp', 'inc.', 'registered office', 'cin:']) {
-      expect(all).not.toContain(forbidden);
-    }
+  it('publishes the exact company information supplied by the owner on incorporation', () => {
+    expect(DEFAULT_ABOUT.indiaFirstHeading).toBe('Company Information');
+    expect(DEFAULT_ABOUT.indiaFirst).toEqual([
+      'Legal Name: NAVBHARATAI PRIVATE LIMITED',
+      'Brand: NavBharatAI',
+      'Incorporated: 18 November 2026',
+      'CIN: U62010UP2026PTC254952',
+      'Registered Office: Ektanagar, Budaun City, Budaun – 243601, Uttar Pradesh, India',
+      'Country: India',
+    ]);
   });
 
   it('the contact address is the one the product already publishes', () => {
@@ -96,7 +100,7 @@ describe('the page says what the app actually does', () => {
   it('names the real thing, not only a mission', () => {
     // The old description — "a mission to empower every Indian with the power of Artificial
     // Intelligence" — never said what the app DOES. A visitor could read it and still not know.
-    const opening = `${DEFAULT_ABOUT.tagline} ${DEFAULT_ABOUT.description}`.toLowerCase();
+    const opening = `${DEFAULT_ABOUT.tagline} ${DEFAULT_ABOUT.description} ${DEFAULT_ABOUT.whatWeBuild.join(' ')}`.toLowerCase();
     expect(opening).toContain('app');
     expect(opening).toMatch(/build|builds|built/);
   });

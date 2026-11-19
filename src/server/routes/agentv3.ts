@@ -19404,7 +19404,7 @@ async function noteBuildOutcome(
                 if (endlessRace) {
                   dispatcher.requireEndlessRaceCourse();
                   buildDiag.record({ phase: 'build', severity: 'info', code: 'RACE_COURSE_ENDLESS', autoResolved: true,
-                    message: 'The request is a race and says nothing about its course, so it runs on NavBharatAI\'s endless 12-piece track (createTrackStream with DEFAULT_TRACK_PLAN).' });
+                    message: 'The request is a race and says nothing about its course, so the builder is instructed to use NavBharatAI\'s editable endless road library (twelve 10–100 km maps by default). Actual use is checked separately.' });
                 }
                 buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(gameTurnRequest(prompt, milestoneRequest)), endlessRaceCourse: endlessRace })}\n\n---\n\n${buildPrompt}`;
               } else {

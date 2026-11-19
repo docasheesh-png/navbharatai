@@ -629,7 +629,7 @@ const NEVER_SUGGEST = new Set([
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_MODULE_FILES_UNDELIVERED', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
   'CHECKPOINT_SIGNAL', // our checkpoint heuristic, never a finding (autopsy SignBridge, 2026-09-26)
   'REVIEW_SUGGESTIONS_NOT_READY', // a suggest-only review that ran out of time — nothing for the user to do
-  'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH', 'STRICT_TRIAL', 'SAVED_SOURCE_DIVERGES', 'ATTACHMENTS_READ',
+  'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH', 'STRICT_TRIAL', 'SAVED_SOURCE_DIVERGES', 'ATTACHMENTS_READ', 'ATTACHMENTS_ON_DISK', 'ATTACHMENTS_NOT_ON_DISK',
   'FREE_BUILD_TIME_CAP', 'FREE_BUILD_CHAIN_PAUSED', // our free-tier time policy (freeBuildTimeCap.ts)
   'STYLE_RULES_RESUMED', // our end-of-turn steer (stylePolishResume.ts), never a finding
   'STYLE_PASS_CAPPED', // our own time cap on that pass (stylePassCap.ts), never a finding

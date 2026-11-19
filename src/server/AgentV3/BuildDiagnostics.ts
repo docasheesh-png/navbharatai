@@ -206,6 +206,8 @@ export const PROCESS_ONLY_CODES = new Set([
   'SAVED_SOURCE_DIVERGES',
   // Whether OUR vision call read the user's attachment in time (attachmentReadOutcome.ts, autopsy 1389f0d5).
   'ATTACHMENTS_READ',
+  // …and whether OUR setup saved the user's attached text files whole in the project (attachmentFilesOnDisk.ts, #2415).
+  'ATTACHMENTS_ON_DISK', 'ATTACHMENTS_NOT_ON_DISK',
   // …and its sibling: how far down OUR ladder a build fell (ladderDepth.ts) is a fact about our
   // routing, never about the user's app.
   'LADDER_DEPTH',

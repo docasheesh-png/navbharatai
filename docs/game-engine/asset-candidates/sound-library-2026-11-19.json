@@ -1,0 +1,378 @@
+[
+ {
+  "name": "step",
+  "id": "FEETHmn_ShoeGrassWalk_OS_01",
+  "duration": 0.5508541666666666,
+  "peak": 0.8524817228317261,
+  "rmsDb": -21.07047135958783,
+  "gain": 0.714
+ },
+ {
+  "name": "land",
+  "id": "FEETHmn_ShoeGrassLand_OS_01",
+  "duration": 0.976,
+  "peak": 0.8088186979293823,
+  "rmsDb": -22.062270558439387,
+  "gain": 0.8
+ },
+ {
+  "name": "click",
+  "id": "UIClick_CasualPopsConfirm_OS_01",
+  "duration": 0.26777083333333335,
+  "peak": 0.9028094410896301,
+  "rmsDb": -17.3891636833591,
+  "gain": 0.932
+ },
+ {
+  "name": "error",
+  "id": "UIAlert_CasualPopsError_OS_01",
+  "duration": 0.44858333333333333,
+  "peak": 0.8955494165420532,
+  "rmsDb": -15.354126029708242,
+  "gain": 0.737
+ },
+ {
+  "name": "hit",
+  "id": "FGHTImpt_PunchRegular_OS_01",
+  "duration": 1.0235,
+  "peak": 0.9144903421401978,
+  "rmsDb": -12.320049475281907,
+  "gain": 0.52
+ },
+ {
+  "name": "impact",
+  "id": "FGHTImpt_PunchHarder_OS_01",
+  "duration": 1.049875,
+  "peak": 0.8682804703712463,
+  "rmsDb": -16.6409722527606,
+  "gain": 0.855
+ },
+ {
+  "name": "swing",
+  "id": "WHSH_WhooshMedium_OS_01",
+  "duration": 0.22333333333333333,
+  "peak": 0.9172580242156982,
+  "rmsDb": -15.816753987232914,
+  "gain": 0.778
+ },
+ {
+  "name": "powerup",
+  "id": "UIMisc_Powerup_OS_01",
+  "duration": 1.708,
+  "peak": 0.8805012106895447,
+  "rmsDb": -14.500455644077322,
+  "gain": 0.668
+ },
+ {
+  "name": "laser",
+  "id": "LASRGun_LaserShootUI_OS_01",
+  "duration": 0.9713541666666666,
+  "peak": 0.9286774396896362,
+  "rmsDb": -14.968140964516053,
+  "gain": 0.705
+ },
+ {
+  "name": "step_concrete",
+  "id": "FEETHmn_ShoeConcreteWalk_OS_01",
+  "duration": 0.164,
+  "peak": 0.881401777267456,
+  "rmsDb": -19.61449059649451,
+  "gain": 0.604
+ },
+ {
+  "name": "step_wood",
+  "id": "FEETHmn_ShoeWoodWalk_OS_01",
+  "duration": 0.24022916666666666,
+  "peak": 0.8888489603996277,
+  "rmsDb": -20.937396765896835,
+  "gain": 0.703
+ },
+ {
+  "name": "step_snow",
+  "id": "FEETHmn_ShoeSnowWalk_OS_01",
+  "duration": 0.9100625,
+  "peak": 0.8748205900192261,
+  "rmsDb": -22.089073211125605,
+  "gain": 0.803
+ },
+ {
+  "name": "step_metal",
+  "id": "FEETHmn_ShoeMetalWalk_OS_01",
+  "duration": 0.6724583333333334,
+  "peak": 0.8984353542327881,
+  "rmsDb": -22.238107956506134,
+  "gain": 0.816
+ },
+ {
+  "name": "step_dirt",
+  "id": "FEETHmn_ShoeDirtWalk_OS_01",
+  "duration": 0.432,
+  "peak": 0.874979555606842,
+  "rmsDb": -22.015421365628427,
+  "gain": 0.796
+ },
+ {
+  "name": "rain",
+  "id": "RAINVege_ForestRain_LOOP_01",
+  "duration": 45,
+  "peak": 0.7867780923843384,
+  "rmsDb": -32.477116710876075,
+  "gain": 1
+ },
+ {
+  "name": "wind",
+  "id": "WINDVege_LightWindTreesBirds_LOOP_01",
+  "duration": 73.94108333333334,
+  "peak": 0.7848103642463684,
+  "rmsDb": -22.061731985769594,
+  "gain": 0.8
+ },
+ {
+  "name": "amb_forest",
+  "id": "AMBForst_Forest_LOOP_01",
+  "duration": 59.47575,
+  "peak": 0.27736184000968933,
+  "rmsDb": -29.685031146554675,
+  "gain": 0.964
+ },
+ {
+  "name": "amb_night",
+  "id": "AMBForst_Night_LOOP_01",
+  "duration": 45.052145833333334,
+  "peak": 0.19831275939941406,
+  "rmsDb": -28.75574932623835,
+  "gain": 0.867
+ },
+ {
+  "name": "amb_farm",
+  "id": "AMBFarm_FarmGeneric_LOOP_01",
+  "duration": 89.816,
+  "peak": 0.6015224456787109,
+  "rmsDb": -25.751496728015795,
+  "gain": 0.613
+ },
+ {
+  "name": "amb_city",
+  "id": "AMBUrbn_CityAmerican_LOOP_01",
+  "duration": 85.39258333333333,
+  "peak": 0.7383286952972412,
+  "rmsDb": -19.871542212406045,
+  "gain": 0.312
+ },
+ {
+  "name": "amb_sea",
+  "id": "WATRWave_OceanWaves_LOOP_01",
+  "duration": 45.000479166666665,
+  "peak": 0.8262007832527161,
+  "rmsDb": -21.321804363979982,
+  "gain": 0.368
+ },
+ {
+  "name": "amb_river",
+  "id": "WATRFlow_River_LOOP_01",
+  "duration": 44.61866666666667,
+  "peak": 0.8155865669250488,
+  "rmsDb": -22.09218402443804,
+  "gain": 0.402
+ },
+ {
+  "name": "amb_underwater",
+  "id": "AMBUndwtr_Underwater_LOOP_01",
+  "duration": 45,
+  "peak": 0.9044070839881897,
+  "rmsDb": -13.188344390194954,
+  "gain": 0.144
+ },
+ {
+  "name": "amb_horror",
+  "id": "DSGNDron_DroneCreepy_OS_01",
+  "duration": 45.056,
+  "peak": 0.7515974044799805,
+  "rmsDb": -17.568103038873158,
+  "gain": 0.239
+ },
+ {
+  "name": "car_engine",
+  "id": "VEHCar_CarEngineSlow_LOOP_01",
+  "duration": 4.157041666666666,
+  "peak": 0.9482459425926208,
+  "rmsDb": -7.783615552679695,
+  "gain": 0.155
+ },
+ {
+  "name": "car_engine_fast",
+  "id": "VEHCar_CarEngineHigh_LOOP_01",
+  "duration": 3.945895833333333,
+  "peak": 0.8985044360160828,
+  "rmsDb": -9.334277223763998,
+  "gain": 0.185
+ },
+ {
+  "name": "car_door",
+  "id": "VEHDoor_CarDoorClose_OS_01",
+  "duration": 0.8996458333333334,
+  "peak": 0.898592472076416,
+  "rmsDb": -19.198111663904466,
+  "gain": 1
+ },
+ {
+  "name": "train",
+  "id": "TRNElec_TrainPassby_OS_01",
+  "duration": 27.387375,
+  "peak": 0.8789262771606445,
+  "rmsDb": -18.006909723560966,
+  "gain": 1
+ },
+ {
+  "name": "rowing",
+  "id": "BOATRow_RowboatOarRowing_OS_01",
+  "duration": 3.1114166666666665,
+  "peak": 0.9102528691291809,
+  "rmsDb": -20.262514540587418,
+  "gain": 1
+ },
+ {
+  "name": "dog_bark",
+  "id": "ANMLDog_DogBark_OS_01",
+  "duration": 0.434125,
+  "peak": 0.8460243940353394,
+  "rmsDb": -16.839147975182172,
+  "gain": 0.875
+ },
+ {
+  "name": "horse",
+  "id": "ANMLHors_HorseNeigh_OS_01",
+  "duration": 1.6093958333333334,
+  "peak": 0.8754293322563171,
+  "rmsDb": -13.80314974266884,
+  "gain": 0.617
+ },
+ {
+  "name": "sheep",
+  "id": "ANMLFarm_Sheep_OS_01",
+  "duration": 0.9573333333333334,
+  "peak": 0.8933353424072266,
+  "rmsDb": -17.76615978740065,
+  "gain": 0.973
+ },
+ {
+  "name": "pig",
+  "id": "ANMLFarm_PigSqueal_OS_01",
+  "duration": 0.6251875,
+  "peak": 0.8643460869789124,
+  "rmsDb": -17.991440325137425,
+  "gain": 0.999
+ },
+ {
+  "name": "chicken",
+  "id": "BIRDFowl_Chicken_OS_01",
+  "duration": 3.330604166666667,
+  "peak": 0.8580130934715271,
+  "rmsDb": -22.481391020146766,
+  "gain": 1
+ },
+ {
+  "name": "duck",
+  "id": "BIRDFowl_Duck_OS_01",
+  "duration": 2.4478333333333335,
+  "peak": 0.8285133838653564,
+  "rmsDb": -21.287511320439346,
+  "gain": 1
+ },
+ {
+  "name": "door_open",
+  "id": "DOORWood_FrontDoorOpen_OS_01",
+  "duration": 0.5881875,
+  "peak": 0.806476354598999,
+  "rmsDb": -25.644105770444874,
+  "gain": 1
+ },
+ {
+  "name": "door_close",
+  "id": "DOORWood_FrontDoorClose_OS_01",
+  "duration": 0.5451458333333333,
+  "peak": 0.9498085975646973,
+  "rmsDb": -21.60384890481646,
+  "gain": 1
+ },
+ {
+  "name": "sword_clash",
+  "id": "WEAPSwrd_SwordClash_OS_01",
+  "duration": 1.5465208333333333,
+  "peak": 0.8470095992088318,
+  "rmsDb": -18.942207878991052,
+  "gain": 1
+ },
+ {
+  "name": "sword",
+  "id": "WEAPSwrd_Sword_OS_01",
+  "duration": 1.2971875,
+  "peak": 0.9009054899215698,
+  "rmsDb": -20.508786188464562,
+  "gain": 1
+ },
+ {
+  "name": "axe_chop",
+  "id": "WEAPAxe_WoodCutAxe_OS_01",
+  "duration": 18.3718125,
+  "peak": 0.8718857169151306,
+  "rmsDb": -26.370680251936957,
+  "gain": 1
+ },
+ {
+  "name": "magic",
+  "id": "MAGSpel_MagicSpell_OS_01",
+  "duration": 2.3695,
+  "peak": 0.9164875149726868,
+  "rmsDb": -13.714500204278135,
+  "gain": 0.611
+ },
+ {
+  "name": "shell_casing",
+  "id": "BLLTShel_ShellCasingConcrete_OS_01",
+  "duration": 1.01575,
+  "peak": 0.8941142559051514,
+  "rmsDb": -23.745117462705082,
+  "gain": 1
+ },
+ {
+  "name": "kick",
+  "id": "FGHTImpt_Kick_OS_01",
+  "duration": 0.7705625,
+  "peak": 0.9282516241073608,
+  "rmsDb": -11.070384010775612,
+  "gain": 0.45
+ },
+ {
+  "name": "punch_heavy",
+  "id": "FGHTImpt_PunchHardest_OS_01",
+  "duration": 1.0115833333333333,
+  "peak": 0.8724095821380615,
+  "rmsDb": -15.09130363142354,
+  "gain": 0.715
+ },
+ {
+  "name": "notification",
+  "id": "UIAlert_Notification_OS_01",
+  "duration": 0.1570625,
+  "peak": 0.9116795063018799,
+  "rmsDb": -9.132313926976334,
+  "gain": 0.36
+ },
+ {
+  "name": "countup",
+  "id": "UIData_CasualCountup_OS_01",
+  "duration": 0.9643333333333334,
+  "peak": 0.8835545778274536,
+  "rmsDb": -20.8800226108761,
+  "gain": 1
+ },
+ {
+  "name": "sparkle",
+  "id": "UIMisc_BelltreeUp_OS_01",
+  "duration": 5.016291666666667,
+  "peak": 0.8503623008728027,
+  "rmsDb": -21.28381230730438,
+  "gain": 1
+ }
+]

@@ -102601,6 +102601,13 @@ user, 12.7 working. Tally: ✅ 1 (REPAIR_CLAIM_WITHHELD) · 🔀 0 · ⏭️ 0 �
 **Fixed:** kit file `core/strings.ts` — English and Hindi tables with identical keys and placeholders, `t(key, vars)`, `setGameLanguage('en' | 'hi' | 'auto', overrides)`; the builder supplies any other language through `options.strings` (never machine-guessed here); a missing word falls back to English, never blank. Used by the start screen, pause menu, settings, game over, HUD, loading bar, kit touch-button labels (a label the game wrote is kept), the rotate hint and the run summary. `options.language` / `options.strings` on the Game; prompt tells the builder to set it. (The English-only rule is for NavBharatAI's own UI; this is the user's game.)
 
 **Tests:** `theGameSpeaksThePlayersLanguage` (6). Reversion: a hard-coded Play fails 1. **Still open:** meta goal texts and achievement titles are English data; the racing starter's own buttons are English.
+## 2026-11-19 — Recorded sound library for new games
+- 47 CC BY 4.0 recordings (Meta-open-sound, pinned), loudness-measured in Chromium, 47/47 admitted live. New kit games get a core
+  set replacing built-in voices of the same names + prompt-matched ambience/engines/animals/doors (≤28 sounds, 8 MiB, 4 loops).
+- Every sound changeable in `soundCustomizations.ts` (own file, volume, back to built-in). Kit ships a stand-in loader so nothing
+  can break. Publish serves .ogg as audio/ogg. Kill switch `AGENTV3_GAME_SOUND_LIBRARY` (default on). `tests/gamesGetRecordedSounds.test.ts`.
+- BLOCKED: Quaternius animated animals / guns / vehicles — Google Drive answers "Quota exceeded" for every file (Google's own
+  limit on popular shared files, up to 24 h). Retry later; no workaround used.
 
 ## 2026-11-19 — Game-gap audit P0 #3: the playtest now PRESSES Play again, reads the score and counts the sounds
 

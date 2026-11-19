@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { generateGame3D } from '../src/server/lib/Game3DGenerator';
 import { generateGameController } from '../src/server/lib/GameControllerGenerator';
 import { generateGameRuntime } from '../src/server/lib/GameRuntimeGenerator';
+import { generateGameAssetRuntime } from '../src/server/lib/GameAssetRuntimeGenerator';
 import { GAME_ASSET_MODELS_PATH, generateAssetModelLoader } from '../src/server/lib/GameAssetRuntimeGenerator';
 import { planKitRefresh } from '../src/server/lib/gameRecipeLayers';
 
@@ -117,7 +118,8 @@ describe('contact in the generated 3D kit', () => {
   });
 
   it('upgrades a saved asset loader and keeps collision when an asynchronously loaded model is cloned', async () => {
-    const savedProject = { ...current3DKit, [GAME_ASSET_MODELS_PATH]: legacyLoader };
+    // A game whose runtime is the current one: the loader may be upgraded to match it.
+    const savedProject = { ...current3DKit, [GAME_ASSET_MODELS_PATH]: legacyLoader, 'src/game/three/externalAssets.ts': generateGameAssetRuntime() };
     const refresh = planKitRefresh(savedProject);
     expect(refresh.refreshed).toEqual([GAME_ASSET_MODELS_PATH]);
     const upgraded = refresh.write[GAME_ASSET_MODELS_PATH];
@@ -140,6 +142,16 @@ describe('contact in the generated 3D kit', () => {
     player.reset(3, 0, 0);
     walk(player, 85);
     expect(player.object.position.z).toBeLessThan(2.2);
+  });
+
+  it('an OLDER game whose runtime lacks the new exports keeps its old loader — the pair must match, or the game would not compile', () => {
+    const olderRuntime = generateGameAssetRuntime()
+      .replace(/export function customizedGameAsset/, 'function customizedGameAsset')
+      .replace(/export function applyGameAssetCustomization/, 'function applyGameAssetCustomization')
+      .replace(/export async function loadOwnGameAsset/, 'async function loadOwnGameAsset');
+    const plan = planKitRefresh({ ...current3DKit, [GAME_ASSET_MODELS_PATH]: legacyLoader, 'src/game/three/externalAssets.ts': olderRuntime });
+    expect(plan.write[GAME_ASSET_MODELS_PATH]).toBeUndefined();
+    expect(planKitRefresh({ ...current3DKit, [GAME_ASSET_MODELS_PATH]: legacyLoader }).write[GAME_ASSET_MODELS_PATH]).toBeUndefined();
   });
 
   it('keeps an edited asset loader and a project with its own physics intact', () => {

@@ -385,7 +385,8 @@ export function planKitRefresh(
   const collisionPath = 'src/game/three/collision.ts';
   const collisionKit = pool.get(collisionPath)?.content;
   const hasCollision = !!collisionKit && files[collisionPath] === collisionKit;
-  const assetLoader = upgradeAssetModelLoader(files[GAME_ASSET_MODELS_PATH]);
+  // The loader is upgraded only when the game's own runtime exports what the new loader imports (they are a pair).
+  const assetLoader = upgradeAssetModelLoader(files[GAME_ASSET_MODELS_PATH], files['src/game/three/externalAssets.ts'] ?? '');
   if (Object.keys(stale).length === 0 && !(hasCollision && assetLoader)) return none;
   const has = new Set(Object.keys(files));
   const existing = new Map<string, string | null>(Object.entries(files));

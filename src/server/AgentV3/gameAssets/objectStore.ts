@@ -8,7 +8,7 @@ export function gameAssetObjectStore(): AssetObjectStore {
   const index = (key: string) => isDiscoverySubject(/^game-assets-public-cc\/discovered\/v1\/([a-z]+)\.json$/.exec(key)?.[1] ?? '');
   const file = (key: string) => {
     const bucket = workspaceAssetBucketName();
-    if (!bucket || !(/^game-assets-public-cc\/v1\/[a-f0-9]{64}\.glb$/.test(key) || index(key))) throw new Error('Asset cache storage unavailable');
+    if (!bucket || !(/^game-assets-public-cc\/v1\/[a-f0-9]{64}\.(glb|ogg)$/.test(key) || index(key))) throw new Error('Asset cache storage unavailable');
     return admin.storage().bucket(bucket).file(key);
   };
   return {

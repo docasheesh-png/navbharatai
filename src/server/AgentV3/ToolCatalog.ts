@@ -2479,7 +2479,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: particles, synth, music, audio, feedback. Default = all.',
+            description: 'Optional subset: particles, synth, music, audio, feedback, soundLibrary. Default = all.',
           },
         },
       },

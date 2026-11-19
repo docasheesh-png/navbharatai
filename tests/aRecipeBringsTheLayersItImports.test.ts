@@ -29,6 +29,9 @@ describe('a recipe brings the layers it imports', () => {
       'src/game/three/buildings.ts',
       'src/game/three/camera.ts',
       'src/game/three/collision.ts',
+      // Game.ts keeps enemy health bars facing the camera (updateHealthBars) since 2026-11-19 (the shooter HUD) — so
+      // the closure brings healthbar.ts too.
+      'src/game/three/healthbar.ts',
       // Game.ts gives the player a body (createHumanoid) since 2026-10-05 — an empty controller left the
       // third-person hero invisible — so the closure brings humanoid.ts too.
       'src/game/three/humanoid.ts',

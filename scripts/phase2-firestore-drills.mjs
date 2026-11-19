@@ -340,7 +340,7 @@ async function coordinator() {
       const seeded = await control.ok('wallet-seed', { workspaceId });
       const buildRef = `${workspaceId}-attempt`;
       const result = await Promise.all([a.ok('wallet-debit', { workspaceId, buildRef }), b.ok('wallet-debit', { workspaceId, buildRef })]);
-      assert(result.every((value) => value.ok));
+      assert(result.every((value) => value.ok), `Wallet settlement was not confirmed: ${JSON.stringify(result)}`);
       assert.equal(result.reduce((sum, value) => sum + value.tokensDebited, 0), 5 * seeded.tokensPerRupee);
       const audit = await control.ok('wallet-audit', { workspaceId });
       assert.equal(audit.wallet.tokenBalance, 95 * seeded.tokensPerRupee);

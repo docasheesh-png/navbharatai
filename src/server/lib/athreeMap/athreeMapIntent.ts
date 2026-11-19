@@ -11,7 +11,7 @@
 //
 // Named but not needed → the answer says so; there is never a fake map. PURE: no I/O, no clock, no env. Never throws.
 
-import { buildGameContract } from '../../AgentV3/gameIntent';
+import { asksForBattleRoyale, buildGameContract } from '../../AgentV3/gameIntent';
 import { ATHREE_MAP, LIBRARY_MAPS, type LibraryMap, type MapProfile } from './athreeMapLibrary';
 
 export type AthreeVia = 'stored' | 'named' | 'needed' | 'librarian' | 'declined' | 'other-map' | 'named-not-needed' | 'none';
@@ -45,8 +45,8 @@ const NAMED = /\bathree\b|\ba[\s._-]three\b|\ba[\s._-]?3\s+(?:map|world|duniya|n
 const DECLINED = /\b(?:no|not|don'?t|dont|without|nahi|nahin|mat|naa)\s+(?:(?:use|using|add|the|a|an|to|generate|want|need|install|select)\s+){0,5}(?:athree|a[\s._-]three)\b|\b(?:athree|a[\s._-]three)\s+(?:(?:map|world|ko|ka|is|use)\s+){0,4}(?:(?:nahi|nahin|mat)\b|(?:not|no)\b(?=\s*(?:needed\b|wanted\b|required\b|$|[,.;!?])))|(?:अथ्री|एथ्री|आथ्री|अथरी|एथरी)\s+(?:(?:मैप|नक्शा|नक्शे)\s+)?(?:नहीं|नही|मत)/;
 const CHANGE_MAP = /\b(?:change|switch|different|another|new|badlo|badal|naya|doosra|dusra)\b[^.!?\n]{0,16}\bmap\b|\bmap\b[^.!?\n]{0,16}\b(?:change|badlo|badal|different)\b/;
 
-// Devanagari spellings are input parsing (this module is server code, outside the English-only UI rule).
-const BATTLE_ROYALE = /बैटल\s*रॉयल|पबजी|फ्री\s*फायर|battle\s*royale|\bpubg\b|\bbgmi\b|free\s*fire|fortnite|last\s+man\s+standing|\bbr\s+game\b/;
+// "A royale-style game" has ONE reader: gameIntent.asksForBattleRoyale (autopsy aba63ead — this module and the
+// royale starter's guard kept private copies that had drifted apart).
 const FLIGHT = /फ्लाइट|हवाई\s*जहाज|विमान|प्लेन|flight|\bplane\b|aeroplane|aircraft|\bjet\b|helicopter|\bfly(?:ing)?\b|\bpilot\b/;
 const RACING = /रेसिंग|रेस\s*गेम|गाड़ी|गाडी|\brac(?:e|ing|er)\b|drift|gadi|gaadi|rally|sport\s*car|supercar|bike\s+race|car\s+game|driving/;
 const OPEN_WORLD = /ओपन\s*वर्ल्ड|खुली\s*दुनिया|open[\s-]?world|\bgta\b|sandbox|\bworld\b.*\b(?:explore|big|huge|large)\b|\b(?:big|huge|large|massive|infinite)\s+(?:map|world)\b|survival|\bexplor(?:e|ing|ation)\b|\bisland\b|\bterrain\b/;
@@ -56,7 +56,7 @@ export function mapProfileFor(prompt: string): MapProfile | null {
   const t = norm(prompt);
   const c = buildGameContract(prompt);
   if (c.dimension === '2d') return null;
-  if (BATTLE_ROYALE.test(t)) return 'battle-royale';
+  if (asksForBattleRoyale(t)) return 'battle-royale';
   if (FLIGHT.test(t) || c.vehicle === 'aircraft') return 'flight';
   if (c.genre === 'racing' || RACING.test(t) || (c.vehicle && ['car', 'motorcycle', 'truck', 'bus', 'tractor'].includes(c.vehicle) && /\bgame\b|\bsim/.test(t))) return 'racing';
   if (OPEN_WORLD.test(t)) return /\bexplor|\bwalk|survival|adventure/.test(t) ? 'explore' : 'open-world';

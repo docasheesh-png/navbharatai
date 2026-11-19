@@ -133,7 +133,15 @@ export function replayFromCode(files: Record<string, string>): GameCodeFacts {
  * at a time and never one twice, until a game surface appears — bounded, so a title screen with ten
  * buttons is never a tour.
  */
-export const START_STEM = "(?:start|play|race|begin|go|drive|ride|fly|launch|resume|let'?s\\s+go|tap\\s+to\\s+(?:start|play)|press\\s+start|new\\s+game|khelo|shuru|शुरू|खेलें|खेलो|चलो)";
+//
+// 🔴 AND THE STEM LIST WAS STILL A CLOSED VOCABULARY FOR ONE GENRE (autopsy aba63ead, failedbr #2475, 2026-11-19).
+// A battle-royale build opened on a map whose way into the game was "Enter Battleground". The click explorer
+// pressed it and a game screen came up (its "Quit Game" was pressed on it), yet the playtest found no start
+// stem, pressed nothing, and filed GAME_PLAYTEST_NOT_RUN with "no control that starts a game". Arena, shooter
+// and royale games enter, join, deploy, spawn or drop in rather than "play" — those verbs are stems now, and a
+// label the explorer saw open a screen with a game-session control is vouched for whatever its words
+// (`startLabelsFromExplore`), so the next missing verb is caught by evidence instead of by another list entry.
+export const START_STEM = "(?:start|play|race|begin|go|drive|ride|fly|launch|resume|enter|join|deploy|spawn|drop\\s+in|jump\\s+in|find\\s+match|battle|fight|let'?s\\s+go|tap\\s+to\\s+(?:start|play)|press\\s+start|new\\s+game|khelo|shuru|शुरू|खेलें|खेलो|चलो)";
 /** A start stem as a whole word, anywhere in the label (`u`: the Hindi words have no ASCII word boundary). */
 export const START_LABEL = new RegExp(`(?:^|[^\\p{L}\\p{N}])${START_STEM}(?![\\p{L}\\p{N}])|[▶►⏵]`, 'iu');
 /** The same stem at the very start of the label — ranked first. */
@@ -159,6 +167,21 @@ export function startLabelRank(label: unknown, known: readonly string[] = []): n
   return START_LABEL.test(t) ? 1 : 0;
 }
 
+/** A control that only exists while a game is being played: leaving, pausing or respawning in it. */
+export const GAME_SESSION_CONTROL = /\b(?:quit|exit|leave|abandon|forfeit)\s+(?:the\s+)?(?:game|match|battle\w*|arena|round|race|level)\b|\b(?:pause|resume|respawn)\b|\bgame\s*over\b/i;
+
+/**
+ * EVIDENCE, NOT VOCABULARY (autopsy aba63ead): did pressing `label` on the first screen open a screen that holds
+ * a game-session control ("Quit Game", "Pause", "Respawn")? Then it is the way into the game, whatever its words —
+ * unless its words say it is something else or must never be pressed. PURE.
+ */
+export function opensGameSession(label: string, presses: ReadonlyArray<{ label?: unknown; via?: unknown }>): boolean {
+  const t = String(label ?? '').trim().replace(/\s+/g, ' ');
+  if (!t || t.length > 40 || t.split(' ').length > 6 || NEVER_PRESS.test(t) || NOT_A_START.test(t)) return false;
+  return presses.some((q) => !!q && String(q.via ?? '').trim().replace(/\s+/g, ' ').toLowerCase() === t.toLowerCase()
+    && GAME_SESSION_CONTROL.test(String(q.label ?? '')));
+}
+
 /**
  * The start labels the CLICK EXPLORER has already seen work, handed to the playtest (admin 2026-10-11, build
  * 46e2d74b — item L-18). The explorer pressed "Start Race" and the game came up; the playtest then opened its
@@ -168,11 +191,12 @@ export function startLabelRank(label: unknown, known: readonly string[] = []): n
  */
 export function startLabelsFromExplore(presses: ReadonlyArray<{ label?: unknown; verdict?: unknown; changed?: unknown; kind?: unknown; via?: unknown }> | null | undefined): string[] {
   const out: string[] = [];
-  for (const p of presses ?? []) {
+  const list = presses ?? [];
+  for (const p of list) {
     if (!p || p.verdict !== 'ok' || p.changed !== true || p.via) continue;
     if (p.kind !== undefined && p.kind !== 'press') continue;
     const label = String(p.label ?? '').trim().replace(/\s+/g, ' ');
-    if (!label || startLabelRank(label) === 0) continue;
+    if (!label || (startLabelRank(label) === 0 && !opensGameSession(label, list))) continue;
     if (!out.some((l) => l.toLowerCase() === label.toLowerCase())) out.push(label);
     if (out.length >= 5) break;
   }

@@ -494,6 +494,7 @@ import { turnAskedTheUser } from './nudgeToBuild';
 import { withAppEnvFile } from './appEnvFileForCommand';
 import { locatedErrorText } from './runtimeErrorSite';
 import { consoleCleanVerdict } from './renderCheckConsole';
+import { asksForBattleRoyale } from './gameIntent';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -9925,7 +9926,8 @@ export class ToolDispatcher {
         if (!envFlag('AGENTV3_ORIGINAL_ROYALE')) refuse('The experimental original royale starter is unavailable. Do not promise it is installed or active.');
         if (!this.royaleNewProject || !this.userOwnedSnapshotKnown || this.userOwned.length > 0) refuse('The royale starter requires a verified new project. Preserve existing or imported source; do not replace it with a template.');
         const request = this.coverageRequest ?? this.userRequest ?? '';
-        if (!/battle\s*royale|pubg|bgmi|free\s*fire|firefree|battlefield|पबजी|बैटल\s*रॉयल|फ्री\s*फायर/i.test(request)) refuse('The request does not ask for a royale-style game. Do not add this starter.');
+        // One reader for "a royale-style game" (gameIntent.asksForBattleRoyale, autopsy aba63ead).
+        if (!asksForBattleRoyale(request)) refuse('The request does not ask for a royale-style game. Do not add this starter.');
         const requestedMap = athreeMapIntent({ prompt: request, seedKey: this.workspaceId });
         if (requestedMap.via === 'named' || requestedMap.via === 'other-map') refuse('The request names a different world. The bounded royale starter must not replace that choice.');
         // A failed workspace read is NOT evidence that no map exists. Preserve existing worlds.

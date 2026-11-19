@@ -759,6 +759,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['race', 'racing game', 'countdown', '3 2 1', 'rival cars', 'dusri gaadiyan', 'opponent', 'position', 'lap time', 'timer', 'finish line', 'results', 'crosshair', 'ammo', 'goliyan', 'damage number', 'health bar', 'boss', 'fire animation', 'goli chalate hue dikhe', 'character hilta nahi', 'action dikhta nahi', 'attack animation', 'punch', 'kick', 'sword swing', 'talwar', 'jump animation', 'recoil', 'drift', 'drift button', 'handbrake', 'tyre smoke', 'button kaam nahi karta', 'fire button', 'shooting game', 'pubg jaisa', 'fight game', 'action button'],
   },
   {
+    id: 'india_board_games',
+    name: 'Ludo and Snakes & Ladders with the real rules',
+    path: 'NavBharatAI Pro → chat → ask for the game (for example "Ludo game banao 4 players", "saanp seedhi game banao computer ke saath")',
+    description: 'Ludo and Snakes & Ladders that NavBharatAI builds follow the rules families expect, from a tested rules engine. LUDO for 2 to 4 players: a token leaves home only on a six, a six gives another roll and three sixes in a row lose the turn, the start squares and star squares are safe, landing on an opponent sends it back home and gives another roll, a token needs the exact number to reach home and getting there gives another roll, the turn passes when no token can move, and players are ranked in the order they finish. A computer player can take any seat. SNAKES & LADDERS (saanp-seedhi): the classic board, ladders up and snakes down, an exact roll to reach 100 (or bounce back if asked), and a six rolls again. House rules can be changed by asking.',
+    howToUse: 'Ask for the game and say how many players and whether the computer should play. To change a rule, ask in your own words (for example "6 aane par dobara chance mat do", "100 pe exact number zaroori nahi").',
+    relatedFeatures: ['game_2d_kit'],
+    keywords: ['ludo', 'ludo game', 'ludo king jaisa', 'saanp seedhi', 'snakes and ladders', 'snake ladder', 'board game', 'dice game', 'pasa', 'goti', 'computer ke saath ludo', 'safe square', 'star', 'six aane par'],
+  },
+  {
     id: 'game_2d_kit',
     name: '2D games that feel right — platformers, side-scrollers, runners',
     path: 'NavBharatAI Pro → chat → ask for any 2D game with movement (for example "Mario jaisa platformer banao", "2D runner game", "side scrolling shooter")',

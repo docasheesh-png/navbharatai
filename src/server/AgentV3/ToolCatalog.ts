@@ -2318,6 +2318,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       } },
     },
     {
+      name: 'generate_board_games',
+      description:
+        'The INDIA GAMES PACK (src/game/board/): tested rules engines for the board games India plays — LUDO (2–4 players, leave '
+        + 'the yard on a six, sixes roll again and three in a row lose the turn, safe start and star squares, captures send a token '
+        + 'home and earn a roll, exact roll to finish, finishing order, a pass when nothing can move, a computer player, board '
+        + 'geometry) and SNAKES & LADDERS (saanp-seedhi: the classic board, exact finish or bounce back, a six rolls again, the '
+        + 'zig-zag square layout), with a seeded die. Use it for any of these games; never re-implement their rules.',
+      input_schema: { type: 'object', properties: { include: { type: 'array', items: { type: 'string' },
+        description: 'Optional subset: dice, ludo, snakes. Default = all; every engine brings dice.' } } },
+    },
+    {
       name: 'generate_game_2d',
       description:
         'The 2D GAME KIT (src/game/2d/) for any 2D canvas game with movement — a platformer, side-scroller, runner, top-down or '
@@ -3711,6 +3722,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_athree_map',
   'generate_world_2d',
   'generate_game_2d',
+  'generate_board_games',
   'author_object',
   'generate_game_shell',
   'generate_game_royale',
@@ -3938,6 +3950,7 @@ export const RECIPE_TOOLS = [
   'generate_athree_map',
   'generate_world_2d',
   'generate_game_2d',
+  'generate_board_games',
   'author_object',
   'generate_game_shell',
   'generate_game_royale',

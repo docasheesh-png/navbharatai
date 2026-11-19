@@ -102571,3 +102571,12 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
 - Found while testing: a drop-through left the jump press unconsumed, so the buffer + coyote time jumped the player straight back
   up onto the platform the next step.
 - Locked by `tests/a2DGameFeelsRight.test.ts` (reversion: no sub-stepping / unconsumed drop press → 2 fail).
+
+## 2026-11-19 — India games pack (a): Ludo + Snakes & Ladders (branch `claude/game-board-ludo-snakes`)
+- Gap: no rules engine for any India board game; a model-written Ludo gets safe squares, exact home and sixes wrong.
+- New recipe `generate_board_games` (`src/server/lib/BoardGamesGenerator.ts` → `src/game/board/`): dice.ts (seeded mulberry32,
+  fair die, shuffle), ludo.ts (2–4 players, leave on six, six again / third six forfeits, safe start+star squares, capture → yard
+  + extra roll, exact home + extra roll, pass, finishing order, chooseMove AI, 15×15 board geometry), snakes.ts (classic board,
+  exact finish / bounce back, six again, validated custom boards, zig-zag squareCell). Wired like the 2D kit; AKB entry.
+- Next in the pack (separate PRs): chess; cards (no money — Teen Patti ranking, rummy melds); carrom physics; cricket.
+- Locked by `tests/indiaBoardGamesFollowTheRules.test.ts` (reversion: safe squares ignored / overshooting home → 2 fail).

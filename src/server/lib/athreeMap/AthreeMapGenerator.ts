@@ -10,7 +10,7 @@
 //
 // 🔑 100% OURS. Every line below is written here. The TECHNIQUES are public ideas (value noise with a quintic fade, fractal sums,
 // ridged noise, a Gerstner-free sea plane placeholder until phase 2); each emitted file names its technique in its header, and no
-// third-party code or asset is used. The generator is OFF unless AGENTV3_ATHREE_MAP is on (see ToolDispatcher).
+// third-party code or asset is used. The generator is ON unless AGENTV3_ATHREE_MAP=off (default on since 2026-11-19; see ToolDispatcher).
 //
 // PURE builder → the caller writes the files.
 

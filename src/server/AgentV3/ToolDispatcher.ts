@@ -250,7 +250,7 @@ import { binaryTextWriteRefusal } from './binaryTextWrite';
 import { isKeyboardOnlyGame, touchGameNoteEnabled, touchPlayableNote } from './touchPlayableGame';
 import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type VehicleShapeHalves } from './handWrittenVehicleScan';
 import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, type GroundShapeHalves } from './handWrittenGroundScan';
-import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, type RaceCourseHalves } from './endlessRaceCourse';
+import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, endlessRaceCourseBlocker, type RaceCourseHalves } from './endlessRaceCourse';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
@@ -728,6 +728,9 @@ export function batchRefusalText(written: readonly string[], notWritten: Readonl
   const ok = written.length ? `\nWritten (do not rewrite these): ${written.join(', ')}` : '';
   return `${head}${ok}\n\n${summary}`;
 }
+
+/** The end-of-build race-course check reads at most this many source files (a game is a few dozen). */
+const RACE_SCAN_MAX_FILES = 400;
 
 export class ToolDispatcher {
   /**
@@ -2243,7 +2246,7 @@ export class ToolDispatcher {
         // Routed through `blockers` deliberately: `appIsDone` already refuses any report carrying
         // one, so the done signal, the weak checkpoint and every other reader inherit this at once
         // instead of each learning it separately. See stillTheStarterApp.ts.
-        return await this._blockIfStillTheStarterApp(report);
+        return await this._blockIfRaceHasNoEndlessCourse(await this._blockIfStillTheStarterApp(report));
       })(), readinessTimeoutMs(), 'assessBuildReadiness');
     } catch {
       return unassessedReadinessReport();
@@ -2271,6 +2274,31 @@ export class ToolDispatcher {
    */
   private _buildWrites: (() => Iterable<string>) | null = null;
   setBuildWrites(source: () => Iterable<string>): void { this._buildWrites = source; }
+
+  /**
+   * A race the user did not describe must stream NavBharatAI's endless course (endlessRaceCourse.ts). The write-time
+   * note is said once and a builder could ignore it; this reads the workspace as it is NOW, across every lane, and
+   * blocks readiness until the race streams a track — so "done" can never be said over a 300 m road (admin
+   * 2026-11-19: "road/map bahut chota sa banta hai"). Fail-OPEN on its own trouble: a file we cannot read or list is
+   * not evidence the road is short, and never invents a blocker.
+   */
+  private async _blockIfRaceHasNoEndlessCourse(report: ReadinessReport): Promise<ReadinessReport> {
+    if (!this._endlessRaceCourse) return report;
+    try {
+      const listed = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'race-course-list');
+      const sources = listed.map((p) => p.replace(/^\.?\//, '')).filter((p) => /^src\/.+\.[tj]sx?$/i.test(p) && !p.includes('node_modules'));
+      // Too many files to read them all: a partial read could miss the file that streams the course, so say nothing.
+      if (sources.length > RACE_SCAN_MAX_FILES) return report;
+      const files = new Map<string, string>();
+      for (const p of sources) {
+        try { files.set(p, await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'race-course-read')); }
+        catch { return report; }
+      }
+      const blocker = endlessRaceCourseBlocker(files);
+      if (blocker) return { ...report, ready: false, blockers: [...report.blockers, blocker] };
+    } catch { /* best-effort — never fail a build on this check's own trouble */ }
+    return report;
+  }
 
   private async _blockIfStillTheStarterApp(report: ReadinessReport): Promise<ReadinessReport> {
     // A module that does not own the entry leaves the starter in place by design — judging the whole

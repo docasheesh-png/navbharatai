@@ -39,7 +39,7 @@ import { browserCodeInNodeHint, nodeRunTarget, shouldRefuseBrowserOnlyRun, brows
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 import { inspectCredentials } from './credentialSafety';
 import { probeCredentials, realProbeFetch, credentialProbeEnabled, relevantToApp, type ProbeVerdict } from './credentialProbe';
-import { planSecretRequest, secretRequestPrompt, secretRequestResult, isAiModelKey, keylessAiNote, type SecretAnswer, type SecretAsk } from './secretRequest';
+import { planSecretRequest, secretRequestPrompt, secretRequestResult, isAiModelKey, keylessAiNote, unansweredOnly, alreadyAskedNote, type SecretAnswer, type SecretAsk } from './secretRequest';
 
 /**
  * Sentinel command that forces the user's vault secrets onto disk regardless of the "is this an app
@@ -1663,12 +1663,16 @@ export class ToolDispatcher {
     }
     const handler = this.onServerlessPayment!;
     let result = await handler({ table }).catch(() => null);
-    if (result && !result.ok && result.needKeys && this.onSecretsNeeded) {
-      const saved = await this.onSecretsNeeded([
-        { name: PAYMENT_SECRET_NAMES.keyId, why: 'Your Razorpay Key ID — Razorpay Dashboard → Account & Settings → API Keys.' },
-        { name: PAYMENT_SECRET_NAMES.keySecret, why: 'Your Razorpay Key Secret, from the same page. It is stored only in your own Supabase project.' },
-      ]).catch(() => null);
-      result = saved && typeof saved === 'object' && Object.keys(saved).length > 0 ? await handler({ table }).catch(() => null) : null;
+    const paymentAsks = unansweredOnly([
+      { name: PAYMENT_SECRET_NAMES.keyId, why: 'Your Razorpay Key ID — Razorpay Dashboard → Account & Settings → API Keys.' },
+      { name: PAYMENT_SECRET_NAMES.keySecret, why: 'Your Razorpay Key Secret, from the same page. It is stored only in your own Supabase project.' },
+    ], this.unansweredSecretNames);
+    // The same door as request_secrets: a payment key the user did not give in this build is not asked for again.
+    if (result && !result.ok && result.needKeys && this.onSecretsNeeded && paymentAsks.fresh.length > 0) {
+      const saved = await this.onSecretsNeeded(paymentAsks.fresh).catch(() => null);
+      const got = saved && typeof saved === 'object' && Object.keys(saved).length > 0;
+      if (!got && saved !== 'stopped') for (const a of paymentAsks.fresh) this.unansweredSecretNames.add(a.name);
+      result = got ? await handler({ table }).catch(() => null) : null;
     }
     if (!result) return pending;
     if (!result.ok && result.needKeys) {
@@ -1688,6 +1692,13 @@ export class ToolDispatcher {
 
   /** Names already in the user's vault, so the build never asks twice for the same key. */
   private savedSecretNames: string[] = [];
+  /**
+   * 🔴 Keys this build already asked for and got NO answer to — skipped or timed out (failedbr #2431, 21d59838). The
+   * user ignored a 10-minute popup for two Razorpay keys; 12 minutes later the build opened the SAME popup again and
+   * waited into its deadline. A key the user did not give is an answer: the feature stays a visible "needs setup"
+   * state, and the popup is not reopened for that name in this build (`unansweredOnly`, secretRequest.ts).
+   */
+  private unansweredSecretNames = new Set<string>();
   setSavedSecretNames(names: string[]): void {
     this.savedSecretNames = Array.isArray(names) ? names : [];
   }
@@ -9832,6 +9843,10 @@ export class ToolDispatcher {
         if (keylessNames.length) notes.push(keylessAiNote(keylessNames));
         if (plan.alreadyHave.length) notes.push(`Already saved (no need to ask): ${plan.alreadyHave.join(', ')}.`);
         if (plan.rejected.length) notes.push(`Refused — not a usable app key: ${plan.rejected.join(', ')}. Do not ask for NavBharatAI's own provider keys.`);
+        // Never reopen the popup for a key this build already asked for and got no answer to (failedbr #2431).
+        const repeat = unansweredOnly(plan.ask, this.unansweredSecretNames);
+        if (repeat.repeated.length) notes.push(alreadyAskedNote(repeat.repeated));
+        plan.ask = repeat.fresh;
         if (plan.ask.length === 0) {
           return notes.length ? notes.join(' ') : 'request_secrets: nothing to ask for — the app already has every key it named.';
         }
@@ -9853,6 +9868,7 @@ export class ToolDispatcher {
         }
         const saved: Record<string, string> | null = answer && typeof answer === 'object' ? answer : null;
         if (!saved || Object.keys(saved).length === 0) {
+          for (const n of askedNames) this.unansweredSecretNames.add(n);
           const line = secretRequestResult(answer === 'timed-out' ? 'timed-out' : 'skipped', askedNames);
           this.events?.emit({ type: 'narration', agent: 'architect', text: line, ts: Date.now() });
           // The build CONTINUES. Skipping is a real answer, and the agent is told to leave the feature

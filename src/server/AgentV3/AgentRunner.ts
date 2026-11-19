@@ -137,6 +137,12 @@ export interface AgentRunnerOptions {
    */
   maxBuildMs?: number;
   /**
+   * The credited time this build has spent WAITING FOR THE USER so far (workClock.ts, failedbr #2431). The runner's
+   * deadline, its budget steer and its "half the build time is used" line subtract it, so a key popup is never counted
+   * as building — the promise the live line makes. Absent ⇒ wall time, exactly as before.
+   */
+  pausedMs?: () => number;
+  /**
    * E4 — per-model-turn hard timeout (ms). The wall-clock watchdog above is only checked BETWEEN
    * turns, so a single provider call that hangs (connection open, no bytes, no error) would block the
    * whole build indefinitely — the watchdog never even gets to run. This caps every `runTurn` so a
@@ -649,6 +655,11 @@ export class AgentRunner {
     const modelKeepRecent = Math.max(2, parseInt(process.env.AGENTV3_MODEL_COMPACT_KEEP_RECENT || '', 10) || 6);
     const modelMaxOldToolResultChars = Math.max(500, parseInt(process.env.AGENTV3_MODEL_COMPACT_MAX_CHARS || '', 10) || 2_000);
     const buildStartMs = Date.now();
+    // The user-wait credit (workClock.ts): read once at the start, then subtracted as it grows.
+    const pausedTotal = (): number => { try { const v = Number(this.opts.pausedMs?.() ?? 0); return Number.isFinite(v) && v > 0 ? v : 0; } catch { return 0; } };
+    const pausedAtStart = pausedTotal();
+    /** "Now" on this runner's WORKING clock — wall time minus the user waits since it started. */
+    const workNow = (): number => Date.now() - (pausedTotal() - pausedAtStart);
     /**
      * 🔴 THE TIME BUDGET, TOLD TO THE MODEL (f04421ef autopsy, 2026-09-13).
      *
@@ -1033,7 +1044,7 @@ export class AgentRunner {
         // WATCHDOG — wall-clock cap. Once the build has run past its time limit, stop honestly with
         // whatever was produced instead of looping for 20-30 minutes. A build that DID write files is
         // reported ok:true (the work is real and resumable); one that produced nothing is ok:false.
-        if (buildTimedOut(buildStartMs, maxBuildMs, Date.now())) {
+        if (buildTimedOut(buildStartMs, maxBuildMs, workNow())) {
           const minutes = buildClockMinutes(maxBuildMs, Date.now(), events.startedAt) ?? Math.round((maxBuildMs as number) / 60000);
           const ending = endingContext();
           const builtSomething = ending.builtSomething;
@@ -1878,7 +1889,7 @@ export class AgentRunner {
         // message the runner already appends, so it costs no call and cannot block a build.
         let budgetText: string | null = null;
         try {
-          const bs = budgetSteer(Date.now() - buildStartMs, maxBuildMs ?? 0, budgetStagesSent);
+          const bs = budgetSteer(workNow() - buildStartMs, maxBuildMs ?? 0, budgetStagesSent);
           if (bs) {
             budgetStagesSent.add(bs.stage);
             budgetText = bs.text;
@@ -1888,7 +1899,7 @@ export class AgentRunner {
           // runner's remaining budget plus what had passed before it started.
           if (typeof maxBuildMs === 'number' && maxBuildMs > 0 && events.budgetStagesSaid) {
             const origin = typeof events.startedAt === 'number' ? events.startedAt : buildStartMs;
-            const said = buildBudgetNarration(Date.now() - origin, (buildStartMs - origin) + maxBuildMs, events.budgetStagesSaid);
+            const said = buildBudgetNarration(Date.now() - origin - pausedTotal(), (buildStartMs - origin - pausedAtStart) + maxBuildMs, events.budgetStagesSaid);
             if (said) events.emit({ type: 'narration', agent: agentRole, text: said, ts: Date.now() });
           }
         } catch { /* the budget steer is advisory — it must never break a build */ }

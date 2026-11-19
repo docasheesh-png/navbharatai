@@ -197,7 +197,7 @@ describe('the wiring at the route — proven by reversion', () => {
   });
 
   it('🔒 the remaining time is computed, and a disabled wall clock stays disabled', () => {
-    expect(spawnBlock).toContain('effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt)');
+    expect(spawnBlock).toContain('effectiveBuildSeconds * 1000 - (workElapsed())'); // the working clock (failedbr #2431)
     // `0` means the operator turned the wall clock off — it must not read as "no time left".
     expect(spawnBlock).toContain('effectiveBuildSeconds > 0');
   });

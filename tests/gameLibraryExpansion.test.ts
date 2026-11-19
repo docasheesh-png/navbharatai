@@ -17,6 +17,9 @@ describe('licensed library expansion admission',()=>{
   expect(searchGameLibrary({query:'mage',category:'character',animation:'run'}).entries.length).toBeGreaterThan(0);
   expect(searchGameLibrary({query:'mage',animation:'fly'}).entries).toEqual([]);
   expect(searchGameLibrary({query:'straight road tile',category:'terrain'}).entries.length).toBeGreaterThan(0);
-  expect(searchGameLibrary({category:'maps'}).entries).toEqual([]);
+  // 2026-11-19: the Athree map is ON by default, so the maps category holds exactly our OWN map — never an invented one.
+  const maps=searchGameLibrary({category:'maps'}).entries;
+  expect(maps.map(e=>e.id)).toEqual(['map:athree']);
+  expect(maps[0].license?.spdx).toBe('LicenseRef-NavBharatAI-own');
  });
 });

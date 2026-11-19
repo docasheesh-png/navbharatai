@@ -113,6 +113,8 @@ const NEEDS_CONTEXT: Record<string, {
     expectedFiles: ['src/game/generatedObjects/runtime.ts', 'src/game/generatedObjects/census-object.ts'],
   },
   generate_athree_map: { env: { AGENTV3_ATHREE_MAP: 'on' }, request: 'athree map par ek 3D racing game banao' },
+  // The 2D world decides from the request: only a 2D game whose user wants a big world (world2dIntent).
+  generate_world_2d: { env: {}, request: '2D adventure game banao jiska map bahut bada ho' },
   generate_game_royale: { env: { AGENTV3_ORIGINAL_ROYALE: 'on' }, request: 'Build an original battle royale practice game', newProject: true },
 };
 

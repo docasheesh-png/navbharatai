@@ -250,7 +250,7 @@ import { binaryTextWriteRefusal } from './binaryTextWrite';
 import { isKeyboardOnlyGame, touchGameNoteEnabled, touchPlayableNote } from './touchPlayableGame';
 import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type VehicleShapeHalves } from './handWrittenVehicleScan';
 import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, type GroundShapeHalves } from './handWrittenGroundScan';
-import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, type RaceCourseHalves } from './endlessRaceCourse';
+import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, endlessRaceCourseBlocker, type RaceCourseHalves } from './endlessRaceCourse';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
@@ -378,6 +378,9 @@ import { FORGE_EXAMPLES, FORGE_EXAMPLE_IDS } from '../lib/objectForge/forgeExamp
 import { parseCustomisation, applyEdits, customiseSummary, nodeNamesOf, specFromObjectFile, personSpecFor } from '../lib/objectForge/forgeCustomise';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
+import { generateWorld2D, world2dEnabled, WORLD2D_DIR } from '../lib/world2d/World2DGenerator';
+import { world2dIntent } from './world2dIntent';
+import { gameKitWants3D } from './gameKitSeed';
 import { generateRequestedAthreeWorld } from '../lib/athreeMap/compositionRequest';
 import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from '../lib/athreeMap/athreeMapIntent';
 import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
@@ -730,6 +733,9 @@ export function batchRefusalText(written: readonly string[], notWritten: Readonl
   const ok = written.length ? `\nWritten (do not rewrite these): ${written.join(', ')}` : '';
   return `${head}${ok}\n\n${summary}`;
 }
+
+/** The end-of-build race-course check reads at most this many source files (a game is a few dozen). */
+const RACE_SCAN_MAX_FILES = 400;
 
 export class ToolDispatcher {
   /**
@@ -2248,7 +2254,7 @@ export class ToolDispatcher {
         // Routed through `blockers` deliberately: `appIsDone` already refuses any report carrying
         // one, so the done signal, the weak checkpoint and every other reader inherit this at once
         // instead of each learning it separately. See stillTheStarterApp.ts.
-        return await this._blockIfStillTheStarterApp(report);
+        return await this._blockIfRaceHasNoEndlessCourse(await this._blockIfStillTheStarterApp(report));
       })(), readinessTimeoutMs(), 'assessBuildReadiness');
     } catch {
       return unassessedReadinessReport();
@@ -2276,6 +2282,31 @@ export class ToolDispatcher {
    */
   private _buildWrites: (() => Iterable<string>) | null = null;
   setBuildWrites(source: () => Iterable<string>): void { this._buildWrites = source; }
+
+  /**
+   * A race the user did not describe must stream NavBharatAI's endless course (endlessRaceCourse.ts). The write-time
+   * note is said once and a builder could ignore it; this reads the workspace as it is NOW, across every lane, and
+   * blocks readiness until the race streams a track — so "done" can never be said over a 300 m road (admin
+   * 2026-11-19: "road/map bahut chota sa banta hai"). Fail-OPEN on its own trouble: a file we cannot read or list is
+   * not evidence the road is short, and never invents a blocker.
+   */
+  private async _blockIfRaceHasNoEndlessCourse(report: ReadinessReport): Promise<ReadinessReport> {
+    if (!this._endlessRaceCourse) return report;
+    try {
+      const listed = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'race-course-list');
+      const sources = listed.map((p) => p.replace(/^\.?\//, '')).filter((p) => /^src\/.+\.[tj]sx?$/i.test(p) && !p.includes('node_modules'));
+      // Too many files to read them all: a partial read could miss the file that streams the course, so say nothing.
+      if (sources.length > RACE_SCAN_MAX_FILES) return report;
+      const files = new Map<string, string>();
+      for (const p of sources) {
+        try { files.set(p, await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'race-course-read')); }
+        catch { return report; }
+      }
+      const blocker = endlessRaceCourseBlocker(files);
+      if (blocker) return { ...report, ready: false, blockers: [...report.blockers, blocker] };
+    } catch { /* best-effort — never fail a build on this check's own trouble */ }
+    return report;
+  }
 
   private async _blockIfStillTheStarterApp(report: ReadinessReport): Promise<ReadinessReport> {
     // A module that does not own the entry leaves the starter in place by design — judging the whole
@@ -9933,6 +9964,24 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('athree map');
         return `Added the Athree map (${athreeDecision.reason}):\n${athWritten.join('\n')}\n\n${ath.instructions}${athLayers}`;
+      }
+
+      case 'generate_world_2d': {
+        // THE 2D WORLD (admin 2026-11-19: "bada map … sample bane rakhe ho … perfect add hon ki ek hi lage"). The recipe decides
+        // from the REQUEST — the user's wish, not one word (world2dIntent → largeWorldIntent) — so a big map is never put under
+        // an app with no world, a 3D game (the Athree map serves those) or a board/card/puzzle/quiz game.
+        if (!world2dEnabled()) refuse('The 2D world is switched off for this build, so it cannot be added. Build the game without it and say so plainly in the summary.');
+        const w2dRequest = this.coverageRequest ?? this.userRequest ?? '';
+        let w2dStored = false;
+        try { await this.actuator.readFile(this.workspaceId, `${WORLD2D_DIR}/index.ts`); w2dStored = true; }
+        catch (error) { if (!isNotFoundError(error)) throw error; }
+        const w2dDecision = world2dIntent({ prompt: w2dRequest, drawnIn3D: gameKitWants3D(w2dRequest), stored: w2dStored });
+        if (!w2dDecision.use) refuse(`The 2D world is not used here: ${w2dDecision.reason} Build without it.`);
+        const w2d = generateWorld2D();
+        const w2dWritten = await this.writeRecipeFiles(w2d.files, agent);
+        const w2dLayers = await this.addMissingRecipeLayers(w2d.files, agent);
+        this.scheduleCheckpoint('2d world');
+        return `Added the 2D world (${w2dDecision.reason}):\n${w2dWritten.join('\n')}\n\n${w2d.instructions}${w2dLayers}`;
       }
 
       case 'generate_game_royale': {

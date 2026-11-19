@@ -105,11 +105,28 @@ describe('createTrackStream — a plan streamed for ever, or ended where the use
     return last;
   };
 
-  it('3 infinite loops of A..L: never sinks, joins seamless, memory bounded, laps counted, pieces vary per loop', () => {
-    const stream = O.createTrackStream(O.DEFAULT_TRACK_PLAN, { detail: 'lite' });
+  it('3 infinite loops of a short custom A..L plan: never sinks, joins seamless, memory bounded, laps counted', () => {
+    const shortPlan = {
+  loop: 'infinite',
+  pieces: [
+    { kind: 'straight', length: 120, scenery: 'village', name: 'A village straight' },
+    { kind: 'curve', angle: Math.PI / 3, length: 140, scenery: 'field', name: 'B left sweeper' },
+    { kind: 'hill', length: 160, rise: 7, scenery: 'forest', name: 'C forest hill' },
+    { kind: 'curve', angle: -Math.PI / 3, length: 140, scenery: 'forest', name: 'D right sweeper' },
+    { kind: 'bridge', length: 100, scenery: 'field', name: 'E river bridge' },
+    { kind: 'straight', length: 140, scenery: 'city', name: 'F city straight' },
+    { kind: 'tunnel', length: 80, scenery: 'city', name: 'G tunnel' },
+    { kind: 'curve', angle: Math.PI / 4, length: 120, scenery: 'desert', name: 'H desert bend' },
+    { kind: 'checkpoint', length: 60, scenery: 'village', name: 'I checkpoint' },
+    { kind: 'curve', angle: -Math.PI / 4, length: 120, scenery: 'field', name: 'J field bend' },
+    { kind: 'hill', length: 140, rise: 5, scenery: 'field', name: 'K valley crest' },
+    { kind: 'straight', length: 120, scenery: 'village', name: 'L home straight' },
+  ],
+};
+    const stream = O.createTrackStream(shortPlan, { detail: 'lite' });
     const scene = new THREE.Scene(); scene.add(stream.root);
     const car = O.createCar(); scene.add(car);
-    const loopLen = O.DEFAULT_TRACK_PLAN.pieces.reduce((a: number, p: any) => a + p.length, 0);
+    const loopLen = shortPlan.pieces.reduce((a: number, p: any) => a + p.length, 0);
     let maxAlive = 0, minGap = Infinity, rebased = 0;
     const seen: string[] = [];
     let status: any;
@@ -217,14 +234,181 @@ describe('createTrackStream — a plan streamed for ever, or ended where the use
     stream.dispose();
   });
 
+  it('replaces an initially prefilled terminal or circuit closer ahead, never a terminal under the car', () => {
+    for (const ending of ['end', 'water', 'circuit']) {
+      const pieces = ending === 'circuit'
+        ? [{ kind: 'straight', length: 60 }, { kind: 'curve', length: 60, angle: 0.5 }]
+        : [{ kind: 'straight', length: 60 }, { kind: ending, length: 60 }];
+      const stream = O.createTrackStream({ loop: ending === 'circuit' ? 'circuit' : 'none', pieces }, { detail: 'lite' });
+      const under = stream.segments[0];
+      expect(stream.segments.some((s: any) => s.terminal || s.index === -1)).toBe(true);
+      const next = { loop: 'infinite', pieces: [{ kind: 'straight', length: 80, name: 'replacement' }] };
+      expect(stream.setPlan(next)).toBe(false);
+      expect(stream.setPlan(next, { now: true })).toBe(true);
+      expect(stream.segments).toHaveLength(1);
+      expect(stream.segments[0]).toBe(under);
+      drive(stream, O.createCar(), 500);
+      expect(stream.segments.some((s: any) => s.piece.name === 'replacement')).toBe(true);
+      seamless(stream.segments);
+      stream.dispose();
+    }
+    for (const loop of ['none', 'circuit']) for (const kind of ['end', 'water']) {
+      const terminal = O.createTrackStream({ pieces: [{ kind, length: 60 }], loop });
+      expect(terminal.setPlan(O.DEFAULT_TRACK_PLAN, { now: true })).toBe(false);
+      terminal.dispose();
+    }
+  });
+
+  it('replaces an exactly closed circuit whose last ahead piece needs no extra closer', () => {
+    const stream = O.createTrackStream({ loop: 'circuit', pieces: [
+      { kind: 'curve', length: 100, angle: Math.PI }, { kind: 'curve', length: 100, angle: Math.PI },
+    ] }, { detail: 'lite' });
+    expect(stream.segments).toHaveLength(2);
+    expect(stream.segments.some((s: any) => s.index === -1)).toBe(false);
+    const under = stream.segments[0];
+    expect(stream.setPlan({ loop: 'infinite', pieces: [{ kind: 'straight', length: 80 }] }, { now: true })).toBe(true);
+    expect(stream.segments).toEqual([under]);
+    drive(stream, O.createCar(), 400);
+    seamless(stream.segments);
+    stream.dispose();
+  });
+
+  it('reports the actual immutable terrain and streaming settings after a live edit', () => {
+    const settings = { width: 7, ahead: 2, behind: 1, rebaseAt: 900, seed: 19, amplitude: 3, frequency: 0.02 };
+    const stream = O.createTrackStream({ ...settings, loop: 'infinite', pieces: [{ kind: 'straight', length: 80 }] });
+    expect(stream.setPlan({ pieces: [{ kind: 'hill', length: 80 }], width: 15, ahead: 10,
+      behind: 8, rebaseAt: 5000, seed: 98, amplitude: 20, frequency: 0.4 }, { now: true })).toBe(true);
+    expect(stream.plan).toMatchObject(settings);
+    const car = O.createCar();
+    drive(stream, car, 600);
+    expect(stream.stats().alive).toBeLessThanOrEqual(4);
+    stream.dispose();
+  });
+
   it('an empty plan or an ended course is refused and changes nothing', () => {
     const stream = O.createTrackStream(O.DEFAULT_TRACK_PLAN, { detail: 'lite' });
     expect(stream.setPlan({ pieces: [] })).toBe(false);
-    expect(stream.plan.pieces).toHaveLength(12);
+    expect(stream.plan.pieces).toHaveLength(O.DEFAULT_TRACK_PLAN.pieces.length);
     stream.dispose();
     const fin = O.createTrackStream({ loop: 'none', pieces: [{ kind: 'straight', length: 60 }, { kind: 'end' }] }, { detail: 'lite' });
     drive(fin, O.createCar(), 10000);
     expect(fin.setPlan(O.DEFAULT_TRACK_PLAN)).toBe(false);
     fin.dispose();
   });
+});
+
+ describe('twelve long racing maps, streamed rather than allocated as one mesh', () => {
+  it('defaults to 1–12 in fixed order, 10–100 km each, and an infinite return to map1', () => {
+    const plan = O.DEFAULT_TRACK_PLAN;
+    expect(plan.loop).toBe('infinite'); expect(plan.loopFrom).toBe(0);
+    expect(O.RACING_ROAD_MAPS.map((m: any) => m.id)).toEqual(Array.from({ length: 12 }, (_, i) => i + 1));
+    const order = plan.pieces.filter((p: any, i: number) => !i || p.mapId !== plan.pieces[i - 1].mapId).map((p: any) => p.mapId);
+    expect(order).toEqual(Array.from({ length: 12 }, (_, i) => i + 1));
+    for (const map of O.RACING_ROAD_MAPS) {
+      const parts = plan.pieces.filter((p: any) => p.mapId === map.id);
+      expect(parts.reduce((sum: number, p: any) => sum + p.length, 0)).toBeCloseTo(map.lengthKm * 1000, 5);
+      expect(map.lengthKm).toBeGreaterThanOrEqual(10); expect(map.lengthKm).toBeLessThanOrEqual(100);
+      expect(parts[0].mapOffsetMetres).toBe(0);
+      expect(Math.abs(parts.reduce((sum: number, p: any) => sum + p.angle, 0))).toBeLessThan(1e-9);
+      expect(parts.every((p: any) => p.length <= 200 && p.mapLengthMetres === map.lengthKm * 1000)).toBe(true);
+    }
+    expect(O.RACING_ROAD_MAPS[11].lighting).toBe('night');
+  });
+
+  it('validates length overrides and bounds plan size even at the maximum', () => {
+    for (const invalid of [[], new Array(12), Array(12).fill(NaN), Array(12).fill(Infinity), Array(12).fill(9.99), Array(12).fill(100.01)]) {
+      expect(() => O.createRacingRoadPlan(invalid)).toThrow(RangeError);
+    }
+    const plan = O.createRacingRoadPlan(Array(12).fill(100));
+    expect(plan.pieces).toHaveLength(6000);
+    const fractional = O.createRacingRoadPlan(Array(12).fill(10.123));
+    expect(fractional.pieces.filter((p: any) => p.mapId === 1).reduce((s: number, p: any) => s + p.length, 0)).toBeCloseTo(10123, 6);
+    plan.pieces[0].name = 'changed';
+    expect(O.DEFAULT_TRACK_PLAN.pieces[0].name).not.toBe('changed');
+  });
+
+  it('all twelve map seams including 12→1 have continuous position, heading and height', () => {
+    const plan = O.DEFAULT_TRACK_PLAN;
+    for (let id = 1; id <= 12; id++) {
+      const from = plan.pieces.filter((p: any) => p.mapId === id).slice(-1)[0];
+      const to = plan.pieces.find((p: any) => p.mapId === id % 12 + 1);
+      const stream = O.createTrackStream({ pieces: [from, to], loop: 'infinite', ahead: 2, pickups: false }, { detail: 'lite' });
+      const segs = stream.segments;
+      expect(segs.map((s: any) => s.piece.mapId)).toEqual([id, id % 12 + 1, id]);
+      for (let i = 1; i < segs.length; i++) {
+        expect(segs[i].start).toEqual(segs[i - 1].end);
+        expect(segs[i].length).toBeLessThanOrEqual(200);
+      }
+      stream.dispose(); expect(S.corridorCount()).toBe(0);
+    }
+  });
+
+  it('the actual long default allocates only a rolling window, rebases and disposes', () => {
+    const stream = O.createTrackStream(undefined, { detail: 'lite' });
+    const car = new THREE.Object3D();
+    expect(stream.stats().alive).toBe(4);
+    let shifted = false;
+    for (let step = 0; step < 14; step++) {
+      const target = stream.segments[stream.segments.length - 2];
+      car.position.set(target.end.x, target.end.y, target.end.z);
+      const status = stream.update(car);
+      shifted ||= !!status.rebased;
+      expect(stream.stats().alive).toBeLessThanOrEqual(5);
+      expect(S.corridorCount()).toBeLessThanOrEqual(5);
+      expect(status.segment.piece.mapId).toBe(1);
+      let vertices = 0;
+      stream.root.traverse((o: any) => { vertices += o.geometry?.attributes?.position?.count ?? 0; });
+      expect(vertices).toBeLessThan(200000);
+    }
+    expect(shifted).toBe(true);
+    expect(stream.stats().created).toBeGreaterThan(14);
+    stream.dispose(); expect(S.corridorCount()).toBe(0);
+    expect(stream.root.children).toHaveLength(0);
+  });
+});
+
+
+describe('long-road GPU resource ownership', () => {
+  it('recycling releases chunk-owned materials, not cached/shared surface materials', () => {
+    const stream = O.createTrackStream({ pieces: [{ kind: 'bridge', length: 200, scenery: 'desert' }], loop: 'infinite' }, { detail: 'lite' });
+    const first = stream.segments[0];
+    const owned = new Set<THREE.Material>();
+    for (const item of first.pickups) owned.add(item.material);
+    const water = first.extras.children.find((o: any) => o.material?.transparent);
+    owned.add(water.material);
+    owned.add(first.road.children[1].material);
+    let asphaltReleases = 0;
+    first.road.children[0].material.addEventListener('dispose', () => asphaltReleases++);
+    let releases = 0, groundReleases = 0;
+    for (const material of owned) material.addEventListener('dispose', () => releases++);
+    first.ground.material.addEventListener('dispose', () => groundReleases++);
+    expect(first.ground.material.color.getHex()).toBe(0xb9a065);
+    const car = new THREE.Object3D();
+    const target = stream.segments[2]; car.position.set(target.end.x, target.end.y, target.end.z);
+    stream.update(car);
+    expect(stream.segments.includes(first)).toBe(false);
+    expect(releases).toBe(owned.size);
+    expect(groundReleases).toBe(0);
+    stream.dispose();
+    expect(groundReleases).toBe(1);
+    expect(asphaltReleases).toBe(0);
+    expect(releases).toBe(owned.size);
+  });
+});
+
+it('starter car releases owned materials once without destroying shared tyres', () => {
+  const a = O.createCar({ detail: 'lite' }), b = O.createCar({ detail: 'lite' });
+  const collect = (car: THREE.Object3D) => {
+    const mats = new Set<THREE.Material>();
+    car.traverse((o: any) => { if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) mats.add(m); });
+    return mats;
+  };
+  const ma = collect(a), mb = collect(b);
+  let own = 0, shared = 0;
+  for (const m of ma) m.addEventListener('dispose', () => { if (mb.has(m)) shared++; else own++; });
+  a.userData.disposeOwnedMaterials(); a.userData.disposeOwnedMaterials();
+  expect(own).toBe([...ma].filter(m => !mb.has(m)).length);
+  expect(shared).toBe(0);
+  b.userData.disposeOwnedMaterials();
+  for (const car of [a, b]) car.traverse((o: any) => o.geometry?.dispose());
 });

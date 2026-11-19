@@ -140,11 +140,21 @@ describe('the catalogue points at every builder that exists, and never at the wr
     const builders = [...src.matchAll(/export function (create[A-Z]\w+)\(/g)].map((m) => m[1]);
     const named = new Set(OBJECT_CATALOG.map((e) => (e.builder ?? '').replace(/\(.*$/s, '').trim()).filter(Boolean));
     // Builders that are not catalogue objects on their own (world-building pieces, the renderer).
-    const NOT_OBJECTS = new Set(['createRenderer', 'createTerrain', 'createVehicleState', 'createTraffic', 'createRailTrack', 'createTrackStream']);
+    // createRacingRoadPlan returns TrackPlan data consumed by createTrackStream, not a scene object.
+    const NOT_OBJECTS = new Set(['createRenderer', 'createTerrain', 'createVehicleState', 'createTraffic', 'createRailTrack', 'createTrackStream', 'createRacingRoadPlan']);
     for (const b of builders) {
       if (NOT_OBJECTS.has(b)) continue;
       expect(named.has(b), `${b} exists but no catalogue entry names it`).toBe(true);
     }
+  });
+
+  it('the racing-road plan helper returns course data, not a catalogue scene object', () => {
+    const plan = O.createRacingRoadPlan();
+    expect(plan).not.toBeInstanceOf(THREE.Object3D);
+    expect(plan.loop).toBe('infinite');
+    expect(Array.isArray(plan.pieces)).toBe(true);
+    expect(plan.pieces.length).toBeGreaterThan(0);
+    expect(plan.pieces.every((piece: any) => typeof piece.kind === 'string' && piece.length > 0)).toBe(true);
   });
 
   it('a tiger and a goat have their own anatomy: no antlers, the tiger is striped and long-tailed', () => {

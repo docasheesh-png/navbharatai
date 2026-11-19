@@ -102194,6 +102194,7 @@ To decide next (owner):
   billed sandboxes, the −₹16,102 margin (admin decision), BUILD_BLOCKED_NO_CREDITS on new users, two reason-less log
   lines, the Grievance Officer env.
 
+**2026-11-18, later: #4298 merged** — Q-2754 Q-2755 Q-2756 closed (3). The admin Home autopsy stays NOT COMPLETE: Q-2757…Q-2764 open (Q-2761, Q-2764 blocked on the admin).
 ## 2026-11-18 — Traffic Manager V2, P4: decision records + complete SLO counters (observation only)
 
 The code is in `src/server/AI/TrafficRegistry/decisionRecords.ts`. It hooks the one chat boundary, `observeChatOutcome`, which every chat route passes on both the gateway and the legacy paths. `UniversalAIRouter` passes which path answered.
@@ -102251,6 +102252,24 @@ Owner t311u sequential audit, BR2001 only (BR2000 not retained). Branched from o
 - Proof: `tests/br2001Autopsy.test.ts`; reverting any of the five resolver fixes fails 2–5 tests.
 - Docs: `docs/build-report-autopsy-BR2001.md` and its evidence JSON.
 
+## 2026-11-19 — BR2002 autopsy (a website that succeeded was recorded as a stopped change): only a stop before the result is a stop
+
+Owner t311u sequential audit, BR2002 only. Branched from origin/main `f2b1c01` (#4314). A free Weak website build succeeded YELLOW and was not charged; its change record said "status stopped".
+
+- F1: the settle passed `stopped: abort.signal.aborted || userStop`. Several platform mechanisms abort that controller after a result exists (advisory cap, reaper, lock reclaim, deploy drain). New pure `changeWasStopped` in `buildAbortCause.ts`: the user's own stop is always a stop; any other abort only when it ended the build before a successful result.
+- Sibling found and NOT changed: `runProof()` reads the same bare signal and feeds the markup rule — Q-2767, BLOCKED on the admin's billing decision (recommendation: apply the same rule).
+- Queue: opens Q-2767, Q-2768 (fast lane stopped at 8/12 files and handed off a never-written CSS import), Q-2769 (journey vs accessibility label disagreement); Q-1007 and Q-2753 gain BR2002 evidence.
+- Proof: `tests/br2002Autopsy.test.ts`; reverting the helper or the route fails it.
+- Docs: `docs/build-report-autopsy-BR2002.md` and its evidence JSON.
+
+## 2026-11-19 — BR2003 autopsy (a huge quiz spec failed setup in one second): all closed on main; the sizer is queued
+
+Owner t311u sequential audit, BR2003 only. Branched from origin/main `e8c45ef` (#4316). No product code changed.
+
+- D1–D3 already closed on main (BR1983 reason, BR1984 repeat wording, BR1986 ETA untested on a sandbox outcome); the ETA closure is locked here with this report's numbers.
+- Q-2770 opened (BLOCKED, the admin's scope decision): APP_SCOPE named the app "Project Name" and kept a seven-section spec as one build because of the word "Quiz"; fixing the header alone would make the decision worse. Today's output is pinned exactly.
+- Q-2621 and Q-2750 gain BR2003 evidence.
+- Docs: `docs/build-report-autopsy-BR2003.md`, its evidence JSON, `tests/br2003Autopsy.test.ts`.
 ## 2026-11-19 — cdffbb71 Angular colour-game autopsy: source prepared, gates/merge not claimed
 
 **Report:** `cdffbb71-cf6e-4591-93c4-9c9e79e6852c`. The requested game was not proven runnable; real payments were not delivered. Final report `ok=false`, no customer debit. Historical generated source was not recovered or run. [Full autopsy](docs/build-report-autopsy-cdffbb71.md).

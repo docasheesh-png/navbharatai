@@ -248,6 +248,16 @@ export function currentTypecheckProof(proof: RevisionedTypecheck | undefined, re
   return proof?.revision === revision ? proof.outcome : 'not-run';
 }
 
+/** Current compiler scopes must agree: a narrower clean tsc cannot erase a native template failure. */
+export function combineTypecheckEvidence(
+  platform: 'passed' | 'failed' | 'not-run',
+  command: 'passed' | 'failed' | undefined,
+): 'passed' | 'failed' | 'not-run' {
+  if (platform === 'failed' || command === 'failed') return 'failed';
+  if (platform === 'passed' || command === 'passed') return 'passed';
+  return 'not-run';
+}
+
 /** A current failure cannot be hidden by an earlier pass, or by a narrower production success. */
 export function mergeCurrentTypecheckProof(previous: RevisionedTypecheck | undefined, incoming: RevisionedTypecheck, revision: number): RevisionedTypecheck | undefined {
   if (incoming.revision !== revision) return previous;

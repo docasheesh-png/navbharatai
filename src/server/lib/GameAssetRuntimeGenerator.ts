@@ -42,7 +42,33 @@ export function loadRequestedAsset(subject: string, fallback: () => GameAssetHan
 `;
 
 /** Upgrade the original generated loader and keep its per-game asset manifest. */
-export function upgradeAssetModelLoader(source: string | undefined): string | null {
+/** The names a module imports from './externalAssets' (values and types). PURE. */
+export function runtimeImportNames(loader: string): string[] {
+  const m = /import\s*\{([^}]*)\}\s*from\s*'\.\/externalAssets';/.exec(String(loader ?? ''));
+  return m ? m[1].split(',').map((n) => n.trim().replace(/^type\s+/, '')).filter(Boolean) : [];
+}
+
+/** Does this runtime source export every one of `names`? PURE. */
+export function runtimeExportsAll(runtime: string | undefined, names: readonly string[]): boolean {
+  const src = String(runtime ?? '');
+  return names.every((n) => new RegExp(`export\\s+(?:async\\s+)?(?:function|interface|type|const|class)\\s+${n}\\b`).test(src));
+}
+
+/**
+ * Upgrade an unedited loader to the current generation — but ONLY when the game's own runtime
+ * (src/game/three/externalAssets.ts) exports everything the new loader imports (2026-11-19). The two files are
+ * generated as a pair and the kit refresh rewrites only the loader: an older game kept its older runtime, so a new
+ * loader importing customizedGameAsset / applyGameAssetCustomization / loadOwnGameAsset would not compile. With an
+ * older runtime the old loader stays — it matches its runtime and keeps working. `runtime` undefined (callers that
+ * do not know it) keeps the legacy behaviour.
+ */
+export function upgradeAssetModelLoader(source: string | undefined, runtime?: string): string | null {
+  const next = upgradedAssetModelLoader(source);
+  if (next === null || runtime === undefined) return next;
+  return runtimeExportsAll(runtime, runtimeImportNames(next)) ? next : null;
+}
+
+function upgradedAssetModelLoader(source: string | undefined): string | null {
   const previous = source ? previousLoaderManifest(source) : null;
   if (previous) return generateAssetModelLoader(previous);
   if (!source?.startsWith(legacyModelPrefix) || !source.endsWith(legacyModelSuffix)) return null;

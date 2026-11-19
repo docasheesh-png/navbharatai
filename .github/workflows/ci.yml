@@ -190,7 +190,16 @@ jobs:
       # become a coin flip. No gate is removed — the coverage gate still blocks on a real regression, and
       # a failing test still fails this step exactly as before.
       - name: Test + coverage gate (P-TQA.1 — runs the suite once; BLOCKS on a real coverage regression)
-        run: npm run test:coverage
+        # Start the suite and all its child processes with loopback only. Provider mocks
+        # may be missing, but no test can reach a live provider. No fallback to host networking.
+        run: |
+          sudo -- unshare --net -- /bin/bash -euc '
+            /usr/sbin/ip link set lo up
+            exec /usr/bin/setpriv --reuid="$1" --regid="$2" --init-groups \
+              --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all \
+              -- /usr/bin/env PATH="$3" HOME="$4" CI=true GITHUB_ACTIONS=true \
+                GITHUB_WORKSPACE="$5" RUNNER_TEMP="$6" npm run test:coverage
+          ' coverage "$(id -u)" "$(id -g)" "$PATH" "$HOME" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
 
       - name: Build (frontend bundle + server bundle — catches build-only breaks)
         run: npm run build

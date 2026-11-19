@@ -10,6 +10,7 @@ import { PublicBuildEngineError } from '../src/server/lib/buildEngineError';
 import { BuildDiagnostics, PROCESS_ONLY_CODES, isAppFinding, userFacingReport } from '../src/server/AgentV3/BuildDiagnostics';
 import { PRO_CHAIN_V2_NO_ENGINE } from '../src/server/AgentV3/proChainV2/agentRunner';
 import { neutraliseSupplierNames } from '../src/server/AgentV3/proChainV2/builderAdapters';
+import { __setQubaxBuilderCatalogForTests } from '../src/server/AgentV3/proChainV2/qubaxBuilder';
 import { runWithSurplusBuild, activateSurplusBuildForCurrentRequest } from '../src/server/AI/inferencePolicy';
 import { stripCodeComments } from '../src/server/AgentV3/stripCodeComments';
 
@@ -25,7 +26,16 @@ const KEYS = ['GLM_API_KEY', 'KIMI_API_KEY', 'OPENAI_API_KEY', 'NEMOTRON_API_KEY
 const saved: Record<string, string | undefined> = {};
 const QX_KEY = 'qbx_live_WIRINGSECRET0001';
 const MF_KEY = 'mtf_live_WIRINGSECRET0002';
+// Building a runner can refresh the public catalogue before runTurn. Never fall back to live fetch.
+const mockedCatalogFetch = vi.fn<typeof fetch>(async (input) => {
+  const url = input instanceof Request ? input.url : String(input);
+  if (url === 'https://api.qubax.ai/v1/models') return new Response('{}', { status: 503 });
+  throw new Error('Unexpected HTTP request in builder wiring test');
+});
 beforeEach(() => {
+  __setQubaxBuilderCatalogForTests(null);
+  mockedCatalogFetch.mockClear();
+  vi.stubGlobal('fetch', mockedCatalogFetch);
   for (const k of KEYS) { saved[k] = process.env[k]; delete process.env[k]; }
   Object.assign(process.env, { GLM_API_KEY: 'test-glm', KIMI_API_KEY: 'test-kimi', OPENAI_API_KEY: 'test-openai', NEMOTRON_API_KEY: 'test-nemotron', ANTHROPIC_API_KEY: 'sk-ant-test', QUBAX_API_KEY: QX_KEY, MITRIFY_API_KEY: MF_KEY });
 });
@@ -48,6 +58,9 @@ describe('flag OFF (everyone but z@) — nothing changes', () => {
     expect(proChainV2ForBuild('weak', 'public@user.in', 'uid-x')).toBeUndefined();
     const withHooks = chainFor({ tier: 'weak', noClaude: true, surplusPreWriteFailOpen: hooksFor('public@user.in') });
     const without = chainFor({ tier: 'weak', noClaude: true });
+    expect(mockedCatalogFetch).toHaveBeenCalledWith('https://api.qubax.ai/v1/models', expect.objectContaining({
+      headers: { accept: 'application/json' },
+    }));
     expect(withHooks).toEqual(without);
     // REPOINTED (owner 2026-11-17, "apke sabhi suggestion approved"): Qubax is now a default Weak engine for every
     // user, third after Router One — by the owner's order, not by Pro Chain V2. So the chain is the ladder plus the

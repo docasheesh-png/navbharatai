@@ -102409,3 +102409,11 @@ photo bana diya hai"*. Tally: ✅ 1 self-heal · 🔀 0 workarounds · ⏭️ 1 
 **Has it come back before?** Yes — the zombie-write class (July SimpleBuilder, a38c6fef OneShotBuilder): both
 earlier fixes guarded a LANE; neither could see delegation, because `makeSubAgentSpawn` held the build signal.
 The start-vocabulary class (46e2d74b) was "fixed by shape" but kept a stem list; this one adds evidence.
+
+### 2026-11-19 — failedbr #2466 (a360bc2c) and #2468 (35969611), same PR
+
+- **#2468**: the user stopped an edit at 19 s, before any write. The one warning (DESIGN_CONSISTENCY) is correctly
+  labelled as an observation of pre-existing code. No actionable item — not a defect.
+- **#2466** (song app, user-stopped at 286 s after a rendered app): Q-2923 ✅-pending-merge (a lying a11y analyzer —
+  forwarding primitives labelled by their caller, one shared reader for both analyzers); Q-2924–Q-2927 OPEN rows.
+- **#2469** is owned by open PR #4300; **#2470** (99771bc7) was autopsied in #4303. Not touched here.

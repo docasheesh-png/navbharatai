@@ -73,6 +73,7 @@ export function generateGameAssetRuntime(): string {
   return `import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
+import { events } from '../core/events';
 ${gameAssetLodSource()}
 
 ${gameAssetTextureVerifier(true)}
@@ -99,6 +100,8 @@ export interface GameAssetHandle {
   play?(role: string, fadeSeconds?: number): boolean;
 }
 
+let assetJobs = 0;
+
 /** Own one instance per call: skinned meshes and animation mixers are never shared across actors. */
 export async function loadGameAsset(
   asset: LocalGameAsset,
@@ -106,6 +109,10 @@ export async function loadGameAsset(
   signal?: AbortSignal,
 ): Promise<GameAssetHandle> {
   let loaded: THREE.Group | undefined;
+  // The player sees this model arrive on the loading bar — real bytes, never a timer. Sent on the event bus that every
+  // kit has (core/loading.ts turns it into progress), so a project without loading.ts still compiles and plays.
+  const job = ++assetJobs;
+  events.emit('ASSET_LOADING', { id: job, fraction: 0, done: false });
   const disposeRoot = (root: THREE.Object3D) => {
     const geometries = new Set<THREE.BufferGeometry>();
     const materials = new Set<THREE.Material>();
@@ -130,10 +137,12 @@ export async function loadGameAsset(
     if (!response.ok || !response.body) throw Error('Model unavailable');
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = []; let total = 0;
+    const expected = Number(response.headers.get('content-length')) || 0;
     try {
       for (;;) {
         const { value, done } = await reader.read(); if (done) break;
         total += value.byteLength; if (total > 5 * 1024 * 1024) throw Error('Model exceeds mobile budget');
+        if (expected > 0) events.emit('ASSET_LOADING', { id: job, fraction: Math.min(0.9, (total / expected) * 0.9), done: false });
         chunks.push(value);
       }
     } finally { await reader.cancel(); reader.releaseLock(); }
@@ -209,6 +218,8 @@ export async function loadGameAsset(
   } catch {
     if (loaded) disposeRoot(loaded);
     return fallback();
+  } finally {
+    events.emit('ASSET_LOADING', { id: job, fraction: 1, done: true });
   }
 }
 `;

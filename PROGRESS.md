@@ -102420,6 +102420,36 @@ During remote CI, main advanced to `a5b136d` (#4302 Traffic Manager P4). GitHub 
 
 **D21 diagnostic batch and D22 proof:**the predetermined ten-case batch completed10/10, exit0,36.69s, with no case retry or early stop. Each fresh-wallet race produced one500-token debit and one zero-debit replay,9,500-token/₹95 balance, one operation/immutable ledger record and a valid chain; raw outcomes and read-only audits were retained. This does not reproduce or explain the original failed case, so D21 remains BLOCKED and no wallet logic, retry, timeout or invariant change is justified. D22’s one-line raw-result assertion message passes Node22 syntax checking and leaves the predicate unchanged. The new commit requires all applicable checks again; successful b34 coverage is retained as prior evidence, not final new-source proof. Final aggregate status remains unpassed pending the next full gate.
 
+## 2026-11-19 — failedbr #2475 (aba63ead) autopsy: "pubg/bgmi jaisa game" shipped a 2D map, a stopped repair kept writing
+
+**Report:** turn 3 of a session, Weak tier, qwen3-coder (Surplus), 625 s, gate YELLOW, recorded ok:false. Prompt
+verbatim: *"mujhe pubg/bgmi jaisa game chahiye. jahan ham character ko joystick se move kare! apne pata nahi kya
+photo bana diya hai"*. Tally: ✅ 1 self-heal · 🔀 0 workarounds · ⏭️ 1 skip · ❌ 5 shipped imperfect · 🥵 6 struggles.
+
+| ID | Problem | Root cause → class | Fix · lock |
+|---|---|---|---|
+| Q-2910 | GAME_CONTRACT {unknown, unspecified, unspecified} for PUBG/BGMI | a named well-known game was not a spec; two private royale regexes had drifted | `namedGameReference` + one `asksForBattleRoyale` · `aNamedGameIsASpecification` |
+| Q-2911 | 2D city map shipped as "the game" | same root; nothing told the builder the playable game must come first | contract block line · same test; watch next royale build |
+| Q-2912 | GAME_PLAYTEST_NOT_RUN though "Enter Battleground" opened the game | closed start vocabulary (46e2d74b sibling) | arena stems + `opensGameSession` evidence · same test |
+| Q-2913 | debugger kept writing 595–641 s after the repair was undone; saved as verified | delegated child ran under the BUILD signal only (zombie-write class, delegation road) | `runnerSignal.ts` zone + `childStopSignal` + write refusal · `aStoppedPassLeavesNoWriter` |
+| Q-2914 | report ok:false, summary "This repair had used its time…" | pass runner's terminal `done` on the build stream | pass budget → `agent_done`, no 'stopped' persist · same test |
+| Q-2915 | COVERED map buttons | 🟡 source of the revision not in the report | blocked on information |
+| Q-2916–Q-2922 | repair overrun, 4 old_string misses, syntax reject, nudge, usage, exploration, todo-only | recurrences of Q-2697 / Q-2741 / Q-1347 / Q-2735 / Q-2317 | point at those rows |
+
+**Has it come back before?** Yes — the zombie-write class (July SimpleBuilder, a38c6fef OneShotBuilder): both
+earlier fixes guarded a LANE; neither could see delegation, because `makeSubAgentSpawn` held the build signal.
+The start-vocabulary class (46e2d74b) was "fixed by shape" but kept a stem list; this one adds evidence.
+
+### 2026-11-19 — failedbr #2466 (a360bc2c) and #2468 (35969611), same PR
+
+- **#2468**: the user stopped an edit at 19 s, before any write. The one warning (DESIGN_CONSISTENCY) is correctly
+  labelled as an observation of pre-existing code. No actionable item — not a defect.
+- **#2466** (song app, user-stopped at 286 s after a rendered app): Q-2923 ✅-pending-merge (a lying a11y analyzer —
+  forwarding primitives labelled by their caller, one shared reader for both analyzers); Q-2924–Q-2927 OPEN rows.
+- **#2469** is owned by open PR #4300; **#2470** (99771bc7) was autopsied in #4303. Not touched here.
+- **#2449 / #2450** (3-second runs, E2B cap of 20): Q-2928 (the outcome net now reads the recorded sandbox codes —
+  no more "the engine did not record why" on a run that recorded it twice; the ETA is "untested" too), Q-2929 🟡
+  (E2B plan limit, admin), Q-2930 🟡 (note vs admission budget — owned by the BR1983/BR2003 audit), Q-2931 → Q-2735.
 ## 2026-11-19 — Game library: storage budget + MIT licence (admin request: bigger game object library)
 - Admin asked for 10-20 free models per game subject (people, animals, vehicles, water, terrain, roads...) in the
   NavBharatAI library. Survey found 100 subject specs exist but only 47 real models; the 64-entry catalogue cap blocked growth.
@@ -102461,6 +102491,19 @@ for publishing the complete payload was required. A read-only remote-ref check f
 no connector/alternate route was used to bypass the rejection. No PR or CI run has started. A
 private patch is prepared for review; public push/PR and GitHub validation await authorization.
 
+## 2026-11-19 — the OPEN rows from failedbr #2475/#2466/#2449/#2450, root-caused (follow-up to #4320)
+
+Admin: *"baaki open ho woh fix karo, root cause fix karna"*. Each row was traced against the report's own timestamps first.
+
+| Row | Root cause → class | Fix · lock (each reverted-and-failed) |
+|---|---|---|
+| Q-2917, Q-2926, Q-2918 (+ Q-2697 class) | misses quoted a version not on disk (own earlier edit, own REFUSED change, platform undo); the error never said which | `editProvenance.ts` — last read + last refused per file; a miss names its source · `aMissedEditSaysWhereItsTextCameFrom` |
+| Q-2916 | a 150 s platform-checked repair could delegate to a fresh-context specialist; a withheld tool was only hidden, never refused | `DELEGATION_TOOLS` + `AgentRunner` refuses a withheld tool · `aTimeBoxedRepairDoesNotDelegate` |
+| Q-2924 | salvaged fast-lane files skipped the write-time quality notes; no storage rule at the source | `salvageQualityNotes` in the hand-off + `PERSISTED_STATE_RULE` in all four lanes · `aSalvagedFileAndAStoredValueAreChecked` |
+| Q-2925 | the contract froze callback props as `() => void` | `CALLBACK_PROP_EVENT_RULE` (required event param — an optional one fails under strict, verified with tsc) · same file |
+| Q-2927 | an AI-song stub "fixed" with Web Audio tones | `AI_AUDIO_RULE` in all four lanes · same file |
+| Q-2921, Q-2922 | traced: their instances were the delegated/zombie `debugger` | closed by Q-2916 / Q-2913 |
+| Q-2920, Q-2931 (+ Q-2735) | a failed-and-retried Surplus attempt is reported as a zero-token turn | 🟡 billing decision for the admin, options + recommendation in the row |
 ## 2026-11-19 — Game library batch 3: 50 more live-admitted models (97 → 147)
 - Food, kitchen, graveyard/horror, sci-fi base, town and medieval extras (KayKit Restaurant/Halloween/Space Base/Medieval/
   Prototype CC0; Kenney City Builder MIT). 50/50 admitted live. `tests/libraryBatch3.test.ts`.
@@ -102499,6 +102542,10 @@ Admin: *"game me attack, ya dript … action to ho jata hai, par action hota hua
 **Fixed:** `Humanoid.act()` with nine one-shot poses (punch, swing, fire, kick, throw, jump, land, hit, use) laid over the walk, running in the air too, and an automatic landing squash; the shell exposes `ctx.hero`, poses every action button (`actionPoses`, default attack = recoil/sweep/punch by what the press did, interact = use), and poses from WEAPON_FIRED / MELEE_SWING (player-owned and attack held only — an enemy's shot never moves the hero) / PLAYER_JUMPED / PLAYER_DAMAGED; `endFrame(keepPresses)` keeps edges through a freeze; action groups (attack/fire/shoot/punch…, interact/use, sprint/run/boost, drift/handbrake) share keys and buttons; attack on F/J; `ownerId` on weapon events; drift in `driveVehicle` (slip angle, body lean, tyre smoke via `onVehicleDrift`, Drift touch strip above Brake/Gas); `ACTION_VISIBLE_RULE` in the architect prompt and every game kit handoff; write-time note + readiness warning for a game's own body that reads an action and never poses (`actionVisibility.ts`).
 
 **Tests:** `everyActionIsSeen` (14, drives the real generated shell with touch presses and keys); kit census updates. Reversions seen failing: button poses removed (3 fail), freeze wipes presses (1), no aliases (1). **Not verified:** how the poses look in a real browser on a phone; 2D sprite actions are taught by rule only (no kit sprite system).
+- **Admin "han, apke anusar hi continue karo" (2026-11-19):** Q-2915 built (the coverer's fingerprint → file:line for the
+  repair, `coveringElementSource.ts`); Q-2920/Q-2931 built as option (a) (a failed attempt is judged by its receipt —
+  `FAILED_ATTEMPT_COST_UNKNOWN`, reporting only). Both ride in #4320. Next in the agreed order: measure idle sandboxes
+  (Q-2929), then the admission queue with the BR1983/BR2003 owner (Q-2929 + Q-2930), then Q-2919 after the next royale report.
 
 ## 2026-11-19 — Game-gap audit P0 #1–2: start screen, full pause menu, settings that are APPLIED, mute
 
@@ -102536,6 +102583,17 @@ Independent real-dispatcher review exposed a remaining done/quality hint defect:
 
 The first exactly-one-lease assertion in the phase-2 handoff race now includes only a diagnostic message with the synthetic workspace ID, candidate tokens and raw claim responses. Operations, predicates, deadlines and retries are unchanged. This preserves future failure evidence; it does not establish or fix the cause of the earlier failure whose raw responses were unavailable.
 
+## 2026-11-19 — failedbr #2431 (21d59838) autopsy: "not counted against it" was false, and the same keys were asked twice
+
+Report: a Weak "fix the network error" turn, 25-min free window, OUTCOME_STOPPED at the cap; 12.4 min waiting for the
+user, 12.7 working. Tally: ✅ 1 (REPAIR_CLAIM_WITHHELD) · 🔀 0 · ⏭️ 0 · ❌ 4 · 🥵 4.
+- Q-2932 the watchdog counted the user wait → `workClock.ts` (one credit, capped below Cloud Run's 3600 s; deadline
+  re-armed, runner `pausedMs`, 43 budget checks).
+- Q-2933 the same keys re-asked → per-build unanswered-key memory at the one door.
+- Q-2934 generate_otp ×8 → `run_recipe` reads arguments beside `name` (the error-conversion attempt was reverted:
+  it escaped the do-nothing loop guard).
+- Q-2935 the gate counted no-match probes as blockers, and excused a failed build after a grep → last statement decides.
+- Q-2936 / Q-2937 follow from Q-2933 (watch); Q-2938 usage half closed by #4320's Q-2920; Q-2939 ETA band OPEN.
 ## 2026-11-19 — Game-gap audit P0 #8: the kit's screens and buttons speak the player's language
 
 **Root cause:** every kit string was hard-coded English (Game.ts, Hud.tsx, touchControls.ts, meta summary lines), so a game asked for in Hindi still showed "Paused", "Game over", "Play again", "Attack".
@@ -102550,3 +102608,11 @@ The first exactly-one-lease assertion in the phase-2 handoff race now includes o
   can break. Publish serves .ogg as audio/ogg. Kill switch `AGENTV3_GAME_SOUND_LIBRARY` (default on). `tests/gamesGetRecordedSounds.test.ts`.
 - BLOCKED: Quaternius animated animals / guns / vehicles — Google Drive answers "Quota exceeded" for every file (Google's own
   limit on popular shared files, up to 24 h). Retry later; no workaround used.
+
+## 2026-11-19 — Game-gap audit P0 #3: the playtest now PRESSES Play again, reads the score and counts the sounds
+
+**Root cause:** the playtest proved a game starts, renders and answers input, but never that a round can be played again, that the score moves, or that any sound plays; restart was read from the code only (`replayFromCode`'s word match).
+
+**Fixed:** the kit's Game.ts exposes `window.__nbKit` (status, score, endRound — endRound only does what losing does; removed on dispose); the playtest counts every Web Audio source and `<audio>` play (`soundCounter` init script), reads the kit score before and after the controls, ends the round through the hook and finds and PRESSES the play-again control by its words (`RESTART_LABEL`, English and Hindi), then reads the status. New defects `GAME_DEFECT_RESTART_BROKEN` (no control, or pressing it did not restart) and `GAME_DEFECT_SILENT` (the game's code plays sound — `replayFromCode().sound` — and a whole playthrough played none), each with a repair hint; evidence appended to the verdict head, never points. Soft defects (not in HARD_DEFECTS): a new probe starts as evidence.
+
+**Tests:** `thePlaytestChecksPlayAgainScoreAndSound` (7, four in a real Chromium against kit-hook games: works / no button / dead button / no hook); the 10 existing playtest/repair suites stay green (143). Reversion: the probe that never presses fails. **Still open:** auto-repair stays suspended by design (`docs/security/game-auto-repair-suspension.md`: needs byte-preserving rollback) — the gate and these defects are evidence for the user's one-tap fix; "a win/level can be completed" is not provable generically and is not claimed.

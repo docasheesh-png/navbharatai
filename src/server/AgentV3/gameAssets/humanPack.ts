@@ -1,3 +1,4 @@
+import { asksForBattleRoyale } from '../gameIntent';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -30,7 +31,9 @@ export function needsHumanCharacter(options: Pick<GameAssetSeedOptions, 'prompt'
   if (typeof options.needsHuman === 'boolean') return options.needsHuman;
   const prompt = options.prompt.normalize('NFKC').slice(0, 16000);
   if (/\b(?:no|without)\s+(?:any\s+)?(?:humans?|people|characters?|persons?)\b|बिना\s*(?:इंसान|मानव)/i.test(prompt)) return false;
-  return /\b(?:humans?|persons?|people|characters?|humanoids?|soldiers?|pedestrians?|npcs?|battle\s*royale|pubg|free\s*fire|battlefield|third[- ]person\s*(?:shooter|adventure)|football|soccer|basketball|boxing)\b|इंसान|मानव|कैरेक्टर/i.test(prompt);
+  // A royale is a game of people — read by the ONE royale reader (failedbr #2475: this private list had no "bgmi").
+  if (asksForBattleRoyale(prompt)) return true;
+  return /\b(?:humans?|persons?|people|characters?|humanoids?|soldiers?|pedestrians?|npcs?|third[- ]person\s*(?:shooter|adventure)|football|soccer|basketball|boxing)\b|इंसान|मानव|कैरेक्टर/i.test(prompt);
 }
 
 /** Existing new-3D-game seed calls this, never an edit/import/reopen migration. */

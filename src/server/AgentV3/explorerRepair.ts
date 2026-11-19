@@ -29,6 +29,7 @@
 // PURE. Every side effect (snapshot, repair, re-render, re-explore, revert) is injected, so the whole
 // keep-or-undo decision is unit-tested without a sandbox, a browser or a model.
 
+import { locateCoveringElement, covererLocationSentence } from './coveringElementSource';
 import { pressName, FAILING_VERDICTS, type ExploreRun, type PressResult, type PressVerdict, type UserProof } from './clickExplorer';
 import { strictReverify, verifyAfterFix } from './verifyAfterFix';
 import { PLATFORM_CHECKS_THE_FIX } from './repairScope';
@@ -90,8 +91,10 @@ const NO_INVENTED_RESULT = 'Never make the control appear to work by showing sam
  * control, where it lives, what the browser saw, and — the part a model most needs told — that
  * removing or disabling the control is not a fix. PURE.
  */
-export function explorerRepairFindings(targets: PressResult[]): string[] {
+export function explorerRepairFindings(targets: PressResult[], files?: Record<string, string>): string[] {
   return targets.map((p) => {
+    // Q-2915: name the covering element's place in the source, so the repair starts there instead of hunting.
+    const located = p.verdict === 'covered' && p.coverer && files ? covererLocationSentence(locateCoveringElement(p.coverer, files)) : '';
     const where = p.via ? ` (it appears after opening "${p.via}")` : '';
     const said = p.errors.length ? ` The browser reported: "${p.errors[0].replace(/\s+/g, ' ').slice(0, 180)}".` : '';
     const doing = p.kind === 'type' ? 'typing into' : p.kind === 'pick' ? 'changing' : 'pressing';
@@ -124,7 +127,7 @@ export function explorerRepairFindings(targets: PressResult[]): string[] {
           : needsAbsentDevice(p.errors)
             ? DEVICE_FIX
             : 'Find the cause in the code that runs when it is used and fix it so the control does what its label says.';
-    return `In a real browser, ${doing} "${p.label}"${where} ${what}.${said} ${fix} Do not remove, hide or disable the control — that is not a fix. ${NO_INVENTED_RESULT}`;
+    return `In a real browser, ${doing} "${p.label}"${where} ${what}.${said}${located} ${fix} Do not remove, hide or disable the control — that is not a fix. ${NO_INVENTED_RESULT}`;
   });
 }
 
@@ -293,7 +296,7 @@ export interface ExplorerRepairOutcome {
  * a hybrid. A repair that changed nothing is not "kept": there is nothing to keep and nothing fixed.
  */
 export async function runExplorerRepair(targets: PressResult[], before: ExploreRun, deps: ExplorerRepairDeps): Promise<ExplorerRepairOutcome> {
-  const findings = explorerRepairFindings(targets);
+  const findings = explorerRepairFindings(targets, deps.snapshot);
   const setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = deps.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
   // The build's stop reaches the repair WITH its cause, and our own budget ends it as 'repair-budget' — so the call

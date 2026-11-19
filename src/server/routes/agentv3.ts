@@ -6304,7 +6304,9 @@ async function noteBuildOutcome(
         const resumeSandboxId = sandboxResumeEnabled()
           ? (await sandboxStore.get(workspaceId).catch(() => null)) ?? undefined
           : undefined;
-        await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId);
+        // Waking an existing project is restoration, never a request for a new starter.
+        // This also disables warm fragment completion; reconnect and canonical hydration stay unchanged.
+        await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId, { seedStarter: false });
         const saved = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
         durableFiles = saved;
         // SELF-HEAL the recurring "No package.json found" (admin, 2026-07-21). A hydrated vite-react

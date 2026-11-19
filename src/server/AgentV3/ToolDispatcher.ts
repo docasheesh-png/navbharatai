@@ -78,7 +78,7 @@ import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type Type
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
 import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, writeParseGuardEnabled, parseGuardDecision } from './SyntaxCheck';
 import { htmlEditVerdict, isHtmlPage } from './editIntegrity';
-import { checkPreviewCompiles, previewDivergenceBlocksDelivery } from '../runtime/PreviewCompileCheck';
+import { checkPreviewCompiles, previewCompileApplicability, previewDivergenceBlocksDelivery } from '../runtime/PreviewCompileCheck';
 import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
 import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
@@ -257,7 +257,9 @@ import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
-import { withVitestDeclared, recipeShipsVitestTest, VITEST_RANGE } from './TestGenerationAgent';
+import { withVitestDeclared, recipeShipsVitestTest, vitestDeclarationNote, generatedUnitTestNote } from './TestGenerationAgent';
+import { isAppAnalysisPath } from './appAnalysisPaths';
+import { angularValidationPlan, parseAngularValidation, angularTypeScriptOnlyWriteNote } from './angularValidation';
 import { renderSeenThisBuild } from './renderProof';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
 import { addDependency, removeDependency as removeOneDependency, listDependencies } from './packageEdit';
@@ -546,6 +548,8 @@ export type BrowserActionName = (typeof BROWSER_ACTIONS)[number];
  * the dispatcher decoupled from the full actuator surface.
  */
 export interface ActuatorPort {
+  /** Sync changed manifests before executing JavaScript tests; warm dependency trees are reused. */
+  ensureDependencies?(workspaceId: string): Promise<{ ok: boolean; ran: boolean; log: string }>;
   readFile(workspaceId: string, filePath: string): Promise<string>;
   /**
    * BR1997: an ADVISORY read, bounded by `timeoutMs`, whose timeout never drops the cached sandbox
@@ -1912,7 +1916,7 @@ export class ToolDispatcher {
       ? await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => undefined)
       : undefined;
     const pinCtx = pinPkg !== undefined
-      ? { viteRange: viteRangeOf(pinPkg), reactRange: reactRangeOf(pinPkg), capacitorRange: capacitorRangeOf(pinPkg) }
+      ? { viteRange: viteRangeOf(pinPkg, await this.viteDependencyMetadata()), reactRange: reactRangeOf(pinPkg), capacitorRange: capacitorRangeOf(pinPkg) }
       : undefined;
     const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command, pinCtx));
     await this.ensureSandboxPostgres(effectiveCommand);
@@ -3226,7 +3230,11 @@ export class ToolDispatcher {
       } catch {
         pkg = null; // no manifest reachable — analyzeDependencies returns []
       }
-      return analyzeDependencies([...external], pkg);
+      const configFiles: Record<string, string> = {};
+      await Promise.all([...files].filter((path) => /(^|\/)angular\.json$/.test(path) && isAppAnalysisPath(path)).map(async (path) => {
+        try { configFiles[path] = await this.actuator.readFile(this.workspaceId, path); } catch { /* unavailable config cannot prove use */ }
+      }));
+      return analyzeDependencies([...external], pkg, configFiles);
     } catch {
       // Any failure: return no issues so evaluate's other sections stand.
       return [];
@@ -3754,16 +3762,25 @@ export class ToolDispatcher {
    * output holds a vitest test. Every recipe writer calls it (`tests/aRecipeTestShipsItsRunner` is the census);
    * already declared, unreadable or no test ⇒ nothing. Returns the line for the tool result.
    */
+  private async viteDependencyMetadata(): Promise<{ installedVitePackageJson?: string; packageLockJson?: string }> {
+    const [installedVitePackageJson, packageLockJson] = await Promise.all([
+      this.actuator.readFile(this.workspaceId, 'node_modules/vite/package.json').catch(() => undefined),
+      this.actuator.readFile(this.workspaceId, 'package-lock.json').catch(() => undefined),
+    ]);
+    return { installedVitePackageJson, packageLockJson };
+  }
+
   private async declareVitestForRecipeTests(files: Record<string, string>, agent: AgentRole): Promise<string> {
     if (!recipeShipsVitestTest(files)) return '';
     try {
       const before = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => null);
-      const after = withVitestDeclared(before);
-      if (!after) return '';
+      const metadata = await this.viteDependencyMetadata();
+      const after = withVitestDeclared(before, metadata);
+      if (!after) return vitestDeclarationNote(before, after, metadata);
       await this.actuator.writeFile(this.workspaceId, 'package.json', after);
       this.state?.recordFileChange({ path: 'package.json', kind: 'modify' }, agent);
       this.onFileWrite?.('package.json', after);
-      return `Added vitest@${VITEST_RANGE} to devDependencies so the test this recipe ships can run (it installs on the next typecheck or \`npm install\`).`;
+      return vitestDeclarationNote(before, after, metadata);
     } catch {
       return '';
     }
@@ -4149,7 +4166,8 @@ export class ToolDispatcher {
       // BottomNav rewritten three times for an export App.tsx lacked). At most two targets' candidates
       // are read, only when such an error exists, and a read that fails is simply not evidence.
       // A clean run is SAID, so the model does not re-run the compiler to find out (autopsy dfd81a3a).
-      if (errors.length === 0) return run.silent ? writeTypecheckCleanNote(tsPaths) : '';
+      if (errors.length === 0) return run.silent
+        ? (angularValidationPlan(this.framework) ? angularTypeScriptOnlyWriteNote(tsPaths) : writeTypecheckCleanNote(tsPaths)) : '';
       sources = { ...(await this.exportTargetSources(splitByWrittenFiles(errors, tsPaths).own, sources)), ...sources };
       // Counted by the SAME split the note makes, after the export targets are in hand (they are what
       // tells "add the export there" from "fix it here"). An error that waits on a file not written yet is
@@ -6600,7 +6618,9 @@ export class ToolDispatcher {
         // when grep itself said so. Every dialect it tries carries the same excludes.
         const { stdout } = await this.actuator.runCommand(this.workspaceId, grepCommand(pattern, path, EXCLUDED_DIRS));
         // T1-sec-redact: grep can surface a secret sitting in a matched line (e.g. `grep KEY .env`).
-        return redactSecrets(readGrepOutput(stdout, pattern).text);
+        const reading = readGrepOutput(stdout, pattern);
+        if (reading.failed) throw new Error(redactSecrets(reading.text));
+        return redactSecrets(reading.text);
       }
 
       case 'glob': {
@@ -7065,7 +7085,7 @@ export class ToolDispatcher {
               let pkgJson: string | undefined;
               try { pkgJson = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgJson = undefined; }
               if (typeof pkgJson === 'string') {
-                const depRes = applyWellKnownMissingDeps({ 'package.json': pkgJson, ...astFiles });
+                const depRes = applyWellKnownMissingDeps({ 'package.json': pkgJson, ...astFiles }, await this.viteDependencyMetadata());
                 if (depRes.added.length) {
                   const newPkg = depRes.files['package.json'];
                   // Said only when it LANDED (autopsy SignBridge, 2026-09-26): on a verified-working app
@@ -7154,8 +7174,8 @@ export class ToolDispatcher {
         // "preview does not compile → not charged" verdict). A non-entry divergence (a possibly-never-
         // imported file) stays advisory — no false block, matching PreviewCompileCheck's reachability scoping.
         try {
-          const pc = checkPreviewCompiles(astFiles);
-          if (!pc.ok && previewDivergenceBlocksDelivery(pc.errors)) {
+          const pc = previewCompileApplicability(this.framework).applicable ? checkPreviewCompiles(astFiles) : null;
+          if (pc && !pc.ok && previewDivergenceBlocksDelivery(pc.errors)) {
             const entryErr = pc.errors.find((e) => previewDivergenceBlocksDelivery([e]));
             extra.push({ severity: 'high', label: `the live preview will not compile — ${entryErr?.file ?? 'entry file'}: ${(entryErr?.message ?? 'compile error').slice(0, 160)}` });
           }
@@ -7615,23 +7635,24 @@ export class ToolDispatcher {
         }
         // Declare the runner BEFORE the test lands, so the write-time typecheck that follows the test
         // already sees `vitest` (its script reinstalls when package.json is newer than node_modules).
-        let declaredVitest = false;
+        let declarationNote = '';
         try {
           const pkgBefore = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => null);
-          const pkgAfter = withVitestDeclared(pkgBefore);
+          const metadata = await this.viteDependencyMetadata();
+          const pkgAfter = withVitestDeclared(pkgBefore, metadata);
+          declarationNote = vitestDeclarationNote(pkgBefore, pkgAfter, metadata);
           if (pkgAfter) {
             await this.actuator.writeFile(this.workspaceId, 'package.json', pkgAfter);
             this.state?.recordFileChange({ path: 'package.json', kind: 'modify' }, agent);
             this.onFileWrite?.('package.json', pkgAfter);
-            declaredVitest = true;
           }
         } catch { /* the test is still written; the typecheck then names the missing module honestly */ }
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.state?.recordFileChange({ path, kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — Vitest skeleton for ${functions.length} function(s). Fill in the TODO assertions to verify real behaviour.`
-          + (declaredVitest ? ` Added vitest@${VITEST_RANGE} to devDependencies so the test can run (it installs on the next typecheck or \`npm install\`).` : '');
+        return generatedUnitTestNote(path, kind)
+          + (declarationNote ? ` ${declarationNote}` : '');
       }
 
       case 'generate_integration_tests': {
@@ -7728,6 +7749,16 @@ export class ToolDispatcher {
           this.state?.appendTerminal(msg);
           return msg;
         }
+        let dependencyPreparation = '';
+        if (['vitest', 'jest', 'playwright', 'npm-script'].includes(plan.framework) && this.actuator.ensureDependencies) {
+          const prepared = await this.actuator.ensureDependencies(this.workspaceId);
+          dependencyPreparation = `Dependency preparation (${prepared.ran ? 'sync attempted' : 'no install run'}): ${redactSecrets(prepared.log)}\n`;
+          this.state?.appendTerminal(dependencyPreparation);
+          if (!prepared.ok) {
+            getWorkspaceMemory(this.workspaceId).recordAudit('run_tests UNVERIFIED — dependency preparation failed; suite preserved and not executed.');
+            throw new Error(`Tests were not executed because dependency preparation failed. Preserve the test suite and fix its dependencies.\n${dependencyPreparation}`);
+          }
+        }
         const started = Date.now();
         // B4 — run ONE test instead of the whole suite while iterating on a failure. The suite was
         // re-run in full after every fix attempt, spending the user's sandbox minutes (real money)
@@ -7757,7 +7788,7 @@ export class ToolDispatcher {
           );
         }
         const detail =
-          `${outcome.summary}${partial}\n` +
+          `${outcome.summary}${partial}\n` + dependencyPreparation +
           // The command that ACTUALLY ran, not the unfiltered plan — reporting the plan here would
           // describe a run that did not happen.
           `command: ${filtered.command} — ${plan.reason}\n` +
@@ -7828,9 +7859,10 @@ export class ToolDispatcher {
         // run is silently skipped (the esbuild note still stands) — never a fake pass.
         let tscHeader = '';
         let tscStatus: 'clean' | 'errors' | 'did-not-complete' = 'did-not-complete';
+        const angularPlan = angularValidationPlan(this.framework);
         const isTsProject = files.includes('tsconfig.json')
           && files.some((f) => /\.tsx?$/i.test(f) && !/\.d\.ts$/i.test(f));
-        if (isTsProject && !syntaxHeader) {
+        if (isTsProject && !syntaxHeader && !angularPlan) {
           try {
             const tscCommand = robustTscCommand(`--noEmit --incremental --tsBuildInfoFile /tmp/agentv3-${this.tsBuildInfoId}.tsbuildinfo`, '2>&1 | head -60');
             const tscStartedAt = Date.now();
@@ -7892,6 +7924,27 @@ export class ToolDispatcher {
             tscStatus = 'did-not-complete';
             this._lastTypeErrors = null;
           }
+        }
+        if (angularPlan && !syntaxHeader) {
+          const nativeStarted = Date.now();
+          let nativeRunStarted = false;
+          let nativeResult: { exitCode: number | null; stdout: string; stderr: string };
+          try {
+            if (this.actuator.ensureDependencies) {
+              const prepared = await this.actuator.ensureDependencies(this.workspaceId);
+              this.state?.appendTerminal(`Angular dependency preparation: ${redactSecrets(prepared.log)}`);
+              if (!prepared.ok) throw new Error(`Angular dependency preparation failed; the native build did not run. ${prepared.log}`);
+            }
+            nativeRunStarted = true;
+            nativeResult = await withTimeout(this.actuator.runCommand(this.workspaceId, angularPlan.command), angularPlan.timeoutMs, 'typecheck-angular');
+          } catch (error) {
+            nativeResult = { exitCode: null, stdout: '', stderr: error instanceof Error ? error.message : String(error) };
+          }
+          try { if (nativeRunStarted) this.onCommand?.({ command: angularPlan.command, ...nativeResult, durationMs: Date.now() - nativeStarted }); } catch { /* diagnostics best-effort */ }
+          const native = parseAngularValidation(nativeResult.exitCode, nativeResult.stdout, nativeResult.stderr);
+          this._lastTypeErrors = native.status === 'passed' ? 0 : native.status === 'failed' ? 1 : null;
+          if (native.status === 'failed') getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${native.summary}`);
+          return `typecheck: ${native.summary}\n${redactSecrets(native.output).slice(-6000)}\n${crossLang}`.trim();
         }
         if (syntaxHeader || tscHeader) {
           return `${syntaxHeader}${tscHeader}${crossLang || 'No Python/Java/Go sources to check.'}`.trim();

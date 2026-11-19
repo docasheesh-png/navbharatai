@@ -73,6 +73,44 @@ describe('testFrameworkFromCommand — a suite RUN, not a word match', () => {
       expect(testFrameworkFromCommand(j as unknown as string)).toBeNull();
     }
   });
+
+  it.each([
+    ['CI=1 npx vitest run', 'vitest'],
+    ['CI=1 npx vitest', 'vitest'],
+    ['env CI=1 ./node_modules/.bin/vitest run', 'vitest'],
+    ['cross-env CI=1 npx --no-install vitest run', 'vitest'],
+    ['npm exec -- vitest run', 'vitest'],
+    ['pnpm exec jest', 'jest'],
+    ['python3 -m pytest -v', 'pytest'],
+    ['go test -v ./...', 'go'],
+    ['cd "game app" && npx playwright test --reporter=list', 'playwright'],
+    ['exec -- npx jest', 'jest'],
+    ['bun run test:unit', 'npm-script'],
+  ])('recognises executable argv in %s', (command, framework) => {
+    expect(testFrameworkFromCommand(command)).toBe(framework);
+  });
+
+  it.each(['vitest', 'jest', 'pytest', 'playwright'])('package operations mentioning %s cannot execute a suite', (runner) => {
+    for (const operation of ['install', 'uninstall', 'remove', 'update', 'info', 'view', 'list', 'audit']) {
+      expect(testFrameworkFromCommand(`npm ${operation} ${runner}`)).toBeNull();
+      expect(testFrameworkFromCommand(`cd app && pnpm ${operation} ${runner}`)).toBeNull();
+    }
+    for (const command of [`env CI=1 echo ${runner}`, `printf '${runner}'`, `node -e 'console.log("${runner}")'`, `cat node_modules/.bin/${runner}`]) {
+      expect(testFrameworkFromCommand(command)).toBeNull();
+    }
+  });
+
+  it.each([
+    'npm run build -- vitest', 'npm test-not-a-script', 'npm run test:watch',
+    'npx vitest watch', 'npx vitest list', 'npx vitest bench', 'npx jest --listTests',
+    'pytest --collect-only', 'pytest --co', 'npx playwright show-report',
+    'npx vitest run | head -30', 'npx vitest run || true', 'false; npx jest',
+    'echo skip && npx jest', 'exec true && npx jest', 'bash -c "npx vitest run"',
+    'RUNNER=vitest echo done', '"CI=1" npx vitest run', '$(echo vitest) run',
+    'npx vitest run > results.log', 'npx jest\ntrue', 'npx "jest',
+  ])('abstains on non-runs or opaque shell execution: %s', (command) => {
+    expect(testFrameworkFromCommand(command)).toBeNull();
+  });
 });
 
 describe('testsEvidenceFromCommands — the autopsy case, and the two ways to be wrong about it', () => {
@@ -123,6 +161,59 @@ describe('testsEvidenceFromCommands — the autopsy case, and the two ways to be
   it('installing the browsers alone proves nothing', () => {
     expect(testsEvidenceFromCommands([cmd('npx playwright install chromium', 'ok')])).toBeUndefined();
   });
+
+  it('cdffbb71: removing the missing runner and its test cannot become a passing test suite', () => {
+    const reportCommands = [
+      cmd('npm run test', '\n> my-angular-app@1.0.0 test\n> vitest run\n', 127, 'sh: 1: vitest: not found\n'),
+      cmd('npm uninstall vitest', '\nremoved 21 packages, and audited 852 packages in 5s\n'),
+      cmd('rm src/app/models.test.ts'),
+    ];
+    expect(testsEvidenceFromCommands(reportCommands)).toBeUndefined();
+    expect(agentRunEvidence(reportCommands)).not.toHaveProperty('tests');
+  });
+
+  it.each([undefined, null, NaN, Infinity, -1])('an unknown or invalid exit %s is not a completed passing run', (exitCode) => {
+    expect(testsEvidenceFromCommands([{ command: 'npx playwright test', stdout: PW_PASS, exitCode }])).toBeUndefined();
+  });
+
+  it.each([
+    ['npx vitest run', ''],
+    ['npx vitest run --passWithNoTests', 'No test files found, exiting with code 0'],
+    ['npx vitest run', 'Tests 0 passed (0)'],
+    ['npx playwright test', '0 passed (0.1s)'],
+    ['go test ./...', '? example/app [no test files]'],
+    ['npm test', '> app@1.0.0 test\n> echo "Tests 2 passed (2)"\nTests 2 passed (2)'],
+    ['npm test', '> app@1.0.0 test\n> npm install vitest\nadded 20 packages'],
+  ])('a zero exit without test execution is unverified: %s / %s', (command, output) => {
+    expect(testsEvidenceFromCommands([cmd(command, output)])).toBeUndefined();
+  });
+
+  it.each([
+    ['vitest run', 'Tests 4 passed (4)'],
+    ['vitest', 'Tests 4 passed (4)'],
+    ['jest', 'Tests: 4 passed, 4 total'],
+    ['playwright test', PW_PASS],
+    ['python3 -m pytest', '==== 4 passed in 0.02s ===='],
+    ['go test ./...', 'ok example/app 0.012s'],
+  ])('reads an npm test script using its actual runner: %s', (script, output) => {
+    expect(testsEvidenceFromCommands([cmd('npm test', `> app@1.0.0 test\n> ${script}\n\n${output}`)])).toBe('passed');
+  });
+
+  it('preserves failing executions and latest actual results while ignoring package management', () => {
+    expect(testsEvidenceFromCommands([
+      cmd('npx vitest run', 'Tests 1 failed | 2 passed (3)', 1),
+      cmd('npm uninstall vitest', 'removed 21 packages'),
+    ])).toBe('failed');
+    expect(testsEvidenceFromCommands([cmd('npx jest', 'suite failed while loading', 1)])).toBe('failed');
+    expect(testsEvidenceFromCommands([
+      cmd('npx vitest run', 'Tests 1 failed | 2 passed (3)', 1),
+      cmd('npx vitest run', 'Tests 3 passed (3)'),
+    ])).toBe('passed');
+  });
+
+  it('does not turn a failed summary into a pass when the shell reports zero', () => {
+    expect(testsEvidenceFromCommands([cmd('npx vitest run', 'Tests 1 failed | 2 passed (3)')])).toBe('failed');
+  });
 });
 
 describe('agentRunEvidence — one read, and typecheck is DELEGATED not re-derived', () => {
@@ -158,6 +249,40 @@ describe('agentRunEvidence — one read, and typecheck is DELEGATED not re-deriv
   it('never throws', () => {
     for (const j of [null, undefined, []]) {
       expect(() => agentRunEvidence(j as never)).not.toThrow();
+    }
+  });
+
+  const angularCommand = './node_modules/.bin/ng build --progress=false';
+  const angularPass = cmd(angularCommand, 'Application bundle generation complete. [3.116 seconds]\nOutput location: /app/dist/app');
+  const angularFail = cmd(angularCommand, "✘ [ERROR] NG9: Property 'colour' does not exist on type 'BetTarget'. [plugin angular-compiler]", 1);
+
+  it('recovers the Angular builder receipt even when no plain tsc command ran', () => {
+    expect(agentRunEvidence([angularPass]).typecheck).toBe('passed');
+  });
+
+  it('native template failure supersedes an earlier clean tsc and cannot be cleared by plain tsc', () => {
+    const tsc = cmd('npx tsc --noEmit');
+    expect(agentRunEvidence([tsc, angularFail]).typecheck).toBe('failed');
+    expect(agentRunEvidence([angularFail, tsc]).typecheck).toBe('failed');
+    expect(agentRunEvidence([tsc, angularFail, angularPass]).typecheck).toBe('passed');
+  });
+
+  it('a later TypeScript failure still defeats an earlier Angular pass', () => {
+    const failure = cmd('npx tsc --noEmit', 'src/a.ts(1,1): error TS2304: Cannot find name x.', 1);
+    expect(agentRunEvidence([angularPass, failure]).typecheck).toBe('failed');
+    expect(agentRunEvidence([failure, angularPass]).typecheck).toBe('passed');
+  });
+
+  it('unavailable and incomplete Angular checks add no proof', () => {
+    for (const record of [cmd(angularCommand, '', 127, './node_modules/.bin/ng: not found'), cmd(angularCommand, 'Building...'), { ...angularPass, exitCode: null }]) {
+      expect(agentRunEvidence([record]).typecheck).toBeUndefined();
+      expect(agentRunEvidence([angularFail, record]).typecheck).toBe('failed');
+    }
+  });
+
+  it('Angular success text under help/echo/package-management argv is not build evidence', () => {
+    for (const command of ['echo ./node_modules/.bin/ng build', 'npm install @angular/cli', './node_modules/.bin/ng build --help', './node_modules/.bin/ng build | head']) {
+      expect(agentRunEvidence([{ ...angularPass, command }]).typecheck).toBeUndefined();
     }
   });
 });

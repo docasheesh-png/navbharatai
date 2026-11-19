@@ -47,9 +47,12 @@ export function grepModes(pattern: string): Array<'E' | 'G' | 'F'> {
  * when it could not run). `excludeDirs` bounds an unqualified walk, as before.
  */
 export function grepCommand(pattern: string, path: string, excludeDirs: readonly string[]): string {
+  // An optional path explicitly sent as "" is the same root search as an omitted path (cdffbb71).
+  // Preserve nonempty paths byte-for-byte: spaces may be part of a real directory or file name.
+  const searchPath = path.trim() ? path : '.';
   const excludes = excludeDirs.map((d) => `--exclude-dir=${shellQuote(d)}`).join(' ');
   const modes = grepModes(pattern).join(' ');
-  const one = `grep -rn"$__m" ${excludes} -e ${shellQuote(pattern)} -- ${shellQuote(path)} 2>&1`;
+  const one = `grep -rn"$__m" ${excludes} -e ${shellQuote(pattern)} -- ${shellQuote(searchPath)} 2>&1`;
   return [
     '__c=1; __o=""; __used="-"',
     `for __m in ${modes}; do __o=$(${one}); __c=$?; __used="$__m"; [ "$__c" -eq 0 ] && break; done`,

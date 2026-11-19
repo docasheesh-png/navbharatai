@@ -5,6 +5,8 @@ import {
   previewCompileRepairInstruction,
   previewDivergenceBlocksDelivery,
   previewCompileUnresolvedSummary,
+  previewCompileApplicability,
+  admitPreviewCompileCheck,
 } from './PreviewCompileCheck';
 
 // Autopsy 2026-07-22 (buildId 91694679): the in-browser Babel preview can reject code that tsc + the
@@ -17,6 +19,40 @@ const CLEAN_APP = {
   'src/App.tsx': "export default function App(){ return <div className='x'>Hi</div>; }",
   'src/util.ts': 'export const add = (a: number, b: number): number => a + b;',
 };
+
+describe('preview compiler applicability — cdffbb71', () => {
+  it('admits only the applicable enabled lane and records a non-pass reason once', () => {
+    const reasons: string[] = [];
+    expect(admitPreviewCompileCheck('angular', true, (reason) => reasons.push(reason))).toBe(false);
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain('still need verification');
+    expect(admitPreviewCompileCheck('angular', false, (reason) => reasons.push(reason))).toBe(false);
+    expect(admitPreviewCompileCheck('vite-react', false, (reason) => reasons.push(reason))).toBe(false);
+    expect(admitPreviewCompileCheck('vite-react', true, (reason) => reasons.push(reason))).toBe(true);
+    expect(reasons).toHaveLength(1);
+  });
+  it('Angular decorators are not defects merely because the unrelated Babel preview rejects them', () => {
+    const angular = {
+      'src/app/wallet.service.ts': "import { Injectable } from '@angular/core';\n@Injectable({ providedIn: 'root' })\nexport class WalletService {}",
+    };
+    expect(checkPreviewCompiles(angular).ok).toBe(false);
+    const applicability = previewCompileApplicability('angular');
+    expect(applicability.applicable).toBe(false);
+    if (!applicability.applicable) {
+      expect(applicability.reason).toContain('native build and live preview still need verification');
+    }
+    expect(applicability).not.toHaveProperty('ok');
+  });
+
+  it.each(['angular', 'Angular', 'nestjs', 'nextjs', 'nuxt', 'sveltekit', 'remix', 'astro', 'node-express', 'python-fastapi'])('uses the existing Live-only capability for %s', (framework) => {
+    expect(previewCompileApplicability(framework).applicable).toBe(false);
+  });
+
+  it.each(['vite-react', 'react', 'vue', 'static', '', undefined])('preserves the browser compiler for %s', (framework) => {
+    expect(previewCompileApplicability(framework)).toEqual({ applicable: true });
+    expect(checkPreviewCompiles({ ...CLEAN_APP, 'src/main.tsx': 'export const = ;' }).ok).toBe(false);
+  });
+});
 
 describe('checkPreviewCompiles — faithful in-browser Babel dry-compile', () => {
   it('a clean React+TS app compiles with no errors', () => {

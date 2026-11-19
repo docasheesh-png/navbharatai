@@ -289,6 +289,7 @@ export function ensureHostBinding(command: string, framework?: DevFramework, res
   if (PM_ONE_SHOT_SUBCOMMAND.test(command)) return command;
   // Already binds a host (any interface / explicit flag) — leave untouched.
   if (/--host|-H\b|HOST=|0\.0\.0\.0/.test(command)) return command;
+  if (simpleResolvedScript(resolvedScript) && /(?:^|\s)(?:--host(?:name)?(?:[=\s]|$)|-H(?:[=\s]|$)|HOST=)/.test(resolvedScript)) return command;
   // A direct Node server (`tsx server/index.ts`, …) takes no --host flag; most Express/Fastify apps read
   // the bind host from `HOST` (or bind 0.0.0.0 already). Prefix `HOST=0.0.0.0` so a config-driven server
   // is reachable on the PUBLIC E2B preview instead of binding localhost-only (blank preview). A server
@@ -334,6 +335,20 @@ export function ensureHostBinding(command: string, framework?: DevFramework, res
     return `${command} -- --host 0.0.0.0`;
   }
   return command;
+}
+
+// Only inspect a single resolved server command: a setup command or multiplexer can
+// carry flags that never reach the server. Leave those existing paths unchanged.
+function simpleResolvedScript(script?: string): script is string {
+  return !!script && !pipesOrChainsToAnotherCommand(script) && !runsUnderMultiplexer(script);
+}
+
+function appendServerFlags(command: string, flags: string): string {
+  // When the host was already in package.json, ensureHostBinding adds no `--`.
+  // npm still needs that separator for any remaining flags to reach the child CLI.
+  const separator = /\b(?:npm|pnpm|yarn|bun)\b.*\b(?:run\s+)?(?:dev|serve)\b/.test(command)
+    && !/(?:^|\s)--(?:\s|$)/.test(command) ? ' --' : '';
+  return `${command}${separator} ${flags}`;
 }
 
 /**
@@ -1177,6 +1192,7 @@ export function buildPreKillPortCommand(port: number | number[]): string {
 export function pinDevServerPort(command: string, port: number, framework?: DevFramework, resolvedScript?: string): string {
   if (!command) return command;
   if (/--port[=\s]|[\s]-p[\s]/.test(command)) return command; // already pinned — respect it
+  if (simpleResolvedScript(resolvedScript) && /(?:^|\s)(?:--port[=\s]|-p[=\s]|PORT=)/.test(resolvedScript)) return command;
   // A direct Node server (`tsx server/index.ts`, …) takes no `--port` flag; nearly every Express/Fastify
   // app reads its port from `process.env.PORT`. Inject `PORT=<port>` so the server binds the exact port
   // the health-check watches — the fix for the Mitrify "did not come up on port 5173" import (its
@@ -1215,26 +1231,26 @@ export function pinDevServerPort(command: string, port: number, framework?: DevF
   // Same as above: a flag appended to a `concurrently`-based script never reaches the dev server, and
   // a `--strictPort` that lands on the multiplexer is worse than none (build 4b744bef).
   if (runsUnderMultiplexer(resolvedScript)) return command;
-  if (/\bnext\b/.test(command) || framework === 'next') return `${command} -p ${port}`;
+  if (/\bnext\b/.test(command) || framework === 'next') return appendServerFlags(command, `-p ${port}`);
   const isPmDev = /\b(?:npm|pnpm|yarn|bun)\b.*\b(?:run\s+)?(?:dev|serve)\b/.test(command);
   // Vite (invoked directly, resolved from a script, or the unknown-framework default for a pm-run
   // script — the v5.0 scaffold's case): pin with the Vite-only `--strictPort` so it binds EXACTLY
   // this port or fails loudly instead of silently drifting 5173→5174.
   if (/\bvite\b/.test(command) || framework === 'vite') {
-    return `${command} --port ${port} --strictPort`;
+    return appendServerFlags(command, `--port ${port} --strictPort`);
   }
   // A resolved NON-Vite framework (astro/nuxt/angular): pin the port but DROP `--strictPort`, which
   // those CLIs reject as an unknown flag — passing it crashed the dev server right after start, so
   // the preview never came up (blank). They accept a plain `--port`; if the port still drifts,
   // detectDevPort downstream re-points the preview at the REAL bound port.
   if (isPmDev && (framework === 'astro' || framework === 'nuxt' || framework === 'angular')) {
-    return `${command} --port ${port}`;
+    return appendServerFlags(command, `--port ${port}`);
   }
   // CRA (react-scripts) takes neither `--port` nor `--strictPort` (it reads PORT= from the env) —
   // leave its command untouched rather than append flags it ignores/rejects.
   if (framework === 'cra') return command;
   // Ambiguous pm-run dev/serve with no framework signal → keep the historical Vite assumption.
-  if (isPmDev) return `${command} --port ${port} --strictPort`;
+  if (isPmDev) return appendServerFlags(command, `--port ${port} --strictPort`);
   return command;
 }
 

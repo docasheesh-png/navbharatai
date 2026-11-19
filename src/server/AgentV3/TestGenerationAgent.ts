@@ -15,6 +15,7 @@ import projectPackage from '../../../package.json';
 // brand-new app; a suite the user cannot trust is worse than no suite at all. Pure core → tested.
 
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
+import { viteRangeOf, vitestRangeForVite, type ViteDependencyMetadata } from './DependencyAutoFix';
 
 export type ExportedFn = FunctionDef;
 
@@ -251,12 +252,17 @@ export function planAutoTests(
 }
 
 /**
- * The Vitest range a generated test is declared against. It is this repository's own range, which runs on
- * the same Vite major the app template ships (vitest 5 supports vite ^6 || ^7 || ^8); a test asserts the
- * two stay equal, so the pin cannot drift from a version we actually run.
+ * The default Vitest range verified by this repository's CI. Existing projects can use an older Vite;
+ * generatedVitestRange selects its compatible family instead of imposing this default on them.
  */
 // The generated runner uses the range verified by this repository's own CI.
 export const VITEST_RANGE = projectPackage.devDependencies.vitest;
+
+/** All test-producing callers share the same compatibility rule as dependency installation. */
+export function generatedVitestRange(packageJson: string | null | undefined, metadata: ViteDependencyMetadata = {}): string {
+  const compatible = vitestRangeForVite(viteRangeOf(packageJson, metadata));
+  return compatible === vitestRangeForVite(projectPackage.devDependencies.vite) ? VITEST_RANGE : compatible;
+}
 
 /**
  * THE MODEL ASKED FOR TESTS, SO THE TESTS MUST BE ABLE TO RUN (autopsy a7aa447c, 2026-09-29).
@@ -313,7 +319,7 @@ export const PLATFORM_TEST_SCRIPT = 'vitest run';
  * Returns the new package.json text, or null when nothing was missing, when it cannot be parsed, or when
  * there is nothing to read — never a guess written over a file we could not understand. PURE.
  */
-export function withVitestDeclared(packageJson: string | null | undefined): string | null {
+export function withVitestDeclared(packageJson: string | null | undefined, metadata: ViteDependencyMetadata = {}): string | null {
   if (packageJson == null) return null;
   let pkg: Record<string, unknown>;
   try { pkg = JSON.parse(packageJson) as Record<string, unknown>; } catch { return null; }
@@ -327,12 +333,48 @@ export function withVitestDeclared(packageJson: string | null | undefined): stri
   const runnable = existing.length > 0 && !/no test specified/i.test(existing);
   if (declared && runnable) return null;
   if (!declared) {
+    const range = generatedVitestRange(packageJson, metadata);
+    // An explicit Vite range with no verified compatible runner needs review; never write an empty
+    // npm range or replace the user's framework to make a generated test install.
+    if (!range) return null;
     const dev = (pkg.devDependencies && typeof pkg.devDependencies === 'object' ? pkg.devDependencies : {}) as Record<string, string>;
-    pkg.devDependencies = { ...dev, vitest: VITEST_RANGE };
+    pkg.devDependencies = { ...dev, vitest: range };
   }
   // An author's own script is never overwritten — only a missing or placeholder one is filled.
   if (!runnable) pkg.scripts = { ...scripts, test: PLATFORM_TEST_SCRIPT };
   return `${JSON.stringify(pkg, null, 2)}\n`;
+}
+
+/** A manifest change proves a declaration, never an installation or a passing suite. */
+export function vitestDeclarationNote(before: string | null | undefined, after: string | null | undefined, metadata: ViteDependencyMetadata = {}): string {
+  if (!after) {
+    try {
+      const pkg = JSON.parse(before ?? '{}');
+      const declared = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']
+        .some((section) => pkg?.[section]?.vitest != null);
+      if (!declared && before && !generatedVitestRange(before, metadata)) {
+        return 'No compatible Vitest version was automatically declared for this Vite range. Preserve the tests and resolve runner compatibility before executing them.';
+      }
+    } catch { /* An unreadable manifest is not evidence of an incompatible version. */ }
+    return '';
+  }
+  if (before === after) return '';
+  try {
+    const oldPkg = JSON.parse(before ?? '{}');
+    const pkg = JSON.parse(after);
+    const existing = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']
+      .some((section) => oldPkg?.[section]?.vitest != null);
+    const changes: string[] = [];
+    if (!existing && typeof pkg?.devDependencies?.vitest === 'string') changes.push(`Declared vitest@${pkg.devDependencies.vitest}`);
+    if (oldPkg?.scripts?.test !== pkg?.scripts?.test && pkg?.scripts?.test === PLATFORM_TEST_SCRIPT) changes.push('added the test script');
+    return changes.length ? `${changes.join(' and ')}. Dependencies must be synced before running tests; no test execution is proved by this declaration.` : '';
+  } catch { return ''; }
+}
+
+/** Names and parameter names cannot supply expected behavior; do not call a skeleton coverage. */
+export function generatedUnitTestNote(path: string, kind: 'create' | 'modify' = 'create'): string {
+  return `${kind === 'modify' ? 'Updated' : 'Created'} ${path} with export smoke checks and pending behavioural cases (it.todo). `
+    + 'Add real inputs and expected results before treating it as behaviour coverage. Preserve those tests if the runner needs a dependency fix.';
 }
 
 /**
@@ -368,9 +410,8 @@ export function testSkeletonsCanRun(packageJson: string | null | undefined): boo
  * because a missing skeleton costs nothing and a broken release build costs the user the app. Pure.
  */
 /**
- * What the user is told about the skeletons just written. "Runnable" only when the project really
- * declares vitest — otherwise the one command that makes them run (autopsy SignBridge, 2026-09-26: the
- * user read "runnable Vitest skeletons" about files that import a package the project does not have).
+ * What the user is told about the skeletons just written. Declared is not installed or executed
+ * (cdffbb71): even a manifest with Vitest produced "vitest: not found" and incompatible type files.
  * PURE.
  */
 export function starterTestsNarration(paths: readonly string[], packageJson: string | null | undefined): string {
@@ -382,8 +423,10 @@ export function starterTestsNarration(paths: readonly string[], packageJson: str
     declared = !!(pkg?.dependencies?.vitest || pkg?.devDependencies?.vitest);
   } catch { declared = false; }
   return declared
-    ? `🧪 Scaffolded ${list} — runnable Vitest skeletons with TODO markers for you to fill in real assertions.`
-    : `🧪 Scaffolded ${list} — Vitest skeletons with TODO markers for you to fill in. Vitest is not installed in this project yet; run \`npm install -D vitest\` and then \`npx vitest\` to run them.`;
+    ? `🧪 Scaffolded ${list} — Vitest is declared; installation and execution are not verified. Export smoke checks are included; behavioural cases remain pending (it.todo).`
+    : generatedVitestRange(packageJson)
+      ? `🧪 Scaffolded ${list} — Vitest skeletons with pending behavioural cases (it.todo). Vitest is not declared; run \`npm install -D vitest@${generatedVitestRange(packageJson)}\` and then \`npx vitest\` to run them. No test execution is verified.`
+      : `🧪 Scaffolded ${list} — behavioural cases remain pending (it.todo). No compatible Vitest version was selected for this Vite range; resolve compatibility before installation or execution. The tests are unverified.`;
 }
 
 export function buildTsconfigPath(packageJson: string | null | undefined): string | null {

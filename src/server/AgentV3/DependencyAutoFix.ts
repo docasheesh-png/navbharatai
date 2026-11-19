@@ -16,6 +16,7 @@
 import { NATIVE_CAPABILITIES, REGISTRY_CAPACITOR_MAJOR } from './nativeCapabilities';
 import { analyzeDependencies, rangeMajor, typesToRuntime, type DependencyIssue } from './DependencyAnalysis';
 import { isPlatformE2eScaffold } from './e2eScaffold';
+import { minVersion, satisfies, subset, valid, validRange } from 'semver';
 
 /**
  * Curated well-known npm packages → a known-good caret range. Deliberately EXCLUDES bare names that
@@ -278,24 +279,56 @@ export function reactRangeOf(packageJson: string | null | undefined): string | u
 const VITEST_FAMILY = new Set(['vitest', '@vitest/coverage-v8', '@vitest/ui']);
 
 /**
- * The vitest major that runs on this Vite (autopsy 7d79254b). vitest 5 peers Vite ^6.4 / ^7 / ^8; vitest 3
- * peers ^5 / ^6 / ^7. So a Vite 5 project gets '^3' and everything else — our own Vite 8 scaffold and a
- * project with no Vite at all — gets '^5'. Verified against the npm registry's peerDependencies, not
- * guessed. PURE.
+ * A Vitest family whose supported Vite range contains the WHOLE requested range (7d79254b/cdffbb71).
+ * The earlier first-major comparison incorrectly chose Vitest 5 for Vite 6.0–6.3, and Vitest 3 for
+ * Vite 4. Registry-verified: Vitest 5.1.0 peers ^6.4 || ^7 || ^8; Vitest 3.0.0 depends on ^5 || ^6;
+ * 3.2.0 adds ^7.0.0-0; 0.34.6 depends on ^3.1 || ^4 || ^5.0.0-0. Adjacent stable ranges are merged
+ * below so semver.subset can also prove bounded comparisons such as >=6.4.0 <9.
+ * Empty context keeps the current default. An explicit unknown/unsupported range returns '' for
+ * manual review, as knownDepVersion/planDependencyAutoFix already require; never guess a pin. PURE.
  */
 export function vitestRangeForVite(viteRange: string | null | undefined): string {
-  const major = firstMajor(String(viteRange ?? ''));
-  return major !== null && major <= 5 ? '^3' : '^5';
+  const requested = String(viteRange ?? '').trim();
+  if (!requested) return '^5';
+  if (!validRange(requested) || !minVersion(requested)) return '';
+  const families = [
+    { vitest: '^5', vite: '>=6.4.0 <9.0.0-0' },
+    { vitest: '^3', vite: '>=5.0.0 <7.0.0-0' },
+    { vitest: '^3.2.0', vite: '>=5.0.0 <8.0.0-0 || ^7.0.0-0' },
+    { vitest: '^0.34.6', vite: '>=3.1.0 <6.0.0-0 || ^5.0.0-0' },
+  ];
+  const version = valid(requested);
+  return families.find((family) => version ? satisfies(version, family.vite) : subset(requested, family.vite))?.vitest ?? '';
 }
 
-/** The project's declared Vite range, or undefined when package.json is absent, unreadable or has none. */
-export function viteRangeOf(packageJson: string | null | undefined): string | undefined {
+export interface ViteDependencyMetadata {
+  /** The package Node resolves at the workspace's node_modules/vite/package.json. */
+  installedVitePackageJson?: string | null;
+  /** npm lockfile v1/v2/v3; a root Vite can be transitive (Angular 18's build tool, for example). */
+  packageLockJson?: string | null;
+}
+
+/** Prefer the requested direct range, then actual installed/locked Vite metadata. No framework map.
+ * Angular's manifest declares its builder, not Vite, so reading only direct dependencies picked
+ * Vitest 5 against its resolved Vite 5 in cdffbb71. Nested Vite copies do not prove the root resolution.
+ */
+export function viteRangeOf(packageJson: string | null | undefined, metadata: ViteDependencyMetadata = {}): string | undefined {
   if (typeof packageJson !== 'string') return undefined;
   try {
     const pkg = JSON.parse(packageJson) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> };
     const v = pkg?.devDependencies?.vite ?? pkg?.dependencies?.vite;
-    return typeof v === 'string' ? v : undefined;
+    if (typeof v === 'string' && v.trim()) return v;
   } catch { return undefined; }
+  try {
+    const installed = JSON.parse(metadata.installedVitePackageJson ?? 'null');
+    if (installed?.name === 'vite' && typeof installed.version === 'string' && valid(installed.version)) return installed.version;
+  } catch { /* An unavailable installed package does not invalidate an authoritative lockfile. */ }
+  try {
+    const lock = JSON.parse(metadata.packageLockJson ?? 'null');
+    const version = lock?.packages?.['node_modules/vite']?.version ?? lock?.dependencies?.vite?.version;
+    if (typeof version === 'string' && valid(version)) return version;
+  } catch { /* No resolved Vite evidence — keep the existing no-Vite default. */ }
+  return undefined;
 }
 
 // Matches an npm/pnpm/yarn INSTALL sub-command (not `npx prisma generate`, not `npm run`, not a bare
@@ -662,7 +695,7 @@ const CODE_FILE_RE = /\.(?:m?[jt]sx?)$/i;
  * — any parse/shape problem returns the input unchanged. It can only turn a missing-dependency build into a
  * working one. Pure; never throws.
  */
-export function applyWellKnownMissingDeps(files: Record<string, string>): DependencyReconcileResult {
+export function applyWellKnownMissingDeps(files: Record<string, string>, metadata: ViteDependencyMetadata = {}): DependencyReconcileResult {
   const unchanged: DependencyReconcileResult = { files, added: [] };
   const pkgRaw = files?.['package.json'];
   if (typeof pkgRaw !== 'string') return unchanged;
@@ -691,7 +724,14 @@ export function applyWellKnownMissingDeps(files: Record<string, string>): Depend
   let missing: DependencyIssue[];
   try { missing = analyzeDependencies(external, pkgRaw).filter((d) => d.kind === 'missing'); }
   catch { return unchanged; }
-  const plan = planDependencyAutoFix(missing, { viteRange: viteRangeOf(pkgRaw), reactRange: reactRangeOf(pkgRaw), capacitorRange: capacitorRangeOf(pkgRaw) });
+  const plan = planDependencyAutoFix(missing, {
+    viteRange: viteRangeOf(pkgRaw, {
+      packageLockJson: files['package-lock.json'],
+      installedVitePackageJson: files['node_modules/vite/package.json'],
+      ...metadata,
+    }),
+    reactRange: reactRangeOf(pkgRaw), capacitorRange: capacitorRangeOf(pkgRaw),
+  });
   if (plan.autofixable.length === 0) return unchanged;
 
   let pkg: Record<string, unknown>;

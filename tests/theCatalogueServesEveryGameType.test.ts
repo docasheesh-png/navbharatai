@@ -4,16 +4,16 @@
  * building_A entry byte for byte (same source and derived sha256, 70,720 bytes, 828 triangles).
  */
 import { describe, expect, it } from 'vitest';
-import { REVIEWED_GAME_ASSETS, validateCatalogue } from '../src/server/AgentV3/gameAssets/providers';
+import { REVIEWED_GAME_ASSETS, validateCatalogue, catalogueStorageBytes, CATALOGUE_STORAGE_BUDGET_BYTES } from '../src/server/AgentV3/gameAssets/providers';
 import { gameAssetRequirements } from '../src/server/AgentV3/gameAssets/assetPlan';
 
 const subjects = (prompt: string) => gameAssetRequirements(prompt, REVIEWED_GAME_ASSETS).map((r) => r.subject).sort();
 
 describe('the expanded catalogue', () => {
-  it('is valid, within its 64-model bound, and every new entry is pinned CC0 KayKit with its own pack licence', () => {
+  it('is valid, within its storage budget (was a 64-model bound until 2026-11-19), and every new entry is pinned CC0 KayKit with its own pack licence', () => {
     validateCatalogue(REVIEWED_GAME_ASSETS);
     expect(REVIEWED_GAME_ASSETS.length).toBeGreaterThanOrEqual(35);
-    expect(REVIEWED_GAME_ASSETS.length).toBeLessThanOrEqual(64);
+    expect(catalogueStorageBytes(REVIEWED_GAME_ASSETS)).toBeLessThanOrEqual(CATALOGUE_STORAGE_BUDGET_BYTES);
     const added = REVIEWED_GAME_ASSETS.filter((a) => a.license.reviewedAt === '2026-11-04' && a.format === 'gltf');
     expect(added.length).toBe(28);
     for (const a of added) {

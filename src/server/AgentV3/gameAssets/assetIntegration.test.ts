@@ -3,9 +3,10 @@ import { createDurableAssetCache } from './assetCache';
 import { createAssetProviders, validateCatalogue, polyHavenContainsFile, REVIEWED_GAME_ASSETS } from './providers';
 import { syntheticGlb, syntheticCandidate, paddedSyntheticGlb } from '../../../../tests/fixtures/gameAssetFixtures';
 import { compactGlb } from './assetOptimize';
+import { candidateMatches } from './assetPolicy';
 import { acquireGameAsset } from './assetEngine';
 import { persistProjectAsset, type GameAssetWorkspace } from './assetProject';
-import { prepareGameAssets } from './assetSeed';
+import { prepareGameAssets, MIT_PERMISSION_NOTICE } from './assetSeed';
 import { externalGameAssetsEnabled, gameAssetRequirements } from './assetPlan';
 import { materializeAssets } from '../WorkspaceAssetStore';
 import { contentTypeFor } from '../bucketPublish';
@@ -27,6 +28,18 @@ function rig(bytes = syntheticGlb(), candidate = syntheticCandidate(bytes)) {
 }
 
 describe('L3 acquisition, durable restore and bundle contract (synthetic)', () => {
+  it('ships the full MIT permission notice with an MIT model (admin decision 2026-11-19)', async () => {
+    const bytes = syntheticGlb(); const base = syntheticCandidate(bytes);
+    const mit = { ...base, license: { ...base.license, spdx: 'MIT' as const, attribution: 'Copyright (c) 2023 Kenney' } };
+    const r = rig(bytes, mit);
+    const result = await prepareGameAssets({ prompt:'3D human walking game', workspaceId:'fixture-workspace', workspace:r.workspace, signal:new AbortController().signal, dependencies:r.deps, persistence:r.persistence, catalogue:[mit], env:{ AGENTV3_EXTERNAL_GAME_ASSETS:'on' } });
+    expect(result.status).toBe('prepared');
+    const credits = r.texts.get('public/game-assets/ATTRIBUTION.txt')!;
+    expect(credits).toContain('Copyright (c) 2023 Kenney');
+    expect(credits).toContain(MIT_PERMISSION_NOTICE);
+    const cc0 = rig(); await prepareGameAssets({ prompt:'3D human walking game', workspaceId:'fixture-workspace', workspace:cc0.workspace, signal:new AbortController().signal, dependencies:cc0.deps, persistence:cc0.persistence, catalogue:[cc0.candidate], env:{ AGENTV3_EXTERNAL_GAME_ASSETS:'on' } });
+    expect(cc0.texts.get('public/game-assets/ATTRIBUTION.txt')).not.toContain('Permission is hereby granted');
+  });
   it('is off by default, and the release catalogue contains no invented assets', async () => {
     expect(externalGameAssetsEnabled({})).toBe(false);
     expect(() => validateCatalogue(REVIEWED_GAME_ASSETS)).not.toThrow();
@@ -38,7 +51,14 @@ describe('L3 acquisition, durable restore and bundle contract (synthetic)', () =
   it('requests animal locomotion without substituting a fox for other animals or inventing clips', () => {
     expect(gameAssetRequirements('walking foxes', REVIEWED_GAME_ASSETS)).toEqual([{ subject: 'fox', animation: 'walk' }]);
     expect(gameAssetRequirements('running human', REVIEWED_GAME_ASSETS)).toEqual([{ subject: 'human', animation: 'run' }]);
-    expect(REVIEWED_GAME_ASSETS.filter(c => c.subjects.includes('dog'))).toEqual([]);
+    // 2026-11-19: a real STATIC dog model exists now. A walking dog still gets no model (never the fox, never an invented clip):
+    // the requirement asks for the walk role and no dog entry carries one, so the procedural dog keeps walking.
+    const dogs = REVIEWED_GAME_ASSETS.filter(c => c.subjects.includes('dog'));
+    expect(dogs.length).toBeGreaterThan(0);
+    expect(dogs.every(c => !c.subjects.includes('fox') && c.animations.length === 0)).toBe(true);
+    const walkingDog = gameAssetRequirements('walking dog', REVIEWED_GAME_ASSETS);
+    expect(walkingDog).toEqual([{ subject: 'dog', animation: 'walk' }]);
+    expect(REVIEWED_GAME_ASSETS.filter(c => candidateMatches(c, walkingDog[0]))).toEqual([]);
   });
   it.each([
     // UPDATED 2026-11-04 (L3 step 4): named subjects first, then the scenery this kind of game needs

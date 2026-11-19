@@ -28,7 +28,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "54151cd273d6b21c0c2fb1f56f435d362499321c648585b95e1c255942be2a65",
     "9a4875fa493df5133f278972dca8e813c763b95202b37f794398b2dcdabd5cfe",
     "7527a2e5ef0ac683fdcf5fa698656303fb57aa26a91255683d265afdcaaac58e",
-    "7d363cac186c24083cfa9259db22c6d5221b65c07c410d3e2a7a548645b20616"
+    "7d363cac186c24083cfa9259db22c6d5221b65c07c410d3e2a7a548645b20616",
+    "0bde20f3c613c37e727034203a8642f6829b74a93ba3930490c2958d5cfdc8a7"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -149,7 +150,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "6fd476d425ebacb3e80550606f0c2504536fb3f374b3eae871effe8b07acac96"
   ],
   "src/game/core/input.ts": [
-    "179f0736905e6eb0790e36381ab418ca2da37db6ddcca9608e7e6212e095ad4f"
+    "179f0736905e6eb0790e36381ab418ca2da37db6ddcca9608e7e6212e095ad4f",
+    "b9506b4d2520bbd571005e33646707b84ee4d99fedaf674ea2473b2f34bd2dd3"
   ],
   "src/game/core/loop.ts": [
     "1e560fe9eed32f2e1a010d27356ba7ff43b130e90efdeb954a9c3bbb5f167898"
@@ -228,13 +230,15 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/systems/projectile.ts": [
     "10553042b746135b191f535de32868a67cb30feb2dea7ff7602a4f99730ad71f",
-    "f95683e7a263734463937bf84d42837041cb8e6ce4e8b82b5c9f393c5fe0c7a7"
+    "f95683e7a263734463937bf84d42837041cb8e6ce4e8b82b5c9f393c5fe0c7a7",
+    "257db10ef378cbaa1b5540bfd59cf66837584900d1520d304a84f86a04a6a124"
   ],
   "src/game/systems/spawner.ts": [
     "01a6cdaf392fce48c6e970ad68fb77c20deef9710b9f900a199ca587312389a5"
   ],
   "src/game/systems/weapon.ts": [
-    "fec88fc354b406a35df471174312633b58b63e064578b925d2408e211cb83828"
+    "fec88fc354b406a35df471174312633b58b63e064578b925d2408e211cb83828",
+    "52f2b3fe7299c7db14167b7649a98dbc7cb249cb31187aa9530e7e4584daf841"
   ],
   "src/game/three/atmosphere.ts": [
     "ef9d092d175f1880430ab2e7a0285393433cf3a2f86d2105af4eda44b4e922b8"
@@ -264,7 +268,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/three/humanoid.ts": [
     "3de226c2c8636dae3e27f2f9f05236ea4c5f990e372ae792a49d9587a9e5d8d0",
     "c305ea5884c401bffe55eafb360752ea3b2fb9f7124107a5a0c4c9ff1953d5e9",
-    "f824eab134e9159d672a848eb66f1407629dc1d4e656906320e5032cffee5e95"
+    "f824eab134e9159d672a848eb66f1407629dc1d4e656906320e5032cffee5e95",
+    "6e2d317b6d609072819df5a88fb996b9476d59bc554312ad7ee13d3eb2b7b33d"
   ],
   "src/game/three/lighting.ts": [
     "7b1f89bdc9398b48a10fcc2fd1fb77a9577a2925dee1e14120857e5ac3e8be96"
@@ -300,7 +305,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "76bfaffc33078726ba86c1f017d55978e4293969d67d5dad252c60457ece2570",
     "34fac543f3f341b2e3190b80352587f3122896c3604fa372ed7f9c1fe5206b65",
     "0cb5ef03a66577557e110ca20dc61008af6368bd30b07174130d6ef045b6588c",
-    "cb918bf48ca8f64f2943539913e658a108761f1e37b6ea6ac5d725bbd9eb5ab8"
+    "cb918bf48ca8f64f2943539913e658a108761f1e37b6ea6ac5d725bbd9eb5ab8",
+    "fe2d66923322f205defff093200ecc727890ed99f7feb58060008cfb9a9b4f9e"
   ],
   "src/game/three/renderer.ts": [
     "e3bd063f8ab3ab10a658e8d808c0155a163ca15fb0d8744a4cd7d4fb902b7c19",
@@ -332,7 +338,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/ui/touchControls.ts": [
     "144b2a9ed0824bfabe5d47c2d41bcc031cc294a6c43a14fb9bbdfbc152a2096d",
     "388a4b48dcd4c89508010c3d4c4d9104efeba0f0a714742fbc313c1d0af86f67",
-    "7d8613f9d3a9409db20d532c5b8d00680ab716b06bdad995266d20af28db88b0"
+    "7d8613f9d3a9409db20d532c5b8d00680ab716b06bdad995266d20af28db88b0",
+    "9ed85b5c584048f50b94701dbf2aa7a7cec2516e478122d77cdad0dae21eabc2",
+    "2871c2d0b8d02e1f9adcef7aabdfe4624d71cd2b28f1c9341c5c1a81c52fe513"
   ],
   "src/game/world2d/index.ts": [
     "b294ff67e14198e9b23c99563f6c683d2626b416ca5c64b828dd37baec015291"

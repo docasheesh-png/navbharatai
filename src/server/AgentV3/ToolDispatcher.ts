@@ -251,6 +251,7 @@ import { isKeyboardOnlyGame, touchGameNoteEnabled, touchPlayableNote } from './t
 import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type VehicleShapeHalves } from './handWrittenVehicleScan';
 import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, type GroundShapeHalves } from './handWrittenGroundScan';
 import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, endlessRaceCourseBlocker, type RaceCourseHalves } from './endlessRaceCourse';
+import { actionPoseHalves, actionPoseFinding, actionPoseNote, actionPoseWarning, isGameOwnSource, type ActionPoseHalves } from './actionVisibility';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
@@ -1174,6 +1175,9 @@ export class ToolDispatcher {
   /** A race whose course the request did not describe must stream the endless track (endlessRaceCourse.ts, 2026-11-18). */
   private _endlessRaceCourse = false;
   private _raceCourseIndex = new Map<string, RaceCourseHalves>();
+  /** A game's own player body that reads action buttons and never poses (actionVisibility.ts) — said once per build. */
+  private _actionPoseIndex = new Map<string, ActionPoseHalves>();
+  private _actionPoseNoted = false;
   private _raceCourseNoted = false;
   /** Recipe-known packages a hand-written import already had its one install attempt for (see below). */
   private _importInstallTried = new Set<string>();
@@ -2254,7 +2258,7 @@ export class ToolDispatcher {
         // Routed through `blockers` deliberately: `appIsDone` already refuses any report carrying
         // one, so the done signal, the weak checkpoint and every other reader inherit this at once
         // instead of each learning it separately. See stillTheStarterApp.ts.
-        return await this._blockIfRaceHasNoEndlessCourse(await this._blockIfStillTheStarterApp(report));
+        return await this._warnIfActionsAreNotSeen(await this._blockIfRaceHasNoEndlessCourse(await this._blockIfStillTheStarterApp(report)));
       })(), readinessTimeoutMs(), 'assessBuildReadiness');
     } catch {
       return unassessedReadinessReport();
@@ -2304,6 +2308,30 @@ export class ToolDispatcher {
       }
       const blocker = endlessRaceCourseBlocker(files);
       if (blocker) return { ...report, ready: false, blockers: [...report.blockers, blocker] };
+    } catch { /* best-effort — never fail a build on this check's own trouble */ }
+    return report;
+  }
+
+  /**
+   * The game's own player body reads an action button and never plays a pose (actionVisibility.ts). A WARNING, not a
+   * blocker: the game still plays, but the user sees a shot or a jump with a character standing still. Reads the
+   * workspace as it is now, every lane's files; fail-open on its own trouble.
+   */
+  private async _warnIfActionsAreNotSeen(report: ReadinessReport): Promise<ReadinessReport> {
+    try {
+      const listed = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'action-pose-list');
+      const paths = listed.map((p) => p.replace(/^\.?\//, ''));
+      // Only a game is checked, and only its OWN files are read (kit files are never the game's body).
+      if (!paths.some((p) => p.startsWith('src/game/'))) return report;
+      const sources = paths.filter((p) => isGameOwnSource(p));
+      if (sources.length > RACE_SCAN_MAX_FILES) return report;
+      const index = new Map<string, ActionPoseHalves>();
+      for (const p of sources) {
+        try { index.set(p, actionPoseHalves(p, await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'action-pose-read'))); }
+        catch { return report; }
+      }
+      const finding = actionPoseFinding(index);
+      if (finding) return { ...report, warnings: [...report.warnings, actionPoseWarning(finding)] };
     } catch { /* best-effort — never fail a build on this check's own trouble */ }
     return report;
   }
@@ -4871,6 +4899,15 @@ export class ToolDispatcher {
         for (const p of paths) this._raceCourseIndex.set(p, raceCourseHalves(p, files[p]));
         const finding = raceCourseFinding(this._raceCourseIndex);
         if (finding) { vehicle += endlessRaceCourseNote(finding); this._raceCourseNoted = true; }
+      } catch { /* a note is best-effort */ }
+    }
+    // 🎬 A body of the game's own that reads Fire / Attack / Jump and never plays a pose (admin 2026-11-19: "goli chalne
+    // lagi par character goli chalate huye dikha nahi") — once per build, while the file is open.
+    if (!this._actionPoseNoted) {
+      try {
+        for (const p of paths) this._actionPoseIndex.set(p, actionPoseHalves(p, files[p]));
+        const finding = actionPoseFinding(this._actionPoseIndex);
+        if (finding) { vehicle += actionPoseNote(finding); this._actionPoseNoted = true; }
       } catch { /* a note is best-effort */ }
     }
     const style = await this.styleWriteNotes(files);

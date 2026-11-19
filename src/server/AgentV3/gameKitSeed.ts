@@ -57,6 +57,7 @@ import { namedNonSmartphone } from './deviceTarget';
 import { analyzeRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { wantsSceneObjects, heroObjectContract } from '../lib/heroObjectSpec';
 import { world2dIntent } from './world2dIntent';
+import { ACTION_VISIBLE_RULE } from './actionVisibility';
 
 /** The recipes the seed may run, in the order the architect prompt lists them (runtime first, shell last). */
 export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell' | 'generate_world_2d';
@@ -258,6 +259,7 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
     // A race whose course the request did not describe runs on the kit's endless track (endlessRaceCourse.ts):
     // said only when the 3D layer that holds createTrackStream is really on disk.
     opts.endlessRaceCourse && has('generate_game_3d') ? ENDLESS_RACE_COURSE_RULE : '',
+    ACTION_VISIBLE_RULE,
     has('generate_world_2d')
       ? '🗺️ THE BIG 2D WORLD IS ALREADY IN src/game/world2d/: the user asked for a big map, so build the game ON it —'
         + ' createWorld2D(...) for the map (endless), createWorldRenderer(world).draw(ctx, player.x, player.y, w, h) every frame'

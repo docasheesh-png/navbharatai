@@ -87,6 +87,8 @@ describe('the readiness gate wiring', () => {
   });
   it('the gate is called from assessBuildReadiness (source guard)', () => {
     const src = readFileSync(join(__dirname, '..', 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
-    expect(src).toMatch(/return await this\._blockIfRaceHasNoEndlessCourse\(await this\._blockIfStillTheStarterApp\(report\)\);/);
+    // The race gate wraps the starter gate inside assessBuildReadiness's return (other gates may wrap it in turn).
+    const ret = /return await [^\n]*this\._blockIfRaceHasNoEndlessCourse\(await this\._blockIfStillTheStarterApp\(report\)\)/;
+    expect(src).toMatch(ret);
   });
 });

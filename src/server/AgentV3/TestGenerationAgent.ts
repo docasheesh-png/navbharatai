@@ -264,6 +264,21 @@ export function generatedVitestRange(packageJson: string | null | undefined, met
   return compatible === vitestRangeForVite(projectPackage.devDependencies.vite) ? VITEST_RANGE : compatible;
 }
 
+function hasVitestDeclaration(pkg: Record<string, unknown>): boolean {
+  return ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'].some((section) => {
+    const dependencies = pkg[section];
+    return !!dependencies && typeof dependencies === 'object' && 'vitest' in dependencies;
+  });
+}
+
+/** Adding only a test script never selects a new runner version. */
+export function needsVitestVersionSelection(packageJson: string | null | undefined): boolean {
+  try {
+    const pkg = JSON.parse(packageJson ?? 'null');
+    return !!pkg && typeof pkg === 'object' && !Array.isArray(pkg) && !hasVitestDeclaration(pkg);
+  } catch { return false; }
+}
+
 /**
  * THE MODEL ASKED FOR TESTS, SO THE TESTS MUST BE ABLE TO RUN (autopsy a7aa447c, 2026-09-29).
  *
@@ -324,8 +339,7 @@ export function withVitestDeclared(packageJson: string | null | undefined, metad
   let pkg: Record<string, unknown>;
   try { pkg = JSON.parse(packageJson) as Record<string, unknown>; } catch { return null; }
   if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return null;
-  const has = (k: string) => { const sec = pkg[k]; return !!sec && typeof sec === 'object' && 'vitest' in (sec as object); };
-  const declared = has('dependencies') || has('devDependencies') || has('peerDependencies') || has('optionalDependencies');
+  const declared = hasVitestDeclaration(pkg);
   const scripts = (pkg.scripts && typeof pkg.scripts === 'object' && !Array.isArray(pkg.scripts) ? pkg.scripts : {}) as Record<string, string>;
   const existing = typeof scripts.test === 'string' ? scripts.test.trim() : '';
   // The npm-init placeholder is not a test command — `testRunner` skips it for the same reason, and a
@@ -350,8 +364,7 @@ export function vitestDeclarationNote(before: string | null | undefined, after: 
   if (!after) {
     try {
       const pkg = JSON.parse(before ?? '{}');
-      const declared = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']
-        .some((section) => pkg?.[section]?.vitest != null);
+      const declared = !!pkg && typeof pkg === 'object' && !Array.isArray(pkg) && hasVitestDeclaration(pkg);
       if (!declared && before && !generatedVitestRange(before, metadata)) {
         return 'No compatible Vitest version was automatically declared for this Vite range. Preserve the tests and resolve runner compatibility before executing them.';
       }
@@ -362,8 +375,7 @@ export function vitestDeclarationNote(before: string | null | undefined, after: 
   try {
     const oldPkg = JSON.parse(before ?? '{}');
     const pkg = JSON.parse(after);
-    const existing = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']
-      .some((section) => oldPkg?.[section]?.vitest != null);
+    const existing = !!oldPkg && typeof oldPkg === 'object' && !Array.isArray(oldPkg) && hasVitestDeclaration(oldPkg);
     const changes: string[] = [];
     if (!existing && typeof pkg?.devDependencies?.vitest === 'string') changes.push(`Declared vitest@${pkg.devDependencies.vitest}`);
     if (oldPkg?.scripts?.test !== pkg?.scripts?.test && pkg?.scripts?.test === PLATFORM_TEST_SCRIPT) changes.push('added the test script');

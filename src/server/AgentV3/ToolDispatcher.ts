@@ -207,7 +207,7 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, reactRangeOf, capacitorRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, restoreInconsistentDowngrades, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, reactRangeOf, capacitorRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, restoreInconsistentDowngrades, npmInstallMaskedFailure, needsViteDependencyMetadata, installSelectsVitestVersion, type ViteDependencyMetadata } from './DependencyAutoFix';
 import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { resolveStringArg, missingArgMessage } from './toolArgRepair';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
@@ -257,7 +257,7 @@ import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
-import { withVitestDeclared, recipeShipsVitestTest, vitestDeclarationNote, generatedUnitTestNote } from './TestGenerationAgent';
+import { withVitestDeclared, recipeShipsVitestTest, vitestDeclarationNote, generatedUnitTestNote, needsVitestVersionSelection } from './TestGenerationAgent';
 import { isAppAnalysisPath } from './appAnalysisPaths';
 import { angularValidationPlan, parseAngularValidation, angularTypeScriptOnlyWriteNote } from './angularValidation';
 import { renderSeenThisBuild } from './renderProof';
@@ -1916,7 +1916,7 @@ export class ToolDispatcher {
       ? await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => undefined)
       : undefined;
     const pinCtx = pinPkg !== undefined
-      ? { viteRange: viteRangeOf(pinPkg, await this.viteDependencyMetadata()), reactRange: reactRangeOf(pinPkg), capacitorRange: capacitorRangeOf(pinPkg) }
+      ? { viteRange: viteRangeOf(pinPkg, await this.viteDependencyMetadata(pinPkg, installSelectsVitestVersion(command) ? ['vitest'] : [])), reactRange: reactRangeOf(pinPkg), capacitorRange: capacitorRangeOf(pinPkg) }
       : undefined;
     const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command, pinCtx));
     await this.ensureSandboxPostgres(effectiveCommand);
@@ -3762,7 +3762,12 @@ export class ToolDispatcher {
    * output holds a vitest test. Every recipe writer calls it (`tests/aRecipeTestShipsItsRunner` is the census);
    * already declared, unreadable or no test ⇒ nothing. Returns the line for the tool result.
    */
-  private async viteDependencyMetadata(): Promise<{ installedVitePackageJson?: string; packageLockJson?: string }> {
+  private async viteDependencyMetadata(
+    packageJson: string | null | undefined,
+    automaticPackages: readonly string[],
+    knownMetadata: ViteDependencyMetadata = {},
+  ): Promise<ViteDependencyMetadata> {
+    if (!needsViteDependencyMetadata(packageJson, automaticPackages, knownMetadata)) return {};
     const [installedVitePackageJson, packageLockJson] = await Promise.all([
       this.actuator.readFile(this.workspaceId, 'node_modules/vite/package.json').catch(() => undefined),
       this.actuator.readFile(this.workspaceId, 'package-lock.json').catch(() => undefined),
@@ -3774,7 +3779,7 @@ export class ToolDispatcher {
     if (!recipeShipsVitestTest(files)) return '';
     try {
       const before = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => null);
-      const metadata = await this.viteDependencyMetadata();
+      const metadata = await this.viteDependencyMetadata(before, needsVitestVersionSelection(before) ? ['vitest'] : []);
       const after = withVitestDeclared(before, metadata);
       if (!after) return vitestDeclarationNote(before, after, metadata);
       await this.actuator.writeFile(this.workspaceId, 'package.json', after);
@@ -7085,7 +7090,12 @@ export class ToolDispatcher {
               let pkgJson: string | undefined;
               try { pkgJson = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgJson = undefined; }
               if (typeof pkgJson === 'string') {
-                const depRes = applyWellKnownMissingDeps({ 'package.json': pkgJson, ...astFiles }, await this.viteDependencyMetadata());
+                let depRes = applyWellKnownMissingDeps({ 'package.json': pkgJson, ...astFiles });
+                const metadata = await this.viteDependencyMetadata(pkgJson, depRes.added.map((dep) => dep.package), {
+                  installedVitePackageJson: astFiles['node_modules/vite/package.json'],
+                  packageLockJson: astFiles['package-lock.json'],
+                });
+                if (Object.keys(metadata).length) depRes = applyWellKnownMissingDeps({ 'package.json': pkgJson, ...astFiles }, metadata);
                 if (depRes.added.length) {
                   const newPkg = depRes.files['package.json'];
                   // Said only when it LANDED (autopsy SignBridge, 2026-09-26): on a verified-working app
@@ -7638,7 +7648,7 @@ export class ToolDispatcher {
         let declarationNote = '';
         try {
           const pkgBefore = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => null);
-          const metadata = await this.viteDependencyMetadata();
+          const metadata = await this.viteDependencyMetadata(pkgBefore, needsVitestVersionSelection(pkgBefore) ? ['vitest'] : []);
           const pkgAfter = withVitestDeclared(pkgBefore, metadata);
           declarationNote = vitestDeclarationNote(pkgBefore, pkgAfter, metadata);
           if (pkgAfter) {

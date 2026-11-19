@@ -308,6 +308,24 @@ export interface ViteDependencyMetadata {
   packageLockJson?: string | null;
 }
 
+/** Remote metadata has value only while automatically choosing a Vitest-family version. A direct
+ * Vite declaration or resolution already present in the caller's snapshot is authoritative. Keep
+ * this gate shared by declarations, command pinning and reconciliation: fresh kits must not read
+ * two unrelated files merely to discover that their explicit runner needs no change.
+ */
+export function needsViteDependencyMetadata(
+  packageJson: string | null | undefined,
+  automaticPackages: readonly string[],
+  knownMetadata: ViteDependencyMetadata = {},
+): boolean {
+  if (!automaticPackages.some((name) => VITEST_FAMILY.has(name))) return false;
+  try {
+    const pkg = JSON.parse(packageJson ?? 'null');
+    if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return false;
+  } catch { return false; }
+  return viteRangeOf(packageJson, knownMetadata) === undefined;
+}
+
 /** Prefer the requested direct range, then actual installed/locked Vite metadata. No framework map.
  * Angular's manifest declares its builder, not Vite, so reading only direct dependencies picked
  * Vitest 5 against its resolved Vite 5 in cdffbb71. Nested Vite copies do not prove the root resolution.
@@ -398,6 +416,15 @@ export function pinKnownDepsInInstallCommand(command: string, ctx?: PinContext):
         .join('');
     })
     .join('');
+}
+
+/** Ask the existing pinner whether Vite context can change this command. This deliberately reuses
+ * its parser and exact bare-package rules: uninstall, test runs, explicit versions, React and
+ * Capacitor installs cannot demand a Vite metadata read through a second, broader regex.
+ */
+export function installSelectsVitestVersion(command: string): boolean {
+  return pinKnownDepsInInstallCommand(command, { viteRange: '^5' })
+    !== pinKnownDepsInInstallCommand(command, { viteRange: '^8' });
 }
 
 /**

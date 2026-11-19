@@ -114,7 +114,7 @@ Fxx references point to the current platform fix inventory. Bxx references are e
 
 ## Additional defects discovered during implementation/review
 
-These seventeen rows are **not retroactively attributed to the historical report** and are excluded from the76-item historical bucket tally. Each is an implemented candidate at source preparation; full aggregate CI and explicit merge authorization remain required. Durable queue ownership is mapped below.
+These twenty rows are **not retroactively attributed to the historical report** and are excluded from the76-item historical bucket tally. Each is an implemented candidate at source preparation; full aggregate CI and explicit merge authorization remain required. Durable queue ownership is mapped below.
 
 | ID | Discovery | Cause and correction | Regression/proof boundary |
 |---|---|---|---|
@@ -137,6 +137,10 @@ These seventeen rows are **not retroactively attributed to the historical report
 | D16 | Static orphan detection ignored styles referenced by Angular CLI configuration. | F04 reads CLI/configuration and component stylesheet ownership, including inject:false. This is a source-reproduced sibling, not an observed styles.css warning in the report. | Four analyzer integrations individually fail when reverted; restored integrity5 files/203 tests pass. |
 
 | D17 | First full-gate coverage collection failed because initialLaneDeclineRoute.test.ts only searched direct AST children after the production writer moved inside a named awaited boundary. | The harness now executes the entire actual awaited production IIFE, real writeUnlessFrozen AST, retention/error helpers and guard ordering; exact-count checks and mutation controls remain. | Focused1 file/29 tests pass, including two writer-positive controls and six independent in-memory mutation witnesses (`initial-lane-harness-focused.log`). The first full gate remains incomplete; final-source full CI must rerun. |
+
+| D18 | Full coverage exposed two ETA wiring assertions pinned to the former four-argument unevidencedEtaTickLine call. | aLookupAppHasNothingToSave.test.ts and etaEvidenceWiring.test.ts did not account for the new independent remaining-window argument. Test updates must assert the new contract rather than remove its budget requirement. | Two failures in completed02adf28 coverage. Updated ETA-focused7 files/183 tests pass; isolated removal of the fifth delegated argument fails both arity pins. Restored witness subset passes33 tests. |
+| D19 | Vite compatibility metadata was read eagerly even when an already-declared runner made selection unnecessary. | The fresh-game regression observed extra reads of node_modules/vite/package.json and package-lock.json. The correction gates metadata loading at a shared demand boundary for four dispatcher callers, shares existing-runner presence across dependency sections and preserves compatibility checks when selecting a runner. | Corrected lazy selection passes9 files/230 tests. Removing loader demand guard fails6 tests including the original fresh-seed case; ignoring direct/snapshot evidence fails4; selecting a new runner despite an explicit declaration fails7. Restored2 files/58 tests pass. Server typecheck and unused-import check exit0; full CI remains required. |
+| D20 | An ETA branch test required literal return-object syntax and rejected the new return-withinWindow form. | etaEvidenceWiring.test.ts encoded expression shape instead of the required early-return behavior. Repair must preserve measured-branch termination and remaining-window validation. | ETA-focused7 files/183 tests pass. Isolated file-return removal fails2 tests, step-return removal fails1, and file-window-wrapper bypass fails1; restored witness subset passes33. Full coverage must rerun. |
 
 ## Reconciled timing, usage, cost and counters
 
@@ -230,6 +234,10 @@ At source preparation, **full CI/coverage/drills are not claimed passed**, and n
 
 First full-gate attempt on `2e651be`: the first12 checks exited0, including the informational signature check. Coverage then failed collecting `tests/initialLaneDeclineRoute.test.ts`; focused reproduction reported “Expected one production last deterministic integrity writer, found0” at line80. The run was stopped early: coverage is incomplete, and later production-build/bundle/boot checks and database/emulator drills were not run in that attempt. D17 tracks the harness correction. This does not convert earlier focused checks into a full-CI pass; the final commit must rerun the gate.
 
+A subsequent run on clean commit `02adf28` first failed coverage startup because a previous Vitest report-directory lock still named a zombie process. The owner was confirmed in process state `Z`; the lock was archived without displacing an active test process. That attempt is not credited with coverage execution. Its other checks, including11 database/emulator drills, exited0 with unchanged source fingerprints.
+
+The clean build-job retry on the same commit completed coverage and failed honestly: **3 failed/3,500 passed files;4 failed/54,094 passed/95 skipped tests,54,193 total**. Vitest reported1,540.27s; the command wrapper measured1,542.009s. All other16 recorded build-job checks exited0. Start/end source fingerprints were unchanged. D18–D20 enumerate all four assertion failures; this is not a full-CI pass. The coverage log also contains a metadata lookup warning (`ECONNRESET,403`), without evidence that it caused those assertion failures. Local Node22.23.4/npm11.18.0/Java21 match declared versions; Debian13/OpenJDK21 differ from GitHub’s Ubuntu/Temurin environment. GitHub checkout/cache/artifact-upload actions were not executed locally, and the branch-specific asset acceptance job was inapplicable. Corrected final-source checks must run again; earlier receipts do not certify later edits.
+
 ## Next-build observations and prevention priorities
 
 For a fresh Angular request, observe one valid CLI scaffold, no duplicated launch flags, and native template diagnostics before any “compiles” claim. For generated tests, observe compatible installed tooling and actual test results; uninstall/remove commands must contribute no test pass. For an Angular shell/configured stylesheet, observe no fake page or orphan/unused finding unless actual graph evidence supports it. After a generation timeout, optional finishing must preserve the remaining verification window, and a refused write must leave both saved and runtime bytes unchanged. Replacing only an untouched unverified starter must not trigger authored-project protection; incomplete inventories must keep protection.
@@ -240,7 +248,7 @@ The largest remaining structural gains are early framework-native contract valid
 
 Every historical E row and every discovered D row maps below to an individual durable queue row or explicit accepted evidence. Shared roots retain separate evidence rows. Nine accepted/evidence-only observations have no newly invented defect; their related actionable roots remain queued separately. Current implementations are **IN PROGRESS**, not resolved or merged. Historical/missing-evidence blockers include What/Why/Needs/Tried in the queue and B contracts above.
 
-Allocation: **Q-2784–Q-2875**, 89 new queue rows: 54 IN PROGRESS and 35 BLOCKED; nine accepted/evidence-only E dispositions. Q-2792, Q-2832 and Q-2837 are unallocated: their unpublished draft rows were removed after evidence review; no existing or published ID was closed or renumbered. Existing open PR #4303 owns four recurrence rows; #4300 remains a shared-file/compiler sibling owner, not silently absorbed.
+Allocation: **Q-2784–Q-2878**, 92 new queue rows: 57 IN PROGRESS and 35 BLOCKED; nine accepted/evidence-only E dispositions. Q-2792, Q-2832 and Q-2837 are unallocated: their unpublished draft rows were removed after evidence review; no existing or published ID was closed or renumbered. Existing open PR #4303 owns four recurrence rows; #4300 remains a shared-file/compiler sibling owner, not silently absorbed.
 
 | Evidence | Durable ID / disposition | State | Owner / reason |
 |---|---|---|---|
@@ -344,3 +352,7 @@ Allocation: **Q-2784–Q-2875**, 89 new queue rows: 54 IN PROGRESS and 35 BLOCKE
 | D16 | Q-2840 | IN PROGRESS | Owner codex/autopsy-cdffbb71; source-discovered configured-style detection |
 
 | D17 | Q-2875 | IN PROGRESS | Owner codex/autopsy-cdffbb71; first full-gate AST harness collection failure |
+
+| D18 | Q-2876 | IN PROGRESS | Owner codex/autopsy-cdffbb71; two stale ETA call-contract assertions |
+| D19 | Q-2877 | IN PROGRESS | Owner codex/autopsy-cdffbb71; eager compatibility metadata I/O |
+| D20 | Q-2878 | IN PROGRESS | Owner codex/autopsy-cdffbb71; ETA return-shape assertion |

@@ -1507,11 +1507,21 @@ export class BuildDiagnostics {
       && !/[|;&]/.test(rec.command)
       && !/(?:^|\s)["']?[^\s"']+\.tsx?["']?(?=\s|$)/.test(rec.command)
       && !/(?:^|\s)(?:-p|--project)(?:\s|=)/.test(rec.command)
-      && readAgentRunEvidence([{ ...rec, typecheckCurrent: this.currentCommandEvidence().at(-1)?.typecheckCurrent }]).typecheck === 'passed') this.resolveCompilerFailuresOnRecheck();
+      && readAgentRunEvidence([{ ...rec, typecheckCurrent: this.currentCommandEvidence().at(-1)?.typecheckCurrent }]).typecheck === 'passed'
+      && this.typecheckEvidenceFromAgentCommands() === 'passed') {
+      this.resolveCompilerFailuresOnRecheck(rec.typecheckProof?.revision);
+    }
   }
 
   /** Called only after the compiler genuinely passed; CSS-only/mixed failures need their own recheck. */
-  resolveCompilerFailuresOnRecheck(): number {
+  resolveCompilerFailuresOnRecheck(checkedRevision?: number): number {
+    // A live run cannot settle findings with a missing/stale receipt, even if exit zero is real.
+    // Historical diagnostics without a live revision reader retain their original interpretation.
+    if (this.meta.currentSourceRevision) {
+      try {
+        if (checkedRevision === undefined || checkedRevision !== this.meta.currentSourceRevision()) return 0;
+      } catch { return 0; }
+    }
     let cleared = 0;
     for (const issue of this.issues) {
       if (!['SIMPLE_BUILD_VERIFY_ERROR', 'ONESHOT_VERIFY_FAILED'].includes(issue.code) || issue.autoResolved) continue;

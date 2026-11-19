@@ -102392,7 +102392,7 @@ Tests: `visionImageCoverage.test.ts` covers the census, the source guard, and th
 ## 2026-11-19 — Calculator report 9fba77d7: engine fixes proposed; GitHub validation pending
 
 The owner supplied the complete diagnostic timeline and asked to fix it. Autopsy and per-item ledger:
-`docs/autopsies/calculator-9fba77d7.md` (Q-2756–Q-2766). The saved App.tsx is a regression fixture.
+`docs/autopsies/calculator-9fba77d7.md` (Q-2881–Q-2891). The saved App.tsx is a regression fixture.
 
 The failed repair's root is a boolean union alias plus a positive truthiness guard: the previous cause
 reader required an expanded union and a negated guard. A compiler-backed deterministic pass now follows

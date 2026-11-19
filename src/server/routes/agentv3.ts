@@ -20028,6 +20028,7 @@ async function noteBuildOutcome(
               return { ok: true, errors: '', ran: false };
             }
             await fastReconcileDependencies('verify');
+            const fastVerifyRevision = getWorkspaceMemory(workspaceId).verificationRevision();
             const r = await actuator.runCommand(workspaceId, `${TSC_ENSURE}; if ${TSC_BIN} --noEmit > /tmp/nb_tsc.log 2>&1; then echo __TSC_CLEAN__; fi; tail -200 /tmp/nb_tsc.log 2>/dev/null || true`);
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
             // Preserve the torn-install short circuit. Other unverified outputs must still reach
@@ -20111,8 +20112,13 @@ async function noteBuildOutcome(
               // returns ok:false above (unchanged); only the un-runnable case is downgraded to ran:false.
               return { ok: true, errors: '', ran: false };
             }
-            buildDiag.resolveOnRecheck('SIMPLE_BUILD_VERIFY_ERROR');
-            buildDiag.resolveOnRecheck('ONESHOT_VERIFY_FAILED');
+            // Style normalization can write after the compiler ran. Do not settle old findings
+            // from different source bytes, or contradict a current native framework failure.
+            if (fastVerifyRevision === getWorkspaceMemory(workspaceId).verificationRevision()
+              && buildDiag.agentRunEvidence().typecheck !== 'failed') {
+              buildDiag.resolveOnRecheck('SIMPLE_BUILD_VERIFY_ERROR');
+              buildDiag.resolveOnRecheck('ONESHOT_VERIFY_FAILED');
+            }
             return { ok: true, errors: '', ran: true };
           }
           // NOTE: no catch here on purpose — an infra THROW must reach fastVerify's retry wrapper
@@ -21061,8 +21067,10 @@ async function noteBuildOutcome(
             // compile, even when the shell pipeline itself exits successfully.
             const verdict = tscVerdict(out);
             if (verdict === 'not-run' || verdict === 'unknown') return { ok: true, verified: false, errors: '', revision };
-            if (verdict === 'passed' && revision === getWorkspaceMemory(workspaceId).verificationRevision()) {
-              buildDiag.resolveCompilerFailuresOnRecheck();
+            if (verdict === 'passed'
+              && currentTypecheckProof({ outcome: 'passed', revision }, getWorkspaceMemory(workspaceId).verificationRevision()) === 'passed'
+              && buildDiag.agentRunEvidence().typecheck !== 'failed') {
+              buildDiag.resolveCompilerFailuresOnRecheck(revision);
             }
             return verdict === 'failed'
               ? { ok: false, verified: true, errors: out.slice(0, 6000), revision }

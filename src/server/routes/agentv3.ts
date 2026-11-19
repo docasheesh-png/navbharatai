@@ -784,7 +784,7 @@ import { devServerLaunchPlan, startFilesFromPaths } from '../AgentV3/devServerLa
 import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { attachedBytesNote } from '../AgentV3/attachedFileBytes';
-import { attachmentFilesForProject, attachmentFilesNote } from '../AgentV3/attachmentFilesOnDisk';
+import { attachmentFilesForProject, attachmentFilesNote, writeAttachmentFilesInStep } from '../AgentV3/attachmentFilesOnDisk';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, cssStoppedUnfinishedRecord, cssClassesUndefinedFields, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
@@ -11297,8 +11297,7 @@ async function noteBuildOutcome(
         // failedbr #2415: a text attachment is written WHOLE into the project (attachmentFilesOnDisk.ts) — the prompt
         // copy is capped at 20,000 characters, and a builder told only "here is an excerpt" hunted the disk for the rest.
         attachmentFilesToWrite = attachmentFilesForProject(docAttachments);
-        const onDiskNote = attachmentFilesNote(attachmentFilesToWrite);
-        if (onDiskNote) attachmentContext = `${attachmentContext}\n\n${onDiskNote}`;
+        attachmentContext = [attachmentContext, attachmentFilesNote(attachmentFilesToWrite)].filter(Boolean).join('\n\n'); // no branch: TS2563
         // A picture is part of the spec only when it is a UI design (the describer returned a contract).
         // A photo of a person or a scene says what the picture shows, not what to build.
         const pictureIsSpec = designContract !== null;
@@ -17612,16 +17611,8 @@ async function noteBuildOutcome(
       // Each keeps its OWN failure isolation. `allSettled`, not `all`: one unavailable store must leave
       // the other two contexts in the prompt, exactly as three independent try/catches did.
       // Everything since the project check, as one window — named steps, and the rest as `other`.
-      // failedbr #2415: the whole attached text files, where the builder's note says they are.
-      if (attachmentFilesToWrite.length > 0) {
-        try {
-          const missed: string[] = [];
-          await wiringSteps.step('attached files', () => Promise.all(attachmentFilesToWrite.map((f) => actuator.writeFile(workspaceId, f.path, f.content).catch(() => { missed.push(f.path); }))));
-          buildDiag.record(missed.length === 0
-            ? { phase: 'build', severity: 'info', code: 'ATTACHMENTS_ON_DISK', autoResolved: true, message: `The attached text file(s) were saved whole in the project: ${attachmentFilesToWrite.map((f) => f.path).join(', ')}.` }
-            : { phase: 'build', severity: 'warning', code: 'ATTACHMENTS_NOT_ON_DISK', autoResolved: false, message: `Could not save ${missed.join(', ')} into the project, although the builder was told it is there — it has only the shortened copy in its prompt.` });
-        } catch { /* best-effort — the prompt excerpt remains */ }
-      }
+      // failedbr #2415: the whole attached text files, where the builder's note says they are (no branch here: TS2563).
+      await writeAttachmentFilesInStep(attachmentFilesToWrite, (label, run) => wiringSteps.step(label, run), (p, c) => actuator.writeFile(workspaceId, p, c), (r) => buildDiag.record(r));
       try { buildDiag.closeSetupWindow('Build wiring ready', wiringSteps.list()); } catch { /* timing is observation only */ }
       const contextT0 = Date.now();
       const [prefSettled, adrSettled, brainSettled] = await Promise.allSettled([

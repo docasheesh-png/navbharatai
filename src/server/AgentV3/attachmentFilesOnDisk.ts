@@ -55,3 +55,25 @@ export function attachmentFilesNote(files: ReadonlyArray<AttachmentFile>): strin
     + 'other copy anywhere on the machine, so do not search the filesystem for it. It is the user\'s reference '
     + 'material: build the app in the project\'s own source files, not inside the attachments folder.';
 }
+
+/**
+ * Write the files inside the caller's timed setup step and record the outcome — or do nothing when there are none.
+ * Lives here, not in the route, because the chat handler is at its branch budget (TS2563, theChatHandlerHasHeadroom).
+ */
+export async function writeAttachmentFilesInStep(
+  files: ReadonlyArray<AttachmentFile>,
+  step: (label: string, run: () => Promise<unknown>) => Promise<unknown>,
+  write: (path: string, content: string) => Promise<unknown>,
+  record: (issue: { phase: 'build'; severity: 'info' | 'warning'; code: string; autoResolved: boolean; message: string }) => void,
+): Promise<void> {
+  if (!files.length) return;
+  const missed: string[] = [];
+  try {
+    await step('attached files', () => Promise.all(files.map((f) => Promise.resolve().then(() => write(f.path, f.content)).catch(() => { missed.push(f.path); }))));
+  } catch { /* best-effort — the prompt excerpt remains */ }
+  try {
+    record(missed.length === 0
+      ? { phase: 'build', severity: 'info', code: 'ATTACHMENTS_ON_DISK', autoResolved: true, message: `The attached text file(s) were saved whole in the project: ${files.map((f) => f.path).join(', ')}.` }
+      : { phase: 'build', severity: 'warning', code: 'ATTACHMENTS_NOT_ON_DISK', autoResolved: false, message: `Could not save ${missed.join(', ')} into the project, although the builder was told it is there — it has only the shortened copy in its prompt.` });
+  } catch { /* observation only */ }
+}

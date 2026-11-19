@@ -69,6 +69,8 @@ export function scopeDispute(scope: AppScope, opts: { complex: boolean }): strin
  */
 const FAMOUS_APPS: Array<{ name: string; re: RegExp }> = [
   { name: 'PUBG', re: /\bpubg\b/i },
+  // BGMI is PUBG's India edition — the same scope (failedbr #2475's user typed both).
+  { name: 'BGMI', re: /\bbgmi\b/i },
   { name: 'Free Fire', re: /\bfree\s?fire\b/i },
   { name: 'Fortnite', re: /\bfortnite\b/i },
   { name: 'Call of Duty', re: /\bcall of duty\b|\bcod\s?mobile\b/i },

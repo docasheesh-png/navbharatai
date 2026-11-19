@@ -39,7 +39,7 @@ import { browserCodeInNodeHint, nodeRunTarget, shouldRefuseBrowserOnlyRun, brows
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 import { inspectCredentials } from './credentialSafety';
 import { probeCredentials, realProbeFetch, credentialProbeEnabled, relevantToApp, type ProbeVerdict } from './credentialProbe';
-import { planSecretRequest, secretRequestPrompt, secretRequestResult, isAiModelKey, keylessAiNote, type SecretAnswer, type SecretAsk } from './secretRequest';
+import { planSecretRequest, secretRequestPrompt, secretRequestResult, isAiModelKey, keylessAiNote, unansweredOnly, alreadyAskedNote, type SecretAnswer, type SecretAsk } from './secretRequest';
 
 /**
  * Sentinel command that forces the user's vault secrets onto disk regardless of the "is this an app
@@ -498,6 +498,8 @@ import { turnAskedTheUser } from './nudgeToBuild';
 import { withAppEnvFile } from './appEnvFileForCommand';
 import { locatedErrorText } from './runtimeErrorSite';
 import { consoleCleanVerdict } from './renderCheckConsole';
+import { FileViews, explainEditMiss } from './editProvenance';
+import { asksForBattleRoyale } from './gameIntent';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -743,6 +745,8 @@ export class ToolDispatcher {
    * and a 15th optional boolean is exactly the kind of thing a later call site gets wrong by silence.
    */
   private _publishConsent = false;
+  /** The file versions the model has read, and its refused proposals — to explain a missed edit (editProvenance.ts, Q-2697). */
+  private readonly fileViews = new FileViews();
 
   /**
    * Paid-tool counts for THIS build. Defaults to a fresh object; a child dispatcher is given the
@@ -1448,7 +1452,8 @@ export class ToolDispatcher {
       if (dup) refuse(dup);
     }
     const writeParseReject = await this.parseGuardRejection(rel, existingContent, content);
-    if (writeParseReject) refuse(writeParseReject);
+    if (writeParseReject) { this.fileViews.note(rel, content, 'refused'); refuse(writeParseReject); }
+    this.fileViews.clearRefused(rel);
     await this.refuseBrokenPageEdit(rel, existingContent, content);
     if (opts.expectedSource !== undefined) {
       if (opts.expectedSource === null) {
@@ -1658,12 +1663,16 @@ export class ToolDispatcher {
     }
     const handler = this.onServerlessPayment!;
     let result = await handler({ table }).catch(() => null);
-    if (result && !result.ok && result.needKeys && this.onSecretsNeeded) {
-      const saved = await this.onSecretsNeeded([
-        { name: PAYMENT_SECRET_NAMES.keyId, why: 'Your Razorpay Key ID — Razorpay Dashboard → Account & Settings → API Keys.' },
-        { name: PAYMENT_SECRET_NAMES.keySecret, why: 'Your Razorpay Key Secret, from the same page. It is stored only in your own Supabase project.' },
-      ]).catch(() => null);
-      result = saved && typeof saved === 'object' && Object.keys(saved).length > 0 ? await handler({ table }).catch(() => null) : null;
+    const paymentAsks = unansweredOnly([
+      { name: PAYMENT_SECRET_NAMES.keyId, why: 'Your Razorpay Key ID — Razorpay Dashboard → Account & Settings → API Keys.' },
+      { name: PAYMENT_SECRET_NAMES.keySecret, why: 'Your Razorpay Key Secret, from the same page. It is stored only in your own Supabase project.' },
+    ], this.unansweredSecretNames);
+    // The same door as request_secrets: a payment key the user did not give in this build is not asked for again.
+    if (result && !result.ok && result.needKeys && this.onSecretsNeeded && paymentAsks.fresh.length > 0) {
+      const saved = await this.onSecretsNeeded(paymentAsks.fresh).catch(() => null);
+      const got = saved && typeof saved === 'object' && Object.keys(saved).length > 0;
+      if (!got && saved !== 'stopped') for (const a of paymentAsks.fresh) this.unansweredSecretNames.add(a.name);
+      result = got ? await handler({ table }).catch(() => null) : null;
     }
     if (!result) return pending;
     if (!result.ok && result.needKeys) {
@@ -1683,6 +1692,13 @@ export class ToolDispatcher {
 
   /** Names already in the user's vault, so the build never asks twice for the same key. */
   private savedSecretNames: string[] = [];
+  /**
+   * 🔴 Keys this build already asked for and got NO answer to — skipped or timed out (failedbr #2431, 21d59838). The
+   * user ignored a 10-minute popup for two Razorpay keys; 12 minutes later the build opened the SAME popup again and
+   * waited into its deadline. A key the user did not give is an answer: the feature stays a visible "needs setup"
+   * state, and the popup is not reopened for that name in this build (`unansweredOnly`, secretRequest.ts).
+   */
+  private unansweredSecretNames = new Set<string>();
   setSavedSecretNames(names: string[]): void {
     this.savedSecretNames = Array.isArray(names) ? names : [];
   }
@@ -5557,16 +5573,23 @@ export class ToolDispatcher {
         // ONE entry point for the RECIPE_TOOLS (ToolCatalog.ts). The recipe runs through its OWN case
         // below, unchanged — this only chooses which one. Unknown or "list" ⇒ the inputs, never a guess.
         const recipe = optStr(input, 'name');
-        const inner = (input as Record<string, unknown> | undefined)?.input;
-        const hasInput = !!inner && typeof inner === 'object' && !Array.isArray(inner) && Object.keys(inner).length > 0;
+        // 🔴 ARGUMENTS BESIDE `name` ARE ARGUMENTS (failedbr #2431, 21d59838). The model called
+        // `run_recipe({ name: "generate_otp", provider: … })` eight times: the flat shape models naturally write.
+        // Only `input` was read, so `provider` was dropped, the recipe answered "pass provider" as if that were a
+        // result, and the model repeated the same call. `recipeArguments` takes `input` when it is given, else every
+        // key beside `name`.
+        const inner = recipeArguments(input as Record<string, unknown> | undefined);
+        const hasInput = Object.keys(inner).length > 0;
         if (!isRecipeName(recipe)) {
           const lead = recipe && recipe !== 'list' ? `There is no recipe called "${recipe}". ` : '';
           return `${lead}Available recipes and their inputs:\n\n${recipeListing()}`;
         }
         const def = defaultToolCatalog().find((t) => t.name === recipe);
         const required = ((def?.input_schema as { required?: string[] } | undefined)?.required ?? []);
+        // ⚠️ Help stays a NON-error receipt on purpose: the "steps that do nothing" loop guard counts and ends a model that
+        // repeats it (tests/aPureToolReceiptCannotResetItsLoopGuard). Turned into an error, the repeat ran unbounded.
         if (!hasInput && required.length > 0) return `run_recipe: "${recipe}" needs input. Its inputs:\n\n${recipeListing(recipe)}`;
-        return this.run({ ...call, name: recipe, input: hasInput ? inner as Record<string, unknown> : {} }, agent);
+        return this.run({ ...call, name: recipe, input: inner }, agent);
       }
       case 'read_file': {
         const reqPath = reqStr(input, 'path');
@@ -5581,6 +5604,7 @@ export class ToolDispatcher {
           // a development-only bridge ends up published inside somebody's finished app. It is removed
           // here so the model only ever sees the file it actually authored.
           full = withoutPreviewBridge(reqPath, full);
+          this.fileViews.note(reqPath, full, 'read');
         } catch (err) {
           // PATH-MISS RECOVERY (build-report autopsy 2026-08-01): a bare "does not exist" made the builder
           // loop 12 times guessing the same wrong root (created src/components/ui/X.tsx, read
@@ -5994,7 +6018,14 @@ export class ToolDispatcher {
         // Exact match first, with a whitespace-tolerant fallback so a patch whose
         // indentation/spacing is slightly off still applies (still required to be
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
-        const { updated: edited, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
+        let applied: EditResult;
+        try {
+          applied = applyEdit(existing, oldStr, newStr, path);
+        } catch (missErr) {
+          // Name WHERE the quoted text came from (a refused change, a stale read, memory) — Q-2697, editProvenance.ts.
+          throw withEditMissProvenance(missErr, path, oldStr, existing, this.fileViews);
+        }
+        const { updated: edited, matchedOld, note } = applied;
         // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
         const deduped = this.dedupeImportsForSource(path, guardConfigContent(path, this.applyPostgresProviderLock(path, edited), { framework: this.framework }), agent);
         // Parity with write_file: an edit that cuts design-kit rules out of the stylesheet keeps them
@@ -6017,7 +6048,8 @@ export class ToolDispatcher {
         // Parse guard: refuse an edit that would break a clean file (duplicate declaration / broken JSX),
         // so a syntactically-broken version is never saved — the model gets the exact spot + a fix hint.
         const editParseReject = await this.parseGuardRejection(path, existing, updated);
-        if (editParseReject) refuse(editParseReject);
+        if (editParseReject) { this.fileViews.note(path, updated, 'refused'); refuse(editParseReject); }
+        this.fileViews.clearRefused(path);
         await this.refuseBrokenPageEdit(path, existing, updated);
         await this.actuator.writeFile(this.workspaceId, path, updated);
         this.onFileWrite?.(path, updated);
@@ -9849,6 +9881,10 @@ export class ToolDispatcher {
         if (keylessNames.length) notes.push(keylessAiNote(keylessNames));
         if (plan.alreadyHave.length) notes.push(`Already saved (no need to ask): ${plan.alreadyHave.join(', ')}.`);
         if (plan.rejected.length) notes.push(`Refused — not a usable app key: ${plan.rejected.join(', ')}. Do not ask for NavBharatAI's own provider keys.`);
+        // Never reopen the popup for a key this build already asked for and got no answer to (failedbr #2431).
+        const repeat = unansweredOnly(plan.ask, this.unansweredSecretNames);
+        if (repeat.repeated.length) notes.push(alreadyAskedNote(repeat.repeated));
+        plan.ask = repeat.fresh;
         if (plan.ask.length === 0) {
           return notes.length ? notes.join(' ') : 'request_secrets: nothing to ask for — the app already has every key it named.';
         }
@@ -9870,6 +9906,7 @@ export class ToolDispatcher {
         }
         const saved: Record<string, string> | null = answer && typeof answer === 'object' ? answer : null;
         if (!saved || Object.keys(saved).length === 0) {
+          for (const n of askedNames) this.unansweredSecretNames.add(n);
           const line = secretRequestResult(answer === 'timed-out' ? 'timed-out' : 'skipped', askedNames);
           this.events?.emit({ type: 'narration', agent: 'architect', text: line, ts: Date.now() });
           // The build CONTINUES. Skipping is a real answer, and the agent is told to leave the feature
@@ -10042,7 +10079,8 @@ export class ToolDispatcher {
         if (!envFlag('AGENTV3_ORIGINAL_ROYALE')) refuse('The experimental original royale starter is unavailable. Do not promise it is installed or active.');
         if (!this.royaleNewProject || !this.userOwnedSnapshotKnown || this.userOwned.length > 0) refuse('The royale starter requires a verified new project. Preserve existing or imported source; do not replace it with a template.');
         const request = this.coverageRequest ?? this.userRequest ?? '';
-        if (!/battle\s*royale|pubg|bgmi|free\s*fire|firefree|battlefield|पबजी|बैटल\s*रॉयल|फ्री\s*फायर/i.test(request)) refuse('The request does not ask for a royale-style game. Do not add this starter.');
+        // One reader for "a royale-style game" (gameIntent.asksForBattleRoyale, autopsy aba63ead).
+        if (!asksForBattleRoyale(request)) refuse('The request does not ask for a royale-style game. Do not add this starter.');
         const requestedMap = athreeMapIntent({ prompt: request, seedKey: this.workspaceId });
         if (requestedMap.via === 'named' || requestedMap.via === 'other-map') refuse('The request names a different world. The bounded royale starter must not replace that choice.');
         // A failed workspace read is NOT evidence that no map exists. Preserve existing worlds.
@@ -13084,6 +13122,33 @@ export function ambiguousEditRegions(existing: string, offsets: Iterable<number>
 function withFileNewlines(existing: string, inserted: string): string {
   if (!existing.includes('\r\n')) return inserted;
   return inserted.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+}
+
+/**
+ * Put the provenance sentence into an `old_string not found` error, right after its first sentence; any other
+ * error passes through untouched. PURE.
+ */
+export function withEditMissProvenance(err: unknown, path: string, oldStr: string, current: string, views: FileViews | null | undefined): unknown {
+  if (!(err instanceof Error) || !err.message.startsWith('edit_file: old_string not found')) return err;
+  const why = explainEditMiss(path, oldStr, current, views);
+  if (!why) return err;
+  const cut = err.message.indexOf('. ') + 2;
+  const out = new Error(err.message.slice(0, cut) + why + err.message.slice(cut));
+  out.stack = err.stack;
+  return out;
+}
+
+/**
+ * The arguments a `run_recipe` call carries: its `input` object when one is given, otherwise every key beside `name`
+ * (the flat shape a model naturally writes — failedbr #2431). PURE.
+ */
+export function recipeArguments(input: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const rec = input && typeof input === 'object' ? input : {};
+  const inner = rec.input;
+  if (inner && typeof inner === 'object' && !Array.isArray(inner) && Object.keys(inner).length > 0) return inner as Record<string, unknown>;
+  const rest: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(rec)) if (k !== 'name' && k !== 'input' && v !== undefined) rest[k] = v;
+  return rest;
 }
 
 export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {

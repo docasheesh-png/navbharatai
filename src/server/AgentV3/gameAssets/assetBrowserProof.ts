@@ -1,5 +1,5 @@
 import { gameAssetTextureVerifier } from '../../lib/GameAssetTextureVerifier';
-import { playwrightImport, browserScriptRunLine } from '../sandboxBrowserScript';
+import { SANDBOX_BROWSER_ARGS, playwrightImport, browserScriptRunLine } from '../sandboxBrowserScript';
 import type { AssetRequirement } from './assetPolicy';
 import type { GameAssetWorkspace } from './assetProject';
 import { createHash } from 'node:crypto';
@@ -33,7 +33,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 let browser;
 const watchdog = setTimeout(() => { console.error('Asset proof deadline exceeded'); process.exit(1); }, 20000);
 try {
-  browser = await chromium.launch({ headless: true, ...(cfg.executablePath ? { executablePath: cfg.executablePath } : {}), args: ['--no-sandbox', '--enable-webgl', '--use-gl=angle', '--use-angle=swiftshader'] });
+  browser = await chromium.launch({ headless: true, ...(cfg.executablePath ? { executablePath: cfg.executablePath } : {}), args: [...${JSON.stringify(SANDBOX_BROWSER_ARGS)}, '--use-gl=angle'] });
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   const origin = 'http://127.0.0.1:' + server.address().port;
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());

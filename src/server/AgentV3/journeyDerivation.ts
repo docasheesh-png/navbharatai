@@ -25,7 +25,7 @@
 // PURE. The runner script is a STRING built here and executed by the caller in the sandbox's pre-baked
 // browser — no I/O, no clock, no model call in this module.
 
-import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
+import { SANDBOX_BROWSER_ARGS, browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
 import { newPageOptionsExpr, isSignInRoute } from './signInExplore';
 import { declaredRoutes } from './routerPaths';
 import { rendersDataList } from './DesignCoverage';
@@ -1879,7 +1879,7 @@ ${steps}
 ];
 const OPENER = new RegExp(${JSON.stringify(JOURNEY_OPENER.source)}, 'i');
 const NEVER = new RegExp(${JSON.stringify(NEVER_PRESS.source)}, 'i');
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await chromium.launch({ args: ${JSON.stringify(SANDBOX_BROWSER_ARGS)} });
 for (const j of journeys) {
   // 'unreachable' is the DEFAULT, not a failure state. A journey that never got to press anything has
   // told us nothing about the app, and reporting that as a defect would be an invented alarm.

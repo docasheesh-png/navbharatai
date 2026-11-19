@@ -102843,3 +102843,10 @@ Q-2947–Q-2949 OPEN (edit-miss watch, browser-tool outages without detail, Surp
 - Game drops the player's body on PLAYER_DIED and stands it up on PLAYER_SPAWNED / GAME_STARTED; the prompt tells the builder
   to topple enemies before removing them.
 - Locked by `tests/aDeathIsSeen.test.ts` (reversion: no shell wiring / walking while down → 3 fail).
+## 2026-11-19 — 3D games were blamed for our checker's missing WebGL (Q-2698)
+- Live in builds 2439–2476: every 3D game scored "Controls 0 · 0 fps · no canvas" and the user was told the controls
+  do nothing, while the game had rendered its own "Error creating WebGL context" screen inside the playtest.
+- Root: platform browsers in the sandbox launched without software-WebGL flags; the fallback Playwright install was
+  unpinned (newer Chromium dropped the automatic SwiftShader fallback). Fix: `SANDBOX_BROWSER_ARGS` (one list, every
+  launch, census test), `SANDBOX_PLAYWRIGHT_VERSION` pinned (= Dockerfiles), honest `checkerLacksWebGL` verdict.
+  Real-Chromium test, reversion-proven. Watch the next 3D build for real fps / a scored Controls dimension.

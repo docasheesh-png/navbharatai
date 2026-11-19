@@ -20,7 +20,7 @@
 // one-tap fix (buildFindingSuggestions.ts); nothing is changed behind their back. Kill switch
 // AGENTV3_MOBILE_LAYOUT=off.
 
-import { browserScriptRunLine, parseScriptDiagnostic, playwrightImport } from './sandboxBrowserScript';
+import { SANDBOX_BROWSER_ARGS, browserScriptRunLine, parseScriptDiagnostic, playwrightImport } from './sandboxBrowserScript';
 import { newPageOptionsExpr } from './signInExplore';
 
 export const MOBILE_RESULT_MARKER = 'NBAI_MOBILE:';
@@ -60,7 +60,7 @@ export function mobileLayoutModule(cfg: Record<string, unknown>, importLine: str
   return `${importLine}
 const cfg = ${JSON.stringify(cfg)};
 const say = (o) => console.log(cfg.marker + JSON.stringify(o));
-const browser = await chromium.launch();
+const browser = await chromium.launch({ args: ${JSON.stringify(SANDBOX_BROWSER_ARGS)} });
 try {
   const ctx = await browser.newContext({ ...cfg.pageOpts, viewport: { width: cfg.w, height: cfg.h }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const page = await ctx.newPage();

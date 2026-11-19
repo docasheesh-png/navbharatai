@@ -1,3 +1,4 @@
+import { SANDBOX_BROWSER_ARGS, SANDBOX_PLAYWRIGHT_VERSION } from '../../../sandboxBrowserScript';
 import { exclusiveCreateCommand } from '../../../../lib/proceduralObjects/exclusiveCreateCommand';
 import { randomUUID } from 'node:crypto';
 import { assertNotCanaryWorkspace } from '../../../reliability/canaryIsolation';
@@ -125,7 +126,7 @@ const TOOLS_DIR = '/home/user/.e-tools';
  *
  * 🔴 THE BUG THIS EXISTS TO KILL, and it is the reason the platform's own browser had NEVER run.
  *
- * Playwright is installed with `npm install playwright --prefix ${TOOLS_DIR}`, so it resolves from
+ * Playwright is installed with `npm install playwright@<SANDBOX_PLAYWRIGHT_VERSION> --prefix ${TOOLS_DIR}`, so it resolves from
  * `${TOOLS_DIR}/node_modules`. **Node resolves `require()` by walking up from the SCRIPT'S OWN
  * DIRECTORY — never from `cwd`.** A script written to `/tmp` therefore searches `/tmp/node_modules`
  * and `/node_modules`, finds no playwright, and exits non-zero. Passing `cwd: TOOLS_DIR` to the
@@ -399,7 +400,7 @@ export const SCREENSHOT_SCRIPT = `
 const {chromium}=require('playwright');
 ${CONSOLE_RECORDER_JS}
 (async()=>{
-  const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
+  const b=await chromium.launch({args:[...${JSON.stringify(SANDBOX_BROWSER_ARGS)},'--disable-setuid-sandbox']});
   const p=await b.newPage();
 ${attachConsoleJs('p').trimEnd()}
   const vw=parseInt(process.argv[3],10)||1280;
@@ -476,7 +477,7 @@ export function browsePageScript(url: string, opts?: { recordConsole?: boolean }
 const {chromium}=require('playwright');
 ${record ? CONSOLE_RECORDER_JS : ''}
 (async()=>{
-  const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
+  const b=await chromium.launch({args:[...${JSON.stringify(SANDBOX_BROWSER_ARGS)},'--disable-setuid-sandbox']});
   const p=await b.newPage();
 ${record ? attachConsoleJs('p').trimEnd() : ''}
   await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
@@ -530,7 +531,7 @@ export const BROWSER_DAEMON_SCRIPT = `
 const {chromium}=require('playwright');
 ${CONSOLE_RECORDER_JS}
 (async()=>{
-  const browser=await chromium.launch({headless:true,args:['--no-sandbox','--disable-setuid-sandbox','--remote-debugging-port=${CDP_PORT}']});
+  const browser=await chromium.launch({headless:true,args:[...${JSON.stringify(SANDBOX_BROWSER_ARGS)},'--disable-setuid-sandbox','--remote-debugging-port=${CDP_PORT}']});
   // The browser really launched, so the session is real — see recSessionExisted above.
   recSessionExisted();
   const seen=new WeakSet();
@@ -2161,7 +2162,7 @@ export class E2BActuator implements IEngineerActuator {
         if (!hasPkg) {
           // --prefix installs into TOOLS_DIR without touching the workspace
           const install = await sandbox.commands.run(
-            `npm install playwright --prefix ${TOOLS_DIR} --no-save 2>&1`,
+            `npm install playwright@${SANDBOX_PLAYWRIGHT_VERSION} --prefix ${TOOLS_DIR} --no-save 2>&1`,
             { timeoutMs: 120_000 }
           );
           if (install.exitCode !== 0) return false;

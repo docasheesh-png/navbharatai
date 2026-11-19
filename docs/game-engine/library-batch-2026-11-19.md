@@ -53,3 +53,24 @@ module, landing pad, cargo container, drill rig), Kenney town (fountain, garage,
 Sources: KayKit Restaurant / Halloween / Space Base / Medieval / Prototype (CC0), Kenney City Builder (MIT).
 Build: `buildLibraryBatch.mts <clones> 3`; admission: `admitLibraryBatch.mts <work> <playwright> "" "" 3` gave 50/50 admitted
 (`asset-candidates/library-batch-3-admission.json`). KayKit Dungeon was skipped: it ships FBX/OBJ only, no glTF.
+
+## Batches 4 and 5 (same day): 112 more, 259 total (+6.6 MB)
+Source: Kayque Rotondo's (with Cláudia Dias Roxinol on three kits) CC0 kits on GitHub — `scitizia-pessoas-64`,
+`kit-fauna-ameacada-lowpoly`, `kit-cidade-lowpoly`, `kit-props-brasil-lowpoly`, `kit-predios-brasil-lowpoly`. Provenance
+evidence: each repository contains the Blender scripts that generate its models, a CC0 LICENSE and a CITATION.cff.
+- Batch 4 (60): 13 rigged people with idle/walk/run (`parado`/`andar`/`correr`), 7 everyday vehicles, boat / canoe / jetty,
+  ~39 animals. **Animals are static**: a "walking dog" still gets the procedural dog, never a still model or a fox.
+- Batch 5 (52): public buildings, commerce, industry, energy, nature, farm, street items, dirt-road / zebra-crossing tiles
+  and a road bridge.
+- Admission: 60/60 and 52/52 (`asset-candidates/library-batch-{4,5}-admission.json`).
+- Prompt guards: "Pac-Man", "cricket bat", "day night cycle", "river bank", "game mechanics", "log in", "service worker"
+  and "ice cream cone" pull no model.
+
+## Measured sizes for the older 47 entries
+`scripts/library/measureCatalogueBytes.mts` fetched each through the production transport, matched its pinned hash and
+recorded `bytes`: 7.6 MB in total, instead of the 235 MiB worst case. The whole library now declares about 22 MB of its
+320 MiB budget. A census test requires a measured size on every entry.
+
+## Rejected source (owner decision pending)
+`Vuena/free-game-assets-mega-starter-cc0` declares CC0 and contains rigged characters and animals, but nothing in the
+repository evidences authorship beyond the uploader's statement. Not used.

@@ -598,6 +598,7 @@ const FEEDBACK = `import { events, type GameEvent } from '../core/events';
 import type { GameFeel } from '../core/feel';
 import type { ParticleSystem, ParticlePreset } from './particles';
 import { audio, type SoundCategory } from './audio';
+import { buzz } from '../core/meta';
 
 /**
  * ONE TABLE, ONE PLACE — the reason a hit feels like force instead of a state change.
@@ -621,26 +622,31 @@ export interface FeedbackSpec {
   trauma?: number;
   /** Seconds of frozen simulation. 0.05 is a punch, 0.12 is a kill. */
   hitStop?: number;
+  /**
+   * A phone vibration (ms, or a pattern) — felt in the hand, the one sense a phone game had left unused (admin
+   * 2026-11-19 audit: vibration fired only on rewards, never on a hit). buzz() obeys the player's Vibration setting.
+   */
+  haptic?: number | number[];
 }
 
 /** The default reactions. Tuned so a small event is felt and a big one is not overwhelming. */
 export const FEEDBACK: Partial<Record<GameEvent, FeedbackSpec>> = {
   WEAPON_FIRED:   { particle: 'muzzleFlash', sound: 'shoot',    trauma: 0.14, hitStop: 0.02 },
-  PROJECTILE_HIT: { particle: 'impact',      sound: 'impact',   trauma: 0.10 },
+  PROJECTILE_HIT: { particle: 'impact',      sound: 'impact',   trauma: 0.10, haptic: 12 },
   ENEMY_DAMAGED:  { particle: 'blood',       sound: 'hit',      trauma: 0.12, hitStop: 0.04 },
-  ENEMY_DIED:     { particle: 'explosion',   sound: 'die',      trauma: 0.35, hitStop: 0.09, particleScale: 0.8 },
-  PLAYER_DAMAGED: { particle: 'blood',       sound: 'hurt',     trauma: 0.45, hitStop: 0.07 },
-  PLAYER_DIED:    { particle: 'explosion',   sound: 'death',    trauma: 0.85, hitStop: 0.16 },
+  ENEMY_DIED:     { particle: 'explosion',   sound: 'die',      trauma: 0.35, hitStop: 0.09, particleScale: 0.8, haptic: 30 },
+  PLAYER_DAMAGED: { particle: 'blood',       sound: 'hurt',     trauma: 0.45, hitStop: 0.07, haptic: [45, 30, 45] },
+  PLAYER_DIED:    { particle: 'explosion',   sound: 'death',    trauma: 0.85, hitStop: 0.16, haptic: [90, 50, 160] },
   PLAYER_JUMPED:  { sound: 'jump' },
-  PLAYER_LANDED:  { particle: 'dust',        sound: 'land',     trauma: 0.06, particleScale: 0.6 },
+  PLAYER_LANDED:  { particle: 'dust',        sound: 'land',     trauma: 0.06, particleScale: 0.6, haptic: 10 },
   ITEM_COLLECTED: { particle: 'pickup',      sound: 'pickup' },
   PLAYER_HEALED:  { particle: 'heal',        sound: 'heal' },
-  BOSS_DEFEATED:  { particle: 'explosion',   sound: 'boss_die', trauma: 1.0,  hitStop: 0.25, particleScale: 2 },
+  BOSS_DEFEATED:  { particle: 'explosion',   sound: 'boss_die', trauma: 1.0,  hitStop: 0.25, particleScale: 2, haptic: [80, 40, 80, 40, 200] },
   // A weapon's whole cycle is heard, not only the bang: the dry click is what tells a player to reload.
   WEAPON_EMPTY:   { sound: 'empty' },
   WEAPON_RELOADED: { sound: 'reload' },
   MELEE_SWING:    { sound: 'swing' },
-  MELEE_HIT:      { sound: 'hit',      trauma: 0.2,  hitStop: 0.05 },
+  MELEE_HIT:      { sound: 'hit',      trauma: 0.2,  hitStop: 0.05, haptic: 25 },
   // The rewards that bring a player back are HEARD as well as shown (meta.ts) — on the UI bus.
   COMBO_MILESTONE: { sound: 'combo',   category: 'ui' },
   NEW_BEST:       { sound: 'newbest',  category: 'ui' },
@@ -677,6 +683,7 @@ export function bindGameFeedback(ctx: FeedbackContext, table = FEEDBACK): () => 
         if (spec.trauma) ctx.feel.addTrauma(spec.trauma);
         if (spec.hitStop) ctx.feel.addHitStop(spec.hitStop);
       }
+      if (spec.haptic) buzz(spec.haptic);
     }));
   }
   return () => { for (const off of offs) off(); };
@@ -711,6 +718,7 @@ export function generateGameVfxAudio(include?: string[]): GameVfxAudioResult {
       if (wanted.has(base)) files[path] = content;
     }
     if (files['src/game/fx/feedback.ts']) {
+      // feedback.ts vibrates through core/meta's buzz(), which the runtime recipe writes.
       files['src/game/fx/particles.ts'] = FILES['src/game/fx/particles.ts'];
       files['src/game/fx/audio.ts'] = FILES['src/game/fx/audio.ts'];
     }

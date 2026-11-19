@@ -10,7 +10,7 @@
 // route + UI are thin. Checks are deliberately CONSERVATIVE (regex on the HTML string, not a parser) so
 // a real issue is flagged but false positives are rare — a linter that cries wolf gets ignored.
 
-import { scanMarkup, hasAttr, type ScannedTag } from '../../AgentV3/jsxTags';
+import { scanMarkup, hasAttr, forwardsCallerProps, type ScannedTag } from '../../AgentV3/jsxTags';
 import { stripCommentsForMarkup } from '../../AgentV3/stripCodeComments';
 
 export type A11yViolationType = 'img-alt' | 'input-label' | 'control-name' | 'html-lang' | 'positive-tabindex' | 'click-noninteractive';
@@ -109,7 +109,8 @@ export function controlLabelVerdict(t: ScannedTag): 'not-a-control' | 'labelled'
     // A WRAPPING `<label>` names the control by its own text — the commonest React form shape
     // there is, and the reason a correct golden scaffold was reported as having three unlabelled
     // fields in autopsy 8a92e5ed.
-    t.insideLabel ||
+    // A primitive forwarding its caller's props is labelled at the call site (failedbr #2466, jsxTags.forwardsCallerProps).
+    t.insideLabel || forwardsCallerProps(t.tag) ||
     hasAttr(t.tag, 'aria-label') || hasAttr(t.tag, 'aria-labelledby') ||
     hasAttr(t.tag, 'id') || hasAttr(t.tag, 'title');
   return labelled ? 'labelled' : 'unlabelled';

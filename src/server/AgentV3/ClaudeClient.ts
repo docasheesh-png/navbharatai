@@ -98,6 +98,11 @@ export interface TurnUsage {
    * our own cost figure is an under-estimate, instead of reading a confident zero.
    */
   measured?: boolean;
+  /**
+   * This usage belongs to an attempt that FAILED and was retried (Q-2920, admin decision 2026-11-19): its tokens are not
+   * a turn the provider "answered without reporting". Its cost is known only from its receipt; never assumed zero.
+   */
+  failedAttempt?: true;
 }
 
 export interface TurnResult {

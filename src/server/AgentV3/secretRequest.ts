@@ -266,3 +266,21 @@ export function secretRequestResult(outcome: SecretRequestOutcome, names: readon
   }
   return `👍 Skipped for now. The feature that needs ${list} will stay switched off until you add ${names.length === 1 ? 'it' : 'them'} in Settings → Secrets & API Keys.`;
 }
+
+/**
+ * 🔴 A KEY THE USER DID NOT GIVE IS AN ANSWER (failedbr #2431, 21d59838, 2026-11-17). Split the asks into those never
+ * asked in this build and those already asked and left unanswered (skipped or timed out). Only the first are shown in
+ * a popup; the build was otherwise reopening the same 10-minute popup and waiting into its own deadline. PURE.
+ */
+export function unansweredOnly<T extends { name: string }>(asks: readonly T[], unanswered: ReadonlySet<string>): { fresh: T[]; repeated: string[] } {
+  const fresh: T[] = [];
+  const repeated: string[] = [];
+  for (const a of asks ?? []) (unanswered.has(a.name) ? repeated.push(a.name) : fresh.push(a));
+  return { fresh, repeated };
+}
+
+/** What the builder is told instead of a second popup. PURE. */
+export function alreadyAskedNote(names: readonly string[]): string {
+  return `Already asked for ${names.join(', ')} earlier in this build and the user did not give ${names.length === 1 ? 'it' : 'them'} — `
+    + 'do NOT ask again. Leave that feature as a visible "needs setup" state (the RED line naming the key) and finish everything else.';
+}

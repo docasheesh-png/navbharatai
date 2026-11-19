@@ -102621,3 +102621,11 @@ Admin, after the game-gap audit: *"ek ek kar ke sabhi fix karo!! aur har fix ko 
   exact finish / bounce back, six again, validated custom boards, zig-zag squareCell). Wired like the 2D kit; AKB entry.
 - Next in the pack (separate PRs): chess; cards (no money — Teen Patti ranking, rummy melds); carrom physics; cricket.
 - Locked by `tests/indiaBoardGamesFollowTheRules.test.ts` (reversion: safe squares ignored / overshooting home → 2 fail).
+
+## 2026-11-19 — India games pack (b): chess (branch `claude/game-board-chess`)
+- `src/game/board/chess.ts` added to `generate_board_games`: FEN in/out, legal moves (castling never out of/through/into check,
+  en passant, promotion), SAN with disambiguation and +/#, status (checkmate, stalemate, fifty-move, threefold repetition,
+  insufficient material), movesFrom for tap highlighting, an alpha-beta computer player (depth 1/2/3).
+- The move generator matches the published perft counts on five standard positions (start, Kiwipete, positions 3–5).
+- Locked by `tests/chessFollowsEveryRule.test.ts` (reversion: castling through check / en passant leaving the pawn → 4 fail,
+  including two perft counts).

@@ -188,7 +188,7 @@ describe('🐍 Snakes & Ladders', () => {
 describe('the recipe', () => {
   it('is registered, and a subset always brings the die', () => {
     expect(GAME_RECIPES.generate_board_games).toBe(generateBoardGames);
-    expect(BOARD_GAME_MODULES).toEqual(['dice', 'ludo', 'snakes']);
+    expect(BOARD_GAME_MODULES).toEqual(['dice', 'ludo', 'snakes', 'chess']);
     expect(Object.keys(generateBoardGames(['snakes']).files).sort()).toEqual(['src/game/board/dice.ts', 'src/game/board/snakes.ts']);
   });
 });

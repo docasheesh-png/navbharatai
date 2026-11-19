@@ -760,12 +760,12 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   },
   {
     id: 'india_board_games',
-    name: 'Ludo and Snakes & Ladders with the real rules',
+    name: 'Ludo, Snakes & Ladders and chess with the real rules',
     path: 'NavBharatAI Pro → chat → ask for the game (for example "Ludo game banao 4 players", "saanp seedhi game banao computer ke saath")',
-    description: 'Ludo and Snakes & Ladders that NavBharatAI builds follow the rules families expect, from a tested rules engine. LUDO for 2 to 4 players: a token leaves home only on a six, a six gives another roll and three sixes in a row lose the turn, the start squares and star squares are safe, landing on an opponent sends it back home and gives another roll, a token needs the exact number to reach home and getting there gives another roll, the turn passes when no token can move, and players are ranked in the order they finish. A computer player can take any seat. SNAKES & LADDERS (saanp-seedhi): the classic board, ladders up and snakes down, an exact roll to reach 100 (or bounce back if asked), and a six rolls again. House rules can be changed by asking.',
+    description: 'Ludo and Snakes & Ladders that NavBharatAI builds follow the rules families expect, from a tested rules engine. LUDO for 2 to 4 players: a token leaves home only on a six, a six gives another roll and three sixes in a row lose the turn, the start squares and star squares are safe, landing on an opponent sends it back home and gives another roll, a token needs the exact number to reach home and getting there gives another roll, the turn passes when no token can move, and players are ranked in the order they finish. A computer player can take any seat. SNAKES & LADDERS (saanp-seedhi): the classic board, ladders up and snakes down, an exact roll to reach 100 (or bounce back if asked), and a six rolls again. CHESS with every rule: castling (never out of, through or into check), en passant, promotion with a choice of piece, check, checkmate, stalemate, and the draws (fifty moves, the same position three times, not enough pieces to mate); tapping a piece shows where it can go, and a computer opponent plays at Easy, Normal or Hard. House rules can be changed by asking.',
     howToUse: 'Ask for the game and say how many players and whether the computer should play. To change a rule, ask in your own words (for example "6 aane par dobara chance mat do", "100 pe exact number zaroori nahi").',
     relatedFeatures: ['game_2d_kit'],
-    keywords: ['ludo', 'ludo game', 'ludo king jaisa', 'saanp seedhi', 'snakes and ladders', 'snake ladder', 'board game', 'dice game', 'pasa', 'goti', 'computer ke saath ludo', 'safe square', 'star', 'six aane par'],
+    keywords: ['ludo', 'ludo game', 'ludo king jaisa', 'saanp seedhi', 'snakes and ladders', 'snake ladder', 'board game', 'dice game', 'pasa', 'goti', 'computer ke saath ludo', 'safe square', 'star', 'six aane par', 'chess', 'shatranj', 'chess game', 'computer se chess', 'castling', 'checkmate', 'en passant'],
   },
   {
     id: 'game_2d_kit',

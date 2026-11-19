@@ -2324,9 +2324,11 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'the yard on a six, sixes roll again and three in a row lose the turn, safe start and star squares, captures send a token '
         + 'home and earn a roll, exact roll to finish, finishing order, a pass when nothing can move, a computer player, board '
         + 'geometry) and SNAKES & LADDERS (saanp-seedhi: the classic board, exact finish or bounce back, a six rolls again, the '
-        + 'zig-zag square layout), with a seeded die. Use it for any of these games; never re-implement their rules.',
+        + 'zig-zag square layout) and CHESS (every rule: castling, en passant, promotion, check, checkmate, stalemate, fifty-move, '
+        + 'threefold repetition, insufficient material; FEN and SAN; a computer player at three strengths; perft-verified), with a '
+        + 'seeded die. Use it for any of these games; never re-implement their rules.',
       input_schema: { type: 'object', properties: { include: { type: 'array', items: { type: 'string' },
-        description: 'Optional subset: dice, ludo, snakes. Default = all; every engine brings dice.' } } },
+        description: 'Optional subset: dice, ludo, snakes, chess. Default = all; every engine brings dice.' } } },
     },
     {
       name: 'generate_game_2d',

@@ -1059,9 +1059,10 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       shooter): src/game/2d/ gives Animator sprites, Camera2D, Tilemap.fromRows, PlatformerController (coyote time, jump',
     '       buffer, one-way platforms, no tunnelling), Parallax and Particles2D. Never hand-roll a jump, tile collision or camera.',
     // 🎲 INDIA GAMES PACK (admin 2026-11-19 game-gap audit): tested rules engines for India's board games.
-    '    7d. run_recipe({ name: "generate_board_games" }) — for Ludo or Snakes & Ladders (saanp-seedhi): src/game/board/ has the',
+    '    7d. run_recipe({ name: "generate_board_games" }) — for Ludo, Snakes & Ladders (saanp-seedhi) or chess: src/game/board/ has the',
     '       tested rules (createLudo / legalMoves / move / pass / chooseMove, createSnakes / takeTurn) and board geometry (cellOf,',
     '       squareCell). Draw the board, let the player tap a legal token, animate r.path, announce captures and extra rolls.',
+    '       Chess: createChess / movesFrom / playChess / chessStatus / bestMove(game, 1|2|3) — every rule, never your own.',
     // 🧰 OBJECT FORGE (admin order 2026-11-15): objects nobody pre-built are made BY the builder, from a checked spec.
     '    8. run_recipe({ name: "author_object", input: { spec } }) — the OBJECT FORGE: any object, creature, person, vehicle, building',
     '       or prop the library and the Athree modules do not have. Look in the game library first; when nothing fits, DO NOT hand-write',

@@ -1020,6 +1020,7 @@ import { inventory, type ItemStack } from '../core/inventory';
 import { economy, type ShopEntry } from '../core/economy';
 import { powerUps, type ActivePowerUp } from '../core/powerups';
 import { leaderboard } from '../core/leaderboard';
+import { crafting, type RecipeView } from '../core/crafting';
 
 /**
  * The HUD, driven by EVENTS rather than by the frame.
@@ -1395,6 +1396,8 @@ function useInventory(): ItemStack[] {
 /** The bag: every item with its icon, name and count; a usable one has a Use button. */
 export function InventoryPanel({ onBack }: { onBack: () => void }) {
   const items = useInventory();
+  // Recipes re-read on every bag change (useInventory re-renders this panel).
+  const recipes: RecipeView[] = crafting.list;
   return (
     <div style={{ width: 'min(92vw, 460px)' }}>
       <h2 style={{ fontSize: 26, fontWeight: 800 }}>{t('inventory')}</h2>
@@ -1412,6 +1415,26 @@ export function InventoryPanel({ onBack }: { onBack: () => void }) {
           ))}
         </ul>
       )}
+      {recipes.length ? (
+        <>
+          <h3 style={{ fontSize: 18, fontWeight: 800, marginTop: 14 }}>{t('crafting')}</h3>
+          <ul aria-label={t('crafting')} style={{ listStyle: 'none', margin: '6px 0 0', padding: 0, display: 'grid', gap: 6, textAlign: 'left' }}>
+            {recipes.map((r) => (
+              <li key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', borderRadius: 10, background: 'rgba(255,255,255,0.08)' }}>
+                <span aria-hidden="true" style={{ fontSize: 22, width: 28, textAlign: 'center' }}>{r.icon ?? '🛠️'}</span>
+                <span style={{ flex: 1 }}>
+                  <span style={{ fontWeight: 700 }}>{r.name}</span>
+                  <span style={{ display: 'block', fontSize: 12, opacity: 0.8 }}>
+                    {Object.entries(r.needs).map(([item, n]) => inventory.nameOf(item) + ' ' + Math.min(inventory.count(item), n) + '/' + n).join(' · ')}
+                  </span>
+                </span>
+                <button type="button" disabled={!r.can} onClick={() => crafting.craft(r.id)}
+                  style={{ ...button, marginTop: 0, minWidth: 0, padding: '6px 12px', fontSize: 14, opacity: r.can ? 1 : 0.5, cursor: r.can ? 'pointer' : 'not-allowed' }}>{t('craft')}</button>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
       <button type="button" style={secondary} onClick={onBack}>{t('close')}</button>
     </div>
   );

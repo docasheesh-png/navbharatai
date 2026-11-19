@@ -330,7 +330,7 @@ const EVENTS = `/**
  * system and the HUD, and every new reaction means editing gameplay code again.
  */
 export type GameEvent =
-  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED' | 'PERF_CHANGED' | 'POWERUP_STARTED' | 'POWERUP_ENDED' | 'POWERUPS_CHANGED' | 'LOOT_DROPPED' | 'LEADERBOARD_CHANGED'
+  | 'GAME_STARTED' | 'GAME_OVER' | 'GAME_WON' | 'GAME_PAUSED' | 'GAME_RESUMED' | 'GAME_MENU' | 'SETTINGS_CHANGED' | 'LOADING_PROGRESS' | 'ASSET_LOADING' | 'FULLSCREEN_CHANGED' | 'LANGUAGE_CHANGED' | 'WEAPON_RELOADING' | 'BOSS_BAR' | 'RACE_COUNTDOWN' | 'RACE_STARTED' | 'RACE_STATUS' | 'RACE_FINISHED' | 'LEVELS_CHANGED' | 'HINT' | 'OBJECTIVES_CHANGED' | 'DIALOGUE_STARTED' | 'DIALOGUE_LINE' | 'DIALOGUE_ENDED' | 'INVENTORY_CHANGED' | 'COINS_CHANGED' | 'SHOP_CHANGED' | 'PERF_CHANGED' | 'POWERUP_STARTED' | 'POWERUP_ENDED' | 'POWERUPS_CHANGED' | 'LOOT_DROPPED' | 'LEADERBOARD_CHANGED' | 'ITEM_CRAFTED'
   | 'LEVEL_STARTED' | 'LEVEL_COMPLETED' | 'CHECKPOINT_REACHED'
   | 'PLAYER_SPAWNED' | 'PLAYER_MOVED' | 'PLAYER_JUMPED' | 'PLAYER_LANDED'
   | 'PLAYER_DAMAGED' | 'PLAYER_HEALED' | 'PLAYER_DIED' | 'PLAYER_FELL'
@@ -638,7 +638,7 @@ const EN = {
   level: 'Level', levels: 'Levels', levelComplete: 'Level complete', nextLevel: 'Next level', locked: 'Locked',
   difficulty: 'Difficulty', easy: 'Easy', normal: 'Normal', hard: 'Hard', checkpoint: 'Checkpoint',
   continue: 'Continue', inventory: 'Bag', inventoryEmpty: 'Your bag is empty', close: 'Close', needs: 'Needs {name}',
-  continueGame: 'Continue', newGame: 'New game', credits: 'Credits',
+  continueGame: 'Continue', newGame: 'New game', credits: 'Credits', craft: 'Craft', crafting: 'Make',
   reduceMotion: 'Reduce motion', largeText: 'Large text', colourSafe: 'Colour-blind colours', captions: 'Captions',
   capHit: 'You were hit', capEnemyDown: 'Enemy down', capPickup: 'Picked up', capReload: 'Reloading', capEmpty: 'Out of ammo', capBoss: 'A boss appears', capBossDown: 'Boss defeated', capLevelUp: 'Level up', capCoin: 'Coin', capDanger: 'Enemy spotted you',
   share: 'Share', copied: 'Copied!', shareText: 'I scored {score} in {game}! Can you beat it?', bestOnDevice: 'Best on this device',
@@ -666,7 +666,7 @@ const HI: Record<StringKey, string> = {
   level: 'लेवल', levels: 'लेवल', levelComplete: 'लेवल पूरा', nextLevel: 'अगला लेवल', locked: 'बंद',
   difficulty: 'कठिनाई', easy: 'आसान', normal: 'सामान्य', hard: 'कठिन', checkpoint: 'चेकपॉइंट',
   continue: 'आगे', inventory: 'थैला', inventoryEmpty: 'थैला खाली है', close: 'बंद करें', needs: '{name} चाहिए',
-  continueGame: 'जारी रखें', newGame: 'नया गेम', credits: 'क्रेडिट्स',
+  continueGame: 'जारी रखें', newGame: 'नया गेम', credits: 'क्रेडिट्स', craft: 'बनाएँ', crafting: 'बनाना',
   reduceMotion: 'कम हलचल', largeText: 'बड़े अक्षर', colourSafe: 'कलर-ब्लाइंड रंग', captions: 'कैप्शन',
   capHit: 'आपको चोट लगी', capEnemyDown: 'दुश्मन गिरा', capPickup: 'उठाया', capReload: 'रीलोड', capEmpty: 'गोलियाँ ख़त्म', capBoss: 'बॉस आ गया', capBossDown: 'बॉस हारा', capLevelUp: 'लेवल अप', capCoin: 'सिक्का', capDanger: 'दुश्मन ने देख लिया',
   share: 'शेयर करें', copied: 'कॉपी हो गया!', shareText: 'मैंने {game} में {score} स्कोर किया! क्या आप इसे हरा सकते हैं?', bestOnDevice: 'इस फ़ोन पर सबसे अच्छे',
@@ -1365,6 +1365,57 @@ export const leaderboard = {
   /** Is this entry the one just recorded (for highlighting it)? */
   isLatest(gameId: string, e: ScoreEntry): boolean { return !!last && last.gameId === gameId && last.at === e.at; },
   clear(gameId: string): void { try { localStorage.removeItem(key(gameId)); } catch { /* nothing to clear */ } last = null; events.emit('LEADERBOARD_CHANGED', { gameId, place: null }); },
+};
+`;
+
+const CRAFTING = `/**
+ * CRAFTING (admin 2026-11-19 game-gap audit: no crafting — a survival game's "make a sword from wood and iron" was a
+ * hand-rolled check that took the wood and then found there was no iron). Recipes over the bag (core/inventory.ts):
+ * crafting takes every ingredient or none of them.
+ *
+ *   crafting.define([{ id: 'sword', name: 'Sword', needs: { wood: 2, iron: 3 }, makes: { item: 'sword', count: 1 } },
+ *                    { id: 'torch', name: 'Torch', needs: { wood: 1, coal: 1 }, makes: { item: 'torch', count: 4 } }]);
+ *   crafting.canCraft('sword');  crafting.missing('sword') → [{ item: 'iron', need: 3, have: 1 }]
+ *   crafting.craft('sword')      → true: the ingredients are gone and the sword is in the bag (ITEM_CRAFTED)
+ * The kit's bag screen lists the recipes with what each needs and a Craft button.
+ */
+import { events } from './events';
+import { inventory } from './inventory';
+
+export interface Recipe { id: string; name: string; icon?: string; needs: Record<string, number>; makes: { item: string; count?: number } }
+export interface RecipeView extends Recipe { can: boolean; missing: Array<{ item: string; need: number; have: number }> }
+
+let recipes: Recipe[] = [];
+const whole = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0);
+
+export const crafting = {
+  define(list: Recipe[]): void {
+    recipes = (Array.isArray(list) ? list : []).filter((r) => r && r.id && r.makes && r.makes.item && r.needs && Object.values(r.needs).some((n) => whole(n) > 0));
+  },
+  missing(id: string): Array<{ item: string; need: number; have: number }> {
+    const r = recipes.find((x) => x.id === id);
+    if (!r) return [];
+    return Object.entries(r.needs).map(([item, n]) => ({ item, need: whole(n), have: inventory.count(item) })).filter((m) => m.need > m.have);
+  },
+  canCraft(id: string): boolean { return recipes.some((r) => r.id === id) && crafting.missing(id).length === 0; },
+  /** Make it: every ingredient is taken, or none is. Returns false when something is missing (or the bag is full). */
+  craft(id: string): boolean {
+    const r = recipes.find((x) => x.id === id);
+    if (!r || !crafting.canCraft(id)) return false;
+    const count = Math.max(1, whole(r.makes.count ?? 1));
+    // Room check first: a full stack must not swallow the ingredients and give nothing back.
+    const before = inventory.count(r.makes.item);
+    const taken: Array<[string, number]> = [];
+    for (const [item, n] of Object.entries(r.needs)) { if (whole(n) > 0 && inventory.remove(item, whole(n))) taken.push([item, whole(n)]); }
+    const added = inventory.add(r.makes.item, count);
+    if (added === 0 && inventory.count(r.makes.item) === before) {
+      for (const [item, n] of taken) inventory.add(item, n);   // put everything back
+      return false;
+    }
+    events.emit('ITEM_CRAFTED', { id: r.id, item: r.makes.item, count: added });
+    return true;
+  },
+  get list(): RecipeView[] { return recipes.map((r) => ({ ...r, can: crafting.canCraft(r.id), missing: crafting.missing(r.id) })); },
 };
 `;
 
@@ -2145,10 +2196,11 @@ const FILES: Record<string, string> = {
   'src/game/core/powerups.ts': POWERUPS,
   'src/game/core/loot.ts': LOOT,
   'src/game/core/leaderboard.ts': LEADERBOARD,
+  'src/game/core/crafting.ts': CRAFTING,
 };
 
 /** Every module this generator can emit, by the name callers pass to `include`. PURE. */
-export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot', 'leaderboard'];
+export const GAME_RUNTIME_MODULES: readonly string[] = ['loop', 'input', 'events', 'pool', 'feel', 'state', 'meta', 'settings', 'loading', 'strings', 'levels', 'quests', 'inventory', 'dialogue', 'economy', 'perf', 'powerups', 'loot', 'leaderboard', 'crafting'];
 
 /**
  * Generate the game runtime. `include` optionally filters by module name; default = all.
@@ -2179,7 +2231,7 @@ export function generateGameRuntime(include?: string[]): GameRuntimeResult {
     if (files['src/game/core/strings.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];
     if (files['src/game/core/levels.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/quests.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
-    if (files['src/game/core/economy.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
+    if (files['src/game/core/economy.ts'] || files['src/game/core/crafting.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
     if (files['src/game/core/dialogue.ts']) files['src/game/core/inventory.ts'] = FILES['src/game/core/inventory.ts'];
     if (files['src/game/core/inventory.ts']) files['src/game/core/state.ts'] = FILES['src/game/core/state.ts'];
     if (files['src/game/core/powerups.ts'] || files['src/game/core/loot.ts'] || files['src/game/core/leaderboard.ts']) files['src/game/core/events.ts'] = FILES['src/game/core/events.ts'];

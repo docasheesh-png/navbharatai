@@ -1151,6 +1151,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  TALK AND THE BAG: dialogue.open({ start, nodes }) from src/game/core/dialogue.ts shows a speaker, lines and choices (a',
     '  choice can need an item: requires: { item }); the world holds still while it is open. inventory.define / add / remove /',
     '  has / onUse from src/game/core/inventory.ts is the bag (saved with the game; the Hud shows it). Never hand-build a second.',
+    '  CRAFTING: crafting.define([{ id, name, needs: { wood: 2 }, makes: { item, count } }]) from core/crafting.ts — all or nothing;',
+    '  the bag screen lists the recipes with a Craft button.',
     '  COINS, SHOP, UPGRADES, GARAGE: economy.setup({ id, items, startCoins }) from src/game/core/economy.ts (items with a slot',
     '  such as \'car\' are chosen in the shop; levels makes an upgrade; kind \'item\' goes in the bag); economy.earn(n) on a coin,',
     '  build the car economy.equipped(\'car\') names (again on SHOP_CHANGED), and read upgrades with economy.stat(id, base, perLevel).',

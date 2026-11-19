@@ -102736,3 +102736,9 @@ The first exactly-one-lease assertion in the phase-2 handoff race now includes o
   split when a second camera is set. The game builds player 2's body; touch drives player 1 only. Same-device play only —
   online multiplayer needs a server (not built).
 - Locked by `tests/twoPlayersShareOneDevice.test.ts` (reversion: shared arrows / no split render → 2 fail).
+
+## 2026-11-19 — Game gap P2: crafting (branch `claude/game-crafting`)
+- `core/crafting.ts` over the bag: define / missing / canCraft / craft (every ingredient or none; a result with no room in the
+  bag gives the ingredients back) / list; ITEM_CRAFTED. The bag screen gains a "Make" list: each recipe, what it needs (have/need)
+  and a Craft button enabled only when it can be made.
+- Locked by `tests/craftingTakesAllOrNothing.test.ts` (reversion: partial take / no give-back → 2 fail).

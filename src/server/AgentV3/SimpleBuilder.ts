@@ -19,7 +19,7 @@ import { STEERING_YIELD_REASON, isSteeringYield } from './steeringHandoff';
 
 import { MANIFEST_V2_RULES, cleanPurpose, fastLaneDepsChars, fastLaneMaxFiles, fastLaneV2Enabled, fullDepsContext, parseManifestContract, topoWaves, validateManifestContract, type ValidatedContract } from './reliability/fastLaneV2';
 import { dropShadowingEntries } from './entryShadow';
-import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE, LIGHT_THEME_BY_DEFAULT_RULE, PERSISTED_STATE_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE, LIGHT_THEME_BY_DEFAULT_RULE, PERSISTED_STATE_RULE, AI_AUDIO_RULE } from './noEvalRule';
 import { posix } from 'node:path';
 import { contractFilePath, contractImportSpecifier } from './contractLocation';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
@@ -579,6 +579,7 @@ export function fileSystemPrompt(framework: string): string {
     NO_FAKE_FEATURE_RULE,
     LIGHT_THEME_BY_DEFAULT_RULE,
     PERSISTED_STATE_RULE,
+    AI_AUDIO_RULE,
     ...webPlatformRule(framework),
     ...exportImportConvention(framework),
     ...designContractFor(framework),

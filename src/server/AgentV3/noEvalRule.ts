@@ -142,3 +142,16 @@ export const PERSISTED_STATE_RULE =
   + '(the fields and types this screen needs) before it reaches state — anything that does not fit falls back to the '
   + 'default. A cast or a try/catch is not a check. A generic storage hook takes the check as an argument: '
   + '`useLocalStorage<T>(key, initial, isValid: (v: unknown) => v is T)`.';
+
+/**
+ * 🔴 SYNTHESISED TONES ARE NOT AN AI SONG (Q-2927, failedbr #2466 a360bc2c, 2026-11-19). "Generate a song from my lyrics
+ * with a male or female voice, then download the mp3": the hook shipped a stub; handed the readiness blocker, the model
+ * announced it would "implement real audio generation using the Web Audio API" — oscillator tones presented as the
+ * song. NO_FAKE_FEATURE_RULE already says AI is real or labelled; this names where the line sits for voice and music,
+ * because the model's own idea of "real" was the defect.
+ */
+export const AI_AUDIO_RULE =
+  'AI VOICE AND MUSIC: the browser can really SPEAK text — `speechSynthesis` with the user\'s chosen voice and language — and '
+  + 'that may be offered, labelled as spoken (not sung). SINGING, music from lyrics, a cloned voice, or a downloadable MP3 of any of '
+  + 'them needs a real speech/music provider through its key. Tones or melodies made with the Web Audio API are NOT a generated song '
+  + 'and must never be presented as one: until the provider key is saved, show the RED demo line (NO FAKE FEATURE) and say so.';

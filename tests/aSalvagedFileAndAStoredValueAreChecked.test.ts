@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ts from 'typescript';
 import { salvageQualityNotes } from '../src/server/AgentV3/writeTimeQualityCheck';
-import { PERSISTED_STATE_RULE } from '../src/server/AgentV3/noEvalRule';
+import { PERSISTED_STATE_RULE, AI_AUDIO_RULE } from '../src/server/AgentV3/noEvalRule';
 import { CALLBACK_PROP_EVENT_RULE, contractSystemPrompt, fileSystemPrompt } from '../src/server/AgentV3/SimpleBuilder';
 import { architectSystemPrompt } from '../src/server/AgentV3/systemPrompt';
 import { oneShotSystemPrompt } from '../src/server/AgentV3/OneShotBuilder';
@@ -81,5 +81,19 @@ export const c: Frozen = { onSubmit: handler };
     // And the rule says the parameter is the event itself, never optional.
     expect(CALLBACK_PROP_EVENT_RULE).toMatch(/onSubmit: \(e: React\.FormEvent\) => void/);
     expect(CALLBACK_PROP_EVENT_RULE).not.toMatch(/\(e\?:/);
+  });
+});
+
+describe('Q-2927 — tones are not an AI song: the rule is in every lane that writes app code', () => {
+  it('names the real browser path and the line it must not cross', () => {
+    expect(AI_AUDIO_RULE).toMatch(/speechSynthesis/);
+    expect(AI_AUDIO_RULE).toMatch(/Web Audio API are NOT a generated song/);
+    expect(AI_AUDIO_RULE).toMatch(/RED demo line/);
+  });
+  it('architect, fast lane, one-shot, specialist', () => {
+    expect(architectSystemPrompt('vite-react')).toContain(AI_AUDIO_RULE);
+    expect(fileSystemPrompt('vite-react')).toContain(AI_AUDIO_RULE);
+    expect(oneShotSystemPrompt('vite-react')).toContain(AI_AUDIO_RULE);
+    expect(read('src/server/AgentV3/SubAgent.ts')).toContain('${PERSISTED_STATE_RULE}\\n${AI_AUDIO_RULE}');
   });
 });

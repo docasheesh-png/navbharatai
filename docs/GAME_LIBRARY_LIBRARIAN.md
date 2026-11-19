@@ -27,3 +27,25 @@ No new finished maps, weapons, sound effects or nature/building packs were acqui
 
 ## Follow-on admission: quarantine superseded, not a deployment claim
 The eleven acquired candidates subsequently passed permitted headless-shell rendering, normal acquisition/cache and actual builder-seed checks, plus a bounded local production artifact. Their initial quarantine record is historical. See `game-engine/library-admission-2026-11-13.md` for reproducible commands and exact limits. This candidate adds them to reviewed metadata without enabling rollout flags; final CI/merge and live availability remain separate.
+
+## 2026-11-19: storage budget and MIT
+The 64-model count cap became a 320 MiB storage budget (same ceiling, measured in bytes; undeclared sizes count
+as 5 MiB). MIT joins CC0 and CC-BY-4.0, with the full MIT notice shipped in `ATTRIBUTION.txt`. No new models were
+added by this change. Growth plan, subject list and source survey: `game-engine/library-growth-plan-2026-11-19.md`.
+
+## 2026-11-19: library batch 2 (50 models, 97 total)
+Fifty CC0 (KayKit) and MIT (Kenney Starter Kit) models were derived from pinned sources and each admitted LIVE: download
+through the production transport, production acquisition engine, Chromium render/motion proof and durable-cache restore.
+Evidence: `game-engine/library-batch-2026-11-19.md`, `asset-candidates/2026-11-19-admission.json`. The librarian lists
+them automatically through `REVIEWED_GAME_ASSETS`.
+
+## 2026-11-19: every library model is changeable (admin: "maximum flexibility, even 100% replace")
+Each game seeded with library models gets `src/game/three/assetCustomizations.ts` (`GAME_ASSET_CUSTOMIZATIONS_PATH`),
+read by the loader through `import.meta.glob` (a missing file means no changes, never a broken build). Per subject:
+`source` ('library' | 'procedural' | { file, sha256? } — the project's own same-origin .glb under public/, up to 16 MiB,
+replacing the model 100% or adding a new subject), `height`, `scale`, `yaw` (degrees), `offset`, `tint`, `colors`
+(by material or mesh name), `opacity`, `hide`, `animation`, `roles`, `lod`, `shadows`. Invalid values are ignored; a file
+that cannot load (outside the project, another site, missing, hash changed, not .glb) falls back to the code-built object.
+Unedited loaders from before this change are upgraded by the existing kit refresh; edited ones are left alone. The builder
+is told where changes go in the seed handoff and in every later `object_spec` lead (`localModelLead`). Locked by
+`tests/everyLibraryModelIsChangeable.test.ts` (real runtime + real GLB), proven by reversion.

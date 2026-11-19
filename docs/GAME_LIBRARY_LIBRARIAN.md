@@ -32,3 +32,9 @@ The eleven acquired candidates subsequently passed permitted headless-shell rend
 The 64-model count cap became a 320 MiB storage budget (same ceiling, measured in bytes; undeclared sizes count
 as 5 MiB). MIT joins CC0 and CC-BY-4.0, with the full MIT notice shipped in `ATTRIBUTION.txt`. No new models were
 added by this change. Growth plan, subject list and source survey: `game-engine/library-growth-plan-2026-11-19.md`.
+
+## 2026-11-19: library batch 2 (50 models, 97 total)
+Fifty CC0 (KayKit) and MIT (Kenney Starter Kit) models were derived from pinned sources and each admitted LIVE: download
+through the production transport, production acquisition engine, Chromium render/motion proof and durable-cache restore.
+Evidence: `game-engine/library-batch-2026-11-19.md`, `asset-candidates/2026-11-19-admission.json`. The librarian lists
+them automatically through `REVIEWED_GAME_ASSETS`.

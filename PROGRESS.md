@@ -102401,3 +102401,15 @@ Tests: `visionImageCoverage.test.ts` covers the census, the source guard, and th
 - NEXT: admit batches of CC0/MIT GitHub models (KayKit City/Medieval/Prototype/Skeletons, Kenney starter kits) through the
   existing admission; design a hash-pinned NavBharatAI-hosted copy for non-GitHub CC0 sources (Quaternius animals/nature).
   Plan: `docs/game-engine/library-growth-plan-2026-11-19.md`.
+
+## 2026-11-19 — Game library batch 2: 50 live-admitted models (47 → 97)
+- 50 models from KayKit (CC0) and Kenney Starter Kits (MIT): motorcycle, trucks, road/race tiles, 4 animated skeletons,
+  axe/crossbow/sword/shield/blasters, coins/flag, 9 furniture pieces, cactus, castle/market/tavern/church/watermill/
+  tower/barracks/bridge, mountain/hill/grove, fence/bench/dustbin. +4.96 MB.
+- Every one admitted LIVE (`scripts/library/admitLibraryBatch.mts`): real download, engine, Chromium render + motion proof,
+  cache restore. 50/50 admitted. `tests/libraryBatch2.test.ts` refuses an entry without its admitted record.
+- Sibling of the 64 cap fixed: `assetPlan.ts` matched subjects from only the first 64 catalogue entries.
+- `SOURCE_RECORD_LIMIT` 10,000 → 16,384 for the 95-clip skeleton sources.
+- AppKnowledgeBase: librarian entry lists the new models; two stale "NavBharatAI does not download model files" claims corrected.
+- OPEN: rollout still depends on `AGENTV3_EXTERNAL_GAME_ASSETS` (its Cloud Run value is not recorded here). Animals beyond
+  fox/eagle, boats, aircraft, realistic firearms and audio need non-GitHub CC0 sources + a NavBharatAI-hosted pinned copy.

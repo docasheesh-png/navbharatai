@@ -50,6 +50,21 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   windmill: ['windmill', 'windmills', 'पवनचक्की', 'molino'], target: ['target', 'targets', 'निशाना', 'लक्ष्य', 'diana'],
   barrel: ['barrel', 'barrels', 'ड्रम', 'बैरल', 'barril'], wall: ['wall', 'walls', 'दीवार', 'muro'],
   boxer: ['boxer', 'boxers', 'boxing', 'मुक्केबाज़', 'मुक्केबाज', 'बॉक्सर', 'बॉक्सिंग', 'boxeador', 'boxeo'],
+  // 2026-11-19 library batch 2. Tile subjects stay literal so a bare "road" or "river" keeps the procedural terrain.
+  motorcycle: ['motorcycle', 'motorcycles', 'motorbike', 'motorbikes', 'मोटरसाइकिल', 'बाइक', 'moto'],
+  truck: ['truck', 'trucks', 'lorry', 'ट्रक', 'camión'], skeleton: ['skeleton', 'skeletons', 'कंकाल', 'esqueleto'],
+  axe: ['axe', 'axes', 'कुल्हाड़ी', 'hacha'], crossbow: ['crossbow', 'crossbows', 'ballesta'], sword: ['sword', 'swords', 'तलवार', 'espada'],
+  shield: ['shield', 'shields', 'ढाल', 'escudo'], blaster: ['blaster', 'blasters', 'laser gun', 'laser guns', 'ray gun'],
+  coin: ['coin', 'coins', 'सिक्का', 'सिक्के', 'moneda', 'monedas'], 'coin block': ['coin block', 'coin blocks'],
+  flag: ['flag', 'flags', 'झंडा', 'bandera'], 'flying enemy': ['flying enemy', 'flying enemies', 'enemy drone', 'enemy drones'],
+  bed: ['bed', 'beds', 'पलंग', 'बिस्तर', 'cama'], armchair: ['armchair', 'armchairs'], shelf: ['shelf', 'shelves', 'bookshelf', 'bookshelves'],
+  cactus: ['cactus', 'cacti', 'कैक्टस', 'नागफनी'], castle: ['castle', 'castles', 'महल', 'castillo', 'fort', 'forts', 'किला', 'fortress'],
+  market: ['market', 'marketplace', 'bazaar', 'बाज़ार', 'बाजार', 'mercado'], tavern: ['tavern', 'taverns'], church: ['church', 'churches', 'iglesia'],
+  watermill: ['watermill', 'water mill'], tower: ['tower', 'towers', 'मीनार', 'torre'], barracks: ['barracks'], bridge: ['bridge', 'bridges', 'पुल', 'puente'],
+  'forest grove': ['forest grove', 'grove'], fence: ['fence', 'fences', 'बाड़', 'valla'], dustbin: ['dustbin', 'dustbins', 'कूड़ेदान', 'डस्टबिन', 'trash can', 'trash cans', 'garbage can'],
+  'road junction tile': ['road junction tile'], 'road t junction tile': ['road t junction tile'], 'road crossing tile': ['road crossing tile', 'zebra crossing tile'],
+  'curved road tile': ['curved road tile'], 'race track straight tile': ['race track straight tile'], 'race track corner tile': ['race track corner tile'],
+  'race finish line': ['race finish line', 'finish line'],
 };
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
   fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],
@@ -77,6 +92,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       stool: ['stool sample', 'stool test'], cabinet: ['cabinet minister', 'cabinet meeting'],
       lamp: ['street lamp', 'traffic lamp'],
       rogue: ['hooded rogue', 'hooded rogues'],
+      flag: ['feature flag', 'red flag'], market: ['stock market'], shield: ['shield powerup', 'shield power up'],
       car: ['formula one car', 'formula 1 car', 'f1 car', 'hatchback car', 'station wagon car'], building: ['building a', 'building the'],
     };
     if ((excludedPhrases[subject] ?? []).some(p => mentioned(clause, p))) return false;
@@ -89,7 +105,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
     const local = clauses.filter(c => matching(subject, c)).join(' ');
     const motion = (role: string) => MOTIONS[role].some(word => mentioned(local, word));
     const animation = ['bird', 'eagle', 'parrot'].includes(subject) && motion('fly') ? 'fly'
-      : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue'].includes(subject)
+      : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue', 'skeleton'].includes(subject)
         ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
     return { subject, ...(animation ? { animation } : {}) };
   });

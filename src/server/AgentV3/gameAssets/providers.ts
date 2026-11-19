@@ -5,6 +5,7 @@ import { assetDownloadUrl } from './assetDownload';
 import { safeGltfResourcePath } from './gltfBundle';
 import { reviewedCatalogue } from './reviewedCatalogue';
 import { REVIEWED_LIBRARY_EXPANSION } from './reviewedExpansion';
+import { REVIEWED_LIBRARY_BATCH_2 } from './reviewedLibraryBatch2';
 
 export const GAME_ASSET_PROVIDERS = ['polyhaven', 'kenney', 'quaternius', 'kaykit', 'github', 'sketchfab'] as const;
 export type GameAssetProviderId = typeof GAME_ASSET_PROVIDERS[number];
@@ -33,7 +34,7 @@ export interface ReviewedAsset extends AssetCandidate {
 }
 
 /** Exact asset revisions verified locally; feature activation remains independently default OFF. */
-export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalogue, ...REVIEWED_LIBRARY_EXPANSION];
+export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalogue, ...REVIEWED_LIBRARY_EXPANSION, ...REVIEWED_LIBRARY_BATCH_2];
 
 /**
  * Admin decision 2026-11-19: the library is bounded by STORAGE, not by a model count. The old 64-entry cap was

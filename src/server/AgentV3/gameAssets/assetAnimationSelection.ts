@@ -7,6 +7,12 @@ import { compactGlb } from './assetOptimize.ts';
  * this bounded preprocessing step; the smaller result must pass the unchanged runtime validator.
  * Retained geometry, skin, image and animation bytes are copied exactly, never decoded or retargeted.
  */
+/**
+ * Bounded-work guard for a hash-pinned SOURCE before clip selection (the served result still passes validateGlb).
+ * 2026-11-19: 10,000 → 16,384. KayKit's skeleton characters (95 clips, 4.6 MiB) carry 10,941 accessors; the
+ * source byte ceiling (5 MiB) already bounds the work, so the count limit only needed headroom, not removal.
+ */
+export const SOURCE_RECORD_LIMIT = 16_384;
 export function selectGlbAnimations(input: Uint8Array, sourceSha256: string, names: readonly string[]): Uint8Array {
   const reject = (): never => { throw new Error('Invalid reviewed animation selection'); };
   if (input.byteLength < 28 || input.byteLength > ASSET_LIMITS.bytes
@@ -22,8 +28,8 @@ export function selectGlbAnimations(input: Uint8Array, sourceSha256: string, nam
   if (b.readUInt32LE(24 + jsonLength) !== 0x004e4942 || binLength % 4 || 28 + jsonLength + binLength !== b.length) reject();
   const doc = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(b.subarray(20, 20 + jsonLength)));
   if (!doc || doc.asset?.version !== '2.0' || !Array.isArray(doc.animations) || doc.animations.length > 128
-    || !Array.isArray(doc.accessors) || doc.accessors.length > 10000
-    || !Array.isArray(doc.bufferViews) || doc.bufferViews.length > 10000
+    || !Array.isArray(doc.accessors) || doc.accessors.length > SOURCE_RECORD_LIMIT
+    || !Array.isArray(doc.bufferViews) || doc.bufferViews.length > SOURCE_RECORD_LIMIT
     || !Array.isArray(doc.buffers) || doc.buffers.length !== 1 || doc.buffers[0].uri
     || !Number.isSafeInteger(doc.buffers[0].byteLength) || doc.buffers[0].byteLength < 0
     || binLength - doc.buffers[0].byteLength < 0 || binLength - doc.buffers[0].byteLength > 3) reject();

@@ -741,6 +741,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['download', 'download kahan gaya', 'file kahan gayi', 'save nahi hua', 'download nahi hua', 'downloaded file', 'where is my file', 'save to files', 'iphone download', 'android download', 'documents folder', 'export', 'csv', 'zip download', 'report download', 'share sheet', 'file save'],
   },
   {
+    id: 'game_menus_settings',
+    name: 'Game start screen, pause menu and settings',
+    path: 'In any 3D game NavBharatAI builds: the start screen opens first; during play tap the pause button (II) or press Esc; Settings is on the start screen and in the pause menu; the speaker button mutes',
+    description: 'Every 3D game NavBharatAI builds opens on a START SCREEN with the game\'s name, a one-line description and the controls for the device in hand (touch controls on a phone, keys on a laptop), with Play and Settings buttons. The PAUSE MENU has Resume, Restart, Settings and Menu; the game-over screen has Play again and Menu. SETTINGS really work and are remembered on the device: sound on or off, overall volume, music volume, effects volume, graphics quality (Smooth for weaker phones, Balanced, Sharp), look speed for the camera, and vibration on or off. A speaker button at the top mutes or unmutes in one tap.',
+    howToUse: 'Nothing to switch on. To change the start screen, ask in your own words (for example "start screen pe game ka naam Desert Rally likho", "menu me controls Hindi me dikhao").',
+    relatedFeatures: ['game_actions_visible'],
+    keywords: ['start screen', 'game menu', 'pause menu', 'settings', 'game settings', 'mute', 'awaaz band', 'sound off', 'volume', 'music volume', 'graphics quality', 'smooth', 'lag', 'look speed', 'sensitivity', 'vibration', 'restart', 'play again', 'main menu'],
+  },
+  {
     id: 'game_actions_visible',
     name: 'Game actions you can see — fire, attack, jump, kick, drift',
     path: 'NavBharatAI Pro → chat → ask for any game with actions (a shooter, a fighting game, a racing game); the built game shows them by itself',

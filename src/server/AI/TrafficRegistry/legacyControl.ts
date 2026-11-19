@@ -17,7 +17,7 @@ import type { ControlDoc } from './controlTypes';
 import { currentTrafficControl } from './controlSync';
 import { FREE_CHAIN_RUNG_PROVIDER } from './snapshot';
 
-export const LEGACY_PATHS = ['free-chain', 'chat-router', 'builder'] as const;
+export const LEGACY_PATHS = ['free-chain', 'chat-router', 'builder', 'vision', 'image'] as const;
 export type LegacyPath = typeof LEGACY_PATHS[number];
 
 /**
@@ -34,6 +34,9 @@ export const ENGINE_FAMILY: Readonly<Record<string, string>> = Object.freeze({
   // The builder's Nemotron rung is served through OpenRouter by default (see registry snapshot, P1).
   NEMOTRON: 'openrouter',
 });
+
+/** NavBharatAI's own image engines (navbharatImageEngine.ts) → the family they bill. */
+export const IMAGE_ENGINE_FAMILY: Readonly<Record<string, string>> = Object.freeze({ cloudflare: 'cloudflare', pollinations: 'pollinations', grok: 'xai' });
 
 export function familyOfEngineName(name: string): string | null {
   const key = String(name ?? '').trim().toUpperCase().replace(/#\d+$/, '');

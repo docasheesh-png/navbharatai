@@ -102270,3 +102270,14 @@ Owner t311u sequential audit, BR2003 only. Branched from origin/main `e8c45ef` (
 - Q-2770 opened (BLOCKED, the admin's scope decision): APP_SCOPE named the app "Project Name" and kept a seven-section spec as one build because of the word "Quiz"; fixing the header alone would make the decision worse. Today's output is pinned exactly.
 - Q-2621 and Q-2750 gain BR2003 evidence.
 - Docs: `docs/build-report-autopsy-BR2003.md`, its evidence JSON, `tests/br2003Autopsy.test.ts`.
+## 2026-11-18 — Traffic Manager V2, P8/P9: image reading (vision) and image generation obey drain/disable per path (off by default)
+
+What changed:
+- `COVERED_PATHS` / `LEGACY_PATHS` gain `vision` and `image`.
+- `visionChain.ts` skips a drained or disabled provider next to its existing health skip.
+- `navbharatImageEngine.ts` skips a drained or disabled engine (cloudflare, pollinations, grok → xai) before calling it.
+- Skip only. Order, image holds, quotas and the word-ban guard are unchanged. Off until an admin covers the path.
+
+Deliberately NOT done: recording image-engine health. The image engine shares provider labels with chat (GROK). An image failure would make chat skip that provider, which is a cross-surface routing change nobody approved. That needs separate image labels first.
+
+Tests: `visionImageCoverage.test.ts` covers the census, the source guard, and the image engine with coverage off (still tried) and on (skipped, next engine tried). Reversion of each hook was caught.

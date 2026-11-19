@@ -102609,3 +102609,9 @@ user, 12.7 working. Tally: ✅ 1 (REPAIR_CLAIM_WITHHELD) · 🔀 0 · ⏭️ 0 �
 **Fixed:** the kit's Game.ts exposes `window.__nbKit` (status, score, endRound — endRound only does what losing does; removed on dispose); the playtest counts every Web Audio source and `<audio>` play (`soundCounter` init script), reads the kit score before and after the controls, ends the round through the hook and finds and PRESSES the play-again control by its words (`RESTART_LABEL`, English and Hindi), then reads the status. New defects `GAME_DEFECT_RESTART_BROKEN` (no control, or pressing it did not restart) and `GAME_DEFECT_SILENT` (the game's code plays sound — `replayFromCode().sound` — and a whole playthrough played none), each with a repair hint; evidence appended to the verdict head, never points. Soft defects (not in HARD_DEFECTS): a new probe starts as evidence.
 
 **Tests:** `thePlaytestChecksPlayAgainScoreAndSound` (7, four in a real Chromium against kit-hook games: works / no button / dead button / no hook); the 10 existing playtest/repair suites stay green (143). Reversion: the probe that never presses fails. **Still open:** auto-repair stays suspended by design (`docs/security/game-auto-repair-suspension.md`: needs byte-preserving rollback) — the gate and these defects are evidence for the user's one-tap fix; "a win/level can be completed" is not provable generically and is not claimed.
+## 2026-11-19 — failedbr #2452 (6aed1d6e) autopsy: four silent minutes of `bash` reads
+
+User-stopped at 248 s with nothing written. Q-2940: the exploration guard ignored `bash` reads → one conservative
+`shellInspection.ts` definition; the guard counts a read-only `bash` as a read. Q-2941: the gate called a failed
+read a "build-breaking blocker" → a read cannot break the build. Q-2942 (contract unknown for an unknown title) and
+Q-2943 (Play Store research time) OPEN; Q-2944 → Q-2889.

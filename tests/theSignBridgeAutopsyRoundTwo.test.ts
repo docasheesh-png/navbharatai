@@ -107,9 +107,9 @@ describe('3 · "runnable" is said only when it is true', () => {
     expect(s).toMatch(/npm install -D vitest/);
   });
 
-  it('with vitest declared it is runnable', () => {
+  it('declaring vitest proves neither installation nor execution (cdffbb71)', () => {
     expect(starterTestsNarration(['src/a.test.ts', 'src/b.test.ts'], JSON.stringify({ devDependencies: { vitest: '2' } })))
-      .toMatch(/2 starter tests .*runnable/);
+      .toMatch(/2 starter tests .*declared; installation and execution are not verified/);
   });
 
   it('an unreadable package.json is treated as "not declared"', () => {

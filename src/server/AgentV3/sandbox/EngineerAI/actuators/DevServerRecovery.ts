@@ -582,6 +582,19 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
   if (unresolved && !unresolved.inNodeModules) {
     return make('code_error', `Code error in the source (a restart can't fix it): "${unresolved.specifier}" could not be resolved${unresolved.importer ? ` from ${unresolved.importer}` : ''} — fix the import path, or add the package to package.json if it is a real dependency.`);
   }
+  // Angular's template compiler and workspace validator use neither SyntaxError nor
+  // Unexpected-token for most failures. NG9 in a watching process is still a failed
+  // compile; waiting longer or restarting cannot repair its source/configuration.
+  const angularCompileError = text.match(/^[ \t]*(?:[✘×X]\s*)?(?:\[ERROR\]\s*NG\d+:|Error:[^\n]*\berror NG\d+:)[^\n]*/m)
+    ?? (text.includes('[plugin angular-compiler]')
+      ? text.match(/^[ \t]*(?:[✘×X]\s*)?\[ERROR\]\s*TS\d+:[^\n]*/m) : null);
+  const missingConfiguration = text.match(/^[ \t]*(?:An unhandled exception occurred:\s*)?Configuration ['"][^'"\n]+['"] is not set in (?:the )?workspace\.[^\n]*/m);
+  const invalidConfiguration = text.match(/^[ \t]*(?:Error:\s*)?Schema validation failed with the following errors:\s*\n[ \t]*Data path\b[^\n]*(?:must|should)\b[^\n]*/m);
+  const configurationOrCompileError = angularCompileError ?? missingConfiguration ?? invalidConfiguration;
+  if (configurationOrCompileError) {
+    const detail = configurationOrCompileError[0].trim().replace(/\s+/g, ' ').slice(0, 300);
+    return make('code_error', `Project configuration or compile error (a restart can't fix it): ${detail}`);
+  }
   if (/\bSyntaxError\b/i.test(text)
     || /Transform failed with \d+ error/i.test(text)
     || /\[(?:esbuild|vite)\][^\n]*error/i.test(text)

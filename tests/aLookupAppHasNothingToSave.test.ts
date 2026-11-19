@@ -169,7 +169,7 @@ describe('4 · the live tick stops restating an estimate the build has outrun', 
     expect(src).toContain('evidenced: etaEvidenced, budgetMs: effectiveBuildSeconds * 1000,');
     expect(src).toContain('roughBand: etaRoughBand, roughHighMs: etaRoughHighMs,');
     const eta = readFileSync('src/server/AgentV3/progressEta.ts', 'utf8');
-    expect(eta).toMatch(/unevidencedEtaTickLine\(elapsedMs, s\.budgetMs, s\.roughBand, s\.roughHighMs\)/);
+    expect(eta).toMatch(/unevidencedEtaTickLine\(elapsedMs, s\.budgetMs, s\.roughBand, s\.roughHighMs, s\.remainingMs\)/);
   });
 });
 

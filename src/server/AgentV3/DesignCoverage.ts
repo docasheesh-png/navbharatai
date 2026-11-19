@@ -36,6 +36,7 @@
 // Pure + dependency-free → fully unit-testable.
 
 import { classAttributeValues } from './CssConsistency';
+import { angularWorkspaceFacts, isAngularMountShell } from './angularWorkspaceAnalysis';
 export type DesignDefect =
   | 'BARE_MARKUP' | 'NO_HEADING' | 'RAW_TABLE' | 'LIST_WITHOUT_EMPTY_STATE' | 'NO_STYLESHEET';
 
@@ -334,7 +335,7 @@ export function analyzePage(path: string, content: string, files: Readonly<Recor
  * element selectors (`body`, `h1`) with almost no classes, and flagging that would be a false positive.
  * "This page has no CSS attached to it AT ALL" is unambiguous, so that is the only thing judged.
  */
-export function analyzeHtmlPage(path: string, content: string): PageFinding | null {
+export function analyzeHtmlPage(path: string, content: string, files: Record<string, string> = {}): PageFinding | null {
   if (!/\.html?$/i.test(path)) return null;
   // A SINGLE-PAGE APP'S MOUNT SHELL IS NOT A PAGE (first real build after the design gate shipped,
   // 2026-08-12). A Vite/React `index.html` is `<div id="root"></div>` plus a module script: it has no
@@ -343,7 +344,7 @@ export function analyzeHtmlPage(path: string, content: string): PageFinding | nu
   // class)" — which would fire on essentially every app this platform builds, about the one file that
   // is supposed to look like that. The multi-page static site this function exists for has no mount
   // root and no module script, so the two are cleanly separable.
-  if (isSpaMountShell(content)) return null;
+  if (isSpaMountShell(content) || isAngularMountShell(path, content, files)) return null;
 
   const { total, classed } = countHtmlElements(content);
   if (total < 6) return null;
@@ -386,13 +387,14 @@ export function isSpaMountShell(content: string): boolean {
 export function analyzeDesignCoverage(files: Record<string, string>): DesignCoverageReport {
   const findings: PageFinding[] = [];
   let pagesExamined = 0;
+  const angular = angularWorkspaceFacts(files || {});
 
   for (const [path, content] of Object.entries(files || {})) {
     if (typeof content !== 'string') continue;
 
     if (/\.html?$/i.test(path)) {
       if (countHtmlElements(content).total < 6) continue;
-      if (isSpaMountShell(content)) continue; // not a page — see analyzeHtmlPage
+      if (isSpaMountShell(content) || isAngularMountShell(path, content, files, angular)) continue; // not a page — see analyzeHtmlPage
       pagesExamined++;
       const htmlFinding = analyzeHtmlPage(path, content);
       if (htmlFinding) findings.push(htmlFinding);

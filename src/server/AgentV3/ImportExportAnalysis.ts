@@ -14,6 +14,7 @@
 import { isAppAnalysisPath } from './appAnalysisPaths';
 import { typeOnlyImportSpecs } from './typeOnlyImports';
 import { createExportCapabilities, EXPORT_CODE_FILE, resolveExportTarget } from './exportCapabilities';
+import { angularRequiredDependencies, angularWorkspaceFacts } from './angularWorkspaceAnalysis';
 
 export type ImportMismatchKind = 'named-import-not-exported' | 'default-import-missing';
 
@@ -340,10 +341,12 @@ export function findUnusedDependencies(files: Record<string, string>): UnusedDep
   }
 
   const provided = frameworkProvidedDeps(files, declared);
+  const angularUsed = new Set([...angularRequiredDependencies(pkgRaw), ...angularWorkspaceFacts(files).packages]);
   const unused: UnusedDependency[] = [];
   for (const name of declared) {
     if (IMPLICIT_USE_DEPS.has(name)) continue;
     if (provided.has(name)) continue; // auto-provided by the meta-framework (Nuxt/SvelteKit) — not unused
+    if (angularUsed.has(name)) continue; // Angular's required peers and CLI declarations are uses too
     if (name.startsWith('@types/')) continue; // type-only, never statically imported
     if (commands.has(name)) continue; // run by the project's own scripts (`next dev`, `nodemon …`)
     if (!importedPkgs.has(name)) unused.push({ name });

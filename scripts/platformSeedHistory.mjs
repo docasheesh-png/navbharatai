@@ -45,6 +45,16 @@ async function seedFiles(entry, rev) {
     await build({
       stdin: { contents: entry, loader: 'ts', sourcefile: 'entry.ts', resolveDir: ROOT },
       bundle: true, platform: 'node', format: 'esm', outfile, logLevel: 'silent',
+      // Some starter helpers now reach TypeScript, a CommonJS dependency which
+      // requires Node builtins. The generated ESM bundle needs a real require.
+      banner: { js: [
+        "import { createRequire as seedCreateRequire } from 'node:module';",
+        "import { fileURLToPath as seedFileURLToPath } from 'node:url';",
+        "import { dirname as seedDirname } from 'node:path';",
+        'const require = seedCreateRequire(import.meta.url);',
+        'const __filename = seedFileURLToPath(import.meta.url);',
+        'const __dirname = seedDirname(__filename);',
+      ].join('\n') },
       plugins: rev ? [{
         name: 'at-rev',
         setup(b) {

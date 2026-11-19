@@ -24,6 +24,8 @@
  *   🔴 It stood down for EVERY recognised domain until autopsy 303e8a6f — "a todo app" (productivity), "a racing
  *   game" (game) and a booking app add no access control at all, so they got no note: the 70e030bb class itself.
  *   The domain's own feature list now decides (`domainAddsAccessControl`).
+ * - money movement named as a feature, even when the primary domain is a game. This only withdraws
+ *   the prohibition; it neither adds authentication nor claims that payments have been implemented.
  * A missed case costs today's behaviour; a wrong note would only drop a login the request never named.
  * Kill switch: `AGENTV3_REQUEST_SCOPE=off`. PURE.
  */
@@ -77,6 +79,41 @@ export function asksForSignIn(text: string | null | undefined): boolean {
   return ASKS_FOR_SIGN_IN.test(String(text ?? '').replace(DECLINED_SIGN_IN, ' '));
 }
 
+const DIRECT_MONEY_MOVEMENT = /\b(?:cash[\s-]?outs?|payouts?)\b|\b(?:accept|process|collect|take|make|refund)\s+(?:online\s+)?payments?\b|\b(?:send|receive|transfer)\s+(?:money|funds?)\b/i;
+const DEPOSIT = /\bdeposits?\b/i;
+const WITHDRAW = /\bwithdraw(?:als?|s|ing|n)?\b/i;
+const MONEY_CONTEXT = /\b(?:money|funds?|cash|wallets?|bank(?:ing)?|payments?|balances?|interest|rupees?|dollars?|inr|usd|eur|upi|transactions?)\b/i;
+// "Withdraw a request" means cancel it; geological deposits and course withdrawals are not money.
+// Remove the mention, not the entire request: the same app may separately accept a real payment.
+const NON_MONETARY_MENTIONS = /\b(?:mineral|ore|coal|oil|sediment|sand|calcium|plaque|protein|geological)\s+deposits?\b|\bdeposits?\s+of\s+(?:minerals?|ore|coal|oil|sediment|sand|calcium|plaque|protein)\b|\b(?:course|class|academic|enrolment|enrollment|consent|drug|alcohol|nicotine)\s+withdrawals?\b|\bwithdraw(?:s|ing|n)?\s+(?:(?:a|an|the|their|my)\s+)?(?:leave\s+|course\s+)?(?:requests?|applications?|consent|troops?)\b/gi;
+const SIMULATED_MONEY = /\b(?:demo|mock|simulat(?:e[sd]?|ion|or)|pretend|play[\s-]+money|virtual[\s-]+(?:chips?|coins?|money)|fake[\s-]+money|sandbox[\s-]+payments?)\b/i;
+const REAL_MONEY = /\b(?:real|live|actual)[\s-]+(?:money|payments?|deposits?|withdrawals?|payouts?)\b/i;
+const MONEY_EXPLANATION = /\b(?:calculat(?:e|es|or|ion|ing)|interest|estimat(?:e|es|or|ion)|educational|tutorial|lessons?|explain(?:er)?|symptoms?|geolog(?:y|ical))\b/i;
+const PROCESS_MONEY = /\b(?:accept|process|enable|support|implement|integrate|allow|handle)\s+(?:[\w-]+\s+){0,3}(?:deposits?|withdrawals?|payouts?|payments?)\b/i;
+const MONEY_TERM = String.raw`(?:(?:real|live|actual)[\s-]+(?:money[\s-]+)?)?(?:deposits?|withdrawals?|withdraw|cash[\s-]?outs?|payouts?|payments?|money)`;
+const DECLINED_MONEY = new RegExp(String.raw`\b(?:no|without|do not|don't|never)\s+(?:(?:allow|enable|support|process|accept|include)\s+)?${MONEY_TERM}(?:\s*(?:and|or|/)\s*${MONEY_TERM})*\b|\b${MONEY_TERM}\s+(?:is\s+|are\s+)?(?:not\s+(?:needed|required|allowed)|disabled)\b`, 'gi');
+
+/**
+ * BRcdffbb71: "colour prediction game ... deposit ... withdrawal process" was classified as game,
+ * so the builder was explicitly forbidden accounts despite the money-moving feature. Read that
+ * feature independently of the primary domain. Pure calculators, explanations and explicitly simulated
+ * flows do not imply access control. Separate clauses keep "demo game, but real deposits" from being
+ * discarded with the demo clause. A match only lets the builder consider the requested architecture.
+ */
+export function asksForMoneyMovement(text: string | null | undefined): boolean {
+  const request = String(text ?? '').replace(NON_MONETARY_MENTIONS, ' ');
+  // The report's deposit + withdrawal pair is monetary without an explicit "money" keyword. A
+  // lone ambiguous verb/noun needs financial context, so generic requests cannot disable this rule.
+  const paired = DEPOSIT.test(request) && WITHDRAW.test(request);
+  return request.replace(DECLINED_MONEY, ' ').split(/[.;\n]|\b(?:but|however)\b/i).some((clause) => {
+    const financialContext = paired || MONEY_CONTEXT.test(clause) || REAL_MONEY.test(clause);
+    if (!DIRECT_MONEY_MOVEMENT.test(clause) && !(financialContext && (DEPOSIT.test(clause) || WITHDRAW.test(clause)))) return false;
+    if (REAL_MONEY.test(clause)) return true;
+    if (SIMULATED_MONEY.test(clause)) return false;
+    return !MONEY_EXPLANATION.test(clause) || PROCESS_MONEY.test(clause);
+  });
+}
+
 export interface RequestScopeInput {
   /** What the builder reads: the message, plus any attachment and earlier requests (planningRequest). */
   request: string;
@@ -103,6 +140,7 @@ export function requestScopeVerdict(input: RequestScopeInput, env: NodeJS.Proces
   if (!input?.newBuild) return null;
   if (domainAddsAccessControl(input.domain)) return null;
   if (asksForSignIn(input.request)) return null;
+  if (asksForMoneyMovement(input.request)) return null;
   return { note: REQUEST_SCOPE_NOTE, reason: declinesSignIn(input.request) ? 'declines-sign-in' : 'names-no-sign-in' };
 }
 
@@ -123,5 +161,5 @@ export function requestScopeReportLine(reason: RequestScopeReason): string {
   const why = reason === 'declines-sign-in'
     ? 'The request declines sign-in in so many words (and asks for none of the sign-in words this rule looks for)'
     : 'The request matched none of the sign-in words this rule looks for (login, sign-in, account, password, OTP, roles, admin, private, PIN, biometric, …)';
-  return `${why}, and the requirement analyzer placed it in no domain whose features add access control, so this new build was told to add no login or accounts and no control for a state the data does not have.`;
+  return `${why}, matched no money-movement feature this rule looks for, and the requirement analyzer placed it in no domain whose features add access control, so this new build was told to add no login or accounts and no control for a state the data does not have.`;
 }

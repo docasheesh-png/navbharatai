@@ -35,7 +35,7 @@ import { isModelUnavailableError, isProviderBalanceError } from './providerError
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError, isReasoningRungHandoff, providerNeverAnswered, isSlowStreamAbandon } from './turnDeadline';
-import { typecheckEvidenceFromCommands, commandOutcomeText, type TypecheckCommandProof } from './TscGate';
+import { commandOutcomeText, type TypecheckCommandProof } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
@@ -63,6 +63,8 @@ export function findingLabel(message: unknown): string {
 }
 
 export const PROCESS_ONLY_CODES = new Set([
+  // Compiler applicability describes our preview lane, never a pass or a defect in the app.
+  'PREVIEW_COMPILE_NOT_APPLICABLE',
   // Q-381 batch six (2026-10-12). The dev server would not stay up after the platform restarted it. Its own
   // recording sites say "The app's code was never the problem here — nothing was listening on the preview
   // port" and call it "an infrastructure finding, not an accusation against the user's code" (autopsy
@@ -1515,7 +1517,8 @@ export class BuildDiagnostics {
   }
 
   typecheckEvidenceFromAgentCommands(): 'passed' | 'failed' | undefined {
-    return typecheckEvidenceFromCommands(this.currentCommandEvidence());
+    // Refutation and release readers must agree on native framework scope and live freshness.
+    return readAgentRunEvidence(this.currentCommandEvidence()).typecheck;
   }
 
   /**

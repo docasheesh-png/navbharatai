@@ -2557,7 +2557,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             items: { type: 'string' },
             description:
               'Optional subset: renderer, lighting, materials, camera, world, collision, environment, surfaces, '
-              + 'humanoid, healthBar, objects, buildings, atmosphere. Default = all; imports are pulled in automatically. '
+              + 'humanoid, healthbar, objects, buildings, atmosphere. Default = all; imports are pulled in automatically. '
               + 'buildings = createEnterableHouse(): opt-in interiors, stairs and hinged doors; legacy createHouse() stays scenery. '
               + 'atmosphere = createAtmosphere(): a running day-night clock (sun, moon, stars, street lamps '
               + 'on at dusk) and weather (clear, cloudy, rain, storm with lightning, snow, fog, dust); '

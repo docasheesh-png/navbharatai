@@ -6368,7 +6368,7 @@ const FILES: Record<string, string> = {
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthBar', 'objects', 'atmosphere',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'objects', 'atmosphere',
 ];
 
 /**

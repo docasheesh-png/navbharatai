@@ -1,4 +1,5 @@
 import { generateProceduralObject } from '../lib/proceduralObjects/recipe';
+import { deadStoreSubscriptionNote } from './deadStoreSubscription';
 import { splitSeedOrphans, seedOrphanObservation, kitOrphanObservation } from './seedOrphanOwnership';
 import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
@@ -4968,6 +4969,7 @@ export class ToolDispatcher {
     try { storeLoop = storeEffectLoopNote(files); } catch { /* a note is best-effort */ }
     // A `this`-reading method handed out uncalled (autopsy 6cd698cc — the theme button). See detachedMethod.ts.
     try { storeLoop += detachedMethodNote(files); } catch { /* a note is best-effort */ }
+    try { storeLoop += deadStoreSubscriptionNote(files); } catch { /* a note is best-effort */ } // failedbr #1179
     // An `nb-` class the kit does not have and nothing defines (autopsy 466c260a) — said while the file
     // is open, instead of by the end-of-build check inside a four-minute heal.
     const invented = await this.inventedKitClassNotes(files);

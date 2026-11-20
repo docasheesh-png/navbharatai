@@ -3386,6 +3386,12 @@ export class ToolDispatcher {
             // not an npm dependency — skip it here.
             continue;
           }
+          // 🔴 A BARE IMPORT THAT IS A PROJECT FILE IS NOT A PACKAGE (failedbr #1615, 2026-11-20). With the starter's
+          // `baseUrl: "src"` (mirrored into Vite), `import … from 'types'` IS `src/types.ts` — tsc and Vite both resolve
+          // it — yet it was sent to the package check and became the readiness BLOCKER "2 package(s) the app loads are
+          // not installed: types, lib". `resolveLocalImport` accepts a bare specifier only when a real project file
+          // matches, so `react` / `lodash` stay external exactly as before (ArchitectureAnalysis f04421ef).
+          if (resolveLocalImport(file, spec, files)) continue;
           external.add(spec);
         }
       }

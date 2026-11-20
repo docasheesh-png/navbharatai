@@ -16,6 +16,7 @@
 import { NATIVE_CAPABILITIES, REGISTRY_CAPACITOR_MAJOR } from './nativeCapabilities';
 import { analyzeDependencies, rangeMajor, typesToRuntime, type DependencyIssue } from './DependencyAnalysis';
 import { isPlatformE2eScaffold } from './e2eScaffold';
+import { resolveLocalImport } from './ArchitectureAnalysis';
 import { minVersion, satisfies, subset, valid, validRange } from 'semver';
 
 /**
@@ -728,6 +729,7 @@ export function applyWellKnownMissingDeps(files: Record<string, string>, metadat
   if (typeof pkgRaw !== 'string') return unchanged;
 
   const external: string[] = [];
+  const projectFiles = new Set(Object.keys(files));
   for (const [path, content] of Object.entries(files)) {
     if (!CODE_FILE_RE.test(path) || typeof content !== 'string') continue;
     // 🔴 OUR E2E NET IS NOT RECONCILED (autopsy 7d79254b). It is written, never run, and its runner is
@@ -743,6 +745,8 @@ export function applyWellKnownMissingDeps(files: Record<string, string>, metadat
     while ((m = IMPORT_SPECIFIER_RE.exec(content))) {
       const spec = m[1];
       if (spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('@/')) continue; // local, not npm
+      // failedbr #1615: a bare `types` / `lib` under the starter's `baseUrl: "src"` is a project file, never a package.
+      if (resolveLocalImport(path, spec, projectFiles)) continue;
       external.push(spec);
     }
   }

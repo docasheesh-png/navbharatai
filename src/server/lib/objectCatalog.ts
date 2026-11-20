@@ -566,7 +566,8 @@ const COLLECTIBLES: CatalogEntry[] = [
     parts: ['a colour that means its effect and NOTHING else in the level shares', 'an emissive core or an internal glow', 'a distinct silhouette readable from 20 m', 'a bob-and-spin animation', 'a burst effect plus a sound on pickup'],
     tell: 'Colour-code by EFFECT and never reuse those colours for scenery. A player must know what a pickup does before they reach it.' },
   { id: 'marker', name: 'checkpoint / portal / marker', category: 'collectible',
-    words: 'checkpoint|portal|spawn|waypoint|marker|flag|finish\\s*line|goal\\s*marker|teleport', hi: 'चेकपॉइंट|झंडा',
+    // "spawn" is a PLACE only as a noun (spawn point / zone / pad): "randomly spawn car" is a verb (failedbr #1261).
+    words: 'checkpoint|portal|(?:re)?spawn\\s*(?:point|zone|pad|area|location)s?|waypoint|marker|flag|finish\\s*line|goal\\s*marker|teleport', hi: 'चेकपॉइंट|झंडा',
     dims: 'a checkpoint gate 4-6 m wide and 4 m tall; a floor pad 2 m across; a flag 2.5 m tall',
     parts: ['a shape readable from a DISTANCE and from any angle', 'an animated element — a rotating ring, a rippling surface, a waving flag', 'a clear before/after state so the player knows it triggered', 'a light or emissive so it is visible in every lighting preset'],
     tell: 'It must be legible from across the level and it must visibly CHANGE when used. A static prop the player cannot tell they have activated is a bug report waiting to happen.' },

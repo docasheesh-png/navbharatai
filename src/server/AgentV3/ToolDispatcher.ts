@@ -2781,7 +2781,7 @@ export class ToolDispatcher {
       const errNew = await firstSyntaxError(path, newContent);
       if (!errNew) return this.previewDuplicateRejection(path, oldContent, newContent);
       const errOld = await firstSyntaxError(path, oldContent);
-      const rejection = parseGuardDecision(path, errOld, errNew, true);
+      const rejection = parseGuardDecision(path, errOld, errNew, true, newContent);
       if (rejection) {
         try { getWorkspaceMemory(this.workspaceId).recordError(`[BLOCKED-SYNTAX] refused write that would break ${path}: ${errNew.message}`); } catch { /* audit best-effort */ }
       }

@@ -496,8 +496,10 @@ export function sectionedSpecSize(prompt: string): number | null {
   let bulletsUnderHeading = 0;
   let bulletsOutside = 0;
   let current = false;
+  let numbered = 0;
   for (const line of lines) {
     if (NUMBERED_HEADING.test(line)) {
+      numbered++;
       pending = true; current = false;
       continue;
     }
@@ -507,6 +509,11 @@ export function sectionedSpecSize(prompt: string): number | null {
     }
   }
   if (sections < SECTIONED_MIN) return null;
+  // 🔴 A NUMBERED LIST IS NOT A LIST OF SECTIONS (failedbr #2100, 2026-11-08 — "DriveEasy"). Customer, driver and admin
+  // features were 32 numbered ITEMS under plain headings; three items carried sub-bullets (a form's fields) and the
+  // payment bullets followed item 12, so the spec was sized as "4 sections" and a 40-part, three-role app went to the
+  // fast lane and then to the 25-minute cap. In a spec organised in sections, most numbered lines head a bullet block.
+  if (sections * 2 < numbered) return null;
   // Most bullets must sit under a numbered section, or the headings are decoration on a flat list.
   if (bulletsUnderHeading < bulletsOutside) return null;
   return sections;

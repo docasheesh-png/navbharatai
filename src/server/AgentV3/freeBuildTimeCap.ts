@@ -90,6 +90,21 @@ export function freeBuildWindow(paidSeconds: number, isFreeBuild: boolean, env: 
   return { seconds: cap, capped: true, paidSeconds };
 }
 
+/**
+ * The admin report's FREE_BUILD_TIME_CAP line (Q-2750, autopsy 05eb30ba). It said "a paid build would get 58 min"
+ * in one build and "29 min" in another of the same hour, and both were true: a large ("deep") build's window is
+ * scaled up (PipelineDepth.scaleBuildSeconds). The line never said so, so two true numbers read as a contradiction.
+ * It now names the size whenever the paid window is not the standard one. PURE.
+ */
+export function freeWindowLine(decision: FreeWindowDecision, standardSeconds: number, depth: string): string {
+  const min = (s: number) => Math.round(s / 60);
+  const scaled = Number.isFinite(standardSeconds) && standardSeconds > 0 && min(decision.paidSeconds) !== min(standardSeconds);
+  const paid = scaled
+    ? `a paid build of this size (${depth}) would get ${min(decision.paidSeconds)} min; the standard window is ${min(standardSeconds)} min`
+    : `a paid build would get ${min(decision.paidSeconds)} min`;
+  return `Free build window: ${min(decision.seconds)} min (${paid}).`;
+}
+
 // ── The unattended chain ─────────────────────────────────────────────────────────────────────────
 
 interface Chain { spentMs: number; touchedAt: number }

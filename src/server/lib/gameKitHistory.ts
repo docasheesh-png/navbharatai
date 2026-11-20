@@ -313,6 +313,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/core/quests.ts": [
     "23688f9c511f110c2e0aab1a704abd655b54a2822d5143b09f816313d43dc06c"
   ],
+  "src/game/core/runner.ts": [
+    "97bdd55536727c171dcd0045864eda6f8ecc1406539771fb8ba32e92cdeb2312"
+  ],
   "src/game/core/settings.ts": [
     "26763b0415a83d97907448f7e605ac9ddd527119c2ac59ba08e6e9f743416007",
     "a29d92726e4fd0baf3be8ce978ae3f638d5979892d63416aafa59e6a536e0e86",
@@ -337,6 +340,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "d629f3dc261ed18487740b12de512aa2d23f34742d50a6b775a95b292db13c95",
     "ad218f39f6a20fcb2e26158a5fef567b2378578a783e6ad72cafd923089525e7",
     "89b605f2878fdbb8f020440ee5d2671174d9a54bd6a52227bf9c1bfcb163ebdb"
+  ],
+  "src/game/core/swipe.ts": [
+    "aeef0a97439506917c0cf63ee9a7dee9e9a393b4a1a550006dee1a6f6889666e"
   ],
   "src/game/forge/behave.ts": [
     "a6a8751f2a3e0a244fcb606b7e1f558a0617c95e713a710205ebdabd7751ce7e",

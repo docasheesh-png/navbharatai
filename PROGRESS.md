@@ -103161,3 +103161,23 @@ Ledger, older reports (2026-11-20, next PR):
 - #1926 — Q-3037 (the ID freed by the withdrawn row) a type imported beside a same-name value is refused at write time when the in-browser preview cannot compile it (tsc and esbuild accept it, Babel does not); the E2B-cap start with the fast lane running anyway is BR1952, fixed.
 - #1925 — Q-3039 a React-writing game recipe is refused in a project that cannot mount React (a Svelte game spent ~20 min reconciling the kit's React files); its kit `Game.ts` rewrite is the class #4375's kit guard refuses; its E2B-cap start is Q-2929.
 - #1916 — Q-3040 a dropped-connection message ("network error", "Failed to fetch") no longer offers Fix with AI, and a missing optional `test`/`lint` script is not a build-breaking blocker.
+
+## 2026-11-20 — Game menus in nine more Indian languages + Settings → Language (game-gap audit)
+
+- **Problem:** the game kit's own screens (start, pause, settings, game over, shop, controls, captions) were English or
+  Hindi only. A Tamil, Telugu or Bangla player got English menus unless the builder translated every word, and a missed
+  word stayed English. Nothing told the builder which language the request wanted.
+- **Root cause / class:** the kit had two languages and no path from "the request is in Tamil" to "the game is in Tamil".
+- **Fix:**
+  - `src/server/lib/gameStringsIndic.ts`: full tables for Tamil, Telugu, Bangla, Marathi, Gujarati, Kannada, Malayalam,
+    Punjabi and Odia (every key, every `{placeholder}`, technical tokens kept). Typed as `Record<StringKey, string>` in the
+    generated `core/strings.ts`, so a new key that is not translated everywhere fails the kit's strict compile.
+  - `core/strings.ts`: 11 languages, `'auto'` detects all of them, and a **player choice** (`choosePlayerLanguage`) saved
+    on the device that wins over the game's own; the game's word changes stay in the game's own language only.
+  - Shell: **Settings → Language** list (each language in its own script); every screen re-renders on a change.
+  - `AgentV3/gameLanguage.ts`: the request decides — a language NAMED as the game's language ("Tamil mein", "in Telugu",
+    "Bangla version") or the SCRIPT the request is written in; a subject mention ("a Tamil movie quiz") is not a choice.
+    The kit handoff tells the builder `language: 'ta'` and to write the game's own text in it.
+- **Proof:** `tests/theGameSpeaksIndianLanguages.test.ts` (24 tests; five reversions each failed).
+- 🟡 **Open:** the nine tables were written without a native speaker reviewing every word. They are ordinary words, and any
+  word can be changed with `options.strings`, but a native-speaker pass per language is recommended.

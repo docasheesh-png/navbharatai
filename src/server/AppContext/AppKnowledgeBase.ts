@@ -796,6 +796,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['2d map', '2d world', 'bada map', '2d game bada map', 'top down map', 'top-down game', 'rpg map', 'tile map', 'endless map', 'map chhota hai', 'kahin bhi ghoom', 'badi duniya', 'map khatam na ho', 'open world 2d', '2d open world', 'gaon', 'jungle map', 'registan map', 'jheel', 'minimap', 'naksha'],
   },
   {
+    id: 'game_languages',
+    name: 'Game menus in 11 Indian languages',
+    path: 'NavBharatAI Pro → chat → ask for the game in your language (for example "Tamil mein racing game banao", "make a ludo game in Telugu", or type the request in Bangla, Kannada or any Indian script); in the game itself: Settings → Language',
+    description: 'The screens and buttons of a game NavBharatAI builds — start screen, pause menu, settings, game over, shop, controls, touch buttons and captions — are written in English, Hindi, Tamil, Telugu, Bangla, Marathi, Gujarati, Kannada, Malayalam, Punjabi and Odia (2026-11-20). The game speaks the language the request names ("Tamil mein", "in Telugu", "Bangla version") or the script the request is written in, and its own text (title, levels, dialogue) is written in that language too. Players pick their own language in the game under Settings → Language; the choice is saved on their phone. Any single word can be changed by asking. The nine newer languages were written without a native speaker reviewing every word, so a word may read differently from what a native speaker would choose — ask and it is changed.',
+    howToUse: 'Say the language in your request, or simply write the request in your language. To change one word, ask ("Tamil mein Play ki jagah X likho"). Players change the language from Settings → Language inside the game.',
+    relatedFeatures: ['game_menus_settings', 'game_2d_kit'],
+    keywords: ['language', 'bhasha', 'tamil game', 'telugu game', 'bangla game', 'bengali game', 'marathi game', 'gujarati game', 'kannada game', 'malayalam game', 'punjabi game', 'odia game', 'hindi game', 'game in tamil', 'tamil mein game', 'apni bhasha', 'regional language', 'menu language', 'language setting', 'bhasha badlo'],
+  },
+  {
     id: 'athree_map',
     name: 'Athree map — a big ready-made world for 3D games',
     path: 'NavBharatAI Pro → chat → ask for a 3D game that needs a large world (racing, open world, battle royale, flight, exploring); naming the Athree map in the request picks it',

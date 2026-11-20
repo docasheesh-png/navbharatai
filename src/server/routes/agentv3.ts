@@ -458,7 +458,7 @@ import { gameLibraryBuildReport } from '../AgentV3/gameAssets/gameLibrary';
 import { browseLibrary, libraryThumbPath, addToGamePrompt } from '../AgentV3/gameAssets/libraryThumbnails';
 import { externalGameAssetsEnabled } from '../AgentV3/gameAssets/assetPlan';
 import { wantsEndlessRaceCourse } from '../AgentV3/endlessRaceCourse';
-import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { gamePlannerCapability, gameTurnRequest, gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, gameKitOwnsTheBuild, downgradeEmptyKitSeedSuccesses, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, salvageReadInstruction, repairCompilerFiles, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -14842,7 +14842,7 @@ async function noteBuildOutcome(
       // 🔒 ONE SCOPE VERDICT FOR THE WHOLE BUILD (Q-138, admin 2026-10-11): sized once, here, and read by the
       // report line below, the mega-app roadmap and Software Project Mode alike. Project Mode no longer sizes
       // a request on its own — it splits only what this verdict calls large (scopeVerdict).
-      const appScope = scopeVerdict(planning.sizing, { complex: buildIsComplex });
+      const appScope = scopeVerdict(planning.sizing, { complex: buildIsComplex, gameOnKit: gameKitOwnsTheBuild(planning.sizing, framework) });
       try {
         const scope = appScope.scope;
         buildDiag.record({
@@ -19015,7 +19015,7 @@ async function noteBuildOutcome(
           isEditMode,
           // The text the gate sized and the verdict it read — never a second derivation (Q-138).
           prompt: planning.sizing,
-          scope: { large: appScope.large, signals: appScope.scope.signals },
+          scope: { large: appScope.large, signals: appScope.scope.signals, gameOnKit: appScope.gameOnKit },
           templateIsTheApp: templateIsTheFinishedApp(seededScaffold),
         });
         buildDiag.record({ phase: 'plan', severity: 'info', code: pmDiag.code, message: pmDiag.message, detail: pmDiag.detail, autoResolved: true });

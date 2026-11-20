@@ -279,6 +279,9 @@ export function resolvePmScript(command: string, scripts: Record<string, string>
  * flag. When `framework` is undefined the historical Vite-style `--host` pass-through is kept, so
  * existing callers and the common Vite scaffold are byte-for-byte unchanged.
  */
+/** A static file server that binds all interfaces by default and takes no Vite-style `--host` (failedbr #2224). */
+export const STATIC_FILE_SERVER_RE = /(?:^|[\s;&|(])(?:npx\s+(?:-y\s+)?)?(?:http-server|live-server|serve|python3?\s+-m\s+http\.server)(?=\s|$)/;
+
 export function ensureHostBinding(command: string, framework?: DevFramework, resolvedScript?: string): string {
   if (!command) return command;
   // THE SECOND, INDEPENDENT GUARD (same autopsy as PM_ONE_SHOT_SUBCOMMAND). The classifier decides
@@ -290,6 +293,10 @@ export function ensureHostBinding(command: string, framework?: DevFramework, res
   // Already binds a host (any interface / explicit flag) — leave untouched.
   if (/--host|-H\b|HOST=|0\.0\.0\.0/.test(command)) return command;
   if (simpleResolvedScript(resolvedScript) && /(?:^|\s)(?:--host(?:name)?(?:[=\s]|$)|-H(?:[=\s]|$)|HOST=)/.test(resolvedScript)) return command;
+  // A STATIC FILE SERVER takes no `--host` (failedbr #2224): `http-server` binds every interface by default and names
+  // an address with `-a`, `serve` with `-l`, Python's with `--bind`. `npx http-server . -p 3000` got `-- --host 0.0.0.0`
+  // appended — a flag for Vite, landed on another program. Its own default already serves the public preview.
+  if (STATIC_FILE_SERVER_RE.test(command) || (simpleResolvedScript(resolvedScript) && STATIC_FILE_SERVER_RE.test(resolvedScript))) return command;
   // A direct Node server (`tsx server/index.ts`, …) takes no --host flag; most Express/Fastify apps read
   // the bind host from `HOST` (or bind 0.0.0.0 already). Prefix `HOST=0.0.0.0` so a config-driven server
   // is reachable on the PUBLIC E2B preview instead of binding localhost-only (blank preview). A server

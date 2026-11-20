@@ -478,7 +478,7 @@ export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
 
 /** What NO app built here can do, in the web app or the phone app — and why, in plain words. */
 export interface ImpossiblePower {
-  id: 'lock-screen' | 'read-private-phone-data' | 'control-other-apps' | 'listen-while-closed';
+  id: 'lock-screen' | 'read-private-phone-data' | 'control-other-apps' | 'listen-while-closed' | 'boost-device-limits';
   label: string;
   why: string;
 }
@@ -488,6 +488,8 @@ export const IMPOSSIBLE_POWERS: readonly ImpossiblePower[] = [
   { id: 'read-private-phone-data', label: 'reading SMS, call history or other apps’ notifications', why: 'Google Play allows that only to the phone’s default SMS and calling apps' },
   { id: 'control-other-apps', label: 'controlling other apps or the phone’s settings (Wi-Fi, Bluetooth, mobile data)', why: 'Google Play’s policy on that permission rejects apps like this' },
   { id: 'listen-while-closed', label: 'listening for your voice while the app is closed', why: 'it is not supported in apps built here yet' },
+  // failedbr #2255 (2026-11-20): "internet speed ko 5 guna tej" — the builder began a fake 1×–5× "booster".
+  { id: 'boost-device-limits', label: 'making your internet faster, or adding phone memory or battery', why: 'no app can raise the speed your network gives you or add memory or battery — it can only MEASURE them (for example a real internet speed test), so a "booster" could only show made-up numbers' },
 ];
 
 // ── the three readers ────────────────────────────────────────────────────────────────────────────

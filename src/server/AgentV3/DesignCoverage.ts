@@ -283,6 +283,23 @@ export function shellOwnsPageHeading(pagePath: string, files: Readonly<Record<st
 }
 
 /**
+ * 🎮 A PLAY SCREEN IS A CANVAS, NOT A PAGE WITH A TITLE (failedbr #2279, 2026-11-20 — "GO CAR"). The racing
+ * game's `src/screens/GameplayScreen.tsx` hosts the 3D scene and the HUD over it, and was flagged NO_HEADING:
+ * "does not match the app's own design standard". A heading over a running game is a defect, not a fix, and the
+ * finding feeds the design repair pass that would have paid to add one. Only NO_HEADING is excused, and only
+ * when BOTH hold: the file is named for play (not a menu, shop, garage, results or settings screen, which do get
+ * a title) and it hosts a play surface (a canvas, a scene host ref, the game kit, or a Scene/Canvas/Map/World
+ * component). PURE.
+ */
+const PLAY_NAME_RE = /(?:game|play|race|racing|match|level|arena|battle|stage|driv)/i;
+const NOT_PLAY_NAME_RE = /(?:menu|over|result|lobby|shop|store|setting|garage|leaderboard|profile|select|pause|home|splash)/i;
+const PLAY_SURFACE_RE = /<canvas\b|\b(?:hostRef|mountRef|canvasRef|stageRef|sceneRef|viewportRef)\b|from\s+['"][^'"]*\/game\/|<[A-Z]\w*(?:Scene|Canvas|Map|World|Arena|Stage|Viewport|Track)\b/;
+export function isPlayScreen(path: string, content: string): boolean {
+  const base = String(path ?? '').split('/').pop() ?? '';
+  return PLAY_NAME_RE.test(base) && !NOT_PLAY_NAME_RE.test(base) && PLAY_SURFACE_RE.test(String(content ?? ''));
+}
+
+/**
  * Judge ONE page. Returns null when the file is out of scope or too small to judge honestly.
  *
  * The thresholds are deliberately forgiving: this must fire on "a wall of bare divs", not on a page
@@ -307,7 +324,7 @@ export function analyzePage(path: string, content: string, files: Readonly<Recor
 
   // 2. No title of any kind. An inner page that opens with no heading reads as unfinished even when
   //    the rest is styled — it is the single clearest "this is a draft" signal.
-  if (!/<h[1-3]\b/.test(content) && !/\bnb-hero\b|\bnb-auth\b/.test(content) && !shellOwnsPageHeading(path, files)) defects.push('NO_HEADING');
+  if (!/<h[1-3]\b/.test(content) && !/\bnb-hero\b|\bnb-auth\b/.test(content) && !shellOwnsPageHeading(path, files) && !isPlayScreen(path, content)) defects.push('NO_HEADING');
 
   // 3. A raw table. The kit ships .nb-table-wrap/.nb-table specifically because an unwrapped table
   //    scrolls the whole PAGE sideways on a phone instead of scrolling inside its own box.

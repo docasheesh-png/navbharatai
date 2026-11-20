@@ -3268,7 +3268,10 @@ export class ToolDispatcher {
     // page is a wrong verdict. Medium = surfaced honestly in the report, never a blocker.
     if (collectsPii && !hasPrivacyPolicy) {
       issues.push({ file: '(project)', line: 0, kind: 'missing-privacy-policy', severity: 'medium',
-        snippet: 'App collects personal data (forms/inputs) but ships no privacy policy — add one before a public launch.' });
+        // failedbr #2337 (00f57957): a weak model read "add one" as an order — after the done signal, a sniper game nobody
+        // asked to publish grew a PrivacyPolicy page and store metadata until the user pressed Stop. It is advice for a
+        // public launch: the user is told; nothing is built for it unless they asked for it.
+        snippet: 'ADVISORY — App collects personal data (forms/inputs) but ships no privacy policy. Mention this to the user for a public launch; do NOT build a privacy page or store metadata unless the user asked for one.' });
     }
     // Project-level rule: a tracker without a consent surface drops cookies
     // before consent — a GDPR/ePrivacy violation in the EU.

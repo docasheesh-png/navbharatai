@@ -14,6 +14,8 @@ import {
 } from '../src/server/AgentV3/gameAssets/userModels';
 import { validateGlb } from '../src/server/AgentV3/gameAssets/assetPolicy';
 import { needsOpaqueStorage } from '../src/lib/proAttachmentClient';
+import { importDropReason, assetMimeFor } from '../src/lib/importRules';
+import { extractZipProject } from '../src/server/AgentV3/ProjectImport';
 import { syntheticGlb, encodeFixtureGlb } from './fixtures/gameAssetFixtures';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==', 'base64');
@@ -168,5 +170,24 @@ describe('landing: durable first, read back, then the sandbox — and only what 
     for (const name of ['car.glb', 'car.gltf', 'crate.obj', 'crate.mtl', 'car.bin', 'hero.fbx']) {
       expect(await needsOpaqueStorage({ name, type: '', arrayBuffer: async () => new Uint8Array([0, 1, 2, 3]).buffer }), name).toBe(false);
     }
+  });
+});
+
+describe('the sibling: a 3D app imported as a PROJECT keeps its models byte-exact', () => {
+  it('.glb and a glTF .bin are kept as assets (they were read as text, or dropped); .fbx is dropped honestly', () => {
+    expect(importDropReason('public/models/car.glb')).toBeNull();
+    expect(assetMimeFor('public/models/car.glb')).toBe('model/gltf-binary');
+    expect(assetMimeFor('public/models/scene.bin')).toBe('application/octet-stream');
+    expect(importDropReason('art/car.fbx')).toEqual({ reason: 'binary', path: 'art/car.fbx' });
+  });
+
+  it('the server extractor returns the .glb as the exact bytes', async () => {
+    const glb = syntheticGlb(); const z = new JSZip();
+    z.file('package.json', '{"name":"game"}'); z.file('public/models/car.glb', glb);
+    const out = await extractZipProject(Buffer.from(await z.generateAsync({ type: 'uint8array' })));
+    const asset = (out as unknown as { assets: Record<string, string> }).assets['public/models/car.glb'];
+    expect(asset.startsWith('data:model/gltf-binary;base64,')).toBe(true);
+    expect(Buffer.from(asset.split(',')[1], 'base64').equals(glb)).toBe(true);
+    expect((out as unknown as { files: Record<string, string> }).files['public/models/car.glb']).toBeUndefined();
   });
 });

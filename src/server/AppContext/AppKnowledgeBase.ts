@@ -125,6 +125,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['attach', 'upload file', 'html', 'choose file', 'file picker', 'attachment limit'],
   },
   {
+    id: 'pro_own_3d_models',
+    name: 'Put your own 3D models into your game',
+    path: 'NavBharatAI Pro → paperclip → Choose file → your .glb / .gltf / .obj file(s), or one .zip of models → send with what to do ("add this car to my game")',
+    description: 'Your own 3D models go into YOUR game, next to the library models. Accepted: .glb as it is; .gltf with its .bin and textures; .obj with its .mtl colours and textures (converted automatically); or one .zip holding any of these (a zip with models and no app is merged into the current game, not imported as a new project). Each model is checked and saved in the project as public/models/<file-name>.glb, so it survives a restart, and the builder is told its parts and animations so you can then change it in plain words (colour of one part, size, turn, hide a part, which animation plays). Limits: 8 MB and 200,000 triangles per model, textures up to 4096 px, 8 models per message. Not accepted, with the reason told to you: FBX (export it from Blender as glTF 2.0 .glb), Draco/Meshopt-compressed models (export without compression), and anything that points to files outside itself. A missing texture does not stop the model: it is shown without that texture and you are told which one.',
+    howToUse: 'Attach the model file(s) or one zip of them in NavBharatAI Pro and say where they go ("use my hero.glb as the player", "put these trees in the village"). Then change them like any model: "make the car blue", "make the hero bigger", "hide the helmet".',
+    relatedFeatures: ['pro_attachment_picker', 'agentv3_builder'],
+    keywords: ['my own model', 'upload model', 'glb', 'gltf', 'obj', 'fbx', '3d model upload', 'apna model', 'mera model', 'custom character', 'import model', 'zip of models', 'add my car', 'model daalo'],
+  },
+  {
     id: 'shared_free_daily_answers',
     name: 'Shared daily chat allowance',
     path: 'AI chat or eligible Professionals → daily usage counter',

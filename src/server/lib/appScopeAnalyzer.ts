@@ -393,20 +393,23 @@ export interface ScopeVerdict {
   large: boolean;
   /** Large AND shaped like a project spec — the only question Project Mode still answers itself. */
   projectMode: boolean;
+  /** A game the kit will be laid down for: never split into project modules (`gameKitOwnsTheBuild`, failedbr #2279). */
+  gameOnKit: boolean;
   shape: MegaProjectSignals;
 }
 
-export function scopeVerdict(sizing: string, opts: { complex: boolean }): ScopeVerdict {
+export function scopeVerdict(sizing: string, opts: { complex: boolean; gameOnKit?: boolean }): ScopeVerdict {
   try {
     const scope = analyzeAppScope(sizing);
     const dispute = scopeDispute(scope, opts);
     const large = scope.decision === 'analyze' && !dispute;
     const shape = megaProjectSignals(sizing);
-    return { scope, dispute, large, projectMode: large && shape.fires, shape };
+    const gameOnKit = opts.gameOnKit === true;
+    return { scope, dispute, large, projectMode: large && shape.fires && !gameOnKit, gameOnKit, shape };
   } catch {
     return {
       scope: { decision: 'direct', size: 'small', famousApp: null, signals: ['scope could not be read — built directly'], smallHint: false, smallSubject: false },
-      dispute: null, large: false, projectMode: false,
+      dispute: null, large: false, projectMode: false, gameOnKit: false,
       shape: { scale: 0, features: 0, bigNoun: false, fires: false, sections: null },
     };
   }

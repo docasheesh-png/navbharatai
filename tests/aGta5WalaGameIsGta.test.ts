@@ -48,6 +48,7 @@ describe('BR1966: a glued gta5 title is GTA, like spaced "gta 5"', () => {
     expect(v.plan).toEqual([
       'generate_game_runtime',
       'generate_game_3d',
+      'generate_athree_map', // an open-world game gets the big map, laid down by the platform (failedbr #2478)
       'generate_game_vfx',
       'generate_melody',
       'generate_game_shell',

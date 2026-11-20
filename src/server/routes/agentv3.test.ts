@@ -71,19 +71,22 @@ describe('resolveIdentityWithFallback — the "history opens to 0 messages" regr
 });
 
 describe('candidateConversationIds — a v3_ history entry finds its real server transcript', () => {
-  it('tries the literal id, the signed-in workspace id, then the anon-degraded workspace id', () => {
+  it('tries the literal id, the signed-in workspace id, the bare session id (a duplicated app), then the anon-degraded workspace id', () => {
     expect(candidateConversationIds('v3_sess-1234', 'u1')).toEqual([
       'v3_sess-1234',
       'agentv3-u1-sess-1234',
+      'sess-1234',
       'agentv3-anon-sess-1234',
     ]);
   });
   it('skips the uid candidate when there is no (or an unsafe) verified uid', () => {
-    expect(candidateConversationIds('v3_sess-1234', null)).toEqual(['v3_sess-1234', 'agentv3-anon-sess-1234']);
-    expect(candidateConversationIds('v3_sess-1234', 'bad uid!')).toEqual(['v3_sess-1234', 'agentv3-anon-sess-1234']);
+    expect(candidateConversationIds('v3_sess-1234', null)).toEqual(['v3_sess-1234', 'agentv3-anon-sess-1234', 'sess-1234']);
+    expect(candidateConversationIds('v3_sess-1234', 'bad uid!')).toEqual(['v3_sess-1234', 'agentv3-anon-sess-1234', 'sess-1234']);
   });
-  it('non-v3_ ids resolve only to themselves', () => {
-    expect(candidateConversationIds('agentv3-u1-sess-1234', 'u1')).toEqual(['agentv3-u1-sess-1234']);
+  it('a workspace id resolves to the same session set; an id with no recognisable session resolves only to itself', () => {
+    expect(candidateConversationIds('agentv3-u1-sess-1234', 'u1')).toEqual(['agentv3-u1-sess-1234', 'sess-1234', 'v3_sess-1234', 'agentv3-anon-sess-1234']);
+    expect(candidateConversationIds('agentv3-someoneelse-sess-1234', 'u1')).toEqual(['agentv3-someoneelse-sess-1234']);
+    expect(candidateConversationIds('sess-1234', 'u1')).toEqual(['sess-1234']);
   });
 });
 

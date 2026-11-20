@@ -14,6 +14,8 @@
 // Kill switch: AGENTV3_GAME_SCOPE_CONTRACT=off restores the pre-contract behaviour exactly.
 
 import { withoutDeclinedSentences } from '../lib/RequirementGapAnalyzer';
+import { withoutNonObjectSenses } from '../lib/heroObjectSpec';
+import { BATTLE_ROYALE_REFERENCE } from '../lib/wellKnownGameTitles';
 export type GameGenre =
   | 'racing' | 'shooter' | 'platformer' | 'puzzle' | 'quiz' | 'card' | 'board' | 'runner'
   | 'arcade' | 'sports' | 'fighting' | 'rpg' | 'strategy' | 'snake' | 'simulator' | 'unknown';
@@ -103,7 +105,8 @@ const GENRES: ReadonlyArray<[GameGenre, RegExp]> = [
  * (athreeMapIntent) and the royale starter's guard (ToolDispatcher) used private copies that had already
  * drifted apart (one knew Fortnite, the other Battlefield) — both read this one now.
  */
-export const BATTLE_ROYALE_REFERENCE = /बैटल\s*रॉयल|पबजी|फ्री\s*फायर|battle\s*royale|\bpubg\b|\bbgmi\b|free\s*fire|firefree|fortnite|battlefield|apex\s+legends|last\s+man\s+standing|\bbr\s+game\b/i;
+/** Moved to lib/wellKnownGameTitles (the domain classifier needs it and cannot import this module); re-exported. */
+export { BATTLE_ROYALE_REFERENCE };
 
 /** Does the request ask for a royale-style game (by genre or by a named royale title)? PURE. */
 export function asksForBattleRoyale(text: string | null | undefined): boolean {
@@ -231,7 +234,10 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
   const genre = GENRES.find(([, re]) => re.test(text))?.[0] ?? reference?.genre ?? 'unknown';
   const dimension: GameDimension = /\b3\s?-?d\b|three\.?js|open world/i.test(text) ? '3d' : /\b2\s?-?d\b/i.test(text) ? '2d' : reference?.dimension ?? 'unspecified';
   const requiredFeatures = FEATURES.filter(([, re]) => re.test(text)).map(([f]) => f);
-  const vehicle = VEHICLES.find(([, re]) => re.test(text))?.[0] ?? null;
+  // The vehicle is read with the hero contract's own non-object senses removed (one reader of "is this word the object"),
+  // so a "ground plane" is never an aircraft here while the hero contract says otherwise (failedbr #2478).
+  const objectText = withoutNonObjectSenses(text);
+  const vehicle = VEHICLES.find(([, re]) => re.test(objectText))?.[0] ?? null;
   // A vehicle the player DRIVES is driven: it speeds up and it stops. A train, bus or car simulator that
   // cannot brake is not the game that was asked for, whether or not the request spelt the word out.
   // Only for a SIMULATOR: an endless lane-change racer drives itself and never brakes, and the contract's own rule

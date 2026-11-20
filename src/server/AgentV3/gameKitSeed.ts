@@ -51,7 +51,10 @@
 
 import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
 import { hardConstraintLines } from '../lib/megaRoadmap';
-import { asksForBattleRoyale, buildGameContract, gameContractBlock, gameScopeContractEnabled, type GameScopeContract } from './gameIntent';
+import { asksForBattleRoyale, buildGameContract, gameContractBlock, gameScopeContractEnabled, namedGameReference, type GameScopeContract } from './gameIntent';
+import { largeWorldIntent } from './largeWorldIntent';
+import { athreeMapIntent } from '../lib/athreeMap/athreeMapIntent';
+import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { kitTypeContract, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
 import { namedNonSmartphone } from './deviceTarget';
 import { analyzeRequirementGaps } from '../lib/RequirementGapAnalyzer';
@@ -60,7 +63,8 @@ import { world2dIntent } from './world2dIntent';
 import { ACTION_VISIBLE_RULE } from './actionVisibility';
 
 /** The recipes the seed may run, in the order the architect prompt lists them (runtime first, shell last). */
-export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell' | 'generate_world_2d';
+export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell' | 'generate_world_2d'
+  | 'generate_athree_map';
 
 /** `AGENTV3_GAME_KIT_SEED=off` restores the pre-2026-10-11 behaviour exactly (the model decides). */
 export function gameKitSeedEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -92,12 +96,42 @@ export function gameKitPlan(prompt: string | null | undefined, framework?: strin
   let domain = '';
   try { domain = analyzeRequirementGaps(text).domain; } catch { return []; }
   if (domain !== 'game') return [];
-  if (gameKitWants3D(text)) return ['generate_game_runtime', 'generate_game_3d', 'generate_game_vfx', 'generate_melody', 'generate_game_shell'];
+  if (gameKitWants3D(text)) {
+    // 🗺️ THE BIG MAP IS LAID DOWN BY THE PLATFORM TOO (failedbr #2478, 2026-11-20 — admin: "pubg/free fire/bgmi game … ek
+    // bahut bada map bane … library me already maps hai, par use nahi kiye gaye"). The Athree map was only a line in the
+    // system prompt ("run_recipe generate_athree_map"), so a weak builder never ran it and drew a 30×30 grid with five cubes;
+    // a 2D game's big world was already seeded (generate_world_2d). The same reader the recipe itself uses decides, so the
+    // seed can never lay a map under a game the recipe would refuse; it runs right after the 3D layer that installs three.js.
+    const map: GameKitRecipe[] = athreeMapEnabled() && athreeMapIntent({ prompt: text, seedKey: 'seed-plan' }).use ? ['generate_athree_map'] : [];
+    return ['generate_game_runtime', 'generate_game_3d', ...map, 'generate_game_vfx', 'generate_melody', 'generate_game_shell'];
+  }
   // 🗺️ A 2D game whose user wants a big world (the wish, not one word: world2dIntent → largeWorldIntent, admin 2026-11-19)
   // gets the 2D world laid down by the platform too — the same reason the kit is seeded at all: a capability the
   // platform KNOWS a build needs is not left to the model's optional tool call.
   const flat: GameKitRecipe[] = ['generate_game_runtime', 'generate_game_vfx', 'generate_melody'];
   return world2dIntent({ prompt: text, drawnIn3D: false }).use ? [...flat, 'generate_world_2d'] : flat;
+}
+
+/**
+ * 🎮 A GAME IS BUILT ON THE KIT, NOT SPLIT INTO PROJECT MODULES (failedbr #2279, 2026-11-20 — "GO CAR").
+ *
+ * A 40-part 3D racing spec read as LARGE and project-shaped, so Software Project Mode split it into 14 modules.
+ * Module 1, "Core Gameplay Loop", owned no entry, so nothing could be played this round; and kit seeding runs only
+ * when no module is in flight, so the platform laid down no game kit. The builder spent eight minutes writing its
+ * own car physics and camera, found the kit's car and camera APIs at minute 9, rewrote them, and the user stopped
+ * at 13 minutes with nothing to play. BlockWorld (50378049) and 8e124182 were the same split: the builder ignored
+ * the module scope and wrote the whole game anyway.
+ *
+ * The kit IS a game's decomposition (loop, input, 3D, audio, shell), and the mega-app roadmap already narrows a
+ * big game to a playable step 1 (with its own game-dimension check). So when the kit will be laid down for this
+ * request, Project Mode stands down and the roadmap owns the build. One answer, read by the scope verdict, so the
+ * roadmap, the solo-builder switch and the project planner cannot disagree. AGENTV3_GAME_PROJECT_MODE=on restores
+ * the split. PURE.
+ */
+export function gameKitOwnsTheBuild(prompt: string | null | undefined, framework?: string | null, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (String(env.AGENTV3_GAME_PROJECT_MODE ?? '').trim().toLowerCase() === 'on') return false;
+  if (!gameKitSeedEnabled(env)) return false;
+  try { return gameKitPlan(prompt, framework).length > 0; } catch { return false; }
 }
 
 /** Says 3D in so many words — the same reading `wantsSceneObjects` gives "3d". */
@@ -205,6 +239,16 @@ export function compactRecipeResult(content: string): string {
  * 3D, and how to add the 3D recipes itself if the game truly needs them — never "this is 2D" as a fact the
  * platform does not have.
  */
+/** The builder's instruction when the platform laid the Athree map down: build IN that world, with the recipe's own usage notes. PURE. */
+export function athreeMapHandoff(recipeResult: string): string {
+  const usage = String(recipeResult ?? '').trim().slice(0, 3000);
+  return '🗺️ THE BIG MAP IS ALREADY IN src/game/athree/ — NavBharatAI\'s Athree world (streaming terrain, sea level, plants, safe'
+    + ' spawn points, physics height data), laid down because this game needs a large world. Build the game IN it: put the'
+    + ' player on its ground (its height function, never y = 0), use its spawn points for players, enemies and loot, and stream'
+    + ' it around the player. NEVER replace it with a flat ground plane, a grid, a small arena or terrain of your own.'
+    + (usage ? `\nHow to use it (from the recipe):\n${usage}` : '');
+}
+
 export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts: { flat?: boolean; contract?: string; endlessRaceCourse?: boolean } = {}): string {
   const done = results.filter((r) => r.ok);
   if (done.length === 0) return '';
@@ -258,6 +302,7 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
       : twoD,
     // A race whose course the request did not describe runs on the kit's endless track (endlessRaceCourse.ts):
     // said only when the 3D layer that holds createTrackStream is really on disk.
+    has('generate_athree_map') ? athreeMapHandoff(done.find((r) => r.recipe === 'generate_athree_map')?.content ?? '') : '',
     opts.endlessRaceCourse && has('generate_game_3d') ? ENDLESS_RACE_COURSE_RULE : '',
     ACTION_VISIBLE_RULE,
     has('generate_world_2d')
@@ -364,14 +409,44 @@ export function gameTurnHandoff(
  * under a canvas-only first slice. Explicit dimensional/device constraints still come from the user.
  * No milestone => byte-identical original behavior. This changes no architecture or saved files.
  */
+/**
+ * WHAT GAME THIS IS, carried from the user's own request into every milestone turn (failedbr #2478, 2026-11-20).
+ * "make a bgmi for me" became roadmap step 1, "Create a basic 3D scene … with a ground plane … first-person camera",
+ * and every reader of the turn — the game contract, the kit seed, the map decision — read only that step: the
+ * contract said genre "unknown", the named game was gone, and the big map was never laid down. Only the game's
+ * IDENTITY travels (the named reference, the genre, a big-world wish) — never the request's later-milestone
+ * features, so a step still builds only its own slice. PURE.
+ */
+export function gameIdentityLines(original: string): string[] {
+  const out: string[] = [];
+  const ref = namedGameReference(original);
+  let genre = 'unknown';
+  try { genre = buildGameContract(original).genre; } catch { /* identity lines are best-effort */ }
+  if (ref) out.push(`The game the user named: ${ref.name} — build an ORIGINAL ${ref.genre} game in ${ref.dimension === '3d' ? '3D' : ref.dimension === '2d' ? '2D' : 'its usual view'}, ${ref.camera} camera, in the style of ${ref.name}.`);
+  else if (genre !== 'unknown') out.push(`The user's game is a ${genre} game.`);
+  if (asksForBattleRoyale(original) || largeWorldIntent(original).wants) out.push('The user\'s game needs a big map — a large open area to explore.');
+  return out;
+}
+
 export function gameTurnRequest(original: string, milestone?: string | null): string {
   if (!milestone) return original;
+  // 🔴 ONLY A GAME'S MILESTONE BELONGS TO A GAME (failedbr #2271, 2026-11-20 — "INDIAN MUSIC"). The line below was
+  // added to EVERY roadmap milestone, so a music-streaming app's step 1 ("a Player screen with a real <audio>
+  // element") read as a game: the platform laid down the game kit (loop, input, game sounds) and a game scope
+  // contract for an app with no game in it. The original request decides whether the milestone is a game's; a
+  // milestone that is a game on its own still reads as one through its own words.
+  if (!requestIsGame(original)) return milestone;
   const explicit3D = SAYS_3D.test(original) && gameKitWants3D(original);
   const explicit2D = /\b(?:2\s*-?\s*d|two\s*-?\s*dimensional)\b/i.test(original);
   const phone = namedNonSmartphone(original);
-  return [milestone, 'This milestone belongs to a game.', ...hardConstraintLines(original),
+  return [milestone, 'This milestone belongs to a game.', ...gameIdentityLines(original), ...hardConstraintLines(original),
     explicit2D ? 'User constraint: 2D game.' : explicit3D ? 'User constraint: 3D game.' : '',
     phone ? `User device constraint: ${phone.device}.` : ''].filter(Boolean).join('\n');
+}
+
+/** The original request is a game by the one domain reading the kit uses. Never throws. */
+function requestIsGame(text: string): boolean {
+  try { return analyzeRequirementGaps(String(text ?? '')).domain === 'game'; } catch { return false; }
 }
 
 /** Available capability, not a claim that a seed succeeded or that an AAA clone is possible. */

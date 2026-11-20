@@ -41,7 +41,7 @@ import { runWithRunnerSignal, isPassBudgetCause } from './runnerSignal';
 import { isWithheldTool, withheldToolMessage } from './repairScope';
 import { abortCauseOf, abortSummary, buildClockMinutes, timedOutSummary, stalledModelSummary, stoppedCallFields, type SeedState, type AbortCause } from './buildAbortCause';
 import { isBuildStoppedError } from './stopSignal';
-import { budgetSteer, buildBudgetNarration, type BudgetStage } from './buildBudgetSteer';
+import { budgetSteer, buildBudgetNarration, type BudgetStage, polishHandBackAllowed } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote, turnAskedTheUser, turnDeclined } from './nudgeToBuild';
 import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResumeNote } from './unfinishedResume';
@@ -1466,7 +1466,12 @@ export class AgentRunner {
                   step: steps, elapsedMs: Date.now() - buildStartMs, at: Date.now(),
                 });
               } catch { /* a measurement must never touch a build */ }
-              if (readiness.ready && styleResumes === 0 && !this.opts.focusedRepair && !this.opts.signal?.aborted) {
+              // failedbr #2318: once the build has said it is wrapping up, a ready app is delivered, not polished.
+              const polishAllowed = polishHandBackAllowed(events.budgetStagesSaid);
+              if (readiness.ready && styleResumes === 0 && !polishAllowed) {
+                try { this.opts.onNote?.({ code: 'STYLE_RESUME_STOOD_DOWN', message: 'The app was ready and the build had already said it was wrapping up, so no style or accessibility hand-back was started — the working app is delivered instead of being polished into the time cap.' }); } catch { /* a note must never fail a build */ }
+              }
+              if (readiness.ready && styleResumes === 0 && polishAllowed && !this.opts.focusedRepair && !this.opts.signal?.aborted) {
                 // SCREENS THAT USE CLASSES NO STYLESHEET DEFINES ARE HANDED BACK ONCE, while the model still
                 // holds them (autopsy 1be16985 — 63 undefined classes, then a 174 s fresh-context repair).
                 const style = await dispatcher.undefinedClassesNow();
@@ -1585,7 +1590,7 @@ export class AgentRunner {
             try {
               const style = await dispatcher.undefinedClassesNow({ onlyWritten: true });
               const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, resumesUsed: styleResumes, producedFiles: true });
-              if (decision.resume) {
+              if (decision.resume && polishHandBackAllowed(events.budgetStagesSaid)) {
                 styleResumes++;
                 summaryBeforeStyleResume = turn.text.trim() || null;
                 // A specialist's text is forwarded to the chat too (SubAgent re-emits narration).

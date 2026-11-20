@@ -57,6 +57,15 @@ interface Rule {
  * line whose camelCase humps have been split into words (`splitHumps`), so the leading boundary can be
  * a plain "no letter before" without missing `generateSimulatedVendors`.
  */
+
+/** A line naming a credential (an UPPER_CASE key, secret, token or id) AND where to add it — the honest "needs your key" state. PURE. */
+export function namesAKeyAndWhereToAddIt(line: string): boolean {
+  const s = String(line ?? '');
+  const key = /\b[A-Z][A-Z0-9]*_(?:[A-Z0-9]+_)*(?:KEY|SECRET|TOKEN|ID)\b/.test(s);
+  const where = /secrets?\s*(?:&|and)\s*(?:api\s*)?keys|keys?\s*(?:&|and)\s*secrets|\.env\b|environment variable/i.test(s);
+  return key && where;
+}
+
 const SIMULATED_DATA_RE = /(?<![a-z])(simulat(?:e|ed|es|ing|ion)|mock(?:ed)?|fake|dummy)[\s_-]*(?:[a-z]{0,12}[\s_-]*)?(nearby|vendors?|shops|stores|users|businesses|customers|drivers|riders|merchants|sellers|followers|friends|devices|peers)(?![a-z])/i;
 
 /**
@@ -182,6 +191,13 @@ const RULES: Rule[] = [
     // honest UI text (same bug class as the Tailwind-placeholder false positive:
     // legitimate UI language mistaken for a fake-code marker) and must not be flagged.
     re: /\bcoming\s+soon\b/i,
+    // 🔴 THE HONEST DISCLOSURE THE NO-FAKE RULE DEMANDS IS NOT A STUB (failedbr #2306, f0d054a4, 2026-11-12). A payment
+    // button said "পেমেন্ট গেটওয়ে এখনো সংযোগ করা হয়নি — Coming soon. RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET Settings → App
+    // Settings → Secrets & API Keys-এ যোগ করলে এটি চালু হবে।" — exactly the line NO_FAKE_FEATURE_RULE asks for (the key's
+    // name and where to paste it). This rule read "Coming soon", called it a HIGH fake, and the readiness gate spent both
+    // unfinished-resumes sending the builder back to "fix" a disclosure only the user's keys can resolve. A line that names
+    // a credential AND where to add it is the honest "not available" state, not filler.
+    ignore: (_m, line) => namesAKeyAndWhereToAddIt(line),
   },
   // ── medium: standard TODO/FIXME/HACK comment markers ─────────────────────
   {

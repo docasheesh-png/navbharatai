@@ -103224,6 +103224,22 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 - **Proof:** `tests/aCarHitsWhatItDrivesInto.test.ts` (9 tests, eight reversions each failed); all 28 existing vehicle
   test files (485 tests) pass.
 - 🟡 **Not built yet:** pushing the other car, dents and damage.
+## 2026-11-20 — City blocks in the 3D game kit (game-gap audit)
+
+- **Problem:** a "city" game was one straight road with houses beside it — the kit had `createRoad()` (one strip),
+  `createTraffic()` (one strip) and one/two-storey houses. Builders hand-placed boxes: streets that did not meet,
+  buildings in the road, pavements at the wrong height, and a draw call per box.
+- **Fix:** `src/server/lib/GameCityGenerator.ts` → kit file `src/game/three/city.ts`:
+  - `planCity()` (pure, seeded): streets, crossings, lots (two rows per block, so every lot faces a street), parks (never
+    every block), street lights, a spawn in the left lane. Styles: town / mixed / downtown; size and tallest floor bounded.
+  - `cityRoute()`: along the streets, turning only at crossings, in the LEFT lane (India), ending at a door.
+  - `createCity()`: asphalt with centre dashes and zebra crossings, raised pavements, shops (awning, signboard + `lot.sign`
+    anchor for the name), apartments (balconies, water tanks), office towers, houses (yard + compound wall), parks (trees,
+    paths, benches, fountain), street lights — merged per block (a 6×6 city ≈ 180 meshes). Streets/pavements are ground
+    colliders, buildings solid. `city.heightAt` is the ground for `driveVehicle`, which already stops at the solid buildings; `city.solidAt` is for movers a game positions by hand. (An earlier draft said driveVehicle had no walls — wrong; measured, it sweeps against solid colliders.)
+  - 3D instructions + kit handoff name `createCity()`; AppKnowledgeBase `game_city_blocks`.
+- **Proof:** `tests/aCityHasStreetsAndBlocks.test.ts` (10 tests; seven reversions each failed).
+- 🟡 **Not built yet:** traffic that turns at crossings, traffic lights, pedestrians.
 ## 2026-11-20 — #4389 merged (Q-2750/2753/2766/2769 closed; Surplus retries reported); game library batch 6
 - #4389 merged: every failed Surplus attempt (benched or retried by the stay-alive loop) now reaches the build report as one `SURPLUS` provider notice with codes only (`aRetriedAttemptIsReported`). Q-3019 stays IN PROGRESS for its speed half (retry the same model before benching, decided from the new notices).
 - **Library batch 6** (this PR): the admin's own Quaternius downloads from Drive, licence checked in each archive and on the pack page: Ultimate Gun Pack (12 firearms, the library's first) and Realistic Car Pack (7 cars). The packs have no GLB, so each was converted offline (OBJ+MTL → GLB) and ships PACKAGED in the image (`assets/game-models/<sha256>.glb`). The packaged path is generalized from the eagle to any Quaternius CC0 entry with a pinned hash and size; the transport looks up the reviewed entry by id and checks provider, hash and size. New prompt words (English and Hindi: gun/बंदूक, pistol/पिस्तौल, AK47, sniper, shotgun, SMG, revolver, jeep/SUV, sports car), and a named subtype is not also the generic subject (police car is not also "car"; laser gun is not "gun"). Admission: all 19 rendered live in Chromium. Test: `libraryBatch6`.

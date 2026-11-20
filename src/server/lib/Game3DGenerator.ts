@@ -29,6 +29,7 @@
 // PURE builder → the caller writes the files. The generated code imports three; the generator does not.
 
 import { GAME_BUILDINGS } from './GameBuildingGenerator';
+import { GAME_CITY } from './GameCityGenerator';
 import { kitTypeContract } from './kitTypeContract';
 import { GAME_WORLD_COLLIDER_KEY } from './GameAssetRuntimeGenerator';
 // L3 is emitted only by acknowledged build-time acquisition, never by the default procedural kit.
@@ -6790,10 +6791,12 @@ const FILES: Record<string, string> = {
   'src/game/three/objects.ts': OBJECTS,
   // A sky that lives: the clock, the day-night cycle and the weather, driving the lights above.
   'src/game/three/atmosphere.ts': ATMOSPHERE,
+  // A grid of city blocks: streets, crossings, pavements, shops, apartments, offices, houses, parks (2026-11-20).
+  'src/game/three/city.ts': GAME_CITY,
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight',
+  'buildings', 'renderer', 'lighting', 'materials', 'camera', 'world', 'collision', 'environment', 'surfaces', 'humanoid', 'healthbar', 'race', 'markers', 'objects', 'atmosphere', 'splitscreen', 'flight', 'city',
 ];
 
 /**
@@ -6838,7 +6841,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
     }
     if (files['src/game/three/objects.ts']) files['src/game/three/buildings.ts'] = FILES['src/game/three/buildings.ts'];
     if (files['src/game/three/buildings.ts']) files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
-    if (files['src/game/three/buildings.ts'] || files['src/game/three/world.ts'] || files['src/game/three/objects.ts'] || files['src/game/three/camera.ts']) {
+    if (files['src/game/three/city.ts'] || files['src/game/three/buildings.ts'] || files['src/game/three/world.ts'] || files['src/game/three/objects.ts'] || files['src/game/three/camera.ts']) {
       files['src/game/three/collision.ts'] = FILES['src/game/three/collision.ts'];
     }
     // atmosphere.ts drives the lights lighting.ts makes (it imports AppliedLighting).
@@ -6859,6 +6862,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
     instructions:
       `Added the 3D layer (${Object.keys(files).length} files under src/game/three). Install: three (+ @types/three).\n` +
       'Explorable houses: createHouse({ enterable: true }) or createEnterableHouse(). Flat roof, one/two storeys, real doorway and stairs. Legacy createHouse() is solid scenery. Game shell wires E/mobile Use; custom loops must call interactHouseDoor and updateHouseDoors. Supply all NPC occupants. Do not replace interiors with decorative assets.\n' +
+      (files['src/game/three/city.ts'] ? 'City: const city = createCity({ blocksX: 5, blocksZ: 5, style: \'mixed\' }); scene.add(city.root) — streets, crossings, pavements, shops, apartments, offices, houses, parks, street lights, centred on the origin. Put the player at city.spawn facing city.spawnHeading. Driving: pass { ground: city.heightAt } to driveVehicle, and when city.solidAt(car.position.x, car.position.z, 1.2) put the car back where it was and set its speed to 0. city.route(from, to) gives left-lane waypoints for AI cars, taxis and deliveries; city.lotsOf(\'shop\') and lot.entrance give mission targets; lot.sign is where to write a shop name. Never hand-place a street grid.\n' : '') +
       `${kitTypeContract(files)}\n` +
       '```ts\n' +
       "import * as THREE from 'three';\n" +

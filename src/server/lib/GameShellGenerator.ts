@@ -2049,7 +2049,9 @@ export class TouchControls {
   private current: TouchLayout = 'move';
 
   constructor(
-    private readonly container: HTMLElement,
+    // A plain parameter, not a field: it is only used here, and an unread field fails an app whose tsconfig has
+    // noUnusedLocals (TS6138, failedbr #2036).
+    container: HTMLElement,
     private readonly input: Input,
     private readonly options: TouchControlsOptions = {},
   ) {

@@ -133,6 +133,17 @@ const ENGINEERING_TERMS = [
 ];
 for (const t of ENGINEERING_TERMS) COMMON_ACRONYMS.add(t);
 
+/**
+ * Game titles and ranks: the game a request wants to resemble, never a service to connect to (failedbr #1384 "GTA",
+ * #1373 "SSS" rank, 2026-11-20). Both were flagged UNKNOWN_NAME_IN_REQUEST; a sweep of the titles Indian requests name
+ * found 14 more. Whether a title is a clone request is the scope analyzer's question, not this one's.
+ */
+const GAME_TITLE_TERMS = [
+  'GTA', 'GTAV', 'GTA5', 'PUBG', 'BGMI', 'NFS', 'FIFA', 'WWE', 'FFMAX', 'CSGO', 'DOTA', 'MLBB', 'COC', 'TEKKEN', 'UNO',
+  'KBC', 'SS', 'SSS',
+];
+for (const t of GAME_TITLE_TERMS) COMMON_ACRONYMS.add(t);
+
 /** Services, platforms and stacks NavBharatAI knows by name — the request may really mean to connect them. */
 const KNOWN_SERVICES = new Set([
   'STRIPE', 'RAZORPAY', 'CASHFREE', 'PAYTM', 'PHONEPE', 'PAYPAL', 'FIREBASE', 'SUPABASE', 'MONGODB', 'MYSQL',

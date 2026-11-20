@@ -58,3 +58,10 @@ describe('engineering vocabulary is never an unknown service name (failedbr #153
     expect(unknownNamesInRequest(`Build an app with ${w} support for my shop.`)).toEqual([]);
   });
 });
+
+// …and from failedbr #1384 ("GTA") and #1373 ("SSS" rank): game titles and ranks name a game, not a service.
+describe('game titles and ranks are never unknown service names (failedbr #1384, #1373)', () => {
+  it.each(['GTA', 'PUBG', 'BGMI', 'FIFA', 'WWE', 'SSS', 'MLBB', 'KBC'])('%s', (w) => {
+    expect(unknownNamesInRequest(`Make a game like ${w} with levels for my phone.`)).toEqual([]);
+  });
+});

@@ -64,6 +64,25 @@ const NEGATED_BUILD_STATEMENT = new RegExp([
   'नहीं[^।?!]{0,12}बना(?:ते|ता|ती|एगा|एगी|ओगे)',
 ].join('|'), 'i');
 
+/**
+ * 🔴 A DOCUMENT IS AN ANSWER, NOT AN APP (failedbr #1420, #1430, 2026-11-20). "Create a comprehensive game design document
+ * (GDD) for a mobile 3D cricket game…" was built as an app (the starter was still showing at the end), and "Design a
+ * complete progression loop for a Player Career Mode… Outline the journey… Detail XP/skill trees…" ran as a build whose
+ * model answered with the design document — the right answer — and was then told to "act now". The deliverable in both
+ * is a DOCUMENT: written in chat, with the build offered after.
+ *
+ * Two shapes, both precision-first: the order's object is a document noun (a GDD, design document, PRD, specification,
+ * business plan, pitch deck, essay, report, proposal — never "a document management app"), or the message is written
+ * in document imperatives (two or more sentences opening with Outline / Detail / Describe / Explain / Summarize). "Design a login page" is neither, and still builds.
+ */
+const DOCUMENT_ORDER = /^\s*(?:please\s+)?(?:create|write|make|draft|prepare|generate|give\s+me|design)\s+(?:me\s+)?(?:a|an|the|my)?\s*(?:(?:complete|comprehensive|detailed|full|short|brief|professional|one-page)\s+)*(?:(?:game|product|technical|software|app)\s+)?(?:design\s+doc(?:ument)?|gdd|prd|spec(?:ification)?\s+doc(?:ument)?|business\s+plan|pitch\s+deck|essay|report|proposal|white\s?paper)\b(?!\s+(?:[\w-]+\s+)?(?:app|apps|application|website|tool|generator|maker|builder|system|platform|software|manager|tracker)\b)/i;
+const DOCUMENT_IMPERATIVE = /(?:^|[.!?]\s+|\n\s*)(?:outline|detail|describe|explain|summari[sz]e)\s+[A-Za-z\u0900-\u097F]/gi;
+export function requestsADocument(message: string): boolean {
+  const text = String(message ?? '');
+  if (DOCUMENT_ORDER.test(text)) return true;
+  return (text.match(DOCUMENT_IMPERATIVE) ?? []).length >= 2;
+}
+
 /** The Devanagari `बना-` family ("बनाओ", "बना दो") — the order no Roman list can see. */
 const DEVANAGARI_BUILD_VERB = /बन(?:ा|वा)/;
 
@@ -74,6 +93,7 @@ export type BuildConfirmationReason =
   | 'fresh-start'
   | 'pasted-source'
   | 'names-something-to-build'
+  | 'asks-for-a-document'
   | 'question'
   | 'names-nothing-to-build';
 
@@ -93,6 +113,8 @@ export function buildConfirmation(message: string): BuildConfirmation {
   // Defense in depth: a bare file location is not a build order, even if another classifier changes.
   if (isSourcePathOnly(text)) return { confirmed: false, reason: 'names-nothing-to-build' };
   const lower = text.toLowerCase();
+  // failedbr #1420 / #1430: a document is written in chat (its reply offers the build), even after "create" / "design".
+  if (text && requestsADocument(text)) return { confirmed: false, reason: 'asks-for-a-document' };
   if (text && isExplicitCompleteBuild(text)) return { confirmed: true, reason: 'complete-build' };
   if (text && wantsFreshStart(text)) return { confirmed: true, reason: 'fresh-start' };
   const kw = classifyIntentWithConfidence(text);

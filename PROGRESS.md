@@ -103270,7 +103270,7 @@ Ledger, older reports #1430–#1358 (2026-11-20, next PR):
   code (Q-3141, #1202), GTA (Q-3121), stale tier labels (Q-2748), partial batch writes lead with what failed (#1182/#1234),
   the overdraft floor records debited vs absorbed (#1258/#1234 debit gap), the audit-fix line (npm exits 1 while
   vulnerabilities remain). Blocked: Q-3157 (dependency-only stop charge — admin), Q-3158 (composer of a "Fix this error"
-  prompt — missing information).
+  prompt — missing information). Open: Q-3159–Q-3167.
 - KIMI "suspended due to insufficient balance" in 11 of these reports — Q-1210 (blocked: the provider account's balance).
 - #1359 — "stopped before the app was running" after a 908 s render with the stop at 945 s, billed at cost (in the user's favour): fixed on main (`earliestRenderProof`, a75153ab); its "clone of GTA" reading came from an earlier request in the planning context (needsIntent / subject rule on main).
 - #1419 — a 8 s LAPSED game-runtime recipe left no kit; the builder was told to run the recipes itself (honest), recorded.

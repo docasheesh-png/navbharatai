@@ -103206,3 +103206,13 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
   - Test: `theUsersOwnModelGoesIntoTheGame`.
 - **Sibling bug fixed:** a 3D app imported as a PROJECT zip had its .glb read as text (corrupted) and its glTF .bin dropped. Both are now kept byte-exact.
 - **Open:** real Indian clothing (saree/dhoti/kurta/turban) geometry. No CC0 rigged model exists. The admin decides: accept CC-BY with an automatic credit, or buy a pack whose licence allows redistribution. FBX conversion is also open: no converter we can trust in the server yet.
+
+## 2026-11-20 — #4392 and #4394 merged; library batch 8 (KayKit Adventurers 2.0)
+- #4392 (batch 6: guns and cars) and #4394 (Indian characters, library by meaning, user's own models) merged. The full local gate was green on each final tree (#4394: 3656 files, 55562 tests).
+- **Batch 8** (this PR): the admin's KayKit Adventurers 2.0 download (Kay Lousberg, CC0 per the archive's License.txt: "free to use in personal, educational and commercial projects").
+  - A cartoon bowman with 15 clips; all 9 moving roles proven animated in the live admission.
+  - 15 props the library lacked: bow, arrow, arrow bundle, quiver, dagger, greatsword, battle axe, round/spiked shields, magic staff/wand, spellbook, book, mug, smoke bomb.
+  - Packaged in the image. KayKit joins Quaternius as a packaged provider; every other provider is still refused.
+  - Word guards: "arrow keys", "book a ticket", "hotel staff", "bow tie" match nothing. "big sword" is a greatsword only.
+  - The pack's knight/mage/barbarian/rogue were already in the library from KayKit's public 1.0 repository, so they are not duplicated. Test: `libraryBatch8`.
+- **Evidence note:** this environment cannot reach itch.io, so the evidence link is the distributor URL inside the archive (`More KayKit Assets.url`). The licence itself is the archive's License.txt, pinned by the archive's sha256.

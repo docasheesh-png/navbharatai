@@ -136,6 +136,14 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   ranger: ['ranger', 'rangers'], 'female ranger': ['female ranger', 'female rangers'],
   archer: ['archer', 'archers', 'तीरंदाज', 'तीरंदाज़'], 'female archer': ['female archer', 'female archers', 'woman archer', 'archer girl'],
   hunter: ['hunter', 'hunters', 'शिकारी', 'shikari'],
+  // 2026-11-20 library batch 8 (KayKit Adventurers 2.0): a bowman and fantasy props.
+  bowman: ['bowman', 'bowmen'], 'cartoon archer': ['cartoon archer', 'chibi archer'],
+  bow: ['bow', 'bows', 'bow and arrow', 'धनुष', 'dhanush'], arrow: ['arrow', 'arrows', 'तीर', 'teer'], 'arrow bundle': ['arrow bundle', 'bundle of arrows'],
+  quiver: ['quiver', 'तरकश'], dagger: ['dagger', 'daggers', 'knife', 'चाकू', 'खंजर', 'chaku'],
+  greatsword: ['greatsword', 'great sword', 'two handed sword', 'big sword'], 'battle axe': ['battle axe', 'war axe'],
+  'round shield': ['round shield'], 'spiked shield': ['spiked shield'], 'magic staff': ['magic staff', 'wizard staff', 'mage staff'],
+  'magic wand': ['magic wand', 'wand', 'जादू की छड़ी'], spellbook: ['spellbook', 'spell book', 'magic book'],
+  book: ['book', 'books', 'किताब', 'kitab'], mug: ['mug', 'beer mug', 'tankard'], 'smoke bomb': ['smoke bomb', 'smoke grenade'],
 };
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
   fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],
@@ -167,7 +175,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       woman: ['old woman', 'old women', 'wonder woman', 'village woman', 'village women', 'woman archer'], bat: ['cricket bat', 'baseball bat', 'bat and ball', 'bat ball'], mechanic: ['game mechanic', 'game mechanics'],
       worker: ['service worker', 'web worker', 'office worker'], bus: ['bus stop', 'bus stops', 'school bus stop'], school: ['school bus'], bank: ['river bank', 'blood bank'],
       ant: ['ant man'], log: ['log in', 'login', 'log file', 'log out'],
-      bicycle: ['day night cycle', 'day and night cycle', 'life cycle', 'cycle through', 'weather cycle'], 'traffic cone': ['ice cream cone', 'ice cream cones'], grave: ['grave danger', 'grave mistake'], door: ['door to door', 'door delivery'], market: ['stock market'], shield: ['shield powerup', 'shield power up'],
+      bicycle: ['day night cycle', 'day and night cycle', 'life cycle', 'cycle through', 'weather cycle'], 'traffic cone': ['ice cream cone', 'ice cream cones'], grave: ['grave danger', 'grave mistake'], door: ['door to door', 'door delivery'], market: ['stock market'],
       car: ['formula one car', 'formula 1 car', 'f1 car', 'hatchback car', 'station wagon car',
         // A named kind of car is that model, not "a car" too (police car → car + police car was the old double).
         'police car', 'police cars', 'sports car', 'sports cars', 'पुलिस कार', 'स्पोर्ट्स कार'],
@@ -177,6 +185,10 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       ranger: ['power ranger', 'power rangers', 'female ranger', 'female rangers'], archer: ['female archer', 'female archers', 'woman archer', 'archer girl'],
       hunter: ['treasure hunter', 'treasure hunters', 'bug hunter', 'bug hunters', 'job hunter'],
       man: ['pac man', 'spider man', 'iron man', 'snow man', 'super man', 'he man', 'ant man', 'old man', 'old men', 'village man', 'village men'],
+      arrow: ['arrow key', 'arrow keys', 'arrow button', 'arrow buttons', 'arrow bundle', 'bundle of arrows'],
+      bow: ['bow tie', 'take a bow', 'rainbow'], book: ['book a', 'book now', 'book ticket', 'book tickets', 'book appointment', 'spell book', 'magic book'],
+      sword: ['great sword', 'two handed sword', 'big sword'], axe: ['battle axe', 'war axe'], shield: ['shield powerup', 'shield power up', 'round shield', 'spiked shield'],
+      dagger: ['knife and fork'],
       gun: ['laser gun', 'laser guns', 'ray gun', 'submachine gun', 'submachine guns', 'water gun', 'nail gun', 'glue gun'],
     };
     if ((excludedPhrases[subject] ?? []).some(p => mentioned(clause, p))) return false;
@@ -190,7 +202,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
     const motion = (role: string) => MOTIONS[role].some(word => mentioned(local, word));
     const animation = ['bird', 'eagle', 'parrot'].includes(subject) && motion('fly') ? 'fly'
       : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue', 'skeleton', 'man', 'woman', 'old man', 'old woman', 'farmer', 'racing driver', 'mechanic', 'worker', 'businessman',
-        'villager', 'peasant', 'village man', 'village woman', 'ranger', 'female ranger', 'archer', 'female archer', 'hunter'].includes(subject)
+        'villager', 'peasant', 'village man', 'village woman', 'ranger', 'female ranger', 'archer', 'female archer', 'hunter', 'bowman', 'cartoon archer'].includes(subject)
         ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
     return { subject, ...(animation ? { animation } : {}) };
   });

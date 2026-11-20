@@ -24,3 +24,24 @@ export const ABSENT_DEVICE_CONSOLE_RE = new RegExp(ABSENT_DEVICE_CONSOLE_SRC, 'i
 export function isAbsentDeviceConsoleLine(text: string | null | undefined): boolean {
   return ABSENT_DEVICE_CONSOLE_RE.test(String(text ?? ''));
 }
+
+/**
+ * 🎞️ …AND IT PLAYS NO H.264, AND A SWIPE FEED RACES ITS OWN play()/pause() (failedbr #2169, 2026-11-20 — a reels-style
+ * video app). The render check failed the app on "Error playing video: NotSupportedError: Failed to load because no
+ * supported source was found" (our headless Chromium ships no proprietary codecs, so a public MP4 cannot play in it,
+ * while it plays on every phone) and on "AbortError: The play() request was interrupted by a call to pause()" (the
+ * browser's own message when a feed pauses a video before it started — harmless by the browser vendor's own docs).
+ * A repair could change neither; gate RED, build not ok. Same reader rule as the device line: a console line only,
+ * and only these exact media facts.
+ */
+export const BROWSER_MEDIA_LIMIT_CONSOLE_SRC =
+  String.raw`The play\(\) request was interrupted by (?:a call to pause\(\)|a new load request)`
+  + String.raw`|no supported source was found|NotSupportedError:[^\n]*\b(?:source|media|video|audio|codec|format)\b`;
+
+export const BROWSER_LIMIT_CONSOLE_SRC = `${ABSENT_DEVICE_CONSOLE_SRC}|${BROWSER_MEDIA_LIMIT_CONSOLE_SRC}`;
+const BROWSER_LIMIT_CONSOLE_RE = new RegExp(BROWSER_LIMIT_CONSOLE_SRC, 'i');
+
+/** A console line that only reports a limit of OUR checking browser (no device, no proprietary codec, a play/pause race). PURE. */
+export function isOurBrowserLimitConsoleLine(text: string | null | undefined): boolean {
+  return BROWSER_LIMIT_CONSOLE_RE.test(String(text ?? ''));
+}

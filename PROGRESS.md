@@ -103225,6 +103225,24 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 - **Proof:** `tests/theGameSpeaksIndianLanguages.test.ts` (24 tests; five reversions each failed).
 - 🟡 **Open:** the nine tables were written without a native speaker reviewing every word. They are ordinary words, and any
   word can be changed with `options.strings`, but a native-speaker pass per language is recommended.
+## 2026-11-20 — Cars crash into walls and into each other (engine audit, item 1 of the admin-approved plan)
+
+- **Measured first, with the real kit:** cars already stopped at walls (an earlier claim of mine in this session that
+  they did not was wrong — `vehicleTravel` sweeps the body against scenery). Two real defects:
+  1. a car drove straight THROUGH a parked car at full speed — vehicles were never obstacles, only scenery was;
+  2. a car that clipped a wall at an angle stopped dead and stayed glued to it.
+- **Class:** the vehicle sweep knew one kind of obstacle (scenery) and one outcome (full stop).
+- **Fix (shared `objects.ts`, so every driving game gets it):**
+  - every kit vehicle (car, auto, bus, truck, tractor, motorcycle, bicycle) and every model `driveVehicle` moves is a
+    vehicle body; the sweep also tests the other bodies in the same scene (capsule–capsule, binary-searched fraction);
+    bodies that left their scene are forgotten; overlapping cars can always separate (never lock together);
+  - a blocked car slides along what it hit; the speed loss is paid once at contact, then only scraping friction;
+    a head-on hit still stops dead (existing tests pin it);
+  - `onVehicleCrash(at, vehicle, impact)` once per hit (> 3 m/s lost, 0.3 s apart); the shell turns the PLAYER's crash
+    into `VEHICLE_CRASHED` → sparks, impact sound, trauma, haptic via the feedback table.
+- **Proof:** `tests/aCarHitsWhatItDrivesInto.test.ts` (9 tests, eight reversions each failed); all 28 existing vehicle
+  test files (485 tests) pass.
+- 🟡 **Not built yet:** pushing the other car, dents and damage.
 ## 2026-11-20 — City blocks in the 3D game kit (game-gap audit)
 
 - **Problem:** a "city" game was one straight road with houses beside it — the kit had `createRoad()` (one strip),

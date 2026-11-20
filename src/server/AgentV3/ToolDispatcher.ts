@@ -138,7 +138,7 @@ import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { isBareManifestInstall, manifestRangeRepairEnabled, repairUnavailableRanges, manifestRepairNote } from './manifestRangeRepair';
 import { shellMayWriteOpaquely, markCommand, changedFilesCommand, parseChangedFiles } from './shellWriteReconcile';
 import { isScratchCapture } from './scratchCapture';
-import { isKnownKitVersion } from '../lib/gameRecipeLayers';
+import { isKnownKitVersion, recipeWritesReact, projectRunsReact } from '../lib/gameRecipeLayers';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, shadowKeptToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames, mistypedImport } from './tscErrorCause';
 import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
@@ -5652,6 +5652,12 @@ export class ToolDispatcher {
     // "npm enoent package.json → builder hand-writes a drifted scaffold" class on fallback builds.
     await this.ensureScaffoldOnce();
     const input = call.input;
+    // A React-writing game recipe in a project that cannot mount React (failedbr #1925): refused, with the way forward.
+    if (recipeWritesReact(call.name) && !projectRunsReact(this.framework)) {
+      refuse(`${call.name} was NOT run: it writes React components (.tsx), and this is a ${this.framework} project, which cannot mount them. `
+        + `Build the game in ${this.framework}'s own components instead: one <canvas> driven by requestAnimationFrame, with keyboard and touch input. `
+        + 'The plain-TypeScript kit recipes (generate_game_runtime, generate_game_vfx, generate_melody, generate_game_2d) work in any TypeScript project and may still be used.');
+    }
     // fix/build-reliability (P2b resume + P5b banned deps) — write_file pre-checks, each behind its own flag.
     if (call.name === 'write_file') {
       // P2b — a write cut off at the output limit carries only `_partial_content`: buffer it, never write it.

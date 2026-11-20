@@ -127,7 +127,12 @@ const TOOL_BEFORE = /\b(?:using|use|uses|via|through|thru|over|on|with|by|to|int
 // 3 and built a hard-coded math-quiz racer. A product name followed by a CONTENT noun (video, url,
 // playlist, clip, thumbnail…) or by a Hinglish possessive before an integration noun ("youtube ka
 // link", "instagram ki post") is the product being USED, exactly as a channel preposition before it is.
-const TOOL_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|embeds|channel|bot|webhook|ads|videos?|urls?|playlists?|clips?|thumbnails?|posts?|reels?|stories|feed|page|pages|content|audio|music|songs?|mp3|data|downloads?|kholo|kholna|khol\s+do|chalao|chalana|app\s+(?:kholo|chalao|open))\b|^[\s-]*to[\s-]*(?:mp3|mp4|audio|video|wav|gif|text|pdf)\b/i;
+// 🔴 "YOUTUBE DEKH RAHA THA" IS WATCHING YOUTUBE (failedbr #1879, 2026-11-20). "YouTube dekh raha tha aur mujhe tera
+// ad mila…" — I was watching YouTube and saw your ad — was classed *"LARGE — clone of YouTube"* and the planner
+// handed the builder a six-step video-platform roadmap. English "watch YouTube" was already the product being used
+// (TOOL_BEFORE); its Hinglish word order puts the verb AFTER the name (dekh-, sun-, scroll-, "use kar-") and the
+// channel postposition after it too ("YouTube pe / par / mein"). Both are added to the same list.
+const TOOL_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|embeds|channel|bot|webhook|ads|videos?|urls?|playlists?|clips?|thumbnails?|posts?|reels?|stories|feed|page|pages|content|audio|music|songs?|mp3|data|downloads?|kholo|kholna|khol\s+do|chalao|chalana|app\s+(?:kholo|chalao|open)|dekh\w*|dekha|dekhi|dekhe|sun\w*|scroll\w*|use\s+kar\w*|pe|par|pr|per|mein|me|mai)\b|^[\s-]*to[\s-]*(?:mp3|mp4|audio|video|wav|gif|text|pdf)\b/i;
 
 // 🔴 A PRODUCT A COMMAND OPENS IS NOT THE PRODUCT (autopsy 042e472f + dfd24058, 2026-10-01). A voice
 // assistant's command list — "Open YouTube", `"open YouTube"` — was classed "LARGE — clone of YouTube" in

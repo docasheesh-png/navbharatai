@@ -46,6 +46,24 @@ import { namesNoObject } from './buildableInput';
  */
 const PRODUCT_NOUN =
   /\b(?:apps?|application|website|web\s?site|site|webpage|web\s?page|portal|software|program|game|bot|tool|dashboard|landing\s+page|blog|store|shop|crm|erp|calculator|tracker|system|platform|extension|plugin)\b|ऐप|एप|वेबसाइट|सॉफ्टवेयर|गेम/i;
+/**
+ * 🔴 A SENTENCE ABOUT WHAT NAVBHARATAI DOES NOT MAKE IS NOT AN ORDER (failedbr #1879, 2026-11-20). "YouTube dekh raha
+ * tha aur mujhe tera ad mila… tu to game banate hi nahin hai" — I saw your ad; you don't even make games — confirmed
+ * a build on the word "game" alone, and a YouTube-clone roadmap with a game kit was built for a remark. The verb was
+ * there, but negated and habitual ("banate … nahin", "don't make", "can't build"): a statement about the product,
+ * not a request. On the uncertain branch such a message is answered in chat (whose reply offers the build); an
+ * imperative beside it ("… nahin banate, ek bana do") still confirms through `firstNewBuildOrder`.
+ */
+const NEGATED_BUILD_STATEMENT = new RegExp([
+  String.raw`\b(?:bana|bna|banaa)(?:te|ta|ti|tey)\b[^.?!।]{0,24}\b(?:nahi|nahin|nhi|nai)\b`,
+  String.raw`\b(?:nahi|nahin|nhi|nai)\b[^.?!।]{0,12}\b(?:bana|bna|banaa)(?:te|ta|ti|tey|ega|egi|oge|sakte|sakta)\b`,
+  String.raw`\b(?:bana|bna)\s+(?:nahi|nahin|nhi)\s+(?:sakte|sakta|sakti|paate|pata|pati)\b`,
+  String.raw`\b(?:nahi|nahin|nhi)\s+(?:bana|bna)\s+(?:sakte|sakta|sakti|paate|pata|pati)\b`,
+  String.raw`\b(?:you|u|it|navbharat\w*)\s+(?:guys\s+|people\s+)?(?:don'?t|doesn'?t|dont|doesnt|can'?t|cannot|never|won'?t|couldn'?t)\s+(?:even\s+)?(?:make|build|create)\b`,
+  'बना(?:ते|ता|ती)[^।?!]{0,24}नहीं',
+  'नहीं[^।?!]{0,12}बना(?:ते|ता|ती|एगा|एगी|ओगे)',
+].join('|'), 'i');
+
 /** The Devanagari `बना-` family ("बनाओ", "बना दो") — the order no Roman list can see. */
 const DEVANAGARI_BUILD_VERB = /बन(?:ा|वा)/;
 
@@ -98,6 +116,10 @@ export function buildConfirmation(message: string): BuildConfirmation {
   // unchanged — "make an app" / "app banao" stay explicit-order (the ask-what-to-build gate still
   // asks about them) and "add it to this app" stays an explicit edit.
   if (text && namesNoObject(text)) return { confirmed: false, reason: 'names-nothing-to-build' };
+  // The order is looked for OUTSIDE the negated span, so "you don't even make games" is not read as "make games".
+  if (NEGATED_BUILD_STATEMENT.test(text) && !firstNewBuildOrder(lower.replace(new RegExp(NEGATED_BUILD_STATEMENT.source, 'gi'), ' '))) {
+    return { confirmed: false, reason: 'names-nothing-to-build' };
+  }
   if (firstNewBuildOrder(lower) || DEVANAGARI_BUILD_VERB.test(text) || PRODUCT_NOUN.test(text)) {
     return { confirmed: true, reason: 'names-something-to-build' };
   }

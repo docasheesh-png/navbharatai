@@ -18,6 +18,7 @@
 //                  coyote time, jump buffering and a variable jump height; overlap tests.
 //   parallax.ts  — layers that scroll slower than the world and repeat forever.
 //   particles.ts — a capped particle pool with presets (dust, spark, coin, hit, explosion, smoke).
+//   touch.ts     — the kit's on-screen joystick and buttons for a phone (the same ones the 3D shell uses).
 //   index.ts     — one import.
 //
 // PURE — no I/O.
@@ -588,6 +589,29 @@ export class Particles2D {
 }
 `;
 
+const TOUCH = String.raw`/**
+ * ON-SCREEN CONTROLS FOR A 2D GAME ON A PHONE (game audit 2, 2026-11-20: failedbr #2435 — a Mario-style platformer —
+ * found no touch support in the kit, hand-rolled its own buttons, and scored Phone 0). These are the SAME joystick and
+ * buttons the 3D shell uses (ui/touchControls.ts): multi-touch, safe-area aware, shown only on a touch screen, and they
+ * drive the same Input the keyboard does — so input.axis() and input.isDown('jump') just work on a phone.
+ *
+ *   const input = new Input(stage);
+ *   const touch = mountTouchControls2D(stage, input);                     // joystick + Jump + Attack
+ *   // a runner: mountTouchControls2D(stage, input, { buttons: [{ action: 'jump', label: 'Jump' }] })
+ *   // when the game ends: touch.dispose();
+ */
+import type { Input } from '../core/input';
+import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions } from '../ui/touchControls';
+
+export { TouchControls, DEFAULT_TOUCH_BUTTONS };
+export type { TouchControlsOptions };
+
+/** The usual 2D set: the joystick on the left, Jump and Attack on the right, and no camera drag (a 2D camera follows by itself). */
+export function mountTouchControls2D(stage: HTMLElement, input: Input, options: TouchControlsOptions = {}): TouchControls {
+  return new TouchControls(stage, input, { look: false, buttons: [{ action: 'jump', label: 'Jump' }, { action: 'attack', label: 'Attack' }], ...options });
+}
+`;
+
 const INDEX = String.raw`// The 2D game kit: sprites and animation, camera, tilemap, platformer physics, parallax and particles.
 export { loadImage, SpriteSheet, Animator, drawFrame } from './sprite';
 export type { Clip, DrawOptions } from './sprite';
@@ -601,6 +625,8 @@ export { Parallax, hills } from './parallax';
 export type { ParallaxLayer } from './parallax';
 export { Particles2D, PARTICLE_2D_PRESETS } from './particles';
 export type { Particle2DPreset } from './particles';
+export { mountTouchControls2D, TouchControls, DEFAULT_TOUCH_BUTTONS } from './touch';
+export type { TouchControlsOptions } from './touch';
 `;
 
 const FILES: Record<string, string> = {
@@ -610,17 +636,22 @@ const FILES: Record<string, string> = {
   [`${GAME_2D_DIR}/physics.ts`]: PHYSICS,
   [`${GAME_2D_DIR}/parallax.ts`]: PARALLAX,
   [`${GAME_2D_DIR}/particles.ts`]: PARTICLES,
+  [`${GAME_2D_DIR}/touch.ts`]: TOUCH,
   [`${GAME_2D_DIR}/index.ts`]: INDEX,
 };
 
-export const GAME_2D_MODULES: readonly string[] = ['sprite', 'camera', 'tilemap', 'physics', 'parallax', 'particles'];
+export const GAME_2D_MODULES: readonly string[] = ['sprite', 'camera', 'tilemap', 'physics', 'parallax', 'particles', 'touch'];
 
 const EXAMPLE = [
-  "import { Tilemap, Camera2D, PlatformerController, createBody, touchesHazard, Parallax, hills, Particles2D } from './game/2d';",
+  "import { Tilemap, Camera2D, PlatformerController, createBody, touchesHazard, Parallax, hills, Particles2D, mountTouchControls2D } from './game/2d';",
+  "import { Input } from './game/core/input';",
   '',
   "const canvas = document.createElement('canvas');",
   'canvas.width = 800; canvas.height = 450;',
   "const ctx = canvas.getContext('2d')!;",
+  '// Keyboard, gamepad AND, on a phone, the on-screen joystick and Jump / Attack buttons all drive this one Input.',
+  'const controls = new Input(canvas);',
+  'mountTouchControls2D(document.body, controls);',
   "const map = Tilemap.fromRows(['....................', '.......====....C....', '..P.........###..^^.', '####################'], 32);",
   "const start = map.markers('P')[0];",
   'const player = new PlatformerController(createBody(start.x, start.y, 22, 30));',
@@ -676,7 +707,7 @@ export function generateGame2D(include?: string[]): Game2DResult {
       + 'RULES: build a 2D canvas game ON this kit — never hand-roll a jump, tile collision, a camera or a particle system. '
       + 'Movement goes in the FIXED update; drawing in render (core/loop.ts). Draw the world between cam.begin and cam.end and the '
       + 'HUD after. Animate every character with Animator (idle / run / jump / hit at least) and flip it to face where it moves; '
-      + 'until there is art, the placeholder draws a coloured body, never nothing. Touch controls must drive the same input. '
+      + 'until there is art, the placeholder draws a coloured body, never nothing. On a phone, mountTouchControls2D(stage, input) from src/game/2d/touch.ts gives the joystick and buttons that drive that same Input — never hand-roll touch buttons. '
       + 'A big top-down map is the 2D world recipe (generate_world_2d), not this.',
   };
 }

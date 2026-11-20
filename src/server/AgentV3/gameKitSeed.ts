@@ -60,7 +60,13 @@ import { world2dIntent } from './world2dIntent';
 import { ACTION_VISIBLE_RULE } from './actionVisibility';
 
 /** The recipes the seed may run, in the order the architect prompt lists them (runtime first, shell last). */
-export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell' | 'generate_world_2d';
+export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell' | 'generate_world_2d'
+  | 'generate_game_2d' | 'generate_board_games';
+
+/** 2D games that MOVE a body on screen — they get the 2D kit (sprites, platformer physics, camera, tilemap, particles). */
+const MOVING_2D_GENRES: ReadonlySet<string> = new Set(['platformer', 'runner', 'shooter', 'arcade', 'fighting']);
+/** Cricket is in the India games pack's rules engines, in English or Hindi. */
+const CRICKET = /\bcricket\b|क्रिकेट/i;
 
 /** `AGENTV3_GAME_KIT_SEED=off` restores the pre-2026-10-11 behaviour exactly (the model decides). */
 export function gameKitSeedEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -97,7 +103,16 @@ export function gameKitPlan(prompt: string | null | undefined, framework?: strin
   // gets the 2D world laid down by the platform too — the same reason the kit is seeded at all: a capability the
   // platform KNOWS a build needs is not left to the model's optional tool call.
   const flat: GameKitRecipe[] = ['generate_game_runtime', 'generate_game_vfx', 'generate_melody'];
-  return world2dIntent({ prompt: text, drawnIn3D: false }).use ? [...flat, 'generate_world_2d'] : flat;
+  if (world2dIntent({ prompt: text, drawnIn3D: false }).use) flat.push('generate_world_2d');
+  // 🎮 THE GENRE'S OWN KIT (game audit 2, 2026-11-20): failedbr #2435 ("super Mario Bros game banao") got only the loop,
+  // sound and music and hand-wrote its platformer physics, renderer and touch buttons; #2470 (a Monopoly-style "business
+  // game") got the real-time kit and no rules engine. The kits exist (generate_game_2d, generate_board_games) but were
+  // only ever run if the model chose to — so the platform lays the genre's kit down itself, like the rest of the seed.
+  let genre = 'unknown';
+  try { genre = buildGameContract(text).genre; } catch { /* no genre: the shared kit only */ }
+  if (MOVING_2D_GENRES.has(genre)) flat.push('generate_game_2d');
+  if (genre === 'board' || genre === 'card' || (genre === 'sports' && CRICKET.test(text))) flat.push('generate_board_games');
+  return flat;
 }
 
 /** Says 3D in so many words — the same reading `wantsSceneObjects` gives "3d". */
@@ -260,6 +275,17 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
     // said only when the 3D layer that holds createTrackStream is really on disk.
     opts.endlessRaceCourse && has('generate_game_3d') ? ENDLESS_RACE_COURSE_RULE : '',
     ACTION_VISIBLE_RULE,
+    has('generate_game_2d')
+      ? '🕹️ THE 2D GAME KIT IS ALREADY IN src/game/2d/: build the game ON it — Tilemap.fromRows(...) for the level,'
+        + ' PlatformerController + createBody for the player (coyote time, jump buffer, no tunnelling — NEVER a hand-written'
+        + ' jump or tile collision), Camera2D to follow, Animator for every character (idle / run / jump / hit), Parallax'
+        + ' behind and Particles2D for dust, sparks and coins.'
+      : '',
+    has('generate_board_games')
+      ? '🎲 THE INDIA GAMES PACK IS ALREADY IN src/game/board/: the rules come from it — Ludo, Snakes & Ladders, chess,'
+        + ' carrom, cricket and cards (Teen Patti, rummy) — never re-implement them. Draw the board, let the player tap a legal'
+        + ' move, and announce what happened. Card games are points or pretend chips only, never real money.'
+      : '',
     has('generate_world_2d')
       ? '🗺️ THE BIG 2D WORLD IS ALREADY IN src/game/world2d/: the user asked for a big map, so build the game ON it —'
         + ' createWorld2D(...) for the map (endless), createWorldRenderer(world).draw(ctx, player.x, player.y, w, h) every frame'

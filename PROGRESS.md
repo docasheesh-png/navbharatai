@@ -102890,3 +102890,13 @@ Closed Q-2954, Q-2956, Q-2958, Q-2960 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2958 (#2415): an attached text file is written whole to `attachments/<name>` before the builder starts (the prompt copy is capped at 20,000 characters); the builder is told the path and not to search the disk. The write lives in `writeAttachmentFilesInStep`, because the chat handler is at its TS2563 branch budget (CI caught the first version at 538/537).
 - Q-2960 (#2421): `SIMULATED_RESULT_RE` names generated media (video/audio/blob/clip/render); a not-ok build's writes are scanned and recorded for the admin.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it needs), plus the earlier Q-2942/Q-2943/Q-2947/Q-2948/Q-2949.
+
+## 2026-11-20 — Game audit 2 (#2): the seed lays down the genre's own kit (branch `claude/game-seed-by-genre`)
+- Evidence: failedbr #2435 (Mario) got only loop/sound/music and hand-wrote platformer physics, renderer and touch; #2470
+  (Monopoly-style "business game") got the real-time kit and no rules engine. generate_game_2d / generate_board_games
+  existed but ran only if the model chose to.
+- `gameKitPlan`: a 2D game that moves a body (platformer, runner, shooter, arcade, fighting) adds `generate_game_2d`; board
+  and card games, and cricket, add `generate_board_games`. 3D plans unchanged. The handoff names each kit (2D: never a
+  hand-written jump or tile collision; board: rules come from the pack, card games never for real money).
+- `theRacingCarShowedItsHeadlights` updated to its real point (never 3D; the 2D kit may follow the shared three).
+- Locked by `tests/aGameGetsItsGenresKit.test.ts` (reversion: no genre push → 3 fail).

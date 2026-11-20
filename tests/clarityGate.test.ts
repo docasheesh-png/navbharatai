@@ -97,7 +97,7 @@ describe('never twice in a row', () => {
     const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
     expect(route).toContain("lastRequestTurn.lane === 'clarify'");
     expect(route).toContain('const askWhatToBuild = !askedClarifyLastTurn && namesNothingToBuild');
-    expect(route).toContain('prompt = bestGuessPrompt(lastRequestTurn.text, typedPrompt);');
+    expect(route).toContain('prompt = bestGuessPrompt(lastRequestTurn.text, typedPrompt, mentionsBuildNoun(typedPrompt.toLowerCase()));'); // failedbr #1357
     expect(route).toContain("if (clarifyChips) { if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, 'clarify'); }");
     expect(route).toContain("chatEvents.emit({ type: 'quick_replies', chips: clarifyChips");
     // failedbr #1896: the decision moved into clarityDecision (which also writes its report line).

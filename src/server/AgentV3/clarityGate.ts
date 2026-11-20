@@ -259,9 +259,18 @@ export function clarifyReply(category: ClarityCategory, voice: PlatformVoice): {
   return { text, chips };
 }
 
-/** The note on a build whose request stayed vague after our one question — build the best guess. PURE. */
-export function bestGuessPrompt(firstRequest: string, reply: string): string {
-  return `${String(firstRequest ?? '').trim()}\n${String(reply ?? '').trim()}\n\n`
+/**
+ * The note on a build whose request stayed vague after our one question — build the best guess. PURE.
+ *
+ * 🔴 THE ANSWER REPLACES THE QUESTION'S SUBJECT (failedbr #1357, 2026-11-20). We asked what to build after "All GTA V game
+ * app"; the reply was "Make a i videos kahani app for youtubers". Both lines went to the builder, every reader saw "GTA"
+ * first — "clone of GTA", game domain, a game kit — and the app the user then asked for was never the subject. When the
+ * reply names an app itself (`replyNamesTheApp`, the caller's `mentionsBuildNoun`), the reply IS the request; the first one
+ * stays only when the reply names nothing ("haan", "jo theek lage").
+ */
+export function bestGuessPrompt(firstRequest: string, reply: string, replyNamesTheApp = false): string {
+  const asked = replyNamesTheApp ? '' : `${String(firstRequest ?? '').trim()}\n`;
+  return `${asked}${String(reply ?? '').trim()}\n\n`
     + '[PLATFORM NOTE] The user was already asked once what to build. Do not ask again: choose the single most likely concrete app '
     + 'from what they said, build it with sensible defaults, and begin your first message with ONE short line, in the user\'s language, '
     + 'saying what you assumed (e.g. "Maine ise ek <app type> maan kar banaya hai" — name the app type you chose from THEIR words; never default to a billing/shop app unless they asked for one).';

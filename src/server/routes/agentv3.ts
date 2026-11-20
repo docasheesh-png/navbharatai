@@ -690,7 +690,7 @@ import { getRevisionStore, buildRevision, verifyBase, promoteWithRebase, type Ba
 import { frameworkMismatchFromListing, shouldCheckFrameworkQuestion, answersFrameworkQuestion, frameworkQuestionMarker, frameworkQuestionSteer, frameworkAnswerNote } from '../AgentV3/frameworkQuestion';
 import type { FrameworkCoherence } from '../AgentV3/ProjectImport';
 import { attachmentMemoryEnabled, rememberableUid, saveAttachmentMemory, loadAttachmentMemory, deleteAttachmentMemory, shouldRecallAttachment, refersToEarlierAttachment } from '../lib/attachmentMemory';
-import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt, readerlessIntent, describeReaderOutcome, type ReaderOutcome } from '../AgentV3/IntentClassifier';
+import { classifyIntentSmartDetailed, classifyIntentWithConfidence, mentionsBuildNoun, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt, readerlessIntent, describeReaderOutcome, type ReaderOutcome } from '../AgentV3/IntentClassifier';
 import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
 import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, engineTimeDominated, type WasteKind } from '../AgentV3/providerWaste';
 import { readTurnAnswer, answeredWithoutBuilding, modelsOwnWords } from '../AgentV3/turnAnswer';
@@ -11711,7 +11711,7 @@ async function noteBuildOutcome(
     let clarity: { category: ClarityCategory } | null = askWhatToBuild ? { category: categoryFromWords(prompt) } : null;
     if (askedClarifyLastTurn && lastRequestTurn) {
       console.log('[AGENTV3] clarity gate: this is the reply to our one question — building the best guess, no second question');
-      prompt = bestGuessPrompt(lastRequestTurn.text, typedPrompt);
+      prompt = bestGuessPrompt(lastRequestTurn.text, typedPrompt, mentionsBuildNoun(typedPrompt.toLowerCase()));
       intent = 'new_build';
     } else if (!askWhatToBuild && intent === 'new_build') {
       // failedbr #1896: the judge's decision — or why it was not asked — goes into the build report, not only the log.

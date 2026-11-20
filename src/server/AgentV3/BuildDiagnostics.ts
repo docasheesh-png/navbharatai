@@ -1753,6 +1753,8 @@ export class BuildDiagnostics {
    * it gets a plain note, and the build's own first call — when it comes — replaces that note with the real split.
    */
   private firstCallTimed = false;
+  /** Planner time spent before the first builder call — named in TIME_TO_FIRST_CALL, never called setup. */
+  private plannerMsBeforeFirstCall = 0;
   private preBuildCallNote?: { issue: BuildIssue; latencyMs: number };
   private recordTimeToFirstCall(latencyMs?: number, answerMs?: number, fallbackMs?: number, completedAt = this.now()): void {
     if (this.firstCallTimed) return; // only the first call that ran inside this build's timer
@@ -1797,7 +1799,7 @@ export class BuildDiagnostics {
       // build `npm install` runs in the background boot, CONCURRENT with the build — it does not gate
       // this first call — and a resumed sandbox already carries node_modules. Naming it here sent an
       // autopsy to optimise install when the real cost was the cold sandbox and its round-trips.
-      : `${seconds}s of preparation before the build's first model call began — sandbox setup, project restore and secrets loading all happen in it, and the user waits through every second. (Dependency install is NOT part of this wait: it runs in the background boot, concurrent with the build.) ${callTime!.split ? `The first call then took ${callTime!.text} — provider time, not setup.` : `The first call itself then took ${callTime!.text}; that is model time, not setup.`}`;
+      : `${seconds}s of preparation before the build's first model call began — ${this.plannerMsBeforeFirstCall >= 1000 ? `${Math.round(this.plannerMsBeforeFirstCall / 1000)}s of it was the planner's own model call (it plans a big app before the build starts); the rest is ` : ''}sandbox setup, project restore and secrets loading all happen in it, and the user waits through every second. (Dependency install is NOT part of this wait: it runs in the background boot, concurrent with the build.) ${callTime!.split ? `The first call then took ${callTime!.text} — provider time, not setup.` : `The first call itself then took ${callTime!.text}; that is model time, not setup.`}`;
     // …UNLESS A FAST LANE ALREADY BURNED THAT WINDOW, IN WHICH CASE NONE OF THE ABOVE IS TRUE
     // (autopsy a38c6fef, 2026-09-13). A lane's model call is not RECORDED until it returns, so a lane
     // that is abandoned at its deadline leaves this window looking like pure setup. In the real report
@@ -1901,6 +1903,12 @@ export class BuildDiagnostics {
      * the stop's detail line (autopsy 9c612cdb). Absent for the user's Stop, whose record is unchanged.
      */
     stopCause?: AbortCause;
+    /**
+     * A planner call made BEFORE the build's first builder call (roadmap, blueprint, project planner). It is not the
+     * build's first model call, so it does not end the preparation window; its time is named inside it instead
+     * (failedbr #1200, #1188, #1179: "0s of preparation" printed after a 15 s planner call).
+     */
+    planner?: boolean;
   }): void {
     // The answering engine's own time is only ever PART of the caller's wait — never more than it.
     const answerMs = typeof rec.answerMs === 'number' && Number.isFinite(rec.answerMs) && rec.answerMs >= 0
@@ -1912,7 +1920,11 @@ export class BuildDiagnostics {
     const receivedAt = this.now();
     const completedAt = typeof rec.ts === 'number' && Number.isFinite(rec.ts) && rec.ts > 0 && rec.ts <= receivedAt
       ? rec.ts : receivedAt;
-    this.recordTimeToFirstCall(rec.latencyMs, answerMs, fallbackMs, completedAt);
+    if (rec.planner === true) {
+      if (!this.firstCallTimed && typeof rec.latencyMs === 'number' && Number.isFinite(rec.latencyMs) && rec.latencyMs > 0) this.plannerMsBeforeFirstCall += rec.latencyMs;
+    } else {
+      this.recordTimeToFirstCall(rec.latencyMs, answerMs, fallbackMs, completedAt);
+    }
     this.channelTotals.llmCalls += 1;
     // 🔴 BOTH ENDS, NEVER A PREFIX (2026-09-21). This read `if (this.llmCalls.length < MAX_LLM_CALLS)`,
     // so a build past the cap recorded NO further model calls — and `DiagnosticsStore` then kept the

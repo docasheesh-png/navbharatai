@@ -15619,7 +15619,7 @@ async function noteBuildOutcome(
             } catch (err) {
               try {
                 const who = plannerCallLabel(rmProvider, fastLaneProviderLabel, fastBuildModel());
-                buildDiag.recordLlmCall({ model: who.model, provider: who.provider, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                buildDiag.recordLlmCall({ planner: true, model: who.model, provider: who.provider, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
                 buildDiag.record({
                   phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_FAILED',
                   message: roadmapPlannerFailedMessage(plannerFailureKind(err), rmTimeoutMs, err),
@@ -15632,7 +15632,7 @@ async function noteBuildOutcome(
             }
             try {
               const lbl = fastLaneProviderLabel(rmProvider);
-              buildDiag.recordLlmCall({ model: answeringModel({ answered: rmT.model, planned: claudeRungModelId(rmProvider) ?? null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length + megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals).length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ...answerTimeOf(rmT), ok: true });
+              buildDiag.recordLlmCall({ planner: true, model: answeringModel({ answered: rmT.model, planned: claudeRungModelId(rmProvider) ?? null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length + megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals).length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ...answerTimeOf(rmT), ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += rmT.usage.inputTokens;
             blueprintUsage.outputTokens += rmT.usage.outputTokens;
@@ -17867,7 +17867,7 @@ async function noteBuildOutcome(
                   provider: bpProvider ? fastLaneProviderLabel(bpProvider) : 'unknown',
                   model: answeringModel({ answered, planned: claudeRungModelId(bpProvider) ?? null, family: bpProvider }),
                 }),
-                recordLlmCall: (row) => buildDiag.recordLlmCall(row),
+                recordLlmCall: (row) => buildDiag.recordLlmCall({ ...row, planner: true }), // the blueprint planner (failedbr #1200)
               },
               // The REQUEST's model parameter, under the repo's name for it (§6(b) classifies the helper
               // by this binding). Every rung the plan ladder walks overrides it; the row above never
@@ -19106,7 +19106,7 @@ async function noteBuildOutcome(
               // as every other one, or the report cannot say whether the key was working at all.
               try {
                 const who = plannerCallLabel(ppProvider, fastLaneProviderLabel, fastBuildModel());
-                buildDiag.recordLlmCall({ model: who.model, provider: who.provider, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                buildDiag.recordLlmCall({ planner: true, model: who.model, provider: who.provider, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
               } catch { /* diagnostics best-effort */ }
               throw err;
             } finally {
@@ -19114,7 +19114,7 @@ async function noteBuildOutcome(
             }
             try {
               const lbl = fastLaneProviderLabel(ppProvider);
-              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: claudeRungModelId(ppProvider) ?? null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ...answerTimeOf(t), ok: true });
+              buildDiag.recordLlmCall({ planner: true, model: answeringModel({ answered: t.model, planned: claudeRungModelId(ppProvider) ?? null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ...answerTimeOf(t), ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;

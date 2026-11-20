@@ -103271,6 +103271,15 @@ Ledger, older reports #1430–#1358 (2026-11-20, next PR):
   the overdraft floor records debited vs absorbed (#1258/#1234 debit gap), the audit-fix line (npm exits 1 while
   vulnerabilities remain). Blocked: Q-3157 (dependency-only stop charge — admin), Q-3158 (composer of a "Fix this error"
   prompt — missing information). Open: Q-3159–Q-3167.
+- Batch #1171–#1021 (20 reports, 2026-11-20). Fixed: Q-3168 (👍 accepts the offer), Q-3169 ("banana hai" is the verb, a
+  date token is a format, "WhatsApp-ready" is not a clone), Q-3170 (vite --force is honoured), Q-3171 (a timed-out build did
+  not "report success"), Q-3172 (the unverified note says which happened). Already fixed on main when checked: STUCK_TOOL on
+  a Stop (#1151), a question turn read as an engine outage (#1171, #1053 — r6–r10), stopped-call model labels (#1155,
+  #1111, #1077 — 03368870), "Almost done… your app is built" (#1043, #1046 — BR1992/8cdb4817), "clone of Instagram" (#1052),
+  "VPS"/"LLM" unknown names (#1052, #1049), the stale-module restart (#1153, #1043 — Q-2732), planner seconds and rungs
+  (Q-3154/Q-3155), the 99% index.html rewrite (#1022: it removed an overlaid old app — the fix, not a loss). Charges on
+  stopped builds (#1161, #1111, #1077, #1049, #1046, #1022, #1021) are Q-3148/Q-3157's policy; vague prompts built at once
+  (#1142, #1078) are Q-3137's. Open: Q-3173–Q-3184.
 - KIMI "suspended due to insufficient balance" in 11 of these reports — Q-1210 (blocked: the provider account's balance).
 - #1359 — "stopped before the app was running" after a 908 s render with the stop at 945 s, billed at cost (in the user's favour): fixed on main (`earliestRenderProof`, a75153ab); its "clone of GTA" reading came from an earlier request in the planning context (needsIntent / subject rule on main).
 - #1419 — a 8 s LAPSED game-runtime recipe left no kit; the builder was told to run the recipes itself (honest), recorded.

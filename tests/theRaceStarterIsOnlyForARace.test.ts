@@ -19,9 +19,14 @@ describe('the race starter is only for a race', () => {
     }
   });
 
-  it('a race keeps the whole shell, starter included', () => {
-    expect(gameKitRecipeInput('generate_game_shell', gameKitPlan('make a 3d car racing game'), 'make a 3d car racing game')).toBeUndefined();
+  it('a race keeps the whole shell with its own starter, and not another genre\'s starter', () => {
+    // 2026-11-20: with a second starter (the endless runner) a race no longer gets the WHOLE shell — every module
+    // except the starters of other genres.
+    const input = gameKitRecipeInput('generate_game_shell', gameKitPlan('make a 3d car racing game'), 'make a 3d car racing game') as { include: string[] };
+    expect(input.include).toContain('racingroadgame');
+    expect(input.include).not.toContain('lanerunnergame');
     expect(Object.keys(shellFor('make a 3d car racing game'))).toContain('src/game/RacingRoadGame.tsx');
+    expect(Object.keys(shellFor('make a 3d car racing game'))).not.toContain('src/game/LaneRunnerGame.tsx');
   });
 
   it('without a request the shell is whole, exactly as before', () => {

@@ -94,7 +94,7 @@ import { assessFullRewrite } from './rewriteRisk';
 import { isOurStarterFile, starterTemplates } from './starterFragment';
 import { applyStrictTrial } from './strictTrial';
 import { analyzeToolchain } from './toolchainPins';
-import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from './appDefaults';
+import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE, viteAppOnDisk } from './appDefaults';
 import { APP_ENTRY_CANDIDATES, resolveAppDisplayName } from './appDisplayName';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
@@ -7865,14 +7865,7 @@ export class ToolDispatcher {
         }
         // A Vite app ships only public/, so the standalone files go there or the production build drops
         // them — the rule the post-build pass has followed since 2026-08-03 and this tool never did.
-        let viteApp = false;
-        for (const cfg of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.mts', 'vite.config.cjs', 'vite.config.cts']) {
-          if (await this.actuator.readFile(this.workspaceId, cfg).then(() => true).catch(() => false)) { viteApp = true; break; }
-        }
-        if (!viteApp) {
-          const pkg = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => '');
-          viteApp = /"vite"\s*:/.test(pkg);
-        }
+        const viteApp = await viteAppOnDisk((path) => this.actuator.readFile(this.workspaceId, path));
         // Write standalone files only when absent (never clobber a real manifest/robots the app already has),
         // except our own old cache-first service worker, which is replaced (see appDefaults.ts).
         for (const [rel, content] of Object.entries(plan.files)) {

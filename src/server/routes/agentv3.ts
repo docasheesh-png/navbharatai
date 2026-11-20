@@ -574,7 +574,7 @@ import { DecisionTrace, persistDecisionTrace, getDecisionTrace, decisionTraceFor
 import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration, failuresAreOurStarterTests, ourStarterTestFailedNote } from '../AgentV3/TestGenerationAgent';
 import { starterTestsSkipReason, starterTestsSkippedNote } from '../AgentV3/starterTestsSkip';
 import { buildBillingLabel } from '../AgentV3/buildBillingLabel';
-import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
+import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE, viteAppOnDisk } from '../AgentV3/appDefaults';
 import { APP_ENTRY_CANDIDATES, resolveAppDisplayName } from '../AgentV3/appDisplayName';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
@@ -23805,8 +23805,13 @@ async function noteBuildOutcome(
           // 404s them (which made a real build grind 7 rebuilds copying them by hand). defaultAssetPath →
           // public/<file> for a Vite framework, root otherwise. Kill switch AGENTV3_VITE_PUBLIC_ASSETS=off.
           const publicAssets = (process.env.AGENTV3_VITE_PUBLIC_ASSETS ?? '').trim().toLowerCase() !== 'off';
+          // The project ON DISK decides, not the framework the request named (failedbr #1343: a static site got public/).
+          const assetFramework = await viteAppOnDisk((p) => {
+            const mine = writtenFiles.get(p);
+            return mine != null ? Promise.resolve(mine) : actuator.readFile(workspaceId, p);
+          }) ? 'vite' : null;
           for (const [rel, content] of Object.entries(defaults.files)) {
-            const target = publicAssets ? defaultAssetPath(rel, framework) : rel;
+            const target = publicAssets ? defaultAssetPath(rel, assetFramework) : rel;
             if (writtenFiles.has(target)) continue;
             let existing: string | null = null;
             try { existing = await actuator.readFile(workspaceId, target); } catch { existing = null; }
@@ -23827,7 +23832,7 @@ async function noteBuildOutcome(
           // The old tool wrote the worker at the ROOT of a Vite app, where `public/` now shadows it: our
           // exact v1 left there is upgraded too, so no copy of the stale-forever worker survives.
           const rootSw = SERVICE_WORKER_FILE;
-          if (publicAssets && defaultAssetPath(rootSw, framework) !== rootSw && !writtenFiles.has(rootSw)) {
+          if (publicAssets && defaultAssetPath(rootSw, assetFramework) !== rootSw && !writtenFiles.has(rootSw)) {
             const upgraded = upgradeGeneratedServiceWorker(await actuator.readFile(workspaceId, rootSw).catch(() => null));
             if (upgraded) {
               try {

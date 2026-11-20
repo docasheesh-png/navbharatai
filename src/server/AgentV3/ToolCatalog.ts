@@ -2332,9 +2332,11 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'CRICKET (overs, wides and no-balls with a free hit, strike rotation, chases, results, run rates, timing-based batting), '
         + 'BUSINESS (vyapaar, the property-trading board game, pretend money only: buying, rent with colour sets, houses and hotels, '
         + 'transport and utilities, chance, jail and doubles, mortgages, bankruptcy and a winner, a computer player), '
+        + 'MATCH-3 (swap neighbours to line up three: no starting matches, always a move, cascades, line / area / bomb tiles, '
+        + 'a hint, moves-and-target levels), '
         + 'with a seeded die. Use it for any of these games; never re-implement their rules.',
       input_schema: { type: 'object', properties: { include: { type: 'array', items: { type: 'string' },
-        description: 'Optional subset: dice, ludo, snakes, chess, cards, carrom, cricket, business. Default = all; every engine brings dice.' } } },
+        description: 'Optional subset: dice, ludo, snakes, chess, cards, carrom, cricket, business, match3. Default = all; every engine brings dice.' } } },
     },
     {
       name: 'generate_game_2d',

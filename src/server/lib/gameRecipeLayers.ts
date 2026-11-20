@@ -76,6 +76,29 @@ export const GAME_RECIPES: Readonly<Record<string, (include?: string[]) => Recip
   author_object: generateObjectForge,
 };
 
+/**
+ * 🔴 A REACT RECIPE IN A PROJECT THAT IS NOT REACT (failedbr #1925, 2026-11-08 — a Svelte game). The platform correctly
+ * did not lay the kit into a Svelte project, but `run_recipe` still let the model run `generate_game_shell`, which writes
+ * React components (`GameCanvas.tsx`, `Hud.tsx`). The model then spent twenty minutes reconciling React files with a
+ * Svelte app, the readiness gate judged it as a React app ("no error boundary"), and the build ended RED. Which recipes
+ * write React is read from what each one EMITS (a `.tsx`/`.jsx` file), never from a hand-kept list; the rest of the kit
+ * is plain TypeScript a Svelte or Vue project can import. PURE.
+ */
+let reactRecipes: Set<string> | null = null;
+export function recipeWritesReact(name: string): boolean {
+  if (!reactRecipes) {
+    reactRecipes = new Set();
+    for (const [path, f] of recipeFilePool()) if (/\.(?:tsx|jsx)$/.test(path)) reactRecipes.add(f.recipe);
+  }
+  return reactRecipes.has(name);
+}
+
+/** A project that can mount a React component: the default Vite React app, Next, Remix, Gatsby. Unknown ⇒ the default. */
+export function projectRunsReact(framework: string | null | undefined): boolean {
+  const f = String(framework ?? '').trim().toLowerCase();
+  return !f || /react|next|remix|gatsby/.test(f);
+}
+
 export interface LayerFile { recipe: string; content: string }
 
 let poolCache: Map<string, LayerFile> | null = null;

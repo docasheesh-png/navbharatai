@@ -19,6 +19,9 @@
 //               family rules (own coin continues, striker foul returns a coin, the queen must be covered, board scoring).
 //   cricket.ts — a cricket match engine: overs, wides and no-balls (free hit), strike rotation, innings ends, chases,
 //               results as commentators say them, run rates, and timing-based batting for a tap game.
+//   business.ts — Business (vyapaar), the property-trading board game, PRETEND money only: buy, rent (a full colour set
+//               doubles it; houses and a hotel), transport and utilities, chance, jail and doubles, even building,
+//               mortgages, automatic fund-raising and bankruptcy, a winner, and a computer player (2026-11-20).
 //   match3.ts — match-3: no starting matches, always a move (reshuffles when stuck), cascades with chain scoring, line /
 //               area / bomb tiles, a hint, moves-and-target levels, and cascade steps for animation (2026-11-20).
 //   snakes.ts — Snakes & Ladders: the classic board, exact roll to finish (or bounce back), a six rolls again, and the
@@ -1335,6 +1338,487 @@ export function shotFromTiming(timingError: number, ball: { onStumps: boolean; a
 }
 `;
 
+const BUSINESS = String.raw`/**
+ * BUSINESS (vyapaar) — the property-trading board game families in India play, with PRETEND money only. Original board:
+ * 36 squares, Indian cities in colour sets, four transport lines, two utilities, chance, taxes, jail and a rest house.
+ *
+ *   let game = createBusiness({ players: [{ name: 'You' }, { name: 'Computer', computer: true }], seed: Date.now() });
+ *   const r = roll(game, rollDie(rng), rollDie(rng));     // moves, pays rent/tax, draws chance, sends to jail
+ *   game = r.state;                                       // r.events says what happened, in order, for the screen
+ *   if (game.phase === 'buy') game = (wantIt ? buy(game) : decline(game)).state;
+ *   if (game.phase === 'end') game = endTurn(game).state;  // 'roll' again means doubles: the same player rolls
+ *   computerTurn(game, rng) plays a whole turn for a computer player.
+ *
+ * RULES (each in BusinessRules): pass Start to collect; doubles roll again and three doubles in a row go to jail; leave
+ * jail on doubles, by paying the fine, or pay it after the last allowed try; a full colour set doubles the bare rent; build
+ * only on a full, unmortgaged set and evenly (no square more than one house ahead of its set); four houses then a hotel;
+ * a mortgaged square takes no rent. A player who cannot pay sells houses (half price) and mortgages (half price) by
+ * themselves — the game never stalls — and is bankrupt only when that is still not enough: what they own goes to the
+ * player they owed, or back to the bank. The last player standing wins.
+ * NOT BUILT (say so if asked): auctions (a declined square stays with the bank) and trading between players.
+ * PRETEND MONEY ONLY: never a deposit, a wallet top-up, a bet or a cash prize (India bans real-money online games).
+ */
+import { createRng, shuffle, type Rng } from './dice';
+
+export type SquareKind = 'start' | 'city' | 'transport' | 'utility' | 'tax' | 'chance' | 'jail' | 'goToJail' | 'rest';
+export interface BoardSquare {
+  name: string;
+  kind: SquareKind;
+  /** City colour set; transport and utility squares use 'transport' and 'utility'. */
+  group?: string;
+  price?: number;
+  /** City rent: bare, 1–4 houses, hotel. */
+  rent?: number[];
+  houseCost?: number;
+  /** A tax square's amount. */
+  tax?: number;
+}
+
+const r10 = (n: number): number => Math.round(n / 10) * 10;
+function city(name: string, group: string, price: number, houseCost: number): BoardSquare {
+  return { name, kind: 'city', group, price, houseCost, rent: [0.08, 0.4, 1.1, 3, 4, 5].map((k) => r10(price * k)) };
+}
+const T = (name: string): BoardSquare => ({ name, kind: 'transport', group: 'transport', price: 2000 });
+const U = (name: string): BoardSquare => ({ name, kind: 'utility', group: 'utility', price: 1500 });
+const C: BoardSquare = { name: 'Chance', kind: 'chance' };
+
+/** The board, clockwise from Start. Corners at 0, 9, 18 and 27. */
+export const BUSINESS_BOARD: readonly BoardSquare[] = [
+  { name: 'Start', kind: 'start' },
+  city('Jaipur', 'brown', 600, 500), C, city('Agra', 'brown', 600, 500), { name: 'Income tax', kind: 'tax', tax: 1000 },
+  T('Railways'), city('Lucknow', 'sky', 1000, 500), C, city('Patna', 'sky', 1200, 500),
+  { name: 'Jail', kind: 'jail' },
+  city('Bhopal', 'pink', 1400, 1000), U('Electricity board'), city('Indore', 'pink', 1400, 1000), city('Nagpur', 'pink', 1600, 1000),
+  T('Airways'), city('Ahmedabad', 'orange', 1800, 1000), C, city('Surat', 'orange', 2000, 1000),
+  { name: 'Rest house', kind: 'rest' },
+  city('Kochi', 'red', 2200, 1500), C, city('Chennai', 'red', 2200, 1500), city('Hyderabad', 'red', 2400, 1500),
+  T('Waterways'), city('Pune', 'yellow', 2600, 1500), city('Bengaluru', 'yellow', 2800, 1500), U('Water works'),
+  { name: 'Go to jail', kind: 'goToJail' },
+  city('Kolkata', 'green', 3000, 2000), city('Chandigarh', 'green', 3000, 2000), city('Delhi', 'green', 3200, 2000), C,
+  T('Roadways'), city('Goa', 'blue', 3500, 2000), { name: 'Wealth tax', kind: 'tax', tax: 1500 }, city('Mumbai', 'blue', 4000, 2000),
+];
+
+export type ChanceCard =
+  | { text: string; kind: 'collect' | 'pay'; amount: number }
+  | { text: string; kind: 'collectEach' | 'payEach'; amount: number }
+  | { text: string; kind: 'moveTo'; square: number }
+  | { text: string; kind: 'moveBy'; steps: number }
+  | { text: string; kind: 'jail' };
+
+export const CHANCE_CARDS: readonly ChanceCard[] = [
+  { text: 'Your shop had a festival rush. Collect 1500.', kind: 'collect', amount: 1500 },
+  { text: 'Bank interest. Collect 500.', kind: 'collect', amount: 500 },
+  { text: 'You won a quiz prize. Collect 1000.', kind: 'collect', amount: 1000 },
+  { text: 'Repairs to your shop. Pay 800.', kind: 'pay', amount: 800 },
+  { text: 'School fees. Pay 1000.', kind: 'pay', amount: 1000 },
+  { text: 'It is your birthday. Collect 200 from every player.', kind: 'collectEach', amount: 200 },
+  { text: 'You treat everyone to dinner. Pay 200 to every player.', kind: 'payEach', amount: 200 },
+  { text: 'Go to Start.', kind: 'moveTo', square: 0 },
+  { text: 'Take a trip to Mumbai.', kind: 'moveTo', square: 35 },
+  { text: 'Catch a flight: go to Airways.', kind: 'moveTo', square: 14 },
+  { text: 'Go back 3 squares.', kind: 'moveBy', steps: -3 },
+  { text: 'Go to jail. Do not pass Start.', kind: 'jail' },
+];
+
+export interface BusinessRules {
+  startCash: number; passStart: number; jailFine: number; maxJailTries: number;
+  doublesRollAgain: boolean; threeDoublesToJail: boolean; evenBuild: boolean;
+}
+export const DEFAULT_BUSINESS_RULES: Readonly<BusinessRules> = {
+  startCash: 15000, passStart: 1500, jailFine: 500, maxJailTries: 3, doublesRollAgain: true, threeDoublesToJail: true, evenBuild: true,
+};
+
+export interface BusinessPlayer { name: string; computer: boolean; cash: number; position: number; inJail: boolean; jailTries: number; bankrupt: boolean }
+export type BusinessPhase = 'roll' | 'buy' | 'end' | 'over';
+export interface BusinessState {
+  board: BoardSquare[];
+  players: BusinessPlayer[];
+  /** Owner of each square (player index), or null for the bank. */
+  owner: (number | null)[];
+  /** Houses on each square: 0–4, 5 = a hotel. */
+  houses: number[];
+  mortgaged: boolean[];
+  turn: number;
+  phase: BusinessPhase;
+  doubles: number;
+  rollAgain: boolean;
+  lastRoll: number;
+  chance: number[];
+  chanceAt: number;
+  winner: number | null;
+  rules: BusinessRules;
+}
+
+export type BusinessEvent =
+  | { type: 'moved'; player: number; from: number; to: number; passedStart: boolean }
+  | { type: 'collected'; player: number; amount: number; reason: string }
+  | { type: 'paid'; player: number; amount: number; to: number | null; reason: string }
+  | { type: 'chance'; player: number; card: ChanceCard }
+  | { type: 'jailed'; player: number; reason: 'square' | 'card' | 'three doubles' }
+  | { type: 'leftJail'; player: number; how: 'doubles' | 'fine' }
+  | { type: 'stayedInJail'; player: number; tries: number }
+  | { type: 'canBuy'; player: number; square: number; price: number }
+  | { type: 'bought'; player: number; square: number; price: number }
+  | { type: 'declined'; player: number; square: number }
+  | { type: 'built'; player: number; square: number; houses: number }
+  | { type: 'soldHouse'; player: number; square: number; houses: number }
+  | { type: 'mortgaged' | 'unmortgaged'; player: number; square: number }
+  | { type: 'bankrupt'; player: number; to: number | null }
+  | { type: 'won'; player: number };
+
+export interface BusinessResult { state: BusinessState; ok: boolean; events: BusinessEvent[]; reason?: string }
+
+const clone = (s: BusinessState): BusinessState => JSON.parse(JSON.stringify(s));
+const fail = (state: BusinessState, reason: string): BusinessResult => ({ state, ok: false, events: [], reason });
+
+export function createBusiness(o: { players: Array<{ name: string; computer?: boolean }>; rules?: Partial<BusinessRules>; seed?: number; board?: BoardSquare[] }): BusinessState {
+  const list = (o.players ?? []).slice(0, 6);
+  if (list.length < 2) throw new Error('Business needs 2 to 6 players');
+  const rules = { ...DEFAULT_BUSINESS_RULES, ...(o.rules ?? {}) };
+  const board = (o.board ?? BUSINESS_BOARD).map((sq) => ({ ...sq, rent: sq.rent ? sq.rent.slice() : undefined }));
+  const rng = createRng(o.seed ?? Date.now());
+  return {
+    board,
+    players: list.map((p) => ({ name: String(p.name || 'Player'), computer: !!p.computer, cash: rules.startCash, position: 0, inJail: false, jailTries: 0, bankrupt: false })),
+    owner: board.map(() => null), houses: board.map(() => 0), mortgaged: board.map(() => false),
+    turn: 0, phase: 'roll', doubles: 0, rollAgain: false, lastRoll: 0,
+    chance: shuffle(CHANCE_CARDS.map((_, i) => i), rng), chanceAt: 0, winner: null, rules,
+  };
+}
+
+/** Squares of one colour set (or all transport / utility squares). */
+export function groupSquares(state: BusinessState, group: string): number[] {
+  return state.board.map((sq, i) => (sq.group === group ? i : -1)).filter((i) => i >= 0);
+}
+/** Does this player own every square of the set? */
+export function ownsGroup(state: BusinessState, player: number, group: string): boolean {
+  const sq = groupSquares(state, group);
+  return sq.length > 0 && sq.every((i) => state.owner[i] === player);
+}
+
+/** What landing here costs, for a roll of diceTotal. 0 when unowned, mortgaged, or the lander's own. */
+export function rentFor(state: BusinessState, square: number, diceTotal: number, lander = -1): number {
+  const sq = state.board[square];
+  const owner = state.owner[square];
+  if (!sq || owner === null || owner === lander || state.mortgaged[square] || state.players[owner]?.bankrupt) return 0;
+  if (sq.kind === 'city') {
+    const h = state.houses[square];
+    const bare = sq.rent?.[0] ?? 0;
+    if (h > 0) return sq.rent?.[h] ?? bare;
+    return ownsGroup(state, owner, sq.group ?? '') ? bare * 2 : bare;
+  }
+  const owned = groupSquares(state, sq.group ?? '').filter((i) => state.owner[i] === owner && !state.mortgaged[i]).length;
+  if (sq.kind === 'transport') return 250 * Math.pow(2, Math.max(0, owned - 1));
+  if (sq.kind === 'utility') return diceTotal * (owned >= 2 ? 10 : 4);
+  return 0;
+}
+
+/** Cash plus what the player's squares and houses would raise if sold to the bank (half price each). */
+export function netWorth(state: BusinessState, player: number): number {
+  let total = state.players[player]?.cash ?? 0;
+  state.owner.forEach((o, i) => {
+    if (o !== player) return;
+    const sq = state.board[i];
+    total += state.mortgaged[i] ? 0 : Math.floor((sq.price ?? 0) / 2);
+    total += Math.floor(state.houses[i] * (sq.houseCost ?? 0) / 2);
+  });
+  return total;
+}
+
+/** Sell houses, then mortgage, until the player has 'need' in cash or nothing is left. Mutates s. */
+function raise(s: BusinessState, p: number, need: number, ev: BusinessEvent[]): void {
+  const pl = s.players[p];
+  while (pl.cash < need) {
+    let best = -1;
+    s.houses.forEach((h, i) => { if (s.owner[i] === p && h > 0 && (best < 0 || h > s.houses[best])) best = i; });
+    if (best < 0) break;
+    s.houses[best] -= 1;
+    pl.cash += Math.floor((s.board[best].houseCost ?? 0) / 2);
+    ev.push({ type: 'soldHouse', player: p, square: best, houses: s.houses[best] });
+  }
+  while (pl.cash < need) {
+    let best = -1;
+    s.owner.forEach((o, i) => {
+      if (o === p && !s.mortgaged[i] && s.houses[i] === 0 && (best < 0 || (s.board[i].price ?? 0) < (s.board[best].price ?? 0))) best = i;
+    });
+    if (best < 0) break;
+    s.mortgaged[best] = true;
+    pl.cash += Math.floor((s.board[best].price ?? 0) / 2);
+    ev.push({ type: 'mortgaged', player: p, square: best });
+  }
+}
+
+/** Player p pays amount to player 'to' (or the bank). Raises funds or goes bankrupt. Mutates s. */
+function pay(s: BusinessState, p: number, amount: number, to: number | null, reason: string, ev: BusinessEvent[]): void {
+  const pl = s.players[p];
+  if (amount <= 0 || pl.bankrupt) return;
+  if (pl.cash < amount) raise(s, p, amount, ev);
+  if (pl.cash >= amount) {
+    pl.cash -= amount;
+    if (to !== null) s.players[to].cash += amount;
+    ev.push({ type: 'paid', player: p, amount, to, reason });
+    return;
+  }
+  // Bankrupt: everything goes to the creditor, or back to the bank.
+  if (to !== null) s.players[to].cash += pl.cash;
+  ev.push({ type: 'paid', player: p, amount: pl.cash, to, reason });
+  pl.cash = 0;
+  pl.bankrupt = true;
+  pl.inJail = false;
+  s.owner.forEach((o, i) => {
+    if (o !== p) return;
+    s.houses[i] = 0;
+    if (to === null) { s.owner[i] = null; s.mortgaged[i] = false; } else s.owner[i] = to;
+  });
+  ev.push({ type: 'bankrupt', player: p, to });
+  const alive = s.players.map((x, i) => (x.bankrupt ? -1 : i)).filter((i) => i >= 0);
+  if (alive.length === 1) { s.winner = alive[0]; s.phase = 'over'; ev.push({ type: 'won', player: alive[0] }); }
+}
+
+function goToJail(s: BusinessState, p: number, why: 'square' | 'card' | 'three doubles', ev: BusinessEvent[]): void {
+  const pl = s.players[p];
+  pl.position = s.board.findIndex((sq) => sq.kind === 'jail');
+  pl.inJail = true; pl.jailTries = 0;
+  s.rollAgain = false;
+  ev.push({ type: 'jailed', player: p, reason: why });
+}
+
+/** Move by steps (negative goes back and never passes Start). Mutates s. */
+function moveBy(s: BusinessState, p: number, steps: number, ev: BusinessEvent[]): void {
+  const pl = s.players[p];
+  const n = s.board.length;
+  const from = pl.position;
+  const to = ((from + steps) % n + n) % n;
+  const passedStart = steps > 0 && from + steps >= n;
+  pl.position = to;
+  ev.push({ type: 'moved', player: p, from, to, passedStart });
+  if (passedStart) { pl.cash += s.rules.passStart; ev.push({ type: 'collected', player: p, amount: s.rules.passStart, reason: 'passed Start' }); }
+}
+
+/** What landing on the current square does. Mutates s. */
+function land(s: BusinessState, p: number, diceTotal: number, ev: BusinessEvent[], depth = 0): void {
+  const pl = s.players[p];
+  const i = pl.position;
+  const sq = s.board[i];
+  if (sq.kind === 'goToJail') return goToJail(s, p, 'square', ev);
+  if (sq.kind === 'tax') return pay(s, p, sq.tax ?? 0, null, sq.name, ev);
+  if (sq.kind === 'chance' && depth < 3) {
+    const card = CHANCE_CARDS[s.chance[s.chanceAt % s.chance.length]];
+    s.chanceAt = (s.chanceAt + 1) % s.chance.length;
+    ev.push({ type: 'chance', player: p, card });
+    if (card.kind === 'collect') { pl.cash += card.amount; ev.push({ type: 'collected', player: p, amount: card.amount, reason: 'chance' }); }
+    else if (card.kind === 'pay') pay(s, p, card.amount, null, 'chance', ev);
+    else if (card.kind === 'collectEach') {
+      s.players.forEach((o, j) => { if (j !== p && !o.bankrupt && !pl.bankrupt) pay(s, j, card.amount, p, 'chance', ev); });
+    } else if (card.kind === 'payEach') {
+      s.players.forEach((o, j) => { if (j !== p && !o.bankrupt && !pl.bankrupt) pay(s, p, card.amount, j, 'chance', ev); });
+    } else if (card.kind === 'jail') goToJail(s, p, 'card', ev);
+    else {
+      const steps = card.kind === 'moveBy' ? card.steps : card.kind === 'moveTo' ? (card.square - i + s.board.length) % s.board.length : 0;
+      moveBy(s, p, steps, ev);
+      land(s, p, diceTotal, ev, depth + 1);
+    }
+    return;
+  }
+  if (sq.price === undefined) return;
+  const owner = s.owner[i];
+  if (owner === null) {
+    s.phase = 'buy';
+    ev.push({ type: 'canBuy', player: p, square: i, price: sq.price });
+    return;
+  }
+  const rent = rentFor(s, i, diceTotal, p);
+  if (rent > 0) pay(s, p, rent, owner, 'rent for ' + sq.name, ev);
+}
+
+function settle(s: BusinessState): void {
+  if (s.phase === 'over' || s.phase === 'buy') return;
+  const pl = s.players[s.turn];
+  s.phase = s.rollAgain && !pl.bankrupt && !pl.inJail ? 'roll' : 'end';
+}
+
+/** Roll for the current player with two dice (1–6 each). */
+export function roll(state: BusinessState, d1: number, d2: number): BusinessResult {
+  if (state.phase !== 'roll') return fail(state, 'not time to roll (' + state.phase + ')');
+  if (![d1, d2].every((d) => Number.isInteger(d) && d >= 1 && d <= 6)) return fail(state, 'each die is 1 to 6');
+  const s = clone(state);
+  const ev: BusinessEvent[] = [];
+  const p = s.turn;
+  const pl = s.players[p];
+  const doubles = d1 === d2;
+  const total = d1 + d2;
+  s.lastRoll = total;
+  s.rollAgain = false;
+  if (pl.inJail) {
+    if (doubles) { pl.inJail = false; pl.jailTries = 0; ev.push({ type: 'leftJail', player: p, how: 'doubles' }); }
+    else {
+      pl.jailTries += 1;
+      if (pl.jailTries < s.rules.maxJailTries) { ev.push({ type: 'stayedInJail', player: p, tries: pl.jailTries }); s.phase = 'end'; return { state: s, ok: true, events: ev }; }
+      pay(s, p, s.rules.jailFine, null, 'jail fine', ev);
+      if (pl.bankrupt) { settle(s); return { state: s, ok: true, events: ev }; }
+      pl.inJail = false; pl.jailTries = 0;
+      ev.push({ type: 'leftJail', player: p, how: 'fine' });
+    }
+    // Leaving jail on doubles does not roll again.
+  } else if (doubles) {
+    s.doubles += 1;
+    if (s.rules.threeDoublesToJail && s.doubles >= 3) { goToJail(s, p, 'three doubles', ev); s.phase = 'end'; return { state: s, ok: true, events: ev }; }
+    s.rollAgain = s.rules.doublesRollAgain;
+  }
+  moveBy(s, p, total, ev);
+  land(s, p, total, ev);
+  settle(s);
+  return { state: s, ok: true, events: ev };
+}
+
+/** Pay the fine to leave jail before rolling. */
+export function payJailFine(state: BusinessState): BusinessResult {
+  const pl = state.players[state.turn];
+  if (state.phase !== 'roll' || !pl.inJail) return fail(state, 'not in jail');
+  if (pl.cash < state.rules.jailFine) return fail(state, 'not enough cash');
+  const s = clone(state);
+  const ev: BusinessEvent[] = [];
+  pay(s, s.turn, s.rules.jailFine, null, 'jail fine', ev);
+  s.players[s.turn].inJail = false; s.players[s.turn].jailTries = 0;
+  ev.push({ type: 'leftJail', player: s.turn, how: 'fine' });
+  return { state: s, ok: true, events: ev };
+}
+
+/** Buy the square the current player is offered. */
+export function buy(state: BusinessState): BusinessResult {
+  if (state.phase !== 'buy') return fail(state, 'nothing to buy');
+  const s = clone(state);
+  const p = s.turn;
+  const i = s.players[p].position;
+  const price = s.board[i].price ?? 0;
+  if (s.players[p].cash < price) return fail(state, 'not enough cash');
+  s.players[p].cash -= price;
+  s.owner[i] = p;
+  s.phase = 'roll';
+  settle(s);
+  return { state: s, ok: true, events: [{ type: 'bought', player: p, square: i, price }] };
+}
+
+/** Leave the offered square with the bank. */
+export function decline(state: BusinessState): BusinessResult {
+  if (state.phase !== 'buy') return fail(state, 'nothing to decline');
+  const s = clone(state);
+  s.phase = 'roll';
+  settle(s);
+  return { state: s, ok: true, events: [{ type: 'declined', player: s.turn, square: s.players[s.turn].position }] };
+}
+
+/** Pass the dice to the next player still in the game. */
+export function endTurn(state: BusinessState): BusinessResult {
+  if (state.phase !== 'end') return fail(state, 'the turn is not over (' + state.phase + ')');
+  const s = clone(state);
+  let next = s.turn;
+  do next = (next + 1) % s.players.length; while (s.players[next].bankrupt && next !== s.turn);
+  s.turn = next; s.phase = 'roll'; s.doubles = 0; s.rollAgain = false;
+  return { state: s, ok: true, events: [] };
+}
+
+/** Why a house cannot go on this square, or null when it can. */
+export function cannotBuild(state: BusinessState, player: number, square: number): string | null {
+  const sq = state.board[square];
+  if (!sq || sq.kind !== 'city') return 'only cities take houses';
+  if (state.owner[square] !== player) return 'not yours';
+  if (!ownsGroup(state, player, sq.group ?? '')) return 'own the whole colour set first';
+  const set = groupSquares(state, sq.group ?? '');
+  if (set.some((i) => state.mortgaged[i])) return 'a square in the set is mortgaged';
+  if (state.houses[square] >= 5) return 'already has a hotel';
+  if (state.rules.evenBuild && state.houses[square] > Math.min(...set.map((i) => state.houses[i]))) return 'build evenly across the set';
+  if (state.players[player].cash < (sq.houseCost ?? 0)) return 'not enough cash';
+  return null;
+}
+
+/** Add a house (the fifth is a hotel). */
+export function build(state: BusinessState, player: number, square: number): BusinessResult {
+  const why = state.phase === 'over' ? 'the game is over' : cannotBuild(state, player, square);
+  if (why) return fail(state, why);
+  const s = clone(state);
+  s.players[player].cash -= s.board[square].houseCost ?? 0;
+  s.houses[square] += 1;
+  return { state: s, ok: true, events: [{ type: 'built', player, square, houses: s.houses[square] }] };
+}
+
+/** Sell one house back for half its cost, keeping the set even. */
+export function sellHouse(state: BusinessState, player: number, square: number): BusinessResult {
+  const sq = state.board[square];
+  if (!sq || state.owner[square] !== player || state.houses[square] === 0) return fail(state, 'no house to sell');
+  const set = groupSquares(state, sq.group ?? '');
+  if (state.rules.evenBuild && state.houses[square] < Math.max(...set.map((i) => state.houses[i]))) return fail(state, 'sell evenly across the set');
+  const s = clone(state);
+  s.houses[square] -= 1;
+  s.players[player].cash += Math.floor((sq.houseCost ?? 0) / 2);
+  return { state: s, ok: true, events: [{ type: 'soldHouse', player, square, houses: s.houses[square] }] };
+}
+
+/** Mortgage an unbuilt square for half its price. */
+export function mortgage(state: BusinessState, player: number, square: number): BusinessResult {
+  const sq = state.board[square];
+  if (!sq || state.owner[square] !== player || state.mortgaged[square]) return fail(state, 'cannot mortgage this square');
+  if (groupSquares(state, sq.group ?? '').some((i) => state.houses[i] > 0)) return fail(state, 'sell the set\'s houses first');
+  const s = clone(state);
+  s.mortgaged[square] = true;
+  s.players[player].cash += Math.floor((sq.price ?? 0) / 2);
+  return { state: s, ok: true, events: [{ type: 'mortgaged', player, square }] };
+}
+
+/** Pay off a mortgage: half the price plus 10%. */
+export function unmortgage(state: BusinessState, player: number, square: number): BusinessResult {
+  const sq = state.board[square];
+  if (!sq || state.owner[square] !== player || !state.mortgaged[square]) return fail(state, 'not mortgaged');
+  const cost = Math.ceil((sq.price ?? 0) / 2 * 1.1);
+  if (state.players[player].cash < cost) return fail(state, 'not enough cash');
+  const s = clone(state);
+  s.mortgaged[square] = false;
+  s.players[player].cash -= cost;
+  return { state: s, ok: true, events: [{ type: 'unmortgaged', player, square }] };
+}
+
+const RESERVE = 1500;
+/** Would a sensible computer player buy the square it is offered? */
+export function computerWantsToBuy(state: BusinessState): boolean {
+  if (state.phase !== 'buy') return false;
+  const p = state.turn;
+  const i = state.players[p].position;
+  const sq = state.board[i];
+  const left = state.players[p].cash - (sq.price ?? 0);
+  if (left < 0) return false;
+  const completes = groupSquares(state, sq.group ?? '').every((j) => j === i || state.owner[j] === p);
+  return completes || left >= RESERVE;
+}
+
+/** Play a whole turn for the current player (rolling, buying, building, paying the fine). Returns every step. */
+export function computerTurn(state: BusinessState, rng: Rng): BusinessResult {
+  let s = state;
+  const events: BusinessEvent[] = [];
+  const p = s.turn;
+  for (let guard = 0; guard < 12 && s.phase !== 'over' && s.turn === p; guard++) {
+    if (s.phase === 'roll') {
+      if (s.players[p].inJail && s.players[p].cash > s.rules.jailFine + RESERVE * 2) { const j = payJailFine(s); if (j.ok) { s = j.state; events.push(...j.events); } }
+      const r = roll(s, 1 + Math.floor(rng() * 6), 1 + Math.floor(rng() * 6));
+      s = r.state; events.push(...r.events);
+    } else if (s.phase === 'buy') {
+      const r = computerWantsToBuy(s) ? buy(s) : decline(s);
+      s = r.state; events.push(...r.events);
+    } else if (s.phase === 'end') {
+      // Build evenly while cash stays above a safety reserve.
+      for (let k = 0; k < 20; k++) {
+        const options = s.board.map((_, i) => i).filter((i) => cannotBuild(s, p, i) === null && s.players[p].cash - (s.board[i].houseCost ?? 0) >= RESERVE * 2);
+        if (!options.length) break;
+        const b = build(s, p, options[0]);
+        s = b.state; events.push(...b.events);
+      }
+      const e = endTurn(s);
+      s = e.state; events.push(...e.events);
+    }
+  }
+  return { state: s, ok: true, events };
+}
+`;
+
 const MATCH3 = String.raw`/**
  * MATCH-3 — swap two neighbouring tiles to line up three or more of a colour (game-gap audit 2026-11-20: every match-3
  * was hand-written, and the same faults came back — a board that starts with matches already on it, a board with no move
@@ -1595,6 +2079,8 @@ export { createCarrom, placeStriker, strikerFits, shoot, stepPhysics, BOARD as C
 export type { CarromState, Disc, DiscKind, QueenState, ShotResult } from './carrom';
 export { createMatch, bowl, summary, runRates, oversText, shotFromTiming } from './cricket';
 export type { Match, MatchOptions, Innings, BatterCard, Ball, Dismissal, Extra } from './cricket';
+export { createBusiness, roll as rollBusiness, buy, decline, endTurn, payJailFine, build, sellHouse, mortgage, unmortgage, cannotBuild, rentFor, netWorth, ownsGroup, groupSquares, computerWantsToBuy, computerTurn, BUSINESS_BOARD, CHANCE_CARDS, DEFAULT_BUSINESS_RULES } from './business';
+export type { BusinessState, BusinessPlayer, BusinessRules, BusinessPhase, BusinessEvent, BusinessResult, BoardSquare, SquareKind, ChanceCard } from './business';
 export { createMatch3, swapTiles, hint as match3Hint, findRuns } from './match3';
 export type { Match3State, Match3Status, Tile, Special, Cell as Match3Cell, CascadeStep, SwapResult } from './match3';
 `;
@@ -1607,11 +2093,12 @@ const FILES: Record<string, string> = {
   [`${BOARD_DIR}/cards.ts`]: CARDS,
   [`${BOARD_DIR}/carrom.ts`]: CARROM,
   [`${BOARD_DIR}/cricket.ts`]: CRICKET,
+  [`${BOARD_DIR}/business.ts`]: BUSINESS,
   [`${BOARD_DIR}/match3.ts`]: MATCH3,
   [`${BOARD_DIR}/index.ts`]: INDEX,
 };
 
-export const BOARD_GAME_MODULES: readonly string[] = ['dice', 'ludo', 'snakes', 'chess', 'cards', 'carrom', 'cricket', 'match3'];
+export const BOARD_GAME_MODULES: readonly string[] = ['dice', 'ludo', 'snakes', 'chess', 'cards', 'carrom', 'cricket', 'business', 'match3'];
 
 const EXAMPLE = [
   "import { createLudo, legalMoves, move, pass, chooseMove, cellOf, createRng, rollDie, type LudoState } from './game/board';",
@@ -1653,10 +2140,10 @@ export function generateBoardGames(include?: string[]): BoardGamesResult {
     files,
     dependencies: [],
     instructions:
-      `Added the India games pack (${Object.keys(files).length} files under ${BOARD_DIR}): tested rules for Ludo, Snakes & Ladders, chess, carrom, cricket and card games (Teen Patti, rummy), `
+      `Added the India games pack (${Object.keys(files).length} files under ${BOARD_DIR}): tested rules for Ludo, Snakes & Ladders, chess, carrom, cricket, Business (vyapaar) and card games (Teen Patti, rummy), `
       + 'a seeded die, and board geometry for drawing.\n'
       + '```ts\n' + EXAMPLE + '\n```\n'
-      + 'RULES: the game\'s rules come from these engines — never re-implement Ludo, Snakes & Ladders, chess or match-3 logic. For match-3, every swap goes through swapTiles(game, a, b): ok false means swap the two back on screen; otherwise animate r.steps in order (cleared, then the fall, chain by chain) and show game.score, game.movesLeft and game.status; a Hint button uses match3Hint(game). For chess, highlight movesFrom(game, square) when a piece is tapped, ask which piece on a promotion, show check, and end the game on chessStatus (checkmate, stalemate and each draw named). For cricket, every ball goes through bowl() (with shotFromTiming for the player\'s tap) and the scoreboard shows summary() and match.innings[match.current].thisOver. For carrom, drag the striker along the baseline (placeStriker), aim and pull back for power, then play shot.frames as the animation and show shot.message. Card games are for FUN: points or pretend chips only — never real money, never a deposit, a wallet top-up or a cash prize (India bans real-money online games). Draw the board from '
+      + 'RULES: the game\'s rules come from these engines — never re-implement Ludo, Snakes & Ladders, chess, Business or match-3 logic. For Business, every roll goes through rollBusiness(game, d1, d2), then follow game.phase: \'buy\' shows Buy / Skip (buy / decline), \'end\' shows End turn (endTurn), \'roll\' again means doubles; show each event in r.events (rent paid, chance card, jail, bankrupt), draw owners and houses from game.owner and game.houses, and let the player build (cannotBuild says why not) and mortgage; a computer player plays with computerTurn. Money in Business is pretend money. For match-3, every swap goes through swapTiles(game, a, b): ok false means swap the two back on screen; otherwise animate r.steps in order (cleared, then the fall, chain by chain) and show game.score, game.movesLeft and game.status; a Hint button uses match3Hint(game). For chess, highlight movesFrom(game, square) when a piece is tapped, ask which piece on a promotion, show check, and end the game on chessStatus (checkmate, stalemate and each draw named). For cricket, every ball goes through bowl() (with shotFromTiming for the player\'s tap) and the scoreboard shows summary() and match.innings[match.current].thisOver. For carrom, drag the striker along the baseline (placeStriker), aim and pull back for power, then play shot.frames as the animation and show shot.message. Card games are for FUN: points or pretend chips only — never real money, never a deposit, a wallet top-up or a cash prize (India bans real-money online games). Draw the board from '
       + 'cellOf / squareCell, animate a token along r.path, and say what happened (a capture, a token home, another roll, a pass when '
       + 'nothing can move). Let the player tap the token they want from legalMoves; highlight those tokens. A computer opponent '
       + 'uses chooseMove. House rules are options (rules: { ... }), not new code.',

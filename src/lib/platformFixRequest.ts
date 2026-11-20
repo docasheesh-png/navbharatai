@@ -150,6 +150,12 @@ export function looksLikeMachineError(message: string | null | undefined): boole
  * useful button on a real code error is a small annoyance; offering it on our own operational notice
  * is what fed the builder its own voice.
  */
+/** The browser's whole message for a request that never reached us — Chrome, Firefox, Safari and axios. PURE. */
+export function isClientConnectionError(message: string | null | undefined): boolean {
+  const m = String(message ?? '').trim().replace(/[.!]+$/, '').toLowerCase();
+  return /^(?:typeerror:\s*)?(?:network error|failed to fetch|load failed|networkerror when attempting to fetch resource|the network connection was lost|the internet connection appears to be offline|net::err_[a-z_]+)$/.test(m);
+}
+
 export function errorCanBeFixedByEditingTheApp(opts: {
   /** True when the failure came from an HTTP refusal raised before the build stream opened. */
   beforeBuildStarted?: boolean;
@@ -162,6 +168,10 @@ export function errorCanBeFixedByEditingTheApp(opts: {
   // Autopsy 05eb30ba: a build the PLATFORM stopped (the wallet, a clock, a deploy, the user's own Stop) ends with
   // our own sentence, out of the stream. No edit to the app answers it. See platformStopNotices.ts.
   if (isPlatformStopNotice(opts.message)) return false;
+  // failedbr #1916: the browser's own words for a dropped connection ("network error", "Failed to fetch", "Load failed")
+  // are about the user's connection, never the app. Offered as "Fix with AI", one became a five-minute build "fixing"
+  // an app that had rendered at 56 s. Exact message only; any text that says more keeps today's behaviour.
+  if (isClientConnectionError(opts.message)) return false;
   return String(opts.message ?? '').trim() !== '';
 }
 

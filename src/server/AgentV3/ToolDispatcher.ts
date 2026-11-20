@@ -81,7 +81,7 @@ import { resolveObjectSpec, renderSpec, memoryCache } from '../lib/objectSpecPro
 import { aiRouter } from '../lib/aiRouter';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
-import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, writeParseGuardEnabled, parseGuardDecision } from './SyntaxCheck';
+import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, writeParseGuardEnabled, parseGuardDecision, isDuplicateDeclarationError } from './SyntaxCheck';
 import { htmlEditVerdict, isHtmlPage } from './editIntegrity';
 import { checkPreviewCompiles, previewCompileApplicability, previewDivergenceBlocksDelivery } from '../runtime/PreviewCompileCheck';
 import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
@@ -138,7 +138,7 @@ import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { isBareManifestInstall, manifestRangeRepairEnabled, repairUnavailableRanges, manifestRepairNote } from './manifestRangeRepair';
 import { shellMayWriteOpaquely, markCommand, changedFilesCommand, parseChangedFiles } from './shellWriteReconcile';
 import { isScratchCapture } from './scratchCapture';
-import { isKnownKitVersion } from '../lib/gameRecipeLayers';
+import { isKnownKitVersion, recipeWritesReact, projectRunsReact } from '../lib/gameRecipeLayers';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, shadowKeptToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames, mistypedImport } from './tscErrorCause';
 import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
@@ -2738,6 +2738,32 @@ export class ToolDispatcher {
     refuse(verdict.message);
   }
 
+  /**
+   * 🔴 ESBUILD ACCEPTS IT, THE PREVIEW DOES NOT (failedbr #1926, 2026-11-08 — "health detector"). `import { AuditLog }
+   * from '../types'` (an interface, imported without `type`) beside `const AuditLog = () => …`: tsc and esbuild drop
+   * the type import and compile it, the in-browser preview's Babel cannot know the import is only a type and throws
+   * "Duplicate declaration", so the build ended RED on PREVIEW_COMPILE_DIVERGENCE after 25 minutes. The write-time guard
+   * parsed with esbuild only. For a file the in-browser preview compiles, the preview's own Babel check now runs too —
+   * refusing ONLY the duplicate-declaration class (Babel rejects other valid TypeScript, such as decorators, and those
+   * must not block a write), and only when the old content did not already have it.
+   */
+  private previewDuplicateRejection(path: string, oldContent: string, newContent: string): string | null {
+    if (!/\.(?:tsx?|jsx?)$/.test(path) || /\.d\.ts$/.test(path)) return null;
+    if (!previewCompileApplicability(this.framework).applicable) return null;
+    const first = (content: string) => checkPreviewCompiles({ [path]: content }).errors[0];
+    const now = first(newContent);
+    if (!now || !isDuplicateDeclarationError({ path, message: now.message })) return null;
+    const before = oldContent ? first(oldContent) : undefined;
+    if (before && isDuplicateDeclarationError({ path, message: before.message })) return null; // mid-removal: never trap it
+    const name = /Duplicate declaration "([^"]+)"/.exec(now.message)?.[1];
+    try { getWorkspaceMemory(this.workspaceId).recordError(`[BLOCKED-PREVIEW-DUPLICATE] refused write to ${path}: ${now.message.slice(0, 120)}`); } catch { /* audit best-effort */ }
+    return `WRITE REJECTED — ${path} would not compile in the live preview: ${now.message.split('\n')[0]}. It was NOT saved. `
+      + (name
+        ? `"${name}" is declared in this file AND imported. If the import is only a type, write \`import type { ${name} }\` (or rename the import, e.g. \`import type { ${name} as ${name}Data }\`); otherwise rename the local declaration. `
+        : 'A name is both imported and declared in this file; rename one of them, or import a type with `import type`. ')
+      + 'TypeScript accepts this, but the in-browser preview\'s compiler does not, and the user would see a broken preview.';
+  }
+
   private async parseGuardRejection(path: string, oldContent: string, newContent: string): Promise<string | null> {
     try {
       // Independent of the syntax parse guard (and of its kill switch): leftover apply-patch /
@@ -2753,7 +2779,7 @@ export class ToolDispatcher {
       }
       if (!writeParseGuardEnabled()) return null;
       const errNew = await firstSyntaxError(path, newContent);
-      if (!errNew) return null; // parses clean → nothing to block (skips the second parse in the common case)
+      if (!errNew) return this.previewDuplicateRejection(path, oldContent, newContent);
       const errOld = await firstSyntaxError(path, oldContent);
       const rejection = parseGuardDecision(path, errOld, errNew, true);
       if (rejection) {
@@ -5629,6 +5655,12 @@ export class ToolDispatcher {
     // "npm enoent package.json → builder hand-writes a drifted scaffold" class on fallback builds.
     await this.ensureScaffoldOnce();
     const input = call.input;
+    // A React-writing game recipe in a project that cannot mount React (failedbr #1925): refused, with the way forward.
+    if (recipeWritesReact(call.name) && !projectRunsReact(this.framework)) {
+      refuse(`${call.name} was NOT run: it writes React components (.tsx), and this is a ${this.framework} project, which cannot mount them. `
+        + `Build the game in ${this.framework}'s own components instead: one <canvas> driven by requestAnimationFrame, with keyboard and touch input. `
+        + 'The plain-TypeScript kit recipes (generate_game_runtime, generate_game_vfx, generate_melody, generate_game_2d) work in any TypeScript project and may still be used.');
+    }
     // fix/build-reliability (P2b resume + P5b banned deps) — write_file pre-checks, each behind its own flag.
     if (call.name === 'write_file') {
       // P2b — a write cut off at the output limit carries only `_partial_content`: buffer it, never write it.

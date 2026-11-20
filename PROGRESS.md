@@ -102981,6 +102981,24 @@ Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2970 (#2399): an import of a `.d.ts` file resolves in the readiness analyzer.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (blocked, each with what it needs).
 
+## 2026-11-20 — Business (vyapaar) board game + "a game is not its theme" (game-gap audit item)
+
+- **Gap 1 (missing engine):** no rules for the property-trading board game. `BoardGamesGenerator` now writes
+  `src/game/board/business.ts` — original 36-square board (Indian cities, 4 transport, 2 utilities), pretend money only:
+  buy/decline, rent (set doubles, houses, hotel), chance, taxes, Start, doubles/three-doubles jail, jail fine/tries,
+  even building, mortgages, automatic fund-raising, bankruptcy to the creditor, winner, computer player. Not built:
+  auctions, trading (stated in the engine, the instructions and the AppKnowledgeBase entry).
+- **Gap 2 (root cause, wider class):** the request never reached a game engine. `selectDomain` let a game's THEME
+  pick the domain — 10 of 14 themed game prompts measured (restaurant, hospital, bank, shop, school, stock-market,
+  gym, pizza, real-estate) and every "gaadi wala" racing game (logistics) were read as a business, and `gameKitPlan`
+  seeds the kit only for domain 'game'. Class: a word that describes the game's world chose the app type.
+  Fix in the ONE place a domain is chosen: `asksForAGame` — a game as the thing built, with no app/website/portal
+  named beside it, is a game; "game" as a modifier (schedules, slots, store, tickets) names no game (the reverse slip:
+  "cricket academy app with game schedules" was a game); a game moving real money keeps the BR1985 fintech precedent.
+  Corpus diff over 1,630 game-mentioning test strings: 44 changed, every real prompt in the right direction.
+  `gameIntent` board genre now covers business game / vyapaar / monopoly / व्यापार का खेल.
+- **Lock:** `tests/aBusinessGameFollowsTheRules.test.ts` (34) incl. 40 four-computer games with invariants each turn;
+  12 reversion proofs each fail. Strict compile of the generated pack caught one union-narrowing error (fixed).
 ## 2026-11-20 — Game kit: swipe input + endless-runner rules (game-gap audit item)
 
 - **Gap:** no swipe and no runner in the kit, so every runner was hand-written: a row with no way through, a fast
@@ -103136,3 +103154,7 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 **25-minute investigation (last 50 builds, #2430–#2479):** 3 of 50 hit the wall-clock cap; ~10 games were judged "not playable" (Controls 0 / 0 fps / no canvas), all BEFORE the WebGL checker fix (#4358). #2478 (bgmi, the only post-fix cap) was already autopsied (Q-3010–Q-3019); its 15-minute false Rules-of-Hooks chase (Q-3014) is fixed on main — verified: the kit Hud.tsx is now clean.
 
 **Q-3019 traced:** ~63k input tokens per call for ~160 output; the 8 slow calls (40–122 s) each followed a model switch inside Surplus (same-model median 4.6 s vs 36.7 s after a switch), ~7.5 of 25 min. Each switch follows a failed attempt the session retried silently (`console.warn` only), so the report said every call was ok. Fixed here: `onAttemptFailed` (one notice per failure, codes only) → `onProviderError('SURPLUS')` at both runner sites · `aRetriedAttemptIsReported`. Open: retry the same model once before benching.
+- #1941, #1940, #1938, #1933 — no new rows (each read; none in the BR1950–2003 series): #1941's guessed `Input.bind` is BR1954's kit-type-contract class; #1940 rendered at 761 s and was stopped by the user at 782 s (the free-tier ceiling, Q-2240); #1938's "kit laid down (0 files)" after the E2B cap is BR1977's `downgradeEmptyKitSeedSuccesses`; #1933 rendered at 359 s as an original runner before the user stopped it.
+- #1926 — Q-3037 (the ID freed by the withdrawn row) a type imported beside a same-name value is refused at write time when the in-browser preview cannot compile it (tsc and esbuild accept it, Babel does not); the E2B-cap start with the fast lane running anyway is BR1952, fixed.
+- #1925 — Q-3039 a React-writing game recipe is refused in a project that cannot mount React (a Svelte game spent ~20 min reconciling the kit's React files); its kit `Game.ts` rewrite is the class #4375's kit guard refuses; its E2B-cap start is Q-2929.
+- #1916 — Q-3040 a dropped-connection message ("network error", "Failed to fetch") no longer offers Fix with AI, and a missing optional `test`/`lint` script is not a build-breaking blocker.

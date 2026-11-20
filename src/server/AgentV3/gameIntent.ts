@@ -78,7 +78,8 @@ const GENRES: ReadonlyArray<[GameGenre, RegExp]> = [
   ['snake', /\bsnake\b/i],
   ['quiz', /\b(quiz|trivia)\b/i],
   ['card', /\b(card game|solitaire|poker|uno|teen ?patti|rummy)\b/i],
-  ['board', /\b(chess|ludo|tic[- ]?tac[- ]?toe|checkers|carrom|board game|snakes? and ladders?)\b/i],
+  // Business / vyapaar (the property-trading board game) — game-gap audit 2026-11-20: it read as genre 'unknown'.
+  ['board', /\b(chess|ludo|tic[- ]?tac[- ]?toe|checkers|carrom|board game|snakes? and ladders?|business\s+game|vyapaa?r(?:\s+game)?|monopoly|property[- ]trading\s+game)\b|व्यापार\s*(?:का\s*)?(?:खेल|गेम)/i],
   ['puzzle', /\b(puzzle|sudoku|match[- ]?3|candy|2048|tetris|crossword|memory game)\b/i],
   ['runner', /\b(endless\s+runn(?:er|ing)|runner|subway surf)|(?:एंडलेस|अंतहीन)\s*(?:रनर|रनिंग|दौड़)/i],
   ['platformer', /\b(platformer|mario|jump(ing)? game)\b/i],

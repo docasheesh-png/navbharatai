@@ -486,7 +486,7 @@ export function enumeratedFeatureItems(prompt: string, opts: { plainLines?: bool
  * "Features:" list of twenty items is sized exactly as before. PURE.
  */
 export const SECTIONED_MIN = 3;
-const NUMBERED_HEADING = /^\s*\d{1,3}[.)]\s+\S/;
+const NUMBERED_HEADING = /^\s*(\d{1,3})[.)]\s+\S/;
 const BULLET_LINE = /^\s*[-*•]\s+\S/;
 
 export function sectionedSpecSize(prompt: string): number | null {
@@ -496,10 +496,8 @@ export function sectionedSpecSize(prompt: string): number | null {
   let bulletsUnderHeading = 0;
   let bulletsOutside = 0;
   let current = false;
-  let numbered = 0;
   for (const line of lines) {
     if (NUMBERED_HEADING.test(line)) {
-      numbered++;
       pending = true; current = false;
       continue;
     }
@@ -509,12 +507,41 @@ export function sectionedSpecSize(prompt: string): number | null {
     }
   }
   if (sections < SECTIONED_MIN) return null;
-  // 🔴 A NUMBERED LIST IS NOT A LIST OF SECTIONS (failedbr #2100, 2026-11-08 — "DriveEasy"). Customer, driver and admin
-  // features were 32 numbered ITEMS under plain headings; three items carried sub-bullets (a form's fields) and the
-  // payment bullets followed item 12, so the spec was sized as "4 sections" and a 40-part, three-role app went to the
-  // fast lane and then to the 25-minute cap. In a spec organised in sections, most numbered lines head a bullet block.
-  if (sections * 2 < numbered) return null;
   // Most bullets must sit under a numbered section, or the headings are decoration on a flat list.
   if (bulletsUnderHeading < bulletsOutside) return null;
+  if (headingRunSections(lines) < SECTIONED_MIN) return null;
   return sections;
+}
+
+/**
+ * 🔴 A NUMBERED LIST IS NOT A LIST OF SECTIONS (failedbr #2100, 2026-11-08 — "DriveEasy"). Its features were numbered
+ * ITEMS (1–12, 1–10, 1–10) under plain headings; three items carried sub-bullets (a booking form's fields) and the
+ * payment bullets followed item 12. Every numbered line followed by bullets was taken as a section heading, so a
+ * 40-part, three-role app was sized as "4 sections", went to the fast lane, and then to the 25-minute cap.
+ *
+ * Section headings are ONE numbered run in which nearly every heading has its own bullets ("1. App Details … 8."),
+ * and a list inside a section is a run of its own (#2094: subjects 1–15 inside section 2). Lines are grouped into
+ * numbering runs (a 1 starts a run; n continues the run that last reached n-1), and only a run in which at least
+ * half the numbered lines carry a bullet block contributes. Read only as an extra condition on the rule above, so it
+ * can switch the section reading OFF, never on. Indentation is not read: a sectioned spec written as nested Markdown
+ * is still a sectioned spec. PURE.
+ */
+function headingRunSections(lines: readonly string[]): number {
+  interface Run { last: number; lines: number; withBullets: number }
+  const runs: Run[] = [];
+  let open: Run | null = null;
+  let openHasBullets = false;
+  for (const line of lines) {
+    const n = NUMBERED_HEADING.exec(line);
+    if (n) {
+      const num = Number(n[1]);
+      const run: Run = runs.find((r) => r.last === num - 1 && num > 1) ?? { last: 0, lines: 0, withBullets: 0 };
+      if (!runs.includes(run)) runs.push(run);
+      run.last = num; run.lines++;
+      open = run; openHasBullets = false;
+      continue;
+    }
+    if (open && !openHasBullets && BULLET_LINE.test(line)) { open.withBullets++; openHasBullets = true; }
+  }
+  return runs.filter((r) => r.withBullets * 2 >= r.lines).reduce((sum, r) => sum + r.withBullets, 0);
 }

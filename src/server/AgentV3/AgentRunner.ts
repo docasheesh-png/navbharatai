@@ -1499,7 +1499,7 @@ export class AgentRunner {
                 // unspent). Never after a refusal or a question to the user; at most twice. See
                 // unfinishedResume.ts.
                 const starterBlocker = readiness.blockers.some(isStarterBlocker);
-                const resume = decideUnfinishedResume({ text: turn.text, blockers: readiness.blockers, resumesUsed: unfinishedResumes, producedFiles: producingToolUses > 0 });
+                const resume = decideUnfinishedResume({ text: turn.text, blockers: readiness.blockers, resumesUsed: unfinishedResumes, producedFiles: producingToolUses > 0, editingExistingApp: this.opts.editingExistingApp === true });
                 const standDownNote = resume.resume ? null : unfinishedResumeStandDownNote(resume.standDown, readiness.blockers.length);
                 if (standDownNote) { try { this.opts.onNote?.({ code: 'UNFINISHED_RESUME_STOOD_DOWN', message: standDownNote, detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ } }
                 if (resume.resume && !this.opts.signal?.aborted) {

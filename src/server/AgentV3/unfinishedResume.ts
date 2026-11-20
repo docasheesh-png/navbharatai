@@ -44,6 +44,21 @@ export interface UnfinishedResumeInput {
    * "App ready hai!" with a security blocker the model was never shown. Absent ⇒ today's behaviour.
    */
   producedFiles?: boolean;
+  /**
+   * This turn EDITS an app that already existed. 🔴 failedbr #2342 (95884987, 2026-11-13): "the game won't open in the
+   * APK, fix it". The model found and fixed the real cause at 19 min and said so — and the readiness gate's only blocker
+   * was the PROJECT's score, 0/100 from 18 medium `innerHTML` findings that were in the user's 646 KB game before the
+   * turn began. The resume sent the model back into an unrequested security refactor; the 25-minute cap stopped it, and
+   * the turn — real fix included — was saved to a wip branch instead of main. The project score cannot say whether an
+   * EDIT is done (the done signal's `editingExistingApp` rule says the same), so on an edit it does not force a resume.
+   * Every other blocker still does. Absent ⇒ today's behaviour.
+   */
+  editingExistingApp?: boolean;
+}
+
+/** The aggregate "the project scores below the bar" blocker (Readiness.ts) — a project measure, not this turn's failure. */
+export function isProjectScoreBlocker(blocker: string): boolean {
+  return /^readiness score \d+\/100 is below the \d+\/100 bar\b/.test(String(blocker ?? '').trim());
 }
 
 export interface UnfinishedResumeDecision {
@@ -51,7 +66,7 @@ export interface UnfinishedResumeDecision {
   /** The model-facing message; '' when `resume` is false. Never shown to the user. */
   message: string;
   /** Why a possible resume was withheld — for the admin report. */
-  standDown?: 'declined' | 'asked-the-user' | 'limit' | 'disabled' | 'no-blockers';
+  standDown?: 'declined' | 'asked-the-user' | 'limit' | 'disabled' | 'no-blockers' | 'edit-project-score';
 }
 
 const MAX_LISTED = 5;
@@ -59,8 +74,10 @@ const MAX_BLOCKER_CHARS = 240;
 
 export function decideUnfinishedResume(input: UnfinishedResumeInput): UnfinishedResumeDecision {
   if (!unfinishedResumeEnabled(input.env)) return { resume: false, message: '', standDown: 'disabled' };
-  const blockers = (input.blockers ?? []).map((b) => String(b ?? '').trim()).filter(Boolean);
-  if (blockers.length === 0) return { resume: false, message: '', standDown: 'no-blockers' };
+  const all = (input.blockers ?? []).map((b) => String(b ?? '').trim()).filter(Boolean);
+  if (all.length === 0) return { resume: false, message: '', standDown: 'no-blockers' };
+  const blockers = input.editingExistingApp === true ? all.filter((b) => !isProjectScoreBlocker(b)) : all;
+  if (blockers.length === 0) return { resume: false, message: '', standDown: 'edit-project-score' };
   if (input.resumesUsed >= (input.maxResumes ?? MAX_UNFINISHED_RESUMES)) return { resume: false, message: '', standDown: 'limit' };
   // Declined first: it is the stronger claim, the same order the nudge uses.
   if (turnDeclined(input.text)) return { resume: false, message: '', standDown: 'declined' };
@@ -92,6 +109,7 @@ export function unfinishedResumeStandDownNote(standDown: UnfinishedResumeDecisio
   if (!standDown || standDown === 'no-blockers' || standDown === 'disabled') return null;
   const why = standDown === 'declined' ? 'the model declined the request'
     : standDown === 'asked-the-user' ? 'the model asked the user a question before building anything'
+    : standDown === 'edit-project-score' ? 'this turn edits an existing app, and the only blocker was the project\'s overall score, which the turn did not set'
     : 'the resume limit was reached';
   return `The readiness check still found ${blockerCount} blocker(s), but the build was not resumed: ${why}.`;
 }

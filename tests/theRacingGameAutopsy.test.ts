@@ -44,7 +44,7 @@ describe('1 · a game never starts in the fast lane', () => {
   it('the route gates the lane on it and records why (source guard)', () => {
     const route = src('src/server/routes/agentv3.ts');
     expect(route).toContain('if (fastLaneWouldRun && !fastLaneRung.skip && !fastLaneGameSkip) {');
-    expect(route).toContain("fastLaneGameSkip = fastLaneSkipsGame(analyzeRequirementGaps(prompt).domain)");
+    expect(route).toContain("fastLaneGameSkip = fastLaneSkipsGame(analyzeRequirementGaps(prompt).domain");
     // Both registries are module-private sets; read them where they are declared.
     for (const [file, name] of [['src/server/AgentV3/BuildDiagnostics.ts', 'PROCESS_ONLY_CODES'], ['src/server/AgentV3/buildFindingSuggestions.ts', 'NEVER_SUGGEST']]) {
       const text = src(file);

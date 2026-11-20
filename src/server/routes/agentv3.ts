@@ -15299,6 +15299,8 @@ async function noteBuildOutcome(
         proChainV2,
         onSurplusError: surplusRawErrorReporter(email, (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }), userId),
         userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
+        // failedbr #2408/#2428: a failed Surplus turn's seconds are the engine's waste, not our clock's.
+        onSurplusAttemptWasted: (ms) => recordAttemptWasted('SURPLUS', 'error', ms),
         onFailOpen: (reason, diag) => {
           const dropped = surplusSession;
           surplusSession = undefined;
@@ -19623,7 +19625,7 @@ async function noteBuildOutcome(
       // A game is built with the game recipes, which only the full builder can call (fastLaneSkipsGame).
       let fastLaneGameSkip = false;
       if (fastLaneWouldRun && !fastLaneRung.skip) {
-        try { fastLaneGameSkip = fastLaneSkipsGame(analyzeRequirementGaps(prompt).domain); } catch { fastLaneGameSkip = false; }
+        try { fastLaneGameSkip = fastLaneSkipsGame(analyzeRequirementGaps(prompt).domain, process.env, gameKitSeeded.length); } catch { fastLaneGameSkip = gameKitSeeded.length > 0; }
         if (fastLaneGameSkip) {
           // 🔴 THE PREMISE IS NOW STATED AS A FACT, NOT ASSUMED (admin 2026-10-11, build 46e2d74b). This line
           // said the full builder "can run" the game tools, and 46e2d74b's full builder never ran one — the

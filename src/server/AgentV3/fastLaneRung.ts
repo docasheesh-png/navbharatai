@@ -74,7 +74,15 @@ export function fastLaneRungDecision(
  *
  * `AGENTV3_FASTLANE_GAMES=on` lets the lane try games again, with no deploy.
  */
-export function fastLaneSkipsGame(domain: string | null | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+export function fastLaneSkipsGame(domain: string | null | undefined, env: NodeJS.ProcessEnv = process.env, kitSeededCount = 0): boolean {
+  // 🔴 A SEEDED KIT IS THE ANSWER, WHATEVER THE DOMAIN READER SAYS (failedbr #2339, 36ad150c, 2026-11-12). The kit
+  // seeder judged "game 24*7 apne aap chalega … tribe … mukhiya …" a game and laid down 32 files; the requirement
+  // analyzer's domain was not 'game', so the fast lane ran anyway and regenerated 20 files — most of them the kit's own
+  // paths (core/loop, core/input, three/camera, three/surfaces …), each from its own contract. The kit's other files
+  // then imported names the new versions no longer exported: 37–58 compile errors and a 25-minute grind. Two readers of
+  // "is this a game" disagreed; the files on disk are evidence, so they decide. The lane cannot try games on top of a
+  // kit even with the env switch — it would overwrite it.
+  if (kitSeededCount > 0) return true;
   if (String(env.AGENTV3_FASTLANE_GAMES ?? '').trim().toLowerCase() === 'on') return false;
   return domain === 'game';
 }

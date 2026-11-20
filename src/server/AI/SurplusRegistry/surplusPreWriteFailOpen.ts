@@ -59,6 +59,14 @@ export type SurplusPreWriteFailOpenHooks = {
   /** `diag` (BR2388): the supplier-free `[engine-diag: stage=… reason=… safe=… status=…]` marker, for the
    *  admin report only; '' when the failure carried none. */
   onFailOpen?: (reason: SurplusPreWriteFailOpenReason, diag?: string) => void;
+  /**
+   * How long a failed Surplus turn ran before it failed — when the failure was the ENGINE's, not our clock's (the
+   * signal was not aborted). 🔴 failedbr #2408 / #2428 (2026-11-17): Surplus held the fast lane's plan call for 90 s and
+   * then failed `invalid_completion`; the next rung found no time left, its "budget exhausted before this call could
+   * start" became the record's only error, and PROVIDER_TIME_WASTED said "no engine wasted any time". This feeds the
+   * build's waste ledger so those seconds are counted against the engine that spent them.
+   */
+  onSurplusAttemptWasted?: (ms: number) => void;
   /** Owner per-profile opt-out (surplusNoFallback): never drop Surplus to Weak; error propagates. */
   noFallback?: boolean;
   /** Observe every Surplus turn error (raw-error profiles). Never alters control flow. */
@@ -181,6 +189,7 @@ export function wrapSurplusRunnerPreWriteFailOpen(
     get plannedModel() { return hooks.state.dropped ? weak?.plannedModel : surplus.plannedModel; },
     async runTurn(params) {
       if (hooks.state.dropped) return getWeak().runTurn(params);
+      const startedAt = Date.now();
       try {
         const result = await surplus.runTurn(params);
         // Healthy Surplus turn clears a prior admit-circuit spike (HALF_OPEN → CLOSED).
@@ -188,6 +197,7 @@ export function wrapSurplusRunnerPreWriteFailOpen(
         return result;
       } catch (error) {
         try { hooks.onSurplusError?.(error); } catch { /* observer must never alter the turn */ }
+        if (!params.signal?.aborted) { try { hooks.onSurplusAttemptWasted?.(Date.now() - startedAt); } catch { /* telemetry only */ } }
         if (params.signal?.aborted || !tryConsumeSurplusPreWriteFailOpen(hooks, error, { allowAfterWrite: true })) throw error;
         return getWeak().runTurn(params);
       }

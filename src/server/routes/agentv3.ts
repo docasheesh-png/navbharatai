@@ -24340,6 +24340,7 @@ async function noteBuildOutcome(
               try {
                 const port = previewUrlPort(lastPreviewUrl) ?? 5173;
                 await withTimeout(actuator.runCommand(workspaceId, `${buildPreKillPortCommand(port)}; rm -rf node_modules/.vite`), 20_000, 'stale-module-stop');
+                await startPythonBackendFirst('stale-module-restart');
                 await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), previewWakeBudgetMs(), 'stale-module-restart');
               } catch { /* the re-check below is the real verdict */ }
               buildDiag.record({

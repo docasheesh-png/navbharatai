@@ -3,7 +3,7 @@
 // decision went only to the server log. It is now a CLARITY_DECISION line in the build report.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { clarityJudgeSkipReason, shouldJudgeClarity } from '../src/server/AgentV3/clarityGate';
+import { clarityDecision, clarityJudgeSkipReason, shouldJudgeClarity } from '../src/server/AgentV3/clarityGate';
 
 const base = {
   enabled: true, newBuild: true, workspaceHoldsOnlyOurStarter: true, earlierBuildableRequest: false,
@@ -27,10 +27,22 @@ describe('the clarity decision is in the build report (failedbr #1896)', () => {
     expect(clarityJudgeSkipReason({ ...base, ...patch })).toMatch(re);
   });
 
-  it('the route records the decision, both when the judge runs and when it does not', () => {
+  it('the decision carries its line both when the judge runs and when it does not', async () => {
+    const ran = await clarityDecision(base, async () => ({ verdict: 'clear', category: 'game', ms: 812 }));
+    expect(ran).toEqual({ vagueCategory: null, line: 'The clarity judge read the request as clear (game, 812 ms).' });
+    const vague = await clarityDecision(base, async () => ({ verdict: 'vague', category: 'game', ms: 700 }));
+    expect(vague.vagueCategory).toBe('game');
+    expect(vague.line).toMatch(/answered with one question/);
+    let called = false;
+    const skipped = await clarityDecision({ ...base, earlierBuildableRequest: true }, async () => { called = true; return { verdict: 'vague', category: 'game', ms: 1 }; });
+    expect(called).toBe(false);
+    expect(skipped.line).toMatch(/^The clarity judge was not consulted: an earlier message/);
+  });
+
+  it('the route records the decision in the build report', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    expect(route).toMatch(/clarityReportLine = `The clarity judge read the request as/);
-    expect(route).toMatch(/clarityReportLine = `The clarity judge was not consulted: \$\{clarityJudgeSkipReason\(judgeInputs\)/);
+    expect(route).toMatch(/const decided = await clarityDecision\(/);
+    expect(route).toMatch(/clarityReportLine = decided\.line;/);
     expect(route).toMatch(/code: 'CLARITY_DECISION', message: clarityReportLine/);
   });
 });

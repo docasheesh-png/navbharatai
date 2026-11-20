@@ -35,7 +35,7 @@ import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmiss
 import { weakScopeChatTerminal, weakScopeCatchResult } from '../AgentV3/weakScopeTerminal';
 import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction, weakForceContinueDecision } from '../AgentV3/weakBuildPreflight';
 import { toSafeClientMessage } from '../lib/httpError';
-import { clarityGateEnabled, shouldJudgeClarity, clarityJudgeSkipReason, judgeClarity, clarifyReply, categoryFromWords, bestGuessPrompt, type ClarityCategory, type QuickReply } from '../AgentV3/clarityGate';
+import { clarityGateEnabled, clarityDecision, judgeClarity, clarifyReply, categoryFromWords, bestGuessPrompt, type ClarityCategory, type QuickReply } from '../AgentV3/clarityGate';
 import { clarityJudgeAsk } from '../AgentV3/clarityJudgeAsk';
 import { platformVoiceEnabled, voiceOf, voiceRequestedIn, eventInUserVoice } from '../AgentV3/platformVoice';
 import { silenceMemoryEnabled, sharedProviderSilenceMemory } from '../AgentV3/providerSilenceMemory';
@@ -11711,7 +11711,7 @@ async function noteBuildOutcome(
       intent = 'new_build';
     } else if (!askWhatToBuild && intent === 'new_build') {
       // failedbr #1896: the judge's decision — or why it was not asked — goes into the build report, not only the log.
-      const judgeInputs = {
+      const decided = await clarityDecision({
         enabled: clarityGateEnabled(),
         newBuild: true,
         workspaceHoldsOnlyOurStarter: await workspaceHoldsOnlyOurStarter(),
@@ -11722,15 +11722,9 @@ async function noteBuildOutcome(
         alreadyAsking: false,
         prompt: String(prompt ?? ''),
         isStarterPrompt: goldenScaffoldForPrompt(String(prompt ?? '')) !== null,
-      };
-      if (shouldJudgeClarity(judgeInputs)) {
-        const v = await judgeClarity(prompt, clarityJudgeAsk);
-        console.log(`[AGENTV3] clarity judge: ${v.verdict} (${v.category}, ${v.ms}ms)`);
-        clarityReportLine = `The clarity judge read the request as ${v.verdict} (${v.category}, ${v.ms} ms)${v.verdict === 'vague' ? ', so it was answered with one question instead of a build' : ''}.`;
-        if (v.verdict === 'vague') { clarity = { category: v.category }; intent = 'chat'; }
-      } else {
-        clarityReportLine = `The clarity judge was not consulted: ${clarityJudgeSkipReason(judgeInputs) ?? 'its conditions were not met'}.`;
-      }
+      }, () => judgeClarity(prompt, clarityJudgeAsk));
+      clarityReportLine = decided.line;
+      if (decided.vagueCategory) { clarity = { category: decided.vagueCategory }; intent = 'chat'; }
     }
     /**
      * 🔴 THE APP THEY ASKED ABOUT IS NOT HERE (autopsy 0d297b25). "The WORKNEX app is already developed

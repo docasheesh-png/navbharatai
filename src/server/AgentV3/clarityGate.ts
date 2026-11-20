@@ -139,6 +139,28 @@ export function clarityJudgeSkipReason(i: Parameters<typeof shouldJudgeClarity>[
   return 'a question is already being asked';
 }
 
+/**
+ * The whole clarity decision for a new build, with its report line: the judge runs when `shouldJudgeClarity` says so,
+ * and the line says what it decided or why it was not asked (failedbr #1896). `vagueCategory` is set only on a
+ * 'vague' verdict, which is the one that answers with a question instead of a build. Kept out of the route so the
+ * chat handler's branch budget (Q-979) does not grow.
+ */
+export async function clarityDecision(
+  inputs: Parameters<typeof shouldJudgeClarity>[0],
+  judge: () => Promise<ClarityVerdict>,
+): Promise<{ vagueCategory: ClarityCategory | null; line: string }> {
+  if (!shouldJudgeClarity(inputs)) {
+    return { vagueCategory: null, line: `The clarity judge was not consulted: ${clarityJudgeSkipReason(inputs) ?? 'its conditions were not met'}.` };
+  }
+  const v = await judge();
+  console.log(`[AGENTV3] clarity judge: ${v.verdict} (${v.category}, ${v.ms}ms)`);
+  const vague = v.verdict === 'vague';
+  return {
+    vagueCategory: vague ? v.category : null,
+    line: `The clarity judge read the request as ${v.verdict} (${v.category}, ${v.ms} ms)${vague ? ', so it was answered with one question instead of a build' : ''}.`,
+  };
+}
+
 /** At or above this many words a request is a spec, not a vague order — the judge is not consulted. */
 export const LONG_SPEC_WORDS = 15;
 

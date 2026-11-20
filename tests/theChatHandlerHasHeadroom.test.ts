@@ -74,7 +74,7 @@ function branchTokens(body: string): number {
 // Surplus Weak-only + SURPLUS_* report recording extracted to surplusChatAdmission (measured 539).
 // Weak scope Switch-module terminal extracted to weakScopeTerminal (measured 537).
 // Continue-with-Weak force decision extracted to weakForceContinueDecision (stays at 537).
-const BRANCH_BUDGET = 537;
+const BRANCH_BUDGET = 536;
 
 const WHAT_TO_DO = [
   'The chat handler is at or over its branch budget.',

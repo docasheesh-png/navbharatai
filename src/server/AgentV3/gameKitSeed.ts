@@ -388,12 +388,23 @@ export function gameTurnHandoff(
  */
 export function gameTurnRequest(original: string, milestone?: string | null): string {
   if (!milestone) return original;
+  // 🔴 ONLY A GAME'S MILESTONE BELONGS TO A GAME (failedbr #2271, 2026-11-20 — "INDIAN MUSIC"). The line below was
+  // added to EVERY roadmap milestone, so a music-streaming app's step 1 ("a Player screen with a real <audio>
+  // element") read as a game: the platform laid down the game kit (loop, input, game sounds) and a game scope
+  // contract for an app with no game in it. The original request decides whether the milestone is a game's; a
+  // milestone that is a game on its own still reads as one through its own words.
+  if (!requestIsGame(original)) return milestone;
   const explicit3D = SAYS_3D.test(original) && gameKitWants3D(original);
   const explicit2D = /\b(?:2\s*-?\s*d|two\s*-?\s*dimensional)\b/i.test(original);
   const phone = namedNonSmartphone(original);
   return [milestone, 'This milestone belongs to a game.', ...hardConstraintLines(original),
     explicit2D ? 'User constraint: 2D game.' : explicit3D ? 'User constraint: 3D game.' : '',
     phone ? `User device constraint: ${phone.device}.` : ''].filter(Boolean).join('\n');
+}
+
+/** The original request is a game by the one domain reading the kit uses. Never throws. */
+function requestIsGame(text: string): boolean {
+  try { return analyzeRequirementGaps(String(text ?? '')).domain === 'game'; } catch { return false; }
 }
 
 /** Available capability, not a claim that a seed succeeded or that an AAA clone is possible. */

@@ -19395,6 +19395,9 @@ async function noteBuildOutcome(
         }
       }
 
+      // An EXISTING 3D game sees the library menu on every later turn too (gameLibrarySelection.ts) — one call, no branch here,
+      // and OUTSIDE the new-build seed block below (it never runs on a new build).
+      buildPrompt = await withLibraryMenuForExistingGame(buildPrompt, { intent, read: (p) => actuator.readFile(workspaceId, p), uid: verified?.uid });
       // ── GAME KIT SEED (admin 2026-10-11, build 46e2d74b: "racing game me car ulti chal rahi hai") ──
       // The player's car showed its headlights and LEFT turned it right. The kit had the correct camera and
       // steering since 2026-10-05; that build never ran a single recipe and hand-wrote its own engine, so
@@ -19463,8 +19466,6 @@ async function noteBuildOutcome(
           }
         } catch { /* a refresh that cannot run leaves the project exactly as it was */ }
       }
-      // An EXISTING 3D game sees the library menu on every later turn too (gameLibrarySelection.ts) — one call, no branch here.
-      buildPrompt = await withLibraryMenuForExistingGame(buildPrompt, { intent, read: (p) => actuator.readFile(workspaceId, p), uid: verified?.uid });
       if (intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         const kitPlan: GameKitRecipe[] = (() => { try { return gameKitPlan(gameTurnRequest(prompt, milestoneRequest), framework); } catch { return []; } })();
         if (kitPlan.length === 0) {

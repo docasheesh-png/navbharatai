@@ -75,7 +75,10 @@ describe('an EXISTING 3D game sees the library on every later turn (admin 2026-1
     expect(await withLibraryMenuForExistingGame('p', { intent: 'edit_existing', read: kit, env: { AGENTV3_EXTERNAL_GAME_ASSETS: 'admin' } as NodeJS.ProcessEnv, uid: null })).toBe('p');
   });
 
-  it('the chat route calls it before the new-game seed, with the workspace reader', () => {
-    expect(readFileSync('src/server/routes/agentv3.ts', 'utf8')).toMatch(/buildPrompt = await withLibraryMenuForExistingGame\(buildPrompt, \{ intent, read: \(p\) => actuator\.readFile\(workspaceId, p\), uid: verified\?\.uid \}\);\n\s+if \(intent === 'new_build' && !projectModuleRef/);
+  it('the chat route calls it before the new-game seed block, with the workspace reader', () => {
+    const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    const call = route.indexOf('buildPrompt = await withLibraryMenuForExistingGame(buildPrompt, { intent, read: (p) => actuator.readFile(workspaceId, p), uid: verified?.uid });');
+    expect(call).toBeGreaterThan(0);
+    expect(call).toBeLessThan(route.indexOf('// ── GAME KIT SEED'));
   });
 });

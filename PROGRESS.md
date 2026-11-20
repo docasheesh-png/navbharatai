@@ -103124,3 +103124,4 @@ Ledger, older reports (2026-11-20, next PR):
 - #1876 — no new rows: 53 ENGINE_R1 fallbacks (Q-2692) and a free build that cost about $1 before the ceiling stopped it (Q-2240, blocked on the admin's money decision).
 - #1913 — Q-3041 the Play Store / App Store are where an app is published, not a shop: a game that mentioned uploading to the play store was read as ecommerce and got no kit.
 - #1930, #1914 — no defect: a user stop at 18 s before any write; the write guard refused a duplicate declaration, then the user stopped.
+- #1910, #1909, #1906, #1898 — no new rows (each read): a user stop at 9 s; #1909 and #1906 rendered at 451 s and 415 s before user stops (#1906's unreported Surplus usage only under-counts our own cost); #1898's guessed `createTerrain` is BR1954's kit-contract class and its skipped write-time typecheck is autopsy 61279465, both fixed.

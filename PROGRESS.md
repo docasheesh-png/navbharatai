@@ -103106,6 +103106,16 @@ Ledger, older reports (2026-11-20, #4377):
   Not built (stated): swim animation, a phone dive button.
 - **Lock:** `tests/aPlayerSwims.test.ts` (9, real motor/controller/terrain, incl. the sink-to-the-bottom baseline).
   8 reversion proofs fail. Generated kit tsc before/after: identical 33 pre-existing errors.
+## 2026-11-20 — Game kit: match-3 engine (game-gap audit item)
+
+- **Gap:** no match-3 rules; every one was hand-written (starting matches, dead boards with no reshuffle, holes after
+  cascades, swaps accepted without a match) — and a match-3 request (genre `puzzle`) was never seeded with any engine.
+- **Fix:** `src/game/board/match3.ts` in the board pack: deal with no runs and a guaranteed move; adjacent swaps only,
+  refused without a match; cascades with chain scoring (10 × tiles × chain); line (4), area (L/T), bomb (5) tiles that
+  chain-fire; gravity + seeded refill; reshuffle (same tiles) when stuck, fresh deal if no order works; hint; moves and
+  target → won/lost; per-cascade steps for animation; deterministic per seed. `gameKitSeed` seeds the pack for match-3
+  words (MATCH3, not other puzzles). ToolCatalog, instructions, handoff line, AppKnowledgeBase updated.
+- **Lock:** `tests/aMatch3BoardIsAlwaysFair.test.ts` (10). 9 reversion proofs fail. Strict compile of the pack clean.
 ## 2026-11-20 — #4365 merged (Q-2746/2747/2748/2751/2752 closed); four more 05eb30ba-era rows fixed
 Closed on merge of #4365 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-2746, Q-2747, Q-2748, Q-2751, Q-2752 — ledger in the entry above.
 

@@ -38,6 +38,7 @@ import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError, isReasoningRungHandoff, providerNeverAnswered, isSlowStreamAbandon } from './turnDeadline';
 import { commandOutcomeText, looksLikeTypecheckCommand, type TypecheckCommandProof } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
+import { terminalOutcomeCode } from './buildOutcomeSummaries';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
 import { readEvidenceLedger, type EvidenceLedger } from './evidenceLedger';
@@ -205,6 +206,8 @@ export const PROCESS_ONLY_CODES = new Set([
   'SAVED_SOURCE_DIVERGES',
   // Whether OUR vision call read the user's attachment in time (attachmentReadOutcome.ts, autopsy 1389f0d5).
   'ATTACHMENTS_READ',
+  // …and whether OUR setup saved the user's attached text files whole in the project (attachmentFilesOnDisk.ts, #2415).
+  'ATTACHMENTS_ON_DISK', 'ATTACHMENTS_NOT_ON_DISK',
   // …and its sibling: how far down OUR ladder a build fell (ladderDepth.ts) is a fact about our
   // routing, never about the user's app.
   'LADDER_DEPTH',
@@ -2229,8 +2232,16 @@ export class BuildDiagnostics {
           this.recordFullError({ message: e.message, phase: 'build' });
           break;
         }
+        // 🔴 …AND NEITHER IS A PROVIDER OUTAGE (failedbr #2424, b3ca7df0, 2026-11-17). "All NavBharatAI Pro providers
+        // failed (… KIMI suspended … GLM overloaded)" reached here as a BUILD-phase error, so the release gate listed it
+        // as "1 build-breaking blocker" of a quiz game that had rendered and passed 12 real presses — and the user's
+        // summary named the outage as "the main thing still broken". The same sentence the outcome net already reads
+        // (`terminalOutcomeCode`) files it in the PROVIDER phase: still an unresolved error the admin sees, never a
+        // finding about the app (the provider-phase rule above). The app is judged by its own evidence.
+        const engineEnding = terminalOutcomeCode({ messages: [e.message] });
+        const providerFact = engineEnding === 'OUTCOME_ENGINE_UNAVAILABLE' || engineEnding === 'OUTCOME_ENGINE_TIMEOUT';
         this.record({
-          phase: 'build', severity: 'error', code: 'BUILD_ERROR',
+          phase: providerFact ? 'provider' : 'build', severity: 'error', code: 'BUILD_ERROR',
           message: e.message.slice(0, 800), autoResolved: false,
         });
         // #1 full errors — keep the COMPLETE message (the 800-char timeline slice can drop the real

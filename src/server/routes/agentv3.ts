@@ -787,6 +787,7 @@ import { devServerLaunchPlan, startFilesFromPaths } from '../AgentV3/devServerLa
 import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { attachedBytesNote } from '../AgentV3/attachedFileBytes';
+import { attachmentFilesForProject, attachmentFilesNote, writeAttachmentFilesInStep } from '../AgentV3/attachmentFilesOnDisk';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, cssStoppedUnfinishedRecord, cssClassesUndefinedFields, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
@@ -11268,6 +11269,8 @@ async function noteBuildOutcome(
     const zipImports = rawAttachments.filter((a) => isZipAttachment(a));
     const docAttachments = rawAttachments.filter((a) => !isZipAttachment(a));
     let attachmentContext = '';
+    // Text attachments written whole into the project once the workspace exists (failedbr #2415).
+    let attachmentFilesToWrite: ReturnType<typeof attachmentFilesForProject> = [];
     // AP-8 — the structured design contract extracted from an uploaded mockup, when there was one.
     // Held outside the try so it survives to the build prompt AND to the post-build verification.
     let designContract: DesignContract | null = null;
@@ -11319,6 +11322,10 @@ async function noteBuildOutcome(
         // and "your attached letter is loaded"). Ours, so outside the untrusted fence. See attachedFileBytes.ts.
         const bytesNote = attachedBytesNote(docAttachments);
         if (bytesNote) attachmentContext = `${attachmentContext}\n\n${bytesNote}`;
+        // failedbr #2415: a text attachment is written WHOLE into the project (attachmentFilesOnDisk.ts) — the prompt
+        // copy is capped at 20,000 characters, and a builder told only "here is an excerpt" hunted the disk for the rest.
+        attachmentFilesToWrite = attachmentFilesForProject(docAttachments);
+        attachmentContext = [attachmentContext, attachmentFilesNote(attachmentFilesToWrite)].filter(Boolean).join('\n\n'); // no branch: TS2563
         // A picture is part of the spec only when it is a UI design (the describer returned a contract).
         // A photo of a person or a scene says what the picture shows, not what to build.
         const pictureIsSpec = designContract !== null;
@@ -17634,6 +17641,8 @@ async function noteBuildOutcome(
       // Each keeps its OWN failure isolation. `allSettled`, not `all`: one unavailable store must leave
       // the other two contexts in the prompt, exactly as three independent try/catches did.
       // Everything since the project check, as one window — named steps, and the rest as `other`.
+      // failedbr #2415: the whole attached text files, where the builder's note says they are (no branch here: TS2563).
+      await writeAttachmentFilesInStep(attachmentFilesToWrite, (label, run) => wiringSteps.step(label, run), (p, c) => actuator.writeFile(workspaceId, p, c), (r) => buildDiag.record(r));
       try { buildDiag.closeSetupWindow('Build wiring ready', wiringSteps.list()); } catch { /* timing is observation only */ }
       const contextT0 = Date.now();
       const [prefSettled, adrSettled, brainSettled] = await Promise.allSettled([
@@ -26067,13 +26076,18 @@ async function noteBuildOutcome(
       // feature whose OUTPUT is invented — a random "recognised" song, "[Translated to hi]: …", search
       // results written into the code. Same scope (this turn's reachable writes), same one sentence.
       try {
-        if (result.ok && expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
+        // failedbr #2421: a STOPPED (not-ok) build's saved writes are scanned too — the next turn scans only its own
+        // writes, so a fake saved before a Stop was never named anywhere. Not ok ⇒ recorded for the admin; the user's
+        // summary (which already says the build stopped) is not changed.
+        if (expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
           const faked = loadedFindings(simulatedResultIssues(Object.fromEntries(writtenFiles)), dispatcher.lastReachability);
           if (faked.length > 0) {
-            result = { ...result, summary: `${result.summary}${simulatedResultNotice(faked)}` };
+            result = result.ok ? { ...result, summary: `${result.summary}${simulatedResultNotice(faked)}` } : result;
             buildDiag.record({
               phase: 'readiness', severity: 'warning', code: 'SIMULATED_RESULT_SHIPPED', autoResolved: false,
-              message: `A feature of the app returns made-up results in ${faked.length} place(s) — disclosed to the user in the summary.`,
+              message: result.ok
+                ? `A feature of the app returns made-up results in ${faked.length} place(s) — disclosed to the user in the summary.`
+                : `A file saved by this unfinished build returns made-up results in ${faked.length} place(s) — not yet made real or labelled; not shown to the user because the build did not finish.`,
               detail: faked.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
             });
           }

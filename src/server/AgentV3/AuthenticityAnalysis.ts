@@ -85,10 +85,14 @@ const PRACTICE_AHEAD = String.raw`[\s_-]*(?:[a-z0-9]{1,16}[\s_-]+){0,2}?${PRACTI
  * answers, predictions, detections, forecast, prices, a mock database or service) — `simulate network
  * delay`, `simulate processing`, a physics `simulateStep` and a game's `mockBattle` do not match — nor does
  * the subject of a DETECTOR app ("fake news detection", "fake review checker", "fake currency scanner").
+ * 🔴 GENERATED MEDIA IS A RESULT TOO (failedbr #2421, 3ce4316c): a video maker's `processVideo` waited a second and returned
+ * "a mock video blob" built from text ("Mock video data processed with …"). The noun list knew songs and translations
+ * but no video, audio or blob, so the fake was never named. `simulate video processing` still does not match (no
+ * output noun follows), only the made-up video / audio / blob / clip / render itself.
  * Nor a made-up CREDENTIAL (autopsy 6cd698cc): "Generates a mock API key for the demo user" is a sign-in
  * detail, not a result a feature returns, and it told the user "some features show demo results".
  */
-const SIMULATED_RESULT_RE = new RegExp(String.raw`(?<![a-z])(simulat(?:e|ed|es|ing|ion)(?!${PRACTICE_AHEAD})|mock(?:ed)?(?!${PRACTICE_AHEAD})|fake(?![\s_-]*(?:news|reviews?|accounts?|profiles?|calls?|products?|currency|notes?)\b)|dummy)[\s_-]*(?:[a-z]{1,16}[\s_-]+){0,2}(results?|search\s+results|songs?|tracks?|recognition|detection|detections|translations?|translated|overviews?|summar(?:y|ies)|answers?|predictions?|forecasts?|weather|prices?|quotes?|db|database|service|api(?![\s_-]*(?:keys?|tokens?|secrets?)(?![a-z])))(?![a-z])|\bapi\.mock[\w-]*\.|\[translated\s+(?:to|in)\b`, 'i');
+const SIMULATED_RESULT_RE = new RegExp(String.raw`(?<![a-z])(simulat(?:e|ed|es|ing|ion)(?!${PRACTICE_AHEAD})|mock(?:ed)?(?!${PRACTICE_AHEAD})|fake(?![\s_-]*(?:news|reviews?|accounts?|profiles?|calls?|products?|currency|notes?)\b)|dummy)[\s_-]*(?:[a-z]{1,16}[\s_-]+){0,2}(results?|search\s+results|songs?|tracks?|recognition|detection|detections|translations?|translated|overviews?|summar(?:y|ies)|answers?|predictions?|forecasts?|weather|prices?|quotes?|videos?|audio|blobs?|clips?|renders?|db|database|service|api(?![\s_-]*(?:keys?|tokens?|secrets?)(?![a-z])))(?![a-z])|\bapi\.mock[\w-]*\.|\[translated\s+(?:to|in)\b`, 'i');
 
 /** Paths we never scan — generated, vendored, or test code. */
 const SKIP_PATH = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next)([\\/]|$)|\.test\.|\.spec\.|__tests__|(^|[\\/])tests?([\\/]|$)|(^|[\\/])specs?([\\/]|$)/i;

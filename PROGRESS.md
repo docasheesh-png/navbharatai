@@ -102981,6 +102981,18 @@ Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2970 (#2399): an import of a `.d.ts` file resolves in the readiness analyzer.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (blocked, each with what it needs).
 
+## 2026-11-20 — Game kit: swipe input + endless-runner rules (game-gap audit item)
+
+- **Gap:** no swipe and no runner in the kit, so every runner was hand-written: a row with no way through, a fast
+  run tunnelling through an obstacle between two frames, lanes backwards, touch listeners the browser refused to cancel.
+- **Fix:** `GameRuntimeGenerator` (seeded into every game) now writes `src/game/core/swipe.ts` (`bindSwipe`: a swipe
+  presses the same actions as the keys — left/right, up → jump, down → slide; pointer events + `touch-action: none`,
+  fires mid-swipe, ignores presses that start on a button) and `src/game/core/runner.ts` (`LaneRunner`: lanes, jump,
+  slide, coins, speed ramp, seeded course; every row leaves a free lane reachable at the arrival speed; swept hits).
+  Declared in the ToolCatalog include list; AppKnowledgeBase `game_2d_kit` updated.
+- **Lock:** `tests/aRunnerAlwaysHasAWayThrough.test.ts` (11) — an autopilot survives 60 seeded 90-second courses at
+  max speed. Reversion proofs: no free lane, endpoint collision, speed-blind gap, lanes backwards, repeat swipes,
+  flipped up/down each fail. A dead one-lane guard found by reversion was removed.
 ## 2026-11-20 — Game kit: get in and out of vehicles (game-gap audit item)
 
 - **Gap:** walk-and-drive games hand-wrote Use + ctx.follow, and the walking body kept moving, unseen, while the player
@@ -103100,3 +103112,21 @@ Ledger for the next PR (rows Q-3021…Q-3024):
 - #2036 — Q-3034 every game-kit file now compiles under a strict app tsconfig (noUnusedLocals/noUnusedParameters): the only offender, TouchControls' unread `container` field, failed the user's typecheck and looped the builder. Its E2B-cap setup failure is Q-2929.
 - #2065 — no defect: a "continue" turn rendered at 221 s and the user stopped it at 274 s; its two unused `@capacitor/*` warnings are advisory and true.
 - #2064, #2037, #2001, #2003 — no new rows: #2064's "could not find @Composable" was fixed by BR1998; #2037's skipped write-time typecheck by autopsy 61279465; #2001's `?react` SVG imports by BR2001; #2001's and #2003's E2B concurrency refusals are Q-2929 (blocked on the plan limit).
+
+## 2026-11-20 — #4380 merged (failedbr #2158 / #2133 / #2100 / #2094 / #2090 / #2086 / #2036)
+
+Closed Q-3021, Q-3023, Q-3025, Q-3029, Q-3031, Q-3032, Q-3033, Q-3034 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): a rule about how to build and the staples of a small game are not features; a numbered list with a few sub-bullets is not a spec in sections; a stylesheet wired by an Astro/Vue/Svelte component is wired; exam words are not services; a game that names a hospital is a game (unless it handles real money); a package-manager query is a read; a roadmap step cannot invent a native mobile stack; every game-kit file compiles under a strict app tsconfig.
+Still open, our own work: Q-3022, Q-3024, Q-3026, Q-3027, Q-3030. Blocked on the admin: Q-3028 (exact starter chip vs the Surplus authoring rule), plus the earlier blocked rows.
+
+Also renumbered the queue-retry-drills row from a duplicate Q-3020 to Q-3035: two sessions had both taken Q-3020 on 2026-11-20 (3eea5cae1 and 6942a03ec), so `theQueueIdsAreUnique` was red on `main`.
+- #2030 — Q-3036 a handler that admits it is pretend ("for demo purposes, we'll just show an alert", "…in a real application") is a HIGH authenticity finding; a fake Download button had shipped unnamed. Its "Play Store button" order enabled the deploy tool (PUBLISH_REQUESTED), which is the designed reading.
+- #2005 — no new row: the E2B concurrency cap (Q-2929) refused setup and the fast lane still ran, with all 22 writes refused; since BR1952 a text-only lane is skipped against an unavailable workspace (`FAST_LANE_SKIPPED_SANDBOX`).
+
+## 2026-11-20 — #4385 merged (failedbr #2030; #4380 rows closed; duplicate Q-3020 renumbered)
+
+Closed Q-3036 (ID appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): a handler that admits it is pretend is a HIGH authenticity finding.
+
+Ledger, older reports (2026-11-20, next PR):
+- #1994 — no new rows, and my first attempt WITHDRAWN before merge. Reports #1950–#2003 had already been autopsied by another session (the BRxxxx series). BR1994 had recorded both of my findings: the recovered `npm install` still counted on a failed build's gate is **Q-2707**, 🟡 blocked on an owner billing decision (a red gate is what makes a failed build free, so forgiving a recovered failure there can newly charge a build). The YouTube-downloader policy is **Q-1005**, 🟡 blocked on the admin. I had changed `recordCommand` to make exactly the Q-2707 change without that decision; it was reverted in #4387 before merging, and Q-3037/Q-3038 (which never reached `main`) were removed. Lesson: check the `BRxxxx` series for a report number before autopsying it.
+- #1987 — no new row: the workspace was already a Spring Boot project (its saved starter), so a PUBG-style request was built on it without the game kit by design; its `npm install` without a package.json blocker is BR1987, fixed.
+- #1995, #1993, #1986, #1984, #1983 — no new rows: all five are SANDBOX_RECOVERY_UNAVAILABLE ("could not be safely reconnected") within 1–19 s, not the E2B cap (read, not assumed). The refusal's reason has been in the report since #4253. #1995 and #1984 were "Fix this error and continue building the app: <that refusal>", the Fix-with-AI-on-our-own-notice class BR1995 fixed (2026-11-17).

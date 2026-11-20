@@ -103150,3 +103150,20 @@ Ledger, older reports (2026-11-20, next PR):
 - #1926 — Q-3037 (the ID freed by the withdrawn row) a type imported beside a same-name value is refused at write time when the in-browser preview cannot compile it (tsc and esbuild accept it, Babel does not); the E2B-cap start with the fast lane running anyway is BR1952, fixed.
 - #1925 — Q-3039 a React-writing game recipe is refused in a project that cannot mount React (a Svelte game spent ~20 min reconciling the kit's React files); its kit `Game.ts` rewrite is the class #4375's kit guard refuses; its E2B-cap start is Q-2929.
 - #1916 — Q-3040 a dropped-connection message ("network error", "Failed to fetch") no longer offers Fix with AI, and a missing optional `test`/`lint` script is not a build-breaking blocker.
+
+## 2026-11-20 — City blocks in the 3D game kit (game-gap audit)
+
+- **Problem:** a "city" game was one straight road with houses beside it — the kit had `createRoad()` (one strip),
+  `createTraffic()` (one strip) and one/two-storey houses. Builders hand-placed boxes: streets that did not meet,
+  buildings in the road, pavements at the wrong height, and a draw call per box.
+- **Fix:** `src/server/lib/GameCityGenerator.ts` → kit file `src/game/three/city.ts`:
+  - `planCity()` (pure, seeded): streets, crossings, lots (two rows per block, so every lot faces a street), parks (never
+    every block), street lights, a spawn in the left lane. Styles: town / mixed / downtown; size and tallest floor bounded.
+  - `cityRoute()`: along the streets, turning only at crossings, in the LEFT lane (India), ending at a door.
+  - `createCity()`: asphalt with centre dashes and zebra crossings, raised pavements, shops (awning, signboard + `lot.sign`
+    anchor for the name), apartments (balconies, water tanks), office towers, houses (yard + compound wall), parks (trees,
+    paths, benches, fountain), street lights — merged per block (a 6×6 city ≈ 180 meshes). Streets/pavements are ground
+    colliders, buildings solid. `city.heightAt` / `city.solidAt` give cars a ground and walls (driveVehicle has neither).
+  - 3D instructions + kit handoff name `createCity()`; AppKnowledgeBase `game_city_blocks`.
+- **Proof:** `tests/aCityHasStreetsAndBlocks.test.ts` (10 tests; seven reversions each failed).
+- 🟡 **Not built yet:** traffic that turns at crossings, traffic lights, pedestrians.

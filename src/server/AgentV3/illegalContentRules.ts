@@ -322,9 +322,11 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
      * itself ("no real money", "never a deposit", "without cash prizes", and after it: "real-money play is not supported"), because the PUBLISH scanner reads this context
      * with no exempt step — and the board-games kit's own generated files say "never real money, never a deposit, a
      * wallet top-up or a cash prize" beside "Teen Patti". A kit-built fun game must not be blocked by its own disclaimer.
+     * A sentence that says real money is BANNED is the same kind of disclaimer (the Business kit: "India bans real-money
+     * online games"), so a ban word — bans, banned, prohibited, forbidden, illegal, outlawed — counts as a negation too.
      */
     context: withDevanagari(
-      /(?<!\b(?:no|not|never|nor|without|zero|fake|pretend|non|instead\s+of)\b[^.!?\n]{0,48})\b(deposit\w*|withdraw\w*|cash[-\s]?outs?|payouts?|real[-\s]?(?:money|cash|rupees?)|cash[-\s]?prizes?|prize[-\s]?money|win(?:ning)?[-\s]+(?:real\s+)?(?:money|cash|rupees?|₹)|add[-\s]+money|upi\s+(?:deposit|top[-\s]?ups?)|wallet[-\s]+top[-\s]?ups?|asli\s+paise|paise?\s+(?:jeet\w*|lagao|lagaa?ye|lagaa?na|jama|nikaal\w*|kamao))\b(?![-\s\w]{0,30}\b(?:is|are|was|were)\s+(?:not|never)\b)/i,
+      /(?<!\b(?:no|not|never|nor|without|zero|fake|pretend|non|instead\s+of|bans?|banned|banning|prohibit\w*|forbid\w*|illegal|outlaw\w*)\b[^.!?\n]{0,48})\b(deposit\w*|withdraw\w*|cash[-\s]?outs?|payouts?|real[-\s]?(?:money|cash|rupees?)|cash[-\s]?prizes?|prize[-\s]?money|win(?:ning)?[-\s]+(?:real\s+)?(?:money|cash|rupees?|₹)|add[-\s]+money|upi\s+(?:deposit|top[-\s]?ups?)|wallet[-\s]+top[-\s]?ups?|asli\s+paise|paise?\s+(?:jeet\w*|lagao|lagaa?ye|lagaa?na|jama|nikaal\w*|kamao))\b(?![-\s\w]{0,30}\b(?:is|are|was|were)\s+(?:not|never|banned|prohibited|forbidden|illegal|outlawed)\b)/i,
       ['असली\\s+पैसे', 'पैसे\\s+(?:जमा|निकाल|लगा|जीत)', 'कैश\\s+प्राइज' + NUKTA + '?', 'डिपॉजिट', 'विड्रॉ', 'इनाम\\s+की\\s+राशि'], W.REAL_MONEY_GAMBLING.context,
     ),
     // Recorded, not refused: a betting word and money mentioned in a request to build — a human looks later.

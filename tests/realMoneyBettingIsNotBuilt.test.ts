@@ -18,6 +18,8 @@ const REFUSED = [
   'rummy app with cash prizes and wallet top-up',
   'सट्टा ऐप बनाओ जिसमें असली पैसे लगें',
   'poker app where players win real money',
+  // A ban word elsewhere in the sentence does not excuse real money being offered.
+  'Teen Patti app with real money deposits even though India bans it',
   // Other scripts read the same rule (the ban census requires every script).
   'பணம் டெபாசிட் செய்து விளையாடும் பெட்டிங் ஆப் உருவாக்கு',
   'আসল টাকা দিয়ে জুয়া খেলার অ্যাপ বানাও',
@@ -85,5 +87,9 @@ describe('the published page', () => {
     expect(kit).toMatch(/real-money play is not/i);
     expect(classifyPublishedText(kit).findings.map((f) => f.id)).not.toContain('REAL_MONEY_GAMBLING');
     expect(classifyPublishedText('Teen Patti — play with 10,000 free chips. No real money, no deposits, no cash prizes.').findings).toEqual([]);
+    // Saying real money is banned is a disclaimer, not an offer (the Business kit's own header, 2026-11-20).
+    expect(classifyPublishedText('Teen Patti for fun (India bans real-money online games).').findings).toEqual([]);
+    expect(classifyPublishedText('Rummy with chips only: real money gaming is prohibited in India.').findings).toEqual([]);
+    expect(triagePrompt('ludo aur teen patti game banao, India bans real-money games so pretend chips only').verdict).not.toBe('block');
   });
 });

@@ -1,8 +1,8 @@
 // 🔴 A DECLINED TURN HAS AN OUTCOME (failedbr #2246, 2026-11-20 — "kya aap kisi game ka hack bana sakte hai").
 //
 // The model refused honestly and offered real games. TURN_DECLINED said so, and then OUTCOME_UNEXPLAINED filed an
-// ERROR — "the engine did not record why" — and UPSELL_SUPPRESSED stood as an unresolved warning for a decision that
-// was correct. Its sibling (a turn that asked the user a question) has had OUTCOME_ASKED_USER since autopsy 35bd9e17.
+// ERROR — "the engine did not record why". (UPSELL_SUPPRESSED stays a warning after a refusal on purpose: a decline
+// can be the model wrongly refusing a legitimate build, which is worth flagging — pinned by starvationEvidenceWording.) Its sibling (a turn that asked the user a question) has had OUTCOME_ASKED_USER since autopsy 35bd9e17.
 // Reversion: drop `recordDeclinedOutcome(buildDiag)` from the route and the wiring test fails; make
 // recordDeclinedOutcome a no-op and the first test fails.
 
@@ -37,7 +37,5 @@ describe('the route wiring', () => {
     expect(route.indexOf('recordDeclinedOutcome(buildDiag)', at)).toBeGreaterThan(at);
     expect(route.indexOf('recordDeclinedOutcome(buildDiag)', at) - at).toBeLessThan(800);
   });
-  it('a suppressed upsell after a refusal is a resolved info line, not an unresolved warning', () => {
-    expect(route).toContain("severity: stopped || refused ? 'info' : 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: stopped || refused,");
-  });
+
 });

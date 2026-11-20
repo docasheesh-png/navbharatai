@@ -102963,7 +102963,8 @@ Closed Q-2978, Q-2979, Q-2980, Q-2981, Q-2982, Q-2983, Q-2985, Q-2986 (IDs appen
 Ledger for the next PR (rows Q-2987…Q-2989):
 - #2263 — Q-2987 a handled missing camera in our checking browser is not an app defect (render filter + click explorer, one pattern).
 - #2255 — Q-2988 "make my internet 5× faster" is the fifth impossible power; the builder is told and the honest alternative named.
-- #2246 — Q-2989 a declined turn records OUTCOME_DECLINED; a suppressed upsell after a refusal is resolved.
+- #2246 — Q-2989 a declined turn records OUTCOME_DECLINED (UPSELL_SUPPRESSED after a refusal deliberately stays a warning).
+- #2224 — Q-2990 the install stamp never creates a `node_modules` FILE (the 115 s reinstall-before-every-start on a dependency-free site); a static file server keeps its own host binding.
 - #2264 — not new rows: the "📨 picked up your message" text that equalled the model's own narration came through `/api/agentv3/steer`, which sends only the composer's content (`sendSteer` in AgentV3Panel.tsx) — the user's own action, not an engine echo. The mock "realistic simulation" of video generation is the SIMULATED_RESULT class already fixed for videos (Q-2960, #4360). edit_file misses are the weak model's, met by the designed layer.
 - #2257 — no defect: the user stopped 2.8 min in after the app rendered; the two warnings are accurate notes on an unfinished tree.
 - #2256 (and #2252, same workspace) — the same class as Q-2979 (a game split into project modules, module 3 of 14); resolved by #4369.

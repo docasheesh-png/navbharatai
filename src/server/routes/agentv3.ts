@@ -28136,7 +28136,7 @@ async function noteBuildOutcome(
           }
           if (refused || degraded || misconfigured || starved || stopped || interrupted) {
             buildDiag.record({
-              phase: 'build', severity: stopped || refused ? 'info' : 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: stopped || refused,
+              phase: 'build', severity: stopped ? 'info' : 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: stopped,
               // A STOPPED build's suppression is the right call and nothing is left to act on — as an
               // unresolved warning it was one of the two "problems" on a report of a build the user simply
               // stopped (autopsy 6db0ff31). The other reasons stay warnings: each names a real fault of ours.

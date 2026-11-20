@@ -65,13 +65,14 @@ describe('1 · the staleness probe asks what is on disk', () => {
     // Every successful install stamps the tree so the mtime test settles.
     // 4 → 5 on 2026-10-21: the ETARGET manifest-repair retry (step 2.6) stamps the tree on success too.
     expect(src.match(/return settled\(/g)?.length).toBe(5);
-    expect(src).toContain("sandbox.commands.run('touch node_modules'");
+    // STAMP_NODE_MODULES since failedbr #2224: a bare `touch` made a FILE on a dependency-free project.
+    expect(src).toContain('sandbox.commands.run(STAMP_NODE_MODULES');
   });
 
   it('the typecheck prelude stamps the tree after installing, so it does not reinstall every run', () => {
     // The install is logged since autopsy 12c642ed (npm's reason used to go to /dev/null); the stamp
     // still follows a successful install, and only that.
-    expect(TSC_ENSURE).toMatch(/then \(npm install >>\S+ 2>&1 \|\| \([^)]*\)\) && touch node_modules; fi/);
+    expect(TSC_ENSURE).toMatch(/then \(npm install >>\S+ 2>&1 \|\| \([^)]*\)\) && \{ \[ -f node_modules \] && rm -f node_modules; mkdir -p node_modules && touch node_modules; \}; fi/);
   });
 });
 

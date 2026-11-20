@@ -15,6 +15,7 @@ import { withoutSourcePaths } from './sourcePathPrompt';
 import { withoutUrls } from './promptUrls';
 import { indicDomainMatches, usesIndicScript } from './indicDomainTerms';
 import { withoutMachineText } from './machineText';
+import { namesWellKnownGame } from './wellKnownGameTitles';
 
 export interface RequirementGaps {
   domain: string;
@@ -854,7 +855,9 @@ function selectDomain(text: string): DomainDef | undefined {
   if (asksForAGame(text)) return DOMAINS.find((d) => d.key === 'game');
   const gameRead = withoutGameModifiers(text);
   return DOMAINS
-    .filter((d) => (d.key === 'game' ? d.re.test(gameRead) || indicDomainMatches(d.key, gameRead) : d.re.test(text) || indicDomainMatches(d.key, text)))
+    // A request that NAMES a well-known game ("make a bgmi for me") is a game request even without the word (failedbr #2478).
+    // Read on the FULL text: its "about a game" guard (tournament, top-up, website) needs the words the modifier strip removes.
+    .filter((d) => (d.key === 'game' ? d.re.test(gameRead) || indicDomainMatches(d.key, gameRead) || namesWellKnownGame(text) : d.re.test(text) || indicDomainMatches(d.key, text)))
     .reduce<DomainDef | undefined>((best, d) => {
       if (!best) return d;
       const a = domainFeatureScore(best, text);

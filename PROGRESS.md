@@ -102891,6 +102891,11 @@ Closed Q-2954, Q-2956, Q-2958, Q-2960 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2960 (#2421): `SIMULATED_RESULT_RE` names generated media (video/audio/blob/clip/render); a not-ok build's writes are scanned and recorded for the admin.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it needs), plus the earlier Q-2942/Q-2943/Q-2947/Q-2948/Q-2949.
 
+## 2026-11-20 — Game audit 2 (#7): one word for loudness across the kit (branch `claude/game-playoptions-trap`)
+- Evidence: failedbr #2435 spent three turns on `TS2353 'volume' does not exist in type 'PlayOptions'` — audio.play and
+  playMusic take `volume`, the melody player's PlayOptions said `gain`.
+- The melody player now takes `volume` (gain kept as an alias; volume wins when both are given).
+- Locked by `tests/oneWordForLoudness.test.ts` (recording AudioContext; reversion: volume ignored → 2 fail).
 ## 2026-11-20 — Game audit 2 (#1): a 3D game that skips the kit's shell is told what it loses (branch `claude/game-shell-mounted`)
 - Evidence: failedbr #2475 / #2476 / #2477 (three "pubg / bgmi jaisa" games, all asking for a joystick). The shell
   (GameCanvas.tsx) was seeded each time; the builder wrote its own `new THREE.WebGLRenderer()` + rAF loop, so the shell's
@@ -102909,6 +102914,28 @@ Closed Q-2962, Q-2963, Q-2965 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_C
 - Q-2965 (#2339): a seeded game kit always skips the fast lane (`fastLaneSkipsGame(domain, env, kitSeededCount)`), so the lane can never regenerate files over the kit.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964 (blocked, each with what it needs).
 
+## 2026-11-20 — An old game would not open from history: "HTTP 404: Conversation not found" for a `v3_` id
+
+Admin report: opening an old game showed "This chat's transcript hasn't reached the server yet …" with the
+diagnostic `server refused the transcript (HTTP 404: Conversation not found.) for id v3_95865209-…`.
+
+- **Root cause.** The history list loads only the 50 most recent apps from the server; an older app shows up
+  only through its `chat_sessions` row, whose id is `v3_<sid>`. To open it, `candidateConversationIds` tried
+  `v3_<sid>`, `agentv3-<uid>-<sid>` and `agentv3-anon-<sid>`. It did NOT try the bare `<sid>`, where a
+  **duplicated app's** record lives, and nothing could find a record saved under a **random id** (builds from
+  before conversationId = workspaceId). Answer: 404.
+- **Class.** Two copies of "which ids can a session's record have" had drifted: `conversationIdCandidatesForWorkspace`
+  (build path) knew the bare-session-id case, `candidateConversationIds` (open, delete, pin, duplicate, rename,
+  unsend) did not.
+- **Fix.** `candidateConversationIds` now derives the session from either form of the id and reuses
+  `conversationIdCandidatesForWorkspace`, so both lists are one. `conversationLookupIds` adds, as the last
+  resort, the ids of this user's records for that workspace (`listIdsByWorkspace`, an owner-filtered
+  two-field equality query that needs no composite index). All six routes use it.
+- **Locked by** `tests/aDuplicatedAppOpensFromHistory.test.ts`, using the report's session id. Reverting
+  either half fails it (2 tests fail for the candidate list, 1 for the old-record lookup). A census guard
+  fails if a route builds its own candidate list again.
+- **Not verified.** Which of the two shapes this specific game had: production data was not readable from
+  this session. **Watch for:** the same game now opens with its messages.
 ## 2026-11-20 — failedbr #2318 / #2306 / #2399 resolved (#4361 merged)
 
 Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).
@@ -102936,3 +102963,47 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (bloc
   `gameIntent` board genre now covers business game / vyapaar / monopoly / व्यापार का खेल.
 - **Lock:** `tests/aBusinessGameFollowsTheRules.test.ts` (34) incl. 40 four-computer games with invariants each turn;
   12 reversion proofs each fail. Strict compile of the generated pack caught one union-narrowing error (fixed).
+## 2026-11-20 — Autopsy failedbr #2478 ("make a bgmi for me"): royale requests get the big map, laid down by the platform
+
+Admin: a PUBG / Free Fire / BGMI request must get a big, realistic map; the library already has maps that were not used.
+The build failed at the 25-minute cap with a 30×30 grid and five cubes. Root causes, each fixed as a class (rows Q-3010 – Q-3019):
+- **Q-3010** The Athree map was a system-prompt line only; the 3D seed never laid it down. `gameKitPlan` now seeds
+  `generate_athree_map` (the recipe's own `athreeMapIntent` decides) and the handoff says build IN it.
+- **Q-3011** "make a bgmi for me" was domain "general". One shared title reader (`lib/wellKnownGameTitles`); apps ABOUT a game stay apps.
+- **Q-3012** Milestone turns lost the user's game (contract genre "unknown"). `gameIdentityLines` + `ToolDispatcher.worldRequest()`.
+- **Q-3013** "ground plane" was an aircraft / flight map. Shared `withoutNonObjectSenses` gained geometry senses.
+- **Q-3014** The failure itself: `inventory.use()` read as React's `use` → 15-minute false chase. Member calls are hooks only on a PascalCase namespace.
+- Open: Q-3016 (racing starter shipped for every 3D game), Q-3018, Q-3019; Q-3017 blocked on the admin's model-library rollout decision.
+Locked by `tests/aRoyaleRequestGetsTheBigMap.test.ts` and `tests/aMethodNamedUseIsNotAHook.test.ts`, each half reverted-and-failed.
+## 2026-11-20 — failedbr #2379 / #2337 resolved (#4362 merged); autopsies #2320, #2311, #2295, #2279, #2278, #2271 (#4369)
+
+Closed Q-2972, Q-2973, Q-2976 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).
+- Q-2972 (#2379): a dev server backgrounded in a subshell is unwrapped before the probes are dropped (`unwrapSubshellBackgroundedServer`).
+- Q-2973 (#2379): emoji/symbol-labelled buttons are controls in the pasted-page facts (`symbolControl`).
+- Q-2976 (#2337): the missing-privacy-policy note is ADVISORY — tell the user, build nothing unless asked.
+
+Ledger for the reports worked in #4369 (rows Q-2977…Q-2984 in the queue):
+- #2320 — same class as Q-2963 (edit held to the project score), already merged in #4360. No new row.
+- #2311 (stopped fast-lane build) — CSS_CLASSES_UNDEFINED on a stopped tree: already RESOLVED by #4259 (BR1988), merged after this build ran. The unlabelled NotesManager field: Q-2977 🟡 (the report lacks the file's text).
+- #2295 (a bare `src/game/fx/synth.ts` read as a game build, game kit seeded, "Add credits" upsell) — every item already RESOLVED on main: a source path alone is chat (`source-path-only`, 2026-11-16), chat intent seeds no kit, an answer-only turn gets no upsell (`answerOnlyNow`), and the Surplus failed-attempt usage hole was closed by #4320 (Q-2920). No new row.
+- #2279 (GO CAR) — Q-2978 game words are one family; Q-2979 a game the kit owns is never split into project modules; Q-2980 a play screen is not held to a page title. Not new rows: the TOOL_ERROR write without a path (the instructive-error layer converged next turn, and a write with no path cannot be repaired without guessing); CSS_CLASSES_UNDEFINED on a stopped MODULE turn (BR1988 keeps module turns on main's warning by design, and Q-2979 removes the game instance); USAGE_NOT_REPORTED (#4320).
+- #2278 (racing game) — Q-2981 a model's successful install re-stamps node_modules (sibling of the #4253 recipe-install fix); Q-2982 a seeded library is never rewritten for an importer's invented export; Q-2984 🟡 dead controls (game auto-repair is suspended by a security decision).
+- #2271 (INDIAN MUSIC) — Q-2983 a music app's roadmap step got the game kit; Q-2985 an unguarded Supabase client is noted at write time; Q-2986 a blocked `.env` read lists the saved key names. Not a defect: the closing "previous work is still stopping" line is RC-4's deliberate wording, pinned by BR1964. Already resolved elsewhere: the 10-minute key wait counted against the build (#2431, `workClock.ts`, 2026-11-19); 41 "ENGINE_R1 failed" fallbacks are Q-2692 (another session's branch owns it).
+Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971, Q-2974, Q-2975, Q-2977, Q-2984 (blocked, each with what it needs).
+
+## 2026-11-20 — #4369 merged (failedbr #2279 / #2278 / #2271); autopsies #2264, #2263, #2257, #2256, #2255, #2246 (next PR)
+
+Closed Q-2978, Q-2979, Q-2980, Q-2981, Q-2982, Q-2983, Q-2985, Q-2986 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): game words are one family; a game the kit owns is never split into project modules; a play screen needs no page title; a model's successful install re-stamps node_modules; a seeded library is never rewritten for an importer's invented export; a music app's roadmap step is not a game; an unguarded Supabase client is noted at write time; a blocked `.env` read names the saved keys. #4369's merge-base CI had one queue-retry-drill timeout (4002 ms on a lease claim — code the PR never touched); its single re-run passed.
+
+Ledger for the next PR (rows Q-2987…Q-2989):
+- #2263 — Q-2987 a handled missing camera in our checking browser is not an app defect (render filter + click explorer, one pattern).
+- #2255 — Q-2988 "make my internet 5× faster" is the fifth impossible power; the builder is told and the honest alternative named.
+- #2246 — Q-2989 a declined turn records OUTCOME_DECLINED (UPSELL_SUPPRESSED after a refusal deliberately stays a warning).
+- #2216 — Q-3011 a model write that removes an untouched kit file's exports or class members is refused.
+- #2208 — Q-3012 music-genre and AI terms are one unknown-name family; Q-3013 "<framework> Vite plugin not found in Vite config" is a configuration error, not a blind restart.
+- #2193 — the free-build cost-ceiling class, Q-2240 (🟡 the admin's money decision; the report is added to that row).
+- #2224 — Q-3010 the install stamp never creates a `node_modules` FILE (the 115 s reinstall-before-every-start on a dependency-free site); a static file server keeps its own host binding.
+- #2264 — not new rows: the "📨 picked up your message" text that equalled the model's own narration came through `/api/agentv3/steer`, which sends only the composer's content (`sendSteer` in AgentV3Panel.tsx) — the user's own action, not an engine echo. The mock "realistic simulation" of video generation is the SIMULATED_RESULT class already fixed for videos (Q-2960, #4360). edit_file misses are the weak model's, met by the designed layer.
+- #2257 — no defect: the user stopped 2.8 min in after the app rendered; the two warnings are accurate notes on an unfinished tree.
+- #2256 (and #2252, same workspace) — the same class as Q-2979 (a game split into project modules, module 3 of 14); resolved by #4369.
+Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971, Q-2974, Q-2975, Q-2977, Q-2984 (blocked, each with what it needs).

@@ -590,7 +590,11 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
       ? text.match(/^[ \t]*(?:[✘×X]\s*)?\[ERROR\]\s*TS\d+:[^\n]*/m) : null);
   const missingConfiguration = text.match(/^[ \t]*(?:An unhandled exception occurred:\s*)?Configuration ['"][^'"\n]+['"] is not set in (?:the )?workspace\.[^\n]*/m);
   const invalidConfiguration = text.match(/^[ \t]*(?:Error:\s*)?Schema validation failed with the following errors:\s*\n[ \t]*Data path\b[^\n]*(?:must|should)\b[^\n]*/m);
-  const configurationOrCompileError = angularCompileError ?? missingConfiguration ?? invalidConfiguration;
+  // A framework whose Vite plugin is missing from vite.config (failedbr #2224/#2208 class, 2026-11-20): `remix vite:dev`
+  // printed "Remix Vite plugin not found in Vite config", was restarted twice as "no recognisable error", and gave up.
+  // A restart cannot add a plugin to a config file; the repair must.
+  const missingVitePlugin = text.match(/^[^\n]*\bVite plugin (?:was )?not found in (?:the |your )?Vite config[^\n]*/im);
+  const configurationOrCompileError = angularCompileError ?? missingConfiguration ?? invalidConfiguration ?? missingVitePlugin;
   if (configurationOrCompileError) {
     const detail = configurationOrCompileError[0].trim().replace(/\s+/g, ' ').slice(0, 300);
     return make('code_error', `Project configuration or compile error (a restart can't fix it): ${detail}`);

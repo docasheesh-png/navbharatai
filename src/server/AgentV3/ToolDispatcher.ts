@@ -66,7 +66,7 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole, isPlanningOnlyRole, PLAN_YOURSELF_NOTE } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
-import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER, sharedBareTypecheckCommand } from './tscCommand';
+import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER, sharedBareTypecheckCommand, nodeModulesStampAfterInstall } from './tscCommand';
 import { parseTscErrors, fixTypeOnlyValueImports as fixTypeOnlyValueImportsFromErrors, type TscError } from './EndgameRepair';
 import { tscCommandVerdict, looksLikeTypecheckCommand, tscVerdict, countTscErrors, buildScriptTypecheckVerdict, type TypecheckCommandProof } from './TscGate';
 import { checksWholeDefaultTsProject } from './tscCommandMode';
@@ -177,7 +177,7 @@ import { callRemoteTool } from './mcpTransport';
 import type { SafeMcpTool } from './mcpClient';
 import type { McpServerConfig } from './mcpTransport';
 import { featureFileGuardEnabled, protectedFeatureFileDeletion, protectedFeatureFileMessage } from './featureFileGuard';
-import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, runtimeManifestDeletionTarget, runtimeManifestDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, runtimeManifestDeletionTarget, runtimeManifestDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage, envReadBlockedRemedy } from './CommandGovernance';
 import { ToolRefusal, refuse } from './toolRefusal';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { cloneDestination, shouldRefuseClone, cloneGuardMessage } from './gitCloneGuard';
@@ -253,6 +253,8 @@ import { analyzeRequirementCoverage, requirementCoverageSummary, currentRequestF
 import { binaryTextWriteRefusal } from './binaryTextWrite';
 import { isKeyboardOnlyGame, touchGameNoteEnabled, touchPlayableNote } from './touchPlayableGame';
 import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type VehicleShapeHalves } from './handWrittenVehicleScan';
+import { unguardedEnvClient, unguardedEnvClientNote } from './unguardedEnvClient';
+import { kitLibraryRewriteRefusal } from './kitLibraryGuard';
 import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, type GroundShapeHalves } from './handWrittenGroundScan';
 import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, endlessRaceCourseBlocker, type RaceCourseHalves } from './endlessRaceCourse';
 import { actionPoseHalves, actionPoseFinding, actionPoseNote, actionPoseWarning, isGameOwnSource, type ActionPoseHalves } from './actionVisibility';
@@ -386,7 +388,7 @@ import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateAthreeMap } from '../lib/athreeMap/AthreeMapGenerator';
 import { generateWorld2D, world2dEnabled, WORLD2D_DIR } from '../lib/world2d/World2DGenerator';
 import { world2dIntent } from './world2dIntent';
-import { gameKitWants3D } from './gameKitSeed';
+import { gameKitWants3D, gameTurnRequest } from './gameKitSeed';
 import { generateRequestedAthreeWorld } from '../lib/athreeMap/compositionRequest';
 import { athreeMapIntent, athreeModulesFor, enforceAthreeModuleExclusions } from '../lib/athreeMap/athreeMapIntent';
 import { ARCHETYPES, ARCHETYPE_IDS, mapChoiceFor, sizeKmIn, clampSizeKm, type Archetype } from '../lib/athreeMap/athreeMapKinds';
@@ -1178,6 +1180,8 @@ export class ToolDispatcher {
    */
   private _vehicleShapeIndex = new Map<string, VehicleShapeHalves>();
   private _vehicleShapeNoted = false;
+  /** An unguarded module-scope Supabase client was noted this build (unguardedEnvClient.ts, failedbr #2271). */
+  private _envClientNoted = false;
   /** Hand-written flat roads / pinned vehicle y / own trains on hilly terrain (handWrittenGroundScan.ts, 2026-11-02). */
   private _groundShapeIndex = new Map<string, GroundShapeHalves>();
   private _groundShapeNoted = false;
@@ -1200,6 +1204,18 @@ export class ToolDispatcher {
   private _uploadStorageNoted = false;
   /** The entry-first hand-back is said once per build (earlyPreview.ts, autopsy 39e982bd). */
   private _entryFirstNoted = false;
+  /**
+   * The text that decides a game's WORLD (the Athree map, the 2D world, a requested map): the turn's brief plus the game's
+   * identity from the user's OWN request. 🔴 failedbr #2478: on a roadmap build the brief is milestone 1 ("a 3D scene … with a
+   * ground plane"), and the map recipe decided from that alone — so "make a bgmi for me" could never get its map, even when
+   * the platform asked for it. Built by the same `gameTurnRequest` every other milestone reader uses.
+   */
+  private worldRequest(): string {
+    const brief = this.coverageRequest ?? this.userRequest ?? '';
+    if (!this.coverageRequest || !this.userRequest || this.coverageRequest === this.userRequest) return brief;
+    return gameTurnRequest(this.userRequest, this.coverageRequest);
+  }
+
   setCoverageRequest(text: string | null): void {
     this.coverageRequest = typeof text === 'string' && text.trim() ? text : null;
   }
@@ -1471,6 +1487,9 @@ export class ToolDispatcher {
     if (writeParseReject) { this.fileViews.note(rel, content, 'refused'); refuse(writeParseReject); }
     this.fileViews.clearRefused(rel);
     await this.refuseBrokenPageEdit(rel, existingContent, content);
+    // The game kit is a library the model builds on, never one it rewrites out from under its shell (failedbr #2216).
+    const kitRefusal = kitLibraryRewriteRefusal(rel, existingContent, content, opts.source);
+    if (kitRefusal) { try { getWorkspaceMemory(this.workspaceId).recordAudit(`[BLOCKED-KIT-REWRITE] ${rel}`); } catch { /* audit best-effort */ } refuse(kitRefusal); }
     if (opts.expectedSource !== undefined) {
       if (opts.expectedSource === null) {
         if (!this.actuator.createFileExclusive) refuse('Atomic object creation is unavailable; no unsafe write attempted.');
@@ -4990,6 +5009,13 @@ export class ToolDispatcher {
         if (finding) { vehicle += actionPoseNote(finding); this._actionPoseNoted = true; }
       } catch { /* a note is best-effort */ }
     }
+    // 🔑 A Supabase client built at load from keys nobody saved — a white screen until they are (failedbr #2271).
+    if (!this._envClientNoted) {
+      try {
+        const p = paths.find((q) => unguardedEnvClient(q, files[q]));
+        if (p) { vehicle += unguardedEnvClientNote(p); this._envClientNoted = true; }
+      } catch { /* a note is best-effort */ }
+    }
     // 🎮 A 3D game building its own renderer while the kit's shell sits unused (builds #2475–#2477: three "pubg jaisa"
     // games, all asking for a joystick, all shipped without the shell's touch controls) — once per build, while open.
     if (!this._shellNoted) {
@@ -6364,7 +6390,7 @@ export class ToolDispatcher {
         // secrets, or execute remote code. MEDIUM commands run but carry a warning.
         const risk = classifyCommandRisk(command);
         if (risk.level === 'high') {
-          const blockMsg = `[GOVERNANCE BLOCKED] Command not executed — HIGH-risk operation detected:\n  ${risk.reasons.join('\n  ')}\n  Command: ${command.slice(0, 300)}\n\nIf this was a legitimate need, rephrase the task to avoid dangerous shell patterns.`;
+          const blockMsg = `[GOVERNANCE BLOCKED] Command not executed — HIGH-risk operation detected:\n  ${risk.reasons.join('\n  ')}\n  Command: ${command.slice(0, 300)}\n\nIf this was a legitimate need, rephrase the task to avoid dangerous shell patterns.` + envReadBlockedRemedy(risk.reasons, Object.keys(this.userSecretsEnv));
           getWorkspaceMemory(this.workspaceId).recordAudit(
             `[BLOCKED-HIGH] refused: ${command.slice(0, 200)} — ${risk.reasons.join('; ')}`,
           );
@@ -6400,6 +6426,10 @@ export class ToolDispatcher {
           if (rewritten) {
             try { this.onFileWrite?.(rewritten, await this.actuator.readFile(this.workspaceId, rewritten)); }
             catch { /* the sandbox scan at the final save still sees it */ }
+            // …and the tree it installed is current: re-stamp node_modules, as every platform install does, or the
+            // write-time typecheck stands down for the rest of the build (nodeModulesStampAfterInstall, failedbr #2278).
+            const stamp = nodeModulesStampAfterInstall(rewritten);
+            if (stamp) { try { await this.actuator.runCommand(this.workspaceId, stamp); } catch { /* the end-of-build typecheck still runs */ } }
           }
         }
         // AND SO IS EVERY FILE THE COMMAND PLAINLY WROTE (iPhone/candy report 7da1cdca, 2026-10-04). The
@@ -10058,21 +10088,21 @@ export class ToolDispatcher {
         // under an app that has none, cannot override a user's "not Athree", and cannot swap a project's map on an edit.
         if (!athreeMapEnabled()) refuse('The Athree map is not switched on for this build, so it cannot be added. Build the world without it and say so plainly in the summary.');
         const athreeStored = await this.actuator.readFile(this.workspaceId, 'src/game/athree/index.ts').then(() => ({ mapId: 'athree' }), () => null);
-        const athreeDecision = athreeMapIntent({ prompt: this.coverageRequest ?? this.userRequest ?? '', stored: athreeStored, seedKey: this.workspaceId });
+        const athreeDecision = athreeMapIntent({ prompt: this.worldRequest(), stored: athreeStored, seedKey: this.workspaceId });
         if (!athreeDecision.use) refuse(`The Athree map is not used here: ${athreeDecision.reason} Build without it.`);
         // Retain the native request-driven module selector for both plain and composed worlds.
         const athRec = (input as Record<string, unknown>) || {};
         const athModules = Array.isArray(athRec.include) ? athRec.include.filter((v): v is string => typeof v === 'string') : undefined;
-        const athSelection = athreeModulesFor(this.coverageRequest ?? this.userRequest ?? '');
+        const athSelection = athreeModulesFor(this.worldRequest());
         const athPick = athModules ? enforceAthreeModuleExclusions(athModules, athSelection) : athSelection.modules;
         const composition = athRec.composition;
         const athArchetype = typeof athRec.archetype === 'string' ? athRec.archetype.trim().toLowerCase() : '';
         const athSize = typeof athRec.size_km === 'number' && Number.isFinite(athRec.size_km) ? athRec.size_km : null;
         if (athArchetype && !(athArchetype in ARCHETYPES)) refuse(`Unknown map kind "${athArchetype}". The kinds are: ${ARCHETYPE_IDS.join(', ')}.`);
-        let athChoice = athArchetype || athSize !== null ? { archetype: (athArchetype || 'continental') as Archetype, sizeKm: athSize ?? 100 } : mapChoiceFor(this.coverageRequest ?? this.userRequest ?? '');
+        let athChoice = athArchetype || athSize !== null ? { archetype: (athArchetype || 'continental') as Archetype, sizeKm: athSize ?? 100 } : mapChoiceFor(this.worldRequest());
         if (athChoice) athChoice = { archetype: athChoice.archetype, sizeKm: clampSizeKm(athChoice.sizeKm) };
         if (composition !== undefined) {
-          const promptSize = sizeKmIn(this.coverageRequest ?? this.userRequest ?? '');
+          const promptSize = sizeKmIn(this.worldRequest());
           const requestedSizes = [athSize, promptSize].filter((size): size is number => size !== null);
           const width = (composition as {widthKm?:unknown})?.widthKm;
           if (requestedSizes.some(size => width !== size)) refuse('Requested map size and composition widthKm must agree; composition supports only 1–100 km. No map was installed.');
@@ -10143,7 +10173,7 @@ export class ToolDispatcher {
         // from the REQUEST — the user's wish, not one word (world2dIntent → largeWorldIntent) — so a big map is never put under
         // an app with no world, a 3D game (the Athree map serves those) or a board/card/puzzle/quiz game.
         if (!world2dEnabled()) refuse('The 2D world is switched off for this build, so it cannot be added. Build the game without it and say so plainly in the summary.');
-        const w2dRequest = this.coverageRequest ?? this.userRequest ?? '';
+        const w2dRequest = this.worldRequest();
         let w2dStored = false;
         try { await this.actuator.readFile(this.workspaceId, `${WORLD2D_DIR}/index.ts`); w2dStored = true; }
         catch (error) { if (!isNotFoundError(error)) throw error; }
@@ -10159,6 +10189,7 @@ export class ToolDispatcher {
       case 'generate_game_royale': {
         if (!envFlag('AGENTV3_ORIGINAL_ROYALE')) refuse('The experimental original royale starter is unavailable. Do not promise it is installed or active.');
         if (!this.royaleNewProject || !this.userOwnedSnapshotKnown || this.userOwned.length > 0) refuse('The royale starter requires a verified new project. Preserve existing or imported source; do not replace it with a template.');
+        // The STARTER follows this turn's own request (it is a whole-game template, not a world): never the identity lines.
         const request = this.coverageRequest ?? this.userRequest ?? '';
         // One reader for "a royale-style game" (gameIntent.asksForBattleRoyale, autopsy aba63ead).
         if (!asksForBattleRoyale(request)) refuse('The request does not ask for a royale-style game. Do not add this starter.');

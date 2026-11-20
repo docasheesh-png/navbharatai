@@ -123,7 +123,8 @@ describe('BR1969 neighbours: race-the-event and bike-the-vehicle stay non-games;
   it('already-titled games keep their kits', () => {
     expect(analyzeRequirementGaps('gta5 wala game').domain).toBe('game');
     expect(gameKitWants3D('gta5 wala game')).toBe(true);
-    expect(gameKitPlan('gta5 wala game')).toEqual([...THREE_D_KIT]);
+    // An open-world GTA game also gets the big map, laid down after the 3D layer (failedbr #2478).
+    expect(gameKitPlan('gta5 wala game')).toEqual([...THREE_D_KIT.slice(0, 2), 'generate_athree_map', ...THREE_D_KIT.slice(2)]);
     expect(analyzeRequirementGaps('Make a game game was type of super market simulator make a game').domain).toBe('game');
     expect(gameKitPlan('Make a game game was type of super market simulator make a game')).toEqual([
       'generate_game_runtime', 'generate_game_vfx', 'generate_melody',

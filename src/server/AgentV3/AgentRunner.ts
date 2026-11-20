@@ -1,4 +1,5 @@
 import { usdAmount } from '../lib/usdAmount';
+import { isCodeWithoutInstruction } from '../lib/pastedSource';
 import { bindReplyLanguage } from './replyLanguageBinding';
 import { elideEmbeddedMedia } from '../../lib/embeddedMedia';
 import type { PlatformVoice } from './platformVoice';
@@ -512,7 +513,14 @@ export function liveUserMessageTurn(message: string, etaShown?: string | null): 
   const eta = etaShown && asksHowLong(message)
     ? `They are asking how long it will take. The platform's own estimate, already on their screen: "${etaShown.replace(/\s+/g, ' ').trim()}". Answer with THAT, in their language — never a number of your own. `
     : '';
-  return '[USER MESSAGE — sent live during the build.] Act on it now without discarding progress. '
+  // failedbr #1277 (2026-11-20): the user pasted the body of src/game/core/loop.ts mid-build with no words, and it was
+  // delivered as an order to "act on it now". Code says WHAT, never what to do with it (pastedSource.ts).
+  const code = isCodeWithoutInstruction(message)
+    ? 'It is source code with no words: treat it as the user\'s own version of a project file — find the file it matches '
+      + '(by its exports and contents) and keep their version unless it breaks the build; if it matches no file, say so in one '
+      + 'line and carry on with the app. Never invent a feature from it. '
+    : '';
+  return '[USER MESSAGE — sent live during the build.] Act on it now without discarding progress. ' + code
     + 'If it answers a question you asked, build to that answer. If it is unclear what it asks for, '
     + 'say in one line how you read it before you continue. Your final reply must say what you did '
     + `about it. ${eta}\n${message}`;

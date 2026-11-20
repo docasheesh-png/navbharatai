@@ -28,7 +28,8 @@
  */
 
 import { isSourcePathOnly } from '../lib/sourcePathPrompt';
-import { isPastedHtmlDocument, isPastedSource, readablePrompt } from '../lib/pastedSource';
+import { isCodeWithoutInstruction } from '../lib/pastedSource';
+export { isCodeWithoutInstruction };
 import {
   classifyIntentWithConfidence,
   firstNewBuildOrder,
@@ -99,18 +100,6 @@ export function declinesTheBuild(message: string): boolean {
   return !firstNewBuildOrder(rest.toLowerCase()) && !/\b(?:banao|bnao|banado|bana\s+do|banaiye|build|make|create)\b/i.test(rest);
 }
 
-/**
- * CODE WITH NO WORDS IS NOT AN ORDER (failedbr #1278, 2026-11-20). A user pasted 3,855 characters of Unity C#
- * (`using UnityEngine; … class BikeController : MonoBehaviour { [Header("Bike Settings")] …`) into their Quran reader and
- * wrote nothing. The engine invented a task — "add a Settings feature", lifted from the script's own `[Header]` — classified
- * it a large high-risk change and edited an unrelated app for four minutes. A pasted source file says WHAT, never what to
- * do with it, so it is answered (and the reply asks). A whole pasted HTML page is different: it is the user's own app and
- * has its own brief (pastedAppBrief.ts), so it still builds. PURE.
- */
-export function isCodeWithoutInstruction(message: string): boolean {
-  const text = String(message ?? '');
-  return isPastedSource(text) && !isPastedHtmlDocument(text) && readablePrompt(text).trim() === '';
-}
 
 /**
  * Does this turn ask whether the message itself confirms a build? A new build always; an edit only when no earlier request

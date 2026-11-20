@@ -258,3 +258,17 @@ export function pastedAppFacts(prompt: string | null | undefined): PastedAppFact
   if (colours.length === 0) colours.push(...plainColours(css, html));
   return { title, heading, description, controls, fields, colours };
 }
+
+/**
+ * CODE WITH NO WORDS IS NOT AN ORDER (failedbr #1278, 2026-11-20). A user pasted 3,855 characters of Unity C#
+ * (`using UnityEngine; … class BikeController : MonoBehaviour { [Header("Bike Settings")] …`) into their Quran reader and
+ * wrote nothing. The engine invented a task — "add a Settings feature", lifted from the script's own `[Header]` — classified
+ * it a large high-risk change and edited an unrelated app for four minutes. A pasted source file says WHAT, never what to
+ * do with it, so it is answered (and the reply asks). A whole pasted HTML page is different: it is the user's own app and
+ * has its own brief (AgentV3/pastedAppBrief.ts), so it still builds. PURE.
+ */
+export function isCodeWithoutInstruction(message: string): boolean {
+  const text = String(message ?? '');
+  return isPastedSource(text) && !isPastedHtmlDocument(text) && readablePrompt(text).trim() === '';
+}
+

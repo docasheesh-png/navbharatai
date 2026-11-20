@@ -102907,3 +102907,22 @@ Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2969 (#2306): a GET probe of the app's own localhost (and `sleep`) is a read-only inspection, never a release-gate blocker (`isLocalhostProbe`).
 - Q-2970 (#2399): an import of a `.d.ts` file resolves in the readiness analyzer.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (blocked, each with what it needs).
+
+## 2026-11-20 — Business (vyapaar) board game + "a game is not its theme" (game-gap audit item)
+
+- **Gap 1 (missing engine):** no rules for the property-trading board game. `BoardGamesGenerator` now writes
+  `src/game/board/business.ts` — original 36-square board (Indian cities, 4 transport, 2 utilities), pretend money only:
+  buy/decline, rent (set doubles, houses, hotel), chance, taxes, Start, doubles/three-doubles jail, jail fine/tries,
+  even building, mortgages, automatic fund-raising, bankruptcy to the creditor, winner, computer player. Not built:
+  auctions, trading (stated in the engine, the instructions and the AppKnowledgeBase entry).
+- **Gap 2 (root cause, wider class):** the request never reached a game engine. `selectDomain` let a game's THEME
+  pick the domain — 10 of 14 themed game prompts measured (restaurant, hospital, bank, shop, school, stock-market,
+  gym, pizza, real-estate) and every "gaadi wala" racing game (logistics) were read as a business, and `gameKitPlan`
+  seeds the kit only for domain 'game'. Class: a word that describes the game's world chose the app type.
+  Fix in the ONE place a domain is chosen: `asksForAGame` — a game as the thing built, with no app/website/portal
+  named beside it, is a game; "game" as a modifier (schedules, slots, store, tickets) names no game (the reverse slip:
+  "cricket academy app with game schedules" was a game); a game moving real money keeps the BR1985 fintech precedent.
+  Corpus diff over 1,630 game-mentioning test strings: 44 changed, every real prompt in the right direction.
+  `gameIntent` board genre now covers business game / vyapaar / monopoly / व्यापार का खेल.
+- **Lock:** `tests/aBusinessGameFollowsTheRules.test.ts` (34) incl. 40 four-computer games with invariants each turn;
+  12 reversion proofs each fail. Strict compile of the generated pack caught one union-narrowing error (fixed).

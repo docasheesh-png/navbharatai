@@ -68,7 +68,7 @@ export interface SurplusBuildSession {
   readonly buildId: string;
   readonly model: string;
   readonly estimatedMicroUsd: string;
-  runner(callbacks?: { onTurnComplete?: (result: TurnResult, used: 'SURPLUS') => void; onProviderUsed?: (permit: SurplusTurnPermit) => void }): ReturnType<typeof makeSurplusTurnRunner>;
+  runner(callbacks?: { onTurnComplete?: (result: TurnResult, used: 'SURPLUS') => void; onProviderUsed?: (permit: SurplusTurnPermit) => void; onAttemptFailed?: (failure: SurplusAttemptFailure) => void }): ReturnType<typeof makeSurplusTurnRunner>;
 }
 const fail = (reason: string): never => { throw new SurplusBuildUnavailableError(reason); };
 function estimate(params: RunTurnParams): Workload {
@@ -145,6 +145,8 @@ export async function createSurplusBuildSession(options: {
   return Object.freeze({ buildId: options.buildId, get model() { return model; }, estimatedMicroUsd: initial.selection.estimatedMicroUsd,
     runner(callbacks: Parameters<SurplusBuildSession['runner']>[0] = {}) {
       const failedModels = new WeakMap<object, Set<string>>();
+      /** Failed attempts already reported by the per-attempt handler, so the stay-alive loop never counts one twice. */
+      let attemptNotices = 0;
       const authorizedFallbacks = new WeakSet<object>();
       async function authorize(params: RunTurnParams, previous?: SurplusTurnPermit) {
           if (terminalPolicyFailure) throw terminalPolicyFailure;
@@ -272,6 +274,11 @@ export async function createSurplusBuildSession(options: {
               if (alt) model = alt;
             }
           }
+          // Q-3019 (failedbr #2478): a failed attempt was retried inside this session and reached the report only as a
+          // slower "ok" call — the report said no engine wasted any time. It is now said, with codes only.
+          attemptNotices++;
+          notifyAttemptFailed(callbacks, { model: permit.model, stage: failure?.stage ?? 'dispatch', reason: failure?.reason ?? 'dispatch_failed',
+            attempt: failure?.attempt ?? 1, benched: !terminalPolicyFailure, ...(model !== permit.model ? { nextModel: model } : {}) });
         },
         onProviderUsed: permit => { model = permit.model; try { callbacks.onProviderUsed?.(permit); } catch { /* observation cannot hold the inference queue */ } },
         onTurnComplete(result, used) {
@@ -307,6 +314,7 @@ export async function createSurplusBuildSession(options: {
             const outer = params.deadlineAt ?? Infinity;
             if (attempt > 0 && outer - now0 < policy.minTurnMs) break;
             const deadlineAt = Math.min(outer, now0 + policy.turnMs);
+            const noticesBefore = attemptNotices;
             try {
               return await native.runTurn({ ...params, deadlineAt });
             } catch (error) {
@@ -315,6 +323,12 @@ export async function createSurplusBuildSession(options: {
               if (attempt >= policy.retries) break;
               const wait = policy.backoffMs[Math.min(attempt, policy.backoffMs.length - 1)];
               try { console.warn(`[SURPLUS] stay-alive: turn retry ${attempt + 1}/${policy.retries} in ${wait}ms`); } catch { /* best-effort */ }
+              // Q-3019: a failed turn no per-attempt notice covered (a timeout, a transport death before dispatch) — once,
+              // with its time and the wait before the next try. One failure is one notice, so the tally stays true.
+              if (attemptNotices === noticesBefore) {
+                notifyAttemptFailed(callbacks, { model, stage: 'turn', reason: publicBuildEngineSafeReason(error) ?? 'turn_failed',
+                  attempt: attempt + 1, elapsedMs: Date.now() - now0, retryInMs: wait });
+              }
               await raceStop(new Promise<void>(resolve => setTimeout(resolve, wait)), params.signal);
             }
           }
@@ -325,6 +339,36 @@ export async function createSurplusBuildSession(options: {
       } };
     },
   });
+}
+
+/**
+ * One failed Surplus attempt, as the build report may show it (Q-3019). Codes only — never the raw provider text,
+ * which stays behind the public wording (rawErrorDetail.ts).
+ */
+export interface SurplusAttemptFailure {
+  model: string;
+  /** 'dispatch' / 'response_validation' (one HTTP attempt) or 'turn' (the whole turn, retried by the stay-alive loop). */
+  stage: string;
+  reason: string;
+  attempt: number;
+  elapsedMs?: number;
+  retryInMs?: number;
+  /** The model was taken out of this build's rotation — the next turn starts on another model, with a cold cache. */
+  benched?: boolean;
+  nextModel?: string;
+}
+
+/** Plain words for the report: what failed, what it cost, what happens next. PURE. */
+export function describeSurplusAttemptFailure(f: SurplusAttemptFailure): string {
+  const parts = [`Surplus attempt ${f.attempt} on ${f.model} failed (${f.stage}: ${f.reason})`];
+  if (typeof f.elapsedMs === 'number') parts.push(`after ${Math.round(f.elapsedMs / 100) / 10}s`);
+  if (f.benched) parts.push(f.nextModel ? `— ${f.model} is benched for this build; the next turn moves to ${f.nextModel}, whose cache is cold` : `— ${f.model} is benched for this build`);
+  if (typeof f.retryInMs === 'number') parts.push(`— retrying in ${Math.round(f.retryInMs / 1000)}s`);
+  return parts.join(' ');
+}
+
+function notifyAttemptFailed(callbacks: { onAttemptFailed?: (f: SurplusAttemptFailure) => void } | undefined, f: SurplusAttemptFailure): void {
+  try { callbacks?.onAttemptFailed?.(f); } catch { /* an observation never holds the inference queue */ }
 }
 
 export const SURPLUS_PARALLEL_CALLS_DEFAULT = 128;

@@ -4,6 +4,7 @@ import { gameAssetRequirements } from './assetPlan';
 import { REVIEWED_GAME_ASSETS, type ReviewedAsset } from './providers';
 import { sceneryFor } from './worldDressing';
 import { searchGameLibrary } from './gameLibrary';
+import { ownModelGuide } from './modelSourcesGuide';
 export interface LibraryRequest {
   prompt: string;
   requirements?: ReadonlyArray<{ subject: string; role?: 'player' | 'opponent' | 'environment' | 'prop'; animation?: string }>;
@@ -74,6 +75,8 @@ export function gameLibraryMenuHandoff(catalogue: readonly ReviewedAsset[] = REV
     + `Every ready 3D model in the NavBharatAI library, by subject. The models already prepared above were matched from the WORDS of the request; `
     + `choose from this menu by its MEANING. When the game needs something listed here that was not prepared — a village story needs villagers, `
     + `houses and a well even if nobody typed "villager"; a hunting game needs a hunter and animals — call add_library_models with those subjects `
-    + `(and the animation role the game uses, in brackets). Add only what the game needs, at most 6 per call. Not listed → build it with the recipes.\n`
-    + lines.join('\n');
+    + `(and the animation role the game uses, in brackets). Add only what the game needs, at most 6 per call. Not listed → build it with the recipes; `
+    + `and when the user asked for a SPECIFIC thing that is not listed and a code-built version would not be what they meant (a particular creature, `
+    + `vehicle or character look), also tell them where to get it free and how to attach it — the guide below.\n`
+    + lines.join('\n') + '\n' + ownModelGuide([]);
 }

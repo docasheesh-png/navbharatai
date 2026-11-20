@@ -8,9 +8,9 @@ import { REVIEWED_GAME_ASSETS,validateCatalogue } from '../src/server/AgentV3/ga
 import { gameAssetRequirements,externalGameAssetsEnabled } from '../src/server/AgentV3/gameAssets/assetPlan';
 import { searchGameLibrary } from '../src/server/AgentV3/gameAssets/gameLibrary';
 describe('licensed library expansion admission',()=>{
- it('adds eleven pinned models without changing default rollout',()=>{
+ it('adds eleven pinned models; the library is on by default (admin 2026-11-20)',()=>{
   expect(REVIEWED_LIBRARY_EXPANSION).toHaveLength(11);expect(REVIEWED_GAME_ASSETS).toHaveLength(47 + REVIEWED_LIBRARY_BATCH_2.length + REVIEWED_LIBRARY_BATCH_3.length + REVIEWED_LIBRARY_BATCH_4.length + REVIEWED_LIBRARY_BATCH_5.length);
-  expect(()=>validateCatalogue(REVIEWED_GAME_ASSETS)).not.toThrow();expect(externalGameAssetsEnabled({})).toBe(false);
+  expect(()=>validateCatalogue(REVIEWED_GAME_ASSETS)).not.toThrow();expect(externalGameAssetsEnabled({})).toBe(true);expect(externalGameAssetsEnabled({AGENTV3_EXTERNAL_GAME_ASSETS:'off'})).toBe(false);
  });
  it('selects exact characters and locomotion, not a neighbouring substitute',()=>{
   expect(gameAssetRequirements('running hooded rogue',REVIEWED_GAME_ASSETS)).toEqual([{subject:'hooded rogue',animation:'run'}]);

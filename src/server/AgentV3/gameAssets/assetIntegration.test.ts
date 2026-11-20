@@ -40,13 +40,14 @@ describe('L3 acquisition, durable restore and bundle contract (synthetic)', () =
     const cc0 = rig(); await prepareGameAssets({ prompt:'3D human walking game', workspaceId:'fixture-workspace', workspace:cc0.workspace, signal:new AbortController().signal, dependencies:cc0.deps, persistence:cc0.persistence, catalogue:[cc0.candidate], env:{ AGENTV3_EXTERNAL_GAME_ASSETS:'on' } });
     expect(cc0.texts.get('public/game-assets/ATTRIBUTION.txt')).not.toContain('Permission is hereby granted');
   });
-  it('is off by default, and the release catalogue contains no invented assets', async () => {
-    expect(externalGameAssetsEnabled({})).toBe(false);
+  it('is ON by default (admin 2026-11-20), off by its kill switch, and the release catalogue contains no invented assets', async () => {
+    expect(externalGameAssetsEnabled({})).toBe(true);
+    expect(externalGameAssetsEnabled({ AGENTV3_EXTERNAL_GAME_ASSETS: 'off' })).toBe(false);
     expect(() => validateCatalogue(REVIEWED_GAME_ASSETS)).not.toThrow();
     expect(REVIEWED_GAME_ASSETS.length).toBeGreaterThan(0);
     expect(REVIEWED_GAME_ASSETS.every(c => c.downloadUrl.startsWith('https://raw.githubusercontent.com/') && /^[a-f0-9]{40}$/.test(c.revision))).toBe(true);
-    const r = rig(); const result = await prepareGameAssets({ prompt:'3D car game', workspaceId:'fixture-workspace', workspace:r.workspace, signal:new AbortController().signal, dependencies:r.deps, catalogue:[r.candidate], env:{} });
-    expect(result.status).toBe('off'); expect(r.download).not.toHaveBeenCalled(); expect(r.disk.size).toBe(0);
+    const r = rig(); const result = await prepareGameAssets({ prompt:'3D car game', workspaceId:'fixture-workspace', workspace:r.workspace, signal:new AbortController().signal, dependencies:r.deps, catalogue:[r.candidate], env:{ AGENTV3_EXTERNAL_GAME_ASSETS: 'off' } });
+    expect(result.status).toBe('off'); // the kill switch keeps the seed network-free expect(r.download).not.toHaveBeenCalled(); expect(r.disk.size).toBe(0);
   });
   it('requests animal locomotion without substituting a fox for other animals or inventing clips', () => {
     expect(gameAssetRequirements('walking foxes', REVIEWED_GAME_ASSETS)).toEqual([{ subject: 'fox', animation: 'walk' }]);
@@ -170,7 +171,7 @@ it('persists optimized provenance and reuses derived bytes from the durable cach
   } finally {vi.unstubAllGlobals();}
 });
 
-it('uses the shared boolean flag convention and stays off for unset/unknown/negative values', () => {
-  for(const value of ['on','ON',' true ','1','yes'])expect(externalGameAssetsEnabled({AGENTV3_EXTERNAL_GAME_ASSETS:value})).toBe(true);
-  for(const value of [undefined,'','off','FALSE','0','typo'])expect(externalGameAssetsEnabled({AGENTV3_EXTERNAL_GAME_ASSETS:value})).toBe(false);
+it('uses the shared boolean flag convention: on when unset (admin 2026-11-20), off for negative values and for a typo', () => {
+  for(const value of [undefined,'','on','ON',' true ','1','yes'])expect(externalGameAssetsEnabled({AGENTV3_EXTERNAL_GAME_ASSETS:value})).toBe(true);
+  for(const value of ['off','FALSE','0','typo'])expect(externalGameAssetsEnabled({AGENTV3_EXTERNAL_GAME_ASSETS:value})).toBe(false);
 });

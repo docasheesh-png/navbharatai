@@ -16,6 +16,7 @@ import { withoutUrls } from './promptUrls';
 import { indicDomainMatches, usesIndicScript } from './indicDomainTerms';
 import { withoutMachineText } from './machineText';
 import { namesWellKnownGame } from './wellKnownGameTitles';
+import { requestSubject } from './requestSubject';
 
 export interface RequirementGaps {
   domain: string;
@@ -61,7 +62,7 @@ const AUDIT_LOG_FEATURE_RE =
 const DOMAINS: DomainDef[] = [
   {
     key: 'healthcare',
-    re: /hospital|clinic|patient|\bemr\b|\behr\b|health|medical|doctor|pharmacy|appointment|\blab\b|diagnos|\baspatal\b|\bmareez\b|\bdawai\b|\bdavai\b|\bdavakhana\b|\bilaj\b|\bchikitsa\b|\bswasthya\b|अस्पताल|क्लिनिक|मरीज|दवाई|दवाखाना|इलाज|चिकित्सा|स्वास्थ्य|डॉक्टर/i,
+    re: /hospital|clinic|(?<!im)patient|\bemr\b|\behr\b|health|medical|doctor|pharmacy|(?<!dis)appointment|\blab\b|diagnos|\baspatal\b|\bmareez\b|\bdawai\b|\bdavai\b|\bdavakhana\b|\bilaj\b|\bchikitsa\b|\bswasthya\b|अस्पताल|क्लिनिक|मरीज|दवाई|दवाखाना|इलाज|चिकित्सा|स्वास्थ्य|डॉक्टर/i,
     features: [
       { label: 'role-based access (staff / doctor / admin)', re: /role|rbac|permission|staff|admin|access control/i },
       { label: 'audit log of record changes', re: new RegExp(`${AUDIT_LOG_FEATURE_RE.source}|history`, 'i') },
@@ -169,7 +170,7 @@ const DOMAINS: DomainDef[] = [
     // records for `cart`/`shop`/`friend`, one level up (a word shared by five domains instead of a stem
     // hiding inside another word). It remains a FEATURE regex below, where it belongs: "does this
     // prompt mention billing?" is a real question; "is this a billing app, therefore SaaS?" is not.
-    re: /\bsaas\b|subscription|\bteam\b|workspace|tenant|\bb2b\b/i,
+    re: /\bsaas\b|subscription|\bteam\b|workspace|(?<!lieu)tenant|\bb2b\b/i,
     features: [
       { label: 'multi-tenant isolation', re: /multi.?tenant|tenant|workspace|organi[sz]ation/i },
       { label: 'team roles (RBAC)', re: /role|rbac|permission|team|member|invite/i },
@@ -184,7 +185,7 @@ const DOMAINS: DomainDef[] = [
     // "table" is far more often a data/pricing table than a restaurant one, so it turned a data-table
     // component into a reservations app. Genuine table booking still classifies here via `book` /
     // `reserve` / `reservation`, which is what actually carries the booking intent.
-    re: /\bbooks?\b|\bbooking\b|reservation|reserve|\bslot\b|rental|\brent\b|ticket/i,
+    re: /\bbooks?\b|\bbooking\b|(?<!p)reservation|(?<!p)reserve|\bslot\b|(?<!pa)rental|\brent\b|ticket/i,
     features: [
       { label: 'availability calendar', re: /calendar|availab|slot|schedul/i },
       { label: 'booking + confirmation', re: /book|reserv|confirm/i },
@@ -199,7 +200,7 @@ const DOMAINS: DomainDef[] = [
     key: 'education',
     // `\btutor` is closed to `\btutors?\b|tutoring`: the open prefix matched "tutorial", so any app
     // described as having a tutorial was classified as an education platform.
-    re: /\bschool\b|college|student|teacher|\bcourse\b|\blms\b|e-?learning|classroom|\bexam\b|\btutors?\b|tutoring|coaching|edtech|syllabus|curriculum|\bvidyalaya\b|\bpathshala\b|\bpadhai\b|\bshikshak\b|\bchhatra\b|\bkaksha\b|विद्यालय|पाठशाला|पढ़ाई|शिक्षक|छात्र|कक्षा|स्कूल|कॉलेज|परीक्षा/i,
+    re: /\bschool\b|college|student|teacher|\bcourse\b|\blms\b|(?<!r)e-?learning|classroom|\bexam\b|\btutors?\b|tutoring|coaching|edtech|syllabus|curriculum|\bvidyalaya\b|\bpathshala\b|\bpadhai\b|\bshikshak\b|\bchhatra\b|\bkaksha\b|विद्यालय|पाठशाला|पढ़ाई|शिक्षक|छात्र|कक्षा|स्कूल|कॉलेज|परीक्षा/i,
     features: [
       { label: 'roles (student / teacher / admin)', re: /role|rbac|permission|teacher|admin|staff/i },
       { label: 'courses & lessons / content', re: /course|lesson|module|content|curriculum|syllabus/i },
@@ -223,7 +224,7 @@ const DOMAINS: DomainDef[] = [
   },
   {
     key: 'restaurant',
-    re: /restaurant|\bcafe\b|\bmenu\b|\bdine\b|kitchen|\bkot\b|food.?order|eatery|canteen|\bpos\b|\bdhaba\b|\bbhojan\b|\bkhana\b|\brasoi\b|\bthali\b|\bnashta\b|ढाबा|भोजन|खाना|रसोई|थाली|नाश्ता|रेस्टोरेंट|मेन्यू|मेनू/i,
+    re: /restaurant|\bcafe\b|\bmenu\b|\bdine\b|kitchen|\bkot\b|food.?order|\beatery|canteen|\bpos\b|\bdhaba\b|\bbhojan\b|\bkhana\b|\brasoi\b|\bthali\b|\bnashta\b|ढाबा|भोजन|खाना|रसोई|थाली|नाश्ता|रेस्टोरेंट|मेन्यू|मेनू/i,
     features: [
       { label: 'menu management', re: /menu|dish|item|category|price/i },
       { label: 'table / order management (dine-in + takeaway)', re: /table|order|takeaway|dine|counter/i },
@@ -237,7 +238,7 @@ const DOMAINS: DomainDef[] = [
   // wins keeps all existing classifications byte-identical (e.g. "rent/ticket" still resolve to booking).
   {
     key: 'fintech',
-    re: /fintech|\bwallet\b|\bupi\b|\bloan\b|lending|\bbank(ing)?\b|\bemi\b|insurance|remittance|payout|\bledger\b|expense track|budgeting|neobank|\bkyc\b|\budhaar\b|\budhari\b|\bkhata\b|\bbahi\b|\blenden\b|\bbyaj\b|\bkarz\b|\bkist\b|उधार|खाता|बही|लेनदेन|ब्याज|कर्ज|किस्त/i,
+    re: /fintech|\bwallet\b|\bupi\b|\bloan\b|(?<!b)lending|\bbank(ing)?\b|\bemi\b|insurance|remittance|payout|\bledger\b|expense track|budgeting|neobank|\bkyc\b|\budhaar\b|\budhari\b|\bkhata\b|\bbahi\b|\blenden\b|\bbyaj\b|\bkarz\b|\bkist\b|उधार|खाता|बही|लेनदेन|ब्याज|कर्ज|किस्त/i,
     features: [
       { label: 'KYC / identity verification', re: /kyc|verif|identity|aadhaar|pan|document/i },
       { label: 'transaction ledger + statements', re: /ledger|transaction|statement|history|balance/i },
@@ -276,7 +277,7 @@ const DOMAINS: DomainDef[] = [
   },
   {
     key: 'events',
-    re: /\bevent\b|conference|festival|concert|meetup|webinar|\bexpo\b|\bgala\b|seminar|\bsummit\b|\bshaadi\b|\bshadi\b|\bvivah\b|\bsamaroh\b|\bmela\b|शादी|विवाह|समारोह|मेला|कार्यक्रम/i,
+    re: /\bevent\b|conference|festival|(?<!dis)concert|meetup|webinar|\bexpo\b|\bgala\b|seminar|\bsummit\b|\bshaadi\b|\bshadi\b|\bvivah\b|\bsamaroh\b|\bmela\b|शादी|विवाह|समारोह|मेला|कार्यक्रम/i,
     features: [
       { label: 'event listings + agenda / schedule', re: /listing|agenda|schedul|program|session|speaker/i },
       { label: 'ticket types + capacity', re: /ticket|capacity|seat|tier|pass/i },
@@ -816,9 +817,15 @@ export function indiaFirstGuidance(domain: string): string {
  */
 export const MEDIA_PLAYER_APP = /\b(?:music|audio|mp3|song|video|media|podcast|radio|fm)\s*[-\s]?\s*players?\b|(?:म्यूजिक|म्यूज़िक|संगीत|ऑडियो|वीडियो|गाने|गानों)\s*(?:का\s*)?प्लेयर/i;
 
+/** Money a game really handles — a wallet, real-money stakes, payouts — which makes it a regulated fintech product. */
+const REAL_MONEY_IN_A_GAME = /\bwallet\b|real[- ]?money|\bupi\b|\bkyc\b|payout|withdraw|\bbet(?:s|ting)?\b|\bwager|\bdeposit/i;
+
+const GAME_IS_THE_SUBJECT =
+  /(?:\bgames?|\bkhel|खेल|गेम|গেম|ગેમ|ਗੇਮ|ಗೇಮ್|கேம்|గేమ్|ഗെയിം)(?:\s+(?:app|banao|bana\s*do|banakar\s*do|bana\s*ke\s*do|banaun\s*de|chahiye|chahie|please|pls|for\s+me|बनाओ|बना\s*दो|चाहिए))*\s*[.!]*$/i;
+
 function selectDomain(text: string): DomainDef | undefined {
   if (MEDIA_PLAYER_APP.test(text)) return undefined;
-  return DOMAINS
+  const picked = DOMAINS
     // A request that NAMES a well-known game ("make a bgmi for me") is a game request even without the word (failedbr #2478).
     .filter((d) => d.re.test(text) || indicDomainMatches(d.key, text) || (d.key === 'game' && namesWellKnownGame(text)))
     .reduce<DomainDef | undefined>((best, d) => {
@@ -835,6 +842,19 @@ function selectDomain(text: string): DomainDef | undefined {
       // is byte-identical.
       return domainHeadlineHits(d, text) > domainHeadlineHits(best, text) ? d : best;
     }, undefined);
+  // 🔴 WHAT IS BEING MADE OUTRANKS WHAT IT CONTAINS (failedbr #2090, 2026-11-08). "Make a realistic cricket game with
+  // … dressing room and hospital gym bus flight" tied game and healthcare on features (0–0) and headline words (1–1),
+  // and array order handed it to healthcare: the game was given EMR, pharmacy and staff roles, and no game kit. A game
+  // names real places all the time (a hospital, a school, a gym). So when the request's own subject is a game ("…
+  // cricket game", "…game banao"), the game wins unless the other domain has MORE feature signals than the game, or the
+  // game handles real money: a fantasy cricket game with a wallet and real-money prizes is a regulated product and
+  // stays fintech with its KYC guidance (BR1985), while a bank-robbery game is a game. A "game store app" never
+  // reaches here: its subject's head noun is "app".
+  const game = DOMAINS.find((d) => d.key === 'game');
+  const realMoney = picked?.key === 'fintech' && REAL_MONEY_IN_A_GAME.test(text);
+  if (picked && game && picked !== game && !realMoney && GAME_IS_THE_SUBJECT.test(requestSubject(text))
+    && domainFeatureScore(picked, text) <= domainFeatureScore(game, text)) return game;
+  return picked;
 }
 
 /** How many DISTINCT words of a domain's headline the prompt names (+1 when it names it in an Indic

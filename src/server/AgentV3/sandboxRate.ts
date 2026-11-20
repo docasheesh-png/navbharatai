@@ -40,6 +40,7 @@
 // in a console only the admin can reach (fourth absolute rule, step 6).
 //
 // Pure — no I/O, no clock.
+import { usdAmount } from '../lib/usdAmount';
 
 /**
  * E2B's published per-resource prices, in USD per hour.
@@ -149,7 +150,7 @@ export function rateMismatch(env: NodeJS.ProcessEnv = process.env): RateMismatch
   const direction = ratio < 1 ? 'UNDER-states' : 'OVER-states';
   const note =
     `Sandbox rate check: E2B_USD_PER_HOUR is $${configured} per hour, but this template `
-    + `(${vcpu} vCPU / ${ram} GB) costs $${implied.toFixed(4)} per running hour. `
+    + `(${vcpu} vCPU / ${ram} GB) costs $${usdAmount(implied)} per running hour. `
     + `Every VM cost figure ${direction} the real spend by about ${Math.abs(ratio - 1) * 100 < 1000 ? (Math.abs(ratio - 1) * 100).toFixed(0) : '999+'}%. `
     + `Fix it in Cloud Run: set E2B_USD_PER_HOUR=${implied.toFixed(4)}.`;
   return { configured, implied, ratio: Math.round(ratio * 1000) / 1000, note };

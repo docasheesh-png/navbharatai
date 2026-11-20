@@ -96,6 +96,17 @@ const MUSIC_AND_AI_TERMS = [
 ];
 for (const t of MUSIC_AND_AI_TERMS) COMMON_ACRONYMS.add(t);
 
+/**
+ * Exam and classroom terms: what a study app contains, never a service to connect to (failedbr #2094, 2026-11-08: a
+ * Class 9 test-bank app asked for "100 MCQ questions" per subject, and the builder was told MCQ was an unknown name it
+ * must not build a client for). The boards (CBSE, NCERT, JEE…) were already known; the question formats were not.
+ */
+const EDUCATION_TERMS = [
+  'MCQ', 'MCQS', 'PYQ', 'PYQS', 'OMR', 'SGPA', 'HSC', 'SSLC', 'PUC', 'NTA', 'CUET', 'TET', 'CTET', 'NDA', 'CDS',
+  'BPSC', 'MPSC', 'RPSC', 'UPPSC', 'RRB', 'BSEB', 'LKG', 'UKG', 'FAQ', 'FAQS',
+];
+for (const t of EDUCATION_TERMS) COMMON_ACRONYMS.add(t);
+
 /** Services, platforms and stacks NavBharatAI knows by name — the request may really mean to connect them. */
 const KNOWN_SERVICES = new Set([
   'STRIPE', 'RAZORPAY', 'CASHFREE', 'PAYTM', 'PHONEPE', 'PAYPAL', 'FIREBASE', 'SUPABASE', 'MONGODB', 'MYSQL',

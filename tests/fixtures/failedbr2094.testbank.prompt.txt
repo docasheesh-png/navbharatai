@@ -1,0 +1,117 @@
+PROFESSIONAL EDUCATION APP PROMPT – TEST BANK
+
+Create a professional, modern, mobile-friendly education application named TEST BANK exclusively for Class 9 students.
+
+1. App Details
+
+- App Name: TEST BANK
+- Target Class: Class 9 only
+- Board: All Indian Education Boards
+- Language: Hindi and English
+- Design: Professional, modern and attractive
+- Theme: Blue, white and dark mode
+- Platform: Android and mobile-friendly web app
+
+2. Subjects and Questions
+
+Add 100 MCQ questions for EACH subject:
+
+1. Mathematics – 100 Questions
+2. Science – 100 Questions
+3. Physics – 100 Questions
+4. Chemistry – 100 Questions
+5. Biology – 100 Questions
+6. Social Science – 100 Questions
+7. History – 100 Questions
+8. Geography – 100 Questions
+9. Political Science – 100 Questions
+10. Economics – 100 Questions
+11. English – 100 Questions
+12. Hindi – 100 Questions
+13. Urdu – 100 Questions
+14. Sanskrit – 100 Questions
+15. General Knowledge – 100 Questions
+
+Total: 1,500 MCQ Questions.
+
+Important: Avoid duplicate questions. Follow the Class 9 syllabus and organize questions chapter-wise.
+
+3. MCQ Test System
+
+- Every question must have 4 options: A, B, C, D.
+- Only one correct answer.
+- Show correct answers after submission.
+- Show explanations for answers.
+- Next and Previous buttons.
+- Question navigation.
+- Countdown timer.
+- Submit Test button.
+- Automatic score calculation.
+- Negative marking option.
+
+4. Results System
+
+After completing a test, display:
+
+- Total Questions
+- Correct Answers
+- Wrong Answers
+- Unattempted Questions
+- Total Marks
+- Percentage
+- Performance report
+
+5. Additional Features
+
+- Subject-wise tests
+- Chapter-wise tests
+- Random MCQ practice
+- Daily practice test
+- Mock examination
+- Previous test history
+- Bookmark important questions
+- Search questions
+- Hindi and English language selection
+- Dark mode
+- Offline question access where supported
+
+6. Admin Panel
+
+Create an admin panel where the administrator can:
+
+- Add new questions
+- Edit questions
+- Delete questions
+- Add new subjects
+- Upload question banks
+- Update correct answers
+- Add explanations
+- Update app content
+
+7. Home Screen
+
+Create an attractive home screen with:
+
+- TEST BANK Logo
+- Welcome to TEST BANK
+- Class 9
+- All Subjects
+- Start Practice
+- Mock Test
+- Daily Quiz
+- My Results
+- Settings
+
+8. Important Technical Requirements
+
+- Build a fully functional application, not just a UI demo.
+- Save test results and user progress.
+- Use a database for storing questions.
+- Make the app responsive on Android phones.
+- Keep the app lightweight and fast.
+- Do not use fake buttons or placeholder questions.
+- Include all 1,500 properly written questions.
+- Organize the project so questions can be updated later.
+- Provide a working preview and a downloadable Android APK if supported.
+
+FINAL GOAL: Build TEST BANK as a complete Class 9 MCQ examination application with 15 subjects, 100 unique questions per subject, 4 options per question, correct answers, explanations and a complete examination system.

@@ -11,6 +11,7 @@
 // trips it. A FREE build (billedUsd 0) never trips it — but a free build runs only on the cheap weak-tier
 // engines (Claude excluded by construction), so it is not a runaway-cost risk in the first place. Pure +
 // deterministic (the decision) so it is unit-testable independently of the report renderer.
+import { usdAmount } from '../lib/usdAmount';
 
 /** The admin-set per-build cost-alert threshold in USD, from `AGENTV3_COST_ALERT_USD`. 0 (or unset /
  *  non-positive / unparseable) means the alert is OFF — no report ever changes. */
@@ -30,5 +31,5 @@ export function costAlertAdvisory(billedUsd: number | undefined, thresholdUsd: n
   if (!(thresholdUsd > 0)) return null;                 // alert disabled
   if (typeof billedUsd !== 'number' || !Number.isFinite(billedUsd)) return null;
   if (billedUsd < thresholdUsd) return null;            // under the threshold — no alert
-  return `⚠️ COST ALERT: this build charged $${billedUsd.toFixed(4)}, crossing the $${thresholdUsd.toFixed(2)} alert threshold (AGENTV3_COST_ALERT_USD). Review the token usage / tier above.`;
+  return `⚠️ COST ALERT: this build charged $${usdAmount(billedUsd)}, crossing the $${thresholdUsd.toFixed(2)} alert threshold (AGENTV3_COST_ALERT_USD). Review the token usage / tier above.`;
 }

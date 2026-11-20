@@ -322,8 +322,9 @@ describe('BR1984: a pre-timer Surplus scope call is not reported as a zero-secon
       ok: true,
     });
     const note = d.report().issues.find((i) => i.code === 'TIME_TO_FIRST_CALL')!.message;
-    expect(note).toContain('4.8s latency');
-    expect(note).toContain('cannot be separated');
+    // Q-2746: the pre-build call is now named in plain words (started before the build's timer, not counted).
+    expect(note).toContain('4.8s model call');
+    expect(note).toContain("started before this build's timer");
     expect(note).not.toContain('first call itself then took 0s');
     expect(note).not.toContain('0s of preparation');
     expect(d.report().llmCalls?.[0].latencyMs).toBe(4774);

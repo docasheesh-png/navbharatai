@@ -74,7 +74,8 @@ describe('the report\'s 26 already-published preview results do not buy fresh lo
     const out = await runPreviewScript(Array.from({ length: 26 }, (_, i) => preview(i)));
     expect(out.result.ok).toBe(false);
     expect(out.result.summary).toContain('steps that do nothing');
-    expect(out.runnerDispatches).toHaveLength(8);
+    // Q-3018: update_preview is steered from its 2nd unchanged repeat (2, 4, 8 …), so FINAL comes at 4 and the run ends at 6.
+    expect(out.runnerDispatches).toHaveLength(6);
     expect(out.calls).toBeLessThan(13);
     expect(JSON.stringify(out.messages)).toContain('LOOP GUARD — FINAL');
     expect(JSON.stringify(out.messages)).not.toContain('This call is banned for the rest');
@@ -84,9 +85,9 @@ describe('the report\'s 26 already-published preview results do not buy fresh lo
   it('a real edit after FINAL resets the epoch and its no-op ending; a needed preview in that same turn still runs', async () => {
     const edit = { id: 'source-edit', name: 'write_file', input: { path: 'src/style.css', content: 'main { margin: 0; }' } };
     const script: (ScriptTool | ScriptTool[])[] = [
-      ...Array.from({ length: 7 }, (_, i) => preview(i)),
-      [edit, preview(7)],
-      preview(8), preview(9),
+      ...Array.from({ length: 5 }, (_, i) => preview(i)), // past FINAL (4) under the 2-repeat preview threshold (Q-3018)
+      [edit, preview(5)],
+      preview(6), preview(7),
     ];
     const out = await runPreviewScript(script);
     expect(out.result.ok).toBe(true);
@@ -144,7 +145,7 @@ describe('only an observed successful no-change receipt can lose its mutation se
       expect(isNoOpTurn([call], () => false, (tu) => isNoEffectToolCall(state, tu))).toBe(true);
     }
     expect(state.mutations).toBe(0);
-    expect(nudges).toEqual([3, 6, 12, 24]);
+    expect(nudges).toEqual([2, 4, 8, 16]); // Q-3018: a refused refresh is already one warning
   });
 
   it.each([

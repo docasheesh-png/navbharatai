@@ -143,8 +143,9 @@ describe('BR1985: a pre-timer model call is not reported as a zero-second first 
       ok: true,
     });
     const note = d.report().issues.find((i) => i.code === 'TIME_TO_FIRST_CALL')!.message;
-    expect(note).toContain('20.4s latency');
-    expect(note).toContain('cannot be separated');
+    // Q-2746: same intent, plain words — the pre-build call is named and not counted as setup.
+    expect(note).toContain('20.4s model call');
+    expect(note).toContain("started before this build's timer");
     expect(note).not.toContain('first call itself then took 0s');
     expect(note).not.toContain('0s of preparation');
   });

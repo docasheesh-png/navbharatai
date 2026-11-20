@@ -1,0 +1,93 @@
+Build a modern, professional, fully responsive Driver Booking App called "DriveEasy".
+
+The app should allow customers to easily book professional drivers for their personal vehicles, outstation trips, local travel, and hourly requirements.
+
+DESIGN:
+- Modern, premium, clean UI.
+- Mobile-first responsive design.
+- Attractive colors: dark navy blue, white, and orange.
+- Easy navigation and smooth animations.
+- Professional dashboard with intuitive icons.
+
+CUSTOMER FEATURES:
+1. User registration and login using mobile number, OTP, and email.
+2. Customer profile management.
+3. Book a driver by entering:
+   - Pickup location
+   - Drop location
+   - Pickup date
+   - Pickup time
+   - Vehicle type
+   - Trip type
+4. Booking categories:
+   - Local Driver
+   - Outstation Driver
+   - Full-Day Driver
+   - Hourly Driver
+   - Monthly Driver
+   - Airport Pickup/Drop
+5. Display available drivers with:
+   - Profile photo
+   - Name
+   - Experience
+   - Ratings and reviews
+   - Price
+   - Availability
+6. Real-time driver tracking using GPS.
+7. Booking confirmation and cancellation.
+8. Online payment and cash payment options.
+9. Booking history.
+10. Customer ratings and reviews.
+11. Notifications for booking updates.
+12. Customer support and emergency contact.
+
+DRIVER FEATURES:
+1. Driver registration and login.
+2. Driver profile with photo and details.
+3. Upload driving licence and verification documents.
+4. Set availability status.
+5. Accept or reject booking requests.
+6. View customer pickup and destination details.
+7. GPS navigation.
+8. Earnings dashboard.
+9. Booking history.
+10. Customer ratings and reviews.
+
+ADMIN PANEL:
+1. Admin login.
+2. Manage customers and drivers.
+3. Approve and verify drivers.
+4. Manage bookings.
+5. Manage pricing and commissions.
+6. Track active trips.
+7. Manage payments and refunds.
+8. View reports and analytics.
+9. Handle customer complaints.
+10. Send notifications.
+
+PAYMENT SYSTEM:
+- UPI
+- Google Pay
+- PhonePe
+- Paytm
+- Debit/Credit Cards
+- Cash
+
+ADDITIONAL FEATURES:
+- Google Maps integration.
+- Live GPS tracking.
+- Automatic fare calculation.
+- Driver availability management.
+- Referral and discount coupons.
+- WhatsApp booking notifications.
+- Multi-language support.
+- Secure authentication and data storage.
+
+IMPORTANT:
+Build a fully functional application, not just a static design.
+Connect the frontend to a backend and database.
+Create separate customer, driver, and admin dashboards.
+Make every button and booking workflow functional.
+Use clean, scalable code and secure APIs.
+
+The final application should work smoothly on Android, iOS, and desktop browsers.

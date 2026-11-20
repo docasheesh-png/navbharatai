@@ -323,6 +323,9 @@ const normTitle = (t: string): string => t.toLowerCase().replace(/[^a-z0-9]+/g, 
  *   • fewer than MIN_ROADMAP_STEPS survivors ⇒ null (not a real roadmap — the caller builds directly).
  * Pure; never throws.
  */
+/** A native mobile stack named in a step: React Native, Expo, Flutter, SwiftUI, Jetpack Compose, Kotlin, Ionic. */
+const NATIVE_STACK = /\breact[- ]?native\b|\bexpo\b|\bflutter\b|\bswift\s?ui\b|\bjetpack\s+compose\b|\bkotlin\b|\bionic\b/i;
+
 export function roadmapGuardrail(
   parsed: { userMessage?: string; achievableSummary: string; note: string | null; steps: Array<{ title: string; goal: string; buildPrompt: string; needsInfra: string | null }> } | null,
   famousApp: string | null,
@@ -338,6 +341,17 @@ export function roadmapGuardrail(
     && !requiresSingleHtml(architecture.originalRequest)
     && parsed.steps.some((step) => requiresSingleHtml(step.buildPrompt))) {
     return { roadmap: null, rejected: [`roadmap architecture conflicts with selected ${architecture.framework}: single HTML is a planner choice, not a user constraint`] };
+  }
+
+  // failedbr #2086 (2026-11-08, "an app like instagram with games"): step 1 said "Create a React Native app with
+  // Firebase authentication" though the user named no stack and the project is a Vite web app. Every lane obeyed the
+  // step: the fast lane planned react-navigation and react-native-paper, its files could not compile, and the full
+  // builder spent the rest of the run converting them to web until the user stopped it. A native stack the user did
+  // not ask for is the planner's choice, the same class as the invented single-HTML policy above.
+  if (architecture && architecture.framework === 'vite-react'
+    && !NATIVE_STACK.test(architecture.originalRequest)
+    && parsed.steps.some((step) => NATIVE_STACK.test(step.buildPrompt))) {
+    return { roadmap: null, rejected: [`roadmap architecture conflicts with selected ${architecture.framework}: a native mobile stack is a planner choice, not a user constraint`] };
   }
 
   if (architecture && parsed.steps.some(step => gameDimensionConflict(architecture.originalRequest, step.buildPrompt))) {

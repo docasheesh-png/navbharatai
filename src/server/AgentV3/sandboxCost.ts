@@ -27,6 +27,7 @@
  * verified against two consecutive invoices to the cent. Do not reintroduce a local default here.
  */
 export { sandboxUsdPerHour } from './sandboxRate';
+import { usdAmount } from '../lib/usdAmount';
 import { sandboxUsdPerHour, rateMismatchNote } from './sandboxRate';
 
 export interface SandboxCostRecord {
@@ -64,7 +65,7 @@ export function sandboxCost(seconds: unknown, env: NodeJS.ProcessEnv = process.e
 export function describeSandboxCost(cost: SandboxCostRecord | null, buildSeconds?: number): string {
   if (!cost) return 'Sandbox time  : not measured';
   const mins = (cost.seconds / 60).toFixed(1);
-  const base = `Sandbox time  : ${mins} min  ≈ $${cost.usd.toFixed(4)} (estimated infra cost)`;
+  const base = `Sandbox time  : ${mins} min  ≈ $${usdAmount(cost.usd)} (estimated infra cost)`;
   const b = Number(buildSeconds);
   if (!Number.isFinite(b) || b <= 0 || cost.seconds <= b) return base;
   const idle = ((cost.seconds - b) / 60).toFixed(1);
@@ -143,13 +144,13 @@ export function sandboxBillingNote(
     const measured = cost && billedSeconds != null && Number.isFinite(billedSeconds) && billedSeconds >= 0
       ? sandboxCost(Math.min(cost.seconds, billedSeconds), env) : cost;
     const expense = sandboxExpenseUsd(measured, env);
-    return `Sandbox infrastructure: ${expense > 0 ? `$${expense.toFixed(4)} at configured rate` : 'expense unavailable'}. Internal expense only; customer sandbox service fee is 2.5% of the discounted pre-sandbox subtotal.`;
+    return `Sandbox infrastructure: ${expense > 0 ? `$${usdAmount(expense)} at configured rate` : 'expense unavailable'}. Internal expense only; customer sandbox service fee is 2.5% of the discounted pre-sandbox subtotal.`;
   }
   if (!cost || !(cost.usd > 0)) return 'Sandbox time: not measured on this build.';
   const on = String(env.AGENTV3_BILL_SANDBOX || '').trim().toLowerCase() === 'on';
   const rate = Number(env.E2B_USD_PER_HOUR);
   const rateSet = Number.isFinite(rate) && rate > 0;
-  if (!on) return `Sandbox ${cost.seconds}s ≈ $${cost.usd.toFixed(4)} — absorbed by NavBharatAI (AGENTV3_BILL_SANDBOX is off).`;
+  if (!on) return `Sandbox ${cost.seconds}s ≈ $${usdAmount(cost.usd)} — absorbed by NavBharatAI (AGENTV3_BILL_SANDBOX is off).`;
   if (!rateSet) {
     return `Sandbox ${cost.seconds}s — NOT billed: E2B_USD_PER_HOUR is unset, so the only available rate is a placeholder. `
       + 'Set the real rate from your E2B plan to start charging for it.';
@@ -159,10 +160,10 @@ export function sandboxBillingNote(
   const billed = Number(billedSeconds);
   const capped = Number.isFinite(billed) && billed >= 0 && billed < cost.seconds;
   const base = capped
-    ? `Sandbox ${cost.seconds}s held ≈ $${cost.usd.toFixed(4)} at $${rate}/hr; `
+    ? `Sandbox ${cost.seconds}s held ≈ $${usdAmount(cost.usd)} at $${rate}/hr; `
       + `${Math.round(billed)}s of it reached this build's real cost before markup `
-      + `(≈ $${sandboxCost(billed)!.usd.toFixed(4)}) — the rest is idle time between builds, which is never billed twice.`
-    : `Sandbox ${cost.seconds}s ≈ $${cost.usd.toFixed(4)} at $${rate}/hr — included in this build's real cost before markup.`;
+      + `(≈ $${usdAmount(sandboxCost(billed)!.usd)}) — the rest is idle time between builds, which is never billed twice.`
+    : `Sandbox ${cost.seconds}s ≈ $${usdAmount(cost.usd)} at $${rate}/hr — included in this build's real cost before markup.`;
   // A configured rate that contradicts the machine it prices is the one failure this line cannot show
   // on its own: it would read as a confident, itemised, wrong number. See sandboxRate.ts.
   const mismatch = rateMismatchNote(env);

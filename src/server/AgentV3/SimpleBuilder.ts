@@ -244,11 +244,40 @@ export function dropUnchangedScaffold(
   const scaffold = new Set(scaffoldPaths);
   const dropped: string[] = [];
   const kept = manifest.filter((m) => {
-    const unchanged = scaffold.has(m.path) && UNCHANGED_PURPOSE_RE.test(m.purpose || '');
+    const unchanged = scaffold.has(m.path) && (UNCHANGED_PURPOSE_RE.test(m.purpose || '') || describesOnlyTheDefault(m.path, m.purpose || ''));
     if (unchanged) dropped.push(m.path);
     return !unchanged;
   });
   return { kept, dropped };
+}
+
+/**
+ * 🔴 A SCAFFOLD FILE DESCRIBED ONLY BY WHAT IT ALREADY IS (failedbr #1798, 2026-11-20). Planning a counter app, the model
+ * listed `package.json :: Project dependencies and scripts for Vite React TypeScript setup`, `vite.config.ts :: Vite
+ * configuration file for React plugin and build settings`, `src/main.tsx :: Entry point rendering the App component
+ * within React.StrictMode` and `index.html :: HTML template with root div for React app mounting`. None says
+ * "(provided)", so all four were generated — `package.json` and `vite.config.ts` came back as byte-copies of the
+ * starter after 68 s and 102 s — and the lane ran out of budget before `src/App.tsx`, the only file the app needed.
+ *
+ * For these four scaffold files, a purpose made only of the words that describe the default file names no change, and
+ * is read exactly like "(unchanged)". Any other word keeps it: "including react-router-dom", "wraps App in a
+ * BrowserRouter", "sets the page title". PURE.
+ */
+const DEFAULT_SCAFFOLD_FILE = /^(?:package\.json|vite\.config\.[cm]?[jt]s|index\.html|src\/main\.[jt]sx?)$/;
+const DEFAULT_PURPOSE_WORDS = new Set([
+  'a', 'an', 'the', 'and', 'for', 'of', 'to', 'in', 'into', 'with', 'within', 'on', 'that', 'this', 'its', 'it',
+  'project', 'app', 'application', 'react', 'vite', 'typescript', 'ts', 'tsx', 'js', 'jsx', 'node', 'npm',
+  'dependencies', 'dependency', 'deps', 'scripts', 'script', 'setup', 'set', 'up', 'configuration', 'config', 'configured',
+  'file', 'plugin', 'plugins', 'build', 'builds', 'settings', 'dev', 'development', 'server', 'basic', 'standard', 'default',
+  'entry', 'point', 'rendering', 'renders', 'render', 'component', 'root', 'strictmode', 'mounting', 'mount', 'mounts',
+  'main', 'dom', 'element', 'html', 'template', 'div', 'page', 'document', 'module', 'modules', 'bootstrap', 'bootstraps',
+  'tooling', 'metadata', 'manifest', 'package', 'packages', 'library', 'libraries', 'required', 'necessary', 'needed',
+]);
+export function describesOnlyTheDefault(path: string, purpose: string): boolean {
+  if (!DEFAULT_SCAFFOLD_FILE.test(String(path ?? ''))) return false;
+  const words = String(purpose ?? '').toLowerCase().match(/[a-z0-9@][a-z0-9@._/-]*/g) ?? [];
+  if (words.length === 0) return false;
+  return words.every((w) => w.split(/[._/-]+/).filter(Boolean).every((part) => DEFAULT_PURPOSE_WORDS.has(part)));
 }
 
 /**

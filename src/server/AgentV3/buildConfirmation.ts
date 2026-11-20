@@ -83,6 +83,21 @@ export function requestsADocument(message: string): boolean {
   return (text.match(DOCUMENT_IMPERATIVE) ?? []).length >= 2;
 }
 
+/**
+ * 🔴 "NHI BANAO" IS "DON'T BUILD" (failedbr #1270, 2026-11-20). The whole message was "Nhi banao" — do not make it — and
+ * the keyword ladder read "banao" as an unmistakable order (`explicit-order`, high confidence); "mat banao" / "na banao" /
+ * "abhi mat banao" confirmed too. A negation word IMMEDIATELY BEFORE the build verb is a refusal: "na" after the verb
+ * ("bana do na") is the polite tag and stays an order. The order is still found anywhere else in the message, so
+ * "ads mat banao, game banao" builds.
+ */
+const NEGATED_ORDER = /(?:^|[\s,.!?।])(?:mat|mt|nahi|nahin|nhi|nai|na|no)\s+(?:abhi\s+)?(?:banao|bnao|banaao|banaiye|banaye|banado|bana\s+do|bnado|banana|bana|karo|kro|kar\s+do|build|make|create)\b|(?:मत|नहीं|ना)\s+बना(?:ओ|इए|ना|\s+दो)?|\b(?:don'?t|do\s+not|dont|never)\s+(?:build|make|create)\s+(?:it|this|that|anything|an?\s+app|the\s+app)?\b/gi;
+export function declinesTheBuild(message: string): boolean {
+  const text = String(message ?? '');
+  if (!new RegExp(NEGATED_ORDER.source, 'i').test(text)) return false;
+  const rest = text.replace(NEGATED_ORDER, ' ');
+  return !firstNewBuildOrder(rest.toLowerCase()) && !/\b(?:banao|bnao|banado|bana\s+do|banaiye|build|make|create)\b/i.test(rest);
+}
+
 /** The Devanagari `बना-` family ("बनाओ", "बना दो") — the order no Roman list can see. */
 const DEVANAGARI_BUILD_VERB = /बन(?:ा|वा)/;
 
@@ -94,6 +109,7 @@ export type BuildConfirmationReason =
   | 'pasted-source'
   | 'names-something-to-build'
   | 'asks-for-a-document'
+  | 'declines-the-build'
   | 'question'
   | 'names-nothing-to-build';
 
@@ -113,6 +129,8 @@ export function buildConfirmation(message: string): BuildConfirmation {
   // Defense in depth: a bare file location is not a build order, even if another classifier changes.
   if (isSourcePathOnly(text)) return { confirmed: false, reason: 'names-nothing-to-build' };
   const lower = text.toLowerCase();
+  // failedbr #1270: "nhi banao" / "mat banao" refuses the build; it never confirms one.
+  if (text && declinesTheBuild(text)) return { confirmed: false, reason: 'declines-the-build' };
   // failedbr #1420 / #1430: a document is written in chat (its reply offers the build), even after "create" / "design".
   if (text && requestsADocument(text)) return { confirmed: false, reason: 'asks-for-a-document' };
   if (text && isExplicitCompleteBuild(text)) return { confirmed: true, reason: 'complete-build' };
@@ -181,6 +199,9 @@ export function isOfferAcceptance(message: string): boolean {
     .map((w) => w.trim())
     .filter(Boolean);
   if (words.length === 0 || words.length > 8) return false;
+  // failedbr #1270: "na banao" (don't build) was a YES because "na" is a filler — as the tag AFTER a verb it is ("bana do
+  // na"); BEFORE one it is the refusal. Any refusal is never an acceptance.
+  if (declinesTheBuild(String(message ?? ''))) return false;
   let decisive = false;
   for (const w of words) {
     if (YES_WORDS.has(w) || DO_IT_WORDS.has(w)) { decisive = true; continue; }

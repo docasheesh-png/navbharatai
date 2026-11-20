@@ -103222,6 +103222,7 @@ Ledger, older reports #1533–#1432 (2026-11-20, next PR):
 Ledger, older reports #1430–#1358 (2026-11-20, next PR):
 - #1430, #1420 — Q-3120 (a document request is answered, not built).
 - #1384, #1373 — Q-3121 (game titles and ranks are not services).
+- #1270 — Q-3122 (a refusal such as "Nhi banao" is neither a build order nor a yes to our offer).
 - KIMI "suspended due to insufficient balance" in 11 of these reports — Q-1210 (blocked: the provider account's balance).
 - #1359 — "stopped before the app was running" after a 908 s render with the stop at 945 s, billed at cost (in the user's favour): fixed on main (`earliestRenderProof`, a75153ab); its "clone of GTA" reading came from an earlier request in the planning context (needsIntent / subject rule on main).
 - #1419 — a 8 s LAPSED game-runtime recipe left no kit; the builder was told to run the recipes itself (honest), recorded.

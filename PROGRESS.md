@@ -102909,6 +102909,28 @@ Closed Q-2962, Q-2963, Q-2965 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_C
 - Q-2965 (#2339): a seeded game kit always skips the fast lane (`fastLaneSkipsGame(domain, env, kitSeededCount)`), so the lane can never regenerate files over the kit.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964 (blocked, each with what it needs).
 
+## 2026-11-20 — An old game would not open from history: "HTTP 404: Conversation not found" for a `v3_` id
+
+Admin report: opening an old game showed "This chat's transcript hasn't reached the server yet …" with the
+diagnostic `server refused the transcript (HTTP 404: Conversation not found.) for id v3_95865209-…`.
+
+- **Root cause.** The history list loads only the 50 most recent apps from the server; an older app shows up
+  only through its `chat_sessions` row, whose id is `v3_<sid>`. To open it, `candidateConversationIds` tried
+  `v3_<sid>`, `agentv3-<uid>-<sid>` and `agentv3-anon-<sid>`. It did NOT try the bare `<sid>`, where a
+  **duplicated app's** record lives, and nothing could find a record saved under a **random id** (builds from
+  before conversationId = workspaceId). Answer: 404.
+- **Class.** Two copies of "which ids can a session's record have" had drifted: `conversationIdCandidatesForWorkspace`
+  (build path) knew the bare-session-id case, `candidateConversationIds` (open, delete, pin, duplicate, rename,
+  unsend) did not.
+- **Fix.** `candidateConversationIds` now derives the session from either form of the id and reuses
+  `conversationIdCandidatesForWorkspace`, so both lists are one. `conversationLookupIds` adds, as the last
+  resort, the ids of this user's records for that workspace (`listIdsByWorkspace`, an owner-filtered
+  two-field equality query that needs no composite index). All six routes use it.
+- **Locked by** `tests/aDuplicatedAppOpensFromHistory.test.ts`, using the report's session id. Reverting
+  either half fails it (2 tests fail for the candidate list, 1 for the old-record lookup). A census guard
+  fails if a route builds its own candidate list again.
+- **Not verified.** Which of the two shapes this specific game had: production data was not readable from
+  this session. **Watch for:** the same game now opens with its messages.
 ## 2026-11-20 — failedbr #2318 / #2306 / #2399 resolved (#4361 merged)
 
 Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).

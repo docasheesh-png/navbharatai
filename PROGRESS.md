@@ -103006,3 +103006,19 @@ Ledger for the next PR (rows Q-2987…Q-2989):
 - #2257 — no defect: the user stopped 2.8 min in after the app rendered; the two warnings are accurate notes on an unfinished tree.
 - #2256 (and #2252, same workspace) — the same class as Q-2979 (a game split into project modules, module 3 of 14); resolved by #4369.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971, Q-2974, Q-2975, Q-2977, Q-2984 (blocked, each with what it needs).
+
+## 2026-11-20 — Real-money betting apps are not built; pretend-chip games are (admin point 9)
+
+- **Admin decision:** "other app builder jo karte hai, same karo". Published policies: Bolt (StackBlitz) and Builder.io
+  forbid UNLAWFUL gambling (Builder.io: only with licences); Replit lists gambling among illegal uses. India's Promotion
+  and Regulation of Online Gaming Act, 2025 bans every real-money online game (offering/facilitating: cognizable,
+  non-bailable). Same standard for an Indian platform ⇒ never the real-money part.
+- **Fix:** `REAL_MONEY_GAMBLING` (`illegal`) in `illegalContentRules.ts` — subject (betting/casino/satta/poker/rummy/
+  teen patti/fantasy league/lottery) AND context (deposit, withdraw, cash out, real money, cash prizes, UPI top-up,
+  paise lagao/jeeto). Negated mentions skipped inside the pattern (before AND after), because the publish scanner has no
+  exempt step and our own board-games kit says "Real-money play is not something this pack supports" beside Teen Patti.
+  Exempt: de-addiction/helpline/awareness apps. All nine other Indian scripts (census), with word-end guards
+  (ಚಟ/ಚಟುವಟಿಕೆ). The refusal now names the 2025 Act and offers the same game with pretend chips (EN + HI); all 7
+  `blockMessage` callers pass `triage.ruleId` (census test). AppKnowledgeBase updated.
+- **Lock:** `tests/realMoneyBettingIsNotBuilt.test.ts` (24). Reversion proofs: class, leading negation, trailing
+  negation, exemption, generic message, a caller dropping the rule, the ಚಟ word-end — each fails.

@@ -231,7 +231,7 @@ import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessTimeoutMs, readinessVerdict, unassessedReadinessReport, type ExtraFinding, type ReadinessReport } from './Readiness';
-import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
+import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker, starterPreviewNote } from './stillTheStarterApp';
 import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE, entryFirstWriteNote } from './earlyPreview';
 import { autoStyleFloorEnabled, autoStyleSheet, withAutoStyleImport, keepAutoStyleImport, AUTO_STYLE_PATH } from './autoStyleFloor';
 import { entryAutoWireEnabled, isAutoWiredEntry, isScreenPath, zeroPropExport, childrenOnlyProvider, autoWiredEntry, autoWiredNote, type WiredExport } from './entryAutoWire';
@@ -12641,7 +12641,16 @@ export class ToolDispatcher {
             + ` its web page is served on port ${appPortMap.preview}. A person opening the preview should see the web page,`
             + ` so once that server is up, call update_preview with port=${appPortMap.preview}.`
           : '';
-        return `Live preview published (port ${port} verified UP).${secondary} Internal url for your own tool calls only, NEVER to be quoted in your reply to the user: ${url}`;
+        // A preview of the untouched starter is UP, and that is not the same fact as "your app is up" (failedbr #1275).
+        let starterNote = '';
+        if (!this._starterExpected) {
+          try {
+            starterNote = starterPreviewNote(await entryIsStillTheStarter(
+              (path) => withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'preview-starter-read'),
+            ));
+          } catch { starterNote = ''; }
+        }
+        return `Live preview published (port ${port} verified UP).${secondary}${starterNote} Internal url for your own tool calls only, NEVER to be quoted in your reply to the user: ${url}`;
       }
 
       case 'task': {

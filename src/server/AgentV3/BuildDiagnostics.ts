@@ -361,6 +361,8 @@ export const PROCESS_ONLY_CODES = new Set([
   'OUTCOME_AI_PAUSED',
   // …and a turn that ended by asking the user a question (autopsy 35bd9e17): a hand-back, not a finding.
   'OUTCOME_ASKED_USER',
+  // …and a turn the model declined with an honest answer (failedbr #2246): an answer, not a finding.
+  'OUTCOME_DECLINED',
 ]);
 
 /**
@@ -1207,7 +1209,7 @@ export class BuildDiagnostics {
     }
     // Outcomes are facts, not narration. The route's generic onNote adapter labels notes as
     // info/auto-resolved; restore the canonical severity so the final outcome cannot be hidden.
-    if (issue.code === 'OUTCOME_ASKED_USER') {
+    if (issue.code === 'OUTCOME_ASKED_USER' || issue.code === 'OUTCOME_DECLINED') {
       issue = { ...issue, phase: 'build', severity: 'info', autoResolved: false };
     } else if (issue.code === 'OUTCOME_EMPTY_BUILD' || issue.code === 'OUTCOME_SANDBOX_UNAVAILABLE') {
       issue = { ...issue, phase: 'build', severity: 'error', autoResolved: false };

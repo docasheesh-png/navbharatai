@@ -279,6 +279,9 @@ export function resolvePmScript(command: string, scripts: Record<string, string>
  * flag. When `framework` is undefined the historical Vite-style `--host` pass-through is kept, so
  * existing callers and the common Vite scaffold are byte-for-byte unchanged.
  */
+/** A static file server that binds all interfaces by default and takes no Vite-style `--host` (failedbr #2224). */
+export const STATIC_FILE_SERVER_RE = /(?:^\s*|[;&|(]\s*|\bnpx\s+(?:-y\s+)?)(?:http-server|live-server|serve|python3?\s+-m\s+http\.server)(?=\s|$)/;
+
 export function ensureHostBinding(command: string, framework?: DevFramework, resolvedScript?: string): string {
   if (!command) return command;
   // THE SECOND, INDEPENDENT GUARD (same autopsy as PM_ONE_SHOT_SUBCOMMAND). The classifier decides
@@ -290,6 +293,10 @@ export function ensureHostBinding(command: string, framework?: DevFramework, res
   // Already binds a host (any interface / explicit flag) — leave untouched.
   if (/--host|-H\b|HOST=|0\.0\.0\.0/.test(command)) return command;
   if (simpleResolvedScript(resolvedScript) && /(?:^|\s)(?:--host(?:name)?(?:[=\s]|$)|-H(?:[=\s]|$)|HOST=)/.test(resolvedScript)) return command;
+  // A STATIC FILE SERVER takes no `--host` (failedbr #2224): `http-server` binds every interface by default and names
+  // an address with `-a`, `serve` with `-l`, Python's with `--bind`. `npx http-server . -p 3000` got `-- --host 0.0.0.0`
+  // appended — a flag for Vite, landed on another program. Its own default already serves the public preview.
+  if (STATIC_FILE_SERVER_RE.test(command) || (simpleResolvedScript(resolvedScript) && STATIC_FILE_SERVER_RE.test(resolvedScript))) return command;
   // A direct Node server (`tsx server/index.ts`, …) takes no --host flag; most Express/Fastify apps read
   // the bind host from `HOST` (or bind 0.0.0.0 already). Prefix `HOST=0.0.0.0` so a config-driven server
   // is reachable on the PUBLIC E2B preview instead of binding localhost-only (blank preview). A server
@@ -919,8 +926,24 @@ export function isLongRunningCommand(rawCommand: string): boolean {
  * already last is returned byte-for-byte — so every single-line command behaves exactly as before.
  * Quotes are respected, so a `;` or newline inside a quoted argument never splits. PURE.
  */
-export function dropProbesAfterDevServer(command: string): string {
-  if (!command) return command;
+/**
+ * `(npm run dev … &) ; sleep 3; probe` → `npm run dev … &` + newline + `; sleep 3; probe` — a dev server backgrounded inside a SUBSHELL
+ * is the same as one backgrounded plainly. 🔴 failedbr #2379 (f0313035, 2026-11-15): the splitter below cut on the `&`
+ * INSIDE the parentheses, so the "dev segment" kept the opening `(` and lost the `)`; the launcher then ran
+ * `( BROWSER=none (npm run dev … ) > /tmp/nbai-devserver.log 2>&1` — a bash syntax error on every attempt, reported as
+ * "the dev server did not start and its log had no recognisable error" three times (84 s), and the user stopped.
+ * Only a leading `( <one command with no parentheses> & )` whose command starts a dev server is unwrapped. PURE.
+ */
+export function unwrapSubshellBackgroundedServer(command: string): string {
+  const m = /^\s*\(\s*([^()]+?)\s*&\s*\)\s*(?:(?:;|&&)\s*)?([\s\S]*)$/.exec(String(command ?? ''));
+  if (!m || !isLongRunningCommand(m[1])) return command;
+  const rest = m[2].trim();
+  return rest ? `${m[1].trim()} &\n${rest}` : `${m[1].trim()} &`;
+}
+
+export function dropProbesAfterDevServer(rawCommand: string): string {
+  if (!rawCommand) return rawCommand;
+  const command = unwrapSubshellBackgroundedServer(rawCommand);
   const segments: Array<{ text: string; backgrounded: boolean }> = [];
   let cur = '';
   let quote: string | null = null;
@@ -952,7 +975,7 @@ export function dropProbesAfterDevServer(command: string): string {
   if (dev.length !== 1) return command;
   const devSeg = dev[0];
   const after = meaningful.filter((seg) => seg.idx > devSeg.idx);
-  if (after.length === 0) return command; // already last — nothing to drop, byte-identical
+  if (after.length === 0) return command; // already last — nothing to drop (byte-identical unless a subshell was unwrapped)
   const before = meaningful.filter((seg) => seg.idx < devSeg.idx).map((seg) => seg.text.trim() + (seg.backgrounded ? ' &' : ''));
   return [...before, `${devSeg.text.trim()} &`].join('\n');
 }

@@ -612,7 +612,9 @@ import type { Timeline, Tune } from './notation';
 export interface PlayOptions {
   /** Repeat the whole tune until stop(). */
   loop?: boolean;
-  /** 0..1 over the player's own volume. */
+  /** 0..1 over the player's own volume — the same name the sound effects (audio.play) and the music (playMusic) use. */
+  volume?: number;
+  /** The older name for volume; still accepted. volume wins when both are given. */
   gain?: number;
   /** Called once the last note has finished (never when stopped, and never when looping). */
   onEnd?: () => void;
@@ -733,7 +735,10 @@ export class MelodyPlayer {
     this.cursor = 0;
     // A beat of headroom so the first note is booked in the future, not already late.
     this.startedAt = this.ctx.currentTime + 0.06;
-    if (typeof options.gain === 'number') this.setVolume(options.gain);
+    // ONE word for loudness across the kit (failedbr #2435: \`volume\` here was a type error while audio.play takes
+    // \`volume\` — three turns went into finding out the melody player said \`gain\`).
+    const level = typeof options.volume === 'number' ? options.volume : options.gain;
+    if (typeof level === 'number') this.setVolume(level);
 
     this.pump();
     this.timer = setInterval(() => this.pump(), TICK_MS);

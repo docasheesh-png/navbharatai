@@ -15,6 +15,7 @@ import { withoutSourcePaths } from './sourcePathPrompt';
 import { withoutUrls } from './promptUrls';
 import { indicDomainMatches, usesIndicScript } from './indicDomainTerms';
 import { withoutMachineText } from './machineText';
+import { namesWellKnownGame } from './wellKnownGameTitles';
 
 export interface RequirementGaps {
   domain: string;
@@ -815,7 +816,8 @@ export const MEDIA_PLAYER_APP = /\b(?:music|audio|mp3|song|video|media|podcast|r
 function selectDomain(text: string): DomainDef | undefined {
   if (MEDIA_PLAYER_APP.test(text)) return undefined;
   return DOMAINS
-    .filter((d) => d.re.test(text) || indicDomainMatches(d.key, text))
+    // A request that NAMES a well-known game ("make a bgmi for me") is a game request even without the word (failedbr #2478).
+    .filter((d) => d.re.test(text) || indicDomainMatches(d.key, text) || (d.key === 'game' && namesWellKnownGame(text)))
     .reduce<DomainDef | undefined>((best, d) => {
       if (!best) return d;
       const a = domainFeatureScore(best, text);

@@ -103200,3 +103200,24 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 - **Library batch 6** (this PR): the admin's own Quaternius downloads from Drive, licence checked in each archive and on the pack page: Ultimate Gun Pack (12 firearms, the library's first) and Realistic Car Pack (7 cars). The packs have no GLB, so each was converted offline (OBJ+MTL → GLB) and ships PACKAGED in the image (`assets/game-models/<sha256>.glb`). The packaged path is generalized from the eagle to any Quaternius CC0 entry with a pinned hash and size; the transport looks up the reviewed entry by id and checks provider, hash and size. New prompt words (English and Hindi: gun/बंदूक, pistol/पिस्तौल, AK47, sniper, shotgun, SMG, revolver, jeep/SUV, sports car), and a named subtype is not also the generic subject (police car is not also "car"; laser gun is not "gun"). Admission: all 19 rendered live in Chromium. Test: `libraryBatch6`.
 - Drive review (2026-11-20): accepted N1, N2, N3, N4, N8, N9, N16, Downtown City, Medieval Village, KayKit Adventurers 2.0, SBS textures (CC0 per the archive's licence file). Rejected: N5 (licence forbids redistribution), N6 (paid, attribution), N10 (Cenji licence), Bestiary (not CC0), and every archive with no licence file (sounds, PSX cars, retro weapons, furniture, rooms, etc.) until a source page shows its licence.
 - Next: animated clothed characters (Universal Base Characters + Modular Outfits + Universal Animation Library, same 65-joint rig; four built under 5 MB with 16 animations each).
+
+## 2026-11-20 — Game maker: Indian characters, library chosen by meaning, the user's own models (admin: "a. b. sab karo")
+- **Library batch 7:** the first clothed, fully animated characters: village man, village woman, and ranger man/woman (archer, hunter).
+  - Built from three of the admin's CC0 Quaternius packs on one 65-joint rig.
+  - Indian look by default, set as material colours: skin tone, black hair, a white kurta-like shirt, red for the village woman.
+  - Plain part names so a user can change any part: materials Skin/Hair/Eyes/Clothes; nodes Head/Body/Arms/Legs/Hood….
+  - 12 animation roles, every moving one proven in the live admission.
+  - New subjects only, so man/woman keep their models. Test: `libraryBatch7`.
+- **By meaning, not by word:** a new game's builder gets the whole library as a menu (`gameLibraryMenuHandoff`), only when the library is on for the account.
+  - `add_library_models` takes every role.
+  - A role the model lacks keeps the model and is reported; it used to make the model unavailable.
+  - Test: `theLibraryIsChosenByMeaning`.
+- **The user's own models** (`userModels.ts`): attach .glb / .gltf (+bin, textures) / .obj (+mtl, textures), loose or as a zip of models.
+  - Each model is converted to one checked GLB, saved durably, then written to the sandbox at public/models/<name>.glb.
+  - The builder is told the parts and animations of what really landed.
+  - FBX and Draco/Meshopt are refused, with the exact export step.
+  - A missing texture loads without it and the user is told.
+  - Limits: 8 MB, 200k triangles, 4096 px, 8 per message.
+  - Test: `theUsersOwnModelGoesIntoTheGame`.
+- **Sibling bug fixed:** a 3D app imported as a PROJECT zip had its .glb read as text (corrupted) and its glTF .bin dropped. Both are now kept byte-exact.
+- **Open:** real Indian clothing (saree/dhoti/kurta/turban) geometry. No CC0 rigged model exists. The admin decides: accept CC-BY with an automatic credit, or buy a pack whose licence allows redistribution. FBX conversion is also open: no converter we can trust in the server yet.

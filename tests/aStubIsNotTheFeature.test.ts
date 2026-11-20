@@ -77,3 +77,16 @@ describe('wired', () => {
     expect(disp).toContain('security += hollowFeatureWriteNote(p, files[p]);');
   });
 });
+
+// failedbr #728 (queue Q-3205): "Working AI replies — simulated responses that feel helpful and natural".
+describe('Q-3205 — simulated AI replies are not sold as working', () => {
+  const base = { consoleCaptured: true, screenshotTaken: true, previewVerified: true };
+  it('the real #728 line is contradicted', () => {
+    const c = auditSummaryClaims('- **Working AI replies** — simulated responses that feel helpful and natural', base);
+    expect(c.map((x) => x.kind)).toContain('ai-working-but-simulated');
+  });
+  it('🔒 an honest line, or a real AI line, is left alone', () => {
+    expect(auditSummaryClaims('The chat uses sample replies until you connect an AI key.', base).map((x) => x.kind)).not.toContain('ai-working-but-simulated');
+    expect(auditSummaryClaims('Working AI replies through your OpenAI key.', base).map((x) => x.kind)).not.toContain('ai-working-but-simulated');
+  });
+});

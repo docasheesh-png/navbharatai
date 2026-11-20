@@ -165,7 +165,7 @@ export interface MeasuredFacts {
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'functionality-unverified' | 'persistence-unverified' | 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable' | 'restart-claimed' | 'feature-claimed-but-empty';
+export type ClaimKind = 'functionality-unverified' | 'persistence-unverified' | 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable' | 'restart-claimed' | 'feature-claimed-but-empty' | 'ai-working-but-simulated';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -202,6 +202,10 @@ const FAKE_FEATURE_CLAIMS: Record<string, { feature: RegExp; label: string; meas
 /** A line that calls the feature done: "works", "implemented", "integrated", "✅ …", "ready", "complete". */
 const FEATURE_DONE = /✅|\b(?:works?|working|implemented|integrated|added|ready|complete[d]?|done|functional|enabled|live|secure|real)\b/i;
 /** The same line already says it is not real — no contradiction to correct. */
+/** Q-3205: AI replies named as working on a line that also says they are simulated. */
+const AI_REPLIES = /\b(?:AI|assistant|chat\s*bot|chatbot|bot)\b[^\n]{0,40}\b(?:repl(?:y|ies)|responses?|answers?|chat)\b|\b(?:AI|smart)[\s-]+(?:powered\s+)?(?:repl(?:y|ies)|responses?|answers?|assistant|chat)\b/i;
+const AI_WORKING = /✅|\b(?:working|works|real|live|intelligent|fully\s+functional)\b/i;
+const AI_SIMULATED = /\b(?:simulat\w*|scripted|canned|pre[\s-]?written|mock(?:ed)?|fake)\b/i;
 /** The same line already says the part is empty or left for later. */
 const ADMITS_EMPTY = /\b(?:stub(?:bed)?|empty|todo|later|not\s+(?:built|implemented|done)|pending|removed)\b/i;
 const ADMITS_DEMO = /\b(?:demo|sample|mock|placeholder|simulated|not\s+real|not\s+yet|coming\s+soon|needs?\s+(?:a\s+)?key|add\s+(?:your|a)\s+key|until\s+you)\b/i;
@@ -496,6 +500,17 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
         : fake === 'upload' && facts.fakeFeatureEvidence?.some((f) => f.kind === fake && f.evidence === 'local-upload-path')
           ? 'this upload handler only displays local demo success and needs real upload wiring with a confirmed result; adding keys alone does not connect it'
         : `${spec.measured} — it is a demo until the real provider's key is added (the red line on the app's screen says which)`,
+    });
+  }
+
+  // "WORKING AI replies — simulated responses that feel helpful" (failedbr #728, Q-3205): the line admits the replies are
+  // simulated and still sells them as working AI. A reader keeps the headline, so the platform says it plainly.
+  {
+    const line = text.split(/\n+/).find((l) => AI_REPLIES.test(l) && AI_WORKING.test(l) && AI_SIMULATED.test(l));
+    if (line) out.push({
+      kind: 'ai-working-but-simulated',
+      claimed: 'that the app has working AI replies',
+      measured: 'the same sentence says the replies are simulated — no AI is connected, so every reply is text written into the app',
     });
   }
 

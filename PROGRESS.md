@@ -102983,3 +102983,8 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971, Q-29
 Closed Q-2987, Q-2988, Q-2989, Q-2990, Q-2991, Q-2992, Q-2993 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): a handled missing camera/microphone in our checking browser is not an app defect; "make the internet faster" is the fifth impossible power; a declined turn records OUTCOME_DECLINED; the node_modules stamp never creates a file (and a static file server keeps its own host); a model write that removes an untouched kit file's exports or class members is refused; music-genre and AI terms are one unknown-name family; "<framework> Vite plugin not found in Vite config" is a configuration error. CI caught one defect of the PR's own (an install-stamp test leaving temp dirs behind — moved to makeTempDir) before merge.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971, Q-2974, Q-2975, Q-2977, Q-2984, Q-2240 (blocked, each with what it needs).
 
+Ledger, older reports (2026-11-20, #4377):
+- #2169 — Q-2994 our browser's media limits (no H.264, a play()/pause() race) are not an app defect.
+- #2205 — no new row: an edit turn on an existing app got no platform kit seed by design (the kit is never written over somebody's work); the model's own run_recipe laid it down safely; the four edit_file misses are the weak model's.
+- #2196 — no new row: a 32-file app rendered at 7 min and the build kept writing until the 25-min cap — the free-tier convergence ceiling, Q-2240.
+

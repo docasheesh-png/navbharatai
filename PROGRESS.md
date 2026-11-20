@@ -102917,3 +102917,16 @@ Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2969 (#2306): a GET probe of the app's own localhost (and `sleep`) is a read-only inspection, never a release-gate blocker (`isLocalhostProbe`).
 - Q-2970 (#2399): an import of a `.d.ts` file resolves in the readiness analyzer.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (blocked, each with what it needs).
+
+## 2026-11-20 — Autopsy failedbr #2478 ("make a bgmi for me"): royale requests get the big map, laid down by the platform
+
+Admin: a PUBG / Free Fire / BGMI request must get a big, realistic map; the library already has maps that were not used.
+The build failed at the 25-minute cap with a 30×30 grid and five cubes. Root causes, each fixed as a class (rows Q-2990 – Q-2999):
+- **Q-2990** The Athree map was a system-prompt line only; the 3D seed never laid it down. `gameKitPlan` now seeds
+  `generate_athree_map` (the recipe's own `athreeMapIntent` decides) and the handoff says build IN it.
+- **Q-2991** "make a bgmi for me" was domain "general". One shared title reader (`lib/wellKnownGameTitles`); apps ABOUT a game stay apps.
+- **Q-2992** Milestone turns lost the user's game (contract genre "unknown"). `gameIdentityLines` + `ToolDispatcher.worldRequest()`.
+- **Q-2993** "ground plane" was an aircraft / flight map. Shared `withoutNonObjectSenses` gained geometry senses.
+- **Q-2994** The failure itself: `inventory.use()` read as React's `use` → 15-minute false chase. Member calls are hooks only on a PascalCase namespace.
+- Open: Q-2996 (racing starter shipped for every 3D game), Q-2998, Q-2999; Q-2997 blocked on the admin's model-library rollout decision.
+Locked by `tests/aRoyaleRequestGetsTheBigMap.test.ts` and `tests/aMethodNamedUseIsNotAHook.test.ts`, each half reverted-and-failed.

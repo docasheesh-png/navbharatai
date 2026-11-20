@@ -898,7 +898,7 @@ export interface BuildDiagnosticsReport {
    * Observability only: written once at build start from a value the route already computed, read by
    * nothing in the build path.
    */
-  requestAnalysis?: { taskType: string; complexityScore: number; startTier: string; startBand?: string; signalsCouldNotRead?: boolean };
+  requestAnalysis?: { taskType: string; complexityScore: number; complexityBand: string; signalsCouldNotRead?: boolean };
   liveTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   /** The cache-hit input tokens seen so far, paired with `liveTokens`. Same unreconciled status. */
   liveCacheReadInputTokens?: number;
@@ -1099,7 +1099,7 @@ export class BuildDiagnostics {
   private todoOnlyTally?: { turns: number; latencyMs: number; firstInRun?: number };
   /** provider → failure bucket → count. See recordProviderFailure. */
   private readonly providerFailureReasons = new Map<string, Map<string, number>>();
-  private requestAnalysis?: { taskType: string; complexityScore: number; startTier: string; startBand?: string; signalsCouldNotRead?: boolean };
+  private requestAnalysis?: { taskType: string; complexityScore: number; complexityBand: string; signalsCouldNotRead?: boolean };
   /** See the transient-status note in the narration handler. */
   private transientStatusRecorded = false;
   /** Type errors the LAST typecheck row recorded (SANDBOX_CMD "typecheck … → N type errors" / "clean"). */
@@ -2715,7 +2715,11 @@ export class BuildDiagnostics {
     // Recorded only when TRUE, so every existing report and every English build is byte-identical.
     const couldNotRead = a?.unreadable === true;
     this.requestAnalysis = {
-      taskType, complexityScore: score, startTier, startBand: startBandLabel(startTier),
+      // 🔴 Q-2748 (autopsy 05eb30ba): the report no longer carries the band's KEY. Keys are historical model names
+      // ("sonnet" = the standard band), and printed beside a label they still read as "this Weak build started on
+      // Sonnet" — the class autopsy 2b0a3ed5 fixed only halfway by adding the label. The key stays in cost telemetry
+      // and the lanes; the report carries only what it means. modelPerformance maps legacy reports back.
+      taskType, complexityScore: score, complexityBand: startBandLabel(startTier),
       ...(couldNotRead ? { signalsCouldNotRead: true } : {}),
     };
   }

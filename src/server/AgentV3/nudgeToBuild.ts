@@ -96,12 +96,23 @@ function withoutTrailingDecoration(line: string): string {
  * mirrors the user's language, so a model that asks without punctuating will not be caught by this
  * half. That is why `declined` below is a second, independent test rather than an alternative.
  */
+const INDIRECT_QUESTION = new RegExp([
+  String.raw`\b(?:please\s+)?(?:tell\s+me|let\s+me\s+know)\s+(?:which|what|whether|how)\b`,
+  String.raw`\b(?:batao|bataiye|bataye|bata\s+do|bata\s+dijiye)\s+(?:ki\s+)?(?:\w+\s+){0,4}(?:kaun|kaunsa|kaunsi|kya|kaisa|kaisi|kitn)`,
+  String.raw`(?:बताइए|बताइये|बताएं|बताओ|बता\s*दीजिए)\s*(?:कि)?[^।.!\n]{0,60}(?:कौन|क्या|कैसा|कैसी|कितन)`,
+].join('|'), 'i');
+
 export function turnAskedTheUser(text: string | null | undefined): boolean {
   const lines = String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
   const last = lines[lines.length - 1];
   if (last === undefined) return false;
   const tail = withoutTrailingDecoration(last);
   if (QUESTION_MARKS.test(tail)) return true;
+  // 🔴 AN INDIRECT QUESTION HAS NO QUESTION MARK (failedbr #1020, 2026-11-20). "ऐप का टॉपिक खाली रह गया है। कृपया मुझे
+  // बताइए कि आप कौन सी ऐप बनवाना चाहते हैं" — "please tell me which app you want" — was read as a stall, the build was nudged,
+  // and the model guessed a To-Do app while the user's real answer arrived mid-build. "Tell me / let me know WHICH / WHAT /
+  // WHETHER …" asks, in any of the three ways it is written.
+  if (INDIRECT_QUESTION.test(tail)) return true;
   // 🔴 A QUESTION FOLLOWED BY "PLEASE TELL ME" IS STILL A QUESTION (autopsy e6d46cde, 2026-09-30). The
   // model answered *"एक ऐप बनाओ टेलीनॉर"* with *"क्या आप इसी तरह का ऐप चाहते हैं? अगर आपके मन में कुछ और
   // है … तो बता दीजिए। 🙏"* — a question, then "if you had something else in mind, tell me". The line

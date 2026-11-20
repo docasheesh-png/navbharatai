@@ -195,6 +195,10 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "d35a8cd244f22d8cd904c02e4433d23ff6ba11548a7468585ce9e6ca97cbd8ff",
     "0fe39b5c79c7a12b6ebe68b056e70521921795677a1a4387adbd6ae9a204f19e"
   ],
+  "src/game/board/business.ts": [
+    "6e18312645538ed41be8bbdefdabbf229679b60d0b3cf40bc08ac28cf915f017",
+    "a1d0f01f1f35d41cd1b6e1407c9ca3679a76cdb246b7f95502d4b0e7a86e9221"
+  ],
   "src/game/board/cards.ts": [
     "a7ca14416a63e05180341db601ba7f7bc5c44165710e4c23e75282210ce88c44"
   ],
@@ -215,7 +219,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "20af6ddf6766ebc0010edc0f9ba8c3479fe6d755f00fe43bdd0d8094fbf061cc",
     "51bd385e993d8765a1c86c568a600f12c9466fe9a30cb8ae5f8ea84ce6abaf67",
     "3b023e173bd3c3c68dfa24ac1beea403338ba83fac53147d488432ea4368184d",
-    "8b14a62bdbf1d55aec67022207e29968e1361ca4282335a13286c10916e57d3b"
+    "8b14a62bdbf1d55aec67022207e29968e1361ca4282335a13286c10916e57d3b",
+    "053e9f9b909528b10107e48248a2de3f134d11ceb5b03c5663ef2137f4d04c94"
   ],
   "src/game/board/ludo.ts": [
     "20d771e554d6d8ac6f292298a5a2299998123e637369d6497ae3ab591500917d"

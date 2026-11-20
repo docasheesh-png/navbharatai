@@ -153,6 +153,14 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   // 2026-11-20 library batch 9: the Farm Animal Pack — animals that move.
   'farm cow': ['farm cow', 'dairy cow'], 'farm horse': ['farm horse'], zebra: ['zebra', 'zebras', 'ज़ेबरा', 'जेबरा'],
   llama: ['llama', 'llamas', 'alpaca'], pig: ['pig', 'pigs', 'piglet', 'सूअर', 'suar'], sheep: ['sheep', 'lamb', 'भेड़', 'bhed'], pug: ['pug', 'pugs'],
+  // 2026-11-20 library batch 10 (Downtown City MegaKit): whole city buildings, city street tiles, sidewalks, street props.
+  'city building': ['city building', 'office building', 'office tower', 'city buildings', 'office buildings'], 'heritage building': ['heritage building', 'old building', 'brick building'],
+  'shop building': ['shop building', 'shops building', 'corner shop'], 'city street': ['city street', 'city road', 'two lane road'],
+  'four lane road': ['four lane road', '4 lane road', 'highway road'], 'city crossroads': ['crossroads', 'city crossroads', 'chauraha', 'चौराहा'],
+  'city t junction': ['t junction', 'city t junction', 'tiraha', 'तिराहा'], 'city street curve': ['city street curve', 'road curve', 'road turn'],
+  'four lane road curve': ['four lane road curve'], sidewalk: ['sidewalk', 'footpath', 'pavement', 'फुटपाथ'], 'sidewalk corner': ['sidewalk corner', 'footpath corner'],
+  'ac unit': ['ac unit', 'air conditioner', 'aircon'], bollard: ['bollard', 'bollards'], manhole: ['manhole', 'manhole cover', 'gutter cover'],
+  planter: ['planter', 'flower pot', 'gamla', 'गमला'], 'street drain': ['street drain', 'drain grate', 'naali'],
 };
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
   fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],
@@ -188,7 +196,8 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       car: ['formula one car', 'formula 1 car', 'f1 car', 'hatchback car', 'station wagon car',
         // A named kind of car is that model, not "a car" too (police car → car + police car was the old double).
         'police car', 'police cars', 'sports car', 'sports cars', 'पुलिस कार', 'स्पोर्ट्स कार'],
-      building: ['building a', 'building the'],
+      building: ['building a', 'building the', 'city building', 'city buildings', 'office building', 'office buildings', 'heritage building', 'old building', 'brick building', 'shop building'],
+      sidewalk: ['sidewalk corner', 'footpath corner'], 'city street': ['city street curve'], 'four lane road': ['four lane road curve'],
       rifle: ['assault rifle', 'assault rifles', 'sniper rifle', 'sniper rifles'],
       // A named kind of character is that model, not the generic one too.
       ranger: ['power ranger', 'power rangers', 'female ranger', 'female rangers'], archer: ['female archer', 'female archers', 'woman archer', 'archer girl'],

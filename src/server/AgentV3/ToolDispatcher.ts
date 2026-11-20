@@ -66,7 +66,7 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole, isPlanningOnlyRole, PLAN_YOURSELF_NOTE } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
-import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER, sharedBareTypecheckCommand } from './tscCommand';
+import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER, sharedBareTypecheckCommand, nodeModulesStampAfterInstall } from './tscCommand';
 import { parseTscErrors, fixTypeOnlyValueImports as fixTypeOnlyValueImportsFromErrors, type TscError } from './EndgameRepair';
 import { tscCommandVerdict, looksLikeTypecheckCommand, tscVerdict, countTscErrors, buildScriptTypecheckVerdict, type TypecheckCommandProof } from './TscGate';
 import { checksWholeDefaultTsProject } from './tscCommandMode';
@@ -6358,6 +6358,10 @@ export class ToolDispatcher {
           if (rewritten) {
             try { this.onFileWrite?.(rewritten, await this.actuator.readFile(this.workspaceId, rewritten)); }
             catch { /* the sandbox scan at the final save still sees it */ }
+            // …and the tree it installed is current: re-stamp node_modules, as every platform install does, or the
+            // write-time typecheck stands down for the rest of the build (nodeModulesStampAfterInstall, failedbr #2278).
+            const stamp = nodeModulesStampAfterInstall(rewritten);
+            if (stamp) { try { await this.actuator.runCommand(this.workspaceId, stamp); } catch { /* the end-of-build typecheck still runs */ } }
           }
         }
         // AND SO IS EVERY FILE THE COMMAND PLAINLY WROTE (iPhone/candy report 7da1cdca, 2026-10-04). The

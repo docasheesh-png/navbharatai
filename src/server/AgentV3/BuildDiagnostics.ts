@@ -4587,6 +4587,13 @@ export function deriveRootCause(input: {
   if (issues.some(isInfra)) {
     return 'The build sandbox became unavailable mid-build (reaped/expired/unreachable), so the app could not be finished or verified. This is an infrastructure condition, not a defect in the generated app.';
   }
+  // 🔴 A QUESTION IS NOT A FAILURE WITH NO ERROR (failedbr #1619, #1564, #1537, 2026-11-20). "Make sure video", "Sell app"
+  // and a native-Android JARVIS spec were each answered with a question to the user (TURN_ANSWERED_A_QUESTION) — no
+  // build was attempted, so nothing failed — and the report said "Build did not succeed, but no specific error was
+  // captured", which reads as a silent crash. The turn's own record says what it was.
+  if (ok === false && issues.some((i) => i.code === 'TURN_ANSWERED_A_QUESTION')) {
+    return 'This turn asked the user a question instead of building, so no build was attempted — it is waiting on their answer, not a failure.';
+  }
   if (ok === false) return 'Build did not succeed, but no specific error was captured.';
   return undefined; // still running / nothing to report yet
 }

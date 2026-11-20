@@ -103217,5 +103217,5 @@ Ledger, older reports #1533–#1432 (2026-11-20, next PR):
 - glm-5.3 first calls of 140–331 s (#1446, #1435, #1432, #1449) and GLM flashx silences (#1507, #1493, #1487, #1465, #1455) — the Weak-tier provider class already open; benching worked as designed.
 - #1507, #1493 — "stopped before the app was running" after an in-build render is fixed on main (`earliestRenderProof`); #1493's failed `ls` blocker (`isReadOnlyInspection`) and 14 no-op `update_preview` calls (RepeatProbeGuard) are fixed on main; #1507's "stub marker" on coordinate placeholders is the authenticity analyzer's precision, recorded.
 - #1446 — `cd /workspace` (fixed on main: `fixSandboxWorkspaceCd`); a FULL-REWRITE of the kit's `state.ts` was warned and the model restored it.
-- #1509, #1498, #1487, #1465, #1455, #1453, #1447, #1435, #1432 — user stops (#1465's 3D choice for a request that said "3d ho na chahiye" is model drift, recorded).
+- #1509, #1498, #1487, #1465, #1455, #1453, #1447, #1435, #1432 — user stops.
 

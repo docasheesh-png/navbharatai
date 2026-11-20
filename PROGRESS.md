@@ -103085,3 +103085,12 @@ Ledger for the next PR (rows Q-3021…Q-3024):
 - #2036 — Q-3034 every game-kit file now compiles under a strict app tsconfig (noUnusedLocals/noUnusedParameters): the only offender, TouchControls' unread `container` field, failed the user's typecheck and looped the builder. Its E2B-cap setup failure is Q-2929.
 - #2065 — no defect: a "continue" turn rendered at 221 s and the user stopped it at 274 s; its two unused `@capacitor/*` warnings are advisory and true.
 - #2064, #2037, #2001, #2003 — no new rows: #2064's "could not find @Composable" was fixed by BR1998; #2037's skipped write-time typecheck by autopsy 61279465; #2001's `?react` SVG imports by BR2001; #2001's and #2003's E2B concurrency refusals are Q-2929 (blocked on the plan limit).
+
+## 2026-11-20 — #4380 merged (failedbr #2158 / #2133 / #2100 / #2094 / #2090 / #2086 / #2036)
+
+Closed Q-3021, Q-3023, Q-3025, Q-3029, Q-3031, Q-3032, Q-3033, Q-3034 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): a rule about how to build and the staples of a small game are not features; a numbered list with a few sub-bullets is not a spec in sections; a stylesheet wired by an Astro/Vue/Svelte component is wired; exam words are not services; a game that names a hospital is a game (unless it handles real money); a package-manager query is a read; a roadmap step cannot invent a native mobile stack; every game-kit file compiles under a strict app tsconfig.
+Still open, our own work: Q-3022, Q-3024, Q-3026, Q-3027, Q-3030. Blocked on the admin: Q-3028 (exact starter chip vs the Surplus authoring rule), plus the earlier blocked rows.
+
+Also renumbered the queue-retry-drills row from a duplicate Q-3020 to Q-3035: two sessions had both taken Q-3020 on 2026-11-20 (3eea5cae1 and 6942a03ec), so `theQueueIdsAreUnique` was red on `main`.
+- #2030 — Q-3036 a handler that admits it is pretend ("for demo purposes, we'll just show an alert", "…in a real application") is a HIGH authenticity finding; a fake Download button had shipped unnamed. Its "Play Store button" order enabled the deploy tool (PUBLISH_REQUESTED), which is the designed reading.
+- #2005 — no new row: the E2B concurrency cap (Q-2929) refused setup and the fast lane still ran, with all 22 writes refused; since BR1952 a text-only lane is skipped against an unavailable workspace (`FAST_LANE_SKIPPED_SANDBOX`).

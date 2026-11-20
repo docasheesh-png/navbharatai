@@ -6826,7 +6826,7 @@ export function isBroken(object: THREE.Object3D): boolean { return brokenSet.has
 export function breakableTargets(): BreakableTarget[] {
   const out: BreakableTarget[] = [];
   const box = new THREE.Box3();
-  for (const [object, e] of entries) {
+  for (const object of entries.keys()) {
     if (!object.parent) continue;
     box.setFromObject(object);
     if (box.isEmpty()) continue;

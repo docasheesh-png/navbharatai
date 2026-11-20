@@ -437,7 +437,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/three/breakable.ts": [
     "9b8c9de651ffd6b2b0e50abbc820f0333b992d3dd8bf5207874644c4ea1c0f2e",
-    "a2b900a33512ecd6c4fbf581779694696ecab7c4dfc819e4d9a953e10a1d5e7c"
+    "a2b900a33512ecd6c4fbf581779694696ecab7c4dfc819e4d9a953e10a1d5e7c",
+    "8c9bc3850ef3a475216d51172d92e99f1dfbab848ec2c6ad82b4db8687e5ca7f"
   ],
   "src/game/three/buildings.ts": [
     "2ded7bb92d7d4ba33e19a6d95f4ad44158ec497d72ad602946cb0ec58380f15f"

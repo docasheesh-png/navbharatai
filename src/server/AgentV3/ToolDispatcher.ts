@@ -154,6 +154,7 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome, writeErrorTrendNote } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, authenticityConfidenceCount, fakeResultWriteNote } from './AuthenticityAnalysis';
 import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
+import { hollowFeatureWriteNote } from './hollowFeature';
 import { browserAiKeyWriteNote } from './browserAiKeyScan';
 import { mixedSvgImportWriteNote } from './svgImportShape';
 import { uploadStorageWriteNote } from './browserFileStore';
@@ -4985,6 +4986,8 @@ export class ToolDispatcher {
       // A login / payment / OTP / email that only pretends (admin 2026-10-04, NO FAKE BUTTON) — said while
       // the file is open, where the real provider is cheapest to wire. Kill switch AGENTV3_NO_FAKE_FEATURES=off.
       try { if (noFakeFeaturesEnabled()) security += fakeFeatureWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // A page that returns null / a hook that returns {} to quiet tsc (failedbr #745, Q-3204) — while the file is open.
+      try { if (noFakeFeaturesEnabled()) security += hollowFeatureWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
       // An AI provider called from the page with a key the page must hold (autopsy e52cebbf, Q-730).
       try { security += browserAiKeyWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
       // An SVG imported in two plugins' styles at once (Q-2766, BR2001) — the exact one-line fix, file still open.

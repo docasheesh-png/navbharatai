@@ -312,6 +312,7 @@ import { importFailureNarration, importFailureModelReason } from '../AgentV3/imp
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { pathsAShellRemovalIsCheckedAgainst } from '../AgentV3/shellWriteTargets';
+import { findHollowFeatures, hollowFeatureReport, type HollowFeature } from '../AgentV3/hollowFeature';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
@@ -14155,6 +14156,8 @@ async function noteBuildOutcome(
     // Fake login / payment / OTP / email found in the WHOLE project (fakeFeatureScan.ts) — computed once at
     // the production-defaults pass (the red on-screen line), read again by the disclosure and the key ask.
     let fakeFeatures: FakeFeatureFinding[] = [];
+    // A screen that renders nothing / a hook that returns nothing (failedbr #745, Q-3204, hollowFeature.ts).
+    let hollowFeatures: HollowFeature[] = [];
     /** The change being made to this app (changeEngine/changeSession.ts) — null for chat turns or when off. */
     let changeSession: ChangeSession | null = null;
     /** The release gate's verdict, once this build reached it — the evidence that its checks ran. */
@@ -23801,6 +23804,8 @@ async function noteBuildOutcome(
             if (noFakeFeaturesEnabled() && !isImportTurn) {
               const whole = { ...(await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>))), ...Object.fromEntries(writtenFiles) };
               fakeFeatures = loadedFindings(findFakeFeatures(whole, prompt), dispatcher.lastReachability);
+              hollowFeatures = findHollowFeatures(whole);
+              if (hollowFeatures.length > 0) buildDiag.record({ phase: 'build', severity: 'warning', code: 'HOLLOW_FEATURE', message: hollowFeatureReport(hollowFeatures), autoResolved: false });
             } else {
               fakeFeatures = [];
             }
@@ -26048,6 +26053,8 @@ async function noteBuildOutcome(
           // "✅ Login with Google" about a login whose password is written into the app (fakeFeatureScan.ts).
           fakeFeatures: fakeFeatures.map((f) => f.kind),
           fakeFeatureEvidence: fakeFeatures,
+          // "Profile pages with follow/unfollow" about a ProfilePage that returns null (failedbr #745, Q-3204).
+          hollowFeatures: hollowFeatures.map((h) => ({ name: h.name, words: h.words })),
           // THE LEDGER, not this pass's local memory (2026-09-21). Three lines of this same function
           // already asked `renderProvenNow()`; asking a narrower source here let the platform accuse
           // the model of claiming a working preview in a report that itself proves one rendered.

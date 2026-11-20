@@ -23,3 +23,10 @@ describe('game vocabulary is never an unknown service name', () => {
     expect(unknownNamesInRequest('Make a racing game with a HUD and NPC cars and a ZORBIX mode.')).toEqual(['ZORBIX']);
   });
 });
+
+// …and its siblings from failedbr #2208 (an AI music app: "EDM" and "LLM" were both flagged).
+describe('music-genre and AI terms are never unknown service names (failedbr #2208)', () => {
+  it.each(['EDM', 'LOFI', 'RNB', 'KPOP', 'HIPHOP', 'DAW', 'VST', 'LLM', 'LLMS', 'RAG', 'ASR', 'NLU', 'GAN', 'RNN', 'AGI', 'SDXL'])('%s', (w) => {
+    expect(unknownNamesInRequest(`Build an AI music app with ${w} support and a player.`)).toEqual([]);
+  });
+});

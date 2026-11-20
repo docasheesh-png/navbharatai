@@ -118,6 +118,19 @@ export const MANIFEST_CURRENT =
   `&& [ "$(cat ${PRIMED_STAMP} 2>>${TSC_ENSURE_LOG})" = "$(stat -c '%i %Y' node_modules 2>>${TSC_ENSURE_LOG})" ] ` +
   `&& node -e "${SAME_DECLARED_RANGES_JS}" 2>>${TSC_ENSURE_LOG}; }; }`;
 
+/**
+ * 🔴 THE INSTALL STAMP MUST NEVER CREATE A FILE NAMED node_modules (failedbr #2224, 2026-11-20).
+ *
+ * Every platform install ends by stamping `node_modules`, so `[ package.json -nt node_modules ]` goes quiet once the tree
+ * is reconciled. That stamp was a bare `touch node_modules`. A project with NO dependencies (a static site) gets no
+ * `node_modules` directory from `npm install`, so `touch` created an empty FILE of that name — and from then on every
+ * `[ ! -d node_modules ]` read the project as never installed: the dev-server health check reinstalled before every
+ * start ("installing dependencies (package.json changed)…") and `npm run dev` took 115 s, the user watching, before
+ * they stopped it. ONE stamp, used by every install site: a stray file of that name is replaced by the directory it
+ * should have been, the directory is made if missing (an empty one is exactly "nothing to install"), then stamped.
+ */
+export const STAMP_NODE_MODULES = '{ [ -f node_modules ] && rm -f node_modules; mkdir -p node_modules && touch node_modules; }';
+
 export const TSC_ENSURE =
   // Wait (bounded) for an install already filling node_modules. Still busy ⇒ say so and stop: never run
   // a second install into the same tree, and never read a half-filled one (`exit` ends this command
@@ -129,7 +142,7 @@ export const TSC_ENSURE =
   PRIME_NODE_MODULES +
   // `&& touch node_modules`: an "up to date" install leaves the directory's mtime alone, so without the
   // stamp a rewritten package.json kept this re-running `npm install` before every typecheck.
-  `if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then ${INSTALL('')} && touch node_modules; fi; ` +
+  `if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then ${INSTALL('')} && ${STAMP_NODE_MODULES}; fi; ` +
   // PINNED to the major our scaffolds declare (autopsy 4499741f). An unpinned install fetched a newer
   // major that REMOVES `baseUrl`, so a project without its own `typescript` failed on its tsconfig alone
   // (TS5102) — a verdict about the compiler we picked, not about the app.
@@ -186,7 +199,7 @@ export function recipeInstallCommand(deps: ReadonlyArray<{ name: string; version
     // entry under node_modules/@types, so node_modules' own mtime stays older and MANIFEST_CURRENT judged the tree
     // stale — the write-time typecheck then stood down on 3 writes of a build whose dependencies were installed.
     // TSC_ENSURE stamps the directory after its install for the same reason; this install now does too.
-    + `touch ${NPM_INSTALL_LOCK}; ${installs} && touch node_modules; _nbs=$?; rm -f ${NPM_INSTALL_LOCK}; exit $_nbs`;
+    + `touch ${NPM_INSTALL_LOCK}; ${installs} && ${STAMP_NODE_MODULES}; _nbs=$?; rm -f ${NPM_INSTALL_LOCK}; exit $_nbs`;
 }
 
 /**

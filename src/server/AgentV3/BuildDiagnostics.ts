@@ -3015,6 +3015,28 @@ export class BuildDiagnostics {
    * silence unrelated warnings; a readiness warning that a later pass made FALSE must be cleared by
    * its own sentence and nothing else.
    */
+  /**
+   * AN EARLIER FAILED TYPECHECK IS ANSWERED BY THE CURRENT ONE (failedbr #1258, #1253, 2026-11-20). The gate read
+   * "Failed: 1 build-breaking blocker ($ ./node_modules/.bin/tsc --noEmit 2>&1 → exit 2)" and "Proven: the project
+   * typechecks" in one line: the failure was an earlier run, the proof a later whole-project run on the current files,
+   * and the end-of-build back-fill that matches a later success by its exact command text never ran before the gate and
+   * would not have matched the write-time check's own command anyway. When the gate's own typecheck evidence for the
+   * current revision is `passed`, every earlier failed typecheck command is answered. Returns how many. Any other
+   * evidence ('failed', 'not-run', unknown) answers nothing.
+   */
+  answerTypecheckFailuresWhenProven(typecheck: unknown): number {
+    if (typecheck !== 'passed') return 0;
+    let cleared = 0;
+    for (const issue of this.issues) {
+      if (issue.code !== 'SANDBOX_CMD_FAILED' || issue.autoResolved === true) continue;
+      if (!isTypecheckCommand(commandKey(String(issue.message ?? '')))) continue;
+      issue.autoResolved = true;
+      cleared++;
+    }
+    if (cleared > 0) this.notify();
+    return cleared;
+  }
+
   resolveOnRecheck(code: string, opts: { messageIncludes?: string } = {}): number {
     const needle = typeof opts.messageIncludes === 'string' ? opts.messageIncludes : null;
     let cleared = 0;
@@ -3890,6 +3912,11 @@ export function isNeverRootCause(code: string): boolean {
  * capped exactly as the SANDBOX_CMD_FAILED message renders it, so an issue message and a recorded
  * command compare equal without re-parsing either. PURE.
  */
+/** A whole-project TypeScript check: `tsc --noEmit` (any path to tsc, vue-tsc too) or the project's typecheck script. PURE. */
+export function isTypecheckCommand(command: string): boolean {
+  return /(?:^|[\s/&;|])(?:vue-)?tsc\b[^|;&]*--noEmit\b|\bnpm\s+run\s+(?:typecheck|type-check|tsc)\b/.test(String(command ?? ''));
+}
+
 export function commandKey(commandOrMessage: string): string {
   const raw = (commandOrMessage || '').trim();
   // Issue messages render as `$ <command> → exit N (Ms)`; recorded commands are the bare command.

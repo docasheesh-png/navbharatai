@@ -25405,6 +25405,8 @@ async function noteBuildOutcome(
             currentTypecheckProof(platformTypecheckProof, getWorkspaceMemory(workspaceId).verificationRevision()),
             gateLedger.facts.typecheck?.outcome);
           fillGateFromLedger(gateEvidence, gateLedger);
+          // failedbr #1258: a current passing typecheck answers every earlier failed one before the gate counts blockers.
+          buildDiag.answerTypecheckFailuresWhenProven(gateEvidence.typecheck);
         }
         catch { /* evidence recovery is best-effort and must never touch a build */ }
         // THE EARLY SYNTAX VERDICT IS RE-CHECKED BEFORE THE GATE COUNTS IT (Q-821). A later pass can have made

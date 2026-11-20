@@ -53,6 +53,7 @@ import { SANDBOX_BROWSER_ARGS, browserScriptRunLine, parseScriptDiagnostic, brow
 import { BROWSER_PAGE_OPTIONS } from './signInExplore';
 import { DESTRUCTIVE_LOCAL_WORDS, SPENDING_LOCAL_WORDS, DEVANAGARI_NEVER_WORDS } from './localActionWords';
 import { MAIN_REGION_EMPTY_JS, BROWSE_MAIN_GRACE_MS } from './PreviewVerify';
+import { ABSENT_DEVICE_CONSOLE_SRC } from './absentDeviceConsole';
 
 /** Where the pre-baked Playwright and its browsers live inside the sandbox image. */
 export const EXPLORE_TOOLS_DIR = '/home/user/.e-tools';
@@ -116,7 +117,8 @@ export const WRITE_VERBS = /\b(add|new|create|save|submit|post|publish|book|conf
  * the dev server's own chatter, and a failed resource load (a missing favicon is not a broken button).
  * An UNCAUGHT exception is never filtered — that arrives as `pageerror`, not as a console line.
  */
-export const CONSOLE_NOISE = /^(warning:|download the react devtools|\[vite\]|\[hmr\]|failed to load resource|%c)|favicon|react-refresh|each child in a list should have a unique/i;
+// …and a line that only says OUR browser has no camera/microphone/location (absentDeviceConsole.ts, failedbr #2263).
+export const CONSOLE_NOISE = new RegExp(String.raw`^(warning:|download the react devtools|\[vite\]|\[hmr\]|failed to load resource|%c)|favicon|react-refresh|each child in a list should have a unique` + '|' + ABSENT_DEVICE_CONSOLE_SRC, 'i');
 
 /**
  * 🔎 A SEARCH BOX AND A SORT MENU ARE TRIED TOO (admin 2026-09-30, after autopsy ee0e6de5: *"haan,

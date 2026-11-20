@@ -44,6 +44,7 @@ const FIX_HINT: Readonly<Record<GameDefectCode, string>> = {
   GAME_DEFECT_VEHICLE_STALLED: 'The vehicle never moves with the accelerator held — call driveVehicle(car, drive, ctx.input.axis(), dt) in EVERY update() for the car the player drives (from src/game/three/objects.ts), with "let car; let drive;" declared outside setup() and set there (drive = createVehicleState(car)). Never move the car by hand.',
   GAME_DEFECT_MISSING_LAYER: 'Code imports game-kit files that are not on disk — run the owning run_recipe (generate_game_3d / generate_game_shell) instead of hand-writing them.',
   GAME_DEFECT_RESTART_BROKEN: 'After the round ends there is no working Play again — keep the kit\'s game-over screen (its Play again calls game.restart()), or give your own end screen a real <button> that resets the round and sets status back to playing.',
+  GAME_DEFECT_TOUCH_SCROLLS: 'A touch handler calls preventDefault on a passive listener, so the browser ignores it and the page can scroll or zoom under the player\'s thumb — register it with addEventListener(type, fn, { passive: false }) (React\'s onTouch* props are passive), or give the game area the CSS touch-action: none.',
   GAME_DEFECT_SILENT: 'The game\'s code plays sound but a whole playthrough played none — play effects from real events (bindGameFeedback / audio.play on a jump, a hit, a pickup) after the first tap, and check the player\'s settings are not muting them.',
 };
 

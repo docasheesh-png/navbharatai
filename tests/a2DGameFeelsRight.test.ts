@@ -206,7 +206,7 @@ describe('🌄 parallax, ✨ particles, 🖼️ sprites', () => {
 describe('the recipe', () => {
   it('is a registered game recipe with every module, and a physics subset brings the tilemap', () => {
     expect(GAME_RECIPES.generate_game_2d).toBe(generateGame2D);
-    expect(GAME_2D_MODULES).toEqual(['sprite', 'camera', 'tilemap', 'physics', 'parallax', 'particles']);
+    expect(GAME_2D_MODULES).toEqual(['sprite', 'camera', 'tilemap', 'physics', 'parallax', 'particles', 'touch']);
     expect(Object.keys(generateGame2D(['physics']).files).sort()).toEqual(['src/game/2d/physics.ts', 'src/game/2d/tilemap.ts']);
   });
 });

@@ -343,7 +343,9 @@ export type ProjectModeSkipReason =
    */
   | 'template-is-the-app'
   /** Shaped like a project spec, but the one scope verdict (APP_SCOPE) reads it as one app (Q-138). */
-  | 'scope-says-one-app';
+  | 'scope-says-one-app'
+  /** A game the platform lays the kit down for: built on the kit, never split into modules (failedbr #2279). */
+  | 'game-builds-on-kit';
 
 export interface ProjectModeDiagnosis {
   code: 'PROJECT_MODE';
@@ -405,7 +407,7 @@ export function projectModeDiagnosis(args: {
    * The one scope verdict (`scopeVerdict` in lib/appScopeAnalyzer.ts — Q-138). Project Mode reads its size
    * answer and never sizes on its own; when it is absent the spec shape alone is reported (unit callers).
    */
-  scope?: { large: boolean; signals: string[] } | null;
+  scope?: { large: boolean; signals: string[]; gameOnKit?: boolean } | null;
   /** The seeded template IS the finished app (`simple` tier) — autopsy e3135b7b. A `pro` scaffold is not. */
   templateIsTheApp?: boolean;
 }): ProjectModeDiagnosis {
@@ -502,6 +504,16 @@ export function projectModeDiagnosis(args: {
       'Software Project Mode is ON and this prompt is shaped like a project spec, but the scope analyser reads it as one app — normal path.',
       `${signals} Scope: ${args.scope.signals.join('; ') || 'ordinary one-shot app'}. One scope verdict decides the size of a `
         + 'build (APP_SCOPE, admin 2026-10-11); project mode splits only a request that verdict calls large.',
+    );
+  }
+
+  if (args.scope?.gameOnKit === true) {
+    return say(
+      'game-builds-on-kit',
+      'Software Project Mode is ON and this prompt is a large project spec, but it is a game — it is built on the game kit, not split into modules.',
+      `${signals} The kit is a game's own decomposition (loop, input, 3D, audio, shell), laid down before the first `
+        + 'model call; a module turn gets no kit and owns no screen, so nothing could be played (failedbr #2279). '
+        + 'AGENTV3_GAME_PROJECT_MODE=on restores the split.',
     );
   }
 

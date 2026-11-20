@@ -103231,3 +103231,21 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
   - Word guards: "arrow keys", "book a ticket", "hotel staff", "bow tie" match nothing. "big sword" is a greatsword only.
   - The pack's knight/mage/barbarian/rogue were already in the library from KayKit's public 1.0 repository, so they are not duplicated. Test: `libraryBatch8`.
 - **Evidence note:** this environment cannot reach itch.io, so the evidence link is the distributor URL inside the archive (`More KayKit Assets.url`). The licence itself is the archive's License.txt, pinned by the archive's sha256.
+
+## 2026-11-20 — #4396 merged (batch 8); batches 9–10, FBX import, "where to get it", library on every 3D turn
+- #4396 merged. It also merged the other session's switch: the library is ON by default (`7aac6be51`). The admin can now delete `AGENTV3_EXTERNAL_GAME_ASSETS` from Cloud Run — a value of `admin` would keep it owner-only.
+- **Batch 9:** the Quaternius Farm Animal Pack (CC0 per the pack page). Cow, horse and zebra idle/walk/run/jump/die; llama, pig, sheep and pug idle/jump. Every moving role proven live.
+  - FBX-only pack, converted with `scripts/library/fbxToGlb.mjs` (three.js in a sandboxed Chromium).
+  - Running the downloaded FBX2glTF binary was refused by the auto-mode classifier, so it was not used.
+- **Batch 10:** the Downtown City MegaKit (CC0) — 3 whole brick buildings, city street tiles, sidewalks and 5 street props.
+  - The kit's vertex-colour wear mask, painted as red streaks, is removed.
+  - Hindi words: chauraha, tiraha, footpath, gamla.
+- **FBX attachments** are converted on the server (`fbxToGlb` in userModels.ts), keeping skin and animations. Three defects were fixed and locked by real CC0 fixtures in `tests/fixtures/fbx`:
+  - materials came out fully transparent;
+  - one primitive per polygon run;
+  - a texture made FBXLoader call `document`, so a textured FBX never parsed.
+  - Open: textures cannot come across in Node. The user is told, with the .glb route.
+- **Where to get a model** (`modelSourcesGuide.ts`): when the user asks for something the library lacks, the builder builds the closest version AND tells the user the free CC0/CC-BY sources, the file to pick, the upload path and the licence rule.
+- **The library on every later turn of a 3D game** (`withLibraryMenuForExistingGame`): it reached only the creating turn before.
+  - Withdrawn after checking: the tested templates are never 3D, so the template path was not a gap.
+- **Process note:** I wrote files into the main checkout while its gate was running. That gate was stopped and discarded; GitHub CI on the exact pushed commit decided #4396.

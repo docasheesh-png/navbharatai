@@ -102906,6 +102906,13 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it n
   way back, and a readiness WARNING (not a blocker: the game may still run on a desktop). 2D canvas games, board games and
   projects without the shell are never flagged (Q-2715 preserved).
 - Locked by `tests/aGameIsBuiltOnTheShell.test.ts` (reversion: renderer detection off → 3 fail).
+## 2026-11-20 — Game audit 2 (#3): the 2D kit carries the touch controls (branch `claude/game-2d-touch`)
+- Evidence: failedbr #2435 (Mario) grepped the kit's Input for touch, found none, hand-rolled buttons and scored Phone 0. The
+  touch joystick and buttons lived only behind the 3D shell.
+- `src/game/2d/touch.ts`: mountTouchControls2D(stage, input, options) — the SAME TouchControls the 3D shell uses (joystick,
+  Jump + Attack by default, no camera drag), driving the same Input as the keyboard; the recipe layer adder brings
+  ui/touchControls.ts with it. The kit's instructions and compiled example show it; AppKnowledgeBase updated.
+- Locked by `tests/a2DGameIsPlayableOnAPhone.test.ts` (real modules on a fake page; reversion: no 2D defaults → fails).
 ## 2026-11-20 — failedbr #2408 / #2342 / #2339 resolved (#4360 merged)
 
 Closed Q-2962, Q-2963, Q-2965 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).

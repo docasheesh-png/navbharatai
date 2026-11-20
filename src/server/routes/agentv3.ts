@@ -15299,6 +15299,8 @@ async function noteBuildOutcome(
         proChainV2,
         onSurplusError: surplusRawErrorReporter(email, (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }), userId),
         userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
+        // failedbr #2408/#2428: a failed Surplus turn's seconds are the engine's waste, not our clock's.
+        onSurplusAttemptWasted: (ms) => recordAttemptWasted('SURPLUS', 'error', ms),
         onFailOpen: (reason, diag) => {
           const dropped = surplusSession;
           surplusSession = undefined;

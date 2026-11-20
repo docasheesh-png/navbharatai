@@ -1,4 +1,4 @@
-import { ASSET_LIMITS, validateGlb } from './assetPolicy';
+import { ASSET_LIMITS, validateGlb, type GlbLimits } from './assetPolicy';
 
 /** Only pack-relative reviewed resources. Never resolve a glTF URI against a network URL. */
 export function safeGltfResourcePath(path: string): boolean {
@@ -7,13 +7,13 @@ export function safeGltfResourcePath(path: string): boolean {
 }
 
 /** Deterministic, bounded glTF+BIN+PNG/JPEG → self-contained GLB. No native code or archive extraction. */
-export function bundleGltf(json: Uint8Array, resources: ReadonlyMap<string, Uint8Array>): Uint8Array {
+export function bundleGltf(json: Uint8Array, resources: ReadonlyMap<string, Uint8Array>, limits: GlbLimits = ASSET_LIMITS, allowedExtensions: readonly string[] = []): Uint8Array {
   if (json.byteLength > 1024 * 1024 || resources.size > 16) throw new Error('glTF resource budget');
   let total = json.byteLength;
   for (const [path, bytes] of resources) {
     if (!safeGltfResourcePath(path)) throw new Error('Unsafe glTF resource path');
     total += bytes.byteLength;
-    if (total > ASSET_LIMITS.bytes) throw new Error('glTF byte budget');
+    if (total > limits.bytes) throw new Error('glTF byte budget');
   }
   const doc = JSON.parse(new TextDecoder('utf-8', { fatal:true }).decode(json));
   if (doc?.asset?.version !== '2.0' || !Array.isArray(doc.buffers) || doc.buffers.length > 16
@@ -27,7 +27,7 @@ export function bundleGltf(json: Uint8Array, resources: ReadonlyMap<string, Uint
   const append = (bytes: Uint8Array) => {
     const start = offset; const padded = Buffer.alloc(Math.ceil(bytes.byteLength / 4) * 4);
     padded.set(bytes); chunks.push(padded); offset += padded.length;
-    if (offset > ASSET_LIMITS.bytes) throw new Error('Bundled glTF byte budget');
+    if (offset > limits.bytes) throw new Error('Bundled glTF byte budget');
     return start;
   };
   const bufferOffsets = doc.buffers.map((buffer: {uri?:unknown;byteLength?:number}) => {
@@ -58,12 +58,12 @@ export function bundleGltf(json: Uint8Array, resources: ReadonlyMap<string, Uint
   doc.buffers = [{byteLength:offset}]; doc.bufferViews = views;
   const raw = Buffer.from(JSON.stringify(doc)); const paddedJson = Buffer.alloc(Math.ceil(raw.length / 4) * 4,32); raw.copy(paddedJson);
   const size = 28 + paddedJson.length + offset;
-  if (size > ASSET_LIMITS.bytes) throw new Error('Bundled GLB exceeds budget');
+  if (size > limits.bytes) throw new Error('Bundled GLB exceeds budget');
   const glb = Buffer.alloc(size);
   glb.writeUInt32LE(0x46546c67,0);glb.writeUInt32LE(2,4);glb.writeUInt32LE(size,8);
   glb.writeUInt32LE(paddedJson.length,12);glb.writeUInt32LE(0x4e4f534a,16);paddedJson.copy(glb,20);
   glb.writeUInt32LE(offset,20+paddedJson.length);glb.writeUInt32LE(0x004e4942,24+paddedJson.length);
   Buffer.concat(chunks,offset).copy(glb,28+paddedJson.length);
-  validateGlb(glb);
+  validateGlb(glb, limits, allowedExtensions);
   return glb;
 }

@@ -10,9 +10,13 @@ import { REVIEWED_LIBRARY_BATCH_3 } from './reviewedLibraryBatch3';
 import { REVIEWED_LIBRARY_BATCH_4 } from './reviewedLibraryBatch4';
 import { REVIEWED_LIBRARY_BATCH_5 } from './reviewedLibraryBatch5';
 import { REVIEWED_LIBRARY_BATCH_6 } from './reviewedLibraryBatch6';
+import { REVIEWED_LIBRARY_BATCH_7 } from './reviewedLibraryBatch7';
+import { REVIEWED_LIBRARY_BATCH_8 } from './reviewedLibraryBatch8';
 
 export const GAME_ASSET_PROVIDERS = ['polyhaven', 'kenney', 'quaternius', 'kaykit', 'github', 'sketchfab'] as const;
 export type GameAssetProviderId = typeof GAME_ASSET_PROVIDERS[number];
+/** Providers whose CC0 packs the admin downloaded and we converted offline: their models may ship inside the server image. */
+const PACKAGED_PROVIDERS: readonly GameAssetProviderId[] = ['quaternius', 'kaykit'];
 export interface ReviewedAsset extends AssetCandidate {
   /** Curated library classification; no gameplay or device certification. */
   libraryCategory?: ObjectCategory;
@@ -38,7 +42,7 @@ export interface ReviewedAsset extends AssetCandidate {
 }
 
 /** Exact asset revisions verified locally; feature activation remains independently default OFF. */
-export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalogue, ...REVIEWED_LIBRARY_EXPANSION, ...REVIEWED_LIBRARY_BATCH_2, ...REVIEWED_LIBRARY_BATCH_3, ...REVIEWED_LIBRARY_BATCH_4, ...REVIEWED_LIBRARY_BATCH_5, ...REVIEWED_LIBRARY_BATCH_6];
+export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [...reviewedCatalogue, ...REVIEWED_LIBRARY_EXPANSION, ...REVIEWED_LIBRARY_BATCH_2, ...REVIEWED_LIBRARY_BATCH_3, ...REVIEWED_LIBRARY_BATCH_4, ...REVIEWED_LIBRARY_BATCH_5, ...REVIEWED_LIBRARY_BATCH_6, ...REVIEWED_LIBRARY_BATCH_7, ...REVIEWED_LIBRARY_BATCH_8];
 
 /**
  * Admin decision 2026-11-19: the library is bounded by STORAGE, not by a model count. The old 64-entry cap was
@@ -63,8 +67,8 @@ export function validateCatalogue(assets: readonly ReviewedAsset[]): void {
       || !candidateMatches(c, { subject: c.subjects[0] }) || c.downloadOrigins.length > 4) throw new Error('Unreviewed catalogue entry');
     // A PACKAGED model ships inside the server image (assets/game-models/<sha256>.glb) because it is an offline conversion
     // with no pinned public GLB (2026-11-20, the admin's Quaternius packs: OBJ/FBX converted to GLB). Allowed only for the
-    // reviewed CC0 provider, with its exact byte size declared — the transport refuses any file whose size or hash differs.
-    if (c.packaged && (c.provider !== 'quaternius' || !/^[a-f0-9]{64}$/.test(c.sha256) || c.bytes === undefined || c.license.spdx !== 'CC0-1.0')) throw new Error('Unreviewed packaged model');
+    // reviewed CC0 providers (Quaternius; KayKit since batch 8, 2026-11-20), with its exact byte size declared — the transport refuses any file whose size or hash differs.
+    if (c.packaged && (!PACKAGED_PROVIDERS.includes(c.provider) || !/^[a-f0-9]{64}$/.test(c.sha256) || c.bytes === undefined || c.license.spdx !== 'CC0-1.0')) throw new Error('Unreviewed packaged model');
     assetDownloadUrl(c.downloadUrl, new Set(c.downloadOrigins));
     for (const origin of c.downloadOrigins) if (new URL(origin).origin !== origin) throw new Error('Invalid reviewed origin');
     if (c.optimization !== undefined && (!['compact-v1', 'animation-selection-v1'].includes(c.optimization) || !/^[a-f0-9]{64}$/.test(c.sourceSha256 ?? ''))) throw new Error('Unreviewed optimization source/version');

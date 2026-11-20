@@ -1,7 +1,7 @@
 /** Planning evidence only: no inferred phone model, benchmark or automatic asset activation. */
 import { buildGameContract } from '../gameIntent';
 import { gameAssetRequirements } from './assetPlan';
-import { REVIEWED_GAME_ASSETS } from './providers';
+import { REVIEWED_GAME_ASSETS, type ReviewedAsset } from './providers';
 import { sceneryFor } from './worldDressing';
 import { searchGameLibrary } from './gameLibrary';
 export interface LibraryRequest {
@@ -50,4 +50,30 @@ export function gameLibraryPlanningHandoff(prompt: string): string {
   const plan=planGameLibrary({prompt});
   const concise=(r: typeof plan.requirements[number])=>({subject:r.subject,role:r.role,required:r.required,animation:r.animation,candidates:r.candidates.map(c=>({id:c.id,availability:c.availability})),missing:r.missing});
   return '[GAME_LIBRARY_REQUIREMENTS]\n'+JSON.stringify({genre:plan.genre,profile:plan.profile,budget:plan.budget,deviceFit:plan.deviceFit,requirements:plan.requirements.map(concise),optionalScenery:plan.suggestions.map(concise),warnings:plan.warnings,verificationRequired:plan.verificationRequired});
+}
+
+/**
+ * THE LIBRARY BY MEANING, NOT BY WORD (admin 2026-11-20: "words par nahi, intention par depend hona chahiye").
+ * The seed and the plan above match the WORDS of a request, so "a story set in a village" got no villager because nobody
+ * typed "villager". The builder model reads meaning; it simply never saw what the library holds. This is that menu: one
+ * line per category, each subject once, with the animation roles it can play — so the model can call add_library_models
+ * for what the game NEEDS. Only shown when the library is on for the account (a menu of tools it cannot use would cost a
+ * wasted call per build). Bounded: subjects are the reviewed catalogue's own, never prompt text.
+ */
+export function gameLibraryMenuHandoff(catalogue: readonly ReviewedAsset[] = REVIEWED_GAME_ASSETS): string {
+  const byCategory = new Map<string, Map<string, Set<string>>>();
+  for (const c of catalogue) {
+    const category = c.libraryCategory ?? 'other';
+    const subjects = byCategory.get(category) ?? new Map<string, Set<string>>(); byCategory.set(category, subjects);
+    const roles = Object.keys(c.animationRoles ?? {}).filter(r => r !== 'idle');
+    for (const s of c.subjects.slice(0, 16)) { const set = subjects.get(s) ?? new Set<string>(); subjects.set(s, set); roles.forEach(r => set.add(r)); }
+  }
+  const lines = [...byCategory].sort(([a], [b]) => a.localeCompare(b)).map(([category, subjects]) =>
+    `${category}: ${[...subjects].sort(([a], [b]) => a.localeCompare(b)).map(([s, roles]) => roles.size ? `${s} (${[...roles].join('/')})` : s).join(', ')}`);
+  return '[GAME_LIBRARY_MENU]\n'
+    + `Every ready 3D model in the NavBharatAI library, by subject. The models already prepared above were matched from the WORDS of the request; `
+    + `choose from this menu by its MEANING. When the game needs something listed here that was not prepared — a village story needs villagers, `
+    + `houses and a well even if nobody typed "villager"; a hunting game needs a hunter and animals — call add_library_models with those subjects `
+    + `(and the animation role the game uses, in brackets). Add only what the game needs, at most 6 per call. Not listed → build it with the recipes.\n`
+    + lines.join('\n');
 }

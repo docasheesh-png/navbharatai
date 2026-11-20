@@ -178,7 +178,7 @@ describe('wiring — both surfaces, and neither can be blocked BY the checker fa
     expect(src).toContain("audit(\n          triage.verdict === 'block' ? 'PROMPT_BLOCKED' : 'PROMPT_FLAGGED'");
     // The class and the prompt are passed since 2026-09-13: the pornography refusal is written in the
     // USER'S language (Hindi in → Hindi out), and every other class keeps the neutral Terms wording.
-    expect(src).toContain('res.status(403).json({ error: blockMessage(triage.contentClass, prompt) })');
+    expect(src).toContain('res.status(403).json({ error: blockMessage(triage.contentClass, prompt, triage.ruleId) })');
   });
 
   it('the chat path triages AFTER attachments are extracted — the same request, pasted in a file', () => {

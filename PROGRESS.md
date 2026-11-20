@@ -103079,6 +103079,21 @@ Ledger for the next PR (rows Q-2987…Q-2989):
 - #2256 (and #2252, same workspace) — the same class as Q-2979 (a game split into project modules, module 3 of 14); resolved by #4369.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971, Q-2974, Q-2975, Q-2977, Q-2984 (blocked, each with what it needs).
 
+## 2026-11-20 — Real-money betting apps are not built; pretend-chip games are (admin point 9)
+
+- **Admin decision:** "other app builder jo karte hai, same karo". Published policies: Bolt (StackBlitz) and Builder.io
+  forbid UNLAWFUL gambling (Builder.io: only with licences); Replit lists gambling among illegal uses. India's Promotion
+  and Regulation of Online Gaming Act, 2025 bans every real-money online game (offering/facilitating: cognizable,
+  non-bailable). Same standard for an Indian platform ⇒ never the real-money part.
+- **Fix:** `REAL_MONEY_GAMBLING` (`illegal`) in `illegalContentRules.ts` — subject (betting/casino/satta/poker/rummy/
+  teen patti/fantasy league/lottery) AND context (deposit, withdraw, cash out, real money, cash prizes, UPI top-up,
+  paise lagao/jeeto). Negated mentions skipped inside the pattern (before AND after), because the publish scanner has no
+  exempt step and our own board-games kit says "Real-money play is not something this pack supports" beside Teen Patti.
+  Exempt: de-addiction/helpline/awareness apps. All nine other Indian scripts (census), with word-end guards
+  (ಚಟ/ಚಟುವಟಿಕೆ). The refusal now names the 2025 Act and offers the same game with pretend chips (EN + HI); all 7
+  `blockMessage` callers pass `triage.ruleId` (census test). AppKnowledgeBase updated.
+- **Lock:** `tests/realMoneyBettingIsNotBuilt.test.ts` (24). Reversion proofs: class, leading negation, trailing
+  negation, exemption, generic message, a caller dropping the rule, the ಚಟ word-end — each fails.
 ## 2026-11-20 — #4375 merged (failedbr #2263 / #2255 / #2246 / #2224 / #2216 / #2208)
 
 Closed Q-2987, Q-2988, Q-2989, Q-2990, Q-2991, Q-2992, Q-2993 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): a handled missing camera/microphone in our checking browser is not an app defect; "make the internet faster" is the fifth impossible power; a declined turn records OUTCOME_DECLINED; the node_modules stamp never creates a file (and a static file server keeps its own host); a model write that removes an untouched kit file's exports or class members is refused; music-genre and AI terms are one unknown-name family; "<framework> Vite plugin not found in Vite config" is a configuration error. CI caught one defect of the PR's own (an install-stamp test leaving temp dirs behind — moved to makeTempDir) before merge.
@@ -103203,3 +103218,34 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 - **Library batch 6** (this PR): the admin's own Quaternius downloads from Drive, licence checked in each archive and on the pack page: Ultimate Gun Pack (12 firearms, the library's first) and Realistic Car Pack (7 cars). The packs have no GLB, so each was converted offline (OBJ+MTL → GLB) and ships PACKAGED in the image (`assets/game-models/<sha256>.glb`). The packaged path is generalized from the eagle to any Quaternius CC0 entry with a pinned hash and size; the transport looks up the reviewed entry by id and checks provider, hash and size. New prompt words (English and Hindi: gun/बंदूक, pistol/पिस्तौल, AK47, sniper, shotgun, SMG, revolver, jeep/SUV, sports car), and a named subtype is not also the generic subject (police car is not also "car"; laser gun is not "gun"). Admission: all 19 rendered live in Chromium. Test: `libraryBatch6`.
 - Drive review (2026-11-20): accepted N1, N2, N3, N4, N8, N9, N16, Downtown City, Medieval Village, KayKit Adventurers 2.0, SBS textures (CC0 per the archive's licence file). Rejected: N5 (licence forbids redistribution), N6 (paid, attribution), N10 (Cenji licence), Bestiary (not CC0), and every archive with no licence file (sounds, PSX cars, retro weapons, furniture, rooms, etc.) until a source page shows its licence.
 - Next: animated clothed characters (Universal Base Characters + Modular Outfits + Universal Animation Library, same 65-joint rig; four built under 5 MB with 16 animations each).
+
+## 2026-11-20 — Game maker: Indian characters, library chosen by meaning, the user's own models (admin: "a. b. sab karo")
+- **Library batch 7:** the first clothed, fully animated characters: village man, village woman, and ranger man/woman (archer, hunter).
+  - Built from three of the admin's CC0 Quaternius packs on one 65-joint rig.
+  - Indian look by default, set as material colours: skin tone, black hair, a white kurta-like shirt, red for the village woman.
+  - Plain part names so a user can change any part: materials Skin/Hair/Eyes/Clothes; nodes Head/Body/Arms/Legs/Hood….
+  - 12 animation roles, every moving one proven in the live admission.
+  - New subjects only, so man/woman keep their models. Test: `libraryBatch7`.
+- **By meaning, not by word:** a new game's builder gets the whole library as a menu (`gameLibraryMenuHandoff`), only when the library is on for the account.
+  - `add_library_models` takes every role.
+  - A role the model lacks keeps the model and is reported; it used to make the model unavailable.
+  - Test: `theLibraryIsChosenByMeaning`.
+- **The user's own models** (`userModels.ts`): attach .glb / .gltf (+bin, textures) / .obj (+mtl, textures), loose or as a zip of models.
+  - Each model is converted to one checked GLB, saved durably, then written to the sandbox at public/models/<name>.glb.
+  - The builder is told the parts and animations of what really landed.
+  - FBX and Draco/Meshopt are refused, with the exact export step.
+  - A missing texture loads without it and the user is told.
+  - Limits: 8 MB, 200k triangles, 4096 px, 8 per message.
+  - Test: `theUsersOwnModelGoesIntoTheGame`.
+- **Sibling bug fixed:** a 3D app imported as a PROJECT zip had its .glb read as text (corrupted) and its glTF .bin dropped. Both are now kept byte-exact.
+- **Open:** real Indian clothing (saree/dhoti/kurta/turban) geometry. No CC0 rigged model exists. The admin decides: accept CC-BY with an automatic credit, or buy a pack whose licence allows redistribution. FBX conversion is also open: no converter we can trust in the server yet.
+
+## 2026-11-20 — #4392 and #4394 merged; library batch 8 (KayKit Adventurers 2.0)
+- #4392 (batch 6: guns and cars) and #4394 (Indian characters, library by meaning, user's own models) merged. The full local gate was green on each final tree (#4394: 3656 files, 55562 tests).
+- **Batch 8** (this PR): the admin's KayKit Adventurers 2.0 download (Kay Lousberg, CC0 per the archive's License.txt: "free to use in personal, educational and commercial projects").
+  - A cartoon bowman with 15 clips; all 9 moving roles proven animated in the live admission.
+  - 15 props the library lacked: bow, arrow, arrow bundle, quiver, dagger, greatsword, battle axe, round/spiked shields, magic staff/wand, spellbook, book, mug, smoke bomb.
+  - Packaged in the image. KayKit joins Quaternius as a packaged provider; every other provider is still refused.
+  - Word guards: "arrow keys", "book a ticket", "hotel staff", "bow tie" match nothing. "big sword" is a greatsword only.
+  - The pack's knight/mage/barbarian/rogue were already in the library from KayKit's public 1.0 repository, so they are not duplicated. Test: `libraryBatch8`.
+- **Evidence note:** this environment cannot reach itch.io, so the evidence link is the distributor URL inside the archive (`More KayKit Assets.url`). The licence itself is the archive's License.txt, pinned by the archive's sha256.

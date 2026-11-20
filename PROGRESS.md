@@ -103085,3 +103085,15 @@ Ledger for the next PR (rows Q-3021…Q-3024):
 - #2036 — Q-3034 every game-kit file now compiles under a strict app tsconfig (noUnusedLocals/noUnusedParameters): the only offender, TouchControls' unread `container` field, failed the user's typecheck and looped the builder. Its E2B-cap setup failure is Q-2929.
 - #2065 — no defect: a "continue" turn rendered at 221 s and the user stopped it at 274 s; its two unused `@capacitor/*` warnings are advisory and true.
 - #2064, #2037, #2001, #2003 — no new rows: #2064's "could not find @Composable" was fixed by BR1998; #2037's skipped write-time typecheck by autopsy 61279465; #2001's `?react` SVG imports by BR2001; #2001's and #2003's E2B concurrency refusals are Q-2929 (blocked on the plan limit).
+
+## 2026-11-20 — Game kit: breakable objects (game-gap audit item)
+
+- **Gap:** no breakables — a crate took hits and nothing happened, or a builder hid it and it kept blocking invisibly.
+- **Fix:** 3D kit `src/game/three/breakable.ts`: `makeBreakable(obj, { health, pieces, color, debrisSeconds, onBreak })`;
+  `breakableTargets()` joins the weapon's own target list and `hitBreakables(hits, from)` routes hits back (enemies
+  untouched, stale hits on a broken crate ignored); at zero the object LEAVES the scene (stops blocking) and shatters
+  into debris (object colour, flies away from the hit, gravity, bounce, settle, shrink, dispose geometry + material);
+  broken objects leave the registry (WeakSet remembers them). The shell steps debris every frame and clears on dispose.
+  ToolCatalog, 3D instructions, AppKnowledgeBase updated; lifecycle harness stub added.
+- **Lock:** `tests/aCrateBreaksWhenHit.test.ts` (7, real breakable + real ProjectileSystem). 11 reversion proofs fail
+  (three first slipped through — two were real test gaps, now covered; one was a dead mutation, redone on the guard).

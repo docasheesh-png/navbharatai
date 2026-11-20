@@ -25,6 +25,7 @@
 // PURE: prompt in, contract out. No clock, no I/O, no env.
 
 import { realismIntent, type RealismTier } from './realismIntent';
+import { namesWellKnownGame } from './wellKnownGameTitles';
 import { OBJECT_CATALOG } from './objectCatalog';
 import { PLACEMENT, compileMatch, type CatalogEntry, type ObjectCategory } from './objectCatalogTypes';
 import { genericObjectProtocol } from './objectSpecProvider';
@@ -93,7 +94,8 @@ const FLAT_GAME = /\b(?:2\s*-?\s*d|two\s*-?\s*dimensional|match\s*-?\s*(?:3|thre
 
 export function wantsSceneObjects(prompt: string | null | undefined): boolean {
   const text = String(prompt ?? '');
-  if (!SCENE_WORDS.test(text)) return false;
+  // A named game ("make a bgmi for me") is a game even without the word — the same reader the domain classifier uses.
+  if (!SCENE_WORDS.test(text) && !namesWellKnownGame(text)) return false;
   if (SAYS_3D.test(text)) return true;
   return !FLAT_GAME.test(text);
 }
@@ -115,6 +117,10 @@ const NOT_THE_OBJECT = [
   /\bhero\s*(?:sections?|banners?|images?|areas?|text|titles?|headers?|blocks?|slides?|videos?|shots?|cards?)\b/gi,
   /\bcharacters?\s*(?:counts?|limits?|encoding|sets?|lengths?)\b/gi,
   /\b(?:video|music|media|audio|mp3|youtube|podcast|radio)\s+players?\b/gi,
+  // 🔴 failedbr #2478 (2026-11-20): a roadmap step said "a 3D scene … with a ground plane", and the game contract made the
+  // player DRIVE AN AIRCRAFT ("The player drives: a aircraft") while the hero contract asked for an air vehicle. A plane
+  // of geometry — ground, floor, base, grid, water, clipping, image — or three.js's PlaneGeometry is not an aeroplane.
+  /\b(?:ground|floor|base|flat|grid|water|xz|horizontal|clipping|image|focal|near|far)\s*-?\s*planes?\b|\bplane\s*-?\s*(?:geometry|mesh)\b|\bPlaneGeometry\b/gi,
 ];
 
 export function withoutNonObjectSenses(text: string): string {

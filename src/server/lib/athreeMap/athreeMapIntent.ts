@@ -14,6 +14,8 @@
 import { asksForBattleRoyale, buildGameContract } from '../../AgentV3/gameIntent';
 import { ATHREE_MAP, LIBRARY_MAPS, type LibraryMap, type MapProfile } from './athreeMapLibrary';
 import { largeWorldIntent } from '../../AgentV3/largeWorldIntent';
+import { GTA_TITLE } from '../wellKnownGameTitles';
+import { withoutNonObjectSenses } from '../heroObjectSpec';
 
 export type AthreeVia = 'stored' | 'named' | 'needed' | 'librarian' | 'declined' | 'other-map' | 'named-not-needed' | 'road-library' | 'none';
 
@@ -58,9 +60,12 @@ export function mapProfileFor(prompt: string): MapProfile | null {
   const c = buildGameContract(prompt);
   if (c.dimension === '2d') return null;
   if (asksForBattleRoyale(t)) return 'battle-royale';
-  if (FLIGHT.test(t) || c.vehicle === 'aircraft') return 'flight';
+  // A plane of GEOMETRY ("a ground plane") is not an aircraft — the hero contract's own reader removes those senses first
+  // (failedbr #2478: roadmap step 1's "ground plane" made a BGMI request a FLIGHT game). c.vehicle already reads it that way.
+  if (FLIGHT.test(withoutNonObjectSenses(t)) || c.vehicle === 'aircraft') return 'flight';
   if (c.genre === 'racing' || RACING.test(t) || (c.vehicle && ['car', 'motorcycle', 'truck', 'bus', 'tractor'].includes(c.vehicle) && /\bgame\b|\bsim/.test(t))) return 'racing';
-  if (OPEN_WORLD.test(t)) return /\bexplor|\bwalk|survival|adventure/.test(t) ? 'explore' : 'open-world';
+  // GTA_TITLE is the shared reader ("gta5" glued too — the private `\bgta\b` missed it).
+  if (OPEN_WORLD.test(t) || GTA_TITLE.test(t)) return /\bexplor|\bwalk|survival|adventure/.test(t) ? 'explore' : 'open-world';
   // 🗺️ The WISH, not the word (admin 2026-11-19: "sirf word par nahi, intension par trigger ho"). "Bada map banao",
   // "kahin bhi ghoom sakun", "map bahut chhota hai" mean a big world as surely as "open world" does. Only for a
   // GAME: a big font or a long list is not a world. An endless runner is a lane, not a world.
@@ -86,7 +91,7 @@ function isGameRequest(t: string, c: ReturnType<typeof buildGameContract>): bool
  */
 export function raceWantsOpenWorld(prompt: string): boolean {
   const t = norm(prompt);
-  if (OPEN_WORLD_RACE.test(t)) return true;
+  if (OPEN_WORLD_RACE.test(t) || GTA_TITLE.test(t)) return true;
   const wish = largeWorldIntent(prompt);
   // "Bada MAP / badi DUNIYA" asks for land around the race; "lambi sadak" asks for road, which the library gives.
   return wish.wish === 'free-roam' || (wish.wish === 'big-space' && WORLD_NOUN.test(wish.evidence));

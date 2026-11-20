@@ -102945,6 +102945,18 @@ Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2970 (#2399): an import of a `.d.ts` file resolves in the readiness analyzer.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (blocked, each with what it needs).
 
+## 2026-11-20 — Autopsy failedbr #2478 ("make a bgmi for me"): royale requests get the big map, laid down by the platform
+
+Admin: a PUBG / Free Fire / BGMI request must get a big, realistic map; the library already has maps that were not used.
+The build failed at the 25-minute cap with a 30×30 grid and five cubes. Root causes, each fixed as a class (rows Q-3010 – Q-3019):
+- **Q-3010** The Athree map was a system-prompt line only; the 3D seed never laid it down. `gameKitPlan` now seeds
+  `generate_athree_map` (the recipe's own `athreeMapIntent` decides) and the handoff says build IN it.
+- **Q-3011** "make a bgmi for me" was domain "general". One shared title reader (`lib/wellKnownGameTitles`); apps ABOUT a game stay apps.
+- **Q-3012** Milestone turns lost the user's game (contract genre "unknown"). `gameIdentityLines` + `ToolDispatcher.worldRequest()`.
+- **Q-3013** "ground plane" was an aircraft / flight map. Shared `withoutNonObjectSenses` gained geometry senses.
+- **Q-3014** The failure itself: `inventory.use()` read as React's `use` → 15-minute false chase. Member calls are hooks only on a PascalCase namespace.
+- Open: Q-3016 (racing starter shipped for every 3D game), Q-3018, Q-3019; Q-3017 blocked on the admin's model-library rollout decision.
+Locked by `tests/aRoyaleRequestGetsTheBigMap.test.ts` and `tests/aMethodNamedUseIsNotAHook.test.ts`, each half reverted-and-failed.
 ## 2026-11-20 — failedbr #2379 / #2337 resolved (#4362 merged); autopsies #2320, #2311, #2295, #2279, #2278, #2271 (#4369)
 
 Closed Q-2972, Q-2973, Q-2976 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).
@@ -102969,10 +102981,10 @@ Ledger for the next PR (rows Q-2987…Q-2989):
 - #2263 — Q-2987 a handled missing camera in our checking browser is not an app defect (render filter + click explorer, one pattern).
 - #2255 — Q-2988 "make my internet 5× faster" is the fifth impossible power; the builder is told and the honest alternative named.
 - #2246 — Q-2989 a declined turn records OUTCOME_DECLINED (UPSELL_SUPPRESSED after a refusal deliberately stays a warning).
-- #2216 — Q-2991 a model write that removes an untouched kit file's exports or class members is refused.
-- #2208 — Q-2992 music-genre and AI terms are one unknown-name family; Q-2993 "<framework> Vite plugin not found in Vite config" is a configuration error, not a blind restart.
+- #2216 — Q-3011 a model write that removes an untouched kit file's exports or class members is refused.
+- #2208 — Q-3012 music-genre and AI terms are one unknown-name family; Q-3013 "<framework> Vite plugin not found in Vite config" is a configuration error, not a blind restart.
 - #2193 — the free-build cost-ceiling class, Q-2240 (🟡 the admin's money decision; the report is added to that row).
-- #2224 — Q-2990 the install stamp never creates a `node_modules` FILE (the 115 s reinstall-before-every-start on a dependency-free site); a static file server keeps its own host binding.
+- #2224 — Q-3010 the install stamp never creates a `node_modules` FILE (the 115 s reinstall-before-every-start on a dependency-free site); a static file server keeps its own host binding.
 - #2264 — not new rows: the "📨 picked up your message" text that equalled the model's own narration came through `/api/agentv3/steer`, which sends only the composer's content (`sendSteer` in AgentV3Panel.tsx) — the user's own action, not an engine echo. The mock "realistic simulation" of video generation is the SIMULATED_RESULT class already fixed for videos (Q-2960, #4360). edit_file misses are the weak model's, met by the designed layer.
 - #2257 — no defect: the user stopped 2.8 min in after the app rendered; the two warnings are accurate notes on an unfinished tree.
 - #2256 (and #2252, same workspace) — the same class as Q-2979 (a game split into project modules, module 3 of 14); resolved by #4369.

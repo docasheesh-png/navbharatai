@@ -331,6 +331,10 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
             + ' platforms with markWorldCollider(mesh) from src/game/three/collision.ts. For custom movers,'
             + ' use sweepWorldCapsules with worldColliders before applying movement. Verify that walls and'
             + ' trunks block, low steps climb and roofs stop jumps.'
+            + (/src\/game\/three\/city\.ts/.test(done.find((r) => r.recipe === 'generate_game_3d')?.content ?? '')
+              ? ' For a city or a town, build it with createCity() from src/game/three/city.ts (streets, crossings, pavements,'
+                + ' shops, apartments, offices, houses, parks; city.spawn, city.route, city.solidAt) — never hand-place a street grid.'
+              : '')
           : '')
       : twoD,
     // A race whose course the request did not describe runs on the kit's endless track (endlessRaceCourse.ts):

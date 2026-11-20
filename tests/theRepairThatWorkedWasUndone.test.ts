@@ -133,7 +133,7 @@ describe('2 · a repair the platform checks itself does not check itself', () =>
     expect(green).toContain('tools: withoutPlatformCheckTools(baseRunnerOpts.tools)');
   });
   it('SOURCE: a focused repair gets no end-of-turn style hand-back and no style note in the done steer', () => {
-    expect(RUNNER).toMatch(/readiness\.ready && styleResumes === 0 && !this\.opts\.focusedRepair/);
+    expect(RUNNER).toMatch(/readiness\.ready && styleResumes === 0 && (?:polishAllowed && )?!this\.opts\.focusedRepair/);
     expect(RUNNER).toMatch(/styleResumeEnabled\(\) && !this\.opts\.focusedRepair/);
   });
 });

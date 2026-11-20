@@ -102881,3 +102881,12 @@ Still open from these reports: Q-2942, Q-2943, Q-2947, Q-2948, Q-2949 (see the q
   tile (a picture would need an on-screen credit; users never see source names). Names drop internal batch prefixes.
 - **Proof:** the real picker bundled into Chromium against the real server function: grid renders, search "cow" → "Cow",
   tap → composer holds the id instruction, no page errors. Locks: `tests/theGameLibraryIsOnScreen.test.ts` (12).
+
+## 2026-11-20 — failedbr #2424 / #2417 / #2415 / #2421 resolved (#4357 merged)
+
+Closed Q-2954, Q-2956, Q-2958, Q-2960 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).
+- Q-2954 (#2424): a provider-exhaustion error event ("All NavBharatAI Pro providers failed …") is filed in the provider phase, so it is never a build-breaking blocker of an app that rendered.
+- Q-2956 (#2417): a planner cancelled by a stop is `stopped`, never "failed … the build proceeded directly".
+- Q-2958 (#2415): an attached text file is written whole to `attachments/<name>` before the builder starts (the prompt copy is capped at 20,000 characters); the builder is told the path and not to search the disk. The write lives in `writeAttachmentFilesInStep`, because the chat handler is at its TS2563 branch budget (CI caught the first version at 538/537).
+- Q-2960 (#2421): `SIMULATED_RESULT_RE` names generated media (video/audio/blob/clip/render); a not-ok build's writes are scanned and recorded for the admin.
+Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it needs), plus the earlier Q-2942/Q-2943/Q-2947/Q-2948/Q-2949.

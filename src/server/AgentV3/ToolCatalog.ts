@@ -2330,9 +2330,11 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'points or pretend chips only, never real money), CARROM (real disc physics at real sizes — collisions, friction, '
         + 'cushions, corner pockets — and the family rules: own coin continues, striker foul, covering the queen, board scoring), '
         + 'CRICKET (overs, wides and no-balls with a free hit, strike rotation, chases, results, run rates, timing-based batting), '
+        + 'BUSINESS (vyapaar, the property-trading board game, pretend money only: buying, rent with colour sets, houses and hotels, '
+        + 'transport and utilities, chance, jail and doubles, mortgages, bankruptcy and a winner, a computer player), '
         + 'with a seeded die. Use it for any of these games; never re-implement their rules.',
       input_schema: { type: 'object', properties: { include: { type: 'array', items: { type: 'string' },
-        description: 'Optional subset: dice, ludo, snakes, chess, cards, carrom, cricket. Default = all; every engine brings dice.' } } },
+        description: 'Optional subset: dice, ludo, snakes, chess, cards, carrom, cricket, business. Default = all; every engine brings dice.' } } },
     },
     {
       name: 'generate_game_2d',
@@ -2639,6 +2641,9 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'frame-rate-independent damp), and META — what brings a player back: a best score that survives a '
         + 'reload, NEW BEST and near-miss ("only 12 more") moments, a combo multiplier, XP + levels with '
         + 'unlocks, achievements, and a daily streak with three daily goals, with on-screen announcements. '
+        + 'It also has swipe input (core/swipe.ts: a swipe presses the same actions as the arrow keys) and the '
+        + 'endless-runner rules (core/runner.ts: LaneRunner with lanes, jump, slide, coins and obstacle rows that '
+        + 'always leave a reachable free lane) — never hand-write either. '
         + 'NO dependency is added and nothing here is engine-specific, so it '
         + 'serves a 2D canvas and a 3D scene equally. '
         + 'DO NOT hand-roll a requestAnimationFrame loop, a keydown handler or a bullet array — every one '
@@ -2650,7 +2655,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: loop, input, events, pool, feel, state, meta, settings, loading, strings, levels, quests, inventory, dialogue, economy, perf, powerups, loot, leaderboard, crafting, keybinds. Default = all; imports are pulled in automatically.',
+            description: 'Optional subset: loop, input, events, pool, feel, state, meta, settings, loading, strings, levels, quests, inventory, dialogue, economy, perf, powerups, loot, leaderboard, crafting, swipe, runner, keybinds. Default = all; imports are pulled in automatically.',
           },
         },
       },

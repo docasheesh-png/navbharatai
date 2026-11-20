@@ -198,6 +198,10 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "d35a8cd244f22d8cd904c02e4433d23ff6ba11548a7468585ce9e6ca97cbd8ff",
     "0fe39b5c79c7a12b6ebe68b056e70521921795677a1a4387adbd6ae9a204f19e"
   ],
+  "src/game/board/business.ts": [
+    "6e18312645538ed41be8bbdefdabbf229679b60d0b3cf40bc08ac28cf915f017",
+    "a1d0f01f1f35d41cd1b6e1407c9ca3679a76cdb246b7f95502d4b0e7a86e9221"
+  ],
   "src/game/board/cards.ts": [
     "a7ca14416a63e05180341db601ba7f7bc5c44165710e4c23e75282210ce88c44"
   ],
@@ -218,7 +222,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "20af6ddf6766ebc0010edc0f9ba8c3479fe6d755f00fe43bdd0d8094fbf061cc",
     "51bd385e993d8765a1c86c568a600f12c9466fe9a30cb8ae5f8ea84ce6abaf67",
     "3b023e173bd3c3c68dfa24ac1beea403338ba83fac53147d488432ea4368184d",
-    "8b14a62bdbf1d55aec67022207e29968e1361ca4282335a13286c10916e57d3b"
+    "8b14a62bdbf1d55aec67022207e29968e1361ca4282335a13286c10916e57d3b",
+    "053e9f9b909528b10107e48248a2de3f134d11ceb5b03c5663ef2137f4d04c94"
   ],
   "src/game/board/ludo.ts": [
     "20d771e554d6d8ac6f292298a5a2299998123e637369d6497ae3ab591500917d"
@@ -310,6 +315,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/game/core/quests.ts": [
     "23688f9c511f110c2e0aab1a704abd655b54a2822d5143b09f816313d43dc06c"
   ],
+  "src/game/core/runner.ts": [
+    "97bdd55536727c171dcd0045864eda6f8ecc1406539771fb8ba32e92cdeb2312"
+  ],
   "src/game/core/settings.ts": [
     "26763b0415a83d97907448f7e605ac9ddd527119c2ac59ba08e6e9f743416007",
     "a29d92726e4fd0baf3be8ce978ae3f638d5979892d63416aafa59e6a536e0e86",
@@ -334,6 +342,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "d629f3dc261ed18487740b12de512aa2d23f34742d50a6b775a95b292db13c95",
     "ad218f39f6a20fcb2e26158a5fef567b2378578a783e6ad72cafd923089525e7",
     "89b605f2878fdbb8f020440ee5d2671174d9a54bd6a52227bf9c1bfcb163ebdb"
+  ],
+  "src/game/core/swipe.ts": [
+    "aeef0a97439506917c0cf63ee9a7dee9e9a393b4a1a550006dee1a6f6889666e"
   ],
   "src/game/forge/behave.ts": [
     "a6a8751f2a3e0a244fcb606b7e1f558a0617c95e713a710205ebdabd7751ce7e",

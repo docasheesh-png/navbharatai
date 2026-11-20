@@ -66,7 +66,7 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole, isPlanningOnlyRole, PLAN_YOURSELF_NOTE } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
-import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER, sharedBareTypecheckCommand } from './tscCommand';
+import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER, sharedBareTypecheckCommand, nodeModulesStampAfterInstall } from './tscCommand';
 import { parseTscErrors, fixTypeOnlyValueImports as fixTypeOnlyValueImportsFromErrors, type TscError } from './EndgameRepair';
 import { tscCommandVerdict, looksLikeTypecheckCommand, tscVerdict, countTscErrors, buildScriptTypecheckVerdict, type TypecheckCommandProof } from './TscGate';
 import { checksWholeDefaultTsProject } from './tscCommandMode';
@@ -177,7 +177,7 @@ import { callRemoteTool } from './mcpTransport';
 import type { SafeMcpTool } from './mcpClient';
 import type { McpServerConfig } from './mcpTransport';
 import { featureFileGuardEnabled, protectedFeatureFileDeletion, protectedFeatureFileMessage } from './featureFileGuard';
-import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, runtimeManifestDeletionTarget, runtimeManifestDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, runtimeManifestDeletionTarget, runtimeManifestDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage, envReadBlockedRemedy } from './CommandGovernance';
 import { ToolRefusal, refuse } from './toolRefusal';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { cloneDestination, shouldRefuseClone, cloneGuardMessage } from './gitCloneGuard';
@@ -253,6 +253,7 @@ import { analyzeRequirementCoverage, requirementCoverageSummary, currentRequestF
 import { binaryTextWriteRefusal } from './binaryTextWrite';
 import { isKeyboardOnlyGame, touchGameNoteEnabled, touchPlayableNote } from './touchPlayableGame';
 import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type VehicleShapeHalves } from './handWrittenVehicleScan';
+import { unguardedEnvClient, unguardedEnvClientNote } from './unguardedEnvClient';
 import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, type GroundShapeHalves } from './handWrittenGroundScan';
 import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, endlessRaceCourseBlocker, type RaceCourseHalves } from './endlessRaceCourse';
 import { actionPoseHalves, actionPoseFinding, actionPoseNote, actionPoseWarning, isGameOwnSource, type ActionPoseHalves } from './actionVisibility';
@@ -1178,6 +1179,8 @@ export class ToolDispatcher {
    */
   private _vehicleShapeIndex = new Map<string, VehicleShapeHalves>();
   private _vehicleShapeNoted = false;
+  /** An unguarded module-scope Supabase client was noted this build (unguardedEnvClient.ts, failedbr #2271). */
+  private _envClientNoted = false;
   /** Hand-written flat roads / pinned vehicle y / own trains on hilly terrain (handWrittenGroundScan.ts, 2026-11-02). */
   private _groundShapeIndex = new Map<string, GroundShapeHalves>();
   private _groundShapeNoted = false;
@@ -5002,6 +5005,13 @@ export class ToolDispatcher {
         if (finding) { vehicle += actionPoseNote(finding); this._actionPoseNoted = true; }
       } catch { /* a note is best-effort */ }
     }
+    // 🔑 A Supabase client built at load from keys nobody saved — a white screen until they are (failedbr #2271).
+    if (!this._envClientNoted) {
+      try {
+        const p = paths.find((q) => unguardedEnvClient(q, files[q]));
+        if (p) { vehicle += unguardedEnvClientNote(p); this._envClientNoted = true; }
+      } catch { /* a note is best-effort */ }
+    }
     // 🎮 A 3D game building its own renderer while the kit's shell sits unused (builds #2475–#2477: three "pubg jaisa"
     // games, all asking for a joystick, all shipped without the shell's touch controls) — once per build, while open.
     if (!this._shellNoted) {
@@ -6376,7 +6386,7 @@ export class ToolDispatcher {
         // secrets, or execute remote code. MEDIUM commands run but carry a warning.
         const risk = classifyCommandRisk(command);
         if (risk.level === 'high') {
-          const blockMsg = `[GOVERNANCE BLOCKED] Command not executed — HIGH-risk operation detected:\n  ${risk.reasons.join('\n  ')}\n  Command: ${command.slice(0, 300)}\n\nIf this was a legitimate need, rephrase the task to avoid dangerous shell patterns.`;
+          const blockMsg = `[GOVERNANCE BLOCKED] Command not executed — HIGH-risk operation detected:\n  ${risk.reasons.join('\n  ')}\n  Command: ${command.slice(0, 300)}\n\nIf this was a legitimate need, rephrase the task to avoid dangerous shell patterns.` + envReadBlockedRemedy(risk.reasons, Object.keys(this.userSecretsEnv));
           getWorkspaceMemory(this.workspaceId).recordAudit(
             `[BLOCKED-HIGH] refused: ${command.slice(0, 200)} — ${risk.reasons.join('; ')}`,
           );
@@ -6412,6 +6422,10 @@ export class ToolDispatcher {
           if (rewritten) {
             try { this.onFileWrite?.(rewritten, await this.actuator.readFile(this.workspaceId, rewritten)); }
             catch { /* the sandbox scan at the final save still sees it */ }
+            // …and the tree it installed is current: re-stamp node_modules, as every platform install does, or the
+            // write-time typecheck stands down for the rest of the build (nodeModulesStampAfterInstall, failedbr #2278).
+            const stamp = nodeModulesStampAfterInstall(rewritten);
+            if (stamp) { try { await this.actuator.runCommand(this.workspaceId, stamp); } catch { /* the end-of-build typecheck still runs */ } }
           }
         }
         // AND SO IS EVERY FILE THE COMMAND PLAINLY WROTE (iPhone/candy report 7da1cdca, 2026-10-04). The

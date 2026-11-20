@@ -497,7 +497,10 @@ const IN_APP_AI_RE = /\b(?:ai|a\.i\.|artificial intelligence|gpt|chatgpt|openai|
  * "without AI", "offline", "bina AI", "AI nahi". `IN_APP_AI_RE` fired on the bare word "AI" in prompts like
  * "simple notes app, no AI, no API, works offline", and the lane wired src/lib/ai.ts anyway. PURE.
  */
-export const NO_AI_RE = /\b(?:no|without|not?\s+using|don'?t\s+(?:use|want|need)|bina|without\s+any)\s+(?:any\s+)?(?:ai|a\.i\.|api|apis|gpt|llm|internet|network|backend)\b|\b(?:ai|api)\s+(?:nahi|nahin|mat|na)\b|\b(?:fully\s+)?offline\b|\bno[- ]internet\b/i;
+// failedbr #1222 (2026-11-20): "Mujhe ek ai banana hai jo kisi api par depend na ho" — an AI that must NOT depend on any API —
+// matched none of these, so the lane wired NavBharatAI's API client into it and told every call "do NOT write any other".
+// The dependency phrasing (English and Hinglish) is the same refusal as "no API".
+export const NO_AI_RE = /\b(?:no|without|not?\s+using|don'?t\s+(?:use|want|need)|bina|without\s+any)\s+(?:any\s+|kisi\s+|koi\s+|external\s+|third[- ]party\s+)?(?:ai|a\.i\.|api|apis|gpt|llm|internet|network|backend)\b|\b(?:ai|api)\s+(?:nahi|nahin|mat|na)\b|\b(?:fully\s+)?offline\b|\bno[- ]internet\b|\b(?:apis?|internet|server|backend)\s+(?:par|pe|per|pr|on)\s+depend\s+(?:na|nahi|nahin|mat)\b|\b(?:not?|never|doesn'?t|does\s+not|shouldn'?t|should\s+not)\s+(?:depend|rely)\s+on\s+(?:any\s+|an\s+|external\s+)?(?:apis?|internet|server|backend|cloud)\b|\bindependent\s+of\s+(?:any\s+)?(?:apis?|internet)\b/i;
 
 /** Where NavBharatAI's keyless AI client lives in a browser app (the `generate_ai` recipe writes the same file). */
 export const LANE_AI_CLIENT_PATH = 'src/lib/ai.ts';

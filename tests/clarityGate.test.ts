@@ -100,6 +100,7 @@ describe('never twice in a row', () => {
     expect(route).toContain('prompt = bestGuessPrompt(lastRequestTurn.text, typedPrompt);');
     expect(route).toContain("if (clarifyChips) { if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, 'clarify'); }");
     expect(route).toContain("chatEvents.emit({ type: 'quick_replies', chips: clarifyChips");
-    expect(route).toContain("if (v.verdict === 'vague') { clarity = { category: v.category }; intent = 'chat'; }");
+    // failedbr #1896: the decision moved into clarityDecision (which also writes its report line).
+    expect(route).toContain("if (decided.vagueCategory) { clarity = { category: decided.vagueCategory }; intent = 'chat'; }");
   });
 });

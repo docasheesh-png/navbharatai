@@ -103191,3 +103191,21 @@ Ledger, older reports (2026-11-20, next PR):
 - #1763–#1757 (seven benchmark builds) — already fixed: a Surplus outage no longer counts as the app's blocker (#2424) or as "no outcome recorded"; the Haiku label on a Weak call is Q-970 (blocked).
 - #1745 — already fixed: "hu" no longer confirms a build (`buildConfirmation`).
 
+Ledger, older reports #1743–#1536 (2026-11-20, next PR):
+- #1743 — no defect: an AI chat app rendered at 261 s, then a user stop; one GLM silence (benched by design).
+- #1617 — Q-3113 (`. ./node_modules/.bin/tsc` sourced as shell → ImageMagick `import`); its missing `src/` and TS5102 `baseUrl` errors were the user's own IDE edits to the starter.
+- #1620 — Q-3114 ("free fire app ke lia panel app" is FOR Free Fire, not a clone).
+- #1577, #1565, #1561, #1544, #1540 — Q-2732 / Q-2242: a "does not provide an export named …" that the file on disk disproves restarts the dev server with a fresh cache before any repair.
+- #1619, #1564, #1537 — Q-3115: a turn that asked the user a question is no longer "no specific error was captured". #1537's ecommerce domain for a voice-assistant spec reads "general" on main.
+- #1615 — Q-3116: bare `types` / `lib` under `baseUrl: "src"` are project files, not missing packages; its failed `ls` blockers and `cd /workspace` are fixed on main (`isReadOnlyInspection`, `fixSandboxWorkspaceCd`).
+- #1563 — Q-3117: no preview ever published is RUNTIME_UNCHECKED, never "runtime verified".
+- #1636 — fixed on main: a Free-Fire-style game read as logistics now reads as game.
+- #1626, #1606, #1605, #1600 — the admin's maintenance pause; filed as OUTCOME_AI_PAUSED on main, never a blocker. #1626's kit-contract TS2322 is BR1954's class; #1600's saved `'types'` vs sandbox `'@/types'` is Q-2232 (shell writes the parser cannot name).
+- #1588, #1584, #1577, #1565, #1563, #1560 — the E2B 20-sandbox cap (Q-2929, blocked on the admin). Their "add credits" upsell on a sandbox outage is suppressed on main (`sandboxUnavailable` counts as interrupted); #1565's kit announced with 0 files is BR1977 (`kitSeedClaimIsHonest`).
+- #1570 — fixed on main: "stopped before the app was running" after a 310 s render (`earliestRenderProof`, a75153ab).
+- #1553 — the 123 no-op `update_preview` calls are now steered after 2 and end honestly (RepeatProbeGuard); its 25-min timeout followed.
+- #1624 — Weak-tier reasoning timeouts (KIMI 150 s with only reasoning) and a futility stop after 10 quiet minutes; the provider class, no platform defect beyond the rows already open.
+- #1559 — a GTA-scale spec in project mode: Kimi TPM / Nemotron 429s, a syntax repair that answered with an unshown file (refused, REPAIR_OUT_OF_SCOPE), then a RED gate; recorded, no new class.
+- #1544 — its Marathi narration for a Hindi request was the model's; main detects the request as Hindi.
+- #1629, #1611, #1609, #1608, #1591, #1573, #1548, #1536 — user stops, no defect.
+

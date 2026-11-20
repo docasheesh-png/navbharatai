@@ -22,3 +22,8 @@ describe('a refusal is never a build or a yes (failedbr #1270)', () => {
     expect(isOfferAcceptance('haan')).toBe(true);
   });
 });
+
+describe('a thumbs-up is a yes to the offer (failedbr #1171)', () => {
+  it.each(['👍', '👍🏽', '✅', '👌'])('accepts: %s', (m) => expect(isOfferAcceptance(m)).toBe(true));
+  it.each(['👎', '😂', '🙏', '👍 but make it red'])('not an acceptance: %s', (m) => expect(isOfferAcceptance(m)).toBe(false));
+});

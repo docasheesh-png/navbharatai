@@ -216,6 +216,9 @@ export function isOfferAcceptance(message: string): boolean {
   // failedbr #1270: "na banao" (don't build) was a YES because "na" is a filler — as the tag AFTER a verb it is ("bana do
   // na"); BEFORE one it is the refusal. Any refusal is never an acceptance.
   if (declinesTheBuild(String(message ?? ''))) return false;
+  // failedbr #1171: a thumbs-up IS the reply to "say yes to start" — the most common one on a phone. Only a message made of
+  // nothing but approving emoji counts; an emoji beside words is judged by the words.
+  if (/^(?:\s*(?:👍(?:[\u{1F3FB}-\u{1F3FF}])?|👌(?:[\u{1F3FB}-\u{1F3FF}])?|✅|✔️?|🆗|💯)\s*)+$/u.test(String(message ?? ''))) return true;
   let decisive = false;
   for (const w of words) {
     if (YES_WORDS.has(w) || DO_IT_WORDS.has(w)) { decisive = true; continue; }

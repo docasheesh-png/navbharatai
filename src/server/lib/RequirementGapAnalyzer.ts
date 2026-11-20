@@ -817,17 +817,57 @@ export function indiaFirstGuidance(domain: string): string {
  */
 export const MEDIA_PLAYER_APP = /\b(?:music|audio|mp3|song|video|media|podcast|radio|fm)\s*[-\s]?\s*players?\b|(?:म्यूजिक|म्यूज़िक|संगीत|ऑडियो|वीडियो|गाने|गानों)\s*(?:का\s*)?प्लेयर/i;
 
+/**
+ * 🎲 A GAME IS NOT ITS THEME (game-gap audit 2026-11-20). "business board game jisme property kharid sake" was read as
+ * a REAL-ESTATE app, "restaurant cooking game" as a restaurant, "bank robbery game" as fintech, "shop simulator game"
+ * as ecommerce — ten of fourteen themed game prompts measured that day. Every one of them then got no game kit at all,
+ * because the kit is seeded only for domain 'game'. A game's theme names a business; that never makes it the business.
+ * The opposite slip came from the same reader: "a cricket academy app with game schedules" was read as a game, because
+ * "game" there only describes the schedules.
+ *
+ * So the word GAME is read for what it does in the sentence:
+ * - As a MODIFIER (game schedules, game slots, game store, game tickets, game stats) it names no game being built.
+ * - As the THING BUILT, with no app / website / platform / portal / dashboard / software named beside it, the game
+ *   domain wins outright. "game app" and "platform game" are themselves games, so they never count as that app noun.
+ *   A "gym app with a workout game" names an app, so it keeps the ordinary scoring.
+ * - A game that moves REAL money (a wallet, deposits, withdrawals, payouts, UPI, KYC, real-money or cash prizes) is a
+ *   financial product first, so it keeps the ordinary scoring too — the BR1985 precedent ("fantasy cricket game with a
+ *   wallet and real-money prizes" stays fintech and gets KYC guidance). Pretend money ("fake money") is not that.
+ */
+// ONE list of real money in a game (two sessions had written two that disagreed: one knew "bet"/"wager", the other "cash prizes").
+const MOVES_REAL_MONEY = /\breal[-\s]?money\b|\bcash\s+prizes?\b|\bwallets?\b|\bkyc\b|\bupi\b|\bdeposits?\b|\bwithdraw\w*|\bpayouts?\b|\bbet(?:s|ting)?\b|\bwager\w*|\basli\s+paise\b|असली\s*पैसे/i;
 /** Money a game really handles — a wallet, real-money stakes, payouts — which makes it a regulated fintech product. */
-const REAL_MONEY_IN_A_GAME = /\bwallet\b|real[- ]?money|\bupi\b|\bkyc\b|payout|withdraw|\bbet(?:s|ting)?\b|\bwager|\bdeposit/i;
+const REAL_MONEY_IN_A_GAME = MOVES_REAL_MONEY;
+const GAME_AS_MODIFIER = /\bgames?\s+(?:schedules?|slots?|bookings?|timings?|fixtures?|stores?|shops?|tickets?|stats|statistics|score\s*cards?|scorecards?)\b/gi;
+const NAMES_AN_APP = /\b(?:apps?|application|website|web\s*site|platform|portal|dashboard|software|crm|erp)\b/i;
+const GAME_IS_THE_APP = /\bgames?\s+(?:apps?|application)\b|\bplatform\s+games?\b|\bgame\s+(?:website|web\s*site)\b/gi;
+
+/** The text with every "game" that only describes another noun removed. PURE. */
+function withoutGameModifiers(text: string): string {
+  return text.replace(GAME_AS_MODIFIER, ' ');
+}
+
+/** Does the request ask for a GAME as the thing built? PURE. */
+export function asksForAGame(text: string): boolean {
+  const game = DOMAINS.find((d) => d.key === 'game');
+  if (!game) return false;
+  const named = withoutGameModifiers(String(text ?? ''));
+  if (!game.re.test(named) && !indicDomainMatches('game', named)) return false;
+  if (MOVES_REAL_MONEY.test(named)) return false;
+  return !NAMES_AN_APP.test(named.replace(GAME_IS_THE_APP, ' game '));
+}
 
 const GAME_IS_THE_SUBJECT =
   /(?:\bgames?|\bkhel|खेल|गेम|গেম|ગેમ|ਗੇਮ|ಗೇಮ್|கேம்|గేమ్|ഗെയിം)(?:\s+(?:app|banao|bana\s*do|banakar\s*do|bana\s*ke\s*do|banaun\s*de|chahiye|chahie|please|pls|for\s+me|बनाओ|बना\s*दो|चाहिए))*\s*[.!]*$/i;
 
 function selectDomain(text: string): DomainDef | undefined {
   if (MEDIA_PLAYER_APP.test(text)) return undefined;
+  if (asksForAGame(text)) return DOMAINS.find((d) => d.key === 'game');
+  const gameRead = withoutGameModifiers(text);
   const picked = DOMAINS
     // A request that NAMES a well-known game ("make a bgmi for me") is a game request even without the word (failedbr #2478).
-    .filter((d) => d.re.test(text) || indicDomainMatches(d.key, text) || (d.key === 'game' && namesWellKnownGame(text)))
+    // Read on the FULL text: its "about a game" guard (tournament, top-up, website) needs the words the modifier strip removes.
+    .filter((d) => (d.key === 'game' ? d.re.test(gameRead) || indicDomainMatches(d.key, gameRead) || namesWellKnownGame(text) : d.re.test(text) || indicDomainMatches(d.key, text)))
     .reduce<DomainDef | undefined>((best, d) => {
       if (!best) return d;
       const a = domainFeatureScore(best, text);

@@ -102891,15 +102891,6 @@ Closed Q-2954, Q-2956, Q-2958, Q-2960 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2960 (#2421): `SIMULATED_RESULT_RE` names generated media (video/audio/blob/clip/render); a not-ok build's writes are scanned and recorded for the admin.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it needs), plus the earlier Q-2942/Q-2943/Q-2947/Q-2948/Q-2949.
 
-## 2026-11-20 — Game audit 2 (#2): the seed lays down the genre's own kit (branch `claude/game-seed-by-genre`)
-- Evidence: failedbr #2435 (Mario) got only loop/sound/music and hand-wrote platformer physics, renderer and touch; #2470
-  (Monopoly-style "business game") got the real-time kit and no rules engine. generate_game_2d / generate_board_games
-  existed but ran only if the model chose to.
-- `gameKitPlan`: a 2D game that moves a body (platformer, runner, shooter, arcade, fighting) adds `generate_game_2d`; board
-  and card games, and cricket, add `generate_board_games`. 3D plans unchanged. The handoff names each kit (2D: never a
-  hand-written jump or tile collision; board: rules come from the pack, card games never for real money).
-- `theRacingCarShowedItsHeadlights` updated to its real point (never 3D; the 2D kit may follow the shared three).
-- Locked by `tests/aGameGetsItsGenresKit.test.ts` (reversion: no genre push → 3 fail).
 ## 2026-11-20 — Game audit 2 (#4): a browser intervention is not a crash (branch `claude/playtest-honest`)
 - Evidence: failedbr #2477 — a game scoring 86 (answered up/W, left/A, right/D, Space, drag) was gated "the game was played
   and is not playable (runtime error)" because Chrome logged "Unable to preventDefault inside passive event listener".
@@ -102910,6 +102901,15 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it n
   WebGL no longer blames the game). The "no on-screen controls" (#2435) and start-button (#2475) items stay UNVERIFIED —
   the reports do not show why the detector missed; no detector change without that evidence.
 - Locked by `tests/aBrowserInterventionIsNotACrash.test.ts` (real browser; reversion: interventions as errors → fails).
+## 2026-11-20 — Game audit 2 (#2): the seed lays down the genre's own kit (branch `claude/game-seed-by-genre`)
+- Evidence: failedbr #2435 (Mario) got only loop/sound/music and hand-wrote platformer physics, renderer and touch; #2470
+  (Monopoly-style "business game") got the real-time kit and no rules engine. generate_game_2d / generate_board_games
+  existed but ran only if the model chose to.
+- `gameKitPlan`: a 2D game that moves a body (platformer, runner, shooter, arcade, fighting) adds `generate_game_2d`; board
+  and card games, and cricket, add `generate_board_games`. 3D plans unchanged. The handoff names each kit (2D: never a
+  hand-written jump or tile collision; board: rules come from the pack, card games never for real money).
+- `theRacingCarShowedItsHeadlights` updated to its real point (never 3D; the 2D kit may follow the shared three).
+- Locked by `tests/aGameGetsItsGenresKit.test.ts` (reversion: no genre push → 3 fail).
 ## 2026-11-20 — Game audit 2 (#7): one word for loudness across the kit (branch `claude/game-playoptions-trap`)
 - Evidence: failedbr #2435 spent three turns on `TS2353 'volume' does not exist in type 'PlayOptions'` — audio.play and
   playMusic take `volume`, the melody player's PlayOptions said `gain`.
@@ -102993,6 +102993,24 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (bloc
 - **Lock:** `tests/aRunnerAlwaysHasAWayThrough.test.ts` (11) — an autopilot survives 60 seeded 90-second courses at
   max speed. Reversion proofs: no free lane, endpoint collision, speed-blind gap, lanes backwards, repeat swipes,
   flipped up/down each fail. A dead one-lane guard found by reversion was removed.
+## 2026-11-20 — Business (vyapaar) board game + "a game is not its theme" (game-gap audit item)
+
+- **Gap 1 (missing engine):** no rules for the property-trading board game. `BoardGamesGenerator` now writes
+  `src/game/board/business.ts` — original 36-square board (Indian cities, 4 transport, 2 utilities), pretend money only:
+  buy/decline, rent (set doubles, houses, hotel), chance, taxes, Start, doubles/three-doubles jail, jail fine/tries,
+  even building, mortgages, automatic fund-raising, bankruptcy to the creditor, winner, computer player. Not built:
+  auctions, trading (stated in the engine, the instructions and the AppKnowledgeBase entry).
+- **Gap 2 (root cause, wider class):** the request never reached a game engine. `selectDomain` let a game's THEME
+  pick the domain — 10 of 14 themed game prompts measured (restaurant, hospital, bank, shop, school, stock-market,
+  gym, pizza, real-estate) and every "gaadi wala" racing game (logistics) were read as a business, and `gameKitPlan`
+  seeds the kit only for domain 'game'. Class: a word that describes the game's world chose the app type.
+  Fix in the ONE place a domain is chosen: `asksForAGame` — a game as the thing built, with no app/website/portal
+  named beside it, is a game; "game" as a modifier (schedules, slots, store, tickets) names no game (the reverse slip:
+  "cricket academy app with game schedules" was a game); a game moving real money keeps the BR1985 fintech precedent.
+  Corpus diff over 1,630 game-mentioning test strings: 44 changed, every real prompt in the right direction.
+  `gameIntent` board genre now covers business game / vyapaar / monopoly / व्यापार का खेल.
+- **Lock:** `tests/aBusinessGameFollowsTheRules.test.ts` (34) incl. 40 four-computer games with invariants each turn;
+  12 reversion proofs each fail. Strict compile of the generated pack caught one union-narrowing error (fixed).
 ## 2026-11-20 — Game kit: get in and out of vehicles (game-gap audit item)
 
 - **Gap:** walk-and-drive games hand-wrote Use + ctx.follow, and the walking body kept moving, unseen, while the player

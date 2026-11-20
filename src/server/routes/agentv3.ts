@@ -388,6 +388,7 @@ import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/B
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
 import { designHealDecision, designHealGuardNote } from '../AgentV3/designHealGuard';
+import { exportRepairRequest, exportFindingText } from '../AgentV3/exportRepairDirection';
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { planDeployment, deployDecision, choosePublishRoute } from '../AgentV3/deployPlan';
@@ -21520,20 +21521,16 @@ async function noteBuildOutcome(
           }
           let targets = firstPass.ours;
           if (targets.length > 0) {
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'MISSING_EXPORT_DETECTED', message: `${targets.length} file(s) are missing exports that other files import (the build fails):\n${exportRegenInstruction(targets)}`, autoResolved: false });
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'MISSING_EXPORT_DETECTED', message: `${targets.length} file(s) are missing exports that other files import (the build fails):\n${exportFindingText(targets, writtenFiles, exportGateBase)}`, autoResolved: false });
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 ${targets.length} file(s) are missing an export another file needs — regenerating them…`, ts: Date.now() });
             try {
-              const targetFiles = targets
-                .map((t) => ({ path: t.target, content: writtenFiles.get(t.target) || '' }))
-                .filter((f) => f.content);
+              // A file the platform seeded (the game kit, a golden scaffold) is a fixed library: its IMPORTER is rewritten
+              // against its real exports, and the library itself is never sent (exportRepairDirection.ts, failedbr #2278).
+              const exportRepair = exportRepairRequest(targets, writtenFiles, { ...exportGateBase, ...Object.fromEntries(writtenFiles) });
+              const targetFiles = exportRepair.files;
               // Q-1125: through the one recording door — this pass used to leave no row at all.
               const t = await recordedRepairCall(repairSystemPrompt(framework),
-                  `The app was built for this request:\n${prompt}\n\n` +
-                  `These files are imported by other modules for specific bindings, but they DO NOT export those ` +
-                  `bindings (usually a generation that was cut off before the export). Rewrite EACH file in full ` +
-                  `so it exports EXACTLY the required names, keeping all its existing logic/UI and adding the ` +
-                  `missing export(s) with real implementations (no stubs). Change nothing else.\n\n` +
-                  `REQUIRED EXPORTS:\n${exportRegenInstruction(targets)}\n\n` +
+                  `The app was built for this request:\n${prompt}\n\n${exportRepair.instruction}\n\n` +
                   `The files to rewrite (complete each one, exports included):\n` +
                   targetFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 6000)}`).join('\n'));
               const scopedExport = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), targetFiles.map((f) => f.path));
@@ -21551,7 +21548,7 @@ async function noteBuildOutcome(
               events.emit({ type: 'narration', agent: 'architect', text: '✅ Restored the missing exports — the imports resolve now.', ts: Date.now() });
               if (writtenFiles.size > 0) { try { await saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* durable save best-effort */ } }
             } else {
-              buildDiag.record({ phase: 'build', severity: 'error', code: 'OUTCOME_MISSING_EXPORT', message: `After one repair pass, ${targets.length} file(s) STILL miss an imported export — the build will fail:\n${exportRegenInstruction(targets)}`, autoResolved: false });
+              buildDiag.record({ phase: 'build', severity: 'error', code: 'OUTCOME_MISSING_EXPORT', message: `After one repair pass, ${targets.length} file(s) STILL miss an imported export — the build will fail:\n${exportFindingText(targets, writtenFiles, exportGateBase)}`, autoResolved: false });
               events.emit({ type: 'narration', agent: 'architect', text: '⚠️ Some imports still reference exports that could not be restored. Your files are saved — send a follow-up and I\'ll finish the fix.', ts: Date.now() });
             }
           }

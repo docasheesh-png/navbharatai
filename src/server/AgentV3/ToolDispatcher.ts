@@ -257,6 +257,7 @@ import { unguardedEnvClient, unguardedEnvClientNote } from './unguardedEnvClient
 import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, type GroundShapeHalves } from './handWrittenGroundScan';
 import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, endlessRaceCourseBlocker, type RaceCourseHalves } from './endlessRaceCourse';
 import { actionPoseHalves, actionPoseFinding, actionPoseNote, actionPoseWarning, isGameOwnSource, type ActionPoseHalves } from './actionVisibility';
+import { shellHalves, shellBypassFinding, shellBypassNote, shellBypassWarning, type ShellHalves } from './shellBypass';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
@@ -1189,6 +1190,10 @@ export class ToolDispatcher {
   /** A game's own player body that reads action buttons and never poses (actionVisibility.ts) — said once per build. */
   private _actionPoseIndex = new Map<string, ActionPoseHalves>();
   private _actionPoseNoted = false;
+  private _shellIndex = new Map<string, ShellHalves>();
+  private _shellNoted = false;
+  /** src/game/GameCanvas.tsx is in the project (null = not yet looked). */
+  private _shellPresent: boolean | null = null;
   private _raceCourseNoted = false;
   /** Recipe-known packages a hand-written import already had its one install attempt for (see below). */
   private _importInstallTried = new Set<string>();
@@ -2283,7 +2288,7 @@ export class ToolDispatcher {
         // Routed through `blockers` deliberately: `appIsDone` already refuses any report carrying
         // one, so the done signal, the weak checkpoint and every other reader inherit this at once
         // instead of each learning it separately. See stillTheStarterApp.ts.
-        return await this._warnIfActionsAreNotSeen(await this._blockIfRaceHasNoEndlessCourse(await this._blockIfStillTheStarterApp(report)));
+        return await this._warnIfShellSkipped(await this._warnIfActionsAreNotSeen(await this._blockIfRaceHasNoEndlessCourse(await this._blockIfStillTheStarterApp(report))));
       })(), readinessTimeoutMs(), 'assessBuildReadiness');
     } catch {
       return unassessedReadinessReport();
@@ -2342,6 +2347,28 @@ export class ToolDispatcher {
    * blocker: the game still plays, but the user sees a shot or a jump with a character standing still. Reads the
    * workspace as it is now, every lane's files; fail-open on its own trouble.
    */
+  /**
+   * A 3D game that builds its own renderer and never mounts the kit's shell (shellBypass.ts) — it loses the touch controls,
+   * menus, HUD and music. A WARNING: the game may still run on a desktop. Fail-open on its own trouble.
+   */
+  private async _warnIfShellSkipped(report: ReadinessReport): Promise<ReadinessReport> {
+    try {
+      const listed = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'shell-bypass-list');
+      const paths = listed.map((p) => p.replace(/^\.?\//, ''));
+      if (!paths.includes('src/game/GameCanvas.tsx')) return report;
+      const sources = paths.filter((p) => isGameOwnSource(p));
+      if (sources.length > RACE_SCAN_MAX_FILES) return report;
+      const index = new Map<string, ShellHalves>();
+      for (const p of sources) {
+        try { index.set(p, shellHalves(p, await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'shell-bypass-read'))); }
+        catch { return report; }
+      }
+      const finding = shellBypassFinding(index, true);
+      if (finding) return { ...report, warnings: [...report.warnings, shellBypassWarning(finding)] };
+    } catch { /* best-effort — never fail a build on this check's own trouble */ }
+    return report;
+  }
+
   private async _warnIfActionsAreNotSeen(report: ReadinessReport): Promise<ReadinessReport> {
     try {
       const listed = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'action-pose-list');
@@ -4971,6 +4998,21 @@ export class ToolDispatcher {
       try {
         const p = paths.find((q) => unguardedEnvClient(q, files[q]));
         if (p) { vehicle += unguardedEnvClientNote(p); this._envClientNoted = true; }
+      } catch { /* a note is best-effort */ }
+    }
+    // 🎮 A 3D game building its own renderer while the kit's shell sits unused (builds #2475–#2477: three "pubg jaisa"
+    // games, all asking for a joystick, all shipped without the shell's touch controls) — once per build, while open.
+    if (!this._shellNoted) {
+      try {
+        for (const p of paths) this._shellIndex.set(p, shellHalves(p, files[p]));
+        if ([...this._shellIndex.values()].some((h) => h.ownRenderer)) {
+          if (this._shellPresent === null) {
+            try { await withTimeout(this.actuator.readFile(this.workspaceId, 'src/game/GameCanvas.tsx'), 5_000, 'shell-present'); this._shellPresent = true; }
+            catch (error) { if (isNotFoundError(error)) this._shellPresent = false; }
+          }
+          const finding = shellBypassFinding(this._shellIndex, this._shellPresent === true);
+          if (finding) { vehicle += shellBypassNote(finding); this._shellNoted = true; }
+        }
       } catch { /* a note is best-effort */ }
     }
     const style = await this.styleWriteNotes(files);

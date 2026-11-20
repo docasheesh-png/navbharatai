@@ -102891,6 +102891,16 @@ Closed Q-2954, Q-2956, Q-2958, Q-2960 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2960 (#2421): `SIMULATED_RESULT_RE` names generated media (video/audio/blob/clip/render); a not-ok build's writes are scanned and recorded for the admin.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it needs), plus the earlier Q-2942/Q-2943/Q-2947/Q-2948/Q-2949.
 
+## 2026-11-20 — Game audit 2 (#1): a 3D game that skips the kit's shell is told what it loses (branch `claude/game-shell-mounted`)
+- Evidence: failedbr #2475 / #2476 / #2477 (three "pubg / bgmi jaisa" games, all asking for a joystick). The shell
+  (GameCanvas.tsx) was seeded each time; the builder wrote its own `new THREE.WebGLRenderer()` + rAF loop, so the shell's
+  touch joystick, menus, HUD and music never existed (#2476: d-pad handlers "empty functions", off-screen; #2477: arrows
+  "changed nothing"). The prompt already said "mount <GameCanvas>"; the only signal was an end-of-build "kit component not used".
+- `src/server/AgentV3/shellBypass.ts`: shell present + a game's own file builds its own renderer (WebGLRenderer or r3f) +
+  nothing of its own mounts GameCanvas / new Game / RacingRoadGame → a write-time repair note naming what is lost and the exact
+  way back, and a readiness WARNING (not a blocker: the game may still run on a desktop). 2D canvas games, board games and
+  projects without the shell are never flagged (Q-2715 preserved).
+- Locked by `tests/aGameIsBuiltOnTheShell.test.ts` (reversion: renderer detection off → 3 fail).
 ## 2026-11-20 — failedbr #2408 / #2342 / #2339 resolved (#4360 merged)
 
 Closed Q-2962, Q-2963, Q-2965 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).

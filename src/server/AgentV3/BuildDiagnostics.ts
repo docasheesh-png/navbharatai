@@ -1771,7 +1771,7 @@ export class BuildDiagnostics {
         phase: 'plan', severity: 'info', code: 'TIME_TO_FIRST_CALL', ts: completedAt, autoResolved: true,
         message: `A ${Math.round(latencyMs! / 100) / 10}s model call (a pre-build check such as the scope classification) started before this build's timer, so it is not counted as setup time. No call made by the build itself was recorded, so its preparation time was not measured.`,
       };
-      this.issues.push(issue);
+      pushBounded(this.issues, issue, MAX_ISSUES);
       this.preBuildCallNote = { issue, latencyMs: latencyMs! };
       return;
     }

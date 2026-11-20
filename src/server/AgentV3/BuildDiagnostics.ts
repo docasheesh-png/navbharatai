@@ -1460,6 +1460,8 @@ export class BuildDiagnostics {
       // A Maven / Go start that failed only because the image lacks the compiler is
       // infrastructure, not a compile error in the app.
       && !isMissingStartToolchain(rec.command, rec.stdout, rec.stderr)
+      // An app with no test or lint script was asked for one (failedbr #1916): an answer, not a build failure.
+      && !isMissingOptionalScript(rec.command, rec.stdout, rec.stderr)
       // A command that only READS (shellInspection.ts) cannot break the build: a failed `cd …; cat …` is a wrong guess
       // about where a file is, not a build failure (failedbr #2452 listed one as a "build-breaking blocker").
       && !isReadOnlyInspection(rec.command);
@@ -3369,6 +3371,22 @@ function capFact(kept: number, total: number, cap: number): ChannelTruncation | 
  *   3. a health-probe `curl` hitting a not-yet-ready dev server (connection refused 7 / can't resolve 6
  *      / timeout 28) — probing an unready port is not a build failure.
  */
+/**
+ * 🔴 "THE APP HAS NO TESTS" IS NOT A BROKEN BUILD (failedbr #1916, 2026-11-08). The builder ran `npm test` in an app
+ * whose package.json has no `test` script; npm answered `Missing script: "test"` with exit 1, and that answer became
+ * the release gate's ONE build-breaking blocker on an app that had rendered at 56 s. The gate already says "the app has
+ * no test suite that could be run here" on its own line. Only the OPTIONAL scripts (test, lint) are excused, and only
+ * on npm/pnpm/yarn's own "missing script" answer; a missing `build`, `dev` or `start` is a real defect and stays one.
+ * PURE.
+ */
+export function isMissingOptionalScript(command: string, stdout?: string, stderr?: string): boolean {
+  const cmd = String(command ?? '').trim();
+  const m = /^(?:cd\s+\S+\s*&&\s*)?(?:npm|pnpm|yarn)\s+(?:(?:run|run-script)\s+)?(test|t|lint)\b[^|;&]*$/.exec(cmd);
+  if (!m) return false;
+  const out = `${stdout ?? ''}\n${stderr ?? ''}`;
+  return /Missing script:?\s*["']?(?:test|lint)["']?|Command "(?:test|lint)" not found|ERR_PNPM_NO_SCRIPT[^\n]*(?:test|lint)/i.test(out);
+}
+
 export function isExpectedNonzeroExit(command: string, exitCode: number | null): boolean {
   if (exitCode === 0 || exitCode === null) return false;
   const cmd = (command || '').trim();

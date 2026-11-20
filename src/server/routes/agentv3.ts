@@ -27626,7 +27626,7 @@ async function noteBuildOutcome(
                   : { base: greenFiles, kind: 'green-snapshot' as const };
                 if (!chosen) {
                   if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop', renderedInBuild: renderedInBuildUnchanged(inBuildGreenAt, postGreenWrites.length) })) {
-                    events.emit({ type: 'narration', agent: 'architect', text: greenGuardUnverifiedMessage(), ts: Date.now() });
+                    events.emit({ type: 'narration', agent: 'architect', text: greenGuardUnverifiedMessage({ provenBroken: previewProvenBroken === true, newApp: intent === 'new_build' }), ts: Date.now() });
                     buildDiag.record({
                       phase: 'build', severity: 'warning', code: 'GREEN_GUARD_UNVERIFIED',
                       message: 'The app could not be opened to check this turn, so the user\u2019s changes were KEPT rather than rolled back. The last known good snapshot is unchanged and still available.',
@@ -27669,7 +27669,7 @@ async function noteBuildOutcome(
                 // KEPT, BUT UNCHECKED — and the user hears so. This is the branch that used to be a
                 // silent rollback. Saying nothing here would replace one dishonest outcome with a
                 // quieter one; the change is theirs, it stayed, and we could not confirm it.
-                events.emit({ type: 'narration', agent: 'architect', text: greenGuardUnverifiedMessage(), ts: Date.now() });
+                events.emit({ type: 'narration', agent: 'architect', text: greenGuardUnverifiedMessage({ provenBroken: previewProvenBroken === true, newApp: intent === 'new_build' }), ts: Date.now() });
                 buildDiag.record({
                   phase: 'build', severity: 'warning', code: 'GREEN_GUARD_UNVERIFIED',
                   message: 'The app could not be opened to check this turn, so the user\u2019s changes were KEPT rather than rolled back. The last known good snapshot is unchanged and still available.',

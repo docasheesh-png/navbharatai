@@ -511,9 +511,15 @@ export function releaseGateRedOutcomeMessage(blockers: number, timedOut: boolean
   return `${opening} with ${blockers} unresolved build-breaking issue(s) — the verdict has been corrected to NOT ok.`;
 }
 
-export function releaseGateFailureSummary(blockerCount: number, rootCause?: string | null): string {
+export function releaseGateFailureSummary(blockerCount: number, rootCause?: string | null, builderWroteFiles = true): string {
   const n = Math.max(1, blockerCount);
   const one = n === 1;
+  // failedbr #677 (Q-3220): "Your app is built and saved, but 2 things are still broken" — on a build that wrote ZERO
+  // files. Nothing was built; saying it was, then listing what is broken in it, describes an app that does not exist.
+  if (!builderWroteFiles) {
+    return `Nothing was built this time — the build ended before your app was written, so it is NOT ready to use. `
+      + `You have NOT been charged for this build. Reply "continue" and I'll build it.`;
+  }
   // The root cause is an internal diagnostic sentence; take only its first line and cap it, so the
   // user gets the fact without a stack of file paths they cannot act on.
   const because = String(rootCause ?? '').split('\n')[0].trim();

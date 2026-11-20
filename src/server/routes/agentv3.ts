@@ -25704,7 +25704,7 @@ async function noteBuildOutcome(
           } else {
           // The cause comes from the gate's own sentence, not a second derivation — one source, so the
           // summary the user reads and the verdict that flipped can never describe different builds.
-          result = { ...settled, ok: false, summary: releaseGateFailureSummary(gateBlockers, releaseGateSummary(gate)) };
+          result = { ...settled, ok: false, summary: releaseGateFailureSummary(gateBlockers, releaseGateSummary(gate), builderWroteCount() > 0) }; // Q-3220
           // NOTE: `buildResultRef` (the deadline finalizer's snapshot) is deliberately NOT touched here
           // — it is not set yet at this point, and downstream it is captured ONLY `if (result.ok)`.
           // Flipping `result` above therefore keeps BOTH exits honest by construction, which is the

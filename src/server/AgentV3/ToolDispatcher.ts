@@ -177,7 +177,7 @@ import { callRemoteTool } from './mcpTransport';
 import type { SafeMcpTool } from './mcpClient';
 import type { McpServerConfig } from './mcpTransport';
 import { featureFileGuardEnabled, protectedFeatureFileDeletion, protectedFeatureFileMessage } from './featureFileGuard';
-import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, runtimeManifestDeletionTarget, runtimeManifestDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, runtimeManifestDeletionTarget, runtimeManifestDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage, envReadBlockedRemedy } from './CommandGovernance';
 import { ToolRefusal, refuse } from './toolRefusal';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { cloneDestination, shouldRefuseClone, cloneGuardMessage } from './gitCloneGuard';
@@ -253,6 +253,7 @@ import { analyzeRequirementCoverage, requirementCoverageSummary, currentRequestF
 import { binaryTextWriteRefusal } from './binaryTextWrite';
 import { isKeyboardOnlyGame, touchGameNoteEnabled, touchPlayableNote } from './touchPlayableGame';
 import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type VehicleShapeHalves } from './handWrittenVehicleScan';
+import { unguardedEnvClient, unguardedEnvClientNote } from './unguardedEnvClient';
 import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, type GroundShapeHalves } from './handWrittenGroundScan';
 import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, endlessRaceCourseBlocker, type RaceCourseHalves } from './endlessRaceCourse';
 import { actionPoseHalves, actionPoseFinding, actionPoseNote, actionPoseWarning, isGameOwnSource, type ActionPoseHalves } from './actionVisibility';
@@ -1177,6 +1178,8 @@ export class ToolDispatcher {
    */
   private _vehicleShapeIndex = new Map<string, VehicleShapeHalves>();
   private _vehicleShapeNoted = false;
+  /** An unguarded module-scope Supabase client was noted this build (unguardedEnvClient.ts, failedbr #2271). */
+  private _envClientNoted = false;
   /** Hand-written flat roads / pinned vehicle y / own trains on hilly terrain (handWrittenGroundScan.ts, 2026-11-02). */
   private _groundShapeIndex = new Map<string, GroundShapeHalves>();
   private _groundShapeNoted = false;
@@ -4963,6 +4966,13 @@ export class ToolDispatcher {
         if (finding) { vehicle += actionPoseNote(finding); this._actionPoseNoted = true; }
       } catch { /* a note is best-effort */ }
     }
+    // 🔑 A Supabase client built at load from keys nobody saved — a white screen until they are (failedbr #2271).
+    if (!this._envClientNoted) {
+      try {
+        const p = paths.find((q) => unguardedEnvClient(q, files[q]));
+        if (p) { vehicle += unguardedEnvClientNote(p); this._envClientNoted = true; }
+      } catch { /* a note is best-effort */ }
+    }
     const style = await this.styleWriteNotes(files);
     // Screens written while the entry is still the starter (autopsy 68f0a486) — the user sees none of them.
     // Carried on `shadow` (the "what the preview will not show" notes) so the guarded sum keeps its shape.
@@ -6322,7 +6332,7 @@ export class ToolDispatcher {
         // secrets, or execute remote code. MEDIUM commands run but carry a warning.
         const risk = classifyCommandRisk(command);
         if (risk.level === 'high') {
-          const blockMsg = `[GOVERNANCE BLOCKED] Command not executed — HIGH-risk operation detected:\n  ${risk.reasons.join('\n  ')}\n  Command: ${command.slice(0, 300)}\n\nIf this was a legitimate need, rephrase the task to avoid dangerous shell patterns.`;
+          const blockMsg = `[GOVERNANCE BLOCKED] Command not executed — HIGH-risk operation detected:\n  ${risk.reasons.join('\n  ')}\n  Command: ${command.slice(0, 300)}\n\nIf this was a legitimate need, rephrase the task to avoid dangerous shell patterns.` + envReadBlockedRemedy(risk.reasons, Object.keys(this.userSecretsEnv));
           getWorkspaceMemory(this.workspaceId).recordAudit(
             `[BLOCKED-HIGH] refused: ${command.slice(0, 200)} — ${risk.reasons.join('; ')}`,
           );

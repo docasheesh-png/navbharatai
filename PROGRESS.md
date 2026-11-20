@@ -103163,6 +103163,17 @@ Ledger for the next PR (rows Q-3021…Q-3024):
 - #2065 — no defect: a "continue" turn rendered at 221 s and the user stopped it at 274 s; its two unused `@capacitor/*` warnings are advisory and true.
 - #2064, #2037, #2001, #2003 — no new rows: #2064's "could not find @Composable" was fixed by BR1998; #2037's skipped write-time typecheck by autopsy 61279465; #2001's `?react` SVG imports by BR2001; #2001's and #2003's E2B concurrency refusals are Q-2929 (blocked on the plan limit).
 
+## 2026-11-20 — Game kit: breakable objects (game-gap audit item)
+
+- **Gap:** no breakables — a crate took hits and nothing happened, or a builder hid it and it kept blocking invisibly.
+- **Fix:** 3D kit `src/game/three/breakable.ts`: `makeBreakable(obj, { health, pieces, color, debrisSeconds, onBreak })`;
+  `breakableTargets()` joins the weapon's own target list and `hitBreakables(hits, from)` routes hits back (enemies
+  untouched, stale hits on a broken crate ignored); at zero the object LEAVES the scene (stops blocking) and shatters
+  into debris (object colour, flies away from the hit, gravity, bounce, settle, shrink, dispose geometry + material);
+  broken objects leave the registry (WeakSet remembers them). The shell steps debris every frame and clears on dispose.
+  ToolCatalog, 3D instructions, AppKnowledgeBase updated; lifecycle harness stub added.
+- **Lock:** `tests/aCrateBreaksWhenHit.test.ts` (7, real breakable + real ProjectileSystem). 11 reversion proofs fail
+  (three first slipped through — two were real test gaps, now covered; one was a dead mutation, redone on the guard).
 
 Note (2026-11-20): the feature-stem row first opened as Q-2972, then Q-3020, and the list-form row as Q-3021 were renumbered Q-3101 / Q-3102 — each earlier number was taken by another session in parallel (two Q-3020 rows briefly existed on main).
 ## 2026-11-20 — #4380 merged (failedbr #2158 / #2133 / #2100 / #2094 / #2090 / #2086 / #2036)

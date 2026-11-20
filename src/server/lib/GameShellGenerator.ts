@@ -63,6 +63,7 @@ import { updateHealthBars } from './three/healthbar';
 import { mapMarkers, type MarkerKind } from './three/markers';
 import { renderSplit } from './three/splitscreen';
 import { ParticleSystem } from './fx/particles';
+import { updateBreakables, clearBreakables } from './three/breakable';
 import { audio } from './fx/audio';
 import { bindGameFeedback, type FeedbackContext } from './fx/feedback';
 // NavBharatAI's recorded sounds when this game was seeded with them; otherwise a stand-in that keeps built-in voices.
@@ -707,6 +708,8 @@ export class Game {
       groundScene(this.scene);
       this.syncTouchLayout();   // back to the joystick if the car has left the scene
       this.particles.update(delta);
+      // Debris from broken crates and walls flies, falls, settles and goes (three/breakable.ts).
+      updateBreakables(delta);
     }
     // During a hit-stop freeze the game did not run, so a press made now is KEPT for the step that does — wiping it
     // here was why a tap sometimes did nothing at all (the freeze follows every shot and every hit).
@@ -1051,6 +1054,7 @@ export class Game {
     safe(() => audio.stopAll());
     safe(() => this.particles.dispose());
     safe(() => this.hero?.dispose());
+    safe(() => clearBreakables());   // a reloaded game starts with no breakables or debris from this one
     this.scene.traverse((obj: THREE.Object3D) => {
       const mesh = obj as THREE.Mesh;
       if (mesh.geometry) safe(() => mesh.geometry.dispose());

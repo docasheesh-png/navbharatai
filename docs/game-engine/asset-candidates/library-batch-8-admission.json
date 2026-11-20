@@ -1,0 +1,454 @@
+{
+  "checkedAt": "2026-11-20",
+  "renderer": "Chromium headless, SwiftShader WebGL, 390x844 viewport",
+  "results": [
+    {
+      "id": "k8-arrow",
+      "sha256": "af74b241a5265472508d25923432cb1d1ce0c710aa02654b7c58c664c9fac00d",
+      "bytes": 17260,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 52,
+          "changedPixels": 272,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 52,
+          "changedPixels": 272,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-arrow-bundle",
+      "sha256": "167232b1632c346927eea48f868241805ba366a2bba7ea9a806ffd3a8d85117a",
+      "bytes": 29976,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 280,
+          "changedPixels": 1209,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 280,
+          "changedPixels": 1209,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-bow",
+      "sha256": "dac8d35bf603c308bf7e37034ff1e20431240ad4e8e001f43980139828699dbd",
+      "bytes": 64116,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 684,
+          "changedPixels": 211,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 684,
+          "changedPixels": 211,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-quiver",
+      "sha256": "5b9d8321fcaf08c4234b29e8b9d65d779ce9aa58d12173682189dc85f2074840",
+      "bytes": 30276,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 255,
+          "changedPixels": 1480,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 255,
+          "changedPixels": 1480,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-dagger",
+      "sha256": "54f4cfe479a60e93e385a5d728cdababf3a12958a35fe46ec5cec95e15f174ad",
+      "bytes": 24048,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 172,
+          "changedPixels": 829,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 172,
+          "changedPixels": 829,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-greatsword",
+      "sha256": "5c526033368e9e42721a48272ab5edd178464289c0a1acda4b5a3f29c8a4c156",
+      "bytes": 34208,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 412,
+          "changedPixels": 644,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 412,
+          "changedPixels": 644,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-battle-axe",
+      "sha256": "be5829071e1e84425021282938ca8ad136e87c0e40825b24652c9cf5545ca26c",
+      "bytes": 37764,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 508,
+          "changedPixels": 1404,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 508,
+          "changedPixels": 1404,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-round-shield",
+      "sha256": "f4007aa8a1f55a07d0ecf1a260e833af4d629a5bfd67831e406a458fcaccaa95",
+      "bytes": 26064,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 284,
+          "changedPixels": 2310,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 284,
+          "changedPixels": 2310,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-spiked-shield",
+      "sha256": "37880b5b72d6cebd7820b102751ff5fc97e32e4be18b029df2baccf4aefd22a3",
+      "bytes": 35772,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 420,
+          "changedPixels": 2278,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 420,
+          "changedPixels": 2278,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-magic-staff",
+      "sha256": "a3b50f1c850e66377a35ea5afff01acf5904936e82650aecbc9cea75f58b767f",
+      "bytes": 34680,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 440,
+          "changedPixels": 691,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 440,
+          "changedPixels": 691,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-magic-wand",
+      "sha256": "5750532a96ee3b85910756f70eee404c54cc51c9d12500af16b7f3c823e06e14",
+      "bytes": 22052,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 150,
+          "changedPixels": 691,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 150,
+          "changedPixels": 691,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-spellbook",
+      "sha256": "20dbf18f19485746cde37cd5230b1b4c56c31198da7e97e7ef780290cd475459",
+      "bytes": 31248,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 292,
+          "changedPixels": 3195,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 292,
+          "changedPixels": 3195,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-book",
+      "sha256": "648a41c2a06cf0fdb1a1671684b3600c0260249ca9dc48df83a0969a7d78ed00",
+      "bytes": 30648,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 292,
+          "changedPixels": 3380,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 292,
+          "changedPixels": 3380,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-mug",
+      "sha256": "b035bfcd60170d14bc6e31dd39b4b77475dfb21ba5e94b68ab578e3427dc8bf7",
+      "bytes": 31576,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 426,
+          "changedPixels": 2535,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 426,
+          "changedPixels": 2535,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-smoke-bomb",
+      "sha256": "8ed1e59628fa29ca6bd9a035ce92b09869b78fc6b05ef9835a5e27d14f8eb84d",
+      "bytes": 27856,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 310,
+          "changedPixels": 2026,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 310,
+          "changedPixels": 2026,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "k8-bowman",
+      "sha256": "4d41eb0c14ecab446a383e5e454e411e51fb709c6f9f638329c389cb3b386d7b",
+      "bytes": 807272,
+      "liveDownload": true,
+      "cacheRestores": 17,
+      "proofs": [
+        {
+          "animation": "Walking_A",
+          "triangles": 8900,
+          "changedPixels": 1633,
+          "animated": true
+        },
+        {
+          "animation": "Walking_A",
+          "triangles": 8900,
+          "changedPixels": 1633,
+          "animated": true
+        },
+        {
+          "animation": "Running_A",
+          "triangles": 8900,
+          "changedPixels": 1648,
+          "animated": true
+        },
+        {
+          "animation": "Running_A",
+          "triangles": 8900,
+          "changedPixels": 1648,
+          "animated": true
+        },
+        {
+          "animation": "Jump_Full_Short",
+          "triangles": 8900,
+          "changedPixels": 1635,
+          "animated": true
+        },
+        {
+          "animation": "Jump_Full_Short",
+          "triangles": 8900,
+          "changedPixels": 1635,
+          "animated": true
+        },
+        {
+          "animation": "Hit_A",
+          "triangles": 8900,
+          "changedPixels": 1625,
+          "animated": true
+        },
+        {
+          "animation": "Hit_A",
+          "triangles": 8900,
+          "changedPixels": 1625,
+          "animated": true
+        },
+        {
+          "animation": "Death_A",
+          "triangles": 8900,
+          "changedPixels": 1036,
+          "animated": true
+        },
+        {
+          "animation": "Death_A",
+          "triangles": 8900,
+          "changedPixels": 1036,
+          "animated": true
+        },
+        {
+          "animation": "Throw",
+          "triangles": 8900,
+          "changedPixels": 1675,
+          "animated": true
+        },
+        {
+          "animation": "Throw",
+          "triangles": 8900,
+          "changedPixels": 1675,
+          "animated": true
+        },
+        {
+          "animation": "PickUp",
+          "triangles": 8900,
+          "changedPixels": 1624,
+          "animated": true
+        },
+        {
+          "animation": "PickUp",
+          "triangles": 8900,
+          "changedPixels": 1624,
+          "animated": true
+        },
+        {
+          "animation": "Interact",
+          "triangles": 8900,
+          "changedPixels": 1641,
+          "animated": true
+        },
+        {
+          "animation": "Interact",
+          "triangles": 8900,
+          "changedPixels": 1641,
+          "animated": true
+        },
+        {
+          "animation": "Use_Item",
+          "triangles": 8900,
+          "changedPixels": 1643,
+          "animated": true
+        },
+        {
+          "animation": "Use_Item",
+          "triangles": 8900,
+          "changedPixels": 1643,
+          "animated": true
+        }
+      ],
+      "verdict": "admitted"
+    }
+  ]
+}

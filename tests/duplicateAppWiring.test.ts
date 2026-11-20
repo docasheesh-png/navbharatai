@@ -20,7 +20,7 @@ describe('🔒 the duplicate route', () => {
 
   it('reaches the source only through conversationAccess — never a claimed id', () => {
     // Spelling-proof for the same reason as appLockEnforce: the id may be normalised by routeParam.
-    expect(block).toMatch(/candidateConversationIds\([^,]*req\.params\.id[^,]*, userId\)/);
+    expect(block).toMatch(/conversationLookupIds\([^,]*, [^,]*req\.params\.id[^,]*, userId\)/);
     expect(block).toContain('conversationAccess(rec, userId)');
   });
 

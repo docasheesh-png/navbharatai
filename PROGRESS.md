@@ -103183,4 +103183,11 @@ Ledger, older reports (2026-11-20, next PR):
 - #1803 — Q-3110: a system package install (apt, yum, apk, brew…) is answered at the bash door with the npm route; the 300 s foreground `node server.ts` is backgrounded on main, and the ffmpeg core and EADDRINUSE items are existing rows/rules.
 - #1801 — Q-3111 (with #1803): a server written without the SPA catch-all is told so at the write; its OUTCOME_AUTHORITY_UNAVAILABLE at 547 s is Q-2957 (blocked), which now names this report.
 - #1798 — Q-3112: a scaffold file the fast-lane plan describes only as it already is (package.json, vite.config, index.html, src/main) is not regenerated; the counter app lost its budget to two byte-copies of the starter before `App.tsx`. The 503 that ended it is a Surplus engine condition.
+- #1795 — no defect: an admin bench prompt stopped by the user at 14 s.
+- #1791 — already fixed: the "BMI autopsy" (#4025) absorbs unverifiable Surplus usage at ₹0 and never stops a build on it.
+- #1786, #1784, #1782, #1781, #1780, #1779, #1776 — already fixed on main: the Surplus scope check's token cap (DNA 05011), the unverified-charge stop (#4025), the billing throw after a rendered app, and OUTCOME_UNEXPLAINED for the engine sentence; "Fix with AI" no longer offers the engine's own outage message; the "your app is built" ticker is gated (Q-1024, #1817).
+- #1785 — Q-3112 again (byte-copied package.json / vite.config.ts) plus the #4025 accounting 503s.
+- #1773 — Q-2957 (lease authority, blocked), which now names this report.
+- #1763–#1757 (seven benchmark builds) — already fixed: a Surplus outage no longer counts as the app's blocker (#2424) or as "no outcome recorded"; the Haiku label on a Weak call is Q-970 (blocked).
+- #1745 — already fixed: "hu" no longer confirms a build (`buildConfirmation`).
 

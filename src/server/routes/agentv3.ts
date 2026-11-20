@@ -27237,6 +27237,7 @@ async function noteBuildOutcome(
             // to switch off" (Q-1019) — never "the build produced no files".
             modelAnswer.asked || modelAnswer.pointed || modelAnswer.notOurs,
             modelAnswer.declined,
+            isEditMode, // an edit that changed nothing left the app as it was (Q-3213)
           );
           if (emptyFail) {
             // THE FLIP RECORDS ITS OWN OUTCOME (2026-09-17) — see `emptyBuildOutcomeIssue`. Without it

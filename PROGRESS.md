@@ -103003,4 +103003,5 @@ Ledger, older reports (2026-11-20, #4377):
 - #2188 — not opened in full: stopped by the user at 51 s on "a game fully like Free Fire Max"; its class (a famous-game clone on the weak tier) is covered by the roadmap/kit path.
 - #2155 — Q-2996 a missing plain stylesheet import (`./index.css`) is created deterministically.
 - #2159, #2160 — no new row: SANDBOX_RECOVERY_UNAVAILABLE within 1 s; the refusal's admin-only reason was not in these 11-09 reports, and the report has carried it since #4253 (11-16).
+- #2141 — Q-2997 Hinglish fillers (aisa, jismein, bhai…) are not subjects, so a new game order on an unrelated app is asked about instead of built into it.
 

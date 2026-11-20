@@ -1,0 +1,424 @@
+{
+  "checkedAt": "2026-11-20",
+  "renderer": "Chromium headless, SwiftShader WebGL, 390x844 viewport",
+  "results": [
+    {
+      "id": "q6-car-sedan",
+      "sha256": "3c9f8f0d9ed09d78ab39a8e4c635a290c7a1f778da1774575fc7d8005b47531a",
+      "bytes": 162876,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 2954,
+          "changedPixels": 1761,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 2954,
+          "changedPixels": 1761,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-car-hatchback",
+      "sha256": "fe65b41c878887b3b7ef04b40f79aa6c05c9fd7c34e9af9d3bbfd20a9f5e94bc",
+      "bytes": 172336,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3124,
+          "changedPixels": 2058,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3124,
+          "changedPixels": 2058,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-car-suv",
+      "sha256": "30b6b36fd6b6ff5191bf5d522aafab277b79158d8a4ff32cbd5ed653130588d1",
+      "bytes": 179872,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3294,
+          "changedPixels": 2086,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3294,
+          "changedPixels": 2086,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-car-sports",
+      "sha256": "b13e044d1ff64f906db7a0cbd17d9c4cedf84b67e86ce54ca7b4f2c787d520c1",
+      "bytes": 169032,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3066,
+          "changedPixels": 1794,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3066,
+          "changedPixels": 1794,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-car-coupe",
+      "sha256": "b2ad93eab52e6cbff85017bb89ae6b57087a1c0f551dc2511b499d96436bd833",
+      "bytes": 173324,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3148,
+          "changedPixels": 1882,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3148,
+          "changedPixels": 1882,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-car-police",
+      "sha256": "862512cf75437eefd416fb00f712caab68062d042fed901e6afb3fbc422a3500",
+      "bytes": 178404,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3232,
+          "changedPixels": 1912,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3232,
+          "changedPixels": 1912,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-car-taxi",
+      "sha256": "3c059a600f7b7e2c8591ab33c04ed4dec5f5f70455a53ca44992457c2cd7ba12",
+      "bytes": 179296,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 3278,
+          "changedPixels": 1735,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 3278,
+          "changedPixels": 1735,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-gun-assault-rifle",
+      "sha256": "3deae2937d2a3282c97c159bac60ebccdc6e5f8e52d44dcb42259879c73e8f39",
+      "bytes": 61416,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1244,
+          "changedPixels": 981,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1244,
+          "changedPixels": 981,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-gun-carbine",
+      "sha256": "fc8c997308f4be71a28c93f79c3e1c7c0358163d15e74ad443f76b243b00e6df",
+      "bytes": 121836,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1930,
+          "changedPixels": 586,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1930,
+          "changedPixels": 586,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-gun-bullpup",
+      "sha256": "db5cf7a7a91460bc502e41a6390aa974ac5d77dc40e766d212e0ebafa008b882",
+      "bytes": 135784,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 2778,
+          "changedPixels": 900,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 2778,
+          "changedPixels": 900,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-gun-pistol",
+      "sha256": "8a4101d33612d4db829f0a81a7ce130d9ecad1f83e0656c3b3125de3dc448ecd",
+      "bytes": 57192,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1040,
+          "changedPixels": 1807,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1040,
+          "changedPixels": 1807,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-gun-pistol-heavy",
+      "sha256": "77fe9056b6179d9f13916dd50458df038386d79f47872a3ea9c04a022e70dce1",
+      "bytes": 72476,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1442,
+          "changedPixels": 2034,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1442,
+          "changedPixels": 2034,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-gun-revolver",
+      "sha256": "39685151a7fc2083a31ac18f1c6a2b6eb32900c50d492fde8ec4410a0f8ea953",
+      "bytes": 47228,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1046,
+          "changedPixels": 1023,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1046,
+          "changedPixels": 1023,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-gun-shotgun",
+      "sha256": "393c1cf504b002544976d4448d73aa989a8f15d4fdc5fe0ac4f3cf587b32b467",
+      "bytes": 60172,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1270,
+          "changedPixels": 533,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1270,
+          "changedPixels": 533,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-gun-sawed-off",
+      "sha256": "9d5c7ceee60a8a207464b744a753d8212cebaa2ec1477da0afffd436b7211b4e",
+      "bytes": 50304,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 956,
+          "changedPixels": 761,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 956,
+          "changedPixels": 761,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-gun-sniper",
+      "sha256": "2352c0e9fff384a2123bdd7e0efe2b6e28e0d233d46296c2e2aa0887907cb705",
+      "bytes": 71832,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1382,
+          "changedPixels": 357,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1382,
+          "changedPixels": 357,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-gun-sniper-tactical",
+      "sha256": "b86ed955cbb049c498bbb32d2289098097aa7a7d6e4c5f6ea404f764ce3c621e",
+      "bytes": 70256,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1344,
+          "changedPixels": 354,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1344,
+          "changedPixels": 354,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-gun-smg",
+      "sha256": "218c7fe102bfd39476a5033a64bcc88f4b89b4ffc8a682f011c0b2f480b9525a",
+      "bytes": 55900,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1164,
+          "changedPixels": 1454,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1164,
+          "changedPixels": 1454,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    },
+    {
+      "id": "q6-gun-smg-compact",
+      "sha256": "76631b9cdb78b01a8fb7fd52dc75427728559ab1af8df80d517ad34b9d7b7ceb",
+      "bytes": 77128,
+      "liveDownload": true,
+      "cacheRestores": 1,
+      "proofs": [
+        {
+          "animation": null,
+          "triangles": 1566,
+          "changedPixels": 974,
+          "animated": false
+        },
+        {
+          "animation": null,
+          "triangles": 1566,
+          "changedPixels": 974,
+          "animated": false
+        }
+      ],
+      "verdict": "admitted"
+    }
+  ]
+}

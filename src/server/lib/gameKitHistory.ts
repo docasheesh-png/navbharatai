@@ -87,7 +87,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "f701c69ba2193751501424193b1e7fa5967451883cd6194e4c36bc83e99afeb3",
     "b0b19ea22f13befaf45cde9d3e03858c0577153dc6525d72da34195e7eede9e8",
     "1627f1cc88ae14fc0412f869a1a65218d0cfe1ea948e39a4ff33265c29a2fa28",
-    "6d70d7571f8d8ac5bd2f663b7d92ce72ca89ee5a84b96347cf36b414ea057444"
+    "ec22b56f6734db29b56f782f470e327a021ef7766df77965ffd13f2e31b624f4",
+    "da01170c581ba1899af18d5442830040f94a7f0296ebff37c2228267f0374543"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -456,6 +457,9 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/three/atmosphere.ts": [
     "ef9d092d175f1880430ab2e7a0285393433cf3a2f86d2105af4eda44b4e922b8"
+  ],
+  "src/game/three/breakable.ts": [
+    "8c9bc3850ef3a475216d51172d92e99f1dfbab848ec2c6ad82b4db8687e5ca7f"
   ],
   "src/game/three/buildings.ts": [
     "2ded7bb92d7d4ba33e19a6d95f4ad44158ec497d72ad602946cb0ec58380f15f"

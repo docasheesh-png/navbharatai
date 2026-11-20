@@ -103339,3 +103339,24 @@ Ledger, older reports #1430–#1358 (2026-11-20, next PR):
   - Test: `theUsersOwnModelGoesIntoTheGame`.
 - **Sibling bug fixed:** a 3D app imported as a PROJECT zip had its .glb read as text (corrupted) and its glTF .bin dropped. Both are now kept byte-exact.
 - **Open:** real Indian clothing (saree/dhoti/kurta/turban) geometry. No CC0 rigged model exists. The admin decides: accept CC-BY with an automatic credit, or buy a pack whose licence allows redistribution. FBX conversion is also open: no converter we can trust in the server yet.
+
+## 2026-11-20 — failedbr #745 … #691 autopsied (PR #4390, continued)
+
+Every report from #745 down to #691 read in full (reader subagents, then each item checked against current `main`).
+Most September items were already fixed by later autopsies; those are recorded with their evidence, not re-fixed.
+
+| ID | Report | Problem → root cause / class | Fix · lock |
+|---|---|---|---|
+| Q-3200 | #734/#735/#731/#729/#728 | AMBIENT_SHIM_REMOVED rewrote a reference `.d.ts` in the user's imported repo every build — the repair scanned every `.ts` | `inAppBuildScope` · `theShimRepairStaysInTheApp` |
+| Q-3201 | #728/#731/#734/#735 | ~480 vendored reference files crowded the real app out of the 300-file evaluate snapshot (false sink, "partially scanned", false unused deps) | `foldersOutsideTheApp` decided from tsconfig include / scripts / bundler config / index.html BEFORE the cap · `aVendoredFolderIsNotTheApp` |
+| Q-3202 | #741/#755 | A folder/glob `rm` of files an EARLIER build saved never reached the durable store (Q-246 checked this build's writes only) | `pathsAShellRemovalIsCheckedAgainst(written, savedAtStart)` · `aShellDeleteLeavesTheSavedProject` |
+| Q-3203 | #724–#735 | VITE_ENV_TYPES_ADDED every build | already fixed (de3bb2bb, 2026-10-01) · `theCoactCollectorAutopsy` §6 |
+| Q-3204 | #745 | `ProfilePage() { return null }` / `useSocial() { return {} }` shipped and sold as "profile pages" | `hollowFeature.ts`: write-time note, HOLLOW_FEATURE report line, `feature-claimed-but-empty` claim · `aStubIsNotTheFeature` |
+| Q-3205 | #728 | "Working AI replies — simulated responses" | scripted chat already disclosed (466c260a); `ai-working-but-simulated` claim · same file |
+| Q-3206 / Q-3207 / Q-3208 | #729–#735 | wrong clock named; blocked `rm` shown ✓; dev server given up on while starting | already fixed (bb688add; `refuse()`; 2720e553) |
+| Q-3209 | #696 | A cap filled by stalled ANSWERS ended "not converging / endless loop" — the waste ledger counted only failed calls | stalled successful turn → `stalled` waste · `aStalledAnswerIsEngineTime` |
+| Q-3210 | #693 | A library attendance app graded against a school's LMS list (courses, grading, fees) on "student" | narrow `library` domain before education · `aLibraryIsNotASchool` |
+| Q-3211 | #697 | Assamese UPSC essay routed to a build on length alone | already fixed (e628efd4, f2ff962f, buildConfirmation) · `anEssayQuestionIsNotABuild` |
+| Q-1553…Q-1557 | #696/#695/#693/#692/#691 | bulk rows | autopsied; every remaining item mapped to a fix above or to an earlier one (slowRungBench/crawlBench, runnerChainSummary, retryLeadsHigher, OUTCOME_REAPED, BuildDeadlineLifecycle, isLongRunningCommand, fileMentions KNOWN_ANNOTATIONS) |
+
+Merged `origin/main` (#4391's Q-3035/Q-3017 rows kept; Q-3037/39/40 stay closed). No local CI per the admin.

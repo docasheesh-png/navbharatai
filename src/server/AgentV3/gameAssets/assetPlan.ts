@@ -44,7 +44,7 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   eagle: ['eagle', 'eagles', 'चील', 'águila'], parrot: ['parrot', 'parrots', 'तोता', 'तोते', 'loro'],
   ship: ['ship', 'ships', 'जहाज', 'जहाज़', 'barco', 'barcos'],
   human: ['human', 'person', 'people', 'humanoid', 'इंसान', 'मानव', 'persona', 'personas'],
-  dog: ['dog', 'dogs', 'कुत्ता', 'कुत्ते', 'perro'], cow: ['cow', 'cows', 'गाय', 'vaca'],
+  dog: ['dog', 'dogs', 'कुत्ता', 'कुत्ते', 'perro'], cow: ['cow', 'cows', 'गाय', 'gaay', 'vaca'],
   horse: ['horse', 'horses', 'घोड़ा', 'घोड़े', 'caballo'], deer: ['deer', 'हिरण', 'ciervo'],
   fox: ['fox', 'foxes', 'लोमड़ी', 'zorro'], tree: ['tree', 'trees', 'पेड़', 'árbol'],
   table: ['table', 'tables', 'मेज', 'मेज़', 'mesa'], chair: ['chair', 'chairs', 'कुर्सी', 'silla'],
@@ -150,6 +150,9 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   'round shield': ['round shield'], 'spiked shield': ['spiked shield'], 'magic staff': ['magic staff', 'wizard staff', 'mage staff'],
   'magic wand': ['magic wand', 'wand', 'जादू की छड़ी'], spellbook: ['spellbook', 'spell book', 'magic book'],
   book: ['book', 'books', 'किताब', 'kitab'], mug: ['mug', 'beer mug', 'tankard'], 'smoke bomb': ['smoke bomb', 'smoke grenade'],
+  // 2026-11-20 library batch 9: the Farm Animal Pack — animals that move.
+  'farm cow': ['farm cow', 'dairy cow'], 'farm horse': ['farm horse'], zebra: ['zebra', 'zebras', 'ज़ेबरा', 'जेबरा'],
+  llama: ['llama', 'llamas', 'alpaca'], pig: ['pig', 'pigs', 'piglet', 'सूअर', 'suar'], sheep: ['sheep', 'lamb', 'भेड़', 'bhed'], pug: ['pug', 'pugs'],
 };
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
   fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],
@@ -195,6 +198,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       bow: ['bow tie', 'take a bow', 'rainbow'], book: ['book a', 'book now', 'book ticket', 'book tickets', 'book appointment', 'spell book', 'magic book'],
       sword: ['great sword', 'two handed sword', 'big sword'], axe: ['battle axe', 'war axe'], shield: ['shield powerup', 'shield power up', 'round shield', 'spiked shield'],
       dagger: ['knife and fork'],
+      pig: ['wild pig', 'wild pigs', 'guinea pig', 'guinea pigs'], cow: ['farm cow', 'dairy cow', 'sea cow'], horse: ['farm horse', 'sea horse', 'seahorse'],
       gun: ['laser gun', 'laser guns', 'ray gun', 'submachine gun', 'submachine guns', 'water gun', 'nail gun', 'glue gun'],
     };
     if ((excludedPhrases[subject] ?? []).some(p => mentioned(clause, p))) return false;
@@ -208,7 +212,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
     const motion = (role: string) => MOTIONS[role].some(word => mentioned(local, word));
     const animation = ['bird', 'eagle', 'parrot'].includes(subject) && motion('fly') ? 'fly'
       : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox', 'mage', 'wizard', 'barbarian', 'rogue', 'hooded rogue', 'skeleton', 'man', 'woman', 'old man', 'old woman', 'farmer', 'racing driver', 'mechanic', 'worker', 'businessman',
-        'villager', 'peasant', 'village man', 'village woman', 'ranger', 'female ranger', 'archer', 'female archer', 'hunter', 'bowman', 'cartoon archer'].includes(subject)
+        'villager', 'peasant', 'village man', 'village woman', 'ranger', 'female ranger', 'archer', 'female archer', 'hunter', 'bowman', 'cartoon archer', 'farm cow', 'farm horse', 'zebra'].includes(subject)
         ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
     return { subject, ...(animation ? { animation } : {}) };
   });

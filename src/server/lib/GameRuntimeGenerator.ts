@@ -139,6 +139,8 @@ export const DEFAULT_ACTIONS: ActionMap = {
   pause: ['Escape', 'Pad:9'],
   kick: ['KeyK'],
   reload: ['KeyR', 'Pad:3'],
+  // Crouch, and dive while swimming (play/character.ts) — C, Left Ctrl, or the right stick pressed in.
+  crouch: ['KeyC', 'ControlLeft', 'Pad:11'],
   drift: ['Space', 'Pad:4'],
 };
 
@@ -646,6 +648,7 @@ const EN = {
   autoQuality: 'Auto quality', fpsCounter: 'FPS counter',
   shop: 'Shop', coins: 'Coins', buy: 'Buy', equip: 'Use', equipped: 'In use', owned: 'Owned', maxed: 'Max', levelShort: 'Lv {n}',
   controls: 'Controls', pressKey: 'Press a key (Esc to cancel)', resetControls: 'Reset controls', up: 'Up', down: 'Down', reload: 'Reload',
+  crouch: 'Crouch / dive',
 };
 
 export type StringKey = keyof typeof EN;
@@ -676,6 +679,7 @@ const HI: Record<StringKey, string> = {
   autoQuality: 'ऑटो क्वालिटी', fpsCounter: 'FPS काउंटर',
   shop: 'दुकान', coins: 'सिक्के', buy: 'खरीदें', equip: 'चुनें', equipped: 'चुना हुआ', owned: 'आपका', maxed: 'पूरा', levelShort: 'लेवल {n}',
   controls: 'कंट्रोल्स', pressKey: 'कोई कुंजी दबाएँ (रद्द करने के लिए Esc)', resetControls: 'कंट्रोल्स रीसेट करें', up: 'ऊपर', down: 'नीचे', reload: 'रीलोड',
+  crouch: 'झुकें / गोता',
 };
 
 export const GAME_STRINGS: Readonly<Record<GameLanguage, Record<StringKey, string>>> = { en: EN, hi: HI };
@@ -2560,7 +2564,7 @@ const KEYBINDS = `/**
 import { DEFAULT_ACTIONS, type ActionMap } from './input';
 
 /** The actions a player can rebind, in the order Settings lists them. */
-export const REBINDABLE_ACTIONS: readonly string[] = ['up', 'down', 'left', 'right', 'jump', 'sprint', 'attack', 'interact', 'reload', 'drift'];
+export const REBINDABLE_ACTIONS: readonly string[] = ['up', 'down', 'left', 'right', 'jump', 'sprint', 'crouch', 'attack', 'interact', 'reload', 'drift'];
 
 const STORAGE_KEY = 'nb-game-keys-v1';
 const KEY_CODE = /^(?:Key[A-Z]|Digit[0-9]|Numpad[0-9]|Arrow(?:Up|Down|Left|Right)|F(?:[1-9]|1[0-2])|Space|Enter|Tab|Backspace|Shift(?:Left|Right)|Control(?:Left|Right)|Alt(?:Left|Right)|Comma|Period|Slash|Semicolon|Quote|BracketLeft|BracketRight|Backslash|Minus|Equal|Backquote)$/;

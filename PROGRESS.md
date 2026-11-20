@@ -103095,6 +103095,17 @@ Ledger, older reports (2026-11-20, #4377):
 - #2141 — Q-2997 Hinglish fillers (aisa, jismein, bhai…) are not subjects, so a new game order on an unrelated app is asked about instead of built into it.
 
 
+## 2026-11-20 — Game kit: swimming (game-gap audit item)
+
+- **Gap:** nothing in the kit knew what water was — a player who walked into a lake sank and walked along the bottom.
+- **Fix:** motor `stepSwim` (pure: float at head-out depth by buoyancy spring, water drag, slower swim speed, Jump held
+  up / dive held down, Jump at the surface climbs out); controller `setWater(level | (x,z)=>level|null)` with a 0.25 m
+  exit margin so the edge does not flicker, breath (runs down under water, refills 4× faster, `onOutOfBreath` once a
+  second), `swimming` / `underwater` / `breath` getters, reset clears it. New `crouch` action (C / Left Ctrl / Pad:11),
+  rebindable in Settings → Controls (EN + HI label); the shell passes `diveHeld`. Instructions + AppKnowledgeBase.
+  Not built (stated): swim animation, a phone dive button.
+- **Lock:** `tests/aPlayerSwims.test.ts` (9, real motor/controller/terrain, incl. the sink-to-the-bottom baseline).
+  8 reversion proofs fail. Generated kit tsc before/after: identical 33 pre-existing errors.
 ## 2026-11-20 — Game kit: match-3 engine (game-gap audit item)
 
 - **Gap:** no match-3 rules; every one was hand-written (starting matches, dead boards with no reshuffle, holes after

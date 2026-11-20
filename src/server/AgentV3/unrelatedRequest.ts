@@ -69,6 +69,15 @@ const STOP = new Set([
   'wala', 'wali', 'wale', 'waala', 'waali', 'mein', 'liye', 'saath', 'aur', 'bhi', 'ek', 'kuch', 'koi', 'hai', 'hain', 'mujhe',
   'uploaded', 'upload', 'type', 'types', 'simple', 'basic', 'small', 'big', 'good', 'best', 'beautiful', 'nice', 'modern',
   'full', 'complete', 'working', 'real', 'online', 'free', 'tool', 'tools', 'system', 'page', 'pages', 'screen', 'screens',
+  // Hinglish connectives, address words and helper verbs (failedbr #2141, 2026-11-20): "Bhai … aisa game banakar do
+  // jismein 3D ho … chala sake" and an earlier "… aisa hack banana hai jismein …" "shared" aisa and jism, so the build
+  // order for a new bus game was built INTO a Free Fire hack app and the user was never asked.
+  'aisa', 'aise', 'aisi', 'esa', 'ese', 'esi', 'jaisa', 'jaise', 'jaisi', 'jismein', 'jisme', 'jismai', 'jisse', 'jiske',
+  'jiski', 'usmein', 'usme', 'usse', 'uske', 'uski', 'isme', 'ismein', 'isse', 'iske', 'bhai', 'bhaiya', 'yaar', 'yar',
+  'banakar', 'banakr', 'banake', 'banaake', 'banaana', 'banaao', 'banaye', 'bnakar', 'dedo', 'dena', 'dijiye', 'chahie',
+  'chahte', 'chahta', 'chahti', 'sake', 'sakte', 'sakta', 'sakti', 'sakein', 'chala', 'chalana', 'chalane', 'chalaye',
+  'aana', 'aane', 'hona', 'hota', 'hoti', 'hote', 'kaise', 'kaisa', 'kaisi', 'tarah', 'wala', 'usmein', 'hamara', 'hamari',
+  'mera', 'meri', 'mere', 'apna', 'apni', 'apne', 'abhi', 'phir', 'fir', 'bilkul', 'achha', 'accha', 'sabhi', 'saare',
   // the whole-thing nouns themselves
   'app', 'apps', 'application', 'website', 'websites', 'site', 'sites', 'webapp', 'game', 'games', 'dashboard', 'portal',
   'store', 'shop', 'pdf', 'pdfs', 'ebook', 'book', 'document', 'documents', 'landing', 'clone', 'software',
@@ -79,10 +88,17 @@ const STOP = new Set([
   'home', 'test', 'tests', 'spec', 'setup', 'vite', 'env', 'readme', 'package', 'tsconfig', 'node',
 ]);
 
+/**
+ * Real subjects shorter than four letters (failedbr #2141): "… 3D ho aur usmein ham kar chala sake bus" — a bus game —
+ * had no subject left once the fillers were gone, because "bus" is three letters. A closed list, never a general
+ * three-letter rule, which would let "hai", "aur" and "ham" back in.
+ */
+const SHORT_SUBJECTS = new Set(['bus', 'car', 'cab', 'van', 'jet', 'gym', 'tax', 'art', 'pet', 'dog', 'cat', 'zoo', 'spa', 'tea', 'map', 'ski', 'sea', 'sky', 'war', 'gun', 'fit', 'law', 'job', 'ice']);
+
 /** The four-letter stems of the subject words in a text. PURE. */
 export function subjectStems(text: string): Set<string> {
   const words = textWords(String(text ?? '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase())
-    .filter((w) => w.length >= 4 && !STOP.has(w) && !/^\d+$/.test(w));
+    .filter((w) => (w.length >= 4 || SHORT_SUBJECTS.has(w)) && !STOP.has(w) && !/^\d+$/.test(w));
   return new Set(words.map((w) => w.slice(0, 4)));
 }
 

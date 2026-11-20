@@ -12,7 +12,7 @@ import { appSourceFrame, locatedErrorText, siteTag } from './runtimeErrorSite';
 import { renderRepairGuidance } from './RuntimeErrorClassify';
 import { envFlag } from '../lib/envFlag';
 import { CANCELLED_REQUEST_RE } from './renderCheckConsole';
-import { isAbsentDeviceConsoleLine } from './absentDeviceConsole';
+import { isOurBrowserLimitConsoleLine } from './absentDeviceConsole';
 
 export interface RuntimeError {
   t: number;
@@ -228,8 +228,8 @@ export function filterActionableErrors(errors: unknown): RuntimeError[] {
     const text = typeof (e as RuntimeError).text === 'string' ? (e as RuntimeError).text.trim() : '';
     if (!text) continue;
     if ((e as RuntimeError).kind === 'console' && BLOCKED_AUTOFOCUS_NOTICE_RE.test(text)) continue;
-    // Our checking browser has no camera/microphone/location; an app that caught and logged that is working (failedbr #2263).
-    if ((e as RuntimeError).kind === 'console' && isAbsentDeviceConsoleLine(text)) continue;
+    // Our browser's own limits (no camera, no H.264): not the app (#2263, #2169).
+    if ((e as RuntimeError).kind === 'console' && isOurBrowserLimitConsoleLine(text)) continue;
     if (NOISE.some((re) => re.test(text))) continue;
     const key = text.slice(0, 200);
     if (seen.has(key)) continue;

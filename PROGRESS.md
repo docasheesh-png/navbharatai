@@ -103099,3 +103099,11 @@ Ledger for the next PR (rows Q-3021…Q-3024):
 
 
 Note (2026-11-20): the feature-stem row first opened as Q-2972, then Q-3020, and the list-form row as Q-3021 were renumbered Q-3101 / Q-3102 — each earlier number was taken by another session in parallel (two Q-3020 rows briefly existed on main).
+## 2026-11-20 — #4380 merged (failedbr #2158 / #2133 / #2100 / #2094 / #2090 / #2086 / #2036)
+
+Closed Q-3021, Q-3023, Q-3025, Q-3029, Q-3031, Q-3032, Q-3033, Q-3034 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): a rule about how to build and the staples of a small game are not features; a numbered list with a few sub-bullets is not a spec in sections; a stylesheet wired by an Astro/Vue/Svelte component is wired; exam words are not services; a game that names a hospital is a game (unless it handles real money); a package-manager query is a read; a roadmap step cannot invent a native mobile stack; every game-kit file compiles under a strict app tsconfig.
+Still open, our own work: Q-3022, Q-3024, Q-3026, Q-3027, Q-3030. Blocked on the admin: Q-3028 (exact starter chip vs the Surplus authoring rule), plus the earlier blocked rows.
+
+Also renumbered the queue-retry-drills row from a duplicate Q-3020 to Q-3035: two sessions had both taken Q-3020 on 2026-11-20 (3eea5cae1 and 6942a03ec), so `theQueueIdsAreUnique` was red on `main`.
+- #2030 — Q-3036 a handler that admits it is pretend ("for demo purposes, we'll just show an alert", "…in a real application") is a HIGH authenticity finding; a fake Download button had shipped unnamed. Its "Play Store button" order enabled the deploy tool (PUBLISH_REQUESTED), which is the designed reading.
+- #2005 — no new row: the E2B concurrency cap (Q-2929) refused setup and the fast lane still ran, with all 22 writes refused; since BR1952 a text-only lane is skipped against an unavailable workspace (`FAST_LANE_SKIPPED_SANDBOX`).

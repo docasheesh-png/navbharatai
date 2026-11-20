@@ -120,3 +120,23 @@ export function withAutoStyleImport(mount: string): string | null {
   if (typeof mount !== 'string' || mount.includes('nb-autostyle.css')) return null;
   return `${AUTO_STYLE_IMPORT}\n${mount}`;
 }
+
+/** The Vite mounts the floor is imported from. */
+const FLOOR_MOUNTS = new Set(['src/main.tsx', 'src/main.jsx']);
+
+/**
+ * 🔴 THE FLOOR SHEET LEFT BEHIND (Q-2316; failedbr #1823, #1822, 2026-11-20). Both builds ended with
+ * `src/nb-autostyle.css` "imported by nothing": the platform had laid the floor and imported it from the mount, and a
+ * later rewrite of `src/main.tsx` dropped the import. The floor re-imports only when its own sheet CHANGES, and a new
+ * turn starts with no memory of it, so the sheet stayed on disk, unstyled and flagged, for the rest of the project.
+ *
+ * The import is now kept the way the design kit's rules are kept (`keepKitOnRewrite`): a write to the mount that drops
+ * a floor import the file already had gets it back, first. A mount that never had it is left alone. `null` when
+ * nothing needs keeping. PURE.
+ */
+export function keepAutoStyleImport(path: string, existing: string, next: string): string | null {
+  const p = String(path ?? '').replace(/^\.?\/+/, '');
+  if (!FLOOR_MOUNTS.has(p)) return null;
+  if (typeof existing !== 'string' || !existing.includes('nb-autostyle.css')) return null;
+  return withAutoStyleImport(next);
+}

@@ -230,7 +230,7 @@ import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessTimeoutMs, readinessVerdict, unassessedReadinessReport, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
 import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE, entryFirstWriteNote } from './earlyPreview';
-import { autoStyleFloorEnabled, autoStyleSheet, withAutoStyleImport, AUTO_STYLE_PATH } from './autoStyleFloor';
+import { autoStyleFloorEnabled, autoStyleSheet, withAutoStyleImport, keepAutoStyleImport, AUTO_STYLE_PATH } from './autoStyleFloor';
 import { entryAutoWireEnabled, isAutoWiredEntry, isScreenPath, zeroPropExport, childrenOnlyProvider, autoWiredEntry, autoWiredNote, type WiredExport } from './entryAutoWire';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
 import { loadedMissingPackageUses, notInstalledBlockerLabel, undeclaredInstalledLabel, type MissingPackageUse } from './missingPackageBlockers';
@@ -3568,6 +3568,8 @@ export class ToolDispatcher {
    * only records it. Never throws: a guard failure writes the model's content exactly as sent.
    */
   private keepDesignKit(path: string, content: string, existingContent: string): { content: string; note: string } {
+    // Q-2316: a rewrite of the Vite mount that drops the style floor's import keeps it (both write doors pass here).
+    try { content = keepAutoStyleImport(path, existingContent, content) ?? content; } catch { /* keep best-effort */ }
     try {
       const keep = keepKitOnRewrite(path, existingContent, content);
       if (!keep) return { content, note: '' };
@@ -5407,6 +5409,8 @@ export class ToolDispatcher {
   /** Screen → its classes no real stylesheet defines, as last measured (autoStyleFloor.ts). */
   private readonly _floorMissing = new Map<string, string[]>();
   private _floorSheet = '';
+  /** Q-2316: whether this turn has checked that an existing floor sheet is still imported. */
+  private _floorWiringChecked = false;
   /**
    * 🔴 SCREENS SHOWN AS RAW HTML FOR A WHOLE BUILD (autopsy ca99778e). Lays the platform's style floor for the
    * classes still undefined: a plain sheet imported first from the Vite mount, rewritten as the set changes. It is
@@ -5423,7 +5427,11 @@ export class ToolDispatcher {
       const all = new Set<string>();
       for (const m of this._floorMissing.values()) for (const c of m) all.add(c);
       const sheet = autoStyleSheet(all);
-      if (sheet === this._floorSheet || (!sheet && !this._floorSheet)) return;
+      // Q-2316: once per turn, a floor sheet already on disk (an earlier turn's) is re-imported if the mount lost it,
+      // even when this turn's sheet is unchanged — that orphan is what #1822 continued from.
+      const firstThisTurn = !this._floorWiringChecked;
+      this._floorWiringChecked = true;
+      if (!firstThisTurn && (sheet === this._floorSheet || (!sheet && !this._floorSheet))) return;
       let mountPath = '';
       let mount: string | null = null;
       for (const p of ['src/main.tsx', 'src/main.jsx']) {
@@ -5433,6 +5441,16 @@ export class ToolDispatcher {
         } catch { /* try the next */ }
       }
       if (!mountPath || typeof mount !== 'string') return;
+      if (firstThisTurn && (sheet === this._floorSheet || (!sheet && !this._floorSheet))) {
+        // Nothing to rewrite: only re-wire an existing sheet whose import the mount has lost.
+        const onDisk = await withTimeout(this.actuator.readFile(this.workspaceId, AUTO_STYLE_PATH), 5_000, 'style-floor-sheet').catch(() => null);
+        const rewired = typeof onDisk === 'string' ? withAutoStyleImport(mount) : null;
+        if (rewired) {
+          await this.inPlatformPass('style-floor', () => this.actuator.writeFile(this.workspaceId, mountPath, rewired));
+          try { this.onFileWrite?.(mountPath, rewired); } catch { /* durable mirror is best-effort */ }
+        }
+        return;
+      }
       const body = sheet || '/* navbharatai:auto-style-floor — every class has a real rule now. */\n';
       await this.inPlatformPass('style-floor', () => this.actuator.writeFile(this.workspaceId, AUTO_STYLE_PATH, body));
       this._floorSheet = sheet;

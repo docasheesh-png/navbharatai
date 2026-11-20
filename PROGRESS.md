@@ -102907,3 +102907,16 @@ Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2969 (#2306): a GET probe of the app's own localhost (and `sleep`) is a read-only inspection, never a release-gate blocker (`isLocalhostProbe`).
 - Q-2970 (#2399): an import of a `.d.ts` file resolves in the readiness analyzer.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (blocked, each with what it needs).
+
+## 2026-11-20 — Game kit: swipe input + endless-runner rules (game-gap audit item)
+
+- **Gap:** no swipe and no runner in the kit, so every runner was hand-written: a row with no way through, a fast
+  run tunnelling through an obstacle between two frames, lanes backwards, touch listeners the browser refused to cancel.
+- **Fix:** `GameRuntimeGenerator` (seeded into every game) now writes `src/game/core/swipe.ts` (`bindSwipe`: a swipe
+  presses the same actions as the keys — left/right, up → jump, down → slide; pointer events + `touch-action: none`,
+  fires mid-swipe, ignores presses that start on a button) and `src/game/core/runner.ts` (`LaneRunner`: lanes, jump,
+  slide, coins, speed ramp, seeded course; every row leaves a free lane reachable at the arrival speed; swept hits).
+  Declared in the ToolCatalog include list; AppKnowledgeBase `game_2d_kit` updated.
+- **Lock:** `tests/aRunnerAlwaysHasAWayThrough.test.ts` (11) — an autopilot survives 60 seeded 90-second courses at
+  max speed. Reversion proofs: no free lane, endpoint collision, speed-blind gap, lanes backwards, repeat swipes,
+  flipped up/down each fail. A dead one-lane guard found by reversion was removed.

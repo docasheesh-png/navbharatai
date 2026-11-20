@@ -101,3 +101,25 @@ export function answeredInsteadOfBuilding(
     pointed: f.pointed === true, notOurs: f.notOurs === true,
   });
 }
+
+/**
+ * 🔴 A DECLINED TURN HAS AN OUTCOME (failedbr #2246, 2026-11-20 — "kisi game ka hack bana sakte ho?").
+ *
+ * The model refused, honestly, and offered real games instead. `TURN_DECLINED` said exactly that — and then the
+ * last-resort net filed `OUTCOME_UNEXPLAINED` at ERROR severity, "the engine did not record why", on a turn whose
+ * ending was the engine's own deliberate answer. Its sibling, the turn that asked the user a question, has recorded
+ * `OUTCOME_ASKED_USER` since autopsy 35bd9e17; the declined path never got the same line. Recorded only when no
+ * outcome is on the timeline yet, so one ending never carries two. Never throws.
+ */
+export function recordDeclinedOutcome(diag: {
+  record(r: { phase: 'build'; severity: 'info'; code: string; message: string; autoResolved: boolean }): unknown;
+  report(): { issues: ReadonlyArray<{ code: string }> };
+}): void {
+  try {
+    if (diag.report().issues.some((i) => /^OUTCOME_/.test(i.code))) return;
+    diag.record({
+      phase: 'build', severity: 'info', code: 'OUTCOME_DECLINED', autoResolved: false,
+      message: 'Build outcome: DECLINED — the model answered that it will not or cannot build this, and wrote no file. Nothing failed; its answer is the result.',
+    });
+  } catch { /* a note must never fail a build */ }
+}

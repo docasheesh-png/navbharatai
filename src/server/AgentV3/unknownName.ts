@@ -84,6 +84,18 @@ const GAME_TERMS = [
 ];
 for (const t of GAME_TERMS) COMMON_ACRONYMS.add(t);
 
+/**
+ * Music-genre and AI/ML terms — what an app DOES, never a service to connect to (failedbr #2208, 2026-11-20: an AI
+ * music app's spec said "EDM" and "LLM", and the builder was told both were unknown names it must not build a client
+ * for). One family each, for the same reason as the game words above.
+ */
+const MUSIC_AND_AI_TERMS = [
+  'EDM', 'LOFI', 'RNB', 'KPOP', 'JPOP', 'HIPHOP', 'DAW', 'VST', 'MIDI', 'BGM', 'OST', 'DJ', 'BPM', 'EQ', 'ASMR',
+  'LLM', 'LLMS', 'RAG', 'ASR', 'NLU', 'NLG', 'GAN', 'GANS', 'CNN', 'RNN', 'LSTM', 'AGI', 'GENAI', 'SDXL', 'LORA', 'VAE',
+  'ONNX', 'GGUF', 'MCP', 'VLM', 'TTS', 'STT', 'OCR', 'NLP',
+];
+for (const t of MUSIC_AND_AI_TERMS) COMMON_ACRONYMS.add(t);
+
 /** Services, platforms and stacks NavBharatAI knows by name — the request may really mean to connect them. */
 const KNOWN_SERVICES = new Set([
   'STRIPE', 'RAZORPAY', 'CASHFREE', 'PAYTM', 'PHONEPE', 'PAYPAL', 'FIREBASE', 'SUPABASE', 'MONGODB', 'MYSQL',

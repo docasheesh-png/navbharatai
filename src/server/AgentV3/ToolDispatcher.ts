@@ -254,6 +254,7 @@ import { binaryTextWriteRefusal } from './binaryTextWrite';
 import { isKeyboardOnlyGame, touchGameNoteEnabled, touchPlayableNote } from './touchPlayableGame';
 import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type VehicleShapeHalves } from './handWrittenVehicleScan';
 import { unguardedEnvClient, unguardedEnvClientNote } from './unguardedEnvClient';
+import { kitLibraryRewriteRefusal } from './kitLibraryGuard';
 import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, type GroundShapeHalves } from './handWrittenGroundScan';
 import { raceCourseHalves, raceCourseFinding, endlessRaceCourseNote, endlessRaceCourseBlocker, type RaceCourseHalves } from './endlessRaceCourse';
 import { actionPoseHalves, actionPoseFinding, actionPoseNote, actionPoseWarning, isGameOwnSource, type ActionPoseHalves } from './actionVisibility';
@@ -1486,6 +1487,9 @@ export class ToolDispatcher {
     if (writeParseReject) { this.fileViews.note(rel, content, 'refused'); refuse(writeParseReject); }
     this.fileViews.clearRefused(rel);
     await this.refuseBrokenPageEdit(rel, existingContent, content);
+    // The game kit is a library the model builds on, never one it rewrites out from under its shell (failedbr #2216).
+    const kitRefusal = kitLibraryRewriteRefusal(rel, existingContent, content, opts.source);
+    if (kitRefusal) { try { getWorkspaceMemory(this.workspaceId).recordAudit(`[BLOCKED-KIT-REWRITE] ${rel}`); } catch { /* audit best-effort */ } refuse(kitRefusal); }
     if (opts.expectedSource !== undefined) {
       if (opts.expectedSource === null) {
         if (!this.actuator.createFileExclusive) refuse('Atomic object creation is unavailable; no unsafe write attempted.');

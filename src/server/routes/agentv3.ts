@@ -751,7 +751,7 @@ import { withRequestNotes, requestNotesFor } from '../AgentV3/requestNotes';
 import { abortBuild, abortCauseOf, abortRequestedAtOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort, changeWasStopped } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
-import { isAnswerOnlyTurn, answeredInsteadOfBuilding, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate } from '../AgentV3/answerOnlyTurn';
+import { isAnswerOnlyTurn, answeredInsteadOfBuilding, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate, recordDeclinedOutcome } from '../AgentV3/answerOnlyTurn';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
@@ -21026,6 +21026,7 @@ async function noteBuildOutcome(
               + 'not retried, not replaced with "please try again", and no upsell was offered. Before 2026-09-26 the '
               + 'empty-build flip overwrote the refusal and the free-tier upsell then asked the user to add credits.',
           });
+          recordDeclinedOutcome(buildDiag); // …and the outcome that sentence implies (failedbr #2246)
         } catch { /* a note must never fail a build */ }
       }
       /**

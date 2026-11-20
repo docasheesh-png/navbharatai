@@ -115,6 +115,28 @@ export function gameKitPlan(prompt: string | null | undefined, framework?: strin
   return flat;
 }
 
+/**
+ * 🎮 A GAME IS BUILT ON THE KIT, NOT SPLIT INTO PROJECT MODULES (failedbr #2279, 2026-11-20 — "GO CAR").
+ *
+ * A 40-part 3D racing spec read as LARGE and project-shaped, so Software Project Mode split it into 14 modules.
+ * Module 1, "Core Gameplay Loop", owned no entry, so nothing could be played this round; and kit seeding runs only
+ * when no module is in flight, so the platform laid down no game kit. The builder spent eight minutes writing its
+ * own car physics and camera, found the kit's car and camera APIs at minute 9, rewrote them, and the user stopped
+ * at 13 minutes with nothing to play. BlockWorld (50378049) and 8e124182 were the same split: the builder ignored
+ * the module scope and wrote the whole game anyway.
+ *
+ * The kit IS a game's decomposition (loop, input, 3D, audio, shell), and the mega-app roadmap already narrows a
+ * big game to a playable step 1 (with its own game-dimension check). So when the kit will be laid down for this
+ * request, Project Mode stands down and the roadmap owns the build. One answer, read by the scope verdict, so the
+ * roadmap, the solo-builder switch and the project planner cannot disagree. AGENTV3_GAME_PROJECT_MODE=on restores
+ * the split. PURE.
+ */
+export function gameKitOwnsTheBuild(prompt: string | null | undefined, framework?: string | null, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (String(env.AGENTV3_GAME_PROJECT_MODE ?? '').trim().toLowerCase() === 'on') return false;
+  if (!gameKitSeedEnabled(env)) return false;
+  try { return gameKitPlan(prompt, framework).length > 0; } catch { return false; }
+}
+
 /** Says 3D in so many words — the same reading `wantsSceneObjects` gives "3d". */
 const SAYS_3D = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional)\b/i;
 /**
@@ -392,12 +414,23 @@ export function gameTurnHandoff(
  */
 export function gameTurnRequest(original: string, milestone?: string | null): string {
   if (!milestone) return original;
+  // 🔴 ONLY A GAME'S MILESTONE BELONGS TO A GAME (failedbr #2271, 2026-11-20 — "INDIAN MUSIC"). The line below was
+  // added to EVERY roadmap milestone, so a music-streaming app's step 1 ("a Player screen with a real <audio>
+  // element") read as a game: the platform laid down the game kit (loop, input, game sounds) and a game scope
+  // contract for an app with no game in it. The original request decides whether the milestone is a game's; a
+  // milestone that is a game on its own still reads as one through its own words.
+  if (!requestIsGame(original)) return milestone;
   const explicit3D = SAYS_3D.test(original) && gameKitWants3D(original);
   const explicit2D = /\b(?:2\s*-?\s*d|two\s*-?\s*dimensional)\b/i.test(original);
   const phone = namedNonSmartphone(original);
   return [milestone, 'This milestone belongs to a game.', ...hardConstraintLines(original),
     explicit2D ? 'User constraint: 2D game.' : explicit3D ? 'User constraint: 3D game.' : '',
     phone ? `User device constraint: ${phone.device}.` : ''].filter(Boolean).join('\n');
+}
+
+/** The original request is a game by the one domain reading the kit uses. Never throws. */
+function requestIsGame(text: string): boolean {
+  try { return analyzeRequirementGaps(String(text ?? '')).domain === 'game'; } catch { return false; }
 }
 
 /** Available capability, not a claim that a seed succeeded or that an AAA clone is possible. */

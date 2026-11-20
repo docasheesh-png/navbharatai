@@ -1,0 +1,149 @@
+Build a professional, production-ready Android Music Streaming Application named "INDIAN MUSIC".
+
+MAIN CONCEPT:
+Create an online music streaming platform where the Admin can upload songs, and all users who install the Android application can discover and listen to those songs online.
+
+IMPORTANT:
+This must be a fully functional online music application, not just a UI design or demo application.
+
+1. USER APPLICATION
+
+Create a modern and attractive music streaming interface.
+
+Features:
+
+- Home Screen
+- All Songs
+- Latest Songs
+- Trending Songs
+- Recently Added
+- Search Songs
+- Music Categories
+- Artists
+- Playlists
+- Favorites
+- Recently Played
+
+2. MUSIC PLAYER
+
+Create a professional music player with:
+
+- Play / Pause
+- Next Song
+- Previous Song
+- Seek Bar
+- Song Duration
+- Volume Control
+- Background Music Playback
+- Lock Screen Controls
+- Notification Music Controls
+- Shuffle Mode
+- Repeat Mode
+- Album Artwork
+- Song Title and Artist Name
+
+Users should be able to listen to songs online without downloading them.
+
+3. ADMIN PANEL
+
+Create a secure Admin Dashboard accessible only to the authorized administrator.
+
+Admin Features:
+
+- Upload MP3 Audio Files
+- Upload Song Cover Images
+- Add Song Title
+- Add Singer Name
+- Add Album Name
+- Add Music Category
+- Add Song Description
+- Publish Songs Online
+- Edit Song Details
+- Delete Songs
+- Manage Playlists
+- View Total Songs
+- View Total Users
+- View Song Plays
+
+When Admin uploads a new song, it should automatically become available in the application for all users.
+
+4. ONLINE DATABASE & STORAGE
+
+Use a reliable cloud backend.
+
+Requirements:
+
+- Secure cloud database
+- Cloud audio storage
+- Song metadata management
+- Audio streaming URLs
+- Automatic synchronization
+- Secure admin authentication
+- User authentication (optional)
+
+All uploaded songs must remain available online until the Admin removes them.
+
+5. DESIGN
+
+Create a premium music application UI.
+
+Design Style:
+
+- Modern dark theme
+- Black background
+- Purple and blue gradient accents
+- Premium music player
+- Smooth animations
+- Attractive song cards
+- Beautiful album artwork
+- Responsive Android interface
+
+6. APK DEVELOPMENT
+
+Build a complete Android application.
+
+Requirements:
+
+- Generate installable APK
+- Application Name: INDIAN MUSIC
+- Package Name: com.indianmusic.app
+- Android compatibility
+- Internet connectivity
+- Background audio playback
+- Proper permissions
+- Fast loading
+- Error handling
+
+7. IMPORTANT FUNCTIONAL REQUIREMENTS
+
+- Admin uploads songs only once.
+- Uploaded songs automatically appear for every user.
+- Users can search and play songs.
+- New songs should appear without requiring an APK update.
+- Audio must stream from cloud storage.
+- Music should continue playing when the screen is locked.
+- Support multiple simultaneous listeners.
+- Display loading indicators while songs load.
+- Handle slow internet connections properly.
+
+8. SECURITY
+
+- Only authorized Admin can upload, edit, or delete songs.
+- Normal users must not access Admin functions.
+- Protect cloud storage and database.
+- Validate uploaded audio files.
+- Upload only music for which the administrator has permission or distribution rights.
+
+FINAL DELIVERABLE:
+
+Provide:
+
+1. Complete Android application source code.
+2. Fully working Admin Panel.
+3. Connected Cloud Database.
+4. Cloud Audio Storage.
+5. Functional Music Streaming System.
+6. Installable Android APK.
+7. Setup and deployment instructions.
+
+Build this as a real online music streaming platform, not a static demo.

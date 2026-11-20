@@ -980,6 +980,15 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
     return { domain: domain ? domain.key : 'general', mentioned, likelyMissing, nonFunctional, india: detectIndiaContext(original), clarifyingQuestions: [] };
   }
 
+  // 🧾 A SHOP'S BILLING COUNTER IS NOT AN ONLINE STORE (failedbr #670, queue Q-3218). "Build a GST billing app for a
+  // shop: items with a price and a GST slab, add items to a bill with quantities…" is ecommerce by this file's own
+  // rule (a shop is a shop; billing is a feature word), and was then told it lacked payments + refunds, cart &
+  // checkout and accounts — an ONLINE store's features for a counter that prints a bill. The domain stays named;
+  // only the online-only features are withdrawn, and only when the request is an in-person bill with no online word.
+  if (domain?.key === 'ecommerce' && isAnInStoreBillingCounter(text)) {
+    for (let i = likelyMissing.length - 1; i >= 0; i--) if (ONLINE_ONLY_FEATURES.has(likelyMissing[i])) likelyMissing.splice(i, 1);
+  }
+
   // Ask about the highest-value missing pieces first (cap at 6 so we never over-ask — the admin's rule).
   const clarifyingQuestions: string[] = [];
   for (const label of likelyMissing.slice(0, 4)) clarifyingQuestions.push(`Does it need ${label}?`);
@@ -1042,6 +1051,16 @@ const INSTITUTION_SCOPE_RE = /\b(?:teachers?|tutors?|admins?|administrators?|sta
  * missed; "case  study", "case/study" and "case, study" still leaked. The lookbehind is now
  * `(?<!\bcase[\s\-/,]+)` and `study[\s-]+` accepts multiple separators.
  */
+/** Online-store features a billing counter does not have (Q-3218). */
+const ONLINE_ONLY_FEATURES: ReadonlySet<string> = new Set(['payments + refunds', 'cart & checkout', 'accounts & addresses', 'product catalog + search']);
+const COUNTER_BILL = /\b(?:billing|invoic\w*|bills?|receipts?|pos|point[\s-]of[\s-]sale)\b|बिल|रसीद/i;
+const SELLS_ONLINE = /\bonline\b|website|e[-\s]?commerce|\bcart\b|checkout|deliver\w*|ship\w*|customers?\s+(?:can\s+)?(?:order|buy|browse)|order\s+online|marketplace|ऑनलाइन/i;
+/** Is the request an in-person billing counter (a bill, a receipt, a POS) with nothing sold online? PURE. */
+export function isAnInStoreBillingCounter(prompt: string): boolean {
+  const t = String(prompt || '');
+  return COUNTER_BILL.test(t) && !SELLS_ONLINE.test(t);
+}
+
 export function namesASingleLearnerTool(prompt: string): boolean {
   const t = String(prompt || '');
   return (PRACTICE_TOOL_RE.test(t) && !INSTITUTION_SCOPE_RE.test(t)) || namesAPersonalToolForStudents(t);

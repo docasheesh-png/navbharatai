@@ -16,6 +16,7 @@
 import { RECIPE_LIBRARY_PATH, declaredMembers } from './typeMembers';
 import { isPlatformSeededFile } from './platformAuthored';
 import { createExportCapabilities } from './exportCapabilities';
+import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
 
 /** The model's own write paths. Platform passes (kit refresh, heals) never reach this guard. */
 const MODEL_SOURCES = new Set(['write_file', 'write_files_batch', 'replace_symbol']);
@@ -59,6 +60,6 @@ export function kitLibraryRewriteRefusal(
   const shown = dropped.slice(0, 8).join(', ') + (dropped.length > 8 ? `, … (${dropped.length} in all)` : '');
   return `${rel} is NavBharatAI's game kit, and this rewrite would REMOVE ${shown} — the kit's other files (its shell, `
     + 'HUD and recipes) use them, so the game would stop compiling. Do not rewrite kit files. Import what you need from it, '
-    + 'put your game\'s own logic in a NEW file (for example src/game/RacingGame.tsx), or use edit_file to ADD to the kit '
-    + 'without removing anything.';
+    + 'put your game\'s own logic in a NEW file (for example src/game/RacingGame.tsx), or ADD to the kit without removing '
+    + `anything. ${APPEND_WITH_EMPTY_OLD_STRING}`;
 }

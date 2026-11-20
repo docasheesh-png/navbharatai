@@ -65,3 +65,13 @@ describe('game titles and ranks are never unknown service names (failedbr #1384,
     expect(unknownNamesInRequest(`Make a game like ${w} with levels for my phone.`)).toEqual([]);
   });
 });
+
+describe('Indian places and public-works terms are not services (failedbr #1326)', () => {
+  it('the civil engineer request names nothing unknown', () => {
+    expect(unknownNamesInRequest('I am civil engineer ,i want prepare ai app for prepare DPR OF PONDS ,DETAILED estimate,costing , BOQ,leveling graph and others all works ,which is most important for prepare DPR OF PONDS IN MINOR WATER RESOURCES DEPARTMENT BIHAR')).toEqual([]);
+    expect(unknownNamesInRequest('PWD SOR rates for MAHARASHTRA and a PMGSY road tracker for JHARKHAND')).toEqual([]);
+  });
+  it('a coined product name is still asked about', () => {
+    expect(unknownNamesInRequest('connect my app to the ZORBLAX feed for BIHAR')).toEqual(['ZORBLAX']);
+  });
+});

@@ -144,6 +144,28 @@ const GAME_TITLE_TERMS = [
 ];
 for (const t of GAME_TITLE_TERMS) COMMON_ACRONYMS.add(t);
 
+/**
+ * Indian places and public-works vocabulary: where the app is for, or the document it prepares — never a service
+ * (failedbr #1326, 2026-11-20: "DPR OF PONDS … BOQ … DEPARTMENT BIHAR" flagged "DPR", "BOQ", "BIHAR"). Every state and
+ * union territory, the metros, and the terms of a government estimate (DPR, BOQ, SOR, DSR, PWD, RCC…) and its schemes.
+ */
+const INDIAN_PLACE_TERMS = [
+  'ANDHRA', 'PRADESH', 'ARUNACHAL', 'ASSAM', 'BIHAR', 'CHHATTISGARH', 'GOA', 'GUJARAT', 'HARYANA', 'HIMACHAL', 'JHARKHAND',
+  'KARNATAKA', 'KERALA', 'MADHYA', 'MAHARASHTRA', 'MANIPUR', 'MEGHALAYA', 'MIZORAM', 'NAGALAND', 'ODISHA', 'ORISSA', 'PUNJAB',
+  'RAJASTHAN', 'SIKKIM', 'TAMIL', 'NADU', 'TELANGANA', 'TRIPURA', 'UTTAR', 'UTTARAKHAND', 'BENGAL', 'DELHI', 'NCR', 'JAMMU',
+  'KASHMIR', 'LADAKH', 'PUDUCHERRY', 'PONDICHERRY', 'CHANDIGARH', 'LAKSHADWEEP', 'ANDAMAN', 'NICOBAR', 'DAMAN', 'DIU',
+  'DADRA', 'NAGAR', 'HAVELI', 'MUMBAI', 'KOLKATA', 'CHENNAI', 'BENGALURU', 'BANGALORE', 'HYDERABAD', 'PUNE', 'AHMEDABAD',
+  'JAIPUR', 'LUCKNOW', 'PATNA', 'BHOPAL', 'INDORE', 'NAGPUR', 'SURAT', 'KANPUR', 'RANCHI', 'NOIDA', 'GURGAON', 'GURUGRAM',
+  'INDIA', 'BHARAT',
+];
+for (const t of INDIAN_PLACE_TERMS) COMMON_ACRONYMS.add(t);
+const PUBLIC_WORKS_TERMS = [
+  'DPR', 'BOQ', 'BOM', 'SOR', 'DSR', 'PWD', 'CPWD', 'RCC', 'PCC', 'NHAI', 'PMGSY', 'PMAY', 'NREGA', 'MGNREGA', 'MNREGA',
+  'AMRUT', 'JJM', 'MWRD', 'WRD', 'PHED', 'RWD', 'BDO', 'DM', 'SDM', 'NIT', 'EMD', 'GEM', 'CSR', 'MSME', 'GIS', 'DEM',
+  'RL', 'FRL', 'HFL', 'MLA', 'MP', 'ULB', 'GP', 'PRI',
+];
+for (const t of PUBLIC_WORKS_TERMS) COMMON_ACRONYMS.add(t);
+
 /** Services, platforms and stacks NavBharatAI knows by name — the request may really mean to connect them. */
 const KNOWN_SERVICES = new Set([
   'STRIPE', 'RAZORPAY', 'CASHFREE', 'PAYTM', 'PHONEPE', 'PAYPAL', 'FIREBASE', 'SUPABASE', 'MONGODB', 'MYSQL',

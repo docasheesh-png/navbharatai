@@ -64,6 +64,7 @@ import type { WorkspaceState } from './WorkspaceState';
 import type { ToolUse } from './ClaudeClient';
 import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
 import { defaultToolCatalog, isRecipeName, recipeListing } from './ToolCatalog';
+import { withStructuredArguments } from './toolArgumentShape';
 import type { Checkpointer } from './GitManager';
 import { isWorkerRole, isPlanningOnlyRole, PLAN_YOURSELF_NOTE } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
@@ -4541,6 +4542,9 @@ export class ToolDispatcher {
   async dispatch(call: ToolUse, agent: AgentRole = 'architect', opts?: { signal?: AbortSignal }): Promise<ToolResult> {
     assertCanaryLegacyAllowed('builder-function-tools');
     if (opts?.signal) return runWithToolSignal(opts.signal, () => this.dispatch(call, agent));
+    // An array or object argument an engine sent as JSON text is read as what it says (toolArgumentShape.ts).
+    const shaped = withStructuredArguments(call.input, catalogDef(call.name));
+    if (shaped !== call.input) call = { ...call, input: shaped as ToolUse['input'] };
     // Secret redaction (R1.1, roadmap §3.2): tool_call input and tool_result summaries are
     // streamed to the user's screen, so a command/output that inlines an API key, a .env value
     // or a connection-string password must be masked BEFORE it is shown. We redact ONLY the
@@ -13142,6 +13146,12 @@ function titleOf(obj: Record<string, unknown>, item: unknown, id: string, known:
   if (typeof item === 'string' && item.trim()) return item.trim(); // `todos: ["do x", "do y"]`
   if (typeof obj.title === 'string' && obj.title.trim()) return obj.title.trim();
   return known.get(id) ?? ''; // the id we already have a title for — the reported case
+}
+
+let catalogByName: Map<string, ReturnType<typeof defaultToolCatalog>[number]> | null = null;
+function catalogDef(name: string): ReturnType<typeof defaultToolCatalog>[number] | undefined {
+  catalogByName ??= new Map(defaultToolCatalog().map((t) => [t.name, t] as const));
+  return catalogByName.get(name);
 }
 
 function parseTodos(input: Record<string, unknown>, existing: readonly TodoItem[] = []): TodoItem[] {

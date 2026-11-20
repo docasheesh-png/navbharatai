@@ -13823,7 +13823,7 @@ async function noteBuildOutcome(
                 watchdogStopNote = wdStop.cancelBill.userMessage ? `🧾 ${proSubtotalNotice(wdStop.cancelBill.userMessage)}` : null;
                 buildDiagRef?.record({
                   phase: 'build', severity: 'info', code: 'CANCELLED_BUILD_CHARGED', autoResolved: true,
-                  message: `${proSubtotalNotice(wdStop.cancelBill.reason)} (discount ${wdStop.cancelBill.discountPct}%, delivery: ${wdStop.cancelBill.delivery}; settled by the deadline finalizer).`,
+                  message: `${proSubtotalNotice(wdStop.cancelBill.reason)} (stop discount ${wdStop.cancelBill.discountPct}%, delivery: ${wdStop.cancelBill.delivery}; settled by the deadline finalizer).`,
                 });
               } else if (wdStop.kind === 'late-stop-free' || wdStop.kind === 'failed-free') {
                 watchdogBilledUsd = 0;
@@ -28301,7 +28301,7 @@ async function noteBuildOutcome(
         zeroBillReason = undefined;
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'CANCELLED_BUILD_CHARGED',
-          message: `${proSubtotalNotice(charged.reason)} (discount ${charged.discountPct}%, delivery: ${charged.delivery}).`,
+          message: `${proSubtotalNotice(charged.reason)} (stop discount ${charged.discountPct}%, delivery: ${charged.delivery}).`,
           autoResolved: true,
         });
         if (charged.userMessage) {

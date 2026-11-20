@@ -102999,6 +102999,17 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (bloc
   `gameIntent` board genre now covers business game / vyapaar / monopoly / व्यापार का खेल.
 - **Lock:** `tests/aBusinessGameFollowsTheRules.test.ts` (34) incl. 40 four-computer games with invariants each turn;
   12 reversion proofs each fail. Strict compile of the generated pack caught one union-narrowing error (fixed).
+## 2026-11-20 — Game kit: key rebinding (game-gap audit item)
+
+- **Gap:** keys were fixed; the Input constructor took a map but nothing saved or changed one, and Settings had no Controls.
+- **Fix:** runtime `src/game/core/keybinds.ts` (`loadKeyBindings` over the defaults, sanitised; `rebindKey` in place so the
+  live Input sees it at once, takes the key from other actions and gives a keyless action the old key; `resetKeyBindings`;
+  `captureKey` consumes the key, Esc cancels; Escape is never bindable; mouse/pad/touch untouched). The shell's Game builds
+  its Input on the saved keys (`game.keys`, null for two players), and Settings gets a Controls section on keyboard devices.
+  New strings in English and Hindi. ToolCatalog include list + AppKnowledgeBase `game_menus_settings` updated.
+- **Lock:** `tests/aPlayerCanChangeTheKeys.test.ts` (9, real keybinds + input). 8 reversion proofs fail. Generated kit
+  compiled with tsc before/after: identical 33 pre-existing errors (all the missing `@types/three` in this repo).
+  `royalePracticeLifecycle` harness gained the new import's stub.
 ## 2026-11-20 — Autopsy failedbr #2478 ("make a bgmi for me"): royale requests get the big map, laid down by the platform
 
 Admin: a PUBG / Free Fire / BGMI request must get a big, realistic map; the library already has maps that were not used.

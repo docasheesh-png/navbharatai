@@ -86,7 +86,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "1d3fbe3ba2d6655fc2bffaa8014dfe40b6f1c8cf016f17247dc66569e43073ab",
     "f701c69ba2193751501424193b1e7fa5967451883cd6194e4c36bc83e99afeb3",
     "b0b19ea22f13befaf45cde9d3e03858c0577153dc6525d72da34195e7eede9e8",
-    "1627f1cc88ae14fc0412f869a1a65218d0cfe1ea948e39a4ff33265c29a2fa28"
+    "1627f1cc88ae14fc0412f869a1a65218d0cfe1ea948e39a4ff33265c29a2fa28",
+    "6b2976f78dec85929086185af9655bd6e21a363e6937944139f21f2a2107ced9"
   ],
   "src/game/GameCanvas.tsx": [
     "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
@@ -267,7 +268,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "420e7bc7fa02fa3bf14ccd9fe9ed782df54702a4e08659d58be9b4b5f117f825",
     "d778aea68fa180454d509dfe0959e82c5206cec94492e41f82ec4b214741da95",
     "2e6ae3de8fab6a4148b1d83a42ef39e8305f16dfb005db32e83b6ddf96d0bb29",
-    "58afe75ccda3c61e5206571a3aa602f55c6036553dc5852609e1263fe03c50ba"
+    "58afe75ccda3c61e5206571a3aa602f55c6036553dc5852609e1263fe03c50ba",
+    "49992550ae54aec705d3a3fd59b857c28a81d56b71db8d0dd80bd76bc20081d8"
   ],
   "src/game/core/feel.ts": [
     "6fd476d425ebacb3e80550606f0c2504536fb3f374b3eae871effe8b07acac96"
@@ -383,7 +385,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "3b1bdaba648b84956fdb7f87f9fe77190edd03343751df01871e513a109403d2",
     "b24bb48a0a85cff4c6b92a534c2ba4f8a5324fc793aeced49109d0bbb1edeb97",
     "1cb1260ae5b8a06669f86ae06e13d19c65ade1bc46c0dbaa984af20444ea5e6d",
-    "38707d870fa12b534e70acf0da4a415ecc468a28593071eb3daee524e793de59"
+    "38707d870fa12b534e70acf0da4a415ecc468a28593071eb3daee524e793de59",
+    "6e2cd5e5cc973a4abaeacc9e1c5bd57e1793e7e3b93f69da787c05ddadf0c060"
   ],
   "src/game/fx/music.ts": [
     "9236e81cb871e1e42f8d51efac8ee6b84a392e7ec5a0ba55c893af945f906dd1"
@@ -532,7 +535,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "0cb5ef03a66577557e110ca20dc61008af6368bd30b07174130d6ef045b6588c",
     "cb918bf48ca8f64f2943539913e658a108761f1e37b6ea6ac5d725bbd9eb5ab8",
     "fe2d66923322f205defff093200ecc727890ed99f7feb58060008cfb9a9b4f9e",
-    "e9ca3f0c156ac3cf2257e8ab81823164712e21911517a6d85dfced61eceaea6a"
+    "e9ca3f0c156ac3cf2257e8ab81823164712e21911517a6d85dfced61eceaea6a",
+    "a56af822f5eba66cfbbdea0f19750e504574f88f4ee74e15bea8c20a7bae8686"
   ],
   "src/game/three/race.ts": [
     "f1d609a86491745c075b1605a20943b5a0cca91e2c341110a5412a800819e548"

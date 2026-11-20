@@ -102987,4 +102987,6 @@ Ledger, older reports (2026-11-20, #4377):
 - #2169 — Q-2994 our browser's media limits (no H.264, a play()/pause() race) are not an app defect.
 - #2205 — no new row: an edit turn on an existing app got no platform kit seed by design (the kit is never written over somebody's work); the model's own run_recipe laid it down safely; the four edit_file misses are the weak model's.
 - #2196 — no new row: a 32-file app rendered at 7 min and the build kept writing until the 25-min cap — the free-tier convergence ceiling, Q-2240.
+- #2163 — Q-2995 "गेम" (and "game" in the other Indian scripts) is a game: an all-Devanagari racing request now gets the kit.
+- #2188 — not opened in full: stopped by the user at 51 s on "a game fully like Free Fire Max"; its class (a famous-game clone on the weak tier) is covered by the roadmap/kit path.
 

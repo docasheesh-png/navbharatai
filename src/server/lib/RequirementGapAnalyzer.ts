@@ -343,7 +343,10 @@ const DOMAINS: DomainDef[] = [
     // features on an ordinary app, and classifying them as a game would hand the build a game engine.
     // "game plan" is an idiom, not a game — a sales tool must not be handed a game engine.
     // "khel" / "खेल" is Hindi for game (Game Engine Ultra Phase 4 finding: "ek car wala khel banao" was missed).
-    re: /\bgames?\b(?!\s+plans?\b)|\bgameplay\b|platformer|\bshooter\b|\brpg\b|roguelike|tower\s?defen[cs]e|endless\s?runner|\barcade\b|\bfps\b|racing\s?game|puzzle\s?game|multiplayer|\bkhel\b|खेल/i,
+    // …and "game" itself as Indian scripts write it (failedbr #2163, 2026-11-20): "हम मुझे एक ऐसा गेम बना कर दो कर रेसिंग
+    // वाला … इंफिनिटी रोड" read as `general`, so the build got no game kit and went through the fast lane. Devanagari
+    // गेम, Bengali গেম, Gujarati ગેમ, Gurmukhi ਗੇਮ, Kannada ಗೇಮ್, Tamil கேம், Telugu గేమ్, Malayalam ഗെയിം.
+    re: /\bgames?\b(?!\s+plans?\b)|\bgameplay\b|platformer|\bshooter\b|\brpg\b|roguelike|tower\s?defen[cs]e|endless\s?runner|\barcade\b|\bfps\b|racing\s?game|puzzle\s?game|multiplayer|\bkhel\b|खेल|गेम|গেম|ગેમ|ਗੇਮ|ಗೇಮ್|கேம்|గేమ్|ഗെയിം/i,
     features: [
       // What a game prompt almost never says but every finished game needs. Each of these is the
       // difference between a tech demo and something someone plays twice.

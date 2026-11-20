@@ -102923,7 +102923,7 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964 (blocked, each with w
 | Q-2751 | LADDER_DEPTH counted the scope call on an empty build → scope tokens share the build's ledger | `PHASE_SCOPE` at both scope writers; ladder skips it; bill unchanged (tested) · `aScopeCheckIsNotALadderSlice` |
 | Q-2752 | domain stems inside unrelated words → census vs 275k words found 9 (parental→booking, impatient→healthcare, blending→fintech, …) | each guarded against that word only · `aWordInsideAWordIsNotADomain` (old code: 8 fail) |
 
-**Discovered, not folded in:** Q-2972 — 488 unbounded FEATURE stems match inside source code, so most features read as already present. Fixing it changes what every domain build is told to add; it needs a measured before/after of its own.
+**Discovered, not folded in:** Q-3020 — 488 unbounded FEATURE stems match inside source code, so most features read as already present. Fixing it changes what every domain build is told to add; it needs a measured before/after of its own.
 ## 2026-11-20 — An old game would not open from history: "HTTP 404: Conversation not found" for a `v3_` id
 
 Admin report: opening an old game showed "This chat's transcript hasn't reached the server yet …" with the

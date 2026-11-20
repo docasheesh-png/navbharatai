@@ -63,7 +63,7 @@ export async function imageForApiKey(
       void recordSafetyFlag(buildSafetyFlag({ uid: auth.userId, triage, surface: 'image', excerpt: safetyExcerpt(prompt), at: now }))
         .catch(() => { /* the decision stands either way */ });
       if (triage.verdict === 'block') {
-        return { ok: false, status: 422, code: 'content_policy', message: blockMessage(triage.contentClass, prompt) };
+        return { ok: false, status: 422, code: 'content_policy', message: blockMessage(triage.contentClass, prompt, triage.ruleId) };
       }
     }
   } catch (e) {

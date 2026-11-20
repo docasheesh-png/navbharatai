@@ -376,7 +376,25 @@ async function coordinator() {
     if (version.result.receipts) {
       await check('two workers reserve one request identity and terminal replay cannot execute', async () => {
         const data = { workspaceId: `agentv3-${prefix}-owner-receipt`, ownerId: `${prefix}-owner`, requestId: randomUUID(), input: { message: 'local fixture' } };
-        const results = await Promise.all([a.ok('receipt-reserve', { ...data, attemptId: randomUUID() }), b.ok('receipt-reserve', { ...data, attemptId: randomUUID() })]);
+        let results = await Promise.all([a.ok('receipt-reserve', { ...data, attemptId: randomUUID() }), b.ok('receipt-reserve', { ...data, attemptId: randomUUID() })]);
+        assert.ok(results.filter((result) => result.ok).length <= 1, 'Two executors were admitted for one request identity.');
+        // 🔒 CONTENTION PAST THE PRODUCTION DEADLINE IS UNKNOWN, NOT A VERDICT (Q-3035, admin option (a), 2026-11-20). Measured on
+        // Firestore emulator v1.22.0: two workers that read-then-write one document commit after ~2.0 s / 2.7–3.5 s — the
+        // emulator's ~2 s lock wait per round against the 4 s production deadline can time BOTH out on a busy runner
+        // (production resolves the same contention in milliseconds). As this drill already does for Stop/retire: an
+        // all-UNAVAILABLE outcome is replayed sequentially with the same idempotent request, and the DURABLE invariant is
+        // asserted — never two winners, exactly one recorded. The evidence says when it happened.
+        let contentionReconciled = false;
+        if (results.every((result) => !result.ok && result.code === 'unavailable')) {
+          contentionReconciled = true;
+          // The one reservation that exists is either made now or was committed by an unconfirmed original; both return it.
+          const first = await a.ok('receipt-reserve', { ...data, attemptId: randomUUID() });
+          assert.ok(first.ok || (first.code === 'in-progress' && first.receipt), JSON.stringify(first));
+          const second = await b.ok('receipt-reserve', { ...data, attemptId: randomUUID() });
+          assert.equal(second.ok, false); assert.equal(second.code, 'in-progress');
+          assert.equal(second.receipt.attemptId, first.receipt.attemptId, 'Two different reservations were recorded.');
+          results = [{ ok: true, receipt: first.receipt }, second];
+        }
         assert.equal(results.filter((result) => result.ok).length, 1);
         assert.equal(results.find((result) => !result.ok).code, 'in-progress');
         const accepted = results.find((result) => result.ok).receipt;
@@ -388,7 +406,7 @@ async function coordinator() {
         assert.equal(terminal.receipt.buildRef, accepted.buildRef);
         assert.equal((await retry.ok('receipt-reserve', { ...data, input: { message: 'different workload' }, attemptId: randomUUID() })).code, 'input-mismatch');
         await retry.kill();
-        return { executorsAdmitted: 1, terminalReplay: terminal.code, changedInput: 'input-mismatch', stableBuildRef: true };
+        return { executorsAdmitted: 1, terminalReplay: terminal.code, changedInput: 'input-mismatch', stableBuildRef: true, contentionReconciled };
       });
 
       await check('uncertain request reservation commit cannot execute on restart', async () => {
@@ -485,15 +503,40 @@ async function coordinator() {
       await check('two real workers consume a one-use module handoff once', async () => {
         const f = await readyFixture('handoff-consume-race');
         const candidates = [randomUUID(), randomUUID()];
-        const claims = await Promise.all([a.ok('lease-claim', { workspaceId: f.workspaceId, token: candidates[0], owner: 'handoff-worker-a' }),
+        let claims = await Promise.all([a.ok('lease-claim', { workspaceId: f.workspaceId, token: candidates[0], owner: 'handoff-worker-a' }),
           b.ok('lease-claim', { workspaceId: f.workspaceId, token: candidates[1], owner: 'handoff-worker-b' })]);
+        assert.ok(claims.filter((value) => value.ok).length <= 1, 'Two workers hold one build lease.');
+        // 🔒 CONTENTION PAST THE PRODUCTION DEADLINE IS UNKNOWN, NOT A VERDICT (Q-3035, admin option (a), 2026-11-20). Measured on
+        // Firestore emulator v1.22.0: two workers that read-then-write one document commit after ~2.0 s / 2.7–3.5 s — the
+        // emulator's ~2 s lock wait per round against the 4 s production deadline can time BOTH out on a busy runner
+        // (production resolves the same contention in milliseconds). As this drill already does for Stop/retire: an
+        // all-UNAVAILABLE outcome is replayed sequentially with the same idempotent request, and the DURABLE invariant is
+        // asserted — never two winners, exactly one recorded. The evidence says when it happened.
+        const reconciled = [];
+        if (claims.every((value) => !value.ok && value.reason === 'unavailable')) {
+          reconciled.push('lease');
+          const durable = await control.ok('durable', { workspaceId: f.workspaceId, collection: 'agentv3_build_leases' });
+          if (durable && candidates.includes(durable.token)) claims = candidates.map((token) => ({ ok: token === durable.token }));
+          else { assert.equal(durable, null, JSON.stringify(durable)); claims = [await a.ok('lease-claim', { workspaceId: f.workspaceId, token: candidates[0], owner: 'handoff-worker-a' }), { ok: false }]; }
+        }
         assert.equal(claims.filter((value) => value.ok).length, 1,
           JSON.stringify({ workspaceId: f.workspaceId, candidates, claims }));
         const attemptId = candidates[claims.findIndex((value) => value.ok)];
         const request = transfer(f, attemptId);
         // Both processes deliberately replay the same already-authorized attempt; the ticket CAS is
         // still one-use independently of the separate lease-race result above.
-        const consumers = await Promise.all([a.ask('bind', request), b.ask('bind', request)]);
+        let consumers = await Promise.all([a.ask('bind', request), b.ask('bind', request)]);
+        assert.ok(consumers.filter((value) => value.ok).length <= 1, 'A one-use handoff was consumed twice.');
+        if (consumers.every((value) => !value.ok && value.error?.code === 'QUEUE_STORE_UNAVAILABLE')) {
+          reconciled.push('handoff');
+          // One-use: the sequential replay consumes it, or finds it already consumed by an unconfirmed original (a conflict);
+          // the second replay can only conflict. The durable checks below prove exactly one consumption either way.
+          const first = await a.ask('bind', request);
+          assert.ok(first.ok || first.error?.code === 'QUEUE_CLAIM_CONFLICT', JSON.stringify(first));
+          const second = await b.ask('bind', request);
+          assert.equal(second.ok, false); assert.equal(second.error.code, 'QUEUE_CLAIM_CONFLICT');
+          consumers = [first.ok ? first : { ok: true, result: 'committed-by-an-unconfirmed-original' }, second];
+        }
         // Capture durable evidence before the original exactly-one-ACK assertion can throw.
         // Keep that assertion: an observation must not silently convert UNKNOWN into success.
         if (consumers.filter((value) => value.ok).length !== 1 || consumers.some((value) => !value.ok && value.error?.code !== 'QUEUE_CLAIM_CONFLICT')) {
@@ -507,7 +550,7 @@ async function coordinator() {
         assert.equal(current.items[0].continuation, undefined);
         assert.equal(current.items[0].continuationWindow.requestId, request.expected.requestId);
         assert.equal(await control.ok('claim', { workspaceId: f.workspaceId }), null);
-        return { leaseWinners: 1, ticketConsumers: 1, replayCode: 'QUEUE_CLAIM_CONFLICT', logicalA: 'running', nextStepBlocked: true };
+        return { leaseWinners: 1, ticketConsumers: 1, replayCode: 'QUEUE_CLAIM_CONFLICT', logicalA: 'running', nextStepBlocked: true, contentionReconciled: reconciled };
       });
 
       await check('Stop and normal retirement serialize both queue readiness and predecessor lease deletion', async () => {
@@ -553,6 +596,7 @@ async function coordinator() {
 
       await check('Stop racing handoff consumption cancels the ticket and flags the current successor lease', async () => {
         const observed = [];
+        const reconciledOrders = [];
         for (const order of ['stop-first', 'consume-first', 'concurrent']) {
           const f = await readyFixture(`handoff-stop-consume-${order}`); const attemptId = randomUUID();
           assert.equal((await control.ok('lease-claim', { workspaceId: f.workspaceId, token: attemptId, owner: 'successor-before-stop' })).ok, true);
@@ -567,7 +611,12 @@ async function coordinator() {
           };
           if (order === 'stop-first') { stopped = await b.ask('continuation-stop', { workspaceId: f.workspaceId }); await requireStoppedAcknowledgment(); consumed = await a.ask('bind', request); }
           else if (order === 'consume-first') { consumed = await a.ask('bind', request); stopped = await b.ask('continuation-stop', { workspaceId: f.workspaceId }); await requireStoppedAcknowledgment(); }
-          else { [consumed, stopped] = await Promise.all([a.ask('bind', request), b.ask('continuation-stop', { workspaceId: f.workspaceId })]); await requireStoppedAcknowledgment(); }
+          else {
+            [consumed, stopped] = await Promise.all([a.ask('bind', request), b.ask('continuation-stop', { workspaceId: f.workspaceId })]); await requireStoppedAcknowledgment();
+            // Q-3035: a bind that timed out under contention is UNKNOWN; after the confirmed Stop the same one-use request
+            // can only conflict (cancelled, or already consumed by an unconfirmed original). Replay it once to know which.
+            if (!consumed.ok && consumed.error?.code === 'QUEUE_STORE_UNAVAILABLE') { reconciledOrders.push(order); consumed = await a.ask('bind', request); }
+          }
           if (!consumed.ok && consumed.error?.code !== 'QUEUE_CLAIM_CONFLICT') {
             await captureDrillAcknowledgments(control, { name: 'handoff-stop-consume', order, workspaceId: f.workspaceId,
               operations: { stop: stopped, consumer: consumed } });
@@ -586,7 +635,7 @@ async function coordinator() {
           assert.equal(replay.ok, false); assert.equal(replay.error.code, 'QUEUE_CLAIM_CONFLICT');
           observed.push({ order, consumedBeforeStop: consumed.ok, currentLeaseStopRequested: true, oldTicketReplay: replay.error.code });
         }
-        return { interleavings: observed, physicalLimit: 'An already-issued provider operation is not revoked by this queue/lease transaction.' };
+        return { interleavings: observed, physicalLimit: 'An already-issued provider operation is not revoked by this queue/lease transaction.', contentionReconciled: reconciledOrders };
       });
 
       await check('normal retirement committed ACK loss reconciles READY from a fresh worker without replaying an old attempt', async () => {

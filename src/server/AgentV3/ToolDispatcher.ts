@@ -5,7 +5,7 @@ import { labelAuthoredFields } from '../AppMakerLab/intelligence/A11yLinter';
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
 import { ASSET_MODELS_PATH, localModelSubjects, readyModelFor, localModelLead } from './gameAssets/localModelNote';
 import { addLibraryModels } from './gameAssets/assetSeed';
-import { externalGameAssetsEnabled, gameAssetRequirements } from './gameAssets/assetPlan';
+import { externalGameAssetsEnabled, libraryRequirement } from './gameAssets/assetPlan';
 import { REVIEWED_GAME_ASSETS } from './gameAssets/providers';
 import type { AssetRequirement } from './gameAssets/assetPolicy';
 import { randomUUID } from 'node:crypto';
@@ -10521,13 +10521,12 @@ export class ToolDispatcher {
           return 'The NavBharatAI model library is not switched on for this account, so no model was added. Build these objects with the existing recipes (object_spec / the 3D kit builders) instead.';
         }
         if (typeof this.actuator.writeBinaryFile !== 'function') return 'This sandbox cannot write binary files, so no library model was added. Build these objects with the existing recipes instead.';
-        const served = new Set(REVIEWED_GAME_ASSETS.flatMap((c) => c.subjects));
-        const requirements: AssetRequirement[] = []; const unknown: string[] = [];
+        const requirements: AssetRequirement[] = []; const unknown: string[] = []; const unplayable: string[] = [];
         for (const m of asked) {
-          const name = String(m.subject).trim().toLowerCase();
-          const subject = served.has(name) ? name : gameAssetRequirements(name, REVIEWED_GAME_ASSETS).map((r) => r.subject).find((s2) => served.has(s2));
-          if (!subject) { unknown.push(String(m.subject)); continue; }
-          if (!requirements.some((r) => r.subject === subject)) requirements.push({ subject, ...(typeof m.animation === 'string' && m.animation ? { animation: m.animation } : {}) });
+          const asked1 = libraryRequirement(String(m.subject), m.animation, REVIEWED_GAME_ASSETS);
+          if (!asked1) { unknown.push(String(m.subject)); continue; }
+          if (asked1.droppedRole) unplayable.push(`${asked1.requirement.subject} (${asked1.droppedRole})`);
+          if (!requirements.some((r) => r.subject === asked1.requirement.subject)) requirements.push(asked1.requirement);
         }
         if (!requirements.length) return `None of these are in the NavBharatAI model library: ${unknown.join(', ')}. Search with object_spec({ library_query: "…" }) for names it has, or build them with the existing recipes.`;
         const read = (path: string) => this.actuator.readFile(this.workspaceId, path).catch(() => null);
@@ -10547,6 +10546,7 @@ export class ToolDispatcher {
         return `Added to the game from the NavBharatAI library: ${ready.join(', ')}.`
           + (missed.length ? ` Not added (build these with the existing recipes): ${missed.join(', ')}.` : '')
           + (unknown.length ? ` Not in the library: ${unknown.join(', ')}.` : '')
+          + (unplayable.length ? ` Added without that animation (the model has no such role): ${unplayable.join(', ')}.` : '')
           + ` Use them with: const handle = await loadRequestedAsset('<subject>', fallback) from src/game/three/assetModels.ts; add handle.root to the scene, call handle.update(dt) each frame and handle.dispose() on teardown. Earlier models are unchanged. To recolour, resize or replace one, edit ONLY src/game/three/assetCustomizations.ts.${layers}`;
       }
 

@@ -102898,3 +102898,10 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961 (blocked, each with what it n
   Jump + Attack by default, no camera drag), driving the same Input as the keyboard; the recipe layer adder brings
   ui/touchControls.ts with it. The kit's instructions and compiled example show it; AppKnowledgeBase updated.
 - Locked by `tests/a2DGameIsPlayableOnAPhone.test.ts` (real modules on a fake page; reversion: no 2D defaults → fails).
+## 2026-11-20 — failedbr #2408 / #2342 / #2339 resolved (#4360 merged)
+
+Closed Q-2962, Q-2963, Q-2965 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`).
+- Q-2962 (#2408, #2428): a failed Surplus turn's duration feeds the build's waste ledger (`onSurplusAttemptWasted`), so "no engine wasted any time" can no longer be said over a 90 s Surplus hang.
+- Q-2963 (#2342): on an edit, the aggregate project-score blocker no longer forces an unfinished-resume (`isProjectScoreBlocker`); the verdict half is Q-2964 (admin decision).
+- Q-2965 (#2339): a seeded game kit always skips the fast lane (`fastLaneSkipsGame(domain, env, kitSeededCount)`), so the lane can never regenerate files over the kit.
+Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964 (blocked, each with what it needs).

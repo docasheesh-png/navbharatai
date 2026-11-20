@@ -53,6 +53,7 @@ import { ENDLESS_RACE_COURSE_RULE } from './endlessRaceCourse';
 import { hardConstraintLines } from '../lib/megaRoadmap';
 import { asksForBattleRoyale, buildGameContract, gameContractBlock, gameScopeContractEnabled, namedGameReference, type GameScopeContract } from './gameIntent';
 import { largeWorldIntent } from './largeWorldIntent';
+import { GAME_SHELL_MODULES } from '../lib/GameShellGenerator';
 import { athreeMapIntent } from '../lib/athreeMap/athreeMapIntent';
 import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { kitTypeContract, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
@@ -190,8 +191,16 @@ export function wantsSceneDetail(prompt: string | null | undefined): boolean {
  * `audio.ts` and the `synth.ts` voices it needs, which import nothing. If the builder later adds the 3D
  * shell, the shell's missing-layer adder writes the particles it imports.
  */
-export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKitRecipe[]): Record<string, unknown> | undefined {
+export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKitRecipe[], request?: string | null): Record<string, unknown> | undefined {
   if (recipe === 'generate_game_vfx' && !plan.includes('generate_game_3d')) return { include: ['audio'] };
+  // 🏁 THE RACE STARTER ONLY FOR A RACE (failedbr #2478, Q-3016): the shell shipped src/game/RacingRoadGame.tsx under EVERY
+  // 3D game, so a BGMI request was handed a racing game ("seeded but not imported: RacingRoadGame") — a starter that steers
+  // a weak builder toward the wrong genre. Without a request (a caller that cannot say), the whole shell, as before.
+  if (recipe === 'generate_game_shell' && typeof request === 'string' && request.trim()) {
+    let genre = 'unknown';
+    try { genre = buildGameContract(request).genre; } catch { return undefined; }
+    if (genre !== 'racing') return { include: GAME_SHELL_MODULES.filter((m) => m !== 'racingroadgame') };
+  }
   return undefined;
 }
 

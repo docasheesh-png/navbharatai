@@ -336,7 +336,7 @@ describe('1d · the route seeds the kit before the first model call, behind ever
   });
 
   it('goes through the dispatcher exactly as a model call would, with the plan bookkeeping muted', () => {
-    expect(block).toContain("const recipeInput = gameKitRecipeInput(recipe, kitPlan);");
+    expect(block).toContain("const recipeInput = gameKitRecipeInput(recipe, kitPlan, gameTurnRequest(prompt, milestoneRequest));");
     expect(block).toContain("dispatcher.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe, ...(recipeInput ? { input: recipeInput } : {}) } }, 'architect', { signal: abort.signal })");
     const on = block.indexOf('platformSeedInFlight = true;');
     const off = block.indexOf('platformSeedInFlight = false;');

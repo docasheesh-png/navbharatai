@@ -19500,7 +19500,7 @@ async function noteBuildOutcome(
                 for (const recipe of kitPlan) {
                   if (abort.signal.aborted) break;
                   // A 2D plan takes the effects layer's SOUND half only — its particles would install three.js.
-                  const recipeInput = gameKitRecipeInput(recipe, kitPlan);
+                  const recipeInput = gameKitRecipeInput(recipe, kitPlan, gameTurnRequest(prompt, milestoneRequest));
                   const r = await dispatcher.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe, ...(recipeInput ? { input: recipeInput } : {}) } }, 'architect', { signal: abort.signal });
                   kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? '') });
                 }

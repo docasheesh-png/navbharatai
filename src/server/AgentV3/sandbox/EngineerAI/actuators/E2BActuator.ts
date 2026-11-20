@@ -96,7 +96,7 @@ import { browseConsoleCaptureEnabled, CANCELLED_REQUEST_RE } from '../../../rend
 import { gunzipSync } from 'zlib';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../../../../lib/generatedDirs';
 import type { ActuatorCommandTiming } from '../../../commandTiming';
-import { NPM_INSTALL_LOCK, NPM_INSTALL_LOCK_FRESH, INSTALL_WAIT_SECONDS, PRIME_NODE_MODULES, WARM_NODE_MODULES } from '../../../tscCommand';
+import { NPM_INSTALL_LOCK, NPM_INSTALL_LOCK_FRESH, INSTALL_WAIT_SECONDS, PRIME_NODE_MODULES, WARM_NODE_MODULES, STAMP_NODE_MODULES } from '../../../tscCommand';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -1036,7 +1036,8 @@ export class E2BActuator implements IEngineerActuator {
     // changes nothing in the directory itself, so without the stamp a package.json rewritten by an edit
     // read as stale for the rest of the build .
     const settled = async (r: { success: boolean; log: string }): Promise<{ success: boolean; log: string }> => {
-      if (r.success) await sandbox.commands.run('touch node_modules', { cwd: WORKSPACE_ROOT, timeoutMs: 5_000 }).catch(() => {});
+      // STAMP_NODE_MODULES, never a bare `touch`: a project with no dependencies has no directory to stamp (failedbr #2224).
+      if (r.success) await sandbox.commands.run(STAMP_NODE_MODULES, { cwd: WORKSPACE_ROOT, timeoutMs: 5_000 }).catch(() => {});
       return r;
     };
 

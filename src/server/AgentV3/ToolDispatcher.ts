@@ -241,7 +241,7 @@ import { loadedMissingPackageUses, notInstalledBlockerLabel, undeclaredInstalled
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
 import { importsOfDeletedFiles, danglingImportNote, deletedImportNoteEnabled, orderImportCandidates, readSourcesWithinBudget, withoutDeletedImportNote } from './deletedImportNote';
-import { filesOutsideTheApp, outsideAppMatcher, outsideTheAppNote } from './outsideTheApp';
+import { filesOutsideTheApp, outsideAppMatcher, outsideTheAppNote, foldersOutsideTheApp, inFolderOutsideTheApp } from './outsideTheApp';
 import { userFileGuardEnabled, unaskedUserFileRemovals, userFileRemovalMessage } from './userFileGuard';
 import { prunableGraphPaths, pruneWasRefused, pruneRefusedMessage } from './graphReconcile';
 import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis';
@@ -3015,7 +3015,7 @@ export class ToolDispatcher {
     }
   }
 
-  private async readEvalSnapshot(): Promise<{ files: string[]; sources: EvalSourceFile[] }> {
+  private async readEvalSnapshot(planSkip?: (files: string[]) => Promise<(path: string) => boolean>): Promise<{ files: string[]; sources: EvalSourceFile[] }> {
     const SOURCE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|astro|html?|py|rb|java|php|go)$/i;
     const SKIP_DIR = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)/i;
     let files: string[] = [];
@@ -3023,7 +3023,11 @@ export class ToolDispatcher {
     try {
       // Bound the listing (15s) so a stalled sandbox can't hang the gate before any read starts.
       files = await withTimeout(this.actuator.listFiles(this.workspaceId), 15_000, 'listFiles');
-      const candidates = files.filter((p) => SOURCE.test(p) && !SKIP_DIR.test(p)).slice(0, 300);
+      // A folder the app does not build is decided BEFORE the 300-file cap (Q-3201): ~480 vendored reference files
+      // used to crowd the real app out of the snapshot.
+      let skip: (path: string) => boolean = () => false;
+      if (planSkip) { try { skip = await planSkip(files); } catch { skip = () => false; } }
+      const candidates = files.filter((p) => SOURCE.test(p) && !SKIP_DIR.test(p) && !skip(p)).slice(0, 300);
       // PARALLEL + per-file timeout (audit P0-C): 300 sequential reads after the app is already
       // built was the #1 "fully-built app dies at the readiness gate" cause. Read in bounded batches,
       // each capped at 5s; a slow/unreadable file is dropped, never breaks evaluate.
@@ -7005,17 +7009,28 @@ export class ToolDispatcher {
         // Read the source tree ONCE and share it across every file-scanning dimension
         // (was ~7 directory listings + each file read ~5×). `snap.files` is the full
         // name-only list for hygiene/secret-leak; `snap.sources` carries content.
-        const fullSnap = await this.readEvalSnapshot();
         let pkgForRun: string | null = null;
         try {
           pkgForRun = await this.actuator.readFile(this.workspaceId, 'package.json');
         } catch {
           pkgForRun = null; // no manifest — runnability is simply "not assessable"
         }
+        // A WHOLE FOLDER THE APP DOES NOT BUILD (failedbr #728, Q-3201, outsideTheApp.ts) — decided from the project's
+        // own tsconfig / scripts / bundler config / index.html, before the snapshot's file cap is spent.
+        let outsideFolders = new Set<string>();
+        const fullSnap = await this.readEvalSnapshot(async (files) => {
+          const roots = files.filter((p) => /^(?:tsconfig(?:\.[\w-]+)?\.json|index\.html|(?:vite|webpack|rollup|astro|next|nuxt|svelte|rsbuild|rspack)\.config\.[cm]?[jt]s)$/.test(p.replace(/^\.\//, '')));
+          const projectSources = (await Promise.all(roots.slice(0, 12).map(async (p) => {
+            try { return { path: p.replace(/^\.\//, ''), content: await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'readFile') }; } catch { return null; }
+          }))).filter((x): x is { path: string; content: string } => x !== null);
+          outsideFolders = foldersOutsideTheApp(files, pkgForRun, projectSources);
+          return inFolderOutsideTheApp(outsideFolders);
+        });
         // A DOCUMENT THE USER BROUGHT IN IS NOT THE APP (autopsy 4d538ca3, see outsideTheApp.ts): a
         // reference page the bundle never ships scored this app 0/100, and the model deleted the
         // user's file to clear it. Such files are set aside from every scan and named in the result.
-        const outsideApp = filesOutsideTheApp(fullSnap.files, pkgForRun, fullSnap.sources);
+        const inOutsideFolder = inFolderOutsideTheApp(outsideFolders);
+        const outsideApp = new Set([...filesOutsideTheApp(fullSnap.files, pkgForRun, fullSnap.sources), ...fullSnap.files.filter(inOutsideFolder)]);
         try { mem.setOutsideTheApp(outsideApp); } catch { /* the shared record is best-effort */ }
         const isOutsideApp = outsideAppMatcher(outsideApp);
         const snap = outsideApp.size === 0

@@ -112,7 +112,10 @@ export function appendChange(mem: EngineeringMemory, record: Omit<ChangeRecord, 
 
 /** One admin-report line for a change. */
 export function describeChange(c: ChangeRecord): string {
-  const parts = [`${c.id} ${c.kind}/${c.depth}`, `${c.files.length} file(s)`, `status ${c.status}`];
+  // Q-2753 (BR1999, BR2002): four lines of one report gave four file counts and only this one named no scope. It counts
+  // the files this turn wrote MINUS seeded kit files left as seeded and the platform's finishing writes
+  // (`reviewChangedPaths`) — narrower than FE_BE_PARTITION ("every file this turn wrote") and the manifest (the project).
+  const parts = [`${c.id} ${c.kind}/${c.depth}`, `${c.files.length} file(s) changed by the build (unchanged kit files and the platform's finishing writes not counted)`, `status ${c.status}`];
   if (c.gate) parts.push(`gate ${c.gate.toUpperCase()}`);
   if (c.requirements.length) parts.push(`requirements ${c.requirements.join(', ')}`);
   if (c.regressed.length) parts.push(`REGRESSED ${c.regressed.join(', ')}`);

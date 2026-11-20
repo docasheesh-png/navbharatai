@@ -152,6 +152,7 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
 import { scanAuthenticity, authenticitySummary, authenticityConfidenceCount, fakeResultWriteNote } from './AuthenticityAnalysis';
 import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
 import { browserAiKeyWriteNote } from './browserAiKeyScan';
+import { mixedSvgImportWriteNote } from './svgImportShape';
 import { uploadStorageWriteNote } from './browserFileStore';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
@@ -4966,6 +4967,8 @@ export class ToolDispatcher {
       try { if (noFakeFeaturesEnabled()) security += fakeFeatureWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
       // An AI provider called from the page with a key the page must hold (autopsy e52cebbf, Q-730).
       try { security += browserAiKeyWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // An SVG imported in two plugins' styles at once (Q-2766, BR2001) — the exact one-line fix, file still open.
+      try { security += mixedSvgImportWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
       // An uploaded file read into text, headed for a store that holds 5 MB (autopsy 68f0a486, Q-542) — once per
       // build, with the IndexedDB file store the right fix needs, while the file is still open.
       if (!this._uploadStorageNoted) {

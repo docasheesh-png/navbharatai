@@ -45,7 +45,8 @@ describe('buffered call evidence keeps the clock that observed it', () => {
     expect(report.llmCalls[0].ts).toBe(start - 2000);
     const timing = report.issues.find(i => i.code === 'TIME_TO_FIRST_CALL');
     expect(timing?.ts).toBe(start - 2000);
-    expect(timing?.message).toContain('cannot be separated');
+    // Q-2746: the pre-build call is now named in plain words (started before the build's timer, not counted).
+    expect(timing?.message).toContain("started before this build's timer");
     expect(timing?.message).not.toContain('of preparation');
     if (!success) expect(report.issues.find(i => i.code === 'LLM_CALL_FAILED')?.ts).toBe(start - 2000);
   });

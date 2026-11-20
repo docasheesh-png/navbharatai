@@ -103,9 +103,9 @@ describe('it never invents the split it cannot measure', () => {
   it('a latency longer than the whole build cannot produce a negative setup', () => {
     // An incompatible clock window cannot establish zero setup or a clamped call duration.
     const p = at(afterMs(30_000, 999_000))!;
-    expect(p.message).toContain('999s latency');
-    expect(p.message).toContain('30s build timing window');
-    expect(p.message).toContain('cannot be separated');
+    // Q-2746: the pre-build call is now named in plain words (started before the build's timer, not counted).
+    expect(p.message).toContain('999s model call');
+    expect(p.message).toContain("started before this build's timer");
     expect(p.message).not.toMatch(/^0s of preparation|^-\d/);
     expect(p.severity).toBe('info');
   });

@@ -21,3 +21,11 @@ describe('a homograph, a format and an output shape are not things (failedbr #10
     expect(clone('make a whatsapp clone')).toBe('WhatsApp');
   });
 });
+
+describe('"bus" as Hinglish "bas" is not a vehicle (failedbr #898)', () => {
+  it('"vah bus phone nahin …" adds no bus; a real bus still does', () => {
+    expect(ids('vah bus phone nahin ghusa rahata Hai har din to ek Aisa game bnao')).not.toContain('bus');
+    expect(ids('city bus driving game')).toContain('bus');
+    expect(ids('bus simulator game')).toContain('bus');
+  });
+});

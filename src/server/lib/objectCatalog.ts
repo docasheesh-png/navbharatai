@@ -45,7 +45,9 @@ const VEHICLES_LAND: CatalogEntry[] = [
     parts: ['single front wheel under a fork', 'canvas roof on thin posts', 'OPEN sides with no doors', 'bench seat visible from outside', 'handlebar steering, not a wheel', 'yellow-and-green or black-and-yellow paint'],
     tell: 'The three-wheel stance and the open sides are the silhouette — you can see straight THROUGH it, which no car does.' },
   { id: 'bus', name: 'bus', category: 'vehicle-land', builder: 'createBus',
-    words: 'bus|coach|minibus|school\\s*bus', hi: 'बस',
+    // "bus" is also Hinglish "bas" (just / only): "vah bus phone nahin ghusa rahata" made a kids' learning game a BUS hero
+    // object (failedbr #898). Not a vehicle when a Hinglish word stands right beside it; "school bus", "bus game" still are.
+    words: '(?<!\\b(?:vah|woh|wo|aur|to|ab|bas|ki|ke|toh|par)\\s{1,2})bus(?!\\s+(?:phone|mobile|wo|woh|yeh|ye|itna|itni|ek|kar|karo|ho|hai|kuch|mein|ab|abhi|isi|ise|use|usko|mujhe|hum|tum|aap|thoda|thodi|khel|padh|dekh)\\b)|coach|minibus|school\\s*bus', hi: 'बस',
     dims: '11 m long, 2.5 m wide, 3.2 m tall, wheelbase 5.6 m, wheel radius 0.50 m',
     parts: ['a long flat-sided box with a flat front', 'a ROW of windows the full length at one height', 'a door with steps', 'large wheels partly hidden by the body', 'destination board above the windscreen'],
     tell: 'The window band running the whole length at a constant height is what makes it a bus rather than a large van.' },

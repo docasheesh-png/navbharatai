@@ -44,7 +44,9 @@ describe('L3 acquisition, durable restore and bundle contract (synthetic)', () =
     expect(externalGameAssetsEnabled({})).toBe(false);
     expect(() => validateCatalogue(REVIEWED_GAME_ASSETS)).not.toThrow();
     expect(REVIEWED_GAME_ASSETS.length).toBeGreaterThan(0);
-    expect(REVIEWED_GAME_ASSETS.every(c => c.downloadUrl.startsWith('https://raw.githubusercontent.com/') && /^[a-f0-9]{40}$/.test(c.revision))).toBe(true);
+    // Every entry is pinned: a public GLB at an exact revision, or (2026-11-20) a PACKAGED offline conversion whose file in the
+    // image is checked by size and hash (tests/libraryBatch6.test.ts) — never an unpinned or invented source.
+    expect(REVIEWED_GAME_ASSETS.every(c => /^[a-f0-9]{40}$/.test(c.revision) && (c.packaged ? /^[a-f0-9]{64}$/.test(c.sha256) && typeof c.bytes === 'number' : c.downloadUrl.startsWith('https://raw.githubusercontent.com/')))).toBe(true);
     const r = rig(); const result = await prepareGameAssets({ prompt:'3D car game', workspaceId:'fixture-workspace', workspace:r.workspace, signal:new AbortController().signal, dependencies:r.deps, catalogue:[r.candidate], env:{} });
     expect(result.status).toBe('off'); expect(r.download).not.toHaveBeenCalled(); expect(r.disk.size).toBe(0);
   });

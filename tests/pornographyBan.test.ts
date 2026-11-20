@@ -154,11 +154,11 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
   const chat = readFileSync(join(process.cwd(), 'src/server/routes/chat.ts'), 'utf8');
 
   it('the build route refuses in the user\'s language', () => {
-    expect(route).toContain('blockMessage(triage.contentClass, prompt)');
+    expect(route).toContain('blockMessage(triage.contentClass, prompt, triage.ruleId)');
   });
 
   it('the chat route does too — one triage serves both surfaces', () => {
-    expect(chat).toContain('blockMessage(triage.contentClass, message)');
+    expect(chat).toContain('blockMessage(triage.contentClass, message, triage.ruleId)');
   });
 
   it('🔒 the free-tier upsell can never follow a refusal', () => {

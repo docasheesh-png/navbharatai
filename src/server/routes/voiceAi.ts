@@ -38,7 +38,7 @@ export function registerVoiceAiRoutes(app: Express): void {
       if (!account.ok) { res.status(account.status).json(account.body); return; }
       const input = readVoiceInput(req.body);
       const triage = triagePrompt(input.text);
-      if (triage.verdict === 'block') { res.status(422).json({ error: blockMessage(triage.contentClass, input.text), code: 'blocked' }); return; }
+      if (triage.verdict === 'block') { res.status(422).json({ error: blockMessage(triage.contentClass, input.text, triage.ruleId), code: 'blocked' }); return; }
       await assertAiAvailable();
       const config = voiceAiConfig();
       if (!config.available || config.pricePer1000CharactersInr === null) throw new VoiceAiError('unavailable');

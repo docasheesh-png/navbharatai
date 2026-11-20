@@ -12,7 +12,9 @@ export interface StoredProAttachment {
 
 // Keep established document/vision and ZIP import paths unchanged. All other binary
 // formats go to opaque storage, even when their extension is disguised as text.
-const DOCUMENT = /\.(docx?|xlsx?|pptx?|pdf|png|jpe?g|gif|webp|bmp|svg|heic|heif|zip)$/i;
+// 3D models (.glb/.gltf/.obj/.fbx and a glTF's .bin / an OBJ's .mtl) go to the build too (2026-11-20): the server checks
+// and converts them and puts them into the user's game (src/server/AgentV3/gameAssets/userModels.ts).
+const DOCUMENT = /\.(docx?|xlsx?|pptx?|pdf|png|jpe?g|gif|webp|bmp|svg|heic|heif|zip|glb|gltf|obj|fbx|bin|mtl)$/i;
 const EXECUTABLE = /\.(exe|dll|so|dylib|com|msi|apk|ipa|wasm)$/i;
 export async function needsOpaqueStorage(file: Pick<File, 'name' | 'type' | 'arrayBuffer'>): Promise<boolean> {
   if (EXECUTABLE.test(file.name)) return true;

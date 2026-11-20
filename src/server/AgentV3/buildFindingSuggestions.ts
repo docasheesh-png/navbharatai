@@ -553,6 +553,9 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
  * the admin on 2026-10-11 (Q-380, closed): leave it — a crashed build stays free and NavBharatAI absorbs it.
  */
 export const APP_FINDINGS_WITHOUT_AN_OFFER = new Set([
+  // userModels.ts: a model the user attached was not added. The message names each file and its exact fix (export as
+  // .glb, remove compression, attach the missing file) — only the user can re-export or re-attach it; no button can.
+  'USER_MODELS_NOT_ALL_ADDED',
   // BR1957: a concrete source-level storage-to-state warning, not proof of a runtime crash.
   // The message names the file/line and validation needed. No generic one-click schema rewrite:
   // guessing a domain shape can corrupt valid user data. Keep it visible/unresolved as advisory.

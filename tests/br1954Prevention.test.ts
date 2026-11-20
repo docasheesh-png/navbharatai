@@ -134,7 +134,7 @@ describe('BR1954 — the existing source/API contract is a prerequisite, not con
     expect(body).toContain('buildPrompt = `${gameHandoff.block}');
     expect(body).toContain('stopped: abort.signal.aborted');
     expect(route.match(/gameContract = buildGameContract\(/g) ?? []).toHaveLength(0);
-    expect(route).toContain('gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(gameTurnRequest(prompt, milestoneRequest)), endlessRaceCourse: endlessRace })');
+    expect(route).toContain('gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(gameTurnRequest(prompt, milestoneRequest)), request: gameTurnRequest(prompt, milestoneRequest), endlessRaceCourse: endlessRace })');
     // Preservation gates remain independently required; handoff cannot make an edit a fresh seed.
     expect(route).toContain("if (intent === 'new_build' && !projectModuleRef && !isImportTurn)");
     expect(route).toContain("if (intent === 'edit_existing' && !isImportTurn && !projectModuleRef && projectFilesAtTurnStart");

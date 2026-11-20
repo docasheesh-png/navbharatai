@@ -103224,6 +103224,43 @@ Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 - **Proof:** `tests/theRunnerStarterPlays.test.ts` (8): Right moves right on screen through the real chase camera; a bot
   playing through the player's own input survives 90 s / 1200+ m; standing still → game over; Play again is clean; the
   right starter per genre. Seven reversions each failed. Kit strict compile + shell/seed/reader suites green.
+## 2026-11-20 — Game menus in nine more Indian languages + Settings → Language (game-gap audit)
+
+- **Problem:** the game kit's own screens (start, pause, settings, game over, shop, controls, captions) were English or
+  Hindi only. A Tamil, Telugu or Bangla player got English menus unless the builder translated every word, and a missed
+  word stayed English. Nothing told the builder which language the request wanted.
+- **Root cause / class:** the kit had two languages and no path from "the request is in Tamil" to "the game is in Tamil".
+- **Fix:**
+  - `src/server/lib/gameStringsIndic.ts`: full tables for Tamil, Telugu, Bangla, Marathi, Gujarati, Kannada, Malayalam,
+    Punjabi and Odia (every key, every `{placeholder}`, technical tokens kept). Typed as `Record<StringKey, string>` in the
+    generated `core/strings.ts`, so a new key that is not translated everywhere fails the kit's strict compile.
+  - `core/strings.ts`: 11 languages, `'auto'` detects all of them, and a **player choice** (`choosePlayerLanguage`) saved
+    on the device that wins over the game's own; the game's word changes stay in the game's own language only.
+  - Shell: **Settings → Language** list (each language in its own script); every screen re-renders on a change.
+  - `AgentV3/gameLanguage.ts`: the request decides — a language NAMED as the game's language ("Tamil mein", "in Telugu",
+    "Bangla version") or the SCRIPT the request is written in; a subject mention ("a Tamil movie quiz") is not a choice.
+    The kit handoff tells the builder `language: 'ta'` and to write the game's own text in it.
+- **Proof:** `tests/theGameSpeaksIndianLanguages.test.ts` (24 tests; five reversions each failed).
+- 🟡 **Open:** the nine tables were written without a native speaker reviewing every word. They are ordinary words, and any
+  word can be changed with `options.strings`, but a native-speaker pass per language is recommended.
+## 2026-11-20 — Cars crash into walls and into each other (engine audit, item 1 of the admin-approved plan)
+
+- **Measured first, with the real kit:** cars already stopped at walls (an earlier claim of mine in this session that
+  they did not was wrong — `vehicleTravel` sweeps the body against scenery). Two real defects:
+  1. a car drove straight THROUGH a parked car at full speed — vehicles were never obstacles, only scenery was;
+  2. a car that clipped a wall at an angle stopped dead and stayed glued to it.
+- **Class:** the vehicle sweep knew one kind of obstacle (scenery) and one outcome (full stop).
+- **Fix (shared `objects.ts`, so every driving game gets it):**
+  - every kit vehicle (car, auto, bus, truck, tractor, motorcycle, bicycle) and every model `driveVehicle` moves is a
+    vehicle body; the sweep also tests the other bodies in the same scene (capsule–capsule, binary-searched fraction);
+    bodies that left their scene are forgotten; overlapping cars can always separate (never lock together);
+  - a blocked car slides along what it hit; the speed loss is paid once at contact, then only scraping friction;
+    a head-on hit still stops dead (existing tests pin it);
+  - `onVehicleCrash(at, vehicle, impact)` once per hit (> 3 m/s lost, 0.3 s apart); the shell turns the PLAYER's crash
+    into `VEHICLE_CRASHED` → sparks, impact sound, trauma, haptic via the feedback table.
+- **Proof:** `tests/aCarHitsWhatItDrivesInto.test.ts` (9 tests, eight reversions each failed); all 28 existing vehicle
+  test files (485 tests) pass.
+- 🟡 **Not built yet:** pushing the other car, dents and damage.
 ## 2026-11-20 — City blocks in the 3D game kit (game-gap audit)
 
 - **Problem:** a "city" game was one straight road with houses beside it — the kit had `createRoad()` (one strip),

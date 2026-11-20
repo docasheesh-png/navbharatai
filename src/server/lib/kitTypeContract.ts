@@ -196,7 +196,15 @@ const CONTRACT: readonly ContractEntry[] = [
   // What `touchControls: { buttons: [...] }` takes. The reported build passed strings.
   { file: 'src/game/ui/touchControls.ts', names: ['TouchButton', 'TouchLayout', 'TouchControlsOptions'] },
   // 1b38d662: livery/color were guessed and Motorcycle was passed as an Object3D instead of .root.
-  { file: 'src/game/three/objects.ts', names: ['RoadOptions', 'RailTrackOptions', 'HouseOptions', 'TreeOptions', 'MountainOptions', 'MotorcycleOptions', 'Motorcycle', 'VehicleTuning', 'VehicleState', 'createRoad', 'createHouse', 'createTree', 'createMountain'] },
+  // failedbr #1298 (2026-11-20): `createCar(...).root` (it returns the Group itself), createVehicleState(vehicle, tuning) and
+  // driveVehicle's fifth parameter were guessed — 41 type errors and 2.5 minutes of fixes.
+  { file: 'src/game/three/objects.ts', names: ['RoadOptions', 'RailTrackOptions', 'HouseOptions', 'TreeOptions', 'MountainOptions', 'MotorcycleOptions', 'Motorcycle', 'VehicleTuning', 'VehicleState', 'createRoad', 'createHouse', 'createTree', 'createMountain', 'CarOptions', 'createCar', 'createVehicleState', 'driveVehicle'] },
+  // failedbr #1298: 'concrete' was passed as a SurfaceKind — a closed list the builder never saw.
+  { file: 'src/game/three/surfaces.ts', names: ['SurfaceKind'] },
+  // failedbr #1277: `saveState` / `loadState` (the kit's are `save` / `load`) and a `BLOCKFALL_BG` tune were guessed —
+  // 14 type errors, and a batch repair that raised them to 18.
+  { file: 'src/game/core/state.ts', names: ['GameState', 'state', 'save', 'load', 'hasSave', 'clearSave', 'resetRun'] },
+  { file: 'src/audio/tunes.ts', names: ['TUNES', 'CUES'] },
   // cf1706d2 (2026-11-02): sharedMaterial('plastic' | 'rubber', …) and paletteColor('steel' | 'coal', …) —
   // six type errors and five fix-up rounds, because the two closed name lists were never handed over.
   // (RailTrackOptions above: the same build passed { path } to createRailTrack.)

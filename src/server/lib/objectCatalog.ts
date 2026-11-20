@@ -590,7 +590,9 @@ const CONTAINERS: CatalogEntry[] = [
 /** Food. */
 const FOOD: CatalogEntry[] = [
   { id: 'fruit', name: 'fruit / vegetable', category: 'food',
-    words: 'fruit|apple|mango|banana|vegetable|sabzi|tomato|potato|coconut|orange', hi: 'फल|सब्ज़ी|सब्जी|आम|केला',
+    // "banana" is also the Hindi verb "to make" ("ek game banana hai") — failedbr #1068 got a fruit in a zombie game. The
+    // fruit only where no build noun precedes it and no auxiliary completes it into the verb (IntentClassifier's homograph).
+    words: 'fruit|apple|mango|(?<!\\b(?:app|apps|game|website|site|software|application|project|tool)\\s{1,3})banana(?!\\s+(?:hai|h|he|tha|thi|chahta|chahti|chahte|chahiye|padega|padegi|hoga|hogi|ka|ki|ke))|vegetable|sabzi|tomato|potato|coconut|orange', hi: 'फल|सब्ज़ी|सब्जी|आम|केला',
     dims: 'apple 0.08 m, mango 0.12 m, banana 0.18 m, coconut 0.15 m, watermelon 0.30 m',
     parts: ['a stem, calyx or crown — never a bare ball', 'an asymmetric shape, slightly dented', 'colour variation across the surface, not one flat tone', 'a small specular sheen on the skin'],
     tell: 'Check it against a 0.18 m hand. Food is the easiest thing in a game to build twice too large, and a plain sphere is a marble.' },

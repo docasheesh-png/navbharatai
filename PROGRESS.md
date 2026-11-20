@@ -102949,7 +102949,7 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964 (blocked, each with w
 | Q-2751 | LADDER_DEPTH counted the scope call on an empty build → scope tokens share the build's ledger | `PHASE_SCOPE` at both scope writers; ladder skips it; bill unchanged (tested) · `aScopeCheckIsNotALadderSlice` |
 | Q-2752 | domain stems inside unrelated words → census vs 275k words found 9 (parental→booking, impatient→healthcare, blending→fintech, …) | each guarded against that word only · `aWordInsideAWordIsNotADomain` (old code: 8 fail) |
 
-**Discovered, not folded in:** Q-3020 — 488 unbounded FEATURE stems match inside source code, so most features read as already present. Fixing it changes what every domain build is told to add; it needs a measured before/after of its own.
+**Discovered, not folded in:** Q-3101 — 488 unbounded FEATURE stems match inside source code, so most features read as already present. Fixing it changes what every domain build is told to add; it needs a measured before/after of its own.
 ## 2026-11-20 — An old game would not open from history: "HTTP 404: Conversation not found" for a `v3_` id
 
 Admin report: opening an old game showed "This chat's transcript hasn't reached the server yet …" with the
@@ -103077,6 +103077,17 @@ Ledger, older reports (2026-11-20, #4377):
 - #2141 — Q-2997 Hinglish fillers (aisa, jismein, bhai…) are not subjects, so a new game order on an unrelated app is asked about instead of built into it.
 
 
+## 2026-11-20 — #4365 merged (Q-2746/2747/2748/2751/2752 closed); four more 05eb30ba-era rows fixed
+Closed on merge of #4365 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-2746, Q-2747, Q-2748, Q-2751, Q-2752 — ledger in the entry above.
+
+| ID | Problem → root cause → class | Fix · lock (each proven by reversion) |
+|---|---|---|
+| Q-2750 | "a paid build would get 58 min" vs "29 min" in the same hour → both true: a deep build's window is doubled, the line never said so | `freeWindowLine` names the size when scaled · `aPaidWindowSaysWhyItDiffers` |
+| Q-2753 | four file counts in one report (28/21/30/30) → four different sets, CHANGE_RECORDED the only one naming none | its scope is in the line · `everyFileCountNamesItsScope` |
+| Q-2769 | JOURNEY_NOT_DERIVED told a list-driven form (`name={field.name}`) it had no names while accessibility scored 100 → the check reads names from source | the limit is said as the check's; real unnamed forms keep the remedy · `aFormBuiltFromAListIsNotUnnamed` |
+| Q-2766 | `{ ReactComponent }` + `?react` (two SVG plugins' styles) → preview errors until rewired | named on write with the exact default-import fix · `anSvgImportUsesOnePluginsStyle` |
+
+**Opened:** Q-3102 — a list-driven form gets no journey at all; the real fix reads field names from the running page.
 ## 2026-11-20 — #4377 merged (failedbr #2169 / #2163 / #2155 / #2141); autopsies #2158, #2133, #2122, #2116 (next PR)
 
 Closed Q-2994, Q-2995, Q-2996, Q-2997 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): our browser's media limits are not an app defect; "game" in the Indian scripts is a game; a missing plain stylesheet import is created; Hinglish fillers are not subjects in the "add to this app or a new one?" check.
@@ -103098,6 +103109,8 @@ Ledger for the next PR (rows Q-3021…Q-3024):
 - #2065 — no defect: a "continue" turn rendered at 221 s and the user stopped it at 274 s; its two unused `@capacitor/*` warnings are advisory and true.
 - #2064, #2037, #2001, #2003 — no new rows: #2064's "could not find @Composable" was fixed by BR1998; #2037's skipped write-time typecheck by autopsy 61279465; #2001's `?react` SVG imports by BR2001; #2001's and #2003's E2B concurrency refusals are Q-2929 (blocked on the plan limit).
 
+
+Note (2026-11-20): the feature-stem row first opened as Q-2972, then Q-3020, and the list-form row as Q-3021 were renumbered Q-3101 / Q-3102 — each earlier number was taken by another session in parallel (two Q-3020 rows briefly existed on main).
 ## 2026-11-20 — #4380 merged (failedbr #2158 / #2133 / #2100 / #2094 / #2090 / #2086 / #2036)
 
 Closed Q-3021, Q-3023, Q-3025, Q-3029, Q-3031, Q-3032, Q-3033, Q-3034 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): a rule about how to build and the staples of a small game are not features; a numbered list with a few sub-bullets is not a spec in sections; a stylesheet wired by an Astro/Vue/Svelte component is wired; exam words are not services; a game that names a hospital is a game (unless it handles real money); a package-manager query is a read; a roadmap step cannot invent a native mobile stack; every game-kit file compiles under a strict app tsconfig.

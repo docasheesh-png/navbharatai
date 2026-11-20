@@ -104,16 +104,21 @@ const BASH = existsSync('/bin/bash') ? '/bin/bash' : null;
 describe.skipIf(!BASH)('3 · the ensure step repairs a torn compiler and never races our install', () => {
   let dir = '';
   let calls = '';
+  // A PRIVATE lock (CI flake, 2026-11-20): the real path is shared by every test that runs the ensure script, whose own
+  // install step does `rm -f` on it — under the full suite another file could release this test's lock after 29 ms.
+  // The script is the real one, with the path redirected (as aPrimedTreeIsNotAStaleTree does).
+  let LOCK = '';
   // Resolves its own link like node's require does: `.bin/tsc` → `typescript/bin/tsc` → `../lib/tsc.js`.
   const fakeTsc = '#!/bin/sh\nd=$(dirname "$(readlink -f "$0")")/../lib/tsc.js; [ -f "$d" ] || { echo "Error: Cannot find module \'../lib/tsc.js\'"; exit 1; }; echo REAL_TSC_RAN\n';
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), 'nbai-tsc-'));
     calls = join(dir, 'npm-calls');
+    LOCK = join(dir, 'install.lock');
     mkdirSync(join(dir, 'bin'));
     writeFileSync(join(dir, 'bin', 'npm'), `#!/bin/sh\necho "npm $*" >> ${calls}\nmkdir -p node_modules/typescript/bin node_modules/typescript/lib node_modules/.bin\nprintf '%s' '${fakeTsc.replace(/'/g, "'\\''")}' > node_modules/typescript/bin/tsc\nchmod +x node_modules/typescript/bin/tsc\ntouch node_modules/typescript/lib/tsc.js node_modules/typescript/lib/lib.es5.d.ts\nln -sf ../typescript/bin/tsc node_modules/.bin/tsc\n`);
     chmodSync(join(dir, 'bin', 'npm'), 0o755);
   });
-  afterAll(() => { try { rmSync(dir, { recursive: true, force: true }); rmSync(NPM_INSTALL_LOCK, { force: true }); } catch { /* cleanup */ } });
+  afterAll(() => { try { rmSync(dir, { recursive: true, force: true }); rmSync(LOCK, { force: true }); } catch { /* cleanup */ } });
 
   const workspace = (torn: boolean) => {
     const ws = mkdtempSync(join(dir, 'ws-'));
@@ -134,43 +139,43 @@ describe.skipIf(!BASH)('3 · the ensure step repairs a torn compiler and never r
   };
   const run = (ws: string) => {
     try { rmSync(calls, { force: true }); } catch { /* none yet */ }
-    const out = execFileSync(BASH!, ['-c', robustTscCommand('--noEmit', '2>&1 | head -20')], {
+    const out = execFileSync(BASH!, ['-c', robustTscCommand('--noEmit', '2>&1 | head -20').split(NPM_INSTALL_LOCK).join(LOCK)], {
       cwd: ws, env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}` }, encoding: 'utf8',
     });
     return { out, npm: existsSync(calls) ? readFileSync(calls, 'utf8') : '' };
   };
 
   it('🔴 a compiler with its bin/ and without its lib/ is reinstalled, and then really runs', () => {
-    try { rmSync(NPM_INSTALL_LOCK, { force: true }); } catch { /* none */ }
+    try { rmSync(LOCK, { force: true }); } catch { /* none */ }
     const r = run(workspace(true));
     expect(r.npm).toMatch(/npm install/);
     expect(r.out).toContain('REAL_TSC_RAN');
   });
   it('an intact compiler is left alone — no install at all', () => {
-    try { rmSync(NPM_INSTALL_LOCK, { force: true }); } catch { /* none */ }
+    try { rmSync(LOCK, { force: true }); } catch { /* none */ }
     const r = run(workspace(false));
     expect(r.npm).toBe('');
     expect(r.out).toContain('REAL_TSC_RAN');
   });
   it('🔴 while our own install runs, the check waits for it instead of starting a second one', () => {
-    writeFileSync(NPM_INSTALL_LOCK, '');
+    writeFileSync(LOCK, '');
     const ws = workspace(false);
     const t0 = Date.now();
     // execFileSync blocks this thread, so the lock is released from a child shell.
-    execFileSync(BASH!, ['-c', `(sleep 1.5; rm -f ${NPM_INSTALL_LOCK}) >/dev/null 2>&1 &`]);
+    execFileSync(BASH!, ['-c', `(sleep 1.5; rm -f ${LOCK}) >/dev/null 2>&1 &`]);
     const r = run(ws);
     expect(Date.now() - t0).toBeGreaterThanOrEqual(1_000);
     expect(r.out).toContain('REAL_TSC_RAN');
   }, 30_000);
   it('a lock left by an install that died long ago is ignored', () => {
-    writeFileSync(NPM_INSTALL_LOCK, '');
+    writeFileSync(LOCK, '');
     const old = new Date(Date.now() - 30 * 60_000);
-    utimesSync(NPM_INSTALL_LOCK, old, old);
+    utimesSync(LOCK, old, old);
     const t0 = Date.now();
     const r = run(workspace(false));
     expect(Date.now() - t0).toBeLessThan(5_000);
     expect(r.out).toContain('REAL_TSC_RAN');
-    rmSync(NPM_INSTALL_LOCK, { force: true });
+    rmSync(LOCK, { force: true });
   });
   it('🔒 a lock that never clears ends in an honest "nothing was checked", not a race', () => {
     const cmd = robustTscCommand();

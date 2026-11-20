@@ -111,6 +111,9 @@ export const JOURNEY_RESULT_MARKER = 'NBAI_JOURNEY ';
 // READING THE APP'S OWN MARKUP
 // ---------------------------------------------------------------------------------------------
 
+/** A field identity attribute written as an expression (`name={field.name}`) — present, but unreadable from source. */
+const EXPRESSION_IDENTITY_ATTR = /(?<![-\w])(?:name|id|placeholder|aria-label|data-testid)\s*=\s*\{/;
+
 const ATTR = (tag: string, attr: string): string | null => {
   const m = new RegExp(`\\b${attr}\\s*=\\s*["']([^"']+)["']`, 'i').exec(tag);
   return m ? m[1] : null;
@@ -1807,6 +1810,23 @@ export function noJourneyReason(files: Record<string, string>): string {
   // really saves what is typed" — while `appHasNoDataEntry`, which the release gate reads, said it has
   // nothing to save. Two readers, two answers; the gate's is the true one, so it is said here as well.
   if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) return nothingToSaveReason(files ?? {});
+  // 🔴 THE FIELDS WERE NAMED — FROM A LIST (Q-2769, BR2002). A business site's contact form drew its inputs from
+  // a `FormField[]` list (`name={field.name}`, `placeholder={field.placeholder}`, `<label>{field.label}</label>`).
+  // Accessibility scored the same files 100/100; this sentence told the admin the fields had "no name, id,
+  // placeholder, label or test id" and asked for a fix the app did not need. The check reads names from the
+  // SOURCE and an expression has no value there — a limit of the check, said as one. (Reading the names from
+  // the running page instead is the capability that would remove the limit; it is recorded on Q-2769.)
+  const listDrivenForm = pages.flatMap((p) => formSourcesFor(p, files)).find((s) => {
+    const fields = formFields(s.source);
+    return fields.length > 0
+      && fields.every(({ tag, labelText }) => targetForInput(tag) === null && !labelText)
+      && fields.some(({ tag }) => EXPRESSION_IDENTITY_ATTR.test(tag));
+  });
+  if (listDrivenForm) {
+    return `the form in ${listDrivenForm.path} takes its fields' names and labels from a list in the code (for example `
+      + '`name={field.name}`), and this check reads field names from the source, where an expression has no value — '
+      + 'so no journey was derived. That is a limit of this check, not a defect in the app, and nothing needs changing for it.';
+  }
   return 'the forms in this app have no field this check could address honestly (no name, id, placeholder, '
     + 'label or test id), so no journey was derived rather than one that would fail for the wrong reason. '
     + 'Give each field a `name` and a label and this check can prove the app really saves what is typed — '

@@ -103095,6 +103095,17 @@ Ledger, older reports (2026-11-20, #4377):
 - #2141 — Q-2997 Hinglish fillers (aisa, jismein, bhai…) are not subjects, so a new game order on an unrelated app is asked about instead of built into it.
 
 
+## 2026-11-20 — Game kit: swimming (game-gap audit item)
+
+- **Gap:** nothing in the kit knew what water was — a player who walked into a lake sank and walked along the bottom.
+- **Fix:** motor `stepSwim` (pure: float at head-out depth by buoyancy spring, water drag, slower swim speed, Jump held
+  up / dive held down, Jump at the surface climbs out); controller `setWater(level | (x,z)=>level|null)` with a 0.25 m
+  exit margin so the edge does not flicker, breath (runs down under water, refills 4× faster, `onOutOfBreath` once a
+  second), `swimming` / `underwater` / `breath` getters, reset clears it. New `crouch` action (C / Left Ctrl / Pad:11),
+  rebindable in Settings → Controls (EN + HI label); the shell passes `diveHeld`. Instructions + AppKnowledgeBase.
+  Not built (stated): swim animation, a phone dive button.
+- **Lock:** `tests/aPlayerSwims.test.ts` (9, real motor/controller/terrain, incl. the sink-to-the-bottom baseline).
+  8 reversion proofs fail. Generated kit tsc before/after: identical 33 pre-existing errors.
 ## 2026-11-20 — Game kit: match-3 engine (game-gap audit item)
 
 - **Gap:** no match-3 rules; every one was hand-written (starting matches, dead boards with no reshuffle, holes after
@@ -103255,3 +103266,9 @@ Ledger, older reports #1430–#1358 (2026-11-20, next PR):
 - #1419 — a 8 s LAPSED game-runtime recipe left no kit; the builder was told to run the recipes itself (honest), recorded.
 - #1426, #1425, #1417, #1406, #1397, #1392, #1377, #1372, #1371, #1362, #1358 — user stops; the slow glm-5.3 / Nemotron first calls and GLM flashx silences are the Weak-tier provider class already open.
 
+
+## 2026-11-20 — #4389 merged (Q-2750/2753/2766/2769 closed; Surplus retries reported); game library batch 6
+- #4389 merged: every failed Surplus attempt (benched or retried by the stay-alive loop) now reaches the build report as one `SURPLUS` provider notice with codes only (`aRetriedAttemptIsReported`). Q-3019 stays IN PROGRESS for its speed half (retry the same model before benching, decided from the new notices).
+- **Library batch 6** (this PR): the admin's own Quaternius downloads from Drive, licence checked in each archive and on the pack page: Ultimate Gun Pack (12 firearms, the library's first) and Realistic Car Pack (7 cars). The packs have no GLB, so each was converted offline (OBJ+MTL → GLB) and ships PACKAGED in the image (`assets/game-models/<sha256>.glb`). The packaged path is generalized from the eagle to any Quaternius CC0 entry with a pinned hash and size; the transport looks up the reviewed entry by id and checks provider, hash and size. New prompt words (English and Hindi: gun/बंदूक, pistol/पिस्तौल, AK47, sniper, shotgun, SMG, revolver, jeep/SUV, sports car), and a named subtype is not also the generic subject (police car is not also "car"; laser gun is not "gun"). Admission: all 19 rendered live in Chromium. Test: `libraryBatch6`.
+- Drive review (2026-11-20): accepted N1, N2, N3, N4, N8, N9, N16, Downtown City, Medieval Village, KayKit Adventurers 2.0, SBS textures (CC0 per the archive's licence file). Rejected: N5 (licence forbids redistribution), N6 (paid, attribution), N10 (Cenji licence), Bestiary (not CC0), and every archive with no licence file (sounds, PSX cars, retro weapons, furniture, rooms, etc.) until a source page shows its licence.
+- Next: animated clothed characters (Universal Base Characters + Modular Outfits + Universal Animation Library, same 65-joint rig; four built under 5 MB with 16 animations each).

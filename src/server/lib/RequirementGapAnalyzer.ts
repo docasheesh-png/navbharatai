@@ -196,6 +196,22 @@ const DOMAINS: DomainDef[] = [
   },
   // Appended (2026-07-20) AFTER the domains above so existing classifications never change (first match
   // wins): these only catch prompts the domains above did not. High-demand verticals for the SMB market.
+  // A LIBRARY IS NOT A SCHOOL (failedbr #693, queue Q-3210). "Arivu central library … library attendance management
+  // … student login and admin login" matched education on "student", and the builder was told a library register
+  // "almost always needs" courses & lessons, assignments & grading and fees. Its members are students; it teaches
+  // nothing. Placed BEFORE education (first match wins) and narrow: "library" only beside a library's own words
+  // (attendance, books, members, borrow, reading room), so a component / photo / music library never matches.
+  {
+    key: 'library',
+    re: /\blibrar(?:y|ies)\b(?=[^.\n]{0,80}\b(?:attendance|books?|members?|membership|borrow\w*|issue|reading|librarian|visitors?|seats?)\b)|\b(?:attendance|books?|members?|librarian|reading)\b[^.\n]{0,80}\blibrar(?:y|ies)\b|\breading\s+room\b|\bgranthalaya\b|ग्रंथालय|पुस्तकालय/i,
+    features: [
+      { label: 'roles (member / librarian / admin)', re: /role|rbac|permission|librarian|admin|staff/i },
+      { label: 'member registration', re: /member|registration|register|sign\s?-?up|enrol/i },
+      { label: 'attendance / visit log', re: /attendance|check[\s-]?in|visit|entry|log/i },
+      { label: 'book catalogue & issue / return', re: /book|catalog|issue|borrow|return|isbn/i },
+      { label: 'reports', re: /report|analytics|dashboard|export/i },
+    ],
+  },
   {
     key: 'education',
     // `\btutor` is closed to `\btutors?\b|tutoring`: the open prefix matched "tutorial", so any app

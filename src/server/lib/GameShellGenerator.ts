@@ -631,6 +631,8 @@ export class Game {
           sprint: this.input.isDown('sprint'),
           jumpPressed: this.input.wasPressed('jump'),
           jumpHeld: this.input.isDown('jump'),
+          // Dive while swimming (ctx.player.setWater): C, Left Ctrl or the right stick.
+          diveHeld: this.input.isDown('crouch'),
         },
         this.rig.yaw,
       );
@@ -1687,7 +1689,7 @@ function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange:
  */
 /** Each rebindable action's label in the game's language. */
 const ACTION_LABEL: Record<string, StringKey> = {
-  up: 'up', down: 'down', left: 'left', right: 'right', jump: 'jump', sprint: 'run', attack: 'attack', interact: 'use', reload: 'reload', drift: 'drift',
+  up: 'up', down: 'down', left: 'left', right: 'right', jump: 'jump', sprint: 'run', crouch: 'crouch', attack: 'attack', interact: 'use', reload: 'reload', drift: 'drift',
 };
 
 /**

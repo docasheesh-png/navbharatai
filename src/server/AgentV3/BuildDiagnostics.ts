@@ -1513,6 +1513,18 @@ export class BuildDiagnostics {
       autoResolved: !failed,
       detail: failed ? capTail(rec.stderr || rec.stdout, 400) : undefined,
     });
+    // 🔴 A FAILURE THE SAME COMMAND LATER UNDID IS NOT A BLOCKER (failedbr #1994, 2026-11-08). `npm install` exited 1 on a
+    // peer conflict at 353 s, `npm install --legacy-peer-deps` passed at 371 s, plain `npm install` passed again at
+    // 1042 s, and the release gate still listed "$ npm install → exit 1" as a build-breaking blocker. The recovery rule
+    // (`recoveredCommands`) was applied only to a build that SUCCEEDED, so on a build that timed out it never ran. The
+    // clean re-run of the same command is the evidence, whatever the build's final outcome. Not for a pipe (its exit is
+    // the last program's) and not for a typecheck, which resolves on its own proof below.
+    if (rec.exitCode === 0 && !/[|]/.test(rec.command) && !looksLikeTypecheckCommand(rec.command)) {
+      const key = commandKey(rec.command);
+      for (const issue of this.issues) {
+        if (issue.code === 'SANDBOX_CMD_FAILED' && !issue.autoResolved && commandKey(issue.message) === key) issue.autoResolved = true;
+      }
+    }
     // A completed whole-project compiler check, never a build-only command, a help page,
     // a partial-file check, a pipe whose exit belongs to head/tail, or an interrupted command.
     if (rec.exitCode === 0 && looksLikeTypecheckCommand(rec.command)

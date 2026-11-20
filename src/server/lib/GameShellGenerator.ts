@@ -149,8 +149,9 @@ export interface GameOptions {
   orientation?: 'landscape' | 'portrait' | 'any';
   /**
    * The language of the game's own screens and buttons (start, pause, settings, game over, touch buttons). Default 'en';
-   * 'hi' is Hindi; 'auto' follows the page. For any other language pass strings with every word you need — a key you
-   * leave out stays English, never blank.
+   * 'hi' Hindi, 'ta' Tamil, 'te' Telugu, 'bn' Bangla, 'mr' Marathi, 'gu' Gujarati, 'kn' Kannada, 'ml' Malayalam,
+   * 'pa' Punjabi, 'or' Odia; 'auto' follows the page. For any other language pass strings with every word you need — a
+   * key you leave out stays English, never blank. The player can change it in Settings → Language (saved on the device).
    */
   language?: GameLanguage | 'auto';
   strings?: Partial<Record<StringKey, string>>;
@@ -1166,7 +1167,7 @@ import { meta, combo, summaryLines } from '../core/meta';
 import type { Game } from '../Game';
 import { settings, type GameSettings } from '../core/settings';
 import { loading, type LoadingState } from '../core/loading';
-import { t, type StringKey } from '../core/strings';
+import { t, choosePlayerLanguage, currentGameLanguage, GAME_LANGUAGES, GAME_LANGUAGE_NATIVE_NAMES, type GameLanguage, type StringKey } from '../core/strings';
 import { REBINDABLE_ACTIONS, rebindKey, resetKeyBindings, primaryKey, keyLabel, captureKey } from '../core/keybinds';
 import { prefersTouch } from './touchControls';
 import { lastRaceResults } from '../three/race';
@@ -1225,6 +1226,13 @@ const roundIcon: React.CSSProperties = { pointerEvents: 'auto', width: 44, heigh
 function useSettings(): GameSettings {
   const [value, setValue] = useState<GameSettings>(settings.get());
   useEffect(() => settings.subscribe(setValue), []);
+  return value;
+}
+
+/** The language on screen, live: every kit screen re-renders in the new words the moment it changes. */
+function useLanguage(): GameLanguage {
+  const [value, setValue] = useState<GameLanguage>(currentGameLanguage());
+  useEffect(() => events.on('LANGUAGE_CHANGED', () => setValue(currentGameLanguage())), []);
   return value;
 }
 
@@ -1867,6 +1875,7 @@ function ControlsSection({ game }: { game: Game }) {
 
 function SettingsPanel({ game, onBack }: { game: Game; onBack: () => void }) {
   const s = useSettings();
+  const lang = useLanguage();
   const back = useRef<HTMLButtonElement>(null);
   useEffect(() => { back.current?.focus(); }, []);
   return (
@@ -1906,6 +1915,13 @@ function SettingsPanel({ game, onBack }: { game: Game; onBack: () => void }) {
           ))}
         </div>
       </div>
+      <div style={row}>
+        <span>{t('language')}</span>
+        <select aria-label={t('language')} value={lang} onChange={(e) => choosePlayerLanguage(e.target.value as GameLanguage)}
+          style={{ minHeight: 40, padding: '6px 10px', borderRadius: 8, border: '2px solid rgba(255,255,255,0.55)', background: 'rgba(0,0,0,0.35)', color: '#fff', fontSize: 15 }}>
+          {GAME_LANGUAGES.map((l) => <option key={l} value={l} style={{ color: '#111' }}>{GAME_LANGUAGE_NATIVE_NAMES[l]}</option>)}
+        </select>
+      </div>
       <ControlsSection game={game} />
       <button ref={back} type="button" style={button} onClick={onBack}>{t('back')}</button>
     </div>
@@ -1931,6 +1947,7 @@ function SeatPrompt({ game }: { game: Game }) {
 export function Hud({ game }: { game: Game }) {
   const s = useGameState();
   const prefs = useSettings();
+  useLanguage();   // a new language re-renders every screen in its words
   // Large text (Settings): the menus and the top bar drawn a quarter bigger.
   const zoom = prefs.largeText ? 1.25 : 1;
   const load = useLoading();

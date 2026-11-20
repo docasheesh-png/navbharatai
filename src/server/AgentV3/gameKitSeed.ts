@@ -59,6 +59,7 @@ import { athreeMapEnabled } from '../lib/athreeMap/athreeMapLibrary';
 import { kitTypeContract, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
 import { namedNonSmartphone } from './deviceTarget';
 import { analyzeRequirementGaps } from '../lib/RequirementGapAnalyzer';
+import { gameLanguageForRequest, gameLanguageHandoff } from './gameLanguage';
 import { wantsSceneObjects, heroObjectContract } from '../lib/heroObjectSpec';
 import { world2dIntent } from './world2dIntent';
 import { ACTION_VISIBLE_RULE } from './actionVisibility';
@@ -275,7 +276,7 @@ export function athreeMapHandoff(recipeResult: string): string {
     + (usage ? `\nHow to use it (from the recipe):\n${usage}` : '');
 }
 
-export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts: { flat?: boolean; contract?: string; endlessRaceCourse?: boolean } = {}): string {
+export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts: { flat?: boolean; contract?: string; endlessRaceCourse?: boolean; request?: string } = {}): string {
   const done = results.filter((r) => r.ok);
   if (done.length === 0) return '';
   const failed = results.filter((r) => !r.ok);
@@ -335,6 +336,8 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
     has('generate_athree_map') ? athreeMapHandoff(done.find((r) => r.recipe === 'generate_athree_map')?.content ?? '') : '',
     opts.endlessRaceCourse && has('generate_game_3d') ? ENDLESS_RACE_COURSE_RULE : '',
     ACTION_VISIBLE_RULE,
+    // The game's screens in the language the request asked for or was written in (the kit speaks 11 languages).
+    has('generate_game_runtime') || has('generate_game_shell') ? gameLanguageHandoff(gameLanguageForRequest(opts.request)) : '',
     has('generate_game_2d')
       ? '🕹️ THE 2D GAME KIT IS ALREADY IN src/game/2d/: build the game ON it — Tilemap.fromRows(...) for the level,'
         + ' PlatformerController + createBody for the player (coyote time, jump buffer, no tunnelling — NEVER a hand-written'

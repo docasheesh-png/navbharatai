@@ -346,6 +346,7 @@ import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/wea
 import { isPlatformNoticeEcho, platformNoticeEchoReply } from '../AgentV3/platformNoticeEcho';
 import { shouldAnswerPictureRequest, pictureAnswerEnabled, PICTURE_REQUEST_STEER, pictureRequestFallback, CLARIFY_WHAT_TO_MAKE_STEER } from '../AgentV3/pictureRequest';
 import { shouldAnswerSpreadsheetRequest } from '../AgentV3/spreadsheetRequest';
+import { shouldAnswerDeliverableRequest, deliverableSteer, deliverableFallback } from '../AgentV3/presentationRequest';
 import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } from '../AgentV3/spreadsheetTurn';
 import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
 import { starterCompletedNote, seedSourceInventory, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, seedStateOf, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
@@ -11782,7 +11783,7 @@ async function noteBuildOutcome(
       console.log('[AGENTV3] the prompt asks for a spreadsheet file, not an app — making the file instead of building');
       intent = 'chat';
     }
-    const answerPictureRequest = !echoesPlatformNotice && !answerProjectElsewhere && !answerSpreadsheet && (readerPicture || shouldAnswerPictureRequest({
+    const answerPictureRequest = !echoesPlatformNotice && !answerProjectElsewhere && !answerSpreadsheet && (readerPicture || shouldAnswerDeliverableRequest({
       prompt,
       userAppExists,
       importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
@@ -12177,7 +12178,7 @@ async function noteBuildOutcome(
                 (clarifyWhatToBuild ? CLARIFY_WHAT_TO_MAKE_STEER : '')
                 + (answerProjectElsewhere ? projectElsewhereSteer(projectElsewhere) : '')
                 + (askUnrelated ? unrelatedRequestSteer(unrelated?.existingHint ?? '', rawAttachments.length > 0) : '')
-                + (answerPictureRequest ? PICTURE_REQUEST_STEER : '')
+                + (answerPictureRequest ? deliverableSteer(prompt) : '')
                 + (answerThenOffer ? BUILD_OFFER_STEER : '')
                 + (askFramework ? frameworkQuestionSteer(askFramework) : '')
                 + (ambiguousBuildAsk && !askFramework && !answerThenOffer && !clarifyWhatToBuild && !answerProjectElsewhere && !askUnrelated && !answerPictureRequest
@@ -12204,7 +12205,7 @@ async function noteBuildOutcome(
               : askUnrelated
                 ? unrelatedRequestFallback(unrelated?.existingHint ?? '')
               : answerPictureRequest
-                ? pictureRequestFallback()
+                ? deliverableFallback(prompt)
                 : (response?.content ?? '') + (response ? providerDebugTag(response.provider) : '');
           // Cache only a real, non-empty reply (never cache an empty/failed generation).
           if (cacheable && response && response.content && response.content.trim()) {

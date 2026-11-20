@@ -103095,6 +103095,16 @@ Ledger, older reports (2026-11-20, #4377):
 - #2141 — Q-2997 Hinglish fillers (aisa, jismein, bhai…) are not subjects, so a new game order on an unrelated app is asked about instead of built into it.
 
 
+## 2026-11-20 — Game kit: match-3 engine (game-gap audit item)
+
+- **Gap:** no match-3 rules; every one was hand-written (starting matches, dead boards with no reshuffle, holes after
+  cascades, swaps accepted without a match) — and a match-3 request (genre `puzzle`) was never seeded with any engine.
+- **Fix:** `src/game/board/match3.ts` in the board pack: deal with no runs and a guaranteed move; adjacent swaps only,
+  refused without a match; cascades with chain scoring (10 × tiles × chain); line (4), area (L/T), bomb (5) tiles that
+  chain-fire; gravity + seeded refill; reshuffle (same tiles) when stuck, fresh deal if no order works; hint; moves and
+  target → won/lost; per-cascade steps for animation; deterministic per seed. `gameKitSeed` seeds the pack for match-3
+  words (MATCH3, not other puzzles). ToolCatalog, instructions, handoff line, AppKnowledgeBase updated.
+- **Lock:** `tests/aMatch3BoardIsAlwaysFair.test.ts` (10). 9 reversion proofs fail. Strict compile of the pack clean.
 ## 2026-11-20 — #4365 merged (Q-2746/2747/2748/2751/2752 closed); four more 05eb30ba-era rows fixed
 Closed on merge of #4365 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-2746, Q-2747, Q-2748, Q-2751, Q-2752 — ledger in the entry above.
 
@@ -103146,6 +103156,14 @@ Ledger, older reports (2026-11-20, next PR):
 - #1994 — no new rows, and my first attempt WITHDRAWN before merge. Reports #1950–#2003 had already been autopsied by another session (the BRxxxx series). BR1994 had recorded both of my findings: the recovered `npm install` still counted on a failed build's gate is **Q-2707**, 🟡 blocked on an owner billing decision (a red gate is what makes a failed build free, so forgiving a recovered failure there can newly charge a build). The YouTube-downloader policy is **Q-1005**, 🟡 blocked on the admin. I had changed `recordCommand` to make exactly the Q-2707 change without that decision; it was reverted in #4387 before merging, and Q-3037/Q-3038 (which never reached `main`) were removed. Lesson: check the `BRxxxx` series for a report number before autopsying it.
 - #1987 — no new row: the workspace was already a Spring Boot project (its saved starter), so a PUBG-style request was built on it without the game kit by design; its `npm install` without a package.json blocker is BR1987, fixed.
 - #1995, #1993, #1986, #1984, #1983 — no new rows: all five are SANDBOX_RECOVERY_UNAVAILABLE ("could not be safely reconnected") within 1–19 s, not the E2B cap (read, not assumed). The refusal's reason has been in the report since #4253. #1995 and #1984 were "Fix this error and continue building the app: <that refusal>", the Fix-with-AI-on-our-own-notice class BR1995 fixed (2026-11-17).
+
+
+## 2026-11-20 — #4383 merged (Q-2750/2753/2766/2769 closed); Q-3019 traced, its visibility half fixed
+Closed on merge of #4383 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-2750, Q-2753, Q-2766, Q-2769.
+
+**25-minute investigation (last 50 builds, #2430–#2479):** 3 of 50 hit the wall-clock cap; ~10 games were judged "not playable" (Controls 0 / 0 fps / no canvas), all BEFORE the WebGL checker fix (#4358). #2478 (bgmi, the only post-fix cap) was already autopsied (Q-3010–Q-3019); its 15-minute false Rules-of-Hooks chase (Q-3014) is fixed on main — verified: the kit Hud.tsx is now clean.
+
+**Q-3019 traced:** ~63k input tokens per call for ~160 output; the 8 slow calls (40–122 s) each followed a model switch inside Surplus (same-model median 4.6 s vs 36.7 s after a switch), ~7.5 of 25 min. Each switch follows a failed attempt the session retried silently (`console.warn` only), so the report said every call was ok. Fixed here: `onAttemptFailed` (one notice per failure, codes only) → `onProviderError('SURPLUS')` at both runner sites · `aRetriedAttemptIsReported`. Open: retry the same model once before benching.
 - #1941, #1940, #1938, #1933 — no new rows (each read; none in the BR1950–2003 series): #1941's guessed `Input.bind` is BR1954's kit-type-contract class; #1940 rendered at 761 s and was stopped by the user at 782 s (the free-tier ceiling, Q-2240); #1938's "kit laid down (0 files)" after the E2B cap is BR1977's `downgradeEmptyKitSeedSuccesses`; #1933 rendered at 359 s as an original runner before the user stopped it.
 - #1926 — Q-3037 (the ID freed by the withdrawn row) a type imported beside a same-name value is refused at write time when the in-browser preview cannot compile it (tsc and esbuild accept it, Babel does not); the E2B-cap start with the fast lane running anyway is BR1952, fixed.
 - #1925 — Q-3039 a React-writing game recipe is refused in a project that cannot mount React (a Svelte game spent ~20 min reconciling the kit's React files); its kit `Game.ts` rewrite is the class #4375's kit guard refuses; its E2B-cap start is Q-2929.

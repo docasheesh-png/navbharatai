@@ -122,7 +122,10 @@ describe('1a · gameKitPlan — which recipes the platform runs, PURE', () => {
       // Never the 3D layer; a 2D game that moves a body (flappy, pong, space invaders) also gets the 2D kit (2026-11-20).
       const plan = gameKitPlan(p, 'vite-react');
       expect(plan.slice(0, 3), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);
-      expect(plan.filter((r) => r !== 'generate_game_2d'), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);
+      expect(plan.filter((r) => r !== 'generate_game_2d' && r !== 'generate_board_games'), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);
+      // A match-3 / candy game also gets the board pack (its rules engine lives there) — flat, never 3D (2026-11-20).
+      expect(plan, p).not.toContain('generate_game_3d');
+      expect(plan, p).not.toContain('generate_game_shell');
     }
   });
 

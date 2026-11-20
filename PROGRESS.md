@@ -103042,3 +103042,14 @@ Ledger, older reports (2026-11-20, #4377):
 - #2159, #2160 — no new row: SANDBOX_RECOVERY_UNAVAILABLE within 1 s; the refusal's admin-only reason was not in these 11-09 reports, and the report has carried it since #4253 (11-16).
 - #2141 — Q-2997 Hinglish fillers (aisa, jismein, bhai…) are not subjects, so a new game order on an unrelated app is asked about instead of built into it.
 
+
+## 2026-11-20 — Game kit: match-3 engine (game-gap audit item)
+
+- **Gap:** no match-3 rules; every one was hand-written (starting matches, dead boards with no reshuffle, holes after
+  cascades, swaps accepted without a match) — and a match-3 request (genre `puzzle`) was never seeded with any engine.
+- **Fix:** `src/game/board/match3.ts` in the board pack: deal with no runs and a guaranteed move; adjacent swaps only,
+  refused without a match; cascades with chain scoring (10 × tiles × chain); line (4), area (L/T), bomb (5) tiles that
+  chain-fire; gravity + seeded refill; reshuffle (same tiles) when stuck, fresh deal if no order works; hint; moves and
+  target → won/lost; per-cascade steps for animation; deterministic per seed. `gameKitSeed` seeds the pack for match-3
+  words (MATCH3, not other puzzles). ToolCatalog, instructions, handoff line, AppKnowledgeBase updated.
+- **Lock:** `tests/aMatch3BoardIsAlwaysFair.test.ts` (10). 9 reversion proofs fail. Strict compile of the pack clean.

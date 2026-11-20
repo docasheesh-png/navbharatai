@@ -69,6 +69,8 @@ export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'gene
 /** 2D games that MOVE a body on screen — they get the 2D kit (sprites, platformer physics, camera, tilemap, particles). */
 const MOVING_2D_GENRES: ReadonlySet<string> = new Set(['platformer', 'runner', 'shooter', 'arcade', 'fighting']);
 /** Cricket is in the India games pack's rules engines, in English or Hindi. */
+/** A match-3 request in its usual words (it reads as genre 'puzzle'). */
+const MATCH3 = /\bmatch[-\s]?(?:3|three)\b|\bcandy\s*crush\b|\bbejewell?ed\b|\b(?:gems?|jewels?|candies|candy|tiles?)\b[^.!?\n]{0,40}\bmatch(?:ing)?\b|\bmatch(?:ing)?\b[^.!?\n]{0,40}\b(?:gems?|jewels?|candies|candy|tiles?)\b/i;
 const CRICKET = /\bcricket\b|क्रिकेट/i;
 
 /** `AGENTV3_GAME_KIT_SEED=off` restores the pre-2026-10-11 behaviour exactly (the model decides). */
@@ -122,7 +124,8 @@ export function gameKitPlan(prompt: string | null | undefined, framework?: strin
   let genre = 'unknown';
   try { genre = buildGameContract(text).genre; } catch { /* no genre: the shared kit only */ }
   if (MOVING_2D_GENRES.has(genre)) flat.push('generate_game_2d');
-  if (genre === 'board' || genre === 'card' || (genre === 'sports' && CRICKET.test(text))) flat.push('generate_board_games');
+  // A match-3 is a 'puzzle' to the genre reader, and its rules engine lives in the same pack (2026-11-20).
+  if (genre === 'board' || genre === 'card' || (genre === 'sports' && CRICKET.test(text)) || (genre === 'puzzle' && MATCH3.test(text))) flat.push('generate_board_games');
   return flat;
 }
 
@@ -327,7 +330,7 @@ export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts:
       : '',
     has('generate_board_games')
       ? '🎲 THE INDIA GAMES PACK IS ALREADY IN src/game/board/: the rules come from it — Ludo, Snakes & Ladders, chess,'
-        + ' carrom, cricket and cards (Teen Patti, rummy) — never re-implement them. Draw the board, let the player tap a legal'
+        + ' carrom, cricket, match-3 and cards (Teen Patti, rummy) — never re-implement them. Draw the board, let the player tap a legal'
         + ' move, and announce what happened. Card games are points or pretend chips only, never real money.'
       : '',
     has('generate_world_2d')

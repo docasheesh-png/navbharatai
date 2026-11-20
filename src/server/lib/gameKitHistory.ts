@@ -216,10 +216,14 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "20af6ddf6766ebc0010edc0f9ba8c3479fe6d755f00fe43bdd0d8094fbf061cc",
     "51bd385e993d8765a1c86c568a600f12c9466fe9a30cb8ae5f8ea84ce6abaf67",
     "3b023e173bd3c3c68dfa24ac1beea403338ba83fac53147d488432ea4368184d",
-    "8b14a62bdbf1d55aec67022207e29968e1361ca4282335a13286c10916e57d3b"
+    "8b14a62bdbf1d55aec67022207e29968e1361ca4282335a13286c10916e57d3b",
+    "9d3d78ab7c4e36ac646d1881498bac697d23eb41f8991d22cf622c1878a1c884"
   ],
   "src/game/board/ludo.ts": [
     "20d771e554d6d8ac6f292298a5a2299998123e637369d6497ae3ab591500917d"
+  ],
+  "src/game/board/match3.ts": [
+    "d36796c158cbbbd574354b946f405573bd2c0bf3b78c824aceec895d592f6af4"
   ],
   "src/game/board/snakes.ts": [
     "32ac37f4027c36696ed1ee8c329512fa8139c2e44632dd706adb77b285a9ee2f"

@@ -19,6 +19,8 @@
 //               family rules (own coin continues, striker foul returns a coin, the queen must be covered, board scoring).
 //   cricket.ts — a cricket match engine: overs, wides and no-balls (free hit), strike rotation, innings ends, chases,
 //               results as commentators say them, run rates, and timing-based batting for a tap game.
+//   match3.ts — match-3: no starting matches, always a move (reshuffles when stuck), cascades with chain scoring, line /
+//               area / bomb tiles, a hint, moves-and-target levels, and cascade steps for animation (2026-11-20).
 //   snakes.ts — Snakes & Ladders: the classic board, exact roll to finish (or bounce back), a six rolls again, and the
 //               boustrophedon square → grid position for drawing.
 //   index.ts  — one import.
@@ -1333,6 +1335,251 @@ export function shotFromTiming(timingError: number, ball: { onStumps: boolean; a
 }
 `;
 
+const MATCH3 = String.raw`/**
+ * MATCH-3 — swap two neighbouring tiles to line up three or more of a colour (game-gap audit 2026-11-20: every match-3
+ * was hand-written, and the same faults came back — a board that starts with matches already on it, a board with no move
+ * left and no reshuffle, cascades that leave holes, and a swap that "works" without making a match).
+ *
+ *   let game = createMatch3({ width: 8, height: 8, colors: 6, moves: 25, target: 3000, seed: Date.now() });
+ *   const r = swapTiles(game, { x: 2, y: 3 }, { x: 3, y: 3 });   // r.ok false = no match: swap it back on screen
+ *   game = r.state;   // r.steps: what cleared, what fell and what came in, cascade by cascade — animate them in order
+ *   hint(game)        // a swap that works, for a "show me" button
+ *
+ * RULES: three or more in a row or column clear; four in a line makes a LINE tile (clears its row or column when it
+ * goes), five makes a BOMB (clears every tile of the colour it is swapped with, or its own colour when matched), and an
+ * L or T makes an AREA tile (clears the 3 x 3 around it). Tiles fall and new ones drop in from the top; each cascade in a
+ * chain scores more. The board never starts with a match, always has a move, and reshuffles itself when stuck.
+ */
+import { createRng, type Rng } from './dice';
+
+export type Special = 'none' | 'line-h' | 'line-v' | 'area' | 'bomb';
+export interface Tile { color: number; special: Special; id: number }
+export interface Cell { x: number; y: number }
+export type Match3Status = 'playing' | 'won' | 'lost';
+export interface Match3State {
+  width: number; height: number; colors: number;
+  /** grid[y][x]; y = 0 is the TOP row. */
+  grid: Tile[][];
+  score: number;
+  movesLeft: number;
+  target: number;
+  status: Match3Status;
+  /** Seed state for the refills, so a replay drops the same tiles. */
+  seed: number;
+  nextId: number;
+  /** How many times the board reshuffled itself because no move was left. */
+  shuffles: number;
+}
+export interface CascadeStep {
+  /** Cells cleared this cascade (before the fall). */
+  cleared: Cell[];
+  /** Special tiles made this cascade, where they were made (before the fall). */
+  made: Array<Cell & { special: Special }>;
+  /** Points scored this cascade. */
+  points: number;
+  /** Which cascade in the chain (1 = the swap's own match). */
+  chain: number;
+}
+export interface SwapResult { state: Match3State; ok: boolean; steps: CascadeStep[]; reason?: string; reshuffled: boolean }
+
+const clone = (s: Match3State): Match3State => ({ ...s, grid: s.grid.map((row) => row.map((t) => ({ ...t }))) });
+const inside = (s: Match3State, c: Cell): boolean => c.x >= 0 && c.y >= 0 && c.x < s.width && c.y < s.height;
+
+/** Advance the stored seed and return a random source for this call (replays are exact). */
+function rngOf(s: Match3State): Rng {
+  const r = createRng(s.seed);
+  return () => { const v = r(); s.seed = (s.seed * 1103515245 + 12345) >>> 0; return v; };
+}
+
+function newTile(s: Match3State, rng: Rng, color?: number): Tile {
+  return { color: color ?? Math.floor(rng() * s.colors), special: 'none', id: s.nextId++ };
+}
+
+/** Every run of three or more, as lists of cells (a cell in a row run and a column run is in both). */
+export function findRuns(s: Match3State): Cell[][] {
+  const runs: Cell[][] = [];
+  for (let y = 0; y < s.height; y++) {
+    let start = 0;
+    for (let x = 1; x <= s.width; x++) {
+      if (x < s.width && s.grid[y][x].color === s.grid[y][start].color && s.grid[y][x].color >= 0) continue;
+      if (x - start >= 3 && s.grid[y][start].color >= 0) runs.push(Array.from({ length: x - start }, (_, i) => ({ x: start + i, y })));
+      start = x;
+    }
+  }
+  for (let x = 0; x < s.width; x++) {
+    let start = 0;
+    for (let y = 1; y <= s.height; y++) {
+      if (y < s.height && s.grid[y][x].color === s.grid[start][x].color && s.grid[y][x].color >= 0) continue;
+      if (y - start >= 3 && s.grid[start][x].color >= 0) runs.push(Array.from({ length: y - start }, (_, i) => ({ x, y: start + i })));
+      start = y;
+    }
+  }
+  return runs;
+}
+
+/** Would swapping a and b make a match (or fire a bomb)? Does not change the board. */
+function swapMakesMatch(s: Match3State, a: Cell, b: Cell): boolean {
+  if (s.grid[a.y][a.x].special === 'bomb' || s.grid[b.y][b.x].special === 'bomb') return true;
+  const t = s.grid[a.y][a.x]; s.grid[a.y][a.x] = s.grid[b.y][b.x]; s.grid[b.y][b.x] = t;
+  const ok = findRuns(s).length > 0;
+  s.grid[b.y][b.x] = s.grid[a.y][a.x]; s.grid[a.y][a.x] = t;
+  return ok;
+}
+
+/** A swap that makes a match, or null when the board is stuck. */
+export function hint(s: Match3State): [Cell, Cell] | null {
+  for (let y = 0; y < s.height; y++) for (let x = 0; x < s.width; x++) {
+    for (const [dx, dy] of [[1, 0], [0, 1]]) {
+      const a = { x, y }, b = { x: x + dx, y: y + dy };
+      if (inside(s, b) && swapMakesMatch(s, a, b)) return [a, b];
+    }
+  }
+  return null;
+}
+
+/** Fill the board with no match on it and at least one move. */
+function deal(s: Match3State, rng: Rng): void {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    s.grid = [];
+    for (let y = 0; y < s.height; y++) {
+      const row: Tile[] = [];
+      for (let x = 0; x < s.width; x++) {
+        // Never the colour that would make three with the two to the left or the two above.
+        const banned = new Set<number>();
+        if (x >= 2 && row[x - 1].color === row[x - 2].color) banned.add(row[x - 1].color);
+        if (y >= 2 && s.grid[y - 1][x].color === s.grid[y - 2][x].color) banned.add(s.grid[y - 1][x].color);
+        let c = Math.floor(rng() * s.colors);
+        for (let k = 0; banned.has(c) && k < s.colors; k++) c = (c + 1) % s.colors;
+        row.push(newTile(s, rng, c));
+      }
+      s.grid.push(row);
+    }
+    if (hint(s)) return;
+  }
+}
+
+/** Rearrange the same tiles until there is no match and at least one move. */
+function reshuffle(s: Match3State, rng: Rng): void {
+  const tiles = s.grid.flat();
+  for (let attempt = 0; attempt < 200; attempt++) {
+    for (let i = tiles.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [tiles[i], tiles[j]] = [tiles[j], tiles[i]]; }
+    s.grid = Array.from({ length: s.height }, (_, y) => tiles.slice(y * s.width, (y + 1) * s.width));
+    if (findRuns(s).length === 0 && hint(s)) { s.shuffles += 1; return; }
+  }
+  // A colour-starved board that no order can save: deal a fresh one.
+  deal(s, rng);
+  s.shuffles += 1;
+}
+
+export function createMatch3(o: { width?: number; height?: number; colors?: number; moves?: number; target?: number; seed?: number } = {}): Match3State {
+  const width = Math.max(4, Math.min(12, Math.floor(o.width ?? 8)));
+  const height = Math.max(4, Math.min(12, Math.floor(o.height ?? 8)));
+  const colors = Math.max(3, Math.min(8, Math.floor(o.colors ?? 6)));
+  const s: Match3State = {
+    width, height, colors, grid: [], score: 0,
+    movesLeft: Math.max(1, Math.floor(o.moves ?? 25)), target: Math.max(0, Math.floor(o.target ?? 3000)),
+    status: 'playing', seed: (Math.floor(o.seed ?? Date.now()) >>> 0) || 1, nextId: 1, shuffles: 0,
+  };
+  deal(s, rngOf(s));
+  return s;
+}
+
+/** The cells a special tile clears when it goes off. */
+function blast(s: Match3State, at: Cell, special: Special, swappedColor: number | null): Cell[] {
+  const out: Cell[] = [];
+  if (special === 'line-h') for (let x = 0; x < s.width; x++) out.push({ x, y: at.y });
+  else if (special === 'line-v') for (let y = 0; y < s.height; y++) out.push({ x: at.x, y });
+  else if (special === 'area') for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const c = { x: at.x + dx, y: at.y + dy }; if (inside(s, c)) out.push(c); }
+  else if (special === 'bomb') {
+    const color = swappedColor ?? s.grid[at.y][at.x].color;
+    for (let y = 0; y < s.height; y++) for (let x = 0; x < s.width; x++) if (s.grid[y][x].color === color) out.push({ x, y });
+    out.push(at);
+  }
+  return out;
+}
+
+/** Clear, make specials, set off specials, drop, refill — until the board is still. Mutates s. */
+function resolve(s: Match3State, rng: Rng, first: { cells: Cell[]; swapped: Cell[] }, steps: CascadeStep[]): void {
+  let chain = 0;
+  let pending: Cell[] | null = first.cells.length ? first.cells : null;
+  for (let guard = 0; guard < 100; guard++) {
+    const runs = pending ? [] : findRuns(s);
+    if (!pending && runs.length === 0) break;
+    chain += 1;
+    const clear = new Map<string, Cell>();
+    const add = (c: Cell): void => { clear.set(c.x + ',' + c.y, c); };
+    (pending ?? []).forEach(add);
+    runs.flat().forEach(add);
+    // Specials made by this cascade's runs: 5 = bomb, an L/T crossing = area, 4 = line. Made where the swap landed when
+    // it is in the run, else in the run's middle.
+    const made: Array<Cell & { special: Special }> = [];
+    const key = (c: Cell): string => c.x + ',' + c.y;
+    const inRuns = new Map<string, number>();
+    runs.forEach((r) => r.forEach((c) => inRuns.set(key(c), (inRuns.get(key(c)) ?? 0) + 1)));
+    const crossing = [...inRuns.entries()].filter(([, n]) => n > 1).map(([k]) => k);
+    for (const r of runs) {
+      const spot = r.find((c) => first.swapped.some((w) => w.x === c.x && w.y === c.y) && chain === 1) ?? r[Math.floor(r.length / 2)];
+      const cross = r.find((c) => crossing.includes(key(c)));
+      if (r.length >= 5) made.push({ ...spot, special: 'bomb' });
+      else if (cross && !made.some((m) => key(m) === key(cross))) made.push({ ...cross, special: 'area' });
+      else if (r.length === 4) made.push({ ...spot, special: r[0].y === r[1].y ? 'line-v' : 'line-h' });
+    }
+    // Set off every special that is being cleared (which can clear more specials: follow them).
+    const queue = [...clear.values()];
+    const fired = new Set<string>();
+    while (queue.length) {
+      const c = queue.pop() as Cell;
+      const t = s.grid[c.y][c.x];
+      if (t.special === 'none' || fired.has(key(c))) continue;
+      fired.add(key(c));
+      for (const b of blast(s, c, t.special, null)) if (!clear.has(key(b))) { add(b); queue.push(b); }
+    }
+    const cleared = [...clear.values()].filter((c) => !made.some((m) => key(m) === key(c)));
+    const points = cleared.length * 10 * chain;
+    s.score += points;
+    for (const c of cleared) s.grid[c.y][c.x] = { color: -1, special: 'none', id: 0 };
+    for (const m of made) { const t = s.grid[m.y][m.x]; s.grid[m.y][m.x] = { ...t, special: m.special, color: m.special === 'bomb' ? t.color : t.color }; }
+    // Drop: every column falls to the bottom, new tiles come in from the top.
+    for (let x = 0; x < s.width; x++) {
+      const kept: Tile[] = [];
+      for (let y = s.height - 1; y >= 0; y--) if (s.grid[y][x].color >= 0) kept.push(s.grid[y][x]);
+      for (let y = s.height - 1, i = 0; y >= 0; y--, i++) s.grid[y][x] = i < kept.length ? kept[i] : newTile(s, rng);
+    }
+    steps.push({ cleared, made, points, chain });
+    pending = null;
+  }
+}
+
+/** Swap two neighbouring tiles. A swap that makes no match is refused (ok false) and the board is unchanged. */
+export function swapTiles(state: Match3State, a: Cell, b: Cell): SwapResult {
+  const fail = (reason: string): SwapResult => ({ state, ok: false, steps: [], reason, reshuffled: false });
+  if (state.status !== 'playing') return fail('the game is over');
+  if (!inside(state, a) || !inside(state, b)) return fail('off the board');
+  if (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) !== 1) return fail('only neighbouring tiles swap');
+  if (!swapMakesMatch(state, a, b)) return fail('no match');
+  const s = clone(state);
+  const rng = rngOf(s);
+  const ta = s.grid[a.y][a.x], tb = s.grid[b.y][b.x];
+  s.grid[a.y][a.x] = tb; s.grid[b.y][b.x] = ta;
+  // A bomb swapped with a tile clears that tile's colour; two bombs clear the board.
+  const first: Cell[] = [];
+  const bombAt = ta.special === 'bomb' ? b : tb.special === 'bomb' ? a : null;
+  if (bombAt) {
+    const other = bombAt === b ? tb : ta;
+    if (other.special === 'bomb') { for (let y = 0; y < s.height; y++) for (let x = 0; x < s.width; x++) first.push({ x, y }); }
+    else { s.grid[bombAt.y][bombAt.x] = { ...s.grid[bombAt.y][bombAt.x], special: 'none' }; first.push(...blast(s, bombAt, 'bomb', other.color)); }
+  }
+  s.movesLeft -= 1;
+  const steps: CascadeStep[] = [];
+  resolve(s, rng, { cells: first, swapped: [a, b] }, steps);
+  let reshuffled = false;
+  if (!hint(s)) { reshuffle(s, rng); reshuffled = true; }
+  if (s.score >= s.target) s.status = 'won';
+  else if (s.movesLeft <= 0) s.status = 'lost';
+  return { state: s, ok: true, steps, reshuffled };
+}
+`;
+
 const INDEX = String.raw`// The India games pack: tested rules engines (the board is drawn by the game).
 export { createRng, rollDie, shuffle } from './dice';
 export type { Rng } from './dice';
@@ -1348,6 +1595,8 @@ export { createCarrom, placeStriker, strikerFits, shoot, stepPhysics, BOARD as C
 export type { CarromState, Disc, DiscKind, QueenState, ShotResult } from './carrom';
 export { createMatch, bowl, summary, runRates, oversText, shotFromTiming } from './cricket';
 export type { Match, MatchOptions, Innings, BatterCard, Ball, Dismissal, Extra } from './cricket';
+export { createMatch3, swapTiles, hint as match3Hint, findRuns } from './match3';
+export type { Match3State, Match3Status, Tile, Special, Cell as Match3Cell, CascadeStep, SwapResult } from './match3';
 `;
 
 const FILES: Record<string, string> = {
@@ -1358,10 +1607,11 @@ const FILES: Record<string, string> = {
   [`${BOARD_DIR}/cards.ts`]: CARDS,
   [`${BOARD_DIR}/carrom.ts`]: CARROM,
   [`${BOARD_DIR}/cricket.ts`]: CRICKET,
+  [`${BOARD_DIR}/match3.ts`]: MATCH3,
   [`${BOARD_DIR}/index.ts`]: INDEX,
 };
 
-export const BOARD_GAME_MODULES: readonly string[] = ['dice', 'ludo', 'snakes', 'chess', 'cards', 'carrom', 'cricket'];
+export const BOARD_GAME_MODULES: readonly string[] = ['dice', 'ludo', 'snakes', 'chess', 'cards', 'carrom', 'cricket', 'match3'];
 
 const EXAMPLE = [
   "import { createLudo, legalMoves, move, pass, chooseMove, cellOf, createRng, rollDie, type LudoState } from './game/board';",
@@ -1406,7 +1656,7 @@ export function generateBoardGames(include?: string[]): BoardGamesResult {
       `Added the India games pack (${Object.keys(files).length} files under ${BOARD_DIR}): tested rules for Ludo, Snakes & Ladders, chess, carrom, cricket and card games (Teen Patti, rummy), `
       + 'a seeded die, and board geometry for drawing.\n'
       + '```ts\n' + EXAMPLE + '\n```\n'
-      + 'RULES: the game\'s rules come from these engines — never re-implement Ludo, Snakes & Ladders or chess logic. For chess, highlight movesFrom(game, square) when a piece is tapped, ask which piece on a promotion, show check, and end the game on chessStatus (checkmate, stalemate and each draw named). For cricket, every ball goes through bowl() (with shotFromTiming for the player\'s tap) and the scoreboard shows summary() and match.innings[match.current].thisOver. For carrom, drag the striker along the baseline (placeStriker), aim and pull back for power, then play shot.frames as the animation and show shot.message. Card games are for FUN: points or pretend chips only — never real money, never a deposit, a wallet top-up or a cash prize (India bans real-money online games). Draw the board from '
+      + 'RULES: the game\'s rules come from these engines — never re-implement Ludo, Snakes & Ladders, chess or match-3 logic. For match-3, every swap goes through swapTiles(game, a, b): ok false means swap the two back on screen; otherwise animate r.steps in order (cleared, then the fall, chain by chain) and show game.score, game.movesLeft and game.status; a Hint button uses match3Hint(game). For chess, highlight movesFrom(game, square) when a piece is tapped, ask which piece on a promotion, show check, and end the game on chessStatus (checkmate, stalemate and each draw named). For cricket, every ball goes through bowl() (with shotFromTiming for the player\'s tap) and the scoreboard shows summary() and match.innings[match.current].thisOver. For carrom, drag the striker along the baseline (placeStriker), aim and pull back for power, then play shot.frames as the animation and show shot.message. Card games are for FUN: points or pretend chips only — never real money, never a deposit, a wallet top-up or a cash prize (India bans real-money online games). Draw the board from '
       + 'cellOf / squareCell, animate a token along r.path, and say what happened (a capture, a token home, another roll, a pass when '
       + 'nothing can move). Let the player tap the token they want from legalMoves; highlight those tokens. A computer opponent '
       + 'uses chooseMove. House rules are options (rules: { ... }), not new code.',

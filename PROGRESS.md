@@ -103223,6 +103223,15 @@ Ledger, older reports #1430–#1358 (2026-11-20, next PR):
 - #1430, #1420 — Q-3120 (a document request is answered, not built).
 - #1384, #1373 — Q-3121 (game titles and ranks are not services).
 - #1270 — Q-3122 (a refusal such as "Nhi banao" is neither a build order nor a yes to our offer).
+- Batch #1357–#1263 (20 reports, 2026-11-20). Fixed: Q-3123 (stringified tool arguments), Q-3124 (Indian places, public-works
+  terms), Q-3125 (FF = Free Fire), Q-3126 (stop discount named apart), Q-3127 (starter preview named to the model), Q-3128
+  (defaults follow the project on disk), Q-3129 (pasted calculator keys and colours), Q-3130 (recharge refusal = balance),
+  Q-3131 (a picture's subject), Q-3132 (code with no words), Q-3133 (every GameOptions type exported), Q-3134 (quoted symptom).
+  Already fixed on main when checked (no new row): stop_build needs the user's own words (1b38d662); "UTF"/"GTA"
+  (Q-3121); cross-origin autofocus noise (AutoFix); Devanagari गेम (#2163); startTier label (Q-2748); "Hindi me bolo" parts
+  count (now 0); stale-module `combo` (Q-2732); the 22× preview loop (Q-3018); kit colours (BR1954); ETA of a stopped build
+  (cut short). Providers (flashx silent, glm-5.3 reasoning-only, Nemotron crawl, KIMI balance) stay with Q-962, Q-1121,
+  Q-1211, Q-1212, Q-1210. Open: Q-3135–Q-3152.
 - KIMI "suspended due to insufficient balance" in 11 of these reports — Q-1210 (blocked: the provider account's balance).
 - #1359 — "stopped before the app was running" after a 908 s render with the stop at 945 s, billed at cost (in the user's favour): fixed on main (`earliestRenderProof`, a75153ab); its "clone of GTA" reading came from an earlier request in the planning context (needsIntent / subject rule on main).
 - #1419 — a 8 s LAPSED game-runtime recipe left no kit; the builder was told to run the recipes itself (honest), recorded.

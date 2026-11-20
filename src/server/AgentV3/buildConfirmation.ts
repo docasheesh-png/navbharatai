@@ -28,6 +28,7 @@
  */
 
 import { isSourcePathOnly } from '../lib/sourcePathPrompt';
+import { isPastedHtmlDocument, isPastedSource, readablePrompt } from '../lib/pastedSource';
 import {
   classifyIntentWithConfidence,
   firstNewBuildOrder,
@@ -98,6 +99,28 @@ export function declinesTheBuild(message: string): boolean {
   return !firstNewBuildOrder(rest.toLowerCase()) && !/\b(?:banao|bnao|banado|bana\s+do|banaiye|build|make|create)\b/i.test(rest);
 }
 
+/**
+ * CODE WITH NO WORDS IS NOT AN ORDER (failedbr #1278, 2026-11-20). A user pasted 3,855 characters of Unity C#
+ * (`using UnityEngine; … class BikeController : MonoBehaviour { [Header("Bike Settings")] …`) into their Quran reader and
+ * wrote nothing. The engine invented a task — "add a Settings feature", lifted from the script's own `[Header]` — classified
+ * it a large high-risk change and edited an unrelated app for four minutes. A pasted source file says WHAT, never what to
+ * do with it, so it is answered (and the reply asks). A whole pasted HTML page is different: it is the user's own app and
+ * has its own brief (pastedAppBrief.ts), so it still builds. PURE.
+ */
+export function isCodeWithoutInstruction(message: string): boolean {
+  const text = String(message ?? '');
+  return isPastedSource(text) && !isPastedHtmlDocument(text) && readablePrompt(text).trim() === '';
+}
+
+/**
+ * Does this turn ask whether the message itself confirms a build? A new build always; an edit only when no earlier request
+ * left an app — or when the message is code with no words, which is no instruction on any app (failedbr #1278). PURE.
+ */
+export function buildConfirmationApplies(intent: string, earlierRequestLeftAnApp: boolean, message: string): boolean {
+  if (intent === 'new_build') return true;
+  return intent === 'edit_existing' && (!earlierRequestLeftAnApp || isCodeWithoutInstruction(message));
+}
+
 /** The Devanagari `बना-` family ("बनाओ", "बना दो") — the order no Roman list can see. */
 const DEVANAGARI_BUILD_VERB = /बन(?:ा|वा)/;
 
@@ -110,6 +133,7 @@ export type BuildConfirmationReason =
   | 'names-something-to-build'
   | 'asks-for-a-document'
   | 'declines-the-build'
+  | 'code-without-instruction'
   | 'question'
   | 'names-nothing-to-build';
 
@@ -131,6 +155,7 @@ export function buildConfirmation(message: string): BuildConfirmation {
   const lower = text.toLowerCase();
   // failedbr #1270: "nhi banao" / "mat banao" refuses the build; it never confirms one.
   if (text && declinesTheBuild(text)) return { confirmed: false, reason: 'declines-the-build' };
+  if (text && isCodeWithoutInstruction(text)) return { confirmed: false, reason: 'code-without-instruction' };
   // failedbr #1420 / #1430: a document is written in chat (its reply offers the build), even after "create" / "design".
   if (text && requestsADocument(text)) return { confirmed: false, reason: 'asks-for-a-document' };
   if (text && isExplicitCompleteBuild(text)) return { confirmed: true, reason: 'complete-build' };

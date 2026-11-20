@@ -678,7 +678,7 @@ import { liveSearchContext } from '../lib/liveSearchContext';
 import { placePlatformContext } from '../lib/platformContext';
 import { previewAutoRepairEnabled, autoRepairPrecheck, autoRepairDecision, autoRepairPrompt, claimAutoRepair } from '../AgentV3/previewAutoRepair';
 import { clearPreviewGaveUp } from '../AgentV3/previewGiveUp';
-import { buildConfirmation, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
+import { buildConfirmation, buildConfirmationApplies, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
 import { loadProjectMemoryForTurn, memoryStopMessage, recordUserMessage, transcriptOf, asksForTheApp, memoryMessageFor } from '../AgentV3/projectMemoryTurn';
 import { assessEditCandidate, rejectionMessage, type GateVerdict as EditGateVerdict } from '../AgentV3/editPromotionGate';
 import { decideRelease, candidateReplacesBase, editPromotionEnabled, renderEvidence, renderedInBuildUnchanged, buildOkOf } from '../AgentV3/editRelease';
@@ -11570,7 +11570,7 @@ async function noteBuildOutcome(
       && !offerAccepted
       && !frameworkAnswered
       && !importingThisTurn
-      && (intent === 'new_build' || (intent === 'edit_existing' && !earlierRequestLeftAnApp))
+      && buildConfirmationApplies(intent, earlierRequestLeftAnApp, prompt)
       ? buildConfirmation(prompt)
       : null;
     const offerToBuild = buildCheck !== null && !buildCheck.confirmed;

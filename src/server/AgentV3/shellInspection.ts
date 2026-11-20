@@ -35,6 +35,23 @@ export function isLocalhostProbe(segment: string): boolean {
   return true;
 }
 
+/**
+ * A package-manager QUERY — `npm list three`, `npm ls`, `npm view three version`, `npm outdated`, `npm why x`, the pnpm
+ * and yarn equivalents, and a bare version check (`node -v`, `npm -v`, `npx tsc --version`). 🔴 failedbr #2090
+ * (2026-11-08): `npm list three @react-three/fiber @react-three/drei` exited 1 because the packages were not
+ * installed yet — an answer, not a failure — and the release gate listed it as a "build-breaking blocker", the third
+ * sibling of #2452's failed `cat` and #2306's probe. Install, uninstall, audit fix, run and exec are never queries.
+ * Output only to stdout or /dev/null. PURE.
+ */
+export function isPackageQuery(segment: string): boolean {
+  const s = String(segment ?? '').replace(/\d?>>?\s*\/dev\/null/g, '').replace(/\d?>&\d/g, '').trim();
+  if (/[<>]|\$\(|`/.test(s)) return false;
+  if (/^(?:node|npm|pnpm|yarn|npx|tsc)\s+(?:-v|--version)$/.test(s)) return true;
+  if (/^npx\s+(?:--no-install\s+)?[\w@/.-]+\s+(?:-v|--version)$/.test(s)) return true;
+  return /^(?:npm|pnpm)\s+(?:list|ls|ll|la|view|v|info|show|outdated|why|explain|root|prefix|config\s+get)(?:\s|$)/.test(s)
+    || /^yarn\s+(?:list|info|why|outdated)(?:\s|$)/.test(s);
+}
+
 /** Remove quoted regions so separators inside a pattern are not read as structure. */
 function unquote(cmd: string): string {
   return cmd.replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/'[^']*'/g, "''");
@@ -53,7 +70,7 @@ function segmentIsReadOnly(segment: string): boolean {
   if (/HEREDOC|<</.test(s)) return false;
   // Command substitution could run anything.
   if (/\$\(|`/.test(s)) return false;
-  if (isLocalhostProbe(withoutNull)) return true;
+  if (isLocalhostProbe(withoutNull) || isPackageQuery(withoutNull)) return true;
   const words = withoutNull.trim().split(/\s+/);
   // `VAR=value cmd` prefixes are allowed; the program is the first non-assignment word.
   let i = 0;
@@ -76,7 +93,7 @@ export function isReadOnlyInspection(command: string | null | undefined): boolea
   if (/\bawk\b/.test(cmd) && /print[f]?\s*[^;}]*?>|system\s*\(|\|\s*"/.test(cmd)) return false;
   const flat = unquote(cmd);
   // A localhost probe's `curl` is judged by isLocalhostProbe, statement by statement; any other curl stays forbidden.
-  const withoutProbes = flat.split(/(;|&&|\|\||\||\n)/).map((seg) => (isLocalhostProbe(seg.replace(/\d?>>?\s*\/dev\/null/g, '')) ? '' : seg)).join('');
+  const withoutProbes = flat.split(/(;|&&|\|\||\||\n)/).map((seg) => (isLocalhostProbe(seg.replace(/\d?>>?\s*\/dev\/null/g, '')) || isPackageQuery(seg) ? '' : seg)).join('');
   if (/\b(?:rm|mv|cp|mkdir|touch|tee|chmod|chown|ln|npm|npx|pnpm|yarn|node|python3?|curl|wget|git|kill|pkill)\b/.test(withoutProbes.replace(/\b(?:grep|rg|egrep|fgrep)\s+[^|;&]*/g, ''))) return false;
   const segments = flat.split(/;|&&|\|\||\||\n/);
   return segments.every(segmentIsReadOnly);

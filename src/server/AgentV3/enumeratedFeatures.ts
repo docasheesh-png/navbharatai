@@ -138,8 +138,18 @@ const RECORD_ATTRIBUTE =
   /^(?:date|dates|time|timing|due date|start date|end date|category|categories|amount|amounts|price|prices|cost|qty|quantity|name|names|title|description|email|e-?mail id|phone|phone number|mobile|mobile number|address|status|priority|note|notes|tag|tags|label|labels|rating|age|gender|remarks?|payment (?:method|mode|type|option)s?)(?:\s+(?:like|such as|e\.?g\.?|ex)\b.*)?$/i;
 
 function isRecordAttribute(item: string): boolean {
-  return RECORD_ATTRIBUTE.test(item.trim());
+  return RECORD_ATTRIBUTE.test(item.trim()) || GAME_STAPLE.test(item.trim());
 }
+
+/**
+ * 🔴 WHAT EVERY SMALL GAME HAS IS NOT A MODULE (failedbr #2158, 2026-11-09). "Collisions, score and lives,
+ * pause/resume, game-over and restart" are the staples of a one-screen arcade game, as date and amount are the
+ * columns of one expense — and they pushed a compact space shooter past the project line. A closed list, like
+ * RECORD_ATTRIBUTE: modes, maps, multiplayer, clans, a shop or a leaderboard are never on it, so a big game keeps
+ * its count.
+ */
+const GAME_STAPLE =
+  /^(?:collisions?(?: detection)?|score|scores|scoring|lives|life|health|hp|pause|resume|pause\s*(?:\/|and)\s*resume|game[- ]over(?: screen)?|restart|retry|play again|timer|countdown|level[- ]up|high[- ]score)$/i;
 
 /**
  * 🔴 A PROMPT ABOUT HOW TO ANSWER IS NOT A LIST OF WHAT TO BUILD (autopsy 8e124182, 2026-09-30).
@@ -197,7 +207,7 @@ function appLines(text: string): string[] {
  * two buttons and stay two. A module name is never a style word, so an ERP's list keeps its count.
  */
 const STYLE_ADJECTIVE =
-  /^(?:simple|clean|modern|minimal|minimalist|beautiful|elegant|sleek|attractive|professional|colou?rful|stylish|premium|fast|smooth|responsive|intuitive|user[- ]friendly|easy|lightweight|polished|good[- ]looking)$/i;
+  /^(?:simple|clean|modern|minimal|minimalist|beautiful|elegant|sleek|attractive|professional|colou?rful|stylish|premium|fast|smooth|responsive|intuitive|user[- ]friendly|easy|lightweight|polished|compact|good[- ]looking)$/i;
 
 function collapseVariants(items: string[]): string[] {
   const out: string[] = [];
@@ -315,6 +325,52 @@ export function countEnumeratedFeatures(prompt: string): number {
   return Math.min(enumeratedFeatureItems(prompt).length, MAX_COUNTED);
 }
 
+/**
+ * 🔴 A RULE ABOUT HOW TO BUILD IS NOT A PART TO BUILD (failedbr #2158, 2026-11-09 — "Cosmic Defender").
+ *
+ * One paragraph asked for "a polished, compact, responsive space-shooter game" with a leaderboard, then set
+ * rules: "Use only the Weak/free engine …; do not start a paid live server, publish, configure a domain,
+ * create external accounts/infrastructure, or use any paid tier. After building, run the available free
+ * preview/tests and report …". It counted 22 parts. "publish", "configure a domain" and "run the available
+ * free preview/tests" were among them, and a compact game was split into fourteen project modules.
+ *
+ * A clause that forbids, restricts or tells the builder what to do once it is done ("do not …", "never …",
+ * "use only …", "after building, …") names no part of the app, so it is dropped up to its `;`, its `:` or the
+ * end of its sentence. Every other sentence is kept exactly as it was, so a line is otherwise counted as before.
+ * Together with GAME_STAPLE below the prompt counts 9, and the game is one build again.
+ *
+ * ⚠️ NOT CHANGED HERE, ON PURPOSE: a list opener's colon still runs to the end of its LINE, not its sentence, so
+ * one paragraph's first colon opens a list over every later sentence. Scoping it per sentence was measured: it
+ * moved the starter chips both ways (school ERP 15→9, NGO 16→8, coaching 7→11, wedding RSVP 11→14), because
+ * those counts lean on that span. Re-scoping it needs the project gates re-measured with it, and that is queue row
+ * Q-3022, not a side effect of this fix.
+ * It can only LOWER a count, the safe direction for the gates that read it (this module's header). PURE.
+ */
+const NOT_A_PART_CLAUSE =
+  /^\s*(?:(?:and|but|or|also)\s+)?(?:do\s+not|don'?t|never|no\s+(?:paid|fake|demo|mock|placeholder|dummy|external)\b|avoid|without|use\s+only|only\s+use|(?:after|once|when|before)\s+(?:building|built|done|finishing|finalizing|you(?:'re|\s+are)?\s+(?:finish|done|build))|if\s+no\b)/i;
+
+function withoutRuleClauses(line: string): string {
+  return line
+    .split(/(?<=[.!?])\s+(?=\S)/)
+    .map((sentence) => {
+      // Clauses end at `;` and at `:` ("Add a leaderboard: use only …; create …"). A dropped clause takes its
+      // separator, except a list-opening colon, which passes to the next kept clause.
+      const parts = sentence.split(/([;:])/);
+      let kept = '';
+      let sep = '';
+      for (let i = 0; i < parts.length; i += 2) {
+        const before = i > 0 ? parts[i - 1] : '';
+        if (sep !== ':') sep = before;
+        if (NOT_A_PART_CLAUSE.test(parts[i])) continue;
+        kept += (kept ? sep : '') + parts[i];
+        sep = '';
+      }
+      return kept;
+    })
+    .filter((sentence) => sentence.trim())
+    .join(' ');
+}
+
 /** The items themselves, in first-seen order — what `countEnumeratedFeatures` counts. PURE. */
 export function enumeratedFeatureItems(prompt: string, opts: { plainLines?: boolean } = {}): string[] {
   // A pasted link is not a list item (autopsy 33812996) — dropped before anything is counted.
@@ -327,7 +383,7 @@ export function enumeratedFeatureItems(prompt: string, opts: { plainLines?: bool
     const item = tidy(raw);
     if (!isItem(item)) return;
     if (isRecordAttribute(item)) return;
-    if (STYLE_ADJECTIVE.test(item)) return;
+    if (STYLE_ADJECTIVE.test(item.replace(/^(?:a|an|the)\s+/i, ''))) return;
     seen.add(item.toLowerCase());
   };
 
@@ -385,7 +441,14 @@ export function enumeratedFeatureItems(prompt: string, opts: { plainLines?: bool
     // example and a quoted tagline were counted as features of a one-app spec, and the prompt was
     // decomposed as a mega project whose planner then burned 315 seconds).
     if (CODE_LINE.test(line)) continue;
-    const plain = line.replace(QUOTED, ' ');
+    // A rule about how to build ("do not publish …", "after building, run …") names no part (failedbr #2158).
+    countLine(withoutRuleClauses(line.replace(QUOTED, ' ')));
+  }
+  flushRun(null);
+
+  return collapseVariants([...seen]);
+
+  function countLine(plain: string): void {
 
     // An inline run. Whatever sits before a list opener is the REQUEST ("ek hospital management
     // system banao jisme …"); the list is what follows it.
@@ -401,14 +464,11 @@ export function enumeratedFeatureItems(prompt: string, opts: { plainLines?: bool
     // A piece longer than an item can be is a CLAUSE (autopsy 39955124: "Do not portray sacred characters in
     // disrespectful, comedic, or inappropriate situations." counted three features at the old +2 margin).
     const hasClause = pieces.some((p) => words(p) > MAX_ITEM_WORDS);
-    if (!(opener >= 0 && opened) && SENTENCE_END.test(plain.trim()) && words(plain) > PROSE_WORDS && hasClause) continue;
+    if (!(opener >= 0 && opened) && SENTENCE_END.test(plain.trim()) && words(plain) > PROSE_WORDS && hasClause) return;
 
-    if (pieces.length < MIN_RUN_ITEMS) continue;
+    if (pieces.length < MIN_RUN_ITEMS) return;
     for (const piece of pieces) add(piece);
   }
-  flushRun(null);
-
-  return collapseVariants([...seen]);
 }
 
 /**
@@ -426,7 +486,7 @@ export function enumeratedFeatureItems(prompt: string, opts: { plainLines?: bool
  * "Features:" list of twenty items is sized exactly as before. PURE.
  */
 export const SECTIONED_MIN = 3;
-const NUMBERED_HEADING = /^\s*\d{1,3}[.)]\s+\S/;
+const NUMBERED_HEADING = /^\s*(\d{1,3})[.)]\s+\S/;
 const BULLET_LINE = /^\s*[-*•]\s+\S/;
 
 export function sectionedSpecSize(prompt: string): number | null {
@@ -449,5 +509,39 @@ export function sectionedSpecSize(prompt: string): number | null {
   if (sections < SECTIONED_MIN) return null;
   // Most bullets must sit under a numbered section, or the headings are decoration on a flat list.
   if (bulletsUnderHeading < bulletsOutside) return null;
+  if (headingRunSections(lines) < SECTIONED_MIN) return null;
   return sections;
+}
+
+/**
+ * 🔴 A NUMBERED LIST IS NOT A LIST OF SECTIONS (failedbr #2100, 2026-11-08 — "DriveEasy"). Its features were numbered
+ * ITEMS (1–12, 1–10, 1–10) under plain headings; three items carried sub-bullets (a booking form's fields) and the
+ * payment bullets followed item 12. Every numbered line followed by bullets was taken as a section heading, so a
+ * 40-part, three-role app was sized as "4 sections", went to the fast lane, and then to the 25-minute cap.
+ *
+ * Section headings are ONE numbered run in which nearly every heading has its own bullets ("1. App Details … 8."),
+ * and a list inside a section is a run of its own (#2094: subjects 1–15 inside section 2). Lines are grouped into
+ * numbering runs (a 1 starts a run; n continues the run that last reached n-1), and only a run in which at least
+ * half the numbered lines carry a bullet block contributes. Read only as an extra condition on the rule above, so it
+ * can switch the section reading OFF, never on. Indentation is not read: a sectioned spec written as nested Markdown
+ * is still a sectioned spec. PURE.
+ */
+function headingRunSections(lines: readonly string[]): number {
+  interface Run { last: number; lines: number; withBullets: number }
+  const runs: Run[] = [];
+  let open: Run | null = null;
+  let openHasBullets = false;
+  for (const line of lines) {
+    const n = NUMBERED_HEADING.exec(line);
+    if (n) {
+      const num = Number(n[1]);
+      const run: Run = runs.find((r) => r.last === num - 1 && num > 1) ?? { last: 0, lines: 0, withBullets: 0 };
+      if (!runs.includes(run)) runs.push(run);
+      run.last = num; run.lines++;
+      open = run; openHasBullets = false;
+      continue;
+    }
+    if (open && !openHasBullets && BULLET_LINE.test(line)) { open.withBullets++; openHasBullets = true; }
+  }
+  return runs.filter((r) => r.withBullets * 2 >= r.lines).reduce((sum, r) => sum + r.withBullets, 0);
 }

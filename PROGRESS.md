@@ -102949,7 +102949,7 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964 (blocked, each with w
 | Q-2751 | LADDER_DEPTH counted the scope call on an empty build → scope tokens share the build's ledger | `PHASE_SCOPE` at both scope writers; ladder skips it; bill unchanged (tested) · `aScopeCheckIsNotALadderSlice` |
 | Q-2752 | domain stems inside unrelated words → census vs 275k words found 9 (parental→booking, impatient→healthcare, blending→fintech, …) | each guarded against that word only · `aWordInsideAWordIsNotADomain` (old code: 8 fail) |
 
-**Discovered, not folded in:** Q-3020 — 488 unbounded FEATURE stems match inside source code, so most features read as already present. Fixing it changes what every domain build is told to add; it needs a measured before/after of its own.
+**Discovered, not folded in:** Q-3101 — 488 unbounded FEATURE stems match inside source code, so most features read as already present. Fixing it changes what every domain build is told to add; it needs a measured before/after of its own.
 ## 2026-11-20 — An old game would not open from history: "HTTP 404: Conversation not found" for a `v3_` id
 
 Admin report: opening an old game showed "This chat's transcript hasn't reached the server yet …" with the
@@ -102981,6 +102981,18 @@ Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2970 (#2399): an import of a `.d.ts` file resolves in the readiness analyzer.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (blocked, each with what it needs).
 
+## 2026-11-20 — Game kit: get in and out of vehicles (game-gap audit item)
+
+- **Gap:** walk-and-drive games hand-wrote Use + ctx.follow, and the walking body kept moving, unseen, while the player
+  drove (player.update ran every step with the same axis), so getting out put the player wherever it had wandered.
+- **Fix (opt-in, so no existing game changes):** `ctx.vehicles.add(car)` in the shell. Use beside it gets in (body held
+  still and hidden, camera chases the car, the shell drives it); Use again gets out beside it, braking first at speed;
+  the parked car is created at speed 0 and stays put. If the game drives it itself, the game wins (no double driving).
+  On exit the car stops being "the player's car" so the camera returns to the player. Phones keep the Use button.
+  Hud shows "E — get in / get out" (EN + HI). Shell instructions + AppKnowledgeBase updated.
+- **Lock:** `tests/aPlayerGetsInAndOutOfACar.test.ts` (7, real Game.ts/objects/input/controller). 9 reversion proofs fail.
+  Generated kit tsc before/after: identical 33 pre-existing errors (missing @types/three). The typecheck caught an
+  unescaped apostrophe in the new knowledge-base text before push.
 ## 2026-11-20 — Game kit: key rebinding (game-gap audit item)
 
 - **Gap:** keys were fixed; the Input constructor took a map but nothing saved or changed one, and Settings had no Controls.
@@ -103063,4 +103075,27 @@ Closed on merge of #4365 (IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt`): Q-27
 | Q-2769 | JOURNEY_NOT_DERIVED told a list-driven form (`name={field.name}`) it had no names while accessibility scored 100 → the check reads names from source | the limit is said as the check's; real unnamed forms keep the remedy · `aFormBuiltFromAListIsNotUnnamed` |
 | Q-2766 | `{ ReactComponent }` + `?react` (two SVG plugins' styles) → preview errors until rewired | named on write with the exact default-import fix · `anSvgImportUsesOnePluginsStyle` |
 
-**Opened:** Q-3021 — a list-driven form gets no journey at all; the real fix reads field names from the running page.
+**Opened:** Q-3102 — a list-driven form gets no journey at all; the real fix reads field names from the running page.
+## 2026-11-20 — #4377 merged (failedbr #2169 / #2163 / #2155 / #2141); autopsies #2158, #2133, #2122, #2116 (next PR)
+
+Closed Q-2994, Q-2995, Q-2996, Q-2997 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): our browser's media limits are not an app defect; "game" in the Indian scripts is a game; a missing plain stylesheet import is created; Hinglish fillers are not subjects in the "add to this app or a new one?" check.
+- #2139 — no defect: a "hack" request with photo, map and location was planned as a harmless map where users drop their own markers (no tracking, no cheat); the user stopped it at 22 s.
+
+Ledger for the next PR (rows Q-3021…Q-3024):
+- #2158 — Q-3021 a rule about how to build ("do not publish …", "after building, run …") and the staples of a small game (score, lives, restart) are not parts: a compact space shooter counted 22 and went to 14 project modules; it now counts 6 and builds as one app. Q-3022 opened: a list opener's colon still spans its whole line; scoping it per sentence needs the project gates re-measured. Also in #2158, already fixed and not given rows: "WASD" as an unknown service (#4369), and a stopped Surplus call filed under `claude-sonnet-4-6` on a Weak build (BR1992, 2026-11-16).
+- #2133 — Q-3023 the orphan-stylesheet check reads Astro/Vue/Svelte component files (imports, `<link>`, `<style>` `@import`, Vue `<style src>`), and our `nbai-native.css` is written only together with the `<link>` that uses it. Q-3024 opened: the project graph never reads component-file imports, so three broken `.astro` imports were found only by full builds (the app had rendered at 135 s; the user stopped it at 743 s).
+- #2122 — no defect: a battle-royale game rendered at 182 s; the user stopped it at 200 s.
+- #2116 — no defect: a Marathi auto-rickshaw simulator was still rendering when the user stopped it at 219 s. Its "13 distinct colours" warning (identical in #2122) is the kit/scene-renderer class already excluded from the colour count by BR1954/Q-2311 and #2437.
+- #2100 — Q-3025 a numbered list whose few items carry sub-bullets is not a spec in sections: a 40-part, three-role driver-booking app was sized small, went to the fast lane and then to the 25-minute cap; the project gate now fires. Q-3026 opened: the build ran on a sandbox holding another app's 30 files while the durable store was empty. Q-3027 opened: `App.tsx` went back to that app's version mid-build, and no event names the heal that wrote it.
+- #2105 — Q-3028 🟡 blocked on the admin: an exact starter chip on a finished template still runs the model, which edited a working to-do app for 300 s against its "make NO edits" instruction; the model-free fix collides with #4253's Surplus authoring rule.
+- #2094 — Q-3029 exam and classroom words (MCQ, PYQ, OMR…) are not unknown services. Q-3030 opened: the fast lane learns it cannot finish only after ~330 s of generation (here and in #2100). The 25-minute cap itself is the free-tier ceiling, Q-2240. Its final "the previous work is still stopping" line is deliberate (RC-4). #2094 is also the counter-case that keeps Q-3025's sections rule honest: a real sectioned spec stays sectioned.
+- #2090 — Q-3031 a game whose subject is a game ("…cricket game") is a game even when it names a hospital, unless the other domain has more feature signals or the game handles real money (BR1985). Q-3032 a package-manager query (`npm list …`) is a read, not a build-breaking blocker (the #2452/#2306 class). The fast lane's ten `.png` jerseys were already refused at plan time since BR1952 (#4253, 2026-11-16).
+- #2092 — no new row: a user stop at 96 s. The model wrote its own `GameEngine` over the kit's loop against the kit prompt; a 2D game drawing its own canvas is allowed (Q-2715), and the phone-playability cost is already checked at write time (`touchPlayableGame`). Its stopped call's Sonnet label was fixed by BR1992.
+- #2086 — Q-3033 a roadmap step that invents a native mobile stack (React Native, Flutter…) over a Vite project is rejected, the BR1952 class. Its binary `.png` plan is the BR1952 plan-time refusal, already fixed.
+- #2078 — no new row: a user stop at 50 s. The fast lane's "simulate the process and return a dummy blob" is the fake-media class failedbr #2421 already names.
+- #2036 — Q-3034 every game-kit file now compiles under a strict app tsconfig (noUnusedLocals/noUnusedParameters): the only offender, TouchControls' unread `container` field, failed the user's typecheck and looped the builder. Its E2B-cap setup failure is Q-2929.
+- #2065 — no defect: a "continue" turn rendered at 221 s and the user stopped it at 274 s; its two unused `@capacitor/*` warnings are advisory and true.
+- #2064, #2037, #2001, #2003 — no new rows: #2064's "could not find @Composable" was fixed by BR1998; #2037's skipped write-time typecheck by autopsy 61279465; #2001's `?react` SVG imports by BR2001; #2001's and #2003's E2B concurrency refusals are Q-2929 (blocked on the plan limit).
+
+
+Note (2026-11-20): the feature-stem row first opened as Q-2972, then Q-3020, and the list-form row as Q-3021 were renumbered Q-3101 / Q-3102 — each earlier number was taken by another session in parallel (two Q-3020 rows briefly existed on main).

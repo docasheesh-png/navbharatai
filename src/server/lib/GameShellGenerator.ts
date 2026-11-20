@@ -36,7 +36,8 @@ export interface GameShellResult {
 
 const GAME = `import * as THREE from 'three';
 import { GameLoop } from './core/loop';
-import { Input, PLAYER1_ACTIONS, PLAYER2_ACTIONS } from './core/input';
+import { Input, PLAYER1_ACTIONS, PLAYER2_ACTIONS, type ActionMap } from './core/input';
+import { loadKeyBindings } from './core/keybinds';
 import { GameFeel } from './core/feel';
 import { events } from './core/events';
 import { state, setStatus, resetRun, save as saveState, load as loadState, hasSave, clearSave } from './core/state';
@@ -244,6 +245,11 @@ export class Game {
   readonly input: Input;
   /** Player 2's input, with options.players = 2. */
   readonly input2: Input | null = null;
+  /**
+   * The keys the player chose (Settings → Controls), read by the same Input object, so a change applies at once.
+   * null with two players: each player's keys are fixed so the two halves of the keyboard never overlap.
+   */
+  readonly keys: ActionMap | null = null;
   private secondCamera: THREE.Camera | null = null;
   readonly lights: AppliedLighting;
 
@@ -371,7 +377,10 @@ export class Game {
       this.input2 = new Input(this.canvas, PLAYER2_ACTIONS, { padIndex: 1 });
       const second = this.input2;
       this.disposers.push(() => second.dispose());
-    } else this.input = new Input(this.canvas);
+    } else {
+      this.keys = loadKeyBindings();
+      this.input = new Input(this.canvas, this.keys);
+    }
     // Remember what the player's input looks like, so driveVehicle(car, s, ctx.input.axis(), dt) names
     // the PLAYER's car (see playerVehicle). Same values, same object — only now it is recognisable.
     const readAxis = this.input.axis.bind(this.input);
@@ -1148,6 +1157,7 @@ import type { Game } from '../Game';
 import { settings, type GameSettings } from '../core/settings';
 import { loading, type LoadingState } from '../core/loading';
 import { t, type StringKey } from '../core/strings';
+import { REBINDABLE_ACTIONS, rebindKey, resetKeyBindings, primaryKey, keyLabel, captureKey } from '../core/keybinds';
 import { prefersTouch } from './touchControls';
 import { lastRaceResults } from '../three/race';
 import { levels } from '../core/levels';
@@ -1805,7 +1815,47 @@ function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange:
  * SETTINGS — every control here is APPLIED at once by the shell (Game.applySettings) and saved on this device:
  * sound (mute, master, music, effects), picture quality, look speed, vibration.
  */
-function SettingsPanel({ onBack }: { onBack: () => void }) {
+/** Each rebindable action's label in the game's language. */
+const ACTION_LABEL: Record<string, StringKey> = {
+  up: 'up', down: 'down', left: 'left', right: 'right', jump: 'jump', sprint: 'run', attack: 'attack', interact: 'use', reload: 'reload', drift: 'drift',
+};
+
+/**
+ * CONTROLS — change a key: tap the key shown beside an action, then press the new key (Esc cancels). Shown on a keyboard
+ * device in a one-player game; a phone plays with the touch buttons, and two players keep fixed halves of the keyboard.
+ */
+function ControlsSection({ game }: { game: Game }) {
+  const keys = game.keys;
+  const [waiting, setWaiting] = useState<string | null>(null);
+  const [, redraw] = useState(0);
+  useEffect(() => {
+    if (!waiting || !keys) return;
+    return captureKey(window, (code) => {
+      if (code) rebindKey(keys, waiting, code);
+      setWaiting(null);
+      redraw((n) => n + 1);
+    });
+  }, [waiting, keys]);
+  if (!keys || prefersTouch()) return null;
+  return (
+    <div>
+      <h3 style={{ fontSize: 18, fontWeight: 800, margin: '14px 0 4px' }}>{t('controls')}</h3>
+      {REBINDABLE_ACTIONS.filter((a) => keys[a]).map((a) => (
+        <div key={a} style={row}>
+          <span>{t(ACTION_LABEL[a] ?? 'use')}</span>
+          <button type="button" aria-label={t(ACTION_LABEL[a] ?? 'use') + ': ' + (waiting === a ? t('pressKey') : keyLabel(primaryKey(keys, a)))}
+            onClick={() => setWaiting(waiting === a ? null : a)}
+            style={{ ...secondary, marginTop: 0, minWidth: 84, minHeight: 40, padding: '6px 14px', background: waiting === a ? '#fde047' : 'rgba(255,255,255,0.14)', color: waiting === a ? '#111' : '#fff' }}>
+            {waiting === a ? t('pressKey') : keyLabel(primaryKey(keys, a))}
+          </button>
+        </div>
+      ))}
+      <button type="button" style={secondary} onClick={() => { resetKeyBindings(keys); setWaiting(null); redraw((n) => n + 1); }}>{t('resetControls')}</button>
+    </div>
+  );
+}
+
+function SettingsPanel({ game, onBack }: { game: Game; onBack: () => void }) {
   const s = useSettings();
   const back = useRef<HTMLButtonElement>(null);
   useEffect(() => { back.current?.focus(); }, []);
@@ -1846,6 +1896,7 @@ function SettingsPanel({ onBack }: { onBack: () => void }) {
           ))}
         </div>
       </div>
+      <ControlsSection game={game} />
       <button ref={back} type="button" style={button} onClick={onBack}>{t('back')}</button>
     </div>
   );
@@ -1934,7 +1985,7 @@ export function Hud({ game }: { game: Game }) {
   }, [game, s.status, panel]);
 
   const settingsOrScreen = (screen: React.ReactNode) => (
-    <div style={overlay}><div style={{ zoom }}>{panel === 'settings' ? <SettingsPanel onBack={() => setPanel(null)} /> : panel === 'inventory' ? <InventoryPanel onBack={() => { setPanel(null); game.resume(); }} /> : panel === 'shop' ? <ShopPanel onBack={() => setPanel(null)} /> : panel === 'credits' ? <CreditsPanel list={game.creditsList} onBack={() => setPanel(null)} /> : screen}</div></div>
+    <div style={overlay}><div style={{ zoom }}>{panel === 'settings' ? <SettingsPanel game={game} onBack={() => setPanel(null)} /> : panel === 'inventory' ? <InventoryPanel onBack={() => { setPanel(null); game.resume(); }} /> : panel === 'shop' ? <ShopPanel onBack={() => setPanel(null)} /> : panel === 'credits' ? <CreditsPanel list={game.creditsList} onBack={() => setPanel(null)} /> : screen}</div></div>
   );
 
   return (

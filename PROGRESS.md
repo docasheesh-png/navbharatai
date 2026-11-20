@@ -102974,6 +102974,17 @@ Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (bloc
 - **Lock:** `tests/aPlayerGetsInAndOutOfACar.test.ts` (7, real Game.ts/objects/input/controller). 9 reversion proofs fail.
   Generated kit tsc before/after: identical 33 pre-existing errors (missing @types/three). The typecheck caught an
   unescaped apostrophe in the new knowledge-base text before push.
+## 2026-11-20 — Game kit: key rebinding (game-gap audit item)
+
+- **Gap:** keys were fixed; the Input constructor took a map but nothing saved or changed one, and Settings had no Controls.
+- **Fix:** runtime `src/game/core/keybinds.ts` (`loadKeyBindings` over the defaults, sanitised; `rebindKey` in place so the
+  live Input sees it at once, takes the key from other actions and gives a keyless action the old key; `resetKeyBindings`;
+  `captureKey` consumes the key, Esc cancels; Escape is never bindable; mouse/pad/touch untouched). The shell's Game builds
+  its Input on the saved keys (`game.keys`, null for two players), and Settings gets a Controls section on keyboard devices.
+  New strings in English and Hindi. ToolCatalog include list + AppKnowledgeBase `game_menus_settings` updated.
+- **Lock:** `tests/aPlayerCanChangeTheKeys.test.ts` (9, real keybinds + input). 8 reversion proofs fail. Generated kit
+  compiled with tsc before/after: identical 33 pre-existing errors (all the missing `@types/three` in this repo).
+  `royalePracticeLifecycle` harness gained the new import's stub.
 ## 2026-11-20 — Autopsy failedbr #2478 ("make a bgmi for me"): royale requests get the big map, laid down by the platform
 
 Admin: a PUBG / Free Fire / BGMI request must get a big, realistic map; the library already has maps that were not used.
@@ -103018,3 +103029,19 @@ Ledger for the next PR (rows Q-2987…Q-2989):
 - #2257 — no defect: the user stopped 2.8 min in after the app rendered; the two warnings are accurate notes on an unfinished tree.
 - #2256 (and #2252, same workspace) — the same class as Q-2979 (a game split into project modules, module 3 of 14); resolved by #4369.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971, Q-2974, Q-2975, Q-2977, Q-2984 (blocked, each with what it needs).
+
+## 2026-11-20 — #4375 merged (failedbr #2263 / #2255 / #2246 / #2224 / #2216 / #2208)
+
+Closed Q-2987, Q-2988, Q-2989, Q-2990, Q-2991, Q-2992, Q-2993 (IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`): a handled missing camera/microphone in our checking browser is not an app defect; "make the internet faster" is the fifth impossible power; a declined turn records OUTCOME_DECLINED; the node_modules stamp never creates a file (and a static file server keeps its own host); a model write that removes an untouched kit file's exports or class members is refused; music-genre and AI terms are one unknown-name family; "<framework> Vite plugin not found in Vite config" is a configuration error. CI caught one defect of the PR's own (an install-stamp test leaving temp dirs behind — moved to makeTempDir) before merge.
+Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971, Q-2974, Q-2975, Q-2977, Q-2984, Q-2240 (blocked, each with what it needs).
+
+Ledger, older reports (2026-11-20, #4377):
+- #2169 — Q-2994 our browser's media limits (no H.264, a play()/pause() race) are not an app defect.
+- #2205 — no new row: an edit turn on an existing app got no platform kit seed by design (the kit is never written over somebody's work); the model's own run_recipe laid it down safely; the four edit_file misses are the weak model's.
+- #2196 — no new row: a 32-file app rendered at 7 min and the build kept writing until the 25-min cap — the free-tier convergence ceiling, Q-2240.
+- #2163 — Q-2995 "गेम" (and "game" in the other Indian scripts) is a game: an all-Devanagari racing request now gets the kit.
+- #2188 — not opened in full: stopped by the user at 51 s on "a game fully like Free Fire Max"; its class (a famous-game clone on the weak tier) is covered by the roadmap/kit path.
+- #2155 — Q-2996 a missing plain stylesheet import (`./index.css`) is created deterministically.
+- #2159, #2160 — no new row: SANDBOX_RECOVERY_UNAVAILABLE within 1 s; the refusal's admin-only reason was not in these 11-09 reports, and the report has carried it since #4253 (11-16).
+- #2141 — Q-2997 Hinglish fillers (aisa, jismein, bhai…) are not subjects, so a new game order on an unrelated app is asked about instead of built into it.
+

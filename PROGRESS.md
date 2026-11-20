@@ -102917,3 +102917,16 @@ Closed Q-2966, Q-2968, Q-2969, Q-2970 (IDs appended to `docs/claude/BUILD_REPORT
 - Q-2969 (#2306): a GET probe of the app's own localhost (and `sleep`) is a read-only inspection, never a release-gate blocker (`isLocalhostProbe`).
 - Q-2970 (#2399): an import of a `.d.ts` file resolves in the readiness analyzer.
 Still open: Q-2953, Q-2955, Q-2957, Q-2959, Q-2961, Q-2964, Q-2967, Q-2971 (blocked, each with what it needs).
+
+## 2026-11-20 — Game kit: get in and out of vehicles (game-gap audit item)
+
+- **Gap:** walk-and-drive games hand-wrote Use + ctx.follow, and the walking body kept moving, unseen, while the player
+  drove (player.update ran every step with the same axis), so getting out put the player wherever it had wandered.
+- **Fix (opt-in, so no existing game changes):** `ctx.vehicles.add(car)` in the shell. Use beside it gets in (body held
+  still and hidden, camera chases the car, the shell drives it); Use again gets out beside it, braking first at speed;
+  the parked car is created at speed 0 and stays put. If the game drives it itself, the game wins (no double driving).
+  On exit the car stops being "the player's car" so the camera returns to the player. Phones keep the Use button.
+  Hud shows "E — get in / get out" (EN + HI). Shell instructions + AppKnowledgeBase updated.
+- **Lock:** `tests/aPlayerGetsInAndOutOfACar.test.ts` (7, real Game.ts/objects/input/controller). 9 reversion proofs fail.
+  Generated kit tsc before/after: identical 33 pre-existing errors (missing @types/three). The typecheck caught an
+  unescaped apostrophe in the new knowledge-base text before push.
